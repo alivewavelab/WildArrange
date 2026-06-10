@@ -31,7 +31,7 @@
 - `doc/project-architecture.md`：运行时架构、状态文件和 gate 模型。
 - `doc/development-plan.md`：P0/P1/P2 路线。
 - `bin/helix.mjs`：CLI 入口。
-- `src/helix-core.mjs`：线性循环编排、节点流转、重试/ checkpoint 与 workflow 入口。
+- `src/helix-core.mjs`：线性任务节点运行时、重试 / checkpoint 与兼容导出。
 - `src/helix-change.mjs`：任务变更治理、Review Blocker、ChangeRequest 审核与决策。
 - `src/helix-failure.mjs`：失败原因分类、返工提示与失败摘要。
 - `src/helix-rules.mjs`：项目规范扫描与规则上下文注入。
@@ -40,6 +40,7 @@
 - `src/helix-context.mjs`：Agent 上下文、恢复快照、会话延续。
 - `src/helix-hooks.mjs`：宿主生命周期 Hook、PreToolUse 范围拦截。
 - `src/helix-status.mjs`：状态报告、Workflow 总结与 Dashboard 数据。
+- `src/helix-workflow.mjs`：Workflow 入口、样例计划生成与计划模板复制。
 - `test/*.test.mjs`：Node 内置测试。
 - `.helix/`：运行时状态目录，可由 CLI 生成。
 
