@@ -10,6 +10,10 @@ bin/helix.mjs
      -> src/helix-routing.mjs
      -> src/helix-rules.mjs
      -> src/helix-review.mjs
+     -> src/helix-injection.mjs
+     -> src/helix-context.mjs
+     -> src/helix-hooks.mjs
+     -> src/helix-status.mjs
      -> src/helix-plan.mjs
      -> src/helix-team.mjs
      -> src/helix-gates.mjs
@@ -21,12 +25,16 @@ bin/helix.mjs
 ## Main Files
 
 - `bin/helix.mjs`: CLI routing.
-- `src/helix-core.mjs`: orchestration runtime for task loop, workflow nodes, hooks, context, and change request review.
+- `src/helix-core.mjs`: orchestration runtime for task loop, workflow nodes, steering, change requests, and workflow entrypoints.
 - `src/helix-foundation.mjs`: shared constants, runtime initialization, config, locks, prompt-pack registry, snapshots, and resume context basics.
 - `src/helix-adapters.mjs`: Codex/Cursor adapter install, uninstall, report, and backup logic.
 - `src/helix-routing.mjs`: intent/domain/complexity routing and route request persistence.
 - `src/helix-rules.mjs`: project rule scanning and rule-context generation from AGENTS/CLAUDE/Cursor/OMO-style files.
 - `src/helix-review.mjs`: worker execution and deterministic Oracle/Momus/Metis review lanes.
+- `src/helix-injection.mjs`: injection-point resolution and mounted markdown/skill attachment loading.
+- `src/helix-context.mjs`: agent context, resume snapshots, session lineage, and continuation directives.
+- `src/helix-hooks.mjs`: host lifecycle hook handling and pre-tool-use scope guard output.
+- `src/helix-status.mjs`: workflow summary, status report, dashboard data, and ledger tail reads.
 - `src/helix-plan.mjs`: plan normalization, graph validation, plan import, route enrichment, and task-state loading.
 - `src/helix-team.mjs`: team-lite tasks, claims, evidence recording, task-state persistence, outbox, and durable message board.
 - `src/helix-gates.mjs`: command execution, verifier, scope guard, path checks, checkpoints, change requests, review/failure reports, and wisdom ledger.
@@ -68,4 +76,4 @@ Codex receives `.helix/adapters/codex/hooks.json`, which mirrors OMO-style lifec
 `src/helix-core.mjs` is no longer a pure single-file runtime, but it still holds several domains. Before adding deeper LLM providers and LSP gates, continue splitting it into:
 
 - `helix-task.mjs`
-- `helix-hooks.mjs`
+- `helix-change.mjs`
