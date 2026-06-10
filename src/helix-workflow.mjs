@@ -9,7 +9,7 @@ import {
 } from "./helix-foundation.mjs";
 import { importPlan } from "./helix-plan.mjs";
 import { statusReport, writeWorkflowSummary } from "./helix-status.mjs";
-import { runNextTask } from "./helix-core.mjs";
+import { runNextTask } from "./helix-node-runtime.mjs";
 
 export async function runWorkflow(rootDir, options = {}) {
   await initRuntime(rootDir);

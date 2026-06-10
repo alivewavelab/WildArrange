@@ -17,6 +17,7 @@ bin/helix.mjs
      -> src/helix-hooks.mjs
      -> src/helix-status.mjs
      -> src/helix-workflow.mjs
+     -> src/helix-node-runtime.mjs
      -> src/helix-plan.mjs
      -> src/helix-team.mjs
      -> src/helix-gates.mjs
@@ -28,7 +29,7 @@ bin/helix.mjs
 ## Main Files
 
 - `bin/helix.mjs`: CLI routing.
-- `src/helix-core.mjs`: node runtime for linear task execution, verify/scope/review/checkpoint/retry, and compatibility re-exports.
+- `src/helix-core.mjs`: compatibility export surface for existing CLI/tests/imports.
 - `src/helix-foundation.mjs`: shared constants, runtime initialization, config, locks, prompt-pack registry, snapshots, and resume context basics.
 - `src/helix-adapters.mjs`: Codex/Cursor adapter install, uninstall, report, and backup logic.
 - `src/helix-change.mjs`: steering proposals, review blockers, ChangeRequest review, and explicit accept/reject resolution.
@@ -41,6 +42,7 @@ bin/helix.mjs
 - `src/helix-hooks.mjs`: host lifecycle hook handling and pre-tool-use scope guard output.
 - `src/helix-status.mjs`: workflow summary, status report, dashboard data, and ledger tail reads.
 - `src/helix-workflow.mjs`: workflow entrypoint, sample plan generation, and plan template copying.
+- `src/helix-node-runtime.mjs`: linear task node runtime for execute/verify/scope/review/checkpoint/retry.
 - `src/helix-plan.mjs`: plan normalization, graph validation, plan import, route enrichment, and task-state loading.
 - `src/helix-team.mjs`: team-lite tasks, claims, evidence recording, task-state persistence, outbox, and durable message board.
 - `src/helix-gates.mjs`: command execution, verifier, scope guard, path checks, checkpoints, change requests, review/failure reports, and wisdom ledger.
@@ -79,6 +81,4 @@ Codex receives `.helix/adapters/codex/hooks.json`, which mirrors OMO-style lifec
 
 ## Known Architecture Debt
 
-`src/helix-core.mjs` is now focused on node runtime behavior. Before adding deeper LLM providers and LSP gates, the remaining optional split is:
-
-- `helix-node-runtime.mjs`
+`src/helix-core.mjs` is now a compatibility barrel. New implementation should go into the focused modules above rather than growing `helix-core.mjs`.
