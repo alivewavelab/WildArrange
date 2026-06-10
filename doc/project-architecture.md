@@ -5,6 +5,8 @@
 ```text
 bin/helix.mjs
   -> src/helix-core.mjs
+     -> src/helix-foundation.mjs
+     -> src/helix-adapters.mjs
   -> src/helix-dashboard.mjs
   -> packs/omo-linear/*
   -> .helix/*
@@ -13,7 +15,9 @@ bin/helix.mjs
 ## Main Files
 
 - `bin/helix.mjs`: CLI routing.
-- `src/helix-core.mjs`: current monolithic runtime for plan, task, gates, hooks, team-lite, resume, and adapter logic.
+- `src/helix-core.mjs`: orchestration runtime for plan, task loop, gates, hooks, team-lite, change requests, and workflow nodes.
+- `src/helix-foundation.mjs`: shared constants, runtime initialization, config, locks, prompt-pack registry, snapshots, and resume context basics.
+- `src/helix-adapters.mjs`: Codex/Cursor adapter install, uninstall, report, and backup logic.
 - `src/helix-dashboard.mjs`: local dashboard HTTP API and HTML UI.
 - `packs/omo-linear/agents`: role prompts.
 - `packs/omo-linear/skills`: skill prompts.
@@ -49,11 +53,10 @@ Codex receives `.helix/adapters/codex/hooks.json`, which mirrors OMO-style lifec
 
 ## Known Architecture Debt
 
-`src/helix-core.mjs` is intentionally monolithic for M1 speed. Before adding LLM providers and LSP gates, split it into:
+`src/helix-core.mjs` is no longer a pure single-file runtime, but it still holds several domains. Before adding deeper LLM providers and LSP gates, continue splitting it into:
 
 - `helix-plan.mjs`
 - `helix-task.mjs`
 - `helix-gates.mjs`
 - `helix-hooks.mjs`
 - `helix-team.mjs`
-- `helix-adapters.mjs`
