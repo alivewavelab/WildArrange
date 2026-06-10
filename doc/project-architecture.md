@@ -8,6 +8,7 @@ bin/helix.mjs
      -> src/helix-foundation.mjs
      -> src/helix-adapters.mjs
      -> src/helix-routing.mjs
+     -> src/helix-rules.mjs
      -> src/helix-plan.mjs
      -> src/helix-team.mjs
      -> src/helix-gates.mjs
@@ -19,10 +20,11 @@ bin/helix.mjs
 ## Main Files
 
 - `bin/helix.mjs`: CLI routing.
-- `src/helix-core.mjs`: orchestration runtime for task loop, gates, hooks, team-lite, change requests, and workflow nodes.
+- `src/helix-core.mjs`: orchestration runtime for task loop, workflow nodes, hooks, context, and change request review.
 - `src/helix-foundation.mjs`: shared constants, runtime initialization, config, locks, prompt-pack registry, snapshots, and resume context basics.
 - `src/helix-adapters.mjs`: Codex/Cursor adapter install, uninstall, report, and backup logic.
 - `src/helix-routing.mjs`: intent/domain/complexity routing and route request persistence.
+- `src/helix-rules.mjs`: project rule scanning and rule-context generation from AGENTS/CLAUDE/Cursor/OMO-style files.
 - `src/helix-plan.mjs`: plan normalization, graph validation, plan import, route enrichment, and task-state loading.
 - `src/helix-team.mjs`: team-lite tasks, claims, evidence recording, task-state persistence, outbox, and durable message board.
 - `src/helix-gates.mjs`: command execution, verifier, scope guard, path checks, checkpoints, change requests, review/failure reports, and wisdom ledger.
@@ -65,3 +67,4 @@ Codex receives `.helix/adapters/codex/hooks.json`, which mirrors OMO-style lifec
 
 - `helix-task.mjs`
 - `helix-hooks.mjs`
+- `helix-review.mjs`
