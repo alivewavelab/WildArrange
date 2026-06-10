@@ -1,0 +1,59 @@
+# HelixFlow Project Architecture
+
+## Runtime Shape
+
+```text
+bin/helix.mjs
+  -> src/helix-core.mjs
+  -> src/helix-dashboard.mjs
+  -> packs/omo-linear/*
+  -> .helix/*
+```
+
+## Main Files
+
+- `bin/helix.mjs`: CLI routing.
+- `src/helix-core.mjs`: current monolithic runtime for plan, task, gates, hooks, team-lite, resume, and adapter logic.
+- `src/helix-dashboard.mjs`: local dashboard HTTP API and HTML UI.
+- `packs/omo-linear/agents`: role prompts.
+- `packs/omo-linear/skills`: skill prompts.
+- `packs/omo-linear/tools/tool-contract.json`: tool contract inventory.
+- `helix.config.json`: local runtime configuration.
+
+## Runtime State
+
+- `.helix/team/tasks.json`: durable task state.
+- `.helix/ledger.jsonl`: append-only audit log.
+- `.helix/checkpoints`: checkpoint JSON after all gates pass.
+- `.helix/reports`: human-readable reports.
+- `.helix/snapshots/context.md`: resume context.
+- `.helix/adapters`: generated adapter files, reports, and backups.
+
+## Gate Model
+
+Completion requires:
+
+1. `worker_command` exits 0.
+2. `verify_commands` exists and passes.
+3. `successCriteria` passes.
+4. `scope_guard` returns `pass`.
+5. `review_gate` returns `pass`.
+
+`inconclusive` is not completion evidence.
+
+## Adapter Model
+
+Cursor receives `.cursor/rules/helixflow.mdc`.
+
+Codex receives `.helix/adapters/codex/hooks.json`, which mirrors OMO-style lifecycle hooks. Full host-level Codex plugin installation is still future adapter work.
+
+## Known Architecture Debt
+
+`src/helix-core.mjs` is intentionally monolithic for M1 speed. Before adding LLM providers and LSP gates, split it into:
+
+- `helix-plan.mjs`
+- `helix-task.mjs`
+- `helix-gates.mjs`
+- `helix-hooks.mjs`
+- `helix-team.mjs`
+- `helix-adapters.mjs`

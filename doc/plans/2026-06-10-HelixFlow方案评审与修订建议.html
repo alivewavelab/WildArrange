@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>HelixFlow 方案评审与修订建议 · 2026-06-10</title>
+<style>
+  body{font-family:-apple-system,"PingFang SC",sans-serif;background:#f5f6f8;color:#222;margin:0;padding:32px;max-width:1080px;margin:auto}
+  h1{font-size:22px} h2{font-size:17px;margin-top:36px;border-left:4px solid #4a6cf7;padding-left:10px}
+  .meta{color:#888;font-size:13px;margin-bottom:24px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:14px}
+  .card{background:#fff;border-radius:10px;padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  .card h3{margin:0 0 8px;font-size:15px;display:flex;align-items:center;gap:8px}
+  .card p{margin:6px 0;font-size:13.5px;line-height:1.7}
+  .tag{font-size:11px;padding:2px 8px;border-radius:10px;color:#fff;font-weight:600}
+  .p0{background:#e5484d}.p1{background:#f29d38}.p2{background:#8e9aaf}
+  .score{font-size:13px;color:#555}
+  .bar{height:6px;background:#e8eaef;border-radius:3px;margin:6px 0 2px}
+  .bar i{display:block;height:6px;border-radius:3px;background:#4a6cf7}
+  table{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden;font-size:13px}
+  th,td{padding:9px 12px;border-bottom:1px solid #eef0f4;text-align:left;vertical-align:top}
+  th{background:#f0f2f7;font-weight:600}
+  code{background:#eef0f4;padding:1px 5px;border-radius:4px;font-size:12px}
+  .verdict{background:#eef3ff;border:1px solid #c9d6ff;border-radius:10px;padding:14px 18px;font-size:14px;line-height:1.8}
+</style>
+</head>
+<body>
+<h1>HelixFlow 方案评审与修订建议</h1>
+<div class="meta">2026-06-10 ｜ 评审对象：通用Agent工作流内核方案 + M1工作保险箱需求 + PipelineAtlas 11 项目拆解 ｜ 评审基准：4 个核心目标</div>
+
+<div class="verdict">
+<b>总判断：地基扎实，方向对，可以进 ce-plan；但有一个系统性遗漏 —— debug/fix 工作流。</b><br>
+调研确实做到源码级，各家精华（CommandRegistrar / Delta Spec / context_package / 四段评审 / MCP 硬门 / index.yml）都抓对了。
+四个目标中：<b>可插拔(3)、不丢不覆盖(4) 覆盖强</b>；<b>流程简洁(1)、自进化(2) 是当前短板</b>，且两者的交点正是被漏掉的 debug 节点。
+</div>
+
+<h2>一 · 四目标对照评分</h2>
+<div class="grid">
+<div class="card"><h3>目标1 · 流程短 + 治理强 <span class="score">6/10</span></h3><div class="bar"><i style="width:60%"></i></div>
+<p>9 阶段 + 4 治理角色对日常小任务偏重，方案自己承认但「轻量档」只有一句话。<b>门要硬、站要少</b>：MCP 硬门保治理强度，流程长度按工作级别分流。</p>
+<p>建议：复用文档规范已有的 <code>任务/模块/专项</code> 三级 —— 任务级走 work→review→test 短链；模块级加 spec/plan；专项级才跑全 9 阶段。SuperClaude 三维触发表已调研到，但只用于选模型，应同时用于选流程长度。</p></div>
+
+<div class="card"><h3>目标2 · 项目自进化 <span class="score">5/10</span></h3><div class="bar"><i style="width:50%"></i></div>
+<p>复利飞轮（召回前置+沉淀后置）载体正确，CE 双轨 schema 的 bug 轨（symptoms/root_cause）天然支持 debug 召回。但自进化被推迟到 M2/M3 且只有一句话，<b>没有 hf-debug 节点承接</b>。</p>
+<p>建议：debug/fix 设为一等节点，内嵌两个自进化钩子 —— ① 修复后自动生成回归检查；② 按项目沉淀诊断 playbook（症状→根因映射），越修越快。</p></div>
+
+<div class="card"><h3>目标3 · 可插拔 <span class="score">9/10</span></h3><div class="bar"><i style="width:90%"></i></div>
+<p>三个解耦 + 插拔表是全方案最强部分，结构性可插拔成立。</p>
+<p>小缺口：目前「拔」= 删目录/改编排。建议加项目级 <code>helix.json</code> 声明启用哪些 stage/gate/skill/MCP，裁剪变成配置而非删文件（disabled_hooks 模式已调研到，顺手采用）。</p></div>
+
+<div class="card"><h3>目标4 · 同步/共享/不覆盖/可追回 <span class="score">8/10</span></h3><div class="bar"><i style="width:80%"></i></div>
+<p>M1 工作保险箱正面命中且排序正确（先打地基）。worktree 隔离 + delta + 快照 + 硬锁覆盖「不覆盖、可追回」。</p>
+<p>两个缺口：① 快照只落本地 <code>refs/helix/snapshots</code>，机器丢=工作丢、队友看不见 —— <b>快照需推远端</b>（参考蓝图 opencode-worktree-session 本身就 push）；② R4 在途总览是单机视角，多人需互见 in-flight（只读即可）。</p></div>
+</div>
+
+<h2>二 · 调研遗漏清单（具体到文件）</h2>
+<table>
+<tr><th>优先级</th><th>遗漏</th><th>证据</th><th>影响</th></tr>
+<tr><td><span class="tag p0">P0</span></td><td><b>debug 线全线未拆</b></td><td>CE 的 <code>ce-debug</code>（本机已装未映射）；omc 的 debug/self-improve（README 自注「40+ skills 未映射」）；SuperClaude <code>troubleshoot.md</code>（未映射清单）；claude-forge <code>build-error-resolver.md</code>（未映射清单）</td><td>直接命中目标2 的锚点场景</td></tr>
+<tr><td><span class="tag p0">P0</span></td><td><b>hf-run 缺 fix 环节</b></td><td>atlas 07 写明 lfg = plan→work→review→<b>fix</b>→test→pr→CI(3轮)；hf-run 草稿的 9 阶段链无 fix/debug 站</td><td>review 产出 findings 后无一等承接者</td></tr>
+<tr><td><span class="tag p1">P1</span></td><td>BMAD <code>workflows/*.yaml</code>（agents/tasks 之上的团队级串联定义）疑似未拆</td><td>03 节点表只见 agent/task/template/checklist</td><td>正是「工作流编排」层的原始定义</td></tr>
+<tr><td><span class="tag p1">P1</span></td><td>SuperClaude <code>load/save</code>（跨会话持久化）</td><td>README「未映射」清单</td><td>关联目标4 的会话恢复</td></tr>
+<tr><td><span class="tag p2">P2</span></td><td>OpenSpec onboard/feedback、CE 的 ce-doc-review</td><td>各 README 自注</td><td>低，可后补</td></tr>
+</table>
+
+<h2>三 · 修订建议（按优先级）</h2>
+<div class="grid">
+<div class="card"><h3><span class="tag p0">P0</span> 新增 hf-debug/fix 一等节点</h3>
+<p>位置：review 与 test 之间（对齐 lfg）。职责：承接 findings + 测试失败；内嵌自进化双钩子（bug→回归检查、bug 轨召回优先）。这是目标2 的落点，不应等到 M3 才有形态。</p></div>
+<div class="card"><h3><span class="tag p0">P0</span> 流程三级分流写进 hf-run</h3>
+<p>任务级 3 站 / 模块级 5-6 站 / 专项级 9 站，门全部保留 MCP 硬门。分流判据可抄 SuperClaude 三维触发表（关键词+文件类型+复杂度）。</p></div>
+<div class="card"><h3><span class="tag p1">P1</span> M1 增补：快照推远端 + 团队在途互见</h3>
+<p>R2 加一条：快照 SHOULD 异步推 <code>refs/helix/snapshots/*</code> 到远端；R4 总览支持读远端 refs 展示队友 in-flight（只读）。</p></div>
+<div class="card"><h3><span class="tag p1">P1</span> helix.json 项目级插拔清单</h3>
+<p>每项目声明启用的 stage/gate/skill/MCP；拔=改配置。与双作用域优先链（项目>用户）合并设计。</p></div>
+<div class="card"><h3><span class="tag p2">P2</span> 补拆 debug 线进 PipelineAtlas</h3>
+<p>ce-debug 本机即有，零成本；omc debug / SuperClaude troubleshoot / claude-forge build-error-resolver 各拆一节点目录。</p></div>
+</div>
+
+<div class="meta" style="margin-top:28px">评审 v1 · 证据均来自仓内文件（atlas README 的「未映射」自注、hf-run/hf-test 草稿、M1 需求 R1–R7）</div>
+</body>
+</html>

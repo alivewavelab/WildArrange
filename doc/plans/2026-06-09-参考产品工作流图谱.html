@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>参考产品工作流图谱 · Pipeline Atlas</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#fff; --line:#e4e7ec; --line2:#d0d5dd;
+    --tx:#1f2733; --tx2:#475467; --tx3:#8a93a3;
+    --indigo:#4f46e5; --blue:#2563eb; --green:#16a34a; --gray:#667085; --purple:#7c3aed; --red:#dc2626; --amber:#d97706;
+    --io:#f4f6fb;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--tx);font-family:-apple-system,"PingFang SC","Microsoft YaHei",Segoe UI,Roboto,sans-serif;line-height:1.65;font-size:14px}
+  .wrap{display:flex;max-width:1320px;margin:0 auto}
+  nav{position:sticky;top:0;align-self:flex-start;width:215px;min-width:215px;height:100vh;overflow-y:auto;padding:20px 12px;border-right:1px solid var(--line);background:var(--panel)}
+  nav h4{color:var(--tx3);font-size:10px;letter-spacing:1px;text-transform:uppercase;margin:16px 8px 6px}
+  nav a{display:block;color:var(--tx2);text-decoration:none;font-size:12.5px;padding:5px 10px;border-radius:6px}
+  nav a:hover{background:var(--bg);color:var(--tx)}
+  nav a b{color:var(--tx3);font-weight:400;font-size:11px}
+  main{flex:1;padding:30px 38px;min-width:0}
+  h1{font-size:25px;margin:0 0 4px}
+  .sub{color:var(--tx3);font-size:13px;margin-bottom:18px}
+  .legend{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 8px;padding:12px 14px;background:var(--panel);border:1px solid var(--line);border-radius:10px;font-size:12px}
+  .legend b{color:var(--tx2);margin-right:4px}
+  .prod{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:22px 0;scroll-margin-top:14px}
+  .prod-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:6px}
+  .prod-h h2{font-size:19px;margin:0}
+  .stars{font-size:12px;color:var(--tx3);background:var(--bg);padding:2px 8px;border-radius:20px}
+  .flow1{font-size:12.5px;color:var(--blue);background:#eff4ff;border:1px solid #d8e4ff;border-radius:7px;padding:7px 11px;margin:8px 0 4px}
+  .stage{margin:16px 0 4px;padding-left:14px;border-left:2px solid var(--line2)}
+  .stage-t{display:flex;align-items:center;gap:8px;font-weight:700;font-size:14.5px;margin:6px 0 8px;margin-left:-7px}
+  .stage-t .sd{width:11px;height:11px;border-radius:50%;background:var(--blue);border:2px solid #fff;box-shadow:0 0 0 1px var(--blue)}
+  details.node{background:var(--panel);border:1px solid var(--line);border-radius:9px;margin:6px 0;overflow:hidden}
+  details.node[open]{border-color:var(--line2);box-shadow:0 1px 4px rgba(16,24,40,.05)}
+  summary{display:flex;align-items:center;gap:9px;padding:9px 13px;cursor:pointer;list-style:none;font-size:13.5px}
+  summary::-webkit-details-marker{display:none}
+  summary:hover{background:#fafbfc}
+  .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .dot.g{background:var(--green)}.dot.b{background:var(--blue)}.dot.o{background:var(--amber)}.dot.r{background:var(--red)}.dot.p{background:var(--purple)}
+  summary .nm{font-weight:600;flex:1;min-width:0}
+  .pill{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:5px;white-space:nowrap}
+  .p-res{background:#eef2ff;color:var(--indigo)}        /* 常驻 */
+  .p-ind{background:#eff4ff;color:var(--blue)}          /* 独立调用 */
+  .p-od{background:#ecfdf3;color:var(--green)}           /* 按需读取 */
+  .p-api{background:#f2f4f7;color:var(--gray)}           /* API调用 */
+  .p-cyc{background:#f5f0ff;color:var(--purple)}         /* 周期触发 */
+  .p-gate{background:#fef2f2;color:var(--red)}           /* GATE */
+  .tok{font-size:11px;color:var(--tx3);font-variant-numeric:tabular-nums;min-width:46px;text-align:right}
+  .body{padding:4px 13px 13px;border-top:1px solid var(--line)}
+  .io{display:flex;gap:8px;background:var(--io);border-radius:6px;padding:6px 10px;margin:6px 0;font-size:12.5px}
+  .io .k{color:var(--blue);font-weight:700;min-width:34px;flex:none}
+  .d{display:flex;gap:8px;font-size:12.5px;margin:5px 2px;color:var(--tx2)}
+  .d .k{color:var(--tx3);font-weight:700;min-width:34px;flex:none}
+  code{background:var(--bg);padding:1px 5px;border-radius:4px;font-family:"SF Mono",Menlo,Consolas,monospace;font-size:11.5px;color:#b91c5c;word-break:break-all}
+  .inf{font-size:10px;color:var(--amber);font-weight:700;border:1px solid #fde68a;background:#fffbeb;padding:1px 5px;border-radius:4px}
+  .note{font-size:12px;color:var(--tx2);background:#fffbeb;border:1px solid #fde68a;border-radius:7px;padding:8px 11px;margin:8px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav>
+  <h4>产品（12）</h4>
+  <a href="#helixflow">0 · HelixFlow <b>我们的框架</b></a>
+  <a href="#claude-flow">1 · claude-flow <b>SPARC编排</b></a>
+  <a href="#spec-workflow">2 · spec-workflow-mcp <b>审批门</b></a>
+  <a href="#bmad">3 · BMAD-METHOD <b>角色链</b></a>
+  <a href="#spec-kit">4 · spec-kit <b>约束链</b></a>
+  <a href="#openspec">5 · OpenSpec <b>delta</b></a>
+  <a href="#agent-os">6 · Agent OS <b>规范注入</b></a>
+  <a href="#ce">7 · compound-engineering <b>复利</b></a>
+  <a href="#omc">8 · oh-my-claudecode <b>team</b></a>
+  <a href="#omo">9 · oh-my-openagent <b>神话编排</b></a>
+  <a href="#forge">10 · claude-forge <b>设计优先</b></a>
+  <a href="#superclaude">11 · SuperClaude <b>persona</b></a>
+  <h4>附录</h4>
+  <a href="#roster">附A · Agent 名册</a>
+  <a href="#commands">附B · /命令清单</a>
+  <h4>说明</h4>
+  <a href="#how">怎么读这张图</a>
+</nav>
+<main>
+<h1>参考产品工作流图谱 · Pipeline Atlas</h1>
+<div class="sub">11 个标杆产品的完整工作流，节点级拆解。每个节点点击展开看：输入/输出/触发/注入提示词/方式/tool·skill·mcp/源码文件。源码级调研，标 <span class="inf">推断</span> 者为非源码确证。｜ 2026-06-09</div>
+
+<div class="legend">
+  <b>节点类型：</b>
+  <span class="pill p-res">常驻</span> 一直在上下文
+  <span class="pill p-ind">独立调用</span> 单独 LLM/子Agent调用
+  <span class="pill p-od">按需读取</span> 用到才加载
+  <span class="pill p-api">API调用</span> 外部API/工具
+  <span class="pill p-cyc">周期触发</span> hook/loop/cron
+  <span class="pill p-gate">GATE</span> 质量门/卡点
+</div>
+
+<div class="note" id="how"><b>怎么读：</b>每个产品先给「一句话工作流」（横向阶段链），下面按阶段分组，每个阶段是一条带蓝点的竖线，竖线下挂若干「节点」。点开节点看注入了什么提示词、用什么 tool/skill/mcp、读写哪些文件。token 估算是粗略量级，用于判断"常驻"成本。</div>
+<div class="note" style="background:#ecfdf3;border-color:#a7f3d0;color:#065f46"><b>📁 真实源文件已落盘：</b>每个产品/每个节点的原始注入提示词、工具、skill 源文件都抓到了 <code>PipelineAtlas/</code>（与本文件同项目），按 <code>项目 → 节点 → 源文件</code> 组织，每项目带 README 映射表。索引见 <code>PipelineAtlas/README.md</code>。本图是可视化索引，PipelineAtlas 是可逐字读的源文件库。00-HelixFlow 是我们框架的设计草稿。</div>
+
+<!-- ========================= 0 HelixFlow ========================= -->
+<div class="prod" id="helixflow" style="border-color:#a7f3d0;background:#fbfffe">
+<div class="prod-h"><h2>0 · HelixFlow v2（我们的框架）</h2><span class="stars" style="background:#ecfdf3;color:#065f46">v2 · 借鉴 omoa 源码机制 · 2026-06-10 修订 · 源码依据 PipelineAtlas/09-oh-my-openagent/WORKFLOW.md</span></div>
+<div class="flow1">三级分流：任务级 3 站 / 模块级 6 站 / 专项级全链 ｜ 治理=hooks 硬机制非 agent 自律 ｜ 贯穿：recall 前置 + compound 沉淀 ｜ 状态：.helix/state.json（抄 boulder）续作不丢 ｜ 载体：Claude Code 原生全量 + Codex 薄适配 + Cursor 兜底（不依赖 opencode）</div>
+
+<div class="stage"><div class="stage-t"><span class="sd" style="background:#0ea5e9;box-shadow:0 0 0 1px #0ea5e9"></span>v2 新增 · 三级分流（流程长度按工作级别，门不减）</div>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">hx-route · 分流判定</span><span class="pill p-res">常驻</span><span class="tok">低</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>用户请求</div><div class="io"><span class="k">输出</span>tier 判定（任务/模块/专项）+ 对应流程链</div><div class="d"><span class="k">注入</span>"三维判据：关键词+文件类型+复杂度（SuperClaude 触发表）；<b>2+ 步或多文件强制升档出计划</b>（omoa ulw 规则）；用户可显式指定 tier 覆盖判定"</div><div class="d"><span class="k">偷自</span>omoa keyword-detector + SuperClaude 三维表；对齐文档规范已有 任务/模块/专项 三级</div></div>
+  </details>
+  <details class="node"><summary><span class="dot g"></span><span class="nm">任务级 · 3 站：work→review→test</span><span class="pill p-ind">独立调用</span><span class="tok">低</span></summary>
+    <div class="body"><div class="d"><span class="k">形态</span>对应 omoa「直接 Sisyphus 干」：不写计划文件，直接执行；review/test 门照常硬卡；vault 自动落袋</div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">模块级 · 6 站：spec→plan→work→review→debug/fix→test</span><span class="pill p-ind">独立调用</span><span class="tok">中</span></summary>
+    <div class="body"><div class="d"><span class="k">形态</span>对应 omoa「Metis→Prometheus→Momus→Atlas」：spec 前置 Metis 式预审，plan 出口过 Momus 式验收门，执行走计划文件 + 状态续作</div></div>
+  </details>
+  <details class="node"><summary><span class="dot r"></span><span class="nm">专项级 · 全链 + 多 agent 并行</span><span class="pill p-gate">GATE</span><span class="tok">高</span></summary>
+    <div class="body"><div class="d"><span class="k">形态</span>对应 omoa ULW/team：全 9+1 站，Wave 并行派发，vault worktree 隔离；默认关，专项再开</div></div>
+  </details>
+</div>
+
+<div class="stage"><div class="stage-t"><span class="sd" style="background:#16a34a;box-shadow:0 0 0 1px #16a34a"></span>全流程 9 阶段（4 治理 + 4 执行）</div>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">hf-ideate · 创意→需求</span><span class="pill p-ind">独立调用</span><span class="tok">中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>功能想法</div><div class="io"><span class="k">输出</span>brief.md(REQ-ID + 验收场景)</div><div class="d"><span class="k">注入</span>"大道至简产品合伙人；先给假设非问一堆；聚焦 WHAT/WHY 禁技术实现；RFC2119+Given/When/Then"</div><div class="d"><span class="k">角色</span>产品负责人(治理)</div><div class="d"><span class="k">偷自</span>ce-brainstorm rigor probes</div><div class="d"><span class="k">源</span><code>PipelineAtlas/00-HelixFlow/01-hf-ideate/SKILL.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">hf-spec · 规格(约束源)</span><span class="pill p-ind">独立调用</span><span class="tok">中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>brief + constitution</div><div class="io"><span class="k">输出</span>spec.md + changes/delta</div><div class="d"><span class="k">注入</span>"spec 是合同非文档；改 spec 走 delta 不动主 spec(多人不冲突)；constitution 合规"</div><div class="d"><span class="k">v2 前置</span>Metis 式预审子调用（READ-ONLY）：意图分类、隐藏需求、AI-slop 模式、澄清问题——在写 spec 前杀盲区</div><div class="d"><span class="k">偷自</span>OpenSpec delta + RFC2119 + omoa metis.ts</div><div class="d"><span class="k">源</span><code>00-HelixFlow/02-hf-spec/</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">hf-design · UI/UX（可拔）</span><span class="pill p-ind">独立调用</span><span class="tok">中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>spec</div><div class="io"><span class="k">输出</span>design spec(含组件槽位) + 截图</div><div class="d"><span class="k">注入</span>"设计系统/交互/视觉三一致；工具类必须有范围反馈(Gizmo)杀痛点6；<b>组件槽位列全</b>杀痛点5；落 HTML 不只在聊天"</div><div class="d"><span class="k">角色</span>设计负责人(治理)·纯技术项目可拔</div><div class="d"><span class="k">源</span><code>00-HelixFlow/03-hf-design/</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">hf-architect · 架构基线</span><span class="pill p-ind">独立调用</span><span class="tok">中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>spec + design</div><div class="io"><span class="k">输出</span>architecture/*(sharding) + contracts/</div><div class="d"><span class="k">注入</span>"技术设计一致性；决策追溯 REQ-ID；架构冲突触发返工→重排"</div><div class="d"><span class="k">偷自</span>spec-kit 宪法门</div><div class="d"><span class="k">源</span><code>00-HelixFlow/04-hf-architect/</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">hf-plan · 任务 DAG + context_package</span><span class="pill p-ind">独立调用</span><span class="tok">中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>spec + architecture</div><div class="io"><span class="k">输出</span>plan.md（<b>Wave 分组并行</b> + 依赖矩阵 + context_package + writable_by + 每任务 category/skills）</div><div class="d"><span class="k">注入</span>"按 Wave 分组：无依赖任务进 Wave 1 并行，依赖矩阵显式列 Blocks/Can-Parallelize-With；<b>为每任务预提取 context_package</b>；任务标<b>语义 category</b>（quick/deep/ultrabrain/visual-engineering）而非模型名，dispatch 时各产品自行映射模型"</div><div class="d"><span class="k">v2 出口门</span>Momus 式验收子调用：清晰度/可验证/上下文充分（&gt;10% 靠猜即拒），OKAY 才放行，REJECTED 最多挑 3 刺改后重提</div><div class="d"><span class="k">偷自</span>omoa Prometheus plan 格式 + Momus 循环 + BMAD Story 包</div><div class="d"><span class="k">源</span><code>00-HelixFlow/05-hf-plan/</code> · 格式样例 <code>09-oh-my-openagent/WORKFLOW.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot g"></span><span class="nm">hf-work · 执行</span><span class="pill p-res">常驻</span><span class="tok">高</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>一个 Implementation Unit</div><div class="io"><span class="k">输出</span>代码 + execution_record + 增量 commit</div><div class="d"><span class="k">注入</span>"context_package 已全，不主动翻文档；只改 writable_by 区段；worktree/分支隔离 + 持续 checkpoint"</div><div class="d"><span class="k">角色</span>开发(执行)</div><div class="d"><span class="k">源</span><code>00-HelixFlow/06-hf-work/</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">hf-review · 四段评审管线</span><span class="pill p-ind">独立调用</span><span class="tok">高</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>diff + plan(R-IDs)</div><div class="io"><span class="k">输出</span>findings JSON / report.md</div><div class="d"><span class="k">注入</span>"扇出→指纹去重→跨reviewer升信→<b>置信门控放最后(P0 保留)</b>→per-finding 独立验证(绝不batch)；Requirements Completeness + regression 杀痛点4"</div><div class="d"><span class="k">偷自</span>CE 四段管线</div><div class="d"><span class="k">源</span><code>00-HelixFlow/07-hf-review/</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot r"></span><span class="nm">hf-debug/fix · 修复(v2 新增一等节点)</span><span class="pill p-ind">独立调用</span><span class="tok">中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>review findings + 测试失败</div><div class="io"><span class="k">输出</span>修复 + 回归检查 + 诊断记录</div><div class="d"><span class="k">注入</span>"假设驱动调试：症状→假设→验证→修，先根因后补丁；<b>2+ 次失败强制升级 Oracle 式顾问</b>(omoa 规则)；修复不破坏既有测试"</div><div class="d"><span class="k">自进化双钩</span>① 每个修掉的 bug 自动生成回归检查；② 沉淀 症状→根因 诊断 playbook，bug 轨召回优先——同类问题越修越快(目标2 落点)</div><div class="d"><span class="k">位置</span>review 与 test 之间，对齐 lfg 状态机 plan→work→review→<b>fix</b>→test</div><div class="d"><span class="k">偷自</span>omoa oracle.ts + debugging skill + CE ce-debug；上轮评审 P0</div><div class="d"><span class="k">源</span><code>00-HelixFlow/</code>(待补节点目录)</div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">hf-test · 测试(自进化)</span><span class="pill p-ind">独立调用</span><span class="tok">中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>spec 场景 + 代码</div><div class="io"><span class="k">输出</span>测试报告</div><div class="d"><span class="k">注入</span>"从场景生成用例；<b>实跑验功能</b>不能只'不报错'；主路径+边界；<b>BUG→自动回归检查(自进化,M2/M3)</b>"</div><div class="d"><span class="k">门</span>test_gate(MCP 硬门)</div><div class="d"><span class="k">源</span><code>00-HelixFlow/08-hf-test/</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot r"></span><span class="nm">hf-deploy · 部署(HITL)</span><span class="pill p-gate">GATE</span><span class="tok">低</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>通过测试的变更</div><div class="io"><span class="k">输出</span>上线 + PR + 监控</div><div class="d"><span class="k">注入</span>"对外操作先确认；Go/No-Go+回滚+监控；CI watch autofix 3 轮不弱化断言"</div><div class="d"><span class="k">门</span>deploy_gate 必须人类拍板(HITL)</div><div class="d"><span class="k">源</span><code>00-HelixFlow/09-hf-deploy/</code></div></div>
+  </details>
+</div>
+
+<div class="stage"><div class="stage-t"><span class="sd" style="background:#7c3aed;box-shadow:0 0 0 1px #7c3aed"></span>贯穿（复利飞轮）+ 编排</div>
+  <details class="node"><summary><span class="dot p"></span><span class="nm">hf-recall · 召回前置</span><span class="pill p-od">按需读取</span><span class="tok">低</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>阶段 context</div><div class="io"><span class="k">输出</span>历史经验召回</div><div class="d"><span class="k">注入</span>"先读 CONCEPTS.md；Grep-first frontmatter 预筛(200→5)；冲突显式标记不让旧学习覆盖现状"</div><div class="d"><span class="k">偷自</span>CE learnings-researcher</div><div class="d"><span class="k">源</span><code>00-HelixFlow/10-hf-recall/</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot p"></span><span class="nm">hf-compound · 沉淀后置(自进化载体)</span><span class="pill p-od">按需读取</span><span class="tok">高</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>问题解决过程</div><div class="io"><span class="k">输出</span>docs/solutions/双轨 schema + CONCEPTS.md + <b>执行中 notepads 台账</b></div><div class="d"><span class="k">注入</span>"双轨 frontmatter；五维 overlap 评分 High→更新旧文档防漂移；子agent只回文本仅orchestrator写文件；<b>bug 轨喂给自进化测试</b>"</div><div class="d"><span class="k">v2 增补</span>执行期智慧台账（抄 omoa notepads）：conventions/failures&amp;gotchas/decisions <b>append-only</b>，Wave 间传给下一任务——沉淀不只在收尾，执行中就在积累</div><div class="d"><span class="k">偷自</span>CE ce-compound + omoa notepads</div><div class="d"><span class="k">源</span><code>00-HelixFlow/11-hf-compound/</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot p"></span><span class="nm">hf-run · 编排器(带 GATE 状态机)</span><span class="pill p-res">常驻</span><span class="tok">—</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>feature 目标（按 hx-route 分流的 tier 走对应链）</div><div class="io"><span class="k">输出</span>状态机执行 + <code>.helix/state.json</code></div><div class="d"><span class="k">注入</span>"链上每步 GATE:STOP 断言；recall 前置+compound 后置；按 Wave 并行派发，每任务带 category+skills"</div><div class="d"><span class="k">v2 状态续作（抄 boulder）</span><code>.helix/state.json</code> 记 active_plan/session 血缘/per-task 计时；每次工具调用后数计划 checkbox，<b>余 &gt;0 自动注入「Status: 5/8 completed」续作提示</b>；崩溃/换会话从断点续，session id 追加血缘——专项跨多会话不丢线索</div><div class="d"><span class="k">偷自</span>lfg 状态机 + omoa boulder-state + atlas 续作注入（<code>packages/boulder-state</code> 是现成纯 TS 库可直接用）</div><div class="d"><span class="k">源</span><code>00-HelixFlow/12-hf-run-orchestrator/</code></div></div>
+  </details>
+</div>
+
+<div class="stage"><div class="stage-t"><span class="sd" style="background:#b91c1c;box-shadow:0 0 0 1px #b91c1c"></span>v2 新增 · 硬治理层（门=代码强制，非 agent 自律；omoa 12 个硬 hook 的等价移植）</div>
+  <details class="node"><summary><span class="dot r"></span><span class="nm">gate-continuation · 不许半途而废</span><span class="pill p-gate">GATE</span><span class="tok">低</span></summary>
+    <div class="body"><div class="d"><span class="k">机制</span>Stop hook：计划/todo 有未完成项时 block 停止并注入续作提示；显式「停止续作」状态持久化、用户普通消息不会误清除</div><div class="d"><span class="k">偷自</span>omoa todo-continuation-enforcer + stop-continuation-guard（lazycodex 已验证此 hook 可移植出 opencode）</div></div>
+  </details>
+  <details class="node"><summary><span class="dot r"></span><span class="nm">gate-write · 写保护</span><span class="pill p-gate">GATE</span><span class="tok">低</span></summary>
+    <div class="body"><div class="d"><span class="k">机制</span>PreToolUse hook：① 未 Read 过的已有文件不许 Write/Edit（canonical path 防绕过）；② 台账/审计目录 append-only 禁覆写</div><div class="d"><span class="k">偷自</span>omoa write-existing-file-guard + notepad-write-guard</div></div>
+  </details>
+  <details class="node"><summary><span class="dot r"></span><span class="nm">gate-schema · 产物格式门</span><span class="pill p-gate">GATE</span><span class="tok">低</span></summary>
+    <div class="body"><div class="d"><span class="k">机制</span>PostToolUse hook：写计划/spec 文件时校验 schema（checkbox 可解析、必填段齐全），解析不了=会被编排器跳过=立即警告</div><div class="d"><span class="k">偷自</span>omoa plan-format-validator</div></div>
+  </details>
+  <details class="node"><summary><span class="dot r"></span><span class="nm">gate-quality · 质量硬门</span><span class="pill p-gate">GATE</span><span class="tok">低</span></summary>
+    <div class="body"><div class="d"><span class="k">机制</span>test 未过不许 commit、review P0 未清不许 push（git pre-commit/pre-push 兜底=产品中立）、deploy 必须人工放行(HITL)；反垃圾注释扫描在 Edit 后自动跑、违规写回输出逼 agent 自改</div><div class="d"><span class="k">偷自</span>spec-workflow-mcp 门=工具返回值 + omoa comment-checker</div></div>
+  </details>
+</div>
+
+<div class="stage"><div class="stage-t"><span class="sd" style="background:#dc2626;box-shadow:0 0 0 1px #dc2626"></span>M1 · 工作保险箱（先建·别丢东西 Job A）</div>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">M1 · 8 节点（画像/隔离/checkpoint/落地/恢复/收口/硬锁/跨产品）</span><span class="pill p-gate">M1</span><span class="tok">—</span></summary>
+    <div class="body"><div class="io"><span class="k">目标</span>关 Agent/忘合并/分支乱都不丢一行；任意在途状态一键恢复；产物标准化可读；轻重仓画像自适应；三产品一致</div>
+    <div class="d"><span class="k">01 画像识别</span>引擎可追加(Unity/UE/网游)+体积→light/heavy；写 .helix/config</div>
+    <div class="d"><span class="k">02 隔离</span>light=worktree-per-task；heavy=单副本+分支</div>
+    <div class="d"><span class="k">03 checkpoint daemon</span>持续快照到 shadow ref(连崩溃都兜)；独立 ref 防膨胀；<b>v2: 快照异步推远端 <code>refs/helix/snapshots/*</code></b>——机器丢不等于工作丢(上轮评审 P1)</div>
+    <div class="d"><span class="k">04 产物落地</span>持续落 git 中立目录 + 统一模板(组件槽位)</div>
+    <div class="d"><span class="k">05 一键恢复</span>CLI <code>helix vault/restore</code> + MCP(agent-native 对等)；状态地基直接用 omoa <code>packages/boulder-state</code>(纯 TS 现成库)</div>
+    <div class="d"><span class="k">06 merge 收口</span>检测"完成未合并"(oh-my 生态空白·差异化)；<b>v2: 在途总览读远端 refs 展示队友 in-flight(只读)</b>——多人互见(上轮评审 P1)</div>
+    <div class="d"><span class="k">07 硬锁</span>git lfs lock，远端仲裁，commit/push 边界强制(不可合并文件按引擎追加)</div>
+    <div class="d"><span class="k">08 跨产品</span>git 层+薄 MCP/CLI；hooks 弱的产品 git pre-commit 兜底</div>
+    <div class="d"><span class="k">源</span><code>00-HelixFlow/M1-work-vault/</code> + 需求 <code>doc/brainstorms/...M1工作保险箱-requirements.html</code></div></div>
+  </details>
+</div>
+
+<div class="stage"><div class="stage-t"><span class="sd" style="background:#f59e0b;box-shadow:0 0 0 1px #f59e0b"></span>v2 新增 · 跨产品落地（不依赖 opencode；抄 omoa「Core 纯库 → 各产品薄适配」分层）</div>
+  <details class="node"><summary><span class="dot g"></span><span class="nm">Claude Code / Cowork（主力·全量形态）</span><span class="pill p-res">常驻</span><span class="tok">—</span></summary>
+    <div class="body"><div class="d"><span class="k">载体</span>原生 hooks(PreToolUse/PostToolUse/Stop) 承载全部硬治理门 + skills 承载阶段提示词 + MCP 承载 vault；54 个 omoa hook 里治理核心约 12 个，事件模型一一对应(omoa 自己的 claude-code-hooks 兼容层就是这张映射表，~2110 行源码可参照)</div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">Codex CLI（轻量形态·照抄 lazycodex 配方）</span><span class="pill p-ind">独立调用</span><span class="tok">—</span></summary>
+    <div class="body"><div class="d"><span class="k">载体</span>lazycodex 已验证的 8 组件模式：rules/comment-checker/lsp/续作(Stop hook 读 state.json)/关键词注入 经 Codex 原生插件系统注入；<b>agent 编排层不移植</b>——用 Codex 原生 agent，治理和状态续作照样硬</div><div class="d"><span class="k">源</span><code>/tmp/omoa/packages/omo-codex/</code>(配方) · 拆解 <code>09-oh-my-openagent/WORKFLOW.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">Cursor（最薄形态·兜底）</span><span class="pill p-od">按需读取</span><span class="tok">—</span></summary>
+    <div class="body"><div class="d"><span class="k">载体</span>.cursor/rules 注入流程纪律 + git pre-commit/pre-push 兜质量门 + vault daemon 产品中立兜「不丢工作」——误用 Cursor 也不破底线</div></div>
+  </details>
+  <details class="node"><summary><span class="dot p"></span><span class="nm">三产品共用资产</span><span class="pill p-od">按需读取</span><span class="tok">—</span></summary>
+    <div class="body"><div class="d"><span class="k">一份规则三家生效</span>omoa rules-engine 本来就按优先级读 <code>.claude/rules</code> &gt; <code>.cursor/rules</code> &gt; <code>.github/instructions</code>——规则放 <code>.claude/rules/</code> 一处维护即可</div><div class="d"><span class="k">产品中立 MCP</span><code>lsp-tools-mcp</code> / <code>ast-grep-mcp</code> 是 stdio MCP，三产品 <code>.mcp.json</code> 直挂</div><div class="d"><span class="k">纯库</span><code>boulder-state</code>(状态) / <code>rules-engine</code>(规则) / <code>comment-checker-core</code>(反垃圾注释) 直接 import 进 helix-* 实现</div></div>
+  </details>
+</div>
+</div>
+
+<!-- ========================= 1 claude-flow ========================= -->
+<div class="prod" id="claude-flow">
+<div class="prod-h"><h2>1 · claude-flow</h2><span class="stars">⭐ 31–58K · ruvnet</span></div>
+<div class="flow1">初始化(swarm) → pre-task hook → SPARC 编排器 → 5阶段 SPARC 子模式 → memory/学习管道 → post-task hook → 部署后监控</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>会话生命周期</div>
+  <details class="node"><summary><span class="dot p"></span><span class="nm">session-start Hook</span><span class="pill p-cyc">周期触发</span><span class="tok">~200</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>新会话事件</div><div class="io"><span class="k">输出</span>恢复上次 memory，初始化 11 个命名空间(agents/tasks/sessions/swarm/spec/arch/impl/test/debug/...)</div>
+    <div class="d"><span class="k">触发</span>Claude Code 会话启动</div><div class="d"><span class="k">注入</span>"恢复上次 session 数据，重载 agent 拓扑与任务状态"</div><div class="d"><span class="k">方式</span>hook</div><div class="d"><span class="k">tool</span><code>mcp__claude-flow__memory_search</code> / <code>hooks session-start</code></div><div class="d"><span class="k">文件</span><code>.claude/commands/hooks/</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot p"></span><span class="nm">route Hook (智能路由)</span><span class="pill p-res">常驻</span><span class="tok">~100</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>任务描述 + 复杂度评估</div><div class="io"><span class="k">输出</span>选定模型/代理类型；复杂度等级 1–13</div>
+    <div class="d"><span class="k">触发</span>每次新任务/子任务分派前</div><div class="d"><span class="k">注入</span>按复杂度选模型：1=bugfix、3=feature、5=refactor、7=perf、9=security、13=docs</div><div class="d"><span class="k">方式</span>hook (MoE routing)</div><div class="d"><span class="k">文件</span>CLAUDE.md (route hook 表)</div></div>
+  </details>
+  <details class="node"><summary><span class="dot p"></span><span class="nm">session-end Hook</span><span class="pill p-res">常驻</span><span class="tok">~100</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>会话结束事件</div><div class="io"><span class="k">输出</span>未完成任务 checkpoint 存 memory；代理状态序列化；知识转移</div>
+    <div class="d"><span class="k">触发</span>会话关闭</div><div class="d"><span class="k">注入</span>"保存未完成任务状态与 agent 上下文供 session-restore"</div><div class="d"><span class="k">方式</span>hook</div><div class="d"><span class="k">tool</span><code>memory_usage{namespace:sessions}</code></div></div>
+  </details>
+</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>任务前编排</div>
+  <details class="node"><summary><span class="dot p"></span><span class="nm">pre-task Hook</span><span class="pill p-res">常驻</span><span class="tok">~500</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>任务描述文本</div><div class="io"><span class="k">输出</span>JSON：代理类型清单、拓扑建议(hierarchical/mesh/adaptive)、复杂度、历史决策检索</div>
+    <div class="d"><span class="k">触发</span>任何新任务启动前自动</div><div class="d"><span class="k">注入</span>"分析需求→定代理类型→检索过往决策→选拓扑→估资源"</div><div class="d"><span class="k">方式</span>hook</div><div class="d"><span class="k">tool</span><code>swarm_init</code>,<code>memory_search</code></div><div class="d"><span class="k">文件</span><code>.claude/commands/hooks/pre-task.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">Swarm Init (蜂群初始化)</span><span class="pill p-ind">独立调用</span><span class="tok">~200</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>topology, maxAgents(8), strategy(specialized), consensus(raft)</div><div class="io"><span class="k">输出</span>蜂群实例；代理池就绪；共享内存命名空间</div>
+    <div class="d"><span class="k">触发</span>pre-task 分析后 / <code>swarm init</code></div><div class="d"><span class="k">注入</span>"复杂任务必须用 MCP 工具初始化 swarm"</div><div class="d"><span class="k">方式</span>MCP tool</div><div class="d"><span class="k">tool</span><code>mcp__ruv-swarm__swarm_init</code></div></div>
+  </details>
+</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>SPARC 编排器</div>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/sparc-sparc (主编排器)</span><span class="pill p-ind">独立调用</span><span class="tok">~1.5–3K</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>用户顶层任务描述</div><div class="io"><span class="k">输出</span>子任务清单(TodoWrite 5–10+)；并行/串行计划；子代理分派指令</div>
+    <div class="d"><span class="k">触发</span><code>/sparc-sparc "task"</code> / <code>sparc_mode{mode:orchestrator}</code></div><div class="d"><span class="k">注入</span>"拆阶段(design→implement→test→deploy)，映射依赖，单消息内 spawn 代理(run_in_background)，5s 监控，聚合结果"</div><div class="d"><span class="k">方式</span>slash-command → MCP 委派</div><div class="d"><span class="k">tool</span><code>sparc_mode</code>,<code>TodoWrite</code>,<code>Task</code></div><div class="d"><span class="k">文件</span><code>.claude/commands/sparc/orchestrator.md</code></div></div>
+  </details>
+</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>SPARC 5阶段子模式</div>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/sparc-spec-pseudocode</span><span class="pill p-ind">独立调用</span><span class="tok">~2–4K</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>需求、约束、边界条件</div><div class="io"><span class="k">输出</span><code>phase_N.md</code> 规格(&lt;500行/模块) + 含 TDD 锚点的伪代码</div>
+    <div class="d"><span class="k">触发</span>Orchestrator 委派 / <code>/sparc-spec-pseudocode</code></div><div class="d"><span class="k">注入</span>"捕获完整上下文→模块化伪代码+TDD锚点；无硬编码密钥；文件&lt;500行"</div><div class="d"><span class="k">方式</span>slash/MCP</div><div class="d"><span class="k">tool</span><code>sparc_mode{spec-pseudocode}</code>,<code>memory{ns:spec}</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/sparc-architect</span><span class="pill p-ind">独立调用</span><span class="tok">~3–6K</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>规格、伪代码</div><div class="io"><span class="k">输出</span>架构图、组件接口、DB schema、API 合约、基础设施方案</div>
+    <div class="d"><span class="k">触发</span>Orchestrator / <code>/sparc-architect</code></div><div class="d"><span class="k">注入</span>"设计系统结构，决策存 memory ns:arch，跨代理共享组件规格；支持微服务/事件驱动/DDD/CQRS"</div><div class="d"><span class="k">方式</span>slash/MCP</div><div class="d"><span class="k">tool</span><code>sparc_mode{architect}</code>,<code>memory{ns:arch}</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/sparc-code (Auto-Coder)</span><span class="pill p-ind">独立调用</span><span class="tok">~4–8K</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>架构、伪代码、任务分解</div><div class="io"><span class="k">输出</span>实现代码(模块&lt;500行)；无硬编码密钥</div>
+    <div class="d"><span class="k">触发</span>Orchestrator / <code>/sparc-code</code></div><div class="d"><span class="k">注入</span>"无硬编码 env；复杂逻辑拆模块；用 TDD/调试/安全/优化流；按需委派专项子模式"</div><div class="d"><span class="k">方式</span>slash/MCP</div><div class="d"><span class="k">tool</span><code>sparc_mode{code}</code>,edit,read</div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/sparc-tdd</span><span class="pill p-ind">独立调用</span><span class="tok">~2–5K</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>功能描述、覆盖率目标(90%)</div><div class="io"><span class="k">输出</span>red→green→refactor；单元/集成/E2E/性能/安全测试</div>
+    <div class="d"><span class="k">触发</span>Orchestrator / <code>/sparc-tdd</code></div><div class="d"><span class="k">注入</span>"先写失败测试(red)→最小实现(green)→重构；覆盖率 90%"</div><div class="d"><span class="k">方式</span>slash/MCP</div><div class="d"><span class="k">tool</span><code>sparc_mode{tdd}</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/sparc-debug</span><span class="pill p-ind">独立调用</span><span class="tok">~2–4K</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>错误信息、堆栈、失败测试</div><div class="io"><span class="k">输出</span>根因分析、修复补丁、回归测试</div>
+    <div class="d"><span class="k">触发</span>测试失败 / <code>/sparc-debug</code></div><div class="d"><span class="k">注入</span>"先查根因再打补丁；验证修复不破坏已有测试"</div><div class="d"><span class="k">方式</span>slash/MCP</div><div class="d"><span class="k">tool</span><code>sparc_mode{debug}</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/sparc-security-review</span><span class="pill p-ind">独立调用</span><span class="tok">~2–4K</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>代码库路径、审计范围</div><div class="io"><span class="k">输出</span>安全发现(暴露密钥/env泄漏/超500行) + 缓解建议</div>
+    <div class="d"><span class="k">触发</span>Refinement 阶段 / <code>/sparc-security-review</code></div><div class="d"><span class="k">注入</span>"静/动态审计；标记暴露密钥、env泄漏、文件>500行"</div><div class="d"><span class="k">方式</span>slash/MCP</div><div class="d"><span class="k">tool</span><code>sparc_mode{security-review}</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/sparc-refinement-optimization</span><span class="pill p-ind">独立调用</span><span class="tok">~2–4K</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>现有模块、性能数据</div><div class="io"><span class="k">输出</span>重构模块(>500行拆分)、配置移至 env、性能优化</div>
+    <div class="d"><span class="k">触发</span>代码实现后 / 命令</div><div class="d"><span class="k">注入</span>"重构、模块化、提性能；>500行拆小；配置入环境变量；解耦依赖"</div><div class="d"><span class="k">方式</span>slash/MCP</div><div class="d"><span class="k">tool</span><code>sparc_mode{refinement-optimization}</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/sparc-integration</span><span class="pill p-ind">独立调用</span><span class="tok">~3–5K</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>所有子模式产出(规格/架构/代码/测试)</div><div class="io"><span class="k">输出</span>统一运行系统；preflight 结果；接口兼容性报告</div>
+    <div class="d"><span class="k">触发</span>所有 SPARC 阶段完成后</div><div class="d"><span class="k">注入</span>"合并各模式产出为可运行、测试过的生产系统；确保一致性、内聚、模块化；finalize 前跑 preflight"</div><div class="d"><span class="k">方式</span>slash/MCP</div><div class="d"><span class="k">tool</span><code>sparc_mode{integration}</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/sparc-docs-writer</span><span class="pill p-ind">独立调用</span><span class="tok">~2–3K</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>集成后系统代码、架构决策</div><div class="io"><span class="k">输出</span>技术文档、API 文档、用户指南</div>
+    <div class="d"><span class="k">触发</span>Integration 后</div><div class="d"><span class="k">注入</span>"集成后沉淀知识：技术文档、API 参考、用户指南"</div><div class="d"><span class="k">方式</span>slash/MCP</div><div class="d"><span class="k">tool</span><code>sparc_mode{docs-writer}</code></div></div>
+  </details>
+</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>内存与学习管道</div>
+  <details class="node"><summary><span class="dot p"></span><span class="nm">Memory Store/Search</span><span class="pill p-res">常驻</span><span class="tok">—</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>键值对 + namespace 标签</div><div class="io"><span class="k">输出</span>HNSW 向量索引；跨代理/跨会话语义检索</div>
+    <div class="d"><span class="k">触发</span>任意代理需保存/读取决策时</div><div class="d"><span class="k">注入</span>11 个命名空间：operational(agents/tasks/sessions/swarm)+development(spec/arch/impl/test/debug)+general</div><div class="d"><span class="k">方式</span>MCP tool</div><div class="d"><span class="k">tool</span><code>memory_usage</code>,<code>memory_search</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot p"></span><span class="nm">4步智能循环 (RETRIEVE→JUDGE→DISTILL→CONSOLIDATE)</span><span class="pill p-cyc">周期触发</span><span class="tok">—</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>代理执行轨迹；成功/失败结果</div><div class="io"><span class="k">输出</span>LoRA 提取的学习模式；EWC 防遗忘权重；SONA 自适应(&lt;0.05ms)</div>
+    <div class="d"><span class="k">触发</span>post-task hook / 12 Background Workers 周期</div><div class="d"><span class="k">注入</span>"HNSW检索→判定成败→LoRA蒸馏→弹性权重固化"</div><div class="d"><span class="k">方式</span>后台 Worker + hook</div><div class="d"><span class="k">tool</span>SONA；<code>hooks post-task --train-patterns</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot p"></span><span class="nm">12 Background Workers (守护进程)</span><span class="pill p-cyc">周期触发</span><span class="tok">—</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>代码库状态、任务指标、会话事件</div><div class="io"><span class="k">输出</span>各 Worker 专项报告存 <code>.claude-flow/metrics/</code></div>
+    <div class="d"><span class="k">触发</span>hook 事件 / 时间间隔(连续5–30min)</div><div class="d"><span class="k">注入</span>连续:map/audit/optimize/testgaps；周期:security-scanner/learning-optimizer/adr-compliance；手动:ultralearn/deepdive/benchmark</div><div class="d"><span class="k">方式</span>后台 daemon + hook</div><div class="d"><span class="k">tool</span><code>daemon start</code></div></div>
+  </details>
+</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>任务后 & 部署后</div>
+  <details class="node"><summary><span class="dot p"></span><span class="nm">post-task Hook (模式训练+通知)</span><span class="pill p-res">常驻</span><span class="tok">~200</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>任务完成事件 + 任务 ID</div><div class="io"><span class="k">输出</span>执行轨迹存 memory；lead 代理收到通知；触发模式训练</div>
+    <div class="d"><span class="k">触发</span>任意代理任务完成时</div><div class="d"><span class="k">注入</span>"存执行模式、通知 lead、触发 --train-patterns"</div><div class="d"><span class="k">方式</span>hook</div><div class="d"><span class="k">tool</span><code>hooks post-task --train-patterns</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/sparc-post-deployment-monitoring</span><span class="pill p-ind">独立调用</span><span class="tok">~1–2K/周期</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>系统指标、日志、运行检查、用户行为</div><div class="io"><span class="k">输出</span>性能摘要；异常/回归标记；hotfix 新任务(new_task)</div>
+    <div class="d"><span class="k">触发</span>系统上线后 / 命令</div><div class="d"><span class="k">注入</span>"上线后观测：性能/日志/反馈；标异常回归；阈值超限 new_task 升级"</div><div class="d"><span class="k">方式</span>slash/MCP</div><div class="d"><span class="k">tool</span><code>sparc_mode{post-deployment-monitoring}</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">预制 feature workflow (Architect→Coder→Tester→Reviewer)</span><span class="pill p-ind">独立调用</span><span class="tok">~15–40K</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>功能需求</div><div class="io"><span class="k">输出</span>完整功能(代码+测试+审查)</div>
+    <div class="d"><span class="k">触发</span><code>workflow execute feature</code></div><div class="d"><span class="k">注入</span>顺序 SendMessage 链：researcher→architect→coder→tester→reviewer，每个完成后传给下一个</div><div class="d"><span class="k">方式</span>subagent dispatch via SendMessage</div><div class="d"><span class="k">tool</span><code>send_message</code></div></div>
+  </details>
+</div>
+</div>
+<!-- ========================= 2 spec-workflow-mcp ========================= -->
+<div class="prod" id="spec-workflow">
+<div class="prod-h"><h2>2 · spec-workflow-mcp</h2><span class="stars">⭐ 4.2K · Pimzino · GPL-3.0</span></div>
+<div class="flow1">Steering文档 → Requirements → [审批门] → Design → [审批门] → Tasks → [审批门] → 实现(+强制日志) → 验证/归档 ｜ 状态机由 MCP server 强制，非 agent 自律</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>项目治理</div>
+  <details class="node"><summary><span class="dot g"></span><span class="nm">steering-guide</span><span class="pill p-od">按需读取</span><span class="tok">~500–800</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>项目名/描述</div><div class="io"><span class="k">输出</span>三份治理文档 <code>.spec-workflow/steering/</code>：product.md(愿景)、tech.md(技术决策)、structure.md(代码组织)</div>
+    <div class="d"><span class="k">触发</span>用户显式请求"Create steering documents"，工具检测关键词</div><div class="d"><span class="k">注入</span>"条件激活；顺序 product→tech→structure，每阶段用 approvals 门控；口头批准绝不接受，仅 dashboard/VSCode；delete 失败不得继续"</div><div class="d"><span class="k">方式</span>MCP tool(无参，纯上下文注入)</div><div class="d"><span class="k">tool</span><code>steering-guide</code>→<code>approvals</code></div><div class="d"><span class="k">文件</span><code>src/tools/steering-guide.ts</code></div></div>
+  </details>
+</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>需求 → 设计 → 任务（三段，各带审批门）</div>
+  <details class="node"><summary><span class="dot g"></span><span class="nm">spec-workflow-guide → Requirements</span><span class="pill p-od">按需读取</span><span class="tok">~800–1.2K</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>功能描述(可 @file 引用)；user stories</div><div class="io"><span class="k">输出</span><code>requirements.md</code>(EARS 格式接受标准) 存 <code>.spec-workflow/specs/&lt;name&gt;/</code></div>
+    <div class="d"><span class="k">触发</span>"Create a spec for [feature]"</div><div class="d"><span class="k">注入</span>"严格按流程；kebab-case；一次一个 spec；顺序不跳步；需求写 EARS；生成后调 approvals 请审批再进 Design"</div><div class="d"><span class="k">方式</span>MCP tool(规则注入)</div><div class="d"><span class="k">tool</span><code>spec-workflow-guide</code></div><div class="d"><span class="k">文件</span><code>src/tools/spec-workflow-guide.ts</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot r"></span><span class="nm">approvals 审批门 (request→status→delete)</span><span class="pill p-gate">GATE</span><span class="tok">~200×3</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>title, filePath, type=document, category=spec</div><div class="io"><span class="k">输出</span>approvalId + Dashboard 深链；状态 pending→approved/rejected/needs-revision</div>
+    <div class="d"><span class="k">触发</span>每个文档(requirements/design/tasks)生成后强制</div><div class="d"><span class="k">注入</span>"返回 approvalId，未批准不得进下一阶段；needs-revision 按行内评论改后重提；delete 失败则停止"</div><div class="d"><span class="k">方式</span>MCP tool(状态机硬门，外部 Dashboard/VSCode 强制)</div><div class="d"><span class="k">tool</span><code>approvals{action:request|status|delete}</code></div><div class="d"><span class="k">文件</span><code>src/tools/approvals.ts</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot g"></span><span class="nm">spec-workflow-guide → Design</span><span class="pill p-od">按需读取</span><span class="tok">~1–2K</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>已审批 requirements.md + steering(tech/structure)</div><div class="io"><span class="k">输出</span><code>design.md</code>(架构模式、系统交互、数据模型)</div>
+    <div class="d"><span class="k">触发</span>Requirements 审批通过+delete 后自动</div><div class="d"><span class="k">注入</span>"分析现有 codebase 模式，引用 tech.md/structure.md；生成后请审批"</div><div class="d"><span class="k">方式</span>MCP tool</div><div class="d"><span class="k">tool</span><code>spec-workflow-guide</code>→<code>approvals</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot g"></span><span class="nm">spec-workflow-guide → Tasks</span><span class="pill p-od">按需读取</span><span class="tok">~1.5–3K</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>已审批 design.md</div><div class="io"><span class="k">输出</span><code>tasks.md</code>(原子任务，每项 1–3 文件，顺序编号+依赖，含 role/restrictions/leverage/success)</div>
+    <div class="d"><span class="k">触发</span>Design 审批通过后自动</div><div class="d"><span class="k">注入</span>"拆原子 1–3 文件单元；顺序编号；依赖有序；agent-friendly 结构化 prompt"</div><div class="d"><span class="k">方式</span>MCP tool</div><div class="d"><span class="k">tool</span><code>spec-workflow-guide</code>→<code>approvals</code></div></div>
+  </details>
+</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>实现（含防假完成）</div>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">任务实现 (LLM 代码生成)</span><span class="pill p-ind">独立调用</span><span class="tok">~3–10K/任务</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>已审批 tasks.md(单任务/批量 section)；codebase 上下文</div><div class="io"><span class="k">输出</span>功能代码；修改/新建文件；测试</div>
+    <div class="d"><span class="k">触发</span>"Implement task N from [spec]"</div><div class="d"><span class="k">注入</span>"编码前先搜实现日志防重复；编码后必须调 log-implementation，否则任务不能标完成"</div><div class="d"><span class="k">方式</span>自然语言 → LLM(MCP 规则约束)</div></div>
+  </details>
+  <details class="node"><summary><span class="dot r"></span><span class="nm">log-implementation (阻断性日志)</span><span class="pill p-gate">GATE</span><span class="tok">~400</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>specName,taskId,summary,filesModified/Created,statistics,<b>artifacts(必填)</b></div><div class="io"><span class="k">输出</span>带时间戳日志(文件追踪+代码指标+结构化产物)；任务标完成；artifacts 为空则拒绝</div>
+    <div class="d"><span class="k">触发</span>每个任务编码完成后强制</div><div class="d"><span class="k">注入</span>"artifacts 必填：API端点/组件/函数/类/集成。不完整日志=重复代码=技术债"</div><div class="d"><span class="k">方式</span>MCP tool</div><div class="d"><span class="k">tool</span><code>log-implementation</code></div><div class="d"><span class="k">文件</span><code>src/tools/log-implementation.ts</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot g"></span><span class="nm">spec-status (状态机查询/归档)</span><span class="pill p-od">按需读取</span><span class="tok">~300</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>specName</div><div class="io"><span class="k">输出</span>整体状态(requirements-needed/.../completed)；任务进度；Dashboard URL；所有任务[x]→归档 <code>.spec-workflow/archive/</code></div>
+    <div class="d"><span class="k">触发</span>用户查询 / LLM 自动检查阶段前提</div><div class="d"><span class="k">注入</span>线性强制 Requirements→Design→Tasks→Implementation→Completed</div><div class="d"><span class="k">方式</span>MCP tool</div><div class="d"><span class="k">tool</span><code>spec-status</code></div></div>
+  </details>
+</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>Bug 快速通道</div>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">bug-create → analyze → fix→verify</span><span class="pill p-ind">独立调用</span><span class="tok">~0.5/2–4/3–6K</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>bug 描述/复现步骤/期望vs实际；错误日志</div><div class="io"><span class="k">输出</span>bug 报告→根因分析→修复+测试验证→log-implementation→resolved</div>
+    <div class="d"><span class="k">触发</span>"Create a bug report / Investigate root cause / Create a fix"</div><div class="d"><span class="k">注入</span>跳过 full requirements/design 审批门(快速分支)；修复仍须 log-implementation</div><div class="d"><span class="k">方式</span>自然语言 → LLM(spec-workflow-guide bug 分支)</div><div class="d"><span class="k">文件</span><code>docs/PROMPTING-GUIDE.md</code></div></div>
+  </details>
+</div>
+</div>
+<!-- ========================= 3 BMAD-METHOD ========================= -->
+<div class="prod" id="bmad">
+<div class="prod-h"><h2>3 · BMAD-METHOD</h2><span class="stars">⭐ 48.8K · bmad-code-org</span></div>
+<div class="flow1">规划期(Web UI)：Analyst→PM→UX→Architect→PO质检→文档切片 ｜ 开发期(IDE)：SM草拟Story→Dev实现→QA审查 → 迭代 ｜ 每个 agent 是 YAML-in-MD，依赖按需加载</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>编排层</div>
+  <details class="node"><summary><span class="dot p"></span><span class="nm">BMad Orchestrator / Master</span><span class="pill p-res">常驻</span><span class="tok">高</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>用户自然语言请求</div><div class="io"><span class="k">输出</span>路由到正确 agent / workflow；可变身任意 agent</div>
+    <div class="d"><span class="k">触发</span>Web Bundle 启动自动 / IDE <code>@bmad-orchestrator</code></div><div class="d"><span class="k">注入</span>"按需变身任意 agent，绝不预加载资源，运行时才 discover+load"</div><div class="d"><span class="k">方式</span>Web Bundle 打包(team-fullstack.txt) 上传 Gemini Gem；或 IDE @agent</div><div class="d"><span class="k">tool</span><code>*agent &lt;id&gt;</code>,<code>*workflow</code>,<code>*party-mode</code></div><div class="d"><span class="k">文件</span><code>bmad-core/agents/bmad-orchestrator.md</code></div></div>
+  </details>
+</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>规划期（Web UI · 省 token）</div>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">Mary · Analyst — 研究/项目简报</span><span class="pill p-ind">独立调用</span><span class="tok">~5–15K</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>项目想法 / 市场/竞品研究需求</div><div class="io"><span class="k">输出</span><code>docs/project-brief.md</code>(可选 market-research/competitor)</div>
+    <div class="d"><span class="k">触发</span>新项目；<code>@analyst</code> + <code>*create-project-brief</code></div><div class="d"><span class="k">注入</span>"好奇驱动、证据为本、战略情境化；先发散探索再收敛"；elicit=true 强制与用户交互</div><div class="d"><span class="k">方式</span>agent 按需加载 task；<code>create-doc.md</code> + <code>project-brief-tmpl.yaml</code></div><div class="d"><span class="k">文件</span><code>bmad-core/agents/analyst.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">John · PM — PRD 创建</span><span class="pill p-ind">独立调用</span><span class="tok">~10–25K</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>project-brief.md</div><div class="io"><span class="k">输出</span><code>docs/prd.md</code>(功能/非功能需求 + Epic 列表 + Story 骨架)</div>
+    <div class="d"><span class="k">触发</span><code>@pm</code> + <code>*create-prd</code></div><div class="d"><span class="k">注入</span>"深挖 Why、拥护用户、数据驱动、无情排序聚焦 MVP"；自验 <code>pm-checklist.md</code></div><div class="d"><span class="k">方式</span><code>create-doc.md</code> + <code>prd-tmpl.yaml</code></div><div class="d"><span class="k">文件</span><code>bmad-core/agents/pm.md</code>,<code>checklists/pm-checklist.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">Sally · UX Expert — 前端规格 (UI 项目)</span><span class="pill p-ind">独立调用</span><span class="tok">~8–20K</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>prd.md</div><div class="io"><span class="k">输出</span><code>docs/front-end-spec.md</code>(用户旅程/组件/交互/响应式/无障碍)；可选 v0/Lovable AI UI prompt</div>
+    <div class="d"><span class="k">触发</span>含 UI 项目；<code>@ux-expert</code> + <code>*create-front-end-spec</code></div><div class="d"><span class="k">注入</span>"用户中心、迭代求简、为真实场景(边界/错误/加载态)设计、协作非独裁"</div><div class="d"><span class="k">方式</span><code>create-doc.md</code> + <code>front-end-spec-tmpl.yaml</code></div><div class="d"><span class="k">文件</span><code>bmad-core/agents/ux-expert.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">Winston · Architect — 系统架构</span><span class="pill p-ind">独立调用</span><span class="tok">~15–40K</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>prd.md + front-end-spec.md(如有)</div><div class="io"><span class="k">输出</span><code>fullstack-architecture.md</code>；可能反馈 PRD 需变更</div>
+    <div class="d"><span class="k">触发</span><code>@architect</code> + <code>*create-full-stack-architecture</code></div><div class="d"><span class="k">注入</span>"整体系统思维、UX 驱动架构、务实选型(尽量用 boring tech)、渐进复杂、每层安全、成本意识"；自验 <code>architect-checklist.md</code></div><div class="d"><span class="k">方式</span><code>create-doc.md</code> + 架构模板</div><div class="d"><span class="k">文件</span><code>bmad-core/agents/architect.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot r"></span><span class="nm">Sarah · PO — 全量质检 (po-master-checklist)</span><span class="pill p-gate">GATE</span><span class="tok">~20–40K</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>prd + architecture + front-end-spec + 所有 Epic/Story</div><div class="io"><span class="k">输出</span>验证报告(MVP 完整性、开发就绪度 1-10)；决策 APPROVED/CONDITIONAL/REJECTED — <b>规划→开发的入场券</b></div>
+    <div class="d"><span class="k">触发</span>所有规划文档就绪；<code>@po</code> + <code>*execute-checklist-po</code></div><div class="d"><span class="k">注入</span>"质量与完整性守门人"；自动检测项目类型(Greenfield/Brownfield，UI/纯后端)跳过不适用章节；10 大类 60+ 检查项</div><div class="d"><span class="k">方式</span><code>execute-checklist.md</code> + <code>po-master-checklist.md</code></div><div class="d"><span class="k">文件</span><code>checklists/po-master-checklist.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot o"></span><span class="nm">Sarah · PO — 文档切片 Sharding</span><span class="pill p-ind">独立调用</span><span class="tok">中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>docs/prd.md, docs/architecture.md</div><div class="io"><span class="k">输出</span><code>docs/prd/epic-N.md</code> + index.md；<code>docs/architecture/{tech-stack,coding-standards,data-models}.md</code></div>
+    <div class="d"><span class="k">触发</span>PO 质检通过后、切到 IDE；<code>*shard-doc</code></div><div class="d"><span class="k">注入</span>按 H2 切分，lowercase-dash，建 index.md(解决 IDE 上下文窗口)</div><div class="d"><span class="k">方式</span><code>shard-doc.md</code> → <code>md-tree explode</code> CLI</div><div class="d"><span class="k">文件</span><code>core-config.yaml</code>(prdSharded:true)</div></div>
+  </details>
+</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>开发期（IDE · 每 Story 开新对话）</div>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">Bob · SM — 草拟 Story（核心：上下文包）</span><span class="pill p-ind">独立调用</span><span class="tok">~10–30K</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>sharded epic + architecture(按 Story 类型选读) + 上个 Story 的 Dev Agent Record</div><div class="io"><span class="k">输出</span><code>docs/stories/{e}.{s}.story.md</code>(状态 Draft)，Dev Notes 含架构摘录+来源引用</div>
+    <div class="d"><span class="k">触发</span><code>@sm</code> + <code>*draft</code></div><div class="d"><span class="k">注入</span>"严格按 create-next-story；信息只来自 PRD/架构，绝不捏造；为'连笨 AI 都能实现'写超详细 Story；永不写代码"；6 步顺序执行；自验 story-draft-checklist</div><div class="d"><span class="k">方式</span><code>create-next-story.md</code> + <code>story-tmpl.yaml</code></div><div class="d"><span class="k">文件</span><code>bmad-core/tasks/create-next-story.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">James · Dev — Story 实现</span><span class="pill p-ind">独立调用</span><span class="tok">~5–15K 启动</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>Approved Story + devLoadAlwaysFiles(coding-standards/tech-stack/source-tree)</div><div class="io"><span class="k">输出</span>实现代码(列入 File List)；仅更新 Dev Agent Record 段落；状态 Ready for Review</div>
+    <div class="d"><span class="k">触发</span>Story=Approved；<code>@dev</code> + <code>*develop-story</code></div><div class="d"><span class="k">注入</span>"Story 含所有所需信息，<b>绝不主动加载 PRD/架构文档</b>；只更新 Dev Agent Record 段；读任务→实现→测试→全通过才打[x]"；自验 story-dod-checklist；连续失败3次/缺配置→HALT</div><div class="d"><span class="k">方式</span>IDE agent；读 core-config.yaml</div><div class="d"><span class="k">文件</span><code>bmad-core/agents/dev.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot o"></span><span class="nm">Quinn · QA — 代码审查与重构</span><span class="pill p-ind">独立调用</span><span class="tok">~10–30K</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>Ready-for-Review Story + Dev 的 File List + 编码标准</div><div class="io"><span class="k">输出</span>仅追加 QA Results 段落(质量评估/重构记录/合规)；<b>有权直接重构代码</b>(须解释)</div>
+    <div class="d"><span class="k">触发</span>Dev 标记 Ready for Review；<code>@qa</code> + <code>*review</code></div><div class="d"><span class="k">注入</span>"资深视角审 junior；主动重构而非只指出；左移测试、风险导向；只能写 QA Results 段"；9 步审查</div><div class="d"><span class="k">方式</span><code>review-story.md</code> task</div><div class="d"><span class="k">文件</span><code>bmad-core/tasks/review-story.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot p"></span><span class="nm">迭代循环 SM→Dev→QA + Story 段落写权限</span><span class="pill p-cyc">周期触发</span><span class="tok">—</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>上个 Story 的 Dev Agent Record</div><div class="io"><span class="k">输出</span>下个 Story Draft；Epic 完成后询问是否进下一 Epic(绝不自动跳)</div>
+    <div class="d"><span class="k">注入</span><b>段落写权限矩阵</b>：SM 写 Status/Story/AC/Tasks/Dev Notes；Dev 独占 Dev Agent Record + 打勾 Tasks；QA 独占追加 QA Results，不可改其它任何段</div><div class="d"><span class="k">方式</span>文件段落隔离(防下游覆盖上游决策)</div><div class="d"><span class="k">文件</span><code>story-tmpl.yaml</code>(editors 字段)</div></div>
+  </details>
+</div>
+<div class="note">变更控制：开发中遇技术死路/新需求 → <code>correct-course.md</code> + <code>change-checklist.md</code> 生成 "Sprint Change Proposal"(影响分析+修改草稿)→用户批准→必要时回 PM/Architect 重规划。Brownfield 变体：Architect 先 <code>document-project.md</code> 文档化现有系统。</div>
+</div>
+<!-- ========================= 4 spec-kit ========================= -->
+<div class="prod" id="spec-kit">
+<div class="prod-h"><h2>4 · spec-kit</h2><span class="stars">⭐ 111K · github</span></div>
+<div class="flow1">constitution → specify → clarify → checklist → plan → tasks → analyze → implement → taskstoissues ｜ CommandRegistrar 把一份模板编译成 35 种 AI 助手原生格式</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>命令链（每个命令=一个节点，读上游写下游）</div>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/speckit.constitution</span><span class="pill p-ind">独立调用</span><span class="tok">中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>项目原则；现有 constitution.md</div><div class="io"><span class="k">输出</span><code>.specify/memory/constitution.md</code>(语义版本号 + Sync Impact Report)</div>
+    <div class="d"><span class="k">触发</span>项目初始化一次 / 原则更新</div><div class="d"><span class="k">注入</span>"治理代理：替换 [TOKENS]，递增版本，向 plan/spec/task 模板传播变更，生成同步报告"</div><div class="d"><span class="k">方式</span>slash-command(per-agent 编译)</div><div class="d"><span class="k">文件</span><code>templates/commands/constitution.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/speckit.specify</span><span class="pill p-ind">独立调用</span><span class="tok">中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>自然语言描述；active spec template</div><div class="io"><span class="k">输出</span><code>specs/{seq}-{name}/spec.md</code> + checklists/requirements.md</div>
+    <div class="d"><span class="k">触发</span>描述新功能</div><div class="d"><span class="k">注入</span>"专注 WHAT 和 WHY 不写 HOW，不写框架/代码结构，最多 3 个 [NEEDS CLARIFICATION]，success criteria 可测量且技术无关"</div><div class="d"><span class="k">方式</span>slash-command；INTEGRATION_REGISTRY 编译</div><div class="d"><span class="k">文件</span><code>templates/commands/specify.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/speckit.clarify</span><span class="pill p-ind">独立调用</span><span class="tok">轻–中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>spec.md + constitution.md</div><div class="io"><span class="k">输出</span>spec.md 追加 <code>## Clarifications</code>；更新受影响小节</div>
+    <div class="d"><span class="k">触发</span>specify 后、plan 前，发现歧义时</div><div class="d"><span class="k">注入</span>"扫 9 类歧义，每次只问一个，最多 5 题，每题限 2–5 选项，按影响排序，原子化保存防上下文丢失"</div><div class="d"><span class="k">方式</span>slash-command</div><div class="d"><span class="k">文件</span><code>templates/commands/clarify.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/speckit.checklist</span><span class="pill p-ind">独立调用</span><span class="tok">中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>spec.md (+plan/tasks 可选)</div><div class="io"><span class="k">输出</span><code>checklists/{domain}.md</code>(CHK### 编号，只增不删)</div>
+    <div class="d"><span class="k">触发</span>specify 后任意时点</div><div class="d"><span class="k">注入</span>"需求质量检单(英语的单元测试)：完整/清晰/一致/可测/覆盖/边界/非功能/依赖/歧义 9 维；≥80% 条目追溯到 spec section"</div><div class="d"><span class="k">方式</span>slash-command</div><div class="d"><span class="k">文件</span><code>templates/commands/checklist.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/speckit.plan</span><span class="pill p-ind">独立调用</span><span class="tok">重</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>spec.md + constitution.md(门禁)</div><div class="io"><span class="k">输出</span><code>plan.md</code> + <code>data-model.md</code> + <code>contracts/</code> + <code>quickstart.md</code></div>
+    <div class="d"><span class="k">触发</span>clarify 后</div><div class="d"><span class="k">注入</span>"Phase0 研究解 NEEDS CLARIFICATION；Phase1 生成 data-model/contracts/quickstart；constitution check 在 design 前后各一次；门禁失败进 ERROR"</div><div class="d"><span class="k">方式</span>slash-command + 宪法门禁</div><div class="d"><span class="k">文件</span><code>templates/commands/plan.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/speckit.tasks</span><span class="pill p-ind">独立调用</span><span class="tok">中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>plan.md + spec.md(+data-model/contracts)</div><div class="io"><span class="k">输出</span><code>tasks.md</code>(<code>[TaskID] [P?] [Story?] 描述 file/path</code>)</div>
+    <div class="d"><span class="k">触发</span>plan 后</div><div class="d"><span class="k">注入</span>"五类 phase(Setup→Foundational→User Story→Integration→Polish)；[P] 标可并行；每任务含文件路径；TDD 优先；依赖有序"</div><div class="d"><span class="k">方式</span>slash-command</div><div class="d"><span class="k">文件</span><code>templates/commands/tasks.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot r"></span><span class="nm">/speckit.analyze (一致性守门·只读)</span><span class="pill p-gate">GATE</span><span class="tok">中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>spec + plan + tasks + constitution</div><div class="io"><span class="k">输出</span>findings 报告(≤50行) + coverage matrix — <b>不写文件，输出到 chat</b></div>
+    <div class="d"><span class="k">触发</span>tasks 后、implement 前</div><div class="d"><span class="k">注入</span>"六遍检查：重复/歧义/欠规格/宪法对齐(MUST 冲突=CRITICAL)/覆盖缺口/不一致；只读，改动需用户批准"</div><div class="d"><span class="k">方式</span>slash-command(只读)</div><div class="d"><span class="k">文件</span><code>templates/commands/analyze.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/speckit.implement</span><span class="pill p-ind">独立调用</span><span class="tok">重</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>tasks.md + plan/data-model/contracts/checklists</div><div class="io"><span class="k">输出</span>代码文件；tasks.md 完成项标 [X]</div>
+    <div class="d"><span class="k">触发</span>analyze/tasks 后</div><div class="d"><span class="k">注入</span>"TDD 优先；按 Setup→Tests→Core→Integration→Polish；[P] 并行；非并行任务失败立即 halt；checklist 不完整则暂停确认"</div><div class="d"><span class="k">方式</span>slash-command；phase-by-phase</div><div class="d"><span class="k">文件</span><code>templates/commands/implement.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot g"></span><span class="nm">/speckit.taskstoissues</span><span class="pill p-od">按需读取</span><span class="tok">轻</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>tasks.md；git remote(必须 GitHub)</div><div class="io"><span class="k">输出</span>按依赖顺序创建 GitHub Issues</div>
+    <div class="d"><span class="k">触发</span>implement 后需在 GitHub 跟踪</div><div class="d"><span class="k">注入</span>"验证 remote 为 GitHub；按依赖顺序建 issue；绝不在不匹配 remote 上建"</div><div class="d"><span class="k">方式</span>slash-command + GitHub API</div><div class="d"><span class="k">文件</span><code>templates/commands/taskstoissues.md</code></div></div>
+  </details>
+</div>
+<div class="note"><b>CommandRegistrar（跨产品核心）：</b><code>INTEGRATION_REGISTRY</code> 注册 35 种助手，每种声明 directory / format(Markdown|TOML) / args(<code>$ARGUMENTS</code>|<code>{{args}}</code>) / 扩展名。一份模板编译成 <code>.claude/commands/</code>、<code>.gemini/*.toml</code>、Codex <code>$speckit-*</code> 等。运行时模板优先级：project-overrides → presets → extensions → core。</div>
+</div>
+
+<!-- ========================= 5 OpenSpec ========================= -->
+<div class="prod" id="openspec">
+<div class="prod-h"><h2>5 · OpenSpec</h2><span class="stars">⭐ 53.7K · Fission-AI</span></div>
+<div class="flow1">[explore→] propose → apply → [verify→] sync → archive ｜ 以 change 为单元，delta spec(ADDED/MODIFIED/REMOVED) 不动主规格，archive 时合并 — 多并行不冲突</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>核心路径 (core profile)</div>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/opsx:explore (可选·纯对话)</span><span class="pill p-ind">独立调用</span><span class="tok">轻–中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>问题域描述；codebase</div><div class="io"><span class="k">输出</span>分析建议(只输出 chat，不写文件)</div>
+    <div class="d"><span class="k">触发</span>需求不清、调研时</div><div class="d"><span class="k">注入</span>"开放探索，分析 codebase，对比方案，洞察结晶时引导 /opsx:propose；不创建 artifact"</div><div class="d"><span class="k">方式</span>slash-command via SKILL.md(Claude) / workflow(Windsurf) / prompt(Cursor)</div><div class="d"><span class="k">文件</span><code>.claude/commands/opsx/explore.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/opsx:propose (一次生成全部制品)</span><span class="pill p-ind">独立调用</span><span class="tok">重</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>change 名/描述；config.yaml(project context)；现有 specs(baseline)</div><div class="io"><span class="k">输出</span><code>changes/&lt;name&gt;/</code>：proposal.md → specs/*.md(delta) → design.md → tasks.md</div>
+    <div class="d"><span class="k">触发</span>所有新变更起点</div><div class="d"><span class="k">注入</span>"按 schema DAG 顺序一次生成所有 apply-required 制品，用 config 的 context + per-artifact rules 约束，完成提示 /opsx:apply"</div><div class="d"><span class="k">方式</span>slash-command(SKILL.md)；<code>openspec init --tools</code> 部署</div><div class="d"><span class="k">文件</span><code>schemas/spec-driven/schema.yaml</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/opsx:apply</span><span class="pill p-ind">独立调用</span><span class="tok">重</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>tasks.md(- [ ] 格式) + proposal/specs/design 上下文</div><div class="io"><span class="k">输出</span>代码；tasks 完成项标 [x](可断点恢复)</div>
+    <div class="d"><span class="k">触发</span>propose/ff 后；可随时恢复</div><div class="d"><span class="k">注入</span>"读 tasks 找未完成，逐一实现，写代码/测试，标 [x]，支持恢复；非 - [ ] 格式不被追踪"</div><div class="d"><span class="k">方式</span>slash-command</div><div class="d"><span class="k">文件</span><code>.claude/commands/opsx/apply.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot r"></span><span class="nm">/opsx:verify (可选守门)</span><span class="pill p-gate">GATE</span><span class="tok">中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>tasks.md + specs + design + codebase</div><div class="io"><span class="k">输出</span>验证报告(CRITICAL/WARNING/SUGGESTION) — 不写文件，不阻塞 archive</div>
+    <div class="d"><span class="k">触发</span>apply 后、archive 前</div><div class="d"><span class="k">注入</span>"三维：完整性(task/requirement/scenario 全覆盖)、正确性(实现匹配规格意图、边界处理)、连贯性(design 决策体现在代码、命名一致)"</div><div class="d"><span class="k">方式</span>slash-command + codebase 搜索</div><div class="d"><span class="k">文件</span><code>.claude/commands/opsx/verify.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot o"></span><span class="nm">/opsx:sync (delta → 主规格合并)</span><span class="pill p-ind">独立调用</span><span class="tok">轻–中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>changes/&lt;name&gt;/specs/(ADDED/MODIFIED/REMOVED/RENAMED)</div><div class="io"><span class="k">输出</span>更新 <code>openspec/specs/{domain}/spec.md</code>(智能合并，保留未涉及内容)</div>
+    <div class="d"><span class="k">触发</span>长周期变更中途 / 多并行 change 需共享 baseline；archive 自动提示</div><div class="d"><span class="k">注入</span>"解析 delta 指令，智能合并到主规格，保留未提及内容，change 保持活跃"</div><div class="d"><span class="k">方式</span>slash-command；<code>openspec archive</code> 含 sync</div><div class="d"><span class="k">文件</span><code>.claude/commands/opsx/sync.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/opsx:archive</span><span class="pill p-ind">独立调用</span><span class="tok">轻</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>完整 change 目录；task 完成状态</div><div class="io"><span class="k">输出</span><code>changes/archive/YYYY-MM-DD-&lt;name&gt;/</code>(保留审计轨迹)</div>
+    <div class="d"><span class="k">触发</span>verify 后、工作完成时</div><div class="d"><span class="k">注入</span>"检查四件制品；task 不完整仅 warn；delta 未 sync 则提示；移至 archive/"</div><div class="d"><span class="k">方式</span>slash-command(<code>--skip-specs</code> 跳过 sync)</div><div class="d"><span class="k">文件</span><code>.claude/commands/opsx/archive.md</code></div></div>
+  </details>
+</div>
+<div class="stage"><div class="stage-t"><span class="sd"></span>扩展 workflow（逐件控制）</div>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/opsx:new → continue / ff → bulk-archive / onboard</span><span class="pill p-ind">独立调用</span><span class="tok">轻–重</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>change 名；DAG 状态</div><div class="io"><span class="k">输出</span>new=空目录+.openspec.yaml；continue=逐件按 DAG；ff=批量全部；bulk-archive=多 change 按时间合并冲突</div>
+    <div class="d"><span class="k">触发</span>需要逐件审阅控制时</div><div class="d"><span class="k">注入</span>continue:"查 DAG，展示就绪/阻塞，创建第一个就绪制品"；onboard:"扫 codebase 找改进，引导走完 11 阶段端到端"</div><div class="d"><span class="k">方式</span>slash-command</div><div class="d"><span class="k">文件</span><code>.claude/commands/opsx/{new,continue,ff}.md</code></div></div>
+  </details>
+</div>
+</div>
+
+<!-- ========================= 6 Agent OS ========================= -->
+<div class="prod" id="agent-os">
+<div class="prod-h"><h2>6 · Agent OS</h2><span class="stars">⭐ 4.8K · buildermethods · 仅 Claude</span></div>
+<div class="flow1">plan-product → discover-standards → index-standards → inject-standards → shape-spec ｜ 从存量代码提炼规范，再 token-efficient 注入约束</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>规范驱动循环</div>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/plan-product</span><span class="pill p-ind">独立调用</span><span class="tok">轻</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>对话回答(分批问)</div><div class="io"><span class="k">输出</span><code>agent-os/product/</code>：mission.md / roadmap.md / tech-stack.md</div>
+    <div class="d"><span class="k">触发</span>项目初始化</div><div class="d"><span class="k">注入</span>"6 步引导：查已有→三问愿景→MVP功能→确认技术栈→生成3文件→确认；每次只问一个，用 AskUserQuestion，保持轻量不过度设计"</div><div class="d"><span class="k">方式</span>slash-command + AskUserQuestion</div><div class="d"><span class="k">文件</span><code>commands/agent-os/plan-product.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/discover-standards (从代码提炼规范)</span><span class="pill p-ind">独立调用</span><span class="tok">中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>codebase(每聚焦区读 5–10 代表文件) + 用户对 pattern "why" 的回答</div><div class="io"><span class="k">输出</span><code>agent-os/standards/{domain}/{standard}.md</code> + 更新 index.yml</div>
+    <div class="d"><span class="k">触发</span>初始化 / 发现未文档化 pattern</div><div class="d"><span class="k">注入</span>"找 3–5 主要区→读代表文件识别 opinionated/tribal pattern→问 why→起草(规则领先、示例丰富、skip obvious)→写入→更新 index"</div><div class="d"><span class="k">方式</span>slash-command + AskUserQuestion</div><div class="d"><span class="k">文件</span><code>commands/agent-os/discover-standards.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot g"></span><span class="nm">/index-standards</span><span class="pill p-od">按需读取</span><span class="tok">轻</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>standards/ 下所有 .md + 现有 index.yml</div><div class="io"><span class="k">输出</span>重建 <code>standards/index.yml</code>(每文件一行描述，文件夹字母序)</div>
+    <div class="d"><span class="k">触发</span>手动增删 standard 后 / discover 完成自动</div><div class="d"><span class="k">注入</span>"对比新旧，新 standard 读内容起草单句描述(AskUserQuestion 验证)，删孤立条目"</div><div class="d"><span class="k">方式</span>slash-command</div><div class="d"><span class="k">文件</span><code>commands/agent-os/index-standards.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot g"></span><span class="nm">/inject-standards (token-efficient 注入)</span><span class="pill p-od">按需读取</span><span class="tok">轻–中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>index.yml(轻量匹配) + 选中 standard 全文</div><div class="io"><span class="k">输出</span>按场景注入：对话(全文读入)/skill(@引用或拷贝)/plan(embed)</div>
+    <div class="d"><span class="k">触发</span>开发前 / shape-spec 步骤5 自动</div><div class="d"><span class="k">注入</span>"先读 index.yml 推断相关性，再按需读全文(不一次性塞)；建议 2–5 个相关 standard"</div><div class="d"><span class="k">方式</span>slash-command(auto-suggest/explicit 双模式)</div><div class="d"><span class="k">文件</span><code>commands/agent-os/inject-standards.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/shape-spec (必须 plan mode)</span><span class="pill p-ind">独立调用</span><span class="tok">中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>功能描述 + visuals + reference 代码 + product/ + 选中 standards</div><div class="io"><span class="k">输出</span><code>agent-os/specs/{YYYY-MM-DD-HHMM-slug}/</code>：plan.md / shape.md / standards.md(全文内嵌) / references.md</div>
+    <div class="d"><span class="k">触发</span>重要功能开发前；非 plan mode 立即 abort</div><div class="d"><span class="k">注入</span>"9 步：澄清范围→收 visuals→找 reference 代码→查 product context→扫 index 建议 standards→生成文件夹名→搭 plan(Task1 始终保存 spec)→完善任务→呈现计划等批准；保持轻量"</div><div class="d"><span class="k">方式</span>slash-command + plan mode 前置检查</div><div class="d"><span class="k">文件</span><code>commands/agent-os/shape-spec.md</code></div></div>
+  </details>
+</div>
+</div>
+<!-- ========================= 7 compound-engineering ========================= -->
+<div class="prod" id="ce">
+<div class="prod-h"><h2>7 · compound-engineering</h2><span class="stars">v3.11.1 · Every · 本机已装</span></div>
+<div class="flow1">[brainstorm→] plan →[GATE]→ work →[GATE]→ code-review(四段) → 修复应用 → 残余归档 → test-browser → commit-push-pr → CI监控修复 ｜ 贯穿：recall 前置 + compound 沉淀</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>计划（ce-plan）</div>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">ce-brainstorm (可选上游)</span><span class="pill p-ind">独立调用</span><span class="tok">中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>功能想法/问题</div><div class="io"><span class="k">输出</span><code>docs/brainstorms/*-requirements.md/.html</code>(Actors/Key Flows/Acceptance)</div>
+    <div class="d"><span class="k">触发</span>用户 <code>/ce-brainstorm</code>；lfg 不自动触发</div><div class="d"><span class="k">注入</span>定义 WHAT；一次一问；rigor probes(evidence/specificity/counterfactual/attachment)</div><div class="d"><span class="k">方式</span>skill orchestration + AskUserQuestion</div><div class="d"><span class="k">文件</span><code>skills/ce-brainstorm/SKILL.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">ce-plan 研究扇出 + 计划生成</span><span class="pill p-ind">独立调用</span><span class="tok">中–高</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>$ARGUMENTS / brainstorm 文档</div><div class="io"><span class="k">输出</span><code>docs/plans/YYYY-MM-DD-NNN-*-plan.md</code>(Implementation Units U-ID + Test Scenarios + Requirements Trace)</div>
+    <div class="d"><span class="k">触发</span>lfg Step 1</div><div class="d"><span class="k">注入</span>Phase 0.7 范围 GATE(Standard/Deep 等确认)；Phase 1 并行扇出 ce-repo-research-analyst + <b>ce-learnings-researcher(recall)</b> + 条件 web/docs researcher</div><div class="d"><span class="k">方式</span>子agent 扇出(model:sonnet) + Write</div><div class="d"><span class="k">文件</span><code>skills/ce-plan/SKILL.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot r"></span><span class="nm">GATE-1：计划文件存在校验</span><span class="pill p-gate">GATE</span><span class="tok">—</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>docs/plans/ 目录</div><div class="io"><span class="k">输出</span>plan file path(传给 review Step3)</div>
+    <div class="d"><span class="k">触发</span>lfg Step 1 后</div><div class="d"><span class="k">注入</span>"若无计划文件则重新调用 ce-plan"</div><div class="d"><span class="k">方式</span>GATE:STOP + Bash glob 验证</div><div class="d"><span class="k">文件</span><code>skills/lfg/SKILL.md</code></div></div>
+  </details>
+</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>执行（ce-work）</div>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">ce-work 分流 + 执行循环</span><span class="pill p-res">常驻</span><span class="tok">高</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>计划文件(U-ID/Files/Approach/Test/Verification)</div><div class="io"><span class="k">输出</span>代码变更 + 增量 conventional commit</div>
+    <div class="d"><span class="k">触发</span>lfg Step 2</div><div class="d"><span class="k">注入</span>读 Implementation Units + Scope Boundaries；并行子agent 接收 Unit 全量上下文；worktree 隔离模式可独立 commit，共享模式由 orchestrator 统一 commit；Parallel Safety Check(文件交集)</div><div class="d"><span class="k">方式</span>内联/串行/并行子agent(<code>isolation:worktree</code>) + TaskCreate</div><div class="d"><span class="k">文件</span><code>skills/ce-work/SKILL.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot r"></span><span class="nm">GATE-2：代码变更存在校验</span><span class="pill p-gate">GATE</span><span class="tok">—</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>git status/diff</div><div class="io"><span class="k">输出</span>确认有文件改动(超过计划文件本身)</div>
+    <div class="d"><span class="k">触发</span>lfg Step 2 后</div><div class="d"><span class="k">注入</span>"无代码变更则不得进 Step 3"</div><div class="d"><span class="k">方式</span>GATE:STOP</div></div>
+  </details>
+</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>代码评审（ce-code-review · 四段管线）</div>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">Stage1–3：scope→意图→reviewer 选择</span><span class="pill p-od">按需读取</span><span class="tok">低</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>$ARGUMENTS(base:/plan:/PR号)</div><div class="io"><span class="k">输出</span>BASE/FILES/DIFF；Intent summary；选定 reviewer 列表(≥6)；R-IDs</div>
+    <div class="d"><span class="k">触发</span>lfg Step 3 <code>mode:agent plan:&lt;path&gt;</code></div><div class="d"><span class="k">注入</span>reviewer 按 diff 用 agent judgment 选(非关键词)；<code>data-migration</code> 等有 spawn gate；project-standards 收 standards 路径(非内容)</div><div class="d"><span class="k">方式</span>Bash(git/gh) + Glob</div><div class="d"><span class="k">文件</span><code>skills/ce-code-review/references/persona-catalog.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">Stage4：reviewer 子agent 并行扇出</span><span class="pill p-ind">独立调用</span><span class="tok">高(14+persona)</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>每 persona 的 agent 文件 + diff-scope + findings schema + review bundle(intent/files/diff/run_id)</div><div class="io"><span class="k">输出</span>每 reviewer 写全量 JSON 到 <code>/tmp/.../{run_id}/{reviewer}.json</code>，只回 compact JSON</div>
+    <div class="d"><span class="k">触发</span>Stage3 后自动并行</div><div class="d"><span class="k">注入</span>高风险三 reviewer(correctness/security/adversarial)继承 session 模型；其余 <code>model:sonnet</code>；有界并行(尊重并发限制)</div><div class="d"><span class="k">方式</span>有界并行子agent(run_in_background)</div><div class="d"><span class="k">文件</span><code>references/subagent-template.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot r"></span><span class="nm">Stage5：去重 + 跨reviewer升信 + 置信门控</span><span class="pill p-gate">GATE</span><span class="tok">中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>所有 reviewer compact JSON</div><div class="io"><span class="k">输出</span>去重后 finding set；actionable 队列 + report-only 队列</div>
+    <div class="d"><span class="k">注入</span>①Validate ②Dedup(指纹=file+行桶±3+title) ③≥2 reviewer 命中→anchor 升级(50→75→100) ④弱信号降级软桶 ⑤<b>置信门控放最后：抑制 anchor&lt;75 的非 P0；P0 在 50+ 仍保留</b></div><div class="d"><span class="k">方式</span>orchestrator 主线(无工具)</div><div class="d"><span class="k">文件</span><code>ce-code-review/SKILL.md Stage 5</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">Stage5b：per-finding 独立验证波</span><span class="pill p-ind">独立调用</span><span class="tok">中(≤15)</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>每 finding 的 title/severity/file/fix(从 /tmp 读) + full diff</div><div class="io"><span class="k">输出</span>每个 <code>{validated:true|false,reason}</code>；false→drop</div>
+    <div class="d"><span class="k">触发</span>Stage5 后，surviving≥1</div><div class="d"><span class="k">注入</span>"<b>绝不 batch</b>(batch 会重现 persona 偏置)；P0/P1 infra 失败 keep；P2/P3 drop"；上限 15</div><div class="d"><span class="k">方式</span>有界并行子agent(每 finding 独立保证 independence)</div><div class="d"><span class="k">文件</span><code>references/validator-template.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">Stage6：合成报告 + 需求完整性</span><span class="pill p-res">常驻</span><span class="tok">中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>合并 finding set + plan requirements</div><div class="io"><span class="k">输出</span>mode:agent→单 raw JSON(<code>/tmp/.../review.json</code>)；default→report.md</div>
+    <div class="d"><span class="k">触发</span>Stage5b 后</div><div class="d"><span class="k">注入</span>Requirements Completeness(对照 plan R-ID 核需求落实)；机器交接 JSON / 人看 markdown 双轨</div><div class="d"><span class="k">方式</span>orchestrator + Write</div></div>
+  </details>
+</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>修复 / 残余 / 测试 / 提交 / CI</div>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">Step4：review 修复机械应用</span><span class="pill p-res">常驻</span><span class="tok">低–中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>actionable_findings JSON</div><div class="io"><span class="k">输出</span>修复变更 + <code>fix(review):</code> commit + push</div>
+    <div class="d"><span class="k">触发</span>lfg Step 4</div><div class="d"><span class="k">注入</span>应用条件(AND)：有 suggested_fix + confidence 100(或75跨persona一致) + 机械性 + 代码行证据仍匹配；不应用 advisory / 行为变更类；<b>永不 push</b>由 lfg 控制</div><div class="d"><span class="k">方式</span>Edit + Bash(git)</div></div>
+  </details>
+  <details class="node"><summary><span class="dot o"></span><span class="nm">Step5：残余 findings 自主归档</span><span class="pill p-od">按需读取</span><span class="tok">低</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>未应用的 downstream-resolver findings</div><div class="io"><span class="k">输出</span>PR body <code>## Residual Review Findings</code> 或 <code>docs/residual-review-findings/&lt;branch&gt;.md</code></div>
+    <div class="d"><span class="k">触发</span>有未应用 actionable findings 时</div><div class="d"><span class="k">注入</span>fallback 链：Named Tracker→GitHub Issues→inline PR body/fallback file；DONE 前必须持久化</div><div class="d"><span class="k">方式</span>非交互 tracker-defer + gh/git</div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">ce-test-browser (E2E)</span><span class="pill p-ind">独立调用</span><span class="tok">中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>PR号/branch；<code>mode:pipeline</code></div><div class="io"><span class="k">输出</span>每路由截图 + Browser Test Results</div>
+    <div class="d"><span class="k">触发</span>lfg Step 6</div><div class="d"><span class="k">注入</span>pipeline 跳过询问(headless)；自动扫空闲 port(3000+ 防并发)；自动起 dev server</div><div class="d"><span class="k">方式</span>Bash(<code>agent-browser</code> CLI 独占)</div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">ce-commit-push-pr</span><span class="pill p-ind">独立调用</span><span class="tok">低–中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>git status/diff/branch</div><div class="io"><span class="k">输出</span>conventional commit + push + <code>gh pr create</code></div>
+    <div class="d"><span class="k">触发</span>lfg Step 7</div><div class="d"><span class="k">注入</span>PR body 经 pr-description-writing.md；body 必须写 tmpfile 再 <code>--body-file</code>(防空 body bug)；可选 ce-demo-reel 抓 demo</div><div class="d"><span class="k">方式</span>Bash(git/gh)</div></div>
+  </details>
+  <details class="node"><summary><span class="dot r"></span><span class="nm">Step8：CI 监控 + 自动修复(最多3轮)</span><span class="pill p-gate">GATE</span><span class="tok">中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>open PR + CI checks + 失败日志</div><div class="io"><span class="k">输出</span><code>fix(ci):</code> commit/push；或3轮后 PR body <code>## CI Failures Unresolved</code></div>
+    <div class="d"><span class="k">触发</span>lfg Step 8(有 open PR)</div><div class="d"><span class="k">注入</span>"最多3轮；不得 weaken/skip/mock 失败断言(必须修根因)；flaky 无法修则记残余" → <code>&lt;promise&gt;DONE&lt;/promise&gt;</code></div><div class="d"><span class="k">方式</span><code>gh pr checks --watch</code> + Edit + git</div></div>
+  </details>
+</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>复利学习闭环（贯穿）</div>
+  <details class="node"><summary><span class="dot g"></span><span class="nm">ce-learnings-researcher (recall 前置)</span><span class="pill p-od">按需读取</span><span class="tok">低–中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>planning context / review bundle</div><div class="io"><span class="k">输出</span><code>## Institutional Learnings Search Results</code></div>
+    <div class="d"><span class="k">触发</span>ce-plan Phase1.1 并行 + ce-code-review Stage4 always-on</div><div class="d"><span class="k">注入</span>"先读 CONCEPTS.md 对齐术语；<b>Grep-first</b>(frontmatter 字段预筛 200→5)→读前30行→相关性评分→全文 top5；冲突时显式标记，绝不让旧学习静默覆盖现状"</div><div class="d"><span class="k">方式</span>子agent(model:inherit) + Grep/Glob</div><div class="d"><span class="k">文件</span><code>agents/ce-learnings-researcher.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot g"></span><span class="nm">ce-compound (document 沉淀后置)</span><span class="pill p-od">按需读取</span><span class="tok">高</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>对话历史(问题解决过程)</div><div class="io"><span class="k">输出</span><code>docs/solutions/{category}/*.md</code>(双轨 frontmatter) + 可选更新 CONCEPTS.md</div>
+    <div class="d"><span class="k">触发</span>auto-invoke 触发词("that worked"/"it's fixed")或 <code>mode:headless</code></div><div class="d"><span class="k">注入</span>三并行子agent(Context Analyzer/Solution Extractor/Related Docs Finder 五维 overlap 评分 High→更新旧文档防漂移)；<b>子agent 只回文本，仅 orchestrator 写文件，主交付物只 1 个</b>；Discoverability Check(确保 AGENTS.md 引导发现 docs/solutions/)</div><div class="d"><span class="k">方式</span>3 子agent + Write(独占)</div><div class="d"><span class="k">文件</span><code>skills/ce-compound/references/schema.yaml</code></div></div>
+  </details>
+</div>
+</div>
+<!-- ========================= 8 oh-my-claudecode ========================= -->
+<div class="prod" id="omc">
+<div class="prod-h"><h2>8 · oh-my-claudecode</h2><span class="stars">⭐ 36K · Yeachan-Heo</span></div>
+<div class="flow1">Team 主线：team-plan→prd→exec→verify→fix(loop) ｜ 独立模式：autopilot / ralph / ultrawork ｜ 关键词即接口 + handoff 文件驱动 + 双作用域 .omc/</div>
+<div class="note" style="background:#fff7ed;border-color:#fed7aa;color:#9a3412"><b>为何节点看着少？</b>它是"一句话扔进去走开"的自动驾驶——<b>入口极少</b>（几个关键词模式），但运行时<b>内部并行扇出</b>到下面那一排底层 agent（≤6 并发）。牛在运行时编排，不在阶段数量。</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>Team Pipeline（多智能体协作主线）</div>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">team-plan → team-prd</span><span class="pill p-ind">独立调用</span><span class="tok">中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>用户目标 → plan.md</div><div class="io"><span class="k">输出</span><code>.omc/handoffs/team-{name}/plan.md</code> → <code>prd.md</code>(可测试验收标准)</div>
+    <div class="d"><span class="k">触发</span><code>/team N:agent "task"</code> 或关键词 <code>team</code>；prd 由 plan 完成后自动接续</div><div class="d"><span class="k">注入</span>planner(Opus)"战略分解为独立并行 lane"→document-specialist(Sonnet)"每任务有 testable condition"</div><div class="d"><span class="k">方式</span>slash + <code>keyword-detector.mjs</code> hook 注入 system-reminder；handoff 文件驱动</div><div class="d"><span class="k">文件</span><code>skills/team.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">team-exec (并行执行)</span><span class="pill p-ind">独立调用</span><span class="tok">高(≤6并发)</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>PRD + 分配工作项</div><div class="io"><span class="k">输出</span>实现提交；状态 <code>.omc/state/team/{name}/workers/</code></div>
+    <div class="d"><span class="k">触发</span>PRD 验证通过后</div><div class="d"><span class="k">注入</span>executor(Sonnet)/executor-high(Opus)含完整任务上下文；独立任务 >30s 时并发</div><div class="d"><span class="k">方式</span>多 agent spawn；<code>OMC_PARALLEL_EXECUTION</code>；任务队列</div></div>
+  </details>
+  <details class="node"><summary><span class="dot o"></span><span class="nm">team-verify → team-fix (loop)</span><span class="pill p-gate">GATE</span><span class="tok">中–高</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>实现代码 + PRD 验收条件</div><div class="io"><span class="k">输出</span>verify-results.md(逐条证据)；失败→fix-queue loop 直到通过/超限</div>
+    <div class="d"><span class="k">触发</span>exec 完成→verify；失败→fix</div><div class="d"><span class="k">注入</span>qa-tester"对每条 PRD 验收提供可证明证据"；fix 用 executor 含具体失败信息</div><div class="d"><span class="k">方式</span>handoff 文件驱动循环；handoff 仅 team skill 可写</div><div class="d"><span class="k">文件</span><code>.omc/state/team/{name}/fix-queue</code></div></div>
+  </details>
+</div>
+<div class="stage"><div class="stage-t"><span class="sd"></span>独立全流程模式（关键词触发）</div>
+  <details class="node"><summary><span class="dot p"></span><span class="nm">autopilot</span><span class="pill p-res">常驻</span><span class="tok">高(预算200K)</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>2–3 行产品 idea</div><div class="io"><span class="k">输出</span>完整实现+测试+文档 <code>.omc/artifacts/</code></div>
+    <div class="d"><span class="k">触发</span>关键词 <code>autopilot</code>/<code>build me</code>/<code>end to end</code></div><div class="d"><span class="k">注入</span>6 步：解析意图→并行研究→生成计划→执行→测试→fix 循环</div><div class="d"><span class="k">方式</span><code>persistent-mode.cjs</code> Stop hook 阻断退出强制继续；仅 <code>/cancel</code> 可中断</div><div class="d"><span class="k">文件</span><code>hooks/persistent-mode.cjs</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot p"></span><span class="nm">ralph (验证持久循环)</span><span class="pill p-res">常驻</span><span class="tok">高</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>任务目标(可 <code>--critic=architect|critic|codex</code>)</div><div class="io"><span class="k">输出</span>批准的实现</div><div class="d"><span class="k">注入</span>"实现→选定 reviewer 自我批评→修复→verify，The boulder never stops"</div><div class="d"><span class="k">方式</span>persistent-mode hook;<code>--critic</code> 路由 reviewer 层级</div><div class="d"><span class="k">文件</span><code>skills/ralph/SKILL.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot p"></span><span class="nm">ultrawork (最大并行吞吐)</span><span class="pill p-res">常驻</span><span class="tok">高</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>任务目标</div><div class="io"><span class="k">输出</span>聚合交付物</div><div class="d"><span class="k">注入</span>"拆独立 lane→同时 spawn executor/architect/designer→最小序列化合并"</div><div class="d"><span class="k">方式</span><code>OMC_PARALLEL_EXECUTION</code>；≤6 并发</div><div class="d"><span class="k">文件</span><code>skills/ultrawork/SKILL.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot p"></span><span class="nm">ultraqa (质量门循环)</span><span class="pill p-ind">独立调用</span><span class="tok">中–高</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>代码 + 质量目标</div><div class="io"><span class="k">输出</span>test/lint/build 全绿代码</div><div class="d"><span class="k">注入</span>"diagnose→fix→test until quality gate passes"</div><div class="d"><span class="k">文件</span><code>skills/ultraqa/SKILL.md</code></div></div>
+  </details>
+</div>
+<div class="stage"><div class="stage-t"><span class="sd"></span>底层 agent 角色（被上面模式扇出调用）</div>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">planner / executor / executor-high / qa-tester / document-specialist / designer</span><span class="pill p-ind">独立调用</span><span class="tok">Sonnet/Opus</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>模式委派的子任务</div><div class="io"><span class="k">输出</span>各角色产物(计划/代码/测试判决/文档)</div>
+    <div class="d"><span class="k">说明</span>这些是 team/autopilot/ultrawork 内部并行扇出的真正干活角色——"节点少"是因为入口少，<b>干活的 agent 在这里</b></div><div class="d"><span class="k">注入</span>planner"分解独立 lane"；executor(Sonnet)/executor-high(Opus) 含完整任务上下文；qa-tester"逐条 PRD 验收给证据"</div><div class="d"><span class="k">文件</span><code>agents/{planner,executor,qa-tester}.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot p"></span><span class="nm">hooks：keyword-detector + persistent-mode</span><span class="pill p-cyc">周期触发</span><span class="tok">—</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>用户 prompt / Stop 事件</div><div class="io"><span class="k">输出</span>注入 system-reminder 触发模式 / 阻断退出强制继续</div>
+    <div class="d"><span class="k">注入</span><b>关键词即接口</b>：检测 ultrawork/ralph/autopilot 注入指令；persistent-mode 阻断 session 退出(仅 /cancel 可断)</div><div class="d"><span class="k">文件</span><code>scripts/keyword-detector.mjs</code>,<code>scripts/persistent-mode.cjs</code></div></div>
+  </details>
+</div>
+</div>
+
+<!-- ========================= 9 oh-my-openagent ========================= -->
+<div class="prod" id="omo">
+<div class="prod-h"><h2>9 · oh-my-openagent</h2><span class="stars">⭐ 61.6K · code-yeongyu · opencode</span></div>
+<div class="flow1">Prometheus(访谈规划)→Metis(差距)→Momus(严苛审批) → Atlas(调度) → Sisyphus(并行编排)→Oracle/Librarian/Explore/Hephaestus → ulw-loop(持久自验证) ｜ 模型能力类别路由 + Hashline Edit</div>
+<div class="note" style="background:#fff7ed;border-color:#fed7aa;color:#9a3412"><b>为何阶段看着少？</b>它的深度在"<b>10 个专精 agent + 模型能力类别路由</b>"（每个 agent 按 deep/quick/visual/ultrabrain 路由到不同模型），不在线性阶段。下面已展开到一 agent 一节点。星标 61K 含部分短期热度，真实差异化是路由 + Hashline Edit + 持久循环。</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>规划三神（写 .omo/ 只读约束）</div>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">Prometheus → Metis → Momus</span><span class="pill p-ind">独立调用</span><span class="tok">~1100行 prompt</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>任务描述(Tab/@plan)</div><div class="io"><span class="k">输出</span><code>.omo/plans/{name}.md</code> → 差距分析 → 通过/拒绝裁决</div>
+    <div class="d"><span class="k">触发</span><code>/start-work</code> 规划分支</div><div class="d"><span class="k">注入</span>Prometheus"像真工程师访谈用户，识别 scope/歧义/风险，不写代码"；Metis"差距分析(高温)"；Momus"无情计划审查，仅审查模式，硬通过/拒绝门"</div><div class="d"><span class="k">方式</span>双 prompt(Claude/GPT)，<code>isGptModel()</code> 自动切；工具受限只写 .omo/</div><div class="d"><span class="k">文件</span><code>.agents/{prometheus,metis,momus}.md</code></div></div>
+  </details>
+</div>
+<div class="stage"><div class="stage-t"><span class="sd"></span>执行编排</div>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">Atlas (调度) + Sisyphus (默认并行编排)</span><span class="pill p-res">常驻</span><span class="tok">~1100行</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>.omo/plans/ 或 boulder.json</div><div class="io"><span class="k">输出</span>协调多 agent；wisdom 写 <code>.omo/notepads/</code></div>
+    <div class="d"><span class="k">触发</span><code>/start-work</code>；关键词 <code>ultrawork</code>/<code>ulw</code> 激活最大并行</div><div class="d"><span class="k">注入</span>"Todo-list orchestrator，跨 session 保进度，不直接改代码委托 subagent"；5+ 后台 agent 并行</div><div class="d"><span class="k">方式</span>communicator 组(Opus4.7→Kimi→GPT5.5→GLM)；<code>task()</code>/<code>call_omo_agent()</code></div><div class="d"><span class="k">文件</span><code>.agents/{atlas,sisyphus}.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot g"></span><span class="nm">Hephaestus (GPT 原生深度编码)</span><span class="pill p-ind">独立调用</span><span class="tok">高</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>目标(非步骤)</div><div class="io"><span class="k">输出</span>端到端完整实现</div><div class="d"><span class="k">注入</span>"给目标不给配方；自主探索代码库、研究模式、端到端执行"(GPT5.3 Codex，无 fallback)</div><div class="d"><span class="k">文件</span><code>src/agents/hephaestus/agent.ts</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot g"></span><span class="nm">Oracle (只读架构顾问)</span><span class="pill p-od">按需读取</span><span class="tok">中–高</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>架构问题/调试上下文</div><div class="io"><span class="k">输出</span>战略建议(不改文件)</div><div class="d"><span class="k">注入</span>"只读高 IQ 顾问；资深架构师 + 最后兜底调试器"；工具受限禁写/禁委托</div><div class="d"><span class="k">文件</span><code>src/agents/oracle.ts</code>(双模型 prompt)</div></div>
+  </details>
+  <details class="node"><summary><span class="dot g"></span><span class="nm">Librarian (文档/OSS 搜索)</span><span class="pill p-od">按需读取</span><span class="tok">低–中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>库 API 查询</div><div class="io"><span class="k">输出</span>文档片段/代码示例</div><div class="d"><span class="k">注入</span>"速度优先于深度"；utility runner 组(GPT5.4 Mini Fast→MiniMax→Haiku)</div><div class="d"><span class="k">文件</span><code>src/agents/librarian.ts</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot g"></span><span class="nm">Explore (grep + Hashline Edit)</span><span class="pill p-od">按需读取</span><span class="tok">低(~10并行)</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>代码模式查询</div><div class="io"><span class="k">输出</span>文件位置/匹配片段</div><div class="d"><span class="k">注入</span><b>Hashline Edit</b>(LINE#ID 内容哈希锚定，成功率 6.7%→68.3%)；最快模型，高度可并行</div><div class="d"><span class="k">文件</span><code>src/agents/explore.ts</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">Sisyphus-Junior (分类任务执行)</span><span class="pill p-ind">独立调用</span><span class="tok">50–200行/任务</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>详细任务 prompt(含 accumulated wisdom)</div><div class="io"><span class="k">输出</span>代码变更/验证</div><div class="d"><span class="k">注入</span>继承编排者能力，不可再委托；<b>类别决定模型链</b>(visual→Gemini；deep→GPT5.5；quick→Mini；ultrabrain→xhigh)</div><div class="d"><span class="k">文件</span><code>src/agents/sisyphus/</code> factory</div></div>
+  </details>
+  <details class="node"><summary><span class="dot g"></span><span class="nm">Multimodal Looker (视觉分析·只读)</span><span class="pill p-od">按需读取</span><span class="tok">中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>截图/PDF/设计稿</div><div class="io"><span class="k">输出</span>视觉内容分析</div><div class="d"><span class="k">注入</span>只读 + vision 能力；GPT5.5/Kimi multimodal</div><div class="d"><span class="k">文件</span><code>_model-routing/agent-model-matching.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot p"></span><span class="nm">ulw-loop (Ralph 持久自验证循环)</span><span class="pill p-res">常驻</span><span class="tok">高</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>目标 + codebase 状态</div><div class="io"><span class="k">输出</span>100% 完成的迭代实现 + 审计追踪</div>
+    <div class="d"><span class="k">触发</span><code>/ulw-loop</code> / <code>ralph-loop</code></div><div class="d"><span class="k">注入</span>"自指执行循环，不到 100% 不停；激进无用户介入；尊重并发限制；迭代间 compacting"</div><div class="d"><span class="k">方式</span>持久状态 <code>.omo/boulder-state/</code></div></div>
+  </details>
+</div>
+</div>
+
+<!-- ========================= 10 claude-forge ========================= -->
+<div class="prod" id="forge">
+<div class="prod-h"><h2>10 · claude-forge</h2><span class="stars">⭐ 0.7K · sangrokjung · 最贴 oh-my-zsh</span></div>
+<div class="flow1">/plan → /tdd → /code-review → /handoff-verify → /commit-push-pr → /sync（或 /auto 一键全流程）｜ symlink 安装 + settings.local.json 覆盖</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>设计优先流水线</div>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/plan → /tdd</span><span class="pill p-ind">独立调用</span><span class="tok">高(Opus)</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>功能描述 → 用户确认的计划</div><div class="io"><span class="k">输出</span>实现计划(等确认) → 测试套件+实现(测试先行)</div>
+    <div class="d"><span class="k">触发</span><code>/plan</code> → <code>/tdd</code></div><div class="d"><span class="k">注入</span>planner"design-first，写代码前等确认"；tdd-guide"先写测试再写码，一次一个工作单元"</div><div class="d"><span class="k">方式</span>slash → Opus agent</div><div class="d"><span class="k">文件</span><code>.claude/agents/</code>,<code>.claude/commands/</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot o"></span><span class="nm">/code-review → /handoff-verify</span><span class="pill p-gate">GATE</span><span class="tok">高→中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>tdd 完成的代码+测试</div><div class="io"><span class="k">输出</span>审查发现报告 → build/test/lint 验证结果</div>
+    <div class="d"><span class="k">触发</span><code>/code-review</code> → <code>/handoff-verify</code></div><div class="d"><span class="k">注入</span>code-reviewer + security-reviewer 双 Opus 并行；verify-agent"新鲜上下文(fresh context)防污染，并发 build+test+lint"</div><div class="d"><span class="k">方式</span>双 Opus agent 并行 → Sonnet verify</div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/commit-push-pr → /sync (收尾)</span><span class="pill p-ind">独立调用</span><span class="tok">中</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>已验证代码</div><div class="io"><span class="k">输出</span>commit+push+PR(可选合并) → 更新 <code>prompt_plan.md</code>/<code>spec.md</code>/<code>CLAUDE.md</code>/rules</div>
+    <div class="d"><span class="k">触发</span><code>/commit-push-pr</code> → <code>/sync</code></div><div class="d"><span class="k">注入</span>智能提交信息；doc-updater"保持规范文档与实现同步"</div><div class="d"><span class="k">方式</span>Git 序列 + Sonnet doc-updater</div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/auto (一键全流程)</span><span class="pill p-ind">独立调用</span><span class="tok">很高</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>一行功能描述(如 <code>/auto login page</code>)</div><div class="io"><span class="k">输出</span>Plan→PR 全自动(含文档)</div>
+    <div class="d"><span class="k">触发</span><code>/auto</code></div><div class="d"><span class="k">注入</span>压缩 plan→tdd→code-review→handoff-verify→commit-push-pr 为单次序列编排</div><div class="d"><span class="k">方式</span>全 pipeline agent 组合</div></div>
+  </details>
+</div>
+<div class="note">工程亮点：40 命令 + 15 skill + 21 生命周期钩子；<code>install.sh</code> symlink 到 ~/.claude/(<code>git pull</code> 即升级)；<code>settings.local.json</code> 自动 merge 到 settings.json 之上(团队规范 vs 个人定制不冲突)。</div>
+</div>
+
+<!-- ========================= 11 SuperClaude ========================= -->
+<div class="prod" id="superclaude">
+<div class="prod-h"><h2>11 · SuperClaude_Framework</h2><span class="stars">⭐ 23K · 仅 Claude(@import)</span></div>
+<div class="flow1">/sc:brainstorm → design → workflow/spawn → implement → test → document ｜ persona 按上下文自动激活，/sc:pm 全程守护 ｜ 30 命令分 8 层 + 5 行为模式</div>
+
+<div class="stage"><div class="stage-t"><span class="sd"></span>编排层</div>
+  <details class="node"><summary><span class="dot p"></span><span class="nm">/sc:pm (项目管理守护)</span><span class="pill p-res">常驻</span><span class="tok">低(后台)</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>任意用户请求</div><div class="io"><span class="k">输出</span>CLAUDE.md 文档；session 持久化；persona 委托</div>
+    <div class="d"><span class="k">触发</span>自动激活，每 session 启动恢复上下文</div><div class="d"><span class="k">注入</span>PDCA 循环；委托 requirements-analyst/system-architect/security-engineer/...</div><div class="d"><span class="k">方式</span>SessionStart hook + Serena MCP 持久记忆</div><div class="d"><span class="k">文件</span><code>plugins/superclaude/hooks/</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/sc:spawn · workflow · task</span><span class="pill p-ind">独立调用</span><span class="tok">中–高</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>复杂任务 / PRD / 动作目标</div><div class="io"><span class="k">输出</span>spawn=Epic→Story→Task 依赖树(纯规划)；workflow=路线图；task=执行(含代码)</div>
+    <div class="d"><span class="k">触发</span>对应 slash</div><div class="d"><span class="k">注入</span>区分：spawn/workflow 只规划不写码；task 经 persona 协调+MCP 路由执行</div><div class="d"><span class="k">方式</span>slash → persona 路由 → MCP 选择</div></div>
+  </details>
+</div>
+<div class="stage"><div class="stage-t"><span class="sd"></span>发现 / 实现 / 质量 / 文档（按层）</div>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/sc:brainstorm · research (发现层)</span><span class="pill p-ind">独立调用</span><span class="tok">中–高</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>模糊 idea / 查询</div><div class="io"><span class="k">输出</span>需求技术简报 / <code>claudedocs/research_*.md</code></div>
+    <div class="d"><span class="k">触发</span>slash 或检测"maybe/I want to build"自动激活 Brainstorming Mode</div><div class="d"><span class="k">注入</span>requirements-analyst Socratic 问答；research 用 Tavily 并行搜+多跳</div><div class="d"><span class="k">方式</span>skill + persona</div><div class="d"><span class="k">文件</span><code>plugins/superclaude/skills/brainstorm.md</code></div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/sc:design · implement (实现层)</span><span class="pill p-ind">独立调用</span><span class="tok">中–高</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>目标系统 / 功能描述 + framework</div><div class="io"><span class="k">输出</span>design=架构图/API规格/schema(蓝图)；implement=代码+测试</div>
+    <div class="d"><span class="k">触发</span>对应 slash</div><div class="d"><span class="k">注入</span>按上下文激活 frontend/backend/security persona；Context7 MCP 取框架文档；magic 生成 UI</div><div class="d"><span class="k">方式</span>slash → persona → MCP</div></div>
+  </details>
+  <details class="node"><summary><span class="dot o"></span><span class="nm">/sc:analyze · troubleshoot · test · build (质量层)</span><span class="pill p-ind">独立调用</span><span class="tok">中–高</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>目标代码 + focus(quality/security/perf)</div><div class="io"><span class="k">输出</span>分析报告(不修)/诊断/测试结果/构建产物</div>
+    <div class="d"><span class="k">触发</span>对应 slash；analyze 可 <code>--introspect</code></div><div class="d"><span class="k">注入</span>security-engineer+quality-engineer 并行；troubleshoot 默认 diagnose-first，<code>--fix</code> 才执行；test 用 Playwright E2E</div><div class="d"><span class="k">方式</span>slash → 多 persona + playwright MCP</div></div>
+  </details>
+  <details class="node"><summary><span class="dot b"></span><span class="nm">/sc:improve·cleanup·document·explain·index-repo + 专家面板</span><span class="pill p-ind">独立调用</span><span class="tok">低–高</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>目标代码 / 规格 / 商业内容</div><div class="io"><span class="k">输出</span>改进/清理代码、JSDoc/API 文档、<code>PROJECT_INDEX.md</code>(省94% token)、专家审查报告</div>
+    <div class="d"><span class="k">触发</span>对应 slash</div><div class="d"><span class="k">注入</span>improve/cleanup 安全变更自动、风险变更需批准；spec-panel 模拟 10 位专家、business-panel 模拟 9 位思想家(debate 对抗压测)</div><div class="d"><span class="k">方式</span>slash → multi-persona 模拟</div></div>
+  </details>
+  <details class="node"><summary><span class="dot p"></span><span class="nm">5 行为模式（横切叠加）</span><span class="pill p-cyc">周期触发</span><span class="tok">—</span></summary>
+    <div class="body"><div class="io"><span class="k">输入</span>触发条件/flag</div><div class="io"><span class="k">输出</span>叠加在命令上的行为层</div>
+    <div class="d"><span class="k">注入</span>Brainstorming(模糊词)/Introspection(错误恢复 --introspect)/Task Management(>3步或>3文件 自动分层规划)/Orchestration(>3并行 智能MCP路由)/Token Efficiency(高context --uc 省30-50%)</div><div class="d"><span class="k">方式</span>hook + flag</div><div class="d"><span class="k">文件</span><code>docs/user-guide/modes.md</code></div></div>
+  </details>
+</div>
+</div>
+
+<!-- ===================== 附A Agent 名册 ===================== -->
+<div class="prod" id="roster">
+<div class="prod-h"><h2>附 A · 各项目 Agent 名册</h2><span class="stars">叫啥 / 干啥 / 基本处理逻辑</span></div>
+<p style="font-size:12.5px;color:var(--tx3);margin:6px 0 0">命令/工具驱动的项目（spec-kit、OpenSpec、Agent OS、spec-workflow-mcp）<b>不 spawn 子 Agent</b>——靠 slash 命令/MCP 工具串流程，故无名册。</p>
+
+<details class="node" open><summary><span class="dot b"></span><span class="nm">0 · HelixFlow（我们的框架·设计）</span><span class="pill p-ind">8 角色 + reviewer 池</span></summary>
+<div class="body"><div class="d"><span class="k">治理(4)</span>产品负责人(价值/需求)、架构师(技术一致性)、设计负责人(体验/视觉·可拔)、PM(编排/依赖)</div><div class="d"><span class="k">执行(4)</span>开发Agent(按context_package实现)、Reviewer池(四段评审扇出)、测试Agent(实跑验功能)、部署Agent(Go/No-Go)</div><div class="d"><span class="k">逻辑</span>治理=episodic 事件/周期唤醒；执行=挂在编排循环上扇出；reviewer 池可追加(借CE persona)</div></div>
+</details>
+
+<details class="node"><summary><span class="dot b"></span><span class="nm">1 · claude-flow（60+ agent 类型）</span><span class="pill p-ind">.md 文件即配置</span></summary>
+<div class="body">
+<div class="d"><span class="k">核心开发</span>researcher(知识图谱遍历探索，<b>不改源码</b>)、planner(伪代码/控制流)、system-architect(模块边界/API契约)、coder(TDD实现,函数≤20行)、tester(测试+覆盖率)、reviewer(质量/安全/性能分级)</div>
+<div class="d"><span class="k">编排协调</span>hierarchical/mesh/adaptive-coordinator(拓扑)、raft-manager/byzantine/gossip-coordinator/crdt-synchronizer(共识/同步)</div>
+<div class="d"><span class="k">专项</span>security-architect/security-auditor(CVE扫描)、memory-specialist、performance-engineer、domain-modeler(DDD)、adr-architect</div>
+<div class="d"><span class="k">GitHub/领域</span>pr-manager、code-review-swarm、issue-tracker、release-manager；backend-dev、mobile-dev、ml-developer、api-docs、cicd-engineer</div>
+<div class="d"><span class="k">逻辑</span>每 agent 是 <code>.md</code> 文件(角色名=subagent_type)；prompt 末尾硬编码"完成后 SendMessage 给谁"，链式自驱</div></div>
+</details>
+
+<details class="node"><summary><span class="dot b"></span><span class="nm">3 · BMAD-METHOD（9 + 2 编排）</span><span class="pill p-ind">人名 persona</span></summary>
+<div class="body">
+<div class="d"><span class="k">Mary</span>Analyst — 研究/项目简报；好奇驱动、证据为本</div>
+<div class="d"><span class="k">John</span>PM — PRD；挖 Why + 无情排序聚焦 MVP</div>
+<div class="d"><span class="k">Sally</span>UX Expert — 前端规格；用户中心、为边界/错误态设计</div>
+<div class="d"><span class="k">Winston</span>Architect — 架构；务实选型(boring tech)、每层安全</div>
+<div class="d"><span class="k">Sarah</span>PO — 质检+文档切片；质量与完整性守门人</div>
+<div class="d"><span class="k">Bob</span>SM — 草拟 Story；<b>只从 PRD/架构提取，绝不捏造</b>，永不写代码</div>
+<div class="d"><span class="k">James</span>Dev — 实现；<b>不主动翻文档只读 Story</b>，只改 Dev Agent Record 段</div>
+<div class="d"><span class="k">Quinn</span>QA — 审查+主动重构；资深视角，只写 QA Results 段</div>
+<div class="d"><span class="k">编排</span>BMad Orchestrator(按需变身任意 agent)、BMad Master(全能聚合)</div></div>
+</details>
+
+<details class="node"><summary><span class="dot b"></span><span class="nm">7 · compound-engineering（24 ce-* agent）</span><span class="pill p-ind">写 findings JSON</span></summary>
+<div class="body">
+<div class="d"><span class="k">always-on 审查</span>correctness(逻辑/边界/状态bug)、testing(覆盖/断言)、maintainability(复杂度/耦合)、project-standards(对照CLAUDE.md)、agent-native-reviewer</div>
+<div class="d"><span class="k">条件审查</span>security、performance、api-contract、data-migration、reliability、adversarial(<b>主动构造失败</b>)、previous-comments</div>
+<div class="d"><span class="k">栈专属</span>julik-frontend-races(Stimulus/Turbo竞态)、swift-ios</div>
+<div class="d"><span class="k">文档/方案 lens</span>design-lens、product-lens、security-lens、scope-guardian、feasibility、coherence、adversarial-document、design-implementation、code-simplicity</div>
+<div class="d"><span class="k">研究</span>learnings-researcher(<b>grep frontmatter 召回</b>,只读)</div>
+<div class="d"><span class="k">逻辑</span>各写 compact findings JSON + 置信锚点自评(100/75/50/25) + "不 flag"抑制条件防误报；always-on vs conditional 不在 frontmatter 标记，在编排 skill 集中声明 + spawn gate</div></div>
+</details>
+
+<details class="node"><summary><span class="dot b"></span><span class="nm">8 · oh-my-claudecode（19 agent）</span><span class="pill p-ind">完成即销毁</span></summary>
+<div class="body">
+<div class="d"><span class="k">构建/分析</span>Explore Analyst、Planner、Architect、Debugger、Executor、executor-high、Code-Simplifier</div>
+<div class="d"><span class="k">质量</span>Security-Reviewer、Code-Reviewer、Critic、Test-Engineer、QA-Tester</div>
+<div class="d"><span class="k">专项</span>Document-Specialist、Designer、Writer、Scientist、Git-Master、Tracer、Orchestrator(总指挥)</div>
+<div class="d"><span class="k">逻辑</span>on-demand spawn，任务完成即 die 不留 idle；executor=Sonnet / executor-high=Opus 按复杂度路由</div></div>
+</details>
+
+<details class="node"><summary><span class="dot b"></span><span class="nm">9 · oh-my-openagent（11 agent · 神话命名）</span><span class="pill p-ind">模型类别路由</span></summary>
+<div class="body">
+<div class="d"><span class="k">规划三神</span>Prometheus(访谈规划,只写.omo)、Metis(差距分析,高温)、Momus(严苛审批,硬通过/拒绝门)</div>
+<div class="d"><span class="k">编排</span>Atlas(todo调度,跨session续传)、Sisyphus(默认并行编排,5+后台agent)、Sisyphus-Junior(分类执行,类别决定模型)</div>
+<div class="d"><span class="k">专精</span>Hephaestus(GPT深度编码,<b>给目标不给步骤</b>)、Oracle(只读架构顾问/最后调试)、Librarian(文档搜索,速度优先)、Explore(grep+<b>Hashline Edit</b>)、Multimodal Looker(视觉,只读)</div>
+<div class="d"><span class="k">逻辑</span>agent 声明能力类别(deep/quick/visual/ultrabrain)，<b>不硬编码模型</b>，系统路由到当前最优模型+产品</div></div>
+</details>
+
+<details class="node"><summary><span class="dot b"></span><span class="nm">10 · claude-forge（6 agent · Opus/Sonnet 分级）</span><span class="pill p-ind">设计优先</span></summary>
+<div class="body">
+<div class="d"><span class="k">Opus(深度)</span>planner(design-first,写码前等确认)、tdd-guide(测试先行)、code-reviewer、security-reviewer</div>
+<div class="d"><span class="k">Sonnet(执行)</span>verify-agent(<b>新鲜上下文</b>并发 build+test+lint)、doc-updater(同步 prompt_plan/spec/CLAUDE.md)</div>
+<div class="d"><span class="k">逻辑</span>命令→对应 agent；color 标识区分；symlink 安装、settings.local.json 个人覆盖</div></div>
+</details>
+
+<details class="node"><summary><span class="dot b"></span><span class="nm">11 · SuperClaude（16–19 persona）</span><span class="pill p-ind">三维自动激活</span></summary>
+<div class="body">
+<div class="d"><span class="k">架构</span>system/backend/frontend/devops-architect</div>
+<div class="d"><span class="k">质量/专项</span>security-engineer、performance-engineer、root-cause-analyst、quality-engineer、refactoring-expert、python-expert</div>
+<div class="d"><span class="k">产品/文档</span>requirements-analyst、technical-writer、learning-guide、deep-research-agent、<b>pm-agent(后台守护,PDCA,每session启动恢复上下文)</b></div>
+<div class="d"><span class="k">逻辑</span><b>三维触发</b>(关键词+文件类型+复杂度)自动激活——本质是模型读了指令文件做行为判断，非程序逻辑；也可 <code>@agent-name</code> 手动调</div></div>
+</details>
+</div>
+
+<!-- ===================== 附B 命令清单 ===================== -->
+<div class="prod" id="commands">
+<div class="prod-h"><h2>附 B · 各项目 /命令清单</h2><span class="stars">命令 → 作用 → 对应节点</span></div>
+<table>
+<thead><tr><th>项目</th><th>主要命令（→ 作用）</th></tr></thead>
+<tbody>
+<tr><td><b>0 HelixFlow</b><br><span style="color:var(--tx3)">设计</span></td><td>能力即 skill（非 slash，跨产品可移植）：<code>hf-ideate</code>/<code>hf-spec</code>/<code>hf-design</code>/<code>hf-architect</code>/<code>hf-plan</code>/<code>hf-work</code>/<code>hf-review</code>/<code>hf-test</code>/<code>hf-deploy</code> + 贯穿 <code>hf-recall</code>/<code>hf-compound</code> + 编排 <code>hf-run</code>；M1 CLI <code>helix vault</code>/<code>helix restore</code>/<code>helix watch</code></td></tr>
+<tr><td><b>1 claude-flow</b></td><td><code>/sparc-sparc</code>(编排)、<code>/sparc-{spec-pseudocode,architect,code,tdd,debug,security-review,refinement-optimization-mode,integration,docs-writer,post-deployment-monitoring}</code>、<code>/coordination/swarm-init</code>；CLI <code>npx claude-flow hooks {session-start,pre-task,post-task,session-end}</code> / <code>memory {store,search}</code> / <code>workflow execute {feature,bugfix}</code> / <code>daemon start</code></td></tr>
+<tr><td><b>2 spec-workflow-mcp</b></td><td><b>无 slash 命令</b> —— MCP 工具(自然语言触发)：<code>spec-workflow-guide</code>、<code>steering-guide</code>、<code>approvals</code>(request/status/delete)、<code>log-implementation</code>、<code>spec-status</code></td></tr>
+<tr><td><b>3 BMAD-METHOD</b></td><td>IDE 激活 <code>@agent</code>(Claude 用 <code>/agent</code>)；agent 内 <code>*</code> 命令：<code>*help</code>/<code>*draft</code>/<code>*create-prd</code>/<code>*create-doc</code>/<code>*create-front-end-spec</code>/<code>*create-full-stack-architecture</code>/<code>*execute-checklist-po</code>/<code>*shard-doc</code>/<code>*review</code>/<code>*validate-story-draft</code>/<code>*correct-course</code>/<code>*party-mode</code>/<code>*yolo</code>/<code>*kb-mode</code>/<code>*exit</code></td></tr>
+<tr><td><b>4 spec-kit</b></td><td><code>/speckit.{constitution,specify,clarify,checklist,plan,tasks,analyze,implement,taskstoissues}</code>（skills 模式为 <code>$speckit-*</code>，Gemini 为 <code>.toml</code>）</td></tr>
+<tr><td><b>5 OpenSpec</b></td><td><code>/opsx:{explore,propose,apply,verify,sync,archive}</code>(core) + <code>{new,continue,ff,bulk-archive,onboard}</code>(扩展)；非 Claude 产品为 <code>/opsx-*</code></td></tr>
+<tr><td><b>6 Agent OS</b></td><td><code>/plan-product</code>、<code>/discover-standards</code>、<code>/index-standards</code>、<code>/inject-standards</code>、<code>/shape-spec</code>（仅 Claude Code）</td></tr>
+<tr><td><b>7 compound-engineering</b></td><td><code>/lfg</code>(全流程编排)、<code>/ce-{brainstorm,plan,work,code-review,test-browser,commit-push-pr,compound,debug,commit,worktree,simplify-code,resolve-pr-feedback,...}</code>；参数 token：<code>mode:agent</code>/<code>plan:&lt;path&gt;</code>/<code>base:&lt;ref&gt;</code></td></tr>
+<tr><td><b>8 oh-my-claudecode</b></td><td><code>/oh-my-claudecode:team N:agent</code>、<code>/autopilot</code>、<code>/cancel</code>、<code>/skill {list,add,remove,edit,search}</code>、<code>/skillify</code>、<code>/ccg review</code>；<b>关键词即接口</b>：<code>ultrawork|ulw|ralph|autopilot|ultraqa|don't stop</code>；CLI <code>omc hud</code>/<code>omc wait</code>/<code>omc ultragoal</code></td></tr>
+<tr><td><b>9 oh-my-openagent</b></td><td><code>/start-work</code>、<code>/ulw-loop</code>；关键词 <code>ultrawork|ulw</code>；<b>Tab 键</b>或 <code>@plan "desc"</code> 触发规划</td></tr>
+<tr><td><b>10 claude-forge</b></td><td><code>/plan</code>→<code>/tdd</code>→<code>/code-review</code>→<code>/handoff-verify</code>→<code>/commit-push-pr</code>→<code>/sync</code>，或 <code>/auto</code>(一键)；另 <code>/security-review</code>/<code>/quick-commit</code>/<code>/explore</code>（共 40 命令）</td></tr>
+<tr><td><b>11 SuperClaude</b></td><td><code>/sc:{pm,spawn,workflow,task,brainstorm,research,implement,design,analyze,troubleshoot,test,build,improve,cleanup,document,explain,index-repo,spec-panel,business-panel,git,estimate,reflect,load,save,...}</code>(30)；<code>@agent-&lt;name&gt;</code> 手动调 persona；flag <code>--think/--think-hard/--ultrathink</code>、<code>--c7/--seq/--magic</code></td></tr>
+</tbody>
+</table>
+<div class="note"><b>对 HelixFlow 的启示：</b>命令是各产品最分裂的扩展点（spec-kit 编译多格式、Gemini 用 TOML、BMAD 用 <code>*</code>、oh-my 用关键词、spec-workflow 干脆没命令）。所以 HelixFlow 把能力押在 <b>skill</b>（可移植）而非 slash 命令，命令层交给各产品适配器投影。</div>
+</div>
+
+<div class="note" style="margin-top:24px;background:#eff4ff;border-color:#d8e4ff;color:var(--tx2)"><b>横向规律（看完 11 个的提炼）：</b>① 阶段都收敛到「需求→规格/计划→实现→评审/测试→提交/沉淀」；② 治理角色多为<span class="pill p-res">常驻/周期</span>(hook/守护)，执行角色多为<span class="pill p-ind">独立调用</span>(子agent扇出)；③ 越成熟的越把「硬质量门」从 prompt 下沉到 <span class="pill p-gate">GATE</span>(spec-workflow 的 MCP 审批、ce 的 GATE:STOP、CI 三轮)；④ 产物全是文件(spec/plan/story/findings JSON)，靠 frontmatter/区段权限/delta 防冲突；⑤ 跨产品全靠「一份源 → 编译/symlink 投影」(spec-kit Registrar、ce 转换器、forge symlink、wshobson make generate)。这五条正是 HelixFlow 的设计依据。</div>
+
+</main>
+</div>
+</body>
+</html>

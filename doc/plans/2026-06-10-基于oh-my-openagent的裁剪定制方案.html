@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>基于 oh-my-openagent 的裁剪定制方案 · 2026-06-10</title>
+<style>
+  body{font-family:-apple-system,"PingFang SC",sans-serif;background:#f5f6f8;color:#222;margin:0;padding:32px;max-width:1080px;margin:auto}
+  h1{font-size:22px} h2{font-size:17px;margin-top:36px;border-left:4px solid #4a6cf7;padding-left:10px}
+  .meta{color:#888;font-size:13px;margin-bottom:20px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:14px}
+  .card{background:#fff;border-radius:10px;padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  .card h3{margin:0 0 8px;font-size:15px;display:flex;align-items:center;gap:8px}
+  .card p,.card li{margin:6px 0;font-size:13.5px;line-height:1.7}
+  .card ul{padding-left:18px;margin:6px 0}
+  .tag{font-size:11px;padding:2px 8px;border-radius:10px;color:#fff;font-weight:600;white-space:nowrap}
+  .keep{background:#2f9e63}.cut{background:#8e9aaf}.add{background:#e5484d}.cfg{background:#f29d38}
+  table{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden;font-size:13px}
+  th,td{padding:9px 12px;border-bottom:1px solid #eef0f4;text-align:left;vertical-align:top}
+  th{background:#f0f2f7;font-weight:600}
+  code{background:#eef0f4;padding:1px 5px;border-radius:4px;font-size:12px}
+  .verdict{background:#eef3ff;border:1px solid #c9d6ff;border-radius:10px;padding:14px 18px;font-size:14px;line-height:1.8}
+  .warn{background:#fff7ed;border:1px solid #fdd9a8;border-radius:10px;padding:12px 16px;font-size:13.5px;line-height:1.7;margin-top:12px}
+  .flow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:13px;margin:8px 0}
+  .node{background:#fff;border:1.5px solid #4a6cf7;border-radius:8px;padding:5px 12px}
+  .node.new{border-color:#e5484d;color:#e5484d;font-weight:600}
+  .arrow{color:#999}
+</style>
+</head>
+<body>
+<h1>基于 oh-my-openagent 的裁剪定制方案</h1>
+<div class="meta">2026-06-10 ｜ 替代「从零自研 HelixFlow 内核」｜ 底座：code-yeongyu/oh-my-openagent v4.8.1（前名 oh-my-opencode，2026-06-09 仍在活跃发版）</div>
+
+<div class="verdict">
+<b>结论：成立，且比自研路线删掉了最重的一整层。</b><br>
+oh-my-openagent 已官方支持 opencode（终极版）+ Codex CLI（lazycodex 轻量版），Claude Code 支持在上游重构路线图上 ——
+原 HelixFlow 方案里最贵的「跨产品适配器编译器」<b>整层不用做了</b>。
+策略一句话：<b>不 fork、纯做减法 + 三个自有插件补强</b>（治理硬门 / 工作保险箱 / 复利自进化），全部定制放自己命名空间，升级即重装。
+</div>
+
+<div class="warn">
+<b>License 红线（SUL-1.0，已核实条款）</b>：✅ 内部商用允许、✅ 内部修改允许（须声明修改）、❌ 禁止商业性再分发。
+团队内部用没问题；<b>不可把它打包进对外售卖的产品</b>。最佳实践：完全不改上游源码，定制全走 overlay 插件 + 配置，连「修改声明」义务都规避掉。
+</div>
+
+<h2>一 · 四目标映射：底座给了什么，缺什么</h2>
+<table>
+<tr><th>目标</th><th>底座已有（保留）</th><th>缺口（自建补强）</th></tr>
+<tr><td><b>1 流程短+治理强</b></td><td>天然三级分流：日常直接 Sisyphus / 中等 Metis→Prometheus→Momus→Atlas / 专项 ULW·team —— 正好对应你们的 任务/模块/专项</td><td>治理偏软：Momus 设计上倾向放行，无硬质量门、无 spec 契约、无部署 HITL → <b>gate 插件</b></td></tr>
+<tr><td><b>2 自进化</b></td><td>Oracle（≥2 次失败的难调试顾问）、模型能力类别路由</td><td>无复利闭环（无召回/沉淀）→ <b>compound 插件</b>：CE 双轨 schema（bug 轨 symptoms/root_cause）+ bug→自动回归检查</td></tr>
+<tr><td><b>3 可插拔</b></td><td>原生最强：<code>disabled_hooks</code>、JSONC 双作用域配置（用户 ~/.config &gt; 项目 .opencode/）、agent/skill/MCP 即插即用</td><td>基本零自建，裁剪=改配置</td></tr>
+<tr><td><b>4 同步/共享/不覆盖/可追回</b></td><td>opencode <code>ctx.worktree</code> 一等公民 + <code>snapshot:true</code>；opencode-worktree-session 插件 ≈ M1 蓝图</td><td><b>vault 插件</b>：补 merge 收口、重仓(Unity)画像（branch-per-task+LFS 锁）、快照推远端、产物模板、飞书同步</td></tr>
+</table>
+
+<h2>二 · 裁剪清单（减法）</h2>
+<div class="grid">
+<div class="card"><h3><span class="tag cut">裁掉</span> Hephaestus</h3><p>唯一硬依赖 GPT-5.5 的 agent。若不想绑双供应商订阅，<code>disabled</code> 即可；其职责由 Sisyphus+Oracle 覆盖。</p></div>
+<div class="card"><h3><span class="tag cut">收敛</span> 模型回退链</h3><p>上游 fallback 链含 kimi/glm/minimax 等家族，按团队实际订阅收敛到 Claude（主）+ 必要的 fast/cheap 档（Librarian/Explore 用）。</p></div>
+<div class="card"><h3><span class="tag cfg">默认关</span> ULW / team 模式</h3><p>小团队日常用不到大编队，专项再开。关=配置，不删能力。</p></div>
+<div class="card"><h3><span class="tag cut">整层删除</span> 跨产品适配器编译器</h3><p>原自研方案最重的一层。Codex 用 lazycodex 轻量版、Claude Code 等上游重构；git 层 vault daemon 保持产品中立兜底（误用 Cursor 也不丢工作）。</p></div>
+</div>
+
+<h2>三 · 自建补强（三个 overlay 插件，全部 <code>helix-*</code> 命名空间）</h2>
+<div class="grid">
+<div class="card"><h3><span class="tag add">helix-gate</span> 治理硬门</h3>
+<ul><li>用 opencode 54+ 生命周期 hook + permission 机制做强制门：test 未过不许 commit、review P0 未清不许 push、部署须人工放行（HITL）</li>
+<li>思路抄 spec-workflow-mcp：门=工具返回值，不靠 agent 自律</li></ul></div>
+<div class="card"><h3><span class="tag add">helix-vault</span> 工作保险箱（原 M1，载体换了）</h3>
+<ul><li>在 opencode-worktree-session 模式上补：merge 收口编排、轻/重仓画像（Unity: branch-per-task + git lfs lock）、快照推远端 <code>refs/helix/snapshots</code>、在途总览+一键恢复</li>
+<li>R1–R7 需求原封不动有效，实现从「自研内核」缩水为「一个插件」</li></ul></div>
+<div class="card"><h3><span class="tag add">helix-compound</span> 复利自进化</h3>
+<ul><li>召回前置（session start grep <code>docs/solutions/</code> frontmatter）+ 沉淀后置（双轨 schema）</li>
+<li>debug 自进化：每个修复的 bug 自动生成回归检查；bug 轨召回让同类问题越修越快 —— 上轮评审 P0 在此落地</li></ul></div>
+<div class="card"><h3><span class="tag keep">原调研不浪费</span></h3>
+<p>PipelineAtlas 全部转为三个插件的抄袭来源：gate←spec-workflow-mcp、compound←CE schema.yaml、vault←opencode-worktree-session；HelixFlow 9 阶段方案降级为治理设计参考。</p></div>
+</div>
+
+<h2>四 · 日常流程形态（裁剪后）</h2>
+<div class="flow">
+<span class="node">任务级：Sisyphus 直干</span><span class="arrow">→</span><span class="node new">helix-gate 硬门</span><span class="arrow">→</span><span class="node new">vault 自动落袋</span>
+</div>
+<div class="flow">
+<span class="node">模块级：Metis 预审</span><span class="arrow">→</span><span class="node">Prometheus 计划</span><span class="arrow">→</span><span class="node">Momus 审计划</span><span class="arrow">→</span><span class="node">Atlas 编排执行</span><span class="arrow">→</span><span class="node new">gate</span><span class="arrow">→</span><span class="node new">compound 沉淀</span>
+</div>
+<div class="flow">
+<span class="node">专项级：再开 ULW/team</span><span class="arrow">→</span><span class="node">同上 + 多 agent 并行（vault worktree 隔离）</span>
+</div>
+
+<h2>五 · 落地顺序</h2>
+<table>
+<tr><th>里程碑</th><th>内容</th><th>量级</th></tr>
+<tr><td><b>M0 装机裁剪</b></td><td>装 omoa + lazycodex；写裁剪配置（disabled hooks/agents、模型收敛）；项目 <code>.opencode/</code> 双作用域规范</td><td>天级</td></tr>
+<tr><td><b>M1 helix-vault</b></td><td>别丢东西（原 M1 全部需求，实现缩水为插件）</td><td>原计划的零头</td></tr>
+<tr><td><b>M2 helix-gate</b></td><td>test/review 硬门 + 部署 HITL + 产物模板</td><td>小</td></tr>
+<tr><td><b>M3 helix-compound</b></td><td>召回/沉淀 + debug 自进化飞轮</td><td>小</td></tr>
+</table>
+
+<h2>六 · 风险与对策</h2>
+<table>
+<tr><th>风险</th><th>对策</th></tr>
+<tr><td>上游演进快（196 个 release、改名过渡期），fork 必然脱节</td><td>铁律：不改上游一行码；定制全在 helix-* 插件 + 配置 overlay，升级=重装</td></tr>
+<tr><td>SUL-1.0 非开源协议，禁止商业再分发</td><td>仅内部使用；任何对外交付的产品不内嵌它</td></tr>
+<tr><td>Claude Code 支持是上游「期货」</td><td>近期主力真用 opencode（习惯迁移成本认了）；vault daemon 产品中立兜底</td></tr>
+<tr><td>治理强度依赖自建 gate 插件的完成度</td><td>M2 排在 vault 之后立即做；未完成前用 opencode permission 配置先顶硬约束</td></tr>
+</table>
+
+<div class="meta" style="margin-top:28px">v1 · 上游信息已联网核实（GitHub 仓库页 + LICENSE.md，2026-06-10）｜ 上游：2026-06-09 两份方案文档 + 同日评审</div>
+</body>
+</html>

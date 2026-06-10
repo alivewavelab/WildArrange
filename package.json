@@ -1,0 +1,26 @@
+{
+  "name": "helixflow",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Linear governance runtime for Codex and Cursor agent workflows",
+  "type": "module",
+  "bin": {
+    "helix": "./bin/helix.mjs",
+    "helixflow": "./bin/helix.mjs"
+  },
+  "files": [
+    "README.md",
+    "bin/",
+    "src/",
+    "packs/",
+    "helix.config.example.json",
+    "CLAUDE.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "helix": "node ./bin/helix.mjs"
+  }
+}
