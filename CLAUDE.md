@@ -31,7 +31,8 @@
 - `doc/project-architecture.md`：运行时架构、状态文件和 gate 模型。
 - `doc/development-plan.md`：P0/P1/P2 路线。
 - `bin/helix.mjs`：CLI 入口。
-- `src/helix-core.mjs`：线性循环编排、节点流转、任务变更与 workflow 入口。
+- `src/helix-core.mjs`：线性循环编排、节点流转、重试/ checkpoint 与 workflow 入口。
+- `src/helix-change.mjs`：任务变更治理、Review Blocker、ChangeRequest 审核与决策。
 - `src/helix-rules.mjs`：项目规范扫描与规则上下文注入。
 - `src/helix-review.mjs`：Worker 执行与 Oracle/Momus/Metis 确定性复核门。
 - `src/helix-injection.mjs`：注入点解析、Markdown/Skill 挂载加载。

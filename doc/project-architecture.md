@@ -7,6 +7,7 @@ bin/helix.mjs
   -> src/helix-core.mjs
      -> src/helix-foundation.mjs
      -> src/helix-adapters.mjs
+     -> src/helix-change.mjs
      -> src/helix-routing.mjs
      -> src/helix-rules.mjs
      -> src/helix-review.mjs
@@ -25,9 +26,10 @@ bin/helix.mjs
 ## Main Files
 
 - `bin/helix.mjs`: CLI routing.
-- `src/helix-core.mjs`: orchestration runtime for task loop, workflow nodes, steering, change requests, and workflow entrypoints.
+- `src/helix-core.mjs`: orchestration runtime for task loop, workflow nodes, retry/checkpoint behavior, and workflow entrypoints.
 - `src/helix-foundation.mjs`: shared constants, runtime initialization, config, locks, prompt-pack registry, snapshots, and resume context basics.
 - `src/helix-adapters.mjs`: Codex/Cursor adapter install, uninstall, report, and backup logic.
+- `src/helix-change.mjs`: steering proposals, review blockers, ChangeRequest review, and explicit accept/reject resolution.
 - `src/helix-routing.mjs`: intent/domain/complexity routing and route request persistence.
 - `src/helix-rules.mjs`: project rule scanning and rule-context generation from AGENTS/CLAUDE/Cursor/OMO-style files.
 - `src/helix-review.mjs`: worker execution and deterministic Oracle/Momus/Metis review lanes.
@@ -75,5 +77,5 @@ Codex receives `.helix/adapters/codex/hooks.json`, which mirrors OMO-style lifec
 
 `src/helix-core.mjs` is no longer a pure single-file runtime, but it still holds several domains. Before adding deeper LLM providers and LSP gates, continue splitting it into:
 
-- `helix-task.mjs`
-- `helix-change.mjs`
+- `helix-workflow.mjs`
+- `helix-failure.mjs`
