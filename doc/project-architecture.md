@@ -7,6 +7,8 @@ bin/helix.mjs
   -> src/helix-core.mjs
      -> src/helix-foundation.mjs
      -> src/helix-adapters.mjs
+     -> src/helix-routing.mjs
+     -> src/helix-plan.mjs
   -> src/helix-dashboard.mjs
   -> packs/omo-linear/*
   -> .helix/*
@@ -15,9 +17,11 @@ bin/helix.mjs
 ## Main Files
 
 - `bin/helix.mjs`: CLI routing.
-- `src/helix-core.mjs`: orchestration runtime for plan, task loop, gates, hooks, team-lite, change requests, and workflow nodes.
+- `src/helix-core.mjs`: orchestration runtime for task loop, gates, hooks, team-lite, change requests, and workflow nodes.
 - `src/helix-foundation.mjs`: shared constants, runtime initialization, config, locks, prompt-pack registry, snapshots, and resume context basics.
 - `src/helix-adapters.mjs`: Codex/Cursor adapter install, uninstall, report, and backup logic.
+- `src/helix-routing.mjs`: intent/domain/complexity routing and route request persistence.
+- `src/helix-plan.mjs`: plan normalization, graph validation, plan import, route enrichment, and task-state loading.
 - `src/helix-dashboard.mjs`: local dashboard HTTP API and HTML UI.
 - `packs/omo-linear/agents`: role prompts.
 - `packs/omo-linear/skills`: skill prompts.
@@ -55,7 +59,6 @@ Codex receives `.helix/adapters/codex/hooks.json`, which mirrors OMO-style lifec
 
 `src/helix-core.mjs` is no longer a pure single-file runtime, but it still holds several domains. Before adding deeper LLM providers and LSP gates, continue splitting it into:
 
-- `helix-plan.mjs`
 - `helix-task.mjs`
 - `helix-gates.mjs`
 - `helix-hooks.mjs`
