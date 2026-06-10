@@ -107,7 +107,7 @@ export function normalizeTask(task, index, defaults = {}) {
   };
 }
 
-function normalizeSuccessCriteria(value, taskId, subject, verifyCommands) {
+export function normalizeSuccessCriteria(value, taskId, subject, verifyCommands) {
   if (value === undefined) return seedDefaultSuccessCriteria(taskId, subject, verifyCommands);
   if (!Array.isArray(value)) throw new Error(`task ${taskId} successCriteria must be an array`);
   if (value.length === 0) return seedDefaultSuccessCriteria(taskId, subject, verifyCommands);

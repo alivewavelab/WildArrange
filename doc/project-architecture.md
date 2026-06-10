@@ -9,6 +9,7 @@ bin/helix.mjs
      -> src/helix-adapters.mjs
      -> src/helix-routing.mjs
      -> src/helix-plan.mjs
+     -> src/helix-team.mjs
   -> src/helix-dashboard.mjs
   -> packs/omo-linear/*
   -> .helix/*
@@ -22,6 +23,7 @@ bin/helix.mjs
 - `src/helix-adapters.mjs`: Codex/Cursor adapter install, uninstall, report, and backup logic.
 - `src/helix-routing.mjs`: intent/domain/complexity routing and route request persistence.
 - `src/helix-plan.mjs`: plan normalization, graph validation, plan import, route enrichment, and task-state loading.
+- `src/helix-team.mjs`: team-lite tasks, claims, evidence recording, task-state persistence, outbox, and durable message board.
 - `src/helix-dashboard.mjs`: local dashboard HTTP API and HTML UI.
 - `packs/omo-linear/agents`: role prompts.
 - `packs/omo-linear/skills`: skill prompts.
@@ -62,4 +64,3 @@ Codex receives `.helix/adapters/codex/hooks.json`, which mirrors OMO-style lifec
 - `helix-task.mjs`
 - `helix-gates.mjs`
 - `helix-hooks.mjs`
-- `helix-team.mjs`
