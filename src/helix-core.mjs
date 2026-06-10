@@ -1,14 +1,12 @@
 import { existsSync } from "node:fs";
-import { appendFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { spawn } from "node:child_process";
 import {
   DEFAULT_HELIX_CONFIG,
   STATE_VERSION,
   appendLedger,
   createWorkId,
   ensureHelixDirs,
-  hashContent,
   initRuntime,
   loadHelixConfig,
   nowIso,
@@ -43,6 +41,24 @@ import {
   sendTeamMessage,
   writeOutbox,
 } from "./helix-team.mjs";
+import {
+  appendWisdom,
+  changedPathsIntroducedByTask,
+  collectGitChangedPaths,
+  collectGitDiff,
+  listChangeRequests,
+  pathAllowed,
+  pathMatchesPattern,
+  renderChangeRequestMarkdown,
+  runCommand,
+  runVerifier,
+  scopeGuard,
+  writeChangeRequest,
+  writeCheckpoint,
+  writeFailureReport,
+  writeOpenChangesIndex,
+  writeReviewReport,
+} from "./helix-gates.mjs";
 
 export {
   DEFAULT_HELIX_CONFIG,
@@ -99,6 +115,22 @@ export {
   sendTeamMessage,
   writeOutbox,
 } from "./helix-team.mjs";
+export {
+  appendWisdom,
+  changedPathsIntroducedByTask,
+  collectGitChangedPaths,
+  collectGitDiff,
+  listChangeRequests,
+  pathAllowed,
+  pathMatchesPattern,
+  runCommand,
+  runVerifier,
+  scopeGuard,
+  writeChangeRequest,
+  writeCheckpoint,
+  writeFailureReport,
+  writeReviewReport,
+} from "./helix-gates.mjs";
 const PROJECT_RULE_FILES = [
   "AGENTS.md",
   "CLAUDE.md",
@@ -267,6 +299,10 @@ function renderRulesMarkdown(result) {
 
 function uniqueStrings(values) {
   return [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))];
+}
+
+function normalizeRelativePath(filePath) {
+  return filePath.replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+/g, "/");
 }
 
 export async function steerWorkflow(rootDir, proposal = {}) {
@@ -1213,36 +1249,6 @@ export async function runWorker(rootDir, task, options = {}) {
   return { kind: "worker", at: nowIso(), command, ...result };
 }
 
-export async function runVerifier(rootDir, task) {
-  if (!Array.isArray(task.verify_commands) || task.verify_commands.length === 0) {
-    return {
-      kind: "verifier",
-      at: nowIso(),
-      pass: false,
-      results: [{
-        command: null,
-        exitCode: 1,
-        stdout: "",
-        stderr: "verify_commands must contain at least one command",
-      }],
-    };
-  }
-
-  const results = [];
-  for (const command of task.verify_commands) {
-    const result = await runCommand(command, rootDir);
-    results.push({ command, ...result });
-    if (result.exitCode !== 0) break;
-  }
-
-  return {
-    kind: "verifier",
-    at: nowIso(),
-    pass: results.every((result) => result.exitCode === 0),
-    results,
-  };
-}
-
 export async function runReviewGate(rootDir, task, evidence = {}) {
   const workerResult = evidence.workerResult || [...task.evidence].reverse().find((entry) => entry.kind === "worker");
   const verifyResult = evidence.verifyResult || task.last_verify_result || [...task.evidence].reverse().find((entry) => entry.kind === "verifier");
@@ -1351,198 +1357,6 @@ function verifierEvidenceComplete(task, verifyResult) {
   return Array.isArray(verifyResult.results) && verifyResult.results.length > 0 && verifyResult.results.length === task.verify_commands.length;
 }
 
-export function runCommand(command, cwd, timeoutMs = 120_000) {
-  return new Promise((resolve) => {
-    const child = spawn(command, {
-      cwd,
-      shell: true,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, HELIX_RUNTIME: "1" },
-    });
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      child.kill("SIGTERM");
-      settled = true;
-      resolve({ exitCode: 124, stdout, stderr: `${stderr}\nCommand timed out after ${timeoutMs}ms`.trim() });
-    }, timeoutMs);
-
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("close", (code) => {
-      if (settled) return;
-      clearTimeout(timer);
-      settled = true;
-      resolve({ exitCode: code ?? 1, stdout, stderr });
-    });
-  });
-}
-
-export async function collectGitDiff(rootDir) {
-  const gitDir = path.join(rootDir, ".git");
-  if (!existsSync(gitDir)) return "";
-  const result = await runCommand("git diff -- . ':!.helix'", rootDir, 30_000);
-  return result.exitCode === 0 ? result.stdout : "";
-}
-
-export async function collectGitChangedPaths(rootDir) {
-  const gitDir = path.join(rootDir, ".git");
-  if (!existsSync(gitDir)) {
-    try {
-      const manifest = await collectFileManifest(rootDir);
-      return { available: true, source: "file_manifest", paths: Object.keys(manifest).sort(), fingerprints: manifest };
-    } catch (error) {
-      return { available: false, reason: `git repository not found and file manifest failed: ${error instanceof Error ? error.message : String(error)}`, paths: [] };
-    }
-  }
-
-  const diff = await runCommand("git diff --name-only -- . ':!.helix'", rootDir, 30_000);
-  const untracked = await runCommand("git ls-files --others --exclude-standard -- . ':!.helix'", rootDir, 30_000);
-  if (diff.exitCode !== 0 || untracked.exitCode !== 0) {
-    return {
-      available: false,
-      reason: [diff.stderr, untracked.stderr].filter(Boolean).join("\n") || "git changed path collection failed",
-      paths: [],
-    };
-  }
-
-  return {
-    available: true,
-    source: "git",
-    paths: [...new Set([...splitPathLines(diff.stdout), ...splitPathLines(untracked.stdout)])].sort(),
-  };
-}
-
-function changedPathsIntroducedByTask(beforeChanged, afterChanged) {
-  if (!beforeChanged.available || !afterChanged.available) {
-    return undefined;
-  }
-  if (beforeChanged.fingerprints && afterChanged.fingerprints) {
-    const before = beforeChanged.fingerprints;
-    const after = afterChanged.fingerprints;
-    return Object.keys(after)
-      .filter((filePath) => before[filePath] !== after[filePath])
-      .map(normalizeRelativePath)
-      .sort();
-  }
-  const before = new Set(beforeChanged.paths.map(normalizeRelativePath));
-  return afterChanged.paths.map(normalizeRelativePath).filter((filePath) => !before.has(filePath));
-}
-
-const FILE_MANIFEST_SKIP_DIRS = new Set([".git", ".helix", "node_modules"]);
-
-async function collectFileManifest(rootDir, relativeDir = "") {
-  const absoluteDir = path.join(rootDir, relativeDir);
-  const entries = await readdir(absoluteDir, { withFileTypes: true });
-  const manifest = {};
-  for (const entry of entries) {
-    const relativePath = normalizeRelativePath(path.join(relativeDir, entry.name));
-    if (entry.isDirectory()) {
-      if (FILE_MANIFEST_SKIP_DIRS.has(entry.name)) continue;
-      Object.assign(manifest, await collectFileManifest(rootDir, relativePath));
-      continue;
-    }
-    if (!entry.isFile()) continue;
-    const fileStat = await stat(path.join(rootDir, relativePath));
-    manifest[relativePath] = `${fileStat.size}:${fileStat.mtimeMs}`;
-  }
-  return manifest;
-}
-
-function splitPathLines(value) {
-  return value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-}
-
-export async function scopeGuard(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
-  const taskState = await loadTaskState(rootDir);
-  if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
-
-  const task = resolveGuardTask(taskState.tasks, options.taskId);
-  const collected = Array.isArray(options.changedPaths)
-    ? { available: true, paths: options.changedPaths }
-    : await collectGitChangedPaths(rootDir);
-
-  if (!collected.available) {
-    const guarded = (task.writable_paths || []).length > 0;
-    const result = {
-      status: guarded ? "fail" : "inconclusive",
-      taskId: task.id,
-      reason: options.unavailableReason || collected.reason,
-      changedPaths: [],
-      writablePaths: task.writable_paths,
-      deniedPaths: [],
-    };
-    await appendLedger(rootDir, { type: guarded ? "scope_guard_failed" : "scope_guard_inconclusive", planId: taskState.planId, taskId: task.id, reason: result.reason });
-    return result;
-  }
-
-  const changedPaths = collected.paths.map(normalizeRelativePath);
-  const writablePaths = task.writable_paths.map(normalizeRelativePath);
-  const deniedPaths = changedPaths.filter((filePath) => !pathAllowed(filePath, writablePaths));
-  const status = deniedPaths.length === 0 ? "pass" : "fail";
-  const result = {
-    status,
-    taskId: task.id,
-    changedPaths,
-    writablePaths,
-    deniedPaths,
-  };
-
-  await appendLedger(rootDir, {
-    type: status === "pass" ? "scope_guard_passed" : "scope_guard_failed",
-    planId: taskState.planId,
-    taskId: task.id,
-    changedPathCount: changedPaths.length,
-    deniedPaths,
-  });
-  return result;
-}
-
-function resolveGuardTask(tasks, taskId) {
-  const task = taskId
-    ? tasks.find((candidate) => candidate.id === taskId)
-    : tasks.find((candidate) => ["in_progress", "verifying", "pending"].includes(candidate.status));
-  if (!task) {
-    throw new Error(taskId ? `unknown task: ${taskId}` : "no active or pending task found");
-  }
-  return task;
-}
-
-function normalizeRelativePath(filePath) {
-  return filePath.replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+/g, "/");
-}
-
-export function pathAllowed(filePath, writablePaths) {
-  if (writablePaths.length === 0) return false;
-  const normalizedFile = normalizeRelativePath(filePath);
-  return writablePaths.some((pattern) => pathMatchesPattern(normalizedFile, pattern));
-}
-
-export function pathMatchesPattern(filePath, pattern) {
-  const normalizedPattern = normalizeRelativePath(pattern);
-  if (normalizedPattern === filePath) return true;
-  if (normalizedPattern.endsWith("/**")) {
-    const prefix = normalizedPattern.slice(0, -3);
-    return filePath === prefix || filePath.startsWith(`${prefix}/`);
-  }
-  if (!normalizedPattern.includes("*")) {
-    return filePath.startsWith(`${normalizedPattern.replace(/\/$/, "")}/`);
-  }
-
-  const escaped = normalizedPattern
-    .split("*")
-    .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
-    .join(".*");
-  return new RegExp(`^${escaped}$`).test(filePath);
-}
-
 async function safeReadDir(dirPath, options = undefined) {
   try {
     return await readdir(dirPath, options);
@@ -1550,293 +1364,6 @@ async function safeReadDir(dirPath, options = undefined) {
     if (error?.code === "ENOENT") return [];
     throw error;
   }
-}
-
-export async function writeCheckpoint(rootDir, planId, task, verifyResult, scopeResult = null, reviewResult = null) {
-  const checkpointPath = resolveHelixPath(rootDir, "checkpoints", `${planId}-${task.id}.json`);
-  await writeJsonAtomic(checkpointPath, {
-    planId,
-    taskId: task.id,
-    subject: task.subject,
-    verifiedAt: nowIso(),
-    verifyResult,
-    scopeResult,
-    reviewResult,
-  });
-}
-
-export async function writeChangeRequest(rootDir, planId, task, scopeResult, source = "scope_guard") {
-  await ensureHelixDirs(rootDir);
-  const signature = hashContent(JSON.stringify({
-    planId,
-    taskId: task.id,
-    deniedPaths: scopeResult.deniedPaths || [],
-    writablePaths: scopeResult.writablePaths || task.writable_paths || [],
-  })).slice(0, 12);
-  const id = `CR-${signature}`;
-  const jsonPath = resolveHelixPath(rootDir, "changes", `${id}.json`);
-  const mdPath = resolveHelixPath(rootDir, "changes", `${id}.md`);
-  const existing = await readJson(jsonPath, null);
-  const changeRequest = existing || {
-    id,
-    kind: "change_request",
-    status: "open",
-    source,
-    planId,
-    taskId: task.id,
-    subject: task.subject,
-    createdAt: nowIso(),
-    updatedAt: nowIso(),
-    evidence: `scope guard denied paths: ${(scopeResult.deniedPaths || []).join(", ") || "unknown"}`,
-    rationale: "Worker changed files outside task.writable_paths; Sisyphus/Prometheus must decide whether to revise scope or reject the change.",
-    deniedPaths: scopeResult.deniedPaths || [],
-    changedPaths: scopeResult.changedPaths || [],
-    writablePaths: scopeResult.writablePaths || task.writable_paths || [],
-    proposedActions: [
-      "revert_or_move_out_of_scope_changes",
-      "revise_plan_writable_paths_after_review",
-      "split_into_new_task",
-    ],
-    invariants: {
-      autoApply: false,
-      requiresSisyphusReview: true,
-      mustNotWeakenVerification: true,
-    },
-  };
-  if (existing) {
-    changeRequest.updatedAt = nowIso();
-    changeRequest.lastSeenSource = source;
-  }
-  changeRequest.reportJsonPath = path.relative(rootDir, jsonPath);
-  changeRequest.reportMdPath = path.relative(rootDir, mdPath);
-  await writeJsonAtomic(jsonPath, changeRequest);
-  await writeFile(mdPath, renderChangeRequestMarkdown(changeRequest), "utf8");
-  await writeOpenChangesIndex(rootDir);
-  await appendLedger(rootDir, {
-    type: existing ? "change_request_reused" : "change_request_created",
-    planId,
-    taskId: task.id,
-    changeRequestId: id,
-    deniedPaths: changeRequest.deniedPaths,
-    reportPath: changeRequest.reportMdPath,
-  });
-  return changeRequest;
-}
-
-function renderChangeRequestMarkdown(changeRequest) {
-  return `# ChangeRequest ${changeRequest.id}
-
-| Field | Value |
-| --- | --- |
-| Status | \`${changeRequest.status}\` |
-| Source | \`${changeRequest.source}\` |
-| Plan | \`${changeRequest.planId}\` |
-| Task | \`${changeRequest.taskId}\` |
-| Subject | ${changeRequest.subject} |
-
-## Evidence
-
-${changeRequest.evidence}
-
-## Rationale
-
-${changeRequest.rationale}
-
-${changeRequest.decision ? `## Decision
-
-- Reviewer: ${changeRequest.reviewer || "Sisyphus"}
-- Decision: \`${changeRequest.decision}\`
-- Reviewed at: ${changeRequest.reviewedAt}
-- Applied scope: ${Boolean(changeRequest.appliedScope)}
-
-### Decision Evidence
-
-${changeRequest.decisionEvidence}
-
-### Decision Rationale
-
-${changeRequest.decisionRationale}
-` : ""}
-
-## Paths
-
-- Writable: ${changeRequest.writablePaths.join(", ") || "(none)"}
-- Changed: ${changeRequest.changedPaths.join(", ") || "(none)"}
-- Denied: ${changeRequest.deniedPaths.join(", ") || "(none)"}
-${changeRequest.appliedWritablePaths ? `- Applied writable paths: ${changeRequest.appliedWritablePaths.join(", ") || "(none)"}` : ""}
-
-## Allowed Resolutions
-
-${changeRequest.proposedActions.map((action) => `- ${action}`).join("\n")}
-
-## Invariants
-
-- autoApply: ${changeRequest.invariants.autoApply}
-- requiresSisyphusReview: ${changeRequest.invariants.requiresSisyphusReview}
-- mustNotWeakenVerification: ${changeRequest.invariants.mustNotWeakenVerification}
-`;
-}
-
-async function writeOpenChangesIndex(rootDir) {
-  const changes = await listChangeRequests(rootDir);
-  const openChanges = changes.filter((change) => change.status === "open");
-  const lines = ["# Open ChangeRequests", ""];
-  if (openChanges.length === 0) {
-    lines.push("No open change requests.");
-  } else {
-    for (const change of openChanges) {
-      lines.push(`- ${change.id}: ${change.subject}`);
-      lines.push(`  - Task: ${change.taskId}`);
-      lines.push(`  - Denied: ${(change.deniedPaths || []).join(", ") || "(none)"}`);
-      lines.push(`  - Report: ${change.reportMdPath}`);
-    }
-  }
-  await writeFile(resolveHelixPath(rootDir, "changes", "open.md"), `${lines.join("\n")}\n`, "utf8");
-}
-
-export async function listChangeRequests(rootDir) {
-  await ensureHelixDirs(rootDir);
-  let entries = [];
-  try {
-    entries = await readdir(resolveHelixPath(rootDir, "changes"));
-  } catch (error) {
-    if (error?.code === "ENOENT") return [];
-    throw error;
-  }
-  const changes = [];
-  for (const entry of entries.filter((name) => /^CR-.+\.json$/.test(name)).sort()) {
-    changes.push(await readJson(resolveHelixPath(rootDir, "changes", entry)));
-  }
-  return changes;
-}
-
-export async function writeReviewReport(rootDir, planId, task, reviewResult) {
-  await ensureHelixDirs(rootDir);
-  const basePath = resolveHelixPath(rootDir, "reports", "reviews", `${planId}-${task.id}`);
-  const jsonPath = `${basePath}.json`;
-  const mdPath = `${basePath}.md`;
-  reviewResult.reportJsonPath = path.relative(rootDir, jsonPath);
-  reviewResult.reportMdPath = path.relative(rootDir, mdPath);
-  const report = {
-    planId,
-    taskId: task.id,
-    subject: task.subject,
-    status: reviewResult.pass ? "pass" : "fail",
-    reviewerAgents: reviewResult.reviewerAgents,
-    lanes: reviewResult.lanes,
-    reviewCommandResults: reviewResult.reviewCommandResults,
-    standardsCommandResults: reviewResult.standardsCommandResults || [],
-    at: reviewResult.at,
-  };
-  await writeJsonAtomic(jsonPath, report);
-  await writeFile(mdPath, renderReviewMarkdown(report), "utf8");
-  await appendLedger(rootDir, {
-    type: "review_report_written",
-    planId,
-    taskId: task.id,
-    pass: reviewResult.pass,
-    reportPath: reviewResult.reportMdPath,
-  });
-  return report;
-}
-
-function renderReviewMarkdown(report) {
-  const lanes = report.lanes.map((lane) => `| ${lane.name} | ${lane.agent} | ${lane.status} | ${lane.summary} |`).join("\n");
-  const failed = report.lanes
-    .filter((lane) => lane.status === "fail")
-    .map((lane) => `- ${lane.name}: ${lane.fixBy}`)
-    .join("\n");
-  const standards = (report.standardsCommandResults || [])
-    .map((result) => `| \`${result.command}\` | ${result.exitCode} |`)
-    .join("\n");
-  return `# Review Gate
-
-| Field | Value |
-| --- | --- |
-| Plan | \`${report.planId}\` |
-| Task | \`${report.taskId}\` |
-| Subject | ${report.subject} |
-| Status | \`${report.status}\` |
-| Agents | ${report.reviewerAgents.join(", ")} |
-
-## Lanes
-
-| Lane | Agent | Status | Summary |
-| --- | --- | --- | --- |
-${lanes}
-
-## Blocking Fixes
-
-${failed || "- None"}
-
-## Standards Commands
-
-${standards ? `| Command | Exit Code |
-| --- | --- |
-${standards}` : "- None"}
-`;
-}
-
-export async function writeFailureReport(rootDir, planId, task) {
-  if (!task.last_failure) return null;
-  await ensureHelixDirs(rootDir);
-  const basePath = resolveHelixPath(rootDir, "reports", "failures", `${planId}-${task.id}`);
-  const jsonPath = `${basePath}.json`;
-  const mdPath = `${basePath}.md`;
-  task.last_failure.reportJsonPath = path.relative(rootDir, jsonPath);
-  task.last_failure.reportMdPath = path.relative(rootDir, mdPath);
-  const report = {
-    planId,
-    taskId: task.id,
-    subject: task.subject,
-    status: task.status,
-    attempts: task.attempts,
-    maxAttempts: task.maxAttempts,
-    failure: task.last_failure,
-  };
-  await writeJsonAtomic(jsonPath, report);
-  await writeFile(mdPath, renderFailureMarkdown(report), "utf8");
-  await appendLedger(rootDir, {
-    type: "failure_report_written",
-    planId,
-    taskId: task.id,
-    reason: task.last_failure.reason,
-    reportPath: task.last_failure.reportMdPath,
-  });
-  return report;
-}
-
-function renderFailureMarkdown(report) {
-  const failure = report.failure;
-  return `# Task Failure
-
-| Field | Value |
-| --- | --- |
-| Plan | \`${report.planId}\` |
-| Task | \`${report.taskId}\` |
-| Subject | ${report.subject} |
-| Status | \`${report.status}\` |
-| Attempts | ${report.attempts}/${report.maxAttempts} |
-| Reason | \`${failure.reason}\` |
-
-## Retry Hint
-
-\`\`\`text
-${failure.retryHint}
-\`\`\`
-
-${failure.changeRequest ? `## ChangeRequest
-
-- ID: \`${failure.changeRequest.id}\`
-- Report: ${failure.changeRequest.reportMdPath}
-- Denied paths: ${(failure.changeRequest.deniedPaths || []).join(", ") || "(none)"}
-` : ""}
-`;
-}
-
-export async function appendWisdom(rootDir, task, verifyResult) {
-  const line = `- ${nowIso()} ${task.id}: ${task.subject} verified by ${verifyResult.results.length} command(s).\n`;
-  await appendFile(resolveHelixPath(rootDir, "wisdom", "verification.md"), line, "utf8");
 }
 
 export async function writeWorkflowSummary(rootDir, options = {}) {
