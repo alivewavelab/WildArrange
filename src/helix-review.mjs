@@ -1,0 +1,141 @@
+import { nowIso } from "./helix-foundation.mjs";
+import { runCommand } from "./helix-gates.mjs";
+import { scanProjectRules } from "./helix-rules.mjs";
+import { criteriaStatus } from "./helix-team.mjs";
+
+export async function runWorker(rootDir, task, options = {}) {
+  const command = options.workerCommand || task.worker_command;
+  if (!command) {
+    return {
+      kind: "worker",
+      at: nowIso(),
+      command: null,
+      exitCode: 0,
+      stdout: "No worker_command configured; treating implementation as externally completed.",
+      stderr: "",
+    };
+  }
+  const result = await runCommand(command, rootDir, options.timeoutMs);
+  return { kind: "worker", at: nowIso(), command, ...result };
+}
+
+export async function runReviewGate(rootDir, task, evidence = {}) {
+  const workerResult = evidence.workerResult || [...task.evidence].reverse().find((entry) => entry.kind === "worker");
+  const verifyResult = evidence.verifyResult || task.last_verify_result || [...task.evidence].reverse().find((entry) => entry.kind === "verifier");
+  const scopeResult = evidence.scopeResult || task.last_scope_result || [...task.evidence].reverse().find((entry) => entry.kind === "scope_guard");
+  const criteria = criteriaStatus(task);
+  const rulesContext = await scanProjectRules(rootDir, {
+    targetPaths: uniqueStrings([...(task.writable_paths || []), ...((scopeResult?.changedPaths) || [])]),
+  });
+  const reviewCommandResults = [];
+  const standardsCommandResults = [];
+
+  for (const command of task.review_commands || []) {
+    const result = await runCommand(command, rootDir);
+    reviewCommandResults.push({ command, ...result });
+    if (result.exitCode !== 0) break;
+  }
+
+  for (const command of task.standards_commands || []) {
+    const result = await runCommand(command, rootDir);
+    standardsCommandResults.push({ command, ...result });
+    if (result.exitCode !== 0) break;
+  }
+
+  const lanes = [
+    reviewLane("goal_compliance", "Oracle", workerResult?.exitCode === 0 && verifyResult?.pass === true, {
+      summary: workerResult?.exitCode === 0 && verifyResult?.pass === true
+        ? "worker completed and verifier passed against task acceptance commands"
+        : "worker or verifier evidence does not prove the task goal",
+      fixBy: "修复实现或验收失败后，重新运行 execute/verify。",
+    }),
+    reviewLane("scope_fidelity", "Momus", scopeResult?.status === "pass", {
+      statusOverride: scopeResult?.status === "inconclusive" && (task.writable_paths || []).length === 0 ? "warn" : undefined,
+      summary: scopeResult?.status === "fail"
+        ? `out-of-scope paths: ${(scopeResult.deniedPaths || []).join(", ") || "unknown"}`
+        : scopeResult?.status === "inconclusive"
+          ? `scope guard inconclusive: ${scopeResult.reason || "no changed-path evidence"}`
+          : "changed paths stay within writable_paths",
+      fixBy: "移除范围外改动，或走 ChangeRequest 扩展任务边界。",
+    }),
+    reviewLane("evidence_quality", "Metis", verifierEvidenceComplete(task, verifyResult), {
+      summary: verifierEvidenceComplete(task, verifyResult)
+        ? "all verifier commands produced passing evidence"
+        : "verifier evidence is missing, partial, or failing",
+      fixBy: "补齐并运行覆盖真实行为的 verify_commands。",
+    }),
+    reviewLane("success_criteria", "Oracle", criteria.pass, {
+      summary: criteria.pass
+        ? `${criteria.passed}/${criteria.total} success criteria passed`
+        : `criteria not satisfied: pass=${criteria.passed}, pending=${criteria.pending}, fail=${criteria.failed}`,
+      fixBy: "补齐 criterion evidence，或修复实现后重新运行 verifier；不要删除 successCriteria。",
+    }),
+    reviewLane("project_rules_context", "Momus", rulesContext.matched > 0, {
+      statusOverride: rulesContext.matched > 0 ? undefined : "warn",
+      summary: rulesContext.matched > 0
+        ? `${rulesContext.matched}/${rulesContext.total} project rule(s) injected from ${rulesContext.reportMdPath}`
+        : "no project rules matched; review relies on prompt pack and commands",
+      fixBy: "补充 CLAUDE.md/AGENTS.md/.cursor/rules/.github/instructions，或确认本任务无需项目规则。",
+    }),
+    reviewLane("explicit_review_commands", "Oracle", reviewCommandResults.every((result) => result.exitCode === 0), {
+      statusOverride: reviewCommandResults.length === 0 ? "warn" : undefined,
+      summary: reviewCommandResults.length === 0
+        ? "no review_commands configured; deterministic review lanes only"
+        : reviewCommandResults.every((result) => result.exitCode === 0)
+          ? `${reviewCommandResults.length} review command(s) passed`
+          : commandObservation(reviewCommandResults.find((result) => result.exitCode !== 0) || { exitCode: 1 }),
+      fixBy: "按 review_commands 的失败输出修复，不要删除 review_commands 绕过复核。",
+    }),
+    reviewLane("project_standards", "Momus", standardsCommandResults.every((result) => result.exitCode === 0), {
+      statusOverride: standardsCommandResults.length === 0 ? "warn" : undefined,
+      summary: standardsCommandResults.length === 0
+        ? "no standards_commands configured; relying on project instructions and explicit review lanes"
+        : standardsCommandResults.every((result) => result.exitCode === 0)
+          ? `${standardsCommandResults.length} standards command(s) passed`
+          : commandObservation(standardsCommandResults.find((result) => result.exitCode !== 0) || { exitCode: 1 }),
+      fixBy: "按 standards_commands 的失败输出修复项目规范问题，不要删除规范门来制造 PASS。",
+    }),
+  ];
+
+  return {
+    kind: "review_gate",
+    at: nowIso(),
+    pass: lanes.every((lane) => lane.status !== "fail"),
+    reviewerAgents: ["Oracle", "Momus", "Metis"],
+    lanes,
+    reviewCommandResults,
+    standardsCommandResults,
+    successCriteria: criteria,
+    rulesContextPath: rulesContext.reportMdPath,
+  };
+}
+
+function reviewLane(name, agent, condition, options) {
+  const status = options.statusOverride || (condition ? "pass" : "fail");
+  return {
+    name,
+    agent,
+    status,
+    summary: options.summary,
+    fixBy: options.fixBy,
+  };
+}
+
+function verifierEvidenceComplete(task, verifyResult) {
+  if (!verifyResult || verifyResult.kind !== "verifier") return false;
+  if (verifyResult.pass !== true) return false;
+  return Array.isArray(verifyResult.results) && verifyResult.results.length > 0 && verifyResult.results.length === task.verify_commands.length;
+}
+
+function commandObservation(result) {
+  return `exit=${result.exitCode}; stdout=${truncateForSummary(result.stdout || "", 180)}; stderr=${truncateForSummary(result.stderr || "", 180)}`;
+}
+
+function truncateForSummary(value, limit = 500) {
+  if (value.length <= limit) return value;
+  return `${value.slice(0, limit - 15)}...[truncated]`;
+}
+
+function uniqueStrings(values) {
+  return [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))];
+}

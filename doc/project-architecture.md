@@ -9,6 +9,7 @@ bin/helix.mjs
      -> src/helix-adapters.mjs
      -> src/helix-routing.mjs
      -> src/helix-rules.mjs
+     -> src/helix-review.mjs
      -> src/helix-plan.mjs
      -> src/helix-team.mjs
      -> src/helix-gates.mjs
@@ -25,6 +26,7 @@ bin/helix.mjs
 - `src/helix-adapters.mjs`: Codex/Cursor adapter install, uninstall, report, and backup logic.
 - `src/helix-routing.mjs`: intent/domain/complexity routing and route request persistence.
 - `src/helix-rules.mjs`: project rule scanning and rule-context generation from AGENTS/CLAUDE/Cursor/OMO-style files.
+- `src/helix-review.mjs`: worker execution and deterministic Oracle/Momus/Metis review lanes.
 - `src/helix-plan.mjs`: plan normalization, graph validation, plan import, route enrichment, and task-state loading.
 - `src/helix-team.mjs`: team-lite tasks, claims, evidence recording, task-state persistence, outbox, and durable message board.
 - `src/helix-gates.mjs`: command execution, verifier, scope guard, path checks, checkpoints, change requests, review/failure reports, and wisdom ledger.
@@ -67,4 +69,3 @@ Codex receives `.helix/adapters/codex/hooks.json`, which mirrors OMO-style lifec
 
 - `helix-task.mjs`
 - `helix-hooks.mjs`
-- `helix-review.mjs`
