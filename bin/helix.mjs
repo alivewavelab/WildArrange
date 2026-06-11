@@ -2,6 +2,10 @@
 import path from "node:path";
 import { startDashboardServer } from "../src/helix-dashboard.mjs";
 import {
+  DEFAULT_EXECUTOR_AGENT,
+  DEFAULT_LEAD_AGENT,
+  DEFAULT_PACKAGE_NAME,
+  PRODUCT_NAME,
   buildAgentContext,
   continuationDirective,
   createSamplePlan,
@@ -60,53 +64,53 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`HelixFlow linear runtime
+  console.log(`${PRODUCT_NAME} linear runtime
 
 Usage:
-  helix init [--sample]
-  helix config init [--root] [--force]
-  helix config show
-  helix adapter install [--target codex|cursor|all] [--mode local|npx] [--package helixflow]
-  helix adapter uninstall [--target codex|cursor|all]
-  helix injection show --point before_review [--agent Oracle] [--task T001]
-  helix hook run [--from hook.json] [--format text|json]
-  helix plan --from <plan.json>
-  helix run
-  helix workflow --from <plan.json>
-  helix workflow --sample
-  helix node route --text "request"
-  helix node execute [--task T001]
-  helix node verify [--task T001]
-  helix node scope [--task T001]
-  helix node review [--task T001]
-  helix node checkpoint [--task T001]
-  helix node retry [--task T001]
-  helix status
-  helix resume [--session <id>]
-  helix continuation check [--session <id>]
-  helix summary
-  helix rules collect [--target src/app.js]
-  helix context build [--agent Atlas] [--task T001]
-  helix evidence record --task T001 --criterion C001 --status pass --evidence "..."
-  helix steer --from <proposal.json>
-  helix review-blockers record --from <blocker.json>
-  helix task list [--status pending] [--owner Atlas]
-  helix task get --task T001
-  helix task claim [--task T001] [--owner Atlas]
-  helix task create --from <task.json>
-  helix team send --to Atlas --from Sisyphus --body "..."
-  helix team inbox [--agent Atlas]
-  helix changes list
-  helix changes review --id CR-xxxx
-  helix changes resolve --id CR-xxxx --decision accept|reject --evidence "..." --rationale "..." [--apply-scope]
-  helix serve [--host 127.0.0.1] [--port 8765] [--token <token>]
-  helix guard scope [--task T001]
-  helix route --text "request"
-  helix prompts list
-  helix prompts show --agent Atlas
-  helix prompts show --skill review-work
-  helix prompts show --tools
-  helix prompts show --routes
+  wildarrange init [--sample]
+  wildarrange config init [--root] [--force]
+  wildarrange config show
+  wildarrange adapter install [--target codex|cursor|all] [--mode local|npx] [--package wildarrange]
+  wildarrange adapter uninstall [--target codex|cursor|all]
+  wildarrange injection show --point before_review [--agent BaiZe] [--task T001]
+  wildarrange hook run [--from hook.json] [--format text|json]
+  wildarrange plan --from <plan.json>
+  wildarrange run
+  wildarrange workflow --from <plan.json>
+  wildarrange workflow --sample
+  wildarrange node route --text "request"
+  wildarrange node execute [--task T001]
+  wildarrange node verify [--task T001]
+  wildarrange node scope [--task T001]
+  wildarrange node review [--task T001]
+  wildarrange node checkpoint [--task T001]
+  wildarrange node retry [--task T001]
+  wildarrange status
+  wildarrange resume [--session <id>]
+  wildarrange continuation check [--session <id>]
+  wildarrange summary
+  wildarrange rules collect [--target src/app.js]
+  wildarrange context build [--agent ${DEFAULT_EXECUTOR_AGENT}] [--task T001]
+  wildarrange evidence record --task T001 --criterion C001 --status pass --evidence "..."
+  wildarrange steer --from <proposal.json>
+  wildarrange review-blockers record --from <blocker.json>
+  wildarrange task list [--status pending] [--owner ${DEFAULT_EXECUTOR_AGENT}]
+  wildarrange task get --task T001
+  wildarrange task claim [--task T001] [--owner ${DEFAULT_EXECUTOR_AGENT}]
+  wildarrange task create --from <task.json>
+  wildarrange team send --to ${DEFAULT_EXECUTOR_AGENT} --from ${DEFAULT_LEAD_AGENT} --body "..."
+  wildarrange team inbox [--agent ${DEFAULT_EXECUTOR_AGENT}]
+  wildarrange changes list
+  wildarrange changes review --id CR-xxxx
+  wildarrange changes resolve --id CR-xxxx --decision accept|reject --evidence "..." --rationale "..." [--apply-scope]
+  wildarrange serve [--host 127.0.0.1] [--port 8765] [--token <token>]
+  wildarrange guard scope [--task T001]
+  wildarrange route --text "request"
+  wildarrange prompts list
+  wildarrange prompts show --agent ${DEFAULT_EXECUTOR_AGENT}
+  wildarrange prompts show --skill review-work
+  wildarrange prompts show --tools
+  wildarrange prompts show --routes
 
 Plan schema:
   {
@@ -172,7 +176,7 @@ async function main() {
       console.log(JSON.stringify(await installAdapter(rootDir, {
         target: args.target && args.target !== true ? args.target : "all",
         mode: args.mode && args.mode !== true ? args.mode : "local",
-        packageName: args.package && args.package !== true ? args.package : "helixflow",
+        packageName: args.package && args.package !== true ? args.package : DEFAULT_PACKAGE_NAME,
       }), null, 2));
       return;
     }

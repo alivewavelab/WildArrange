@@ -142,7 +142,7 @@ async function readTextFile(filePath, fallback = "") {
 function renderWorkflowSummaryMarkdown(summary) {
   const status = summary.status || {};
   const lines = [
-    "# HelixFlow Workflow Summary",
+    "# WildArrange Workflow Summary",
     "",
     `Generated: ${summary.at}`,
     `Reason: ${summary.reason}`,

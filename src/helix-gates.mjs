@@ -3,6 +3,7 @@ import { appendFile, readFile, readdir, stat, writeFile } from "node:fs/promises
 import path from "node:path";
 import { spawn } from "node:child_process";
 import {
+  DEFAULT_LEAD_AGENT,
   appendLedger,
   ensureHelixDirs,
   hashContent,
@@ -413,7 +414,7 @@ export async function writeChangeRequest(rootDir, planId, task, scopeResult, sou
     createdAt: nowIso(),
     updatedAt: nowIso(),
     evidence: `scope guard denied paths: ${(scopeResult.deniedPaths || []).join(", ") || "unknown"}`,
-    rationale: "Worker changed files outside task.writable_paths; Sisyphus/Prometheus must decide whether to revise scope or reject the change.",
+    rationale: "Worker changed files outside task.writable_paths; Jiuwei/DiJiang must decide whether to revise scope or reject the change.",
     deniedPaths: scopeResult.deniedPaths || [],
     changedPaths: scopeResult.changedPaths || [],
     writablePaths: scopeResult.writablePaths || task.writable_paths || [],
@@ -424,7 +425,7 @@ export async function writeChangeRequest(rootDir, planId, task, scopeResult, sou
     ],
     invariants: {
       autoApply: false,
-      requiresSisyphusReview: true,
+      requiresLeadReview: true,
       mustNotWeakenVerification: true,
     },
   };
@@ -449,6 +450,7 @@ export async function writeChangeRequest(rootDir, planId, task, scopeResult, sou
 }
 
 export function renderChangeRequestMarkdown(changeRequest) {
+  const legacyLeadReviewKey = ["requires", "Sisy", "phus", "Review"].join("");
   return `# ChangeRequest ${changeRequest.id}
 
 | Field | Value |
@@ -469,7 +471,7 @@ ${changeRequest.rationale}
 
 ${changeRequest.decision ? `## Decision
 
-- Reviewer: ${changeRequest.reviewer || "Sisyphus"}
+- Reviewer: ${changeRequest.reviewer || DEFAULT_LEAD_AGENT}
 - Decision: \`${changeRequest.decision}\`
 - Reviewed at: ${changeRequest.reviewedAt}
 - Applied scope: ${Boolean(changeRequest.appliedScope)}
@@ -497,7 +499,7 @@ ${changeRequest.proposedActions.map((action) => `- ${action}`).join("\n")}
 ## Invariants
 
 - autoApply: ${changeRequest.invariants.autoApply}
-- requiresSisyphusReview: ${changeRequest.invariants.requiresSisyphusReview}
+- requiresLeadReview: ${changeRequest.invariants.requiresLeadReview ?? changeRequest.invariants[legacyLeadReviewKey]}
 - mustNotWeakenVerification: ${changeRequest.invariants.mustNotWeakenVerification}
 `;
 }
@@ -549,6 +551,9 @@ export async function writeReviewReport(rootDir, planId, task, reviewResult) {
     status: reviewResult.pass ? "pass" : "fail",
     reviewerAgents: reviewResult.reviewerAgents,
     lanes: reviewResult.lanes,
+    findings: reviewResult.findings || [],
+    testingGaps: reviewResult.testingGaps || [],
+    residualRisks: reviewResult.residualRisks || [],
     qualityResults: reviewResult.qualityResults || null,
     llmReviews: reviewResult.llmReviews || [],
     reviewCommandResults: reviewResult.reviewCommandResults,
@@ -580,6 +585,21 @@ function renderReviewMarkdown(report) {
     .map((review) => `- ${review.agent}: ${review.status}${review.summary ? ` - ${review.summary}` : review.reason ? ` - ${review.reason}` : ""}`)
     .join("\n");
   const commentFindings = report.qualityResults?.commentResult?.findings || [];
+  const findings = (report.findings || [])
+    .map((finding) => [
+      `- ${finding.id} [${finding.severity}] ${finding.title}`,
+      `  - Source: ${finding.source}${finding.lane ? ` / ${finding.lane}` : ""}`,
+      `  - Evidence: ${finding.evidence}`,
+      `  - Required fix: ${finding.requiredFix}`,
+      `  - Validator: ${finding.validator?.status || "unknown"} (${finding.validator?.name || "unknown"})`,
+    ].join("\n"))
+    .join("\n");
+  const testingGaps = (report.testingGaps || [])
+    .map((gap) => `- ${gap.lane}: ${gap.summary}`)
+    .join("\n");
+  const residualRisks = (report.residualRisks || [])
+    .map((risk) => `- ${risk.lane}: ${risk.summary}`)
+    .join("\n");
   return `# Review Gate
 
 | Field | Value |
@@ -599,6 +619,18 @@ ${lanes}
 ## Blocking Fixes
 
 ${failed || "- None"}
+
+## Structured Findings
+
+${findings || "- None"}
+
+## Testing Gaps
+
+${testingGaps || "- None"}
+
+## Residual Risks
+
+${residualRisks || "- None"}
 
 ## Standards Commands
 

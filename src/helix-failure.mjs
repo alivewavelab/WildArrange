@@ -84,7 +84,7 @@ function commandObservation(result) {
 }
 
 function failureFixBy(reason, task, scopeResult, reviewResult, criteriaResult) {
-  if (reason === "worker_failed") return "修复 worker_command 或交给 Hephaestus 重新实现同一任务，然后重跑 execute。";
+  if (reason === "worker_failed") return "修复 worker_command 或交给 ZhuRong 重新实现同一任务，然后重跑 execute。";
   if (reason === "verifier_failed") return "按失败命令输出修正实现，不改验收标准；修完后重跑 verify 和 checkpoint。";
   if (reason === "scope_guard_failed") {
     return `移除计划外改动或创建 ChangeRequest 扩展 writable_paths。当前允许范围：${task.writable_paths.join(", ") || "(none)"}；被拒绝：${(scopeResult.deniedPaths || []).join(", ") || "(unknown)"}`;

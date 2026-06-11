@@ -1,5 +1,8 @@
 import path from "node:path";
 import {
+  DEFAULT_EXECUTOR_AGENT,
+  DEFAULT_LEAD_AGENT,
+  PRODUCT_NAME,
   STATE_VERSION,
   appendLedger,
   createWorkId,
@@ -15,6 +18,7 @@ import { routeRequest } from "./helix-routing.mjs";
 import { scanProjectRules } from "./helix-rules.mjs";
 import { findRunnableTask } from "./helix-team.mjs";
 import { buildAgentContext, continuationDirective, resumeReport } from "./helix-context.mjs";
+import { evaluateHookResultGate } from "./helix-hook-result-gate.mjs";
 
 export async function runInjectionHook(rootDir, input = {}) {
   const hookRootDir = input.cwd && typeof input.cwd === "string" ? input.cwd : rootDir;
@@ -30,7 +34,7 @@ export async function runInjectionHook(rootDir, input = {}) {
     facts.resume = await resumeReport(hookRootDir, { sessionId, source: "hook:session_start" });
     facts.rules = await scanProjectRules(hookRootDir);
     facts.agentContext = await buildAgentContext(hookRootDir, {
-      agent: "Sisyphus",
+      agent: DEFAULT_LEAD_AGENT,
       taskId,
       injectionPoint: pointName,
     }).catch((error) => ({ error: error.message }));
@@ -44,6 +48,7 @@ export async function runInjectionHook(rootDir, input = {}) {
   } else if (event === "PostToolUse") {
     facts.targetPaths = targetPaths;
     facts.rules = await scanProjectRules(hookRootDir, { targetPaths });
+    facts.resultGate = await evaluateHookResultGate(hookRootDir, input);
     if (taskId) {
       facts.scope = await scopeGuard(hookRootDir, { taskId }).catch((error) => ({ status: "inconclusive", reason: error.message }));
     }
@@ -74,7 +79,7 @@ export async function runInjectionHook(rootDir, input = {}) {
     taskId: taskId || null,
     targetPaths,
     enabled: injectionPoint.enabled,
-    decision: facts.preflight?.decision || null,
+    decision: facts.preflight?.decision || facts.resultGate?.decision || null,
     output,
   };
   const safeSessionId = sanitizeFileSegment(sessionId || "session");
@@ -138,7 +143,7 @@ export async function preToolUseGuard(rootDir, input = {}) {
       kind: "pre_tool_use_guard",
       at: nowIso(),
       decision: "warn",
-      reason: "file target detected but no active HelixFlow task was found",
+      reason: `file target detected but no active ${PRODUCT_NAME} task was found`,
       toolName,
       taskId: taskId || null,
       targetPaths,
@@ -186,7 +191,7 @@ function renderPreToolUseHookOutput(preflight, contextMarkdown) {
   };
   if (preflight?.decision === "deny") {
     output.hookSpecificOutput.permissionDecision = "deny";
-    output.hookSpecificOutput.permissionDecisionReason = preflight.reason || "HelixFlow pre-tool-use guard denied this tool call.";
+    output.hookSpecificOutput.permissionDecisionReason = preflight.reason || `${PRODUCT_NAME} pre-tool-use guard denied this tool call.`;
   }
   return `${JSON.stringify(output)}\n`;
 }
@@ -225,8 +230,8 @@ function injectionPointForHookEvent(event) {
 }
 
 function defaultAgentForHookEvent(event) {
-  if (event === "SessionStart" || event === "UserPromptSubmit" || event === "Stop" || event === "PostCompact") return "Sisyphus";
-  return "Atlas";
+  if (event === "SessionStart" || event === "UserPromptSubmit" || event === "Stop" || event === "PostCompact") return DEFAULT_LEAD_AGENT;
+  return DEFAULT_EXECUTOR_AGENT;
 }
 
 function normalizeHookSessionId(input) {
@@ -289,9 +294,9 @@ function sanitizeFileSegment(value) {
 
 function renderHookInjectionMarkdown({ event, pointName, sessionId, taskId, targetPaths, facts, injectionPoint }) {
   const lines = [
-    `<helixflow-injection event="${event}" point="${pointName}">`,
+    `<wildarrange-injection event="${event}" point="${pointName}">`,
     "",
-    "# HelixFlow Runtime Injection",
+    "# WildArrange Runtime Injection",
     "",
     `- Event: ${event}`,
     `- Injection point: ${pointName}`,
@@ -317,7 +322,7 @@ function renderHookInjectionMarkdown({ event, pointName, sessionId, taskId, targ
   }
   appendHookFacts(lines, facts);
   appendInjectionAttachments(lines, injectionPoint);
-  lines.push("</helixflow-injection>", "");
+  lines.push("</wildarrange-injection>", "");
   return lines.join("\n");
 }
 
@@ -329,6 +334,12 @@ function appendHookFacts(lines, facts) {
     lines.push(`- Primary agent: ${facts.route.primaryAgent}`);
     lines.push(`- Category: ${facts.route.category || "(none)"}`);
     lines.push(`- Risk: ${facts.route.risk || "(unknown)"}`);
+    if ((facts.route.planAgents || []).length > 0) {
+      lines.push("- Plan Agent Bundle:");
+      for (const agent of facts.route.planAgents) {
+        lines.push(`  - ${agent.name} (${agent.stage}): ${agent.purpose}`);
+      }
+    }
     lines.push("");
   }
   if (facts.resume) {
@@ -349,6 +360,17 @@ function appendHookFacts(lines, facts) {
     lines.push("## Scope Guard", "");
     lines.push(`- Status: ${facts.scope.status}`);
     lines.push(`- Reason: ${facts.scope.reason || "(none)"}`);
+    lines.push("");
+  }
+  if (facts.resultGate) {
+    lines.push("## Tool Result Gate", "");
+    lines.push(`- Decision: ${facts.resultGate.decision}`);
+    lines.push(`- Summary: ${facts.resultGate.summary}`);
+    if (facts.resultGate.findings.length > 0) {
+      for (const finding of facts.resultGate.findings) {
+        lines.push(`- ${finding.severity}: ${finding.name} - ${finding.requiredAction}`);
+      }
+    }
     lines.push("");
   }
   if (facts.rules) {

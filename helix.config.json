@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "runtime": "helix-linear",
+  "runtime": "wildarrange-linear",
   "adapters": {
     "codex": {
       "enabled": true,
@@ -41,51 +41,117 @@
     }
   },
   "agents": {
-    "Sisyphus": {
+    "Jiuwei": {
       "role": "lead_orchestrator",
       "provider": "host",
       "model": "host-default",
       "reasoning": "high"
     },
-    "Atlas": {
+    "YingLong": {
       "role": "linear_executor",
       "provider": "host",
       "model": "host-default",
       "reasoning": "medium"
     },
-    "Hephaestus": {
+    "ZhuRong": {
       "role": "implementation_worker",
       "provider": "host",
       "model": "host-default",
       "reasoning": "medium"
     },
-    "Oracle": {
+    "BaiZe": {
       "role": "goal_verifier",
       "provider": "host",
       "model": "host-default",
       "reasoning": "high"
     },
-    "Librarian": {
+    "Taotie": {
       "role": "external_research",
       "provider": "deepseek",
       "model": "deepseek-v4-pro"
     },
-    "Explore": {
+    "Kui": {
       "role": "fast_explorer",
       "provider": "deepseek",
       "model": "deepseek-v4-flash"
     },
-    "Metis": {
+    "CangJie": {
+      "role": "archivist_router",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash"
+    },
+    "LuanNiao": {
       "role": "risk_reviewer",
       "provider": "host",
       "model": "host-default",
       "reasoning": "medium"
     },
-    "Momus": {
+    "QiongQi": {
       "role": "skeptical_reviewer",
       "provider": "host",
       "model": "host-default",
       "reasoning": "xhigh"
+    }
+  },
+  "archivistRouter": {
+    "enabled": false,
+    "agent": "CangJie",
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash",
+    "triggers": {
+      "sessionStart": true,
+      "gitHeadChanged": true,
+      "lowConfidenceRoute": true,
+      "everyUserPrompts": {
+        "default": 10,
+        "ideate": 5,
+        "plan": 5,
+        "clarify": 5,
+        "execute": 15,
+        "verify": 15,
+        "review": 15,
+        "min": 5,
+        "max": 20
+      },
+      "workflowCheckpoint": true
+    },
+    "memory": {
+      "backend": "structured-files",
+      "root": ".helix/memory",
+      "captureMode": "conclusions-only",
+      "includeCodeBlocks": false,
+      "maxRecentTurns": 10,
+      "recentTurnWindows": {
+        "default": 10,
+        "ideate": 5,
+        "plan": 5,
+        "clarify": 5,
+        "execute": 15,
+        "verify": 15,
+        "review": 15,
+        "max": 20
+      },
+      "maxRoutingPacketChars": 12000,
+      "injectFields": [
+        "progress",
+        "decisions",
+        "artifacts",
+        "implementationNotes",
+        "researchNotes",
+        "pitfalls",
+        "openQuestions"
+      ]
+    },
+    "keywordEvolution": {
+      "suggestOnly": true,
+      "autoApplyConfidence": 0.85,
+      "minEvidenceCount": 2,
+      "protectedTargets": [
+        "askGate",
+        "intents.review",
+        "intents.release_git",
+        "intents.change_request"
+      ]
     }
   },
   "dynamicAgents": {
@@ -125,7 +191,7 @@
       "enabled": false,
       "required": false,
       "agents": [
-        "Momus"
+        "QiongQi"
       ],
       "temperature": 0,
       "timeoutMs": 45000,
@@ -172,7 +238,6 @@
       ".github/copilot-instructions.md"
     ],
     "projectRuleDirs": [
-      ".omo/rules",
       ".claude/rules",
       ".cursor/rules",
       ".github/instructions"
@@ -191,9 +256,9 @@
         ".helix/rules/context.md"
       ],
       "skills": [
-        "helix-injection-runtime",
+        "wildarrange-injection-runtime",
         "start-work",
-        "hf-recall"
+        "wa-recall"
       ],
       "rules": {
         "mode": "static"
@@ -210,9 +275,9 @@
         ".helix/rules/context.md"
       ],
       "skills": [
-        "helix-injection-runtime",
-        "hf-ideate",
-        "hf-plan",
+        "wildarrange-injection-runtime",
+        "wa-ideate",
+        "wa-plan",
         "review-work"
       ],
       "rules": {
@@ -229,7 +294,7 @@
         ".helix/rules/context.md"
       ],
       "skills": [
-        "helix-injection-runtime"
+        "wildarrange-injection-runtime"
       ],
       "rules": {
         "mode": "dynamic_blocker"
@@ -260,8 +325,8 @@
         ".helix/rules/context.md"
       ],
       "skills": [
-        "helix-injection-runtime",
-        "hf-recall"
+        "wildarrange-injection-runtime",
+        "wa-recall"
       ],
       "rules": {
         "mode": "recovery_marker"
@@ -275,11 +340,11 @@
         "scope_guard"
       ],
       "markdown": [
-        ".helix/context-agents/Atlas-{taskId}.md",
+        ".helix/context-agents/YingLong-{taskId}.md",
         ".helix/rules/context.md"
       ],
       "skills": [
-        "helix-injection-runtime",
+        "wildarrange-injection-runtime",
         "programming",
         "debugging",
         "refactor"
@@ -296,15 +361,15 @@
         "review_gate"
       ],
       "markdown": [
-        ".helix/context-agents/Oracle-{taskId}.md",
-        ".helix/context-agents/Momus-{taskId}.md",
-        ".helix/context-agents/Metis-{taskId}.md",
+        ".helix/context-agents/BaiZe-{taskId}.md",
+        ".helix/context-agents/QiongQi-{taskId}.md",
+        ".helix/context-agents/LuanNiao-{taskId}.md",
         ".helix/rules/context.md"
       ],
       "skills": [
-        "helix-injection-runtime",
+        "wildarrange-injection-runtime",
         "review-work",
-        "hf-review",
+        "wa-review",
         "visual-qa"
       ],
       "rules": {
@@ -323,8 +388,8 @@
         ".helix/rules/context.md"
       ],
       "skills": [
-        "helix-injection-runtime",
-        "hf-test",
+        "wildarrange-injection-runtime",
+        "wa-test",
         "review-work"
       ],
       "rules": {
@@ -342,7 +407,7 @@
         ".helix/snapshots/context.md"
       ],
       "skills": [
-        "helix-injection-runtime",
+        "wildarrange-injection-runtime",
         "start-work"
       ],
       "rules": {

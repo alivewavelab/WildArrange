@@ -9,17 +9,53 @@ export const HELIX_DIR = ".helix";
 export const STATE_VERSION = 1;
 export const TASK_STATUSES = new Set(["pending", "in_progress", "verifying", "completed", "failed", "review_blocked", "needs_user_decision"]);
 export const HELIX_CONFIG_FILE = "helix.config.json";
+export const PRODUCT_NAME = "WildArrange";
+export const DEFAULT_PACKAGE_NAME = "wildarrange";
+export const DEFAULT_RUNTIME_NAME = "wildarrange-linear";
+export const DEFAULT_CLI_COMMAND = "wildarrange";
+export const DEFAULT_LEAD_AGENT = "Jiuwei";
+export const DEFAULT_EXECUTOR_AGENT = "YingLong";
+export const DEFAULT_REVIEW_AGENTS = ["BaiZe", "QiongQi", "LuanNiao"];
+const legacyAgentName = (...parts) => parts.join("");
+export const AGENT_ALIASES = {
+  [legacyAgentName("Sisy", "phus")]: "Jiuwei",
+  [legacyAgentName("Sisy", "phus", "-junior")]: "LuWu",
+  [legacyAgentName("sisy", "phus_junior")]: "LuWu",
+  [legacyAgentName("At", "las")]: "YingLong",
+  [legacyAgentName("Hephae", "stus")]: "ZhuRong",
+  [legacyAgentName("Prome", "theus")]: "DiJiang",
+  [legacyAgentName("Ora", "cle")]: "BaiZe",
+  [legacyAgentName("Libra", "rian")]: "Taotie",
+  [legacyAgentName("Exp", "lore")]: "Kui",
+  [legacyAgentName("Me", "tis")]: "LuanNiao",
+  [legacyAgentName("Mo", "mus")]: "QiongQi",
+  [legacyAgentName("Multi", "modal-Looker")]: "KaimingShou",
+  multimodal_looker: "KaimingShou",
+};
+export const AGENT_DISPLAY_NAMES = {
+  Jiuwei: "九尾狐 / Nine-Tailed Fox",
+  ZhuRong: "祝融 / Zhu Rong",
+  DiJiang: "帝江 / Di Jiang",
+  YingLong: "应龙 / Ying Long",
+  BaiZe: "白泽 / Bai Ze",
+  Taotie: "饕餮 / Taotie",
+  Kui: "夔 / Kui",
+  LuanNiao: "鸾鸟 / Luan Niao",
+  QiongQi: "穷奇 / Qiong Qi",
+  LuWu: "陆吾 / Lu Wu",
+  KaimingShou: "开明兽 / Kaiming Shou",
+};
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 export const PROJECT_DIR = path.dirname(MODULE_DIR);
-export const DEFAULT_PROMPT_PACK_DIR = path.join(PROJECT_DIR, "packs", "helix-linear");
+export const DEFAULT_PROMPT_PACK_DIR = path.join(PROJECT_DIR, "packs", DEFAULT_RUNTIME_NAME);
 const LOCK_RETRY_MS = 50;
 const LOCK_WAIT_TIMEOUT_MS = 15_000;
 const LOCK_STALE_AFTER_MS = 300_000;
 
 export const DEFAULT_HELIX_CONFIG = {
   version: 1,
-  runtime: "helix-linear",
+  runtime: DEFAULT_RUNTIME_NAME,
   adapters: {
     codex: { enabled: true, hookMode: "cli-adapter" },
     cursor: { enabled: true, hookMode: "cli-adapter" },
@@ -32,14 +68,14 @@ export const DEFAULT_HELIX_CONFIG = {
     gemini: { type: "openai-compatible", apiKeyEnv: "GEMINI_API_KEY", baseUrlEnv: "GEMINI_BASE_URL" },
   },
   agents: {
-    Sisyphus: { role: "lead_orchestrator", provider: "host", model: "host-default", reasoning: "high" },
-    Atlas: { role: "linear_executor", provider: "host", model: "host-default", reasoning: "medium" },
-    Hephaestus: { role: "implementation_worker", provider: "host", model: "host-default", reasoning: "medium" },
-    Oracle: { role: "goal_verifier", provider: "host", model: "host-default", reasoning: "high" },
-    Librarian: { role: "external_research", provider: "deepseek", model: "deepseek-v4-pro" },
-    Explore: { role: "fast_explorer", provider: "deepseek", model: "deepseek-v4-flash" },
-    Metis: { role: "risk_reviewer", provider: "host", model: "host-default", reasoning: "medium" },
-    Momus: { role: "skeptical_reviewer", provider: "host", model: "host-default", reasoning: "xhigh" },
+    Jiuwei: { role: "lead_orchestrator", provider: "host", model: "host-default", reasoning: "high" },
+    YingLong: { role: "linear_executor", provider: "host", model: "host-default", reasoning: "medium" },
+    ZhuRong: { role: "implementation_worker", provider: "host", model: "host-default", reasoning: "medium" },
+    BaiZe: { role: "goal_verifier", provider: "host", model: "host-default", reasoning: "high" },
+    Taotie: { role: "external_research", provider: "deepseek", model: "deepseek-v4-pro" },
+    Kui: { role: "fast_explorer", provider: "deepseek", model: "deepseek-v4-flash" },
+    LuanNiao: { role: "risk_reviewer", provider: "host", model: "host-default", reasoning: "medium" },
+    QiongQi: { role: "skeptical_reviewer", provider: "host", model: "host-default", reasoning: "xhigh" },
   },
   dynamicAgents: {
     "visual-engineering": { provider: "gemini", model: "gemini-3.1-pro" },
@@ -54,7 +90,7 @@ export const DEFAULT_HELIX_CONFIG = {
     llm: {
       enabled: false,
       required: false,
-      agents: ["Momus"],
+      agents: ["QiongQi"],
       temperature: 0,
       timeoutMs: 45000,
       maxEvidenceChars: 12000,
@@ -85,28 +121,28 @@ export const DEFAULT_HELIX_CONFIG = {
     dynamicMaxRuleChars: 4000,
     dynamicMaxResultChars: 10000,
     projectSingleFiles: ["AGENTS.md", "CLAUDE.md", "CONTEXT.md", ".github/copilot-instructions.md"],
-    projectRuleDirs: [".omo/rules", ".claude/rules", ".cursor/rules", ".github/instructions"],
+    projectRuleDirs: [".claude/rules", ".cursor/rules", ".github/instructions"],
   },
   injectionPoints: {
     session_start: {
       enabled: true,
       tools: ["helix_resume", "helix_rules_collect", "helix_context_build"],
       markdown: [".helix/snapshots/context.md", ".helix/rules/context.md"],
-      skills: ["helix-injection-runtime", "start-work", "hf-recall"],
+      skills: ["wildarrange-injection-runtime", "start-work", "wa-recall"],
       rules: { mode: "static" },
     },
     user_prompt_submit: {
       enabled: true,
       tools: ["helix_route", "helix_rules_collect"],
       markdown: [".helix/snapshots/context.md", ".helix/rules/context.md"],
-      skills: ["helix-injection-runtime", "hf-ideate", "hf-plan", "review-work"],
+      skills: ["wildarrange-injection-runtime", "wa-ideate", "wa-plan", "review-work"],
       rules: { mode: "static" },
     },
     pre_tool_use: {
       enabled: true,
       tools: ["scope_guard", "helix_rules_collect"],
       markdown: [".helix/rules/context.md"],
-      skills: ["helix-injection-runtime"],
+      skills: ["wildarrange-injection-runtime"],
       rules: { mode: "dynamic_blocker" },
     },
     post_tool_use: {
@@ -120,35 +156,35 @@ export const DEFAULT_HELIX_CONFIG = {
       enabled: true,
       tools: ["helix_resume", "helix_rules_collect"],
       markdown: [".helix/snapshots/context.md", ".helix/rules/context.md"],
-      skills: ["helix-injection-runtime", "hf-recall"],
+      skills: ["wildarrange-injection-runtime", "wa-recall"],
       rules: { mode: "recovery_marker" },
     },
     before_execute: {
       enabled: true,
       tools: ["helix_context_build", "helix_node", "scope_guard"],
-      markdown: [".helix/context-agents/Atlas-{taskId}.md", ".helix/rules/context.md"],
-      skills: ["helix-injection-runtime", "programming", "debugging", "refactor"],
+      markdown: [".helix/context-agents/YingLong-{taskId}.md", ".helix/rules/context.md"],
+      skills: ["wildarrange-injection-runtime", "programming", "debugging", "refactor"],
       rules: { mode: "dynamic" },
     },
     before_review: {
       enabled: true,
       tools: ["helix_context_build", "helix_evidence_record", "review_gate"],
-      markdown: [".helix/context-agents/Oracle-{taskId}.md", ".helix/context-agents/Momus-{taskId}.md", ".helix/context-agents/Metis-{taskId}.md", ".helix/rules/context.md"],
-      skills: ["helix-injection-runtime", "review-work", "hf-review", "visual-qa"],
+      markdown: [".helix/context-agents/BaiZe-{taskId}.md", ".helix/context-agents/QiongQi-{taskId}.md", ".helix/context-agents/LuanNiao-{taskId}.md", ".helix/rules/context.md"],
+      skills: ["wildarrange-injection-runtime", "review-work", "wa-review", "visual-qa"],
       rules: { mode: "dynamic" },
     },
     before_checkpoint: {
       enabled: true,
       tools: ["helix_evidence_record", "review_gate", "helix_summary"],
       markdown: [".helix/reports/reviews/{planId}-{taskId}.md", ".helix/rules/context.md"],
-      skills: ["helix-injection-runtime", "hf-test", "review-work"],
+      skills: ["wildarrange-injection-runtime", "wa-test", "review-work"],
       rules: { mode: "dynamic" },
     },
     stop: {
       enabled: true,
       tools: ["helix_continuation_check", "helix_resume"],
       markdown: [".helix/sessions/continuation.md", ".helix/snapshots/context.md"],
-      skills: ["helix-injection-runtime", "start-work"],
+      skills: ["wildarrange-injection-runtime", "start-work"],
       rules: { mode: "static" },
     },
   },
@@ -216,9 +252,9 @@ export async function loadHelixConfig(rootDir) {
   const rootConfig = await readJson(rootConfigPath, null);
   const runtimeConfig = await readJson(runtimeConfigPath, null);
   const sourcePath = rootConfig ? rootConfigPath : runtimeConfig ? runtimeConfigPath : null;
-  const config = deepMerge(DEFAULT_HELIX_CONFIG, runtimeConfig || {});
+  const config = normalizeRuntimeConfig(deepMerge(DEFAULT_HELIX_CONFIG, runtimeConfig || {}));
   return {
-    config: deepMerge(config, rootConfig || {}),
+    config: normalizeRuntimeConfig(deepMerge(config, rootConfig || {})),
     sourcePath: sourcePath ? path.relative(rootDir, sourcePath) : "default",
   };
 }
@@ -232,6 +268,50 @@ export async function writeDefaultHelixConfig(rootDir, options = {}) {
   await writeJsonAtomic(targetPath, DEFAULT_HELIX_CONFIG);
   await appendLedger(rootDir, { type: "config_written", configPath: path.relative(rootDir, targetPath), root: options.root === true });
   return { path: path.relative(rootDir, targetPath), created: true, config: DEFAULT_HELIX_CONFIG };
+}
+
+export function normalizeAgentKey(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const sanitized = trimmed.replace(/[^\w.-]/g, "_");
+  return AGENT_ALIASES[sanitized] || AGENT_ALIASES[trimmed] || sanitized;
+}
+
+export function displayAgentName(value) {
+  const key = normalizeAgentKey(value);
+  if (!key) return "";
+  return AGENT_DISPLAY_NAMES[key] || key;
+}
+
+function normalizeRuntimeConfig(config) {
+  if (!isPlainObject(config)) return config;
+  const normalized = { ...config };
+  if (normalized.runtime === ["helix", "linear"].join("-")) normalized.runtime = DEFAULT_RUNTIME_NAME;
+  normalized.agents = normalizeAgentMap(normalized.agents);
+  if (Array.isArray(normalized.review?.llm?.agents)) {
+    normalized.review = {
+      ...normalized.review,
+      llm: {
+        ...normalized.review.llm,
+        agents: normalized.review.llm.agents.map(normalizeAgentKey).filter(Boolean),
+      },
+    };
+  }
+  return normalized;
+}
+
+function normalizeAgentMap(agents) {
+  if (!isPlainObject(agents)) return agents;
+  const normalized = {};
+  for (const [name, value] of Object.entries(agents)) {
+    const key = normalizeAgentKey(name);
+    if (!key) continue;
+    normalized[key] = isPlainObject(value) && isPlainObject(normalized[key])
+      ? deepMerge(normalized[key], value)
+      : value;
+  }
+  return normalized;
 }
 
 function deepMerge(base, override) {
@@ -513,7 +593,7 @@ function summarizeChangeForContext(change) {
 function renderContextMarkdown(context) {
   const status = context.status || {};
   const lines = [
-    "# HelixFlow Resume Context",
+    "# WildArrange Resume Context",
     "",
     `Generated: ${context.at}`,
     `Reason: ${context.reason}`,
@@ -710,8 +790,9 @@ export async function renderPromptPackEntry(rootDir, selector) {
   let entry;
   let label;
   if (selector.agent) {
-    entry = registry.agents?.[selector.agent];
-    label = `agent ${selector.agent}`;
+    const agent = normalizeAgentKey(selector.agent);
+    entry = registry.agents?.[agent];
+    label = `agent ${agent || selector.agent}`;
   } else if (selector.skill) {
     entry = registry.skills?.[selector.skill];
     label = `skill ${selector.skill}`;

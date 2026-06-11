@@ -1,6 +1,9 @@
 import {
+  DEFAULT_EXECUTOR_AGENT,
+  DEFAULT_LEAD_AGENT,
   appendLedger,
   initRuntime,
+  normalizeAgentKey,
   renderPromptPackEntry,
   writeSnapshot,
 } from "./helix-foundation.mjs";
@@ -33,7 +36,7 @@ export function resolveRouteDecision(routes, text) {
       ...routes.defaults,
       intent: "ask",
       route: askGate.route || "ask",
-      primaryAgent: askGate.primaryAgent || "Sisyphus",
+      primaryAgent: askGate.primaryAgent || DEFAULT_LEAD_AGENT,
       supportAgents: [],
       category: null,
       skills: [],
@@ -43,14 +46,22 @@ export function resolveRouteDecision(routes, text) {
     }, null, null, askMatches);
   }
 
-  const intent = bestMatch(routes.intents || [], lowerText) || routes.defaults;
+  let intent = bestMatch(routes.intents || [], lowerText) || routes.defaults;
+  if (intent?.name === "review" && hasPlanningCreationSignal(lowerText)) {
+    intent = (routes.intents || []).find((entry) => entry.name === "plan") || intent;
+  }
   const domain = bestMatch(routes.domains || [], lowerText);
   const complexity = bestMatch(routes.complexity || [], lowerText);
   const merged = mergeRoute(routes.defaults, intent, domain, complexity);
+  merged.planAgents = matchPlanAgentBundles(routes.planAgentBundles || [], lowerText);
+  for (const planAgent of merged.planAgents) {
+    merged.risk = higherRisk(merged.risk, planAgent.risk);
+  }
   return buildRouteResult(routes, text, merged, domain, complexity, [
     ...(intent?.matchedSignals || []),
     ...(domain?.matchedSignals || []),
     ...(complexity?.matchedSignals || []),
+    ...merged.planAgents.flatMap((agent) => agent.matchedSignals || []),
   ]);
 }
 
@@ -69,6 +80,19 @@ function matchSignals(lowerText, signals) {
   return signals.filter((signal) => signalMatches(lowerText, String(signal).toLowerCase()));
 }
 
+function matchPlanAgentBundles(entries, lowerText) {
+  return entries
+    .map((entry) => ({ ...entry, matchedSignals: matchSignals(lowerText, entry.signals || []) }))
+    .filter((entry) => entry.matchedSignals.length > 0)
+    .map((entry) => ({
+      name: entry.name,
+      stage: entry.stage,
+      risk: entry.risk || "medium",
+      purpose: entry.purpose || "",
+      matchedSignals: entry.matchedSignals,
+    }));
+}
+
 function signalMatches(lowerText, signal) {
   if (!signal) return false;
   if (!/^[a-z0-9][a-z0-9\s_-]*$/i.test(signal)) {
@@ -76,6 +100,10 @@ function signalMatches(lowerText, signal) {
   }
   const escaped = signal.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
   return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, "i").test(lowerText);
+}
+
+function hasPlanningCreationSignal(lowerText) {
+  return /(新增|新功能|大功能|做一个|实现|开发|设计|计划|方案|mvp|一期|从零)/i.test(lowerText);
 }
 
 function mergeRoute(defaults, intent, domain, complexity) {
@@ -90,8 +118,8 @@ function mergeRoute(defaults, intent, domain, complexity) {
 
   if (complexity?.routeBias === "plan" && !["review", "resume", "investigate", "answer", "release_git"].includes(merged.intent)) {
     merged.route = "plan";
-    merged.primaryAgent = "Prometheus";
-    merged.supportAgents = uniqueStrings(["Explore", "Librarian", "Metis", "Momus", "Oracle", ...(merged.supportAgents || [])]);
+    merged.primaryAgent = "DiJiang";
+    merged.supportAgents = uniqueStrings(["Kui", "Taotie", "LuanNiao", "QiongQi", "BaiZe", ...(merged.supportAgents || [])]);
     merged.needsPlan = false;
   }
   if (complexity?.categoryBias && !domain?.category) {
@@ -117,7 +145,7 @@ function mergeRoute(defaults, intent, domain, complexity) {
   }
   if (merged.intent === "review") {
     merged.category = null;
-    merged.primaryAgent = "Oracle";
+    merged.primaryAgent = "BaiZe";
   }
   if (merged.intent === "resume") {
     merged.nextCommand = "node ./bin/helix.mjs resume";
@@ -144,8 +172,9 @@ function buildRouteResult(routes, text, route, domain, complexity, matchedSignal
     complexity: route.complexity || complexity?.name || routes.defaults.complexity,
     domain: route.domain || domain?.name || routes.defaults.domain,
     route: route.route || routes.defaults.route,
-    primaryAgent: route.primaryAgent || routes.defaults.primaryAgent,
-    supportAgents: uniqueStrings(route.supportAgents || []),
+    primaryAgent: normalizeAgentKey(route.primaryAgent || routes.defaults.primaryAgent) || DEFAULT_EXECUTOR_AGENT,
+    supportAgents: uniqueStrings(route.supportAgents || []).map(normalizeAgentKey).filter(Boolean),
+    planAgents: route.planAgents || [],
     category: route.category ?? null,
     skills: uniqueStrings(route.skills || []),
     nextCommand: route.nextCommand || routes.defaults.nextCommand,

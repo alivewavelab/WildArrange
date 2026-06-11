@@ -3,9 +3,12 @@ import {
   claimTeamTask,
   createTeamTask,
   dashboardData,
+  DEFAULT_EXECUTOR_AGENT,
+  DEFAULT_LEAD_AGENT,
   getTeamTask,
   listTeamMessages,
   listTeamTasks,
+  PRODUCT_NAME,
   runNextTask,
   runWorkflowNode,
   sendTeamMessage,
@@ -158,7 +161,7 @@ function renderDashboardHtml() {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>HelixFlow Runtime</title>
+  <title>${PRODUCT_NAME} Runtime</title>
   <style>
     :root {
       color-scheme: light;
@@ -291,7 +294,7 @@ function renderDashboardHtml() {
 <body>
   <header>
     <div>
-      <h1>HelixFlow Runtime</h1>
+      <h1>${PRODUCT_NAME} Runtime</h1>
       <div class="muted" id="subtitle">loading</div>
     </div>
     <div class="toolbar">
@@ -309,7 +312,7 @@ function renderDashboardHtml() {
           <h3>Task Claim</h3>
           <div class="form-row">
             <input id="claimTaskId" placeholder="T001 或留空认领下一个">
-            <input id="claimOwner" placeholder="Atlas" value="Atlas">
+            <input id="claimOwner" placeholder="${DEFAULT_EXECUTOR_AGENT}" value="${DEFAULT_EXECUTOR_AGENT}">
           </div>
           <button id="claimTask">Claim</button>
         </div>
@@ -321,8 +324,8 @@ function renderDashboardHtml() {
         <div class="op-block">
           <h3>Team Message</h3>
           <div class="form-row">
-            <input id="msgFrom" placeholder="Sisyphus" value="Sisyphus">
-            <input id="msgTo" placeholder="Atlas" value="Atlas">
+            <input id="msgFrom" placeholder="${DEFAULT_LEAD_AGENT}" value="${DEFAULT_LEAD_AGENT}">
+            <input id="msgTo" placeholder="${DEFAULT_EXECUTOR_AGENT}" value="${DEFAULT_EXECUTOR_AGENT}">
           </div>
           <textarea id="msgBody">继续推进当前任务，完成后等待 verifier 与 review gate。</textarea>
           <div class="form-row">
@@ -473,7 +476,7 @@ function renderDashboardHtml() {
     el("runNext").addEventListener("click", () => runAction("Run next", () => postJson("/api/run-next", {})));
     el("claimTask").addEventListener("click", () => {
       const taskId = el("claimTaskId").value.trim();
-      const owner = el("claimOwner").value.trim() || "Atlas";
+      const owner = el("claimOwner").value.trim() || "${DEFAULT_EXECUTOR_AGENT}";
       runQuiet("Claim task", () => postJson("/api/tasks/claim", { taskId: taskId || undefined, owner }));
     });
     el("createTask").addEventListener("click", () => {
@@ -488,8 +491,8 @@ function renderDashboardHtml() {
     });
     el("sendMessage").addEventListener("click", async () => {
       const payload = await runQuiet("Send message", () => postJson("/api/team/send", {
-        from: el("msgFrom").value.trim() || "Sisyphus",
-        to: el("msgTo").value.trim() || "Atlas",
+        from: el("msgFrom").value.trim() || "${DEFAULT_LEAD_AGENT}",
+        to: el("msgTo").value.trim() || "${DEFAULT_EXECUTOR_AGENT}",
         body: el("msgBody").value,
       }));
       if (payload && payload.result) {

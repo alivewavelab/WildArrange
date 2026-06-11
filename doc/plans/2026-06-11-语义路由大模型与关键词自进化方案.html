@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WildArrange 档案路由员与关键词自进化方案</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172026;
+      --muted: #60707a;
+      --line: #d8e0e4;
+      --bg: #f6f8f9;
+      --panel: #ffffff;
+      --p0: #c7352b;
+      --p1: #b7791f;
+      --p2: #2b6cb0;
+      --ok: #237a57;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+      line-height: 1.65;
+    }
+    main { max-width: 1180px; margin: 0 auto; padding: 32px 24px 56px; }
+    h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: 0; }
+    h2 { margin: 32px 0 12px; font-size: 21px; }
+    h3 { margin: 0 0 8px; font-size: 16px; }
+    p { margin: 0 0 12px; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    pre { overflow: auto; padding: 14px; border-radius: 8px; background: #0f1720; color: #e6edf3; }
+    .lead { color: var(--muted); max-width: 880px; }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .flow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; align-items: stretch; }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; color: #fff; margin-bottom: 8px; }
+    .p0 { background: var(--p0); }
+    .p1 { background: var(--p1); }
+    .p2 { background: var(--p2); }
+    .ok { background: var(--ok); }
+    .arrow {
+      text-align: center;
+      color: var(--muted);
+      font-weight: 600;
+      align-self: center;
+    }
+    .list { margin: 0; padding-left: 20px; }
+    .list li { margin: 6px 0; }
+    table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); }
+    th, td { text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); padding: 10px 12px; }
+    th { background: #edf2f4; }
+    a { color: #2459a6; }
+    @media (max-width: 900px) {
+      .grid, .flow { grid-template-columns: 1fr; }
+      .arrow { display: none; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>WildArrange 档案路由员与关键词自进化方案</h1>
+  <p class="lead">结论：路由不要只靠关键词，也不要每轮都让大模型做全量裁判。第一版采用“确定性关键词热路径 + ArchivistRouter 档案路由员”的混合结构；大模型固定使用 <code>deepseek-v4-flash</code>，只在新会话、Git 提交边界、低置信度、固定轮次触发，负责识别多意图、整理阶段档案、生成上下文注入包，并提出关键词库补丁。</p>
+
+  <h2>一、为什么这样做</h2>
+  <div class="grid">
+    <section class="card">
+      <span class="tag ok">保留</span>
+      <h3>关键词路由仍是主干</h3>
+      <p>当前 <code>src/helix-routing.mjs</code> 已经能按 <code>routes.json</code> 做 intent/domain/complexity 路由，速度快、可解释、可测试，适合作为默认热路径。</p>
+    </section>
+    <section class="card">
+      <span class="tag p0">补强</span>
+      <h3>档案路由员处理语义和多意图</h3>
+      <p>一句话里可能同时包含“继续、加功能、审核、发版”。关键词只能命中信号，ArchivistRouter 负责切段、排序、解释冲突、建议交给哪个 Agent，并生成下一轮应注入的阶段上下文。</p>
+    </section>
+    <section class="card">
+      <span class="tag p1">演进</span>
+      <h3>关键词库由档案路由员提出补丁</h3>
+      <p>聊天阶段结束后，ArchivistRouter 从会话和执行结果中提炼用户习惯，只生成建议补丁；默认不自动改 <code>routes.json</code>，避免路由被一次误判污染。</p>
+    </section>
+  </div>
+
+  <h2>二、外部证据</h2>
+  <table>
+    <thead>
+      <tr><th>来源</th><th>可借鉴点</th><th>落到 WildArrange</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><a href="https://openai.github.io/openai-agents-python/handoffs/">OpenAI Agents SDK Handoffs</a></td>
+        <td>handoff 是交给 LLM 选择的工具；支持目的地描述、结构化 metadata、input filter、会话历史压缩。</td>
+        <td>路由输出必须结构化；下游 Agent 不吃全量聊天，而吃过滤后的 routing packet。</td>
+      </tr>
+      <tr>
+        <td><a href="https://docs.langchain.com/oss/python/langgraph/workflows-agents">LangGraph Workflows / Routing</a></td>
+        <td>routing workflow 用 LLM 产出结构化决策，再走 conditional edges；orchestrator-worker 适合未知子任务。</td>
+        <td>先由 ArchivistRouter 产出 JSON，再决定是 answer、plan、execute、review、change_request 还是 release_git。</td>
+      </tr>
+      <tr>
+        <td><a href="https://microsoft.github.io/autogen/stable/user-guide/agentchat-user-guide/selector-group-chat.html">AutoGen SelectorGroupChat</a></td>
+        <td>模型基于共享上下文和 participant name/description 选择下一位 speaker，并保留上下文。</td>
+        <td>Agent prompt 的角色描述要成为路由输入的一部分，而不是散落在每个 Agent 自己判断。</td>
+      </tr>
+      <tr>
+        <td><a href="https://docs.langchain.com/oss/python/concepts/memory">LangGraph Memory</a></td>
+        <td>区分 thread-scoped short-term memory 与跨会话 long-term memory；长上下文会分散模型注意力。</td>
+        <td>保存会话摘要和用户偏好，不把完整无限聊天直接塞给路由模型。</td>
+      </tr>
+      <tr>
+        <td><a href="https://arxiv.org/abs/2603.04444">vLLM Semantic Router</a></td>
+        <td>路由应组合关键词、语言、上下文长度、权限、神经分类、embedding 等多种信号。</td>
+        <td>WildArrange 第一版先做 keyword + LLM semantic；后续再加 embedding / feedback / cost routing。</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>三、角色定位</h2>
+  <div class="grid">
+    <section class="card">
+      <span class="tag p0">档案员</span>
+      <h3>保存结构化阶段记忆</h3>
+      <p>沉淀进展、结论、成果物、实现方式、调研来源、踩坑和未决问题。它不保存无限聊天全文，而保存压缩后的项目档案。</p>
+    </section>
+    <section class="card">
+      <span class="tag p0">路由员</span>
+      <h3>决定下一步交给谁</h3>
+      <p>读取当前 prompt、确定性路由结果、项目档案和 Agent 描述，输出主路由、多意图片段、支持 Agent 和置信度。</p>
+    </section>
+    <section class="card">
+      <span class="tag p1">维护员</span>
+      <h3>迭代关键词和注入包</h3>
+      <p>发现用户反复使用的表达，生成待审关键词补丁；同时生成下一轮注入给主 Agent 的 compact context。</p>
+    </section>
+  </div>
+
+  <h2>四、推荐流程</h2>
+  <div class="flow">
+    <section class="card">
+      <span class="tag ok">输入</span>
+      <h3>UserPromptSubmit</h3>
+      <p>先跑当前 <code>routeRequest</code>，得到确定性结果、命中信号和冲突信号。</p>
+    </section>
+    <div class="arrow">→</div>
+    <section class="card">
+      <span class="tag p0">触发判断</span>
+      <h3>是否需要 LLM</h3>
+      <p>新会话、Git HEAD 改变、低置信度、同一句多意图、按阶段自适应轮数触发。</p>
+    </section>
+    <div class="arrow">→</div>
+    <section class="card">
+      <span class="tag p0">档案路由员</span>
+      <h3>ArchivistRouter</h3>
+      <p>读取 routing packet 和项目档案，输出 route、agent、segments、confidence、reason。</p>
+    </section>
+    <section class="card">
+      <span class="tag p1">上下文包</span>
+      <h3>Context Injection</h3>
+      <p>提炼用户习惯，生成关键词补丁、记忆更新和下一轮上下文注入包。</p>
+    </section>
+  </div>
+
+  <h2>五、触发规则</h2>
+  <table>
+    <thead>
+      <tr><th>触发点</th><th>原因</th><th>默认动作</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>新会话 / SessionStart</td>
+        <td>用户可能删除或关闭旧会话，路由需要恢复阶段判断。</td>
+        <td>读取 resume/context/ledger tail 和结构化档案，生成本会话 routing context。</td>
+      </tr>
+      <tr>
+        <td>Git 提交后 / HEAD changed</td>
+        <td>提交是天然阶段边界，需求、代码状态和下一步工作会变化。</td>
+        <td>记录 commit hash、diff summary、已完成任务，刷新关键词建议。</td>
+      </tr>
+      <tr>
+        <td>按阶段轮数触发</td>
+        <td>长对话即使没有 commit，也会漂移；但不同阶段的信息密度不同。</td>
+        <td>计划/脑爆/澄清每 5 轮压缩；默认 10 轮；编码/验收/review 10-20 轮，当前配置默认 15 轮。</td>
+      </tr>
+      <tr>
+        <td>低置信度 / 冲突命中</td>
+        <td>例如“继续做并 review 一下新增功能”，关键词会同时命中 resume/execute/review。</td>
+        <td>立即启动 ArchivistRouter，按 segments 拆分主任务和附属任务。</td>
+      </tr>
+      <tr>
+        <td>workflow checkpoint / summary</td>
+        <td>一轮治理结束，最适合沉淀“这类任务以后怎么路由”。</td>
+        <td>生成 archivist route report，不自动改生产路由。</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>六、Routing Packet</h2>
+  <p>ArchivistRouter 不吃完整无限聊天，而吃一个有上限、可审计的包：</p>
+  <ul class="list">
+    <li>当前用户输入和确定性路由结果。</li>
+    <li>最近 N 轮用户/助手/工具摘要：计划/脑爆/澄清默认 N=5，常规 N=10，编码/验收/review 默认 N=15，上限 N=20。</li>
+    <li>采集模式为 <code>conclusions-only</code>：只保留用户意图、助手可见结论、工具结果摘要、执行证据摘要；默认剥离代码块、diff、完整命令输出和中间过程。</li>
+    <li><code>.helix/snapshots/context.json</code>、<code>.helix/ledger.jsonl</code> tail、当前 task/workflow 状态。</li>
+    <li>当前 <code>routes.json</code>、Agent name/description、可用 skills/tools 摘要。</li>
+    <li>Git HEAD、最近 commit message、改动路径摘要。</li>
+    <li>已确认的用户偏好、团队规范摘要和长期结构化档案命中项。</li>
+  </ul>
+
+  <h2>七、结构化记忆</h2>
+  <p>第一版不引入外部数据库或向量库。采用本地 structured files：JSONL 事件流 + JSON 摘要 + Markdown 人读摘要。十几万行级别先靠按阶段压缩、代码剥离和索引文件解决，后续再按需接 SQLite 或外挂记忆系统。</p>
+  <table>
+    <thead>
+      <tr><th>路径</th><th>内容</th><th>用途</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>.helix/memory/events.jsonl</code></td>
+        <td>阶段事件：prompt 摘要、路由决策、执行结果、验证结果、Git 边界。</td>
+        <td>可追溯事实源。</td>
+      </tr>
+      <tr>
+        <td><code>.helix/memory/stage-summaries/*.json</code></td>
+        <td>进展、结论、成果物、实现方式、调研、踩坑、未决问题；不保存完整代码。</td>
+        <td>跨会话恢复和上下文注入。</td>
+      </tr>
+      <tr>
+        <td><code>.helix/memory/index.json</code></td>
+        <td>关键词、领域、Agent、文件路径、成果物到摘要的索引。</td>
+        <td>长期记忆的关键词路由和快速召回。</td>
+      </tr>
+      <tr>
+        <td><code>.helix/routing/suggestions/*.json</code></td>
+        <td>关键词补丁、证据、风险等级、apply/reject 状态。</td>
+        <td>受控迭代 <code>routes.json</code>。</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>八、LLM 输出 Schema</h2>
+  <pre>{
+  "archive": {
+    "progress": [],
+    "decisions": [],
+    "artifacts": [],
+    "implementationNotes": [],
+    "researchNotes": [],
+    "pitfalls": [],
+    "openQuestions": [],
+    "codePolicy": "no code blocks, no diffs, summarize implementation conclusions only"
+  },
+  "decision": {
+    "intent": "plan|execute|review|change_request|release_git|resume|answer|investigate",
+    "domain": "visual|logic|writing|git|debug|research|recovery|general",
+    "route": "plan|execute|verify|change_request|recover|answer|explore",
+    "primaryAgent": "Jiuwei|DiJiang|YingLong|BaiZe|Kui|Taotie",
+    "supportAgents": [],
+    "category": "quick|deep|visual-engineering|research|git|null",
+    "planAgents": [],
+    "confidence": 0.0,
+    "reasons": [],
+    "segments": [
+      {
+        "text": "用户原话片段",
+        "intent": "execute",
+        "route": "execute",
+        "agent": "YingLong",
+        "priority": "P0|P1|P2"
+      }
+    ]
+  },
+  "keywordPatch": {
+    "add": [
+      {
+        "target": "intents.plan.signals",
+        "terms": ["需求澄清"],
+        "evidence": "最近多次用户把该词用于规划阶段"
+      }
+    ],
+    "remove": [],
+    "requiresHumanReview": true
+  },
+  "contextInjection": {
+    "summaryMarkdown": "",
+    "mustRemember": [],
+    "safeToOmit": []
+  },
+  "userPreferenceNotes": [],
+  "memoryUpdates": []
+}</pre>
+
+  <h2>九、关键词演进门控</h2>
+  <div class="grid">
+    <section class="card">
+      <span class="tag p0">不能自动污染</span>
+      <h3>默认只写建议</h3>
+      <p>补丁写入 <code>.helix/routing/suggestions/*.json</code> 和 Markdown 摘要，不直接改 <code>packs/wildarrange-linear/routes.json</code>。</p>
+    </section>
+    <section class="card">
+      <span class="tag p1">可选自动应用</span>
+      <h3>高置信度才可自动合并</h3>
+      <p>同时满足：confidence ≥ 0.85、同类证据出现 ≥ 2 次、没有覆盖 ask/review/release_git 等高风险规则。</p>
+    </section>
+    <section class="card">
+      <span class="tag p0">高风险必须人审</span>
+      <h3>Jiuwei / 用户确认</h3>
+      <p>涉及验收、Git、权限、安全、删除、发布、计划外变更的关键词补丁，必须进入待审队列。</p>
+    </section>
+  </div>
+
+  <h2>十、实现优先级</h2>
+  <table>
+    <thead>
+      <tr><th>优先级</th><th>模块</th><th>验收标准</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>P0</td>
+        <td><code>src/helix-archivist-router.mjs</code></td>
+        <td>能构建 routing packet、判断触发点、调用 deepseek-v4-flash、写入 archive / route / contextInjection artifact；无 key 时不阻断主流程。</td>
+      </tr>
+      <tr>
+        <td>P0</td>
+        <td><code>src/helix-routing.mjs</code></td>
+        <td>确定性路由结果增加 confidence、conflicts、matchedGroups，供 ArchivistRouter 判断是否介入。</td>
+      </tr>
+      <tr>
+        <td>P0</td>
+        <td><code>src/helix-hooks.mjs</code></td>
+        <td>SessionStart、UserPromptSubmit 能按规则触发 ArchivistRouter；不会每轮无脑调用 LLM。</td>
+      </tr>
+      <tr>
+        <td>P1</td>
+        <td><code>.helix/routing/suggestions</code></td>
+        <td>关键词补丁有证据、有来源、有风险等级、有 apply/reject 状态。</td>
+      </tr>
+      <tr>
+        <td>P1</td>
+        <td>CLI：<code>route reflect</code> / <code>route suggestions</code></td>
+        <td>用户能查看、应用、拒绝关键词建议；所有动作写 ledger。</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>十一、判断</h2>
+  <p>把档案员和任务路由放在一起是合适的。路由精准性依赖项目阶段记忆；阶段记忆的价值也体现在下一次能不能路由准确。第一版用 deepseek-v4-flash 足够，关键不是模型越贵越好，而是输入包结构化、剥离代码噪音、输出 schema 稳定、关键词补丁有门控。</p>
+</main>
+</body>
+</html>

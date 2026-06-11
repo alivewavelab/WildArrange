@@ -3,7 +3,10 @@ import path from "node:path";
 import {
   appendLedger,
   createWorkId,
+  DEFAULT_EXECUTOR_AGENT,
+  DEFAULT_LEAD_AGENT,
   ensureHelixDirs,
+  normalizeAgentKey,
   nowIso,
   readJson,
   resolveHelixPath,
@@ -97,7 +100,7 @@ async function claimTeamTaskUnlocked(rootDir, options = {}) {
   if (blockers.length > 0) throw new Error(`task ${task.id} blocked by ${blockers.join(",")}`);
 
   task.status = "in_progress";
-  task.owner = options.owner || task.owner || "Atlas";
+  task.owner = normalizeAgentName(options.owner || task.owner || DEFAULT_EXECUTOR_AGENT);
   task.claimedAt = nowIso();
   task.updatedAt = nowIso();
   await persistTaskState(rootDir, taskState);
@@ -202,7 +205,7 @@ export async function persistTaskState(rootDir, taskState) {
 export async function writeOutbox(rootDir, task, workerResult) {
   const outboxPath = resolveHelixPath(rootDir, "team", "outbox", `${task.id}-${Date.now()}.json`);
   await writeJsonAtomic(outboxPath, {
-    to: "Atlas",
+    to: DEFAULT_EXECUTOR_AGENT,
     from: task.owner || "worker",
     summary: `${task.id} done-claim`,
     taskId: task.id,
@@ -214,7 +217,7 @@ export async function writeOutbox(rootDir, task, workerResult) {
 export async function sendTeamMessage(rootDir, options = {}) {
   await ensureHelixDirs(rootDir);
   const to = normalizeAgentName(options.to);
-  const from = normalizeAgentName(options.from || "Sisyphus");
+  const from = normalizeAgentName(options.from || DEFAULT_LEAD_AGENT);
   const body = typeof options.body === "string" ? options.body.trim() : "";
   if (!to) throw new Error("message recipient is required");
   if (!body) throw new Error("message body is required");
@@ -243,10 +246,7 @@ export async function sendTeamMessage(rootDir, options = {}) {
 }
 
 export function normalizeAgentName(value) {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  return trimmed.replace(/[^\w.-]/g, "_");
+  return normalizeAgentKey(value);
 }
 
 async function appendTeamMessageIndex(rootDir, message) {

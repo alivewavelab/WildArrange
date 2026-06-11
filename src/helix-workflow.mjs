@@ -47,7 +47,7 @@ export async function createSamplePlan(rootDir, targetPath = resolveHelixPath(ro
   const verifyScript = "node -e \"const fs=require('fs'); const v=fs.readFileSync('.helix/artifacts/linear-smoke.txt','utf8').trim(); if(v!=='ok') process.exit(1)\"";
   const sample = {
     title: "M1 linear loop smoke",
-    objective: "Prove Atlas can run one worker task and verify it before checkpoint.",
+    objective: "Prove YingLong can run one worker task and verify it before checkpoint.",
     tasks: [
       {
         id: "T001",

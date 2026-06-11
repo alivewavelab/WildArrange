@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { loadHelixConfig, readJson, resolveHelixPath } from "./helix-foundation.mjs";
+import { DEFAULT_LEAD_AGENT, loadHelixConfig, normalizeAgentKey, readJson, resolveHelixPath } from "./helix-foundation.mjs";
 
 export async function resolveInjectionPoint(rootDir, name, variables = {}) {
   const { config, sourcePath } = await loadHelixConfig(rootDir);
@@ -28,8 +28,9 @@ export async function resolveInjectionPoint(rootDir, name, variables = {}) {
 }
 
 export function defaultInjectionPointForAgent(agent) {
-  if (agent === "Oracle" || agent === "Momus" || agent === "Metis") return "before_review";
-  if (agent === "Sisyphus") return "user_prompt_submit";
+  const normalized = normalizeAgentKey(agent);
+  if (normalized === "BaiZe" || normalized === "QiongQi" || normalized === "LuanNiao") return "before_review";
+  if (normalized === DEFAULT_LEAD_AGENT) return "user_prompt_submit";
   return "before_execute";
 }
 

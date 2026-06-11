@@ -1,16 +1,17 @@
 {
-  "name": "helixflow",
+  "name": "wildarrange",
   "version": "0.1.0",
   "private": false,
   "description": "Linear governance runtime for Codex and Cursor agent workflows",
   "type": "module",
   "bin": {
     "helix": "./bin/helix.mjs",
-    "helixflow": "./bin/helix.mjs"
+    "wildarrange": "./bin/helix.mjs"
   },
   "files": [
     "README.md",
-    ".env.helix.example",
+    "README.en.md",
+    ".env.wildarrange.example",
     "bin/",
     "src/",
     "packs/",

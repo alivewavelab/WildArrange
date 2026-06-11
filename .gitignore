@@ -2,5 +2,7 @@
 .cursor/
 .tmp/
 .helix/
+.archive/
+.backups/
 node_modules/
 npm-debug.log*

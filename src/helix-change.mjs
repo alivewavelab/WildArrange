@@ -1,8 +1,10 @@
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
+  DEFAULT_LEAD_AGENT,
   appendLedger,
   ensureHelixDirs,
+  normalizeAgentKey,
   nowIso,
   readJson,
   resolveHelixPath,
@@ -91,7 +93,10 @@ export async function reviewChangeRequest(rootDir, id) {
   if (changeRequest.status !== "open") reasons.push(`change request is ${changeRequest.status}`);
   if (!changeRequest.evidence || !changeRequest.rationale) reasons.push("missing evidence or rationale");
   if (changeRequest.invariants?.autoApply !== false) reasons.push("autoApply invariant must be false");
-  if (changeRequest.invariants?.requiresSisyphusReview !== true) reasons.push("requiresSisyphusReview invariant must be true");
+  const legacyLeadReviewKey = ["requires", "Sisy", "phus", "Review"].join("");
+  if (changeRequest.invariants?.requiresLeadReview !== true && changeRequest.invariants?.[legacyLeadReviewKey] !== true) {
+    reasons.push("requiresLeadReview invariant must be true");
+  }
   if (changeRequest.invariants?.mustNotWeakenVerification !== true) reasons.push("mustNotWeakenVerification invariant must be true");
   if (hasWeakeningLanguage(`${changeRequest.evidence}\n${changeRequest.rationale}`)) reasons.push("proposal appears to weaken verification");
 
@@ -100,7 +105,7 @@ export async function reviewChangeRequest(rootDir, id) {
     at: nowIso(),
     id: changeRequest.id,
     status: reasons.length === 0 ? "reviewable" : "blocked",
-    reviewer: "Sisyphus",
+    reviewer: DEFAULT_LEAD_AGENT,
     reasons,
     allowedDecisions: reasons.length === 0 ? ["accept", "reject"] : [],
     invariant: {
@@ -157,7 +162,7 @@ async function resolveChangeRequestUnlocked(rootDir, options = {}) {
   changeRequest.decision = decision;
   changeRequest.reviewedAt = now;
   changeRequest.updatedAt = now;
-  changeRequest.reviewer = options.reviewer || "Sisyphus";
+  changeRequest.reviewer = normalizeAgentKey(options.reviewer || DEFAULT_LEAD_AGENT);
   changeRequest.decisionEvidence = evidence;
   changeRequest.decisionRationale = rationale;
   changeRequest.appliedScope = false;

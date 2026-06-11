@@ -1,5 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import {
+  DEFAULT_EXECUTOR_AGENT,
   STATE_VERSION,
   TASK_STATUSES,
   appendLedger,
@@ -89,7 +90,7 @@ export function normalizeTask(task, index, defaults = {}) {
     category: task.category || null,
     category_source: task.category ? "explicit" : "unresolved",
     status: validateStatus(task.status || "pending"),
-    owner: task.owner || "Atlas",
+    owner: task.owner || DEFAULT_EXECUTOR_AGENT,
     attempts: Number.isInteger(task.attempts) ? task.attempts : 0,
     maxAttempts: Number.isInteger(task.maxAttempts) ? task.maxAttempts : 3,
     blockedBy: normalizeStringArray(task.blockedBy ?? [], `task ${id} blockedBy`),

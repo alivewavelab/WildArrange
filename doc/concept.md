@@ -1,8 +1,8 @@
-# HelixFlow Concept
+# WildArrange Concept
 
-HelixFlow is a small-team governance layer for AI coding agents.
+WildArrange is a small-team governance layer for AI coding agents.
 
-The simple analogy: a worker can say "I finished", but the warehouse gate still checks the package before it leaves. HelixFlow is that gate.
+The simple analogy: a worker can say "I finished", but the warehouse gate still checks the package before it leaves. WildArrange is that gate.
 
 ## Product Intent
 
@@ -20,7 +20,7 @@ Plan -> Worker -> Verifier -> Scope Guard -> Review Gate -> Checkpoint
 
 Each step writes evidence to `.helix/`, so a new session can resume from disk.
 
-## What Is Borrowed From OMO
+## External Pattern Boundary
 
 - Specialized agent roles.
 - Planning and execution separation.
@@ -35,4 +35,4 @@ M1 does not yet run a real multi-agent cluster. It first makes one linear path r
 
 ## Current Truth
 
-Momus, Metis, and Oracle are represented as review lanes and prompt roles today. They do not yet call real LLM providers. Until the provider layer is connected, review is deterministic governance, not full OMO-style adversarial reasoning.
+QiongQi, LuanNiao, and BaiZe are represented as review lanes and prompt roles today. They do not yet call real LLM providers. Until the provider layer is connected, review is deterministic governance, not full adversarial reasoning.

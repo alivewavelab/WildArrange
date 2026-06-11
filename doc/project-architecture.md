@@ -1,4 +1,4 @@
-# HelixFlow Project Architecture
+# WildArrange Project Architecture
 
 ## Runtime Shape
 
@@ -22,7 +22,7 @@ bin/helix.mjs
      -> src/helix-team.mjs
      -> src/helix-gates.mjs
   -> src/helix-dashboard.mjs
-  -> packs/helix-linear/*
+  -> packs/wildarrange-linear/*
   -> .helix/*
 ```
 
@@ -35,8 +35,9 @@ bin/helix.mjs
 - `src/helix-change.mjs`: steering proposals, review blockers, ChangeRequest review, and explicit accept/reject resolution.
 - `src/helix-failure.mjs`: failure reason classification, retry hints, and actionable failure summaries.
 - `src/helix-routing.mjs`: intent/domain/complexity routing and route request persistence.
-- `src/helix-rules.mjs`: project rule scanning and rule-context generation from AGENTS/CLAUDE/Cursor/OMO-style files.
-- `src/helix-review.mjs`: worker execution and deterministic Oracle/Momus/Metis review lanes.
+- `src/helix-archivist-router.mjs` (planned): DeepSeek flash based archivist/router, routing packet construction, low-confidence route escalation, structured memory updates, context injection packs, and keyword suggestion artifacts.
+- `src/helix-rules.mjs`: project rule scanning and rule-context generation from AGENTS/CLAUDE/Cursor-style files.
+- `src/helix-review.mjs`: worker execution and deterministic BaiZe/QiongQi/LuanNiao review lanes.
 - `src/helix-injection.mjs`: injection-point resolution and mounted markdown/skill attachment loading.
 - `src/helix-context.mjs`: agent context, resume snapshots, session lineage, and continuation directives.
 - `src/helix-hooks.mjs`: host lifecycle hook handling and pre-tool-use scope guard output.
@@ -47,9 +48,9 @@ bin/helix.mjs
 - `src/helix-team.mjs`: team-lite tasks, claims, evidence recording, task-state persistence, outbox, and durable message board.
 - `src/helix-gates.mjs`: command execution, verifier, scope guard, path checks, checkpoints, change requests, review/failure reports, and wisdom ledger.
 - `src/helix-dashboard.mjs`: local dashboard HTTP API and HTML UI.
-- `packs/helix-linear/agents`: role prompts.
-- `packs/helix-linear/skills`: skill prompts.
-- `packs/helix-linear/tools/tool-contract.json`: tool contract inventory.
+- `packs/wildarrange-linear/agents`: role prompts.
+- `packs/wildarrange-linear/skills`: skill prompts.
+- `packs/wildarrange-linear/tools/tool-contract.json`: tool contract inventory.
 - `helix.config.json`: local runtime configuration.
 
 ## Runtime State
@@ -59,7 +60,23 @@ bin/helix.mjs
 - `.helix/checkpoints`: checkpoint JSON after all gates pass.
 - `.helix/reports`: human-readable reports.
 - `.helix/snapshots/context.md`: resume context.
+- `.helix/memory/events.jsonl`: planned structured memory event stream for routing and stage archive facts.
+- `.helix/memory/stage-summaries`: planned structured summaries for progress, decisions, artifacts, implementation notes, research notes, pitfalls, and open questions.
+- `.helix/memory/index.json`: planned lightweight keyword/domain/artifact index for memory recall.
+- `.helix/routing/suggestions`: planned ArchivistRouter keyword suggestions and user-preference routing notes.
 - `.helix/adapters`: generated adapter files, reports, and backups.
+
+## Routing Model
+
+Routing uses a hybrid model:
+
+1. `src/helix-routing.mjs` runs the deterministic hot path from `packs/wildarrange-linear/routes.json`.
+2. A planned `ArchivistRouter` node uses `deepseek-v4-flash` and may run at SessionStart, after Git HEAD changes, on low-confidence or conflicting routes, and every adaptive number of user prompts.
+3. Prompt-count triggers are stage aware: ideate/plan/clarify defaults to 5 turns, normal work defaults to 10 turns, and execute/verify/review defaults to 15 turns with a 20-turn cap.
+4. `ArchivistRouter` reads a bounded routing packet and structured memory instead of unlimited raw chat history.
+5. Routing packets use conclusions-only capture: keep user intent, visible assistant conclusions, summarized tool results, evidence, progress, decisions, artifacts, implementation conclusions, research notes, pitfalls, and open questions; strip code blocks, diffs, raw command output, and intermediate process text by default.
+6. It may produce route decisions, multi-intent segments, structured archive updates, context injection packs, user-preference notes, and keyword patch suggestions.
+7. Keyword suggestions are written for review first. High-risk routing areas such as review, Git, permissions, safety, deletion, release, and scope changes require human or Jiuwei approval before updating `routes.json`.
 
 ## Gate Model
 
@@ -77,13 +94,13 @@ The review gate is host-neutral. It runs from the CLI and may include determinis
 
 ## Adapter Model
 
-Cursor receives `.cursor/rules/helixflow.mdc`.
+Cursor receives `.cursor/rules/wildarrange.mdc`.
 
-Codex receives `.helix/adapters/codex/hooks.json`, which mirrors OMO-style lifecycle hooks. Full host-level Codex plugin installation is still future adapter work.
+Codex receives `.helix/adapters/codex/hooks.json`, which mirrors host lifecycle hooks. Full host-level Codex plugin installation is still future adapter work.
 
 ## Provider Model
 
-Default GPT-family agents use `provider: "host"`. That means Codex/Cursor owns model selection, authentication, and model routing. HelixFlow does not require `OPENAI_API_KEY` for host-managed Atlas, Hephaestus, Oracle, Metis, Momus, Sisyphus, or generic `deep`/`ultrabrain` lanes.
+Default GPT-family agents use `provider: "host"`. That means Codex/Cursor owns model selection, authentication, and model routing. WildArrange does not require `OPENAI_API_KEY` for host-managed YingLong, ZhuRong, BaiZe, LuanNiao, QiongQi, Jiuwei, or generic `deep`/`ultrabrain` lanes.
 
 External providers use `type: "openai-compatible"` and are configured with:
 
@@ -95,7 +112,7 @@ External providers use `type: "openai-compatible"` and are configured with:
 
 ## Commercial Boundary
 
-HelixFlow core must remain original code. External workflow projects may inform concepts, node names, and quality gates, but commercial builds must not ship copied source, copied prompt text, or tool implementations from licenses that restrict commercial redistribution.
+WildArrange core must remain original code. External workflow projects may inform concepts, node names, and quality gates, but commercial builds must not ship copied source, copied prompt text, or tool implementations from licenses that restrict commercial redistribution.
 
 Adapter-specific behavior belongs in `src/helix-adapters.mjs` or host-specific generated files. Core workflow, gates, ledger, and provider logic must run without Codex/Cursor private hooks.
 

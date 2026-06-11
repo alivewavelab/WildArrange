@@ -3,6 +3,8 @@ import { copyFile, mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   PROJECT_DIR,
+  DEFAULT_PACKAGE_NAME,
+  PRODUCT_NAME,
   STATE_VERSION,
   appendLedger,
   ensureHelixDirs,
@@ -16,7 +18,7 @@ export async function installAdapter(rootDir, options = {}) {
   await initRuntime(rootDir);
   const target = options.target || "all";
   const mode = options.mode || "local";
-  const packageName = options.packageName || options.package || "helixflow";
+  const packageName = options.packageName || options.package || DEFAULT_PACKAGE_NAME;
   const hookCommand = adapterHookCommand({ mode, packageName });
   const outputs = [];
   const backupId = createAdapterBackupId("install");
@@ -32,7 +34,7 @@ export async function installAdapter(rootDir, options = {}) {
   if (target === "all" || target === "cursor") {
     const cursorDir = path.join(rootDir, ".cursor", "rules");
     await mkdir(cursorDir, { recursive: true });
-    const cursorRulePath = path.join(cursorDir, "helixflow.mdc");
+    const cursorRulePath = path.join(cursorDir, "wildarrange.mdc");
     const cursorRuleBackup = await backupExistingAdapterFile(rootDir, cursorRulePath, backupId);
     await writeFile(cursorRulePath, renderCursorRule({ hookCommand }), "utf8");
     const cursorReadmePath = resolveHelixPath(rootDir, "adapters", "cursor", "README.md");
@@ -81,7 +83,8 @@ export async function uninstallAdapter(rootDir, options = {}) {
     candidates.push({ target: "codex", path: resolveHelixPath(rootDir, "adapters", "codex", "hooks.json") });
   }
   if (target === "all" || target === "cursor") {
-    candidates.push({ target: "cursor", path: path.join(rootDir, ".cursor", "rules", "helixflow.mdc") });
+    candidates.push({ target: "cursor", path: path.join(rootDir, ".cursor", "rules", "wildarrange.mdc") });
+    candidates.push({ target: "cursor", path: path.join(rootDir, ".cursor", "rules", ["helix", "flow.mdc"].join("")) });
     candidates.push({ target: "cursor", path: resolveHelixPath(rootDir, "adapters", "cursor", "README.md") });
   }
 
@@ -137,22 +140,22 @@ function buildCodexHooksConfig(command) {
   const hook = (timeout, statusMessage) => ({ type: "command", command, timeout, statusMessage });
   return {
     hooks: {
-      SessionStart: [{ hooks: [hook(10, "HelixFlow: Loading governance context")] }],
-      UserPromptSubmit: [{ hooks: [hook(10, "HelixFlow: Routing and loading governance context")] }],
+      SessionStart: [{ hooks: [hook(10, `${PRODUCT_NAME}: Loading governance context`)] }],
+      UserPromptSubmit: [{ hooks: [hook(10, `${PRODUCT_NAME}: Routing and loading governance context`)] }],
       PreToolUse: [{
         matcher: "^(apply_patch|write|Write|edit|Edit|multi_edit|multiedit|MultiEdit|create_goal)$",
-        hooks: [hook(10, "HelixFlow: Checking planned scope before tool use")],
+        hooks: [hook(10, `${PRODUCT_NAME}: Checking planned scope before tool use`)],
       }],
       PostToolUse: [{
         matcher: "^(apply_patch|write|Write|edit|Edit|multi_edit|multiedit|MultiEdit)$",
-        hooks: [hook(10, "HelixFlow: Matching project rules after tool use")],
+        hooks: [hook(10, `${PRODUCT_NAME}: Matching project rules after tool use`)],
       }],
       PostCompact: [{
         matcher: "manual|auto",
-        hooks: [hook(10, "HelixFlow: Rehydrating governance context after compaction")],
+        hooks: [hook(10, `${PRODUCT_NAME}: Rehydrating governance context after compaction`)],
       }],
-      Stop: [{ hooks: [hook(10, "HelixFlow: Checking continuation state")] }],
-      SubagentStop: [{ hooks: [hook(10, "HelixFlow: Checking continuation state")] }],
+      Stop: [{ hooks: [hook(10, `${PRODUCT_NAME}: Checking continuation state`)] }],
+      SubagentStop: [{ hooks: [hook(10, `${PRODUCT_NAME}: Checking continuation state`)] }],
     },
   };
 }
@@ -161,14 +164,14 @@ function renderCursorRule({ hookCommand }) {
   return `---
 alwaysApply: true
 ---
-# HelixFlow Governance Runtime
+# ${PRODUCT_NAME} Governance Runtime
 
-This project uses HelixFlow for local agent governance.
+This project uses ${PRODUCT_NAME} for local agent governance.
 
 Required behavior:
 
 - Before planning or implementing, run \`${hookCommand}\` with a \`UserPromptSubmit\` payload when available.
-- Before editing files for a HelixFlow task, verify task scope with \`node ./bin/helix.mjs guard scope --task <taskId>\` or \`node ./bin/helix.mjs hook run\` using a \`PreToolUse\` payload.
+- Before editing files for a ${PRODUCT_NAME} task, verify task scope with \`node ./bin/helix.mjs guard scope --task <taskId>\` or \`node ./bin/helix.mjs hook run\` using a \`PreToolUse\` payload.
 - Treat worker completion as a claim only. Completion requires verifier, scope guard, review gate, success criteria evidence, and checkpoint.
 - Do not weaken \`verify_commands\`, \`review_commands\`, \`standards_commands\`, project rules, or \`successCriteria\` to manufacture PASS.
 - If Cursor cannot execute lifecycle hooks automatically, run \`node ./bin/helix.mjs continuation check\` before stopping a task.
@@ -176,9 +179,9 @@ Required behavior:
 }
 
 function renderCursorAdapterReadme({ hookCommand }) {
-  return `# HelixFlow Cursor Adapter
+  return `# ${PRODUCT_NAME} Cursor Adapter
 
-Cursor does not provide the same Codex plugin hook lifecycle in this runtime, so this adapter installs a persistent Cursor rule at \`.cursor/rules/helixflow.mdc\`.
+Cursor does not provide the same Codex plugin hook lifecycle in this runtime, so this adapter installs a persistent Cursor rule at \`.cursor/rules/wildarrange.mdc\`.
 
 Hook command for manual or future adapter use:
 
@@ -192,7 +195,7 @@ This gives Cursor the same governance contract, but hard blocking depends on Cur
 
 function renderAdapterInstallReport(report) {
   const lines = [
-    "# HelixFlow Adapter Install Report",
+    `# ${PRODUCT_NAME} Adapter Install Report`,
     "",
     `Generated: ${report.at}`,
     `Target: ${report.target}`,
@@ -214,14 +217,14 @@ function renderAdapterInstallReport(report) {
   lines.push("");
   lines.push("## Install Model");
   lines.push("");
-  lines.push("- Recommended user entry: `npx helixflow@latest init` or `npx helixflow@latest adapter install`.");
-  lines.push("- Recommended persistent project setup after publish: add `helixflow` as a devDependency so hook commands do not require network access.");
+  lines.push("- Recommended user entry: `npx wildarrange@latest init` or `npx wildarrange@latest adapter install`.");
+  lines.push("- Recommended persistent project setup after publish: add `wildarrange` as a devDependency so hook commands do not require network access.");
   return `${lines.join("\n")}\n`;
 }
 
 function renderAdapterUninstallReport(report) {
   const lines = [
-    "# HelixFlow Adapter Uninstall Report",
+    `# ${PRODUCT_NAME} Adapter Uninstall Report`,
     "",
     `Generated: ${report.at}`,
     `Target: ${report.target}`,

@@ -1,8 +1,15 @@
 export {
   DEFAULT_HELIX_CONFIG,
+  DEFAULT_CLI_COMMAND,
+  DEFAULT_EXECUTOR_AGENT,
+  DEFAULT_LEAD_AGENT,
+  DEFAULT_PACKAGE_NAME,
   DEFAULT_PROMPT_PACK_DIR,
+  DEFAULT_REVIEW_AGENTS,
+  DEFAULT_RUNTIME_NAME,
   HELIX_CONFIG_FILE,
   HELIX_DIR,
+  PRODUCT_NAME,
   STATE_VERSION,
   TASK_STATUSES,
   appendLedger,
@@ -30,8 +37,10 @@ export { loadRoutesConfig, resolveRouteDecision, routeRequest } from "./helix-ro
 export { scanProjectRules } from "./helix-rules.mjs";
 export { runReviewGate, runWorker } from "./helix-review.mjs";
 export { callOpenAICompatible, resolveAgentProvider, runLlmReview } from "./helix-llm.mjs";
+export { buildReviewFindingBundle, validateReviewFinding } from "./helix-review-findings.mjs";
 export { buildAgentContext, continuationDirective, recordRuntimeSession, resumeReport, writeContextSnapshot } from "./helix-context.mjs";
 export { preToolUseGuard, runInjectionHook } from "./helix-hooks.mjs";
+export { detectToolResultFindings, evaluateHookResultGate } from "./helix-hook-result-gate.mjs";
 export { resolveInjectionPoint } from "./helix-injection.mjs";
 export { dashboardData, statusReport, writeWorkflowSummary } from "./helix-status.mjs";
 export { copyPlanTemplate, createSamplePlan, runWorkflow } from "./helix-workflow.mjs";

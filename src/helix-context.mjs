@@ -1,6 +1,8 @@
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
+  DEFAULT_EXECUTOR_AGENT,
+  DEFAULT_LEAD_AGENT,
   STATE_VERSION,
   appendLedger,
   createWorkId,
@@ -29,8 +31,8 @@ export async function buildAgentContext(rootDir, options = {}) {
     ...(changed.available ? changed.paths : []),
   ].map(normalizeRelativePath));
   const rules = await scanProjectRules(rootDir, { targetPaths });
-  const resumeContext = await writeContextSnapshot(rootDir, { reason: `agent-context:${options.agent || "Atlas"}` });
-  const agent = normalizeAgentName(options.agent || task?.owner || "Atlas") || "Atlas";
+  const agent = normalizeAgentName(options.agent || task?.owner || DEFAULT_EXECUTOR_AGENT) || DEFAULT_EXECUTOR_AGENT;
+  const resumeContext = await writeContextSnapshot(rootDir, { reason: `agent-context:${agent}` });
   const role = options.role || roleForAgent(agent);
   const injectionPointName = options.injectionPoint || defaultInjectionPointForAgent(agent);
   const injectionPoint = await resolveInjectionPoint(rootDir, injectionPointName, {
@@ -189,8 +191,8 @@ export async function continuationDirective(rootDir, options = {}) {
     taskId: runnable?.id || active?.id || failed?.id || null,
     nextCommand: runnable ? "node ./bin/helix.mjs run" : active ? `node ./bin/helix.mjs node verify --task ${active.id}` : failed ? "node ./bin/helix.mjs status" : null,
     message: shouldContinue
-      ? `HelixFlow 还有未收口工作：${runnable?.id || active?.id || failed?.id}。请继续执行 ${runnable ? "run" : active ? "node loop" : "failure review"}，不要丢失上下文。`
-      : "HelixFlow 当前没有可续跑任务。",
+      ? `WildArrange 还有未收口工作：${runnable?.id || active?.id || failed?.id}。请继续执行 ${runnable ? "run" : active ? "node loop" : "failure review"}，不要丢失上下文。`
+      : "WildArrange 当前没有可续跑任务。",
     resume,
   };
   const jsonPath = resolveHelixPath(rootDir, "sessions", "continuation.json");
@@ -213,16 +215,16 @@ function resolveContextTask(tasks, taskId) {
 }
 
 function roleForAgent(agent) {
-  if (agent === "Oracle") return "goal_verifier";
-  if (agent === "Momus") return "skeptical_scope_reviewer";
-  if (agent === "Metis") return "bug_and_evidence_reviewer";
-  if (agent === "Sisyphus") return "lead_orchestrator";
+  if (agent === "BaiZe") return "goal_verifier";
+  if (agent === "QiongQi") return "skeptical_scope_reviewer";
+  if (agent === "LuanNiao") return "bug_and_evidence_reviewer";
+  if (agent === DEFAULT_LEAD_AGENT) return "lead_orchestrator";
   return "linear_worker";
 }
 
 function renderAgentContextMarkdown(context) {
   const lines = [
-    "# HelixFlow Agent Context",
+    "# WildArrange Agent Context",
     "",
     `Generated: ${context.at}`,
     `Config: ${context.configPath}`,
@@ -317,7 +319,7 @@ function summarizeChangeForContext(change) {
 function renderContextMarkdown(context) {
   const status = context.status || {};
   const lines = [
-    "# HelixFlow Resume Context",
+    "# WildArrange Resume Context",
     "",
     `Generated: ${context.at}`,
     `Reason: ${context.reason}`,
@@ -416,7 +418,7 @@ async function readSessionLineage(rootDir) {
 
 function renderContinuationMarkdown(directive) {
   return [
-    "# HelixFlow Continuation Directive",
+    "# WildArrange Continuation Directive",
     "",
     `Generated: ${directive.at}`,
     `Should continue: ${directive.shouldContinue ? "yes" : "no"}`,

@@ -1,0 +1,880 @@
+{
+  "version": 1,
+  "runtime": "wildarrange-linear",
+  "tools": [
+    {
+      "name": "helix_init",
+      "layer": "runtime_state",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs init",
+      "purpose": "创建 .helix 运行时状态、Agent 注册表、prompt-pack 注册表和 ledger。",
+      "reads": [
+        "packs/wildarrange-linear/**"
+      ],
+      "writes": [
+        ".helix/**"
+      ]
+    },
+    {
+      "name": "helix_config",
+      "layer": "runtime_state",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs config init --root | node ./bin/helix.mjs config show",
+      "purpose": "生成或读取 `helix.config.json` / `.helix/config.json`。用于配置模型 provider/model/reasoning，以及每个注入点挂载哪些 tool、markdown、skill、rules。",
+      "reads": [
+        "helix.config.json",
+        ".helix/config.json"
+      ],
+      "writes": [
+        "helix.config.json",
+        ".helix/config.json",
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "helix_injection_show",
+      "layer": "context_injection",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs injection show --point before_review --agent BaiZe --task T001",
+      "purpose": "解析某个注入点最终会挂载的 tools、markdown、skills 和 rules，用于调试 Codex/Cursor adapter 与 Agent 上下文是否接近预期。",
+      "reads": [
+        "helix.config.json",
+        ".helix/config.json",
+        ".helix/prompt-pack.json",
+        ".helix/**/*.md"
+      ],
+      "writes": []
+    },
+    {
+      "name": "helix_hook_run",
+      "layer": "context_injection",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs hook run --from hook.json",
+      "purpose": "Codex/Cursor adapter 入口：读取 SessionStart/UserPromptSubmit/PostToolUse/PostCompact/Stop hook payload，执行对应规则扫描、路由、续跑或范围检查，并输出可直接注入模型上下文的 Markdown。",
+      "reads": [
+        "helix.config.json",
+        ".helix/config.json",
+        ".helix/**",
+        "AGENTS.md",
+        "CLAUDE.md",
+        ".cursor/rules/**/*.md"
+      ],
+      "writes": [
+        ".helix/sessions/hooks/*.json",
+        ".helix/rules/context.*",
+        ".helix/snapshots/context.*",
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "helix_adapter_install",
+      "layer": "host_adapter",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs adapter install --target all --mode local",
+      "purpose": "生成 Codex hooks 配置和 Cursor rule 配置，把 WildArrange 的 hook run 入口挂到宿主可调用的位置；默认不修改用户全局配置。",
+      "reads": [
+        "package.json",
+        "helix.config.json",
+        "packs/wildarrange-linear/**"
+      ],
+      "writes": [
+        ".helix/adapters/**",
+        ".cursor/rules/wildarrange.mdc",
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "pre_tool_use_guard",
+      "layer": "gate",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs hook run --from pre-tool-use.json",
+      "purpose": "按 PreToolUse deny 格式，在工具执行前检查计划范围；计划外写入返回 permissionDecision=deny，防止先落盘后补救。",
+      "reads": [
+        ".helix/team/tasks.json",
+        "helix.config.json",
+        "hook payload"
+      ],
+      "writes": [
+        ".helix/sessions/hooks/*.json",
+        ".helix/ledger.jsonl",
+        ".helix/rules/context.*"
+      ]
+    },
+    {
+      "name": "post_tool_use_result_gate",
+      "layer": "gate",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs hook run --from post-tool-use.json",
+      "purpose": "读取 PostToolUse payload，识别 MCP transport failure、非零 exit code、permission denied、command not found 和显式失败状态；阻止把坏工具输出当完成证据。",
+      "reads": [
+        "hook payload",
+        "tool_response",
+        "helix.config.json"
+      ],
+      "writes": [
+        ".helix/sessions/hooks/*.json",
+        ".helix/ledger.jsonl"
+      ],
+      "commercialBoundary": "WildArrange original implementation; host-specific payload shapes stay in adapter layer."
+    },
+    {
+      "name": "helix_resume",
+      "layer": "runtime_state",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs resume [--session <id>]",
+      "purpose": "从 .helix/work.json、tasks.json、ledger.jsonl 恢复中断会话位置；记录 session 血缘，并刷新 `.helix/snapshots/context.md` 供新 Codex/Cursor 会话直接读取。",
+      "reads": [
+        ".helix/work.json",
+        ".helix/team/tasks.json",
+        ".helix/ledger.jsonl",
+        ".helix/snapshots/latest.json",
+        ".helix/sessions/lineage.json"
+      ],
+      "writes": [
+        ".helix/ledger.jsonl",
+        ".helix/sessions/lineage.json",
+        ".helix/snapshots/context.json",
+        ".helix/snapshots/context.md"
+      ]
+    },
+    {
+      "name": "helix_continuation_check",
+      "layer": "runtime_state",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs continuation check [--session <id>]",
+      "purpose": "Codex/Cursor 会话停止前读取 .helix 状态；如果还有 runnable、active、failed、review_blocked 任务，输出下一步续跑指令，避免关闭会话丢上下文。",
+      "reads": [
+        ".helix/work.json",
+        ".helix/team/tasks.json",
+        ".helix/ledger.jsonl",
+        ".helix/snapshots/latest.json"
+      ],
+      "writes": [
+        ".helix/sessions/continuation.json",
+        ".helix/sessions/continuation.md",
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "helix_rules_collect",
+      "layer": "context_injection",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs rules collect [--target <path>]",
+      "purpose": "扫描 AGENTS.md、CLAUDE.md、CONTEXT.md、.claude/.cursor/.github 规则，并按 target path/globs 生成 `.helix/rules/context.md`。",
+      "reads": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        "CONTEXT.md",
+        ".claude/rules/**/*.md",
+        ".cursor/rules/**/*.md",
+        ".github/instructions/**/*.md"
+      ],
+      "writes": [
+        ".helix/rules/context.json",
+        ".helix/rules/context.md",
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "helix_context_build",
+      "layer": "context_injection",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs context build [--agent YingLong] [--task T001]",
+      "purpose": "为单个简单上下文 Agent 生成任务、规则、变更路径、恢复指令和不可破坏 invariants 的输入包；后续接真实模型时作为 Agent 上下文。",
+      "reads": [
+        ".helix/team/tasks.json",
+        ".helix/snapshots/context.md",
+        ".helix/rules/context.md",
+        "git diff"
+      ],
+      "writes": [
+        ".helix/context-agents/*.json",
+        ".helix/context-agents/*.md",
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "helix_snapshot_write",
+      "layer": "runtime_state",
+      "status": "implemented-in-loop",
+      "command": "node ./bin/helix.mjs run",
+      "purpose": "在关键节点写入可恢复快照，并同步刷新 `.helix/snapshots/context.md`，避免 Codex/Cursor 会话被关闭后丢上下文。",
+      "reads": [
+        ".helix/**"
+      ],
+      "writes": [
+        ".helix/snapshots/**"
+      ]
+    },
+    {
+      "name": "helix_plan_import",
+      "layer": "planning",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs plan --from <plan.json>",
+      "purpose": "把机器可读计划导入 .helix/team/tasks.json。",
+      "reads": [
+        "<plan.json>"
+      ],
+      "writes": [
+        ".helix/plans/**",
+        ".helix/team/tasks.*",
+        ".helix/work.json",
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "plan_validate",
+      "layer": "planning",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs plan --from <plan.json>",
+      "purpose": "验证任务必须有 subject、verify_commands，并在导入前检查 task id 唯一、blockedBy 指向已知任务、无自依赖、无循环依赖。",
+      "reads": [
+        "<plan.json>"
+      ],
+      "writes": [
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "helix_run_next",
+      "layer": "execution_loop",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs run",
+      "purpose": "让下一个 pending task 走完 worker、verifier、scope_guard、checkpoint、retry 和 ledger。",
+      "reads": [
+        ".helix/team/tasks.json"
+      ],
+      "writes": [
+        ".helix/**",
+        "task.writable_paths"
+      ]
+    },
+    {
+      "name": "helix_workflow",
+      "layer": "execution_loop",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs workflow --from <plan.json>",
+      "purpose": "一键串起 init、plan import、run-until-idle、status、snapshot、workflow summary，用于模拟项目验收主路径。",
+      "reads": [
+        "<plan.json>",
+        "packs/wildarrange-linear/**"
+      ],
+      "writes": [
+        ".helix/**",
+        "task.writable_paths",
+        ".helix/reports/workflow-summary.*"
+      ]
+    },
+    {
+      "name": "helix_node",
+      "layer": "execution_loop",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs node <route|execute|verify|scope|review|checkpoint|retry>",
+      "purpose": "把 workflow 拆成可单独测试的节点：route、execute、verify、scope、review、checkpoint、retry。每个节点独立读写状态和 ledger。",
+      "reads": [
+        ".helix/team/tasks.json",
+        ".helix/prompt-pack.json",
+        "packs/wildarrange-linear/routes.json"
+      ],
+      "writes": [
+        ".helix/**",
+        "task.writable_paths",
+        ".helix/reports/failures/**",
+        ".helix/reports/reviews/**"
+      ]
+    },
+    {
+      "name": "helix_serve",
+      "layer": "runtime_state",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs serve --host 127.0.0.1 --port 8765",
+      "purpose": "启动只读本地网页 dashboard，展示 status、tasks、route decisions、snapshots 和 ledger。",
+      "reads": [
+        ".helix/**"
+      ],
+      "writes": []
+    },
+    {
+      "name": "helix_status",
+      "layer": "runtime_state",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs status",
+      "purpose": "显示当前 work 和任务计数。",
+      "reads": [
+        ".helix/work.json",
+        ".helix/team/tasks.json"
+      ],
+      "writes": []
+    },
+    {
+      "name": "helix_summary",
+      "layer": "runtime_state",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs summary",
+      "purpose": "生成或刷新 `.helix/reports/workflow-summary.json|md`，汇总任务状态、checkpoint、review/failure report、ChangeRequest 和 wisdom，作为模拟项目后的验收产物。",
+      "reads": [
+        ".helix/work.json",
+        ".helix/team/tasks.json",
+        ".helix/checkpoints/**",
+        ".helix/reports/**",
+        ".helix/changes/**",
+        ".helix/wisdom/**"
+      ],
+      "writes": [
+        ".helix/reports/workflow-summary.json",
+        ".helix/reports/workflow-summary.md",
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "helix_route",
+      "layer": "routing",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs route --text <request>",
+      "purpose": "按 Helix intent gate + category resolver，把用户请求解析为 primaryAgent、supportAgents、category、skills 和 nextCommand。",
+      "reads": [
+        "packs/wildarrange-linear/routes.json",
+        ".helix/work.json",
+        ".helix/team/tasks.json",
+        ".helix/snapshots/latest.json"
+      ],
+      "writes": [
+        ".helix/ledger.jsonl",
+        ".helix/snapshots/**"
+      ]
+    },
+    {
+      "name": "scope_guard",
+      "layer": "gate",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs guard scope --task <taskId>",
+      "purpose": "在 checkpoint 或 merge 前，对照 task.writable_paths 检查 changed paths；计划外改动必须退回 Jiuwei/DiJiang 审核，并生成 ChangeRequest。",
+      "reads": [
+        ".helix/team/tasks.json",
+        "git diff",
+        "git ls-files"
+      ],
+      "writes": [
+        ".helix/ledger.jsonl",
+        ".helix/changes/**"
+      ]
+    },
+    {
+      "name": "change_request_list",
+      "layer": "change_control",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs changes list",
+      "purpose": "列出 scope_guard 或 review blocker 生成的开放变更请求；只展示证据，不自动扩 scope。",
+      "reads": [
+        ".helix/changes/**"
+      ],
+      "writes": []
+    },
+    {
+      "name": "change_request_review",
+      "layer": "change_control",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs changes review --id <CR-id>",
+      "purpose": "由 Jiuwei 对 ChangeRequest 做确定性审计：必须有 evidence/rationale，保持 autoApply=false，不允许削弱 verification/review gates。",
+      "reads": [
+        ".helix/changes/<CR-id>.json"
+      ],
+      "writes": [
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "change_request_resolve",
+      "layer": "change_control",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs changes resolve --id <CR-id> --decision accept|reject --evidence <text> --rationale <text> [--apply-scope]",
+      "purpose": "把负责人裁决写入 ChangeRequest。accept/reject 本身只落盘；只有显式 --apply-scope 才把被拒路径并入 task.writable_paths 并允许后续 retry。",
+      "reads": [
+        ".helix/changes/<CR-id>.json",
+        ".helix/team/tasks.json"
+      ],
+      "writes": [
+        ".helix/changes/**",
+        ".helix/team/tasks.json",
+        ".helix/plans/**",
+        ".helix/ledger.jsonl",
+        ".helix/snapshots/**"
+      ]
+    },
+    {
+      "name": "helix_steer",
+      "layer": "change_control",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs steer --from <proposal.json>",
+      "purpose": "治理计划变更：支持 add_task、split_task、reorder_pending、revise_acceptance、mark_blocked；必须 evidence+rationale，禁止削弱验收或伪造完成。",
+      "reads": [
+        ".helix/team/tasks.json",
+        "<proposal.json>"
+      ],
+      "writes": [
+        ".helix/team/tasks.json",
+        ".helix/plans/**",
+        ".helix/ledger.jsonl",
+        ".helix/snapshots/**"
+      ]
+    },
+    {
+      "name": "helix_evidence_record",
+      "layer": "gate",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs evidence record --task T001 --criterion C001 --status pass --evidence <text>",
+      "purpose": "为 task.successCriteria 记录 criterion 级证据；checkpoint 不再只看命令级 verifier，还要求 successCriteria 全 PASS。",
+      "reads": [
+        ".helix/team/tasks.json"
+      ],
+      "writes": [
+        ".helix/team/tasks.json",
+        ".helix/plans/**",
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "helix_review_blocker_record",
+      "layer": "change_control",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs review-blockers record --from <blocker.json>",
+      "purpose": "把 final review blocker 记录成 review_blocked 状态，并追加独立 resolution task；原任务不被错误 checkpoint。",
+      "reads": [
+        ".helix/team/tasks.json",
+        "<blocker.json>"
+      ],
+      "writes": [
+        ".helix/team/tasks.json",
+        ".helix/plans/**",
+        ".helix/ledger.jsonl",
+        ".helix/snapshots/**"
+      ]
+    },
+    {
+      "name": "review_gate",
+      "layer": "gate",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs node review --task <taskId>",
+      "purpose": "checkpoint 前运行目标符合、范围一致、证据质量、success criteria、项目规则、显式 review_commands、project standards、LSP/comment/LLM 多 lane 复核；输出结构化 findings/testingGaps/residualRisks，失败则不允许 checkpoint。",
+      "reads": [
+        "task.evidence",
+        "task.successCriteria",
+        "task.verify_commands",
+        "task.review_commands",
+        "task.standards_commands",
+        "git diff",
+        "project rules",
+        "helix.config.json"
+      ],
+      "writes": [
+        ".helix/team/tasks.json",
+        ".helix/ledger.jsonl",
+        ".helix/reports/reviews/**",
+        ".helix/reports/failures/**",
+        ".helix/rules/**"
+      ],
+      "commercialBoundary": "WildArrange original implementation; external projects are conceptual references only."
+    },
+    {
+      "name": "review_finding_validator",
+      "layer": "gate",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs node review --task <taskId>",
+      "purpose": "把 deterministic lane、comment checker、LLM review 的问题归一成 finding schema，并为每条 finding 附独立 validator verdict，供 review blocker、dashboard 和 retry 使用。",
+      "reads": [
+        "reviewResult.lanes",
+        "qualityResults.commentResult.findings",
+        "llmReviews[].findings"
+      ],
+      "writes": [
+        ".helix/reports/reviews/**"
+      ],
+      "commercialBoundary": "WildArrange original schema validator; no copied third-party prompt or schema text."
+    },
+    {
+      "name": "llm_review",
+      "layer": "gate",
+      "status": "implemented",
+      "command": "configured by helix.config.json review.llm",
+      "purpose": "通过 OpenAI-compatible HTTP provider 调用 QiongQi/LuanNiao/BaiZe 等审查角色。无 key 时默认跳过或告警；required=true 时才阻断。",
+      "reads": [
+        "helix.config.json",
+        "task.evidence",
+        "task.successCriteria",
+        "project rules"
+      ],
+      "writes": [
+        ".helix/reports/reviews/**"
+      ],
+      "commercialBoundary": "Provider abstraction is model-neutral and host-neutral; no dependency on private host APIs."
+    },
+    {
+      "name": "test_gate",
+      "layer": "gate",
+      "status": "implemented",
+      "command": "task.verify_commands[]",
+      "purpose": "每个任务必须配置可执行 verifier；失败则回到 pending 或 failed，写入可读 failure report，不允许 checkpoint。",
+      "reads": [
+        "task.verify_commands"
+      ],
+      "writes": [
+        ".helix/team/tasks.json",
+        ".helix/ledger.jsonl",
+        ".helix/reports/failures/**"
+      ]
+    },
+    {
+      "name": "comment_check",
+      "layer": "gate",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs node review --task <taskId>",
+      "purpose": "检查变更文件中的占位注释、AI 署名、TODO/FIXME、lorem ipsum；默认 warn，可配置 blockOnFindings=true 阻断 checkpoint。",
+      "reads": [
+        "task.writable_paths",
+        "scopeResult.changedPaths",
+        "helix.config.json"
+      ],
+      "writes": [
+        ".helix/ledger.jsonl"
+      ],
+      "commercialBoundary": "WildArrange original implementation."
+    },
+    {
+      "name": "wisdom_append",
+      "layer": "memory",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs run",
+      "purpose": "每个任务后追加可复用 learnings、decisions、issues 和 verification notes。",
+      "reads": [
+        "task.evidence"
+      ],
+      "writes": [
+        ".helix/wisdom/**"
+      ]
+    },
+    {
+      "name": "grep_search",
+      "layer": "code_intelligence",
+      "status": "contract-only",
+      "command": "rg <pattern>",
+      "purpose": "做快速文本搜索；优先 rg，输出文件和行号，供 Kui/Taotie/YingLong 共享。",
+      "reads": [
+        "workspace files"
+      ],
+      "writes": []
+    },
+    {
+      "name": "glob_search",
+      "layer": "code_intelligence",
+      "status": "contract-only",
+      "command": "rg --files",
+      "purpose": "枚举候选文件，替代慢速全盘查找。",
+      "reads": [
+        "workspace files"
+      ],
+      "writes": []
+    },
+    {
+      "name": "ast_grep_search",
+      "layer": "code_intelligence",
+      "status": "contract-only",
+      "command": "ast-grep --pattern <pattern>",
+      "purpose": "按语法结构查找代码，而不是靠字符串猜测。",
+      "reads": [
+        "workspace files"
+      ],
+      "writes": []
+    },
+    {
+      "name": "ast_grep_replace_dry_run",
+      "layer": "code_intelligence",
+      "status": "contract-only",
+      "command": "ast-grep --pattern <pattern> --rewrite <rewrite> --dry-run",
+      "purpose": "批量改代码前先做结构化 dry-run，避免正则误伤。",
+      "reads": [
+        "workspace files"
+      ],
+      "writes": []
+    },
+    {
+      "name": "lsp_diagnostics",
+      "layer": "code_intelligence",
+      "status": "implemented",
+      "command": "configured by helix.config.json qualityGates.lspDiagnostics.commands",
+      "purpose": "运行项目配置的 typecheck/LSP 诊断命令，作为 LuanNiao 找 BUG 和 BaiZe 验收的证据。",
+      "reads": [
+        "workspace files",
+        "helix.config.json"
+      ],
+      "writes": [
+        ".helix/reports/reviews/**"
+      ],
+      "commercialBoundary": "CLI command adapter; no embedded third-party LSP daemon code."
+    },
+    {
+      "name": "lsp_references",
+      "layer": "code_intelligence",
+      "status": "contract-only",
+      "command": "contract-only",
+      "purpose": "跨文件查引用，支持安全重构和影响面判断。",
+      "reads": [
+        "workspace files",
+        "language server"
+      ],
+      "writes": []
+    },
+    {
+      "name": "lsp_rename",
+      "layer": "code_intelligence",
+      "status": "contract-only",
+      "command": "contract-only",
+      "purpose": "让语言服务器生成重命名 workspace edits，必须经过 scope_guard 后才能落盘。",
+      "reads": [
+        "workspace files",
+        "language server"
+      ],
+      "writes": [
+        "task.writable_paths"
+      ]
+    },
+    {
+      "name": "git_status",
+      "layer": "git",
+      "status": "contract-only",
+      "command": "git status --short",
+      "purpose": "所有任务前后读取工作区状态，识别用户未授权改动。",
+      "reads": [
+        "git index",
+        "workspace files"
+      ],
+      "writes": []
+    },
+    {
+      "name": "git_diff",
+      "layer": "git",
+      "status": "implemented-in-loop",
+      "command": "git diff -- . ':!.helix'",
+      "purpose": "worker 前后采集差异，作为 done-claim 和 verifier 的输入证据。",
+      "reads": [
+        "git index",
+        "workspace files"
+      ],
+      "writes": []
+    },
+    {
+      "name": "git_checkpoint",
+      "layer": "git",
+      "status": "contract-only",
+      "command": "contract-only",
+      "purpose": "范围门控、测试门控、review 门控都 PASS 后，生成可追溯 checkpoint；未来可绑定 commit/branch/PR。",
+      "reads": [
+        ".helix/checkpoints/**",
+        ".helix/reports/reviews/**",
+        "git diff"
+      ],
+      "writes": [
+        "git index",
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "worktree_create",
+      "layer": "git",
+      "status": "contract-only",
+      "command": "contract-only",
+      "purpose": "多 Agent 并行前为任务创建隔离 worktree；M1 线性循环暂不启用。",
+      "reads": [
+        "git repository"
+      ],
+      "writes": [
+        "worktree path"
+      ]
+    },
+    {
+      "name": "merge_admit",
+      "layer": "git",
+      "status": "contract-only",
+      "command": "contract-only",
+      "purpose": "把 worker worktree 的成果合入主工作区前，要求 scope_guard、test_gate、review_gate 全部 PASS。",
+      "reads": [
+        "worktree diff",
+        ".helix/ledger.jsonl"
+      ],
+      "writes": [
+        "main workspace"
+      ]
+    },
+    {
+      "name": "team_task_create",
+      "layer": "team_lite",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs task create --from <task.json>",
+      "purpose": "在已有 plan 中追加任务，继承 plan.defaults，重新校验 blockedBy 依赖图并写入 .helix/team/tasks.json；适合 ChangeRequest 或设计调整后新增任务。",
+      "reads": [
+        ".helix/team/tasks.json",
+        ".helix/plans/<planId>.json",
+        "packs/wildarrange-linear/routes.json",
+        "<task.json>"
+      ],
+      "writes": [
+        ".helix/team/tasks.json",
+        ".helix/team/tasks.md",
+        ".helix/plans/**",
+        ".helix/ledger.jsonl",
+        ".helix/snapshots/**"
+      ]
+    },
+    {
+      "name": "team_task_update",
+      "layer": "team_lite",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs task claim [--task <taskId>] [--owner <agent>]",
+      "purpose": "安全认领 pending 且未被 blockedBy 阻塞的任务，状态只会进入 in_progress；completed 仍只能由 verifier/scope/review/checkpoint gate 产生。",
+      "reads": [
+        ".helix/team/tasks.json"
+      ],
+      "writes": [
+        ".helix/team/tasks.json",
+        ".helix/team/tasks.md",
+        ".helix/ledger.jsonl",
+        ".helix/snapshots/**"
+      ]
+    },
+    {
+      "name": "team_task_list",
+      "layer": "team_lite",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs task list [--status <status>] [--owner <agent>]",
+      "purpose": "列出任务对象，支持按 status/owner 过滤；status 仍可用 `helix status` 查看聚合计数。",
+      "reads": [
+        ".helix/team/tasks.json"
+      ],
+      "writes": [
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "team_task_get",
+      "layer": "team_lite",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs task get --task <taskId>",
+      "purpose": "读取单个任务完整对象，供 YingLong/Jiuwei 在恢复、失败分析、追加任务前确认当前状态。",
+      "reads": [
+        ".helix/team/tasks.json"
+      ],
+      "writes": [
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "team_send_message",
+      "layer": "team_lite",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs team send --to <Agent> --from <Agent> --body <text>",
+      "purpose": "写入 .helix/team/inbox/<Agent>/ 和 outbox/<Agent>/，并追加 .helix/team/messages.md，用文件消息板实现最小协同消息能力。",
+      "reads": [
+        ".helix/team/inbox/**"
+      ],
+      "writes": [
+        ".helix/team/inbox/**",
+        ".helix/team/outbox/**",
+        ".helix/team/messages.md",
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "team_read_inbox",
+      "layer": "team_lite",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs team inbox [--agent <Agent>]",
+      "purpose": "读取某个 Agent 或全部 Agent 的 inbox；M1 只读不 ack，未来支持 processed/ 和 live delivery。",
+      "reads": [
+        ".helix/team/inbox/**"
+      ],
+      "writes": [
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "prompt_list",
+      "layer": "prompt_pack",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs prompts list",
+      "purpose": "列出当前安装的 Agent/Skill/Tool 合同。",
+      "reads": [
+        ".helix/prompt-pack.json"
+      ],
+      "writes": []
+    },
+    {
+      "name": "prompt_show",
+      "layer": "prompt_pack",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs prompts show --agent <name>",
+      "purpose": "从已安装 prompt-pack 渲染指定 Agent 提示词，并校验 sha256 未漂移。",
+      "reads": [
+        ".helix/prompt-pack.json",
+        "packs/wildarrange-linear/**"
+      ],
+      "writes": []
+    },
+    {
+      "name": "skill_show",
+      "layer": "prompt_pack",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs prompts show --skill <name>",
+      "purpose": "从已安装 prompt-pack 渲染指定 Skill，并校验 sha256 未漂移。",
+      "reads": [
+        ".helix/prompt-pack.json",
+        "packs/wildarrange-linear/**"
+      ],
+      "writes": []
+    },
+    {
+      "name": "codex_spawn_agent",
+      "layer": "adapter",
+      "status": "contract-only",
+      "command": "contract-only",
+      "purpose": "Codex 适配器：未来用本地 CLI/API 拉起动态 Agent，把 prompt、skill、task 和上下文快照一起传入。",
+      "reads": [
+        ".helix/prompt-pack.json",
+        ".helix/team/tasks.json",
+        ".helix/snapshots/**"
+      ],
+      "writes": [
+        ".helix/sessions/**",
+        ".helix/team/outbox/**"
+      ]
+    },
+    {
+      "name": "cursor_rule_sync",
+      "layer": "adapter",
+      "status": "contract-only",
+      "command": "contract-only",
+      "purpose": "Cursor 适配器：把 Agent/Skill 约束同步成 project rules，并让执行前后进入 Helix gate。",
+      "reads": [
+        "packs/wildarrange-linear/**"
+      ],
+      "writes": [
+        ".cursor/**"
+      ]
+    },
+    {
+      "name": "mcp_register",
+      "layer": "adapter",
+      "status": "contract-only",
+      "command": "contract-only",
+      "purpose": "把 ast-grep、LSP、git bash、team-lite 等能力注册为 Codex/Cursor 可调用 MCP。",
+      "reads": [
+        "tool configuration"
+      ],
+      "writes": [
+        "tool-specific MCP config"
+      ]
+    }
+  ],
+  "adapterNotes": {
+    "codex": "以 shell-backed commands 或 MCP tools 暴露这些能力；Codex 写文件必须保持在任务范围内。",
+    "cursor": "以本地 CLI commands 和 project rules 暴露；用 watcher 或 git hooks 强化 gate。"
+  }
+}

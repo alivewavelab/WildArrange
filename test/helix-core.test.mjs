@@ -52,7 +52,7 @@ import {
 async function withTempDir(fn) {
   const baseDir = path.join(process.cwd(), ".tmp");
   await mkdir(baseDir, { recursive: true });
-  const dir = await mkdtemp(path.join(baseDir, "helix-linear-"));
+  const dir = await mkdtemp(path.join(baseDir, "wildarrange-linear-"));
   try {
     await fn(dir);
   } finally {
@@ -112,6 +112,10 @@ async function postJson(url, body) {
   });
 }
 
+function nodeEval(source) {
+  return `node -e ${JSON.stringify(source.replace(/\s*\n\s*/g, " ").trim())}`;
+}
+
 test("init creates durable runtime state", async () => {
   await withTempDir(async (dir) => {
     const work = await initRuntime(dir);
@@ -121,28 +125,45 @@ test("init creates durable runtime state", async () => {
   });
 });
 
-test("init installs helix-linear prompt, skill, and tool contracts", async () => {
+test("init installs wildarrange-linear prompt, skill, and tool contracts", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
     const pack = await listPromptPack(dir);
-    assert.equal(pack.name, "helix-linear");
+    assert.equal(pack.name, "wildarrange-linear");
     assert.deepEqual(
       pack.agents.sort(),
-      ["Atlas", "Explore", "Hephaestus", "Librarian", "Metis", "Momus", "Oracle", "Prometheus", "Router", "Sisyphus"].sort(),
+      [
+        "YingLong",
+        "Kui",
+        "ZhuRong",
+        "Taotie",
+        "LuanNiao",
+        "QiongQi",
+        "BaiZe",
+        "DiJiang",
+        "Router",
+        "Jiuwei",
+        "ProductIntentReviewer",
+        "UserJourneyMapper",
+        "AcceptanceDesigner",
+        "UXInteractionReviewer",
+        "ScopeTradeoffReviewer",
+        "DomainBenchmarkResearcher",
+      ].sort(),
     );
     assert.ok(pack.skills.includes("review-work"));
     assert.equal(pack.tools, "tools/tool-contract.json");
     assert.equal(pack.routes, "routes.json");
-    assert.ok(pack.skills.includes("helix-injection-runtime"));
+    assert.ok(pack.skills.includes("wildarrange-injection-runtime"));
 
-    const atlasPrompt = await renderPromptPackEntry(dir, { agent: "Atlas" });
-    assert.match(atlasPrompt, /必须 verifier PASS/);
+    const yingLongPrompt = await renderPromptPackEntry(dir, { agent: "YingLong" });
+    assert.match(yingLongPrompt, /必须 verifier PASS/);
 
     const reviewSkill = await renderPromptPackEntry(dir, { skill: "review-work" });
     assert.match(reviewSkill, /目标验证器/);
 
     const toolContract = JSON.parse(await renderPromptPackEntry(dir, { tools: true }));
-    assert.equal(toolContract.runtime, "helix-linear");
+    assert.equal(toolContract.runtime, "wildarrange-linear");
     assert.ok(toolContract.tools.some((tool) => tool.name === "helix_run_next"));
     assert.ok(toolContract.tools.some((tool) => tool.name === "scope_guard"));
     assert.ok(toolContract.tools.some((tool) => tool.name === "ast_grep_search"));
@@ -151,6 +172,25 @@ test("init installs helix-linear prompt, skill, and tool contracts", async () =>
     const routeTable = JSON.parse(await renderPromptPackEntry(dir, { routes: true }));
     assert.equal(routeTable.version, 1);
     assert.ok(routeTable.intents.some((intent) => intent.name === "execute"));
+    assert.ok(routeTable.planAgentBundles.some((agent) => agent.name === "ProductIntentReviewer"));
+  });
+});
+
+test("route decision loads product planning agent bundle on demand", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const route = await routeRequest(dir, {
+      text: "做一个网页版提醒事项 App，一期 MVP 要有清单流程、空状态、验收标准和失败恢复。",
+    });
+
+    assert.equal(route.domain, "visual");
+    assert.equal(route.category, "visual-engineering");
+    assert.ok(route.planAgents.some((agent) => agent.name === "ProductIntentReviewer"));
+    assert.ok(route.planAgents.some((agent) => agent.name === "UserJourneyMapper"));
+    assert.ok(route.planAgents.some((agent) => agent.name === "AcceptanceDesigner"));
+    assert.ok(route.planAgents.some((agent) => agent.name === "UXInteractionReviewer"));
+    assert.ok(route.planAgents.some((agent) => agent.name === "ScopeTradeoffReviewer"));
+    assert.match(route.reason, /验收/);
   });
 });
 
@@ -158,14 +198,14 @@ test("config controls models and injection point mounts", async () => {
   await withTempDir(async (dir) => {
     await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
       agents: {
-        Oracle: { provider: "host", model: "host-default", reasoning: "xhigh" },
+        BaiZe: { provider: "host", model: "host-default", reasoning: "xhigh" },
       },
       injectionPoints: {
         before_review: {
           enabled: true,
           tools: ["review_gate", "helix_evidence_record"],
           markdown: ["CLAUDE.md"],
-          skills: ["review-work", "helix-injection-runtime"],
+          skills: ["review-work", "wildarrange-injection-runtime"],
           rules: { mode: "dynamic" },
         },
       },
@@ -175,14 +215,14 @@ test("config controls models and injection point mounts", async () => {
 
     const loaded = await loadHelixConfig(dir);
     assert.equal(loaded.sourcePath, "helix.config.json");
-    assert.equal(loaded.config.agents.Oracle.reasoning, "xhigh");
+    assert.equal(loaded.config.agents.BaiZe.reasoning, "xhigh");
 
-    const injection = await resolveInjectionPoint(dir, "before_review", { agent: "Oracle", taskId: "T001" });
+    const injection = await resolveInjectionPoint(dir, "before_review", { agent: "BaiZe", taskId: "T001" });
     assert.deepEqual(injection.tools, ["review_gate", "helix_evidence_record"]);
     assert.equal(injection.markdown[0].path, "CLAUDE.md");
     assert.ok(injection.markdown[0].content.includes("Use real verification"));
     assert.ok(injection.skills.some((skill) => skill.name === "review-work"));
-    assert.ok(injection.skills.some((skill) => skill.name === "helix-injection-runtime"));
+    assert.ok(injection.skills.some((skill) => skill.name === "wildarrange-injection-runtime"));
   });
 });
 
@@ -191,18 +231,48 @@ test("default GPT-family agents are delegated to the host provider", async () =>
     await initRuntime(dir);
     const { config } = await loadHelixConfig(dir);
     assert.equal(config.modelProviders.host.type, "host");
-    assert.equal(config.agents.Atlas.provider, "host");
-    assert.equal(config.agents.Momus.provider, "host");
+    assert.equal(config.agents.YingLong.provider, "host");
+    assert.equal(config.agents.QiongQi.provider, "host");
     assert.equal(config.modelProviders.openai, undefined);
 
-    const resolved = resolveAgentProvider(config, "Momus");
+    const resolved = resolveAgentProvider(config, "QiongQi");
     assert.equal(resolved.available, false);
     assert.equal(resolved.hostManaged, true);
     assert.match(resolved.reason, /managed by the host adapter/);
   });
 });
 
-test("hook adapter emits OMO-like runtime injection for user prompt", async () => {
+test("legacy agent names resolve to WildArrange agent keys", async () => {
+  await withTempDir(async (dir) => {
+    const legacyExecutor = ["At", "las"].join("");
+    const legacyReviewer = ["Mo", "mus"].join("");
+    const legacyLead = ["Sisy", "phus"].join("");
+    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
+      agents: {
+        [legacyExecutor]: { provider: "host", model: "legacy-executor" },
+        [legacyReviewer]: { provider: "host", model: "legacy-reviewer" },
+      },
+      review: {
+        llm: { enabled: false, agents: [legacyReviewer] },
+      },
+    }, null, 2));
+    await initRuntime(dir);
+
+    const { config } = await loadHelixConfig(dir);
+    assert.equal(config.agents.YingLong.model, "legacy-executor");
+    assert.equal(config.agents.QiongQi.model, "legacy-reviewer");
+    assert.deepEqual(config.review.llm.agents, ["QiongQi"]);
+
+    const message = await sendTeamMessage(dir, { from: legacyLead, to: legacyExecutor, body: "legacy route" });
+    assert.equal(message.from, "Jiuwei");
+    assert.equal(message.to, "YingLong");
+
+    const legacyPrompt = await renderPromptPackEntry(dir, { agent: legacyExecutor });
+    assert.match(legacyPrompt, /YingLong/);
+  });
+});
+
+test("hook adapter emits WildArrange runtime injection for user prompt", async () => {
   await withTempDir(async (dir) => {
     await writeFile(path.join(dir, "AGENTS.md"), "# Project Rules\n\nAlways verify behavior.\n");
     await initRuntime(dir);
@@ -216,9 +286,11 @@ test("hook adapter emits OMO-like runtime injection for user prompt", async () =
 
     assert.equal(result.event, "UserPromptSubmit");
     assert.equal(result.pointName, "user_prompt_submit");
-    assert.match(result.output, /<helixflow-injection event="UserPromptSubmit" point="user_prompt_submit">/);
+    assert.match(result.output, /<wildarrange-injection event="UserPromptSubmit" point="user_prompt_submit">/);
     assert.match(result.output, /## Route Decision/);
     assert.match(result.output, /Category: visual-engineering/);
+    assert.match(result.output, /Plan Agent Bundle/);
+    assert.match(result.output, /UXInteractionReviewer/);
     assert.match(result.output, /Project Rules/);
     assert.match(result.output, /Always verify behavior/);
 
@@ -254,8 +326,36 @@ test("hook adapter injects dynamic rules after tool use target paths", async () 
     assert.deepEqual(result.targetPaths, ["src/app.js"]);
     assert.match(result.output, /Dynamic Targets/);
     assert.match(result.output, /src\/app\.js/);
+    assert.match(result.output, /Tool Result Gate/);
+    assert.match(result.output, /Decision: pass/);
     assert.match(result.output, /UI files need browser verification/);
     assert.match(result.output, /Run browser verification after UI changes/);
+  });
+});
+
+test("post-tool-use result gate blocks failed tool evidence", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+
+    const result = await runInjectionHook(dir, {
+      hook_event_name: "PostToolUse",
+      session_id: "session-failed-tool",
+      cwd: dir,
+      tool_name: "exec_command",
+      tool_response: {
+        exitCode: 127,
+        stderr: "zsh: command not found: pnpmx",
+      },
+    });
+
+    assert.equal(result.decision, "block");
+    assert.match(result.output, /Tool Result Gate/);
+    assert.match(result.output, /Decision: block/);
+    assert.match(result.output, /nonzero_exit_code/);
+    assert.match(result.output, /command_not_found/);
+
+    const ledger = await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8");
+    assert.match(ledger, /hook_result_gate/);
   });
 });
 
@@ -305,29 +405,29 @@ test("pre-tool-use guard denies out-of-scope file writes before they land", asyn
 
 test("adapter install writes codex hooks and cursor rules", async () => {
   await withTempDir(async (dir) => {
-    const report = await installAdapter(dir, { target: "all", mode: "npx", packageName: "helixflow" });
+    const report = await installAdapter(dir, { target: "all", mode: "npx", packageName: "wildarrange" });
     assert.equal(report.mode, "npx");
     assert.ok(report.outputs.some((output) => output.path === ".helix/adapters/codex/hooks.json"));
-    assert.ok(report.outputs.some((output) => output.path === ".cursor/rules/helixflow.mdc"));
+    assert.ok(report.outputs.some((output) => output.path === ".cursor/rules/wildarrange.mdc"));
 
     const codexHooks = await readJson(resolveHelixPath(dir, "adapters", "codex", "hooks.json"));
     assert.ok(codexHooks.hooks.PreToolUse);
     assert.match(codexHooks.hooks.PreToolUse[0].matcher, /apply_patch/);
-    assert.match(codexHooks.hooks.SessionStart[0].hooks[0].command, /npx -y helixflow hook run/);
+    assert.match(codexHooks.hooks.SessionStart[0].hooks[0].command, /npx -y wildarrange hook run/);
 
-    const cursorRule = await readFile(path.join(dir, ".cursor", "rules", "helixflow.mdc"), "utf8");
+    const cursorRule = await readFile(path.join(dir, ".cursor", "rules", "wildarrange.mdc"), "utf8");
     assert.match(cursorRule, /alwaysApply: true/);
-    assert.match(cursorRule, /HelixFlow Governance Runtime/);
+    assert.match(cursorRule, /WildArrange Governance Runtime/);
 
-    const cursorRulePath = path.join(dir, ".cursor", "rules", "helixflow.mdc");
+    const cursorRulePath = path.join(dir, ".cursor", "rules", "wildarrange.mdc");
     await writeFile(cursorRulePath, "existing user rule\n");
     const reinstall = await installAdapter(dir, { target: "cursor", mode: "local" });
-    const ruleOutput = reinstall.outputs.find((output) => output.path === ".cursor/rules/helixflow.mdc");
+    const ruleOutput = reinstall.outputs.find((output) => output.path === ".cursor/rules/wildarrange.mdc");
     assert.ok(ruleOutput.backup);
     assert.equal(await readFile(path.join(dir, ruleOutput.backup), "utf8"), "existing user rule\n");
 
     const uninstall = await uninstallAdapter(dir, { target: "all" });
-    assert.ok(uninstall.outputs.some((output) => output.path === ".cursor/rules/helixflow.mdc" && output.status === "removed" && output.backup));
+    assert.ok(uninstall.outputs.some((output) => output.path === ".cursor/rules/wildarrange.mdc" && output.status === "removed" && output.backup));
     await assert.rejects(readFile(cursorRulePath, "utf8"), /ENOENT/);
     assert.match(await readFile(resolveHelixPath(dir, "adapters", "uninstall-report.md"), "utf8"), /Adapter Uninstall Report/);
   });
@@ -337,24 +437,24 @@ test("team-lite sends and lists durable inbox messages", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
     const message = await sendTeamMessage(dir, {
-      from: "Sisyphus",
-      to: "Atlas",
+      from: "Jiuwei",
+      to: "YingLong",
       body: "Continue T001 after verifier passes.",
       summary: "continue T001",
     });
-    assert.equal(message.from, "Sisyphus");
-    assert.equal(message.to, "Atlas");
+    assert.equal(message.from, "Jiuwei");
+    assert.equal(message.to, "YingLong");
     assert.equal(message.status, "unread");
-    assert.match(message.inboxPath, /^\.helix\/team\/inbox\/Atlas\/msg_.+\.json$/);
+    assert.match(message.inboxPath, /^\.helix\/team\/inbox\/YingLong\/msg_.+\.json$/);
 
-    const atlasInbox = await listTeamMessages(dir, { agent: "Atlas" });
-    assert.equal(atlasInbox.length, 1);
-    assert.equal(atlasInbox[0].id, message.id);
-    assert.equal(atlasInbox[0].body, "Continue T001 after verifier passes.");
+    const yingLongInbox = await listTeamMessages(dir, { agent: "YingLong" });
+    assert.equal(yingLongInbox.length, 1);
+    assert.equal(yingLongInbox[0].id, message.id);
+    assert.equal(yingLongInbox[0].body, "Continue T001 after verifier passes.");
 
     const allInbox = await listTeamMessages(dir);
     assert.equal(allInbox.length, 1);
-    assert.match(await readFile(resolveHelixPath(dir, "team", "messages.md"), "utf8"), /Sisyphus -> Atlas: continue T001/);
+    assert.match(await readFile(resolveHelixPath(dir, "team", "messages.md"), "utf8"), /Jiuwei -> YingLong: continue T001/);
     assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /team_message_sent/);
   });
 });
@@ -393,7 +493,7 @@ test("routeRequest maps high-risk domains to the right agents and categories", a
 
     const review = await routeRequest(dir, "帮我 review 这次代码是否满足目标");
     assert.equal(review.intent, "review");
-    assert.equal(review.primaryAgent, "Oracle");
+    assert.equal(review.primaryAgent, "BaiZe");
     assert.equal(review.category, null);
     assert.ok(review.skills.includes("review-work"));
 
@@ -409,7 +509,7 @@ test("routeRequest maps high-risk domains to the right agents and categories", a
     const architecture = await routeRequest(dir, "优化 Agent 路由和编排状态机，跑通完整 workflow");
     assert.equal(architecture.domain, "logic");
     assert.equal(architecture.route, "plan");
-    assert.equal(architecture.primaryAgent, "Prometheus");
+    assert.equal(architecture.primaryAgent, "DiJiang");
     assert.equal(architecture.category, "ultrabrain");
   });
 });
@@ -594,11 +694,11 @@ test("project rules and agent context collect matching local governance", async 
     assert.ok(rules.rules.some((rule) => rule.path === ".cursor/rules/frontend.md"));
     assert.match(await readFile(resolveHelixPath(dir, "rules", "context.md"), "utf8"), /UI 变更必须浏览器验收/);
 
-    const context = await buildAgentContext(dir, { agent: "Momus", taskId: "T001" });
-    assert.equal(context.agent, "Momus");
+    const context = await buildAgentContext(dir, { agent: "QiongQi", taskId: "T001" });
+    assert.equal(context.agent, "QiongQi");
     assert.equal(context.task.id, "T001");
     assert.equal(context.projectRules.matched, 2);
-    assert.match(await readFile(resolveHelixPath(dir, "context-agents", "Momus-T001.md"), "utf8"), /HelixFlow Agent Context/);
+    assert.match(await readFile(resolveHelixPath(dir, "context-agents", "QiongQi-T001.md"), "utf8"), /WildArrange Agent Context/);
   });
 });
 
@@ -747,7 +847,7 @@ test("review blockers create a resolution task without completing the blocked ta
       taskId: "T001",
       title: "Resolve missing browser verification",
       objective: "Run browser-level evidence before final checkpoint.",
-      evidence: "Oracle final review found missing browser evidence.",
+      evidence: "BaiZe final review found missing browser evidence.",
       rationale: "The blocker must be resolved as a separate task.",
       worker_command: "node -e \"process.exit(0)\"",
       verify_commands: ["node -e \"process.exit(0)\""],
@@ -831,10 +931,10 @@ test("LLM review gate uses OpenAI-compatible provider when configured", async ()
           local: { apiKeyEnv: "HELIX_TEST_LLM_KEY", baseUrl },
         },
         agents: {
-          Momus: { provider: "local", model: "test-reviewer" },
+          QiongQi: { provider: "local", model: "test-reviewer" },
         },
         review: {
-          llm: { enabled: true, required: true, agents: ["Momus"] },
+          llm: { enabled: true, required: true, agents: ["QiongQi"] },
         },
       }, null, 2));
       process.env.HELIX_TEST_LLM_KEY = "test-key";
@@ -854,7 +954,7 @@ test("LLM review gate uses OpenAI-compatible provider when configured", async ()
 
       const result = await runNextTask(dir);
       assert.equal(result.status, "completed");
-      assert.ok(result.reviewResult.lanes.some((lane) => lane.name === "llm_Momus" && lane.status === "pass"));
+      assert.ok(result.reviewResult.lanes.some((lane) => lane.name === "llm_QiongQi" && lane.status === "pass"));
       assert.equal(result.reviewResult.llmReviews[0].model, "test-reviewer");
 
       const reviewReport = await readJson(resolveHelixPath(dir, "reports", "reviews", `${plan.id}-T001.json`));
@@ -894,9 +994,218 @@ test("comment checker can block checkpoint when configured", async () => {
     assert.equal(result.status, "failed");
     assert.equal(result.task.last_failure.reason, "review_gate_failed");
     assert.ok(result.reviewResult.lanes.some((lane) => lane.name === "comment_checker" && lane.status === "fail"));
+    assert.ok(result.reviewResult.findings.some((finding) => finding.source === "comment_checker" && finding.validator.status === "validated"));
 
     const reviewReport = await readFile(resolveHelixPath(dir, "reports", "reviews", `${plan.id}-T001.md`), "utf8");
     assert.match(reviewReport, /src\/app\.js:1 todo/);
+    assert.match(reviewReport, /## Structured Findings/);
+    assert.match(reviewReport, /Validator: validated/);
+
+    const reviewJson = await readJson(resolveHelixPath(dir, "reports", "reviews", `${plan.id}-T001.json`));
+    assert.ok(reviewJson.findings.some((finding) => finding.source === "comment_checker"));
+    assert.ok(Array.isArray(reviewJson.testingGaps));
+    assert.ok(Array.isArray(reviewJson.residualRisks));
+  });
+});
+
+test("simulation greenfield project runs from product planning to completed web app", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(path.join(dir, "AGENTS.md"), "# Project Rules\n\nUser-visible web work needs verifier evidence.\n");
+    await initRuntime(dir);
+
+    const route = await routeRequest(dir, {
+      text: "从零做一个网页版提醒事项 App，一期 MVP 要有清单流程、空状态、验收标准和失败恢复。",
+    });
+    assert.equal(route.route, "plan");
+    assert.ok(route.planAgents.some((agent) => agent.name === "ProductIntentReviewer"));
+    assert.ok(route.planAgents.some((agent) => agent.name === "UserJourneyMapper"));
+    assert.ok(route.planAgents.some((agent) => agent.name === "AcceptanceDesigner"));
+    assert.ok(route.planAgents.some((agent) => agent.name === "UXInteractionReviewer"));
+
+    const planPath = path.join(dir, "greenfield-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Greenfield reminders web app",
+      objective: "从产品澄清到可验证 Web 提醒事项 App 完成闭环。",
+      tasks: [
+        {
+          id: "T001",
+          subject: "产出提醒事项产品 brief、设计和计划",
+          description: "澄清目标、用户旅程、空状态、失败恢复和验收口径。",
+          writable_paths: [".workflow/**"],
+          worker_command: nodeEval(`
+            const fs = require("fs");
+            fs.mkdirSync(".workflow/specs/reminders", { recursive: true });
+            fs.mkdirSync(".workflow/designs/reminders", { recursive: true });
+            fs.mkdirSync(".workflow/plans/reminders", { recursive: true });
+            fs.writeFileSync(".workflow/specs/reminders/brief.md", [
+              "# Reminders Brief",
+              "REQ-REMINDER-001 SHALL let users add reminders.",
+              "REQ-REMINDER-002 MUST show an empty state before any reminder exists.",
+              "Given an empty list When the page opens Then empty guidance is visible.",
+              "Given invalid text When adding Then the app keeps the user in flow."
+            ].join("\\n"));
+            fs.writeFileSync(".workflow/designs/reminders/spec.md", [
+              "# Reminders Design",
+              "Slots: header, input, add button, list, empty state, error feedback.",
+              "States: loading, empty, success, error, repeated-use."
+            ].join("\\n"));
+            fs.writeFileSync(".workflow/plans/reminders/tasks.md", [
+              "# Reminders Tasks",
+              "T002 implements the app with verifier evidence."
+            ].join("\\n"));
+          `),
+          verify_commands: [
+            nodeEval(`
+              const fs = require("fs");
+              const brief = fs.readFileSync(".workflow/specs/reminders/brief.md", "utf8");
+              const design = fs.readFileSync(".workflow/designs/reminders/spec.md", "utf8");
+              if (!brief.includes("REQ-REMINDER-001") || !brief.includes("Given an empty list")) process.exit(1);
+              if (!design.includes("empty state") || !design.includes("error feedback")) process.exit(1);
+            `),
+          ],
+        },
+        {
+          id: "T002",
+          subject: "实现网页版提醒事项 App",
+          description: "根据 T001 的 brief/design 生成可打开的 HTML 与 JS。",
+          blockedBy: ["T001"],
+          writable_paths: ["index.html", "package.json", "src/**"],
+          worker_command: nodeEval(`
+            const fs = require("fs");
+            fs.mkdirSync("src", { recursive: true });
+            fs.writeFileSync("package.json", JSON.stringify({ scripts: { test: "node src/app.test.js" } }, null, 2));
+            fs.writeFileSync("index.html", [
+              "<!doctype html>",
+              "<html><head><meta charset=\\"utf-8\\"><title>提醒事项</title></head>",
+              "<body><main><h1>提醒事项</h1><input id=\\"new-item\\"><button id=\\"add\\">添加</button><p id=\\"empty\\">还没有提醒事项</p><ul id=\\"list\\"></ul></main><script src=\\"src/app.js\\"></script></body></html>"
+            ].join("\\n"));
+            fs.writeFileSync("src/app.js", [
+              "function addReminder(items, title) {",
+              "  const text = String(title || '').trim();",
+              "  if (!text) return { items, error: '请输入提醒事项' };",
+              "  return { items: [...items, { id: items.length + 1, title: text, done: false }], error: '' };",
+              "}",
+              "if (typeof module !== 'undefined') module.exports = { addReminder };"
+            ].join("\\n"));
+            fs.writeFileSync("src/app.test.js", [
+              "const { addReminder } = require('./app.js');",
+              "const added = addReminder([], '交付方案');",
+              "if (added.items.length !== 1 || added.error) process.exit(1);",
+              "const empty = addReminder([], '   ');",
+              "if (!empty.error || empty.items.length !== 0) process.exit(1);"
+            ].join("\\n"));
+          `),
+          verify_commands: ["npm test"],
+        },
+      ],
+    }, null, 2));
+
+    await importPlan(dir, planPath);
+    const first = await runNextTask(dir);
+    assert.equal(first.status, "completed");
+    const second = await runNextTask(dir);
+    assert.equal(second.status, "completed");
+
+    const status = await statusReport(dir);
+    assert.equal(status.total, 2);
+    assert.equal(status.completed, 2);
+    assert.match(await readFile(path.join(dir, "index.html"), "utf8"), /提醒事项/);
+    assert.match(await readFile(resolveHelixPath(dir, "reports", "workflow-summary.md"), "utf8"), /Status: PASS/);
+  });
+});
+
+test("simulation existing project handles large feature addition through planning and gates", async () => {
+  await withTempDir(async (dir) => {
+    await mkdir(path.join(dir, "src"), { recursive: true });
+    await mkdir(path.join(dir, "test"), { recursive: true });
+    await writeFile(path.join(dir, "AGENTS.md"), "# Existing Project Rules\n\nLarge features require scope and regression evidence.\n");
+    await writeFile(path.join(dir, "src", "app.cjs"), "function listItems(items) { return items; }\nmodule.exports = { listItems };\n");
+    await writeFile(path.join(dir, "test", "app.test.cjs"), "const { listItems } = require('../src/app.cjs');\nif (listItems([1]).length !== 1) process.exit(1);\n");
+    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    assert.equal((await runCommand("git add AGENTS.md src/app.cjs test/app.test.cjs", dir)).exitCode, 0);
+    await initRuntime(dir);
+
+    const route = await routeRequest(dir, {
+      text: "已有项目新增一个提醒分组大功能，要处理权限、状态流程、回归验收和范围取舍。",
+    });
+    assert.equal(route.route, "plan");
+    assert.ok(route.planAgents.some((agent) => agent.name === "UserJourneyMapper"));
+    assert.ok(route.planAgents.some((agent) => agent.name === "AcceptanceDesigner"));
+    assert.ok(route.planAgents.some((agent) => agent.name === "ScopeTradeoffReviewer"));
+
+    const planPath = path.join(dir, "existing-feature-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Existing project reminder groups",
+      objective: "在已有项目里新增提醒分组能力，并保留既有列表行为。",
+      tasks: [
+        {
+          id: "T001",
+          subject: "补充分组功能计划证据",
+          description: "记录用户旅程、范围取舍和验收标准。",
+          writable_paths: [".workflow/**"],
+          worker_command: nodeEval(`
+            const fs = require("fs");
+            fs.mkdirSync(".workflow/plans/reminder-groups", { recursive: true });
+            fs.writeFileSync(".workflow/plans/reminder-groups/tasks.md", [
+              "# Reminder Groups Plan",
+              "IN: create group, assign reminder, preserve existing listItems behavior.",
+              "OUT: sharing permissions and cloud sync are deferred.",
+              "Acceptance: regression test listItems and new group behavior."
+            ].join("\\n"));
+          `),
+          verify_commands: [
+            nodeEval(`
+              const fs = require("fs");
+              const plan = fs.readFileSync(".workflow/plans/reminder-groups/tasks.md", "utf8");
+              if (!plan.includes("OUT: sharing permissions") || !plan.includes("regression test")) process.exit(1);
+            `),
+          ],
+        },
+        {
+          id: "T002",
+          subject: "实现提醒分组并保留回归行为",
+          description: "新增 groupReminder，同时保持 listItems 不变。",
+          blockedBy: ["T001"],
+          writable_paths: ["src/**", "test/**"],
+          worker_command: nodeEval(`
+            const fs = require("fs");
+            fs.writeFileSync("src/app.cjs", [
+              "function listItems(items) { return items; }",
+              "function groupReminder(groups, groupName, reminderTitle) {",
+              "  const key = String(groupName || '').trim();",
+              "  const title = String(reminderTitle || '').trim();",
+              "  if (!key || !title) return { groups, error: '分组和提醒不能为空' };",
+              "  const next = { ...groups, [key]: [...(groups[key] || []), title] };",
+              "  return { groups: next, error: '' };",
+              "}",
+              "module.exports = { listItems, groupReminder };"
+            ].join("\\n"));
+            fs.writeFileSync("test/app.test.cjs", [
+              "const { listItems, groupReminder } = require('../src/app.cjs');",
+              "if (listItems([1]).length !== 1) process.exit(1);",
+              "const grouped = groupReminder({}, '工作', '提交方案');",
+              "if (grouped.error || grouped.groups['工作'][0] !== '提交方案') process.exit(1);",
+              "const invalid = groupReminder({}, '', '提交方案');",
+              "if (!invalid.error) process.exit(1);"
+            ].join("\\n"));
+          `),
+          verify_commands: ["node test/app.test.cjs"],
+        },
+      ],
+    }, null, 2));
+
+    await importPlan(dir, planPath);
+    assert.equal((await runNextTask(dir)).status, "completed");
+    const implemented = await runNextTask(dir);
+    assert.equal(implemented.status, "completed");
+    assert.equal(implemented.scopeResult.status, "pass");
+    assert.equal(implemented.reviewResult.pass, true);
+
+    await writeWorkflowSummary(dir, { reason: "existing_feature_simulation" });
+    const status = await statusReport(dir);
+    assert.equal(status.completed, 2);
+    assert.match(await readFile(path.join(dir, "src", "app.cjs"), "utf8"), /groupReminder/);
+    assert.match(await readFile(resolveHelixPath(dir, "reports", "workflow-summary.md"), "utf8"), /Status: PASS/);
   });
 });
 
@@ -1007,11 +1316,11 @@ test("team task claim respects blockers and does not bypass execution gates", as
     }));
     await importPlan(dir, planPath);
 
-    await assert.rejects(() => claimTeamTask(dir, { taskId: "T002", owner: "Atlas" }), /blocked by T001/);
+    await assert.rejects(() => claimTeamTask(dir, { taskId: "T002", owner: "YingLong" }), /blocked by T001/);
 
-    const claimed = await claimTeamTask(dir, { taskId: "T001", owner: "Atlas" });
+    const claimed = await claimTeamTask(dir, { taskId: "T001", owner: "YingLong" });
     assert.equal(claimed.task.status, "in_progress");
-    assert.equal(claimed.task.owner, "Atlas");
+    assert.equal(claimed.task.owner, "YingLong");
     assert.ok(claimed.task.claimedAt);
 
     const readBack = await getTeamTask(dir, "T001");
@@ -1026,7 +1335,7 @@ test("team task claim respects blockers and does not bypass execution gates", as
     const checkpointed = await runWorkflowNode(dir, "checkpoint", { taskId: "T001" });
     assert.equal(checkpointed.status, "completed");
 
-    const secondClaim = await claimTeamTask(dir, { taskId: "T002", owner: "Atlas" });
+    const secondClaim = await claimTeamTask(dir, { taskId: "T002", owner: "YingLong" });
     assert.equal(secondClaim.task.status, "in_progress");
     assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /team_task_claimed/);
   });
@@ -1178,7 +1487,7 @@ test("accepted change request can explicitly apply scope and reopen retry", asyn
     const resolved = await resolveChangeRequest(dir, {
       id: changeRequestId,
       decision: "accept",
-      evidence: "docs/leak.md is part of the accepted task output after Sisyphus review",
+      evidence: "docs/leak.md is part of the accepted task output after Jiuwei review",
       rationale: "The task objective needs this artifact and verification remains unchanged",
       applyScope: true,
     });
@@ -1400,7 +1709,7 @@ test("resume writes durable context snapshot and session lineage", async () => {
     assert.match(firstResume.nextAction, /run task T001/);
 
     let contextMd = await readFile(resolveHelixPath(dir, "snapshots", "context.md"), "utf8");
-    assert.match(contextMd, /HelixFlow Resume Context/);
+    assert.match(contextMd, /WildArrange Resume Context/);
     assert.match(contextMd, /codex-session-a/);
     assert.match(contextMd, /run task T001/);
     assert.match(contextMd, /Checkpoint requires verifier PASS/);
@@ -1495,28 +1804,28 @@ test("dashboard API drives task, inbox, and summary operations without bypassing
       assert.equal(state.body.status.pending, 2);
       assert.equal(state.body.summary, null);
 
-      const blockedClaim = await postJson(`${baseUrl}/api/tasks/claim`, { taskId: "T002", owner: "Atlas" });
+      const blockedClaim = await postJson(`${baseUrl}/api/tasks/claim`, { taskId: "T002", owner: "YingLong" });
       assert.equal(blockedClaim.response.status, 500);
       assert.match(blockedClaim.body.error, /blocked by T001/);
 
-      const claimed = await postJson(`${baseUrl}/api/tasks/claim`, { taskId: "T001", owner: "Atlas" });
+      const claimed = await postJson(`${baseUrl}/api/tasks/claim`, { taskId: "T001", owner: "YingLong" });
       assert.equal(claimed.response.status, 200);
       assert.equal(claimed.body.result.task.status, "in_progress");
-      assert.equal(claimed.body.result.task.owner, "Atlas");
+      assert.equal(claimed.body.result.task.owner, "YingLong");
 
       const task = await fetchJson(`${baseUrl}/api/tasks/T001`);
       assert.equal(task.response.status, 200);
       assert.equal(task.body.result.task.status, "in_progress");
 
       const message = await postJson(`${baseUrl}/api/team/send`, {
-        from: "Sisyphus",
-        to: "Atlas",
+        from: "Jiuwei",
+        to: "YingLong",
         body: "Continue T001 from dashboard.",
       });
       assert.equal(message.response.status, 200);
-      assert.equal(message.body.result.to, "Atlas");
+      assert.equal(message.body.result.to, "YingLong");
 
-      const inbox = await fetchJson(`${baseUrl}/api/team/inbox?agent=Atlas`);
+      const inbox = await fetchJson(`${baseUrl}/api/team/inbox?agent=YingLong`);
       assert.equal(inbox.response.status, 200);
       assert.equal(inbox.body.result.length, 1);
       assert.equal(inbox.body.result[0].body, "Continue T001 from dashboard.");

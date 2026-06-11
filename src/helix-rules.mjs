@@ -21,7 +21,6 @@ const PROJECT_RULE_FILES = [
 ];
 
 const PROJECT_RULE_DIRS = [
-  ".omo/rules",
   ".claude/rules",
   ".cursor/rules",
   ".github/instructions",
@@ -157,7 +156,7 @@ function ruleMatchesTargets(rule, targetPaths) {
 
 function renderRulesMarkdown(result) {
   const lines = [
-    "# HelixFlow Project Rules Context",
+    "# WildArrange Project Rules Context",
     "",
     `Generated: ${result.at}`,
     `Targets: ${result.targetPaths.join(", ") || "(all)"}`,

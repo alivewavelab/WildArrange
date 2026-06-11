@@ -1,47 +1,47 @@
-# HelixFlow
+# WildArrange
 
-HelixFlow is a local governance runtime for Codex and Cursor agent workflows.
+简体中文 | [English](./README.en.md)
 
-The first release is deliberately small: one recoverable linear loop before multi-agent parallel execution.
+WildArrange 是面向 Codex 与 Cursor 的本地 Agent 治理运行时。第一版刻意保持精简：先跑通**可恢复、可验证的单线闭环**，再考虑多 Agent 并行。
 
-## What It Does
+## 它能做什么
 
-HelixFlow turns a coding request into a gated workflow:
+WildArrange 把一次编码请求变成带门禁的工作流：
 
 ```text
 init -> plan -> execute -> verify -> scope -> review -> checkpoint -> resume
 ```
 
-The key rule is simple: a worker can claim work is done, but only gates can complete it.
+核心规则：**worker 可以声称完成，但只有 gate 才能判定完成。**
 
-The core runtime is host-neutral. Codex and Cursor adapters improve injection and recovery, but the workflow can run through CLI commands alone.
+核心运行时是宿主中立的。Codex / Cursor adapter 负责注入与恢复增强，但仅凭 CLI 也能跑完整流程。
 
-## Install
+## 安装
 
-From a published package:
-
-```bash
-npx helixflow@latest init
-npx helixflow@latest adapter install
-```
-
-For a long-running project, install it as a project dependency so hooks do not need network access:
+从 npm 包使用：
 
 ```bash
-npm i -D helixflow
-npx helixflow adapter install --mode local
+npx wildarrange@latest init
+npx wildarrange@latest adapter install
 ```
 
-Current local development entry:
+长期使用的项目建议安装为 devDependency，避免 hook 每次走网络：
+
+```bash
+npm i -D wildarrange
+npx wildarrange adapter install --mode local
+```
+
+本地开发（本仓库）：
 
 ```bash
 node ./bin/helix.mjs init
 node ./bin/helix.mjs adapter install --target all --mode local
 ```
 
-## Minimal Workflow
+## 最小工作流
 
-Create a plan:
+创建计划 `plan.json`：
 
 ```json
 {
@@ -59,7 +59,7 @@ Create a plan:
 }
 ```
 
-Run it:
+运行：
 
 ```bash
 node ./bin/helix.mjs plan --from plan.json
@@ -68,17 +68,17 @@ node ./bin/helix.mjs status
 node ./bin/helix.mjs summary
 ```
 
-Or run a full sample:
+或直接跑内置样例：
 
 ```bash
 node ./bin/helix.mjs workflow --sample
 ```
 
-## Important API Contract
+## 重要 API 约定
 
-`runNextTask` returns an action result, not only the stored task status.
+`runNextTask` 返回的是**运行时下一步动作**，不等于任务持久状态。
 
-When a verifier fails, the task is moved back to `pending` for retry, while the returned result can be:
+verifier 失败时，任务会回到 `pending` 等待重试，但返回值可能是：
 
 ```json
 {
@@ -87,98 +87,75 @@ When a verifier fails, the task is moved back to `pending` for retry, while the 
 }
 ```
 
-This is intentional. The result says what the runtime wants next; the task state says where the task is stored.
+这是有意设计：`result.status` 表示运行时建议的下一步；`task.status` 表示磁盘上的任务状态。
 
-## Adapter Commands
+## Adapter
 
 ```bash
 node ./bin/helix.mjs adapter install --target all --mode local
 node ./bin/helix.mjs adapter uninstall --target all
 ```
 
-Install and uninstall both write reports under `.helix/adapters/`. Existing adapter files are backed up before overwrite or removal.
+安装与卸载都会在 `.helix/adapters/` 写入报告；覆盖或删除前会备份已有 adapter 文件。
 
-Cursor receives a project rule at `.cursor/rules/helixflow.mdc`. Codex receives a lifecycle hook bundle at `.helix/adapters/codex/hooks.json`; deeper host-level Codex plugin installation is still adapter work, not assumed by the runtime.
+- **Cursor**：项目规则写入 `.cursor/rules/wildarrange.mdc`
+- **Codex**：生命周期 hook 配置写入 `.helix/adapters/codex/hooks.json`（更深层的 Codex 插件安装仍属 adapter 工作，runtime 不假设已装好）
 
 ## Dashboard
 
-Local dashboard:
+本地启动：
 
 ```bash
 node ./bin/helix.mjs serve --host 127.0.0.1 --port 8765
 ```
 
-Binding to a non-loopback host requires a token:
+绑定非 loopback 地址时必须带 token：
 
 ```bash
 node ./bin/helix.mjs serve --host 0.0.0.0 --port 8765 --token "$HELIX_DASHBOARD_TOKEN"
 ```
 
-API requests then need either:
+API 请求需携带以下之一：
 
 ```text
 Authorization: Bearer <token>
 ```
 
-or:
+或：
 
 ```text
 x-helix-token: <token>
 ```
 
-## Runtime Files
+## 运行时文件
 
-- `.helix/team/tasks.json`: task state
-- `.helix/ledger.jsonl`: append-only event ledger
-- `.helix/checkpoints/`: completed task checkpoints
-- `.helix/reports/`: workflow, review, and failure reports
-- `.helix/snapshots/context.md`: cross-session resume context
-- `.helix/adapters/`: adapter configs, reports, backups
+| 路径 | 作用 |
+|---|---|
+| `.helix/team/tasks.json` | 任务状态 |
+| `.helix/ledger.jsonl` | 追加式事件账本 |
+| `.helix/checkpoints/` | 已完成任务的 checkpoint |
+| `.helix/reports/` | workflow / review / failure 报告 |
+| `.helix/snapshots/context.md` | 跨会话恢复上下文 |
+| `.helix/adapters/` | adapter 配置、报告与备份 |
 
-## Configuration
+## 配置
 
-`helix.config.json` configures agents, model providers, dynamic agents, and injection points.
+`helix.config.json` 配置 Agent、模型 provider、动态类别与注入点。
 
-Agents that use `"provider": "host"` are delegated to the installed host tool. In Codex, GPT-family model selection is handled by Codex. In Cursor, the default Cursor model is used by the adapter path. HelixFlow does not need an OpenAI API key for those host-managed agents.
+`"provider": "host"` 的 Agent 交给宿主工具处理：Codex 侧由 Codex 选模型，Cursor 侧走 adapter 默认模型，**不需要** WildArrange 自备 OpenAI API key。
 
-External providers use OpenAI-compatible HTTP configuration:
-
-```json
-{
-  "modelProviders": {
-    "host": { "type": "host", "adapter": "auto" },
-    "deepseek": {
-      "type": "openai-compatible",
-      "apiKeyEnv": "DEEPSEEK_API_KEY",
-      "baseUrlEnv": "DEEPSEEK_BASE_URL",
-      "defaultBaseUrl": "https://api.deepseek.com"
-    }
-  },
-  "agents": {
-    "Momus": { "role": "skeptical_reviewer", "provider": "host", "model": "host-default" },
-    "Librarian": { "role": "external_research", "provider": "deepseek", "model": "deepseek-v4-pro" }
-  },
-  "review": {
-    "llm": {
-      "enabled": false,
-      "required": false,
-      "agents": ["Momus"]
-    }
-  }
-}
-```
-
-`apiKeyEnv` and `baseUrlEnv` are environment variable names, not secret values. `defaultBaseUrl` is the fallback endpoint used when the `baseUrlEnv` variable is not set.
-
-Use `.env.helix.example` as the environment variable template:
+外部 provider 使用 OpenAI 兼容 HTTP 配置，详见 `helix.config.example.json`。环境变量模板见 `.env.wildarrange.example`：
 
 ```bash
-source .env.helix
+# 复制后填入真实值，勿提交密钥
+source .env.wildarrange
 ```
 
-The deterministic gates work without model APIs. When `review.llm.required` is `false`, a missing external key or a host-managed provider produces a warning rather than blocking the workflow.
+`apiKeyEnv` / `baseUrlEnv` 是**环境变量名**，不是密钥本身。`defaultBaseUrl` 在对应 env 未设置时作为回退地址。
 
-LSP/typecheck and comment checks live in the CLI review gate, not in editor-specific hooks:
+确定性 gate 不依赖模型 API。当 `review.llm.required` 为 `false` 时，缺少外部 key 或 host provider 只会告警，不会阻断线性状态机。
+
+LSP / 类型检查与注释检查走 CLI review gate，而非编辑器专属 hook：
 
 ```json
 {
@@ -195,21 +172,31 @@ LSP/typecheck and comment checks live in the CLI review gate, not in editor-spec
 }
 ```
 
-## Commercial Boundary
+## 商业边界
 
-HelixFlow is an original runtime inspired by agent governance patterns. It must not distribute copied source code, prompt text, or tool implementations from projects whose license blocks commercial redistribution.
+WildArrange 是受 Agent 治理模式启发的原创运行时，**不得**分发受限第三方项目的源码、prompt 原文或近似改写。
 
-Before a commercial release, run the publish review skill and confirm:
+商业发布前请确认：
 
-- No restricted third-party source or prompt text is included.
-- `packs/` contains HelixFlow-authored prompts and contracts.
-- External workflow references remain documentation or conceptual comparison only.
+- 未包含受限第三方源码或 prompt 文本
+- `packs/` 中为 WildArrange 自著 prompt 与 tool 合同
+- 外部工作流参考仅保留为文档或概念对照
 
-## Development
+## 开发
 
 ```bash
 npm test
 npm pack --dry-run --cache /private/tmp/helix-npm-cache
 ```
 
-Current status: linear governance loop is implemented and tested. Optional LLM review, configurable LSP/typecheck diagnostics, and comment checking are available through the CLI review gate. Multi-agent orchestration still needs real sub-agent spawning and background task management.
+当前状态：线性治理闭环已实现并通过测试；可选 LLM review、可配置 LSP/类型检查诊断与注释检查可通过 CLI review gate 启用。多 Agent 编排仍待真实子 Agent 启动与后台任务管理。
+
+## 更多文档
+
+| 文档 | 说明 |
+|---|---|
+| [README.en.md](./README.en.md) | 英文版说明 |
+| [CLAUDE.md](./CLAUDE.md) | Agent / 开发者治理规范 |
+| [doc/concept.md](./doc/concept.md) | 产品概念与外部参考边界 |
+| [doc/project-architecture.md](./doc/project-architecture.md) | 运行时架构与 gate 模型 |
+| [doc/development-plan.md](./doc/development-plan.md) | P0 / P1 / P2 路线 |
