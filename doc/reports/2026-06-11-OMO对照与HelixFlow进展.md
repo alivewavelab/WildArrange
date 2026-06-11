@@ -10,8 +10,10 @@ OMO 源码目录：`/private/tmp/oh-my-openagent-src`
 
 本次维护性目标已经达成：`src/helix-core.mjs` 从 4000+ 行单体收敛为 90 行兼容导出层，实际实现拆入职责单一的领域模块。当前所有 `src/helix-*.mjs` 文件都在 1000 行以内，主要模块保持几百行级别。
 
-但它还不是 OMO 等价实现。差距不在“提示词有没有写”，而在 OMO 的宿主级工具链和后台运行时：真实子 Agent 启动、后台并发、模型 fallback、LSP 守门、评论检查、Skill MCP、OpenCode 会话管理、tmux/cmux 可视化、多 Agent team mode、真实 LLM review provider。  
-按源码级能力看：线性闭环已进入可测试维护状态；去掉多 Agent 并行后，目标 90% 的主要缺口仍是 LSP/comment checker、真实 LLM review gate、prompt/model variant、adapter 真安装。
+但它还不是 OMO 等价实现。差距不在“提示词有没有写”，而在 OMO 的宿主级工具链和后台运行时：真实子 Agent 启动、后台并发、模型 fallback、Skill MCP、OpenCode 会话管理、tmux/cmux 可视化、多 Agent team mode。
+按源码级能力看：线性闭环已进入可测试维护状态；去掉多 Agent 并行后，LLM review provider、LSP/typecheck gate、comment checker 已有可配置实现，剩余主要缺口是真实子 Agent、background task/session manager、skill matcher/Skill MCP、prompt model variants。
+
+商业化边界已收紧：发布包内的 README、CLAUDE、packs、src 不再保留 OMO/SUL 源码溯源字段或 OMO 注入 skill 名；源码级对照证据只保留在 `doc/reports` 等研究文档中，不进入 npm `files` 包体。
 
 ## 已合并进当前本地实现的进展
 
@@ -34,9 +36,12 @@ OMO 源码目录：`/private/tmp/oh-my-openagent-src`
 | 项目规则扫描 | 已完成基础版 | 扫描 `AGENTS.md/CLAUDE.md/CONTEXT.md/.omo/.cursor/.github` 等规则并注入 | `src/helix-rules.mjs` |
 | 跨会话恢复 | 已完成基础版 | 写 `.helix/snapshots/context.md`、continuation 指令，降低 Codex 会话丢失风险 | `src/helix-context.mjs` |
 | 小黑板/任务板 | 已完成轻量版 | 用 `.helix/team/*` 模拟 team message/task create/list/get/claim | `team_send_message`、`team_task_create` |
-| Prompt pack | 已完成裁剪版 | 已有 10 个 Agent、28 个 Skill、55 个 Tool 合同 | `packs/omo-linear/manifest.json`、`tools/tool-contract.json` |
-| 测试 | 已完成本轮验证 | 本轮 `npm test` 在本机权限环境下 `40/40` 通过；沙箱内唯一失败仍是 dashboard 测试绑定 `127.0.0.1` 的 `listen EPERM` | `test/helix-core.test.mjs` |
-| npm pack dry-run | 已完成本轮验证 | `npm pack --dry-run --cache /private/tmp/helix-npm-cache` 通过，包体 65 个文件，约 97.4 kB | `package.json` |
+| LLM review provider | 已完成可配置版 | 通过 OpenAI-compatible HTTP 调用 Momus/Metis/Oracle；默认关闭，无 key 不阻断 | `src/helix-llm.mjs`、`src/helix-review.mjs` |
+| LSP/typecheck gate | 已完成可配置版 | 通过 `qualityGates.lspDiagnostics.commands` 接项目 typecheck/LSP 命令 | `src/helix-gates.mjs` |
+| Comment checker | 已完成可配置版 | 检查占位注释、AI 署名、TODO/FIXME；默认 warn，可配置阻断 | `src/helix-gates.mjs` |
+| Prompt pack | 已完成商业化隔离版 | 暴露名改为 `helix-linear`，新增发布 skills，删除 OMO 注入 skill 名和 tool contract 溯源字段 | `packs/helix-linear/manifest.json`、`tools/tool-contract.json` |
+| 测试 | 待本轮验证 | 新增 LLM provider 与 comment checker 测试，需运行 `npm test` | `test/helix-core.test.mjs` |
+| npm pack dry-run | 待本轮验证 | 涉及发布包内容变化，需重新运行 `npm pack --dry-run --cache /private/tmp/helix-npm-cache` | `package.json` |
 
 ## 本次重构后的代码维护规范
 
@@ -62,7 +67,7 @@ OMO 源码目录：`/private/tmp/oh-my-openagent-src`
 | Librarian | 文档/OSS/多仓检索，提供证据 | 已移植为 Agent 提示词 | 缺少 web/docs provider 和跨 repo 搜索工具实装 |
 | Explore | 快速代码库 grep/模式查找 | 已移植为 Agent 提示词 | `grep/glob` 仍是合同能力，未封装成独立 Agent runtime |
 | Metis | 计划前 gap analyzer，抓隐藏意图/歧义/AI 失误点 | 已移植为 Agent 提示词 | 缺少强制进入规划循环的自动门 |
-| Momus | ruthless reviewer，高精度计划审核 | 已移植为 Agent 提示词 | 缺少真实 LLM review provider 接入 |
+| Momus | ruthless reviewer，高精度计划审核 | 已接可配置 LLM review provider | 需要用户提供真实 provider/model/key 后验证真实效果 |
 | Sisyphus-Junior | category worker，专注执行，禁止再委派 | 部分替代 | 当前用 Hephaestus/Atlas worker 语义替代；后续需要独立 `junior` worker prompt 和工具权限 |
 | Multimodal-Looker | 图片/PDF/图表分析 | 未实现 | 可后置；Codex/Cursor 均有不同视觉能力，适合放 adapter 层 |
 
@@ -248,12 +253,10 @@ OMO 源码目录：`/private/tmp/oh-my-openagent-src`
 
 | 优先级 | 模块 | 为什么先做 |
 |---:|---|---|
-| P0 | 真实 LLM review provider | 没有它，Momus/Metis/Oracle 只能是提示词语义，不能形成“质疑式验收” |
-| P0 | LSP diagnostics gate | OMO 的实际质量提升很大一部分来自编辑后自动诊断 |
-| P0 | comment checker | 对小团队治理有直接价值，能阻断 AI 味和低质量注释 |
 | P0 | adapter 真安装/卸载/备份 | 用户装插件时不能只生成配置，必须有可撤销安装流程 |
+| P0 | 真实用户 provider 配置验证 | LLM review provider 已接通假服务测试，还需要真实 OpenAI/DeepSeek/Kimi/Gemini 配置验证 |
 | P1 | prompt model variants | 让 GPT/Kimi/Gemini 各吃各的提示词，接近 OMO 原效果 |
-| P1 | publish/pre-publish/get-unpublished skills | npm 发布前需要，且能提高交付安全 |
+| P1 | publish/pre-publish/get-unpublished skills | 已补基础版，后续接 CLI 命令和 release notes 自动生成 |
 | P1 | `codex_spawn_agent` 最小实现 | 先跑“简单上下文子 Agent”，再进入并行集群 |
 | P2 | background task/session manager | 多 Agent 并行必需，但在线性 90% 目标后做 |
 | P2 | skill matcher + skill MCP | 提升自动装载效果，降低手动配置 |
@@ -290,6 +293,6 @@ OMO 源码目录：`/private/tmp/oh-my-openagent-src`
 - OMO OpenCode tools：`/private/tmp/oh-my-openagent-src/packages/omo-opencode/src/tools/*`
 - HelixFlow runtime：`/Users/boyanliu/Documents/Development/文档规范/工作范式/src/helix-core.mjs`
 - HelixFlow CLI：`/Users/boyanliu/Documents/Development/文档规范/工作范式/bin/helix.mjs`
-- HelixFlow prompt pack：`/Users/boyanliu/Documents/Development/文档规范/工作范式/packs/omo-linear`
+- HelixFlow prompt pack：`/Users/boyanliu/Documents/Development/文档规范/工作范式/packs/helix-linear`
 - npm scoped package 官方文档：`https://docs.npmjs.com/creating-and-publishing-scoped-public-packages`
 - npm organization 官方文档：`https://docs.npmjs.com/creating-an-organization`

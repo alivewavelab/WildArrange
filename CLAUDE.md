@@ -8,10 +8,12 @@
 
 ## 实现边界
 
-- 先还原 oh-my-openagent 的运行秩序：计划与执行分离、worker 不自证完成、独立验证、失败返工、证据入账。
-- 不直接移植 OpenCode Ultimate 专属工具，例如 `team_*`、OpenCode plugin hooks、tmux layout。
+- 先实现 HelixFlow 的运行秩序：计划与执行分离、worker 不自证完成、独立验证、失败返工、证据入账。
+- 不把任何宿主专属工具硬塞进 core，例如特定 editor plugin hooks、tmux layout。
 - Codex / Cursor 适配放到 runtime adapter 层；核心状态机必须是产品中立的本地文件协议。
-- 第一版不接真实模型 API key，不启动常驻多 Agent 集群，只跑通线性状态机。
+- LLM review 通过 OpenAI-compatible provider 配置化接入；默认关闭，无 key 时不阻断线性状态机。
+- 第一版不启动常驻多 Agent 集群，只跑通线性状态机。
+- 商业发布包不得包含受限第三方源码、prompt 原文或近似改写文本；外部项目只能作为概念参考和对照证据。
 
 ## 工程约束
 
@@ -37,7 +39,7 @@
 ## 目录约定
 
 - `README.md`：新用户安装、初始化、最小工作流和 dashboard 安全说明。
-- `doc/concept.md`：产品概念与 OMO 借鉴边界。
+- `doc/concept.md`：产品概念与外部参考边界。
 - `doc/project-architecture.md`：运行时架构、状态文件和 gate 模型。
 - `doc/development-plan.md`：P0/P1/P2 路线。
 - `bin/helix.mjs`：CLI 入口。
@@ -46,6 +48,7 @@
 - `src/helix-failure.mjs`：失败原因分类、返工提示与失败摘要。
 - `src/helix-rules.mjs`：项目规范扫描与规则上下文注入。
 - `src/helix-review.mjs`：Worker 执行与 Oracle/Momus/Metis 确定性复核门。
+- `src/helix-llm.mjs`：OpenAI-compatible LLM provider 与可选 LLM review。
 - `src/helix-injection.mjs`：注入点解析、Markdown/Skill 挂载加载。
 - `src/helix-context.mjs`：Agent 上下文、恢复快照、会话延续。
 - `src/helix-hooks.mjs`：宿主生命周期 Hook、PreToolUse 范围拦截。

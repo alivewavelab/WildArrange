@@ -2,7 +2,7 @@
 
 ## 目的
 
-有意义的实现完成后做后置 review。这是 OMO 五路 review 的 Helix M1 改编版。M1 可以线性执行各 lane；未来 adapter 可以并行 fan-out。
+有意义的实现完成后做后置 review。M1 可以线性执行各 lane；未来 adapter 可以并行 fan-out。
 
 ## 必要上下文
 

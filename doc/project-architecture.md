@@ -22,7 +22,7 @@ bin/helix.mjs
      -> src/helix-team.mjs
      -> src/helix-gates.mjs
   -> src/helix-dashboard.mjs
-  -> packs/omo-linear/*
+  -> packs/helix-linear/*
   -> .helix/*
 ```
 
@@ -47,9 +47,9 @@ bin/helix.mjs
 - `src/helix-team.mjs`: team-lite tasks, claims, evidence recording, task-state persistence, outbox, and durable message board.
 - `src/helix-gates.mjs`: command execution, verifier, scope guard, path checks, checkpoints, change requests, review/failure reports, and wisdom ledger.
 - `src/helix-dashboard.mjs`: local dashboard HTTP API and HTML UI.
-- `packs/omo-linear/agents`: role prompts.
-- `packs/omo-linear/skills`: skill prompts.
-- `packs/omo-linear/tools/tool-contract.json`: tool contract inventory.
+- `packs/helix-linear/agents`: role prompts.
+- `packs/helix-linear/skills`: skill prompts.
+- `packs/helix-linear/tools/tool-contract.json`: tool contract inventory.
 - `helix.config.json`: local runtime configuration.
 
 ## Runtime State
@@ -73,11 +73,31 @@ Completion requires:
 
 `inconclusive` is not completion evidence.
 
+The review gate is host-neutral. It runs from the CLI and may include deterministic lanes, configured `review_commands`, configured `standards_commands`, optional LSP/typecheck commands, comment checking, and optional OpenAI-compatible LLM review.
+
 ## Adapter Model
 
 Cursor receives `.cursor/rules/helixflow.mdc`.
 
 Codex receives `.helix/adapters/codex/hooks.json`, which mirrors OMO-style lifecycle hooks. Full host-level Codex plugin installation is still future adapter work.
+
+## Provider Model
+
+Default GPT-family agents use `provider: "host"`. That means Codex/Cursor owns model selection, authentication, and model routing. HelixFlow does not require `OPENAI_API_KEY` for host-managed Atlas, Hephaestus, Oracle, Metis, Momus, Sisyphus, or generic `deep`/`ultrabrain` lanes.
+
+External providers use `type: "openai-compatible"` and are configured with:
+
+- `apiKeyEnv`: environment variable name that stores the API key.
+- `baseUrlEnv`: optional environment variable name that overrides the endpoint.
+- `defaultBaseUrl`: fallback endpoint when `baseUrlEnv` is not set.
+
+`apiKeyEnv` and `baseUrlEnv` must not contain raw secret values.
+
+## Commercial Boundary
+
+HelixFlow core must remain original code. External workflow projects may inform concepts, node names, and quality gates, but commercial builds must not ship copied source, copied prompt text, or tool implementations from licenses that restrict commercial redistribution.
+
+Adapter-specific behavior belongs in `src/helix-adapters.mjs` or host-specific generated files. Core workflow, gates, ledger, and provider logic must run without Codex/Cursor private hooks.
 
 ## Known Architecture Debt
 

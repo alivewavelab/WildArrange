@@ -2,7 +2,7 @@
 
 HelixFlow is a local governance runtime for Codex and Cursor agent workflows.
 
-It is inspired by oh-my-openagent, but the first release is deliberately smaller: one recoverable linear loop before multi-agent parallel execution.
+The first release is deliberately small: one recoverable linear loop before multi-agent parallel execution.
 
 ## What It Does
 
@@ -13,6 +13,8 @@ init -> plan -> execute -> verify -> scope -> review -> checkpoint -> resume
 ```
 
 The key rule is simple: a worker can claim work is done, but only gates can complete it.
+
+The core runtime is host-neutral. Codex and Cursor adapters improve injection and recovery, but the workflow can run through CLI commands alone.
 
 ## Install
 
@@ -96,7 +98,7 @@ node ./bin/helix.mjs adapter uninstall --target all
 
 Install and uninstall both write reports under `.helix/adapters/`. Existing adapter files are backed up before overwrite or removal.
 
-Cursor receives a project rule at `.cursor/rules/helixflow.mdc`. Codex receives an OMO-like hook bundle at `.helix/adapters/codex/hooks.json`; deeper host-level Codex plugin installation is still adapter work, not assumed by the runtime.
+Cursor receives a project rule at `.cursor/rules/helixflow.mdc`. Codex receives a lifecycle hook bundle at `.helix/adapters/codex/hooks.json`; deeper host-level Codex plugin installation is still adapter work, not assumed by the runtime.
 
 ## Dashboard
 
@@ -137,7 +139,65 @@ x-helix-token: <token>
 
 `helix.config.json` configures agents, model providers, dynamic agents, and injection points.
 
-Model names such as `gpt-5.5` are placeholders until a real provider implementation is connected. The deterministic gates work without model APIs; LLM review is a P0 follow-up.
+Agents that use `"provider": "host"` are delegated to the installed host tool. In Codex, GPT-family model selection is handled by Codex. In Cursor, the default Cursor model is used by the adapter path. HelixFlow does not need an OpenAI API key for those host-managed agents.
+
+External providers use OpenAI-compatible HTTP configuration:
+
+```json
+{
+  "modelProviders": {
+    "host": { "type": "host", "adapter": "auto" },
+    "deepseek": {
+      "type": "openai-compatible",
+      "apiKeyEnv": "DEEPSEEK_API_KEY",
+      "baseUrlEnv": "DEEPSEEK_BASE_URL",
+      "defaultBaseUrl": "https://api.deepseek.com"
+    }
+  },
+  "agents": {
+    "Momus": { "role": "skeptical_reviewer", "provider": "host", "model": "host-default" },
+    "Librarian": { "role": "external_research", "provider": "deepseek", "model": "deepseek-v4-pro" }
+  },
+  "review": {
+    "llm": {
+      "enabled": false,
+      "required": false,
+      "agents": ["Momus"]
+    }
+  }
+}
+```
+
+`apiKeyEnv` and `baseUrlEnv` are environment variable names, not secret values. `defaultBaseUrl` is the fallback endpoint used when the `baseUrlEnv` variable is not set.
+
+The deterministic gates work without model APIs. When `review.llm.required` is `false`, a missing external key or a host-managed provider produces a warning rather than blocking the workflow.
+
+LSP/typecheck and comment checks live in the CLI review gate, not in editor-specific hooks:
+
+```json
+{
+  "qualityGates": {
+    "lspDiagnostics": {
+      "enabled": true,
+      "commands": ["npm run typecheck"]
+    },
+    "commentChecker": {
+      "enabled": true,
+      "blockOnFindings": false
+    }
+  }
+}
+```
+
+## Commercial Boundary
+
+HelixFlow is an original runtime inspired by agent governance patterns. It must not distribute copied source code, prompt text, or tool implementations from projects whose license blocks commercial redistribution.
+
+Before a commercial release, run the publish review skill and confirm:
+
+- No restricted third-party source or prompt text is included.
+- `packs/` contains HelixFlow-authored prompts and contracts.
+- External workflow references remain documentation or conceptual comparison only.
 
 ## Development
 
@@ -146,4 +206,4 @@ npm test
 npm pack --dry-run --cache /private/tmp/helix-npm-cache
 ```
 
-Current status: linear governance loop is implemented and tested. OMO-equivalent multi-agent orchestration still needs LLM provider integration, LSP diagnostics gate, comment checker, and real sub-agent spawning.
+Current status: linear governance loop is implemented and tested. Optional LLM review, configurable LSP/typecheck diagnostics, and comment checking are available through the CLI review gate. Multi-agent orchestration still needs real sub-agent spawning and background task management.

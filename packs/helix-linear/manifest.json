@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "name": "omo-linear",
-  "description": "HelixFlow M1 的提示词、技能与工具合同包，借鉴 oh-my-openagent 的线性编排循环，并适配 Codex/Cursor。Agent 与 OMO 对照见 agents/README.md。",
+  "name": "helix-linear",
+  "description": "HelixFlow M1 的提示词、技能与工具合同包，适配 Codex/Cursor 和普通 CLI 线性治理循环。",
   "source": {
-    "project": "oh-my-openagent",
-    "adaptation": "保留结构与行为纪律，改成 Codex/Cursor 可用的中立合同；不复制 OpenCode 专属工具表面。"
+    "project": "HelixFlow",
+    "commercialBoundary": "Original prompt/tool contract text for HelixFlow runtime. External projects are conceptual references only."
   },
   "agents": {
     "Router": "agents/router.md",
@@ -20,9 +20,12 @@
   },
   "skills": {
     "start-work": "skills/start-work.md",
-    "omo-injection-runtime": "skills/omo-injection-runtime.md",
+    "helix-injection-runtime": "skills/helix-injection-runtime.md",
     "refactor": "skills/refactor.md",
     "review-work": "skills/review-work.md",
+    "pre-publish-review": "skills/pre-publish-review.md",
+    "get-unpublished-changes": "skills/get-unpublished-changes.md",
+    "publish": "skills/publish.md",
     "debugging": "skills/debugging.md",
     "frontend-ui-ux": "skills/frontend-ui-ux.md",
     "git-master": "skills/git-master.md",

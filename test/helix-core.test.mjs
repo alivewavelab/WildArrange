@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import path from "node:path";
 import test from "node:test";
 
@@ -30,6 +31,7 @@ import {
   resolveInjectionPoint,
   resumeReport,
   reviewChangeRequest,
+  resolveAgentProvider,
   resolveHelixPath,
   routeRequest,
   runInjectionHook,
@@ -75,6 +77,27 @@ async function withDashboard(dir, fn) {
   }
 }
 
+async function withLlmServer(handler, fn) {
+  const server = createServer(handler);
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  try {
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : null;
+    assert.ok(port);
+    await fn(`http://127.0.0.1:${port}`);
+  } finally {
+    await new Promise((resolve, reject) => {
+      server.close((error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+  }
+}
+
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, options);
   const body = await response.json();
@@ -98,11 +121,11 @@ test("init creates durable runtime state", async () => {
   });
 });
 
-test("init installs OMO-linear prompt, skill, and tool contracts", async () => {
+test("init installs helix-linear prompt, skill, and tool contracts", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
     const pack = await listPromptPack(dir);
-    assert.equal(pack.name, "omo-linear");
+    assert.equal(pack.name, "helix-linear");
     assert.deepEqual(
       pack.agents.sort(),
       ["Atlas", "Explore", "Hephaestus", "Librarian", "Metis", "Momus", "Oracle", "Prometheus", "Router", "Sisyphus"].sort(),
@@ -110,7 +133,7 @@ test("init installs OMO-linear prompt, skill, and tool contracts", async () => {
     assert.ok(pack.skills.includes("review-work"));
     assert.equal(pack.tools, "tools/tool-contract.json");
     assert.equal(pack.routes, "routes.json");
-    assert.ok(pack.skills.includes("omo-injection-runtime"));
+    assert.ok(pack.skills.includes("helix-injection-runtime"));
 
     const atlasPrompt = await renderPromptPackEntry(dir, { agent: "Atlas" });
     assert.match(atlasPrompt, /必须 verifier PASS/);
@@ -135,14 +158,14 @@ test("config controls models and injection point mounts", async () => {
   await withTempDir(async (dir) => {
     await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
       agents: {
-        Oracle: { provider: "openai", model: "gpt-5.5", reasoning: "xhigh" },
+        Oracle: { provider: "host", model: "host-default", reasoning: "xhigh" },
       },
       injectionPoints: {
         before_review: {
           enabled: true,
           tools: ["review_gate", "helix_evidence_record"],
           markdown: ["CLAUDE.md"],
-          skills: ["review-work", "omo-injection-runtime"],
+          skills: ["review-work", "helix-injection-runtime"],
           rules: { mode: "dynamic" },
         },
       },
@@ -159,7 +182,23 @@ test("config controls models and injection point mounts", async () => {
     assert.equal(injection.markdown[0].path, "CLAUDE.md");
     assert.ok(injection.markdown[0].content.includes("Use real verification"));
     assert.ok(injection.skills.some((skill) => skill.name === "review-work"));
-    assert.ok(injection.skills.some((skill) => skill.name === "omo-injection-runtime"));
+    assert.ok(injection.skills.some((skill) => skill.name === "helix-injection-runtime"));
+  });
+});
+
+test("default GPT-family agents are delegated to the host provider", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const { config } = await loadHelixConfig(dir);
+    assert.equal(config.modelProviders.host.type, "host");
+    assert.equal(config.agents.Atlas.provider, "host");
+    assert.equal(config.agents.Momus.provider, "host");
+    assert.equal(config.modelProviders.openai, undefined);
+
+    const resolved = resolveAgentProvider(config, "Momus");
+    assert.equal(resolved.available, false);
+    assert.equal(resolved.hostManaged, true);
+    assert.match(resolved.reason, /managed by the host adapter/);
   });
 });
 
@@ -765,6 +804,99 @@ test("linear loop runs worker, verifies, checkpoints, and records ledger", async
     assert.match(ledger, /task_verified/);
     assert.match(ledger, /review_gate_completed/);
     assert.match(ledger, /snapshot_written/);
+  });
+});
+
+test("LLM review gate uses OpenAI-compatible provider when configured", async () => {
+  await withTempDir(async (dir) => {
+    await withLlmServer((request, response) => {
+      assert.equal(request.url, "/chat/completions");
+      assert.equal(request.method, "POST");
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              decision: "PASS",
+              summary: "evidence is sufficient",
+              findings: [],
+            }),
+          },
+        }],
+        usage: { total_tokens: 42 },
+      }));
+    }, async (baseUrl) => {
+      await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
+        modelProviders: {
+          local: { apiKeyEnv: "HELIX_TEST_LLM_KEY", baseUrl },
+        },
+        agents: {
+          Momus: { provider: "local", model: "test-reviewer" },
+        },
+        review: {
+          llm: { enabled: true, required: true, agents: ["Momus"] },
+        },
+      }, null, 2));
+      process.env.HELIX_TEST_LLM_KEY = "test-key";
+      await initRuntime(dir);
+      const planPath = path.join(dir, "llm-review-plan.json");
+      await writeFile(planPath, JSON.stringify({
+        title: "LLM review",
+        tasks: [{
+          id: "T001",
+          subject: "Write reviewed artifact",
+          writable_paths: [".helix/artifacts/llm.txt"],
+          worker_command: "node -e \"const fs=require('fs'); fs.writeFileSync('.helix/artifacts/llm.txt','ok')\"",
+          verify_commands: ["node -e \"const fs=require('fs'); if(fs.readFileSync('.helix/artifacts/llm.txt','utf8')!=='ok') process.exit(1)\""],
+        }],
+      }));
+      const plan = await importPlan(dir, planPath);
+
+      const result = await runNextTask(dir);
+      assert.equal(result.status, "completed");
+      assert.ok(result.reviewResult.lanes.some((lane) => lane.name === "llm_Momus" && lane.status === "pass"));
+      assert.equal(result.reviewResult.llmReviews[0].model, "test-reviewer");
+
+      const reviewReport = await readJson(resolveHelixPath(dir, "reports", "reviews", `${plan.id}-T001.json`));
+      assert.equal(reviewReport.llmReviews[0].summary, "evidence is sufficient");
+    });
+  });
+});
+
+test("comment checker can block checkpoint when configured", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
+      qualityGates: {
+        commentChecker: {
+          enabled: true,
+          blockOnFindings: true,
+          patterns: [{ name: "todo", pattern: "\\bTODO\\b" }],
+        },
+      },
+    }, null, 2));
+    await initRuntime(dir);
+    await mkdir(path.join(dir, "src"), { recursive: true });
+    const planPath = path.join(dir, "comment-gate-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Comment gate",
+      tasks: [{
+        id: "T001",
+        subject: "Write source without placeholder comments",
+        writable_paths: ["src/app.js"],
+        worker_command: "node -e \"const fs=require('fs'); fs.writeFileSync('src/app.js','// TODO remove placeholder\\nexport const ok = true;\\n')\"",
+        verify_commands: ["node -e \"const fs=require('fs'); if(!fs.readFileSync('src/app.js','utf8').includes('ok')) process.exit(1)\""],
+        maxAttempts: 2,
+      }],
+    }));
+    const plan = await importPlan(dir, planPath);
+
+    const result = await runNextTask(dir);
+    assert.equal(result.status, "failed");
+    assert.equal(result.task.last_failure.reason, "review_gate_failed");
+    assert.ok(result.reviewResult.lanes.some((lane) => lane.name === "comment_checker" && lane.status === "fail"));
+
+    const reviewReport = await readFile(resolveHelixPath(dir, "reports", "reviews", `${plan.id}-T001.md`), "utf8");
+    assert.match(reviewReport, /src\/app\.js:1 todo/);
   });
 });
 

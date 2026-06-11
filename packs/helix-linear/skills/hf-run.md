@@ -29,7 +29,7 @@ ideate -> spec -> design -> architect -> plan -> work -> review -> test -> deplo
 - Codex 用 spawn_agent。
 - 找不到 dispatch 参数时 omit。
 - working on parent model 胜过 broken dispatch。
-- skill 名跨产品 verbatim 匹配。
+- skill 名跨产品精确匹配。
 
 画像感知：按引擎/仓库画像选择隔离与门控策略。
 

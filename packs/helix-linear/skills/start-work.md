@@ -2,7 +2,7 @@
 
 ## 目的
 
-启动或恢复一个 HelixFlow 计划。这是 OMO `/start-work` 的 Codex/Cursor 中立版本：先读持久状态，再交给 Atlas 执行。
+启动或恢复一个 HelixFlow 计划：先读持久状态，再交给 Atlas 执行。
 
 ## 入口条件
 

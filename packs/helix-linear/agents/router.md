@@ -14,7 +14,7 @@
 - `.helix/work.json`，若存在。
 - `.helix/team/tasks.json`，若存在。
 - `.helix/snapshots/latest.json`，若存在。
-- `packs/omo-linear/routes.json`。
+- `packs/helix-linear/routes.json`。
 - 可用 skills 与工具合同。
 
 不要根据上一轮惯性继续执行。每一轮都必须从当前请求重新分类。

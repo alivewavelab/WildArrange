@@ -32,9 +32,9 @@
 
 不要向用户询问这些文件里能回答的事实。
 
-## OMO 注入协议
+## Helix 注入协议
 
-HelixFlow 用 `helix.config.json` 复刻 OMO 的 hook 注入效果。你必须把配置视为上下文挂载真相源：
+HelixFlow 用 `helix.config.json` 定义 hook 与节点上下文挂载。你必须把配置视为上下文挂载真相源：
 
 1. 新会话先运行 `node ./bin/helix.mjs config show`，确认模型、注入点、skills/tools/md 挂载。
 2. 恢复时运行 `node ./bin/helix.mjs continuation check`，如果 `shouldContinue=true`，先续跑，不要求用户复述上下文。

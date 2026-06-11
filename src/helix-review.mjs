@@ -1,5 +1,6 @@
-import { nowIso } from "./helix-foundation.mjs";
-import { runCommand } from "./helix-gates.mjs";
+import { loadHelixConfig, nowIso } from "./helix-foundation.mjs";
+import { runCommand, runQualityGates } from "./helix-gates.mjs";
+import { runLlmReview } from "./helix-llm.mjs";
 import { scanProjectRules } from "./helix-rules.mjs";
 import { criteriaStatus } from "./helix-team.mjs";
 
@@ -20,6 +21,7 @@ export async function runWorker(rootDir, task, options = {}) {
 }
 
 export async function runReviewGate(rootDir, task, evidence = {}) {
+  const { config } = await loadHelixConfig(rootDir);
   const workerResult = evidence.workerResult || [...task.evidence].reverse().find((entry) => entry.kind === "worker");
   const verifyResult = evidence.verifyResult || task.last_verify_result || [...task.evidence].reverse().find((entry) => entry.kind === "verifier");
   const scopeResult = evidence.scopeResult || task.last_scope_result || [...task.evidence].reverse().find((entry) => entry.kind === "scope_guard");
@@ -41,6 +43,8 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
     standardsCommandResults.push({ command, ...result });
     if (result.exitCode !== 0) break;
   }
+
+  const qualityResults = await runQualityGates(rootDir, task, scopeResult, config);
 
   const lanes = [
     reviewLane("goal_compliance", "Oracle", workerResult?.exitCode === 0 && verifyResult?.pass === true, {
@@ -95,7 +99,49 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
           : commandObservation(standardsCommandResults.find((result) => result.exitCode !== 0) || { exitCode: 1 }),
       fixBy: "按 standards_commands 的失败输出修复项目规范问题，不要删除规范门来制造 PASS。",
     }),
+    reviewLane("lsp_diagnostics", "Metis", qualityResults.lspResult.pass === true, {
+      statusOverride: qualityResults.lspResult.status === "skipped" ? "warn" : undefined,
+      summary: qualityResults.lspResult.status === "skipped"
+        ? qualityResults.lspResult.reason
+        : qualityResults.lspResult.pass
+          ? `${qualityResults.lspResult.results.length} LSP/typecheck command(s) passed`
+          : commandObservation(qualityResults.lspResult.results.find((result) => result.exitCode !== 0) || { exitCode: 1 }),
+      fixBy: "修复 LSP/typecheck 诊断，或在 helix.config.json 中明确关闭该 gate。",
+    }),
+    reviewLane("comment_checker", "Metis", qualityResults.commentResult.pass === true, {
+      statusOverride: qualityResults.commentResult.status === "warn" || qualityResults.commentResult.status === "skipped" ? "warn" : undefined,
+      summary: qualityResults.commentResult.findings.length === 0
+        ? "no blocked comment/placeholder findings"
+        : `${qualityResults.commentResult.findings.length} comment finding(s): ${qualityResults.commentResult.findings.slice(0, 3).map((finding) => `${finding.file}:${finding.line} ${finding.pattern}`).join("; ")}`,
+      fixBy: "清理占位注释、AI 署名、TODO/FIXME，或把 commentChecker.blockOnFindings 设为 false 仅告警。",
+    }),
   ];
+
+  const deterministicReview = {
+    pass: lanes.every((lane) => lane.status !== "fail"),
+    lanes,
+  };
+  const llmAgents = Array.isArray(config.review?.llm?.agents) && config.review.llm.agents.length > 0
+    ? config.review.llm.agents
+    : ["Momus"];
+  const llmReviews = [];
+  if (config.review?.llm?.enabled === true) {
+    for (const agentName of llmAgents) {
+      const llmReview = await runLlmReview(rootDir, agentName, task, {
+        workerResult,
+        verifyResult,
+        scopeResult,
+        deterministicReview,
+        qualityResults,
+      }, { config });
+      llmReviews.push(llmReview);
+      lanes.push(reviewLane(`llm_${agentName}`, agentName, llmReview.pass === true, {
+        statusOverride: llmReview.status === "warn" || llmReview.status === "skipped" ? "warn" : undefined,
+        summary: llmReview.summary || llmReview.reason || `${agentName} LLM review ${llmReview.status}`,
+        fixBy: "按 LLM review findings 修复；如果 provider 不可用，配置 API key/baseUrl/model 或关闭 required。",
+      }));
+    }
+  }
 
   return {
     kind: "review_gate",
@@ -103,6 +149,8 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
     pass: lanes.every((lane) => lane.status !== "fail"),
     reviewerAgents: ["Oracle", "Momus", "Metis"],
     lanes,
+    qualityResults,
+    llmReviews,
     reviewCommandResults,
     standardsCommandResults,
     successCriteria: criteria,

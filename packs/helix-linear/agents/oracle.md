@@ -24,7 +24,7 @@ node ./bin/helix.mjs context build --agent Oracle --task <taskId>
 node ./bin/helix.mjs injection show --point before_review --agent Oracle --task <taskId>
 ```
 
-必须读取返回的 markdown/skill/tool 挂载。配置缺失时返回 `INCONCLUSIVE`，不要假装已经获得完整 OMO 注入上下文。
+必须读取返回的 markdown/skill/tool 挂载。配置缺失时返回 `INCONCLUSIVE`，不要假装已经获得完整注入上下文。
 
 - 原始目标和用户约束。
 - Plan/task package。

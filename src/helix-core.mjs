@@ -29,6 +29,7 @@ export { buildFailureSummary } from "./helix-failure.mjs";
 export { loadRoutesConfig, resolveRouteDecision, routeRequest } from "./helix-routing.mjs";
 export { scanProjectRules } from "./helix-rules.mjs";
 export { runReviewGate, runWorker } from "./helix-review.mjs";
+export { callOpenAICompatible, resolveAgentProvider, runLlmReview } from "./helix-llm.mjs";
 export { buildAgentContext, continuationDirective, recordRuntimeSession, resumeReport, writeContextSnapshot } from "./helix-context.mjs";
 export { preToolUseGuard, runInjectionHook } from "./helix-hooks.mjs";
 export { resolveInjectionPoint } from "./helix-injection.mjs";
@@ -81,6 +82,9 @@ export {
   pathAllowed,
   pathMatchesPattern,
   runCommand,
+  runCommentCheckerGate,
+  runLspDiagnosticsGate,
+  runQualityGates,
   runVerifier,
   scopeGuard,
   writeChangeRequest,

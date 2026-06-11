@@ -1,10 +1,10 @@
-# OMO Injection Runtime
+# Helix Injection Runtime
 
 ## 目的
 
-把 oh-my-openagent 的 rules / continuation / tool-use 注入效果，裁剪成 HelixFlow 在 Codex 与 Cursor 都能执行的协议。
+把 HelixFlow 的运行时上下文挂载到关键节点，让 Codex、Cursor 或普通 CLI 会话拿到同一类治理信息。
 
-核心目标不是复制某个宿主的 hook 名字，而是确保每个关键节点都拿到同一类上下文：
+核心目标不是依赖某个宿主的私有 hook，而是确保每个关键节点都能读取：
 
 - 项目规则。
 - 当前任务状态。
@@ -36,17 +36,17 @@ node ./bin/helix.mjs config init --root
 
 ## 注入点
 
-| 注入点 | 对应 OMO 行为 | HelixFlow 命令 |
+| 注入点 | 作用 | HelixFlow 命令 |
 | --- | --- | --- |
-| `session_start` | SessionStart 静态规则注入 | `resume` + `rules collect` + `context build` |
-| `user_prompt_submit` | UserPromptSubmit 静态规则补注入 | `route` + `rules collect` |
-| `pre_tool_use` | PreToolUse 工具执行前阻断 | `hook run`，计划外写入返回 `permissionDecision=deny` |
-| `post_tool_use` | PostToolUse 按被改文件动态注入规则 | `rules collect --target <path>` + `scope_guard` |
-| `post_compact` | PostCompact 压缩后恢复标记 | `resume` + `rules collect` |
+| `session_start` | 新会话恢复规则、状态和上下文 | `resume` + `rules collect` + `context build` |
+| `user_prompt_submit` | 用户请求进入时做路由和规则补充 | `route` + `rules collect` |
+| `pre_tool_use` | 工具执行前范围阻断 | `hook run`，计划外写入返回 `permissionDecision=deny` |
+| `post_tool_use` | 工具执行后按目标文件刷新动态规则 | `rules collect --target <path>` + `scope_guard` |
+| `post_compact` | 上下文压缩后恢复工作状态 | `resume` + `rules collect` |
 | `before_execute` | worker 执行前注入任务包 | `context build --agent Atlas --task <id>` |
 | `before_review` | reviewer 审核前注入证据包 | `context build --agent Oracle/Momus/Metis --task <id>` |
 | `before_checkpoint` | checkpoint 前质量门 | `evidence record` + `review gate` |
-| `stop` | start-work-continuation stop hook | `continuation check` |
+| `stop` | 会话停止前生成续跑指令 | `continuation check` |
 
 查看某个注入点最终挂载：
 
@@ -54,7 +54,7 @@ node ./bin/helix.mjs config init --root
 node ./bin/helix.mjs injection show --point before_review --agent Oracle --task T001
 ```
 
-Codex/Cursor adapter 应优先调用 hook 入口，让运行时自动选择注入点并输出 Markdown：
+adapter 应优先调用 hook 入口，让运行时自动选择注入点并输出 Markdown：
 
 ```bash
 node ./bin/helix.mjs hook run --from hook.json
@@ -71,29 +71,19 @@ node ./bin/helix.mjs hook run --from hook.json
 }
 ```
 
-已支持事件：
-
-- `SessionStart` -> `session_start`
-- `UserPromptSubmit` -> `user_prompt_submit`
-- `PreToolUse` -> `pre_tool_use`
-- `PostToolUse` -> `post_tool_use`
-- `PostCompact` -> `post_compact`
-- `Stop` -> `stop`
-- `SubagentStop` -> `stop`
-
 ## Agent 必须行为
 
 ### Sisyphus
 
 - 新会话先看 `session_start` / `stop` 注入结果。
-- 如果宿主提供 hook payload，优先执行 `node ./bin/helix.mjs hook run --from hook.json`，把输出视为实时上下文。
+- 如果宿主提供 hook payload，优先执行 `node ./bin/helix.mjs hook run --from hook.json`。
 - 中途需求变化必须走 `helix steer` 或 ChangeRequest，不允许聊天里直接改计划。
-- 如果配置缺少关键模型或注入点，先报告配置缺口，不要假装 OMO 注入已生效。
+- 如果配置缺少关键模型或注入点，先报告配置缺口。
 
 ### Atlas
 
 - 执行前必须构建 `before_execute` 上下文。
-- 写文件前如果宿主支持 `PreToolUse`，必须接受 `permissionDecision=deny`，不要绕过 scope guard。
+- 写文件前如果宿主支持 `pre_tool_use`，必须接受 `permissionDecision=deny`。
 - verifier PASS 后必须确认 `successCriteria` 证据。
 - checkpoint 前必须跑 `before_checkpoint`，不能只凭 worker DoneClaim。
 
