@@ -10,6 +10,7 @@
   },
   "files": [
     "README.md",
+    ".env.helix.example",
     "bin/",
     "src/",
     "packs/",

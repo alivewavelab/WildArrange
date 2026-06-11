@@ -170,6 +170,12 @@ External providers use OpenAI-compatible HTTP configuration:
 
 `apiKeyEnv` and `baseUrlEnv` are environment variable names, not secret values. `defaultBaseUrl` is the fallback endpoint used when the `baseUrlEnv` variable is not set.
 
+Use `.env.helix.example` as the environment variable template:
+
+```bash
+source .env.helix
+```
+
 The deterministic gates work without model APIs. When `review.llm.required` is `false`, a missing external key or a host-managed provider produces a warning rather than blocking the workflow.
 
 LSP/typecheck and comment checks live in the CLI review gate, not in editor-specific hooks:
