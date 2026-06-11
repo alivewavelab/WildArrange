@@ -7,6 +7,7 @@ import test from "node:test";
 import { startDashboardServer } from "../src/helix-dashboard.mjs";
 import {
   buildAgentContext,
+  buildArchivistPacket,
   continuationDirective,
   createSamplePlan,
   createTeamTask,
@@ -16,6 +17,7 @@ import {
   importPlan,
   installAdapter,
   initRuntime,
+  listParallelAgentRuns,
   loadHelixConfig,
   listTeamMessages,
   listTeamTasks,
@@ -31,10 +33,12 @@ import {
   resolveInjectionPoint,
   resumeReport,
   reviewChangeRequest,
+  runArchivistRouter,
   resolveAgentProvider,
   resolveHelixPath,
   routeRequest,
   runInjectionHook,
+  runParallelAgents,
   runCommand,
   runWorkflowNode,
   runNextTask,
@@ -456,6 +460,87 @@ test("team-lite sends and lists durable inbox messages", async () => {
     assert.equal(allInbox.length, 1);
     assert.match(await readFile(resolveHelixPath(dir, "team", "messages.md"), "utf8"), /Jiuwei -> YingLong: continue T001/);
     assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /team_message_sent/);
+  });
+});
+
+test("parallel agents run task packets concurrently and publish results", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = path.join(dir, "parallel-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Parallel smoke",
+      tasks: [
+        {
+          id: "T001",
+          subject: "Parallel research one",
+          verify_commands: ["node -e \"process.exit(0)\""],
+          writable_paths: [".helix/artifacts/one.txt"],
+        },
+        {
+          id: "T002",
+          subject: "Parallel research two",
+          verify_commands: ["node -e \"process.exit(0)\""],
+          writable_paths: [".helix/artifacts/two.txt"],
+        },
+      ],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    const command = "node -e \"const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'parallel done'}));\" {outputJson}";
+    const batch = await runParallelAgents(dir, {
+      maxAgents: 2,
+      agent: "Kui",
+      command,
+    });
+
+    assert.equal(batch.status, "completed");
+    assert.equal(batch.taskCount, 2);
+    assert.ok(batch.results.every((result) => result.agent === "Kui" && result.pass));
+    assert.ok(batch.results.every((result) => result.result.summary === "parallel done"));
+
+    const messages = await listTeamMessages(dir, { agent: "Jiuwei" });
+    assert.equal(messages.length, 2);
+    assert.ok(messages.every((message) => message.summary.includes("parallel result")));
+
+    const runs = await listParallelAgentRuns(dir);
+    assert.equal(runs.runs.length, 1);
+    assert.equal(runs.runs[0].results.length, 2);
+    assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /parallel_agents_completed/);
+  });
+});
+
+test("ArchivistRouter builds conclusions-only packets and fallback memory", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const packet = await buildArchivistPacket(dir, {
+      stage: "plan",
+      text: "做一个网页版 TODO 工具，先确认 MVP 和验收。",
+      turns: [
+        { role: "assistant", content: "结论：先做清单。\n```js\nconsole.log('secret')\n```\n+ leaked diff line" },
+        { role: "user", content: "补充删除和完成状态。" },
+      ],
+    });
+
+    assert.equal(packet.stage, "plan");
+    assert.equal(packet.turns.length, 2);
+    assert.doesNotMatch(JSON.stringify(packet), /console\.log/);
+    assert.match(JSON.stringify(packet), /code block removed/);
+
+    const result = await runArchivistRouter(dir, {
+      force: true,
+      stage: "plan",
+      text: "做一个网页版 TODO 工具，支持新增、完成、删除。",
+      turns: packet.turns,
+    });
+
+    assert.equal(result.kind, "archivist_router_result");
+    assert.equal(result.llmStatus, "fallback");
+    assert.equal(result.decision.routeDecision.domain, "visual");
+    assert.equal(result.decision.memoryUpdates[0].kind, "archivist_fallback");
+
+    const memoryIndex = await readJson(resolveHelixPath(dir, "memory", "index.json"));
+    assert.ok(memoryIndex.keywords.fallback >= 1);
+    assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /archivist_router_completed/);
   });
 });
 

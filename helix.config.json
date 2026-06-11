@@ -154,6 +154,12 @@
       ]
     }
   },
+  "parallelAgents": {
+    "enabled": true,
+    "defaultMaxAgents": 2,
+    "isolation": "run-dir",
+    "timeoutMs": 120000
+  },
   "dynamicAgents": {
     "visual-engineering": {
       "provider": "gemini",

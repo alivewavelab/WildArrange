@@ -6,6 +6,7 @@ import {
   DEFAULT_LEAD_AGENT,
   DEFAULT_PACKAGE_NAME,
   PRODUCT_NAME,
+  buildArchivistPacket,
   buildAgentContext,
   continuationDirective,
   createSamplePlan,
@@ -15,6 +16,7 @@ import {
   importPlan,
   installAdapter,
   initRuntime,
+  listParallelAgentRuns,
   loadHelixConfig,
   listTeamTasks,
   listTeamMessages,
@@ -28,8 +30,10 @@ import {
   resolveChangeRequest,
   resumeReport,
   reviewChangeRequest,
+  runArchivistRouter,
   routeRequest,
   runInjectionHook,
+  runParallelAgents,
   runWorkflowNode,
   runNextTask,
   runWorkflow,
@@ -78,6 +82,10 @@ Usage:
   wildarrange run
   wildarrange workflow --from <plan.json>
   wildarrange workflow --sample
+  wildarrange parallel run [--max-agents 2] [--task T001,T002] [--agent Kui] [--command "..."]
+  wildarrange parallel list
+  wildarrange archivist packet [--text "..."] [--stage plan] [--turns turns.json]
+  wildarrange archivist run [--text "..."] [--stage plan] [--turns turns.json] [--force]
   wildarrange node route --text "request"
   wildarrange node execute [--task T001]
   wildarrange node verify [--task T001]
@@ -244,6 +252,48 @@ async function main() {
     console.log(JSON.stringify(result, null, 2));
     process.exitCode = result.ok ? 0 : 2;
     return;
+  }
+
+  if (command === "parallel") {
+    const subcommand = args._[1];
+    if (subcommand === "run") {
+      console.log(JSON.stringify(await runParallelAgents(rootDir, {
+        maxAgents: args["max-agents"] && args["max-agents"] !== true ? Number(args["max-agents"]) : undefined,
+        taskIds: args.task && args.task !== true ? String(args.task).split(",").map((item) => item.trim()).filter(Boolean) : [],
+        agent: args.agent && args.agent !== true ? args.agent : undefined,
+        command: args.command && args.command !== true ? args.command : undefined,
+        timeoutMs: args.timeout && args.timeout !== true ? Number(args.timeout) : undefined,
+      }), null, 2));
+      return;
+    }
+    if (subcommand === "list") {
+      console.log(JSON.stringify(await listParallelAgentRuns(rootDir), null, 2));
+      return;
+    }
+    throw new Error("helix parallel requires run or list");
+  }
+
+  if (command === "archivist") {
+    const subcommand = args._[1];
+    const turns = args.turns && args.turns !== true
+      ? await readJson(path.resolve(rootDir, args.turns))
+      : [];
+    const options = {
+      text: args.text && args.text !== true ? args.text : "",
+      stage: args.stage && args.stage !== true ? args.stage : undefined,
+      trigger: args.trigger && args.trigger !== true ? args.trigger : "cli",
+      turns,
+      force: Boolean(args.force),
+    };
+    if (subcommand === "packet") {
+      console.log(JSON.stringify(await buildArchivistPacket(rootDir, options), null, 2));
+      return;
+    }
+    if (subcommand === "run") {
+      console.log(JSON.stringify(await runArchivistRouter(rootDir, options), null, 2));
+      return;
+    }
+    throw new Error("helix archivist requires packet or run");
   }
 
   if (command === "node") {

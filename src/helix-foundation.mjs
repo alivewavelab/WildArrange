@@ -74,8 +74,63 @@ export const DEFAULT_HELIX_CONFIG = {
     BaiZe: { role: "goal_verifier", provider: "host", model: "host-default", reasoning: "high" },
     Taotie: { role: "external_research", provider: "deepseek", model: "deepseek-v4-pro" },
     Kui: { role: "fast_explorer", provider: "deepseek", model: "deepseek-v4-flash" },
+    CangJie: { role: "archivist_router", provider: "deepseek", model: "deepseek-v4-flash" },
     LuanNiao: { role: "risk_reviewer", provider: "host", model: "host-default", reasoning: "medium" },
     QiongQi: { role: "skeptical_reviewer", provider: "host", model: "host-default", reasoning: "xhigh" },
+  },
+  archivistRouter: {
+    enabled: false,
+    agent: "CangJie",
+    provider: "deepseek",
+    model: "deepseek-v4-flash",
+    triggers: {
+      sessionStart: true,
+      gitHeadChanged: true,
+      lowConfidenceRoute: true,
+      everyUserPrompts: {
+        default: 10,
+        ideate: 5,
+        plan: 5,
+        clarify: 5,
+        execute: 15,
+        verify: 15,
+        review: 15,
+        min: 5,
+        max: 20,
+      },
+      workflowCheckpoint: true,
+    },
+    memory: {
+      backend: "structured-files",
+      root: ".helix/memory",
+      captureMode: "conclusions-only",
+      includeCodeBlocks: false,
+      maxRecentTurns: 10,
+      recentTurnWindows: {
+        default: 10,
+        ideate: 5,
+        plan: 5,
+        clarify: 5,
+        execute: 15,
+        verify: 15,
+        review: 15,
+        max: 20,
+      },
+      maxRoutingPacketChars: 12000,
+      injectFields: ["progress", "decisions", "artifacts", "implementationNotes", "researchNotes", "pitfalls", "openQuestions"],
+    },
+    keywordEvolution: {
+      suggestOnly: true,
+      autoApplyConfidence: 0.85,
+      minEvidenceCount: 2,
+      protectedTargets: ["askGate", "intents.review", "intents.release_git", "intents.change_request"],
+    },
+  },
+  parallelAgents: {
+    enabled: true,
+    defaultMaxAgents: 2,
+    isolation: "run-dir",
+    timeoutMs: 120000,
   },
   dynamicAgents: {
     "visual-engineering": { provider: "gemini", model: "gemini-3.1-pro" },
@@ -223,6 +278,11 @@ export async function ensureHelixDirs(rootDir) {
     ["wisdom"],
     ["changes"],
     ["context-agents"],
+    ["agent-runs"],
+    ["memory"],
+    ["memory", "stage-summaries"],
+    ["routing"],
+    ["routing", "suggestions"],
   ];
 
   for (const dir of dirs) {
@@ -241,7 +301,7 @@ export async function readJson(filePath, fallback = undefined) {
 
 export async function writeJsonAtomic(filePath, value) {
   await mkdir(path.dirname(filePath), { recursive: true });
-  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
   await writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   await rename(tempPath, filePath);
 }

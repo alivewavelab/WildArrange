@@ -4,7 +4,7 @@
 
 ## 当前目标
 
-实现 WildArrange M1 线性 Agent 循环。第一版只做可恢复、可验证的单线流程：
+实现 WildArrange M1 线性 Agent 循环，并开始补 M2 的最小多 Agent 与档案路由能力。第一阶段主线仍是可恢复、可验证的单线流程：
 
 ```text
 init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
@@ -16,7 +16,8 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 - 不把任何宿主专属工具硬塞进 core（例如特定 editor plugin hooks、tmux layout）。
 - Codex / Cursor 适配放在 runtime adapter 层；核心状态机必须是产品中立的本地文件协议。
 - LLM review 通过 OpenAI-compatible provider 配置化接入；默认关闭，无 key 时不阻断线性状态机。
-- 第一版不启动常驻多 Agent 集群，只跑通线性状态机。
+- 第一版不启动常驻多 Agent 集群；多 Agent 先以命令型子 Agent 的隔离运行目录跑通 spawn / collect / message 闭环。
+- ArchivistRouter 只读取清洗后的结论包，不摄入代码块、raw diff 或完整命令输出；无 LLM key 时必须 fallback，不阻断主线。
 - 商业发布包不得包含受限第三方源码、prompt 原文或近似改写文本；外部项目只能作为概念参考和对照证据。
 
 ## 工程约束
@@ -67,7 +68,9 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/helix-hooks.mjs`                                        | 宿主生命周期 Hook、PreToolUse 范围拦截                   |
 | `src/helix-adapters.mjs`                                     | Codex / Cursor adapter 安装与卸载                  |
 | `src/helix-routing.mjs`                                      | 请求路由与类别决策                                     |
+| `src/helix-archivist-router.mjs`                             | 档案路由员：routing packet、结构化记忆、路由建议              |
 | `src/helix-team.mjs`                                         | 轻量任务板与消息板                                     |
+| `src/helix-parallel-agents.mjs`                              | 命令型子 Agent 并行运行、隔离结果与消息发布                    |
 | `src/helix-status.mjs`                                       | 状态报告、Workflow 总结与 Dashboard 数据                |
 | `src/helix-dashboard.mjs`                                    | 本地 dashboard HTTP 服务                          |
 | `test/*.test.mjs`                                            | Node 内置测试                                     |
@@ -86,6 +89,10 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | 导入计划              | `node ./bin/helix.mjs plan --from plan.json`                     |
 | 跑下一个任务            | `node ./bin/helix.mjs run`                                       |
 | 跑 sample workflow | `node ./bin/helix.mjs workflow --sample`                         |
+| 跑并行子 Agent       | `node ./bin/helix.mjs parallel run --max-agents 2 --command "..."` |
+| 查看并行运行记录        | `node ./bin/helix.mjs parallel list`                             |
+| 生成档案路由包         | `node ./bin/helix.mjs archivist packet --text "..." --stage plan` |
+| 运行档案路由员         | `node ./bin/helix.mjs archivist run --text "..." --stage plan --force` |
 | 查看状态              | `node ./bin/helix.mjs status`                                    |
 | 生成总结              | `node ./bin/helix.mjs summary`                                   |
 | 启动本地 dashboard    | `node ./bin/helix.mjs serve --host 127.0.0.1 --port 8765`        |
