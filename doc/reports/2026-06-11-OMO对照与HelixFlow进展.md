@@ -6,31 +6,48 @@ OMO 源码目录：`/private/tmp/oh-my-openagent-src`
 
 ## 结论
 
-当前 HelixFlow 已经完成“线性治理闭环”的可运行骨架：初始化、计划导入、路由、任务执行、验证、范围门、复核门、checkpoint、恢复、消息板、dashboard、Codex/Cursor adapter 生成、npm/npx 包结构。
+当前 HelixFlow 已经完成“线性治理闭环”的可运行骨架，并完成核心运行时代码去单体化：初始化、计划导入、路由、任务执行、验证、范围门、复核门、checkpoint、恢复、消息板、dashboard、Codex/Cursor adapter 生成、npm/npx 包结构均已跑通。
+
+本次维护性目标已经达成：`src/helix-core.mjs` 从 4000+ 行单体收敛为 90 行兼容导出层，实际实现拆入职责单一的领域模块。当前所有 `src/helix-*.mjs` 文件都在 1000 行以内，主要模块保持几百行级别。
 
 但它还不是 OMO 等价实现。差距不在“提示词有没有写”，而在 OMO 的宿主级工具链和后台运行时：真实子 Agent 启动、后台并发、模型 fallback、LSP 守门、评论检查、Skill MCP、OpenCode 会话管理、tmux/cmux 可视化、多 Agent team mode、真实 LLM review provider。  
-按源码级能力看：线性闭环约 80%-85%；去掉多 Agent 并行后，目标 90% 的主要缺口是 LSP/comment checker、真实 LLM review gate、prompt/model variant、adapter 真安装。
+按源码级能力看：线性闭环已进入可测试维护状态；去掉多 Agent 并行后，目标 90% 的主要缺口仍是 LSP/comment checker、真实 LLM review gate、prompt/model variant、adapter 真安装。
 
 ## 已合并进当前本地实现的进展
 
-说明：当前目录不是 Git 仓库，`git status` 返回 `fatal: not a git repository`，所以这里的“合并”指本地代码已集中到当前工作区运行时，不是 Git merge/commit。
+说明：当前目录已经是 Git 仓库。本报告中的“已完成”指代码已落盘并通过本机验证；最近重构提交包括 `f75fe0a Split node runtime module`、`09d4337 Split workflow entry module`、`b48efaf Split failure summary module`、`ec3e1d4 Split change governance module`、`6cdfa04 Split context and hook modules`。
 
 | 模块 | 当前状态 | 作用 | 证据 |
 |---|---:|---|---|
 | npm/npx 包结构 | 已完成 | 让用户通过 `npx helixflow` 或安装 devDependency 使用 | `package.json` 暴露 `bin.helix`、`bin.helixflow`，`private=false` |
 | CLI 主入口 | 已完成 | 提供 `init/config/adapter/hook/workflow/node/team/status/serve` 等命令 | `bin/helix.mjs` |
-| 运行时核心 | 已完成 | 管理 `.helix` 状态、计划、任务、ledger、checkpoint、恢复 | `src/helix-core.mjs` |
-| 线性 workflow | 已完成 | 一键走 `plan -> execute -> verify -> scope -> review -> checkpoint` | `runWorkflow`、`runWorkflowNode` |
+| 兼容导出层 | 已完成 | 保持旧 import 兼容，禁止继续堆实现 | `src/helix-core.mjs`，90 行 |
+| 节点运行时 | 已完成 | 执行 `execute/verify/scope/review/checkpoint/retry` 线性节点 | `src/helix-node-runtime.mjs` |
+| 线性 workflow | 已完成 | 一键走 `plan -> execute -> verify -> scope -> review -> checkpoint` | `src/helix-workflow.mjs` |
+| 任务变更治理 | 已完成 | 处理 steering、Review Blocker、ChangeRequest 审核/决策 | `src/helix-change.mjs` |
+| 失败解释器 | 已完成 | 生成失败原因、返工提示和 DO NOT 约束 | `src/helix-failure.mjs` |
+| 运行时状态与总结 | 已完成 | 生成 status、dashboard data、workflow summary | `src/helix-status.mjs` |
 | Codex adapter | 已完成到“生成配置” | 生成 OMO-like lifecycle hooks，不直接改用户全局 Codex 配置 | `.helix/adapters/codex/hooks.json` |
 | Cursor adapter | 已完成到“规则注入” | 用 `.cursor/rules/helixflow.mdc` 做规则层约束，阻断能力依赖 Cursor hook 能力 | `.cursor/rules/helixflow.mdc` |
-| Hook 注入点 | 已完成主路径 | 对齐 OMO 的 `SessionStart/UserPromptSubmit/PreToolUse/PostToolUse/PostCompact/Stop/SubagentStop` | `runInjectionHook`、`buildCodexHooksConfig` |
-| PreToolUse 范围门 | 已完成 | 工具执行前阻断计划外写入，返回 OMO-compatible `permissionDecision=deny` | `preToolUseGuard` |
-| 项目规则扫描 | 已完成基础版 | 扫描 `AGENTS.md/CLAUDE.md/CONTEXT.md/.omo/.cursor/.github` 等规则并注入 | `scanProjectRules` |
-| 跨会话恢复 | 已完成基础版 | 写 `.helix/snapshots/context.md`、continuation 指令，降低 Codex 会话丢失风险 | `resumeReport`、`continuationDirective` |
+| Hook 注入点 | 已完成主路径 | 对齐 OMO 的 `SessionStart/UserPromptSubmit/PreToolUse/PostToolUse/PostCompact/Stop/SubagentStop` | `src/helix-hooks.mjs` |
+| PreToolUse 范围门 | 已完成 | 工具执行前阻断计划外写入，返回 OMO-compatible `permissionDecision=deny` | `src/helix-hooks.mjs` |
+| 项目规则扫描 | 已完成基础版 | 扫描 `AGENTS.md/CLAUDE.md/CONTEXT.md/.omo/.cursor/.github` 等规则并注入 | `src/helix-rules.mjs` |
+| 跨会话恢复 | 已完成基础版 | 写 `.helix/snapshots/context.md`、continuation 指令，降低 Codex 会话丢失风险 | `src/helix-context.mjs` |
 | 小黑板/任务板 | 已完成轻量版 | 用 `.helix/team/*` 模拟 team message/task create/list/get/claim | `team_send_message`、`team_task_create` |
 | Prompt pack | 已完成裁剪版 | 已有 10 个 Agent、28 个 Skill、55 个 Tool 合同 | `packs/omo-linear/manifest.json`、`tools/tool-contract.json` |
-| 测试 | 已完成本轮验证 | 本轮 `npm test` 在本机权限环境下 `37/37` 通过；沙箱内唯一失败是 dashboard 测试绑定 `127.0.0.1` 的 `listen EPERM` | `test/helix-core.test.mjs` |
-| npm pack dry-run | 已完成本轮验证 | `npm pack --dry-run --cache /private/tmp/helix-npm-cache` 通过，包体 48 个文件，约 85.9 kB | `package.json` |
+| 测试 | 已完成本轮验证 | 本轮 `npm test` 在本机权限环境下 `40/40` 通过；沙箱内唯一失败仍是 dashboard 测试绑定 `127.0.0.1` 的 `listen EPERM` | `test/helix-core.test.mjs` |
+| npm pack dry-run | 已完成本轮验证 | `npm pack --dry-run --cache /private/tmp/helix-npm-cache` 通过，包体 65 个文件，约 97.4 kB | `package.json` |
+
+## 本次重构后的代码维护规范
+
+1. `src/helix-core.mjs` 只允许作为兼容导出层存在，不允许新增业务实现。
+2. 新能力必须先判断归属模块；没有合适模块时新增 `src/helix-*.mjs`，不要塞进已有大文件。
+3. 单文件默认控制在 1000 行以内；超过 700 行需要主动评估是否按职责拆分。
+4. 每个模块只承担一个领域：计划、任务、门禁、变更、恢复、Hook、注入、状态、节点运行时、Workflow 入口分别维护。
+5. 跨模块调用通过显式 ESM import；禁止把 `helix-core.mjs` 当内部依赖入口。
+6. 对外兼容可以继续从 `helix-core.mjs` re-export，但模块内部应直接依赖目标实现文件。
+7. 新增功能必须配套测试，并实际运行 `npm test`；涉及发布包内容时同时运行 `npm pack --dry-run --cache /private/tmp/helix-npm-cache`。
+8. Gate 相关安全不变量不能削弱：`verify_commands` 不得为空，checkpoint 必须有 verifier、scope、review、successCriteria 证据。
 
 ## OMO 核心设计对照
 

@@ -82,3 +82,12 @@ Codex receives `.helix/adapters/codex/hooks.json`, which mirrors OMO-style lifec
 ## Known Architecture Debt
 
 `src/helix-core.mjs` is now a compatibility barrel. New implementation should go into the focused modules above rather than growing `helix-core.mjs`.
+
+## Maintenance Rules
+
+- Keep `src/helix-core.mjs` as a compatibility export surface only.
+- Add implementation to the focused module that owns the behavior; create a new `src/helix-*.mjs` module when no current owner fits.
+- Keep source files under 1000 lines by default. At 700+ lines, review whether the file has more than one domain responsibility.
+- Runtime modules should import concrete owner modules directly, not route internal dependencies through `src/helix-core.mjs`.
+- Any new runtime module must be listed in this architecture map and in `CLAUDE.md`.
+- Preserve gate invariants: verifier, scope, review, and success criteria must remain mandatory for completion.

@@ -24,6 +24,16 @@
 - `runNextTask` 的返回 `status` 表示运行时下一步动作；任务持久状态以 `task.status` 为准。例如 verifier 失败时可返回 `status: "retry"`，同时 `task.status === "pending"`。
 - Dashboard 默认只绑定 `127.0.0.1`。任何非 loopback host 必须配置 `--token` 或 `HELIX_DASHBOARD_TOKEN`。
 
+## 代码维护规范
+
+- `src/helix-core.mjs` 只作为兼容导出层，不允许继续堆业务实现。
+- 新增功能必须先归属到现有领域模块；无合适归属时新增 `src/helix-*.mjs`。
+- 单文件默认保持 1000 行以内；超过 700 行必须评估是否按职责拆分。
+- 模块内部必须直接 import 目标实现文件，不要通过 `src/helix-core.mjs` 绕一层。
+- 新增运行时能力必须同时更新 `doc/project-architecture.md` 和本文件的目录约定。
+- gate 安全不变量不能削弱：不得删除或清空 `verify_commands`，不得跳过 verifier/scope/review/successCriteria 完成 checkpoint。
+- 重构后必须验证 `npm test`；涉及包内容变化时同时验证 `npm pack --dry-run --cache /private/tmp/helix-npm-cache`。
+
 ## 目录约定
 
 - `README.md`：新用户安装、初始化、最小工作流和 dashboard 安全说明。
