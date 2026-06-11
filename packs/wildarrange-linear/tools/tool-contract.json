@@ -556,8 +556,8 @@
       "name": "parallel_run",
       "layer": "team",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs parallel run --max-agents 2 --task <taskIds> --agent <agent> --command <runner>",
-      "purpose": "在隔离 run directory 中并发启动命令型子 Agent，生成 task packet、result、team message 和 ledger 记录。",
+      "command": "node ./bin/helix.mjs parallel run --max-agents 2 --task <taskIds> --agent <agent> [--adapter codex|cursor] [--isolation run-dir|git-worktree] --command <runner>",
+      "purpose": "在隔离 run directory 或 Git worktree 中并发启动命令型子 Agent；可通过 Codex/Cursor adapter 命令模板渲染 task packet、result、team message 和 ledger 记录。",
       "reads": [
         ".helix/team/tasks.json",
         "helix.config.json"
@@ -575,13 +575,14 @@
       "layer": "gate",
       "status": "implemented",
       "command": "node ./bin/helix.mjs parallel admit --run <runId> --task <taskId>",
-      "purpose": "把子 Agent 的结构化 files 成果合入主线；先检查 writable_paths，再跑 verifier、scope、review 和 checkpoint。",
+      "purpose": "把子 Agent 的结构化 files 或 Git worktree patch 成果合入主线；先检查 writable_paths，再跑 verifier、scope、review 和 checkpoint。",
       "reads": [
         ".helix/agent-runs/**/agent-result.json",
         ".helix/team/tasks.json"
       ],
       "writes": [
         "task.writable_paths",
+        "workspace files allowed by writable_paths",
         ".helix/checkpoints/**",
         ".helix/reports/**",
         ".helix/ledger.jsonl"
@@ -618,6 +619,34 @@
         ".helix/ledger.jsonl"
       ],
       "commercialBoundary": "Provider abstraction is OpenAI-compatible; prompts and fallback logic are WildArrange original."
+    },
+    {
+      "name": "archivist_suggestions_list",
+      "layer": "memory",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs archivist suggestions list",
+      "purpose": "列出 CangJie 生成但尚未审核的路由关键词建议，供 Jiuwei 或人类审核。",
+      "reads": [
+        ".helix/routing/suggestions/**"
+      ],
+      "writes": []
+    },
+    {
+      "name": "archivist_suggestions_resolve",
+      "layer": "memory",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs archivist suggestions resolve --id <id> --decision accept|reject --evidence <evidence> --rationale <rationale>",
+      "purpose": "接受或拒绝路由关键词建议；accept 时只写 `.helix/routing/routes-overrides.json` 覆盖层，不改 prompt-pack 源文件。",
+      "reads": [
+        ".helix/routing/suggestions/**",
+        "helix.config.json"
+      ],
+      "writes": [
+        ".helix/routing/suggestions/**",
+        ".helix/routing/routes-overrides.json",
+        ".helix/ledger.jsonl"
+      ],
+      "commercialBoundary": "WildArrange original reviewed-routing overlay."
     },
     {
       "name": "grep_search",
@@ -900,18 +929,42 @@
     {
       "name": "codex_spawn_agent",
       "layer": "adapter",
-      "status": "contract-only",
-      "command": "contract-only",
-      "purpose": "Codex 适配器：未来用本地 CLI/API 拉起动态 Agent，把 prompt、skill、task 和上下文快照一起传入。",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs parallel run --task <taskId> --agent <agent> --adapter codex",
+      "purpose": "Codex 适配器最小实现：使用 `parallelAgents.spawnAdapters.codex.command` 命令模板拉起子 Agent，把 task packet、workDir 和 outputJson 传入；真实后台 Agent API 仍属于 adapter 深层增强。",
       "reads": [
+        "helix.config.json",
         ".helix/prompt-pack.json",
         ".helix/team/tasks.json",
         ".helix/snapshots/**"
       ],
       "writes": [
-        ".helix/sessions/**",
-        ".helix/team/outbox/**"
-      ]
+        ".helix/agent-runs/**",
+        ".helix/team/inbox/**",
+        ".helix/team/outbox/**",
+        ".helix/ledger.jsonl"
+      ],
+      "commercialBoundary": "Host-neutral command-template adapter; no private Codex source or API dependency."
+    },
+    {
+      "name": "cursor_spawn_agent",
+      "layer": "adapter",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs parallel run --task <taskId> --agent <agent> --adapter cursor",
+      "purpose": "Cursor 适配器最小实现：使用 `parallelAgents.spawnAdapters.cursor.command` 命令模板拉起子 Agent，并复用同一套 task packet、workDir、outputJson 和 admission gate。",
+      "reads": [
+        "helix.config.json",
+        ".helix/prompt-pack.json",
+        ".helix/team/tasks.json",
+        ".helix/snapshots/**"
+      ],
+      "writes": [
+        ".helix/agent-runs/**",
+        ".helix/team/inbox/**",
+        ".helix/team/outbox/**",
+        ".helix/ledger.jsonl"
+      ],
+      "commercialBoundary": "Host-neutral command-template adapter; no private Cursor source or API dependency."
     },
     {
       "name": "cursor_rule_sync",

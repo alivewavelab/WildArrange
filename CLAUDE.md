@@ -61,6 +61,8 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/helix-review.mjs`                                       | Worker 执行与 BaiZe / QiongQi / LuanNiao 确定性复核门  |
 | `src/helix-review-findings.mjs`                              | LSP / 注释检查等质量发现                               |
 | `src/helix-llm.mjs`                                          | OpenAI-compatible LLM provider 与可选 LLM review |
+| `src/helix-agent-spawn.mjs`                                  | Codex / Cursor / 自定义命令型子 Agent spawn 模板渲染       |
+| `src/helix-git-worktree.mjs`                                 | Git worktree 隔离、patch 提取与 patch admission        |
 | `src/helix-change.mjs`                                       | 任务变更治理、Review Blocker、ChangeRequest           |
 | `src/helix-failure.mjs`                                      | 失败原因分类、返工提示与失败摘要                              |
 | `src/helix-rules.mjs`                                        | 项目规范扫描与规则上下文注入                                |
@@ -91,10 +93,13 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | 跑下一个任务            | `node ./bin/helix.mjs run`                                       |
 | 跑 sample workflow | `node ./bin/helix.mjs workflow --sample`                         |
 | 跑并行子 Agent       | `node ./bin/helix.mjs parallel run --max-agents 2 --command "..."` |
+| 用 worktree 跑子 Agent | `node ./bin/helix.mjs parallel run --task T001 --isolation git-worktree --command "..."` |
 | 合入子 Agent 成果     | `node ./bin/helix.mjs parallel admit --run <runId> --task T001`     |
 | 查看并行运行记录        | `node ./bin/helix.mjs parallel list`                             |
 | 生成档案路由包         | `node ./bin/helix.mjs archivist packet --text "..." --stage plan` |
 | 运行档案路由员         | `node ./bin/helix.mjs archivist run --text "..." --stage plan --force` |
+| 查看路由建议           | `node ./bin/helix.mjs archivist suggestions list`                 |
+| 审核路由建议           | `node ./bin/helix.mjs archivist suggestions resolve --id <id> --decision accept --evidence "..." --rationale "..."` |
 | 查看状态              | `node ./bin/helix.mjs status`                                    |
 | 生成总结              | `node ./bin/helix.mjs summary`                                   |
 | 启动本地 dashboard    | `node ./bin/helix.mjs serve --host 127.0.0.1 --port 8765`        |

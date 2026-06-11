@@ -4,7 +4,9 @@ import {
   appendLedger,
   initRuntime,
   normalizeAgentKey,
+  readJson,
   renderPromptPackEntry,
+  resolveHelixPath,
   writeSnapshot,
 } from "./helix-foundation.mjs";
 
@@ -23,7 +25,9 @@ export async function routeRequest(rootDir, input) {
 }
 
 export async function loadRoutesConfig(rootDir) {
-  return JSON.parse(await renderPromptPackEntry(rootDir, { routes: true }));
+  const routes = JSON.parse(await renderPromptPackEntry(rootDir, { routes: true }));
+  const overrides = await readJson(resolveHelixPath(rootDir, "routing", "routes-overrides.json"), null);
+  return applyRouteOverrides(routes, overrides);
 }
 
 export function resolveRouteDecision(routes, text) {
@@ -193,4 +197,21 @@ function uniqueStrings(values) {
 function higherRisk(left = "low", right = "low") {
   const order = { low: 1, medium: 2, high: 3 };
   return (order[right] || 1) > (order[left] || 1) ? right : left;
+}
+
+function applyRouteOverrides(routes, overrides) {
+  if (!overrides || !Array.isArray(overrides.patches)) return routes;
+  const next = structuredClone(routes);
+  for (const patch of overrides.patches) {
+    const target = String(patch.target || "");
+    const signals = uniqueStrings(patch.signals || []);
+    if (signals.length === 0) continue;
+    const [collectionName, entryName] = target.split(".");
+    const collection = next[collectionName];
+    if (!Array.isArray(collection) || !entryName) continue;
+    const entry = collection.find((candidate) => candidate.name === entryName);
+    if (!entry) continue;
+    entry.signals = uniqueStrings([...(entry.signals || []), ...signals]);
+  }
+  return next;
 }

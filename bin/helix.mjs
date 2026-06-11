@@ -17,6 +17,7 @@ import {
   importPlan,
   installAdapter,
   initRuntime,
+  listArchivistRouteSuggestions,
   listParallelAgentRuns,
   loadHelixConfig,
   listTeamTasks,
@@ -28,6 +29,7 @@ import {
   recordTaskEvidence,
   renderPromptPackEntry,
   resolveInjectionPoint,
+  resolveArchivistRouteSuggestion,
   resolveChangeRequest,
   resumeReport,
   reviewChangeRequest,
@@ -83,11 +85,13 @@ Usage:
   wildarrange run
   wildarrange workflow --from <plan.json>
   wildarrange workflow --sample
-  wildarrange parallel run [--max-agents 2] [--task T001,T002] [--agent Kui] [--command "..."]
+  wildarrange parallel run [--max-agents 2] [--task T001,T002] [--agent Kui] [--adapter codex|cursor] [--isolation run-dir|git-worktree] [--command "..."]
   wildarrange parallel admit --run <runId> --task T001
   wildarrange parallel list
   wildarrange archivist packet [--text "..."] [--stage plan] [--turns turns.json]
   wildarrange archivist run [--text "..."] [--stage plan] [--turns turns.json] [--force]
+  wildarrange archivist suggestions list
+  wildarrange archivist suggestions resolve --id <id> --decision accept|reject --evidence "..." --rationale "..."
   wildarrange node route --text "request"
   wildarrange node execute [--task T001]
   wildarrange node verify [--task T001]
@@ -263,6 +267,8 @@ async function main() {
         maxAgents: args["max-agents"] && args["max-agents"] !== true ? Number(args["max-agents"]) : undefined,
         taskIds: args.task && args.task !== true ? String(args.task).split(",").map((item) => item.trim()).filter(Boolean) : [],
         agent: args.agent && args.agent !== true ? args.agent : undefined,
+        adapter: args.adapter && args.adapter !== true ? args.adapter : undefined,
+        isolation: args.isolation && args.isolation !== true ? args.isolation : undefined,
         command: args.command && args.command !== true ? args.command : undefined,
         timeoutMs: args.timeout && args.timeout !== true ? Number(args.timeout) : undefined,
       }), null, 2));
@@ -304,7 +310,25 @@ async function main() {
       console.log(JSON.stringify(await runArchivistRouter(rootDir, options), null, 2));
       return;
     }
-    throw new Error("helix archivist requires packet or run");
+    if (subcommand === "suggestions") {
+      const action = args._[2];
+      if (action === "list") {
+        console.log(JSON.stringify(await listArchivistRouteSuggestions(rootDir), null, 2));
+        return;
+      }
+      if (action === "resolve") {
+        if (!args.id || args.id === true) throw new Error("helix archivist suggestions resolve requires --id <id>");
+        console.log(JSON.stringify(await resolveArchivistRouteSuggestion(rootDir, {
+          id: args.id,
+          decision: args.decision,
+          evidence: args.evidence && args.evidence !== true ? args.evidence : "",
+          rationale: args.rationale && args.rationale !== true ? args.rationale : "",
+        }), null, 2));
+        return;
+      }
+      throw new Error("helix archivist suggestions requires list or resolve");
+    }
+    throw new Error("helix archivist requires packet, run, or suggestions");
   }
 
   if (command === "node") {

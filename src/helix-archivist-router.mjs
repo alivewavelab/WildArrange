@@ -11,6 +11,7 @@ import {
   writeJsonAtomic,
   writeSnapshot,
 } from "./helix-foundation.mjs";
+import { runCommand } from "./helix-gates.mjs";
 import { callOpenAICompatible, resolveAgentProvider } from "./helix-llm.mjs";
 import { routeRequest } from "./helix-routing.mjs";
 
@@ -68,6 +69,20 @@ export async function runArchivistRouter(rootDir, options = {}) {
     return result;
   }
 
+  const trigger = await evaluateArchivistTrigger(rootDir, archivistConfig, options);
+  if (!trigger.shouldRun && options.force !== true) {
+    const result = {
+      kind: "archivist_router",
+      at: nowIso(),
+      status: "skipped",
+      pass: true,
+      reason: trigger.reason,
+      trigger,
+    };
+    await appendLedger(rootDir, { type: "archivist_router_skipped", reason: result.reason, trigger: options.trigger || "manual" });
+    return result;
+  }
+
   const packet = await buildArchivistPacket(rootDir, options);
   const agentName = options.agent || archivistConfig.agent || "CangJie";
   const resolved = resolveAgentProvider(config, agentName);
@@ -102,6 +117,7 @@ export async function runArchivistRouter(rootDir, options = {}) {
     packet,
     decision,
     llmStatus,
+    trigger,
   });
   await appendLedger(rootDir, {
     type: "archivist_router_completed",
@@ -109,6 +125,7 @@ export async function runArchivistRouter(rootDir, options = {}) {
     status: llmStatus,
     route: decision.routeDecision?.route || null,
     confidence: decision.routeDecision?.confidence ?? null,
+    triggerReason: trigger.reason,
   });
   await writeSnapshot(rootDir, "archivist_router_completed", artifact);
   return artifact;
@@ -128,6 +145,62 @@ export async function recordArchivistEvent(rootDir, event) {
   return normalized;
 }
 
+export async function listArchivistRouteSuggestions(rootDir) {
+  await ensureHelixDirs(rootDir);
+  const dirPath = resolveHelixPath(rootDir, "routing", "suggestions");
+  const entries = [];
+  for (const name of await readdir(dirPath).catch(() => [])) {
+    if (!name.endsWith(".json")) continue;
+    const suggestion = await readJson(path.join(dirPath, name), null);
+    if (suggestion) entries.push(suggestion);
+  }
+  return entries.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+}
+
+export async function resolveArchivistRouteSuggestion(rootDir, options = {}) {
+  await ensureHelixDirs(rootDir);
+  if (!options.id) throw new Error("archivist suggestion resolve requires id");
+  const decision = String(options.decision || "").toLowerCase();
+  if (!["accept", "reject"].includes(decision)) throw new Error("archivist suggestion decision must be accept or reject");
+
+  const suggestionPath = resolveHelixPath(rootDir, "routing", "suggestions", `${options.id}.json`);
+  const artifact = await readJson(suggestionPath, null);
+  if (!artifact) throw new Error(`archivist route suggestion not found: ${options.id}`);
+  if (artifact.status !== "pending_review") throw new Error(`archivist route suggestion ${options.id} is ${artifact.status}`);
+
+  artifact.status = decision === "accept" ? "accepted" : "rejected";
+  artifact.resolvedAt = nowIso();
+  artifact.resolution = {
+    decision,
+    evidence: asString(options.evidence),
+    rationale: asString(options.rationale),
+    reviewer: asString(options.reviewer || "Jiuwei"),
+  };
+
+  let applied = [];
+  if (decision === "accept") {
+    applied = await applyKeywordSuggestions(rootDir, artifact.suggestions || [], {
+      evidence: artifact.resolution.evidence,
+      rationale: artifact.resolution.rationale,
+    });
+    artifact.applied = applied;
+  }
+
+  await writeJsonAtomic(suggestionPath, artifact);
+  await appendLedger(rootDir, {
+    type: "archivist_route_suggestion_resolved",
+    suggestionId: options.id,
+    decision,
+    appliedCount: applied.length,
+  });
+  await writeSnapshot(rootDir, "archivist_route_suggestion_resolved", {
+    suggestionId: options.id,
+    decision,
+    appliedCount: applied.length,
+  });
+  return artifact;
+}
+
 async function persistArchivistDecision(rootDir, payload) {
   const id = createWorkId("archive");
   const stage = payload.packet.stage;
@@ -138,6 +211,7 @@ async function persistArchivistDecision(rootDir, payload) {
     at,
     agent: payload.agentName,
     llmStatus: payload.llmStatus,
+    trigger: payload.trigger || null,
     packet: payload.packet,
     decision: normalizeDecision(payload.decision),
   };
@@ -167,7 +241,7 @@ async function persistArchivistDecision(rootDir, payload) {
       id,
       at,
       status: "pending_review",
-      suggestions: artifact.decision.keywordSuggestions,
+      suggestions: normalizeKeywordSuggestions(artifact.decision.keywordSuggestions),
       routeDecision: artifact.decision.routeDecision || null,
     });
   }
@@ -183,6 +257,7 @@ function buildArchivistPrompt(packet) {
       "Identify route, agent lane, multi-intent segments, memory updates, context injection facts, and keyword suggestions.",
       "Do not suggest changes to protected routes unless evidence is strong.",
       "Return JSON with keys: summary, routeDecision, multiIntentSegments, memoryUpdates, contextInjection, keywordSuggestions.",
+      "keywordSuggestions items must use {target:\"intents.plan|domains.visual|complexity.multi_step\", signals:[\"...\"], evidence:\"...\", confidence:0.0-1.0}.",
     ],
     packet,
   }, null, 2);
@@ -239,6 +314,139 @@ function normalizeDecision(decision) {
     keywordSuggestions: Array.isArray(decision.keywordSuggestions) ? decision.keywordSuggestions.slice(0, 50) : [],
     usage: decision.usage || null,
   };
+}
+
+async function evaluateArchivistTrigger(rootDir, archivistConfig, options) {
+  const triggerName = options.trigger || "manual";
+  const statePath = resolveHelixPath(rootDir, "routing", "archivist-trigger-state.json");
+  const state = await readJson(statePath, {
+    version: 1,
+    promptCounts: {},
+    totalUserPrompts: 0,
+    lastGitHead: null,
+    lastRunAt: null,
+  });
+  const triggers = archivistConfig.triggers || {};
+  const stage = normalizeStage(options.stage || DEFAULT_STAGE);
+  const gitHead = triggers.gitHeadChanged ? await readGitHead(rootDir) : null;
+  const gitChanged = Boolean(gitHead && state.lastGitHead && gitHead !== state.lastGitHead);
+  const firstRun = !state.lastRunAt;
+  let shouldRun = false;
+  let reason = "no trigger threshold reached";
+
+  if (options.force === true) {
+    shouldRun = true;
+    reason = "force";
+  } else if (triggerName === "sessionStart" && triggers.sessionStart !== false) {
+    shouldRun = true;
+    reason = "sessionStart";
+  } else if (triggerName === "postCompact") {
+    shouldRun = true;
+    reason = "postCompact";
+  } else if (triggerName === "workflowCheckpoint" && triggers.workflowCheckpoint !== false) {
+    shouldRun = true;
+    reason = "workflowCheckpoint";
+  } else if (gitChanged) {
+    shouldRun = true;
+    reason = "gitHeadChanged";
+  } else if (triggerName === "userPromptSubmit") {
+    const threshold = promptThresholdForStage(triggers.everyUserPrompts || {}, stage);
+    const currentCount = Number(state.promptCounts[stage] || 0) + 1;
+    state.promptCounts[stage] = currentCount;
+    state.totalUserPrompts = Number(state.totalUserPrompts || 0) + 1;
+    if (firstRun || currentCount >= threshold) {
+      shouldRun = true;
+      reason = firstRun ? "firstUserPrompt" : `promptWindow:${stage}:${currentCount}/${threshold}`;
+      state.promptCounts[stage] = 0;
+    }
+  } else if (triggerName === "manual" || triggerName === "cli") {
+    shouldRun = true;
+    reason = triggerName;
+  }
+
+  if (gitHead) state.lastGitHead = gitHead;
+  if (shouldRun) state.lastRunAt = nowIso();
+  state.updatedAt = nowIso();
+  await writeJsonAtomic(statePath, state);
+  return {
+    shouldRun,
+    reason,
+    trigger: triggerName,
+    stage,
+    gitHead,
+    gitChanged,
+    promptCounts: state.promptCounts,
+  };
+}
+
+async function readGitHead(rootDir) {
+  const result = await runCommand("git rev-parse HEAD", rootDir, 15_000);
+  if (result.exitCode !== 0) return null;
+  return result.stdout.trim() || null;
+}
+
+function promptThresholdForStage(config, stage) {
+  const min = Number(config.min || 5);
+  const max = Number(config.max || 20);
+  const selected = Number(config[stage] || config.default || 10);
+  return Math.max(min, Math.min(selected, max));
+}
+
+async function applyKeywordSuggestions(rootDir, suggestions, resolution) {
+  const { config } = await loadHelixConfig(rootDir);
+  const protectedTargets = new Set(config.archivistRouter?.keywordEvolution?.protectedTargets || []);
+  const normalized = normalizeKeywordSuggestions(suggestions);
+  const accepted = [];
+  for (const suggestion of normalized) {
+    if (protectedTargets.has(suggestion.target) && (!resolution.evidence || !resolution.rationale)) {
+      throw new Error(`protected route suggestion ${suggestion.target} requires evidence and rationale`);
+    }
+    accepted.push(suggestion);
+  }
+
+  const overlayPath = resolveHelixPath(rootDir, "routing", "routes-overrides.json");
+  const overlay = await readJson(overlayPath, { version: 1, patches: [] });
+  const existingKeys = new Set((overlay.patches || []).map((patch) => `${patch.target}:${(patch.signals || []).join("|")}`));
+  for (const suggestion of accepted) {
+    const key = `${suggestion.target}:${suggestion.signals.join("|")}`;
+    if (existingKeys.has(key)) continue;
+    overlay.patches.push({
+      target: suggestion.target,
+      signals: suggestion.signals,
+      evidence: suggestion.evidence,
+      confidence: suggestion.confidence,
+      source: "archivist_router",
+      appliedAt: nowIso(),
+    });
+  }
+  overlay.updatedAt = nowIso();
+  await writeJsonAtomic(overlayPath, overlay);
+  return accepted;
+}
+
+function normalizeKeywordSuggestions(suggestions) {
+  if (!Array.isArray(suggestions)) return [];
+  return suggestions
+    .map((suggestion) => {
+      if (!suggestion || typeof suggestion !== "object") return null;
+      const target = asString(suggestion.target).trim();
+      const signals = normalizeStringList(suggestion.signals || suggestion.keywords);
+      if (!/^(intents|domains|complexity)\.[A-Za-z0-9_-]+$/.test(target) || signals.length === 0) return null;
+      return {
+        target,
+        signals,
+        evidence: asString(suggestion.evidence || suggestion.reason),
+        confidence: normalizeConfidence(suggestion.confidence),
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 50);
+}
+
+function normalizeConfidence(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.max(0, Math.min(1, parsed));
 }
 
 function parseArchivistJson(content) {

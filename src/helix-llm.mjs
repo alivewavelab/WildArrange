@@ -1,6 +1,23 @@
 import { loadHelixConfig, nowIso } from "./helix-foundation.mjs";
 
 const DEFAULT_CHAT_PATH = "/chat/completions";
+const REVIEW_AGENT_PROFILES = {
+  BaiZe: {
+    lane: "goal_verifier",
+    focus: "Judge whether the task objective, success criteria, verifier evidence, and checkpoint evidence prove delivery.",
+    failBias: "Fail when the evidence chain is missing, verifier output does not match the task, or the goal is not actually satisfied.",
+  },
+  LuanNiao: {
+    lane: "risk_reviewer",
+    focus: "Find concrete bugs, regression risks, missing tests, LSP/typecheck problems, and maintainability risks that affect this task.",
+    failBias: "Fail only for reproducible defects, missing required tests, or risks that can break the delivered behavior.",
+  },
+  QiongQi: {
+    lane: "skeptical_acceptance",
+    focus: "Act as an adversarial reviewer. Try to disprove the completion claim using scope, verifier, project rules, and user intent.",
+    failBias: "Fail when a reasonable skeptical acceptance review would reject the worker's completion claim.",
+  },
+};
 
 export async function runLlmReview(rootDir, agentName, task, evidence = {}, options = {}) {
   const { config } = options.config ? { config: options.config } : await loadHelixConfig(rootDir);
@@ -36,7 +53,7 @@ export async function runLlmReview(rootDir, agentName, task, evidence = {}, opti
       messages: [
         {
           role: "system",
-          content: "You are a strict software delivery reviewer. Return only compact JSON.",
+          content: buildReviewSystemPrompt(agentName),
         },
         { role: "user", content: prompt },
       ],
@@ -139,13 +156,22 @@ export async function callOpenAICompatible(options) {
 
 function buildReviewPrompt(agentName, task, evidence, llmConfig) {
   const maxChars = Number.isInteger(llmConfig.maxEvidenceChars) ? llmConfig.maxEvidenceChars : 12000;
+  const profile = REVIEW_AGENT_PROFILES[agentName] || {
+    lane: "general_review",
+    focus: "Review whether the task can pass delivery.",
+    failBias: "Fail only for blocking issues tied to the task goal, verifier, scope, or project rules.",
+  };
   const payload = {
     reviewer: agentName,
+    lane: profile.lane,
+    focus: profile.focus,
+    failBias: profile.failBias,
     instruction: [
       "Decide whether this task can pass delivery review.",
       "Return JSON: {\"decision\":\"PASS|WARN|FAIL\",\"summary\":\"...\",\"findings\":[{\"severity\":\"P0|P1|P2\",\"file\":\"optional\",\"reason\":\"...\",\"requiredFix\":\"...\"}]}",
       "FAIL only for issues that should block checkpoint.",
       "Do not fail because a preferred improvement is absent unless it violates the stated goal, verifier, scope, or project rules.",
+      "Every FAIL finding must name the violated evidence, scope, verifier, success criterion, or project rule.",
     ],
     task: {
       id: task.id,
@@ -160,6 +186,16 @@ function buildReviewPrompt(agentName, task, evidence, llmConfig) {
     evidence: summarizeEvidence(evidence),
   };
   return truncate(JSON.stringify(payload, null, 2), maxChars);
+}
+
+function buildReviewSystemPrompt(agentName) {
+  const profile = REVIEW_AGENT_PROFILES[agentName] || REVIEW_AGENT_PROFILES.QiongQi;
+  return [
+    "You are a strict software delivery reviewer. Return only compact JSON.",
+    `Reviewer lane: ${profile.lane}.`,
+    `Focus: ${profile.focus}`,
+    `Blocking rule: ${profile.failBias}`,
+  ].join("\n");
 }
 
 function summarizeEvidence(evidence) {

@@ -131,6 +131,17 @@ export const DEFAULT_HELIX_CONFIG = {
     defaultMaxAgents: 2,
     isolation: "run-dir",
     timeoutMs: 120000,
+    defaultAdapter: null,
+    spawnAdapters: {
+      codex: {
+        command: "",
+        note: "Set a Codex CLI command template here. Variables: {rootDir}, {runDir}, {workDir}, {taskJson}, {outputJson}, {taskId}, {agent}.",
+      },
+      cursor: {
+        command: "",
+        note: "Set a Cursor agent command template here. Variables: {rootDir}, {runDir}, {workDir}, {taskJson}, {outputJson}, {taskId}, {agent}.",
+      },
+    },
   },
   dynamicAgents: {
     "visual-engineering": { provider: "gemini", model: "gemini-3.1-pro" },
@@ -145,7 +156,7 @@ export const DEFAULT_HELIX_CONFIG = {
     llm: {
       enabled: false,
       required: false,
-      agents: ["QiongQi"],
+      agents: ["BaiZe", "LuanNiao", "QiongQi"],
       temperature: 0,
       timeoutMs: 45000,
       maxEvidenceChars: 12000,

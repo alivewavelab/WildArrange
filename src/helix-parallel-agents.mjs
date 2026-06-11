@@ -5,6 +5,7 @@ import {
   appendLedger,
   createWorkId,
   ensureHelixDirs,
+  loadHelixConfig,
   normalizeAgentKey,
   nowIso,
   readJson,
@@ -14,6 +15,8 @@ import {
   writeSnapshot,
 } from "./helix-foundation.mjs";
 import { buildFailureSummary } from "./helix-failure.mjs";
+import { resolveAgentSpawn } from "./helix-agent-spawn.mjs";
+import { applyAgentPatch, collectAgentWorktreePatch, extractPatchPaths, prepareAgentWorktree } from "./helix-git-worktree.mjs";
 import {
   appendWisdom,
   pathAllowed,
@@ -40,6 +43,7 @@ export async function runParallelAgents(rootDir, options = {}) {
   await ensureHelixDirs(rootDir);
   const taskState = await loadTaskState(rootDir);
   if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
+  const { config } = await loadHelixConfig(rootDir);
 
   const tasks = selectParallelTasks(taskState.tasks, options);
   if (tasks.length === 0) {
@@ -56,6 +60,7 @@ export async function runParallelAgents(rootDir, options = {}) {
 
   const results = await Promise.all(tasks.map((task, index) => runOneAgent(rootDir, runDir, runId, task, {
     ...options,
+    config,
     index,
   })));
   await appendRunIndex(rootDir, runId, results);
@@ -90,7 +95,9 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
   const result = await readParallelAgentResult(rootDir, options.runId, options.taskId);
   if (!result.pass) throw new Error(`parallel result for ${options.taskId} did not pass`);
   const files = normalizeProposedFiles(result.result?.files);
-  if (files.length === 0) throw new Error("parallel result has no result.files to admit");
+  if (files.length === 0 && typeof result.result?.patch !== "string") {
+    throw new Error("parallel result has no result.files or result.patch to admit");
+  }
 
   const prepared = await prepareAdmission(rootDir, options.taskId, result, files);
   const verifyResult = await runVerifier(rootDir, prepared.task);
@@ -185,16 +192,23 @@ async function readParallelAgentResult(rootDir, runId, taskId) {
 
 async function prepareAdmission(rootDir, taskId, result, files) {
   const current = await getAdmissionTask(rootDir, taskId);
-  const denied = files.filter((file) => !pathAllowed(file.path, current.task.writable_paths || []));
+  const proposedPaths = files.length > 0 ? files.map((file) => file.path) : normalizePatchPaths(result.result?.patchPaths || result.result?.changedPaths || extractPatchPaths(result.result?.patch || ""));
+  const denied = proposedPaths.filter((filePath) => !pathAllowed(filePath, current.task.writable_paths || []));
   if (denied.length > 0) {
-    throw new Error(`parallel admission denied by writable_paths: ${denied.map((file) => file.path).join(", ")}`);
+    throw new Error(`parallel admission denied by writable_paths: ${denied.join(", ")}`);
   }
 
-  for (const file of files) {
-    const absolutePath = path.join(rootDir, file.path);
-    assertInsideRoot(rootDir, absolutePath, file.path);
-    await mkdir(path.dirname(absolutePath), { recursive: true });
-    await writeFile(absolutePath, file.content, "utf8");
+  if (files.length > 0) {
+    for (const file of files) {
+      const absolutePath = path.join(rootDir, file.path);
+      assertInsideRoot(rootDir, absolutePath, file.path);
+      await mkdir(path.dirname(absolutePath), { recursive: true });
+      await writeFile(absolutePath, file.content, "utf8");
+    }
+  } else if (typeof result.result?.patch === "string") {
+    await applyAgentPatch(rootDir, result.result.patch);
+  } else {
+    throw new Error("parallel result has no result.files or result.patch to admit");
   }
 
   const workerResult = {
@@ -202,7 +216,9 @@ async function prepareAdmission(rootDir, taskId, result, files) {
     at: nowIso(),
     command: `parallel_admit:${result.runId}:${taskId}`,
     exitCode: 0,
-    stdout: `Admitted ${files.length} file(s) from ${result.agent}`,
+    stdout: files.length > 0
+      ? `Admitted ${files.length} file(s) from ${result.agent}`
+      : `Admitted patch with ${proposedPaths.length} path(s) from ${result.agent}`,
     stderr: "",
     source: "parallel_agent_admission",
     runId: result.runId,
@@ -223,7 +239,8 @@ async function prepareAdmission(rootDir, taskId, result, files) {
       at: nowIso(),
       runId: result.runId,
       agent: result.agent,
-      appliedPaths: files.map((file) => file.path),
+      appliedPaths: proposedPaths,
+      admissionMode: files.length > 0 ? "files" : "patch",
       summary: result.result?.summary || "",
     });
     candidate.updatedAt = nowIso();
@@ -234,9 +251,9 @@ async function prepareAdmission(rootDir, taskId, result, files) {
     runId: result.runId,
     taskId,
     agent: result.agent,
-    appliedPaths: files.map((file) => file.path),
+    appliedPaths: proposedPaths,
   });
-  return { task, workerResult, appliedPaths: files.map((file) => file.path) };
+  return { task, workerResult, appliedPaths: proposedPaths };
 }
 
 async function finalizeAdmission(rootDir, taskId, evidence) {
@@ -303,23 +320,43 @@ async function runOneAgent(rootDir, runDir, runId, task, options) {
   const agent = normalizeAgentKey(options.agent || task.owner || `Agent${options.index + 1}`) || `Agent${options.index + 1}`;
   const taskRunDir = path.join(runDir, task.id);
   await mkdir(taskRunDir, { recursive: true });
+  const config = options.config || (await loadHelixConfig(rootDir)).config;
+  const isolation = options.isolation || task.isolation || config.parallelAgents?.isolation || "run-dir";
+  const worktree = await prepareAgentWorktree(rootDir, taskRunDir, {
+    isolation,
+    timeoutMs: normalizeTimeout(options.timeoutMs || config.parallelAgents?.timeoutMs),
+  });
   const taskPacketPath = path.join(taskRunDir, "task.json");
   const resultPath = path.join(taskRunDir, "agent-result.json");
-  await writeJsonAtomic(taskPacketPath, buildTaskPacket(task, { runId, agent }));
+  await writeJsonAtomic(taskPacketPath, buildTaskPacket(task, { runId, agent, worktree }));
 
-  const command = renderRunnerCommand(options.command || options.runnerCommand, {
+  const spawn = resolveAgentSpawn(rootDir, config, task, {
     rootDir,
     runDir: taskRunDir,
+    workDir: worktree.workDir,
     task,
     agent,
     taskPacketPath,
     resultPath,
-  });
+  }, options);
+  const command = spawn.command;
   const startedAt = nowIso();
-  const commandResult = command
-    ? await runCommand(command, taskRunDir, normalizeTimeout(options.timeoutMs))
-    : { exitCode: 0, stdout: "", stderr: "no runner command configured; task packet prepared only" };
-  const structuredResult = await readJson(resultPath, null);
+  const commandResult = worktree.isolation === "git-worktree" && worktree.available !== true
+    ? { exitCode: 1, stdout: "", stderr: worktree.reason || "git-worktree isolation unavailable" }
+    : command
+      ? await runCommand(command, worktree.workDir, normalizeTimeout(options.timeoutMs || config.parallelAgents?.timeoutMs))
+      : { exitCode: 0, stdout: "", stderr: "no runner command configured; task packet prepared only" };
+  const structuredResult = await readJson(resultPath, null) || {};
+  const patchResult = await collectAgentWorktreePatch(rootDir, worktree, {
+    timeoutMs: normalizeTimeout(options.timeoutMs || config.parallelAgents?.timeoutMs),
+  });
+  if (patchResult?.patch && !structuredResult.patch && normalizeProposedFilesOrEmpty(structuredResult.files).length === 0) {
+    structuredResult.patch = patchResult.patch;
+    structuredResult.patchPaths = patchResult.changedPaths;
+    structuredResult.patchPath = patchResult.patchPath;
+    structuredResult.summary = structuredResult.summary || `patch with ${patchResult.changedPaths.length} changed path(s)`;
+    await writeJsonAtomic(resultPath, structuredResult);
+  }
   const result = {
     kind: "parallel_agent_result",
     runId,
@@ -328,11 +365,23 @@ async function runOneAgent(rootDir, runDir, runId, task, options) {
     at: nowIso(),
     startedAt,
     command: command || null,
+    adapter: spawn.adapter,
+    spawnSource: spawn.source,
+    isolation: worktree.isolation,
+    workDir: path.relative(rootDir, worktree.workDir),
+    worktreeAvailable: worktree.available,
+    worktreeReason: worktree.reason,
     exitCode: commandResult.exitCode,
     pass: commandResult.exitCode === 0,
     stdout: truncate(commandResult.stdout || "", 4000),
     stderr: truncate(commandResult.stderr || "", 4000),
     result: structuredResult,
+    patch: patchResult ? {
+      patchPath: patchResult.patchPath,
+      changedPaths: patchResult.changedPaths,
+      status: patchResult.status,
+      exitCode: patchResult.exitCode,
+    } : null,
     runDir: path.relative(rootDir, taskRunDir),
   };
   await writeJsonAtomic(path.join(taskRunDir, "result.json"), result);
@@ -352,6 +401,12 @@ function buildTaskPacket(task, context) {
     at: nowIso(),
     runId: context.runId,
     agent: context.agent,
+    worktree: context.worktree ? {
+      isolation: context.worktree.isolation,
+      workDir: context.worktree.workDir,
+      available: context.worktree.available,
+      reason: context.worktree.reason,
+    } : null,
     task: {
       id: task.id,
       subject: task.subject,
@@ -365,22 +420,13 @@ function buildTaskPacket(task, context) {
     },
     instruction: [
       "Work only inside this run directory unless a host adapter explicitly grants a separate workspace.",
+      "If worktree.available is true, edit inside worktree.workDir and let WildArrange collect the patch.",
       "Write optional structured output to agent-result.json.",
       "To propose mainline changes, write agent-result.json with files: [{\"path\":\"relative/path\",\"content\":\"utf8 text\"}].",
+      "For Git worktree mode, changed files may be admitted as a generated patch after mainline gates pass.",
       "Do not claim the main task is complete; mainline verifier/review gates decide completion.",
     ],
   };
-}
-
-function renderRunnerCommand(command, context) {
-  if (!command || command === true) return null;
-  return String(command)
-    .replaceAll("{rootDir}", shellEscape(context.rootDir))
-    .replaceAll("{runDir}", shellEscape(context.runDir))
-    .replaceAll("{taskId}", shellEscape(context.task.id))
-    .replaceAll("{agent}", shellEscape(context.agent))
-    .replaceAll("{taskJson}", shellEscape(context.taskPacketPath))
-    .replaceAll("{outputJson}", shellEscape(context.resultPath));
 }
 
 async function appendRunIndex(rootDir, runId, results) {
@@ -446,6 +492,19 @@ function normalizeProposedFiles(files) {
   });
 }
 
+function normalizeProposedFilesOrEmpty(files) {
+  try {
+    return normalizeProposedFiles(files);
+  } catch {
+    return [];
+  }
+}
+
+function normalizePatchPaths(paths) {
+  if (!Array.isArray(paths)) return [];
+  return paths.map(normalizeRelativePath).filter((filePath) => filePath && !path.isAbsolute(filePath) && !filePath.startsWith("../") && !filePath.includes("/../"));
+}
+
 function assertInsideRoot(rootDir, absolutePath, displayPath) {
   const relative = path.relative(rootDir, absolutePath);
   if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
@@ -466,8 +525,4 @@ function normalizeRelativePath(filePath) {
 
 function truncate(value, limit) {
   return value.length <= limit ? value : `${value.slice(0, limit - 20)}\n...[truncated]`;
-}
-
-function shellEscape(value) {
-  return `'${String(value).replaceAll("'", "'\\''")}'`;
 }

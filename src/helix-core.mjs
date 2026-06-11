@@ -34,7 +34,13 @@ export { installAdapter, uninstallAdapter } from "./helix-adapters.mjs";
 export { recordReviewBlocker, resolveChangeRequest, reviewChangeRequest, steerWorkflow } from "./helix-change.mjs";
 export { buildFailureSummary } from "./helix-failure.mjs";
 export { loadRoutesConfig, resolveRouteDecision, routeRequest } from "./helix-routing.mjs";
-export { buildArchivistPacket, recordArchivistEvent, runArchivistRouter } from "./helix-archivist-router.mjs";
+export {
+  buildArchivistPacket,
+  listArchivistRouteSuggestions,
+  recordArchivistEvent,
+  resolveArchivistRouteSuggestion,
+  runArchivistRouter,
+} from "./helix-archivist-router.mjs";
 export { scanProjectRules } from "./helix-rules.mjs";
 export { runReviewGate, runWorker } from "./helix-review.mjs";
 export { callOpenAICompatible, resolveAgentProvider, runLlmReview } from "./helix-llm.mjs";
@@ -84,6 +90,8 @@ export {
   writeOutbox,
 } from "./helix-team.mjs";
 export { admitParallelAgentResult, listParallelAgentRuns, runParallelAgents } from "./helix-parallel-agents.mjs";
+export { renderSpawnCommand, resolveAgentSpawn } from "./helix-agent-spawn.mjs";
+export { applyAgentPatch, collectAgentWorktreePatch, extractPatchPaths, prepareAgentWorktree } from "./helix-git-worktree.mjs";
 export {
   appendWisdom,
   changedPathsIntroducedByTask,

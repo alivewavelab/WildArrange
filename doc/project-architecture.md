@@ -21,6 +21,8 @@ bin/helix.mjs
      -> src/helix-node-runtime.mjs
      -> src/helix-plan.mjs
      -> src/helix-team.mjs
+     -> src/helix-agent-spawn.mjs
+     -> src/helix-git-worktree.mjs
      -> src/helix-parallel-agents.mjs
      -> src/helix-gates.mjs
   -> src/helix-dashboard.mjs
@@ -48,7 +50,9 @@ bin/helix.mjs
 - `src/helix-node-runtime.mjs`: linear task node runtime for execute/verify/scope/review/checkpoint/retry.
 - `src/helix-plan.mjs`: plan normalization, graph validation, plan import, route enrichment, and task-state loading.
 - `src/helix-team.mjs`: team-lite tasks, claims, evidence recording, task-state persistence, outbox, and durable message board.
-- `src/helix-parallel-agents.mjs`: command-based child-agent batch runner, isolated run directories, result collection, team message publication, artifact admission, and agent-run index.
+- `src/helix-agent-spawn.mjs`: host-neutral child-agent spawn command rendering for Codex/Cursor/custom command adapters.
+- `src/helix-git-worktree.mjs`: Git worktree isolation, patch extraction, patch path parsing, and patch admission helpers.
+- `src/helix-parallel-agents.mjs`: command-based child-agent batch runner, run-dir or Git worktree isolation, result collection, team message publication, file/patch admission, and agent-run index.
 - `src/helix-gates.mjs`: command execution, verifier, scope guard, path checks, checkpoints, change requests, review/failure reports, and wisdom ledger.
 - `src/helix-dashboard.mjs`: local dashboard HTTP API and HTML UI.
 - `packs/wildarrange-linear/agents`: role prompts.
@@ -68,6 +72,8 @@ bin/helix.mjs
 - `.helix/memory/stage-summaries`: structured summaries for progress, decisions, artifacts, implementation notes, research notes, pitfalls, and open questions.
 - `.helix/memory/index.json`: lightweight keyword/domain/artifact index for memory recall.
 - `.helix/routing/suggestions`: ArchivistRouter keyword suggestions and user-preference routing notes.
+- `.helix/routing/routes-overrides.json`: reviewed keyword patches applied on top of the installed route table.
+- `.helix/routing/archivist-trigger-state.json`: Git HEAD and stage-aware prompt-window counters for ArchivistRouter scheduling.
 - `.helix/adapters`: generated adapter files, reports, and backups.
 
 ## Routing Model
@@ -81,7 +87,7 @@ Routing uses a hybrid model:
 5. `ArchivistRouter` reads a bounded routing packet and structured memory instead of unlimited raw chat history.
 6. Routing packets use conclusions-only capture: keep user intent, visible assistant conclusions, summarized tool results, evidence, progress, decisions, artifacts, implementation conclusions, research notes, pitfalls, and open questions; strip code blocks, diffs, raw command output, and intermediate process text by default.
 7. It may produce route decisions, multi-intent segments, structured archive updates, context injection packs, user-preference notes, and keyword patch suggestions.
-8. Keyword suggestions are written for review first. High-risk routing areas such as review, Git, permissions, safety, deletion, release, and scope changes require human or Jiuwei approval before updating `routes.json`.
+8. Keyword suggestions are written for review first. Accepted suggestions update `.helix/routing/routes-overrides.json`, not the installed prompt-pack source. High-risk routing areas such as review, Git, permissions, safety, deletion, release, and scope changes require evidence and rationale.
 
 ## Parallel Agent Model
 
@@ -89,14 +95,15 @@ The first parallel runtime is intentionally narrow:
 
 1. `parallel run` selects runnable pending tasks or explicit task IDs.
 2. Each child receives a task packet under `.helix/agent-runs/<runId>/<taskId>/task.json`.
-3. The configured runner command executes inside that isolated run directory.
+3. The configured runner command executes inside an isolated run directory, or inside a Git worktree when `--isolation git-worktree` is used.
 4. Optional structured output is read from `agent-result.json`.
-5. Results are written to `.helix/agent-runs`, published to the team message board, and appended to the ledger.
-6. `parallel admit` accepts only structured text file proposals from `agent-result.json.files`.
-7. Admission rejects paths outside `writable_paths`.
-8. Accepted files are written to the main workspace, then verifier, scope guard, review gate, and checkpoint run before the task can become `completed`.
+5. Adapter command templates can be configured under `parallelAgents.spawnAdapters.codex` or `parallelAgents.spawnAdapters.cursor`; they receive `{taskJson}`, `{outputJson}`, `{runDir}`, `{workDir}`, `{taskId}`, and `{agent}`.
+6. Results are written to `.helix/agent-runs`, published to the team message board, and appended to the ledger.
+7. `parallel admit` accepts structured text file proposals from `agent-result.json.files` or Git worktree patches from `agent-result.json.patch`.
+8. Admission rejects paths outside `writable_paths`.
+9. Accepted files or patches are applied to the main workspace, then verifier, scope guard, review gate, and checkpoint run before the task can become `completed`.
 
-This supports structured artifact admission. Git worktree isolation and patch-based merge admission are still the next layer.
+This supports a narrow but real multi-agent admission loop: child agents can work in isolated directories or Git worktrees, but they still cannot self-certify completion.
 
 ## Gate Model
 
@@ -110,7 +117,7 @@ Completion requires:
 
 `inconclusive` is not completion evidence.
 
-The review gate is host-neutral. It runs from the CLI and may include deterministic lanes, configured `review_commands`, configured `standards_commands`, optional LSP/typecheck commands, comment checking, and optional OpenAI-compatible LLM review.
+The review gate is host-neutral. It runs from the CLI and may include deterministic lanes, configured `review_commands`, configured `standards_commands`, optional LSP/typecheck commands, comment checking, and optional OpenAI-compatible LLM review. The default LLM review contract uses three roles when enabled: BaiZe for goal/evidence verification, LuanNiao for bug/risk review, and QiongQi for skeptical acceptance.
 
 ## Adapter Model
 

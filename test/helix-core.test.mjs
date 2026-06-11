@@ -19,6 +19,7 @@ import {
   importPlan,
   installAdapter,
   initRuntime,
+  listArchivistRouteSuggestions,
   listParallelAgentRuns,
   loadHelixConfig,
   listTeamMessages,
@@ -32,6 +33,7 @@ import {
   recordTaskEvidence,
   renderPromptPackEntry,
   resolveChangeRequest,
+  resolveArchivistRouteSuggestion,
   resolveInjectionPoint,
   resumeReport,
   reviewChangeRequest,
@@ -240,6 +242,7 @@ test("default GPT-family agents are delegated to the host provider", async () =>
     assert.equal(config.agents.YingLong.provider, "host");
     assert.equal(config.agents.QiongQi.provider, "host");
     assert.equal(config.modelProviders.openai, undefined);
+    assert.deepEqual(config.review.llm.agents, ["BaiZe", "LuanNiao", "QiongQi"]);
 
     const resolved = resolveAgentProvider(config, "QiongQi");
     assert.equal(resolved.available, false);
@@ -539,6 +542,43 @@ test("parallel agents run task packets concurrently and publish results", async 
   });
 });
 
+test("parallel agents can use configured adapter command templates", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
+      parallelAgents: {
+        spawnAdapters: {
+          codex: {
+            command: "node -e \"const fs=require('fs'); const packet=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); fs.writeFileSync(process.argv[2], JSON.stringify({summary:'adapter '+packet.agent, files:[{path:'.helix/artifacts/adapter.txt', content:packet.task.id}]}));\" {taskJson} {outputJson}",
+          },
+        },
+      },
+    }, null, 2));
+    await initRuntime(dir);
+    const planPath = path.join(dir, "adapter-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Adapter spawn",
+      tasks: [{
+        id: "T001",
+        subject: "Use adapter command",
+        verify_commands: ["node -e \"process.exit(0)\""],
+        writable_paths: [".helix/artifacts/adapter.txt"],
+      }],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    const batch = await runParallelAgents(dir, {
+      taskIds: ["T001"],
+      agent: "Kui",
+      adapter: "codex",
+    });
+
+    assert.equal(batch.status, "completed");
+    assert.equal(batch.results[0].adapter, "codex");
+    assert.equal(batch.results[0].spawnSource, "adapter");
+    assert.equal(batch.results[0].result.files[0].path, ".helix/artifacts/adapter.txt");
+  });
+});
+
 test("parallel admission applies child artifacts only after gates pass", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
@@ -579,6 +619,56 @@ test("parallel admission applies child artifacts only after gates pass", async (
     assert.equal(checkpoint.verifyResult.pass, true);
     assert.equal(checkpoint.scopeResult.status, "pass");
     assert.equal(checkpoint.reviewResult.pass, true);
+  });
+});
+
+test("parallel agents can isolate edits in git worktrees and admit patches", async () => {
+  await withTempDir(async (dir) => {
+    await runCommand("git init", dir);
+    await runCommand("git config user.email test@example.com", dir);
+    await runCommand("git config user.name 'WildArrange Test'", dir);
+    await writeFile(path.join(dir, "README.md"), "root\n");
+    await runCommand("git add README.md", dir);
+    await runCommand("git commit -m initial", dir);
+
+    await initRuntime(dir);
+    const planPath = path.join(dir, "worktree-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Worktree admission",
+      tasks: [{
+        id: "T001",
+        subject: "Admit worktree patch",
+        verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/worktree.txt','utf8').trim()!=='ok') process.exit(1);")],
+        writable_paths: ["src/**"],
+      }],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    const command = [
+      "node -e",
+      JSON.stringify("const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/worktree.txt','ok\\n'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'worktree patch ready'}));"),
+      "{outputJson}",
+    ].join(" ");
+    const batch = await runParallelAgents(dir, {
+      taskIds: ["T001"],
+      agent: "Kui",
+      isolation: "git-worktree",
+      command,
+    });
+
+    assert.equal(batch.status, "completed");
+    assert.equal(batch.results[0].isolation, "git-worktree");
+    assert.equal(batch.results[0].worktreeAvailable, true);
+    assert.deepEqual(batch.results[0].patch.changedPaths, ["src/worktree.txt"]);
+
+    const admitted = await admitParallelAgentResult(dir, {
+      runId: batch.runId,
+      taskId: "T001",
+    });
+
+    assert.equal(admitted.status, "completed");
+    assert.deepEqual(admitted.appliedPaths, ["src/worktree.txt"]);
+    assert.equal(await readFile(path.join(dir, "src", "worktree.txt"), "utf8"), "ok\n");
   });
 });
 
@@ -650,6 +740,75 @@ test("ArchivistRouter builds conclusions-only packets and fallback memory", asyn
     const memoryIndex = await readJson(resolveHelixPath(dir, "memory", "index.json"));
     assert.ok(memoryIndex.keywords.fallback >= 1);
     assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /archivist_router_completed/);
+  });
+});
+
+test("ArchivistRouter route suggestions require review before affecting routing", async () => {
+  await withTempDir(async (dir) => {
+    await withLlmServer((request, response) => {
+      assert.equal(request.url, "/chat/completions");
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              summary: "learned a local routing keyword",
+              routeDecision: { route: "execute", confidence: 0.9 },
+              memoryUpdates: [],
+              contextInjection: { progress: ["route keyword learned"] },
+              keywordSuggestions: [{
+                target: "domains.visual",
+                signals: ["画布测试词"],
+                evidence: "User used this phrase for visual canvas work.",
+                confidence: 0.91,
+              }],
+            }),
+          },
+        }],
+      }));
+    }, async (baseUrl) => {
+      await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
+        modelProviders: {
+          local: { apiKeyEnv: "HELIX_TEST_ARCHIVIST_KEY", baseUrl },
+        },
+        agents: {
+          CangJie: { provider: "local", model: "archivist-test" },
+        },
+        archivistRouter: { enabled: true, agent: "CangJie" },
+      }, null, 2));
+      process.env.HELIX_TEST_ARCHIVIST_KEY = "test-key";
+      await initRuntime(dir);
+
+      const before = await routeRequest(dir, { text: "处理画布测试词" });
+      assert.notEqual(before.domain, "visual");
+
+      const result = await runArchivistRouter(dir, {
+        force: true,
+        stage: "plan",
+        text: "画布测试词在本项目里表示视觉画布类工作。",
+      });
+      assert.equal(result.llmStatus, "called");
+
+      const suggestions = await listArchivistRouteSuggestions(dir);
+      assert.equal(suggestions.length, 1);
+      assert.equal(suggestions[0].status, "pending_review");
+
+      const pending = await routeRequest(dir, { text: "处理画布测试词" });
+      assert.notEqual(pending.domain, "visual");
+
+      const resolved = await resolveArchivistRouteSuggestion(dir, {
+        id: suggestions[0].id,
+        decision: "accept",
+        evidence: "Test reviewer accepted the local visual synonym.",
+        rationale: "The phrase is project-specific and low risk.",
+      });
+      assert.equal(resolved.status, "accepted");
+
+      const after = await routeRequest(dir, { text: "处理画布测试词" });
+      assert.equal(after.domain, "visual");
+      assert.equal(after.category, "visual-engineering");
+      assert.match(await readFile(resolveHelixPath(dir, "routing", "routes-overrides.json"), "utf8"), /画布测试词/);
+    });
   });
 });
 

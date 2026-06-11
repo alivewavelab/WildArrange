@@ -103,10 +103,11 @@ node ./bin/helix.mjs adapter uninstall --target all
 
 ## 多 Agent 最小闭环
 
-命令型子 Agent 可以先在隔离目录内并发运行：
+命令型子 Agent 可以先在隔离目录内并发运行；也可以通过 adapter 命令模板交给 Codex/Cursor 类宿主启动：
 
 ```bash
 node ./bin/helix.mjs parallel run --max-agents 2 --task T001,T002 --agent Kui --command "..."
+node ./bin/helix.mjs parallel run --task T001 --agent Kui --adapter codex
 node ./bin/helix.mjs parallel list
 ```
 
@@ -127,6 +128,13 @@ node ./bin/helix.mjs parallel list
 node ./bin/helix.mjs parallel admit --run <runId> --task T001
 ```
 
+Git 项目可以使用 worktree 隔离。子 Agent 在独立 worktree 写文件，WildArrange 自动提取 patch；合入时同样先过 `writable_paths` 和完整 gate：
+
+```bash
+node ./bin/helix.mjs parallel run --task T001 --isolation git-worktree --command "..."
+node ./bin/helix.mjs parallel admit --run <runId> --task T001
+```
+
 ## ArchivistRouter
 
 ArchivistRouter 是“档案员 + 任务路由”节点。它只读取清洗后的结论包，不摄入代码块、raw diff 或完整命令输出。
@@ -139,6 +147,13 @@ node ./bin/helix.mjs archivist run --text "做一个网页版 TODO 工具" --sta
 ```
 
 当 `archivistRouter.enabled` 为 `true` 时，`SessionStart`、`UserPromptSubmit`、`PostCompact` hook 会自动触发 ArchivistRouter。没有 DeepSeek key 时会走 deterministic fallback，不阻断主流程。
+
+ArchivistRouter 的关键词学习不会直接改路由。建议先进入 `.helix/routing/suggestions/`，审核后才写入 `.helix/routing/routes-overrides.json`：
+
+```bash
+node ./bin/helix.mjs archivist suggestions list
+node ./bin/helix.mjs archivist suggestions resolve --id <id> --decision accept --evidence "..." --rationale "..."
+```
 
 ## Dashboard
 
@@ -231,7 +246,7 @@ npm test
 npm pack --dry-run --cache /private/tmp/helix-npm-cache
 ```
 
-当前状态：线性治理闭环已实现并通过测试；可选 LLM review、可配置 LSP/类型检查诊断与注释检查可通过 CLI review gate 启用。多 Agent 已具备命令型并行、结构化成果 admission 与消息板闭环；下一层是 Codex/Cursor 真实子 Agent 启动、Git worktree 隔离和后台进程管理。
+当前状态：线性治理闭环已实现并通过测试；可选 LLM review、可配置 LSP/类型检查诊断与注释检查可通过 CLI review gate 启用。多 Agent 已具备命令型并行、Codex/Cursor 命令模板 spawn、结构化文件 admission、Git worktree patch admission 与消息板闭环；下一层是 Codex/Cursor 私有后台 Agent API 和长期进程管理。
 
 ## 更多文档
 
