@@ -26,6 +26,9 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
   const workerResult = evidence.workerResult || [...task.evidence].reverse().find((entry) => entry.kind === "worker");
   const verifyResult = evidence.verifyResult || task.last_verify_result || [...task.evidence].reverse().find((entry) => entry.kind === "verifier");
   const scopeResult = evidence.scopeResult || task.last_scope_result || [...task.evidence].reverse().find((entry) => entry.kind === "scope_guard");
+  const workerEvidenceOk = workerEvidenceComplete(workerResult);
+  const verifierEvidenceOk = verifierEvidenceComplete(task, verifyResult);
+  const evidenceIntegrity = reviewEvidenceIntegrity(task, { workerResult, verifyResult });
   const criteria = criteriaStatus(task);
   const rulesContext = await scanProjectRules(rootDir, {
     targetPaths: uniqueStrings([...(task.writable_paths || []), ...((scopeResult?.changedPaths) || [])]),
@@ -48,8 +51,14 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
   const qualityResults = await runQualityGates(rootDir, task, scopeResult, config);
 
   const lanes = [
-    reviewLane("goal_compliance", "BaiZe", workerResult?.exitCode === 0 && verifyResult?.pass === true, {
-      summary: workerResult?.exitCode === 0 && verifyResult?.pass === true
+    reviewLane("evidence_integrity", "BaiZe", evidenceIntegrity.pass, {
+      summary: evidenceIntegrity.pass
+        ? "worker and verifier evidence objects are present and internally complete"
+        : `missing or incomplete evidence: ${evidenceIntegrity.reasons.join("; ")}`,
+      fixBy: "重新运行 execute/verify，确保 workerResult 与 verifyResult 都写入 task evidence。",
+    }),
+    reviewLane("goal_compliance", "BaiZe", workerEvidenceOk && verifierEvidenceOk && workerResult.exitCode === 0 && verifyResult.pass === true, {
+      summary: workerEvidenceOk && verifierEvidenceOk && workerResult.exitCode === 0 && verifyResult.pass === true
         ? "worker completed and verifier passed against task acceptance commands"
         : "worker or verifier evidence does not prove the task goal",
       fixBy: "修复实现或验收失败后，重新运行 execute/verify。",
@@ -63,8 +72,8 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
           : "changed paths stay within writable_paths",
       fixBy: "移除范围外改动，或走 ChangeRequest 扩展任务边界。",
     }),
-    reviewLane("evidence_quality", "LuanNiao", verifierEvidenceComplete(task, verifyResult), {
-      summary: verifierEvidenceComplete(task, verifyResult)
+    reviewLane("evidence_quality", "LuanNiao", verifierEvidenceOk, {
+      summary: verifierEvidenceOk
         ? "all verifier commands produced passing evidence"
         : "verifier evidence is missing, partial, or failing",
       fixBy: "补齐并运行覆盖真实行为的 verify_commands。",
@@ -174,6 +183,17 @@ function reviewLane(name, agent, condition, options) {
     summary: options.summary,
     fixBy: options.fixBy,
   };
+}
+
+function reviewEvidenceIntegrity(task, evidence) {
+  const reasons = [];
+  if (!workerEvidenceComplete(evidence.workerResult)) reasons.push("workerResult missing kind/exitCode");
+  if (!verifierEvidenceComplete(task, evidence.verifyResult)) reasons.push("verifyResult missing, failing, or not aligned with verify_commands");
+  return { pass: reasons.length === 0, reasons };
+}
+
+function workerEvidenceComplete(workerResult) {
+  return workerResult?.kind === "worker" && Number.isInteger(workerResult.exitCode);
 }
 
 function verifierEvidenceComplete(task, verifyResult) {

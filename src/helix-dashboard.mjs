@@ -15,6 +15,8 @@ import {
   writeWorkflowSummary,
 } from "./helix-core.mjs";
 
+class DashboardBadRequest extends Error {}
+
 export function startDashboardServer(rootDir, options = {}) {
   const host = options.host || "127.0.0.1";
   const port = Number.isInteger(options.port) ? options.port : 8765;
@@ -49,7 +51,8 @@ export function startDashboardServer(rootDir, options = {}) {
         return;
       }
       if (request.method === "GET" && url.pathname.startsWith("/api/tasks/")) {
-        const taskId = decodeURIComponent(url.pathname.slice("/api/tasks/".length));
+        const taskId = safeDecodeSegment(url.pathname.slice("/api/tasks/".length), "taskId");
+        validateDashboardId(taskId, "taskId");
         const result = await getTeamTask(rootDir, taskId);
         sendJson(response, 200, { ok: true, result });
         return;
@@ -62,6 +65,7 @@ export function startDashboardServer(rootDir, options = {}) {
       }
       if (request.method === "POST" && url.pathname === "/api/tasks/claim") {
         const body = await readJsonBody(request);
+        validateDashboardId(body.taskId, "taskId");
         const result = await claimTeamTask(rootDir, { taskId: body.taskId, owner: body.owner });
         sendJson(response, 200, { ok: true, result });
         return;
@@ -85,12 +89,14 @@ export function startDashboardServer(rootDir, options = {}) {
         return;
       }
       if (request.method === "POST" && url.pathname.startsWith("/api/node/")) {
-        const nodeName = url.pathname.slice("/api/node/".length);
+        const nodeName = safeDecodeSegment(url.pathname.slice("/api/node/".length), "node");
+        validateNodeName(nodeName);
         if (!["execute", "verify", "scope", "review", "checkpoint", "retry"].includes(nodeName)) {
           sendJson(response, 400, { ok: false, error: `unsupported node: ${nodeName}` });
           return;
         }
         const body = await readJsonBody(request);
+        validateOptionalDashboardId(body.taskId, "taskId");
         const result = await runWorkflowNode(rootDir, nodeName, { taskId: body.taskId });
         sendJson(response, 200, { ok: true, result });
         return;
@@ -101,6 +107,10 @@ export function startDashboardServer(rootDir, options = {}) {
       }
       sendJson(response, 404, { error: "not_found" });
     } catch (error) {
+      if (error instanceof DashboardBadRequest) {
+        sendJson(response, 400, { ok: false, error: error.message });
+        return;
+      }
       sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) });
     }
   });
@@ -119,6 +129,31 @@ function isAuthorized(request, token) {
   const auth = request.headers.authorization || "";
   if (auth === `Bearer ${token}`) return true;
   return request.headers["x-helix-token"] === token;
+}
+
+function safeDecodeSegment(value, label) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new DashboardBadRequest(`invalid ${label} encoding`);
+  }
+}
+
+function validateOptionalDashboardId(value, label) {
+  if (value === undefined || value === null || value === "") return;
+  validateDashboardId(value, label);
+}
+
+function validateDashboardId(value, label) {
+  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)) {
+    throw new DashboardBadRequest(`invalid ${label}`);
+  }
+}
+
+function validateNodeName(value) {
+  if (typeof value !== "string" || !/^[a-z][a-z-]{0,31}$/.test(value)) {
+    throw new DashboardBadRequest("invalid node");
+  }
 }
 
 function readJsonBody(request) {

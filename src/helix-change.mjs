@@ -243,9 +243,13 @@ function validateSteeringProposal(taskState, proposal) {
   if (kind === "reorder_pending") {
     const pendingOrder = Array.isArray(proposal.pendingOrder) ? proposal.pendingOrder : [];
     const pendingIds = taskState.tasks.filter((task) => task.status === "pending").map((task) => task.id);
+    const missingPendingIds = pendingIds.filter((id) => !pendingOrder.includes(id));
     if (pendingOrder.length === 0) reasons.push("reorder_pending requires pendingOrder");
     if (new Set(pendingOrder).size !== pendingOrder.length) reasons.push("duplicate pending id");
     if (pendingOrder.some((id) => !pendingIds.includes(id))) reasons.push("unknown pending id");
+    if (pendingOrder.length !== pendingIds.length || missingPendingIds.length > 0) {
+      reasons.push(`reorder_pending must include every pending task exactly once: missing ${missingPendingIds.join(", ") || "none"}`);
+    }
   }
   return {
     kind: allowedKinds.includes(kind) ? kind : "invalid",

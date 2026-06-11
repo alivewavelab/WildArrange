@@ -13,6 +13,7 @@ import {
   createSamplePlan,
   createTeamTask,
   claimTeamTask,
+  classifyManifestPathChanges,
   dashboardData,
   getTeamTask,
   importPlan,
@@ -986,6 +987,16 @@ test("steering safely adds tasks and rejects weakening proposals", async () => {
     });
     assert.equal(accepted.accepted, true);
     assert.equal(accepted.taskState.tasks.length, 2);
+
+    const incompleteReorder = await steerWorkflow(dir, {
+      kind: "reorder_pending",
+      source: "test",
+      evidence: "Only moving one pending task should be rejected.",
+      rationale: "Pending order must be an exact permutation, not a partial list.",
+      pendingOrder: ["T002"],
+    });
+    assert.equal(incompleteReorder.accepted, false);
+    assert.ok(incompleteReorder.audit.invariant.rejectedReasons.some((reason) => reason.includes("must include every pending task exactly once")));
     assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /steering_applied/);
   });
 });
@@ -1198,6 +1209,38 @@ test("comment checker can block checkpoint when configured", async () => {
     assert.ok(reviewJson.findings.some((finding) => finding.source === "comment_checker"));
     assert.ok(Array.isArray(reviewJson.testingGaps));
     assert.ok(Array.isArray(reviewJson.residualRisks));
+  });
+});
+
+test("comment checker object patterns default to case-insensitive matching", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
+      qualityGates: {
+        commentChecker: {
+          enabled: true,
+          blockOnFindings: true,
+          patterns: [{ name: "todo", pattern: "\\btodo\\b" }],
+        },
+      },
+    }, null, 2));
+    await initRuntime(dir);
+    await mkdir(path.join(dir, "src"), { recursive: true });
+    const planPath = path.join(dir, "comment-case-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Comment case gate",
+      tasks: [{
+        id: "T001",
+        subject: "Block uppercase placeholder comments",
+        writable_paths: ["src/app.js"],
+        worker_command: "node -e \"const fs=require('fs'); fs.writeFileSync('src/app.js','// TODO uppercase placeholder\\nexport const ok = true;\\n')\"",
+        verify_commands: ["node -e \"const fs=require('fs'); if(!fs.readFileSync('src/app.js','utf8').includes('ok')) process.exit(1)\""],
+      }],
+    }));
+    await importPlan(dir, planPath);
+
+    const result = await runNextTask(dir);
+    assert.equal(result.status, "failed");
+    assert.ok(result.reviewResult.lanes.some((lane) => lane.name === "comment_checker" && lane.status === "fail"));
   });
 });
 
@@ -1736,6 +1779,32 @@ test("review gate failure blocks checkpoint and writes actionable failure report
   });
 });
 
+test("review gate fails when verifier evidence is missing", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = path.join(dir, "review-missing-evidence-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Missing evidence review",
+      tasks: [{
+        id: "T001",
+        subject: "Do not review without verifier evidence",
+        worker_command: "node -e \"process.exit(0)\"",
+        verify_commands: ["node -e \"process.exit(0)\""],
+      }],
+    }));
+    const plan = await importPlan(dir, planPath);
+
+    await runWorkflowNode(dir, "execute", { taskId: "T001" });
+    const reviewed = await runWorkflowNode(dir, "review", { taskId: "T001" });
+    assert.equal(reviewed.status, "review_failed");
+    assert.ok(reviewed.reviewResult.lanes.some((lane) => lane.name === "evidence_integrity" && lane.status === "fail"));
+
+    const reviewReport = await readJson(resolveHelixPath(dir, "reports", "reviews", `${plan.id}-T001.json`));
+    assert.equal(reviewReport.status, "fail");
+    assert.ok(reviewReport.lanes.some((lane) => lane.name === "evidence_integrity" && /verifyResult/.test(lane.summary)));
+  });
+});
+
 test("standards command failure blocks checkpoint through review gate", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
@@ -1837,8 +1906,28 @@ test("pathAllowed supports exact paths, directories, globs, and empty scopes", (
   assert.equal(pathAllowed("src/index.js", ["src"]), true);
   assert.equal(pathAllowed("README.md", ["README.md"]), true);
   assert.equal(pathAllowed("test/core.test.mjs", ["test/*.mjs"]), true);
+  assert.equal(pathAllowed("src/index.js.map", ["src/index.js"]), false);
   assert.equal(pathAllowed("docs/plan.md", ["src/**"]), false);
   assert.equal(pathAllowed("src/index.js", []), false);
+});
+
+test("manifest change classification covers added, deleted, and modified files", () => {
+  assert.deepEqual(classifyManifestPathChanges(
+    {
+      "src/deleted.js": "10:1",
+      "src/modified.js": "10:1",
+      "src/same.js": "10:1",
+    },
+    {
+      "src/added.js": "10:1",
+      "src/modified.js": "12:2",
+      "src/same.js": "10:1",
+    },
+  ), [
+    { path: "src/added.js", status: "added" },
+    { path: "src/deleted.js", status: "deleted" },
+    { path: "src/modified.js", status: "modified" },
+  ]);
 });
 
 test("workflow runs sample plan end to end and writes resumable state", async () => {
@@ -2010,6 +2099,12 @@ test("dashboard API drives task, inbox, and summary operations without bypassing
       assert.equal(task.response.status, 200);
       assert.equal(task.body.result.task.status, "in_progress");
 
+      const badTaskPath = await fetchJson(`${baseUrl}/api/tasks/%E0%A4%A`);
+      assert.equal(badTaskPath.response.status, 400);
+
+      const badClaim = await postJson(`${baseUrl}/api/tasks/claim`, { taskId: "../T001", owner: "YingLong" });
+      assert.equal(badClaim.response.status, 400);
+
       const message = await postJson(`${baseUrl}/api/team/send`, {
         from: "Jiuwei",
         to: "YingLong",
@@ -2038,6 +2133,9 @@ test("dashboard API drives task, inbox, and summary operations without bypassing
       assert.equal(summary.response.status, 200);
       assert.equal(summary.body.result.reason, "dashboard");
       assert.equal(summary.body.result.ok, false);
+
+      const badNode = await postJson(`${baseUrl}/api/node/%E0%A4%A`, { taskId: "T001" });
+      assert.equal(badNode.response.status, 400);
 
       const refreshed = await fetchJson(`${baseUrl}/api/state`);
       assert.equal(refreshed.response.status, 200);

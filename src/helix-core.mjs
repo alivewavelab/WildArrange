@@ -87,6 +87,7 @@ export { admitParallelAgentResult, listParallelAgentRuns, runParallelAgents } fr
 export {
   appendWisdom,
   changedPathsIntroducedByTask,
+  classifyManifestPathChanges,
   collectGitChangedPaths,
   collectGitDiff,
   listChangeRequests,

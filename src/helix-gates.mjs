@@ -227,15 +227,29 @@ export function changedPathsIntroducedByTask(beforeChanged, afterChanged) {
     return undefined;
   }
   if (beforeChanged.fingerprints && afterChanged.fingerprints) {
-    const before = beforeChanged.fingerprints;
-    const after = afterChanged.fingerprints;
-    return Object.keys(after)
-      .filter((filePath) => before[filePath] !== after[filePath])
-      .map(normalizeRelativePath)
-      .sort();
+    return classifyManifestPathChanges(beforeChanged.fingerprints, afterChanged.fingerprints)
+      .map((change) => change.path);
   }
   const before = new Set(beforeChanged.paths.map(normalizeRelativePath));
   return afterChanged.paths.map(normalizeRelativePath).filter((filePath) => !before.has(filePath));
+}
+
+export function classifyManifestPathChanges(beforeFingerprints = {}, afterFingerprints = {}) {
+  const allPaths = new Set([
+    ...Object.keys(beforeFingerprints).map(normalizeRelativePath),
+    ...Object.keys(afterFingerprints).map(normalizeRelativePath),
+  ]);
+  return [...allPaths]
+    .map((filePath) => {
+      const beforeHas = Object.hasOwn(beforeFingerprints, filePath);
+      const afterHas = Object.hasOwn(afterFingerprints, filePath);
+      if (!beforeHas && afterHas) return { path: filePath, status: "added" };
+      if (beforeHas && !afterHas) return { path: filePath, status: "deleted" };
+      if (beforeFingerprints[filePath] !== afterFingerprints[filePath]) return { path: filePath, status: "modified" };
+      return null;
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.path.localeCompare(right.path));
 }
 
 const FILE_MANIFEST_SKIP_DIRS = new Set([".git", ".helix", "node_modules"]);
@@ -338,11 +352,18 @@ function commentPatterns(rawPatterns) {
   const source = Array.isArray(rawPatterns) && rawPatterns.length > 0 ? rawPatterns : defaults;
   return source
     .map((item) => {
-      if (typeof item === "string") return { name: item, regex: new RegExp(item, "i") };
+      if (typeof item === "string") return { name: item, regex: new RegExp(item, normalizeRegexFlags()) };
       if (!item || typeof item.pattern !== "string") return null;
-      return { name: item.name || item.pattern, regex: new RegExp(item.pattern, item.flags || "i") };
+      return { name: item.name || item.pattern, regex: new RegExp(item.pattern, normalizeRegexFlags(item.flags)) };
     })
     .filter(Boolean);
+}
+
+function normalizeRegexFlags(rawFlags = "") {
+  const allowed = new Set(["d", "i", "m", "s", "u"]);
+  const flags = new Set(String(rawFlags).split("").filter((flag) => allowed.has(flag)));
+  flags.add("i");
+  return [...flags].sort().join("");
 }
 
 function isLikelyTextPath(filePath) {
@@ -368,7 +389,8 @@ export function pathMatchesPattern(filePath, pattern) {
     return filePath === prefix || filePath.startsWith(`${prefix}/`);
   }
   if (!normalizedPattern.includes("*")) {
-    return filePath.startsWith(`${normalizedPattern.replace(/\/$/, "")}/`);
+    const literalPattern = normalizedPattern.replace(/\/$/, "");
+    return filePath === literalPattern || filePath.startsWith(`${literalPattern}/`);
   }
 
   const escaped = normalizedPattern
