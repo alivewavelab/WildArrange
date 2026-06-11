@@ -529,6 +529,7 @@ test("parallel agents run task packets concurrently and publish results", async 
     assert.equal(batch.status, "completed");
     assert.equal(batch.taskCount, 2);
     assert.ok(batch.results.every((result) => result.agent === "Kui" && result.pass));
+    assert.ok(batch.results.every((result) => result.lifecycle.status === "awaiting_user_acceptance"));
     assert.ok(batch.results.every((result) => result.result.summary === "parallel done"));
 
     const messages = await listTeamMessages(dir, { agent: "Jiuwei" });
@@ -612,8 +613,11 @@ test("parallel admission applies child artifacts only after gates pass", async (
     });
 
     assert.equal(admitted.status, "completed");
+    assert.equal(admitted.acceptanceProof.pass, true);
     assert.deepEqual(admitted.appliedPaths, ["src/parallel.txt"]);
     assert.equal(await readFile(path.join(dir, "src", "parallel.txt"), "utf8"), "ok\n");
+    const releasedResult = await readJson(resolveHelixPath(dir, "agent-runs", batch.runId, "T001", "result.json"));
+    assert.equal(releasedResult.lifecycle.status, "released");
     const checkpoint = await readJson(resolveHelixPath(dir, "checkpoints", `${plan.id}-T001.json`));
     assert.equal(checkpoint.taskId, "T001");
     assert.equal(checkpoint.verifyResult.pass, true);
@@ -853,6 +857,12 @@ test("routeRequest maps high-risk domains to the right agents and categories", a
     const reviewableArtifact = await routeRequest(dir, "write a reviewable artifact");
     assert.equal(reviewableArtifact.intent, "execute");
     assert.equal(reviewableArtifact.route, "execute");
+    assert.ok(reviewableArtifact.confidence >= 0.5);
+
+    const vagueExecute = await routeRequest(dir, "随便弄一下");
+    assert.equal(vagueExecute.route, "plan");
+    assert.equal(vagueExecute.routeAdjusted, true);
+    assert.match(vagueExecute.adjustmentReason, /low route confidence/);
 
     const resume = await routeRequest(dir, "继续上次的工作，从断点恢复");
     assert.equal(resume.intent, "resume");
@@ -1258,6 +1268,13 @@ test("linear loop runs worker, verifies, checkpoints, and records ledger", async
     assert.equal(checkpoint.taskId, "T001");
     assert.equal(checkpoint.scopeResult.status, "pass");
     assert.equal(checkpoint.reviewResult.pass, true);
+
+    const acceptanceProof = await readJson(resolveHelixPath(dir, "reports", "acceptance", `${plan.id}-T001.json`));
+    assert.equal(acceptanceProof.pass, true);
+    assert.ok(acceptanceProof.checks.every((check) => check.status === "pass"));
+    const digest = await readJson(resolveHelixPath(dir, "memory", "last-digest.json"));
+    assert.equal(digest.reason, "task_completed");
+    assert.equal(digest.task.id, "T001");
 
     const reviewReport = await readJson(resolveHelixPath(dir, "reports", "reviews", `${plan.id}-T001.json`));
     assert.equal(reviewReport.status, "pass");

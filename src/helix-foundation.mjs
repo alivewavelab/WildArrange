@@ -126,11 +126,22 @@ export const DEFAULT_HELIX_CONFIG = {
       protectedTargets: ["askGate", "intents.review", "intents.release_git", "intents.change_request"],
     },
   },
+  routeGovernance: {
+    semanticShadow: {
+      enabled: true,
+      agent: "CangJie",
+      timeoutMs: 30000,
+      lowConfidenceThreshold: 0.5,
+      conflictRoute: "plan",
+      enforceLowConfidence: true,
+    },
+  },
   parallelAgents: {
     enabled: true,
     defaultMaxAgents: 2,
     isolation: "run-dir",
     timeoutMs: 120000,
+    retainUntilUserAcceptance: true,
     defaultAdapter: null,
     spawnAdapters: {
       codex: {
@@ -285,12 +296,14 @@ export async function ensureHelixDirs(rootDir) {
     ["reports"],
     ["reports", "failures"],
     ["reports", "reviews"],
+    ["reports", "acceptance"],
     ["rules"],
     ["wisdom"],
     ["changes"],
     ["context-agents"],
     ["agent-runs"],
     ["memory"],
+    ["memory", "digests"],
     ["memory", "stage-summaries"],
     ["routing"],
     ["routing", "suggestions"],

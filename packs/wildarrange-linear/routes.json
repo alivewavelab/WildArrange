@@ -96,7 +96,7 @@
     },
     {
       "name": "execute",
-      "signals": ["实现", "添加", "优化", "改", "跑通", "继续做", "开始做", "implement", "add", "build", "change"],
+      "signals": ["实现", "添加", "优化", "改", "跑通", "继续做", "开始做", "implement", "add", "build", "change", "write"],
       "route": "execute",
       "primaryAgent": "YingLong",
       "supportAgents": ["ZhuRong", "BaiZe"],

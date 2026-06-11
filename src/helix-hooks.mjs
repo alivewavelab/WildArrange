@@ -20,6 +20,7 @@ import { findRunnableTask } from "./helix-team.mjs";
 import { buildAgentContext, continuationDirective, resumeReport } from "./helix-context.mjs";
 import { runArchivistRouter } from "./helix-archivist-router.mjs";
 import { evaluateHookResultGate } from "./helix-hook-result-gate.mjs";
+import { writeMemoryDigest } from "./helix-memory-digest.mjs";
 
 export async function runInjectionHook(rootDir, input = {}) {
   const hookRootDir = input.cwd && typeof input.cwd === "string" ? input.cwd : rootDir;
@@ -45,6 +46,11 @@ export async function runInjectionHook(rootDir, input = {}) {
       trigger: "sessionStart",
       text: facts.resume?.nextAction || "",
     });
+    facts.digest = await writeMemoryDigest(hookRootDir, {
+      reason: "session_start",
+      stage: "resume",
+      route: facts.route,
+    }).catch((error) => ({ error: error.message }));
   } else if (event === "UserPromptSubmit") {
     facts.route = input.prompt ? await routeRequest(hookRootDir, { text: input.prompt }) : null;
     facts.rules = await scanProjectRules(hookRootDir);
@@ -74,6 +80,10 @@ export async function runInjectionHook(rootDir, input = {}) {
       trigger: "postCompact",
       text: facts.resume?.nextAction || "",
     });
+    facts.digest = await writeMemoryDigest(hookRootDir, {
+      reason: "post_compact",
+      stage: "resume",
+    }).catch((error) => ({ error: error.message }));
   } else if (event === "Stop") {
     facts.continuation = await continuationDirective(hookRootDir, { sessionId, source: "hook:stop" });
   }

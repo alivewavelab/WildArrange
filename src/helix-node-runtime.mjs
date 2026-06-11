@@ -7,6 +7,8 @@ import {
 } from "./helix-foundation.mjs";
 import { readChangeRequest } from "./helix-change.mjs";
 import { buildFailureSummary } from "./helix-failure.mjs";
+import { writeAcceptanceProof } from "./helix-acceptance-proof.mjs";
+import { writeMemoryDigest } from "./helix-memory-digest.mjs";
 import { routeRequest } from "./helix-routing.mjs";
 import { runReviewGate, runWorker } from "./helix-review.mjs";
 import { writeWorkflowSummary } from "./helix-status.mjs";
@@ -108,17 +110,41 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
 
   const criteria = criteriaStatus(task);
   if (workerResult.exitCode === 0 && verifyResult.pass && criteria.pass && scopeResult.status === "pass" && reviewResult.pass) {
+    const acceptanceProof = await writeAcceptanceProof(rootDir, taskState.planId, task, {
+      workerResult,
+      verifyResult,
+      scopeResult,
+      reviewResult,
+    });
+    if (!acceptanceProof.pass) {
+      task.status = shouldFailTask(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
+      task.last_failure = buildFailureSummary(task, {
+        workerResult,
+        verifyResult,
+        scopeResult,
+        reviewResult,
+        criteriaResult: criteria,
+        nextStatus: task.status,
+      });
+      task.last_failure.reason = "acceptance_proof_failed";
+      task.last_failure.summary = `acceptance proof failed: ${acceptanceProof.checks.filter((check) => check.status === "fail").map((check) => check.name).join(", ")}`;
+      task.updatedAt = nowIso();
+      await writeFailureReport(rootDir, taskState.planId, task);
+      await persistTaskState(rootDir, taskState);
+      return { status: task.status === "failed" ? "failed" : "retry", task, workerResult, verifyResult, scopeResult, reviewResult, acceptanceProof };
+    }
     task.status = "completed";
     task.updatedAt = nowIso();
     await persistTaskState(rootDir, taskState);
     await writeCheckpoint(rootDir, taskState.planId, task, verifyResult, scopeResult, reviewResult);
     await appendLedger(rootDir, { type: "task_verified", planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult.status, reviewStatus: "pass" });
     await appendWisdom(rootDir, task, verifyResult);
+    await writeMemoryDigest(rootDir, { reason: "task_completed", stage: "checkpoint", task, taskId: task.id });
     await writeSnapshot(rootDir, "checkpointed", { planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult.status });
     if (taskState.tasks.every((candidate) => candidate.status === "completed")) {
       await writeWorkflowSummary(rootDir, { reason: "all_tasks_completed" });
     }
-    return { status: "completed", task, workerResult, verifyResult, scopeResult, reviewResult };
+    return { status: "completed", task, workerResult, verifyResult, scopeResult, reviewResult, acceptanceProof };
   }
 
   task.status = shouldFailTask(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
@@ -347,14 +373,38 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
   const criteria = criteriaStatus(task);
 
   if (workerResult?.exitCode === 0 && verifyResult?.pass === true && criteria.pass && scopeResult?.status === "pass" && reviewResult?.pass === true) {
+    const acceptanceProof = await writeAcceptanceProof(rootDir, taskState.planId, task, {
+      workerResult,
+      verifyResult,
+      scopeResult,
+      reviewResult,
+    });
+    if (!acceptanceProof.pass) {
+      task.status = shouldFailTask(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
+      task.last_failure = buildFailureSummary(task, {
+        workerResult,
+        verifyResult,
+        scopeResult,
+        reviewResult,
+        criteriaResult: criteria,
+        nextStatus: task.status,
+      });
+      task.last_failure.reason = "acceptance_proof_failed";
+      task.last_failure.summary = `acceptance proof failed: ${acceptanceProof.checks.filter((check) => check.status === "fail").map((check) => check.name).join(", ")}`;
+      task.updatedAt = nowIso();
+      await writeFailureReport(rootDir, taskState.planId, task);
+      await persistTaskState(rootDir, taskState);
+      return { status: task.status === "failed" ? "failed" : "retry", task, verifyResult, scopeResult, reviewResult, acceptanceProof };
+    }
     task.status = "completed";
     task.updatedAt = nowIso();
     await persistTaskState(rootDir, taskState);
     await writeCheckpoint(rootDir, taskState.planId, task, verifyResult, scopeResult, reviewResult);
     await appendLedger(rootDir, { type: "node_checkpoint_completed", planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult?.status || "missing", reviewStatus: "pass" });
     await appendWisdom(rootDir, task, verifyResult);
+    await writeMemoryDigest(rootDir, { reason: "task_completed", stage: "checkpoint", task, taskId: task.id });
     await writeSnapshot(rootDir, "node_checkpoint_completed", { planId: taskState.planId, taskId: task.id });
-    return { status: "completed", task, verifyResult, scopeResult, reviewResult };
+    return { status: "completed", task, verifyResult, scopeResult, reviewResult, acceptanceProof };
   }
 
   task.status = shouldFailTask(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";

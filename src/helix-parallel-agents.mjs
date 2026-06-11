@@ -14,7 +14,9 @@ import {
   writeJsonAtomic,
   writeSnapshot,
 } from "./helix-foundation.mjs";
+import { writeAcceptanceProof } from "./helix-acceptance-proof.mjs";
 import { buildFailureSummary } from "./helix-failure.mjs";
+import { writeMemoryDigest } from "./helix-memory-digest.mjs";
 import { resolveAgentSpawn } from "./helix-agent-spawn.mjs";
 import { applyAgentPatch, collectAgentWorktreePatch, extractPatchPaths, prepareAgentWorktree } from "./helix-git-worktree.mjs";
 import {
@@ -133,6 +135,10 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
     scopeResult,
     reviewResult,
   });
+  await updateAgentRunLifecycle(rootDir, options.runId, options.taskId, finalized.status === "completed" ? "released" : "awaiting_revision", {
+    admissionStatus: finalized.status,
+    releasedAt: finalized.status === "completed" ? nowIso() : null,
+  });
   await appendLedger(rootDir, {
     type: "parallel_agent_admission_completed",
     runId: options.runId,
@@ -155,6 +161,7 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
     verifyResult,
     scopeResult,
     reviewResult,
+    acceptanceProof: finalized.acceptanceProof || null,
     task: finalized.task,
   };
 }
@@ -272,12 +279,31 @@ async function finalizeAdmission(rootDir, taskId, evidence) {
       && evidence.scopeResult.status === "pass"
       && evidence.reviewResult.pass
     ) {
+      const acceptanceProof = await writeAcceptanceProof(rootDir, taskState.planId, task, evidence);
+      if (!acceptanceProof.pass) {
+        task.status = shouldFailAdmission(task, evidence.verifyResult, evidence.scopeResult, evidence.reviewResult) ? "failed" : "pending";
+        task.last_failure = buildFailureSummary(task, {
+          workerResult: evidence.workerResult,
+          verifyResult: evidence.verifyResult,
+          scopeResult: evidence.scopeResult,
+          reviewResult: evidence.reviewResult,
+          criteriaResult: criteria,
+          nextStatus: task.status,
+        });
+        task.last_failure.reason = "acceptance_proof_failed";
+        task.last_failure.summary = `acceptance proof failed: ${acceptanceProof.checks.filter((check) => check.status === "fail").map((check) => check.name).join(", ")}`;
+        task.updatedAt = nowIso();
+        await writeFailureReport(rootDir, taskState.planId, task);
+        await persistTaskState(rootDir, taskState);
+        return { status: task.status === "failed" ? "failed" : "retry", planId: taskState.planId, task, acceptanceProof };
+      }
       task.status = "completed";
       task.updatedAt = nowIso();
       await persistTaskState(rootDir, taskState);
       await writeCheckpoint(rootDir, taskState.planId, task, evidence.verifyResult, evidence.scopeResult, evidence.reviewResult);
       await appendWisdom(rootDir, task, evidence.verifyResult);
-      return { status: "completed", planId: taskState.planId, task };
+      await writeMemoryDigest(rootDir, { reason: "parallel_admission_completed", stage: "checkpoint", task, taskId });
+      return { status: "completed", planId: taskState.planId, task, acceptanceProof };
     }
 
     task.status = shouldFailAdmission(task, evidence.verifyResult, evidence.scopeResult, evidence.reviewResult) ? "failed" : "pending";
@@ -376,6 +402,7 @@ async function runOneAgent(rootDir, runDir, runId, task, options) {
     stdout: truncate(commandResult.stdout || "", 4000),
     stderr: truncate(commandResult.stderr || "", 4000),
     result: structuredResult,
+    lifecycle: buildAgentLifecycle(commandResult.exitCode === 0, config),
     patch: patchResult ? {
       patchPath: patchResult.patchPath,
       changedPaths: patchResult.changedPaths,
@@ -438,6 +465,7 @@ async function appendRunIndex(rootDir, runId, results) {
     agent: result.agent,
     pass: result.pass,
     runDir: result.runDir,
+    lifecycle: result.lifecycle || null,
   }));
   if (existing) {
     existing.updatedAt = nowIso();
@@ -451,6 +479,75 @@ async function appendRunIndex(rootDir, runId, results) {
     });
   }
   await writeJsonAtomic(indexPath, index);
+}
+
+async function updateAgentRunLifecycle(rootDir, runId, taskId, status, details = {}) {
+  const resultPath = resolveHelixPath(rootDir, "agent-runs", runId, taskId, "result.json");
+  const result = await readJson(resultPath, null);
+  if (result) {
+    result.lifecycle = {
+      ...(result.lifecycle || {}),
+      status,
+      updatedAt: nowIso(),
+      ...details,
+    };
+    await writeJsonAtomic(resultPath, result);
+  }
+
+  const batchPath = resolveHelixPath(rootDir, "agent-runs", `${runId}.json`);
+  const batch = await readJson(batchPath, null);
+  if (batch) {
+    for (const entry of batch.results || []) {
+      if (entry.taskId !== taskId) continue;
+      entry.lifecycle = {
+        ...(entry.lifecycle || {}),
+        status,
+        updatedAt: nowIso(),
+        ...details,
+      };
+    }
+    await writeJsonAtomic(batchPath, batch);
+  }
+
+  const indexPath = resolveHelixPath(rootDir, "agent-runs", "index.json");
+  const index = await readJson(indexPath, { runs: [] });
+  for (const run of index.runs || []) {
+    if (run.runId !== runId) continue;
+    for (const entry of run.results || []) {
+      if (entry.taskId !== taskId) continue;
+      entry.lifecycle = {
+        ...(entry.lifecycle || {}),
+        status,
+        updatedAt: nowIso(),
+        ...details,
+      };
+    }
+    run.updatedAt = nowIso();
+  }
+  await writeJsonAtomic(indexPath, index);
+  await appendLedger(rootDir, { type: "parallel_agent_lifecycle_updated", runId, taskId, status });
+}
+
+function buildAgentLifecycle(pass, config) {
+  if (!pass) {
+    return {
+      status: "failed",
+      retainUntil: null,
+      updatedAt: nowIso(),
+    };
+  }
+  if (config.parallelAgents?.retainUntilUserAcceptance === false) {
+    return {
+      status: "closed",
+      retainUntil: null,
+      updatedAt: nowIso(),
+    };
+  }
+  return {
+    status: "awaiting_user_acceptance",
+    retainUntil: "parallel_admission_completed",
+    updatedAt: nowIso(),
+  };
 }
 
 function buildMessageBody(task, result) {

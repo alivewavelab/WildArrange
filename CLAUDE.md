@@ -18,7 +18,10 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 - LLM review 通过 OpenAI-compatible provider 配置化接入；默认关闭，无 key 时不阻断线性状态机。
 - 第一版不启动常驻多 Agent 集群；多 Agent 先以命令型子 Agent 的隔离运行目录跑通 spawn / collect / message / admission 闭环。
 - 子 Agent 不能直接自证完成；结构化文件成果必须通过 writable_paths、verifier、scope、review、checkpoint 后才能进入 completed。
+- checkpoint 前必须写入 acceptance proof；proof 不通过不得把任务置为 completed。
+- 子 Agent 成功运行后默认保留为 `awaiting_user_acceptance`，只有主线 admission/checkpoint 完成后才释放。
 - ArchivistRouter 只读取清洗后的结论包，不摄入代码块、raw diff 或完整命令输出；无 LLM key 时必须 fallback，不阻断主线或 hook。
+- 路由必须保留 deterministic 证据；semantic shadow 只能作为第二意见和低置信门控，不得无审计地覆盖路由表。
 - 商业发布包不得包含受限第三方源码、prompt 原文或近似改写文本；外部项目只能作为概念参考和对照证据。
 
 ## 工程约束
@@ -65,9 +68,11 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/helix-git-worktree.mjs`                                 | Git worktree 隔离、patch 提取与 patch admission        |
 | `src/helix-change.mjs`                                       | 任务变更治理、Review Blocker、ChangeRequest           |
 | `src/helix-failure.mjs`                                      | 失败原因分类、返工提示与失败摘要                              |
+| `src/helix-acceptance-proof.mjs`                             | checkpoint 前验收证明链                                 |
 | `src/helix-rules.mjs`                                        | 项目规范扫描与规则上下文注入                                |
 | `src/helix-injection.mjs`                                    | 注入点解析、Markdown / Skill 挂载加载                   |
 | `src/helix-context.mjs`                                      | Agent 上下文、恢复快照、会话延续                           |
+| `src/helix-memory-digest.mjs`                                | 跨会话 digest、任务完成 digest 与恢复索引                   |
 | `src/helix-hooks.mjs`                                        | 宿主生命周期 Hook、PreToolUse 范围拦截                   |
 | `src/helix-adapters.mjs`                                     | Codex / Cursor adapter 安装与卸载                  |
 | `src/helix-routing.mjs`                                      | 请求路由与类别决策                                     |

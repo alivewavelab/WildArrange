@@ -492,6 +492,26 @@
       "commercialBoundary": "WildArrange original schema validator; no copied third-party prompt or schema text."
     },
     {
+      "name": "acceptance_proof",
+      "layer": "gate",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs node checkpoint --task <taskId>",
+      "purpose": "checkpoint 前生成验收证明链；worker、verify_commands、verifier、successCriteria、scope_guard、review_gate、review lanes 任一缺失或失败都不得 completed。",
+      "reads": [
+        "task.evidence",
+        "task.verify_commands",
+        "task.successCriteria",
+        "task.last_scope_result",
+        "task.last_review_result"
+      ],
+      "writes": [
+        ".helix/reports/acceptance/**",
+        ".helix/reports/failures/**",
+        ".helix/ledger.jsonl"
+      ],
+      "commercialBoundary": "WildArrange original acceptance proof schema."
+    },
+    {
       "name": "llm_review",
       "layer": "gate",
       "status": "implemented",
@@ -557,7 +577,7 @@
       "layer": "team",
       "status": "implemented",
       "command": "node ./bin/helix.mjs parallel run --max-agents 2 --task <taskIds> --agent <agent> [--adapter codex|cursor] [--isolation run-dir|git-worktree] --command <runner>",
-      "purpose": "在隔离 run directory 或 Git worktree 中并发启动命令型子 Agent；可通过 Codex/Cursor adapter 命令模板渲染 task packet、result、team message 和 ledger 记录。",
+      "purpose": "在隔离 run directory 或 Git worktree 中并发启动命令型子 Agent；可通过 Codex/Cursor adapter 命令模板渲染 task packet、result、team message 和 ledger 记录；成功结果默认保留为 awaiting_user_acceptance。",
       "reads": [
         ".helix/team/tasks.json",
         "helix.config.json"
@@ -575,7 +595,7 @@
       "layer": "gate",
       "status": "implemented",
       "command": "node ./bin/helix.mjs parallel admit --run <runId> --task <taskId>",
-      "purpose": "把子 Agent 的结构化 files 或 Git worktree patch 成果合入主线；先检查 writable_paths，再跑 verifier、scope、review 和 checkpoint。",
+      "purpose": "把子 Agent 的结构化 files 或 Git worktree patch 成果合入主线；先检查 writable_paths，再跑 verifier、scope、review、acceptance proof 和 checkpoint；成功后释放子 Agent lifecycle。",
       "reads": [
         ".helix/agent-runs/**/agent-result.json",
         ".helix/team/tasks.json"
@@ -619,6 +639,43 @@
         ".helix/ledger.jsonl"
       ],
       "commercialBoundary": "Provider abstraction is OpenAI-compatible; prompts and fallback logic are WildArrange original."
+    },
+    {
+      "name": "semantic_route_shadow",
+      "layer": "routing",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs route --text <request>",
+      "purpose": "保留 deterministic route 证据，同时可用 CangJie 语义第二意见做 shadow review；低置信或冲突的 execute 请求降级到 plan/ask。",
+      "reads": [
+        "packs/wildarrange-linear/routes.json",
+        ".helix/routing/routes-overrides.json",
+        "helix.config.json"
+      ],
+      "writes": [
+        ".helix/ledger.jsonl",
+        ".helix/snapshots/**"
+      ],
+      "commercialBoundary": "WildArrange original routing governance."
+    },
+    {
+      "name": "memory_digest_write",
+      "layer": "memory",
+      "status": "implemented",
+      "command": "automatic on SessionStart/PostCompact/task_completed/parallel_admission_completed",
+      "purpose": "把进展、决策、成果物、实现结论、踩坑和未决问题写入结构化 digest，降低误关会话导致的上下文丢失。",
+      "reads": [
+        ".helix/ledger.jsonl",
+        ".helix/team/tasks.json",
+        ".helix/checkpoints/**",
+        ".helix/memory/last-archivist-result.json"
+      ],
+      "writes": [
+        ".helix/memory/digests/**",
+        ".helix/memory/last-digest.json",
+        ".helix/memory/digest-index.json",
+        ".helix/ledger.jsonl"
+      ],
+      "commercialBoundary": "WildArrange original structured memory digest."
     },
     {
       "name": "archivist_suggestions_list",

@@ -3,12 +3,14 @@ import {
   DEFAULT_LEAD_AGENT,
   appendLedger,
   initRuntime,
+  loadHelixConfig,
   normalizeAgentKey,
   readJson,
   renderPromptPackEntry,
   resolveHelixPath,
   writeSnapshot,
 } from "./helix-foundation.mjs";
+import { callOpenAICompatible, resolveAgentProvider } from "./helix-llm.mjs";
 
 export async function routeRequest(rootDir, input) {
   await initRuntime(rootDir);
@@ -18,8 +20,18 @@ export async function routeRequest(rootDir, input) {
   }
 
   const routes = await loadRoutesConfig(rootDir);
-  const result = resolveRouteDecision(routes, text);
-  await appendLedger(rootDir, { type: "route_decided", route: result.route, intent: result.intent, domain: result.domain, category: result.category });
+  const deterministic = resolveRouteDecision(routes, text);
+  const result = await applySemanticRouteGovernance(rootDir, text, deterministic, input || {});
+  await appendLedger(rootDir, {
+    type: "route_decided",
+    route: result.route,
+    intent: result.intent,
+    domain: result.domain,
+    category: result.category,
+    confidence: result.confidence,
+    semanticStatus: result.semanticShadow?.status || null,
+    routeAdjusted: result.routeAdjusted || false,
+  });
   await writeSnapshot(rootDir, "route_decided", { route: result });
   return result;
 }
@@ -67,6 +79,44 @@ export function resolveRouteDecision(routes, text) {
     ...(complexity?.matchedSignals || []),
     ...merged.planAgents.flatMap((agent) => agent.matchedSignals || []),
   ]);
+}
+
+export async function semanticRouteShadow(rootDir, text, deterministicRoute, options = {}) {
+  const { config } = options.config ? { config: options.config } : await loadHelixConfig(rootDir);
+  const shadowConfig = config.routeGovernance?.semanticShadow || {};
+  if (shadowConfig.enabled !== true) {
+    return { status: "skipped", reason: "routeGovernance.semanticShadow.enabled is not true" };
+  }
+  const agentName = shadowConfig.agent || "CangJie";
+  const resolved = resolveAgentProvider(config, agentName);
+  if (!resolved.available) {
+    return { status: "skipped", reason: resolved.reason, hostManaged: resolved.hostManaged === true };
+  }
+
+  try {
+    const response = await callOpenAICompatible({
+      ...resolved,
+      messages: [
+        {
+          role: "system",
+          content: "You are a strict task router. Return only compact JSON.",
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            instruction: "Classify the user request. Return JSON: {\"intent\":\"resume|change_request|review|debug|plan|investigate|release_git|execute|answer|ask\",\"route\":\"recover|change_request|verify|execute|plan|explore|answer|ask\",\"domain\":\"visual|logic|writing|git|debug|research|review|recovery|default\",\"category\":\"quick|deep|ultrabrain|visual-engineering|research|writing|git|null\",\"confidence\":0.0-1.0,\"reason\":\"...\"}. Prefer plan/ask over execute when ambiguous.",
+            text,
+            deterministicRoute,
+          }),
+        },
+      ],
+      temperature: 0,
+      timeoutMs: Number(shadowConfig.timeoutMs) || 30_000,
+    });
+    return normalizeSemanticRoute(parseSemanticJson(response.content), response.usage);
+  } catch (error) {
+    return { status: "warn", reason: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 function bestMatch(entries, lowerText) {
@@ -163,13 +213,14 @@ function mergeRoute(defaults, intent, domain, complexity) {
 
 function buildRouteResult(routes, text, route, domain, complexity, matchedSignals) {
   const intentName = route.intent || routes.defaults.intent;
+  const signals = uniqueStrings(matchedSignals);
   const reasonParts = [
     `intent=${intentName}`,
     `domain=${route.domain || domain?.name || routes.defaults.domain}`,
     `complexity=${route.complexity || complexity?.name || routes.defaults.complexity}`,
   ];
-  if (matchedSignals.length > 0) {
-    reasonParts.push(`matched=${uniqueStrings(matchedSignals).join(",")}`);
+  if (signals.length > 0) {
+    reasonParts.push(`matched=${signals.join(",")}`);
   }
   return {
     intent: intentName,
@@ -186,6 +237,8 @@ function buildRouteResult(routes, text, route, domain, complexity, matchedSignal
     needsUserInput: Boolean(route.needsUserInput),
     reason: reasonParts.join("; "),
     risk: route.risk || routes.defaults.risk,
+    matchedSignals: signals,
+    confidence: route.confidence ?? routeConfidence(signals, route.risk || routes.defaults.risk),
     inputPreview: text.slice(0, 160),
   };
 }
@@ -214,4 +267,90 @@ function applyRouteOverrides(routes, overrides) {
     entry.signals = uniqueStrings([...(entry.signals || []), ...signals]);
   }
   return next;
+}
+
+async function applySemanticRouteGovernance(rootDir, text, deterministic, input) {
+  const { config } = await loadHelixConfig(rootDir);
+  const shadowConfig = config.routeGovernance?.semanticShadow || {};
+  const semantic = await semanticRouteShadow(rootDir, text, deterministic, { config });
+  const result = { ...deterministic, semanticShadow: semantic };
+  const threshold = Number(shadowConfig.lowConfidenceThreshold ?? 0.5);
+  const semanticConfidence = Number.isFinite(Number(semantic.confidence)) ? Number(semantic.confidence) : null;
+  const effectiveConfidence = Math.min(
+    deterministic.confidence ?? 0.5,
+    semanticConfidence ?? deterministic.confidence ?? 0.5,
+  );
+  result.confidence = effectiveConfidence;
+
+  const semanticRoute = semantic.status === "pass" ? semantic.route : null;
+  const semanticConflict = semanticRoute && semanticRoute !== deterministic.route;
+  result.semanticConflict = Boolean(semanticConflict);
+  if (semantic.status === "pass") {
+    result.semanticDecision = {
+      intent: semantic.intent,
+      route: semantic.route,
+      domain: semantic.domain,
+      category: semantic.category,
+      confidence: semantic.confidence,
+      reason: semantic.reason,
+    };
+  }
+
+  if (
+    input?.allowLowConfidenceExecute !== true
+    && shadowConfig.enforceLowConfidence !== false
+    && deterministic.route === "execute"
+    && (effectiveConfidence < threshold || semanticConflict)
+  ) {
+    const route = semanticRoute === "ask" ? "ask" : shadowConfig.conflictRoute || "plan";
+    return {
+      ...result,
+      route,
+      intent: route === "ask" ? "ask" : "plan",
+      primaryAgent: route === "ask" ? DEFAULT_LEAD_AGENT : "DiJiang",
+      supportAgents: uniqueStrings(["Kui", "Taotie", "BaiZe", ...(result.supportAgents || [])]),
+      needsPlan: route !== "ask",
+      needsUserInput: route === "ask",
+      routeAdjusted: true,
+      adjustmentReason: effectiveConfidence < threshold
+        ? `low route confidence ${effectiveConfidence} < ${threshold}`
+        : `semantic route conflict: deterministic=${deterministic.route}, semantic=${semanticRoute}`,
+    };
+  }
+  return result;
+}
+
+function routeConfidence(signals, risk) {
+  const base = signals.length === 0 ? 0.48 : Math.min(0.92, 0.55 + signals.length * 0.08);
+  if (risk === "high") return Math.max(0.5, base - 0.08);
+  if (risk === "low") return Math.min(0.95, base + 0.05);
+  return base;
+}
+
+function normalizeSemanticRoute(raw, usage) {
+  const confidence = Number(raw.confidence);
+  return {
+    status: "pass",
+    intent: typeof raw.intent === "string" ? raw.intent : null,
+    route: typeof raw.route === "string" ? raw.route : null,
+    domain: typeof raw.domain === "string" ? raw.domain : null,
+    category: raw.category === "null" ? null : typeof raw.category === "string" ? raw.category : null,
+    confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0.5,
+    reason: typeof raw.reason === "string" ? raw.reason : "",
+    usage: usage || null,
+  };
+}
+
+function parseSemanticJson(content) {
+  try {
+    return JSON.parse(content);
+  } catch {
+    const match = String(content || "").match(/\{[\s\S]*\}/);
+    if (!match) return {};
+    try {
+      return JSON.parse(match[0]);
+    } catch {
+      return {};
+    }
+  }
 }

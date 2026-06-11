@@ -122,11 +122,13 @@ node ./bin/helix.mjs parallel list
 }
 ```
 
-合入时不会直接信任子 Agent。`parallel admit` 会先检查 `writable_paths`，再跑 verifier、scope guard、review gate 和 checkpoint：
+合入时不会直接信任子 Agent。`parallel admit` 会先检查 `writable_paths`，再跑 verifier、scope guard、review gate、acceptance proof 和 checkpoint：
 
 ```bash
 node ./bin/helix.mjs parallel admit --run <runId> --task T001
 ```
+
+成功的子 Agent 结果不会立即关闭，而是保留为 `awaiting_user_acceptance`。只有 `parallel admit` 跑完整 gate 并完成 checkpoint 后，才会标记为 `released`。
 
 Git 项目可以使用 worktree 隔离。子 Agent 在独立 worktree 写文件，WildArrange 自动提取 patch；合入时同样先过 `writable_paths` 和完整 gate：
 
@@ -148,12 +150,16 @@ node ./bin/helix.mjs archivist run --text "做一个网页版 TODO 工具" --sta
 
 当 `archivistRouter.enabled` 为 `true` 时，`SessionStart`、`UserPromptSubmit`、`PostCompact` hook 会自动触发 ArchivistRouter。没有 DeepSeek key 时会走 deterministic fallback，不阻断主流程。
 
+路由采用双层策略：确定性关键词路由永远保留证据；如果配置了 `CangJie` provider，`routeGovernance.semanticShadow` 会给出语义第二意见。低置信或冲突的 `execute` 请求会降级为 `plan` / `ask`，避免模糊需求直接开工。
+
 ArchivistRouter 的关键词学习不会直接改路由。建议先进入 `.helix/routing/suggestions/`，审核后才写入 `.helix/routing/routes-overrides.json`：
 
 ```bash
 node ./bin/helix.mjs archivist suggestions list
 node ./bin/helix.mjs archivist suggestions resolve --id <id> --decision accept --evidence "..." --rationale "..."
 ```
+
+跨会话记忆会写入 `.helix/memory/digests/`。任务完成、并行 admission 完成、`SessionStart` 和 `PostCompact` 会生成结构化 digest，用于恢复进展、决策、成果物、实现结论和踩坑记录。
 
 ## Dashboard
 
@@ -189,10 +195,12 @@ x-helix-token: <token>
 | `.helix/ledger.jsonl` | 追加式事件账本 |
 | `.helix/checkpoints/` | 已完成任务的 checkpoint |
 | `.helix/reports/` | workflow / review / failure 报告 |
+| `.helix/reports/acceptance/` | checkpoint 前的验收证明链 |
 | `.helix/snapshots/context.md` | 跨会话恢复上下文 |
 | `.helix/adapters/` | adapter 配置、报告与备份 |
 | `.helix/agent-runs/` | 子 Agent 运行包、结果与 admission 记录 |
 | `.helix/memory/` | ArchivistRouter 结构化记忆 |
+| `.helix/memory/digests/` | 跨会话恢复 digest |
 | `.helix/routing/suggestions/` | 待审核的路由关键词建议 |
 
 ## 配置
@@ -246,7 +254,7 @@ npm test
 npm pack --dry-run --cache /private/tmp/helix-npm-cache
 ```
 
-当前状态：线性治理闭环已实现并通过测试；可选 LLM review、可配置 LSP/类型检查诊断与注释检查可通过 CLI review gate 启用。多 Agent 已具备命令型并行、Codex/Cursor 命令模板 spawn、结构化文件 admission、Git worktree patch admission 与消息板闭环；下一层是 Codex/Cursor 私有后台 Agent API 和长期进程管理。
+当前状态：线性治理闭环已实现并通过测试；checkpoint 前会生成验收证明链，路由具备 deterministic + semantic shadow 双层证据，跨会话记忆会生成 digest。多 Agent 已具备命令型并行、Codex/Cursor 命令模板 spawn、结构化文件 admission、Git worktree patch admission、验收前保留与 admission 后释放；下一层是 Codex/Cursor 私有后台 Agent API 和长期进程管理。
 
 ## 更多文档
 

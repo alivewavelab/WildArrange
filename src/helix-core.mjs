@@ -33,7 +33,9 @@ export {
 export { installAdapter, uninstallAdapter } from "./helix-adapters.mjs";
 export { recordReviewBlocker, resolveChangeRequest, reviewChangeRequest, steerWorkflow } from "./helix-change.mjs";
 export { buildFailureSummary } from "./helix-failure.mjs";
-export { loadRoutesConfig, resolveRouteDecision, routeRequest } from "./helix-routing.mjs";
+export { buildAcceptanceProof, writeAcceptanceProof } from "./helix-acceptance-proof.mjs";
+export { buildMemoryDigest, writeMemoryDigest } from "./helix-memory-digest.mjs";
+export { loadRoutesConfig, resolveRouteDecision, routeRequest, semanticRouteShadow } from "./helix-routing.mjs";
 export {
   buildArchivistPacket,
   listArchivistRouteSuggestions,
