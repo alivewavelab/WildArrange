@@ -18,6 +18,7 @@ import { routeRequest } from "./helix-routing.mjs";
 import { scanProjectRules } from "./helix-rules.mjs";
 import { findRunnableTask } from "./helix-team.mjs";
 import { buildAgentContext, continuationDirective, resumeReport } from "./helix-context.mjs";
+import { runArchivistRouter } from "./helix-archivist-router.mjs";
 import { evaluateHookResultGate } from "./helix-hook-result-gate.mjs";
 
 export async function runInjectionHook(rootDir, input = {}) {
@@ -38,9 +39,21 @@ export async function runInjectionHook(rootDir, input = {}) {
       taskId,
       injectionPoint: pointName,
     }).catch((error) => ({ error: error.message }));
+    facts.archivist = await runArchivistForHook(hookRootDir, input, {
+      event,
+      stage: "resume",
+      trigger: "sessionStart",
+      text: facts.resume?.nextAction || "",
+    });
   } else if (event === "UserPromptSubmit") {
     facts.route = input.prompt ? await routeRequest(hookRootDir, { text: input.prompt }) : null;
     facts.rules = await scanProjectRules(hookRootDir);
+    facts.archivist = await runArchivistForHook(hookRootDir, input, {
+      event,
+      stage: stageForRoute(facts.route),
+      trigger: "userPromptSubmit",
+      text: input.prompt || "",
+    });
   } else if (event === "PreToolUse") {
     facts.targetPaths = targetPaths;
     facts.rules = await scanProjectRules(hookRootDir, { targetPaths });
@@ -55,6 +68,12 @@ export async function runInjectionHook(rootDir, input = {}) {
   } else if (event === "PostCompact") {
     facts.resume = await resumeReport(hookRootDir, { sessionId, source: "hook:post_compact" });
     facts.rules = await scanProjectRules(hookRootDir);
+    facts.archivist = await runArchivistForHook(hookRootDir, input, {
+      event,
+      stage: "resume",
+      trigger: "postCompact",
+      text: facts.resume?.nextAction || "",
+    });
   } else if (event === "Stop") {
     facts.continuation = await continuationDirective(hookRootDir, { sessionId, source: "hook:stop" });
   }
@@ -232,6 +251,48 @@ function injectionPointForHookEvent(event) {
 function defaultAgentForHookEvent(event) {
   if (event === "SessionStart" || event === "UserPromptSubmit" || event === "Stop" || event === "PostCompact") return DEFAULT_LEAD_AGENT;
   return DEFAULT_EXECUTOR_AGENT;
+}
+
+async function runArchivistForHook(rootDir, input, options) {
+  try {
+    return await runArchivistRouter(rootDir, {
+      stage: options.stage,
+      trigger: options.trigger || options.event,
+      text: options.text || "",
+      turns: extractHookTurns(input),
+    });
+  } catch (error) {
+    return {
+      kind: "archivist_router",
+      at: nowIso(),
+      status: "warn",
+      pass: true,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function stageForRoute(route) {
+  const intent = route?.intent;
+  if (intent === "plan") return "plan";
+  if (intent === "ask") return "clarify";
+  if (intent === "review") return "review";
+  if (intent === "resume") return "resume";
+  if (intent === "execute") return "execute";
+  return "default";
+}
+
+function extractHookTurns(input) {
+  const source = input.turns || input.messages || input.conversation || [];
+  if (!Array.isArray(source)) return [];
+  return source.map((turn) => {
+    if (typeof turn === "string") return { role: "unknown", content: turn };
+    if (!turn || typeof turn !== "object") return null;
+    return {
+      role: turn.role || turn.speaker || "unknown",
+      content: turn.content || turn.text || turn.summary || "",
+    };
+  }).filter((turn) => turn && turn.content);
 }
 
 function normalizeHookSessionId(input) {

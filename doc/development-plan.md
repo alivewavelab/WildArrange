@@ -14,7 +14,7 @@
 
 ## P1: Linear Quality
 
-- Implement ArchivistRouter with `deepseek-v4-flash` for SessionStart, Git HEAD changes, low-confidence routes, and periodic prompt summaries. `PARTIAL: runtime and manual CLI are implemented; automatic hook triggers remain`
+- Implement ArchivistRouter with `deepseek-v4-flash` for SessionStart, Git HEAD changes, low-confidence routes, and periodic prompt summaries. `PARTIAL: runtime, manual CLI, SessionStart/UserPromptSubmit/PostCompact hooks are implemented; Git HEAD and prompt-window scheduler remain`
 - Add local structured memory files for progress, decisions, artifacts, implementation notes, research notes, pitfalls, and context injection. `DONE: minimal structured-files backend`
 - Add route suggestion artifacts under `.helix/routing/suggestions` with apply/reject review flow. `PARTIAL: artifacts exist; apply/reject command remains`
 - Add prompt model variants for GPT, Gemini, and Kimi.
@@ -25,9 +25,9 @@
 
 ## P2: Multi-Agent Runtime
 
-- Implement `codex_spawn_agent` minimum viable child-agent call. `PARTIAL: host-neutral command runner exists; Codex adapter spawn remains`
-- Add background task/session manager. `PARTIAL: batch run index exists; process manager remains`
-- Add worktree isolation and merge admission.
+- Implement `codex_spawn_agent` minimum viable child-agent call. `PARTIAL: host-neutral command runner and structured artifact admission exist; Codex adapter spawn remains`
+- Add background task/session manager. `PARTIAL: batch run index and admission records exist; process manager remains`
+- Add worktree isolation and merge admission. `PARTIAL: structured file admission exists; Git worktree / patch merge remains`
 - Add Skill MCP support.
 - Add tmux/cmux visualization only after background agents work.
 

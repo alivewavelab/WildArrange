@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   DEFAULT_LEAD_AGENT,
@@ -9,12 +9,30 @@ import {
   nowIso,
   readJson,
   resolveHelixPath,
+  withTaskStateLock,
   writeJsonAtomic,
   writeSnapshot,
 } from "./helix-foundation.mjs";
-import { runCommand } from "./helix-gates.mjs";
+import { buildFailureSummary } from "./helix-failure.mjs";
+import {
+  appendWisdom,
+  pathAllowed,
+  runCommand,
+  runVerifier,
+  scopeGuard,
+  writeCheckpoint,
+  writeFailureReport,
+  writeReviewReport,
+} from "./helix-gates.mjs";
 import { loadTaskState } from "./helix-plan.mjs";
-import { findRunnableTask, sendTeamMessage } from "./helix-team.mjs";
+import { runReviewGate } from "./helix-review.mjs";
+import {
+  applyVerifierEvidenceToCriteria,
+  criteriaStatus,
+  findRunnableTask,
+  persistTaskState,
+  sendTeamMessage,
+} from "./helix-team.mjs";
 
 const DEFAULT_PARALLEL_TIMEOUT_MS = 120_000;
 
@@ -65,6 +83,75 @@ export async function listParallelAgentRuns(rootDir) {
   return index;
 }
 
+export async function admitParallelAgentResult(rootDir, options = {}) {
+  await ensureHelixDirs(rootDir);
+  if (!options.runId) throw new Error("parallel admit requires runId");
+  if (!options.taskId) throw new Error("parallel admit requires taskId");
+  const result = await readParallelAgentResult(rootDir, options.runId, options.taskId);
+  if (!result.pass) throw new Error(`parallel result for ${options.taskId} did not pass`);
+  const files = normalizeProposedFiles(result.result?.files);
+  if (files.length === 0) throw new Error("parallel result has no result.files to admit");
+
+  const prepared = await prepareAdmission(rootDir, options.taskId, result, files);
+  const verifyResult = await runVerifier(rootDir, prepared.task);
+  await updateAdmissionTask(rootDir, options.taskId, (task) => {
+    task.evidence.push(verifyResult);
+    task.last_verify_result = verifyResult;
+    applyVerifierEvidenceToCriteria(task, verifyResult);
+    task.updatedAt = nowIso();
+    return task;
+  });
+
+  const scopeResult = await scopeGuard(rootDir, {
+    taskId: options.taskId,
+    changedPaths: prepared.appliedPaths,
+  });
+  await updateAdmissionTask(rootDir, options.taskId, (task) => {
+    task.evidence.push({ kind: "scope_guard", at: nowIso(), ...scopeResult });
+    task.last_scope_result = scopeResult;
+    task.updatedAt = nowIso();
+    return task;
+  });
+
+  const reviewTask = await getAdmissionTask(rootDir, options.taskId);
+  const reviewResult = await runReviewGate(rootDir, reviewTask.task, {
+    workerResult: prepared.workerResult,
+    verifyResult,
+    scopeResult,
+  });
+  await writeReviewReport(rootDir, reviewTask.planId, reviewTask.task, reviewResult);
+  const finalized = await finalizeAdmission(rootDir, options.taskId, {
+    workerResult: prepared.workerResult,
+    verifyResult,
+    scopeResult,
+    reviewResult,
+  });
+  await appendLedger(rootDir, {
+    type: "parallel_agent_admission_completed",
+    runId: options.runId,
+    taskId: options.taskId,
+    status: finalized.status,
+    appliedPaths: prepared.appliedPaths,
+  });
+  await writeSnapshot(rootDir, "parallel_agent_admission_completed", {
+    runId: options.runId,
+    taskId: options.taskId,
+    status: finalized.status,
+    appliedPaths: prepared.appliedPaths,
+  });
+  return {
+    kind: "parallel_agent_admission",
+    runId: options.runId,
+    taskId: options.taskId,
+    status: finalized.status,
+    appliedPaths: prepared.appliedPaths,
+    verifyResult,
+    scopeResult,
+    reviewResult,
+    task: finalized.task,
+  };
+}
+
 function selectParallelTasks(tasks, options) {
   if (Array.isArray(options.taskIds) && options.taskIds.length > 0) {
     const selected = options.taskIds.map((taskId) => {
@@ -87,6 +174,129 @@ function selectParallelTasks(tasks, options) {
   }
   for (const task of selected) task.status = "pending";
   return selected;
+}
+
+async function readParallelAgentResult(rootDir, runId, taskId) {
+  const directPath = resolveHelixPath(rootDir, "agent-runs", runId, taskId, "result.json");
+  const result = await readJson(directPath, null);
+  if (!result) throw new Error(`parallel result not found: ${path.relative(rootDir, directPath)}`);
+  return result;
+}
+
+async function prepareAdmission(rootDir, taskId, result, files) {
+  const current = await getAdmissionTask(rootDir, taskId);
+  const denied = files.filter((file) => !pathAllowed(file.path, current.task.writable_paths || []));
+  if (denied.length > 0) {
+    throw new Error(`parallel admission denied by writable_paths: ${denied.map((file) => file.path).join(", ")}`);
+  }
+
+  for (const file of files) {
+    const absolutePath = path.join(rootDir, file.path);
+    assertInsideRoot(rootDir, absolutePath, file.path);
+    await mkdir(path.dirname(absolutePath), { recursive: true });
+    await writeFile(absolutePath, file.content, "utf8");
+  }
+
+  const workerResult = {
+    kind: "worker",
+    at: nowIso(),
+    command: `parallel_admit:${result.runId}:${taskId}`,
+    exitCode: 0,
+    stdout: `Admitted ${files.length} file(s) from ${result.agent}`,
+    stderr: "",
+    source: "parallel_agent_admission",
+    runId: result.runId,
+    agent: result.agent,
+    resultPath: result.runDir ? `${result.runDir}/result.json` : null,
+  };
+  const task = await updateAdmissionTask(rootDir, taskId, (candidate) => {
+    if (!["pending", "in_progress", "verifying"].includes(candidate.status)) {
+      throw new Error(`task ${candidate.id} status ${candidate.status} cannot admit parallel result`);
+    }
+    if (candidate.status === "pending") {
+      candidate.attempts += 1;
+    }
+    candidate.status = "verifying";
+    candidate.evidence.push(workerResult);
+    candidate.evidence.push({
+      kind: "parallel_agent_admission",
+      at: nowIso(),
+      runId: result.runId,
+      agent: result.agent,
+      appliedPaths: files.map((file) => file.path),
+      summary: result.result?.summary || "",
+    });
+    candidate.updatedAt = nowIso();
+    return candidate;
+  });
+  await appendLedger(rootDir, {
+    type: "parallel_agent_admission_started",
+    runId: result.runId,
+    taskId,
+    agent: result.agent,
+    appliedPaths: files.map((file) => file.path),
+  });
+  return { task, workerResult, appliedPaths: files.map((file) => file.path) };
+}
+
+async function finalizeAdmission(rootDir, taskId, evidence) {
+  return withTaskStateLock(rootDir, `parallel-admit-finalize:${taskId}`, async () => {
+    const taskState = await loadTaskState(rootDir);
+    if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
+    const task = taskState.tasks.find((candidate) => candidate.id === taskId);
+    if (!task) throw new Error(`unknown task: ${taskId}`);
+    task.evidence.push(evidence.reviewResult);
+    task.last_review_result = evidence.reviewResult;
+    const criteria = criteriaStatus(task);
+    if (
+      evidence.workerResult.exitCode === 0
+      && evidence.verifyResult.pass
+      && criteria.pass
+      && evidence.scopeResult.status === "pass"
+      && evidence.reviewResult.pass
+    ) {
+      task.status = "completed";
+      task.updatedAt = nowIso();
+      await persistTaskState(rootDir, taskState);
+      await writeCheckpoint(rootDir, taskState.planId, task, evidence.verifyResult, evidence.scopeResult, evidence.reviewResult);
+      await appendWisdom(rootDir, task, evidence.verifyResult);
+      return { status: "completed", planId: taskState.planId, task };
+    }
+
+    task.status = shouldFailAdmission(task, evidence.verifyResult, evidence.scopeResult, evidence.reviewResult) ? "failed" : "pending";
+    task.last_failure = buildFailureSummary(task, {
+      workerResult: evidence.workerResult,
+      verifyResult: evidence.verifyResult,
+      scopeResult: evidence.scopeResult,
+      reviewResult: evidence.reviewResult,
+      criteriaResult: criteria,
+      nextStatus: task.status,
+    });
+    task.updatedAt = nowIso();
+    await writeFailureReport(rootDir, taskState.planId, task);
+    await persistTaskState(rootDir, taskState);
+    return { status: task.status === "failed" ? "failed" : "retry", planId: taskState.planId, task };
+  });
+}
+
+async function updateAdmissionTask(rootDir, taskId, mutate) {
+  return withTaskStateLock(rootDir, `parallel-admit:${taskId}`, async () => {
+    const taskState = await loadTaskState(rootDir);
+    if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
+    const task = taskState.tasks.find((candidate) => candidate.id === taskId);
+    if (!task) throw new Error(`unknown task: ${taskId}`);
+    const updated = mutate(task);
+    await persistTaskState(rootDir, taskState);
+    return updated;
+  });
+}
+
+async function getAdmissionTask(rootDir, taskId) {
+  const taskState = await loadTaskState(rootDir);
+  if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
+  const task = taskState.tasks.find((candidate) => candidate.id === taskId);
+  if (!task) throw new Error(`unknown task: ${taskId}`);
+  return { planId: taskState.planId, task };
 }
 
 async function runOneAgent(rootDir, runDir, runId, task, options) {
@@ -156,6 +366,7 @@ function buildTaskPacket(task, context) {
     instruction: [
       "Work only inside this run directory unless a host adapter explicitly grants a separate workspace.",
       "Write optional structured output to agent-result.json.",
+      "To propose mainline changes, write agent-result.json with files: [{\"path\":\"relative/path\",\"content\":\"utf8 text\"}].",
       "Do not claim the main task is complete; mainline verifier/review gates decide completion.",
     ],
   };
@@ -219,6 +430,38 @@ function normalizeTimeout(value) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) return DEFAULT_PARALLEL_TIMEOUT_MS;
   return parsed;
+}
+
+function normalizeProposedFiles(files) {
+  if (!Array.isArray(files)) return [];
+  return files.map((file, index) => {
+    if (!file || typeof file !== "object") throw new Error(`result.files[${index}] must be an object`);
+    const filePath = normalizeRelativePath(file.path || file.file);
+    if (!filePath) throw new Error(`result.files[${index}].path is required`);
+    if (path.isAbsolute(filePath) || filePath.startsWith("../") || filePath.includes("/../")) {
+      throw new Error(`result.files[${index}].path must stay inside the project`);
+    }
+    if (typeof file.content !== "string") throw new Error(`result.files[${index}].content must be a string`);
+    return { path: filePath, content: file.content };
+  });
+}
+
+function assertInsideRoot(rootDir, absolutePath, displayPath) {
+  const relative = path.relative(rootDir, absolutePath);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`path escapes project root: ${displayPath}`);
+  }
+}
+
+function shouldFailAdmission(task, verifyResult, scopeResult, reviewResult) {
+  if (scopeResult?.status === "fail") return true;
+  if (scopeResult && scopeResult.status !== "pass") return true;
+  if (verifyResult?.pass === true && reviewResult?.kind === "review_gate" && reviewResult.pass === false) return true;
+  return task.attempts >= task.maxAttempts;
+}
+
+function normalizeRelativePath(filePath) {
+  return String(filePath || "").replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+/g, "/");
 }
 
 function truncate(value, limit) {

@@ -101,6 +101,45 @@ node ./bin/helix.mjs adapter uninstall --target all
 - **Cursor**：项目规则写入 `.cursor/rules/wildarrange.mdc`
 - **Codex**：生命周期 hook 配置写入 `.helix/adapters/codex/hooks.json`（更深层的 Codex 插件安装仍属 adapter 工作，runtime 不假设已装好）
 
+## 多 Agent 最小闭环
+
+命令型子 Agent 可以先在隔离目录内并发运行：
+
+```bash
+node ./bin/helix.mjs parallel run --max-agents 2 --task T001,T002 --agent Kui --command "..."
+node ./bin/helix.mjs parallel list
+```
+
+子 Agent 若要提交主线成果，需要在 `agent-result.json` 写入结构化文件：
+
+```json
+{
+  "summary": "artifact ready",
+  "files": [
+    { "path": "src/example.txt", "content": "ok\n" }
+  ]
+}
+```
+
+合入时不会直接信任子 Agent。`parallel admit` 会先检查 `writable_paths`，再跑 verifier、scope guard、review gate 和 checkpoint：
+
+```bash
+node ./bin/helix.mjs parallel admit --run <runId> --task T001
+```
+
+## ArchivistRouter
+
+ArchivistRouter 是“档案员 + 任务路由”节点。它只读取清洗后的结论包，不摄入代码块、raw diff 或完整命令输出。
+
+手动运行：
+
+```bash
+node ./bin/helix.mjs archivist packet --text "做一个网页版 TODO 工具" --stage plan
+node ./bin/helix.mjs archivist run --text "做一个网页版 TODO 工具" --stage plan --force
+```
+
+当 `archivistRouter.enabled` 为 `true` 时，`SessionStart`、`UserPromptSubmit`、`PostCompact` hook 会自动触发 ArchivistRouter。没有 DeepSeek key 时会走 deterministic fallback，不阻断主流程。
+
 ## Dashboard
 
 本地启动：
@@ -137,6 +176,9 @@ x-helix-token: <token>
 | `.helix/reports/` | workflow / review / failure 报告 |
 | `.helix/snapshots/context.md` | 跨会话恢复上下文 |
 | `.helix/adapters/` | adapter 配置、报告与备份 |
+| `.helix/agent-runs/` | 子 Agent 运行包、结果与 admission 记录 |
+| `.helix/memory/` | ArchivistRouter 结构化记忆 |
+| `.helix/routing/suggestions/` | 待审核的路由关键词建议 |
 
 ## 配置
 
@@ -189,7 +231,7 @@ npm test
 npm pack --dry-run --cache /private/tmp/helix-npm-cache
 ```
 
-当前状态：线性治理闭环已实现并通过测试；可选 LLM review、可配置 LSP/类型检查诊断与注释检查可通过 CLI review gate 启用。多 Agent 编排仍待真实子 Agent 启动与后台任务管理。
+当前状态：线性治理闭环已实现并通过测试；可选 LLM review、可配置 LSP/类型检查诊断与注释检查可通过 CLI review gate 启用。多 Agent 已具备命令型并行、结构化成果 admission 与消息板闭环；下一层是 Codex/Cursor 真实子 Agent 启动、Git worktree 隔离和后台进程管理。
 
 ## 更多文档
 

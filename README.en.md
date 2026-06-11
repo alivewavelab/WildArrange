@@ -101,6 +101,45 @@ Install and uninstall both write reports under `.helix/adapters/`. Existing adap
 - **Cursor**: project rule at `.cursor/rules/wildarrange.mdc`
 - **Codex**: lifecycle hook bundle at `.helix/adapters/codex/hooks.json` (deeper Codex plugin installation remains adapter work; the runtime does not assume it)
 
+## Minimal Multi-Agent Loop
+
+Command-based child agents can run concurrently in isolated run directories:
+
+```bash
+node ./bin/helix.mjs parallel run --max-agents 2 --task T001,T002 --agent Kui --command "..."
+node ./bin/helix.mjs parallel list
+```
+
+To propose mainline artifacts, a child agent writes structured files to `agent-result.json`:
+
+```json
+{
+  "summary": "artifact ready",
+  "files": [
+    { "path": "src/example.txt", "content": "ok\n" }
+  ]
+}
+```
+
+Admission does not trust the child agent directly. `parallel admit` checks `writable_paths`, then runs verifier, scope guard, review gate, and checkpoint:
+
+```bash
+node ./bin/helix.mjs parallel admit --run <runId> --task T001
+```
+
+## ArchivistRouter
+
+ArchivistRouter is the archivist plus task-router node. It reads conclusions-only packets and strips code blocks, raw diffs, and full command output.
+
+Manual commands:
+
+```bash
+node ./bin/helix.mjs archivist packet --text "build a web TODO app" --stage plan
+node ./bin/helix.mjs archivist run --text "build a web TODO app" --stage plan --force
+```
+
+When `archivistRouter.enabled` is `true`, `SessionStart`, `UserPromptSubmit`, and `PostCompact` hooks trigger ArchivistRouter automatically. Without a DeepSeek key it falls back to deterministic routing and does not block the main flow.
+
 ## Dashboard
 
 Local dashboard:
@@ -137,6 +176,9 @@ x-helix-token: <token>
 | `.helix/reports/` | Workflow, review, and failure reports |
 | `.helix/snapshots/context.md` | Cross-session resume context |
 | `.helix/adapters/` | Adapter configs, reports, backups |
+| `.helix/agent-runs/` | Child-agent packets, results, and admission records |
+| `.helix/memory/` | ArchivistRouter structured memory |
+| `.helix/routing/suggestions/` | Route keyword suggestions pending review |
 
 ## Configuration
 
@@ -189,7 +231,7 @@ npm test
 npm pack --dry-run --cache /private/tmp/helix-npm-cache
 ```
 
-Current status: the linear governance loop is implemented and tested. Optional LLM review, configurable LSP/typecheck diagnostics, and comment checking are available through the CLI review gate. Multi-agent orchestration still needs real sub-agent spawning and background task management.
+Current status: the linear governance loop is implemented and tested. Optional LLM review, configurable LSP/typecheck diagnostics, and comment checking are available through the CLI review gate. Multi-agent support now includes command-based parallel runs, structured artifact admission, and the message board loop. The next layer is real Codex/Cursor child-agent spawning, Git worktree isolation, and background process management.
 
 ## More Docs
 

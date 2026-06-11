@@ -6,6 +6,7 @@ import {
   DEFAULT_LEAD_AGENT,
   DEFAULT_PACKAGE_NAME,
   PRODUCT_NAME,
+  admitParallelAgentResult,
   buildArchivistPacket,
   buildAgentContext,
   continuationDirective,
@@ -83,6 +84,7 @@ Usage:
   wildarrange workflow --from <plan.json>
   wildarrange workflow --sample
   wildarrange parallel run [--max-agents 2] [--task T001,T002] [--agent Kui] [--command "..."]
+  wildarrange parallel admit --run <runId> --task T001
   wildarrange parallel list
   wildarrange archivist packet [--text "..."] [--stage plan] [--turns turns.json]
   wildarrange archivist run [--text "..."] [--stage plan] [--turns turns.json] [--force]
@@ -270,7 +272,16 @@ async function main() {
       console.log(JSON.stringify(await listParallelAgentRuns(rootDir), null, 2));
       return;
     }
-    throw new Error("helix parallel requires run or list");
+    if (subcommand === "admit") {
+      if (!args.run || args.run === true) throw new Error("helix parallel admit requires --run <runId>");
+      if (!args.task || args.task === true) throw new Error("helix parallel admit requires --task <taskId>");
+      console.log(JSON.stringify(await admitParallelAgentResult(rootDir, {
+        runId: args.run,
+        taskId: args.task,
+      }), null, 2));
+      return;
+    }
+    throw new Error("helix parallel requires run, admit, or list");
   }
 
   if (command === "archivist") {

@@ -553,6 +553,73 @@
       ]
     },
     {
+      "name": "parallel_run",
+      "layer": "team",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs parallel run --max-agents 2 --task <taskIds> --agent <agent> --command <runner>",
+      "purpose": "在隔离 run directory 中并发启动命令型子 Agent，生成 task packet、result、team message 和 ledger 记录。",
+      "reads": [
+        ".helix/team/tasks.json",
+        "helix.config.json"
+      ],
+      "writes": [
+        ".helix/agent-runs/**",
+        ".helix/team/inbox/**",
+        ".helix/team/outbox/**",
+        ".helix/ledger.jsonl"
+      ],
+      "commercialBoundary": "Host-neutral command runner; no private Codex/Cursor API dependency."
+    },
+    {
+      "name": "parallel_admit",
+      "layer": "gate",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs parallel admit --run <runId> --task <taskId>",
+      "purpose": "把子 Agent 的结构化 files 成果合入主线；先检查 writable_paths，再跑 verifier、scope、review 和 checkpoint。",
+      "reads": [
+        ".helix/agent-runs/**/agent-result.json",
+        ".helix/team/tasks.json"
+      ],
+      "writes": [
+        "task.writable_paths",
+        ".helix/checkpoints/**",
+        ".helix/reports/**",
+        ".helix/ledger.jsonl"
+      ],
+      "commercialBoundary": "WildArrange original admission gate."
+    },
+    {
+      "name": "archivist_packet",
+      "layer": "memory",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs archivist packet --text <request> --stage <stage>",
+      "purpose": "构建 conclusions-only routing packet；剔除代码块、raw diff 和完整命令输出。",
+      "reads": [
+        ".helix/ledger.jsonl",
+        ".helix/memory/**",
+        "helix.config.json"
+      ],
+      "writes": []
+    },
+    {
+      "name": "archivist_run",
+      "layer": "memory",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs archivist run --text <request> --stage <stage>",
+      "purpose": "运行 CangJie 档案路由员；有 DeepSeek key 时调用模型，无 key 时 deterministic fallback，不阻断主线。",
+      "reads": [
+        ".helix/ledger.jsonl",
+        ".helix/memory/**",
+        "helix.config.json"
+      ],
+      "writes": [
+        ".helix/memory/**",
+        ".helix/routing/suggestions/**",
+        ".helix/ledger.jsonl"
+      ],
+      "commercialBoundary": "Provider abstraction is OpenAI-compatible; prompts and fallback logic are WildArrange original."
+    },
+    {
       "name": "grep_search",
       "layer": "code_intelligence",
       "status": "contract-only",

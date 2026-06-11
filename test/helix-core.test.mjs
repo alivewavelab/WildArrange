@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { startDashboardServer } from "../src/helix-dashboard.mjs";
 import {
+  admitParallelAgentResult,
   buildAgentContext,
   buildArchivistPacket,
   continuationDirective,
@@ -304,6 +305,34 @@ test("hook adapter emits WildArrange runtime injection for user prompt", async (
   });
 });
 
+test("hook adapter triggers ArchivistRouter without blocking user prompt injection", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
+      archivistRouter: { enabled: true },
+    }, null, 2));
+    await initRuntime(dir);
+
+    const result = await runInjectionHook(dir, {
+      hook_event_name: "UserPromptSubmit",
+      session_id: "session-archivist",
+      cwd: dir,
+      prompt: "做一个网页版 TODO 工具，先计划再实现。",
+      turns: [
+        { role: "assistant", content: "结论：先确认 MVP。\n```js\nconsole.log('drop me')\n```" },
+        { role: "user", content: "要支持完成和删除。" },
+      ],
+    });
+
+    assert.equal(result.event, "UserPromptSubmit");
+    assert.ok(result.output.length > 0);
+    const archivist = await readJson(resolveHelixPath(dir, "memory", "last-archivist-result.json"));
+    assert.equal(archivist.llmStatus, "fallback");
+    assert.equal(archivist.packet.stage, "execute");
+    assert.doesNotMatch(JSON.stringify(archivist.packet), /console\.log/);
+    assert.match(await readFile(resolveHelixPath(dir, "memory", "events.jsonl"), "utf8"), /archivist_fallback/);
+  });
+});
+
 test("hook adapter injects dynamic rules after tool use target paths", async () => {
   await withTempDir(async (dir) => {
     await mkdir(path.join(dir, ".cursor", "rules"), { recursive: true });
@@ -506,6 +535,85 @@ test("parallel agents run task packets concurrently and publish results", async 
     assert.equal(runs.runs.length, 1);
     assert.equal(runs.runs[0].results.length, 2);
     assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /parallel_agents_completed/);
+  });
+});
+
+test("parallel admission applies child artifacts only after gates pass", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = path.join(dir, "parallel-admit-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Parallel admission",
+      tasks: [
+        {
+          id: "T001",
+          subject: "Admit child artifact",
+          verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/parallel.txt','utf8').trim()!=='ok') process.exit(1);")],
+          writable_paths: ["src/**"],
+        },
+      ],
+    }, null, 2));
+    const plan = await importPlan(dir, planPath);
+
+    const command = [
+      "node -e",
+      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
+      "{outputJson}",
+    ].join(" ");
+    const batch = await runParallelAgents(dir, {
+      taskIds: ["T001"],
+      agent: "Kui",
+      command,
+    });
+    const admitted = await admitParallelAgentResult(dir, {
+      runId: batch.runId,
+      taskId: "T001",
+    });
+
+    assert.equal(admitted.status, "completed");
+    assert.deepEqual(admitted.appliedPaths, ["src/parallel.txt"]);
+    assert.equal(await readFile(path.join(dir, "src", "parallel.txt"), "utf8"), "ok\n");
+    const checkpoint = await readJson(resolveHelixPath(dir, "checkpoints", `${plan.id}-T001.json`));
+    assert.equal(checkpoint.taskId, "T001");
+    assert.equal(checkpoint.verifyResult.pass, true);
+    assert.equal(checkpoint.scopeResult.status, "pass");
+    assert.equal(checkpoint.reviewResult.pass, true);
+  });
+});
+
+test("parallel admission rejects artifacts outside writable paths", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = path.join(dir, "parallel-admit-deny-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Parallel admission deny",
+      tasks: [
+        {
+          id: "T001",
+          subject: "Reject leaked artifact",
+          verify_commands: ["node -e \"process.exit(0)\""],
+          writable_paths: ["src/**"],
+        },
+      ],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    const command = [
+      "node -e",
+      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'bad artifact', files:[{path:'docs/leak.md', content:'nope\\n'}]}));"),
+      "{outputJson}",
+    ].join(" ");
+    const batch = await runParallelAgents(dir, {
+      taskIds: ["T001"],
+      agent: "Kui",
+      command,
+    });
+
+    await assert.rejects(
+      admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" }),
+      /parallel admission denied/,
+    );
+    await assert.rejects(readFile(path.join(dir, "docs", "leak.md"), "utf8"), /ENOENT/);
   });
 });
 

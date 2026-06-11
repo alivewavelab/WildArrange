@@ -37,7 +37,7 @@ bin/helix.mjs
 - `src/helix-change.mjs`: steering proposals, review blockers, ChangeRequest review, and explicit accept/reject resolution.
 - `src/helix-failure.mjs`: failure reason classification, retry hints, and actionable failure summaries.
 - `src/helix-routing.mjs`: intent/domain/complexity routing and route request persistence.
-- `src/helix-archivist-router.mjs`: DeepSeek flash based archivist/router runtime, routing packet construction, deterministic fallback, structured memory updates, context injection packs, and keyword suggestion artifacts.
+- `src/helix-archivist-router.mjs`: DeepSeek flash based archivist/router runtime, routing packet construction, deterministic fallback, hook-triggered archive updates, context injection packs, and keyword suggestion artifacts.
 - `src/helix-rules.mjs`: project rule scanning and rule-context generation from AGENTS/CLAUDE/Cursor-style files.
 - `src/helix-review.mjs`: worker execution and deterministic BaiZe/QiongQi/LuanNiao review lanes.
 - `src/helix-injection.mjs`: injection-point resolution and mounted markdown/skill attachment loading.
@@ -48,7 +48,7 @@ bin/helix.mjs
 - `src/helix-node-runtime.mjs`: linear task node runtime for execute/verify/scope/review/checkpoint/retry.
 - `src/helix-plan.mjs`: plan normalization, graph validation, plan import, route enrichment, and task-state loading.
 - `src/helix-team.mjs`: team-lite tasks, claims, evidence recording, task-state persistence, outbox, and durable message board.
-- `src/helix-parallel-agents.mjs`: command-based child-agent batch runner, isolated run directories, result collection, team message publication, and agent-run index.
+- `src/helix-parallel-agents.mjs`: command-based child-agent batch runner, isolated run directories, result collection, team message publication, artifact admission, and agent-run index.
 - `src/helix-gates.mjs`: command execution, verifier, scope guard, path checks, checkpoints, change requests, review/failure reports, and wisdom ledger.
 - `src/helix-dashboard.mjs`: local dashboard HTTP API and HTML UI.
 - `packs/wildarrange-linear/agents`: role prompts.
@@ -76,11 +76,12 @@ Routing uses a hybrid model:
 
 1. `src/helix-routing.mjs` runs the deterministic hot path from `packs/wildarrange-linear/routes.json`.
 2. `ArchivistRouter` uses configured `CangJie` / `deepseek-v4-flash` when provider credentials exist, and falls back to deterministic routing when unavailable.
-3. Prompt-count triggers are stage aware: ideate/plan/clarify defaults to 5 turns, normal work defaults to 10 turns, and execute/verify/review defaults to 15 turns with a 20-turn cap.
-4. `ArchivistRouter` reads a bounded routing packet and structured memory instead of unlimited raw chat history.
-5. Routing packets use conclusions-only capture: keep user intent, visible assistant conclusions, summarized tool results, evidence, progress, decisions, artifacts, implementation conclusions, research notes, pitfalls, and open questions; strip code blocks, diffs, raw command output, and intermediate process text by default.
-6. It may produce route decisions, multi-intent segments, structured archive updates, context injection packs, user-preference notes, and keyword patch suggestions.
-7. Keyword suggestions are written for review first. High-risk routing areas such as review, Git, permissions, safety, deletion, release, and scope changes require human or Jiuwei approval before updating `routes.json`.
+3. Host hooks trigger ArchivistRouter on `SessionStart`, `UserPromptSubmit`, and `PostCompact`. The hook path is non-blocking: failures become warning facts, not denied prompts.
+4. Prompt-count triggers are stage aware: ideate/plan/clarify defaults to 5 turns, normal work defaults to 10 turns, and execute/verify/review defaults to 15 turns with a 20-turn cap.
+5. `ArchivistRouter` reads a bounded routing packet and structured memory instead of unlimited raw chat history.
+6. Routing packets use conclusions-only capture: keep user intent, visible assistant conclusions, summarized tool results, evidence, progress, decisions, artifacts, implementation conclusions, research notes, pitfalls, and open questions; strip code blocks, diffs, raw command output, and intermediate process text by default.
+7. It may produce route decisions, multi-intent segments, structured archive updates, context injection packs, user-preference notes, and keyword patch suggestions.
+8. Keyword suggestions are written for review first. High-risk routing areas such as review, Git, permissions, safety, deletion, release, and scope changes require human or Jiuwei approval before updating `routes.json`.
 
 ## Parallel Agent Model
 
@@ -91,8 +92,11 @@ The first parallel runtime is intentionally narrow:
 3. The configured runner command executes inside that isolated run directory.
 4. Optional structured output is read from `agent-result.json`.
 5. Results are written to `.helix/agent-runs`, published to the team message board, and appended to the ledger.
+6. `parallel admit` accepts only structured text file proposals from `agent-result.json.files`.
+7. Admission rejects paths outside `writable_paths`.
+8. Accepted files are written to the main workspace, then verifier, scope guard, review gate, and checkpoint run before the task can become `completed`.
 
-This does not yet merge child workspace changes into the main project. Git worktree isolation, verifier-before-merge, and merge admission are the next layer.
+This supports structured artifact admission. Git worktree isolation and patch-based merge admission are still the next layer.
 
 ## Gate Model
 

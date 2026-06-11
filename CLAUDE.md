@@ -16,8 +16,9 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 - 不把任何宿主专属工具硬塞进 core（例如特定 editor plugin hooks、tmux layout）。
 - Codex / Cursor 适配放在 runtime adapter 层；核心状态机必须是产品中立的本地文件协议。
 - LLM review 通过 OpenAI-compatible provider 配置化接入；默认关闭，无 key 时不阻断线性状态机。
-- 第一版不启动常驻多 Agent 集群；多 Agent 先以命令型子 Agent 的隔离运行目录跑通 spawn / collect / message 闭环。
-- ArchivistRouter 只读取清洗后的结论包，不摄入代码块、raw diff 或完整命令输出；无 LLM key 时必须 fallback，不阻断主线。
+- 第一版不启动常驻多 Agent 集群；多 Agent 先以命令型子 Agent 的隔离运行目录跑通 spawn / collect / message / admission 闭环。
+- 子 Agent 不能直接自证完成；结构化文件成果必须通过 writable_paths、verifier、scope、review、checkpoint 后才能进入 completed。
+- ArchivistRouter 只读取清洗后的结论包，不摄入代码块、raw diff 或完整命令输出；无 LLM key 时必须 fallback，不阻断主线或 hook。
 - 商业发布包不得包含受限第三方源码、prompt 原文或近似改写文本；外部项目只能作为概念参考和对照证据。
 
 ## 工程约束
@@ -90,6 +91,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | 跑下一个任务            | `node ./bin/helix.mjs run`                                       |
 | 跑 sample workflow | `node ./bin/helix.mjs workflow --sample`                         |
 | 跑并行子 Agent       | `node ./bin/helix.mjs parallel run --max-agents 2 --command "..."` |
+| 合入子 Agent 成果     | `node ./bin/helix.mjs parallel admit --run <runId> --task T001`     |
 | 查看并行运行记录        | `node ./bin/helix.mjs parallel list`                             |
 | 生成档案路由包         | `node ./bin/helix.mjs archivist packet --text "..." --stage plan` |
 | 运行档案路由员         | `node ./bin/helix.mjs archivist run --text "..." --stage plan --force` |

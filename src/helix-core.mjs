@@ -83,7 +83,7 @@ export {
   sendTeamMessage,
   writeOutbox,
 } from "./helix-team.mjs";
-export { listParallelAgentRuns, runParallelAgents } from "./helix-parallel-agents.mjs";
+export { admitParallelAgentResult, listParallelAgentRuns, runParallelAgents } from "./helix-parallel-agents.mjs";
 export {
   appendWisdom,
   changedPathsIntroducedByTask,
