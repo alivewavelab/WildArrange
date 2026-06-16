@@ -79,7 +79,25 @@
       ],
       "writes": [
         ".helix/adapters/**",
+        ".codex/hooks.json",
         ".cursor/rules/wildarrange.mdc",
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "helix_adapter_restore",
+      "layer": "host_adapter",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs adapter restore --backup <backupId>",
+      "purpose": "从 `.helix/adapters/backups/<backupId>/` 恢复被安装或卸载流程备份的 Codex/Cursor adapter 文件，形成可撤销闭环。",
+      "reads": [
+        ".helix/adapters/backups/**"
+      ],
+      "writes": [
+        ".helix/adapters/restore-report.*",
+        ".codex/hooks.json",
+        ".cursor/rules/wildarrange.mdc",
+        ".helix/adapters/codex/hooks.json",
         ".helix/ledger.jsonl"
       ]
     },
@@ -288,11 +306,13 @@
       "layer": "runtime_state",
       "status": "implemented",
       "command": "node ./bin/helix.mjs serve --host 127.0.0.1 --port 8765",
-      "purpose": "启动只读本地网页 dashboard，展示 status、tasks、route decisions、snapshots 和 ledger。",
+      "purpose": "启动本地网页 dashboard，展示 status、tasks、route decisions、snapshots 和 ledger；所有 POST action 必须带 token，并受 Host/Origin 防护。",
       "reads": [
         ".helix/**"
       ],
-      "writes": []
+      "writes": [
+        ".helix/**"
+      ]
     },
     {
       "name": "helix_status",
@@ -303,6 +323,17 @@
       "reads": [
         ".helix/work.json",
         ".helix/team/tasks.json"
+      ],
+      "writes": []
+    },
+    {
+      "name": "ledger_verify",
+      "layer": "runtime_state",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs ledger verify",
+      "purpose": "校验 `.helix/ledger.jsonl` 的 hash 链，发现普通手工改账、断链或 prevHash 不一致。",
+      "reads": [
+        ".helix/ledger.jsonl"
       ],
       "writes": []
     },
@@ -564,12 +595,13 @@
       "layer": "memory",
       "status": "implemented",
       "command": "node ./bin/helix.mjs run",
-      "purpose": "每个任务后追加可复用 learnings、decisions、issues 和 verification notes。",
+      "purpose": "每个任务后追加 verifier 事实到 `.helix/wisdom/verification.md`。结构化 learnings、decisions 和 issues 由 `.helix/memory/` digest 链路承载。",
       "reads": [
         "task.evidence"
       ],
       "writes": [
-        ".helix/wisdom/**"
+        ".helix/wisdom/verification.md",
+        ".helix/memory/**"
       ]
     },
     {
@@ -608,6 +640,45 @@
         ".helix/ledger.jsonl"
       ],
       "commercialBoundary": "WildArrange original admission gate."
+    },
+    {
+      "name": "parallel_status",
+      "layer": "team",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs parallel status [--run <runId>]",
+      "purpose": "读取 `.helix/agent-runs`，汇总子 Agent 结果、adapter、isolation、lifecycle、awaiting_user_acceptance/released/closed 状态。",
+      "reads": [
+        ".helix/agent-runs/**"
+      ],
+      "writes": []
+    },
+    {
+      "name": "parallel_cleanup",
+      "layer": "team",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs parallel cleanup --run <runId>",
+      "purpose": "清理 Git worktree 隔离目录并记录 cleanup lifecycle；只清理 WildArrange 创建并归档在 `.helix/agent-runs` 下的运行。",
+      "reads": [
+        ".helix/agent-runs/**"
+      ],
+      "writes": [
+        ".helix/agent-runs/**",
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "parallel_close",
+      "layer": "team",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs parallel close --run <runId> [--task <taskId>] --reason <reason>",
+      "purpose": "用户验收后关闭保留的子 Agent 结果，更新 lifecycle 为 closed，同时保留证据文件与 ledger。",
+      "reads": [
+        ".helix/agent-runs/**"
+      ],
+      "writes": [
+        ".helix/agent-runs/**",
+        ".helix/ledger.jsonl"
+      ]
     },
     {
       "name": "archivist_packet",
@@ -730,13 +801,16 @@
     {
       "name": "ast_grep_search",
       "layer": "code_intelligence",
-      "status": "contract-only",
-      "command": "ast-grep --pattern <pattern>",
-      "purpose": "按语法结构查找代码，而不是靠字符串猜测。",
+      "status": "implemented-via-configured-command",
+      "command": "configured by helix.config.json qualityGates.astStructure.commands or task.ast_commands",
+      "purpose": "按语法结构查找代码，而不是靠字符串猜测；结果进入 review_gate 的 ast_structure lane。",
       "reads": [
-        "workspace files"
+        "workspace files",
+        "helix.config.json"
       ],
-      "writes": []
+      "writes": [
+        ".helix/reports/reviews/**"
+      ]
     },
     {
       "name": "ast_grep_replace_dry_run",
@@ -763,6 +837,22 @@
         ".helix/reports/reviews/**"
       ],
       "commercialBoundary": "CLI command adapter; no embedded third-party LSP daemon code."
+    },
+    {
+      "name": "hashline_anchors",
+      "layer": "code_intelligence",
+      "status": "implemented",
+      "command": "configured by task.hashline_anchors or qualityGates.hashlineAnchors.anchors",
+      "purpose": "校验关键行的 sha256 anchor，避免基于过期上下文或错误行号的改写进入验收。",
+      "reads": [
+        "workspace files",
+        "task.hashline_anchors",
+        "helix.config.json"
+      ],
+      "writes": [
+        ".helix/reports/reviews/**"
+      ],
+      "commercialBoundary": "Local hash verification; no upstream hashline implementation copied."
     },
     {
       "name": "lsp_references",
@@ -980,6 +1070,31 @@
       "reads": [
         ".helix/prompt-pack.json",
         "packs/wildarrange-linear/**"
+      ],
+      "writes": []
+    },
+    {
+      "name": "skill_match",
+      "layer": "prompt_pack",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs skills match --text <request> [--stage <stage>] [--agent <agent>]",
+      "purpose": "按显式 skill、阶段、路由信号、Agent 角色、类别和关键词为已安装 Skill 打分，返回可解释的按需加载建议。",
+      "reads": [
+        ".helix/prompt-pack.json",
+        "packs/wildarrange-linear/**",
+        "helix.config.json"
+      ],
+      "writes": []
+    },
+    {
+      "name": "prompt_variant",
+      "layer": "prompt_pack",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs prompts variant --agent <agent> [--provider <provider>] [--model <model>]",
+      "purpose": "读取配置化提示词模型变体；作为原始 Agent prompt 的追加偏置，而不是替换 prompt-pack 真值源。",
+      "reads": [
+        "helix.config.json",
+        ".helix/config.json"
       ],
       "writes": []
     },

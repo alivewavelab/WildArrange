@@ -36,8 +36,8 @@ bin/helix.mjs
 
 - `bin/helix.mjs`: CLI routing.
 - `src/helix-core.mjs`: compatibility export surface for existing CLI/tests/imports.
-- `src/helix-foundation.mjs`: shared constants, runtime initialization, config, locks, prompt-pack registry, snapshots, and resume context basics.
-- `src/helix-adapters.mjs`: Codex/Cursor adapter install, uninstall, report, and backup logic.
+- `src/helix-foundation.mjs`: shared constants, runtime initialization, config, locks, prompt-pack registry, hash-chained ledger, ledger verification, snapshots, and resume context basics.
+- `src/helix-adapters.mjs`: Codex/Cursor adapter install, uninstall, restore, report, backup logic, Codex `.codex/hooks.json` generation, and Cursor soft-rule generation.
 - `src/helix-change.mjs`: steering proposals, review blockers, ChangeRequest review, and explicit accept/reject resolution.
 - `src/helix-failure.mjs`: failure reason classification, retry hints, and actionable failure summaries.
 - `src/helix-acceptance-proof.mjs`: checkpoint proof chain that verifies worker, verifier, success criteria, scope, review, and review lanes before completion.
@@ -46,7 +46,9 @@ bin/helix.mjs
 - `src/helix-memory-digest.mjs`: structured session/task/checkpoint digest generation for cross-session recovery.
 - `src/helix-rules.mjs`: project rule scanning and rule-context generation from AGENTS/CLAUDE/Cursor-style files.
 - `src/helix-review.mjs`: worker execution and deterministic BaiZe/QiongQi/LuanNiao review lanes.
+- `src/helix-code-intel.mjs`: host-neutral code intelligence gates for LSP/typecheck commands, AST/structure commands, hashline anchors, and comment checking.
 - `src/helix-injection.mjs`: injection-point resolution and mounted markdown/skill attachment loading.
+- `src/helix-skill-matcher.mjs`: stage/route/agent/keyword skill matching and configurable prompt model variants.
 - `src/helix-context.mjs`: agent context, resume snapshots, session lineage, and continuation directives.
 - `src/helix-hooks.mjs`: host lifecycle hook handling and pre-tool-use scope guard output.
 - `src/helix-status.mjs`: workflow summary, status report, dashboard data, and ledger tail reads.
@@ -56,9 +58,9 @@ bin/helix.mjs
 - `src/helix-team.mjs`: team-lite tasks, claims, evidence recording, task-state persistence, outbox, and durable message board.
 - `src/helix-agent-spawn.mjs`: host-neutral child-agent spawn command rendering for Codex/Cursor/custom command adapters.
 - `src/helix-git-worktree.mjs`: Git worktree isolation, patch extraction, patch path parsing, and patch admission helpers.
-- `src/helix-parallel-agents.mjs`: command-based child-agent batch runner, run-dir or Git worktree isolation, result collection, team message publication, file/patch admission, and agent-run index.
-- `src/helix-gates.mjs`: command execution, verifier, scope guard, path checks, checkpoints, change requests, review/failure reports, and wisdom ledger.
-- `src/helix-dashboard.mjs`: local dashboard HTTP API and HTML UI.
+- `src/helix-parallel-agents.mjs`: command-based child-agent batch runner, run-dir or Git worktree isolation, skipped-run detection, result collection, lifecycle status, explicit close/release/cleanup, team message publication, file/patch admission, and agent-run index.
+- `src/helix-gates.mjs`: command execution, verifier, scope guard, path and realpath checks, checkpoints, change requests, review/failure reports, and wisdom ledger.
+- `src/helix-dashboard.mjs`: local dashboard HTTP API and HTML UI with POST token, Host, and Origin protections.
 - `packs/wildarrange-linear/agents`: role prompts.
 - `packs/wildarrange-linear/skills`: skill prompts.
 - `packs/wildarrange-linear/tools/tool-contract.json`: tool contract inventory.
@@ -67,7 +69,7 @@ bin/helix.mjs
 ## Runtime State
 
 - `.helix/team/tasks.json`: durable task state.
-- `.helix/ledger.jsonl`: append-only audit log.
+- `.helix/ledger.jsonl`: hash-chained append-only audit log. `ledger verify` detects ordinary line edits or broken chains.
 - `.helix/checkpoints`: checkpoint JSON after all gates pass.
 - `.helix/reports`: human-readable reports.
 - `.helix/snapshots/context.md`: resume context.
@@ -110,7 +112,10 @@ The first parallel runtime is intentionally narrow:
 8. Admission rejects paths outside `writable_paths`.
 9. Successful child results enter `awaiting_user_acceptance` instead of being treated as closed.
 10. Accepted files or patches are applied to the main workspace, then verifier, scope guard, review gate, acceptance proof, and checkpoint run before the task can become `completed`.
-11. After admission completes, the child result lifecycle moves to `released`; failed admission keeps it visible for revision.
+11. If admission fails, file proposals or patches are rolled back from the main workspace and the child result stays visible for revision.
+12. After admission completes, the child result lifecycle moves to `released`; failed admission keeps it visible for revision.
+13. `parallel status` reads `.helix/agent-runs` and summarizes retained child-agent lifecycle states.
+14. `parallel close` lets a user release retained child results after human acceptance without deleting evidence.
 
 This supports a narrow but real multi-agent admission loop: child agents can work in isolated directories or Git worktrees, but they still cannot self-certify completion.
 
@@ -127,13 +132,42 @@ Completion requires:
 
 `inconclusive` is not completion evidence.
 
-The review gate is host-neutral. It runs from the CLI and may include deterministic lanes, configured `review_commands`, configured `standards_commands`, optional LSP/typecheck commands, comment checking, and optional OpenAI-compatible LLM review. The default LLM review contract uses three roles when enabled: BaiZe for goal/evidence verification, LuanNiao for bug/risk review, and QiongQi for skeptical acceptance.
+The review gate is host-neutral. It runs from the CLI and may include deterministic lanes, configured `review_commands`, configured `standards_commands`, optional LSP/typecheck commands, AST/structure commands, hashline anchor checks, comment checking, and optional OpenAI-compatible LLM review. The default LLM review contract uses three roles when enabled: BaiZe for goal/evidence verification, LuanNiao for bug/risk review, and QiongQi for skeptical acceptance.
 
 ## Adapter Model
 
-Cursor receives `.cursor/rules/wildarrange.mdc`.
+Codex receives `.codex/hooks.json`. This is the real project-local Codex hook entry and becomes hard enforcement after the project `.codex/` layer and hook definition are trusted through `/hooks`.
 
-Codex receives `.helix/adapters/codex/hooks.json`, which mirrors host lifecycle hooks. Full host-level Codex plugin installation is still future adapter work.
+WildArrange also writes `.helix/adapters/codex/hooks.json` as an audit copy. Cursor receives `.cursor/rules/wildarrange.mdc`; this is soft governance because Cursor does not expose the same command hook lifecycle here.
+
+Adapter install and uninstall always back up overwritten or removed files. `adapter restore --backup <backupId>` restores one backup directory to its original project paths.
+
+## Success Criteria Evidence Model
+
+`successCriteria` are independent completion evidence, not a mirror of verifier output. Explicit criteria remain pending until an agent records evidence or the criterion declares `verifierCommandRefs` that point to concrete passing `verify_commands`. Legacy tasks that omit `successCriteria` receive verifier-bound defaults for compatibility, but possible no-op tasks are marked with `governanceWarnings` so a trivial worker plus trivial verifier is visible.
+
+Checkpoint still requires worker success, verifier pass, success criteria pass, scope pass, review pass, and acceptance proof pass.
+
+## Dashboard Security Model
+
+The dashboard remains local-first. Loopback `GET /api/state` can be read without a token for lightweight status checks. Every `POST` endpoint requires `Authorization: Bearer <token>` or `x-helix-token`, including on `127.0.0.1`, because POST endpoints can execute worker commands. The server also validates Host and Origin / Sec-Fetch-Site to reduce DNS rebinding and browser cross-site trigger risk.
+
+## Skill And Prompt Variant Model
+
+The base prompt pack remains the source of truth. `skills match` is an explainable loading hint that scores installed skills by explicit selection, stage boosts, route keyword signals, agent role, category, and request keywords. It does not mutate the route table.
+
+Prompt variants are config-driven appendices. Host-managed GPT-family agents can use Codex/Cursor defaults, while Gemini, Kimi, DeepSeek, and custom providers can add narrow behavioral bias without replacing the original agent prompt.
+
+## Context Budget Model
+
+`src/helix-injection.mjs` treats prompt-like context as tiered material, not one flat blob:
+
+1. Prompt variants stay short and stable. The default `contextBudgets.prompt.maxChars` is 12,000 chars.
+2. Markdown mounts are for rules, snapshots, and live state. The default Markdown budget is 12,000 chars, with lighter hook budgets for `pre_tool_use` and `post_tool_use`.
+3. Activated Skill mounts are workflow instructions. The default Skill budget is 80,000 chars, with narrower budgets on traffic-light hooks and wider budgets on execute/review hooks.
+4. Any over-budget mount must expose `truncated: true`, original chars, loaded chars, and budget chars. Silent truncation is not allowed.
+
+This follows the runtime philosophy that system prompts act like a constitution, Skills act like task manuals, references act like an archive, and hooks act like traffic lights. Long Skills may be acceptable when they are the actual workflow, but they should be activated by stage or route rather than loaded at every session start.
 
 ## Provider Model
 

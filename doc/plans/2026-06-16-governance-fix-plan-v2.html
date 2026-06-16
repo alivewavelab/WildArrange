@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WildArrange 治理修复方案 v2</title>
+<style>
+  :root{
+    --p0:#e5484d; --p1:#f5a623; --p2:#3b82f6; --ok:#16a34a;
+    --bg:#0f1115; --card:#181b22; --line:#2a2f3a; --txt:#e6e8ec; --mut:#9aa3b2;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.7 -apple-system,"PingFang SC",sans-serif;padding:32px}
+  .wrap{max-width:1080px;margin:0 auto}
+  h1{font-size:26px;margin:0 0 6px}
+  .lead{color:var(--mut);margin:0 0 28px}
+  .analogy{background:var(--card);border-left:4px solid var(--p2);padding:14px 18px;border-radius:8px;margin:0 0 28px;color:#cdd3dd}
+  h2{font-size:19px;margin:34px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;position:relative;overflow:hidden}
+  .card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px}
+  .card.p0::before{background:var(--p0)} .card.p1::before{background:var(--p1)} .card.p2::before{background:var(--p2)}
+  .tag{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:5px;letter-spacing:.5px;margin-bottom:8px}
+  .tag.p0{background:rgba(229,72,77,.18);color:var(--p0)} .tag.p1{background:rgba(245,166,35,.18);color:var(--p1)} .tag.p2{background:rgba(59,130,246,.18);color:var(--p2)}
+  .card h3{margin:0 0 6px;font-size:16px}
+  .card .why{color:var(--mut);font-size:13px;margin:0 0 10px}
+  .card ul{margin:6px 0 0;padding-left:18px} .card li{margin:4px 0;font-size:13.5px}
+  code{background:#11141b;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:12.5px;color:#a9d3ff}
+  .effort{position:absolute;right:14px;top:14px;font-size:11px;color:var(--mut)}
+  .flow{display:flex;align-items:stretch;gap:14px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:20px}
+  .flow .col{flex:1;min-width:200px}
+  .flow .col h4{margin:0 0 10px;font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:1px}
+  .flow .box{background:#11141b;border:1px solid var(--line);border-radius:7px;padding:9px 11px;margin:7px 0;font-size:13px}
+  .arrow{display:flex;align-items:center;color:var(--p2);font-size:22px;font-weight:700}
+  .accept{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 20px}
+  .accept li{margin:6px 0}
+  .accept .ok{color:var(--ok);font-weight:700;margin-right:6px}
+  .note{color:var(--mut);font-size:13px;margin-top:10px}
+  table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#11141b;color:var(--mut)}
+  .seq{counter-reset:step;list-style:none;padding:0}
+  .seq li{counter-increment:step;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 16px 12px 48px;margin:8px 0;position:relative}
+  .seq li::before{content:counter(step);position:absolute;left:14px;top:12px;width:22px;height:22px;border-radius:50%;background:var(--p2);color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>WildArrange 治理修复方案 v2</h1>
+  <p class="lead">一句话：先把"门真独立、宿主真接线、侧门真上锁、记忆真被读"四件事打通；其中 Codex 硬接入不是重写，是一次路径改正。不重写状态机，只修最伤治理可信度的断点。</p>
+
+  <div class="analogy" style="border-left-color:var(--ok)">
+    <strong>落地调整：</strong>P0 已按 hard-after-trust 模型实现：Codex 写 <code>.codex/hooks.json</code> 并要求 <code>/hooks</code> trust；Cursor 保持 soft。successCriteria 采用兼容迁移策略：显式声明的 criteria 不再被 verifier 批量翻绿，必须人工证据或 <code>verifierCommandRefs</code>；未声明 criteria 的旧任务仍生成 verifier-bound 默认项，同时对空 worker + 平凡 verify + 无 writable_paths 写 <code>possible_noop_task</code> warning。
+  </div>
+
+  <div class="analogy">
+    <strong>生活类比：</strong>这栋大楼闸机是真闸机、协议也对，但门禁主机的线接到了隔壁空房间（写错路径），所以闸机一直没通电；同时五道闸共用同一张通行条（同一份 verifier 证据），值班室写了交接日报却没贴到墙上（记忆没被读），后院侧门因为"在院内"就默认不上锁（dashboard 本地免鉴权）。修复不是重盖楼，是把线接对、把通行条拆开、把日报贴上、把侧门加锁。
+  </div>
+
+  <h2>证据核验（含本轮新证据）</h2>
+  <table>
+    <tr><th>问题</th><th>结论</th><th>关键证据</th></tr>
+    <tr>
+      <td><strong>Codex hook 没接入宿主</strong></td>
+      <td style="color:var(--ok)">可立即硬修，非"未来工作"</td>
+      <td>Codex 官方 hooks 文档：原生读 <code>&lt;repo&gt;/.codex/hooks.json</code>，事件名与 <code>permissionDecision:"deny"</code> 协议与本项目 <code>helix-adapters.mjs:186</code> / <code>helix-hooks.mjs:228</code> 完全一致；唯一错在写到了 <code>.helix/adapters/codex/hooks.json</code>（Codex 不读）。</td>
+    </tr>
+    <tr>
+      <td>successCriteria 被 verifier 批量翻绿</td>
+      <td>属实</td>
+      <td><code>helix-team.mjs:124</code> <code>applyVerifierEvidenceToCriteria</code> 在 verifier pass 后把所有 pending criteria 置 pass。</td>
+    </tr>
+    <tr>
+      <td>dashboard loopback 免 token → 本地 RCE</td>
+      <td>风险成立</td>
+      <td><code>helix-dashboard.mjs:24</code> loopback 默认 <code>requireAuth=false</code>，<code>POST /api/run-next</code> 触发真实 worker shell；token 比较非恒定时间（<code>:130</code>）。</td>
+    </tr>
+    <tr>
+      <td>digest/archivist 写了没人读</td>
+      <td>属实</td>
+      <td><code>helix-hooks.mjs:407</code> <code>appendHookFacts</code> 未渲染 <code>facts.digest</code>/<code>facts.archivist</code>；<code>wa-recall</code> 指向 <code>docs/solutions/</code> 而非 <code>.helix/memory/</code>。</td>
+    </tr>
+    <tr>
+      <td>ledger 无防篡改</td>
+      <td>属实</td>
+      <td><code>helix-foundation.mjs:543</code> 仅 append JSONL，无 hash 链、无校验命令。</td>
+    </tr>
+    <tr>
+      <td>worktree 永不清理 / admission 先合后验</td>
+      <td>属实</td>
+      <td>全仓无 <code>worktree remove/prune</code>；<code>helix-parallel-agents.mjs:168</code> 先 apply 到主干再跑 gate，失败才回滚。</td>
+    </tr>
+  </table>
+
+  <h2>P0 — 让治理"真的成立"（本周）</h2>
+  <div class="grid">
+    <div class="card p0">
+      <span class="tag p0">P0 · 最高杠杆</span><span class="effort">~30 行</span>
+      <h3>Codex hook 接对路径 + 信任引导</h3>
+      <p class="why">schema 已对，只差落点与 Codex 的信任审批流。这是把"D 级假接入"一次性拉到"真硬拦截"的最省力改动。</p>
+      <ul>
+        <li>写入改为 <code>&lt;repo&gt;/.codex/hooks.json</code>（保留 <code>.helix/adapters/codex/</code> 作为备份副本）。</li>
+        <li>install 后打印引导：在 Codex 内执行 <code>/hooks</code> review 并 trust（Codex 默认对非托管 hook 要求一次信任审批后才运行）。</li>
+        <li>uninstall 对称删除 <code>.codex/hooks.json</code>，并先备份。</li>
+        <li>install 报告输出 <code>enforcement: hard</code>（Codex）/ <code>soft</code>（Cursor）。</li>
+      </ul>
+    </div>
+    <div class="card p0">
+      <span class="tag p0">P0 · 治理核心</span><span class="effort">~40 行</span>
+      <h3>successCriteria 不再被 verifier 自动满足</h3>
+      <p class="why">否则"多维验收"是假的——verifier 一绿全绿。</p>
+      <ul>
+        <li>移除"verifier pass → 所有 criteria pass"的默认行为（<code>helix-team.mjs:124</code>）。</li>
+        <li>新增字段 <code>verifierCommandRefs</code>：只有显式绑定到具体 verify 命令的 criterion 才能由证据自动通过。</li>
+        <li>默认播种的 C001/C002/C003 保持 <code>pending</code>，缺证据则 checkpoint 真实阻断。</li>
+      </ul>
+    </div>
+    <div class="card p0">
+      <span class="tag p0">P0 · 安全</span><span class="effort">~25 行</span>
+      <h3>dashboard 写操作强制鉴权</h3>
+      <p class="why">挡住 DNS rebinding 借浏览器触发本机命令执行。</p>
+      <ul>
+        <li><code>GET /api/state</code> 保留 loopback 免 token；<strong>所有 POST 默认要求 token</strong>（即便 127.0.0.1）。</li>
+        <li>加 <code>Host</code> 白名单 + <code>Sec-Fetch-Site</code>/<code>Origin</code> 校验，拒绝跨站。</li>
+        <li>token 比较改 <code>crypto.timingSafeEqual</code>。</li>
+      </ul>
+    </div>
+    <div class="card p0">
+      <span class="tag p0">P0 · 记忆闭环</span><span class="effort">~35 行</span>
+      <h3>打通 digest / archivist 读路</h3>
+      <p class="why">否则每次 SessionStart 跑的 LLM token 都在为没人读的产物买单。</p>
+      <ul>
+        <li><code>appendHookFacts</code> 增"记忆摘要"+"档案路由"两段，各最多 3 条（进展/决策/产物/风险/开放问题）。</li>
+        <li>挂到 <code>session_start</code> / <code>post_compact</code> 注入点；生成失败注入 warning，不阻断。</li>
+        <li>修正 <code>wa-recall</code> 目录指向 <code>.helix/memory/</code>。</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>P1 — 加固可信度（两周内）</h2>
+  <div class="grid">
+    <div class="card p1">
+      <span class="tag p1">P1</span><span class="effort">~50 行</span>
+      <h3>ledger hash 链 + verify 命令</h3>
+      <ul>
+        <li>每条事件写 <code>prevHash</code> + <code>hash</code>。</li>
+        <li>新增 <code>helix ledger verify</code>。</li>
+        <li>checkpoint 信任 tasks.json 前先校验 <code>last_verify_result</code> 与 ledger 一致。</li>
+        <li>目标是"改了能发现"，不追求抗 root 签名。</li>
+      </ul>
+    </div>
+    <div class="card p1">
+      <span class="tag p1">P1</span><span class="effort">~60 行</span>
+      <h3>admission 改"先验后合" + worktree 清理</h3>
+      <ul>
+        <li>在隔离区/worktree 内先跑 verifier+scope+review，通过后才合入主干，去掉"脏写主干再回滚"窗口。</li>
+        <li>patch 模式用实际写入路径（<code>git apply --numstat</code>）复核 writable_paths，而非仅解析 diff 头。</li>
+        <li>新增 <code>parallel cleanup</code>：<code>git worktree remove/prune</code> + 目录回收。</li>
+      </ul>
+    </div>
+    <div class="card p1">
+      <span class="tag p1">P1</span><span class="effort">~20 行</span>
+      <h3>no-op 任务防空转 + 路径真实化</h3>
+      <ul>
+        <li>scope guard 用 <code>realpath</code> 解析后再判越界，堵符号链接穿透。</li>
+        <li><code>parallel run</code> 无 runner 命令时返回 <code>skipped</code> 而非 <code>pass</code>。</li>
+        <li>计划导入时对"空 worker + 平凡 verify + 无 writable_paths"给出 warning。</li>
+      </ul>
+    </div>
+    <div class="card p2">
+      <span class="tag p2">P2 · 增强</span><span class="effort">可选</span>
+      <h3>Codex inline config 选项 + Cursor 现实化</h3>
+      <ul>
+        <li>提供 <code>--mode codex-inline</code> 写 <code>.codex/config.toml</code> 的 <code>[hooks]</code>，适配偏好单文件配置的用户。</li>
+        <li>README 明确：Cursor 是"上下文注入+规则提示"（soft），Codex 是命令型 hard hook，避免一刀切宣传。</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>执行顺序（按杠杆/依赖）</h2>
+  <ol class="seq">
+    <li><strong>Codex hook 接对路径</strong>——最高杠杆，单点改动即让"治理"二字成立；先写测试断言 <code>.codex/hooks.json</code> 生成且 schema 合规。</li>
+    <li><strong>successCriteria 解耦</strong>——治理独立性的根；改 <code>helix-team.mjs</code> + plan 校验，配套"未绑定证据则 checkpoint 失败"测试。</li>
+    <li><strong>dashboard 写鉴权</strong>——安全止血，独立可并行。</li>
+    <li><strong>digest 注入</strong>——记忆闭环，依赖第 2 步后的 hook 输出格式稳定。</li>
+    <li><strong>ledger hash 链 → admission 先验后合 → worktree 清理</strong>——P1 加固，串行推进。</li>
+    <li>每步收尾 <code>npm test</code>；涉及包内容跑 <code>npm pack --dry-run --cache /private/tmp/helix-npm-cache</code>。</li>
+  </ol>
+
+  <h2>P0 数据流（修复后）</h2>
+  <div class="flow">
+    <div class="col">
+      <h4>输入</h4>
+      <div class="box">任务计划 + 显式绑定的 successCriteria</div>
+      <div class="box">verifier / scope / review 结果</div>
+      <div class="box">digest / archivist 产物</div>
+      <div class="box">Codex 工具调用（PreToolUse）</div>
+      <div class="box">dashboard HTTP 请求</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="col">
+      <h4>处理组件</h4>
+      <div class="box">helix-adapters：写 <code>.codex/hooks.json</code>（hard）</div>
+      <div class="box">helix-team：criteria 按证据绑定通过</div>
+      <div class="box">helix-hooks：deny 越界 + 注入记忆摘要</div>
+      <div class="box">helix-dashboard：POST 强制 token + Host 校验</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="col">
+      <h4>输出</h4>
+      <div class="box">Codex 在工具执行前真被拦截</div>
+      <div class="box">criteria 不再被 verifier 批量翻绿</div>
+      <div class="box">新会话能看到最近记忆与路由</div>
+      <div class="box">网页无法静默触发本机命令</div>
+    </div>
+  </div>
+
+  <h2>验收标准</h2>
+  <div class="accept">
+    <ul>
+      <li><span class="ok">✓</span>新增测试：<code>adapter install</code> 后 <code>&lt;repo&gt;/.codex/hooks.json</code> 存在，且 PreToolUse deny 输出含 <code>hookSpecificOutput.permissionDecision="deny"</code>。</li>
+      <li><span class="ok">✓</span>新增测试：未绑定证据的 successCriteria，即使 verifier pass，checkpoint 仍失败；带 <code>verifierCommandRefs</code> 的 criteria 可自动通过并记录具体命令。</li>
+      <li><span class="ok">✓</span>新增测试：dashboard POST 无 token 返回 401；跨 Origin 被拒；token 走恒定时间比较。</li>
+      <li><span class="ok">✓</span>新增测试：SessionStart / PostCompact 注入块包含"记忆摘要"和"档案路由"。</li>
+      <li><span class="ok">✓</span>新增测试：<code>ledger verify</code> 能检出被手工改写的行。</li>
+      <li><span class="ok">✓</span>文档测试：README / 架构文档区分 Codex(hard) 与 Cursor(soft)，不暗示 Cursor 已硬拦截。</li>
+      <li><span class="ok">✓</span><code>npm test</code> 全绿；<code>npm pack --dry-run</code> 绿。</li>
+    </ul>
+    <p class="note">本轮不做：完整加密签名账本（hash 链只发现普通篡改）；不重写状态机（主干是可用资产，问题在证据独立性与宿主接线）；Cursor 不强行造硬 hook（其无命令型生命周期 hook，保持 soft 是诚实选择）。</p>
+  </div>
+</div>
+</body>
+</html>

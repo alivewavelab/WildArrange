@@ -70,12 +70,12 @@ TASK ANALYSIS
 
 派发前读取：
 
-- `.helix/wisdom/learnings.md`
-- `.helix/wisdom/decisions.md`
-- `.helix/wisdom/issues.md`
 - `.helix/wisdom/verification.md`
+- `.helix/memory/last-digest.json`
+- `.helix/memory/digest-index.json`
+- `.helix/memory/last-archivist-result.json`
 
-只把与当前任务相关的 wisdom 注入 worker，不要把无关历史塞进上下文。
+这些文件不存在时记录为“无历史材料”，不得报错中断，也不得虚构 learnings / decisions / issues。只把与当前任务相关的 verification notes、digest 和 archivist 结论注入 worker，不要把无关历史塞进上下文。
 
 同时读取注入点：
 

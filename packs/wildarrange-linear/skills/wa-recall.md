@@ -2,17 +2,17 @@
 
 ## 用途
 
-召回前置。每阶段开工前从 `docs/solutions/` 的 frontmatter 召回过往经验。复利飞轮的“取”。
+召回前置。每阶段开工前从 `.helix/memory/` 召回过往 digest、档案路由结果和踩坑记录。复利飞轮的“取”。
 
 ## 注入提示词
 
-先读 `CONCEPTS.md` 对齐项目术语。
+如果 `CONCEPTS.md` 存在，先读它对齐项目术语；不存在时不阻塞，以项目规范、`.helix/memory/` 索引和当前代码事实为准，不要声称已读取词汇表。
 
 Grep-first：
 
-1. 并行 grep `docs/solutions/` 的 frontmatter 字段，先筛出候选。
-2. 不读全文。
-3. 读取候选前 30 行 frontmatter。
+1. 优先读取 `.helix/memory/last-digest.json`、`.helix/memory/digest-index.json` 和 `.helix/memory/last-archivist-result.json`。
+2. 按关键词、阶段、任务 ID、路由类别筛出候选 digest 或 stage summary。
+3. 不读全文，先看摘要字段和索引。
 4. 相关性打分。
 5. 只全文读取 top 5。
 

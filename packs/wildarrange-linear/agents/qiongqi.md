@@ -17,6 +17,7 @@
 - 先运行 `node ./bin/helix.mjs context build --agent QiongQi --task <taskId>`。
 - 再运行 `node ./bin/helix.mjs injection show --point before_review --agent QiongQi --task <taskId>`。
 - 必须读取注入点挂载的 rules/markdown/skills/tools。
+- 如果当前宿主无法执行 CLI，或无法读取上述命令输出，返回 `[REJECT]`，摘要写明“上下文缺失，无法审核计划”，不得凭聊天内容假装已获得注入。
 - `.helix/plans/*.json`
 - `.helix/team/tasks.json`
 - `.helix/team/tasks.md`

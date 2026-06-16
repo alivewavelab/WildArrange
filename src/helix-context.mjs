@@ -254,12 +254,12 @@ function renderAgentContextMarkdown(context) {
   if (context.injectionPoint.markdown.length === 0) {
     lines.push("- Markdown: none");
   } else {
-    for (const item of context.injectionPoint.markdown) lines.push(`- Markdown: ${item.path} (${item.chars} chars)`);
+    for (const item of context.injectionPoint.markdown) lines.push(`- Markdown: ${item.path} (${renderAttachmentSize(item)})`);
   }
   if (context.injectionPoint.skills.length === 0) {
     lines.push("- Skills: none");
   } else {
-    for (const item of context.injectionPoint.skills) lines.push(`- Skill: ${item.name} -> ${item.path} (${item.chars} chars)`);
+    for (const item of context.injectionPoint.skills) lines.push(`- Skill: ${item.name} -> ${item.path} (${renderAttachmentSize(item)})`);
   }
   lines.push("", "## Changed Paths", "");
   if (context.changedPathStatus !== "available") {
@@ -405,6 +405,13 @@ function appendTaskContext(lines, task) {
     lines.push(`  - Failure: ${task.lastFailure.reason} (${task.lastFailure.reportMdPath || "no report"})`);
     lines.push(`  - Retry hint: ${(task.lastFailure.retryHint || "").replace(/\n/g, " / ")}`);
   }
+}
+
+function renderAttachmentSize(item) {
+  const loaded = item.loadedChars ?? String(item.content || "").length;
+  const budget = item.budgetChars ?? "unknown";
+  const suffix = item.truncated ? ", truncated" : "";
+  return `${loaded}/${item.chars} chars, budget ${budget}${suffix}`;
 }
 
 async function readSessionLineage(rootDir) {

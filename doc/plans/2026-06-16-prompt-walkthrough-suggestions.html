@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WildArrange 提示词走查与优化建议</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f7f8fa; color: #172033; }
+    main { max-width: 1120px; margin: 0 auto; padding: 32px 22px 48px; }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    h2 { margin: 28px 0 12px; font-size: 20px; }
+    p, li { line-height: 1.68; }
+    code { background: #edf1f5; border-radius: 4px; padding: 1px 5px; }
+    .lead { color: #435063; font-size: 17px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+    .card { background: #fff; border: 1px solid #dde3ea; border-radius: 8px; padding: 16px; }
+    .tag { display: inline-block; font-size: 12px; font-weight: 700; padding: 3px 8px; border-radius: 999px; margin-bottom: 8px; }
+    .p0 { background: #ffe0dc; color: #a32015; }
+    .p1 { background: #fff0c2; color: #725000; }
+    .p2 { background: #dff3ff; color: #075985; }
+    .ok { background: #def7ec; color: #03543f; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #dde3ea; }
+    th, td { text-align: left; border-bottom: 1px solid #e7ebf0; padding: 10px 12px; vertical-align: top; }
+    th { background: #edf2f7; }
+    .flow { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: 10px; align-items: stretch; }
+    .box { background: #fff; border: 1px solid #dde3ea; border-radius: 8px; padding: 14px; }
+    .arrow { align-self: center; color: #607085; font-weight: 700; }
+    @media (max-width: 760px) { .flow { grid-template-columns: 1fr; } .arrow { text-align: center; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>WildArrange 提示词走查与优化建议</h1>
+  <p class="lead">结论：提示词主骨架是健康的，角色边界、证据门、上下文预算哲学都已经立住。新增核验发现两个更关键的问题：YingLong 读取 runtime 不会生成的 wisdom 文件，wa-recall / wa-compound 把不存在的 CONCEPTS.md 当硬前置。这类“提示词说有、代码没有”的断层优先级高于润色。</p>
+
+  <h2>走查范围</h2>
+  <table>
+    <tr><th>范围</th><th>观察</th></tr>
+    <tr><td><code>skills/wildarrange-injection-runtime.md</code></td><td>治理哲学清楚，长度约 120 行，适合作为运行时总说明；但 Codex hard-after-trust、digest/archivist 已注入、ledger verify 等新事实还没写进去。</td></tr>
+    <tr><td><code>agents/jiuwei.md</code> / <code>agents/yinglong.md</code></td><td>编排与执行角色边界明确；已将 YingLong 的 wisdom 来源改为 runtime 实际生成的 <code>.helix/wisdom/verification.md</code> 与 <code>.helix/memory/</code> digest / archivist 文件。</td></tr>
+    <tr><td><code>agents/baize.md</code> / <code>qiongqi.md</code> / <code>luanniao.md</code></td><td>已补齐 CLI 不可执行时的降级：BaiZe 返回 <code>INCONCLUSIVE</code>，QiongQi 返回 <code>[REJECT]</code> 并说明上下文缺失，避免 Cursor soft adapter 下假装已获得注入。</td></tr>
+    <tr><td><code>skills/wa-recall.md</code> / <code>wa-compound.md</code></td><td>已统一到 <code>.helix/memory/</code>；<code>CONCEPTS.md</code> 改为存在则读/维护，不再是硬依赖。</td></tr>
+    <tr><td><code>tools/tool-contract.json</code></td><td>已补 <code>.codex/hooks.json</code>、<code>ledger verify</code>、<code>parallel cleanup</code>、dashboard POST token，以及 wisdom 实际写入边界。</td></tr>
+  </table>
+
+  <h2>建议卡片</h2>
+  <div class="grid">
+    <section class="card">
+      <span class="tag p0">P0</span>
+      <h3>消除悬空 wisdom 文件</h3>
+      <p><code>yinglong.md</code> 曾要求派发前读取 <code>learnings.md</code>、<code>decisions.md</code>、<code>issues.md</code>，但 runtime 只写 <code>verification.md</code>。已改为读取 <code>verification.md</code> 和 <code>.helix/memory/</code> 的 digest / archivist 索引。</p>
+    </section>
+    <section class="card">
+      <span class="tag p0">P0</span>
+      <h3>CONCEPTS 改为可选</h3>
+      <p><code>CONCEPTS.md</code> 当前不存在。已把 wa-recall / wa-compound 从“先读/顺手维护”改成“存在则使用，不存在不阻塞”，避免 Agent 第一步扑空。</p>
+    </section>
+    <section class="card">
+      <span class="tag p0">P0</span>
+      <h3>同步 Codex hard-after-trust 事实</h3>
+      <p>已把 <code>wildarrange-injection-runtime.md</code> 改成分层表达：Codex 项目 hook 是 hard-after-trust；Cursor 是 soft；CLI 是手动 gate。Agent 不应低估 Codex hook，也不能高估 Cursor 规则。</p>
+    </section>
+    <section class="card">
+      <span class="tag p0">P0</span>
+      <h3>修正 wa-compound 存储路径</h3>
+      <p><code>wa-compound.md</code> 已统一到 <code>.helix/memory/</code>：短期写 digest/event，长期如需人为知识库再另设 export，不让 recall 和 compound 读写两套目录。</p>
+    </section>
+    <section class="card">
+      <span class="tag p0">P0</span>
+      <h3>更新 successCriteria 文案</h3>
+      <p><code>yinglong.md</code> 说 runtime 会为默认 criteria 自动记录 verifier evidence，这句话只对“未显式声明 criteria 的兼容默认项”成立。建议改成：显式 criteria 需要人工证据或 <code>verifierCommandRefs</code>。</p>
+    </section>
+    <section class="card">
+      <span class="tag p1">P1</span>
+      <h3>工具合同补新命令</h3>
+      <p><code>tool-contract.json</code> 应补 <code>ledger verify</code>、<code>parallel cleanup</code>、adapter install 写 <code>.codex/hooks.json</code>、dashboard POST token 约束。它是给 Agent 的工具地图，落后会让 Agent 选错路。</p>
+    </section>
+    <section class="card">
+      <span class="tag p1">P1</span>
+      <h3>减少跨产品旧话术</h3>
+      <p><code>wa-run.md</code> 已从“Claude 可加 model / Codex 用 spawn_agent”改为 WildArrange 自己的 <code>parallel run --adapter</code>、<code>.helix/</code> 状态和 hard/soft adapter 分层语义。</p>
+    </section>
+    <section class="card">
+      <span class="tag p2">P2</span>
+      <h3>Agent 文案局部压缩</h3>
+      <p><code>yinglong.md</code> 286 行，是当前最长 Agent 提示词。它不是过长到危险，但可把 worker assignment 模板和 Final Verification Wave 拆成 Skill 或 reference，主 Agent 留硬边界。</p>
+    </section>
+  </div>
+
+  <h2>建议修改流程</h2>
+  <div class="flow">
+    <div class="box">
+      <strong>输入</strong>
+      <ul>
+        <li>运行时新事实：Codex hard-after-trust、criteria 绑定、ledger verify、digest 注入。</li>
+        <li>现有 prompt pack：agents、skills、tool-contract。</li>
+      </ul>
+    </div>
+    <div class="arrow">→</div>
+    <div class="box">
+      <strong>处理</strong>
+      <ul>
+        <li>只改与运行时不一致的句子。</li>
+        <li>保留角色边界和证据门。</li>
+        <li>删除旧路径和跨产品口号。</li>
+      </ul>
+    </div>
+    <div class="arrow">→</div>
+    <div class="box">
+      <strong>输出</strong>
+      <ul>
+        <li>Agent 不再低估 Codex hard hook。</li>
+        <li>记忆系统读写同一目录。</li>
+        <li>criteria 验收不再被误解为 verifier 回声。</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>不建议做</h2>
+  <ul>
+    <li>不建议继续把外部 Agent prompt 的大段措辞缝进来；现在需要的是对齐运行时事实，不是堆更强语气。</li>
+    <li>不建议把所有工具细节塞进 Agent 主提示词；工具合同和 skill 更适合承载可变命令。</li>
+    <li>不建议把 Cursor 描述成 hard gate；目前它仍是 soft rule，必须诚实。</li>
+  </ul>
+</main>
+</body>
+</html>

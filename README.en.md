@@ -21,14 +21,14 @@ The core runtime is host-neutral. Codex and Cursor adapters improve injection an
 From a published package:
 
 ```bash
-npx wildarrange@latest init
-npx wildarrange@latest adapter install
+npx @alivewavelab/wildarrange@latest init
+npx @alivewavelab/wildarrange@latest adapter install
 ```
 
 For a long-running project, install it as a project dependency so hooks do not need network access:
 
 ```bash
-npm i -D wildarrange
+npm i -D @alivewavelab/wildarrange
 npx wildarrange adapter install --mode local
 ```
 
@@ -94,12 +94,13 @@ This is intentional. `result.status` says what the runtime wants next; `task.sta
 ```bash
 node ./bin/helix.mjs adapter install --target all --mode local
 node ./bin/helix.mjs adapter uninstall --target all
+node ./bin/helix.mjs adapter restore --backup <backupId>
 ```
 
-Install and uninstall both write reports under `.helix/adapters/`. Existing adapter files are backed up before overwrite or removal.
+Install, uninstall, and restore write reports under `.helix/adapters/`. Existing adapter files are backed up before overwrite or removal. `restore` copies files from `.helix/adapters/backups/<backupId>/` back to their original paths.
 
-- **Cursor**: project rule at `.cursor/rules/wildarrange.mdc`
-- **Codex**: lifecycle hook bundle at `.helix/adapters/codex/hooks.json` (deeper Codex plugin installation remains adapter work; the runtime does not assume it)
+- **Codex**: lifecycle hooks are written to `.codex/hooks.json`, with an audit copy at `.helix/adapters/codex/hooks.json`. Codex runs these hard hooks only after the trusted project layer and the hook definition are reviewed/trusted through `/hooks`.
+- **Cursor**: project rule at `.cursor/rules/wildarrange.mdc`. This is soft governance unless Cursor exposes a command lifecycle hook for the project.
 
 ## Minimal Multi-Agent Loop
 
@@ -107,7 +108,10 @@ Command-based child agents can run concurrently in isolated run directories:
 
 ```bash
 node ./bin/helix.mjs parallel run --max-agents 2 --task T001,T002 --agent Kui --command "..."
+node ./bin/helix.mjs parallel run --task T001 --agent Kui --adapter codex
 node ./bin/helix.mjs parallel list
+node ./bin/helix.mjs parallel status --run <runId>
+node ./bin/helix.mjs parallel cleanup --run <runId>
 ```
 
 To propose mainline artifacts, a child agent writes structured files to `agent-result.json`:
@@ -127,6 +131,12 @@ Admission does not trust the child agent directly. `parallel admit` checks `writ
 node ./bin/helix.mjs parallel admit --run <runId> --task T001
 ```
 
+Successful child results remain `awaiting_user_acceptance` until admission/checkpoint releases them. After human acceptance, close retained results explicitly:
+
+```bash
+node ./bin/helix.mjs parallel close --run <runId> --task T001 --reason user_accepted
+```
+
 ## ArchivistRouter
 
 ArchivistRouter is the archivist plus task-router node. It reads conclusions-only packets and strips code blocks, raw diffs, and full command output.
@@ -139,6 +149,21 @@ node ./bin/helix.mjs archivist run --text "build a web TODO app" --stage plan --
 ```
 
 When `archivistRouter.enabled` is `true`, `SessionStart`, `UserPromptSubmit`, and `PostCompact` hooks trigger ArchivistRouter automatically. Without a DeepSeek key it falls back to deterministic routing and does not block the main flow.
+
+## Skills and Prompt Variants
+
+Skill matcher gives an explainable hint for which skills should load at the current stage:
+
+```bash
+node ./bin/helix.mjs skills match --text "build a web reminders app" --stage design --agent YingLong
+```
+
+Prompt variants append model-specific bias without replacing the base agent prompt:
+
+```bash
+node ./bin/helix.mjs prompts variant --agent YingLong --model gpt-5.5
+node ./bin/helix.mjs prompts show --agent YingLong --variant gemini
+```
 
 ## Dashboard
 
@@ -154,7 +179,9 @@ Binding to a non-loopback host requires a token:
 node ./bin/helix.mjs serve --host 0.0.0.0 --port 8765 --token "$HELIX_DASHBOARD_TOKEN"
 ```
 
-API requests then need either:
+`GET /api/state` remains readable on loopback without a token. Every `POST` write operation requires a token even on `127.0.0.1`, and the server validates Host / Origin headers to prevent browser-triggered local command execution.
+
+API write requests need either:
 
 ```text
 Authorization: Bearer <token>
@@ -171,18 +198,22 @@ x-helix-token: <token>
 | Path | Purpose |
 |---|---|
 | `.helix/team/tasks.json` | Task state |
-| `.helix/ledger.jsonl` | Append-only event ledger |
+| `.helix/ledger.jsonl` | Hash-chained append-only event ledger; verify with `node ./bin/helix.mjs ledger verify` |
 | `.helix/checkpoints/` | Completed task checkpoints |
 | `.helix/reports/` | Workflow, review, and failure reports |
+| `.helix/reports/acceptance/` | Acceptance proof chain before checkpoint |
 | `.helix/snapshots/context.md` | Cross-session resume context |
 | `.helix/adapters/` | Adapter configs, reports, backups |
 | `.helix/agent-runs/` | Child-agent packets, results, and admission records |
 | `.helix/memory/` | ArchivistRouter structured memory |
+| `.helix/memory/digests/` | Cross-session recovery digests |
 | `.helix/routing/suggestions/` | Route keyword suggestions pending review |
 
 ## Configuration
 
-`helix.config.json` configures agents, model providers, dynamic categories, and injection points.
+`helix.config.json` configures agents, model providers, dynamic categories, context budgets, and injection points.
+
+`contextBudgets` separates Prompt, Markdown, and Skill loading. Prompt / Markdown mounts keep shorter defaults, while activated Skills can load up to 80,000 chars by default. Over-budget mounts expose `truncated: true` instead of silently cutting context.
 
 Agents with `"provider": "host"` are delegated to the installed host tool. In Codex, GPT-family model selection is handled by Codex. In Cursor, the default Cursor model is used by the adapter path. WildArrange does not need an OpenAI API key for those host-managed agents.
 
@@ -197,7 +228,7 @@ source .env.wildarrange
 
 Deterministic gates work without model APIs. When `review.llm.required` is `false`, a missing external key or a host-managed provider produces a warning rather than blocking the workflow.
 
-LSP/typecheck and comment checks live in the CLI review gate, not in editor-specific hooks:
+LSP/typecheck, AST/structure checks, hashline anchors, and comment checks live in the CLI review gate, not in editor-specific hooks:
 
 ```json
 {
@@ -205,6 +236,16 @@ LSP/typecheck and comment checks live in the CLI review gate, not in editor-spec
     "lspDiagnostics": {
       "enabled": true,
       "commands": ["npm run typecheck"]
+    },
+    "astStructure": {
+      "enabled": true,
+      "commands": ["ast-grep --pattern 'console.log($A)' --lang ts --json src || true"]
+    },
+    "hashlineAnchors": {
+      "enabled": true,
+      "anchors": [
+        { "file": "src/app.ts", "line": 12, "sha256": "<hashLine>" }
+      ]
     },
     "commentChecker": {
       "enabled": true,
@@ -231,7 +272,7 @@ npm test
 npm pack --dry-run --cache /private/tmp/helix-npm-cache
 ```
 
-Current status: the linear governance loop is implemented and tested. Optional LLM review, configurable LSP/typecheck diagnostics, and comment checking are available through the CLI review gate. Multi-agent support now includes command-based parallel runs, structured artifact admission, and the message board loop. The next layer is real Codex/Cursor child-agent spawning, Git worktree isolation, and background process management.
+Current status: the linear governance loop is implemented and tested. Optional LLM review, configurable LSP/typecheck diagnostics, AST/structure commands, hashline anchors, and comment checking are available through the CLI review gate. Multi-agent support now includes command-based parallel runs, structured artifact admission with rollback on failed gates, Git worktree patch admission, and the message board loop. The next layer is real Codex/Cursor child-agent spawning and background process management.
 
 ## More Docs
 

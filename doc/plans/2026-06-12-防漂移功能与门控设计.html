@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>防漂移功能与门控设计</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f7f8fb; color: #172033; }
+    main { max-width: 1080px; margin: 0 auto; padding: 32px 20px 56px; }
+    h1 { margin: 0 0 8px; font-size: 30px; }
+    p { color: #5f6b7a; line-height: 1.6; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin-top: 20px; }
+    .card { background: #fff; border: 1px solid #d9dee8; border-left: 7px solid #2563eb; border-radius: 8px; padding: 16px; }
+    .p0 { border-left-color: #0f766e; }
+    .p1 { border-left-color: #b45309; }
+    .p2 { border-left-color: #7c3aed; }
+    h2 { margin: 0 0 10px; font-size: 18px; }
+    ul { margin: 0; padding-left: 20px; color: #334155; line-height: 1.7; }
+    .flow { display: grid; grid-template-columns: 1fr 38px 1fr 38px 1fr; gap: 10px; align-items: stretch; margin-top: 18px; }
+    .node { background: #fff; border: 1px solid #d9dee8; border-radius: 8px; padding: 14px; }
+    .arrow { display: grid; place-items: center; color: #64748b; font-size: 24px; }
+    code { background: #edf2f7; padding: 2px 5px; border-radius: 4px; }
+    @media (max-width: 780px) { .flow { grid-template-columns: 1fr; } .arrow { display: none; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>防漂移功能与门控设计</h1>
+  <p>目标：长会话里不让 Agent 凭聊天记忆乱改；每次改动必须落到任务单、范围、验收和 checkpoint。</p>
+
+  <section class="grid">
+    <article class="card p0">
+      <h2>P0：任务边界</h2>
+      <ul>
+        <li>没有 active task 时禁止写业务文件。</li>
+        <li>每个 task 必须有 <code>writable_paths</code>。</li>
+        <li>计划外文件变更走 ChangeRequest。</li>
+      </ul>
+    </article>
+    <article class="card p0">
+      <h2>P0：计划质量门</h2>
+      <ul>
+        <li>高风险产品/体验类计划不能只拆 1-2 个任务。</li>
+        <li>至少覆盖需求/设计、实现、验收、复核。</li>
+        <li>缺少验收/复核任务时拒绝导入。</li>
+      </ul>
+    </article>
+    <article class="card p1">
+      <h2>P1：验收强度</h2>
+      <ul>
+        <li>测试不能只跑冒烟路径。</li>
+        <li>新增功能必须声明不能破坏的旧行为。</li>
+        <li>review gate 对弱测试输出 testing gap。</li>
+      </ul>
+    </article>
+    <article class="card p2">
+      <h2>P2：记忆恢复</h2>
+      <ul>
+        <li>聊天结论沉淀到 digest。</li>
+        <li>新会话从任务状态和摘要恢复。</li>
+        <li>不依赖长聊天窗口做工程判断。</li>
+      </ul>
+    </article>
+  </section>
+
+  <section class="flow">
+    <div class="node"><h2>输入</h2><p>用户需求、项目规则、上次 digest、Git 状态。</p></div>
+    <div class="arrow">→</div>
+    <div class="node"><h2>处理组件</h2><p>route、plan import quality gate、PreToolUse scope guard、review/acceptance gate。</p></div>
+    <div class="arrow">→</div>
+    <div class="node"><h2>输出</h2><p>可执行 task DAG、范围锁、验收证据、checkpoint 或 ChangeRequest。</p></div>
+  </section>
+</main>
+</body>
+</html>

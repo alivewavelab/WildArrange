@@ -122,7 +122,7 @@
   "domains": [
     {
       "name": "visual",
-      "signals": ["ui", "ux", "css", "样式", "布局", "视觉", "页面", "网页", "网页版", "前端", "web", "app", "动效", "动画", "截图", "浏览器", "playwright"],
+      "signals": ["ui", "ux", "css", "样式", "布局", "视觉", "页面", "网页", "网页版", "前端", "web", "动效", "动画", "截图", "浏览器", "playwright"],
       "category": "visual-engineering",
       "primaryAgent": "YingLong",
       "supportAgents": ["ZhuRong", "BaiZe"],
@@ -235,7 +235,7 @@
     },
     {
       "name": "UXInteractionReviewer",
-      "signals": ["ui", "ux", "页面", "网页", "app", "交互", "视觉", "按钮", "表单", "空状态", "loading", "error"],
+      "signals": ["ui", "ux", "页面", "网页", "交互", "视觉", "按钮", "表单", "空状态", "loading", "error"],
       "stage": "wa-design",
       "risk": "medium",
       "purpose": "检查界面入口、状态、反馈、组件槽位和截图验收。"

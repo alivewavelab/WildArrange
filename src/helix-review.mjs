@@ -1,5 +1,6 @@
 import { DEFAULT_REVIEW_AGENTS, loadHelixConfig, normalizeAgentKey, nowIso } from "./helix-foundation.mjs";
-import { runCommand, runQualityGates } from "./helix-gates.mjs";
+import { runQualityGates } from "./helix-code-intel.mjs";
+import { runCommand } from "./helix-gates.mjs";
 import { runLlmReview } from "./helix-llm.mjs";
 import { buildReviewFindingBundle } from "./helix-review-findings.mjs";
 import { scanProjectRules } from "./helix-rules.mjs";
@@ -117,6 +118,24 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
           ? `${qualityResults.lspResult.results.length} LSP/typecheck command(s) passed`
           : commandObservation(qualityResults.lspResult.results.find((result) => result.exitCode !== 0) || { exitCode: 1 }),
       fixBy: "修复 LSP/typecheck 诊断，或在 helix.config.json 中明确关闭该 gate。",
+    }),
+    reviewLane("ast_structure", "LuanNiao", qualityResults.astResult.pass === true, {
+      statusOverride: qualityResults.astResult.status === "skipped" ? "warn" : undefined,
+      summary: qualityResults.astResult.status === "skipped"
+        ? qualityResults.astResult.reason
+        : qualityResults.astResult.pass
+          ? `${qualityResults.astResult.results.length} AST/structure command(s) passed`
+          : commandObservation(qualityResults.astResult.results.find((result) => result.exitCode !== 0) || { exitCode: 1 }),
+      fixBy: "修复 ast-grep/结构搜索发现，或在 helix.config.json 中明确关闭该 gate。",
+    }),
+    reviewLane("hashline_anchors", "QiongQi", qualityResults.hashlineResult.pass === true, {
+      statusOverride: qualityResults.hashlineResult.status === "skipped" ? "warn" : undefined,
+      summary: qualityResults.hashlineResult.status === "skipped"
+        ? qualityResults.hashlineResult.reason
+        : qualityResults.hashlineResult.pass
+          ? `${qualityResults.hashlineResult.anchors.length} hashline anchor(s) verified`
+          : `${qualityResults.hashlineResult.findings.length} hashline anchor finding(s): ${qualityResults.hashlineResult.findings.slice(0, 3).map((finding) => `${finding.file}:${finding.line} ${finding.reason}`).join("; ")}`,
+      fixBy: "按最新文件内容刷新 hashline anchor，或重新规划基于稳定语义的改写。",
     }),
     reviewLane("comment_checker", "LuanNiao", qualityResults.commentResult.pass === true, {
       statusOverride: qualityResults.commentResult.status === "warn" || qualityResults.commentResult.status === "skipped" ? "warn" : undefined,

@@ -10,7 +10,7 @@ export const STATE_VERSION = 1;
 export const TASK_STATUSES = new Set(["pending", "in_progress", "verifying", "completed", "failed", "review_blocked", "needs_user_decision"]);
 export const HELIX_CONFIG_FILE = "helix.config.json";
 export const PRODUCT_NAME = "WildArrange";
-export const DEFAULT_PACKAGE_NAME = "wildarrange";
+export const DEFAULT_PACKAGE_NAME = "@alivewavelab/wildarrange";
 export const DEFAULT_RUNTIME_NAME = "wildarrange-linear";
 export const DEFAULT_CLI_COMMAND = "wildarrange";
 export const DEFAULT_LEAD_AGENT = "Jiuwei";
@@ -163,6 +163,44 @@ export const DEFAULT_HELIX_CONFIG = {
     writing: { provider: "kimi", model: "kimi-2.6" },
     git: { provider: "deepseek", model: "deepseek-v4-flash" },
   },
+  promptVariants: {
+    host: "使用宿主 Agent 已配置的主模型与推理策略，不假设具体供应商 API。",
+    gpt: "优先写清验收标准、工具调用纪律和简洁证据摘要。",
+    gemini: "涉及界面或多模态任务时，优先进行视觉检查、状态对比和可见证据记录。",
+    kimi: "优先处理长上下文写作、文档综合和审慎中文表达。",
+    deepseek: "优先快速探索、结构化摘要和成本敏感的路由判断。",
+  },
+  skillMatcher: {
+    enabled: true,
+    defaultLimit: 6,
+    stageBoosts: {
+      ideate: ["wa-ideate", "ultraresearch"],
+      clarify: ["wa-spec", "start-work"],
+      plan: ["wa-plan", "wa-architect", "init-deep"],
+      design: ["wa-design", "frontend-ui-ux", "visual-qa"],
+      execute: ["programming", "debugging", "refactor", "wa-work"],
+      verify: ["wa-test", "review-work"],
+      review: ["wa-review", "review-work", "remove-ai-slops"],
+      deploy: ["wa-deploy", "publish", "pre-publish-review"],
+      recall: ["wa-recall", "get-unpublished-changes"],
+    },
+  },
+  contextBudgets: {
+    prompt: { maxChars: 12_000 },
+    markdown: { maxChars: 12_000 },
+    skill: { maxChars: 80_000 },
+    points: {
+      session_start: { markdownMaxChars: 12_000, skillMaxChars: 60_000 },
+      user_prompt_submit: { markdownMaxChars: 12_000, skillMaxChars: 60_000 },
+      pre_tool_use: { markdownMaxChars: 8_000, skillMaxChars: 16_000 },
+      post_tool_use: { markdownMaxChars: 8_000, skillMaxChars: 12_000 },
+      post_compact: { markdownMaxChars: 16_000, skillMaxChars: 60_000 },
+      before_execute: { markdownMaxChars: 20_000, skillMaxChars: 80_000 },
+      before_review: { markdownMaxChars: 24_000, skillMaxChars: 80_000 },
+      before_checkpoint: { markdownMaxChars: 24_000, skillMaxChars: 60_000 },
+      stop: { markdownMaxChars: 12_000, skillMaxChars: 24_000 },
+    },
+  },
   review: {
     llm: {
       enabled: false,
@@ -179,6 +217,17 @@ export const DEFAULT_HELIX_CONFIG = {
       required: false,
       commands: [],
       timeoutMs: 120000,
+    },
+    astStructure: {
+      enabled: false,
+      required: false,
+      commands: [],
+      timeoutMs: 120000,
+    },
+    hashlineAnchors: {
+      enabled: false,
+      required: false,
+      anchors: [],
     },
     commentChecker: {
       enabled: true,
@@ -492,13 +541,85 @@ export async function withTaskStateLock(rootDir, ownerTag, fn) {
 }
 
 export async function appendLedger(rootDir, event) {
+  const ledgerPath = resolveHelixPath(rootDir, "ledger.jsonl");
+  const previousHash = await readLedgerLastHash(ledgerPath);
   const entry = {
     id: createWorkId("evt"),
     at: nowIso(),
+    prevHash: previousHash,
     ...event,
   };
-  await appendFile(resolveHelixPath(rootDir, "ledger.jsonl"), `${JSON.stringify(entry)}\n`, "utf8");
+  entry.hash = hashLedgerEntry(entry);
+  await appendFile(ledgerPath, `${JSON.stringify(entry)}\n`, "utf8");
   return entry;
+}
+
+export async function verifyLedger(rootDir) {
+  const ledgerPath = resolveHelixPath(rootDir, "ledger.jsonl");
+  let content = "";
+  try {
+    content = await readFile(ledgerPath, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return { kind: "ledger_verification", ok: true, checked: 0, legacy: 0, failures: [] };
+    }
+    throw error;
+  }
+  const failures = [];
+  let previousHash = null;
+  let checked = 0;
+  let legacy = 0;
+  const lines = content.split(/\r?\n/).filter(Boolean);
+  for (let index = 0; index < lines.length; index += 1) {
+    const lineNumber = index + 1;
+    let entry;
+    try {
+      entry = JSON.parse(lines[index]);
+    } catch {
+      failures.push({ line: lineNumber, reason: "invalid_json" });
+      previousHash = null;
+      continue;
+    }
+    if (!entry.hash) {
+      legacy += 1;
+      previousHash = entry.prevHash || null;
+      continue;
+    }
+    checked += 1;
+    if ((entry.prevHash || null) !== previousHash) {
+      failures.push({ line: lineNumber, reason: "prev_hash_mismatch", expected: previousHash, actual: entry.prevHash || null });
+    }
+    const expectedHash = hashLedgerEntry(entry);
+    if (entry.hash !== expectedHash) {
+      failures.push({ line: lineNumber, reason: "hash_mismatch", expected: expectedHash, actual: entry.hash });
+    }
+    previousHash = entry.hash;
+  }
+  return { kind: "ledger_verification", ok: failures.length === 0, checked, legacy, failures };
+}
+
+async function readLedgerLastHash(ledgerPath) {
+  try {
+    const content = await readFile(ledgerPath, "utf8");
+    const lines = content.split(/\r?\n/).filter(Boolean);
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      try {
+        const entry = JSON.parse(lines[index]);
+        if (entry.hash) return entry.hash;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function hashLedgerEntry(entry) {
+  const { hash, ...unsigned } = entry || {};
+  return hashContent(JSON.stringify(unsigned));
 }
 
 export async function writeSnapshot(rootDir, stage, payload = {}) {

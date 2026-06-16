@@ -126,6 +126,8 @@ export function applyVerifierEvidenceToCriteria(task, verifyResult) {
   const recorded = [];
   for (const criterion of task.successCriteria || []) {
     if (criterion.status === "pass") continue;
+    const matchedCommands = matchedVerifierCommands(criterion, task.verify_commands || [], verifyResult.results || []);
+    if (matchedCommands.length === 0) continue;
     const entry = {
       kind: "criterion_evidence",
       at: nowIso(),
@@ -133,7 +135,8 @@ export function applyVerifierEvidenceToCriteria(task, verifyResult) {
       criterionId: criterion.id,
       status: "pass",
       source: "verifier",
-      evidence: `Verifier passed ${verifyResult.results.length}/${task.verify_commands.length} command(s): ${task.verify_commands.join(" && ")}`,
+      evidence: `Verifier passed explicitly bound command(s): ${matchedCommands.join(" && ")}`,
+      verifierCommandRefs: criterion.verifierCommandRefs || [],
     };
     criterion.status = "pass";
     criterion.evidence = [...(criterion.evidence || []), entry];
@@ -142,6 +145,19 @@ export function applyVerifierEvidenceToCriteria(task, verifyResult) {
     recorded.push(entry);
   }
   return recorded;
+}
+
+function matchedVerifierCommands(criterion, verifyCommands, results) {
+  const refs = Array.isArray(criterion?.verifierCommandRefs) ? criterion.verifierCommandRefs : [];
+  if (refs.length === 0) return [];
+  const passedCommands = new Set(results.filter((result) => result.exitCode === 0).map((result) => result.command));
+  const matched = [];
+  for (const ref of refs) {
+    const command = /^\d+$/.test(String(ref)) ? verifyCommands[Number(ref)] : String(ref);
+    if (!command || !passedCommands.has(command)) return [];
+    matched.push(command);
+  }
+  return matched;
 }
 
 export function criteriaStatus(task) {

@@ -1,4 +1,5 @@
 import http from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import {
   claimTeamTask,
   createTeamTask,
@@ -21,14 +22,21 @@ export function startDashboardServer(rootDir, options = {}) {
   const host = options.host || "127.0.0.1";
   const port = Number.isInteger(options.port) ? options.port : 8765;
   const token = typeof options.token === "string" && options.token.length > 0 ? options.token : process.env.HELIX_DASHBOARD_TOKEN || "";
-  const requireAuth = !isLoopbackHost(host) || token.length > 0;
   if (!isLoopbackHost(host) && token.length === 0) {
     throw new Error("helix dashboard requires --token or HELIX_DASHBOARD_TOKEN when binding to a non-loopback host");
   }
   const server = http.createServer(async (request, response) => {
     try {
       const url = new URL(request.url || "/", `http://${host}:${port}`);
-      if (requireAuth && url.pathname.startsWith("/api/") && !isAuthorized(request, token)) {
+      if (url.pathname.startsWith("/api/") && !isAllowedHost(request, host)) {
+        sendJson(response, 403, { ok: false, error: "forbidden_host" });
+        return;
+      }
+      if (url.pathname.startsWith("/api/") && isUnsafeMethod(request.method) && !isSameSiteRequest(request, host)) {
+        sendJson(response, 403, { ok: false, error: "forbidden_origin" });
+        return;
+      }
+      if (url.pathname.startsWith("/api/") && requiresApiAuth(request, host) && !isAuthorized(request, token)) {
         sendJson(response, 401, { ok: false, error: "unauthorized" });
         return;
       }
@@ -102,7 +110,7 @@ export function startDashboardServer(rootDir, options = {}) {
         return;
       }
       if (url.pathname === "/" || url.pathname === "/index.html") {
-        sendHtml(response, 200, renderDashboardHtml());
+        sendHtml(response, 200, renderDashboardHtml({ token }));
         return;
       }
       sendJson(response, 404, { error: "not_found" });
@@ -124,11 +132,60 @@ function isLoopbackHost(host) {
   return host === "localhost" || host === "::1" || host === "127.0.0.1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
 }
 
+function isUnsafeMethod(method) {
+  return !["GET", "HEAD", "OPTIONS"].includes(String(method || "GET").toUpperCase());
+}
+
+function requiresApiAuth(request, host) {
+  return isUnsafeMethod(request.method) || !isLoopbackHost(host);
+}
+
 function isAuthorized(request, token) {
   if (!token) return false;
   const auth = request.headers.authorization || "";
-  if (auth === `Bearer ${token}`) return true;
-  return request.headers["x-helix-token"] === token;
+  if (safeTokenEquals(auth, `Bearer ${token}`)) return true;
+  return safeTokenEquals(request.headers["x-helix-token"], token);
+}
+
+function safeTokenEquals(actual, expected) {
+  if (typeof actual !== "string" || typeof expected !== "string") return false;
+  const actualBuffer = Buffer.from(actual);
+  const expectedBuffer = Buffer.from(expected);
+  if (actualBuffer.length !== expectedBuffer.length) return false;
+  return timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
+function isAllowedHost(request, configuredHost) {
+  const header = request.headers.host;
+  if (!header || typeof header !== "string") return false;
+  const hostName = parseHostName(header);
+  if (!hostName) return false;
+  if (isLoopbackHost(configuredHost)) return isLoopbackHost(hostName);
+  return hostName === configuredHost;
+}
+
+function isSameSiteRequest(request, configuredHost) {
+  const fetchSite = String(request.headers["sec-fetch-site"] || "").toLowerCase();
+  if (fetchSite === "cross-site") return false;
+  const origin = request.headers.origin;
+  if (!origin) return true;
+  try {
+    const originHost = new URL(origin).hostname;
+    if (isLoopbackHost(configuredHost)) return isLoopbackHost(originHost);
+    return originHost === configuredHost;
+  } catch {
+    return false;
+  }
+}
+
+function parseHostName(header) {
+  const value = header.trim();
+  if (!value) return "";
+  if (value.startsWith("[")) {
+    const end = value.indexOf("]");
+    return end > 0 ? value.slice(1, end) : "";
+  }
+  return value.split(":")[0];
 }
 
 function safeDecodeSegment(value, label) {
@@ -190,7 +247,8 @@ function sendHtml(response, statusCode, html) {
   response.end(html);
 }
 
-function renderDashboardHtml() {
+function renderDashboardHtml(options = {}) {
+  const dashboardToken = typeof options.token === "string" ? options.token : "";
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -401,6 +459,7 @@ function renderDashboardHtml() {
     </section>
   </main>
   <script>
+    const DASHBOARD_TOKEN = ${JSON.stringify(dashboardToken)};
     const el = (id) => document.getElementById(id);
     const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
     async function loadState() {
@@ -473,9 +532,11 @@ function renderDashboardHtml() {
       return '<div class="review-box"><strong>' + (review.pass ? 'PASS' : 'FAIL') + '</strong><ul>' + lanes + '</ul>' + report + '</div>';
     }
     async function postJson(url, body) {
+      const headers = { "content-type": "application/json" };
+      if (DASHBOARD_TOKEN) headers.authorization = "Bearer " + DASHBOARD_TOKEN;
       const response = await fetch(url, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers,
         body: JSON.stringify(body || {}),
       });
       const payload = await response.json();

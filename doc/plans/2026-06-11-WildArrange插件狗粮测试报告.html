@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WildArrange 插件狗粮测试报告</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --text: #1f2937;
+      --muted: #667085;
+      --line: #d9dee8;
+      --pass: #0f766e;
+      --warn: #b45309;
+      --fail: #b91c1c;
+      --info: #2563eb;
+    }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 32px 20px 56px;
+    }
+    h1, h2, h3 { margin: 0; }
+    h1 { font-size: 30px; }
+    h2 { font-size: 20px; margin-top: 28px; }
+    h3 { font-size: 16px; }
+    .lead { color: var(--muted); margin: 10px 0 0; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .pass { color: var(--pass); }
+    .warn { color: var(--warn); }
+    .fail { color: var(--fail); }
+    .info { color: var(--info); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 14px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    th, td {
+      text-align: left;
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      font-size: 14px;
+    }
+    th { background: #eef2f7; }
+    tr:last-child td { border-bottom: 0; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      background: #eef2f7;
+      padding: 2px 5px;
+      border-radius: 4px;
+    }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .step {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--info);
+      border-radius: 8px;
+      padding: 12px;
+      min-height: 88px;
+    }
+    .step.pass { border-left-color: var(--pass); }
+    .step.warn { border-left-color: var(--warn); }
+    .step.fail { border-left-color: var(--fail); }
+    .small { color: var(--muted); font-size: 13px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>WildArrange 插件狗粮测试报告</h1>
+  <p class="lead">测试目标：不用用户手工模拟，直接在临时项目里按“真实插件安装 + 模糊需求 + 故意找茬”的方式验证线性治理是否可靠。</p>
+
+  <section class="grid">
+    <article class="card">
+      <div class="status pass">结论：可进入新会话试装</div>
+      <p>Codex/Cursor adapter 能安装、注入、卸载、恢复；线性 workflow 能完成真实小项目任务。</p>
+    </article>
+    <article class="card">
+      <div class="status pass">安全门有效</div>
+      <p>越界写入在 <code>PreToolUse</code> 被拒绝，强行绕过后也被 scope/review gate 拦下。</p>
+    </article>
+    <article class="card">
+      <div class="status warn">宿主强制性需实测</div>
+      <p>本轮已验证 hook 输出正确；Codex 新会话是否严格消费 <code>permissionDecision=deny</code>，需要最终插件态实测。</p>
+    </article>
+  </section>
+
+  <h2>测试流程</h2>
+  <div class="flow">
+    <div class="step pass"><h3>初始化</h3><p class="small"><code>helix init</code> 创建运行时。</p></div>
+    <div class="step pass"><h3>安装 adapter</h3><p class="small">生成 Codex hooks 与 Cursor rules。</p></div>
+    <div class="step pass"><h3>模糊需求路由</h3><p class="small">“像提醒但别复杂” 被路由到 plan。</p></div>
+    <div class="step pass"><h3>正向闭环</h3><p class="small">规划任务 + 编码任务全部 completed。</p></div>
+    <div class="step fail"><h3>坏案例</h3><p class="small">越界写入、验收失败都不能完成。</p></div>
+    <div class="step pass"><h3>卸载恢复</h3><p class="small">adapter uninstall 后可 restore。</p></div>
+  </div>
+
+  <h2>证据表</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>场景</th>
+        <th>输入/命令</th>
+        <th>实际结果</th>
+        <th>判断</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>真实安装</td>
+        <td><code>node ../../bin/helix.mjs adapter install --target all --mode local</code></td>
+        <td>生成 <code>.helix/adapters/codex/hooks.json</code>、<code>.cursor/rules/wildarrange.mdc</code>、Cursor README。</td>
+        <td class="pass">通过</td>
+      </tr>
+      <tr>
+        <td>模糊需求路由</td>
+        <td>“做个能管事儿的小网页，像提醒但别复杂，能顺手处理一下”</td>
+        <td>路由从 execute 调整为 <code>plan</code>，primaryAgent 为 <code>DiJiang</code>，原因是产品/设计信号需要先规划。</td>
+        <td class="pass">通过</td>
+      </tr>
+      <tr>
+        <td>正向项目开发</td>
+        <td><code>dogfood-plan.json</code>，实现提醒事项网页版。</td>
+        <td>2 个任务 completed；<code>npm test</code> 通过；scope/review/acceptance proof 全部通过。</td>
+        <td class="pass">通过</td>
+      </tr>
+      <tr>
+        <td>计划设计错误</td>
+        <td>把实现阶段 review/standards commands 放到规划任务默认值。</td>
+        <td>规划任务因找不到 <code>index.html</code> / <code>src/app.cjs</code> 被 review gate 拒绝，没有误放行。</td>
+        <td class="pass">通过</td>
+      </tr>
+      <tr>
+        <td>越界写入</td>
+        <td>任务只允许 <code>src/**</code>，工具尝试写 <code>docs/leak.md</code>。</td>
+        <td><code>PreToolUse</code> 输出 <code>permissionDecision=deny</code>；强行运行后 scope gate 失败并创建 ChangeRequest。</td>
+        <td class="pass">通过</td>
+      </tr>
+      <tr>
+        <td>验收失败</td>
+        <td>worker 写入 <code>bad</code>，verifier 要求 <code>ok</code>。</td>
+        <td>任务 <code>failed=1</code>；review findings 指向 evidence/goal/success criteria 失败；没有 checkpoint。</td>
+        <td class="pass">通过</td>
+      </tr>
+      <tr>
+        <td>禁用与恢复</td>
+        <td><code>adapter uninstall --target all</code>，再 <code>adapter restore --backup uninstall-2026-06-11T11-53-51-960Z</code></td>
+        <td>Codex hooks、Cursor rules、Cursor README 先 removed，再 restored。</td>
+        <td class="pass">通过</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>当前边界</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>边界</th>
+        <th>影响</th>
+        <th>下一步</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>宿主强制执行</td>
+        <td>本轮证明 hook 输出正确，但 Codex 新会话是否完全尊重 deny，需要插件态试装确认。</td>
+        <td>发布前用新 Codex 会话做一次真实安装测试。</td>
+      </tr>
+      <tr>
+        <td>LLM review</td>
+        <td>本轮主要验证确定性门；真实 Momus/Metis 语义审核依赖 provider 配置。</td>
+        <td>接入 DeepSeek/OpenAI 后增加 LLM 审核狗粮用例。</td>
+      </tr>
+      <tr>
+        <td>LSP/AST/hashline</td>
+        <td>代码智能 gate 已接入，但此临时项目未开启完整语言服务器和结构规则。</td>
+        <td>用一个 TypeScript/React 项目专门做 70+ 分验证。</td>
+      </tr>
+    </tbody>
+  </table>
+</main>
+</body>
+</html>

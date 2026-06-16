@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>WildArrange 上下文预算运行时改造</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 32px; color: #1f2937; background: #f8fafc; }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    p { line-height: 1.7; }
+    .lead { max-width: 960px; font-size: 16px; }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 24px 0; }
+    .card { background: #fff; border: 1px solid #dbe3ef; border-radius: 8px; padding: 16px; }
+    .p0 { border-left: 6px solid #dc2626; }
+    .p1 { border-left: 6px solid #2563eb; }
+    .p2 { border-left: 6px solid #16a34a; }
+    .flow { display: flex; gap: 12px; align-items: stretch; margin-top: 24px; }
+    .node { flex: 1; background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px; }
+    .arrow { align-self: center; color: #64748b; font-weight: 700; }
+    code { background: #e2e8f0; padding: 2px 5px; border-radius: 4px; }
+    ul { padding-left: 20px; line-height: 1.7; }
+  </style>
+</head>
+<body>
+  <h1>上下文预算运行时改造</h1>
+  <p class="lead">结论：废弃 Markdown / Skill 统一 6000 字符静默截断，改为“Prompt 短、Markdown 中、Skill 宽、按注入点收紧、截断必须可见”。借鉴的是 Agent 长上下文治理机制，不复制外部提示词原文。</p>
+
+  <div class="grid">
+    <section class="card p0">
+      <h2>P0 取消静默截断</h2>
+      <p><code>src/helix-injection.mjs</code> 返回 <code>chars</code>、<code>loadedChars</code>、<code>budgetChars</code>、<code>truncated</code>。超过预算时正文内加入中文截断提示。</p>
+    </section>
+    <section class="card p0">
+      <h2>P0 Skill 宽预算</h2>
+      <p>默认已激活 Skill 可加载 80,000 字符；<code>before_execute</code> / <code>before_review</code> 保持宽预算，<code>pre_tool_use</code> / <code>post_tool_use</code> 收紧。</p>
+    </section>
+    <section class="card p1">
+      <h2>P1 中文治理提示</h2>
+      <p><code>wildarrange-injection-runtime</code> 增加中文上下文治理哲学：系统提示词是宪法，Skill 是作业指导书，References 是档案库，Hook 是交通灯。</p>
+    </section>
+  </div>
+
+  <div class="flow">
+    <div class="node"><strong>输入</strong><br>注入点、Markdown 挂载、Skill 挂载、contextBudgets 配置</div>
+    <div class="arrow">→</div>
+    <div class="node"><strong>处理组件</strong><br><code>resolveInjectionPoint</code> 按内容类型和注入点计算预算并加载</div>
+    <div class="arrow">→</div>
+    <div class="node"><strong>输出</strong><br>带预算元数据的注入块；超限时显式提示而非静默失效</div>
+  </div>
+
+  <section class="card">
+    <h2>证据与边界</h2>
+    <ul>
+      <li>原问题位置：<code>src/helix-injection.mjs</code> 曾对 Markdown 和 Skill 都使用 6000 字符截断。</li>
+      <li>项目边界：<code>AGENTS.md</code> 要求商业发布包不得包含外部 prompt 原文或近似改写文本。</li>
+      <li>本次改造只抽象治理机制，不搬运外部提示词文本。</li>
+      <li>新增运行时能力已同步 <code>doc/project-architecture.md</code>、<code>AGENTS.md</code>、README 与测试。</li>
+    </ul>
+  </section>
+</body>
+</html>

@@ -1,5 +1,5 @@
 {
-  "name": "wildarrange",
+  "name": "@alivewavelab/wildarrange",
   "version": "0.1.0",
   "private": false,
   "description": "Linear governance runtime for Codex and Cursor agent workflows",

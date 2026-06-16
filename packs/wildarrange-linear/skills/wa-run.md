@@ -2,7 +2,7 @@
 
 ## 用途
 
-总编排器。把 9 阶段串成带 GATE 的状态机。跨产品 dispatch 优雅降级。
+总编排器。把 9 阶段串成带 GATE 的 `.helix/` 状态机。不同宿主只影响启动方式，不改变治理门。
 
 ## 注入提示词
 
@@ -21,26 +21,26 @@ ideate -> spec -> design -> architect -> plan -> work -> review -> test -> deplo
 
 产物流转用 `$outputs.{stage}.{artifact}` 引用上游。
 
-`.workflow/state/{feature}.json` 记录当前位置和各 gate 结果，崩溃可恢复。
+`.helix/work.json`、`.helix/team/tasks.json`、`.helix/snapshots/context.*` 和 `.helix/ledger.jsonl` 记录当前位置、任务状态、gate 结果和续跑线索，崩溃可恢复。
 
-跨产品 dispatch 优雅降级：
+宿主能力分层：
 
-- Claude 可加 `model:`。
-- Codex 用 spawn_agent。
-- 找不到 dispatch 参数时 omit。
-- working on parent model 胜过 broken dispatch。
-- skill 名跨产品精确匹配。
+- Codex 已安装并 trust hook 时，优先走 `.codex/hooks.json` + `hook run`。
+- Cursor 只有 soft rule 时，必须显式执行 Helix CLI；不能假装有强制拦截。
+- 子 Agent 统一用 `node ./bin/helix.mjs parallel run ...`，adapter 只负责渲染命令模板。
+- 找不到可用 adapter 时，回到父会话线性执行，不能跳过 verifier / scope / review / acceptance proof。
+- skill 名按 prompt-pack 精确匹配，匹配不到时不伪造 skill。
 
 画像感知：按引擎/仓库画像选择隔离与门控策略。
 
 ## 输入 / 输出
 
 - 输入：feature 目标。
-- 输出：贯穿全流程的状态机执行 + `.workflow/state/{feature}.json`。
+- 输出：贯穿全流程的状态机执行 + `.helix/` 状态、ledger、snapshot 和验收证据。
 
 ## 工具 / MCP
 
-- Task / 各产品 dispatch 原语。
-- gates-server。
-- artifacts-server。
-- vault-server。
+- `node ./bin/helix.mjs run`。
+- `node ./bin/helix.mjs parallel run|admit|status|cleanup|close`。
+- `node ./bin/helix.mjs ledger verify`。
+- `node ./bin/helix.mjs status|summary`。

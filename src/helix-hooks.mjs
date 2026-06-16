@@ -168,15 +168,22 @@ export async function preToolUseGuard(rootDir, input = {}) {
     };
   }
   if (!task) {
+    await appendLedger(rootDir, {
+      type: "pre_tool_use_denied",
+      reason: "no_active_task",
+      toolName,
+      targetPaths,
+      deniedPaths: targetPaths,
+    });
     return {
       kind: "pre_tool_use_guard",
       at: nowIso(),
-      decision: "warn",
-      reason: `file target detected but no active ${PRODUCT_NAME} task was found`,
+      decision: "deny",
+      reason: `file target detected but no active ${PRODUCT_NAME} task was found; create/import a plan task before editing files`,
       toolName,
       taskId: taskId || null,
       targetPaths,
-      deniedPaths: [],
+      deniedPaths: targetPaths,
     };
   }
 
@@ -367,29 +374,29 @@ function renderHookInjectionMarkdown({ event, pointName, sessionId, taskId, targ
   const lines = [
     `<wildarrange-injection event="${event}" point="${pointName}">`,
     "",
-    "# WildArrange Runtime Injection",
+    "# WildArrange 运行时注入",
     "",
-    `- Event: ${event}`,
-    `- Injection point: ${pointName}`,
-    `- Session: ${sessionId}`,
-    `- Task: ${taskId || "(none)"}`,
-    `- Config: ${injectionPoint.configPath}`,
+    `- 事件：${event}`,
+    `- 注入点：${pointName}`,
+    `- 会话：${sessionId}`,
+    `- 任务：${taskId || "(none)"}`,
+    `- 配置：${injectionPoint.configPath}`,
     "",
-    "## Required Behavior",
+    "## 必须行为",
     "",
-    "- Treat this block as live runtime context, not optional documentation.",
-    "- Worker done-claim is not completion; completion requires verifier, scope, review, and checkpoint gates.",
-    "- Project rules and success criteria cannot be weakened or deleted to manufacture PASS.",
-    "- If injected evidence is insufficient, return INCONCLUSIVE or request the required gate instead of guessing.",
+    "- 把本块当作当前运行时上下文，不是可选文档。",
+    "- Worker 声称完成不等于完成；完成必须通过 verifier、scope、review、checkpoint gate。",
+    "- 不得削弱或删除项目规则、success criteria 来制造 PASS。",
+    "- 如果注入证据不足，返回 INCONCLUSIVE 或请求必要 gate，不要猜测。",
     "",
-    "## Tools",
+    "## 工具",
     "",
     injectionPoint.tools.length > 0 ? `- ${injectionPoint.tools.join("\n- ")}` : "- (none)",
     "",
   ];
 
   if (targetPaths.length > 0) {
-    lines.push("## Dynamic Targets", "", ...targetPaths.map((targetPath) => `- ${targetPath}`), "");
+    lines.push("## 动态目标", "", ...targetPaths.map((targetPath) => `- ${targetPath}`), "");
   }
   appendHookFacts(lines, facts);
   appendInjectionAttachments(lines, injectionPoint);
@@ -399,14 +406,14 @@ function renderHookInjectionMarkdown({ event, pointName, sessionId, taskId, targ
 
 function appendHookFacts(lines, facts) {
   if (facts.route) {
-    lines.push("## Route Decision", "");
-    lines.push(`- Intent: ${facts.route.intent}`);
-    lines.push(`- Route: ${facts.route.route}`);
-    lines.push(`- Primary agent: ${facts.route.primaryAgent}`);
-    lines.push(`- Category: ${facts.route.category || "(none)"}`);
-    lines.push(`- Risk: ${facts.route.risk || "(unknown)"}`);
+    lines.push("## 路由决策", "");
+    lines.push(`- 意图：${facts.route.intent}`);
+    lines.push(`- 路由：${facts.route.route}`);
+    lines.push(`- 主 Agent：${facts.route.primaryAgent}`);
+    lines.push(`- 类别：${facts.route.category || "(none)"}`);
+    lines.push(`- 风险：${facts.route.risk || "(unknown)"}`);
     if ((facts.route.planAgents || []).length > 0) {
-      lines.push("- Plan Agent Bundle:");
+      lines.push("- 计划 Agent 组合：");
       for (const agent of facts.route.planAgents) {
         lines.push(`  - ${agent.name} (${agent.stage}): ${agent.purpose}`);
       }
@@ -414,29 +421,63 @@ function appendHookFacts(lines, facts) {
     lines.push("");
   }
   if (facts.resume) {
-    lines.push("## Resume", "");
-    lines.push(`- Context: ${facts.resume.contextPath}`);
-    lines.push(`- Next action: ${facts.resume.nextAction}`);
+    lines.push("## 恢复上下文", "");
+    lines.push(`- 上下文：${facts.resume.contextPath}`);
+    lines.push(`- 下一步：${facts.resume.nextAction}`);
     lines.push("");
   }
   if (facts.continuation) {
-    lines.push("## Continuation", "");
-    lines.push(`- Should continue: ${facts.continuation.shouldContinue ? "yes" : "no"}`);
-    lines.push(`- Reason: ${facts.continuation.reason}`);
-    lines.push(`- Next command: ${facts.continuation.nextCommand || "(none)"}`);
-    lines.push(`- Report: ${facts.continuation.reportMdPath}`);
+    lines.push("## 续跑指令", "");
+    lines.push(`- 是否继续：${facts.continuation.shouldContinue ? "yes" : "no"}`);
+    lines.push(`- 原因：${facts.continuation.reason}`);
+    lines.push(`- 下一命令：${facts.continuation.nextCommand || "(none)"}`);
+    lines.push(`- 报告：${facts.continuation.reportMdPath}`);
+    lines.push("");
+  }
+  if (facts.digest) {
+    lines.push("## 记忆摘要", "");
+    if (facts.digest.error) {
+      lines.push(`- 警告：${facts.digest.error}`);
+    } else {
+      lines.push(`- 报告：${facts.digest.reportMdPath || "(none)"}`);
+      lines.push(`- 原因：${facts.digest.reason || "(unknown)"}`);
+      appendShortList(lines, "进展", facts.digest.progress);
+      appendShortList(lines, "决策", facts.digest.decisions);
+      appendShortList(lines, "产物", facts.digest.artifacts);
+      appendShortList(lines, "风险", facts.digest.pitfalls);
+      appendShortList(lines, "开放问题", facts.digest.openQuestions);
+    }
+    lines.push("");
+  }
+  if (facts.archivist) {
+    lines.push("## 档案路由", "");
+    if (facts.archivist.status === "warn") {
+      lines.push(`- 警告：${facts.archivist.reason || "(none)"}`);
+    } else {
+      const routeDecision = facts.archivist.decision?.routeDecision;
+      lines.push(`- 状态：${facts.archivist.llmStatus || facts.archivist.status || "(unknown)"}`);
+      lines.push(`- 摘要：${facts.archivist.decision?.summary || "(none)"}`);
+      if (routeDecision) {
+        lines.push(`- 建议路由：${routeDecision.route || "(none)"}`);
+        lines.push(`- 置信度：${routeDecision.confidence ?? "(unknown)"}`);
+      }
+      const injection = facts.archivist.decision?.contextInjection || {};
+      appendShortList(lines, "档案进展", injection.progress);
+      appendShortList(lines, "档案风险", injection.pitfalls);
+      appendShortList(lines, "档案开放问题", injection.openQuestions);
+    }
     lines.push("");
   }
   if (facts.scope) {
-    lines.push("## Scope Guard", "");
-    lines.push(`- Status: ${facts.scope.status}`);
-    lines.push(`- Reason: ${facts.scope.reason || "(none)"}`);
+    lines.push("## 范围门", "");
+    lines.push(`- 状态：${facts.scope.status}`);
+    lines.push(`- 原因：${facts.scope.reason || "(none)"}`);
     lines.push("");
   }
   if (facts.resultGate) {
-    lines.push("## Tool Result Gate", "");
-    lines.push(`- Decision: ${facts.resultGate.decision}`);
-    lines.push(`- Summary: ${facts.resultGate.summary}`);
+    lines.push("## 工具结果门", "");
+    lines.push(`- 决策：${facts.resultGate.decision}`);
+    lines.push(`- 摘要：${facts.resultGate.summary}`);
     if (facts.resultGate.findings.length > 0) {
       for (const finding of facts.resultGate.findings) {
         lines.push(`- ${finding.severity}: ${finding.name} - ${finding.requiredAction}`);
@@ -445,9 +486,9 @@ function appendHookFacts(lines, facts) {
     lines.push("");
   }
   if (facts.rules) {
-    lines.push("## Project Rules", "");
-    lines.push(`- Matched: ${facts.rules.matched}/${facts.rules.total}`);
-    lines.push(`- Report: ${facts.rules.reportMdPath}`);
+    lines.push("## 项目规则", "");
+    lines.push(`- 命中：${facts.rules.matched}/${facts.rules.total}`);
+    lines.push(`- 报告：${facts.rules.reportMdPath}`);
     for (const rule of facts.rules.rules || []) {
       lines.push(`- ${rule.path}: ${rule.description}`);
       if (rule.content) {
@@ -460,35 +501,53 @@ function appendHookFacts(lines, facts) {
     lines.push("");
   }
   if (facts.agentContext) {
-    lines.push("## Agent Context", "");
+    lines.push("## Agent 上下文", "");
     if (facts.agentContext.error) {
-      lines.push(`- Error: ${facts.agentContext.error}`);
+      lines.push(`- 错误：${facts.agentContext.error}`);
     } else {
-      lines.push(`- Report: ${facts.agentContext.reportMdPath}`);
-      lines.push(`- Agent: ${facts.agentContext.agent}`);
-      lines.push(`- Role: ${facts.agentContext.role}`);
+      lines.push(`- 报告：${facts.agentContext.reportMdPath}`);
+      lines.push(`- Agent：${facts.agentContext.agent}`);
+      lines.push(`- 角色：${facts.agentContext.role}`);
     }
     lines.push("");
   }
 }
 
+function appendShortList(lines, label, items) {
+  const selected = Array.isArray(items) ? items.filter(Boolean).slice(0, 3) : [];
+  if (selected.length === 0) return;
+  lines.push(`- ${label}：`);
+  for (const item of selected) {
+    lines.push(`  - ${item}`);
+  }
+}
+
 function appendInjectionAttachments(lines, injectionPoint) {
-  lines.push("## Markdown Mounts", "");
+  lines.push("## Markdown 挂载", "");
   if (injectionPoint.markdown.length === 0) {
     lines.push("- (none)", "");
   } else {
     for (const item of injectionPoint.markdown) {
-      lines.push(`### ${item.path}`, "", item.content || "(empty)", "");
+      lines.push(`### ${item.path}`, "", renderAttachmentMeta(item), "", item.content || "(empty)", "");
     }
   }
-  lines.push("## Skill Mounts", "");
+  lines.push("## Skill 挂载", "");
   if (injectionPoint.skills.length === 0) {
     lines.push("- (none)", "");
   } else {
     for (const skill of injectionPoint.skills) {
-      lines.push(`### ${skill.name}`, "", skill.content || "(empty)", "");
+      lines.push(`### ${skill.name}`, "", renderAttachmentMeta(skill), "", skill.content || "(empty)", "");
     }
   }
+}
+
+function renderAttachmentMeta(item) {
+  const source = item.path ? `path=${item.path}` : "";
+  const chars = `chars=${item.chars ?? 0}`;
+  const loaded = `loaded=${item.loadedChars ?? String(item.content || "").length}`;
+  const budget = `budget=${item.budgetChars ?? "unknown"}`;
+  const truncated = `truncated=${item.truncated === true}`;
+  return `> 挂载信息：${[source, chars, loaded, budget, truncated].filter(Boolean).join("; ")}`;
 }
 
 function isPlainObject(value) {

@@ -22,6 +22,12 @@
 - 减少不必要状态和分支。
 - UI 改成贴合场景的真实体验。
 
+## 对照例子
+
+- 删前：`// increment index by one`。删后：直接保留 `index += 1`，不写注释。
+- 删前：单次使用的 `createEnhancedRobustConfigManager()`。删后：把 3 行逻辑放回调用点，除非它表达真实领域概念。
+- 删前：错误提示只写“失败”。删后：写清下一步，例如“验证命令失败，请查看 reports/failures 中的 stderr 摘要”。
+
 ## 禁止
 
 - 为“精简”破坏可读性。

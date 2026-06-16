@@ -9,6 +9,7 @@ import {
   resolveHelixPath,
   writeJsonAtomic,
 } from "./helix-foundation.mjs";
+import { runCommand } from "./helix-gates.mjs";
 import { loadTaskState } from "./helix-plan.mjs";
 
 export async function writeMemoryDigest(rootDir, options = {}) {
@@ -63,7 +64,7 @@ export async function buildMemoryDigest(rootDir, options = {}) {
     } : null,
     progress: progressFromLedger(ledgerTail, task),
     decisions: decisionsFromTask(task, checkpoint, latestArchivist),
-    artifacts: artifactRefs(task, checkpoint),
+    artifacts: artifactRefs(taskState?.planId || null, task, checkpoint),
     implementationNotes: implementationNotes(task),
     researchNotes: normalizeList(options.researchNotes),
     pitfalls: pitfallsFromTask(task),
@@ -106,8 +107,12 @@ async function readJsonLines(filePath) {
 }
 
 async function readGitHead(rootDir) {
+  const current = await runCommand("git rev-parse HEAD", rootDir, 15_000);
+  if (current.exitCode === 0 && current.stdout.trim()) {
+    return { value: current.stdout.trim(), source: "git" };
+  }
   const head = await readJson(resolveHelixPath(rootDir, "routing", "archivist-trigger-state.json"), null);
-  return head?.lastGitHead || null;
+  return head?.lastGitHead ? { value: head.lastGitHead, source: "archivist-trigger-state" } : null;
 }
 
 function summarizeTask(task) {
@@ -138,9 +143,9 @@ function decisionsFromTask(task, checkpoint, latestArchivist) {
   ].filter(Boolean).slice(0, 8);
 }
 
-function artifactRefs(task, checkpoint) {
+function artifactRefs(planId, task, checkpoint) {
   return [
-    checkpoint?.reportJsonPath,
+    checkpoint?.reportJsonPath || (planId && task?.id ? path.join(".helix", "checkpoints", `${planId}-${task.id}.json`) : null),
     task?.last_review_result?.reportJsonPath,
     task?.last_failure?.reportJsonPath,
   ].filter(Boolean);
@@ -186,7 +191,7 @@ function renderDigestMarkdown(digest) {
 | Stage | \`${digest.stage}\` |
 | Plan | \`${digest.planId || ""}\` |
 | Task | \`${digest.task?.id || ""}\` |
-| Git HEAD | \`${digest.gitHead || ""}\` |
+| Git HEAD | \`${formatGitHead(digest.gitHead)}\` |
 
 ## Progress
 
@@ -216,6 +221,12 @@ ${listBlock(digest.openQuestions)}
 
 function listBlock(items) {
   return items.length > 0 ? items.map((item) => `- ${item}`).join("\n") : "- None";
+}
+
+function formatGitHead(gitHead) {
+  if (!gitHead) return "";
+  if (typeof gitHead === "string") return gitHead;
+  return `${gitHead.value || ""}${gitHead.source ? ` (${gitHead.source})` : ""}`;
 }
 
 function sanitizeSegment(value) {

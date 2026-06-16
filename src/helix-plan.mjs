@@ -82,6 +82,7 @@ export function normalizeTask(task, index, defaults = {}) {
   const taskSkills = normalizeStringArray(task.skills ?? [], `task ${id} skills`);
   const skills = uniqueStrings([...(defaults.skills || []), ...taskSkills]);
   const successCriteria = normalizeSuccessCriteria(task.successCriteria ?? task.success_criteria, id, subject, verifyCommands);
+  const governanceWarnings = detectTaskGovernanceWarnings({ workerCommand: task.worker_command || task.workerCommand || null, verifyCommands, writablePaths });
 
   return {
     id,
@@ -100,12 +101,35 @@ export function normalizeTask(task, index, defaults = {}) {
     review_commands: reviewCommands,
     standards_commands: standardsCommands,
     successCriteria,
+    governanceWarnings,
     skills,
     route_decision: task.route_decision || null,
     evidence: Array.isArray(task.evidence) ? task.evidence : [],
     createdAt: task.createdAt || nowIso(),
     updatedAt: nowIso(),
   };
+}
+
+function detectTaskGovernanceWarnings({ workerCommand, verifyCommands, writablePaths }) {
+  const warnings = [];
+  const emptyWorker = !workerCommand || trivialCommand(workerCommand);
+  const trivialVerify = verifyCommands.length > 0 && verifyCommands.every(trivialCommand);
+  if (emptyWorker && trivialVerify && writablePaths.length === 0) {
+    warnings.push({
+      code: "possible_noop_task",
+      severity: "warn",
+      message: "worker_command is empty/trivial, verify_commands are trivial, and writable_paths is empty; this task may pass without testing a real change.",
+    });
+  }
+  return warnings;
+}
+
+function trivialCommand(command) {
+  const normalized = String(command || "").replace(/\s+/g, " ").trim();
+  return normalized === ""
+    || /^true$/.test(normalized)
+    || /process\.exit\(0\)/.test(normalized)
+    || /^node -e ["']process\.exit\(0\);?["']$/.test(normalized);
 }
 
 export function normalizeSuccessCriteria(value, taskId, subject, verifyCommands) {
@@ -128,13 +152,36 @@ export function normalizeSuccessCriteria(value, taskId, subject, verifyCommands)
         : "verifier/review evidence proves this criterion",
       status,
       evidence: Array.isArray(criterion.evidence) ? criterion.evidence : [],
+      verifierCommandRefs: normalizeVerifierCommandRefs(criterion.verifierCommandRefs ?? criterion.verifier_command_refs, verifyCommands, `task ${taskId} criterion ${id}`),
       lastUpdatedAt: criterion.lastUpdatedAt || null,
     };
   });
 }
 
+function normalizeVerifierCommandRefs(value, verifyCommands, label) {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new Error(`${label} verifierCommandRefs must be an array`);
+  const maxIndex = verifyCommands.length - 1;
+  return uniqueStrings(value.map((item) => {
+    if (Number.isInteger(item)) {
+      if (item < 0 || item > maxIndex) throw new Error(`${label} verifierCommandRefs contains out-of-range index`);
+      return String(item);
+    }
+    if (typeof item !== "string" || item.trim().length === 0) throw new Error(`${label} verifierCommandRefs must contain command strings or indexes`);
+    const trimmed = item.trim();
+    if (/^\d+$/.test(trimmed)) {
+      const index = Number(trimmed);
+      if (index < 0 || index > maxIndex) throw new Error(`${label} verifierCommandRefs contains out-of-range index`);
+      return trimmed;
+    }
+    if (!verifyCommands.includes(trimmed)) throw new Error(`${label} verifierCommandRefs references an unknown verify command`);
+    return trimmed;
+  }));
+}
+
 function seedDefaultSuccessCriteria(taskId, subject, verifyCommands) {
   const verifierText = verifyCommands.join(" && ");
+  const verifierCommandRefs = verifyCommands.map((_, index) => String(index));
   return [
     {
       id: "C001",
@@ -143,6 +190,7 @@ function seedDefaultSuccessCriteria(taskId, subject, verifyCommands) {
       expectedEvidence: verifierText || "主路径 verifier evidence",
       status: "pending",
       evidence: [],
+      verifierCommandRefs,
       lastUpdatedAt: null,
     },
     {
@@ -152,6 +200,7 @@ function seedDefaultSuccessCriteria(taskId, subject, verifyCommands) {
       expectedEvidence: verifierText || "边界条件 verifier evidence",
       status: "pending",
       evidence: [],
+      verifierCommandRefs,
       lastUpdatedAt: null,
     },
     {
@@ -161,6 +210,7 @@ function seedDefaultSuccessCriteria(taskId, subject, verifyCommands) {
       expectedEvidence: verifierText || "回归保护 verifier evidence",
       status: "pending",
       evidence: [],
+      verifierCommandRefs,
       lastUpdatedAt: null,
     },
   ];
@@ -230,6 +280,7 @@ async function importPlanUnlocked(rootDir, planPath) {
   const rawPlan = await readJson(planPath);
   const plan = normalizePlan(rawPlan);
   await enrichPlanWithRoutes(rootDir, plan);
+  validatePlanImportQuality(plan);
   const targetPath = resolveHelixPath(rootDir, "plans", `${plan.id}.json`);
   await writeJsonAtomic(targetPath, plan);
   await writeJsonAtomic(resolveHelixPath(rootDir, "team", "tasks.json"), {
@@ -260,12 +311,20 @@ async function importPlanUnlocked(rootDir, planPath) {
 
 export async function enrichPlanWithRoutes(rootDir, plan) {
   const routes = await loadRoutesConfig(rootDir);
+  const planRouteDecision = resolveRouteDecision(routes, `${plan.title}\n${plan.objective}`);
+  plan.route_decision = planRouteDecision;
   for (const task of plan.tasks) {
     enrichTaskWithRouteDecision(task, routes);
   }
   await appendLedger(rootDir, {
     type: "plan_routed",
     planId: plan.id,
+    planRoute: {
+      route: planRouteDecision.route,
+      intent: planRouteDecision.intent,
+      risk: planRouteDecision.risk,
+      planAgents: planRouteDecision.planAgents?.map((agent) => agent.name) || [],
+    },
     routes: plan.tasks.map((task) => ({
       taskId: task.id,
       category: task.category,
@@ -273,6 +332,24 @@ export async function enrichPlanWithRoutes(rootDir, plan) {
       skills: task.skills,
     })),
   });
+  return plan;
+}
+
+export function validatePlanImportQuality(plan) {
+  const route = plan.route_decision;
+  const planText = `${plan.title}\n${plan.objective}\n${plan.tasks.map((task) => `${task.subject}\n${task.description}`).join("\n")}`;
+  const productLike = /(产品|用户|体验|页面|网页|工具|上传|视频|pdf|txt|互动|游戏|mvp|流程|多步骤|权限|协作|可视化)/i.test(planText);
+  const highRiskPlanning = route?.route === "plan" && (route.risk === "high" || (route.planAgents || []).length >= 2);
+  if (!productLike || !highRiskPlanning) return plan;
+
+  if (plan.tasks.length < 4) {
+    throw new Error(`high-risk product plan ${plan.id} requires at least 4 tasks: requirements/design, implementation, verification, and review/release`);
+  }
+
+  const hasVerificationTask = plan.tasks.some((task) => /(验收|测试|验证|复核|review|qa|acceptance)/i.test(`${task.subject}\n${task.description}`));
+  if (!hasVerificationTask) {
+    throw new Error(`high-risk product plan ${plan.id} requires an explicit verification/review task`);
+  }
   return plan;
 }
 

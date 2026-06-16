@@ -21,14 +21,14 @@ init -> plan -> execute -> verify -> scope -> review -> checkpoint -> resume
 从 npm 包使用：
 
 ```bash
-npx wildarrange@latest init
-npx wildarrange@latest adapter install
+npx @alivewavelab/wildarrange@latest init
+npx @alivewavelab/wildarrange@latest adapter install
 ```
 
 长期使用的项目建议安装为 devDependency，避免 hook 每次走网络：
 
 ```bash
-npm i -D wildarrange
+npm i -D @alivewavelab/wildarrange
 npx wildarrange adapter install --mode local
 ```
 
@@ -94,12 +94,13 @@ verifier 失败时，任务会回到 `pending` 等待重试，但返回值可能
 ```bash
 node ./bin/helix.mjs adapter install --target all --mode local
 node ./bin/helix.mjs adapter uninstall --target all
+node ./bin/helix.mjs adapter restore --backup <backupId>
 ```
 
-安装与卸载都会在 `.helix/adapters/` 写入报告；覆盖或删除前会备份已有 adapter 文件。
+安装、卸载、恢复都会在 `.helix/adapters/` 写入报告；覆盖或删除前会备份已有 adapter 文件。`restore` 用于把 `.helix/adapters/backups/<backupId>/` 里的文件恢复回原位置。
 
-- **Cursor**：项目规则写入 `.cursor/rules/wildarrange.mdc`
-- **Codex**：生命周期 hook 配置写入 `.helix/adapters/codex/hooks.json`（更深层的 Codex 插件安装仍属 adapter 工作，runtime 不假设已装好）
+- **Codex**：生命周期 hook 写入 `.codex/hooks.json`，并在 `.helix/adapters/codex/hooks.json` 保留审计副本。Codex 需要在可信项目中通过 `/hooks` review / trust 后才会执行这些 hard hook。
+- **Cursor**：项目规则写入 `.cursor/rules/wildarrange.mdc`。当前 Cursor 侧是 soft governance，不等同于 Codex PreToolUse 硬拦截。
 
 ## 多 Agent 最小闭环
 
@@ -109,6 +110,8 @@ node ./bin/helix.mjs adapter uninstall --target all
 node ./bin/helix.mjs parallel run --max-agents 2 --task T001,T002 --agent Kui --command "..."
 node ./bin/helix.mjs parallel run --task T001 --agent Kui --adapter codex
 node ./bin/helix.mjs parallel list
+node ./bin/helix.mjs parallel status --run <runId>
+node ./bin/helix.mjs parallel cleanup --run <runId>
 ```
 
 子 Agent 若要提交主线成果，需要在 `agent-result.json` 写入结构化文件：
@@ -129,6 +132,12 @@ node ./bin/helix.mjs parallel admit --run <runId> --task T001
 ```
 
 成功的子 Agent 结果不会立即关闭，而是保留为 `awaiting_user_acceptance`。只有 `parallel admit` 跑完整 gate 并完成 checkpoint 后，才会标记为 `released`。
+
+用户验收后可以显式关闭保留结果：
+
+```bash
+node ./bin/helix.mjs parallel close --run <runId> --task T001 --reason user_accepted
+```
 
 Git 项目可以使用 worktree 隔离。子 Agent 在独立 worktree 写文件，WildArrange 自动提取 patch；合入时同样先过 `writable_paths` 和完整 gate：
 
@@ -161,6 +170,21 @@ node ./bin/helix.mjs archivist suggestions resolve --id <id> --decision accept -
 
 跨会话记忆会写入 `.helix/memory/digests/`。任务完成、并行 admission 完成、`SessionStart` 和 `PostCompact` 会生成结构化 digest，用于恢复进展、决策、成果物、实现结论和踩坑记录。
 
+## Skill 与提示词变体
+
+Skill matcher 是路由之外的轻量解释层，用来判断当前阶段应加载哪些 skill：
+
+```bash
+node ./bin/helix.mjs skills match --text "做一个网页版提醒事项 App" --stage design --agent YingLong
+```
+
+提示词变体不替代 Agent 原始提示词，只追加模型偏置。GPT 系列和 Codex/Cursor 主模型默认走 `host` / `gpt` 配置，外部模型可按 provider 选择：
+
+```bash
+node ./bin/helix.mjs prompts variant --agent YingLong --model gpt-5.5
+node ./bin/helix.mjs prompts show --agent YingLong --variant gemini
+```
+
 ## Dashboard
 
 本地启动：
@@ -187,12 +211,14 @@ Authorization: Bearer <token>
 x-helix-token: <token>
 ```
 
+本地 dashboard 的 `GET /api/state` 可在 loopback 下免 token 查看；所有 `POST` 写操作即使绑定 `127.0.0.1` 也必须带 token，并会校验 Host / Origin，避免网页静默触发本机 worker 命令。
+
 ## 运行时文件
 
 | 路径 | 作用 |
 |---|---|
 | `.helix/team/tasks.json` | 任务状态 |
-| `.helix/ledger.jsonl` | 追加式事件账本 |
+| `.helix/ledger.jsonl` | 带 hash 链的追加式事件账本，可用 `node ./bin/helix.mjs ledger verify` 检查篡改 |
 | `.helix/checkpoints/` | 已完成任务的 checkpoint |
 | `.helix/reports/` | workflow / review / failure 报告 |
 | `.helix/reports/acceptance/` | checkpoint 前的验收证明链 |
@@ -205,7 +231,9 @@ x-helix-token: <token>
 
 ## 配置
 
-`helix.config.json` 配置 Agent、模型 provider、动态类别与注入点。
+`helix.config.json` 配置 Agent、模型 provider、动态类别、上下文预算与注入点。
+
+`contextBudgets` 区分 Prompt、Markdown 与 Skill：Prompt / Markdown 默认保持短预算，已激活 Skill 默认可加载到 80,000 字符；超过预算时注入结果会显式标记 `truncated: true`，不会静默裁断。
 
 `"provider": "host"` 的 Agent 交给宿主工具处理：Codex 侧由 Codex 选模型，Cursor 侧走 adapter 默认模型，**不需要** WildArrange 自备 OpenAI API key。
 
@@ -220,7 +248,7 @@ source .env.wildarrange
 
 确定性 gate 不依赖模型 API。当 `review.llm.required` 为 `false` 时，缺少外部 key 或 host provider 只会告警，不会阻断线性状态机。
 
-LSP / 类型检查与注释检查走 CLI review gate，而非编辑器专属 hook：
+LSP / 类型检查、AST 结构检查、hashline anchor 与注释检查走 CLI review gate，而非编辑器专属 hook：
 
 ```json
 {
@@ -228,6 +256,16 @@ LSP / 类型检查与注释检查走 CLI review gate，而非编辑器专属 hoo
     "lspDiagnostics": {
       "enabled": true,
       "commands": ["npm run typecheck"]
+    },
+    "astStructure": {
+      "enabled": true,
+      "commands": ["ast-grep --pattern 'console.log($A)' --lang ts --json src || true"]
+    },
+    "hashlineAnchors": {
+      "enabled": true,
+      "anchors": [
+        { "file": "src/app.ts", "line": 12, "sha256": "<hashLine>" }
+      ]
     },
     "commentChecker": {
       "enabled": true,
@@ -254,7 +292,7 @@ npm test
 npm pack --dry-run --cache /private/tmp/helix-npm-cache
 ```
 
-当前状态：线性治理闭环已实现并通过测试；checkpoint 前会生成验收证明链，路由具备 deterministic + semantic shadow 双层证据，跨会话记忆会生成 digest。多 Agent 已具备命令型并行、Codex/Cursor 命令模板 spawn、结构化文件 admission、Git worktree patch admission、验收前保留与 admission 后释放；下一层是 Codex/Cursor 私有后台 Agent API 和长期进程管理。
+当前状态：线性治理闭环已实现并通过测试；checkpoint 前会生成验收证明链，显式 `successCriteria` 只有绑定具体 verifier 命令或人工证据后才会通过。Codex adapter 已能写入项目 `.codex/hooks.json`，通过 `/hooks` trust 后具备 hard hook 拦截；Cursor 仍是 soft 规则注入。跨会话 digest 与 ArchivistRouter 会进入 hook 注入块；ledger 具备 hash 链校验；多 Agent 已具备命令型并行、Codex/Cursor 命令模板 spawn、结构化文件 admission、Git worktree patch admission、验收前保留与 admission 后释放。
 
 ## 更多文档
 

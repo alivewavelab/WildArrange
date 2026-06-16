@@ -8,6 +8,8 @@ const FAILING_LANE_SEVERITY = {
   explicit_review_commands: "P1",
   project_standards: "P1",
   lsp_diagnostics: "P1",
+  ast_structure: "P1",
+  hashline_anchors: "P1",
   comment_checker: "P1",
   project_rules_context: "P2",
 };
@@ -36,7 +38,7 @@ export function buildReviewFindingBundle({ lanes = [], qualityResults = {}, llmR
         summary: lane.summary,
         fixBy: lane.fixBy,
       };
-      if (lane.name.includes("test") || lane.name.includes("evidence") || lane.name.includes("lsp")) {
+      if (lane.name.includes("test") || lane.name.includes("evidence") || lane.name.includes("lsp") || lane.name.includes("ast") || lane.name.includes("hashline")) {
         testingGaps.push(item);
       } else {
         residualRisks.push(item);

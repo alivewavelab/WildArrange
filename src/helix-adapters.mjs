@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, unlink, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   PROJECT_DIR,
@@ -25,10 +25,22 @@ export async function installAdapter(rootDir, options = {}) {
 
   if (target === "all" || target === "codex") {
     const codexHooks = buildCodexHooksConfig(hookCommand);
-    const codexPath = resolveHelixPath(rootDir, "adapters", "codex", "hooks.json");
-    const backup = await backupExistingAdapterFile(rootDir, codexPath, backupId);
-    await writeJsonAtomic(codexPath, codexHooks);
-    outputs.push({ target: "codex", path: path.relative(rootDir, codexPath), status: "generated", backup });
+    const codexRuntimePath = path.join(rootDir, ".codex", "hooks.json");
+    const codexRuntimeBackup = await backupExistingAdapterFile(rootDir, codexRuntimePath, backupId);
+    await writeJsonAtomic(codexRuntimePath, codexHooks);
+    outputs.push({
+      target: "codex",
+      path: path.relative(rootDir, codexRuntimePath),
+      status: "generated",
+      backup: codexRuntimeBackup,
+      enforcement: "hard-after-trust",
+      trustAction: "在 Codex 中执行 /hooks，review 并 trust 本项目 hook。",
+    });
+
+    const codexMirrorPath = resolveHelixPath(rootDir, "adapters", "codex", "hooks.json");
+    const codexMirrorBackup = await backupExistingAdapterFile(rootDir, codexMirrorPath, backupId);
+    await writeJsonAtomic(codexMirrorPath, codexHooks);
+    outputs.push({ target: "codex", path: path.relative(rootDir, codexMirrorPath), status: "generated", backup: codexMirrorBackup, enforcement: "audit-copy" });
   }
 
   if (target === "all" || target === "cursor") {
@@ -40,8 +52,8 @@ export async function installAdapter(rootDir, options = {}) {
     const cursorReadmePath = resolveHelixPath(rootDir, "adapters", "cursor", "README.md");
     const cursorReadmeBackup = await backupExistingAdapterFile(rootDir, cursorReadmePath, backupId);
     await writeFile(cursorReadmePath, renderCursorAdapterReadme({ hookCommand }), "utf8");
-    outputs.push({ target: "cursor", path: path.relative(rootDir, cursorRulePath), status: "generated", backup: cursorRuleBackup });
-    outputs.push({ target: "cursor", path: path.relative(rootDir, cursorReadmePath), status: "generated", backup: cursorReadmeBackup });
+    outputs.push({ target: "cursor", path: path.relative(rootDir, cursorRulePath), status: "generated", backup: cursorRuleBackup, enforcement: "soft" });
+    outputs.push({ target: "cursor", path: path.relative(rootDir, cursorReadmePath), status: "generated", backup: cursorReadmeBackup, enforcement: "documentation" });
   }
 
   if (!["all", "codex", "cursor"].includes(target)) {
@@ -80,6 +92,7 @@ export async function uninstallAdapter(rootDir, options = {}) {
   const outputs = [];
   const candidates = [];
   if (target === "all" || target === "codex") {
+    candidates.push({ target: "codex", path: path.join(rootDir, ".codex", "hooks.json") });
     candidates.push({ target: "codex", path: resolveHelixPath(rootDir, "adapters", "codex", "hooks.json") });
   }
   if (target === "all" || target === "cursor") {
@@ -117,6 +130,53 @@ export async function uninstallAdapter(rootDir, options = {}) {
   return report;
 }
 
+export async function restoreAdapterBackup(rootDir, options = {}) {
+  await ensureHelixDirs(rootDir);
+  const backupId = options.backupId || options.backup;
+  if (!backupId || typeof backupId !== "string") {
+    throw new Error("adapter restore requires --backup <backupId>");
+  }
+  if (backupId.includes("..") || path.isAbsolute(backupId)) {
+    throw new Error("adapter backup id must be a local backup directory name");
+  }
+  const backupRoot = resolveHelixPath(rootDir, "adapters", "backups", backupId);
+  if (!existsSync(backupRoot)) {
+    throw new Error(`adapter backup not found: ${path.relative(rootDir, backupRoot)}`);
+  }
+
+  const files = await listBackupFiles(backupRoot);
+  const outputs = [];
+  for (const relativePath of files) {
+    const sourcePath = path.join(backupRoot, relativePath);
+    const targetPath = path.join(rootDir, relativePath);
+    assertInsideRoot(rootDir, targetPath, relativePath);
+    const backup = await backupExistingAdapterFile(rootDir, targetPath, createAdapterBackupId("pre-restore"));
+    await mkdir(path.dirname(targetPath), { recursive: true });
+    await copyFile(sourcePath, targetPath);
+    outputs.push({
+      path: normalizeRelativePath(relativePath),
+      status: "restored",
+      backup,
+    });
+  }
+
+  const report = {
+    kind: "helix_adapter_restore",
+    version: STATE_VERSION,
+    at: nowIso(),
+    backupId,
+    outputs,
+  };
+  const reportJsonPath = resolveHelixPath(rootDir, "adapters", "restore-report.json");
+  const reportMdPath = resolveHelixPath(rootDir, "adapters", "restore-report.md");
+  report.reportJsonPath = path.relative(rootDir, reportJsonPath);
+  report.reportMdPath = path.relative(rootDir, reportMdPath);
+  await writeJsonAtomic(reportJsonPath, report);
+  await writeFile(reportMdPath, renderAdapterRestoreReport(report), "utf8");
+  await appendLedger(rootDir, { type: "adapter_restored", backupId, outputCount: outputs.length });
+  return report;
+}
+
 function createAdapterBackupId(prefix) {
   return `${prefix}-${new Date().toISOString().replace(/[:.]/g, "-")}`;
 }
@@ -138,16 +198,17 @@ function adapterHookCommand({ mode, packageName }) {
 
 function buildCodexHooksConfig(command) {
   const hook = (timeout, statusMessage) => ({ type: "command", command, timeout, statusMessage });
+  const writeToolMatcher = "^(Bash|apply_patch|functions\\.apply_patch|write|Write|edit|Edit|multi_edit|multiedit|MultiEdit)$";
   return {
     hooks: {
       SessionStart: [{ hooks: [hook(10, `${PRODUCT_NAME}: Loading governance context`)] }],
       UserPromptSubmit: [{ hooks: [hook(10, `${PRODUCT_NAME}: Routing and loading governance context`)] }],
       PreToolUse: [{
-        matcher: "^(apply_patch|write|Write|edit|Edit|multi_edit|multiedit|MultiEdit|create_goal)$",
+        matcher: "^(Bash|apply_patch|functions\\.apply_patch|write|Write|edit|Edit|multi_edit|multiedit|MultiEdit|create_goal|functions\\.create_goal)$",
         hooks: [hook(10, `${PRODUCT_NAME}: Checking planned scope before tool use`)],
       }],
       PostToolUse: [{
-        matcher: "^(apply_patch|write|Write|edit|Edit|multi_edit|multiedit|MultiEdit)$",
+        matcher: writeToolMatcher,
         hooks: [hook(10, `${PRODUCT_NAME}: Matching project rules after tool use`)],
       }],
       PostCompact: [{
@@ -212,13 +273,16 @@ function renderAdapterInstallReport(report) {
     "",
   ];
   for (const output of report.outputs) {
-    lines.push(`- ${output.target}: ${output.path} (${output.status}${output.backup ? `, backup: ${output.backup}` : ""})`);
+    lines.push(`- ${output.target}: ${output.path} (${output.status}${output.enforcement ? `, enforcement: ${output.enforcement}` : ""}${output.backup ? `, backup: ${output.backup}` : ""})`);
+    if (output.trustAction) lines.push(`  - Trust action: ${output.trustAction}`);
   }
   lines.push("");
   lines.push("## Install Model");
   lines.push("");
-  lines.push("- Recommended user entry: `npx wildarrange@latest init` or `npx wildarrange@latest adapter install`.");
-  lines.push("- Recommended persistent project setup after publish: add `wildarrange` as a devDependency so hook commands do not require network access.");
+  lines.push("- Codex project hooks are hard enforcement only after Codex trusts the project `.codex/` layer and the hook definition via `/hooks`.");
+  lines.push("- Cursor rules are soft governance prompts unless Cursor exposes a command lifecycle hook for this project.");
+  lines.push(`- Recommended user entry: \`npx ${DEFAULT_PACKAGE_NAME}@latest init\` or \`npx ${DEFAULT_PACKAGE_NAME}@latest adapter install\`.`);
+  lines.push(`- Recommended persistent project setup after publish: add \`${DEFAULT_PACKAGE_NAME}\` as a devDependency so hook commands do not require network access.`);
   return `${lines.join("\n")}\n`;
 }
 
@@ -239,4 +303,48 @@ function renderAdapterUninstallReport(report) {
   lines.push("");
   lines.push("Removed files were copied under `.helix/adapters/backups/` before deletion when they existed.");
   return `${lines.join("\n")}\n`;
+}
+
+function renderAdapterRestoreReport(report) {
+  const lines = [
+    `# ${PRODUCT_NAME} Adapter Restore Report`,
+    "",
+    `Generated: ${report.at}`,
+    `Backup ID: ${report.backupId}`,
+    "",
+    "## Outputs",
+    "",
+  ];
+  for (const output of report.outputs) {
+    lines.push(`- ${output.path} (${output.status}${output.backup ? `, previous file backup: ${output.backup}` : ""})`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+async function listBackupFiles(rootDir, baseDir = rootDir) {
+  const entries = await readdir(rootDir, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const absolutePath = path.join(rootDir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await listBackupFiles(absolutePath, baseDir));
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    const entryStat = await stat(absolutePath);
+    if (!entryStat.isFile()) continue;
+    files.push(path.relative(baseDir, absolutePath));
+  }
+  return files.sort();
+}
+
+function assertInsideRoot(rootDir, absolutePath, displayPath) {
+  const relative = path.relative(rootDir, absolutePath);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`adapter restore path escapes project root: ${displayPath}`);
+  }
+}
+
+function normalizeRelativePath(filePath) {
+  return String(filePath || "").replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+/g, "/");
 }

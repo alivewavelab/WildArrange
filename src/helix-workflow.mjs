@@ -57,6 +57,15 @@ export async function createSamplePlan(rootDir, targetPath = resolveHelixPath(ro
         writable_paths: [".helix/artifacts/linear-smoke.txt"],
         worker_command: workerScript,
         verify_commands: [verifyScript],
+        successCriteria: [
+          {
+            id: "C001",
+            title: "smoke artifact verified",
+            status: "pending",
+            expectedEvidence: "verifier checks exact smoke artifact content",
+            verifierCommandRefs: [0],
+          },
+        ],
       },
     ],
   };

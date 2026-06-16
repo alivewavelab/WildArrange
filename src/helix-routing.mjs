@@ -68,11 +68,12 @@ export function resolveRouteDecision(routes, text) {
   }
   const domain = bestMatch(routes.domains || [], lowerText);
   const complexity = bestMatch(routes.complexity || [], lowerText);
-  const merged = mergeRoute(routes.defaults, intent, domain, complexity);
+  const merged = mergeRoute(routes.defaults, intent, domain, complexity, lowerText);
   merged.planAgents = matchPlanAgentBundles(routes.planAgentBundles || [], lowerText);
   for (const planAgent of merged.planAgents) {
     merged.risk = higherRisk(merged.risk, planAgent.risk);
   }
+  applyPlanningGate(merged, lowerText);
   return buildRouteResult(routes, text, merged, domain, complexity, [
     ...(intent?.matchedSignals || []),
     ...(domain?.matchedSignals || []),
@@ -160,7 +161,15 @@ function hasPlanningCreationSignal(lowerText) {
   return /(新增|新功能|大功能|做一个|实现|开发|设计|计划|方案|mvp|一期|从零)/i.test(lowerText);
 }
 
-function mergeRoute(defaults, intent, domain, complexity) {
+function hasExplicitContinuationSignal(lowerText) {
+  return /(继续做|继续执行|按计划|已有计划|下一个任务|run next|next task|继续当前任务)/i.test(lowerText);
+}
+
+function hasProductPlanningSignal(lowerText) {
+  return /(做一个|从零|mvp|一期|产品|需求|提醒|待办|todo|管理|管事|复杂|工具|小程序)/i.test(lowerText);
+}
+
+function mergeRoute(defaults, intent, domain, complexity, lowerText = "") {
   const merged = {
     ...defaults,
     ...(intent || {}),
@@ -211,6 +220,27 @@ function mergeRoute(defaults, intent, domain, complexity) {
   return merged;
 }
 
+function applyPlanningGate(merged, lowerText) {
+  if (
+    merged.route !== "execute"
+    || merged.needsPlan !== true
+    || !Array.isArray(merged.planAgents)
+    || merged.planAgents.length === 0
+    || !hasProductPlanningSignal(lowerText)
+    || hasExplicitContinuationSignal(lowerText)
+  ) {
+    return;
+  }
+  merged.intent = "plan";
+  merged.route = "plan";
+  merged.primaryAgent = "DiJiang";
+  merged.supportAgents = uniqueStrings(["Kui", "Taotie", "LuanNiao", "QiongQi", "BaiZe", ...(merged.supportAgents || [])]);
+  merged.skills = uniqueStrings(["wa-plan", ...(merged.skills || [])]);
+  merged.needsPlan = false;
+  merged.routeAdjusted = true;
+  merged.adjustmentReason = "product/design signals require planning before execution";
+}
+
 function buildRouteResult(routes, text, route, domain, complexity, matchedSignals) {
   const intentName = route.intent || routes.defaults.intent;
   const signals = uniqueStrings(matchedSignals);
@@ -240,6 +270,8 @@ function buildRouteResult(routes, text, route, domain, complexity, matchedSignal
     matchedSignals: signals,
     confidence: route.confidence ?? routeConfidence(signals, route.risk || routes.defaults.risk),
     inputPreview: text.slice(0, 160),
+    routeAdjusted: route.routeAdjusted === true,
+    adjustmentReason: route.adjustmentReason || null,
   };
 }
 

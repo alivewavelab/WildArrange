@@ -25,12 +25,13 @@ export {
   readJson,
   renderPromptPackEntry,
   resolveHelixPath,
+  verifyLedger,
   withTaskStateLock,
   writeDefaultHelixConfig,
   writeJsonAtomic,
   writeSnapshot,
 } from "./helix-foundation.mjs";
-export { installAdapter, uninstallAdapter } from "./helix-adapters.mjs";
+export { installAdapter, restoreAdapterBackup, uninstallAdapter } from "./helix-adapters.mjs";
 export { recordReviewBlocker, resolveChangeRequest, reviewChangeRequest, steerWorkflow } from "./helix-change.mjs";
 export { buildFailureSummary } from "./helix-failure.mjs";
 export { buildAcceptanceProof, writeAcceptanceProof } from "./helix-acceptance-proof.mjs";
@@ -47,10 +48,19 @@ export { scanProjectRules } from "./helix-rules.mjs";
 export { runReviewGate, runWorker } from "./helix-review.mjs";
 export { callOpenAICompatible, resolveAgentProvider, runLlmReview } from "./helix-llm.mjs";
 export { buildReviewFindingBundle, validateReviewFinding } from "./helix-review-findings.mjs";
+export {
+  hashLine,
+  runAstStructureGate,
+  runCommentCheckerGate,
+  runHashlineAnchorsGate,
+  runLspDiagnosticsGate,
+  runQualityGates,
+} from "./helix-code-intel.mjs";
 export { buildAgentContext, continuationDirective, recordRuntimeSession, resumeReport, writeContextSnapshot } from "./helix-context.mjs";
 export { preToolUseGuard, runInjectionHook } from "./helix-hooks.mjs";
 export { detectToolResultFindings, evaluateHookResultGate } from "./helix-hook-result-gate.mjs";
 export { resolveInjectionPoint } from "./helix-injection.mjs";
+export { matchSkills, resolvePromptVariant } from "./helix-skill-matcher.mjs";
 export { dashboardData, statusReport, writeWorkflowSummary } from "./helix-status.mjs";
 export { copyPlanTemplate, createSamplePlan, runWorkflow } from "./helix-workflow.mjs";
 export {
@@ -91,7 +101,14 @@ export {
   sendTeamMessage,
   writeOutbox,
 } from "./helix-team.mjs";
-export { admitParallelAgentResult, listParallelAgentRuns, runParallelAgents } from "./helix-parallel-agents.mjs";
+export {
+  admitParallelAgentResult,
+  cleanupParallelAgentRun,
+  closeParallelAgentRun,
+  listParallelAgentRuns,
+  parallelAgentStatus,
+  runParallelAgents,
+} from "./helix-parallel-agents.mjs";
 export { renderSpawnCommand, resolveAgentSpawn } from "./helix-agent-spawn.mjs";
 export { applyAgentPatch, collectAgentWorktreePatch, extractPatchPaths, prepareAgentWorktree } from "./helix-git-worktree.mjs";
 export {
@@ -104,9 +121,6 @@ export {
   pathAllowed,
   pathMatchesPattern,
   runCommand,
-  runCommentCheckerGate,
-  runLspDiagnosticsGate,
-  runQualityGates,
   runVerifier,
   scopeGuard,
   writeChangeRequest,

@@ -108,6 +108,44 @@
     "writing": { "provider": "kimi", "model": "kimi-2.6" },
     "git": { "provider": "deepseek", "model": "deepseek-v4-flash" }
   },
+  "promptVariants": {
+    "host": "使用宿主 Agent 已配置的主模型与推理策略，不假设具体供应商 API。",
+    "gpt": "优先写清验收标准、工具调用纪律和简洁证据摘要。",
+    "gemini": "涉及界面或多模态任务时，优先进行视觉检查、状态对比和可见证据记录。",
+    "kimi": "优先处理长上下文写作、文档综合和审慎中文表达。",
+    "deepseek": "优先快速探索、结构化摘要和成本敏感的路由判断。"
+  },
+  "skillMatcher": {
+    "enabled": true,
+    "defaultLimit": 6,
+    "stageBoosts": {
+      "ideate": ["wa-ideate", "ultraresearch"],
+      "clarify": ["wa-spec", "start-work"],
+      "plan": ["wa-plan", "wa-architect", "init-deep"],
+      "design": ["wa-design", "frontend-ui-ux", "visual-qa"],
+      "execute": ["programming", "debugging", "refactor", "wa-work"],
+      "verify": ["wa-test", "review-work"],
+      "review": ["wa-review", "review-work", "remove-ai-slops"],
+      "deploy": ["wa-deploy", "publish", "pre-publish-review"],
+      "recall": ["wa-recall", "get-unpublished-changes"]
+    }
+  },
+  "contextBudgets": {
+    "prompt": { "maxChars": 12000 },
+    "markdown": { "maxChars": 12000 },
+    "skill": { "maxChars": 80000 },
+    "points": {
+      "session_start": { "markdownMaxChars": 12000, "skillMaxChars": 60000 },
+      "user_prompt_submit": { "markdownMaxChars": 12000, "skillMaxChars": 60000 },
+      "pre_tool_use": { "markdownMaxChars": 8000, "skillMaxChars": 16000 },
+      "post_tool_use": { "markdownMaxChars": 8000, "skillMaxChars": 12000 },
+      "post_compact": { "markdownMaxChars": 16000, "skillMaxChars": 60000 },
+      "before_execute": { "markdownMaxChars": 20000, "skillMaxChars": 80000 },
+      "before_review": { "markdownMaxChars": 24000, "skillMaxChars": 80000 },
+      "before_checkpoint": { "markdownMaxChars": 24000, "skillMaxChars": 60000 },
+      "stop": { "markdownMaxChars": 12000, "skillMaxChars": 24000 }
+    }
+  },
   "review": {
     "llm": {
       "enabled": false,
@@ -124,6 +162,17 @@
       "required": false,
       "commands": [],
       "timeoutMs": 120000
+    },
+    "astStructure": {
+      "enabled": false,
+      "required": false,
+      "commands": [],
+      "timeoutMs": 120000
+    },
+    "hashlineAnchors": {
+      "enabled": false,
+      "required": false,
+      "anchors": []
     },
     "commentChecker": {
       "enabled": true,

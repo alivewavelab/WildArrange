@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WildArrange 治理最后一公里修复方案</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #18212f; background: #f6f7f9; }
+    main { max-width: 1180px; margin: 0 auto; padding: 32px 24px 48px; }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    h2 { margin: 28px 0 12px; font-size: 20px; }
+    p { line-height: 1.7; }
+    .lead { font-size: 17px; color: #384454; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+    .card { background: #fff; border: 1px solid #dfe4ea; border-radius: 8px; padding: 16px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+    .tag { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; margin-bottom: 8px; }
+    .p0 { background: #ffe1dc; color: #9f1d12; }
+    .p1 { background: #fff0c2; color: #7a5200; }
+    .p2 { background: #dff3ff; color: #075985; }
+    .done { background: #def7ec; color: #03543f; }
+    .flow { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: 10px; align-items: stretch; }
+    .box { background: #fff; border: 1px solid #dfe4ea; border-radius: 8px; padding: 14px; min-height: 96px; }
+    .arrow { align-self: center; font-weight: 700; color: #5d6b7a; }
+    ul { padding-left: 18px; line-height: 1.65; }
+    code { background: #edf0f4; border-radius: 4px; padding: 1px 4px; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #dfe4ea; border-radius: 8px; overflow: hidden; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #e8edf2; vertical-align: top; }
+    th { background: #eef2f7; }
+    tr:last-child td { border-bottom: 0; }
+    .note { border-left: 4px solid #64748b; background: #fff; padding: 12px 14px; }
+    @media (max-width: 760px) {
+      .flow { grid-template-columns: 1fr; }
+      .arrow { text-align: center; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>WildArrange 治理最后一公里修复方案</h1>
+  <p class="lead">一句话：先把“门真的独立、记忆真的被读、侧门真的加锁、对外承诺不夸大”四件事接通。不要一次重写框架，先修最影响治理可信度的断点。</p>
+
+  <section class="note">
+    <p><strong>生活类比：</strong>现在的大楼有闸机、值班室和登记簿，但部分闸机共用同一张通行条，值班室生成了日报却没贴到交接板，侧门只因为开在院内就默认不上锁。修复目标不是重盖大楼，而是让每一道已有设施真正承担不同职责。</p>
+  </section>
+
+  <h2>证据判断</h2>
+  <table>
+    <thead>
+      <tr><th>反馈点</th><th>核验结论</th><th>证据</th><th>处理</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>successCriteria 被 verifier 自动翻绿</td>
+        <td>属实</td>
+        <td><code>src/helix-team.mjs</code> 的 <code>applyVerifierEvidenceToCriteria</code> 会在 verifier pass 后把未通过 criteria 统一置为 pass；<code>src/helix-node-runtime.mjs</code> 调用后再 checkpoint。</td>
+        <td>P0 修复：默认 criteria 不再自动通过；只有带明确绑定的 criteria 才可由 verifier 证据通过。</td>
+      </tr>
+      <tr>
+        <td>digest / archivist 写了但 hook 注入没读</td>
+        <td>基本属实</td>
+        <td><code>src/helix-hooks.mjs</code> 会计算 <code>facts.digest</code> 与 <code>facts.archivist</code>，但 <code>appendHookFacts</code> 只渲染 route/resume/continuation/scope/rules/agentContext。</td>
+        <td>P0 修复：把最近 digest 与 archivist 结果渲染进运行时注入块。</td>
+      </tr>
+      <tr>
+        <td>Codex/Cursor hook 没有真实硬接线</td>
+        <td>属实但需分层</td>
+        <td><code>src/helix-adapters.mjs</code> 生成 <code>.helix/adapters/codex/hooks.json</code> 与 Cursor rule；项目文档也写了 Codex 深层插件安装仍是未来工作。</td>
+        <td>P0 文档降级承诺；P1 做真实宿主能力探测与安装路径，不把软规则宣传成硬拦截。</td>
+      </tr>
+      <tr>
+        <td>dashboard loopback 默认免 token，有本地 RCE 风险</td>
+        <td>风险成立</td>
+        <td><code>src/helix-dashboard.mjs</code> 对 loopback 默认 <code>requireAuth=false</code>，但 <code>/api/run-next</code> 会触发真实 worker shell。</td>
+        <td>P0 修复：写操作强制 token 或一次性 session token；Host/Origin 校验；恒定时间 token 比较。</td>
+      </tr>
+      <tr>
+        <td>ledger 没有防篡改</td>
+        <td>属实</td>
+        <td><code>appendLedger</code> 只是追加 JSONL；没有 prevHash/hash 链，也没有 verify 命令。</td>
+        <td>P1 修复：新增 hash chain 与 <code>ledger verify</code>，先做检测，不做加密签名。</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>修复卡片</h2>
+  <div class="grid">
+    <article class="card">
+      <span class="tag p0">P0</span>
+      <h3>停止 successCriteria 自动复述 verifier</h3>
+      <ul>
+        <li>移除“verifier pass 后所有 criteria pass”的默认行为。</li>
+        <li>新增可选字段 <code>evidenceSource</code> 或 <code>verifierCommandRefs</code>，只有显式绑定的 criteria 才能由 verifier 自动通过。</li>
+        <li>默认生成的 C001/C002/C003 必须保持 pending，除非计划导入时给出明确证据绑定。</li>
+        <li>checkpoint 继续要求 criteria 全部 pass，因此缺证据会真实阻断。</li>
+      </ul>
+    </article>
+
+    <article class="card">
+      <span class="tag p0">P0</span>
+      <h3>打通 digest / archivist 读路</h3>
+      <ul>
+        <li><code>appendHookFacts</code> 增加“记忆摘要”和“档案路由”两段。</li>
+        <li>只注入短摘要：进展、决策、产物、风险、开放问题各最多 3 条，避免新上下文预算再次膨胀。</li>
+        <li>当 digest 生成失败时注入 warning，不阻断主流程。</li>
+        <li>把 wa-recall 的目录说明从 <code>docs/solutions/</code> 修正到实际 <code>.helix/memory/</code>。</li>
+      </ul>
+    </article>
+
+    <article class="card">
+      <span class="tag p0">P0</span>
+      <h3>dashboard 写操作加锁</h3>
+      <ul>
+        <li>GET <code>/api/state</code> 可继续本地免 token，降低查看成本。</li>
+        <li>所有 POST 默认要求 token，即使绑定 <code>127.0.0.1</code>。</li>
+        <li>增加 Host 白名单与 Origin/Sec-Fetch-Site 校验，阻断普通网页跨站触发。</li>
+        <li>token 比较改为 <code>crypto.timingSafeEqual</code>。</li>
+      </ul>
+    </article>
+
+    <article class="card">
+      <span class="tag p0">P0</span>
+      <h3>对外承诺降级为真实状态</h3>
+      <ul>
+        <li>README / 架构文档明确：当前 Codex/Cursor adapter 是“上下文注入与规则提示”，不是所有宿主里的硬拦截。</li>
+        <li>adapter install 报告输出 enforcement level：<code>hard</code>、<code>soft</code>、<code>manual</code>。</li>
+        <li>CLI 输出下一步安装提示，避免用户误以为生成 JSON 就等于宿主已接入。</li>
+      </ul>
+    </article>
+
+    <article class="card">
+      <span class="tag p1">P1</span>
+      <h3>ledger hash chain</h3>
+      <ul>
+        <li><code>appendLedger</code> 每条事件写入 <code>prevHash</code> 与 <code>hash</code>。</li>
+        <li>新增 <code>node ./bin/helix.mjs ledger verify</code>。</li>
+        <li>不追求防 root 篡改，只先做到“改了能发现”。</li>
+      </ul>
+    </article>
+
+    <article class="card">
+      <span class="tag p1">P1</span>
+      <h3>worktree 与 admission 后续治理</h3>
+      <ul>
+        <li>新增 worktree cleanup 命令与生命周期状态。</li>
+        <li>admission 从“先合后验再回滚”改成“临时区验收通过后再合”。</li>
+        <li>patch 模式补充实际写入路径复核。</li>
+      </ul>
+    </article>
+  </div>
+
+  <h2>P0 流程图</h2>
+  <div class="flow">
+    <div class="box">
+      <strong>输入</strong>
+      <ul>
+        <li>任务计划与 successCriteria</li>
+        <li>verifier / review / scope 结果</li>
+        <li>digest / archivist 产物</li>
+        <li>dashboard HTTP 请求</li>
+      </ul>
+    </div>
+    <div class="arrow">→</div>
+    <div class="box">
+      <strong>处理组件</strong>
+      <ul>
+        <li><code>helix-team</code>：criteria 证据归属</li>
+        <li><code>helix-hooks</code>：记忆注入</li>
+        <li><code>helix-dashboard</code>：写操作鉴权</li>
+        <li><code>helix-adapters</code>：承诺分级</li>
+      </ul>
+    </div>
+    <div class="arrow">→</div>
+    <div class="box">
+      <strong>输出</strong>
+      <ul>
+        <li>criteria 不再被 verifier 批量翻绿</li>
+        <li>Agent 启动能看到最近记忆和路由</li>
+        <li>本地 dashboard 不能被网页静默触发写操作</li>
+        <li>文档承诺与实际强制力一致</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>验收标准</h2>
+  <ul>
+    <li>新增测试：未手动记录或未显式绑定的 successCriteria，即使 verifier pass，checkpoint 也必须失败。</li>
+    <li>新增测试：带显式 verifier 绑定的 criteria 可以自动通过，并记录具体命令证据。</li>
+    <li>新增测试：SessionStart / PostCompact hook 输出包含“记忆摘要”和“档案路由”。</li>
+    <li>新增测试：dashboard POST 在无 token 时返回 401；带合法 token 才能执行；跨 Origin 被拒绝。</li>
+    <li>文档测试：README 与架构文档不再暗示 Codex/Cursor 已具备宿主级硬拦截。</li>
+    <li>执行 <code>npm test</code>；涉及包内容变化后执行 <code>npm pack --dry-run --cache /private/tmp/helix-npm-cache</code>。</li>
+  </ul>
+
+  <h2>本轮不做</h2>
+  <ul>
+    <li>不做完整加密签名账本。hash chain 只能发现普通篡改，不能对抗拥有本机写权限的人。</li>
+    <li>不承诺立刻接入 Codex/Cursor 私有硬 hook。先把产品话术降级，避免空头承诺。</li>
+    <li>不重写状态机。当前状态机主干是可用资产，问题在证据独立性和宿主接线。</li>
+  </ul>
+</main>
+</body>
+</html>

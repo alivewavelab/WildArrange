@@ -89,24 +89,30 @@ export async function runArchivistRouter(rootDir, options = {}) {
   let decision;
   let llmStatus = "skipped";
   if (resolved.available) {
-    const response = await callOpenAICompatible({
-      ...resolved,
-      messages: [
-        {
-          role: "system",
-          content: "You are CangJie, an archivist and task router. Return only compact JSON.",
-        },
-        {
-          role: "user",
-          content: buildArchivistPrompt(packet),
-        },
-      ],
-      temperature: 0,
-      timeoutMs: Number(archivistConfig.timeoutMs) || 45_000,
-    });
-    decision = parseArchivistJson(response.content);
-    decision.usage = response.usage || null;
-    llmStatus = "called";
+    try {
+      const response = await callOpenAICompatible({
+        ...resolved,
+        messages: [
+          {
+            role: "system",
+            content: "You are CangJie, an archivist and task router. Return only compact JSON.",
+          },
+          {
+            role: "user",
+            content: buildArchivistPrompt(packet),
+          },
+        ],
+        temperature: 0,
+        timeoutMs: Number(archivistConfig.timeoutMs) || 45_000,
+      });
+      decision = parseArchivistJson(response.content);
+      decision.usage = response.usage || null;
+      llmStatus = "called";
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      decision = await fallbackArchivistDecision(rootDir, packet, reason);
+      llmStatus = "fallback";
+    }
   } else {
     decision = await fallbackArchivistDecision(rootDir, packet, resolved.reason);
     llmStatus = "fallback";

@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { appendFile, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { appendFile, readdir, realpath, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import {
@@ -74,116 +74,6 @@ export async function runVerifier(rootDir, task) {
     at: nowIso(),
     pass: results.every((result) => result.exitCode === 0),
     results,
-  };
-}
-
-export async function runQualityGates(rootDir, task, scopeResult = null, config = {}) {
-  const lspResult = await runLspDiagnosticsGate(rootDir, task, config);
-  const commentResult = await runCommentCheckerGate(rootDir, task, scopeResult, config);
-  return {
-    kind: "quality_gates",
-    at: nowIso(),
-    pass: lspResult.pass && commentResult.pass,
-    lspResult,
-    commentResult,
-  };
-}
-
-export async function runLspDiagnosticsGate(rootDir, task, config = {}) {
-  const gateConfig = config.qualityGates?.lspDiagnostics || {};
-  const commands = [
-    ...(Array.isArray(gateConfig.commands) ? gateConfig.commands : []),
-    ...(Array.isArray(task.lsp_commands) ? task.lsp_commands : []),
-  ].filter((command) => typeof command === "string" && command.trim().length > 0);
-
-  if (gateConfig.enabled !== true && commands.length === 0) {
-    return {
-      kind: "lsp_diagnostics",
-      at: nowIso(),
-      status: "skipped",
-      pass: true,
-      results: [],
-      reason: "qualityGates.lspDiagnostics.enabled is not true and no lsp_commands are configured",
-    };
-  }
-
-  if (commands.length === 0) {
-    const status = gateConfig.required === true ? "fail" : "warn";
-    return {
-      kind: "lsp_diagnostics",
-      at: nowIso(),
-      status,
-      pass: status !== "fail",
-      results: [],
-      reason: "lsp diagnostics gate enabled but no commands are configured",
-    };
-  }
-
-  const results = [];
-  for (const command of commands) {
-    const result = await runCommand(command, rootDir, gateConfig.timeoutMs || 120_000);
-    results.push({ command, ...result });
-    if (result.exitCode !== 0) break;
-  }
-  const pass = results.every((result) => result.exitCode === 0);
-  return {
-    kind: "lsp_diagnostics",
-    at: nowIso(),
-    status: pass ? "pass" : "fail",
-    pass,
-    results,
-  };
-}
-
-export async function runCommentCheckerGate(rootDir, task, scopeResult = null, config = {}) {
-  const gateConfig = config.qualityGates?.commentChecker || {};
-  if (gateConfig.enabled === false) {
-    return {
-      kind: "comment_checker",
-      at: nowIso(),
-      status: "skipped",
-      pass: true,
-      findings: [],
-      reason: "qualityGates.commentChecker.enabled is false",
-    };
-  }
-
-  const candidatePaths = commentCandidatePaths(task, scopeResult);
-  const patterns = commentPatterns(gateConfig.patterns);
-  const findings = [];
-  for (const filePath of candidatePaths) {
-    const absolutePath = path.join(rootDir, filePath);
-    if (!pathInsideRoot(rootDir, absolutePath) || !isLikelyTextPath(filePath) || !existsSync(absolutePath)) continue;
-    let content = "";
-    try {
-      const fileStat = await stat(absolutePath);
-      if (fileStat.size > (gateConfig.maxFileBytes || 500_000)) continue;
-      content = await readFile(absolutePath, "utf8");
-    } catch {
-      continue;
-    }
-    const lines = content.split(/\r?\n/);
-    lines.forEach((line, index) => {
-      for (const pattern of patterns) {
-        if (!pattern.regex.test(line)) continue;
-        findings.push({
-          file: normalizeRelativePath(filePath),
-          line: index + 1,
-          pattern: pattern.name,
-          text: line.trim().slice(0, 240),
-        });
-      }
-    });
-  }
-
-  const blockOnFindings = gateConfig.blockOnFindings === true;
-  const status = findings.length === 0 ? "pass" : blockOnFindings ? "fail" : "warn";
-  return {
-    kind: "comment_checker",
-    at: nowIso(),
-    status,
-    pass: status !== "fail",
-    findings,
   };
 }
 
@@ -302,14 +192,21 @@ export async function scopeGuard(rootDir, options = {}) {
 
   const changedPaths = collected.paths.map(normalizeRelativePath);
   const writablePaths = task.writable_paths.map(normalizeRelativePath);
-  const deniedPaths = changedPaths.filter((filePath) => !pathAllowed(filePath, writablePaths));
+  const realpathFindings = await resolveChangedPathRealpaths(rootDir, changedPaths);
+  const deniedPaths = [
+    ...changedPaths.filter((filePath) => !pathAllowed(filePath, writablePaths)),
+    ...realpathFindings
+      .filter((finding) => finding.escapesRoot || (finding.realRelativePath && !pathAllowed(finding.realRelativePath, writablePaths)))
+      .map((finding) => finding.displayPath),
+  ];
   const status = deniedPaths.length === 0 ? "pass" : "fail";
   const result = {
     status,
     taskId: task.id,
     changedPaths,
     writablePaths,
-    deniedPaths,
+    deniedPaths: [...new Set(deniedPaths)],
+    realpathFindings,
   };
 
   await appendLedger(rootDir, {
@@ -317,9 +214,33 @@ export async function scopeGuard(rootDir, options = {}) {
     planId: taskState.planId,
     taskId: task.id,
     changedPathCount: changedPaths.length,
-    deniedPaths,
+    deniedPaths: result.deniedPaths,
   });
   return result;
+}
+
+async function resolveChangedPathRealpaths(rootDir, changedPaths) {
+  const rootReal = await realpath(rootDir).catch(() => rootDir);
+  const findings = [];
+  for (const filePath of changedPaths) {
+    const absolutePath = path.join(rootDir, filePath);
+    const actual = await realpath(absolutePath).catch((error) => {
+      if (error?.code === "ENOENT") return null;
+      throw error;
+    });
+    if (!actual) continue;
+    const realRelative = normalizeRelativePath(path.relative(rootReal, actual));
+    const escapesRoot = realRelative === ".." || realRelative.startsWith("../") || path.isAbsolute(realRelative);
+    if (escapesRoot || realRelative !== filePath) {
+      findings.push({
+        path: filePath,
+        realRelativePath: escapesRoot ? null : realRelative,
+        escapesRoot,
+        displayPath: escapesRoot ? `${filePath} -> ${actual}` : `${filePath} -> ${realRelative}`,
+      });
+    }
+  }
+  return findings;
 }
 
 function resolveGuardTask(tasks, taskId) {
@@ -334,45 +255,6 @@ function resolveGuardTask(tasks, taskId) {
 
 function normalizeRelativePath(filePath) {
   return filePath.replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+/g, "/");
-}
-
-function commentCandidatePaths(task, scopeResult) {
-  const paths = [];
-  if (Array.isArray(scopeResult?.changedPaths)) paths.push(...scopeResult.changedPaths);
-  if (Array.isArray(task.writable_paths)) paths.push(...task.writable_paths.filter((item) => !item.includes("*")));
-  return [...new Set(paths.map(normalizeRelativePath))];
-}
-
-function commentPatterns(rawPatterns) {
-  const defaults = [
-    { name: "ai_attribution", regex: "\\b(as an ai|generated by ai|ai generated|chatgpt|claude generated)\\b" },
-    { name: "placeholder_comment", regex: "\\b(todo|fixme|hack|xxx)\\b" },
-    { name: "lorem_ipsum", regex: "lorem ipsum" },
-  ];
-  const source = Array.isArray(rawPatterns) && rawPatterns.length > 0 ? rawPatterns : defaults;
-  return source
-    .map((item) => {
-      if (typeof item === "string") return { name: item, regex: new RegExp(item, normalizeRegexFlags()) };
-      if (!item || typeof item.pattern !== "string") return null;
-      return { name: item.name || item.pattern, regex: new RegExp(item.pattern, normalizeRegexFlags(item.flags)) };
-    })
-    .filter(Boolean);
-}
-
-function normalizeRegexFlags(rawFlags = "") {
-  const allowed = new Set(["d", "i", "m", "s", "u"]);
-  const flags = new Set(String(rawFlags).split("").filter((flag) => allowed.has(flag)));
-  flags.add("i");
-  return [...flags].sort().join("");
-}
-
-function isLikelyTextPath(filePath) {
-  return /\.(cjs|css|html|js|json|jsx|md|mjs|py|rb|rs|sh|ts|tsx|txt|vue|yaml|yml)$/i.test(filePath);
-}
-
-function pathInsideRoot(rootDir, absolutePath) {
-  const relative = path.relative(rootDir, absolutePath);
-  return relative && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
 export function pathAllowed(filePath, writablePaths) {

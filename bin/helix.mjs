@@ -9,6 +9,8 @@ import {
   admitParallelAgentResult,
   buildArchivistPacket,
   buildAgentContext,
+  cleanupParallelAgentRun,
+  closeParallelAgentRun,
   continuationDirective,
   createSamplePlan,
   createTeamTask,
@@ -21,6 +23,8 @@ import {
   listParallelAgentRuns,
   loadHelixConfig,
   listTeamTasks,
+  matchSkills,
+  parallelAgentStatus,
   listTeamMessages,
   listChangeRequests,
   listPromptPack,
@@ -28,6 +32,7 @@ import {
   recordReviewBlocker,
   recordTaskEvidence,
   renderPromptPackEntry,
+  resolvePromptVariant,
   resolveInjectionPoint,
   resolveArchivistRouteSuggestion,
   resolveChangeRequest,
@@ -46,6 +51,8 @@ import {
   statusReport,
   steerWorkflow,
   uninstallAdapter,
+  verifyLedger,
+  restoreAdapterBackup,
   writeDefaultHelixConfig,
   writeWorkflowSummary,
 } from "../src/helix-core.mjs";
@@ -77,8 +84,9 @@ Usage:
   wildarrange init [--sample]
   wildarrange config init [--root] [--force]
   wildarrange config show
-  wildarrange adapter install [--target codex|cursor|all] [--mode local|npx] [--package wildarrange]
+  wildarrange adapter install [--target codex|cursor|all] [--mode local|npx] [--package ${DEFAULT_PACKAGE_NAME}]
   wildarrange adapter uninstall [--target codex|cursor|all]
+  wildarrange adapter restore --backup <backupId>
   wildarrange injection show --point before_review [--agent BaiZe] [--task T001]
   wildarrange hook run [--from hook.json] [--format text|json]
   wildarrange plan --from <plan.json>
@@ -88,6 +96,9 @@ Usage:
   wildarrange parallel run [--max-agents 2] [--task T001,T002] [--agent Kui] [--adapter codex|cursor] [--isolation run-dir|git-worktree] [--command "..."]
   wildarrange parallel admit --run <runId> --task T001
   wildarrange parallel list
+  wildarrange parallel status [--run <runId>]
+  wildarrange parallel close --run <runId> [--task T001] [--reason "..."]
+  wildarrange parallel cleanup --run <runId>
   wildarrange archivist packet [--text "..."] [--stage plan] [--turns turns.json]
   wildarrange archivist run [--text "..."] [--stage plan] [--turns turns.json] [--force]
   wildarrange archivist suggestions list
@@ -117,12 +128,15 @@ Usage:
   wildarrange changes list
   wildarrange changes review --id CR-xxxx
   wildarrange changes resolve --id CR-xxxx --decision accept|reject --evidence "..." --rationale "..." [--apply-scope]
+  wildarrange ledger verify
   wildarrange serve [--host 127.0.0.1] [--port 8765] [--token <token>]
   wildarrange guard scope [--task T001]
   wildarrange route --text "request"
   wildarrange prompts list
   wildarrange prompts show --agent ${DEFAULT_EXECUTOR_AGENT}
   wildarrange prompts show --skill review-work
+  wildarrange prompts variant [--agent ${DEFAULT_EXECUTOR_AGENT}] [--provider host|deepseek|gemini|kimi] [--model "..."]
+  wildarrange skills match --text "request" [--stage plan] [--agent ${DEFAULT_EXECUTOR_AGENT}] [--limit 6]
   wildarrange prompts show --tools
   wildarrange prompts show --routes
 
@@ -200,7 +214,14 @@ async function main() {
       }), null, 2));
       return;
     }
-    throw new Error("helix adapter requires install or uninstall");
+    if (subcommand === "restore") {
+      if (!args.backup || args.backup === true) throw new Error("helix adapter restore requires --backup <backupId>");
+      console.log(JSON.stringify(await restoreAdapterBackup(rootDir, {
+        backupId: args.backup,
+      }), null, 2));
+      return;
+    }
+    throw new Error("helix adapter requires install, uninstall, or restore");
   }
 
   if (command === "injection") {
@@ -278,6 +299,28 @@ async function main() {
       console.log(JSON.stringify(await listParallelAgentRuns(rootDir), null, 2));
       return;
     }
+    if (subcommand === "status") {
+      console.log(JSON.stringify(await parallelAgentStatus(rootDir, {
+        runId: args.run && args.run !== true ? args.run : undefined,
+      }), null, 2));
+      return;
+    }
+    if (subcommand === "close") {
+      if (!args.run || args.run === true) throw new Error("helix parallel close requires --run <runId>");
+      console.log(JSON.stringify(await closeParallelAgentRun(rootDir, {
+        runId: args.run,
+        taskId: args.task && args.task !== true ? args.task : undefined,
+        reason: args.reason && args.reason !== true ? args.reason : undefined,
+      }), null, 2));
+      return;
+    }
+    if (subcommand === "cleanup") {
+      if (!args.run || args.run === true) throw new Error("helix parallel cleanup requires --run <runId>");
+      console.log(JSON.stringify(await cleanupParallelAgentRun(rootDir, {
+        runId: args.run,
+      }), null, 2));
+      return;
+    }
     if (subcommand === "admit") {
       if (!args.run || args.run === true) throw new Error("helix parallel admit requires --run <runId>");
       if (!args.task || args.task === true) throw new Error("helix parallel admit requires --task <taskId>");
@@ -287,7 +330,7 @@ async function main() {
       }), null, 2));
       return;
     }
-    throw new Error("helix parallel requires run, admit, or list");
+    throw new Error("helix parallel requires run, admit, list, status, close, or cleanup");
   }
 
   if (command === "archivist") {
@@ -515,6 +558,17 @@ async function main() {
     await new Promise(() => {});
   }
 
+  if (command === "ledger") {
+    const subcommand = args._[1];
+    if (subcommand === "verify") {
+      const result = await verifyLedger(rootDir);
+      console.log(JSON.stringify(result, null, 2));
+      process.exitCode = result.ok ? 0 : 2;
+      return;
+    }
+    throw new Error("helix ledger requires verify");
+  }
+
   if (command === "guard") {
     const subcommand = args._[1];
     if (subcommand === "scope") {
@@ -545,10 +599,47 @@ async function main() {
         tools: Boolean(args.tools),
         routes: Boolean(args.routes),
       });
-      console.log(content);
+      if (args.variant || args.provider || args.model) {
+        const variant = await resolvePromptVariant(rootDir, {
+          agent: args.agent && args.agent !== true ? args.agent : undefined,
+          provider: args.provider && args.provider !== true ? args.provider : undefined,
+          model: args.model && args.model !== true ? args.model : undefined,
+          variant: args.variant && args.variant !== true ? args.variant : undefined,
+        });
+        console.log(`${content.trim()}\n\n## 模型变体注入 / Model Variant\n\n${variant.content}\n`);
+      } else {
+        console.log(content);
+      }
       return;
     }
-    throw new Error("helix prompts requires list or show");
+    if (subcommand === "variant") {
+      await initRuntime(rootDir);
+      console.log(JSON.stringify(await resolvePromptVariant(rootDir, {
+        agent: args.agent && args.agent !== true ? args.agent : undefined,
+        provider: args.provider && args.provider !== true ? args.provider : undefined,
+        model: args.model && args.model !== true ? args.model : undefined,
+        variant: args.variant && args.variant !== true ? args.variant : undefined,
+      }), null, 2));
+      return;
+    }
+    throw new Error("helix prompts requires list, show, or variant");
+  }
+
+  if (command === "skills") {
+    const subcommand = args._[1];
+    if (subcommand === "match") {
+      await initRuntime(rootDir);
+      console.log(JSON.stringify(await matchSkills(rootDir, {
+        text: args.text && args.text !== true ? args.text : "",
+        stage: args.stage && args.stage !== true ? args.stage : undefined,
+        agent: args.agent && args.agent !== true ? args.agent : undefined,
+        category: args.category && args.category !== true ? args.category : undefined,
+        skills: args.skills && args.skills !== true ? args.skills : undefined,
+        limit: args.limit && args.limit !== true ? Number(args.limit) : undefined,
+      }), null, 2));
+      return;
+    }
+    throw new Error("helix skills requires match");
   }
 
   throw new Error(`unknown command: ${command}`);

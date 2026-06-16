@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WildArrange 长上下文与 Skill 加载策略</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #17202a; background: #f7f8fa; }
+    main { max-width: 1180px; margin: 0 auto; padding: 28px; }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    h2 { margin: 30px 0 14px; font-size: 20px; }
+    p { line-height: 1.65; }
+    .lead { color: #52606d; margin-top: 0; }
+    .flow { display: grid; grid-template-columns: 1fr 34px 1fr 34px 1fr; gap: 10px; align-items: stretch; }
+    .node, .card { background: #fff; border: 1px solid #dfe5ec; border-radius: 8px; padding: 14px; box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04); }
+    .node strong, .card strong { display: block; margin-bottom: 6px; }
+    .arrow { align-self: center; text-align: center; font-weight: 800; color: #697586; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+    .tag { display: inline-block; padding: 3px 8px; border-radius: 4px; color: #fff; font-size: 12px; font-weight: 700; margin-bottom: 10px; }
+    .p0 { background: #b42318; }
+    .p1 { background: #175cd3; }
+    .p2 { background: #667085; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #dfe5ec; border-radius: 8px; overflow: hidden; }
+    th, td { border-bottom: 1px solid #e5eaf0; padding: 10px; text-align: left; vertical-align: top; }
+    th { background: #eef2f6; }
+    tr:last-child td { border-bottom: 0; }
+    code { background: #eef2f6; padding: 1px 4px; border-radius: 4px; }
+    .note { border-left: 4px solid #175cd3; background: #fff; padding: 12px; border-radius: 6px; }
+    @media (max-width: 780px) {
+      main { padding: 18px; }
+      .flow { grid-template-columns: 1fr; }
+      .arrow { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>长上下文与 Skill 加载策略</h1>
+    <p class="lead">结论：6000 字符一刀切不合理。WildArrange 应改成“目录常驻、Skill 激活后完整加载、重型参考按需加载、提示词规则短而硬、所有截断显式可见”的治理模式。</p>
+
+    <h2>处理流程</h2>
+    <section class="flow">
+      <div class="node"><strong>输入</strong>用户请求、hook 事件、可用 skill 目录、项目规则、任务状态</div>
+      <div class="arrow">→</div>
+      <div class="node"><strong>处理组件</strong>ContextBudgetPolicy 判断目录、规则、Skill、参考材料分别用哪种加载级别</div>
+      <div class="arrow">→</div>
+      <div class="node"><strong>输出</strong>上下文包、加载证据、截断/溢出告警、后续按需读取入口</div>
+    </section>
+
+    <h2>建议预算</h2>
+    <table>
+      <thead>
+        <tr><th>内容类型</th><th>默认策略</th><th>建议上限</th><th>超过时</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Skill 目录</td>
+          <td>启动/PromptSubmit 常驻，只放 name、description、path</td>
+          <td>约 2% 上下文窗口；未知窗口用 8,000 字符</td>
+          <td>优先缩短 description，再省略低优先级 skill，并显式告警</td>
+        </tr>
+        <tr>
+          <td>已激活 Skill 的 <code>SKILL.md</code></td>
+          <td>激活后完整加载，不静默截断</td>
+          <td>软建议 500 行 / 5,000 tokens；硬上限可设 40k-80k 字符</td>
+          <td>若超硬上限，要求分段声明或转 references，不允许假装已完整加载</td>
+        </tr>
+        <tr>
+          <td>重型工作流 / references</td>
+          <td>不随 Skill 主体加载，按触发条件读取</td>
+          <td>单文件 20k-50k 字符可接受，但必须有目录和触发说明</td>
+          <td>按 section/range 读取，写入 loadedSections 证据</td>
+        </tr>
+        <tr>
+          <td>系统/Agent 提示词</td>
+          <td>短、硬、稳定，只保留不可违反规则和路由哲学</td>
+          <td>建议 4k-12k tokens 内，越短越好</td>
+          <td>拆成 hook capsule，不把大段案例和参考资料放常驻提示词</td>
+        </tr>
+        <tr>
+          <td>项目规则 AGENTS/CLAUDE</td>
+          <td>启动时加载指令链；路径越近优先级越高</td>
+          <td>参考 Codex 默认 32 KiB，可配置到 64 KiB</td>
+          <td>保留后加载覆盖关系；截断必须显示来源和缺失量</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>落地改造</h2>
+    <section class="grid">
+      <article class="card">
+        <span class="tag p0">P0</span>
+        <strong>取消静默 6000 字符截断</strong>
+        <p>附件加载结果必须带 <code>truncated</code>、<code>chars</code>、<code>omittedChars</code>、<code>policy</code>。治理依据不能用静默摘要。</p>
+      </article>
+      <article class="card">
+        <span class="tag p0">P0</span>
+        <strong>引入 SkillCatalog 与 SkillActivation</strong>
+        <p>hook 默认只注入目录；任务命中后用专门激活入口加载完整 <code>SKILL.md</code>，并列出 scripts/references/assets，不急着读取。</p>
+      </article>
+      <article class="card">
+        <span class="tag p1">P1</span>
+        <strong>支持 Section 化加载</strong>
+        <p>长 skill 可在 frontmatter 或目录索引中声明 sections、required、onDemand。hook 按事件加载必需 section，references 按条件读。</p>
+      </article>
+      <article class="card">
+        <span class="tag p1">P1</span>
+        <strong>保护已激活 Skill</strong>
+        <p>PostCompact 不能把已激活 skill 压没。压缩时保留 skill id、hash、loadedSections 和关键规则，必要时重新激活。</p>
+      </article>
+      <article class="card">
+        <span class="tag p1">P1</span>
+        <strong>增加预算诊断命令</strong>
+        <p><code>helix context budget</code> 输出当前 hook 将加载什么、多少 token/字符、哪些被省略，方便调试和审计。</p>
+      </article>
+      <article class="card">
+        <span class="tag p2">P2</span>
+        <strong>用测试找真实阈值</strong>
+        <p>不要迷信固定数字。用典型任务跑 6k、12k、24k、48k 的 skill 版本，对比完成率、遗漏率、成本和延迟。</p>
+      </article>
+    </section>
+
+    <h2>治理原则</h2>
+    <p class="note">提示词是宪法，必须短而稳定；Skill 是作业指导书，可以更长但必须按需激活；references 是档案库，可以很大但不能预加载；hook 是交通灯，只在正确时机给正确信号。</p>
+  </main>
+</body>
+</html>

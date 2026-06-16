@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import path from "node:path";
 import test from "node:test";
@@ -9,6 +9,8 @@ import {
   admitParallelAgentResult,
   buildAgentContext,
   buildArchivistPacket,
+  closeParallelAgentRun,
+  cleanupParallelAgentRun,
   continuationDirective,
   createSamplePlan,
   createTeamTask,
@@ -16,6 +18,7 @@ import {
   classifyManifestPathChanges,
   dashboardData,
   getTeamTask,
+  hashLine,
   importPlan,
   installAdapter,
   initRuntime,
@@ -27,11 +30,13 @@ import {
   listChangeRequests,
   listPromptPack,
   pathAllowed,
+  parallelAgentStatus,
   preToolUseGuard,
   readJson,
   recordReviewBlocker,
   recordTaskEvidence,
   renderPromptPackEntry,
+  resolvePromptVariant,
   resolveChangeRequest,
   resolveArchivistRouteSuggestion,
   resolveInjectionPoint,
@@ -53,7 +58,10 @@ import {
   statusReport,
   steerWorkflow,
   uninstallAdapter,
+  restoreAdapterBackup,
+  matchSkills,
   validatePlanGraph,
+  verifyLedger,
   writeWorkflowSummary,
 } from "../src/helix-core.mjs";
 
@@ -68,8 +76,31 @@ async function withTempDir(fn) {
   }
 }
 
-async function withDashboard(dir, fn) {
-  const server = await startDashboardServer(dir, { host: "127.0.0.1", port: 0 });
+async function writeMinimalPromptPack(rootDir, skills = {}) {
+  const packDir = path.join(rootDir, "prompt-pack");
+  await mkdir(path.join(packDir, "skills"), { recursive: true });
+  await mkdir(path.join(packDir, "tools"), { recursive: true });
+  const skillManifest = {};
+  for (const [name, content] of Object.entries(skills)) {
+    const skillPath = `skills/${name}.md`;
+    skillManifest[name] = skillPath;
+    await writeFile(path.join(packDir, skillPath), content);
+  }
+  await writeFile(path.join(packDir, "tools", "tool-contract.json"), JSON.stringify({ tools: [] }, null, 2));
+  await writeFile(path.join(packDir, "manifest.json"), JSON.stringify({
+    version: 1,
+    name: "test-pack",
+    description: "Test prompt pack",
+    source: { project: "WildArrange test" },
+    agents: {},
+    skills: skillManifest,
+    tools: "tools/tool-contract.json",
+  }, null, 2));
+  return packDir;
+}
+
+async function withDashboard(dir, fn, options = {}) {
+  const server = await startDashboardServer(dir, { host: "127.0.0.1", port: 0, token: options.token });
   try {
     const address = server.address();
     const port = typeof address === "object" && address ? address.port : null;
@@ -112,10 +143,10 @@ async function fetchJson(url, options = {}) {
   return { response, body };
 }
 
-async function postJson(url, body) {
+async function postJson(url, body, options = {}) {
   return fetchJson(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...(options.headers || {}) },
     body: JSON.stringify(body || {}),
   });
 }
@@ -202,6 +233,31 @@ test("route decision loads product planning agent bundle on demand", async () =>
   });
 });
 
+test("skill matcher and prompt variants provide explainable loading hints", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+
+    const matched = await matchSkills(dir, {
+      text: "做一个网页版提醒事项 App，需要空状态、视觉验收和实现计划。",
+      stage: "design",
+      agent: "YingLong",
+      limit: 5,
+    });
+    assert.ok(matched.matched.some((skill) => skill.name === "frontend-ui-ux"));
+    assert.ok(matched.matched.some((skill) => skill.name === "visual-qa"));
+    assert.ok(matched.matched.every((skill) => skill.score > 0));
+    assert.ok(matched.matched.some((skill) => skill.reasons.some((reason) => reason.startsWith("stage:"))));
+
+    const gptVariant = await resolvePromptVariant(dir, { agent: "YingLong", model: "gpt-5.5" });
+    assert.equal(gptVariant.variant, "gpt");
+    assert.match(gptVariant.content, /验收标准/);
+
+    const kimiVariant = await resolvePromptVariant(dir, { provider: "kimi", model: "kimi-2.6" });
+    assert.equal(kimiVariant.variant, "kimi");
+    assert.match(kimiVariant.content, /长上下文写作/);
+  });
+});
+
 test("config controls models and injection point mounts", async () => {
   await withTempDir(async (dir) => {
     await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
@@ -231,6 +287,64 @@ test("config controls models and injection point mounts", async () => {
     assert.ok(injection.markdown[0].content.includes("Use real verification"));
     assert.ok(injection.skills.some((skill) => skill.name === "review-work"));
     assert.ok(injection.skills.some((skill) => skill.name === "wildarrange-injection-runtime"));
+  });
+});
+
+test("injection budgets load activated skills beyond legacy six thousand chars", async () => {
+  await withTempDir(async (dir) => {
+    const skillBody = `# 重型 Skill\n\n${"长流程内容。".repeat(1_200)}\n\n末尾校验：完整加载\n`;
+    const packDir = await writeMinimalPromptPack(dir, { "heavy-flow": skillBody });
+    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
+      injectionPoints: {
+        before_execute: {
+          enabled: true,
+          tools: [],
+          markdown: [],
+          skills: ["heavy-flow"],
+          rules: { mode: "dynamic" },
+        },
+      },
+    }, null, 2));
+    await initRuntime(dir, { promptPackDir: packDir });
+
+    const injection = await resolveInjectionPoint(dir, "before_execute", { taskId: "T001" });
+    const skill = injection.skills[0];
+    assert.ok(skill.chars > 6_000);
+    assert.equal(skill.truncated, false);
+    assert.equal(skill.budgetChars, 80_000);
+    assert.match(skill.content, /末尾校验：完整加载/);
+  });
+});
+
+test("injection budgets expose explicit truncation metadata", async () => {
+  await withTempDir(async (dir) => {
+    const skillBody = `# 超重工作流\n\n${"需要按阶段执行的长步骤。".repeat(2_000)}\n\n末尾不应进入注入\n`;
+    const packDir = await writeMinimalPromptPack(dir, { "heavy-flow": skillBody });
+    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
+      contextBudgets: {
+        points: {
+          before_execute: { skillMaxChars: 3_000 },
+        },
+      },
+      injectionPoints: {
+        before_execute: {
+          enabled: true,
+          tools: [],
+          markdown: [],
+          skills: ["heavy-flow"],
+          rules: { mode: "dynamic" },
+        },
+      },
+    }, null, 2));
+    await initRuntime(dir, { promptPackDir: packDir });
+
+    const injection = await resolveInjectionPoint(dir, "before_execute", { taskId: "T001" });
+    const skill = injection.skills[0];
+    assert.equal(skill.truncated, true);
+    assert.equal(skill.budgetChars, 3_000);
+    assert.ok(skill.content.length <= 3_000);
+    assert.match(skill.content, /上下文已截断/);
+    assert.doesNotMatch(skill.content, /末尾不应进入注入/);
   });
 });
 
@@ -296,11 +410,11 @@ test("hook adapter emits WildArrange runtime injection for user prompt", async (
     assert.equal(result.event, "UserPromptSubmit");
     assert.equal(result.pointName, "user_prompt_submit");
     assert.match(result.output, /<wildarrange-injection event="UserPromptSubmit" point="user_prompt_submit">/);
-    assert.match(result.output, /## Route Decision/);
-    assert.match(result.output, /Category: visual-engineering/);
-    assert.match(result.output, /Plan Agent Bundle/);
+    assert.match(result.output, /## 路由决策/);
+    assert.match(result.output, /类别：visual-engineering/);
+    assert.match(result.output, /计划 Agent 组合/);
     assert.match(result.output, /UXInteractionReviewer/);
-    assert.match(result.output, /Project Rules/);
+    assert.match(result.output, /项目规则/);
     assert.match(result.output, /Always verify behavior/);
 
     const hookRecord = await readJson(resolveHelixPath(dir, "sessions", "hooks", "session-1-UserPromptSubmit.json"));
@@ -312,6 +426,9 @@ test("hook adapter emits WildArrange runtime injection for user prompt", async (
 test("hook adapter triggers ArchivistRouter without blocking user prompt injection", async () => {
   await withTempDir(async (dir) => {
     await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
+      modelProviders: {
+        deepseek: { type: "openai-compatible", apiKeyEnv: "HELIX_TEST_MISSING_DEEPSEEK_KEY", defaultBaseUrl: "https://api.deepseek.com" },
+      },
       archivistRouter: { enabled: true },
     }, null, 2));
     await initRuntime(dir);
@@ -329,9 +446,11 @@ test("hook adapter triggers ArchivistRouter without blocking user prompt injecti
 
     assert.equal(result.event, "UserPromptSubmit");
     assert.ok(result.output.length > 0);
+    assert.match(result.output, /## 档案路由/);
+    assert.match(result.output, /状态：fallback/);
     const archivist = await readJson(resolveHelixPath(dir, "memory", "last-archivist-result.json"));
     assert.equal(archivist.llmStatus, "fallback");
-    assert.equal(archivist.packet.stage, "execute");
+    assert.equal(archivist.packet.stage, "plan");
     assert.doesNotMatch(JSON.stringify(archivist.packet), /console\.log/);
     assert.match(await readFile(resolveHelixPath(dir, "memory", "events.jsonl"), "utf8"), /archivist_fallback/);
   });
@@ -361,10 +480,10 @@ test("hook adapter injects dynamic rules after tool use target paths", async () 
 
     assert.equal(result.pointName, "post_tool_use");
     assert.deepEqual(result.targetPaths, ["src/app.js"]);
-    assert.match(result.output, /Dynamic Targets/);
+    assert.match(result.output, /动态目标/);
     assert.match(result.output, /src\/app\.js/);
-    assert.match(result.output, /Tool Result Gate/);
-    assert.match(result.output, /Decision: pass/);
+    assert.match(result.output, /工具结果门/);
+    assert.match(result.output, /决策：pass/);
     assert.match(result.output, /UI files need browser verification/);
     assert.match(result.output, /Run browser verification after UI changes/);
   });
@@ -386,8 +505,8 @@ test("post-tool-use result gate blocks failed tool evidence", async () => {
     });
 
     assert.equal(result.decision, "block");
-    assert.match(result.output, /Tool Result Gate/);
-    assert.match(result.output, /Decision: block/);
+    assert.match(result.output, /工具结果门/);
+    assert.match(result.output, /决策：block/);
     assert.match(result.output, /nonzero_exit_code/);
     assert.match(result.output, /command_not_found/);
 
@@ -440,17 +559,40 @@ test("pre-tool-use guard denies out-of-scope file writes before they land", asyn
   });
 });
 
+test("pre-tool-use guard denies file writes when no task exists", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+
+    const hook = await runInjectionHook(dir, {
+      hook_event_name: "PreToolUse",
+      session_id: "session-no-task",
+      cwd: dir,
+      tool_name: "functions.apply_patch",
+      tool_input: { file_path: "index.html" },
+    });
+    const output = JSON.parse(hook.output);
+    assert.equal(hook.decision, "deny");
+    assert.equal(output.hookSpecificOutput.permissionDecision, "deny");
+    assert.match(output.hookSpecificOutput.permissionDecisionReason, /no active WildArrange task/);
+    assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /no_active_task/);
+  });
+});
+
 test("adapter install writes codex hooks and cursor rules", async () => {
   await withTempDir(async (dir) => {
     const report = await installAdapter(dir, { target: "all", mode: "npx", packageName: "wildarrange" });
     assert.equal(report.mode, "npx");
+    assert.ok(report.outputs.some((output) => output.path === ".codex/hooks.json" && output.enforcement === "hard-after-trust"));
     assert.ok(report.outputs.some((output) => output.path === ".helix/adapters/codex/hooks.json"));
     assert.ok(report.outputs.some((output) => output.path === ".cursor/rules/wildarrange.mdc"));
 
-    const codexHooks = await readJson(resolveHelixPath(dir, "adapters", "codex", "hooks.json"));
+    const codexHooks = await readJson(path.join(dir, ".codex", "hooks.json"));
     assert.ok(codexHooks.hooks.PreToolUse);
+    assert.match(codexHooks.hooks.PreToolUse[0].matcher, /Bash/);
     assert.match(codexHooks.hooks.PreToolUse[0].matcher, /apply_patch/);
+    assert.match(codexHooks.hooks.PreToolUse[0].matcher, /functions\\\.apply_patch/);
     assert.match(codexHooks.hooks.SessionStart[0].hooks[0].command, /npx -y wildarrange hook run/);
+    assert.match(await readFile(resolveHelixPath(dir, "adapters", "install-report.md"), "utf8"), /hard-after-trust/);
 
     const cursorRule = await readFile(path.join(dir, ".cursor", "rules", "wildarrange.mdc"), "utf8");
     assert.match(cursorRule, /alwaysApply: true/);
@@ -464,9 +606,18 @@ test("adapter install writes codex hooks and cursor rules", async () => {
     assert.equal(await readFile(path.join(dir, ruleOutput.backup), "utf8"), "existing user rule\n");
 
     const uninstall = await uninstallAdapter(dir, { target: "all" });
-    assert.ok(uninstall.outputs.some((output) => output.path === ".cursor/rules/wildarrange.mdc" && output.status === "removed" && output.backup));
+    const removedCodex = uninstall.outputs.find((output) => output.path === ".codex/hooks.json" && output.status === "removed");
+    assert.ok(removedCodex?.backup);
+    const removedRule = uninstall.outputs.find((output) => output.path === ".cursor/rules/wildarrange.mdc" && output.status === "removed");
+    assert.ok(removedRule?.backup);
     await assert.rejects(readFile(cursorRulePath, "utf8"), /ENOENT/);
     assert.match(await readFile(resolveHelixPath(dir, "adapters", "uninstall-report.md"), "utf8"), /Adapter Uninstall Report/);
+
+    const backupId = removedRule.backup.split("/")[3];
+    const restored = await restoreAdapterBackup(dir, { backupId });
+    assert.ok(restored.outputs.some((output) => output.path === ".cursor/rules/wildarrange.mdc" && output.status === "restored"));
+    assert.match(await readFile(cursorRulePath, "utf8"), /WildArrange Governance Runtime/);
+    assert.match(await readFile(resolveHelixPath(dir, "adapters", "restore-report.md"), "utf8"), /Adapter Restore Report/);
   });
 });
 
@@ -539,7 +690,43 @@ test("parallel agents run task packets concurrently and publish results", async 
     const runs = await listParallelAgentRuns(dir);
     assert.equal(runs.runs.length, 1);
     assert.equal(runs.runs[0].results.length, 2);
+
+    const status = await parallelAgentStatus(dir, { runId: batch.runId });
+    assert.equal(status.runCount, 1);
+    assert.equal(status.runs[0].summary.awaiting_user_acceptance, 2);
+    assert.ok(status.runs[0].results.every((result) => result.lifecycle.status === "awaiting_user_acceptance"));
+
+    const closed = await closeParallelAgentRun(dir, { runId: batch.runId, taskId: "T001", reason: "user_accepted" });
+    assert.deepEqual(closed.closed, ["T001"]);
+    const afterClose = await parallelAgentStatus(dir, { runId: batch.runId });
+    const closedTask = afterClose.runs[0].results.find((result) => result.taskId === "T001");
+    assert.equal(closedTask.lifecycle.status, "closed");
+    assert.equal(closedTask.lifecycle.closeReason, "user_accepted");
     assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /parallel_agents_completed/);
+    assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /parallel_agent_run_closed/);
+  });
+});
+
+test("parallel agents without a runner command are marked skipped", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = path.join(dir, "parallel-skipped-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Parallel skipped",
+      tasks: [{
+        id: "T001",
+        subject: "Prepare packet only",
+        verify_commands: ["node -e \"process.exit(0)\""],
+        writable_paths: [".helix/artifacts/one.txt"],
+      }],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    const batch = await runParallelAgents(dir, { maxAgents: 1 });
+    assert.equal(batch.status, "skipped");
+    assert.equal(batch.results[0].status, "skipped");
+    assert.equal(batch.results[0].pass, false);
+    assert.equal(batch.results[0].lifecycle.status, "skipped");
   });
 });
 
@@ -623,6 +810,46 @@ test("parallel admission applies child artifacts only after gates pass", async (
     assert.equal(checkpoint.verifyResult.pass, true);
     assert.equal(checkpoint.scopeResult.status, "pass");
     assert.equal(checkpoint.reviewResult.pass, true);
+  });
+});
+
+test("parallel admission rolls back child artifacts when gates fail", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = path.join(dir, "parallel-rollback-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Parallel admission rollback",
+      tasks: [{
+        id: "T001",
+        subject: "Reject bad child artifact",
+        verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/parallel.txt','utf8').trim()!=='ok') process.exit(1);")],
+        writable_paths: ["src/**"],
+      }],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    const command = [
+      "node -e",
+      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'bad artifact', files:[{path:'src/parallel.txt', content:'bad\\n'}]}));"),
+      "{outputJson}",
+    ].join(" ");
+    const batch = await runParallelAgents(dir, {
+      taskIds: ["T001"],
+      agent: "Kui",
+      command,
+    });
+    const admitted = await admitParallelAgentResult(dir, {
+      runId: batch.runId,
+      taskId: "T001",
+    });
+
+    assert.equal(admitted.status, "retry");
+    assert.equal(admitted.rollback.status, "rolled_back");
+    await assert.rejects(readFile(path.join(dir, "src", "parallel.txt"), "utf8"), /ENOENT/);
+    const result = await readJson(resolveHelixPath(dir, "agent-runs", batch.runId, "T001", "result.json"));
+    assert.equal(result.lifecycle.status, "awaiting_revision");
+    assert.equal(result.lifecycle.rollback.status, "rolled_back");
+    assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /parallel_agent_admission_rolled_back/);
   });
 });
 
@@ -714,6 +941,11 @@ test("parallel admission rejects artifacts outside writable paths", async () => 
 
 test("ArchivistRouter builds conclusions-only packets and fallback memory", async () => {
   await withTempDir(async (dir) => {
+    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
+      modelProviders: {
+        deepseek: { type: "openai-compatible", apiKeyEnv: "HELIX_TEST_MISSING_DEEPSEEK_KEY", defaultBaseUrl: "https://api.deepseek.com" },
+      },
+    }, null, 2));
     await initRuntime(dir);
     const packet = await buildArchivistPacket(dir, {
       stage: "plan",
@@ -818,6 +1050,12 @@ test("ArchivistRouter route suggestions require review before affecting routing"
 
 test("routeRequest maps high-risk domains to the right agents and categories", async () => {
   await withTempDir(async (dir) => {
+    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
+      routeGovernance: {
+        semanticShadow: { enabled: false },
+      },
+    }, null, 2));
+    await initRuntime(dir);
     const visual = await routeRequest(dir, "优化这个页面 CSS 布局和按钮动效");
     assert.equal(visual.domain, "visual");
     assert.equal(visual.category, "visual-engineering");
@@ -826,9 +1064,11 @@ test("routeRequest maps high-risk domains to the right agents and categories", a
 
     const webTodo = await routeRequest(dir, "做一个网页版 TODO 工具，支持删除任务");
     assert.equal(webTodo.domain, "visual");
-    assert.equal(webTodo.route, "execute");
+    assert.equal(webTodo.route, "plan");
     assert.equal(webTodo.category, "visual-engineering");
     assert.equal(webTodo.needsUserInput, false);
+    assert.equal(webTodo.routeAdjusted, true);
+    assert.match(webTodo.adjustmentReason, /require planning/);
 
     const normalAdd = await routeRequest(dir, "新增一个网页按钮");
     assert.equal(normalAdd.intent, "execute");
@@ -934,6 +1174,41 @@ test("plan import rejects unknown blockedBy before writing task state", async ()
   });
 });
 
+test("plan import rejects high-risk product plans that are under-split", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = path.join(dir, "lazy-product-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      id: "plan_content_to_interactive_tools",
+      title: "内容转互动工具产品 MVP",
+      objective: "用户上传 PDF、TXT、视频后，系统拆结构件、匹配前端工具，并生成带数据的互动工具实例。",
+      tasks: [
+        {
+          id: "T001",
+          subject: "写产品 brief 和流程",
+          description: "明确产品目标、流程、结构件和互动体验。",
+          writable_paths: [".workflow/**"],
+          worker_command: "node -e \"process.exit(0)\"",
+          verify_commands: ["node -e \"process.exit(0)\""],
+        },
+        {
+          id: "T002",
+          subject: "实现静态 MVP",
+          description: "实现页面和转换逻辑。",
+          blockedBy: ["T001"],
+          writable_paths: ["index.html", "src/**", "test/**"],
+          worker_command: "node -e \"process.exit(0)\"",
+          verify_commands: ["node -e \"process.exit(0)\""],
+        },
+      ],
+    }, null, 2));
+
+    await assert.rejects(() => importPlan(dir, planPath), /requires at least 4 tasks/);
+    const state = await readJson(resolveHelixPath(dir, "team", "tasks.json"), null);
+    assert.equal(state, null);
+  });
+});
+
 test("plan import persists route decisions and fills missing task category and skills", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
@@ -1023,6 +1298,26 @@ test("plan import applies default gates and scope to every task", async () => {
   });
 });
 
+test("plan import warns about possible no-op tasks", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = path.join(dir, "noop-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "No-op warning",
+      tasks: [{
+        id: "T001",
+        subject: "Suspicious task",
+        worker_command: "node -e \"process.exit(0)\"",
+        verify_commands: ["node -e \"process.exit(0)\""],
+      }],
+    }));
+
+    await importPlan(dir, planPath);
+    const state = await readJson(resolveHelixPath(dir, "team", "tasks.json"));
+    assert.equal(state.tasks[0].governanceWarnings[0].code, "possible_noop_task");
+  });
+});
+
 test("project rules and agent context collect matching local governance", async () => {
   await withTempDir(async (dir) => {
     await writeFile(path.join(dir, "AGENTS.md"), "# AGENTS\n\n必须运行真实测试。\n");
@@ -1094,6 +1389,57 @@ test("success criteria evidence is recorded and required by checkpoint", async (
     const result = await runNextTask(dir);
     assert.equal(result.status, "completed");
     assert.equal(result.task.successCriteria[0].status, "pass");
+  });
+});
+
+test("unbound success criteria are not auto-passed by verifier", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = path.join(dir, "criteria-unbound-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Unbound criteria evidence",
+      tasks: [{
+        id: "T001",
+        subject: "Do not auto-pass manual criterion",
+        worker_command: "node -e \"process.exit(0)\"",
+        verify_commands: ["node -e \"process.exit(0)\""],
+        successCriteria: [
+          { id: "C001", title: "Manual criterion", status: "pending", expectedEvidence: "manual proof" },
+        ],
+      }],
+    }));
+    await importPlan(dir, planPath);
+
+    const result = await runNextTask(dir);
+    assert.equal(result.status, "failed");
+    assert.equal(result.task.successCriteria[0].status, "pending");
+    assert.equal(result.task.last_failure.reason, "criteria_failed");
+  });
+});
+
+test("success criteria can be auto-passed only with explicit verifier command refs", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const verifyCommand = "node -e \"process.exit(0)\"";
+    const planPath = path.join(dir, "criteria-bound-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Bound criteria evidence",
+      tasks: [{
+        id: "T001",
+        subject: "Auto-pass bound criterion",
+        worker_command: "node -e \"process.exit(0)\"",
+        verify_commands: [verifyCommand],
+        successCriteria: [
+          { id: "C001", title: "Bound criterion", status: "pending", verifierCommandRefs: [0] },
+        ],
+      }],
+    }));
+    await importPlan(dir, planPath);
+
+    const result = await runNextTask(dir);
+    assert.equal(result.status, "completed");
+    assert.equal(result.task.successCriteria[0].status, "pass");
+    assert.match(result.task.successCriteria[0].evidence[0].evidence, /explicitly bound/);
   });
 });
 
@@ -1287,6 +1633,44 @@ test("linear loop runs worker, verifies, checkpoints, and records ledger", async
   });
 });
 
+test("ledger verification detects tampered hash chain entries", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    let verification = await verifyLedger(dir);
+    assert.equal(verification.ok, true);
+
+    const ledgerPath = resolveHelixPath(dir, "ledger.jsonl");
+    const lines = (await readFile(ledgerPath, "utf8")).trim().split(/\r?\n/);
+    const first = JSON.parse(lines[0]);
+    first.type = "tampered_event";
+    lines[0] = JSON.stringify(first);
+    await writeFile(ledgerPath, `${lines.join("\n")}\n`);
+
+    verification = await verifyLedger(dir);
+    assert.equal(verification.ok, false);
+    assert.ok(verification.failures.some((failure) => failure.reason === "hash_mismatch"));
+  });
+});
+
+test("session hooks inject memory digest summaries", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const samplePath = await createSamplePlan(dir);
+    await importPlan(dir, samplePath);
+    await runNextTask(dir);
+
+    const hook = await runInjectionHook(dir, {
+      hook_event_name: "SessionStart",
+      session_id: "session-memory",
+      cwd: dir,
+    });
+
+    assert.match(hook.output, /## 记忆摘要/);
+    assert.match(hook.output, /原因：session_start/);
+    assert.match(hook.output, /## 档案路由/);
+  });
+});
+
 test("LLM review gate uses OpenAI-compatible provider when configured", async () => {
   await withTempDir(async (dir) => {
     await withLlmServer((request, response) => {
@@ -1420,6 +1804,48 @@ test("comment checker object patterns default to case-insensitive matching", asy
   });
 });
 
+test("code intelligence gates block stale hashline and AST findings", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
+      qualityGates: {
+        astStructure: {
+          enabled: true,
+          required: true,
+          commands: [nodeEval("const fs=require('fs'); if(!fs.readFileSync('src/app.js','utf8').includes('export const ok')) process.exit(1);")],
+        },
+        hashlineAnchors: {
+          enabled: true,
+          required: true,
+        },
+        commentChecker: { enabled: false },
+      },
+    }, null, 2));
+    await initRuntime(dir);
+    await mkdir(path.join(dir, "src"), { recursive: true });
+    const expectedLine = "export const ok = true;";
+    const planPath = path.join(dir, "code-intel-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Code intelligence gate",
+      tasks: [{
+        id: "T001",
+        subject: "Reject stale anchored edit",
+        writable_paths: ["src/app.js"],
+        worker_command: "node -e \"const fs=require('fs'); fs.writeFileSync('src/app.js','export const ok = false;\\n')\"",
+        verify_commands: ["node -e \"const fs=require('fs'); if(!fs.readFileSync('src/app.js','utf8').includes('export const ok')) process.exit(1)\""],
+        hashline_anchors: [{ file: "src/app.js", line: 1, sha256: hashLine(expectedLine), note: "expected stable export line" }],
+      }],
+    }));
+    await importPlan(dir, planPath);
+
+    const result = await runNextTask(dir);
+    assert.equal(result.status, "failed");
+    assert.equal(result.task.last_failure.reason, "review_gate_failed");
+    assert.ok(result.reviewResult.lanes.some((lane) => lane.name === "ast_structure" && lane.status === "pass"));
+    assert.ok(result.reviewResult.lanes.some((lane) => lane.name === "hashline_anchors" && lane.status === "fail"));
+    assert.ok(result.reviewResult.findings.some((finding) => finding.lane === "hashline_anchors" && finding.validator.status === "validated"));
+  });
+});
+
 test("simulation greenfield project runs from product planning to completed web app", async () => {
   await withTempDir(async (dir) => {
     await writeFile(path.join(dir, "AGENTS.md"), "# Project Rules\n\nUser-visible web work needs verifier evidence.\n");
@@ -1509,6 +1935,57 @@ test("simulation greenfield project runs from product planning to completed web 
           `),
           verify_commands: ["npm test"],
         },
+        {
+          id: "T003",
+          subject: "验收提醒事项 App 的核心体验",
+          description: "验证空状态、添加流程、错误反馈和测试证据都存在。",
+          blockedBy: ["T002"],
+          writable_paths: [".helix/artifacts/**"],
+          worker_command: nodeEval(`
+            const fs = require("fs");
+            fs.mkdirSync(".helix/artifacts", { recursive: true });
+            const html = fs.readFileSync("index.html", "utf8");
+            const app = fs.readFileSync("src/app.js", "utf8");
+            const test = fs.readFileSync("src/app.test.js", "utf8");
+            const report = [
+              "# QA Report",
+              html.includes("还没有提醒事项") ? "PASS empty state" : "FAIL empty state",
+              app.includes("请输入提醒事项") ? "PASS error feedback" : "FAIL error feedback",
+              test.includes("交付方案") ? "PASS add flow" : "FAIL add flow"
+            ].join("\\n");
+            fs.writeFileSync(".helix/artifacts/reminders-qa.md", report);
+          `),
+          verify_commands: [
+            nodeEval(`
+              const fs = require("fs");
+              const report = fs.readFileSync(".helix/artifacts/reminders-qa.md", "utf8");
+              if (report.includes("FAIL") || !report.includes("PASS empty state")) process.exit(1);
+            `),
+          ],
+        },
+        {
+          id: "T004",
+          subject: "复核提醒事项 App 完成证据",
+          description: "生成最终完成摘要，证明计划、实现和验收链路闭合。",
+          blockedBy: ["T003"],
+          writable_paths: [".workflow/reports/**"],
+          worker_command: nodeEval(`
+            const fs = require("fs");
+            fs.mkdirSync(".workflow/reports", { recursive: true });
+            fs.writeFileSync(".workflow/reports/reminders-summary.md", [
+              "# Reminders Completion Summary",
+              "Brief, implementation, tests, and QA report are complete.",
+              "No direct coding happened before plan import."
+            ].join("\\n"));
+          `),
+          verify_commands: [
+            nodeEval(`
+              const fs = require("fs");
+              const summary = fs.readFileSync(".workflow/reports/reminders-summary.md", "utf8");
+              if (!summary.includes("Brief") || !summary.includes("QA report")) process.exit(1);
+            `),
+          ],
+        },
       ],
     }, null, 2));
 
@@ -1517,10 +1994,14 @@ test("simulation greenfield project runs from product planning to completed web 
     assert.equal(first.status, "completed");
     const second = await runNextTask(dir);
     assert.equal(second.status, "completed");
+    const third = await runNextTask(dir);
+    assert.equal(third.status, "completed");
+    const fourth = await runNextTask(dir);
+    assert.equal(fourth.status, "completed");
 
     const status = await statusReport(dir);
-    assert.equal(status.total, 2);
-    assert.equal(status.completed, 2);
+    assert.equal(status.total, 4);
+    assert.equal(status.completed, 4);
     assert.match(await readFile(path.join(dir, "index.html"), "utf8"), /提醒事项/);
     assert.match(await readFile(resolveHelixPath(dir, "reports", "workflow-summary.md"), "utf8"), /Status: PASS/);
   });
@@ -1603,6 +2084,56 @@ test("simulation existing project handles large feature addition through plannin
           `),
           verify_commands: ["node test/app.test.cjs"],
         },
+        {
+          id: "T003",
+          subject: "验收提醒分组的回归和边界证据",
+          description: "验证既有 listItems 回归、新增 groupReminder happy path 和错误路径。",
+          blockedBy: ["T002"],
+          writable_paths: [".helix/artifacts/**"],
+          worker_command: nodeEval(`
+            const fs = require("fs");
+            fs.mkdirSync(".helix/artifacts", { recursive: true });
+            const source = fs.readFileSync("src/app.cjs", "utf8");
+            const tests = fs.readFileSync("test/app.test.cjs", "utf8");
+            fs.writeFileSync(".helix/artifacts/reminder-groups-qa.md", [
+              "# Reminder Groups QA",
+              source.includes("listItems") ? "PASS existing behavior" : "FAIL existing behavior",
+              source.includes("groupReminder") ? "PASS new behavior" : "FAIL new behavior",
+              tests.includes("invalid.error") ? "PASS error path" : "FAIL error path"
+            ].join("\\n"));
+          `),
+          verify_commands: [
+            nodeEval(`
+              const fs = require("fs");
+              const report = fs.readFileSync(".helix/artifacts/reminder-groups-qa.md", "utf8");
+              if (report.includes("FAIL") || !report.includes("PASS existing behavior")) process.exit(1);
+            `),
+          ],
+        },
+        {
+          id: "T004",
+          subject: "复核提醒分组范围取舍和交付摘要",
+          description: "记录范围取舍、回归证据和交付状态。",
+          blockedBy: ["T003"],
+          writable_paths: [".workflow/reports/**"],
+          worker_command: nodeEval(`
+            const fs = require("fs");
+            fs.mkdirSync(".workflow/reports", { recursive: true });
+            fs.writeFileSync(".workflow/reports/reminder-groups-summary.md", [
+              "# Reminder Groups Completion Summary",
+              "IN scope group creation and assignment are complete.",
+              "Existing listItems regression evidence is preserved.",
+              "OUT scope sharing permissions and cloud sync remain deferred."
+            ].join("\\n"));
+          `),
+          verify_commands: [
+            nodeEval(`
+              const fs = require("fs");
+              const summary = fs.readFileSync(".workflow/reports/reminder-groups-summary.md", "utf8");
+              if (!summary.includes("regression evidence") || !summary.includes("OUT scope")) process.exit(1);
+            `),
+          ],
+        },
       ],
     }, null, 2));
 
@@ -1612,10 +2143,12 @@ test("simulation existing project handles large feature addition through plannin
     assert.equal(implemented.status, "completed");
     assert.equal(implemented.scopeResult.status, "pass");
     assert.equal(implemented.reviewResult.pass, true);
+    assert.equal((await runNextTask(dir)).status, "completed");
+    assert.equal((await runNextTask(dir)).status, "completed");
 
     await writeWorkflowSummary(dir, { reason: "existing_feature_simulation" });
     const status = await statusReport(dir);
-    assert.equal(status.completed, 2);
+    assert.equal(status.completed, 4);
     assert.match(await readFile(path.join(dir, "src", "app.cjs"), "utf8"), /groupReminder/);
     assert.match(await readFile(resolveHelixPath(dir, "reports", "workflow-summary.md"), "utf8"), /Status: PASS/);
   });
@@ -2077,6 +2610,32 @@ test("scope guard checks git changed paths against task writable paths", async (
   });
 });
 
+test("scope guard rejects symlink realpaths that escape the project", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const outsidePath = path.join(path.dirname(dir), "outside-scope.txt");
+    await writeFile(outsidePath, "secret\n");
+    await symlink(outsidePath, path.join(dir, "allowed-link.txt"));
+    const planPath = path.join(dir, "symlink-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Symlink scope",
+      tasks: [{
+        id: "T001",
+        subject: "Reject symlink escape",
+        writable_paths: ["allowed-link.txt"],
+        worker_command: "node -e \"process.exit(0)\"",
+        verify_commands: ["node -e \"process.exit(0)\""],
+      }],
+    }));
+    await importPlan(dir, planPath);
+
+    const result = await scopeGuard(dir, { taskId: "T001", changedPaths: ["allowed-link.txt"] });
+    assert.equal(result.status, "fail");
+    assert.match(result.deniedPaths[0], /allowed-link\.txt -> /);
+    await rm(outsidePath, { force: true });
+  });
+});
+
 test("pathAllowed supports exact paths, directories, globs, and empty scopes", () => {
   assert.equal(pathAllowed("src/index.js", ["src/**"]), true);
   assert.equal(pathAllowed("src/index.js", ["src"]), true);
@@ -2257,16 +2816,25 @@ test("dashboard API drives task, inbox, and summary operations without bypassing
     await importPlan(dir, planPath);
 
     await withDashboard(dir, async (baseUrl) => {
+      const authHeaders = { authorization: "Bearer dashboard-token" };
       const state = await fetchJson(`${baseUrl}/api/state`);
       assert.equal(state.response.status, 200);
       assert.equal(state.body.status.pending, 2);
       assert.equal(state.body.summary, null);
 
-      const blockedClaim = await postJson(`${baseUrl}/api/tasks/claim`, { taskId: "T002", owner: "YingLong" });
+      const unauthenticatedRun = await postJson(`${baseUrl}/api/run-next`, {});
+      assert.equal(unauthenticatedRun.response.status, 401);
+
+      const crossSite = await postJson(`${baseUrl}/api/summary`, {}, {
+        headers: { authorization: "Bearer dashboard-token", origin: "https://example.com" },
+      });
+      assert.equal(crossSite.response.status, 403);
+
+      const blockedClaim = await postJson(`${baseUrl}/api/tasks/claim`, { taskId: "T002", owner: "YingLong" }, { headers: authHeaders });
       assert.equal(blockedClaim.response.status, 500);
       assert.match(blockedClaim.body.error, /blocked by T001/);
 
-      const claimed = await postJson(`${baseUrl}/api/tasks/claim`, { taskId: "T001", owner: "YingLong" });
+      const claimed = await postJson(`${baseUrl}/api/tasks/claim`, { taskId: "T001", owner: "YingLong" }, { headers: authHeaders });
       assert.equal(claimed.response.status, 200);
       assert.equal(claimed.body.result.task.status, "in_progress");
       assert.equal(claimed.body.result.task.owner, "YingLong");
@@ -2278,14 +2846,14 @@ test("dashboard API drives task, inbox, and summary operations without bypassing
       const badTaskPath = await fetchJson(`${baseUrl}/api/tasks/%E0%A4%A`);
       assert.equal(badTaskPath.response.status, 400);
 
-      const badClaim = await postJson(`${baseUrl}/api/tasks/claim`, { taskId: "../T001", owner: "YingLong" });
+      const badClaim = await postJson(`${baseUrl}/api/tasks/claim`, { taskId: "../T001", owner: "YingLong" }, { headers: authHeaders });
       assert.equal(badClaim.response.status, 400);
 
       const message = await postJson(`${baseUrl}/api/team/send`, {
         from: "Jiuwei",
         to: "YingLong",
         body: "Continue T001 from dashboard.",
-      });
+      }, { headers: authHeaders });
       assert.equal(message.response.status, 200);
       assert.equal(message.body.result.to, "YingLong");
 
@@ -2300,24 +2868,24 @@ test("dashboard API drives task, inbox, and summary operations without bypassing
         blockedBy: ["T001"],
         worker_command: "node -e \"process.exit(0)\"",
         verify_commands: ["node -e \"process.exit(0)\""],
-      });
+      }, { headers: authHeaders });
       assert.equal(created.response.status, 200);
       assert.equal(created.body.result.task.id, "T003");
       assert.equal(created.body.result.task.status, "pending");
 
-      const summary = await postJson(`${baseUrl}/api/summary`, {});
+      const summary = await postJson(`${baseUrl}/api/summary`, {}, { headers: authHeaders });
       assert.equal(summary.response.status, 200);
       assert.equal(summary.body.result.reason, "dashboard");
       assert.equal(summary.body.result.ok, false);
 
-      const badNode = await postJson(`${baseUrl}/api/node/%E0%A4%A`, { taskId: "T001" });
+      const badNode = await postJson(`${baseUrl}/api/node/%E0%A4%A`, { taskId: "T001" }, { headers: authHeaders });
       assert.equal(badNode.response.status, 400);
 
       const refreshed = await fetchJson(`${baseUrl}/api/state`);
       assert.equal(refreshed.response.status, 200);
       assert.equal(refreshed.body.summary.reason, "dashboard");
       assert.equal(refreshed.body.tasks.length, 3);
-    });
+    }, { token: "dashboard-token" });
   });
 });
 
@@ -2336,13 +2904,21 @@ test("dashboard requires a token for non-loopback hosts and enforces API auth", 
       assert.ok(port);
       const baseUrl = `http://127.0.0.1:${port}`;
 
-      const denied = await fetchJson(`${baseUrl}/api/state`);
+      const readable = await fetchJson(`${baseUrl}/api/state`);
+      assert.equal(readable.response.status, 200);
+
+      const denied = await postJson(`${baseUrl}/api/summary`, {});
       assert.equal(denied.response.status, 401);
 
       const allowed = await fetchJson(`${baseUrl}/api/state`, {
         headers: { authorization: "Bearer secret-token" },
       });
       assert.equal(allowed.response.status, 200);
+
+      const writeAllowed = await postJson(`${baseUrl}/api/summary`, {}, {
+        headers: { authorization: "Bearer secret-token" },
+      });
+      assert.equal(writeAllowed.response.status, 200);
     } finally {
       await new Promise((resolve, reject) => {
         server.close((error) => {

@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   DEFAULT_LEAD_AGENT,
@@ -66,13 +66,14 @@ export async function runParallelAgents(rootDir, options = {}) {
     index,
   })));
   await appendRunIndex(rootDir, runId, results);
-  const pass = results.every((result) => result.exitCode === 0);
+  const skipped = results.length > 0 && results.every((result) => result.status === "skipped");
+  const pass = results.every((result) => result.pass === true);
   const batch = {
     kind: "parallel_agent_batch",
     runId,
     at: nowIso(),
     startedAt,
-    status: pass ? "completed" : "failed",
+    status: skipped ? "skipped" : pass ? "completed" : "failed",
     isolation: "run-dir",
     planId: taskState.planId,
     taskCount: results.length,
@@ -88,6 +89,102 @@ export async function listParallelAgentRuns(rootDir) {
   await ensureHelixDirs(rootDir);
   const index = await readJson(resolveHelixPath(rootDir, "agent-runs", "index.json"), { runs: [] });
   return index;
+}
+
+export async function parallelAgentStatus(rootDir, options = {}) {
+  await ensureHelixDirs(rootDir);
+  const index = await listParallelAgentRuns(rootDir);
+  const selectedRuns = options.runId
+    ? (index.runs || []).filter((run) => run.runId === options.runId)
+    : (index.runs || []);
+  const runs = [];
+  for (const run of selectedRuns) {
+    const results = [];
+    for (const entry of run.results || []) {
+      const resultPath = resolveHelixPath(rootDir, "agent-runs", run.runId, entry.taskId, "result.json");
+      const result = await readJson(resultPath, null);
+      results.push({
+        taskId: entry.taskId,
+        agent: entry.agent,
+        pass: entry.pass,
+        runDir: entry.runDir,
+        lifecycle: result?.lifecycle || entry.lifecycle || null,
+        adapter: result?.adapter || null,
+        isolation: result?.isolation || null,
+        command: result?.command || null,
+        resultPath: path.relative(rootDir, resultPath),
+      });
+    }
+    runs.push({
+      runId: run.runId,
+      createdAt: run.createdAt,
+      updatedAt: run.updatedAt,
+      summary: summarizeRunLifecycle(results),
+      results,
+    });
+  }
+  return {
+    kind: "parallel_agent_status",
+    runId: options.runId || null,
+    runCount: runs.length,
+    runs,
+  };
+}
+
+export async function closeParallelAgentRun(rootDir, options = {}) {
+  await ensureHelixDirs(rootDir);
+  if (!options.runId) throw new Error("parallel close requires --run <runId>");
+  const index = await listParallelAgentRuns(rootDir);
+  const run = (index.runs || []).find((candidate) => candidate.runId === options.runId);
+  if (!run) throw new Error(`parallel run not found: ${options.runId}`);
+  const closed = [];
+  for (const entry of run.results || []) {
+    if (options.taskId && entry.taskId !== options.taskId) continue;
+    const status = options.status || "closed";
+    await updateAgentRunLifecycle(rootDir, options.runId, entry.taskId, status, {
+      closedAt: nowIso(),
+      closeReason: options.reason || "user_closed",
+    });
+    closed.push(entry.taskId);
+  }
+  await appendLedger(rootDir, { type: "parallel_agent_run_closed", runId: options.runId, taskIds: closed, reason: options.reason || "user_closed" });
+  return {
+    kind: "parallel_agent_close",
+    runId: options.runId,
+    closed,
+  };
+}
+
+export async function cleanupParallelAgentRun(rootDir, options = {}) {
+  await ensureHelixDirs(rootDir);
+  if (!options.runId) throw new Error("parallel cleanup requires --run <runId>");
+  const status = await parallelAgentStatus(rootDir, { runId: options.runId });
+  const cleaned = [];
+  for (const run of status.runs || []) {
+    for (const entry of run.results || []) {
+      const resultPath = resolveHelixPath(rootDir, "agent-runs", run.runId, entry.taskId, "result.json");
+      const result = await readJson(resultPath, null);
+      if (!result || result.isolation !== "git-worktree" || result.worktreeAvailable !== true) continue;
+      const worktreeDir = path.join(rootDir, result.workDir || "");
+      const remove = await runCommand(`git -C ${shellEscape(rootDir)} worktree remove --force ${shellEscape(worktreeDir)}`, rootDir, 30_000);
+      if (remove.exitCode !== 0 && !/is not a working tree|No such file/i.test(remove.stderr || remove.stdout || "")) {
+        cleaned.push({ taskId: entry.taskId, status: "failed", path: result.workDir, error: remove.stderr || remove.stdout });
+        continue;
+      }
+      await runCommand(`git -C ${shellEscape(rootDir)} worktree prune`, rootDir, 30_000);
+      await updateAgentRunLifecycle(rootDir, run.runId, entry.taskId, "cleaned", {
+        cleanedAt: nowIso(),
+        cleanedPath: result.workDir,
+      });
+      cleaned.push({ taskId: entry.taskId, status: "cleaned", path: result.workDir });
+    }
+  }
+  await appendLedger(rootDir, { type: "parallel_agent_worktree_cleanup", runId: options.runId, cleanedCount: cleaned.filter((item) => item.status === "cleaned").length });
+  return {
+    kind: "parallel_agent_cleanup",
+    runId: options.runId,
+    cleaned,
+  };
 }
 
 export async function admitParallelAgentResult(rootDir, options = {}) {
@@ -135,9 +232,14 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
     scopeResult,
     reviewResult,
   });
+  let rollback = null;
+  if (finalized.status !== "completed") {
+    rollback = await rollbackAdmissionChanges(rootDir, prepared.rollbackPlan);
+  }
   await updateAgentRunLifecycle(rootDir, options.runId, options.taskId, finalized.status === "completed" ? "released" : "awaiting_revision", {
     admissionStatus: finalized.status,
     releasedAt: finalized.status === "completed" ? nowIso() : null,
+    rollback,
   });
   await appendLedger(rootDir, {
     type: "parallel_agent_admission_completed",
@@ -145,12 +247,14 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
     taskId: options.taskId,
     status: finalized.status,
     appliedPaths: prepared.appliedPaths,
+    rollback,
   });
   await writeSnapshot(rootDir, "parallel_agent_admission_completed", {
     runId: options.runId,
     taskId: options.taskId,
     status: finalized.status,
     appliedPaths: prepared.appliedPaths,
+    rollback,
   });
   return {
     kind: "parallel_agent_admission",
@@ -162,6 +266,7 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
     scopeResult,
     reviewResult,
     acceptanceProof: finalized.acceptanceProof || null,
+    rollback,
     task: finalized.task,
   };
 }
@@ -205,7 +310,9 @@ async function prepareAdmission(rootDir, taskId, result, files) {
     throw new Error(`parallel admission denied by writable_paths: ${denied.join(", ")}`);
   }
 
+  let rollbackPlan = { mode: "none", paths: [] };
   if (files.length > 0) {
+    rollbackPlan = await createFileRollbackPlan(rootDir, files);
     for (const file of files) {
       const absolutePath = path.join(rootDir, file.path);
       assertInsideRoot(rootDir, absolutePath, file.path);
@@ -213,7 +320,16 @@ async function prepareAdmission(rootDir, taskId, result, files) {
       await writeFile(absolutePath, file.content, "utf8");
     }
   } else if (typeof result.result?.patch === "string") {
+    rollbackPlan = { mode: "patch", patch: result.result.patch, paths: proposedPaths };
     await applyAgentPatch(rootDir, result.result.patch);
+    const actualPaths = await collectActualAdmissionPaths(rootDir, proposedPaths);
+    const actualDenied = actualPaths.filter((filePath) => !pathAllowed(filePath, current.task.writable_paths || []));
+    if (actualDenied.length > 0) {
+      const rollback = await rollbackAdmissionChanges(rootDir, rollbackPlan);
+      throw new Error(`parallel admission denied by actual written paths: ${actualDenied.join(", ")}; rollback=${rollback.status}`);
+    }
+    rollbackPlan.paths = actualPaths;
+    proposedPaths.splice(0, proposedPaths.length, ...actualPaths);
   } else {
     throw new Error("parallel result has no result.files or result.patch to admit");
   }
@@ -260,7 +376,66 @@ async function prepareAdmission(rootDir, taskId, result, files) {
     agent: result.agent,
     appliedPaths: proposedPaths,
   });
-  return { task, workerResult, appliedPaths: proposedPaths };
+  return { task, workerResult, appliedPaths: proposedPaths, rollbackPlan };
+}
+
+async function collectActualAdmissionPaths(rootDir, fallbackPaths) {
+  const result = await runCommand("git diff --name-only -- . ':!.helix'", rootDir, 30_000);
+  if (result.exitCode !== 0) return fallbackPaths;
+  const paths = result.stdout.split(/\r?\n/).map((line) => normalizeRelativePath(line.trim())).filter(Boolean);
+  return paths.length > 0 ? [...new Set(paths)] : fallbackPaths;
+}
+
+async function createFileRollbackPlan(rootDir, files) {
+  const entries = [];
+  for (const file of files) {
+    const absolutePath = path.join(rootDir, file.path);
+    assertInsideRoot(rootDir, absolutePath, file.path);
+    try {
+      entries.push({
+        path: file.path,
+        existed: true,
+        content: await readFile(absolutePath, "utf8"),
+      });
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      entries.push({ path: file.path, existed: false, content: "" });
+    }
+  }
+  return { mode: "files", paths: files.map((file) => file.path), entries };
+}
+
+async function rollbackAdmissionChanges(rootDir, rollbackPlan) {
+  if (!rollbackPlan || rollbackPlan.mode === "none") {
+    return { status: "skipped", reason: "no rollback plan" };
+  }
+  try {
+    if (rollbackPlan.mode === "files") {
+      for (const entry of rollbackPlan.entries || []) {
+        const absolutePath = path.join(rootDir, entry.path);
+        assertInsideRoot(rootDir, absolutePath, entry.path);
+        if (entry.existed) {
+          await mkdir(path.dirname(absolutePath), { recursive: true });
+          await writeFile(absolutePath, entry.content, "utf8");
+        } else {
+          await rm(absolutePath, { force: true });
+        }
+      }
+    } else if (rollbackPlan.mode === "patch") {
+      const patchPath = path.join(rootDir, ".helix", "agent-runs", `rollback-${Date.now()}-${process.pid}.patch`);
+      await writeFile(patchPath, rollbackPlan.patch, "utf8");
+      const reverse = await runCommand(`git -C ${shellEscape(rootDir)} apply --reverse --whitespace=nowarn ${shellEscape(patchPath)}`, rootDir, 30_000);
+      if (reverse.exitCode !== 0) {
+        throw new Error(reverse.stderr || reverse.stdout || "git apply --reverse failed");
+      }
+    }
+    await appendLedger(rootDir, { type: "parallel_agent_admission_rolled_back", mode: rollbackPlan.mode, paths: rollbackPlan.paths || [] });
+    return { status: "rolled_back", mode: rollbackPlan.mode, paths: rollbackPlan.paths || [] };
+  } catch (error) {
+    const summary = error instanceof Error ? error.message : String(error);
+    await appendLedger(rootDir, { type: "parallel_agent_admission_rollback_failed", mode: rollbackPlan.mode, paths: rollbackPlan.paths || [], error: summary });
+    return { status: "rollback_failed", mode: rollbackPlan.mode, paths: rollbackPlan.paths || [], error: summary };
+  }
 }
 
 async function finalizeAdmission(rootDir, taskId, evidence) {
@@ -366,12 +541,13 @@ async function runOneAgent(rootDir, runDir, runId, task, options) {
     resultPath,
   }, options);
   const command = spawn.command;
+  const commandConfigured = Boolean(command);
   const startedAt = nowIso();
   const commandResult = worktree.isolation === "git-worktree" && worktree.available !== true
     ? { exitCode: 1, stdout: "", stderr: worktree.reason || "git-worktree isolation unavailable" }
     : command
       ? await runCommand(command, worktree.workDir, normalizeTimeout(options.timeoutMs || config.parallelAgents?.timeoutMs))
-      : { exitCode: 0, stdout: "", stderr: "no runner command configured; task packet prepared only" };
+      : { exitCode: 78, stdout: "", stderr: "no runner command configured; task packet prepared only" };
   const structuredResult = await readJson(resultPath, null) || {};
   const patchResult = await collectAgentWorktreePatch(rootDir, worktree, {
     timeoutMs: normalizeTimeout(options.timeoutMs || config.parallelAgents?.timeoutMs),
@@ -398,11 +574,12 @@ async function runOneAgent(rootDir, runDir, runId, task, options) {
     worktreeAvailable: worktree.available,
     worktreeReason: worktree.reason,
     exitCode: commandResult.exitCode,
-    pass: commandResult.exitCode === 0,
+    status: commandConfigured ? (commandResult.exitCode === 0 ? "pass" : "fail") : "skipped",
+    pass: commandConfigured && commandResult.exitCode === 0,
     stdout: truncate(commandResult.stdout || "", 4000),
     stderr: truncate(commandResult.stderr || "", 4000),
     result: structuredResult,
-    lifecycle: buildAgentLifecycle(commandResult.exitCode === 0, config),
+    lifecycle: buildAgentLifecycle(commandConfigured && commandResult.exitCode === 0, config, commandConfigured ? null : "skipped"),
     patch: patchResult ? {
       patchPath: patchResult.patchPath,
       changedPaths: patchResult.changedPaths,
@@ -415,7 +592,7 @@ async function runOneAgent(rootDir, runDir, runId, task, options) {
   await sendTeamMessage(rootDir, {
     from: agent,
     to: DEFAULT_LEAD_AGENT,
-    summary: `${task.id} parallel result: ${result.pass ? "pass" : "fail"}`,
+    summary: `${task.id} parallel result: ${result.status || (result.pass ? "pass" : "fail")}`,
     body: buildMessageBody(task, result),
   });
   await appendLedger(rootDir, { type: "parallel_agent_result", runId, taskId: task.id, agent, pass: result.pass });
@@ -528,7 +705,14 @@ async function updateAgentRunLifecycle(rootDir, runId, taskId, status, details =
   await appendLedger(rootDir, { type: "parallel_agent_lifecycle_updated", runId, taskId, status });
 }
 
-function buildAgentLifecycle(pass, config) {
+function buildAgentLifecycle(pass, config, statusOverride = null) {
+  if (statusOverride === "skipped") {
+    return {
+      status: "skipped",
+      retainUntil: null,
+      updatedAt: nowIso(),
+    };
+  }
   if (!pass) {
     return {
       status: "failed",
@@ -550,11 +734,20 @@ function buildAgentLifecycle(pass, config) {
   };
 }
 
+function summarizeRunLifecycle(results) {
+  const counts = {};
+  for (const result of results) {
+    const status = result.lifecycle?.status || (result.pass ? "completed" : "failed");
+    counts[status] = (counts[status] || 0) + 1;
+  }
+  return counts;
+}
+
 function buildMessageBody(task, result) {
   const lines = [
     `Task: ${task.id} ${task.subject}`,
     `Agent: ${result.agent}`,
-    `Status: ${result.pass ? "pass" : "fail"}`,
+    `Status: ${result.status || (result.pass ? "pass" : "fail")}`,
     `Run dir: ${result.runDir}`,
   ];
   if (result.result?.summary) lines.push(`Summary: ${result.result.summary}`);
@@ -622,4 +815,8 @@ function normalizeRelativePath(filePath) {
 
 function truncate(value, limit) {
   return value.length <= limit ? value : `${value.slice(0, limit - 20)}\n...[truncated]`;
+}
+
+function shellEscape(value) {
+  return `'${String(value).replaceAll("'", "'\\''")}'`;
 }
