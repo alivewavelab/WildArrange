@@ -36,7 +36,8 @@ bin/helix.mjs
 
 - `bin/helix.mjs`: CLI routing.
 - `src/helix-core.mjs`: compatibility export surface for existing CLI/tests/imports.
-- `src/helix-foundation.mjs`: shared constants, runtime initialization, config, locks, prompt-pack registry, hash-chained ledger, ledger verification, snapshots, and resume context basics.
+- `src/helix-foundation.mjs`: shared constants, runtime initialization, config, locks, prompt-pack registry, snapshots, and resume context basics.
+- `src/helix-ledger.mjs`: hash-chained ledger append and ledger verification.
 - `src/helix-adapters.mjs`: Codex/Cursor adapter install, uninstall, restore, report, backup logic, Codex `.codex/hooks.json` generation, and Cursor soft-rule generation.
 - `src/helix-change.mjs`: steering proposals, review blockers, ChangeRequest review, and explicit accept/reject resolution.
 - `src/helix-failure.mjs`: failure reason classification, retry hints, and actionable failure summaries.
@@ -46,6 +47,8 @@ bin/helix.mjs
 - `src/helix-memory-digest.mjs`: structured session/task/checkpoint digest generation for cross-session recovery.
 - `src/helix-rules.mjs`: project rule scanning and rule-context generation from AGENTS/CLAUDE/Cursor-style files.
 - `src/helix-review.mjs`: worker execution and deterministic BaiZe/QiongQi/LuanNiao review lanes.
+- `src/helix-command-safety.mjs`: high-risk shell command preflight shared by worker, verifier, review commands, quality gates, and child-agent runners.
+- `src/helix-security.mjs`: config hash baselines, config verification, runtime state backup, and critical state verification.
 - `src/helix-code-intel.mjs`: host-neutral code intelligence gates for LSP/typecheck commands, AST/structure commands, hashline anchors, and comment checking.
 - `src/helix-injection.mjs`: injection-point resolution and mounted markdown/skill attachment loading.
 - `src/helix-skill-matcher.mjs`: stage/route/agent/keyword skill matching and configurable prompt model variants.
@@ -70,6 +73,8 @@ bin/helix.mjs
 
 - `.helix/team/tasks.json`: durable task state.
 - `.helix/ledger.jsonl`: hash-chained append-only audit log. `ledger verify` detects ordinary line edits or broken chains.
+- `.helix/security/config-baseline.json`: reviewed config fingerprints. `config verify` detects config files added, removed, or changed after baseline.
+- `.helix/backups`: point-in-time copies of ledger, work, tasks, snapshots, and config baseline created by `state backup`.
 - `.helix/checkpoints`: checkpoint JSON after all gates pass.
 - `.helix/reports`: human-readable reports.
 - `.helix/snapshots/context.md`: resume context.

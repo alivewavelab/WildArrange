@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>WildArrange 项目 Review</title>
+<style>
+  :root { --bg:#0f1117; --card:#1a1d27; --ink:#e1e4eb; --muted:#8b92a5; --accent:#5b9cf5; --good:#34d399; --bad:#f87171; --warn:#fbbf24; --purple:#a78bfa; --line:#2a2e3a; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--ink); font:14px/1.6 ui-sans-serif,system-ui,-apple-system,sans-serif; padding:24px; }
+  header { max-width:960px; margin:0 auto 32px; }
+  h1 { font-size:22px; }
+  .meta { color:var(--muted); font-size:12px; margin-top:4px; }
+  main { max-width:960px; margin:0 auto; display:grid; gap:20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px 20px; }
+  h2 { font-size:15px; margin-bottom:12px; display:flex; align-items:center; gap:8px; }
+  .badge { font-size:11px; border-radius:99px; padding:2px 8px; font-weight:600; }
+  .badge-pass { background:#064e3b; color:var(--good); }
+  .badge-warn { background:#451a03; color:var(--warn); }
+  .badge-fail { background:#450a0a; color:var(--bad); }
+  .badge-info { background:#1e293b; color:var(--accent); }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .grid3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
+  .metric { text-align:center; padding:12px; border:1px solid var(--line); border-radius:8px; }
+  .metric .num { font-size:28px; font-weight:700; }
+  .metric .label { font-size:11px; color:var(--muted); margin-top:2px; }
+  ul { padding-left:18px; }
+  li { margin:4px 0; }
+  .severity { display:inline-block; width:8px; height:8px; border-radius:99px; margin-right:6px; }
+  .sev-high { background:var(--bad); }
+  .sev-med { background:var(--warn); }
+  .sev-low { background:var(--accent); }
+  table { width:100%; border-collapse:collapse; font-size:13px; margin-top:8px; }
+  th { text-align:left; color:var(--muted); font-weight:600; padding:6px 8px; border-bottom:1px solid var(--line); font-size:11px; }
+  td { padding:6px 8px; border-bottom:1px solid var(--line); }
+  .file-size { font-size:11px; color:var(--muted); margin-left:6px; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; background:#252830; padding:1px 5px; border-radius:4px; }
+  .tag { font-size:10px; border-radius:4px; padding:1px 6px; margin:0 2px; }
+  .tag-good { background:#064e3b; color:var(--good); }
+  .tag-warn { background:#451a03; color:var(--warn); }
+  .tag-bad { background:#450a0a; color:var(--bad); }
+  pre { background:#252830; border-radius:8px; padding:12px; overflow:auto; font-size:12px; white-space:pre-wrap; }
+  hr { border:none; border-top:1px solid var(--line); margin:16px 0; }
+  .score-bar { height:6px; border-radius:3px; background:var(--line); margin-top:6px; }
+  .score-fill { height:100%; border-radius:3px; }
+</style>
+</head>
+<body>
+<header>
+<h1>WildArrange 完整性审查</h1>
+<div class="meta">审查日期：2026-06-16 · 版本 0.1.0 · 73 tests 全通过 · 29 源文件 / 9,696 行代码 + 2,972 行测试</div>
+</header>
+<main>
+
+<!-- Executive Summary -->
+<div class="card">
+<h2>总评</h2>
+<div class="grid3">
+<div class="metric"><div class="num" style="color:var(--good)">A</div><div class="label">架构设计</div></div>
+<div class="metric"><div class="num" style="color:var(--good)">A</div><div class="label">治理安全</div></div>
+<div class="metric"><div class="num" style="color:var(--warn)">B+</div><div class="label">功能完整性</div></div>
+<div class="metric"><div class="num" style="color:var(--warn)">B</div><div class="label">Agent 鲁棒性</div></div>
+<div class="metric"><div class="num" style="color:var(--good)">A-</div><div class="label">代码质量</div></div>
+<div class="metric"><div class="num" style="color:var(--good)">A</div><div class="label">测试覆盖</div></div>
+</div>
+<p style="margin-top:12px;color:var(--muted)">WildArrange 是目前见过的 AI Agent 治理工具中，<strong style="color:var(--ink)">安全不变量最严格、证据链最完整</strong> 的一个。核心理念（worker 不能说完成就完成，必须独立验证+范围检查+复核+验收证明）贯彻得非常彻底，几乎没有可以绕过的路径。<br><br>主要风险在 Agent 执行层面：作为被 Agent 运行的工具，自身需要更健壮的自我保护，尤其是 shell:true 命令执行、config 注入、并行 Agent 生命周期这三块。</p>
+</div>
+
+<!-- Architecture -->
+<div class="card">
+<h2>1. 架构分析 <span class="badge badge-pass">A</span></h2>
+
+<h3 style="font-size:13px;margin-top:12px;">职责拆分</h3>
+<table>
+<tr><th>层</th><th>模块</th><th>行数</th><th>职责</th></tr>
+<tr><td>⏚ 基础</td><td>helix-foundation</td><td>1,021 <span class="tag tag-warn">边界</span></td><td>路径/JSON/锁/配置/ledger/快照/提示包</td></tr>
+<tr><td>⎍ 核心</td><td>helix-core</td><td>130</td><td>兼容导出层（薄）</td></tr>
+<tr><td>⚙ 流程</td><td>helix-plan · team · node-runtime · workflow</td><td>80 – 541</td><td>计划导入/任务状态/线性执行/workflow</td></tr>
+<tr><td>🛡 门控</td><td>helix-gates · acceptance-proof · code-intel · review · review-findings</td><td>118 – 615</td><td>验证/范围/复核/验收证明/代码质量</td></tr>
+<tr><td>🔀 路由</td><td>helix-routing · archivist-router · skill-matcher</td><td>190 – 588</td><td>确定性+语义混合路由/档案路由/技能匹配</td></tr>
+<tr><td>🔧 适配</td><td>helix-adapters · agent-spawn · git-worktree · parallel-agents</td><td>55 – 822</td><td>Codex/Cursor 适配/子 Agent spawn/worktree/并行</td></tr>
+<tr><td>🖥 UI</td><td>helix-dashboard</td><td>621</td><td>内联 HTML dashboard + API</td></tr>
+</table>
+
+<h3 style="font-size:13px;margin-top:16px;">状态机</h3>
+<pre>pending → in_progress → verifying → (scope check + review gate + acceptance proof) → completed
+                                  ↘ failed / review_blocked / needs_user_decision
+                                  ↘ pending（retry 路径）</pre>
+
+<h3 style="font-size:13px;margin-top:12px;">优点</h3>
+<ul>
+<li><span class="severity sev-low"></span>模块边界清晰：每个 <code>helix-*.mjs</code> 只做一个域的事</li>
+<li><span class="severity sev-low"></span>helix-core 真正做到了纯兼容导出层，没有堆业务逻辑</li>
+<li><span class="severity sev-low"></span>状态持久化与状态机执行分离（task.json 是真相，runNextTask 是动作）</li>
+<li><span class="severity sev-low"></span>锁机制（withTaskStateLock）保证并发安全，支持 stale lock 回收</li>
+<li><span class="severity sev-low"></span>原子写入（temp + rename）避免写一半崩溃</li>
+</ul>
+
+<h3 style="font-size:13px;margin-top:12px;">问题</h3>
+<ul>
+<li><span class="severity sev-med"></span>helix-foundation 1021 行刚好压在 1000 行红线，且混杂了路径工具、锁、配置、ledger、快照、context 渲染、提示包管理等 6+ 个域</li>
+<li><span class="severity sev-low"></span>helix-parallel-agents 822 行，已超 700 行审计线；同时承担了并行调度、patch admission、rollback、生命周期、worktree 集成，差不多 3 个域</li>
+<li><span class="severity sev-low"></span>helix-dashboard 621 行中 HTML 模板占了 ~350 行，可考虑外挂 template 文件（但无外部依赖约束下内联也可接受）</li>
+</ul>
+</div>
+
+<!-- Governance -->
+<div class="card">
+<h2>2. 治理能力审查 <span class="badge badge-pass">A</span></h2>
+
+<h3 style="font-size:13px;margin-top:8px;">安全不变量 → 逐一验证</h3>
+<table>
+<tr><th>不变量</th><th>实现</th><th>能否绕过</th></tr>
+<tr><td>verify_commands 不可为空</td><td><code>helix-gates:50-63</code> 强制检查；<code>helix-plan:73</code> 导入时校验</td><td><span class="tag tag-good">❌ 不可</span></td></tr>
+<tr><td>verify_commands 不可被 steering 削弱</td><td><code>helix-change:278-287</code> 拒绝删除已有门命令</td><td><span class="tag tag-good">❌ 不可</span></td></tr>
+<tr><td>worker done-claim 不是完成</td><td><code>helix-node-runtime:111</code> 同时检查 5 个条件</td><td><span class="tag tag-good">❌ 不可</span></td></tr>
+<tr><td>scope guard 必须 pass</td><td>realpath 解析防止符号链接逃逸 <code>helix-gates:222-244</code></td><td><span class="tag tag-good">❌ 不可</span></td></tr>
+<tr><td>review gate 必须 pass</td><td>13 条确定性 review lane + 可选 LLM lane</td><td><span class="tag tag-good">❌ 不可</span></td></tr>
+<tr><td>acceptance proof 必须 pass</td><td>8 项独立检查 <code>helix-acceptance-proof:41-74</code></td><td><span class="tag tag-good">❌ 不可</span></td></tr>
+<tr><td>ledger 可审计</td><td>SHA-256 hash 链，verify 可检测篡改</td><td><span class="tag tag-good">❌ 不可</span></td></tr>
+<tr><td>ChangeRequest 必须人工审批</td><td>autoApply=false 强制；weakening 语言检测 <code>helix-change:384-387</code></td><td><span class="tag tag-good">❌ 不可</span></td></tr>
+</table>
+
+<h3 style="font-size:13px;margin-top:12px;">弱项发现</h3>
+<ul>
+<li><span class="severity sev-med"></span><b>Scope 的非 Git 降级路径</b>：非 Git 项目使用文件 manifest 指纹，可以检测到文件增删改。但文件 manifest 不区分 "worker 改的" 和 "其他进程改的"。实际风险低（Agent 场景下通常是单进程），但理论上可被绕过。</li>
+<li><span class="severity sev-low"></span><b>Verifier 只看 exitCode=0</b>：不分析 stdout/stderr 内容。如果 verify_commands 写了一个 `node -e "process.exit(0)"`，门就过了。<code>governanceWarnings</code> 标记了 trivial 命令，但不阻断。</li>
+<li><span class="severity sev-low"></span><b>成功标准存在 legacy 默认值</b>：如果任务不写 successCriteria，系统自动种子 3 个默认 criterion（happy path/edge/regression），每个都绑到所有 verifier 命令。这比没有强，但默认 criterion 是模板化的，可能不看实际业务。</li>
+<li><span class="severity sev-low"></span><b>Cursor adapter 是软约束</b>：文档明确写了 "soft governance"。Codex 的 hard hook 依赖用户先 `/hooks` trust。</li>
+</ul>
+
+<h3 style="font-size:13px;margin-top:12px;">治理机制总结</h3>
+<pre>
+Plan → Worker → Verifier → ScopeGuard → ReviewGate(13 lanes) → AcceptanceProof(8 checks) → Checkpoint
+  ↑                                                                                            │
+  └────────────────────────── retry (with ChangeRequest if scope fail) ─────────────────────────┘
+              证据全部入 ledger（hash 链），可随时 verify。
+</pre>
+</div>
+
+<!-- Functional Completeness -->
+<div class="card">
+<h2>3. 功能设计追缺性 <span class="badge badge-warn">B+</span></h2>
+
+<div class="grid2">
+<div>
+<h3 style="font-size:13px;">✅ 已完成</h3>
+<ul style="font-size:13px;">
+<li>M1 线性 Agent 循环完整闭环</li>
+<li>独立 verifier + scope guard + review gate</li>
+<li>Acceptance proof chain（8 checks）</li>
+<li>Hash 链 ledger + 校验</li>
+<li>LSP/AST/hashline/comment 代码质量门</li>
+<li>LLM review（BaiZe/QiongQi/LuanNiao via OpenAI-compatible）</li>
+<li>ArchivistRouter（DeepSeek flash + deterministic fallback）</li>
+<li>路由建议审核流程（pending → accept/reject）</li>
+<li>语义路由 shadow（低置信度降级）</li>
+<li>Session digest / 跨会话恢复</li>
+<li>Prompt variant（GPT/Gemini/Kimi/DeepSeek）</li>
+<li>Skill 匹配器（stage/route/agent 加权打分）</li>
+<li>Steering（add/split/reorder/revise/mark_blocked）</li>
+<li>Review blocker → 生成 resolution task</li>
+<li>Codex/Cursor adapter 安装/卸载/恢复</li>
+<li>并行 Agent + Git worktree 隔离</li>
+<li>子 Agent 结果 admission（patch/file + gate 验证）</li>
+<li>Dashboard HTTP + HTML UI</li>
+<li>Team-lite 消息板</li>
+</ul>
+</div>
+<div>
+<h3 style="font-size:13px;">⚠️ 缺口 / 部分完成</h3>
+<ul style="font-size:13px;">
+<li><span class="severity sev-med"></span><b>无 CI</b>（P1 标记了但仓库尚无 remote）</li>
+<li><span class="severity sev-med"></span><b>pre-publish-review / publish / get-unpublished-changes skills 未实现</b>（P1）</li>
+<li><span class="severity sev-low"></span><b>MCP server 生命周期管理</b> 是 PARTIAL（skill 可安装可匹配，但 MCP server 启动/停止是 "adapter work"）</li>
+<li><span class="severity sev-low"></span><b>常驻多 Agent 集群</b> 未启动（P2 设计如此）</li>
+<li><span class="severity sev-low"></span><b>tmux/cmux 可视化</b> 已推迟</li>
+<li><span class="severity sev-low"></span><b>并行 Agent 的 <code>awaiting_user_acceptance</code> 状态</b>：子 Agent 成功后默认保留等待 admission，但如果用户忘记 close，结果会一直堆在 <code>.helix/agent-runs</code> 里</li>
+<li><span class="severity sev-low"></span><b>没有 lint/format 配置</b>（package.json 里无 eslint/prettier 脚本）</li>
+</ul>
+</div>
+</div>
+
+<h3 style="font-size:13px;margin-top:16px;">潜在的过度设计</h3>
+<ul>
+<li><span class="severity sev-low"></span>16 个 Agent 角色的 prompt pack，但实际运行的 M1 线性循环主要只用到 YingLong/BaiZe/QiongQi/LuanNiao。Jiuwei/DiJiang/Kui/Taotie/ZhuRong 等角色在 route 中引用但实际执行不依赖。</li>
+<li><span class="severity sev-low"></span>injectionPoints 配置了 10 个注入点，每个都有 markdown/skill/rules/tools 配置，默认全开。对一个 M1 阶段工具来说，这些注入点的实际触发依赖宿主 hook（Codex/Cursor），而 Cursor 目前是软约束。</li>
+</ul>
+</div>
+
+<!-- Agent Execution -->
+<div class="card">
+<h2>4. Agent 执行问题分析 <span class="badge badge-warn">B</span></h2>
+<p style="color:var(--muted);">WildArrange 的独特之处：它是被 Agent 安装和运行的工具。Agent 可能会误用它、绕开它、甚至直接删掉 .helix/。以下分析从 "Agent 当作工具调用时" 的角度出发。</p>
+
+<table>
+<tr><th>#</th><th>问题</th><th>严重度</th><th>详情</th></tr>
+<tr>
+<td>1</td>
+<td><b>shell:true 无沙箱</b></td>
+<td><span class="tag tag-bad">高</span></td>
+<td><code>helix-gates:17-48 runCommand</code> 使用 <code>shell:true</code>。当 Agent 调用 <code>helix node execute --task T001</code> 时，worker_command 在 shell 中执行。如果 plan.json 里的 worker_command 被篡改为 <code>rm -rf /</code>，没有沙箱兜底。建议：至少加一个 <code>--dry-run</code> 模式和命令白名单。</td>
+</tr>
+<tr>
+<td>2</td>
+<td><b>.helix/ 目录无完整性保护</b></td>
+<td><span class="tag tag-bad">高</span></td>
+<td>Agent 可以直接删除 .helix/ledger.jsonl 或 .helix/team/tasks.json。ledger hash 链能检测篡改但无法阻止删除。建议：考虑 .helix/ 目录的定期备份或 Git 自动提交。</td>
+</tr>
+<tr>
+<td>3</td>
+<td><b>Plan.json 导入无签名校验</b></td>
+<td><span class="tag tag-warn">中</span></td>
+<td>Agent 可能生成一个 verify_commands 为空的 plan.json，绕过导入时校验。实际测试了 <code>empty verifier commands cannot complete</code> 这个场景，但在 corrupt task state 后通过。不过运行时仍会被 rejectionReason 拦截。</td>
+</tr>
+<tr>
+<td>4</td>
+<td><b>config 可被 Agent 热修改</b></td>
+<td><span class="tag tag-warn">中</span></td>
+<td>Agent 可以编辑 helix.config.json 关闭 commentChecker、关闭 review.llm.required 等。目前没有 config 文件自身的 hash 或签名保护。Agent 可能关掉质量门然后通过 checkpoint。</td>
+</tr>
+<tr>
+<td>5</td>
+<td><b>并行 Agent admission 依赖 task state lock</b></td>
+<td><span class="tag tag-warn">中</span></td>
+<td>admit 过程中 task state 分步更新（prepareAdmission → finalizeAdmission），中间如果 Agent 并发操作 task state，虽然 finalizeAdmission 加了锁，但 prepareAdmission 阶段没有全局锁。<code>helix-parallel-agents:305-380</code> 里的 updateAdmissionTask 有锁，但 getAdmissionTask 无锁。</td>
+</tr>
+<tr>
+<td>6</td>
+<td><b>Agent 可以构造 hook payload 注入</b></td>
+<td><span class="tag tag-warn">中</span></td>
+<td>hook run 接受 stdin JSON。Agent 可以伪造 hook_event_name 触发不匹配的注入点。虽然有基本的 payload 校验，但缺少 HMAC 签名。</td>
+</tr>
+<tr>
+<td>7</td>
+<td><b>Dashboard 的 POST token 默认空</b></td>
+<td><span class="tag tag-warn">中</span></td>
+<td>当 host=127.0.0.1 时，loopback 的 POST 也需要 token（文档正确），但默认 token 为空字符串。Agent 在本地可以通过 localhost POST API 绕过 CLI 直接调 runNextTask。虽然这不算安全漏洞（本地信任边界），但 Agent 可能通过 fetch 直接操作 runtime。</td>
+</tr>
+<tr>
+<td>8</td>
+<td><b>并行 Agent 结果无人认领时会堆积</b></td>
+<td><span class="tag tag-warn">低</span></td>
+<td>子 Agent 成功后进入 <code>awaiting_user_acceptance</code>。如果 Agent 忘记 <code>parallel close</code> 或 <code>parallel admit</code>，结果永远挂起。没有 TTL 或自动清理。</td>
+</tr>
+</table>
+</div>
+
+<!-- Code Review -->
+<div class="card">
+<h2>5. 代码 Review <span class="badge badge-pass">A-</span></h2>
+
+<h3 style="font-size:13px;margin-top:8px;">风格一致性</h3>
+<ul>
+<li><span class="severity sev-low"></span>ESM 统一、无外部 npm 依赖、纯 Node.js 内置模块 → 零依赖债务</li>
+<li><span class="severity sev-low"></span>写文件统一 <code>writeJsonAtomic</code>（temp + rename），无直接 writeFileSync</li>
+<li><span class="severity sev-low"></span>命名规范一致：<code>helix-{domain}.mjs</code>，导出的函数 camelCase，常量 UPPER_SNAKE</li>
+<li><span class="severity sev-low"></span>错误处理统一 throw Error，无 silent swallow</li>
+</ul>
+
+<h3 style="font-size:13px;margin-top:12px;">重复代码</h3>
+<ul>
+<li><span class="severity sev-med"></span><b><code>normalizeRelativePath</code></b> 在 6 个文件里重复定义（gates / node-runtime / adapters / parallel-agents / code-intel / archivist-router）。应提取到 foundation。</li>
+<li><span class="severity sev-med"></span><b><code>uniqueStrings</code></b> 在 5 个文件里重复定义（node-runtime / review / routing / plan / change）。应提取到 foundation。</li>
+<li><span class="severity sev-low"></span><b><code>truncateForSummary</code></b> 在 failure 和 review 中重复定义。</li>
+<li><span class="severity sev-low"></span>legacy agent name alias 在 foundation 里用字符串拼接隐藏原名，但 concept.md 说这是商业合规要求。当前实现虽然绕，但合规。</li>
+</ul>
+
+<h3 style="font-size:13px;margin-top:12px;">依赖方向</h3>
+<ul>
+<li><span class="severity sev-low"></span>依赖图基本是单向的：foundation ← domain modules ← core barrel</li>
+<li><span class="severity sev-med"></span>helix-gates 引用了 helix-plan 的 loadTaskState → 轻微的双向耦合</li>
+<li><span class="severity sev-low"></span>helix-parallel-agents 同时 import 了 9 个其他模块 → 扇入很高但符合编排器角色</li>
+</ul>
+
+<h3 style="font-size:13px;margin-top:12px;">测试覆盖</h3>
+<div class="grid2">
+<div class="metric"><div class="num" style="color:var(--good)">73</div><div class="label">测试用例</div></div>
+<div class="metric"><div class="num" style="color:var(--good)">100%</div><div class="label">通过率</div></div>
+</div>
+<ul style="margin-top:12px;">
+<li><span class="severity sev-low"></span>覆盖了完整的线性循环（执行→验证→scope→review→checkpoint）</li>
+<li><span class="severity sev-low"></span>覆盖了边界场景：空 verifier、scope 失败、ChangeRequest 审核、并行 agent admission/rollback、Git worktree</li>
+<li><span class="severity sev-low"></span>有 2 个大规模仿真测试（greenfield 4-task + existing 4-task），端到端验证</li>
+<li><span class="severity sev-low"></span>ledger hash 链篡改检测有测试</li>
+<li><span class="severity sev-low"></span>Dashboard token 认证有测试</li>
+<li><span class="severity sev-med"></span><b>缺少</b>：并发锁竞争测试、大文件/超长命令的边界测试、注入点安全测试（恶意 payload）</li>
+<li><span class="severity sev-low"></span>所有测试在单文件 <code>test/helix-core.test.mjs</code> 2,972 行中 → 建议按模块拆分</li>
+</ul>
+</div>
+
+<!-- File Size Audit -->
+<div class="card">
+<h2>6. 文件行数审计 <span class="badge badge-info">信息</span></h2>
+<table>
+<tr><th>文件</th><th>行数</th><th>审计线</th><th>建议</th></tr>
+<tr><td>helix-foundation.mjs</td><td>1,021 <span class="tag tag-warn">边界</span></td><td>1,000</td><td>拆出 helix-ledger.mjs / helix-snapshot.mjs</td></tr>
+<tr><td>helix-parallel-agents.mjs</td><td>822 <span class="tag tag-warn">超 700</span></td><td>1,000</td><td>拆出 helix-admission.mjs（admit/rollback 逻辑）</td></tr>
+<tr><td>helix-dashboard.mjs</td><td>621</td><td>—</td><td>HTML 模板可外挂，但无外部依赖下内联可接受</td></tr>
+<tr><td>helix-gates.mjs</td><td>615</td><td>—</td><td>合理</td></tr>
+<tr><td>helix-archivist-router.mjs</td><td>588</td><td>—</td><td>合理</td></tr>
+<tr><td>其他 24 个文件</td><td>&lt; 570</td><td>—</td><td>全部健康</td></tr>
+</table>
+</div>
+
+<!-- Summary -->
+<div class="card">
+<h2>7. 行动建议优先级</h2>
+<table>
+<tr><th>优先级</th><th>建议</th><th>影响</th></tr>
+<tr>
+<td><span class="tag tag-bad">P0</span></td>
+<td><b>shell:true 命令执行加沙箱</b>：至少支持 dry-run 模式，或 worker_command 的可配置白名单/黑名单</td>
+<td>Agent 误操作风险</td>
+</tr>
+<tr>
+<td><span class="tag tag-bad">P0</span></td>
+<td><b>.helix/ 目录防删除</b>：自动 Git 提交 .helix/ 下的 ledger/tasks，或用 chattr 锁（至少文档说明风险）</td>
+<td>证据链丢失</td>
+</tr>
+<tr>
+<td><span class="tag tag-warn">P1</span></td>
+<td><b>消除重复的工具函数</b>：normalizeRelativePath / uniqueStrings / truncateForSummary 提取到 foundation</td>
+<td>维护性</td>
+</tr>
+<tr>
+<td><span class="tag tag-warn">P1</span></td>
+<td><b>helix-foundation 拆分</b>：ledger 相关（hash/verify/append）和 snapshot/context 各自成独立模块</td>
+<td>维护性</td>
+</tr>
+<tr>
+<td><span class="tag tag-warn">P1</span></td>
+<td><b>config 完整性保护</b>：对 helix.config.json 做 hash 或签名，检测 Agent 对质量门的篡改</td>
+<td>治理不可削弱</td>
+</tr>
+<tr>
+<td><span class="tag tag-warn">P1</span></td>
+<td><b>并行 Agent 结果 TTL</b>：对 awaiting_user_acceptance 状态加过期时间（超过 N 天自动 close）</td>
+<td>资源泄漏</td>
+</tr>
+<tr>
+<td><span class="tag tag-warn">P2</span></td>
+<td><b>测试文件拆分</b>：test/helix-core.test.mjs (2,972行) 按模块拆分</td>
+<td>维护性</td>
+</tr>
+<tr>
+<td><span class="tag tag-warn">P2</span></td>
+<td><b>lint/format 脚本</b>：加 npm run lint 和 npm run format</td>
+<td>代码规范</td>
+</tr>
+<tr>
+<td><span class="tag tag-warn">P2</span></td>
+<td><b>CI pipeline</b>：GitHub Actions 跑 npm test</td>
+<td>持续集成</td>
+</tr>
+</table>
+</div>
+
+<div class="card" style="text-align:center;color:var(--muted);font-size:12px;">
+WildArrange Review · 2026-06-16 · 73/73 tests passing · 29 modules · 9,696 loc
+</div>
+
+</main>
+</body>
+</html>

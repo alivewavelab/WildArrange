@@ -338,6 +338,65 @@
       "writes": []
     },
     {
+      "name": "config_baseline",
+      "layer": "runtime_state",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs config baseline --reason <reason>",
+      "purpose": "把当前 `helix.config.json` 和 `.helix/config.json` 写成 hash 基线，用于后续发现 Agent 是否改弱质量门。",
+      "reads": [
+        "helix.config.json",
+        ".helix/config.json"
+      ],
+      "writes": [
+        ".helix/security/config-baseline.json",
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "config_verify",
+      "layer": "runtime_state",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs config verify",
+      "purpose": "校验 config hash 基线；发现 config 文件新增、缺失或内容变化时返回非零状态。",
+      "reads": [
+        "helix.config.json",
+        ".helix/config.json",
+        ".helix/security/config-baseline.json"
+      ],
+      "writes": []
+    },
+    {
+      "name": "state_backup",
+      "layer": "runtime_state",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs state backup --reason <reason>",
+      "purpose": "备份 ledger、work、tasks、snapshot 和 config baseline，降低 `.helix/` 被误删后的证据链丢失风险。",
+      "reads": [
+        ".helix/ledger.jsonl",
+        ".helix/work.json",
+        ".helix/team/tasks.json",
+        ".helix/snapshots/**",
+        ".helix/security/config-baseline.json"
+      ],
+      "writes": [
+        ".helix/backups/**",
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "state_verify",
+      "layer": "runtime_state",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs state verify",
+      "purpose": "检查 `.helix/ledger.jsonl`、`.helix/work.json`、`.helix/team/tasks.json` 是否仍存在，缺失时返回非零状态。",
+      "reads": [
+        ".helix/ledger.jsonl",
+        ".helix/work.json",
+        ".helix/team/tasks.json"
+      ],
+      "writes": []
+    },
+    {
       "name": "helix_summary",
       "layer": "runtime_state",
       "status": "implemented",

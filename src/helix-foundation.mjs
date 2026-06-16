@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { appendFile, copyFile, mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { appendLedger } from "./helix-ledger.mjs";
+export { appendLedger, verifyLedger } from "./helix-ledger.mjs";
 
 export const HELIX_DIR = ".helix";
 export const STATE_VERSION = 1;
@@ -538,88 +539,6 @@ export async function withTaskStateLock(rootDir, ownerTag, fn) {
   } finally {
     await removeLock(lockPath);
   }
-}
-
-export async function appendLedger(rootDir, event) {
-  const ledgerPath = resolveHelixPath(rootDir, "ledger.jsonl");
-  const previousHash = await readLedgerLastHash(ledgerPath);
-  const entry = {
-    id: createWorkId("evt"),
-    at: nowIso(),
-    prevHash: previousHash,
-    ...event,
-  };
-  entry.hash = hashLedgerEntry(entry);
-  await appendFile(ledgerPath, `${JSON.stringify(entry)}\n`, "utf8");
-  return entry;
-}
-
-export async function verifyLedger(rootDir) {
-  const ledgerPath = resolveHelixPath(rootDir, "ledger.jsonl");
-  let content = "";
-  try {
-    content = await readFile(ledgerPath, "utf8");
-  } catch (error) {
-    if (error?.code === "ENOENT") {
-      return { kind: "ledger_verification", ok: true, checked: 0, legacy: 0, failures: [] };
-    }
-    throw error;
-  }
-  const failures = [];
-  let previousHash = null;
-  let checked = 0;
-  let legacy = 0;
-  const lines = content.split(/\r?\n/).filter(Boolean);
-  for (let index = 0; index < lines.length; index += 1) {
-    const lineNumber = index + 1;
-    let entry;
-    try {
-      entry = JSON.parse(lines[index]);
-    } catch {
-      failures.push({ line: lineNumber, reason: "invalid_json" });
-      previousHash = null;
-      continue;
-    }
-    if (!entry.hash) {
-      legacy += 1;
-      previousHash = entry.prevHash || null;
-      continue;
-    }
-    checked += 1;
-    if ((entry.prevHash || null) !== previousHash) {
-      failures.push({ line: lineNumber, reason: "prev_hash_mismatch", expected: previousHash, actual: entry.prevHash || null });
-    }
-    const expectedHash = hashLedgerEntry(entry);
-    if (entry.hash !== expectedHash) {
-      failures.push({ line: lineNumber, reason: "hash_mismatch", expected: expectedHash, actual: entry.hash });
-    }
-    previousHash = entry.hash;
-  }
-  return { kind: "ledger_verification", ok: failures.length === 0, checked, legacy, failures };
-}
-
-async function readLedgerLastHash(ledgerPath) {
-  try {
-    const content = await readFile(ledgerPath, "utf8");
-    const lines = content.split(/\r?\n/).filter(Boolean);
-    for (let index = lines.length - 1; index >= 0; index -= 1) {
-      try {
-        const entry = JSON.parse(lines[index]);
-        if (entry.hash) return entry.hash;
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  } catch (error) {
-    if (error?.code === "ENOENT") return null;
-    throw error;
-  }
-}
-
-function hashLedgerEntry(entry) {
-  const { hash, ...unsigned } = entry || {};
-  return hashContent(JSON.stringify(unsigned));
 }
 
 export async function writeSnapshot(rootDir, stage, payload = {}) {

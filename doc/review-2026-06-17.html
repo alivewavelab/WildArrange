@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WildArrange 项目 Review 报告 - 2026-06-17</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; color: #333; line-height: 1.6; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        h1 { font-size: 28px; margin-bottom: 30px; color: #1a1a1a; border-bottom: 3px solid #007bff; padding-bottom: 10px; }
+        h2 { font-size: 22px; margin: 30px 0 15px; color: #2c3e50; border-left: 4px solid #007bff; padding-left: 10px; }
+        h3 { font-size: 18px; margin: 20px 0 10px; color: #34495e; }
+        .section { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .score-card { display: flex; flex-wrap: wrap; gap: 15px; margin: 20px 0; }
+        .score-item { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; flex: 1; min-width: 200px; text-align: center; }
+        .score-item .score { font-size: 36px; font-weight: bold; }
+        .score-item .label { font-size: 14px; opacity: 0.9; }
+        .risk-high { background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%); }
+        .risk-medium { background: linear-gradient(135deg, #feca57 0%, #ff9f43 100%); }
+        .risk-low { background: linear-gradient(135deg, #48dbfb 0%, #0abde3 100%); }
+        table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #f8f9fa; font-weight: 600; }
+        tr:hover { background: #f5f5f5; }
+        .badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+        .badge-high { background: #ffebee; color: #c62828; }
+        .badge-medium { background: #fff3e0; color: #ef6c00; }
+        .badge-low { background: #e3f2fd; color: #1565c0; }
+        .badge-pass { background: #e8f5e9; color: #2e7d32; }
+        .badge-fail { background: #ffebee; color: #c62828; }
+        .badge-warn { background: #fff8e1; color: #f57f17; }
+        .architecture-diagram { background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 15px 0; font-family: monospace; white-space: pre; overflow-x: auto; }
+        .flow-chart { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 15px 0; }
+        .flow-step { background: #e3f2fd; padding: 10px 15px; border-radius: 6px; border: 2px solid #2196f3; }
+        .flow-arrow { font-size: 24px; color: #2196f3; }
+        .highlight { background: #fffde7; padding: 15px; border-left: 4px solid #ffc107; margin: 15px 0; border-radius: 0 4px 4px 0; }
+        .code-block { background: #263238; color: #eeffff; padding: 15px; border-radius: 6px; overflow-x: auto; font-family: monospace; margin: 10px 0; }
+        .two-column { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        @media (max-width: 768px) { .two-column { grid-template-columns: 1fr; } }
+        ul { margin: 10px 0 10px 20px; }
+        li { margin: 5px 0; }
+        .summary-box { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 25px; border-radius: 12px; margin: 20px 0; }
+        .summary-box h2 { color: white; border-left-color: rgba(255,255,255,0.5); }
+        .metric { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.2); }
+        .metric:last-child { border-bottom: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WildArrange 项目 Review 报告</h1>
+        <p style="color: #666; margin-bottom: 30px;">审查时间：2026-06-17 | 审查范围：架构、治理、功能、执行、代码</p>
+
+        <!-- 总览 -->
+        <div class="summary-box">
+            <h2>总览</h2>
+            <div class="metric"><span>项目定位</span><span>面向 Codex/Cursor 的本地 Agent 治理运行时</span></div>
+            <div class="metric"><span>核心理念</span><span>worker 可以声称完成，但只有 gate 才能判定完成</span></div>
+            <div class="metric"><span>源码规模</span><span>29 个模块，9,696 行代码</span></div>
+            <div class="metric"><span>测试覆盖</span><span>73 个测试用例，全部通过</span></div>
+            <div class="metric"><span>外部依赖</span><span>零依赖，纯 Node.js ESM</span></div>
+        </div>
+
+        <!-- 评分卡 -->
+        <div class="score-card">
+            <div class="score-item"><div class="score">8.5</div><div class="label">架构合理性</div></div>
+            <div class="score-item"><div class="score">9.0</div><div class="label">治理能力</div></div>
+            <div class="score-item"><div class="score">7.5</div><div class="label">功能完备性</div></div>
+            <div class="score-item"><div class="score">6.5</div><div class="label">执行健壮性</div></div>
+            <div class="score-item"><div class="score">7.1</div><div class="label">代码质量</div></div>
+        </div>
+
+        <!-- 架构合理性分析 -->
+        <div class="section">
+            <h2>一、架构合理性分析</h2>
+            
+            <h3>1.1 分层架构</h3>
+            <div class="architecture-diagram">
+Layer 4: helix-workflow / helix-parallel-agents (顶层入口)
+    ↓
+Layer 3: helix-node-runtime (核心编排)
+    ↓
+Layer 2: helix-review / helix-routing / helix-agent-spawn / helix-git-worktree
+    ↓
+Layer 1: helix-plan / helix-team / helix-gates / helix-failure / helix-acceptance-proof
+    ↓
+Layer 0: helix-foundation (无内部依赖，纯基础设施)
+
+helix-core.mjs: 纯导出层，不属于分层</div>
+
+            <h3>1.2 设计优点</h3>
+            <table>
+                <tr><th>设计模式</th><th>说明</th><th>评分</th></tr>
+                <tr><td>Evidence-Driven</td><td>每一步都把结果 push 到 task.evidence[]，全链路可追溯</td><td><span class="badge badge-pass">优秀</span></td></tr>
+                <tr><td>Gate-Then-Checkpoint</td><td>任何 checkpoint 前必须通过 verifier + scope + review + acceptance proof</td><td><span class="badge badge-pass">优秀</span></td></tr>
+                <tr><td>Fail-Safe Rollback</td><td>parallel admission 失败时自动回滚文件</td><td><span class="badge badge-pass">优秀</span></td></tr>
+                <tr><td>Dual-Format Reports</td><td>所有报告同时输出 JSON (机器可读) + Markdown (人工可读)</td><td><span class="badge badge-pass">优秀</span></td></tr>
+                <tr><td>Hash-Chain Ledger</td><td>所有关键事件写入不可篡改的 ledger.jsonl</td><td><span class="badge badge-pass">优秀</span></td></tr>
+                <tr><td>宿主中立</td><td>核心状态机是产品中立的本地文件协议</td><td><span class="badge badge-pass">优秀</span></td></tr>
+            </table>
+
+            <h3>1.3 架构问题</h3>
+            <table>
+                <tr><th>问题</th><th>风险</th><th>建议</th></tr>
+                <tr>
+                    <td>helix-foundation.mjs 超过 1000 行</td>
+                    <td><span class="badge badge-medium">中</span></td>
+                    <td>拆分为基础工具、文件IO、配置管理、运行时初始化四个模块</td>
+                </tr>
+                <tr>
+                    <td>helix-hooks.mjs 依赖 10 个模块</td>
+                    <td><span class="badge badge-medium">中</span></td>
+                    <td>拆分为 scope、injection、context 三个子模块</td>
+                </tr>
+                <tr>
+                    <td>3 个工具函数重复 27 次</td>
+                    <td><span class="badge badge-high">高</span></td>
+                    <td>创建 helix-utils.mjs 公共模块</td>
+                </tr>
+            </table>
+
+            <div class="highlight">
+                <strong>架构评分：8.5/10</strong><br>
+                分层清晰，职责划分合理，无循环依赖。主要问题是基础模块过大和代码重复。
+            </div>
+        </div>
+
+        <!-- 治理能力评估 -->
+        <div class="section">
+            <h2>二、治理能力评估</h2>
+
+            <h3>2.1 核心治理闭环</h3>
+            <div class="flow-chart">
+                <div class="flow-step">Worker 执行</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">Verifier 验证</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">Scope Guard</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">Review Gate</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">Acceptance Proof</div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step">Checkpoint</div>
+            </div>
+
+            <h3>2.2 治理能力矩阵</h3>
+            <table>
+                <tr><th>治理维度</th><th>能力</th><th>实现状态</th><th>评分</th></tr>
+                <tr>
+                    <td rowspan="5">完成验证</td>
+                    <td>worker_command 退出码检查</td>
+                    <td><span class="badge badge-pass">已实现</span></td>
+                    <td>✅</td>
+                </tr>
+                <tr><td>verify_commands 独立验证</td><td><span class="badge badge-pass">已实现</span></td><td>✅</td></tr>
+                <tr><td>successCriteria 证据绑定</td><td><span class="badge badge-pass">已实现</span></td><td>✅</td></tr>
+                <tr><td>空 verify_commands 安全兜底</td><td><span class="badge badge-pass">已实现</span></td><td>✅</td></tr>
+                <tr><td>acceptance proof 8 项检查</td><td><span class="badge badge-pass">已实现</span></td><td>✅</td></tr>
+                <tr>
+                    <td rowspan="4">范围控制</td>
+                    <td>writable_paths 路径比对</td>
+                    <td><span class="badge badge-pass">已实现</span></td>
+                    <td>✅</td>
+                </tr>
+                <tr><td>符号链接逃逸检测</td><td><span class="badge badge-pass">已实现</span></td><td>✅</td></tr>
+                <tr><td>ChangeRequest 自动创建</td><td><span class="badge badge-pass">已实现</span></td><td>✅</td></tr>
+                <tr><td>PreToolUse 写入前拦截</td><td><span class="badge badge-pass">已实现</span></td><td>✅</td></tr>
+                <tr>
+                    <td rowspan="4">审查机制</td>
+                    <td>BaiZe 目标/证据验证</td>
+                    <td><span class="badge badge-pass">已实现</span></td>
+                    <td>✅</td>
+                </tr>
+                <tr><td>QiongQi 质疑性验收</td><td><span class="badge badge-pass">已实现</span></td><td>✅</td></tr>
+                <tr><td>LuanNiao bug/风险审查</td><td><span class="badge badge-pass">已实现</span></td><td>✅</td></tr>
+                <tr><td>LLM 可选集成</td><td><span class="badge badge-pass">已实现</span></td><td>✅</td></tr>
+                <tr>
+                    <td rowspan="3">审计追溯</td>
+                    <td>hash chain ledger</td>
+                    <td><span class="badge badge-pass">已实现</span></td>
+                    <td>✅</td>
+                </tr>
+                <tr><td>JSON + MD 双格式报告</td><td><span class="badge badge-pass">已实现</span></td><td>✅</td></tr>
+                <tr><td>快照与恢复</td><td><span class="badge badge-pass">已实现</span></td><td>✅</td></tr>
+                <tr>
+                    <td rowspan="3">多 Agent 治理</td>
+                    <td>子 Agent 不能自证完成</td>
+                    <td><span class="badge badge-pass">已实现</span></td>
+                    <td>✅</td>
+                </tr>
+                <tr><td>隔离运行 + admission 合入</td><td><span class="badge badge-pass">已实现</span></td><td>✅</td></tr>
+                <tr><td>失败自动回滚</td><td><span class="badge badge-pass">已实现</span></td><td>✅</td></tr>
+            </table>
+
+            <h3>2.3 治理安全不变量</h3>
+            <div class="highlight">
+                <strong>核心不变量（来自 AGENTS.md）：</strong>
+                <ul>
+                    <li>✅ gate 安全不变量不能削弱：不得删除或清空 verify_commands</li>
+                    <li>✅ 不得跳过 verifier / scope / review / successCriteria 完成 checkpoint</li>
+                    <li>✅ checkpoint 前必须写入 acceptance proof</li>
+                    <li>✅ 子 Agent 不能直接自证完成</li>
+                    <li>✅ ArchivistRouter 只读取清洗后的结论包</li>
+                    <li>✅ 路由必须保留 deterministic 证据</li>
+                </ul>
+            </div>
+
+            <div class="highlight">
+                <strong>治理能力评分：9.0/10</strong><br>
+                治理机制设计完善，覆盖了完成验证、范围控制、审查机制、审计追溯、多 Agent 治理等关键维度。安全不变量得到严格遵守。
+            </div>
+        </div>
+
+        <!-- 功能设计完备性分析 -->
+        <div class="section">
+            <h2>三、功能设计完备性分析</h2>
+
+            <h3>3.1 功能覆盖矩阵</h3>
+            <table>
+                <tr><th>功能模块</th><th>状态</th><th>说明</th></tr>
+                <tr><td>线性任务循环</td><td><span class="badge badge-pass">完成</span></td><td>完整的 init → plan → execute → verify → checkpoint 流程</td></tr>
+                <tr><td>计划导入与校验</td><td><span class="badge badge-pass">完成</span></td><td>支持 JSON 导入、依赖图校验、normalizeTask</td></tr>
+                <tr><td>Verifier 机制</td><td><span class="badge badge-pass">完成</span></td><td>支持多命令顺序执行、失败即停</td></tr>
+                <tr><td>Scope Guard</td><td><span class="badge badge-pass">完成</span></td><td>支持 glob pattern、realpath 防逃逸</td></tr>
+                <tr><td>Review Gate</td><td><span class="badge badge-pass">完成</span></td><td>三角色复核、LLM 可选集成</td></tr>
+                <tr><td>Acceptance Proof</td><td><span class="badge badge-pass">完成</span></td><td>8 项检查全部 pass 才允许 checkpoint</td></tr>
+                <tr><td>Ledger 审计</td><td><span class="badge badge-pass">完成</span></td><td>hash chain、篡改检测</td></tr>
+                <tr><td>ChangeRequest</td><td><span class="badge badge-pass">完成</span></td><td>scope 失败自动创建、支持接受/拒绝</td></tr>
+                <tr><td>Codex Adapter</td><td><span class="badge badge-pass">完成</span></td><td>hard hook、安装/卸载/恢复</td></tr>
+                <tr><td>Cursor Adapter</td><td><span class="badge badge-warn">进行中</span></td><td>soft rule 注入</td></tr>
+                <tr><td>并行子 Agent</td><td><span class="badge badge-pass">完成</span></td><td>spawn、隔离、admission、rollback</td></tr>
+                <tr><td>Git Worktree 隔离</td><td><span class="badge badge-pass">完成</span></td><td>独立工作树、patch 提取与合入</td></tr>
+                <tr><td>ArchivistRouter</td><td><span class="badge badge-pass">完成</span></td><td>packet 构建、建议审核流</td></tr>
+                <tr><td>会话恢复</td><td><span class="badge badge-pass">完成</span></td><td>快照、digest、上下文重建</td></tr>
+                <tr><td>Dashboard</td><td><span class="badge badge-pass">完成</span></td><td>本地 HTTP 服务、token 防护</td></tr>
+                <tr><td>Skill Matcher</td><td><span class="badge badge-warn">进行中</span></td><td>匹配与优先级打分</td></tr>
+                <tr><td>代码智能</td><td><span class="badge badge-warn">进行中</span></td><td>LSP、AST、hashline anchor</td></tr>
+            </table>
+
+            <h3>3.2 功能缺失分析</h3>
+            <table>
+                <tr><th>缺失功能</th><th>影响</th><th>优先级</th></tr>
+                <tr>
+                    <td>状态文件损坏恢复</td>
+                    <td>tasks.json / ledger.jsonl 损坏时无法恢复</td>
+                    <td><span class="badge badge-high">P0</span></td>
+                </tr>
+                <tr>
+                    <td>LLM 异常路径处理</td>
+                    <td>超时、500、格式错误等场景未覆盖</td>
+                    <td><span class="badge badge-high">P0</span></td>
+                </tr>
+                <tr>
+                    <td>Agent spawn 命令注入防护</td>
+                    <td>renderSpawnCommand 的模板替换未做安全测试</td>
+                    <td><span class="badge badge-high">P0</span></td>
+                </tr>
+                <tr>
+                    <td>快照轮转清理</td>
+                    <td>快照文件数量无限增长</td>
+                    <td><span class="badge badge-medium">P1</span></td>
+                </tr>
+                <tr>
+                    <td>Evidence 归档机制</td>
+                    <td>evidence 数组无限增长</td>
+                    <td><span class="badge badge-medium">P1</span></td>
+                </tr>
+                <tr>
+                    <td>CI 集成</td>
+                    <td>无法在 CI 环境中自动运行治理检查</td>
+                    <td><span class="badge badge-medium">P2</span></td>
+                </tr>
+                <tr>
+                    <td>tmux/cmux 可视化</td>
+                    <td>多 Agent 运行时缺少可视化</td>
+                    <td><span class="badge badge-low">P3</span></td>
+                </tr>
+            </table>
+
+            <div class="highlight">
+                <strong>功能完备性评分：7.5/10</strong><br>
+                核心治理功能完善，但缺少一些鲁棒性保障（状态损坏恢复、LLM 异常处理）和运维能力（快照清理、CI 集成）。
+            </div>
+        </div>
+
+        <!-- Agent 执行问题分析 -->
+        <div class="section">
+            <h2>四、Agent 执行问题分析</h2>
+
+            <h3>4.1 高风险问题</h3>
+            <table>
+                <tr><th>问题</th><th>风险</th><th>影响</th><th>建议</th></tr>
+                <tr>
+                    <td>retryTaskNode 无限扩大 maxAttempts</td>
+                    <td><span class="badge badge-high">高</span></td>
+                    <td>死循环，任务永远不完成</td>
+                    <td>加入硬上限（如 10 次）</td>
+                </tr>
+                <tr>
+                    <td>runNextTask 长时间持锁</td>
+                    <td><span class="badge badge-high">高</span></td>
+                    <td>其他操作 15 秒超时</td>
+                    <td>拆分锁粒度或改为 per-task 锁</td>
+                </tr>
+                <tr>
+                    <td>advisory lock 非强制</td>
+                    <td><span class="badge badge-high">高</span></td>
+                    <td>外部操作可破坏一致性</td>
+                    <td>在锁文件中加入 UUID 验证</td>
+                </tr>
+                <tr>
+                    <td>快照与 tasks.json 可能不一致</td>
+                    <td><span class="badge badge-high">高</span></td>
+                    <td>恢复后状态错误</td>
+                    <td>在 persistTaskState 后写快照</td>
+                </tr>
+                <tr>
+                    <td>evidence 数组无限增长</td>
+                    <td><span class="badge badge-high">高</span></td>
+                    <td>内存膨胀、序列化变慢</td>
+                    <td>截断 stdout/stderr，归档旧 evidence</td>
+                </tr>
+            </table>
+
+            <h3>4.2 中风险问题</h3>
+            <table>
+                <tr><th>问题</th><th>风险</th><th>影响</th><th>建议</th></tr>
+                <tr>
+                    <td>verifying 状态无回退路径</td>
+                    <td><span class="badge badge-medium">中</span></td>
+                    <td>node 模式下任务卡死</td>
+                    <td>失败后显式回退到 pending</td>
+                </tr>
+                <tr>
+                    <td>persistTaskState 双写非原子</td>
+                    <td><span class="badge badge-medium">中</span></td>
+                    <td>部分写入导致不一致</td>
+                    <td>plan 文件改为延迟写入</td>
+                </tr>
+                <tr>
+                    <td>并行 Agent ledger hash 链分叉</td>
+                    <td><span class="badge badge-medium">中</span></td>
+                    <td>ledger 校验失败</td>
+                    <td>给 appendLedger 加独立锁</td>
+                </tr>
+                <tr>
+                    <td>超时子进程可能泄漏</td>
+                    <td><span class="badge badge-medium">中</span></td>
+                    <td>文件描述符耗尽</td>
+                    <td>加入 SIGKILL 后备</td>
+                </tr>
+                <tr>
+                    <td>readLedgerLastHash 全文读取</td>
+                    <td><span class="badge badge-medium">中</span></td>
+                    <td>ledger 越大越慢</td>
+                    <td>反向读取文件末尾</td>
+                </tr>
+            </table>
+
+            <h3>4.3 状态机流程图</h3>
+            <div class="architecture-diagram">
+pending → in_progress → verifying → reviewing → checkpointing → completed
+    ↑         ↓           ↓           ↓
+    └─────────┴───────────┴───────────┘ (失败回到 pending 或 failed)
+
+问题：verifying 状态失败后，node 模式下可能卡在 verifying</div>
+
+            <div class="highlight">
+                <strong>执行健壮性评分：6.5/10</strong><br>
+                存在 5 个高风险问题，主要是死循环、长时间持锁、状态不一致等。需要优先修复这些问题才能保证生产环境的稳定性。
+            </div>
+        </div>
+
+        <!-- 代码质量 review -->
+        <div class="section">
+            <h2>五、代码质量 Review</h2>
+
+            <h3>5.1 代码复杂度</h3>
+            <table>
+                <tr><th>函数</th><th>文件</th><th>圈复杂度</th><th>建议</th></tr>
+                <tr>
+                    <td>runNextTask</td>
+                    <td>helix-node-runtime.mjs</td>
+                    <td>18-20</td>
+                    <td>拆分为 executeAndVerify、handleSuccess、handleFailure</td>
+                </tr>
+                <tr>
+                    <td>admitParallelAgentResult</td>
+                    <td>helix-parallel-agents.mjs</td>
+                    <td>12-14</td>
+                    <td>提取文件验证、拆分 prepareAdmission</td>
+                </tr>
+                <tr>
+                    <td>scopeGuard</td>
+                    <td>helix-gates.mjs</td>
+                    <td>10-12</td>
+                    <td>添加防御性检查、提取 deniedPaths 构建</td>
+                </tr>
+            </table>
+
+            <h3>5.2 代码重复统计</h3>
+            <table>
+                <tr><th>函数</th><th>重复次数</th><th>涉及文件</th></tr>
+                <tr><td>normalizeRelativePath</td><td>9 次</td><td>helix-adapters, helix-context, helix-parallel-agents 等</td></tr>
+                <tr><td>uniqueStrings</td><td>9 次</td><td>helix-routing, helix-context, helix-plan 等</td></tr>
+                <tr><td>truncate/truncateForSummary</td><td>7 次</td><td>helix-parallel-agents, helix-failure 等</td></tr>
+            </table>
+
+            <h3>5.3 错误处理问题</h3>
+            <ul>
+                <li>18 处重复的 "no imported plan found" 错误检查</li>
+                <li>缺少全局未捕获 Promise rejection 处理</li>
+                <li>readLedgerLastHash 的 catch 块可能隐藏错误</li>
+            </ul>
+
+            <h3>5.4 测试覆盖</h3>
+            <div class="two-column">
+                <div>
+                    <h4>✅ 测试充分的功能</h4>
+                    <ul>
+                        <li>Gate / Verifier / Checkpoint 核心链路</li>
+                        <li>路由与计划</li>
+                        <li>Dashboard 安全</li>
+                        <li>失败路径测试</li>
+                    </ul>
+                </div>
+                <div>
+                    <h4>❌ 测试缺失的场景</h4>
+                    <ul>
+                        <li>状态文件损坏恢复</li>
+                        <li>LLM 异常路径</li>
+                        <li>并发压力测试</li>
+                        <li>Agent spawn 命令注入</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="highlight">
+                <strong>代码质量评分：7.1/10</strong><br>
+                整体代码质量良好，但存在严重的代码重复（3 个函数重复 27 次）和部分函数复杂度过高的问题。建议优先提取公共模块。
+            </div>
+        </div>
+
+        <!-- 改进优先级 -->
+        <div class="section">
+            <h2>六、改进优先级</h2>
+
+            <h3>P0：立即修复</h3>
+            <table>
+                <tr><th>编号</th><th>问题</th><th>影响</th><th>工作量</th></tr>
+                <tr><td>1</td><td>retryTaskNode 的 maxAttempts 无限扩大</td><td>死循环</td><td>0.5d</td></tr>
+                <tr><td>2</td><td>runNextTask 拆分锁粒度</td><td>并发阻塞</td><td>2d</td></tr>
+                <tr><td>3</td><td>evidence 数组截断</td><td>内存膨胀</td><td>1d</td></tr>
+                <tr><td>4</td><td>创建 helix-utils.mjs 消除代码重复</td><td>可维护性</td><td>1d</td></tr>
+            </table>
+
+            <h3>P1：近期修复</h3>
+            <table>
+                <tr><th>编号</th><th>问题</th><th>影响</th><th>工作量</th></tr>
+                <tr><td>5</td><td>ledger append 并发安全</td><td>hash 链分叉</td><td>1d</td></tr>
+                <tr><td>6</td><td>快照一致性</td><td>恢复错误</td><td>1d</td></tr>
+                <tr><td>7</td><td>readLedgerLastHash 优化</td><td>性能</td><td>0.5d</td></tr>
+                <tr><td>8</td><td>verifyTaskNode 失败后回退</td><td>状态卡死</td><td>0.5d</td></tr>
+                <tr><td>9</td><td>状态文件损坏恢复</td><td>数据丢失</td><td>2d</td></tr>
+                <tr><td>10</td><td>LLM 异常路径处理</td><td>功能异常</td><td>1d</td></tr>
+            </table>
+
+            <h3>P2：长期改进</h3>
+            <table>
+                <tr><th>编号</th><th>问题</th><th>影响</th><th>工作量</th></tr>
+                <tr><td>11</td><td>快照轮转清理</td><td>磁盘耗尽</td><td>1d</td></tr>
+                <tr><td>12</td><td>ensureHelixDirs 单次初始化</td><td>性能</td><td>0.5d</td></tr>
+                <tr><td>13</td><td>persistTaskState 延迟写入</td><td>性能</td><td>1d</td></tr>
+                <tr><td>14</td><td>拆分 helix-foundation.mjs</td><td>可维护性</td><td>2d</td></tr>
+                <tr><td>15</td><td>拆分 helix-hooks.mjs</td><td>耦合度</td><td>1d</td></tr>
+                <tr><td>16</td><td>补充测试覆盖</td><td>质量保障</td><td>3d</td></tr>
+            </table>
+        </div>
+
+        <!-- 总结 -->
+        <div class="section">
+            <h2>七、总结</h2>
+
+            <div class="score-card">
+                <div class="score-item"><div class="score">8.5</div><div class="label">架构合理性</div></div>
+                <div class="score-item"><div class="score">9.0</div><div class="label">治理能力</div></div>
+                <div class="score-item"><div class="score">7.5</div><div class="label">功能完备性</div></div>
+                <div class="score-item"><div class="score">6.5</div><div class="label">执行健壮性</div></div>
+                <div class="score-item"><div class="score">7.1</div><div class="label">代码质量</div></div>
+            </div>
+
+            <div class="highlight">
+                <strong>综合评分：7.7/10</strong><br><br>
+                <strong>核心优势：</strong>
+                <ul>
+                    <li>治理机制设计完善，覆盖了完成验证、范围控制、审查机制、审计追溯等关键维度</li>
+                    <li>安全不变量得到严格遵守，gate 不允许削弱</li>
+                    <li>架构分层清晰，职责划分合理，无循环依赖</li>
+                    <li>零外部依赖，纯 Node.js ESM，部署简单</li>
+                    <li>测试覆盖了核心业务逻辑和失败路径</li>
+                </ul>
+                <br>
+                <strong>主要问题：</strong>
+                <ul>
+                    <li>5 个高风险执行问题（死循环、长时间持锁、状态不一致）</li>
+                    <li>3 个工具函数重复 27 次，代码可维护性差</li>
+                    <li>部分函数复杂度过高（runNextTask 圈复杂度 18-20）</li>
+                    <li>缺少状态文件损坏恢复、LLM 异常处理等鲁棒性保障</li>
+                </ul>
+                <br>
+                <strong>建议：</strong><br>
+                优先修复 P0 问题（死循环、锁粒度、evidence 截断、代码重复），预计 4.5 天工作量。修复后可将综合评分提升至 8.5/10。
+            </div>
+        </div>
+
+        <p style="text-align: center; color: #999; margin-top: 40px;">
+            报告生成时间：2026-06-17 | 审查工具：opencode
+        </p>
+    </div>
+</body>
+</html>

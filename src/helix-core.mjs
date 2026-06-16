@@ -31,6 +31,12 @@ export {
   writeJsonAtomic,
   writeSnapshot,
 } from "./helix-foundation.mjs";
+export {
+  verifyConfigBaseline,
+  verifyRuntimeState,
+  writeConfigBaseline,
+  writeRuntimeStateBackup,
+} from "./helix-security.mjs";
 export { installAdapter, restoreAdapterBackup, uninstallAdapter } from "./helix-adapters.mjs";
 export { recordReviewBlocker, resolveChangeRequest, reviewChangeRequest, steerWorkflow } from "./helix-change.mjs";
 export { buildFailureSummary } from "./helix-failure.mjs";

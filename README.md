@@ -133,6 +133,17 @@ node ./bin/helix.mjs parallel admit --run <runId> --task T001
 
 成功的子 Agent 结果不会立即关闭，而是保留为 `awaiting_user_acceptance`。只有 `parallel admit` 跑完整 gate 并完成 checkpoint 后，才会标记为 `released`。
 
+## 防御性校验
+
+```bash
+node ./bin/helix.mjs config baseline --reason reviewed
+node ./bin/helix.mjs config verify
+node ./bin/helix.mjs state backup --reason before-risky-agent
+node ./bin/helix.mjs state verify
+```
+
+WildArrange 会在 shell 执行前阻断明显破坏性命令，例如删除 `.git/.helix`、`git reset --hard`、`git clean -fd`、`sudo` 或 `curl | sh`。正常项目命令、verifier、review command 和子 Agent runner 不受影响。
+
 用户验收后可以显式关闭保留结果：
 
 ```bash
@@ -219,6 +230,8 @@ x-helix-token: <token>
 |---|---|
 | `.helix/team/tasks.json` | 任务状态 |
 | `.helix/ledger.jsonl` | 带 hash 链的追加式事件账本，可用 `node ./bin/helix.mjs ledger verify` 检查篡改 |
+| `.helix/security/config-baseline.json` | config hash 基线，可用 `node ./bin/helix.mjs config verify` 检查质量门是否被改弱 |
+| `.helix/backups/` | `state backup` 生成的运行态关键文件备份 |
 | `.helix/checkpoints/` | 已完成任务的 checkpoint |
 | `.helix/reports/` | workflow / review / failure 报告 |
 | `.helix/reports/acceptance/` | checkpoint 前的验收证明链 |

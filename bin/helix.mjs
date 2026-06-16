@@ -52,8 +52,12 @@ import {
   steerWorkflow,
   uninstallAdapter,
   verifyLedger,
+  verifyConfigBaseline,
+  verifyRuntimeState,
   restoreAdapterBackup,
+  writeConfigBaseline,
   writeDefaultHelixConfig,
+  writeRuntimeStateBackup,
   writeWorkflowSummary,
 } from "../src/helix-core.mjs";
 
@@ -84,6 +88,8 @@ Usage:
   wildarrange init [--sample]
   wildarrange config init [--root] [--force]
   wildarrange config show
+  wildarrange config baseline [--reason "..."]
+  wildarrange config verify
   wildarrange adapter install [--target codex|cursor|all] [--mode local|npx] [--package ${DEFAULT_PACKAGE_NAME}]
   wildarrange adapter uninstall [--target codex|cursor|all]
   wildarrange adapter restore --backup <backupId>
@@ -129,6 +135,8 @@ Usage:
   wildarrange changes review --id CR-xxxx
   wildarrange changes resolve --id CR-xxxx --decision accept|reject --evidence "..." --rationale "..." [--apply-scope]
   wildarrange ledger verify
+  wildarrange state backup [--reason "..."]
+  wildarrange state verify
   wildarrange serve [--host 127.0.0.1] [--port 8765] [--token <token>]
   wildarrange guard scope [--task T001]
   wildarrange route --text "request"
@@ -195,7 +203,19 @@ async function main() {
       console.log(JSON.stringify(await loadHelixConfig(rootDir), null, 2));
       return;
     }
-    throw new Error("helix config requires init or show");
+    if (subcommand === "baseline") {
+      console.log(JSON.stringify(await writeConfigBaseline(rootDir, {
+        reason: args.reason && args.reason !== true ? args.reason : "manual",
+      }), null, 2));
+      return;
+    }
+    if (subcommand === "verify") {
+      const result = await verifyConfigBaseline(rootDir);
+      console.log(JSON.stringify(result, null, 2));
+      process.exitCode = result.ok ? 0 : 2;
+      return;
+    }
+    throw new Error("helix config requires init, show, baseline, or verify");
   }
 
   if (command === "adapter") {
@@ -567,6 +587,23 @@ async function main() {
       return;
     }
     throw new Error("helix ledger requires verify");
+  }
+
+  if (command === "state") {
+    const subcommand = args._[1];
+    if (subcommand === "backup") {
+      console.log(JSON.stringify(await writeRuntimeStateBackup(rootDir, {
+        reason: args.reason && args.reason !== true ? args.reason : "manual",
+      }), null, 2));
+      return;
+    }
+    if (subcommand === "verify") {
+      const result = await verifyRuntimeState(rootDir);
+      console.log(JSON.stringify(result, null, 2));
+      process.exitCode = result.ok ? 0 : 2;
+      return;
+    }
+    throw new Error("helix state requires backup or verify");
   }
 
   if (command === "guard") {

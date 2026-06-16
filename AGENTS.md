@@ -56,11 +56,14 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | [doc/development-plan.md](./doc/development-plan.md)         | P0 / P1 / P2 路线                               |
 | `bin/helix.mjs`                                              | CLI 入口                                        |
 | `src/helix-core.mjs`                                         | 兼容导出层，禁止继续堆实现                                 |
-| `src/helix-foundation.mjs`                                   | 路径、JSON、锁、hash 链 ledger、ledger 校验、快照等基础能力                      |
+| `src/helix-foundation.mjs`                                   | 路径、JSON、锁、配置、快照、prompt-pack 注册等基础能力                      |
+| `src/helix-ledger.mjs`                                       | hash 链 ledger 追加与 ledger 校验 |
 | `src/helix-plan.mjs`                                         | 计划导入、校验、路由 enrichment                         |
 | `src/helix-node-runtime.mjs`                                 | 线性任务节点运行时、重试 / checkpoint                     |
 | `src/helix-workflow.mjs`                                     | Workflow 入口、样例计划生成                            |
 | `src/helix-gates.mjs`                                        | verifier、scope guard、realpath 范围校验、review gate              |
+| `src/helix-command-safety.mjs`                               | shell 命令高风险预检，阻断明显破坏性 worker/verifier/review 命令 |
+| `src/helix-security.mjs`                                     | config hash 基线、运行态备份与关键状态完整性检查 |
 | `src/helix-code-intel.mjs`                                   | LSP/typecheck、AST 结构命令、hashline anchor、注释检查门 |
 | `src/helix-review.mjs`                                       | Worker 执行与 BaiZe / QiongQi / LuanNiao 确定性复核门  |
 | `src/helix-review-findings.mjs`                              | LSP / AST / hashline / 注释检查等质量发现              |
@@ -113,7 +116,11 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | 查看路由建议           | `node ./bin/helix.mjs archivist suggestions list`                 |
 | 审核路由建议           | `node ./bin/helix.mjs archivist suggestions resolve --id <id> --decision accept --evidence "..." --rationale "..."` |
 | 查看状态              | `node ./bin/helix.mjs status`                                    |
+| 写入 config 基线      | `node ./bin/helix.mjs config baseline --reason reviewed`          |
+| 校验 config 基线      | `node ./bin/helix.mjs config verify`                              |
 | 校验 ledger hash 链   | `node ./bin/helix.mjs ledger verify`                             |
+| 备份运行态关键文件      | `node ./bin/helix.mjs state backup --reason before-risky-agent`   |
+| 校验运行态关键文件      | `node ./bin/helix.mjs state verify`                               |
 | 生成总结              | `node ./bin/helix.mjs summary`                                   |
 | 启动本地 dashboard    | `node ./bin/helix.mjs serve --host 127.0.0.1 --port 8765`        |
 | 完整测试              | `npm test`                                                       |

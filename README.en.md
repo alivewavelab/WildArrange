@@ -137,6 +137,17 @@ Successful child results remain `awaiting_user_acceptance` until admission/check
 node ./bin/helix.mjs parallel close --run <runId> --task T001 --reason user_accepted
 ```
 
+## Defensive Checks
+
+```bash
+node ./bin/helix.mjs config baseline --reason reviewed
+node ./bin/helix.mjs config verify
+node ./bin/helix.mjs state backup --reason before-risky-agent
+node ./bin/helix.mjs state verify
+```
+
+WildArrange preflights shell commands and blocks clearly destructive commands such as deleting `.git/.helix`, `git reset --hard`, `git clean -fd`, `sudo`, or `curl | sh`. Normal project commands, verifiers, review commands, and child-agent runners continue to run.
+
 ## ArchivistRouter
 
 ArchivistRouter is the archivist plus task-router node. It reads conclusions-only packets and strips code blocks, raw diffs, and full command output.
@@ -199,6 +210,8 @@ x-helix-token: <token>
 |---|---|
 | `.helix/team/tasks.json` | Task state |
 | `.helix/ledger.jsonl` | Hash-chained append-only event ledger; verify with `node ./bin/helix.mjs ledger verify` |
+| `.helix/security/config-baseline.json` | Config hash baseline; verify with `node ./bin/helix.mjs config verify` |
+| `.helix/backups/` | Runtime critical-file backups created by `state backup` |
 | `.helix/checkpoints/` | Completed task checkpoints |
 | `.helix/reports/` | Workflow, review, and failure reports |
 | `.helix/reports/acceptance/` | Acceptance proof chain before checkpoint |

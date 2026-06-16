@@ -268,11 +268,12 @@ async function verifyTaskNodeUnlocked(rootDir, options = {}) {
   task.last_verify_result = verifyResult;
   const criterionEvidence = applyVerifierEvidenceToCriteria(task, verifyResult);
   if (!verifyResult.pass) {
+    task.status = shouldFailTask(task, verifyResult) ? "failed" : "pending";
     task.last_failure = buildFailureSummary(task, {
       workerResult: [...task.evidence].reverse().find((entry) => entry.kind === "worker") || { exitCode: 0 },
       verifyResult,
       scopeResult: task.last_scope_result || { status: "inconclusive" },
-      nextStatus: "verifying",
+      nextStatus: task.status,
     });
   }
   task.updatedAt = nowIso();
@@ -285,7 +286,7 @@ async function verifyTaskNodeUnlocked(rootDir, options = {}) {
     await persistTaskState(rootDir, taskState);
   }
   await writeSnapshot(rootDir, "node_verify_completed", { planId: taskState.planId, taskId: task.id, pass: verifyResult.pass });
-  return { status: verifyResult.pass ? "verified" : "verify_failed", task, verifyResult };
+  return { status: verifyResult.pass ? "verified" : task.status === "failed" ? "failed" : "verify_failed", task, verifyResult };
 }
 
 export async function scopeTaskNode(rootDir, options = {}) {

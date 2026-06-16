@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { startDashboardServer } from "../src/helix-dashboard.mjs";
 import {
+  appendLedger,
   admitParallelAgentResult,
   buildAgentContext,
   buildArchivistPacket,
@@ -61,7 +62,11 @@ import {
   restoreAdapterBackup,
   matchSkills,
   validatePlanGraph,
+  verifyConfigBaseline,
   verifyLedger,
+  verifyRuntimeState,
+  writeConfigBaseline,
+  writeRuntimeStateBackup,
   writeWorkflowSummary,
 } from "../src/helix-core.mjs";
 
@@ -1652,6 +1657,97 @@ test("ledger verification detects tampered hash chain entries", async () => {
   });
 });
 
+test("ledger appends are serialized under concurrent writers", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    await Promise.all(Array.from({ length: 20 }, (_, index) => appendLedger(dir, {
+      type: "concurrent_test_event",
+      index,
+    })));
+
+    const verification = await verifyLedger(dir);
+    assert.equal(verification.ok, true);
+    const ledger = await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8");
+    const events = ledger.split(/\r?\n/).filter((line) => line.includes("concurrent_test_event"));
+    assert.equal(events.length, 20);
+  });
+});
+
+test("command safety blocks destructive shell commands before execution", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const result = await runCommand("rm -rf .helix", dir);
+    assert.equal(result.exitCode, 126);
+    assert.match(result.stderr, /Command blocked by WildArrange command safety/);
+    assert.equal(result.safety.allowed, false);
+
+    const ledger = await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8");
+    assert.match(ledger, /runtime_initialized/);
+  });
+});
+
+test("runCommand caps command output and reports timeout metadata", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const noisy = await runCommand(nodeEval(`
+      process.stdout.write("x".repeat(50));
+      process.stderr.write("y".repeat(50));
+    `), dir, 120_000, { maxOutputChars: 10 });
+    assert.equal(noisy.exitCode, 0);
+    assert.equal(noisy.stdout.length, 10);
+    assert.equal(noisy.stderr.length, 10);
+    assert.equal(noisy.outputTruncated.stdout, true);
+    assert.equal(noisy.outputTruncated.stderr, true);
+
+    const timedOut = await runCommand(nodeEval("setInterval(() => {}, 1000);"), dir, 10);
+    assert.equal(timedOut.exitCode, 124);
+    assert.equal(timedOut.timedOut, true);
+    assert.match(timedOut.stderr, /Command timed out after 10ms/);
+  });
+});
+
+test("config baseline detects quality gate configuration changes", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const rootConfigPath = path.join(dir, "helix.config.json");
+    await writeFile(rootConfigPath, `${JSON.stringify({ qualityGates: { commentChecker: { enabled: true, blockOnFindings: true } } }, null, 2)}\n`);
+
+    const baseline = await writeConfigBaseline(dir, { reason: "reviewed" });
+    assert.equal(baseline.kind, "config_baseline");
+    assert.ok(baseline.files.some((file) => file.path === "helix.config.json"));
+
+    let verification = await verifyConfigBaseline(dir);
+    assert.equal(verification.ok, true);
+
+    await writeFile(rootConfigPath, `${JSON.stringify({ qualityGates: { commentChecker: { enabled: false, blockOnFindings: false } } }, null, 2)}\n`);
+    verification = await verifyConfigBaseline(dir);
+    assert.equal(verification.ok, false);
+    assert.ok(verification.failures.some((failure) => failure.path === "helix.config.json" && failure.reason === "hash_mismatch"));
+  });
+});
+
+test("runtime state backup preserves critical files and verify reports missing state", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const samplePath = await createSamplePlan(dir);
+    await importPlan(dir, samplePath);
+    let verification = await verifyRuntimeState(dir);
+    assert.equal(verification.ok, true);
+
+    const backup = await writeRuntimeStateBackup(dir, { reason: "before-risky-agent" });
+    assert.equal(backup.kind, "runtime_state_backup");
+    assert.ok(backup.files.some((file) => file.path === ".helix/ledger.jsonl" && file.status === "copied"));
+
+    await rm(resolveHelixPath(dir, "team", "tasks.json"), { force: true });
+    verification = await verifyRuntimeState(dir);
+    assert.equal(verification.ok, false);
+    assert.ok(verification.failures.some((failure) => failure.path === ".helix/team/tasks.json"));
+
+    const manifest = await readJson(resolveHelixPath(dir, "backups", backup.backupId, "manifest.json"));
+    assert.equal(manifest.backupId, backup.backupId);
+  });
+});
+
 test("session hooks inject memory digest summaries", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
@@ -2788,6 +2884,33 @@ test("workflow nodes execute, verify, scope, review, and checkpoint independentl
     assert.equal(state.tasks[0].status, "completed");
     assert.equal(state.tasks[0].route_decision.route, "execute");
     assert.equal((await dashboardData(dir)).status.completed, 1);
+  });
+});
+
+test("workflow verify node returns failed verification to pending for retry", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = path.join(dir, "node-verify-fail-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Node verify fail",
+      tasks: [{
+        id: "T001",
+        subject: "Run a verifier that fails once",
+        writable_paths: ["src/**"],
+        worker_command: nodeEval("process.exit(0);"),
+        verify_commands: [nodeEval("process.exit(1);")],
+      }],
+    }));
+    await importPlan(dir, planPath);
+
+    await runWorkflowNode(dir, "execute", { taskId: "T001" });
+    const verified = await runWorkflowNode(dir, "verify", { taskId: "T001" });
+    assert.equal(verified.status, "verify_failed");
+    assert.equal(verified.task.status, "pending");
+    assert.equal(verified.task.last_failure.nextStatus, "pending");
+
+    const state = await readJson(resolveHelixPath(dir, "team", "tasks.json"));
+    assert.equal(state.tasks[0].status, "pending");
   });
 });
 
