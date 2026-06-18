@@ -35,6 +35,7 @@
 - Add worktree isolation and merge admission. `DONE: Git worktree isolation, patch extraction, writable_paths check, patch apply, verifier/scope/review/checkpoint admission, failed admission rollback`
 - Keep lightweight child-agent results open until user/mainline acceptance. `DONE: successful child results enter awaiting_user_acceptance and release after admission`
 - Add Skill MCP support. `PARTIAL: skill/tool contracts are installable and matchable; external MCP server lifecycle remains adapter work`
+- Add project Agent Pack support for vertical production workflows such as GameYo: project-defined stage workers, stage loops, required outputs, writable paths, and gate bindings, while keeping ProducerAgent and governance gates owned by WildArrange. `TODO`
 - Add tmux/cmux visualization only after background agents work. `DEFERRED: not required for publishable CLI loop`
 
 ## Quality Bar
