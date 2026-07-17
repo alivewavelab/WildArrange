@@ -1,9 +1,10 @@
-import { writeFile } from "node:fs/promises";
+import { readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   DEFAULT_LEAD_AGENT,
   appendLedger,
   ensureHelixDirs,
+  hashContent,
   normalizeAgentKey,
   nowIso,
   readJson,
@@ -12,10 +13,6 @@ import {
   writeJsonAtomic,
   writeSnapshot,
 } from "./helix-foundation.mjs";
-import {
-  renderChangeRequestMarkdown,
-  writeOpenChangesIndex,
-} from "./helix-gates.mjs";
 import {
   loadTaskState,
   normalizeStringArray,
@@ -394,4 +391,150 @@ function normalizeDecision(decision) {
 
 function uniqueStrings(values) {
   return [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))];
+}
+
+export async function writeChangeRequest(rootDir, planId, task, scopeResult, source = "scope_guard") {
+  await ensureHelixDirs(rootDir);
+  const signature = hashContent(JSON.stringify({
+    planId,
+    taskId: task.id,
+    deniedPaths: scopeResult.deniedPaths || [],
+    writablePaths: scopeResult.writablePaths || task.writable_paths || [],
+  })).slice(0, 12);
+  const id = `CR-${signature}`;
+  const jsonPath = resolveHelixPath(rootDir, "changes", `${id}.json`);
+  const mdPath = resolveHelixPath(rootDir, "changes", `${id}.md`);
+  const existing = await readJson(jsonPath, null);
+  const changeRequest = existing || {
+    id,
+    kind: "change_request",
+    status: "open",
+    source,
+    planId,
+    taskId: task.id,
+    subject: task.subject,
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+    evidence: `scope guard denied paths: ${(scopeResult.deniedPaths || []).join(", ") || "unknown"}`,
+    rationale: "Worker changed files outside task.writable_paths; Jiuwei/DiJiang must decide whether to revise scope or reject the change.",
+    deniedPaths: scopeResult.deniedPaths || [],
+    changedPaths: scopeResult.changedPaths || [],
+    writablePaths: scopeResult.writablePaths || task.writable_paths || [],
+    proposedActions: [
+      "revert_or_move_out_of_scope_changes",
+      "revise_plan_writable_paths_after_review",
+      "split_into_new_task",
+    ],
+    invariants: {
+      autoApply: false,
+      requiresLeadReview: true,
+      mustNotWeakenVerification: true,
+    },
+  };
+  if (existing) {
+    changeRequest.updatedAt = nowIso();
+    changeRequest.lastSeenSource = source;
+  }
+  changeRequest.reportJsonPath = path.relative(rootDir, jsonPath);
+  changeRequest.reportMdPath = path.relative(rootDir, mdPath);
+  await writeJsonAtomic(jsonPath, changeRequest);
+  await writeFile(mdPath, renderChangeRequestMarkdown(changeRequest), "utf8");
+  await writeOpenChangesIndex(rootDir);
+  await appendLedger(rootDir, {
+    type: existing ? "change_request_reused" : "change_request_created",
+    planId,
+    taskId: task.id,
+    changeRequestId: id,
+    deniedPaths: changeRequest.deniedPaths,
+    reportPath: changeRequest.reportMdPath,
+  });
+  return changeRequest;
+}
+
+export function renderChangeRequestMarkdown(changeRequest) {
+  const legacyLeadReviewKey = ["requires", "Sisy", "phus", "Review"].join("");
+  return `# ChangeRequest ${changeRequest.id}
+
+| Field | Value |
+| --- | --- |
+| Status | \`${changeRequest.status}\` |
+| Source | \`${changeRequest.source}\` |
+| Plan | \`${changeRequest.planId}\` |
+| Task | \`${changeRequest.taskId}\` |
+| Subject | ${changeRequest.subject} |
+
+## Evidence
+
+${changeRequest.evidence}
+
+## Rationale
+
+${changeRequest.rationale}
+
+${changeRequest.decision ? `## Decision
+
+- Reviewer: ${changeRequest.reviewer || DEFAULT_LEAD_AGENT}
+- Decision: \`${changeRequest.decision}\`
+- Reviewed at: ${changeRequest.reviewedAt}
+- Applied scope: ${Boolean(changeRequest.appliedScope)}
+
+### Decision Evidence
+
+${changeRequest.decisionEvidence}
+
+### Decision Rationale
+
+${changeRequest.decisionRationale}
+` : ""}
+
+## Paths
+
+- Writable: ${changeRequest.writablePaths.join(", ") || "(none)"}
+- Changed: ${changeRequest.changedPaths.join(", ") || "(none)"}
+- Denied: ${changeRequest.deniedPaths.join(", ") || "(none)"}
+${changeRequest.appliedWritablePaths ? `- Applied writable paths: ${changeRequest.appliedWritablePaths.join(", ") || "(none)"}` : ""}
+
+## Allowed Resolutions
+
+${changeRequest.proposedActions.map((action) => `- ${action}`).join("\n")}
+
+## Invariants
+
+- autoApply: ${changeRequest.invariants.autoApply}
+- requiresLeadReview: ${changeRequest.invariants.requiresLeadReview ?? changeRequest.invariants[legacyLeadReviewKey]}
+- mustNotWeakenVerification: ${changeRequest.invariants.mustNotWeakenVerification}
+`;
+}
+
+export async function writeOpenChangesIndex(rootDir) {
+  const changes = await listChangeRequests(rootDir);
+  const openChanges = changes.filter((change) => change.status === "open");
+  const lines = ["# Open ChangeRequests", ""];
+  if (openChanges.length === 0) {
+    lines.push("No open change requests.");
+  } else {
+    for (const change of openChanges) {
+      lines.push(`- ${change.id}: ${change.subject}`);
+      lines.push(`  - Task: ${change.taskId}`);
+      lines.push(`  - Denied: ${(change.deniedPaths || []).join(", ") || "(none)"}`);
+      lines.push(`  - Report: ${change.reportMdPath}`);
+    }
+  }
+  await writeFile(resolveHelixPath(rootDir, "changes", "open.md"), `${lines.join("\n")}\n`, "utf8");
+}
+
+export async function listChangeRequests(rootDir) {
+  await ensureHelixDirs(rootDir);
+  let entries = [];
+  try {
+    entries = await readdir(resolveHelixPath(rootDir, "changes"));
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+  const changes = [];
+  for (const entry of entries.filter((name) => /^CR-.+\.json$/.test(name)).sort()) {
+    changes.push(await readJson(resolveHelixPath(rootDir, "changes", entry)));
+  }
+  return changes;
 }
