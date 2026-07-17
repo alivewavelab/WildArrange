@@ -12,6 +12,7 @@ import { writeMemoryDigest } from "./helix-memory-digest.mjs";
 import { routeRequest } from "./helix-routing.mjs";
 import { captureWorkspaceSnapshot } from "./helix-git-worktree.mjs";
 import { runReviewGate, runWorker } from "./helix-review.mjs";
+import { runDeliveryPipeline } from "./orchestration/delivery-pipeline.mjs";
 import { writeWorkflowSummary } from "./helix-status.mjs";
 import { loadPlanApproval, loadTaskState } from "./helix-plan.mjs";
 import {
@@ -92,65 +93,45 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   await appendLedger(rootDir, { type: "worker_done_claim", planId: taskState.planId, taskId: task.id, exitCode: workerResult.exitCode });
   await writeSnapshot(rootDir, "worker_done", { planId: taskState.planId, taskId: task.id, exitCode: workerResult.exitCode });
 
-  const verifyResult = await runVerifier(rootDir, task);
-  task.evidence.push(verifyResult);
-  task.last_verify_result = verifyResult;
-  const criterionEvidence = applyVerifierEvidenceToCriteria(task, verifyResult);
-  await persistTaskState(rootDir, taskState);
-  await writeSnapshot(rootDir, "verified", { planId: taskState.planId, taskId: task.id, pass: verifyResult.pass });
-  if (criterionEvidence.length > 0) {
-    await appendLedger(rootDir, { type: "criterion_evidence_auto_recorded", planId: taskState.planId, taskId: task.id, count: criterionEvidence.length });
-  }
-
-  const scopeResult = await scopeGuard(rootDir, {
-    taskId: task.id,
+  // Shared delivery pipeline owns gate order (verify -> scope -> review ->
+  // acceptance-proof -> checkpoint); see src/orchestration/delivery-pipeline.mjs.
+  // This function still owns every reporting/ledger side effect itself so
+  // observable behavior (files written, ledger entries, evidence shape)
+  // stays identical to before the pipeline existed.
+  const pipelineResult = await runDeliveryPipeline(rootDir, taskState.planId, task, {
+    initialEvidence: { workerResult },
     changedPaths: changedPathsIntroducedByTask(beforeChanged, afterChanged),
     unavailableReason: beforeChanged.available ? afterChanged.reason : beforeChanged.reason,
   });
+  const verifyResult = pipelineResult.evidence.verifyResult;
+  const scopeResult = pipelineResult.evidence.scopeResult;
+  const reviewResult = pipelineResult.evidence.reviewResult;
+  const acceptanceProof = pipelineResult.evidence.acceptanceProof || null;
+  const criteria = pipelineResult.criteria;
+
+  task.evidence.push(verifyResult);
+  task.last_verify_result = verifyResult;
+  await writeSnapshot(rootDir, "verified", { planId: taskState.planId, taskId: task.id, pass: verifyResult.pass });
+  if (pipelineResult.criterionEvidenceRecorded.length > 0) {
+    await appendLedger(rootDir, { type: "criterion_evidence_auto_recorded", planId: taskState.planId, taskId: task.id, count: pipelineResult.criterionEvidenceRecorded.length });
+  }
+
   task.evidence.push({ kind: "scope_guard", at: nowIso(), ...scopeResult });
   task.last_scope_result = scopeResult;
   if (scopeResult.status === "fail") {
     task.last_change_request = await writeChangeRequest(rootDir, taskState.planId, task, scopeResult, "scope_guard");
   }
-  await persistTaskState(rootDir, taskState);
 
-  const reviewResult = await runReviewGate(rootDir, task, { workerResult, verifyResult, scopeResult });
   task.evidence.push(reviewResult);
   task.last_review_result = reviewResult;
   await writeReviewReport(rootDir, taskState.planId, task, reviewResult);
-  await persistTaskState(rootDir, taskState);
   await appendLedger(rootDir, { type: "review_gate_completed", planId: taskState.planId, taskId: task.id, pass: reviewResult.pass, failedLaneCount: reviewResult.lanes.filter((lane) => lane.status === "fail").length });
   await writeSnapshot(rootDir, "reviewed", { planId: taskState.planId, taskId: task.id, pass: reviewResult.pass });
 
-  const criteria = criteriaStatus(task);
-  if (workerResult.exitCode === 0 && verifyResult.pass && criteria.pass && scopeResult.status === "pass" && reviewResult.pass) {
-    const acceptanceProof = await writeAcceptanceProof(rootDir, taskState.planId, task, {
-      workerResult,
-      verifyResult,
-      scopeResult,
-      reviewResult,
-    });
-    if (!acceptanceProof.pass) {
-      task.status = shouldFailTask(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
-      task.last_failure = buildFailureSummary(task, {
-        workerResult,
-        verifyResult,
-        scopeResult,
-        reviewResult,
-        criteriaResult: criteria,
-        nextStatus: task.status,
-      });
-      task.last_failure.reason = "acceptance_proof_failed";
-      task.last_failure.summary = `acceptance proof failed: ${acceptanceProof.checks.filter((check) => check.status === "fail").map((check) => check.name).join(", ")}`;
-      task.updatedAt = nowIso();
-      await writeFailureReport(rootDir, taskState.planId, task);
-      await persistTaskState(rootDir, taskState);
-      return { status: task.status === "failed" ? "failed" : "retry", task, workerResult, verifyResult, scopeResult, reviewResult, acceptanceProof };
-    }
+  if (pipelineResult.status === "completed") {
     task.status = "completed";
     task.updatedAt = nowIso();
     await persistTaskState(rootDir, taskState);
-    await writeCheckpoint(rootDir, taskState.planId, task, verifyResult, scopeResult, reviewResult);
     await appendLedger(rootDir, { type: "task_verified", planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult.status, reviewStatus: "pass" });
     await appendWisdom(rootDir, task, verifyResult);
     await writeMemoryDigest(rootDir, { reason: "task_completed", stage: "checkpoint", task, taskId: task.id });
@@ -159,6 +140,25 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
       await writeWorkflowSummary(rootDir, { reason: "all_tasks_completed" });
     }
     return { status: "completed", task, workerResult, verifyResult, scopeResult, reviewResult, acceptanceProof };
+  }
+
+  if (acceptanceProof) {
+    // Every upstream gate passed, but acceptance-proof itself found a gap.
+    task.status = shouldFailTask(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
+    task.last_failure = buildFailureSummary(task, {
+      workerResult,
+      verifyResult,
+      scopeResult,
+      reviewResult,
+      criteriaResult: criteria,
+      nextStatus: task.status,
+    });
+    task.last_failure.reason = "acceptance_proof_failed";
+    task.last_failure.summary = `acceptance proof failed: ${acceptanceProof.checks.filter((check) => check.status === "fail").map((check) => check.name).join(", ")}`;
+    task.updatedAt = nowIso();
+    await writeFailureReport(rootDir, taskState.planId, task);
+    await persistTaskState(rootDir, taskState);
+    return { status: task.status === "failed" ? "failed" : "retry", task, workerResult, verifyResult, scopeResult, reviewResult, acceptanceProof };
   }
 
   task.status = shouldFailTask(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";

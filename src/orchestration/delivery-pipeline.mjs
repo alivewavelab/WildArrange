@@ -28,11 +28,16 @@ const STEP_LABELS = {
 export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
   const evidence = { ...(options.initialEvidence || {}) };
   const results = [];
+  let criterionEvidenceRecorded = [];
 
   for (const stepName of GATE_STEPS) {
     const envelope = await invokeCapability(stepName, buildStepContext(stepName, { rootDir, planId, task, evidence, options }));
     results.push(envelope);
-    recordStepEvidence(stepName, evidence, envelope, task);
+    if (stepName === "verify") {
+      criterionEvidenceRecorded = recordStepEvidence(stepName, evidence, envelope, task);
+    } else {
+      recordStepEvidence(stepName, evidence, envelope, task);
+    }
   }
 
   const criteria = criteriaStatus(task);
@@ -40,7 +45,7 @@ export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
   const gatesAllPass = workerExitOk && criteria.pass && results.every((result) => result.status === "pass");
 
   if (!gatesAllPass) {
-    return finalizePipelineResult("blocked", results, evidence, { criteria });
+    return finalizePipelineResult("blocked", results, evidence, { criteria, criterionEvidenceRecorded });
   }
 
   const proofEnvelope = await invokeCapability(
@@ -51,7 +56,7 @@ export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
   recordStepEvidence("acceptance-proof", evidence, proofEnvelope, task);
 
   if (proofEnvelope.status !== "pass") {
-    return finalizePipelineResult("blocked", results, evidence, { criteria });
+    return finalizePipelineResult("blocked", results, evidence, { criteria, criterionEvidenceRecorded });
   }
 
   const checkpointEnvelope = await invokeCapability(
@@ -60,7 +65,7 @@ export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
   );
   results.push(checkpointEnvelope);
 
-  return finalizePipelineResult("completed", results, evidence, { criteria });
+  return finalizePipelineResult("completed", results, evidence, { criteria, criterionEvidenceRecorded });
 }
 
 function buildStepContext(stepName, { rootDir, planId, task, evidence, options }) {
@@ -96,12 +101,14 @@ function recordStepEvidence(stepName, evidence, envelope, task) {
     evidence.verifyResult = envelope.evidence;
     // Mirrors helix-node-runtime.mjs: a passing verifier can auto-satisfy
     // successCriteria that declare verifierCommandRefs, so criteriaStatus()
-    // reflects it without a separate manual step.
-    applyVerifierEvidenceToCriteria(task, envelope.evidence);
+    // reflects it without a separate manual step. The caller (orchestration)
+    // still owns deciding whether this is ledger-worthy.
+    return applyVerifierEvidenceToCriteria(task, envelope.evidence);
   }
   if (stepName === "scope") evidence.scopeResult = envelope.evidence;
   if (stepName === "review") evidence.reviewResult = envelope.evidence;
   if (stepName === "acceptance-proof") evidence.acceptanceProof = envelope.evidence;
+  return undefined;
 }
 
 function finalizePipelineResult(status, results, evidence, extra = {}) {
@@ -113,6 +120,7 @@ function finalizePipelineResult(status, results, evidence, extra = {}) {
     steps: results,
     evidence,
     criteria: extra.criteria || null,
+    criterionEvidenceRecorded: extra.criterionEvidenceRecorded || [],
     totalDurationMs,
     totalCost: totalCostAmount > 0 ? { amount: totalCostAmount, currency: costCurrency } : null,
     summary: renderPipelineSummary(results, totalDurationMs, totalCostAmount, costCurrency),
