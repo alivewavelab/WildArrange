@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>从设计需求到开发测试完成的线性治理流程</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --text: #172033;
+      --muted: #5d687b;
+      --line: #d8dee8;
+      --stage: #e8f3ff;
+      --stage-border: #6aa8e8;
+      --gate: #eef8ec;
+      --gate-border: #79b45d;
+      --tool: #fff3df;
+      --tool-border: #e6a13d;
+      --risk: #ffe9e7;
+      --risk-border: #e06f64;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    main {
+      max-width: 1160px;
+      margin: 0 auto;
+      padding: 32px 22px 48px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+    h2 {
+      margin: 30px 0 14px;
+      font-size: 20px;
+    }
+    h3 {
+      margin: 0 0 8px;
+      font-size: 16px;
+    }
+    p, li {
+      line-height: 1.6;
+    }
+    code {
+      background: #e9edf3;
+      border-radius: 4px;
+      padding: 1px 5px;
+    }
+    .lead {
+      color: var(--muted);
+      font-size: 17px;
+      max-width: 900px;
+    }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 18px 0 26px;
+    }
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 12px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .dot {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+    }
+    .dot.stage { background: var(--stage); border: 2px solid var(--stage-border); }
+    .dot.gate { background: var(--gate); border: 2px solid var(--gate-border); }
+    .dot.tool { background: var(--tool); border: 2px solid var(--tool-border); }
+    .dot.risk { background: var(--risk); border: 2px solid var(--risk-border); }
+    .flow {
+      display: grid;
+      gap: 12px;
+    }
+    .node {
+      display: grid;
+      grid-template-columns: 220px 1fr 1fr 1fr;
+      gap: 10px;
+      align-items: stretch;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .title {
+      background: var(--stage);
+      border: 2px solid var(--stage-border);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .box {
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .inject {
+      background: #f8fbff;
+      border: 1px solid var(--stage-border);
+    }
+    .gate {
+      background: var(--gate);
+      border: 1px solid var(--gate-border);
+    }
+    .tool {
+      background: var(--tool);
+      border: 1px solid var(--tool-border);
+    }
+    .risk {
+      background: var(--risk);
+      border: 1px solid var(--risk-border);
+    }
+    .arrow {
+      text-align: center;
+      color: #7b8797;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+    .card {
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    @media (max-width: 900px) {
+      .node {
+        grid-template-columns: 1fr;
+      }
+      .summary {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>从设计需求到开发测试完成的线性治理流程</h1>
+  <p class="lead">这是一条“用户提出设计需求 → 生成计划 → 执行开发 → 独立验证 → 测试完成”的线性路径。Agent 可以生产内容，但不能自己宣布完成；完成必须由 Gate 放行并写入证据。</p>
+
+  <div class="legend">
+    <span><i class="dot stage"></i>阶段 / 注入</span>
+    <span><i class="dot gate"></i>Gate / 限制</span>
+    <span><i class="dot tool"></i>工具调用</span>
+    <span><i class="dot risk"></i>失败返工</span>
+  </div>
+
+  <h2>主流程</h2>
+  <div class="flow">
+    <section class="node">
+      <div class="title"><h3>1. 用户提出设计需求</h3><p>输入产品目标、设计想法、约束或验收期待。</p></div>
+      <div class="box inject"><strong>注入内容</strong><br>项目规则、AGENTS.md、历史 digest、路由上下文、可用 skill 摘要。</div>
+      <div class="box gate"><strong>Gate / 限制</strong><br>模糊需求不能直接执行；高风险或范围不清时降级到 plan / ask。</div>
+      <div class="box tool"><strong>工具</strong><br><code>hook run</code><br><code>archivist packet/run</code><br><code>skills match</code></div>
+    </section>
+    <div class="arrow">↓</div>
+
+    <section class="node">
+      <div class="title"><h3>2. 需求理解与路由</h3><p>判断是设计、实现、测试、修复，还是需要拆分。</p></div>
+      <div class="box inject"><strong>注入内容</strong><br>路由决策、主 Agent、支持 Agent、任务复杂度、推荐 skill。</div>
+      <div class="box gate"><strong>Gate / 限制</strong><br>低置信 execute 不直接开工；必须留下 deterministic 证据。</div>
+      <div class="box tool"><strong>工具</strong><br><code>node route --text</code><br><code>routeRequest</code><br><code>ArchivistRouter</code></div>
+    </section>
+    <div class="arrow">↓</div>
+
+    <section class="node">
+      <div class="title"><h3>3. 计划生成 / 任务拆分</h3><p>把设计需求转成可执行任务。</p></div>
+      <div class="box inject"><strong>注入内容</strong><br>任务目标、writable_paths、verify_commands、review_commands、successCriteria。</div>
+      <div class="box gate"><strong>Gate / 限制</strong><br>任务必须有独立 verifier；不得靠 worker 自证；高风险计划必须拆细。</div>
+      <div class="box tool"><strong>工具</strong><br><code>plan --from plan.json</code><br><code>task create</code><br><code>context build</code></div>
+    </section>
+    <div class="arrow">↓</div>
+
+    <section class="node">
+      <div class="title"><h3>4. 设计 / 规格产出</h3><p>产出设计说明、交互规格、验收场景。</p></div>
+      <div class="box inject"><strong>注入内容</strong><br>目标用户、核心流程、边界场景、验收标准、项目设计规则。</div>
+      <div class="box gate"><strong>Gate / 限制</strong><br>规格缺失不能进入编码；验收标准不能被后续 worker 私自改弱。</div>
+      <div class="box tool"><strong>工具</strong><br><code>context build --agent Jiuwei</code><br><code>prompts show</code><br><code>rules collect</code></div>
+    </section>
+    <div class="arrow">↓</div>
+
+    <section class="node">
+      <div class="title"><h3>5. 开发执行</h3><p>worker 按任务修改文件或生成产物。</p></div>
+      <div class="box inject"><strong>注入内容</strong><br>当前 task、允许路径、失败历史、相关项目规则、必要 skill。</div>
+      <div class="box gate"><strong>Gate / 限制</strong><br>PreToolUse 检查 active task 与目标路径；禁止越权写文件和危险命令。</div>
+      <div class="box tool"><strong>工具</strong><br><code>run</code><br><code>node execute</code><br><code>parallel run</code><br><code>hook run</code></div>
+    </section>
+    <div class="arrow">↓</div>
+
+    <section class="node">
+      <div class="title"><h3>6. 独立验证</h3><p>运行测试、类型检查、构建或专用验证命令。</p></div>
+      <div class="box inject"><strong>注入内容</strong><br>verify_commands、上一步 worker 证据、期望输出。</div>
+      <div class="box gate"><strong>Gate / 限制</strong><br>verify_commands 不能为空；exit code 不通过则任务回 pending / failed。</div>
+      <div class="box tool"><strong>工具</strong><br><code>node verify</code><br><code>npm test</code><br><code>npm run build</code><br><code>custom verifier</code></div>
+    </section>
+    <div class="arrow">↓</div>
+
+    <section class="node">
+      <div class="title"><h3>7. 范围与质量复核</h3><p>确认改动没有越界，质量门没有被绕过。</p></div>
+      <div class="box inject"><strong>注入内容</strong><br>git/file manifest、writable_paths、review lanes、项目规则上下文。</div>
+      <div class="box gate"><strong>Gate / 限制</strong><br>scope guard、review gate、LSP/AST/hashline/comment checker 可阻断。</div>
+      <div class="box tool"><strong>工具</strong><br><code>guard scope</code><br><code>node scope</code><br><code>node review</code><br><code>review_commands</code></div>
+    </section>
+    <div class="arrow">↓</div>
+
+    <section class="node">
+      <div class="title"><h3>8. 验收证明 / Checkpoint</h3><p>把完成条件汇总成可追溯 proof。</p></div>
+      <div class="box inject"><strong>注入内容</strong><br>worker evidence、verifier evidence、scope result、review result、successCriteria evidence。</div>
+      <div class="box gate"><strong>Gate / 限制</strong><br>所有条件硬 AND；任何一个缺失都不能 completed。</div>
+      <div class="box tool"><strong>工具</strong><br><code>node checkpoint</code><br><code>acceptance proof</code><br><code>ledger append</code></div>
+    </section>
+    <div class="arrow">↓</div>
+
+    <section class="node">
+      <div class="title"><h3>9. 测试完成 / 可恢复交付</h3><p>输出状态、摘要、可恢复上下文。</p></div>
+      <div class="box inject"><strong>注入内容</strong><br>完成摘要、失败记录、任务 digest、下一步 continuation。</div>
+      <div class="box gate"><strong>Gate / 限制</strong><br>ledger hash 链可校验；状态缺失可由 state verify 发现。</div>
+      <div class="box tool"><strong>工具</strong><br><code>status</code><br><code>summary</code><br><code>ledger verify</code><br><code>state backup/verify</code></div>
+    </section>
+  </div>
+
+  <h2>失败返工路径</h2>
+  <section class="node">
+    <div class="title risk"><h3>Gate 失败</h3><p>不进入完成态，按失败类型回到对应环节。</p></div>
+    <div class="box inject"><strong>注入内容</strong><br>failure summary、retry hint、ChangeRequest、被拒路径、失败命令输出。</div>
+    <div class="box gate"><strong>Gate / 限制</strong><br>不能删除 verifier / successCriteria 制造 PASS；越界必须走 ChangeRequest。</div>
+    <div class="box tool"><strong>工具</strong><br><code>changes list/review/resolve</code><br><code>node retry</code><br><code>run</code></div>
+  </section>
+
+  <h2>一句话版</h2>
+  <div class="summary">
+    <section class="card">
+      <h3>Agent 负责生产</h3>
+      <p>设计、编码、测试证据都可以由 Agent 产出，但只能作为 claim 或 evidence。</p>
+    </section>
+    <section class="card">
+      <h3>Gate 负责判定</h3>
+      <p>verifier、scope、review、successCriteria、acceptance proof 全部通过，任务才算完成。</p>
+    </section>
+    <section class="card">
+      <h3>Ledger 负责追溯</h3>
+      <p>每次通过、失败、返工、checkpoint 都入账，后续可恢复、可审计。</p>
+    </section>
+  </div>
+</main>
+</body>
+</html>

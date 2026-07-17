@@ -10,7 +10,8 @@ import {
   writeJsonAtomic,
 } from "./helix-foundation.mjs";
 import { listChangeRequests } from "./helix-gates.mjs";
-import { loadTaskState } from "./helix-plan.mjs";
+import { parallelAgentStatus } from "./helix-parallel-agents.mjs";
+import { loadPlanApproval, loadTaskState } from "./helix-plan.mjs";
 
 export async function writeWorkflowSummary(rootDir, options = {}) {
   await ensureHelixDirs(rootDir);
@@ -94,11 +95,13 @@ export async function dashboardData(rootDir) {
   const summary = await readJson(resolveHelixPath(rootDir, "reports", "workflow-summary.json"), null);
   const ledger = await readLedgerTail(rootDir, 80);
   const changes = await listChangeRequests(rootDir);
+  const attention = await attentionReport(rootDir, { taskState, changes });
   return {
     generatedAt: nowIso(),
     status,
     tasks: taskState?.tasks || [],
     changes,
+    attention,
     summary,
     latestSnapshot: latestSnapshot ? {
       id: latestSnapshot.id,
@@ -107,6 +110,71 @@ export async function dashboardData(rootDir) {
       payload: latestSnapshot.payload,
     } : null,
     ledger,
+  };
+}
+
+export async function attentionReport(rootDir, options = {}) {
+  const taskState = options.taskState !== undefined ? options.taskState : await loadTaskState(rootDir);
+  const changes = options.changes !== undefined ? options.changes : await listChangeRequests(rootDir);
+  const tasks = taskState?.tasks || [];
+
+  const openChanges = changes
+    .filter((change) => change.status === "open")
+    .map((change) => ({
+      id: change.id,
+      taskId: change.taskId,
+      subject: change.subject,
+      deniedPaths: change.deniedPaths || [],
+      reportMdPath: change.reportMdPath || null,
+      resolveHint: `node ./bin/helix.mjs changes resolve --id ${change.id} --decision accept|reject --evidence "..." --rationale "..."`,
+    }));
+
+  const failedTasks = tasks
+    .filter((task) => task.status === "failed")
+    .map((task) => ({
+      id: task.id,
+      subject: task.subject,
+      reason: task.last_failure?.reason || "unknown",
+      retryHint: task.last_failure?.retryHint || null,
+      reportMdPath: task.last_failure?.reportMdPath || null,
+    }));
+
+  const needsUserDecision = tasks
+    .filter((task) => task.status === "needs_user_decision" || task.status === "review_blocked")
+    .map((task) => ({ id: task.id, subject: task.subject, status: task.status }));
+
+  const awaitingAcceptance = [];
+  const parallel = await parallelAgentStatus(rootDir).catch(() => null);
+  for (const run of parallel?.runs || []) {
+    for (const result of run.results || []) {
+      if (result.lifecycle?.status !== "awaiting_user_acceptance") continue;
+      awaitingAcceptance.push({
+        runId: run.runId,
+        taskId: result.taskId,
+        agent: result.agent,
+        resultPath: result.resultPath,
+        admitHint: `node ./bin/helix.mjs parallel admit --run ${run.runId} --task ${result.taskId}`,
+      });
+    }
+  }
+
+  const approval = await loadPlanApproval(rootDir).catch(() => ({ required: false, status: "approved" }));
+  const awaitingPlanApproval = approval.required && approval.status !== "approved"
+    ? [{
+        planId: approval.planId,
+        approveHint: `node ./bin/helix.mjs plan approve`,
+      }]
+    : [];
+
+  return {
+    kind: "attention_report",
+    at: nowIso(),
+    total: openChanges.length + failedTasks.length + needsUserDecision.length + awaitingAcceptance.length + awaitingPlanApproval.length,
+    openChanges,
+    failedTasks,
+    needsUserDecision,
+    awaitingAcceptance,
+    awaitingPlanApproval,
   };
 }
 

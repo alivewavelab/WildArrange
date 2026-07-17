@@ -102,6 +102,13 @@ node ./bin/helix.mjs adapter restore --backup <backupId>
 - **Codex**：生命周期 hook 写入 `.codex/hooks.json`，并在 `.helix/adapters/codex/hooks.json` 保留审计副本。Codex 需要在可信项目中通过 `/hooks` review / trust 后才会执行这些 hard hook。
 - **Cursor**：项目规则写入 `.cursor/rules/wildarrange.mdc`。当前 Cursor 侧是 soft governance，不等同于 Codex PreToolUse 硬拦截。
 
+`adapter install` 还会生成一组 slash 命令，省去手动开终端敲 `node ...`。两端从同一套命令集渲染（`helix-config` / `helix-doctor` / `helix-refresh` / `helix-status` / `helix-plan` / `helix-approve` / `helix-run`）：
+
+- **Cursor**：`.cursor/commands/<name>.md`（纯 Markdown 斜杠命令，聊天输入 `/helix-doctor` 触发）。
+- **Codex**：`.agents/skills/<name>/SKILL.md`（skill 目录，用 `/skills` 或 `$helix-doctor` 触发；Codex 0.117 已移除自定义 prompts，改用 skill）。
+
+每个命令本质是一段提示词，指示 AI 去执行对应的 `helix.mjs` 子命令并汇报结果——是"让 AI 代你敲 CLI"的快捷方式，不是原生按钮。
+
 ## 多 Agent 最小闭环
 
 命令型子 Agent 可以先在隔离目录内并发运行；也可以通过 adapter 命令模板交给 Codex/Cursor 类宿主启动：
@@ -140,9 +147,16 @@ node ./bin/helix.mjs config baseline --reason reviewed
 node ./bin/helix.mjs config verify
 node ./bin/helix.mjs state backup --reason before-risky-agent
 node ./bin/helix.mjs state verify
+node ./bin/helix.mjs state list
+node ./bin/helix.mjs state restore --backup <backupId>
+node ./bin/helix.mjs doctor
 ```
 
-WildArrange 会在 shell 执行前阻断明显破坏性命令，例如删除 `.git/.helix`、`git reset --hard`、`git clean -fd`、`sudo` 或 `curl | sh`。正常项目命令、verifier、review command 和子 Agent runner 不受影响。
+`doctor` 是一键体检：校验 config 结构与挂载、对账已完成任务（checkpoint / acceptance proof / ledger 事件必须齐全）、验证 ledger hash 链，并与最近一次备份交叉比对以发现整链重写。`state restore` 恢复前会自动再做一次备份，恢复错了可以再退回。
+
+每次 worker 执行前，WildArrange 会在 Git 项目里自动记录一份工作区快照（`git stash create`），快照 hash 与恢复命令写入任务证据和 ledger，代码被改坏时可用 `git stash apply <hash>` 还原。
+
+WildArrange 会在 shell 执行前阻断明显破坏性命令，例如删除 `.git/.helix`、递归删除 `src/test/doc` 等项目核心目录、`git reset --hard`、`git clean -fd`、`sudo` 或 `curl | sh`。正常项目命令、verifier、review command 和子 Agent runner 不受影响。
 
 用户验收后可以显式关闭保留结果：
 
@@ -188,6 +202,14 @@ Skill matcher 是路由之外的轻量解释层，用来判断当前阶段应加
 ```bash
 node ./bin/helix.mjs skills match --text "做一个网页版提醒事项 App" --stage design --agent YingLong
 ```
+
+注入点的 Skill 挂载默认按需生效（`skillMatcher.dynamicInjection`）：有请求文本时，只有与本次请求匹配的已配置 skill 才注入全文，其余降级为"按需可加载"引用；`alwaysMount`（默认 `wildarrange-injection-runtime`）始终注入，`maxSkills`（默认 4）限制单次挂载数量。没有请求文本的注入点（如 `pre_tool_use`）回落到静态清单。动态匹配只做减法，不会把清单之外的 skill 全文塞进上下文。
+
+### 人工决策通道与安全开关
+
+- **通用推送（不绑任何外部 IM）**：所有"待人决策"的事项——计划待确认、改动越界的 ChangeRequest、失败任务、子 Agent 待验收——由 hook 在 SessionStart / UserPromptSubmit / PostCompact / Stop 时注入宿主 AI 上下文，要求 AI 主动向开发者复述并给出选项。`attentionReport` 是这份待办的真相源，`status` / dashboard 也能拉取。
+- **计划确认门**：`planApproval.required=true` 时，`plan --from` 导入的计划进入 `awaiting_plan_approval`，`run` 拒绝执行直到开发者 `plan approve`（或对话里用 `/helix-approve`）。默认关闭。
+- **命令安全外置**：内置高危命令正则是不可关闭的底线；`commandSafety.extraPatterns` 允许在其之上追加项目专属危险命令拦截（`{ id, pattern, flags, reason }`），无需改代码。
 
 提示词变体不替代 Agent 原始提示词，只追加模型偏置。GPT 系列和 Codex/Cursor 主模型默认走 `host` / `gpt` 配置，外部模型可按 provider 选择：
 

@@ -39,6 +39,9 @@ export async function buildAgentContext(rootDir, options = {}) {
     agent,
     taskId: task?.id || "",
     planId: taskState?.planId || "",
+  }, {
+    text: task ? `${task.subject}\n${task.description || ""}` : "",
+    stage: stageForInjectionPoint(injectionPointName),
   });
   const modelConfig = config.agents?.[agent] || config.dynamicAgents?.[agent] || null;
   const context = {
@@ -203,6 +206,14 @@ export async function continuationDirective(rootDir, options = {}) {
   await writeFile(mdPath, renderContinuationMarkdown(directive), "utf8");
   await appendLedger(rootDir, { type: "continuation_checked", shouldContinue, reason: directive.reason, taskId: directive.taskId });
   return directive;
+}
+
+function stageForInjectionPoint(pointName) {
+  if (pointName === "before_execute") return "execute";
+  if (pointName === "before_review") return "review";
+  if (pointName === "before_checkpoint") return "verify";
+  if (pointName === "user_prompt_submit") return "plan";
+  return "";
 }
 
 function resolveContextTask(tasks, taskId) {

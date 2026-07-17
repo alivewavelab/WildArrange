@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { runCommand } from "./helix-gates.mjs";
 
@@ -70,6 +70,45 @@ export async function collectAgentWorktreePatch(rootDir, worktree, options = {})
   };
 }
 
+export async function captureWorkspaceSnapshot(rootDir, options = {}) {
+  const label = options.label || "pre-execute";
+  const git = await gitAvailable(rootDir);
+  if (!git.available) {
+    return { kind: "workspace_snapshot", available: false, label, reason: git.reason };
+  }
+  // 只在项目根就是 git 根时快照，避免嵌套目录误伤外层仓库
+  const sameRoot = await pathsEqual(rootDir, git.topLevel);
+  if (!sameRoot) {
+    return { kind: "workspace_snapshot", available: false, label, reason: "project root is not the git toplevel" };
+  }
+  const head = await runCommand(`git -C ${shellEscape(rootDir)} rev-parse HEAD`, rootDir, 15_000);
+  const headCommit = head.exitCode === 0 ? head.stdout.trim() : null;
+  const stash = await runCommand(`git -C ${shellEscape(rootDir)} stash create ${shellEscape(`wildarrange ${label}`)}`, rootDir, 30_000);
+  const stashCommit = stash.exitCode === 0 ? stash.stdout.trim() : null;
+  if (stash.exitCode !== 0) {
+    return {
+      kind: "workspace_snapshot",
+      available: false,
+      label,
+      headCommit,
+      reason: `git stash create failed: ${stash.stderr || stash.stdout}`,
+    };
+  }
+  return {
+    kind: "workspace_snapshot",
+    available: true,
+    label,
+    headCommit,
+    stashCommit: stashCommit || null,
+    dirty: Boolean(stashCommit),
+    restoreHint: stashCommit
+      ? `git stash apply ${stashCommit}`
+      : headCommit
+        ? `git checkout ${headCommit} -- <path>`
+        : null,
+  };
+}
+
 export async function applyAgentPatch(rootDir, patch, options = {}) {
   if (!patch || typeof patch !== "string" || patch.trim().length === 0) {
     throw new Error("parallel admission patch is empty");
@@ -105,6 +144,15 @@ async function gitAvailable(rootDir) {
     return { available: false, reason: "project is not a Git repository" };
   }
   return { available: true, topLevel: result.stdout.trim() };
+}
+
+async function pathsEqual(left, right) {
+  if (!left || !right) return false;
+  try {
+    return await realpath(left) === await realpath(right);
+  } catch {
+    return path.resolve(left) === path.resolve(right);
+  }
 }
 
 function normalizePatchPath(filePath) {

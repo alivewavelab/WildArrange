@@ -37,30 +37,33 @@ bin/helix.mjs
 - `bin/helix.mjs`: CLI routing.
 - `src/helix-core.mjs`: compatibility export surface for existing CLI/tests/imports.
 - `src/helix-foundation.mjs`: shared constants, runtime initialization, config, locks, prompt-pack registry, snapshots, and resume context basics.
-- `src/helix-ledger.mjs`: hash-chained ledger append and ledger verification.
-- `src/helix-adapters.mjs`: Codex/Cursor adapter install, uninstall, restore, report, backup logic, Codex `.codex/hooks.json` generation, and Cursor soft-rule generation.
+- `src/helix-ledger.mjs`: hash-chained ledger append, ledger verification, and verified-entry reads. Once the hash chain has started, unhashed appended lines are reported as tampering, and `doctor` only accepts chain-verified entries as completion evidence.
+- `src/helix-adapters.mjs`: Codex/Cursor adapter install, uninstall, restore, report, backup logic, Codex `.codex/hooks.json` generation, Cursor soft-rule generation, and shared slash-command generation (Cursor `.cursor/commands/*.md`, Codex `.agents/skills/*/SKILL.md`).
 - `src/helix-change.mjs`: steering proposals, review blockers, ChangeRequest review, and explicit accept/reject resolution.
 - `src/helix-failure.mjs`: failure reason classification, retry hints, and actionable failure summaries.
-- `src/helix-acceptance-proof.mjs`: checkpoint proof chain that verifies worker, verifier, success criteria, scope, review, and review lanes before completion.
+- `src/helix-acceptance-proof.mjs`: checkpoint proof chain that verifies worker, verifier, success criteria, scope, review, and review lanes before completion; also rejects no-op tasks whose worker and verify commands are all trivial with no writable paths.
 - `src/helix-routing.mjs`: intent/domain/complexity routing, route request persistence, deterministic confidence, and optional semantic shadow routing.
 - `src/helix-archivist-router.mjs`: DeepSeek flash based archivist/router runtime, routing packet construction, deterministic fallback, hook-triggered archive updates, context injection packs, and keyword suggestion artifacts.
 - `src/helix-memory-digest.mjs`: structured session/task/checkpoint digest generation for cross-session recovery.
 - `src/helix-rules.mjs`: project rule scanning and rule-context generation from AGENTS/CLAUDE/Cursor-style files.
 - `src/helix-review.mjs`: worker execution and deterministic BaiZe/QiongQi/LuanNiao review lanes.
-- `src/helix-command-safety.mjs`: high-risk shell command preflight shared by worker, verifier, review commands, quality gates, and child-agent runners.
-- `src/helix-security.mjs`: config hash baselines, config verification, runtime state backup, and critical state verification.
+- `src/helix-command-safety.mjs`: high-risk shell command preflight shared by worker, verifier, review commands, quality gates, and child-agent runners; blocks destructive system commands and recursive deletion of project source/test/doc directories. Built-in patterns are an immutable floor; `commandSafety.extraPatterns` in config adds project-specific blocks (`compileCommandSafetyPatterns` compiles them and callers thread them via `runCommand` options).
+- `src/helix-security.mjs`: config hash baselines, config verification, runtime state backup, backup listing, one-command state restore, and critical state verification.
+- `src/helix-doctor.mjs`: consistency doctor that audits config structure/mounts, reconciles completed tasks against checkpoints/acceptance proofs/ledger events, verifies the ledger hash chain, and cross-checks the ledger against the latest backup to detect rewrites.
 - `src/helix-code-intel.mjs`: host-neutral code intelligence gates for LSP/typecheck commands, AST/structure commands, hashline anchors, and comment checking.
 - `src/helix-injection.mjs`: injection-point resolution and mounted markdown/skill attachment loading.
 - `src/helix-skill-matcher.mjs`: stage/route/agent/keyword skill matching and configurable prompt model variants.
 - `src/helix-context.mjs`: agent context, resume snapshots, session lineage, and continuation directives.
 - `src/helix-hooks.mjs`: host lifecycle hook handling and pre-tool-use scope guard output.
-- `src/helix-status.mjs`: workflow summary, status report, dashboard data, and ledger tail reads.
+- `src/helix-status.mjs`: workflow summary, status report, dashboard data, attention report (open ChangeRequests, failed tasks, user decisions, plans awaiting approval, child agents awaiting acceptance), and ledger tail reads. The attention report is the source of truth for the generic human-decision push: hooks inject it into the host AI context (SessionStart / UserPromptSubmit / PostCompact / Stop) and instruct the AI to surface pending items to the developer with options — no external IM binding.
+
+Plan approval gate: when `planApproval.required` is true, `importPlan` marks the plan `awaiting_plan_approval` and `runNextTask` refuses to start tasks until `approvePlan` (CLI `plan approve` / slash `/helix-approve`) records approval. Off by default so the linear loop is unaffected unless opted in.
 - `src/helix-workflow.mjs`: workflow entrypoint, sample plan generation, and plan template copying.
 - `src/helix-node-runtime.mjs`: linear task node runtime for execute/verify/scope/review/checkpoint/retry.
-- `src/helix-plan.mjs`: plan normalization, graph validation, plan import, route enrichment, and task-state loading.
+- `src/helix-plan.mjs`: plan normalization, graph validation, plan import, route enrichment, task-state loading, and plan approval state (`loadPlanApproval` / `approvePlan`).
 - `src/helix-team.mjs`: team-lite tasks, claims, evidence recording, task-state persistence, outbox, and durable message board.
 - `src/helix-agent-spawn.mjs`: host-neutral child-agent spawn command rendering for Codex/Cursor/custom command adapters.
-- `src/helix-git-worktree.mjs`: Git worktree isolation, patch extraction, patch path parsing, and patch admission helpers.
+- `src/helix-git-worktree.mjs`: Git worktree isolation, patch extraction, patch path parsing, patch admission helpers, and pre-execute workspace snapshots (`git stash create` based) recorded before every worker run.
 - `src/helix-parallel-agents.mjs`: command-based child-agent batch runner, run-dir or Git worktree isolation, skipped-run detection, result collection, lifecycle status, explicit close/release/cleanup, team message publication, file/patch admission, and agent-run index.
 - `src/helix-gates.mjs`: command execution, verifier, scope guard, path and realpath checks, checkpoints, change requests, review/failure reports, and wisdom ledger.
 - `src/helix-dashboard.mjs`: local dashboard HTTP API and HTML UI with POST token, Host, and Origin protections.
@@ -74,7 +77,8 @@ bin/helix.mjs
 - `.helix/team/tasks.json`: durable task state.
 - `.helix/ledger.jsonl`: hash-chained append-only audit log. `ledger verify` detects ordinary line edits or broken chains.
 - `.helix/security/config-baseline.json`: reviewed config fingerprints. `config verify` detects config files added, removed, or changed after baseline.
-- `.helix/backups`: point-in-time copies of ledger, work, tasks, snapshots, and config baseline created by `state backup`.
+- `.helix/backups`: point-in-time copies of ledger, work, tasks, snapshots, and config baseline created by `state backup`; list with `state list`, restore with `state restore --backup <id>` (a pre-restore backup is taken automatically).
+- `.helix/reports/doctor.json` / `.helix/reports/doctor.md`: latest `doctor` health report covering config mounts, completion reconciliation, ledger verification, and ledger-vs-backup cross-check.
 - `.helix/checkpoints`: checkpoint JSON after all gates pass.
 - `.helix/reports`: human-readable reports.
 - `.helix/snapshots/context.md`: resume context.
@@ -145,7 +149,14 @@ Codex receives `.codex/hooks.json`. This is the real project-local Codex hook en
 
 WildArrange also writes `.helix/adapters/codex/hooks.json` as an audit copy. Cursor receives `.cursor/rules/wildarrange.mdc`; this is soft governance because Cursor does not expose the same command hook lifecycle here.
 
-Adapter install and uninstall always back up overwritten or removed files. `adapter restore --backup <backupId>` restores one backup directory to its original project paths.
+Adapter install also generates a set of slash commands so users do not have to open a terminal for common operations. Both surfaces render from one shared command set (`helix-config`, `helix-doctor`, `helix-refresh`, `helix-status`, `helix-plan`, `helix-run`):
+
+- Cursor: `.cursor/commands/<name>.md` (plain-Markdown slash commands, filename = command name).
+- Codex: `.agents/skills/<name>/SKILL.md` (skill directory with `name`/`description` metadata, since custom prompts were removed in Codex 0.117).
+
+Each command is a prompt that instructs the agent to run the matching `helix.mjs` CLI subcommand and report the result; they are shortcuts that let the agent run the CLI, not native buttons.
+
+Adapter install and uninstall always back up overwritten or removed files, including generated slash commands. `adapter restore --backup <backupId>` restores one backup directory to its original project paths.
 
 ## Success Criteria Evidence Model
 
@@ -160,6 +171,16 @@ The dashboard remains local-first. Loopback `GET /api/state` can be read without
 ## Skill And Prompt Variant Model
 
 The base prompt pack remains the source of truth. `skills match` is an explainable loading hint that scores installed skills by explicit selection, stage boosts, route keyword signals, agent role, category, and request keywords. It does not mutate the route table.
+
+Skill mounting at injection points is on-demand when request text is available (`skillMatcher.dynamicInjection`, enabled by default):
+
+- The static skill list configured on an injection point is the upper bound; dynamic matching only subtracts, it never injects full text of skills outside the configured list.
+- `alwaysMount` skills (default: `wildarrange-injection-runtime`) are always mounted; other configured skills are mounted only when the matcher scores them above zero on request-related signals. Agent-identity boosts alone do not qualify, because they are constant per agent and would degenerate into static mounting.
+- `maxSkills` (default 4) caps the number of dynamically mounted skills by score.
+- Unmounted skills are demoted to on-demand references (name + load command) in the injection output, so the agent can pull them explicitly when needed.
+- Without request text (for example `pre_tool_use`), the point falls back to static mounting and reports the reason in `skillSelection`.
+
+Skill mounting at injection points is on-demand when request text is available. `resolveInjectionPoint` accepts an optional `{ text, stage }` context (hooks pass the user prompt or resume next-action; agent context passes the task subject). Dynamic selection is subtractive only: the configured skill list of an injection point is the upper bound, matched skills are mounted with full content, unmatched skills are demoted to path references the agent can load later via `prompts show --skill <name>`, and skills outside the configured list are never injected as full text no matter how the request is phrased. Agent-identity score alone does not count as a match, since it is constant per request. `skillMatcher.dynamicInjection` controls this behavior (`enabled`, `maxSkills` for the dynamic slots, `alwaysMount` for baseline skills such as `wildarrange-injection-runtime`). Without request text, or when disabled, mounting falls back to the static list.
 
 Prompt variants are config-driven appendices. Host-managed GPT-family agents can use Codex/Cursor defaults, while Gemini, Kimi, DeepSeek, and custom providers can add narrow behavioral bias without replacing the original agent prompt.
 

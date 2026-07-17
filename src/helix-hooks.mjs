@@ -21,6 +21,7 @@ import { buildAgentContext, continuationDirective, resumeReport } from "./helix-
 import { runArchivistRouter } from "./helix-archivist-router.mjs";
 import { evaluateHookResultGate } from "./helix-hook-result-gate.mjs";
 import { writeMemoryDigest } from "./helix-memory-digest.mjs";
+import { attentionReport } from "./helix-status.mjs";
 
 export async function runInjectionHook(rootDir, input = {}) {
   const hookRootDir = input.cwd && typeof input.cwd === "string" ? input.cwd : rootDir;
@@ -88,12 +89,20 @@ export async function runInjectionHook(rootDir, input = {}) {
     facts.continuation = await continuationDirective(hookRootDir, { sessionId, source: "hook:stop" });
   }
 
+  // 通用推送：在有"对话面"的事件里，把待人决策的事项主动注入，指示宿主 AI 直接问开发者。
+  if (["SessionStart", "UserPromptSubmit", "PostCompact", "Stop"].includes(event)) {
+    facts.attention = await attentionReport(hookRootDir).catch(() => null);
+  }
+
   const variables = {
     agent: input.agent || defaultAgentForHookEvent(event),
     taskId,
     planId: await currentPlanId(hookRootDir),
   };
-  const injectionPoint = await resolveInjectionPoint(hookRootDir, pointName, variables);
+  const injectionPoint = await resolveInjectionPoint(hookRootDir, pointName, variables, {
+    text: injectionTextForHookEvent(event, input, facts),
+    stage: injectionStageForHookEvent(event, facts),
+  });
   const contextMarkdown = injectionPoint.enabled ? renderHookInjectionMarkdown({ event, pointName, sessionId, taskId, targetPaths, facts, injectionPoint }) : "";
   const output = event === "PreToolUse" && injectionPoint.enabled
     ? renderPreToolUseHookOutput(facts.preflight, contextMarkdown)
@@ -287,6 +296,19 @@ async function runArchivistForHook(rootDir, input, options) {
       reason: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+function injectionTextForHookEvent(event, input, facts) {
+  if (event === "UserPromptSubmit") return String(input.prompt || "");
+  if (event === "SessionStart" || event === "PostCompact") return String(facts.resume?.nextAction || "");
+  // PreToolUse / PostToolUse / Stop 没有可靠的请求文本，保持静态挂载
+  return "";
+}
+
+function injectionStageForHookEvent(event, facts) {
+  if (event === "UserPromptSubmit") return stageForRoute(facts.route);
+  if (event === "SessionStart" || event === "PostCompact") return "recall";
+  return "";
 }
 
 function stageForRoute(route) {
@@ -511,6 +533,30 @@ function appendHookFacts(lines, facts) {
     }
     lines.push("");
   }
+  appendAttentionReport(lines, facts.attention);
+}
+
+// 把待人决策事项渲染成“请主动问开发者”的指令块（通用推送：以 AI 对话为通道，不依赖任何外部 IM）。
+function appendAttentionReport(lines, attention) {
+  if (!attention || (attention.total || 0) === 0) return;
+  lines.push("## 需要开发者决策（请主动向开发者提问，不要替他决定）", "");
+  lines.push(`- 共有 ${attention.total} 项待处理。请在对话中用中文向开发者说明，并给出明确选项，等开发者答复后再继续。`);
+  for (const item of attention.awaitingPlanApproval || []) {
+    lines.push(`- [计划待确认] 计划 ${item.planId} 需开发者确认后才能执行。请复述计划要点并询问“确认 / 需要修改”；确认后执行：\`${item.approveHint}\`。`);
+  }
+  for (const change of attention.openChanges || []) {
+    lines.push(`- [越界变更待审] 任务 ${change.taskId} 改动越界：${(change.deniedPaths || []).join(", ") || "(见报告)"}。请询问开发者“接受并纳入范围 / 拒绝返工”；处理：\`${change.resolveHint}\`。`);
+  }
+  for (const task of attention.needsUserDecision || []) {
+    lines.push(`- [任务待决策] 任务 ${task.id}（${task.status}）：${task.subject}。需要开发者给出下一步决定。`);
+  }
+  for (const task of attention.failedTasks || []) {
+    lines.push(`- [任务失败] 任务 ${task.id}：${task.reason}。${task.retryHint ? `建议：${task.retryHint}` : "请与开发者确认返工方向。"}`);
+  }
+  for (const item of attention.awaitingAcceptance || []) {
+    lines.push(`- [子 Agent 待验收] run ${item.runId} / 任务 ${item.taskId}（${item.agent}）。请询问开发者是否合入：\`${item.admitHint}\`。`);
+  }
+  lines.push("");
 }
 
 function appendShortList(lines, label, items) {
@@ -539,6 +585,22 @@ function appendInjectionAttachments(lines, injectionPoint) {
       lines.push(`### ${skill.name}`, "", renderAttachmentMeta(skill), "", skill.content || "(empty)", "");
     }
   }
+  appendSkillSelectionReport(lines, injectionPoint.skillSelection);
+}
+
+function appendSkillSelectionReport(lines, selection) {
+  if (!selection || selection.mode !== "dynamic") return;
+  const referenced = selection.referenced || [];
+  const suggestions = selection.suggestions || [];
+  if (referenced.length === 0 && suggestions.length === 0) return;
+  lines.push("## 按需可加载 Skill（未注入全文）", "");
+  for (const item of referenced) {
+    lines.push(`- ${item.name}（${item.reason === "over_max_skills" ? "超出本次挂载上限" : "与本次请求未匹配"}）：需要时执行 \`node ./bin/helix.mjs prompts show --skill ${item.name}\``);
+  }
+  for (const item of suggestions) {
+    lines.push(`- ${item.name}（匹配分 ${item.score}，不在本注入点清单）：需要时执行 \`node ./bin/helix.mjs prompts show --skill ${item.name}\``);
+  }
+  lines.push("");
 }
 
 function renderAttachmentMeta(item) {

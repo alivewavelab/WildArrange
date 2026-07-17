@@ -398,6 +398,10 @@ function renderDashboardHtml(options = {}) {
   </header>
   <main class="grid">
     <div class="grid metrics" id="metrics"></div>
+    <section id="attentionSection">
+      <h2>Needs Attention / 待你处理</h2>
+      <div id="attention"></div>
+    </section>
     <section>
       <h2>Operations</h2>
       <div class="grid ops">
@@ -485,6 +489,7 @@ function renderDashboardHtml(options = {}) {
         const skills = Array.isArray(task.skills) ? task.skills.map((skill) => '<span class="pill">' + esc(skill) + '</span>').join(" ") : "";
         return '<tr><td><strong>' + esc(task.id) + '</strong><br><span class="muted">' + esc(task.subject) + '</span></td><td class="' + esc(task.status) + '">' + esc(task.status) + '</td><td>' + route + '</td><td>' + esc(task.category) + '<br><span class="muted">' + esc(task.category_source) + '</span></td><td>' + skills + '</td><td><code>' + esc((task.verify_commands || []).join(" && ")) + '</code></td><td>' + reviewBox(task) + '</td><td>' + failureBox(task) + '</td><td>' + actionButtons(task) + '</td></tr>';
       }).join("") + '</tbody></table>';
+      renderAttention(data.attention || null);
       renderChanges(data.changes || []);
       el("snapshot").textContent = JSON.stringify(data.latestSnapshot || {}, null, 2);
       el("summary").textContent = JSON.stringify(data.summary || { status: "No summary generated" }, null, 2);
@@ -492,6 +497,33 @@ function renderDashboardHtml(options = {}) {
     }
     function renderInbox(messages) {
       el("inbox").textContent = JSON.stringify(messages || [], null, 2);
+    }
+    function renderAttention(attention) {
+      if (!attention || attention.total === 0) {
+        el("attention").innerHTML = '<div class="muted">没有等待你处理的事项 / Nothing is waiting on you.</div>';
+        return;
+      }
+      const blocks = [];
+      for (const change of attention.openChanges || []) {
+        blocks.push('<div class="failure-box"><strong>越界审批 ' + esc(change.id) + '</strong> · 任务 ' + esc(change.taskId) +
+          '<div class="muted">越界文件: ' + esc((change.deniedPaths || []).join(", ") || "(unknown)") + '</div>' +
+          '<pre>' + esc(change.resolveHint || "") + '</pre></div>');
+      }
+      for (const task of attention.failedTasks || []) {
+        blocks.push('<div class="failure-box"><strong>失败任务 ' + esc(task.id) + '</strong> · ' + esc(task.subject) +
+          '<div class="muted">原因: ' + esc(task.reason) + (task.reportMdPath ? ' · ' + esc(task.reportMdPath) : '') + '</div>' +
+          (task.retryHint ? '<pre>' + esc(task.retryHint) + '</pre>' : '') + '</div>');
+      }
+      for (const task of attention.needsUserDecision || []) {
+        blocks.push('<div class="review-box"><strong>等待决策 ' + esc(task.id) + '</strong> · ' + esc(task.subject) +
+          '<div class="muted">状态: ' + esc(task.status) + '</div></div>');
+      }
+      for (const item of attention.awaitingAcceptance || []) {
+        blocks.push('<div class="review-box"><strong>子 Agent 待验收</strong> · 任务 ' + esc(item.taskId) + ' · ' + esc(item.agent || "") +
+          '<div class="muted">' + esc(item.resultPath || "") + '</div>' +
+          '<pre>' + esc(item.admitHint || "") + '</pre></div>');
+      }
+      el("attention").innerHTML = blocks.join("");
     }
     function renderChanges(changes) {
       const openChanges = changes.filter((change) => change.status === "open");

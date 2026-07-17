@@ -1,4 +1,5 @@
 import { DEFAULT_REVIEW_AGENTS, loadHelixConfig, normalizeAgentKey, nowIso } from "./helix-foundation.mjs";
+import { compileCommandSafetyPatterns } from "./helix-command-safety.mjs";
 import { runQualityGates } from "./helix-code-intel.mjs";
 import { runCommand } from "./helix-gates.mjs";
 import { runLlmReview } from "./helix-llm.mjs";
@@ -18,7 +19,9 @@ export async function runWorker(rootDir, task, options = {}) {
       stderr: "",
     };
   }
-  const result = await runCommand(command, rootDir, options.timeoutMs);
+  const { config } = await loadHelixConfig(rootDir);
+  const extraPatterns = compileCommandSafetyPatterns(config);
+  const result = await runCommand(command, rootDir, options.timeoutMs, { extraPatterns });
   return { kind: "worker", at: nowIso(), command, ...result };
 }
 
@@ -34,17 +37,18 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
   const rulesContext = await scanProjectRules(rootDir, {
     targetPaths: uniqueStrings([...(task.writable_paths || []), ...((scopeResult?.changedPaths) || [])]),
   });
+  const extraPatterns = compileCommandSafetyPatterns(config);
   const reviewCommandResults = [];
   const standardsCommandResults = [];
 
   for (const command of task.review_commands || []) {
-    const result = await runCommand(command, rootDir);
+    const result = await runCommand(command, rootDir, 120_000, { extraPatterns });
     reviewCommandResults.push({ command, ...result });
     if (result.exitCode !== 0) break;
   }
 
   for (const command of task.standards_commands || []) {
-    const result = await runCommand(command, rootDir);
+    const result = await runCommand(command, rootDir, 120_000, { extraPatterns });
     standardsCommandResults.push({ command, ...result });
     if (result.exitCode !== 0) break;
   }

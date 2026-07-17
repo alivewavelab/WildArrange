@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WildArrange 五区解耦重构对齐方案</title>
+  <style>
+    :root {
+      --bg: #f5f7fa;
+      --card: #ffffff;
+      --text: #172033;
+      --muted: #5d6678;
+      --line: #dce2ea;
+      --p0: #c93535;
+      --p1: #d88700;
+      --p2: #2878c8;
+      --ok: #16845b;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.65 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    main { width: min(1180px, calc(100% - 32px)); margin: 32px auto 72px; }
+    h1, h2, h3 { line-height: 1.25; }
+    h1 { margin-bottom: 8px; }
+    h2 { margin-top: 36px; }
+    h3 { margin: 0 0 8px; }
+    p { margin: 8px 0; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    code { background: #edf1f5; padding: 2px 5px; border-radius: 4px; }
+    pre { margin: 10px 0 0; padding: 14px; overflow: auto; color: #e8edf5; background: #182130; border-radius: 8px; font-size: 13px; line-height: 1.55; }
+    table { width: 100%; border-collapse: collapse; background: var(--card); }
+    th, td { padding: 10px 12px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: #edf1f5; }
+    .lead { font-size: 18px; color: #26324a; }
+    .muted { color: var(--muted); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(245px, 1fr)); gap: 14px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; box-shadow: 0 2px 9px rgba(31, 46, 73, .05); }
+    .priority { border-left: 6px solid var(--p2); }
+    .priority.p0 { border-left-color: var(--p0); }
+    .priority.p1 { border-left-color: var(--p1); }
+    .priority.p2 { border-left-color: var(--p2); }
+    .tag { display: inline-block; margin-right: 7px; padding: 2px 8px; border-radius: 99px; color: white; background: var(--p2); font-size: 12px; font-weight: 700; }
+    .tag.p0 { background: var(--p0); }
+    .tag.p1 { background: var(--p1); }
+    .tag.ok { background: var(--ok); }
+    .flow { display: flex; align-items: stretch; gap: 8px; overflow-x: auto; padding: 4px 0 10px; }
+    .node { min-width: 154px; padding: 13px; border: 1px solid #aab7c8; border-radius: 8px; background: white; text-align: center; }
+    .arrow { align-self: center; color: #65748a; font-size: 22px; }
+    .warning { border: 1px solid #e7c088; background: #fff8ec; border-radius: 8px; padding: 13px 15px; }
+    .decision { border: 1px solid #90c9b4; background: #effaf6; border-radius: 8px; padding: 13px 15px; }
+    ul, ol { padding-left: 22px; }
+    li + li { margin-top: 5px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>WildArrange 五区解耦重构对齐方案</h1>
+  <p class="muted">日期：2026-07-17 ｜ 输入：全量源码、测试、项目文档与 Cursor 重构稿</p>
+  <p class="lead"><strong>结论：</strong>接受“五区”作为目标架构，但不能只靠能力网关和目录搬迁。建议采用<strong>五区 + 严格单向依赖 + 共享交付流水线</strong>，先冻结行为与公共契约，再逐段迁移。</p>
+
+  <section>
+    <h2>一、当前系统到底在做什么</h2>
+    <p>WildArrange 不是普通任务执行器，而是一套本地 Agent 治理运行时。核心价值不是“让 worker 跑起来”，而是“worker 不能自证完成，所有成果必须经过独立验证并留下可恢复证据”。</p>
+    <div class="flow" aria-label="主流程">
+      <div class="node"><strong>输入</strong><br>计划 / 任务 / 项目规则</div><div class="arrow">→</div>
+      <div class="node"><strong>执行</strong><br>worker / 子 Agent</div><div class="arrow">→</div>
+      <div class="node"><strong>交付门</strong><br>verify → scope → review → proof</div><div class="arrow">→</div>
+      <div class="node"><strong>状态决策</strong><br>retry / checkpoint / admission</div><div class="arrow">→</div>
+      <div class="node"><strong>输出</strong><br>task 状态 / ledger / digest / snapshot</div>
+    </div>
+    <div class="grid">
+      <article class="card"><h3>线性运行时</h3><p><code>plan → task → worker → verifier → retry/checkpoint</code>，运行返回状态与任务持久状态有明确区别。</p></article>
+      <article class="card"><h3>并行 Agent</h3><p>提供 spawn、隔离目录、worktree、结果收集、patch admission、回滚与用户验收生命周期。</p></article>
+      <article class="card"><h3>AI 编排</h3><p>完成请求路由、Skill 匹配、上下文注入、Archivist 路由建议、可选 LLM review 与记忆摘要。</p></article>
+      <article class="card"><h3>治理与恢复</h3><p>通过 hash ledger、配置基线、运行态备份、doctor、hook 和 adapter 维持可审计、可恢复的执行秩序。</p></article>
+    </div>
+  </section>
+
+  <section>
+    <h2>二、基线证据</h2>
+    <div class="grid">
+      <article class="card"><h3>33 个源码模块</h3><p>核心实现约 20,249 行。当前不是“模块太少”，而是模块之间缺少稳定边界。</p></article>
+      <article class="card"><h3>95 个自动测试</h3><p>在允许本地端口监听的环境中，<strong>95/95 通过</strong>。测试覆盖面广，但尚未覆盖 CLI 入口语法。</p></article>
+      <article class="card priority p0"><h3>CLI 当前不可启动</h3><p><code>bin/helix.mjs</code> 重复导入 <code>approvePlan</code> 和 <code>loadPlanApproval</code>，Node 在解析阶段直接报错。</p></article>
+      <article class="card priority p0"><h3>工作区不是干净基线</h3><p>当前有 27 个已跟踪文件修改、7 个未跟踪文件。重构前必须先明确并保护这批在途成果。</p></article>
+    </div>
+    <div class="warning"><strong>关键判断：</strong>“测试全绿”与“产品入口可运行”目前同时为真和假——模块测试全绿，但 CLI 语法损坏。Phase 0 必须先补 CLI smoke test，否则重构中的回归无法被可靠发现。</div>
+  </section>
+
+  <section>
+    <h2>三、对原重构稿的判断</h2>
+    <div class="grid">
+      <article class="card priority p1"><h3>正确：五区能表达职责</h3><p>Interface、Orchestration、AI、Capabilities、Infrastructure 是合理的目标地图，也适合逐步迁移。</p></article>
+      <article class="card priority p0"><h3>不足：网关会隐藏依赖</h3><p>通用 <code>invokeCapability()</code> 如果没有类型化契约、效应声明和静态注册表，会退化为 service locator：调用看似统一，真实耦合只是藏起来。</p></article>
+      <article class="card priority p0"><h3>不足：原文件归区仍有反向依赖</h3><p><code>review-gate</code>、acceptance proof、memory digest、hook result 等含有领域或 AI 语义，不能简单归入底层。否则 Capability/Infra 会反向 import Orchestration/AI。</p></article>
+      <article class="card priority p0"><h3>缺口：线性与并行交付门会继续漂移</h3><p>“新增检查无需改编排层”只有在交付门本身数据驱动时才成立。应先把两条路径共用的交付判断抽成唯一流水线。</p></article>
+    </div>
+  </section>
+
+  <section>
+    <h2>四、修正后的五区</h2>
+    <table>
+      <thead><tr><th>区域</th><th>只负责什么</th><th>建议模块</th><th>不能做什么</th></tr></thead>
+      <tbody>
+        <tr><td><strong>1. Interface</strong></td><td>把 CLI、HTTP、Codex/Cursor/Hook 宿主输入翻译为用例调用</td><td>CLI、dashboard、adapters、host-hook adapter；旧 <code>src/helix-core.mjs</code> 保留兼容出口</td><td>不决定任务状态，不直接拼交付门</td></tr>
+        <tr><td><strong>2. Orchestration</strong></td><td>用例流程和任务状态的唯一所有者</td><td>linear runtime、<strong>delivery pipeline</strong>、parallel runtime、plan service、task board、workflow、change governance、hook service、failure policy</td><td>不实现 shell、git、LLM、文件系统细节</td></tr>
+        <tr><td><strong>3. AI Orchestration</strong></td><td>所有“需要语义判断或上下文组织”的能力</td><td>routing policy、plan enrichment、archivist reasoning、injection、skill matcher、context composer、rules selection、semantic review、memory digest</td><td>不写任务状态，不直接 checkpoint</td></tr>
+        <tr><td><strong>4. Capabilities / Assurance</strong></td><td>可独立调用、可返回结构化证据的确定性能力</td><td>contract、registry/gateway、verifier、scope guard、review gate、code intel、command safety、acceptance proof、checkpoint、hook result gate、agent runner、doctor audit</td><td>不 import Orchestration；只接收快照并返回结果</td></tr>
+        <tr><td><strong>5. Infrastructure / Platform</strong></td><td>无领域决策的 IO 原语与仓储</td><td>path/config/lock、JSON/state repositories、ledger store、backup store、snapshot store、git client/worktree primitive、OpenAI-compatible HTTP client</td><td>不认识 task 完成规则、路由策略或 review 结论</td></tr>
+      </tbody>
+    </table>
+    <p class="muted">特别调整：memory digest 留在 AI；hook-result-gate 和 review-findings 属于 Assurance；git-worktree 只能依赖纯 git/process 原语，不能从 gate 模块借用命令执行器。</p>
+  </section>
+
+  <section>
+    <h2>五、依赖方向是硬约束</h2>
+    <div class="flow" aria-label="依赖方向">
+      <div class="node"><strong>Interface</strong></div><div class="arrow">→</div>
+      <div class="node"><strong>Orchestration</strong></div><div class="arrow">→</div>
+      <div class="node"><strong>AI / Capabilities</strong><br>同级、互不直连</div><div class="arrow">→</div>
+      <div class="node"><strong>Infrastructure</strong></div>
+    </div>
+    <ul>
+      <li>Interface 只进入 Orchestration。</li>
+      <li>Orchestration 可以调用 AI、Capabilities、Infrastructure。</li>
+      <li>AI 和 Capabilities 只能依赖 Infrastructure，彼此不直接 import。</li>
+      <li>Infrastructure 不依赖任何上层。</li>
+      <li>所有 <code>task.status</code>、attempt、checkpoint 状态变更只能发生在 Orchestration；下层返回 evidence 或 state patch，不能就地改 task。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>六、能力网关：保留，但收紧</h2>
+    <p>第一版采用<strong>静态注册表</strong>，不做动态 import。显式注册更容易审计、测试和打包，也符合当前“无外部依赖、行为可追踪”的产品原则。</p>
+    <div class="grid">
+      <article class="card">
+        <h3>调用信封</h3>
+<pre>{
+  version: 1,
+  requestId,
+  capability: "verify",
+  context: { rootDir, planId, taskId, attempt },
+  input: { taskSnapshot, evidence },
+  policy: { timeoutMs, allowedEffects }
+}</pre>
+      </article>
+      <article class="card">
+        <h3>统一结果</h3>
+<pre>{
+  version: 1,
+  requestId,
+  capability,
+  outcome: "pass" | "fail" | "inconclusive" | "skipped",
+  blocking: true,
+  evidence: [],
+  effects: [],
+  data: {},
+  error: null | { code, message, retryable }
+}</pre>
+      </article>
+    </div>
+    <p><code>outcome</code> 不使用 <code>status</code>，避免与现有“运行时下一步动作”和持久化 <code>task.status</code> 冲突。预期中的执行失败返回结果；程序错误直接抛出。注册描述符必须在执行前声明 process、workspace read/write、runtime write、git、network 等效应。</p>
+  </section>
+
+  <section>
+    <h2>七、真正的核心抽象：共享交付流水线</h2>
+    <div class="flow" aria-label="共享交付流水线">
+      <div class="node"><strong>线性 worker</strong><br>或并行 patch</div><div class="arrow">→</div>
+      <div class="node"><strong>WorkerEvidence</strong><br>统一成果信封</div><div class="arrow">→</div>
+      <div class="node"><strong>Delivery Pipeline</strong><br>verify → scope → review → proof</div><div class="arrow">→</div>
+      <div class="node"><strong>Orchestration 决策</strong><br>retry / checkpoint / admit / rollback</div>
+    </div>
+    <p>线性 runtime 和 parallel admission 都只能调用这一条流水线。并行模块额外负责隔离、apply、rollback、release，但不得复制完成门。这才能确保任何新增 gate 同时作用于两条交付路径。</p>
+  </section>
+
+  <section>
+    <h2>八、实施顺序</h2>
+    <div class="grid">
+      <article class="card priority p0"><span class="tag p0">P0</span><h3>Phase 0：冻结可信基线</h3><ol><li>确认并保护当前 27+7 个在途改动。</li><li>先修复 CLI 重复导入。</li><li>补 <code>node bin/helix.mjs help</code> 等 CLI smoke test。</li><li>记录公共导出、CLI 输出、<code>.helix</code> 状态格式与 95 个测试基线。</li></ol></article>
+      <article class="card priority p0"><span class="tag p0">P0</span><h3>Phase 1：契约与边界守卫</h3><ol><li>新增 capability contract 与静态 registry。</li><li>先只包装 verify，验证统一结果模型。</li><li>新增 import boundary 自动测试，禁止反向依赖。</li></ol></article>
+      <article class="card priority p0"><span class="tag p0">P0</span><h3>Phase 2：拆 Assurance</h3><ol><li>从 <code>helix-gates</code> 拆 command runner、verifier、scope、checkpoint。</li><li>保留旧模块作为 re-export shim。</li><li>每拆一块跑对应测试和全量测试。</li></ol></article>
+      <article class="card priority p0"><span class="tag p0">P0</span><h3>Phase 3：统一交付流水线</h3><ol><li>建立 WorkerEvidence 与 delivery pipeline。</li><li>先迁线性 runtime，再迁 parallel admission。</li><li>新增线性/并行 gate parity 测试。</li></ol></article>
+      <article class="card priority p1"><span class="tag p1">P1</span><h3>Phase 4：拆 Hook 与 AI</h3><ol><li>宿主协议留 Interface。</li><li>生命周期协调进 Orchestration。</li><li>上下文、路由、注入与语义判断进 AI。</li><li>清除 AI 对 task 状态的写操作。</li></ol></article>
+      <article class="card priority p1"><span class="tag p1">P1</span><h3>Phase 5：逐区搬目录</h3><ol><li>一次只搬一个区域。</li><li>内部改为目标文件直接 import。</li><li>旧路径保留临时兼容 shim。</li><li>同步更新 AGENTS 与架构文档。</li></ol></article>
+      <article class="card priority p2"><span class="tag">P2</span><h3>Phase 6：清理底座</h3><ol><li>修复 git-worktree 对 gate 命令执行器的倒置依赖。</li><li><code>foundation</code> 先保留 facade，只按已验证的职责热点拆分。</li><li>不做一次性“大爆炸”重写。</li></ol></article>
+      <article class="card priority p2"><span class="tag">P2</span><h3>Phase 7：收口</h3><ol><li>决定兼容 shim 的长期策略。</li><li>全量测试、CLI smoke、语法检查。</li><li><code>npm pack --dry-run</code> 验证发布包。</li></ol></article>
+    </div>
+  </section>
+
+  <section>
+    <h2>九、验收标准</h2>
+    <ul>
+      <li>现有 95 个测试与新增 contract、boundary、CLI、linear/parallel parity 测试全部通过。</li>
+      <li><code>node --check</code> 覆盖所有 <code>src/*.mjs</code> 与 <code>bin/helix.mjs</code>；CLI help 和 sample workflow 可运行。</li>
+      <li>自动测试证明依赖矩阵无违规 import。</li>
+      <li>任务状态只由 Orchestration 写入；Capability/AI 只返回结构化结果。</li>
+      <li>线性执行与并行 admission 共用一套 delivery pipeline。</li>
+      <li><code>src/helix-core.mjs</code> 公共导出不丢失；现有旧模块路径在迁移期仍可 import。</li>
+      <li><code>.helix</code> 状态格式、ledger 语义、result status/task status 含义不变。</li>
+      <li><code>npm pack --dry-run --cache /private/tmp/helix-npm-cache</code> 通过，发布包不意外扩容或漏文件。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>十、明确不做</h2>
+    <ul>
+      <li>不借重构改变业务行为、任务状态语义或 gate 强度。</li>
+      <li>不迁移 <code>.helix</code> 数据格式。</li>
+      <li>不一次性重写 <code>foundation</code>。</li>
+      <li>不让动态注册、插件系统或新外部依赖扩大本轮范围。</li>
+      <li>不在未确认当前工作区在途改动归属前大规模移动文件。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>十一、待对齐的四个决定</h2>
+    <div class="decision">
+      <ol>
+        <li><strong>目标架构：</strong>采用修正版五区，并把上述依赖方向设为自动测试硬约束。</li>
+        <li><strong>核心抽象：</strong>能力网关使用静态注册与统一信封；共享 delivery pipeline 优先级高于目录搬迁。</li>
+        <li><strong>迁移方式：</strong>先修可信基线，再逐模块抽取；保留 <code>helix-core</code> 和旧路径兼容 shim。</li>
+        <li><strong>兼容边界：</strong>本轮不改公共 API、CLI 语义和 <code>.helix</code> 状态格式。</li>
+      </ol>
+      <p><strong>建议默认全部接受。</strong>对齐后从 Phase 0 开始，不直接进入文件搬迁。</p>
+    </div>
+  </section>
+</main>
+</body>
+</html>

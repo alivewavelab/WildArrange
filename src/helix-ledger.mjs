@@ -24,18 +24,38 @@ export async function appendLedger(rootDir, event) {
 }
 
 export async function verifyLedger(rootDir) {
+  const walk = await walkLedger(rootDir);
+  return {
+    kind: "ledger_verification",
+    ok: walk.failures.length === 0,
+    checked: walk.checked,
+    legacy: walk.legacy,
+    failures: walk.failures,
+  };
+}
+
+// 只返回通过 hash 链校验的条目；doctor 等对账逻辑必须基于它，
+// 避免把手工追加的伪造事件当成完成证据。
+export async function readVerifiedLedgerEntries(rootDir) {
+  const walk = await walkLedger(rootDir);
+  return walk.entries.filter((item) => item.verified).map((item) => item.entry);
+}
+
+async function walkLedger(rootDir) {
   const ledgerPath = resolveHelixPath(rootDir, "ledger.jsonl");
   let content = "";
   try {
     content = await readFile(ledgerPath, "utf8");
   } catch (error) {
     if (error?.code === "ENOENT") {
-      return { kind: "ledger_verification", ok: true, checked: 0, legacy: 0, failures: [] };
+      return { checked: 0, legacy: 0, failures: [], entries: [] };
     }
     throw error;
   }
   const failures = [];
+  const entries = [];
   let previousHash = null;
+  let chainStarted = false;
   let checked = 0;
   let legacy = 0;
   const lines = content.split(/\r?\n/).filter(Boolean);
@@ -50,21 +70,33 @@ export async function verifyLedger(rootDir) {
       continue;
     }
     if (!entry.hash) {
+      // 兼容 hash 链启用前的历史条目；一旦链已开始，后续无 hash 行视为篡改
+      if (chainStarted) {
+        failures.push({ line: lineNumber, reason: "unhashed_entry_after_chain_start" });
+        entries.push({ entry, line: lineNumber, verified: false });
+        continue;
+      }
       legacy += 1;
       previousHash = entry.prevHash || null;
+      entries.push({ entry, line: lineNumber, verified: false });
       continue;
     }
+    chainStarted = true;
     checked += 1;
+    let verified = true;
     if ((entry.prevHash || null) !== previousHash) {
       failures.push({ line: lineNumber, reason: "prev_hash_mismatch", expected: previousHash, actual: entry.prevHash || null });
+      verified = false;
     }
     const expectedHash = hashLedgerEntry(entry);
     if (entry.hash !== expectedHash) {
       failures.push({ line: lineNumber, reason: "hash_mismatch", expected: expectedHash, actual: entry.hash });
+      verified = false;
     }
+    entries.push({ entry, line: lineNumber, verified });
     previousHash = entry.hash;
   }
-  return { kind: "ledger_verification", ok: failures.length === 0, checked, legacy, failures };
+  return { checked, legacy, failures, entries };
 }
 
 async function readLedgerLastHash(ledgerPath) {

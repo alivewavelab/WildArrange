@@ -2,12 +2,13 @@ import { existsSync } from "node:fs";
 import { appendFile, readdir, realpath, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { blockedCommandResult, evaluateCommandSafety } from "./helix-command-safety.mjs";
+import { blockedCommandResult, compileCommandSafetyPatterns, evaluateCommandSafety } from "./helix-command-safety.mjs";
 import {
   DEFAULT_LEAD_AGENT,
   appendLedger,
   ensureHelixDirs,
   hashContent,
+  loadHelixConfig,
   nowIso,
   readJson,
   resolveHelixPath,
@@ -20,7 +21,7 @@ const COMMAND_SIGKILL_GRACE_MS = 2_000;
 
 export function runCommand(command, cwd, timeoutMs = 120_000, options = {}) {
   return new Promise((resolve) => {
-    const safety = evaluateCommandSafety(command, { allowUnsafe: options.allowUnsafe === true });
+    const safety = evaluateCommandSafety(command, { allowUnsafe: options.allowUnsafe === true, extraPatterns: options.extraPatterns });
     if (!safety.allowed) {
       resolve(blockedCommandResult(command, safety));
       return;
@@ -103,9 +104,11 @@ export async function runVerifier(rootDir, task) {
     };
   }
 
+  const { config } = await loadHelixConfig(rootDir);
+  const extraPatterns = compileCommandSafetyPatterns(config);
   const results = [];
   for (const command of task.verify_commands) {
-    const result = await runCommand(command, rootDir);
+    const result = await runCommand(command, rootDir, 120_000, { extraPatterns });
     results.push({ command, ...result });
     if (result.exitCode !== 0) break;
   }

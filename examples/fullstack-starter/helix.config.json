@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "review": {
+    "llm": {
+      "enabled": false,
+      "required": false,
+      "agents": ["BaiZe", "LuanNiao", "QiongQi"]
+    }
+  },
+  "qualityGates": {
+    "lspDiagnostics": {
+      "enabled": false,
+      "required": false,
+      "commands": []
+    },
+    "astStructure": {
+      "enabled": false,
+      "required": false,
+      "commands": []
+    },
+    "commentChecker": {
+      "enabled": true,
+      "blockOnFindings": false
+    }
+  },
+  "skillMatcher": {
+    "dynamicInjection": {
+      "enabled": true,
+      "maxSkills": 4,
+      "alwaysMount": ["wildarrange-injection-runtime"]
+    }
+  }
+}

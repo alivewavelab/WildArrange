@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>GameCopilot 解耦分析与重构切法</title>
+<style>
+:root{
+  --bg:#f6f7f9;--text:#172033;--muted:#5d687b;--line:#d8dee8;
+  --seam:#e8f3ff;--seam-b:#6aa8e8;
+  --smell:#ffe9e7;--smell-b:#e06f64;
+  --p0:#fde4e0;--p0-b:#d6453a;
+  --p1:#fff3df;--p1-b:#e6a13d;
+  --p2:#eef8ec;--p2-b:#79b45d;
+  --ok:#eef8ec;--ok-b:#79b45d;
+}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:var(--text)}
+main{max-width:1180px;margin:0 auto;padding:30px 22px 56px}
+h1{margin:0 0 6px;font-size:26px}
+h2{margin:30px 0 12px;font-size:19px;border-bottom:1px solid var(--line);padding-bottom:6px}
+h3{margin:0 0 6px;font-size:15px}
+p,li{line-height:1.6}
+.lead{color:var(--muted);font-size:16px;max-width:920px}
+.legend{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0 4px;font-size:13px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.dot{width:12px;height:12px;border-radius:3px;display:inline-block;border:1px solid}
+.grid{display:grid;gap:12px}
+.cols-2{grid-template-columns:1fr 1fr}
+.cols-3{grid-template-columns:repeat(3,1fr)}
+@media(max-width:860px){.cols-2,.cols-3{grid-template-columns:1fr}}
+.card{border:1px solid var(--line);border-radius:8px;padding:13px 15px;background:#fff}
+.seam{background:var(--seam);border-color:var(--seam-b)}
+.smell{background:var(--smell);border-color:var(--smell-b)}
+.p0{background:var(--p0);border-color:var(--p0-b)}
+.p1{background:var(--p1);border-color:var(--p1-b)}
+.p2{background:var(--p2);border-color:var(--p2-b)}
+.ok{background:var(--ok);border-color:var(--ok-b)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:10px;color:#fff;margin-right:6px}
+.t-p0{background:var(--p0-b)}.t-p1{background:var(--p1-b)}.t-p2{background:var(--p2-b)}
+table{border-collapse:collapse;width:100%;margin:10px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+th{background:#eef1f6}
+code{background:#e9edf3;border-radius:4px;padding:1px 5px}
+.small{font-size:13px;color:var(--muted)}
+.flow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:10px 0;font-size:13px}
+.flow .box{border:1px solid var(--seam-b);background:var(--seam);border-radius:6px;padding:6px 10px}
+.flow .arr{color:var(--muted)}
+.note{border-left:3px solid var(--seam-b);background:var(--seam);padding:10px 14px;border-radius:0 6px 6px 0;margin:14px 0}
+</style>
+</head>
+<body>
+<main>
+<h1>GameCopilot 解耦分析与重构切法</h1>
+<p class="lead">不按原图 7 个水平层读，而是按"能下刀的缝 / 藏起来的耦合 / 先锁什么"来梳理。目标：让每一块能独立改动而不牵连邻居。</p>
+
+<div class="legend">
+<span><i class="dot" style="background:var(--seam);border-color:var(--seam-b)"></i>解耦切缝</span>
+<span><i class="dot" style="background:var(--smell);border-color:var(--smell-b)"></i>耦合气味</span>
+<span><i class="dot" style="background:var(--ok);border-color:var(--ok-b)"></i>已做得好</span>
+<span><i class="dot" style="background:var(--p0);border-color:var(--p0-b)"></i>P0</span>
+<span><i class="dot" style="background:var(--p1);border-color:var(--p1-b)"></i>P1</span>
+<span><i class="dot" style="background:var(--p2);border-color:var(--p2-b)"></i>P2</span>
+</div>
+
+<h2>一、统一执行链（原图已对，保留）</h2>
+<div class="flow">
+<span class="box">Workflow</span><span class="arr">→</span>
+<span class="box">Execution Controller</span><span class="arr">→</span>
+<span class="box">Capability Gateway</span><span class="arr">→</span>
+<span class="box">Capability</span><span class="arr">→</span>
+<span class="box">Results / Events / Receipts</span>
+</div>
+<p class="small">这条主干是整张图最稳的骨架，重构不动它，只把横切关注点从主干里抽出去。</p>
+
+<h2>二、四条解耦切缝（重构下刀的位置）</h2>
+<div class="grid cols-2">
+<div class="card seam">
+<h3>A. 计划 ↔ 执行</h3>
+<p><b>缝左</b>：AI Workflow Engine（出 Plan/CapabilityCall）<br><b>缝右</b>：Business Workflow Engine + Execution Controller</p>
+<p>契约：Plan 是<b>纯数据</b>；AI 引擎无状态、不直接调能力。</p>
+</div>
+<div class="card seam">
+<h3>B. 编排 ↔ 能力（枢纽）</h3>
+<p><b>缝左</b>：Execution Controller → Capability Gateway<br><b>缝右</b>：原子能力（Layer 5）</p>
+<p>契约：I/O schema + progress/error + <b>副作用分级</b> + undo/rollback。</p>
+</div>
+<div class="card seam">
+<h3>C. 能力 ↔ 宿主资源</h3>
+<p><b>缝左</b>：原子能力<br><b>缝右</b>：游戏进程 / 文件系统 / OS（Layer 7）</p>
+<p>契约：资源句柄由支撑层<b>独占</b>，能力只借不抢。</p>
+</div>
+<div class="card seam">
+<h3>D. 云端 ↔ 本地</h3>
+<p><b>缝左</b>：云端目录 / 计费 / 聚合 trace<br><b>缝右</b>：本地 live state / run ledger / artifacts</p>
+<p>契约：context 合并 + <b>可重放性</b>标志。</p>
+</div>
+</div>
+
+<h2>三、六个耦合气味（重构重点盯这里）</h2>
+<div class="grid cols-2">
+<div class="card smell">
+<h3>1. Layer 3 三头耦合</h3>
+<p>Business Workflow Engine（状态机）、AI Workflow Engine（计划）、Execution Controller（生命周期/路由/超时/重试）都碰 workflow 状态，没说谁拥有唯一真相源。</p>
+<p class="small">→ 指定 Business Workflow Engine 独占状态，另两个只读写它。</p>
+</div>
+<div class="card smell">
+<h3>2. Business Control Slots 回灌方向未定</h3>
+<p>扩展点既能注入上下文又能回写编排 = 隐式回调，重入与循环依赖从这里冒出。</p>
+<p class="small">→ 二选一：只读注入，或产出结构化结果走契约回灌。</p>
+</div>
+<div class="card smell">
+<h3>3. Effect-Undo 一刀切漏掉不可逆动作</h3>
+<p>Game Vision 纯读；Runtime Modification 可 undo；但 <b>Input Automation / 游戏内动作不可撤销</b>（已发生在游戏世界）。</p>
+<p class="small">→ 契约分 read / write-undoable / irreversible 三类，irreversible 强制 checkpoint + 确认。</p>
+</div>
+<div class="card smell">
+<h3>4. 三个能力抢同一游戏进程</h3>
+<p>Game Capability、Input Automation、Runtime Modification 各自 hook 同一进程，却标成"独立原子能力"，靠游戏状态隐式耦合。</p>
+<p class="small">→ 引入 Game Session 资源管理器，能力借句柄。</p>
+</div>
+<div class="card smell">
+<h3>5. Trace/Replay/Checkpoint 三套机制</h3>
+<p>云端 Operation Trace（L2）、本地 Run Ledger（L6）、Checkpoint Manager（L7）若非"一 schema 三 sink"会漂移；重放只对确定性能力成立。</p>
+<p class="small">→ 统一事件 schema + 能力级 replayable 标志。</p>
+</div>
+<div class="card smell">
+<h3>6. 计费/权益横切主干</h3>
+<p>写进 Execution Controller 把"钱"耦合进编排；塞进 Gateway 每个能力都付间接成本。</p>
+<p class="small">→ 做成 Execution Controller 的可插拔策略槽，主干业务无关。</p>
+</div>
+</div>
+
+<h2>四、副作用分级契约（B 缝的核心，P0）</h2>
+<table>
+<tr><th>类别</th><th>代表能力</th><th>契约要求</th><th>处理</th></tr>
+<tr><td>read（纯读）</td><td>Game Vision / Performance Telemetry</td><td>无副作用</td><td>无需 undo，可重放</td></tr>
+<tr><td>write-undoable</td><td>Runtime Modification / MOD Capability</td><td>副作用 + undo</td><td>执行前 checkpoint，失败回滚</td></tr>
+<tr><td>irreversible</td><td>Input Automation / 游戏内动作</td><td>副作用，无 undo</td><td>强制 checkpoint + 用户确认</td></tr>
+</table>
+
+<h2>五、重构优先级</h2>
+<div class="grid cols-3">
+<div class="card p0"><span class="tag t-p0">P0</span><h3>冻结能力契约（B 缝）</h3><p>I/O + 副作用分级 + undo。锁住它，Layer 5 内部随便改。</p></div>
+<div class="card p0"><span class="tag t-p0">P0</span><h3>AI Workflow Engine 无状态化</h3><p>状态挤回 Business Workflow Engine，AI 引擎变纯函数，可换/可测/可重放。</p></div>
+<div class="card p1"><span class="tag t-p1">P1</span><h3>Game Session 资源管理器（C 缝）</h3><p>能力不再各自 hook 游戏进程。</p></div>
+<div class="card p1"><span class="tag t-p1">P1</span><h3>统一事件 schema</h3><p>trace/replay/checkpoint 一个 writer、三个 sink。</p></div>
+<div class="card p2"><span class="tag t-p2">P2</span><h3>权益/计费外提成策略槽</h3><p>主干去业务化。</p></div>
+<div class="card p2"><span class="tag t-p2">P2</span><h3>明确 Slots 回灌方向</h3><p>只读注入 or 走契约回灌，二选一。</p></div>
+</div>
+
+<h2>六、与 WildArrange 的同构（可搬直觉）</h2>
+<div class="grid cols-2">
+<div class="card ok"><h3>已做得好</h3><p>能力契约层（Layer 4）作为枢纽；统一执行链；副作用管理被当成一等公民。</p></div>
+<div class="card ok"><h3>映射对照</h3>
+<p>Business Control Slots ≈ 注入点；能力契约副作用分级 ≈ gate；Local Run Ledger ≈ hash 账本；Game Session ≈ scope guard 可写路径。</p>
+</div>
+</div>
+
+<div class="note"><b>一句话</b>：先冻结 B 缝契约 + 让 AI 引擎无状态，其余都是在这两条缝上"往两边推"。主干不动，横切外提，资源独占。</div>
+</main>
+</body>
+</html>

@@ -1,0 +1,47 @@
+{
+  "title": "Fullstack starter smoke",
+  "objective": "证明这套流水线能在前端和后端各跑通一个真实可验证的任务，再去填规范。",
+  "tasks": [
+    {
+      "id": "T001",
+      "subject": "Frontend: 写一个可验证的前端产物",
+      "description": "Worker 在 src/frontend 下写一个文件；verifier 检查文件内容包含约定标记。用于验证前端路径命中前端规范。",
+      "category": "quick",
+      "writable_paths": ["src/frontend/**"],
+      "worker_command": "node -e \"const fs=require('fs'); fs.mkdirSync('src/frontend',{recursive:true}); fs.writeFileSync('src/frontend/hello.js','export const HELLO = 42;\\n')\"",
+      "verify_commands": [
+        "node -e \"const fs=require('fs'); const s=fs.readFileSync('src/frontend/hello.js','utf8'); if(!s.includes('HELLO')) process.exit(1)\""
+      ],
+      "successCriteria": [
+        {
+          "id": "C001",
+          "title": "前端产物已写入且内容通过校验",
+          "status": "pending",
+          "expectedEvidence": "verifier 读取 src/frontend/hello.js 并确认包含 HELLO 标记",
+          "verifierCommandRefs": [0]
+        }
+      ]
+    },
+    {
+      "id": "T002",
+      "subject": "Backend: 写一个可验证的后端产物",
+      "description": "Worker 在 src/backend 下写一个文件；verifier 检查文件内容包含约定标记。用于验证后端路径命中后端规范。",
+      "category": "quick",
+      "dependsOn": ["T001"],
+      "writable_paths": ["src/backend/**"],
+      "worker_command": "node -e \"const fs=require('fs'); fs.mkdirSync('src/backend',{recursive:true}); fs.writeFileSync('src/backend/health.js','module.exports.HEALTH = 200;\\n')\"",
+      "verify_commands": [
+        "node -e \"const fs=require('fs'); const s=fs.readFileSync('src/backend/health.js','utf8'); if(!s.includes('HEALTH')) process.exit(1)\""
+      ],
+      "successCriteria": [
+        {
+          "id": "C002",
+          "title": "后端产物已写入且内容通过校验",
+          "status": "pending",
+          "expectedEvidence": "verifier 读取 src/backend/health.js 并确认包含 HEALTH 标记",
+          "verifierCommandRefs": [0]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>GameCopilot 解耦重构（维护者视角 v2）</title>
+<style>
+:root{
+  --bg:#f6f7f9;--text:#172033;--muted:#5d687b;--line:#d8dee8;
+  --zone-a:#e3f0ff;--zone-a-b:#4a90d9;
+  --zone-b:#fff3df;--zone-b-b:#e6a13d;
+  --zone-c:#f3e8ff;--zone-c-b:#9b59b6;
+  --zone-d:#eef8ec;--zone-d-b:#5cb85c;
+  --zone-e:#fde8e8;--zone-e-b:#d9534f;
+  --warn:#ffe9e7;--warn-b:#e06f64;
+  --ok:#e8f8e5;--ok-b:#4caf50;
+}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;background:var(--bg);color:var(--text)}
+main{max-width:1200px;margin:0 auto;padding:30px 22px 56px}
+h1{margin:0 0 6px;font-size:26px}
+h2{margin:34px 0 14px;font-size:19px;border-bottom:1px solid var(--line);padding-bottom:6px}
+h3{margin:0 0 6px;font-size:15px;font-weight:700}
+p,li{line-height:1.7;font-size:15px}
+.lead{color:var(--muted);font-size:16px;max-width:920px;margin-bottom:8px}
+.grid{display:grid;gap:14px}
+.cols-2{grid-template-columns:1fr 1fr}
+.cols-3{grid-template-columns:repeat(3,1fr)}
+.cols-5{grid-template-columns:repeat(5,1fr)}
+@media(max-width:900px){.cols-2,.cols-3,.cols-5{grid-template-columns:1fr}}
+.card{border:2px solid var(--line);border-radius:10px;padding:14px 16px;background:#fff}
+.zone-a{border-color:var(--zone-a-b);background:var(--zone-a)}
+.zone-b{border-color:var(--zone-b-b);background:var(--zone-b)}
+.zone-c{border-color:var(--zone-c-b);background:var(--zone-c)}
+.zone-d{border-color:var(--zone-d-b);background:var(--zone-d)}
+.zone-e{border-color:var(--zone-e-b);background:var(--zone-e)}
+.warn{border-color:var(--warn-b);background:var(--warn)}
+.ok{border-color:var(--ok-b);background:var(--ok)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;color:#fff;margin-right:6px}
+.t-a{background:var(--zone-a-b)}.t-b{background:var(--zone-b-b)}.t-c{background:var(--zone-c-b)}.t-d{background:var(--zone-d-b)}.t-e{background:var(--zone-e-b)}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:#eef1f6;font-size:13px}
+.small{font-size:13px;color:var(--muted)}
+.flow-strip{display:flex;align-items:stretch;gap:0;margin:20px 0;border-radius:10px;overflow:hidden;border:2px solid var(--line)}
+.flow-strip .seg{flex:1;padding:14px 12px;text-align:center;font-size:13px;font-weight:600;position:relative}
+.flow-strip .seg::after{content:"→";position:absolute;right:-8px;top:50%;transform:translateY(-50%);font-size:16px;color:var(--muted);z-index:1}
+.flow-strip .seg:last-child::after{content:""}
+.note{border-left:4px solid var(--zone-b-b);background:var(--zone-b);padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0}
+.note2{border-left:4px solid var(--zone-c-b);background:#f9f0ff;padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0}
+.bigq{font-size:18px;font-weight:700;margin:20px 0 10px;color:var(--zone-b-b)}
+</style>
+</head>
+<body>
+<main>
+
+<h1>GameCopilot 解耦重构（维护者视角）</h1>
+<p class="lead">核心原则：<b>改交互去前端、改流程去编排、改 AI 策略去 AI 编排、改具体功能去原子能力、改基础设施去服务</b>——五个区，互不串门。</p>
+
+<h2>一、你的目标：五区模型</h2>
+<p>你想要的其实是这样一个心智模型——<b>每个区只管自己那件事，区和区之间只靠"信封"（契约）对话</b>：</p>
+
+<div class="flow-strip">
+<div class="seg" style="background:var(--zone-a)">① 前端<br><span class="small">只管交互/展示</span></div>
+<div class="seg" style="background:var(--zone-b)">② 业务编排<br><span class="small">工作流/先后/分支</span></div>
+<div class="seg" style="background:var(--zone-c)">③ AI 编排<br><span class="small">理解意图/出计划</span></div>
+<div class="seg" style="background:var(--zone-d)">④ 原子能力<br><span class="small">做一件具体的事</span></div>
+<div class="seg" style="background:var(--zone-e)">⑤ 服务/资源<br><span class="small">被调度的基础设施</span></div>
+</div>
+
+<div class="grid cols-5">
+<div class="card zone-a"><span class="tag t-a">①</span><h3>前端</h3><p>画面、按钮、弹窗、列表。只接收"显示什么"的指令，发出"用户点了什么"的事件。</p></div>
+<div class="card zone-b"><span class="tag t-b">②</span><h3>业务编排</h3><p>决定"先做A、再做B、如果失败就C"。不知道 AI 怎么想的，不知道能力怎么实现。只管流程顺序和分支。</p></div>
+<div class="card zone-c"><span class="tag t-c">③</span><h3>AI 编排</h3><p>拿到目标和上下文，产出计划/建议。<b>不拥有状态、不直接调能力</b>——它只写"建议书"交给业务编排执行。</p></div>
+<div class="card zone-d"><span class="tag t-d">④</span><h3>原子能力</h3><p>一个能力只做一件事（截图识别 / 改配置 / 模拟按键）。有标准入参和出参。被业务编排调度。</p></div>
+<div class="card zone-e"><span class="tag t-e">⑤</span><h3>服务/资源</h3><p>数据库、文件存储、游戏进程、外部 API。被原子能力借用，但自己不决定何时做什么。</p></div>
+</div>
+
+<h2>二、对照原图：哪些做对了、哪些搅在一起了</h2>
+
+<table>
+<tr><th>五区</th><th>原图对应</th><th>✅ 做对了</th><th>⚠️ 搅在一起了</th></tr>
+<tr>
+  <td style="background:var(--zone-a)">① 前端</td>
+  <td>Frontend / In-Game Panel / AI Conversation Panel</td>
+  <td>和后面分得比较开</td>
+  <td>AI Conversation Panel 是"前端"还是"AI编排的入口"？如果它直接调 AI 引擎而不经过业务编排，就破了层</td>
+</tr>
+<tr>
+  <td style="background:var(--zone-b)">② 业务编排</td>
+  <td>Business Workflow Engine + Execution Controller + Business Control Slots</td>
+  <td>有明确的编排层</td>
+  <td>Execution Controller 把<b>路由/超时/重试/调度/状态推进</b>全塞进一个组件——它应该只做"按业务编排指令去调能力"，其余是业务编排自己的事</td>
+</tr>
+<tr>
+  <td style="background:var(--zone-c)">③ AI 编排</td>
+  <td>AI Workflow Engine</td>
+  <td>概念上独立了</td>
+  <td>它和 Business Workflow Engine 共享 workflow 状态 → 谁是"真相源"说不清 → 改流程时不知道去哪改</td>
+</tr>
+<tr>
+  <td style="background:var(--zone-d)">④ 原子能力</td>
+  <td>Layer 5（Game/MOD/Vision/Input/Runtime/Localization…）</td>
+  <td>用 Capability Gateway 统一入口；契约意识很好</td>
+  <td>有 3 个能力（Game Capability、Input Automation、Runtime Modification）都 hook 同一个游戏进程，互不知道对方存在 → 隐式耦合</td>
+</tr>
+<tr>
+  <td style="background:var(--zone-e)">⑤ 服务/资源</td>
+  <td>Layer 6 + 7（本地存储/游戏进程/Tool & MCP Host）</td>
+  <td>本地与云端分离了</td>
+  <td>Trace/Ledger/Checkpoint 三套机制，如果格式不统一就是三份账本 → 排查时不知道看哪个</td>
+</tr>
+</table>
+
+<h2>三、对上一版分析的修正</h2>
+<div class="note">
+<b>上一版哪里对</b>：四条切缝 ABCD 的位置是对的；副作用分级（read / write-undoable / irreversible）这个设计很关键；六个耦合气味也都真实存在。
+</div>
+<div class="card warn" style="margin-top:10px">
+<h3>上一版哪里"过于程序员视角"了</h3>
+<ul>
+<li><b>重构优先级应该以"维护者改什么最频繁"来排</b>，不是以技术复杂度排。你最常改的是"工作流"和"具体功能"，所以 P0 应该是<b>让"改工作流"和"改功能"这两件事各自独立、互不影响</b>，而不是先冻结契约。</li>
+<li><b>统一事件 schema 这种事对你来说不紧急</b>——三份账本格式不统一虽然不优雅，但不阻碍你日常维护。P2 即可。</li>
+<li><b>"AI 引擎无状态化"从你的角度翻译成</b>：AI 只产出"建议书"，不碰真正的进度表。这条原则对，但实操上只要保证"进度表在业务编排那里且只有一份"就够了，不需要用"纯函数"这类概念。</li>
+</ul>
+</div>
+
+<h2>四、修正后的重构优先级（维护者视角）</h2>
+
+<p class="bigq">改什么最频繁 → 就先把那个区隔干净</p>
+
+<div class="grid cols-3">
+<div class="card zone-b">
+<span class="tag t-b">最先做</span>
+<h3>让"改工作流"只动一个地方</h3>
+<p>把 workflow 状态唯一归属到<b>业务编排层</b>。AI 引擎只提交"建议"，不持有任何进度。Execution Controller 只是个"跑腿的"——业务编排说调谁就调谁。</p>
+<p class="small"><b>做完后的体感</b>：改流程顺序/分支/重试逻辑 → 只去业务编排区改。不会牵连 AI 策略也不会牵连具体功能。</p>
+</div>
+<div class="card zone-d">
+<span class="tag t-d">最先做</span>
+<h3>让"改功能"只动一个能力</h3>
+<p>① 冻结能力契约格式（入参/出参/副作用类型）；② 引入"游戏会话管理器"让多个能力共享同一个游戏进程连接而不互踩。</p>
+<p class="small"><b>做完后的体感</b>：改 OCR 识别逻辑 → 只动 Game Vision 能力。不会影响 Input Automation，也不会影响工作流。</p>
+</div>
+<div class="card zone-c">
+<span class="tag t-c">第二步</span>
+<h3>让 AI 策略可换、可关</h3>
+<p>AI 编排是个"顾问"角色：有它时出智能计划，没它时业务编排照样走一个兜底的确定性流程。这样你测试/调试时可以先关掉 AI 看业务逻辑对不对。</p>
+<p class="small"><b>做完后的体感</b>：换 AI 模型 / 改 prompt 策略 → 只动 AI 编排区。业务流程不受影响。</p>
+</div>
+<div class="card zone-a">
+<span class="tag t-a">第三步</span>
+<h3>前端只接收"显示指令"</h3>
+<p>前端不直接调 AI、不直接调能力。它只做两件事：① 收到"显示/刷新"指令就画；② 用户操作了就发一个"用户事件"给业务编排。</p>
+<p class="small"><b>做完后的体感</b>：改 UI 样式/交互 → 只动前端。完全不碰后面的逻辑。</p>
+</div>
+<div class="card zone-e">
+<span class="tag t-e">最后做</span>
+<h3>服务/资源统一接口</h3>
+<p>存储、游戏进程、外部 API 各自一个标准接口。上面的能力只通过接口借用，不直接碰底层细节。</p>
+<p class="small"><b>做完后的体感</b>：换存储方案 / 适配新游戏引擎 → 只动对应的服务适配层。</p>
+</div>
+<div class="card" style="border-color:var(--muted)">
+<span class="tag" style="background:var(--muted)">随时做</span>
+<h3>三份账本合一</h3>
+<p>把 Trace / Ledger / Checkpoint 的格式统一成一种。日常不影响维护，但排错时一个地方查到底。</p>
+</div>
+</div>
+
+<h2>五、一张"我要改 X，去哪改"的速查表</h2>
+<table>
+<tr><th>我想改…</th><th>去哪个区</th><th>动什么</th><th>绝对不碰</th></tr>
+<tr><td>页面长什么样 / 按钮在哪</td><td style="background:var(--zone-a)">① 前端</td><td>组件/样式/布局</td><td>工作流、AI 策略、能力实现</td></tr>
+<tr><td>功能的先后顺序 / 分支逻辑</td><td style="background:var(--zone-b)">② 业务编排</td><td>流程定义文件</td><td>AI prompt、原子能力内部</td></tr>
+<tr><td>AI 理解需求的方式 / 出的计划质量</td><td style="background:var(--zone-c)">③ AI 编排</td><td>prompt / 模型配置 / 规划策略</td><td>业务流程、能力实现</td></tr>
+<tr><td>某个具体功能的实现（OCR 更准 / MOD 逻辑）</td><td style="background:var(--zone-d)">④ 原子能力</td><td>对应能力的实现代码</td><td>编排顺序、其他能力</td></tr>
+<tr><td>数据存哪 / 游戏怎么连</td><td style="background:var(--zone-e)">⑤ 服务/资源</td><td>对应的适配层</td><td>业务逻辑、AI 策略</td></tr>
+<tr><td>加一个全新的功能</td><td style="background:var(--zone-d)">④ 新建一个原子能力</td><td>按契约模板写入参/出参/副作用类型</td><td>已有能力的代码</td></tr>
+<tr><td>把新功能串进已有流程</td><td style="background:var(--zone-b)">② 业务编排</td><td>在流程定义里加一步调用新能力</td><td>新能力的内部实现</td></tr>
+</table>
+
+<h2>六、关键设计原则（非技术语言）</h2>
+
+<div class="grid cols-2">
+<div class="card ok">
+<h3>区和区之间只传"信封"</h3>
+<p>区与区之间不共享内部状态。业务编排不关心 AI 内部怎么推理，只看它交回来的"建议信封"。原子能力不关心谁在调它，只看收到的"任务信封"。</p>
+<p><b>好处</b>：改一个区的内部实现，只要信封格式没变，其他区完全不用动。</p>
+</div>
+<div class="card ok">
+<h3>进度只有一份，在业务编排手里</h3>
+<p>整个系统"现在到哪一步了"只有业务编排知道。AI 编排不维护进度、前端不维护进度、能力不维护进度。</p>
+<p><b>好处</b>：排查"怎么卡住了"只需看一个地方。</p>
+</div>
+<div class="card ok">
+<h3>AI 是顾问不是老板</h3>
+<p>AI 编排产出"建议"，业务编排决定"采不采纳"。没有 AI 或 AI 挂了，业务编排仍能走一条确定性兜底流程。</p>
+<p><b>好处</b>：调试时可以先关掉 AI，验证纯业务逻辑对不对。</p>
+</div>
+<div class="card ok">
+<h3>能力标明"我有没有副作用"</h3>
+<p>每个能力注册时自己声明：我只看（read）、我改了但能撤（undoable）、我做了就收不回（irreversible）。编排根据这个决定要不要先备份或问用户确认。</p>
+<p><b>好处</b>：新加能力时只需填一个标签，编排自动知道怎么保护。</p>
+</div>
+</div>
+
+<h2>七、和原图的主要分歧</h2>
+<table>
+<tr><th>原图做法</th><th>建议调整</th><th>为什么</th></tr>
+<tr><td>Execution Controller 承担路由 + 超时 + 重试 + 状态推进</td><td>状态推进<b>归还</b>给业务编排；Controller 只负责"按指令去调能力、等结果回来"</td><td>否则改流程时不知道是改编排还是改 Controller</td></tr>
+<tr><td>AI Workflow Engine 和 Business Workflow Engine 都碰 workflow 状态</td><td>AI 引擎<b>不碰状态</b>，只交"建议信封"</td><td>否则进度有两个来源，排查时看不清</td></tr>
+<tr><td>Business Control Slots 既注入上下文又能回写编排</td><td>Slots <b>只能注入只读上下文</b>；想改编排必须走"建议信封"</td><td>否则扩展点变成后门，谁加了什么改动看不见</td></tr>
+<tr><td>3 个能力各自 hook 游戏进程</td><td>加一个 <b>Game Session Manager</b>，能力向它借连接</td><td>否则改一个能力的 hook 方式可能影响另一个</td></tr>
+<tr><td>计费/权益写在 Controller 或 Gateway 里</td><td>外提成业务编排的<b>策略插槽</b></td><td>否则改计费逻辑要碰调度主干，风险大</td></tr>
+</table>
+
+<div class="note2">
+<b>一句话总结</b>：让你的维护心智模型就是代码的物理结构——<b>目录分五区、信封定格式、进度一份源、AI 只建议不做主</b>。改任何东西前问自己"我要改的属于哪个区"，答案唯一就对了，答案模糊就是还没解耦干净。
+</div>
+
+</main>
+</body>
+</html>

@@ -15,6 +15,16 @@ const HIGH_RISK_PATTERNS = [
     reason: "recursive deletion targets Git or WildArrange runtime state",
   },
   {
+    id: "project_source_delete",
+    pattern: /\brm\s+[^;&|]*(?:-[^\s;&|]*r[^\s;&|]*f|-[^\s;&|]*f[^\s;&|]*r|--recursive)[^;&|]*(?:^|[\s"'=])(?:\.\/)?(?:src|lib|app|apps|test|tests|doc|docs|bin|packages|source)(?:\/[^\s;&|"']*)?(?:[\s;&|"']|$)/i,
+    reason: "recursive deletion targets project source, test, or doc directories",
+  },
+  {
+    id: "project_source_delete_node",
+    pattern: /\brm(?:Sync)?\(\s*["'`](?:\.\/)?(?:src|lib|app|apps|test|tests|doc|docs|bin|packages|source)["'`/][^)]*recursive\s*:\s*true/i,
+    reason: "inline Node recursive deletion targets project source, test, or doc directories",
+  },
+  {
     id: "git_history_destroy",
     pattern: /\bgit\s+(?:-[^\s]+\s+)*reset\s+--hard\b|\bgit\s+(?:-[^\s]+\s+)*clean\s+-[^\s;&|]*[fd][^\s;&|]*\b/i,
     reason: "git reset --hard or git clean can delete uncommitted work",
@@ -46,6 +56,29 @@ const HIGH_RISK_PATTERNS = [
   },
 ];
 
+// 把 helix.config.json 里 commandSafety.extraPatterns 编译成可用的正则规则。
+// 内置 HIGH_RISK_PATTERNS 始终作为不可削弱的底线；这里只做“加法”，让用户补充项目专属危险命令。
+export function compileCommandSafetyPatterns(config) {
+  const raw = Array.isArray(config?.commandSafety?.extraPatterns) ? config.commandSafety.extraPatterns : [];
+  const compiled = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry.pattern !== "string" || entry.pattern.length === 0) continue;
+    let regex;
+    try {
+      regex = new RegExp(entry.pattern, typeof entry.flags === "string" ? entry.flags : "i");
+    } catch {
+      continue;
+    }
+    compiled.push({
+      id: typeof entry.id === "string" && entry.id ? entry.id : `custom_${compiled.length + 1}`,
+      pattern: regex,
+      reason: typeof entry.reason === "string" && entry.reason ? entry.reason : "matched a project-configured high-risk command pattern",
+      source: "config",
+    });
+  }
+  return compiled;
+}
+
 export function evaluateCommandSafety(command, options = {}) {
   const text = typeof command === "string" ? command.trim() : "";
   if (!text) {
@@ -55,8 +88,9 @@ export function evaluateCommandSafety(command, options = {}) {
     return { allowed: true, level: "override", findings: [] };
   }
 
-  const findings = HIGH_RISK_PATTERNS
-    .filter((item) => item.pattern.test(text))
+  const extraPatterns = Array.isArray(options.extraPatterns) ? options.extraPatterns : [];
+  const findings = [...HIGH_RISK_PATTERNS, ...extraPatterns]
+    .filter((item) => item.pattern instanceof RegExp && item.pattern.test(text))
     .map(({ id, reason }) => ({ id, reason }));
 
   return {

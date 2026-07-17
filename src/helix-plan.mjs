@@ -6,6 +6,7 @@ import {
   appendLedger,
   createWorkId,
   ensureHelixDirs,
+  loadHelixConfig,
   nowIso,
   readJson,
   resolveHelixPath,
@@ -112,9 +113,7 @@ export function normalizeTask(task, index, defaults = {}) {
 
 function detectTaskGovernanceWarnings({ workerCommand, verifyCommands, writablePaths }) {
   const warnings = [];
-  const emptyWorker = !workerCommand || trivialCommand(workerCommand);
-  const trivialVerify = verifyCommands.length > 0 && verifyCommands.every(trivialCommand);
-  if (emptyWorker && trivialVerify && writablePaths.length === 0) {
+  if (isPossibleNoopTask({ worker_command: workerCommand, verify_commands: verifyCommands, writable_paths: writablePaths })) {
     warnings.push({
       code: "possible_noop_task",
       severity: "warn",
@@ -122,6 +121,19 @@ function detectTaskGovernanceWarnings({ workerCommand, verifyCommands, writableP
     });
   }
   return warnings;
+}
+
+export function isPossibleNoopTask(task) {
+  const workerCommand = task?.worker_command || null;
+  const verifyCommands = Array.isArray(task?.verify_commands) ? task.verify_commands : [];
+  const writablePaths = Array.isArray(task?.writable_paths) ? task.writable_paths : [];
+  const emptyWorker = !workerCommand || isTrivialCommand(workerCommand);
+  const trivialVerify = verifyCommands.length > 0 && verifyCommands.every(isTrivialCommand);
+  return emptyWorker && trivialVerify && writablePaths.length === 0;
+}
+
+export function isTrivialCommand(command) {
+  return trivialCommand(command);
 }
 
 function trivialCommand(command) {
@@ -291,6 +303,8 @@ async function importPlanUnlocked(rootDir, planPath) {
   });
   await writeTasksMarkdown(rootDir, plan);
 
+  const { config } = await loadHelixConfig(rootDir);
+  const approvalRequired = config?.planApproval?.required === true;
   const work = await readJson(resolveHelixPath(rootDir, "work.json"), {
     version: STATE_VERSION,
     workId: createWorkId(),
@@ -300,13 +314,59 @@ async function importPlanUnlocked(rootDir, planPath) {
     ...work,
     stage: "planned",
     activePlanId: plan.id,
-    status: "ready",
+    status: approvalRequired ? "awaiting_plan_approval" : "ready",
+    planApproval: {
+      required: approvalRequired,
+      status: approvalRequired ? "pending" : "approved",
+      planId: plan.id,
+      updatedAt: nowIso(),
+    },
     updatedAt: nowIso(),
   });
 
-  await appendLedger(rootDir, { type: "plan_imported", planId: plan.id, taskCount: plan.tasks.length });
+  await appendLedger(rootDir, { type: "plan_imported", planId: plan.id, taskCount: plan.tasks.length, approvalRequired });
   await writeSnapshot(rootDir, "planned", { planId: plan.id });
   return plan;
+}
+
+export async function loadPlanApproval(rootDir) {
+  const work = await readJson(resolveHelixPath(rootDir, "work.json"), null);
+  const approval = work?.planApproval;
+  if (!approval || approval.required !== true) {
+    return { required: false, status: "approved", planId: approval?.planId || work?.activePlanId || null };
+  }
+  return {
+    required: true,
+    status: approval.status === "approved" ? "approved" : "pending",
+    planId: approval.planId || work?.activePlanId || null,
+  };
+}
+
+export async function approvePlan(rootDir, options = {}) {
+  return withTaskStateLock(rootDir, "approve-plan", async () => {
+    const workPath = resolveHelixPath(rootDir, "work.json");
+    const work = await readJson(workPath, null);
+    if (!work || !work.activePlanId) throw new Error("no imported plan found; run helix plan --from <file>");
+    if (options.planId && options.planId !== work.activePlanId) {
+      throw new Error(`plan ${options.planId} is not the active plan (${work.activePlanId})`);
+    }
+    const nextApproval = {
+      required: work.planApproval?.required === true,
+      status: "approved",
+      planId: work.activePlanId,
+      approvedBy: options.approver || "user",
+      approvedAt: nowIso(),
+      note: options.note || "",
+    };
+    await writeJsonAtomic(workPath, {
+      ...work,
+      status: "ready",
+      planApproval: nextApproval,
+      updatedAt: nowIso(),
+    });
+    await appendLedger(rootDir, { type: "plan_approved", planId: work.activePlanId, approver: nextApproval.approvedBy });
+    return { planId: work.activePlanId, status: "approved", approval: nextApproval };
+  });
 }
 
 export async function enrichPlanWithRoutes(rootDir, plan) {

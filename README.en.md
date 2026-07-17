@@ -102,6 +102,13 @@ Install, uninstall, and restore write reports under `.helix/adapters/`. Existing
 - **Codex**: lifecycle hooks are written to `.codex/hooks.json`, with an audit copy at `.helix/adapters/codex/hooks.json`. Codex runs these hard hooks only after the trusted project layer and the hook definition are reviewed/trusted through `/hooks`.
 - **Cursor**: project rule at `.cursor/rules/wildarrange.mdc`. This is soft governance unless Cursor exposes a command lifecycle hook for the project.
 
+`adapter install` also generates slash commands so you don't have to open a terminal for common operations. Both surfaces render from one shared command set (`helix-config` / `helix-doctor` / `helix-refresh` / `helix-status` / `helix-plan` / `helix-approve` / `helix-run`):
+
+- **Cursor**: `.cursor/commands/<name>.md` (plain-Markdown slash commands; type `/helix-doctor` in chat).
+- **Codex**: `.agents/skills/<name>/SKILL.md` (skill directory; invoke via `/skills` or `$helix-doctor`, since Codex 0.117 removed custom prompts in favor of skills).
+
+Each command is a prompt that tells the agent to run the matching `helix.mjs` subcommand and report back — a shortcut that lets the agent run the CLI, not a native button.
+
 ## Minimal Multi-Agent Loop
 
 Command-based child agents can run concurrently in isolated run directories:
@@ -144,9 +151,16 @@ node ./bin/helix.mjs config baseline --reason reviewed
 node ./bin/helix.mjs config verify
 node ./bin/helix.mjs state backup --reason before-risky-agent
 node ./bin/helix.mjs state verify
+node ./bin/helix.mjs state list
+node ./bin/helix.mjs state restore --backup <backupId>
+node ./bin/helix.mjs doctor
 ```
 
-WildArrange preflights shell commands and blocks clearly destructive commands such as deleting `.git/.helix`, `git reset --hard`, `git clean -fd`, `sudo`, or `curl | sh`. Normal project commands, verifiers, review commands, and child-agent runners continue to run.
+`doctor` is a one-command health check: it validates config structure and mounts, reconciles completed tasks against checkpoints, acceptance proofs, and ledger events, verifies the ledger hash chain, and cross-checks the ledger against the latest backup to detect wholesale rewrites. `state restore` automatically takes a pre-restore backup first, so a bad restore can itself be undone.
+
+Before every worker run in a Git project, WildArrange records a workspace snapshot (`git stash create`); the snapshot hash and restore command are stored in task evidence and the ledger, so broken changes can be recovered with `git stash apply <hash>`.
+
+WildArrange preflights shell commands and blocks clearly destructive commands such as deleting `.git/.helix`, recursively deleting project source/test/doc directories, `git reset --hard`, `git clean -fd`, `sudo`, or `curl | sh`. Normal project commands, verifiers, review commands, and child-agent runners continue to run.
 
 ## ArchivistRouter
 
@@ -168,6 +182,14 @@ Skill matcher gives an explainable hint for which skills should load at the curr
 ```bash
 node ./bin/helix.mjs skills match --text "build a web reminders app" --stage design --agent YingLong
 ```
+
+Skill mounting at injection points is on-demand by default (`skillMatcher.dynamicInjection`). When request text is available, only configured skills that match the request are injected in full; the rest are demoted to on-demand references. `alwaysMount` skills (default `wildarrange-injection-runtime`) are always injected, and `maxSkills` (default 4) caps a single mount. Points without request text (such as `pre_tool_use`) fall back to the static list. Dynamic matching only subtracts; it never injects full text of skills outside the configured list.
+
+### Human decision channel and safety switches
+
+- **Generic push (no external IM binding)**: all pending human decisions — plan awaiting approval, out-of-scope ChangeRequests, failed tasks, child agents awaiting acceptance — are injected into the host AI context by hooks (SessionStart / UserPromptSubmit / PostCompact / Stop), instructing the AI to proactively surface them to the developer with options. `attentionReport` is the source of truth; `status` / dashboard can also pull it.
+- **Plan approval gate**: when `planApproval.required=true`, an imported plan enters `awaiting_plan_approval` and `run` refuses to execute until the developer runs `plan approve` (or `/helix-approve` in chat). Off by default.
+- **Externalized command safety**: built-in high-risk command patterns are a floor that cannot be disabled; `commandSafety.extraPatterns` lets you add project-specific dangerous-command blocks (`{ id, pattern, flags, reason }`) without code changes.
 
 Prompt variants append model-specific bias without replacing the base agent prompt:
 

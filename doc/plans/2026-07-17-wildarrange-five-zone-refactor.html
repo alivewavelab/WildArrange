@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>WildArrange 五区解耦重构方案</title>
+<style>
+:root{
+  --bg:#f6f7f9;--text:#172033;--muted:#5d687b;--line:#d8dee8;
+  --l1:#e3f0ff;--l1b:#4a90d9;
+  --l2:#fff3df;--l2b:#e6a13d;
+  --l3a:#f3e8ff;--l3ab:#9b59b6;
+  --l3b:#e8f8e5;--l3bb:#5cb85c;
+  --l4:#fde8e8;--l4b:#d9534f;
+  --pipe:#eef8ec;--pipeb:#2e7d32;
+  --env:#f0f4fa;--envb:#607d8b;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;background:var(--bg);color:var(--text)}
+main{max-width:1240px;margin:0 auto;padding:28px 20px 56px}
+h1{margin:0 0 4px;font-size:24px}
+h2{margin:32px 0 12px;font-size:18px;border-bottom:1px solid var(--line);padding-bottom:5px}
+h3{margin:0 0 5px;font-size:14px;font-weight:700}
+p,li{line-height:1.65;font-size:14px}
+.lead{color:var(--muted);font-size:15px;max-width:900px;margin-bottom:10px}
+.grid{display:grid;gap:12px}
+.c2{grid-template-columns:1fr 1fr}
+.c3{grid-template-columns:repeat(3,1fr)}
+.c4{grid-template-columns:repeat(4,1fr)}
+.c5{grid-template-columns:repeat(5,1fr)}
+.c6{grid-template-columns:repeat(6,1fr)}
+@media(max-width:900px){.c2,.c3,.c4,.c5,.c6{grid-template-columns:1fr}}
+.card{border:2px solid var(--line);border-radius:8px;padding:12px 14px;background:#fff;font-size:13px}
+.l1{border-color:var(--l1b);background:var(--l1)}
+.l2{border-color:var(--l2b);background:var(--l2)}
+.l3a{border-color:var(--l3ab);background:var(--l3a)}
+.l3b{border-color:var(--l3bb);background:var(--l3b)}
+.l4{border-color:var(--l4b);background:var(--l4)}
+.pipe{border-color:var(--pipeb);background:var(--pipe)}
+.env{border-color:var(--envb);background:var(--env)}
+.tag{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;color:#fff;margin-right:5px;vertical-align:middle}
+.t1{background:var(--l1b)}.t2{background:var(--l2b)}.t3a{background:var(--l3ab)}.t3b{background:var(--l3bb)}.t4{background:var(--l4b)}.tp{background:var(--pipeb)}
+table{border-collapse:collapse;width:100%;margin:10px 0;font-size:13px}
+th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+th{background:#eef1f6;font-size:12px}
+.small{font-size:12px;color:var(--muted)}
+.arrow-row{display:flex;align-items:center;justify-content:center;gap:0;margin:8px 0}
+.arrow-row .seg{padding:8px 14px;font-size:12px;font-weight:600;text-align:center;border:1px solid var(--line)}
+.arrow-row .seg:first-child{border-radius:6px 0 0 6px}
+.arrow-row .seg:last-child{border-radius:0 6px 6px 0}
+.arrow-row .arr{padding:0 2px;color:var(--muted);font-size:14px}
+.note{border-left:4px solid var(--l2b);background:var(--l2);padding:10px 14px;border-radius:0 6px 6px 0;margin:14px 0;font-size:13px}
+.phase{display:flex;align-items:flex-start;gap:12px;margin:10px 0;padding:10px 14px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.phase-num{min-width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;color:#fff}
+.phase-body{flex:1}
+.phase-body h3{margin:2px 0 4px}
+.dep-rule{display:grid;grid-template-columns:1fr auto 1fr;gap:6px;align-items:center;text-align:center;margin:10px 0;font-size:13px}
+.dep-rule .ok{color:var(--l3bb);font-weight:700}
+.dep-rule .no{color:var(--l4b);font-weight:700}
+</style>
+</head>
+<body>
+<main>
+
+<h1>WildArrange 五区解耦重构方案</h1>
+<p class="lead">五区 + 严格单向依赖 + 共享交付流水线 + 静态能力网关 + 零破坏兼容。<br>面向 vibe coding 维护者：改工作流只动编排区、改功能只动能力区、每步结果一行人话汇总。</p>
+
+<!-- ========== 层级总览 ========== -->
+<h2>一、层级总览（严格单向：上→下）</h2>
+
+<div class="card l1" style="margin-bottom:4px"><span class="tag t1">L1</span><b>Interface</b> — CLI / Dashboard / Adapters / 兼容 facade</div>
+<div style="text-align:center;color:var(--muted);font-size:18px">↓</div>
+<div class="card l2" style="margin-bottom:4px"><span class="tag t2">L2</span><b>Orchestration</b> — 线性运行 / 并行运行 / <b>共享交付流水线</b> / 任务板 / 计划状态</div>
+<div style="text-align:center;color:var(--muted);font-size:18px">↓ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ↓</div>
+<div class="grid c2" style="margin-bottom:4px">
+<div class="card l3a"><span class="tag t3a">L3a</span><b>AI</b> — 路由 / 注入 / Hooks / 技能匹配 / LLM / 档案路由 / 规则</div>
+<div class="card l3b"><span class="tag t3b">L3b</span><b>Capabilities</b> — Gateway / 验证 / 范围守卫 / 复核 / 验收证明 / 存档 / Worker</div>
+</div>
+<div style="text-align:center;color:var(--muted);font-size:18px">↓ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ↓</div>
+<div class="card l4"><span class="tag t4">L4</span><b>Infrastructure</b> — Foundation / Ledger / Security / GitOps / MemoryDigest</div>
+
+<p class="small" style="margin-top:8px"><b>铁律</b>：上层可调下层，下层绝不反调上层。L3a 和 L3b 同级互不依赖。<code>dependency-boundary.test.mjs</code> 自动扫描 import 强制执行。</p>
+
+<!-- ========== 依赖规则 ========== -->
+<h2>二、依赖规则</h2>
+<table>
+<tr><th>调用方</th><th>允许 import</th><th>禁止 import</th></tr>
+<tr><td style="background:var(--l1)">L1 Interface</td><td>L2</td><td>L3a, L3b, L4（必须通过 L2）</td></tr>
+<tr><td style="background:var(--l2)">L2 Orchestration</td><td>L3a, L3b, L4</td><td>L1</td></tr>
+<tr><td style="background:var(--l3a)">L3a AI</td><td>L4</td><td>L1, L2, L3b</td></tr>
+<tr><td style="background:var(--l3b)">L3b Capabilities</td><td>L4, L3b 内部</td><td>L1, L2, L3a</td></tr>
+<tr><td style="background:var(--l4)">L4 Infrastructure</td><td>无（最底层）</td><td>L1, L2, L3a, L3b</td></tr>
+</table>
+
+<!-- ========== 共享交付流水线 ========== -->
+<h2>三、共享交付流水线</h2>
+<p>线性运行（<code>linear-runtime</code>）和并行合入（<code>parallel-runtime</code>）<b>共用同一条管道</b>，改 gate 顺序/加新 gate 只动这一处：</p>
+
+<div class="arrow-row">
+<div class="seg" style="background:var(--l2)">Worker 干完</div><span class="arr">→</span>
+<div class="seg" style="background:var(--l3b)">验证</div><span class="arr">→</span>
+<div class="seg" style="background:var(--l3b)">范围守卫</div><span class="arr">→</span>
+<div class="seg" style="background:var(--l3b)">复核</div><span class="arr">→</span>
+<div class="seg" style="background:var(--l3b)">验收证明</div><span class="arr">→</span>
+<div class="seg" style="background:var(--l3b)">存档</div><span class="arr">→</span>
+<div class="seg" style="background:var(--pipe)">一行人话汇总</div>
+</div>
+
+<div class="note">
+<b>汇总示例</b>：<br>
+<code>任务① 搭页面骨架：验证(0.3s) → 范围守卫(0.1s) → 复核(12s, ¥0.02) → 验收 → 存档<br>总耗时 14s ｜ 总费用 ¥0.02 ｜ 改了 3 文件，全在允许范围</code>
+</div>
+
+<!-- ========== 能力网关 ========== -->
+<h2>四、能力网关（静态注册 + 统一信封）</h2>
+
+<div class="grid c2">
+<div class="card l3b">
+<h3>静态注册表</h3>
+<p>所有能力在 <code>gateway.mjs</code> 用 object literal 注册。加新能力 = 写实现 + 这里加一行。</p>
+<pre style="font-size:11px;background:#f8f8f8;padding:8px;border-radius:4px;overflow-x:auto">CAPABILITIES = {
+  'worker':           runWorker,
+  'verify':           runVerifier,
+  'scope':            scopeGuard,
+  'review':           runReviewGate,
+  'acceptance-proof': writeAcceptanceProof,
+  'checkpoint':       writeCheckpoint,
+}</pre>
+</div>
+<div class="card env">
+<h3>统一结果信封（6 字段）</h3>
+<table style="font-size:12px">
+<tr><th>字段</th><th>用途</th></tr>
+<tr><td><code>capability</code></td><td>哪个能力</td></tr>
+<tr><td><code>status</code></td><td>pass / fail / inconclusive</td></tr>
+<tr><td><code>evidence</code></td><td>留档证据（原样存入账本）</td></tr>
+<tr><td><code>sideEffect</code></td><td>none / state_written / files_changed</td></tr>
+<tr><td><code>duration_ms</code></td><td>耗时（毫秒）→ 定位哪步慢</td></tr>
+<tr><td><code>cost</code></td><td>LLM 费用（无则 null）</td></tr>
+</table>
+</div>
+</div>
+
+<!-- ========== 目录结构 ========== -->
+<h2>五、目标目录结构</h2>
+<div class="grid c5">
+<div class="card l1">
+<h3>interface/</h3>
+<ul style="margin:0;padding-left:16px;font-size:12px">
+<li>cli.mjs</li>
+<li>dashboard.mjs</li>
+<li>adapters.mjs</li>
+<li>facade.mjs</li>
+</ul>
+</div>
+<div class="card l2">
+<h3>orchestration/</h3>
+<ul style="margin:0;padding-left:16px;font-size:12px">
+<li>linear-runtime.mjs</li>
+<li>parallel-runtime.mjs</li>
+<li><b>delivery-pipeline.mjs</b></li>
+<li>task-board.mjs</li>
+<li>plan-state.mjs</li>
+<li>workflow.mjs</li>
+<li>change-governance.mjs</li>
+</ul>
+</div>
+<div class="card l3a">
+<h3>ai/</h3>
+<ul style="margin:0;padding-left:16px;font-size:12px">
+<li>routing.mjs</li>
+<li>archivist-router.mjs</li>
+<li>injection.mjs</li>
+<li>skill-matcher.mjs</li>
+<li>context.mjs</li>
+<li>hooks.mjs</li>
+<li>llm.mjs</li>
+<li>rules.mjs</li>
+<li>plan-enrichment.mjs</li>
+</ul>
+</div>
+<div class="card l3b">
+<h3>capabilities/</h3>
+<ul style="margin:0;padding-left:16px;font-size:12px">
+<li><b>gateway.mjs</b></li>
+<li>verify.mjs</li>
+<li>scope-guard.mjs</li>
+<li>command-runner.mjs</li>
+<li>command-safety.mjs</li>
+<li>worker.mjs</li>
+<li>review-gate.mjs</li>
+<li>code-intel.mjs</li>
+<li>acceptance-proof.mjs</li>
+<li>checkpoint.mjs</li>
+<li>failure-analysis.mjs</li>
+<li>agent-spawn.mjs</li>
+</ul>
+</div>
+<div class="card l4">
+<h3>infra/</h3>
+<ul style="margin:0;padding-left:16px;font-size:12px">
+<li>foundation.mjs</li>
+<li>ledger.mjs</li>
+<li>security.mjs</li>
+<li>git-worktree.mjs</li>
+<li>memory-digest.mjs</li>
+<li>hook-result-gate.mjs</li>
+<li>review-findings.mjs</li>
+</ul>
+</div>
+</div>
+
+<!-- ========== 重构步骤 ========== -->
+<h2>六、重构步骤（6 个 Phase）</h2>
+
+<div class="phase"><div class="phase-num" style="background:var(--l4b)">0</div><div class="phase-body"><h3>基线修复</h3><p>修 CLI 重复导入 + 加 smoke test + commit 保护工作区 + 拉分支</p></div></div>
+<div class="phase"><div class="phase-num" style="background:var(--l1b)">1</div><div class="phase-body"><h3>骨架 + 边界测试</h3><p>建五区目录 + dependency-boundary.test + gateway 首版 + delivery-pipeline 首版</p></div></div>
+<div class="phase"><div class="phase-num" style="background:var(--l3bb)">2</div><div class="phase-body"><h3>拆 gates + 接入 gateway</h3><p>从 helix-gates 拆出 verify / scope / command-runner / checkpoint → 注册到 gateway → pipeline 串完整序列</p></div></div>
+<div class="phase"><div class="phase-num" style="background:var(--l2b)">3</div><div class="phase-body"><h3>编排层瘦身</h3><p>linear-runtime + parallel-runtime 改调 delivery-pipeline，消除重复编排代码</p></div></div>
+<div class="phase"><div class="phase-num" style="background:var(--l3ab)">4</div><div class="phase-body"><h3>AI 层独立</h3><p>hooks 拆出编排关注点 + plan 拆出路由 enrichment → AI 层不再碰编排状态</p></div></div>
+<div class="phase"><div class="phase-num" style="background:#607d8b">5</div><div class="phase-body"><h3>搬目录 + 激活边界测试</h3><p>move 到五区目录 + 更新兼容层 + 激活 dependency-boundary.test + npm test/pack 全绿</p></div></div>
+<div class="phase"><div class="phase-num" style="background:#333">6</div><div class="phase-body"><h3>收尾</h3><p>文档更新 + 旧路径 shim deprecated + 全量验证</p></div></div>
+
+<!-- ========== 速查表 ========== -->
+<h2>七、"改 X 去哪改"速查</h2>
+<table>
+<tr><th>我想改…</th><th>去哪</th><th>绝对不碰</th></tr>
+<tr><td>工作流顺序 / 重试 / 分支</td><td style="background:var(--l2)"><code>orchestration/</code></td><td>capabilities、ai</td></tr>
+<tr><td>Gate 顺序 / 加减 gate</td><td style="background:var(--l2)"><code>delivery-pipeline.mjs</code></td><td>具体能力内部</td></tr>
+<tr><td>AI 策略 / prompt / 技能匹配</td><td style="background:var(--l3a)"><code>ai/</code></td><td>编排顺序、具体检查</td></tr>
+<tr><td>某个检查更严格/宽松</td><td style="background:var(--l3b)"><code>capabilities/对应文件</code></td><td>编排层、其他能力</td></tr>
+<tr><td>新增一种检查能力</td><td style="background:var(--l3b)"><code>capabilities/</code> 新文件 + gateway 加一行</td><td>编排层零改动</td></tr>
+<tr><td>账本 / 快照 / 配置底层</td><td style="background:var(--l4)"><code>infra/</code></td><td>业务逻辑</td></tr>
+<tr><td>UI / CLI / adapter</td><td style="background:var(--l1)"><code>interface/</code></td><td>后面所有层</td></tr>
+</table>
+
+<!-- ========== Vibe Coding 兜底 ========== -->
+<h2>八、Vibe Coding 维护者兜底保障</h2>
+<div class="grid c3">
+<div class="card pipe"><h3>AI 做了但没做对</h3><p>Gate 序列自动验证，一行汇总告诉你过没过</p></div>
+<div class="card pipe"><h3>AI 改了不该改的</h3><p>Scope guard 硬拦 + ChangeRequest 推到对话问你</p></div>
+<div class="card pipe"><h3>不知道哪步坏了</h3><p>每个 gate 独立 status + duration，pipeline 一行摘要</p></div>
+<div class="card pipe"><h3>AI 跑太慢/太贵</h3><p>duration_ms + cost 字段，汇总里直接看到</p></div>
+<div class="card pipe"><h3>改工作流不知道去哪</h3><p>只动 <code>delivery-pipeline.mjs</code></p></div>
+<div class="card pipe"><h3>重构搞坏了现有功能</h3><p>兼容层 + 边界测试 + 每步 npm test</p></div>
+</div>
+
+<!-- ========== 兼容策略 ========== -->
+<h2>九、兼容策略（零破坏）</h2>
+<table>
+<tr><th>不变的</th><th>保证方式</th></tr>
+<tr><td>所有 export 符号（公共 API）</td><td><code>src/helix-core.mjs</code> 保留为兼容 re-export 层</td></tr>
+<tr><td>CLI 命令和参数语义</td><td><code>bin/helix.mjs</code> 所有子命令不变</td></tr>
+<tr><td><code>.helix/</code> 数据格式</td><td>JSON schema / ledger / snapshot 零改动</td></tr>
+<tr><td>95 个现有测试</td><td>每 Phase 必须全绿</td></tr>
+<tr><td>npm pack 包内容</td><td><code>files</code> 字段覆盖新目录</td></tr>
+</table>
+<p class="small">旧 <code>src/helix-*.mjs</code> 保留为 re-export shim + <code>@deprecated</code>，一个版本周期后删。</p>
+
+<!-- ========== 决策记录 ========== -->
+<h2>十、决策记录</h2>
+<table>
+<tr><th>决策项</th><th>结论</th></tr>
+<tr><td>Gate 序列</td><td>固定顺序，未来可追加新 gate（插入 pipeline），不支持跳过</td></tr>
+<tr><td>信封字段</td><td>6 字段：status / evidence / sideEffect / duration_ms / cost / error</td></tr>
+<tr><td>网关</td><td>首版静态注册，不引入动态插件</td></tr>
+<tr><td>兼容</td><td>旧路径保留一个版本周期</td></tr>
+<tr><td>foundation</td><td>暂不拆（951 行但稳定且无上游依赖）</td></tr>
+<tr><td>L3a vs L3b</td><td>同级互不依赖，都只被 L2 调度</td></tr>
+</table>
+
+</main>
+</body>
+</html>

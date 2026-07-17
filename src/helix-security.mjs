@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, readFile, stat } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import {
   HELIX_CONFIG_FILE,
@@ -126,6 +126,81 @@ export async function writeRuntimeStateBackup(rootDir, options = {}) {
     reason: manifest.reason,
   });
   return manifest;
+}
+
+export async function listRuntimeStateBackups(rootDir) {
+  const backupsDir = resolveHelixPath(rootDir, "backups");
+  let entries = [];
+  try {
+    entries = await readdir(backupsDir);
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+  const backups = [];
+  for (const entry of entries) {
+    const manifest = await readJson(path.join(backupsDir, entry, "manifest.json"), null);
+    if (manifest?.kind === "runtime_state_backup") {
+      backups.push({
+        backupId: manifest.backupId,
+        at: manifest.at,
+        reason: manifest.reason,
+        copiedCount: (manifest.files || []).filter((file) => file.status === "copied").length,
+      });
+    }
+  }
+  return backups.sort((left, right) => String(left.at).localeCompare(String(right.at)));
+}
+
+export async function restoreRuntimeStateBackup(rootDir, options = {}) {
+  const backupId = options.backupId;
+  if (!backupId || typeof backupId !== "string") {
+    throw new Error("state restore requires --backup <backupId>");
+  }
+  const backupDir = resolveHelixPath(rootDir, "backups", backupId);
+  const manifest = await readJson(path.join(backupDir, "manifest.json"), null);
+  if (!manifest || manifest.kind !== "runtime_state_backup") {
+    throw new Error(`unknown state backup: ${backupId}`);
+  }
+
+  // 恢复前先给当前状态留底，恢复错了还能再退回来
+  const preRestore = await writeRuntimeStateBackup(rootDir, { reason: `pre-restore:${backupId}` });
+
+  const restored = [];
+  const skipped = [];
+  for (const file of manifest.files || []) {
+    if (file.status !== "copied") {
+      skipped.push({ path: file.path, reason: "not_in_backup" });
+      continue;
+    }
+    const sourcePath = path.join(backupDir, file.path);
+    const targetPath = path.join(rootDir, file.path);
+    if (!existsSync(sourcePath)) {
+      skipped.push({ path: file.path, reason: "backup_file_missing" });
+      continue;
+    }
+    await mkdir(path.dirname(targetPath), { recursive: true });
+    await copyFile(sourcePath, targetPath);
+    restored.push(file.path);
+  }
+
+  await appendLedger(rootDir, {
+    type: "runtime_state_restored",
+    backupId,
+    preRestoreBackupId: preRestore.backupId,
+    restoredCount: restored.length,
+    skippedCount: skipped.length,
+  });
+
+  return {
+    kind: "runtime_state_restore",
+    at: nowIso(),
+    backupId,
+    backupAt: manifest.at,
+    preRestoreBackupId: preRestore.backupId,
+    restored,
+    skipped,
+  };
 }
 
 export async function verifyRuntimeState(rootDir) {

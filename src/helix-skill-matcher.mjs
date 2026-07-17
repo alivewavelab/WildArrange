@@ -127,7 +127,7 @@ async function loadSkillSummaries(registry) {
 function collectRouteSignals(routes, text) {
   const signals = { intents: [], skills: [] };
   for (const intent of routes?.intents || []) {
-    const keywords = [...(intent.keywords || []), ...(intent.mustInclude || [])].map(normalizeText).filter(Boolean);
+    const keywords = [...(intent.signals || []), ...(intent.keywords || []), ...(intent.mustInclude || [])].map(normalizeText).filter(Boolean);
     const hit = keywords.some((keyword) => keyword && text.includes(keyword));
     if (!hit) continue;
     signals.intents.push(intent.name);

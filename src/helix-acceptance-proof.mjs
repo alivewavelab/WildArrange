@@ -7,6 +7,7 @@ import {
   resolveHelixPath,
   writeJsonAtomic,
 } from "./helix-foundation.mjs";
+import { isPossibleNoopTask } from "./helix-plan.mjs";
 import { criteriaStatus } from "./helix-team.mjs";
 
 export async function writeAcceptanceProof(rootDir, planId, task, evidence = {}) {
@@ -46,6 +47,12 @@ export function buildAcceptanceProof(planId, task, evidence = {}) {
     proofCheck("verify_commands_present", verifyCommands.length > 0, {
       evidence: `${verifyCommands.length} verify command(s)`,
       requiredFix: "补充不可为空的 verify_commands，不允许清空验收门。",
+    }),
+    proofCheck("not_noop_task", !isPossibleNoopTask(task), {
+      evidence: isPossibleNoopTask(task)
+        ? "worker/verify commands are empty or trivial and writable_paths is empty"
+        : "task declares a real worker, verifier, or writable path",
+      requiredFix: "补充真实的 worker_command / verify_commands 或 writable_paths；trivial 命令组合不能作为完成证据。",
     }),
     proofCheck("verifier_passed", verifyResult?.kind === "verifier" && verifyResult.pass === true, {
       evidence: verifyResult ? `pass=${verifyResult.pass}; results=${verifyResult.results?.length || 0}` : "missing verifier result",

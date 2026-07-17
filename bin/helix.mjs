@@ -14,11 +14,13 @@ import {
   continuationDirective,
   createSamplePlan,
   createTeamTask,
+  approvePlan,
   claimTeamTask,
   getTeamTask,
   importPlan,
   installAdapter,
   initRuntime,
+  loadPlanApproval,
   listArchivistRouteSuggestions,
   listParallelAgentRuns,
   loadHelixConfig,
@@ -28,6 +30,7 @@ import {
   listTeamMessages,
   listChangeRequests,
   listPromptPack,
+  listRuntimeStateBackups,
   readJson,
   recordReviewBlocker,
   recordTaskEvidence,
@@ -36,9 +39,11 @@ import {
   resolveInjectionPoint,
   resolveArchivistRouteSuggestion,
   resolveChangeRequest,
+  restoreRuntimeStateBackup,
   resumeReport,
   reviewChangeRequest,
   runArchivistRouter,
+  runDoctor,
   routeRequest,
   runInjectionHook,
   runParallelAgents,
@@ -93,7 +98,7 @@ Usage:
   wildarrange adapter install [--target codex|cursor|all] [--mode local|npx] [--package ${DEFAULT_PACKAGE_NAME}]
   wildarrange adapter uninstall [--target codex|cursor|all]
   wildarrange adapter restore --backup <backupId>
-  wildarrange injection show --point before_review [--agent BaiZe] [--task T001]
+  wildarrange injection show --point before_review [--agent BaiZe] [--task T001] [--text "..."] [--stage plan]
   wildarrange hook run [--from hook.json] [--format text|json]
   wildarrange plan --from <plan.json>
   wildarrange run
@@ -135,8 +140,11 @@ Usage:
   wildarrange changes review --id CR-xxxx
   wildarrange changes resolve --id CR-xxxx --decision accept|reject --evidence "..." --rationale "..." [--apply-scope]
   wildarrange ledger verify
+  wildarrange doctor
   wildarrange state backup [--reason "..."]
   wildarrange state verify
+  wildarrange state list
+  wildarrange state restore --backup <backupId>
   wildarrange serve [--host 127.0.0.1] [--port 8765] [--token <token>]
   wildarrange guard scope [--task T001]
   wildarrange route --text "request"
@@ -252,6 +260,9 @@ async function main() {
         agent: args.agent && args.agent !== true ? args.agent : "",
         taskId: args.task && args.task !== true ? args.task : "",
         planId: args.plan && args.plan !== true ? args.plan : "",
+      }, {
+        text: args.text && args.text !== true ? args.text : "",
+        stage: args.stage && args.stage !== true ? args.stage : "",
       }), null, 2));
       return;
     }
@@ -276,10 +287,30 @@ async function main() {
   }
 
   if (command === "plan") {
-    if (!args.from) throw new Error("helix plan requires --from <plan.json>");
+    if (args._[1] === "approve") {
+      await initRuntime(rootDir);
+      const result = await approvePlan(rootDir, {
+        planId: args.plan && args.plan !== true ? args.plan : undefined,
+        approver: args.by && args.by !== true ? args.by : undefined,
+        note: args.note && args.note !== true ? args.note : undefined,
+      });
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    if (!args.from) throw new Error("helix plan requires --from <plan.json>（或 helix plan approve 确认已导入计划）");
     await initRuntime(rootDir);
     const plan = await importPlan(rootDir, path.resolve(rootDir, args.from));
-    console.log(JSON.stringify({ ok: true, planId: plan.id, taskCount: plan.tasks.length }, null, 2));
+    const approval = await loadPlanApproval(rootDir);
+    console.log(JSON.stringify({
+      ok: true,
+      planId: plan.id,
+      taskCount: plan.tasks.length,
+      approvalRequired: approval.required,
+      approvalStatus: approval.status,
+      nextStep: approval.required && approval.status !== "approved"
+        ? "计划待开发者确认；确认后才可 run。执行 node ./bin/helix.mjs plan approve 或在编辑器里用 /helix-approve。"
+        : "可直接 node ./bin/helix.mjs run。",
+    }, null, 2));
     return;
   }
 
@@ -603,7 +634,23 @@ async function main() {
       process.exitCode = result.ok ? 0 : 2;
       return;
     }
-    throw new Error("helix state requires backup or verify");
+    if (subcommand === "list") {
+      console.log(JSON.stringify(await listRuntimeStateBackups(rootDir), null, 2));
+      return;
+    }
+    if (subcommand === "restore") {
+      if (!args.backup || args.backup === true) throw new Error("helix state restore requires --backup <backupId>");
+      console.log(JSON.stringify(await restoreRuntimeStateBackup(rootDir, { backupId: args.backup }), null, 2));
+      return;
+    }
+    throw new Error("helix state requires backup, verify, list, or restore");
+  }
+
+  if (command === "doctor") {
+    const result = await runDoctor(rootDir);
+    console.log(JSON.stringify(result, null, 2));
+    process.exitCode = result.ok ? 0 : 2;
+    return;
   }
 
   if (command === "guard") {

@@ -174,6 +174,11 @@ export const DEFAULT_HELIX_CONFIG = {
   skillMatcher: {
     enabled: true,
     defaultLimit: 6,
+    dynamicInjection: {
+      enabled: true,
+      maxSkills: 4,
+      alwaysMount: ["wildarrange-injection-runtime"],
+    },
     stageBoosts: {
       ideate: ["wa-ideate", "ultraresearch"],
       clarify: ["wa-spec", "start-work"],
@@ -211,6 +216,12 @@ export const DEFAULT_HELIX_CONFIG = {
       timeoutMs: 45000,
       maxEvidenceChars: 12000,
     },
+  },
+  commandSafety: {
+    extraPatterns: [],
+  },
+  planApproval: {
+    required: false,
   },
   qualityGates: {
     lspDiagnostics: {

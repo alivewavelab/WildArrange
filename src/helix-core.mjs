@@ -32,11 +32,14 @@ export {
   writeSnapshot,
 } from "./helix-foundation.mjs";
 export {
+  listRuntimeStateBackups,
+  restoreRuntimeStateBackup,
   verifyConfigBaseline,
   verifyRuntimeState,
   writeConfigBaseline,
   writeRuntimeStateBackup,
 } from "./helix-security.mjs";
+export { runDoctor } from "./helix-doctor.mjs";
 export { installAdapter, restoreAdapterBackup, uninstallAdapter } from "./helix-adapters.mjs";
 export { recordReviewBlocker, resolveChangeRequest, reviewChangeRequest, steerWorkflow } from "./helix-change.mjs";
 export { buildFailureSummary } from "./helix-failure.mjs";
@@ -67,7 +70,7 @@ export { preToolUseGuard, runInjectionHook } from "./helix-hooks.mjs";
 export { detectToolResultFindings, evaluateHookResultGate } from "./helix-hook-result-gate.mjs";
 export { resolveInjectionPoint } from "./helix-injection.mjs";
 export { matchSkills, resolvePromptVariant } from "./helix-skill-matcher.mjs";
-export { dashboardData, statusReport, writeWorkflowSummary } from "./helix-status.mjs";
+export { attentionReport, dashboardData, statusReport, writeWorkflowSummary } from "./helix-status.mjs";
 export { copyPlanTemplate, createSamplePlan, runWorkflow } from "./helix-workflow.mjs";
 export {
   runNextTask,
@@ -80,9 +83,13 @@ export {
   retryTaskNode,
 } from "./helix-node-runtime.mjs";
 export {
+  approvePlan,
   enrichPlanWithRoutes,
   enrichTaskWithRouteDecision,
   importPlan,
+  isPossibleNoopTask,
+  isTrivialCommand,
+  loadPlanApproval,
   loadTaskState,
   normalizePlan,
   normalizeStringArray,
@@ -116,7 +123,7 @@ export {
   runParallelAgents,
 } from "./helix-parallel-agents.mjs";
 export { renderSpawnCommand, resolveAgentSpawn } from "./helix-agent-spawn.mjs";
-export { applyAgentPatch, collectAgentWorktreePatch, extractPatchPaths, prepareAgentWorktree } from "./helix-git-worktree.mjs";
+export { applyAgentPatch, captureWorkspaceSnapshot, collectAgentWorktreePatch, extractPatchPaths, prepareAgentWorktree } from "./helix-git-worktree.mjs";
 export {
   appendWisdom,
   changedPathsIntroducedByTask,
@@ -134,3 +141,4 @@ export {
   writeFailureReport,
   writeReviewReport,
 } from "./helix-gates.mjs";
+export { compileCommandSafetyPatterns, evaluateCommandSafety } from "./helix-command-safety.mjs";

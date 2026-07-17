@@ -10,9 +10,10 @@ import { buildFailureSummary } from "./helix-failure.mjs";
 import { writeAcceptanceProof } from "./helix-acceptance-proof.mjs";
 import { writeMemoryDigest } from "./helix-memory-digest.mjs";
 import { routeRequest } from "./helix-routing.mjs";
+import { captureWorkspaceSnapshot } from "./helix-git-worktree.mjs";
 import { runReviewGate, runWorker } from "./helix-review.mjs";
 import { writeWorkflowSummary } from "./helix-status.mjs";
-import { loadTaskState } from "./helix-plan.mjs";
+import { loadPlanApproval, loadTaskState } from "./helix-plan.mjs";
 import {
   applyVerifierEvidenceToCriteria,
   criteriaStatus,
@@ -42,6 +43,17 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   const taskState = await loadTaskState(rootDir);
   if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
 
+  const approval = await loadPlanApproval(rootDir);
+  if (approval.required && approval.status !== "approved" && approval.planId === taskState.planId) {
+    await appendLedger(rootDir, { type: "run_blocked_awaiting_plan_approval", planId: taskState.planId });
+    return {
+      status: "awaiting_plan_approval",
+      task: null,
+      planId: taskState.planId,
+      approveHint: "开发者确认计划后放行：node ./bin/helix.mjs plan approve（或在编辑器里用 /helix-approve）",
+    };
+  }
+
   const task = findRunnableTask(taskState.tasks);
   if (!task) {
     const unfinished = taskState.tasks.filter((candidate) => candidate.status !== "completed");
@@ -57,6 +69,7 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   await appendLedger(rootDir, { type: "task_started", planId: taskState.planId, taskId: task.id, attempt: task.attempts });
   await writeSnapshot(rootDir, "task_started", { planId: taskState.planId, taskId: task.id, attempt: task.attempts });
 
+  const workspaceSnapshot = await recordPreExecuteSnapshot(rootDir, taskState.planId, task);
   const beforeDiff = await collectGitDiff(rootDir);
   const beforeChanged = await collectGitChangedPaths(rootDir);
   const workerResult = await runWorker(rootDir, task, options);
@@ -64,6 +77,7 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   const afterChanged = await collectGitChangedPaths(rootDir);
 
   task.status = "verifying";
+  if (workspaceSnapshot) task.evidence.push(workspaceSnapshot);
   task.evidence.push(workerResult);
   task.evidence.push({
     kind: "diff",
@@ -219,6 +233,7 @@ async function executeTaskNodeUnlocked(rootDir, options = {}) {
     await writeSnapshot(rootDir, "node_execute_started", { planId: taskState.planId, taskId: task.id });
   }
 
+  const workspaceSnapshot = await recordPreExecuteSnapshot(rootDir, taskState.planId, task);
   const beforeDiff = await collectGitDiff(rootDir);
   const beforeChanged = await collectGitChangedPaths(rootDir);
   const workerResult = await runWorker(rootDir, task, options);
@@ -226,6 +241,7 @@ async function executeTaskNodeUnlocked(rootDir, options = {}) {
   const afterChanged = await collectGitChangedPaths(rootDir);
 
   task.status = "verifying";
+  if (workspaceSnapshot) task.evidence.push(workspaceSnapshot);
   task.evidence.push(workerResult);
   task.evidence.push({
     kind: "diff",
@@ -504,6 +520,31 @@ async function retryTaskNodeUnlocked(rootDir, options = {}) {
   });
   await writeSnapshot(rootDir, "node_retry_reopened", { planId: taskState.planId, taskId: task.id });
   return { status: "pending", task, failure };
+}
+
+async function recordPreExecuteSnapshot(rootDir, planId, task) {
+  try {
+    const snapshot = await captureWorkspaceSnapshot(rootDir, { label: `pre-execute ${task.id} attempt ${task.attempts}` });
+    const entry = { ...snapshot, at: nowIso(), taskId: task.id };
+    await appendLedger(rootDir, {
+      type: snapshot.available ? "pre_execute_snapshot" : "pre_execute_snapshot_unavailable",
+      planId,
+      taskId: task.id,
+      headCommit: snapshot.headCommit || null,
+      stashCommit: snapshot.stashCommit || null,
+      reason: snapshot.reason || null,
+    });
+    return entry;
+  } catch (error) {
+    // 快照是兜底手段，不能因为快照失败阻断任务执行本身
+    return {
+      kind: "workspace_snapshot",
+      at: nowIso(),
+      taskId: task.id,
+      available: false,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 function resolveNodeTask(tasks, taskId, allowedStatuses) {
