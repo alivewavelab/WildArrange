@@ -13,7 +13,7 @@
  * review) already passed.
  */
 import { invokeCapability } from "../capabilities/gateway.mjs";
-import { applyVerifierEvidenceToCriteria, criteriaStatus } from "../helix-team.mjs";
+import { applyVerifierEvidenceToCriteria, criteriaStatus } from "../infra/success-criteria.mjs";
 
 const GATE_STEPS = ["verify", "scope", "review"];
 
