@@ -8,7 +8,7 @@
  * location; this shim is scheduled for removal once all call sites have
  * been migrated (see doc/plans/2026-07-17-wildarrange-five-zone-refactor.html).
  */
-export { runCommand } from "./capabilities/command-runner.mjs";
+export { runCommand } from "./infra/command-runner.mjs";
 export { runVerifier } from "./capabilities/verify.mjs";
 export {
   changedPathsIntroducedByTask,

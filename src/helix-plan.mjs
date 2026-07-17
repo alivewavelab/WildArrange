@@ -467,9 +467,7 @@ export async function writeTasksMarkdown(rootDir, plan) {
   await writeFile(resolveHelixPath(rootDir, "team", "tasks.md"), `${lines.join("\n")}\n`, "utf8");
 }
 
-export async function loadTaskState(rootDir) {
-  return readJson(resolveHelixPath(rootDir, "team", "tasks.json"), null);
-}
+export { loadTaskState } from "./infra/task-state-store.mjs";
 
 function uniqueStrings(values) {
   return [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))];

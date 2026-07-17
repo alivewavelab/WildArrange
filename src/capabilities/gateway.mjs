@@ -11,13 +11,13 @@
  * First version is intentionally a static object literal, not a dynamic
  * plugin loader: every capability is a real import at the top of this file.
  */
-import { runCommand } from "./command-runner.mjs";
+import { runCommand } from "../infra/command-runner.mjs";
 import { runVerifier } from "./verify.mjs";
 import { scopeGuard } from "./scope-guard.mjs";
 import { writeCheckpoint } from "./checkpoint.mjs";
 import { runReviewGate, runWorker } from "../helix-review.mjs";
 import { writeAcceptanceProof } from "../helix-acceptance-proof.mjs";
-import { evaluateCommandSafety } from "../helix-command-safety.mjs";
+import { evaluateCommandSafety } from "../infra/command-safety.mjs";
 
 async function adaptVerify(ctx) {
   const raw = await runVerifier(ctx.rootDir, ctx.task);

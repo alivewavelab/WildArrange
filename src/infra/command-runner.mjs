@@ -5,7 +5,7 @@
  * this file may weaken that check.
  */
 import { spawn } from "node:child_process";
-import { blockedCommandResult, evaluateCommandSafety } from "../helix-command-safety.mjs";
+import { blockedCommandResult, evaluateCommandSafety } from "./command-safety.mjs";
 
 const DEFAULT_COMMAND_OUTPUT_MAX_CHARS = 200_000;
 const COMMAND_SIGKILL_GRACE_MS = 2_000;

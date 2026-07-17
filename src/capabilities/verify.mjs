@@ -1,6 +1,6 @@
-import { compileCommandSafetyPatterns } from "../helix-command-safety.mjs";
-import { loadHelixConfig, nowIso } from "../helix-foundation.mjs";
-import { runCommand } from "./command-runner.mjs";
+import { compileCommandSafetyPatterns } from "../infra/command-safety.mjs";
+import { loadHelixConfig, nowIso } from "../infra/foundation.mjs";
+import { runCommand } from "../infra/command-runner.mjs";
 
 export async function runVerifier(rootDir, task) {
   if (!Array.isArray(task.verify_commands) || task.verify_commands.length === 0) {
