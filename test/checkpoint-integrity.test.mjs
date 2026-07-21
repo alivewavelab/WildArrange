@@ -24,6 +24,7 @@ import {
   readJson,
   resolveHelixPath,
   runCommand,
+  runDoctor,
   runNextTask,
   runParallelAgents,
   runWorkflowNode,
@@ -36,8 +37,9 @@ async function withTempDir(fn) {
   try {
     await fn(dir);
   } finally {
-    // Undo any read-only sabotage so cleanup can delete the tree.
-    await chmod(resolveHelixPath(dir, "checkpoints"), 0o755).catch(() => {});
+    // Undo any read-only sabotage (checkpoints/team/agent-run dirs, ledger)
+    // so cleanup can delete the tree even when an assertion failed mid-test.
+    await runCommand(`chmod -R u+w ${JSON.stringify(dir)}`, dir, 30_000).catch(() => {});
     await rm(dir, { recursive: true, force: true });
   }
 }
@@ -430,5 +432,195 @@ test("adversarial: parallel admission does not release the child result when the
     assert.equal(await readFile(path.join(dir, "src", "parallel.txt"), "utf8"), "ok\n");
     const lifecycleAfterRepair = await readJson(resolveHelixPath(dir, "agent-runs", batch.runId, "T001", "result.json"));
     assert.equal(lifecycleAfterRepair.lifecycle.status, "released");
+  });
+});
+
+test("adversarial: an interrupted completion transaction is visible to doctor and auto-recovered by the next run", async () => {
+  // Cross-review P1+P2 (round 4, 2026-07-21): the failure window where the
+  // completion ledger event and the derived plan/markdown mirrors were
+  // written but the canonical tasks.json save failed. Plain `run` used to
+  // report "blocked" forever and doctor was blind to the divergence.
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    await importPassingPlan(dir);
+
+    await runWorkflowNode(dir, "execute", { taskId: "T001" });
+    await runWorkflowNode(dir, "verify", { taskId: "T001" });
+    await runWorkflowNode(dir, "scope", { taskId: "T001" });
+    await runWorkflowNode(dir, "review", { taskId: "T001" });
+
+    // Read-only plans dir: acceptance proof, checkpoint and the completion
+    // ledger event all succeed, tasks.md (a derived view) gets rewritten as
+    // completed, but the plan-mirror write fails mid-persist — the canonical
+    // tasks.json save is never reached. This is the exact divergence window
+    // from the round-4 cross-review.
+    const plansDir = resolveHelixPath(dir, "plans");
+    await chmod(plansDir, 0o555);
+    try {
+      await assert.rejects(() => runWorkflowNode(dir, "checkpoint", { taskId: "T001" }), /EACCES|permission denied/i);
+    } finally {
+      await chmod(plansDir, 0o755);
+    }
+
+    const interrupted = await loadTaskState(dir);
+    assert.equal(interrupted.tasks[0].status, "verifying", "canonical state must stay pre-completion");
+    assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /node_checkpoint_completed/);
+    assert.match(await readFile(resolveHelixPath(dir, "team", "tasks.md"), "utf8"), /- Status: completed/, "sanity: the divergence window really exists");
+
+    // doctor must surface both reverse inconsistencies.
+    const report = await runDoctor(dir);
+    const auditFindings = report.findings.filter((finding) => finding.section === "completion_audit");
+    assert.ok(
+      auditFindings.some((finding) => finding.taskId === "T001" && /already has a completion event/.test(finding.message)),
+      `doctor must flag the orphan completion event, got: ${JSON.stringify(auditFindings)}`,
+    );
+    assert.ok(
+      auditFindings.some((finding) => finding.taskId === "T001" && /diverges/.test(finding.message)),
+      `doctor must flag the canonical/derived divergence, got: ${JSON.stringify(auditFindings)}`,
+    );
+
+    // Plain `run` adjudicates the stuck task instead of reporting blocked:
+    // the gate evidence of the current round passes, so it completes.
+    const resumed = await runNextTask(dir);
+    assert.equal(resumed.status, "completed");
+    assert.equal(resumed.resumed, "verifying_task_adjudicated");
+    const recovered = await loadTaskState(dir);
+    assert.equal(recovered.tasks[0].status, "completed");
+    assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /run_resumed_verifying_task/);
+
+    const cleanReport = await runDoctor(dir);
+    const remaining = cleanReport.findings.filter(
+      (finding) => finding.section === "completion_audit" && (finding.message.includes("already has a completion event") || finding.message.includes("diverges")),
+    );
+    assert.deepEqual(remaining, [], "after recovery doctor must see a consistent state");
+  });
+});
+
+test("adversarial: an interrupted verifying task with a bad artifact is sent back to pending by the next run, not completed", async () => {
+  // The auto-recovery path must adjudicate, not rubber-stamp: a task stuck
+  // in verifying whose gate evidence does NOT pass for the current round has
+  // to go back to pending (rejected), never straight to completed.
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    await importPassingPlan(dir);
+
+    // Only execute ran; verify/scope/review never happened this round.
+    await runWorkflowNode(dir, "execute", { taskId: "T001" });
+    const stuck = await loadTaskState(dir);
+    assert.equal(stuck.tasks[0].status, "verifying");
+
+    const adjudicated = await runNextTask(dir);
+    assert.equal(adjudicated.resumed, "verifying_task_adjudicated");
+    assert.notEqual(adjudicated.status, "completed", "missing gate evidence must never auto-complete");
+    const persisted = await loadTaskState(dir);
+    assert.notEqual(persisted.tasks[0].status, "completed");
+    assert.ok(["pending", "failed"].includes(persisted.tasks[0].status), "the stuck task must be released back into the retry loop");
+  });
+});
+
+test("adversarial: parallel admission resumes idempotently after a lifecycle write failure, without touching workspace files", async () => {
+  // Cross-review P1 (round 4, 2026-07-21): task completed + lifecycle save
+  // failed used to be unrecoverable — re-admission was refused because the
+  // task was already completed, leaving the child stuck in
+  // awaiting_user_acceptance forever. The retry must finish ONLY the
+  // missing release and must not re-apply files over the workspace.
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = resolveHelixPath(dir, "artifacts", "parallel-resume-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Parallel admission lifecycle recovery",
+      tasks: [
+        {
+          id: "T001",
+          subject: "Admit child artifact",
+          verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/parallel.txt','utf8').trim()!=='ok') process.exit(1);")],
+          writable_paths: ["src/**"],
+        },
+      ],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    const command = [
+      "node -e",
+      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
+      "{outputJson}",
+    ].join(" ");
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+
+    // Sabotage the per-task run directory: the admission itself completes
+    // (task persisted completed) but updateAgentRunLifecycle cannot write
+    // result.json — the exact interruption from the cross-review.
+    const runTaskDir = resolveHelixPath(dir, "agent-runs", batch.runId, "T001");
+    await chmod(runTaskDir, 0o555);
+    try {
+      await assert.rejects(() => admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" }), /EACCES|permission denied/i);
+    } finally {
+      await chmod(runTaskDir, 0o755);
+    }
+    const stateAfterCrash = await loadTaskState(dir);
+    assert.equal(stateAfterCrash.tasks[0].status, "completed", "sanity: the interruption happened after the completed persist");
+    const lifecycleAfterCrash = await readJson(path.join(runTaskDir, "result.json"));
+    assert.notEqual(lifecycleAfterCrash.lifecycle?.status, "released", "sanity: the release is the missing half of the transaction");
+
+    // A user edit between crash and retry must survive the resume: if the
+    // retry re-applied the child files it would overwrite this content.
+    await writeFile(path.join(dir, "src", "parallel.txt"), "edited after admission\n");
+
+    const resumed = await admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" });
+    assert.equal(resumed.status, "completed");
+    assert.equal(resumed.resumed, true);
+    assert.equal(await readFile(path.join(dir, "src", "parallel.txt"), "utf8"), "edited after admission\n", "resume must not re-apply files");
+    const lifecycleAfterResume = await readJson(path.join(runTaskDir, "result.json"));
+    assert.equal(lifecycleAfterResume.lifecycle.status, "released");
+    assert.equal((await loadTaskState(dir)).tasks[0].status, "completed");
+  });
+});
+
+test("adversarial: parallel admission refuses a task completed by other means BEFORE applying any file", async () => {
+  // Cross-review P1 (round 4, 2026-07-21): admission used to write the
+  // child's files into the workspace first and validate the task status
+  // afterwards, so a doomed admission could still clobber the workspace.
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    const planPath = resolveHelixPath(dir, "artifacts", "parallel-precheck-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Parallel admission status precheck",
+      tasks: [
+        {
+          id: "T001",
+          subject: "Task completed through the linear flow",
+          worker_command: nodeEval("const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/parallel.txt','linear\\n');"),
+          verify_commands: [nodeEval("process.exit(0)")],
+          writable_paths: ["src/**"],
+        },
+      ],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    const command = [
+      "node -e",
+      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'from child agent\\n'}]}));"),
+      "{outputJson}",
+    ].join(" ");
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+
+    // Complete the task through the linear flow, NOT through this admission.
+    const completed = await runNextTask(dir);
+    assert.equal(completed.status, "completed");
+    assert.equal(await readFile(path.join(dir, "src", "parallel.txt"), "utf8"), "linear\n");
+
+    await assert.rejects(
+      () => admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" }),
+      /already completed/,
+      "an unrelated completed task must be refused, not resumed",
+    );
+    assert.equal(
+      await readFile(path.join(dir, "src", "parallel.txt"), "utf8"),
+      "linear\n",
+      "the refusal must happen before any child file touches the workspace",
+    );
   });
 });

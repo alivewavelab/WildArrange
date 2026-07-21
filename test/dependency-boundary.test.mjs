@@ -59,10 +59,96 @@ async function listMjsFiles(dir) {
   return files;
 }
 
+/**
+ * Lexical comment stripping. A plain regex cannot tell a real comment from
+ * "/*" sitting inside a string literal, which let a crafted-but-legal file
+ * hide an import between a string containing a block-comment opener and a
+ * later closer (cross-review P1, round 4, 2026-07-21). This walks the source as a small
+ * state machine: line/block comments are blanked out (newlines preserved so
+ * reported line numbers stay right), while string literals, template
+ * literals (including ${} nesting) and regex literals are copied through
+ * untouched — import specifiers live in strings, so they must survive.
+ */
 function stripComments(source) {
-  // Prevent false edges from paths mentioned inside JSDoc/comments
-  // (e.g. a shim's deprecation note quoting its own old import path).
-  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  let out = "";
+  let i = 0;
+  const n = source.length;
+  let lastSignificant = "";
+  while (i < n) {
+    const ch = source[i];
+    const next = source[i + 1];
+    if (ch === "/" && next === "/") {
+      while (i < n && source[i] !== "\n") { out += " "; i += 1; }
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      out += "  ";
+      i += 2;
+      while (i < n && !(source[i] === "*" && source[i + 1] === "/")) {
+        out += source[i] === "\n" ? "\n" : " ";
+        i += 1;
+      }
+      if (i < n) { out += "  "; i += 2; }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      out += ch;
+      i += 1;
+      while (i < n && source[i] !== ch && source[i] !== "\n") {
+        if (source[i] === "\\") { out += source[i] + (source[i + 1] ?? ""); i += 2; continue; }
+        out += source[i];
+        i += 1;
+      }
+      if (i < n && source[i] === ch) { out += ch; i += 1; }
+      lastSignificant = ch;
+      continue;
+    }
+    if (ch === "`") {
+      out += ch;
+      i += 1;
+      let braceDepth = 0;
+      while (i < n) {
+        const c = source[i];
+        if (c === "\\") { out += c + (source[i + 1] ?? ""); i += 2; continue; }
+        if (braceDepth === 0 && c === "`") { out += c; i += 1; break; }
+        if (braceDepth === 0 && c === "$" && source[i + 1] === "{") { braceDepth = 1; out += "${"; i += 2; continue; }
+        if (braceDepth > 0 && c === "{") braceDepth += 1;
+        if (braceDepth > 0 && c === "}") braceDepth -= 1;
+        out += c;
+        i += 1;
+      }
+      lastSignificant = "`";
+      continue;
+    }
+    if (ch === "/") {
+      // Regex literal vs division, by what precedes the slash: after a value
+      // (identifier, number, closing bracket, string) it is division; after
+      // an operator/opening bracket/keyword it starts a regex literal whose
+      // body must be skipped so its content can't fake a comment marker.
+      const afterKeyword = /(?:^|[^\w$])(?:return|typeof|case|in|of|new|delete|void|do|else|yield|await)\s*$/.test(out);
+      const regexCanStart = lastSignificant === "" || "([{,;=:!&|?+-*%<>~^".includes(lastSignificant) || afterKeyword;
+      if (regexCanStart) {
+        out += ch;
+        i += 1;
+        let inClass = false;
+        while (i < n) {
+          const c = source[i];
+          if (c === "\\") { out += c + (source[i + 1] ?? ""); i += 2; continue; }
+          if (c === "[") inClass = true;
+          else if (c === "]") inClass = false;
+          out += c;
+          i += 1;
+          if ((c === "/" && !inClass) || c === "\n") break;
+        }
+        lastSignificant = ")";
+        continue;
+      }
+    }
+    out += ch;
+    if (!/\s/.test(ch)) lastSignificant = ch;
+    i += 1;
+  }
+  return out;
 }
 
 function extractImportSpecifiers(source) {
@@ -186,6 +272,49 @@ test("dependency boundary: no non-literal dynamic imports anywhere in src/", asy
     }
   }
   assert.deepEqual(violations, [], `dynamic import() whose argument is not a single string literal (invisible to zone checks):\n${violations.join("\n")}`);
+});
+
+test("dependency boundary: comment stripping is string-aware and cannot be blinded by block-comment markers inside literals", () => {
+  // Round-4 adversarial finding: with regex-based stripping, a string literal
+  // containing "/*" started a fake comment that swallowed every line up to a
+  // later "*/" — hiding a real reverse-zone import in between while the file
+  // stayed valid JavaScript. The lexical stripper must keep that import
+  // visible, while still blanking real comments (so specifiers quoted in
+  // JSDoc do not create false edges) and leaving strings/regexes intact.
+  const openComment = "/" + "*";
+  const closeComment = "*" + "/";
+
+  const smuggled = [
+    `const decoy = "${openComment}";`,
+    `import { routeRequest } from "../ai/routing.mjs";`,
+    `const closer = "${closeComment}";`,
+  ].join("\n");
+  assert.ok(
+    extractImportSpecifiers(smuggled).includes("../ai/routing.mjs"),
+    "import hidden between string-embedded comment markers must stay visible",
+  );
+
+  const realComment = [
+    `${openComment} example: import { x } from "../ai/routing.mjs" ${closeComment}`,
+    `// import { y } from "../ai/context.mjs"`,
+    `import { z } from "../infra/foundation.mjs";`,
+  ].join("\n");
+  assert.deepEqual(
+    extractImportSpecifiers(realComment),
+    ["../infra/foundation.mjs"],
+    "specifiers quoted inside real comments must not create edges",
+  );
+
+  const trickyRegexAndTemplate = [
+    `const pattern = /https:\\/\\/${openComment.replace("/", "\\/")}/g;`,
+    "const tpl = `prefix ${value} " + openComment + " suffix`;",
+    `const apostrophe = "don't"; // trailing comment with ' quote`,
+    `import { helper } from "../infra/path-match.mjs";`,
+  ].join("\n");
+  assert.ok(
+    extractImportSpecifiers(trickyRegexAndTemplate).includes("../infra/path-match.mjs"),
+    "regex literals, template literals and quotes in comments must not derail the scanner",
+  );
 });
 
 test("dependency boundary: no module-level import cycles anywhere in src/", async () => {

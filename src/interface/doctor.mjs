@@ -167,7 +167,64 @@ async function checkCompletionIntegrity(rootDir, findings) {
       addFinding(findings, "warn", "completion_audit", `task ${task.id} looks like a no-op task (trivial worker + trivial verifier + no writable paths)`, { taskId: task.id });
     }
   }
-  return { checkedCompleted: audited, totalTasks: (taskState.tasks || []).length, planId: taskState.planId };
+
+  // 反向不一致（cross-review P2, round 4, 2026-07-21）：
+  // 1) 未完成任务却已有账本完成事件 → 完成事务被中断，canonical 落盘失败。
+  //    这是可恢复状态：helix run 会自动裁决卡在 verifying 的任务。
+  let orphanCompletionEvents = 0;
+  for (const task of taskState.tasks || []) {
+    if (task.status === "completed") continue;
+    if (ledgerTaskEvents.has(task.id)) {
+      orphanCompletionEvents += 1;
+      addFinding(findings, "warn", "completion_audit", `task ${task.id} is ${task.status} but the ledger already has a completion event; the completion transaction was interrupted before the canonical state was saved — run \`helix run\` (or \`helix node checkpoint --task ${task.id}\`) to adjudicate it`, { taskId: task.id, taskStatus: task.status });
+    }
+  }
+
+  // 2) 派生视图（plan JSON / tasks.md）与 canonical tasks.json 的状态分叉。
+  const canonicalStatus = new Map((taskState.tasks || []).map((task) => [task.id, task.status]));
+  let derivedDivergences = 0;
+  const planPath = resolveHelixPath(rootDir, "plans", `${taskState.planId}.json`);
+  if (existsSync(planPath)) {
+    const plan = await readJson(planPath);
+    for (const planTask of plan?.tasks || []) {
+      const canonical = canonicalStatus.get(planTask.id);
+      if (canonical && planTask.status !== canonical) {
+        derivedDivergences += 1;
+        addFinding(findings, "warn", "completion_audit", `task ${planTask.id} status diverges between canonical tasks.json (${canonical}) and plan JSON (${planTask.status}); tasks.json is authoritative — the plan mirror was written by an interrupted transaction`, { taskId: planTask.id, canonical, planStatus: planTask.status });
+      }
+    }
+  }
+  const markdownPath = resolveHelixPath(rootDir, "team", "tasks.md");
+  if (existsSync(markdownPath)) {
+    const markdownStatus = parseTasksMarkdownStatuses(await readFile(markdownPath, "utf8"));
+    for (const [taskId, mdStatus] of markdownStatus) {
+      const canonical = canonicalStatus.get(taskId);
+      if (canonical && mdStatus !== canonical) {
+        derivedDivergences += 1;
+        addFinding(findings, "warn", "completion_audit", `task ${taskId} status diverges between canonical tasks.json (${canonical}) and tasks.md (${mdStatus}); tasks.json is authoritative`, { taskId, canonical, markdownStatus: mdStatus });
+      }
+    }
+  }
+
+  return { checkedCompleted: audited, totalTasks: (taskState.tasks || []).length, planId: taskState.planId, orphanCompletionEvents, derivedDivergences };
+}
+
+function parseTasksMarkdownStatuses(markdown) {
+  const statuses = new Map();
+  let currentTaskId = null;
+  for (const line of markdown.split("\n")) {
+    const checkboxMatch = line.match(/^- \[[x ]\] (\S+)\. /);
+    if (checkboxMatch) {
+      currentTaskId = checkboxMatch[1];
+      continue;
+    }
+    const statusMatch = line.match(/^ {2}- Status: (\S+)/);
+    if (statusMatch && currentTaskId) {
+      statuses.set(currentTaskId, statusMatch[1]);
+      currentTaskId = null;
+    }
+  }
+  return statuses;
 }
 
 async function collectCompletionLedgerEvents(rootDir) {
@@ -175,7 +232,11 @@ async function collectCompletionLedgerEvents(rootDir) {
   // 只统计通过 hash 链校验的条目，手工追加的伪造完成事件不算证据
   const entries = await readVerifiedLedgerEntries(rootDir);
   for (const entry of entries) {
-    if (COMPLETION_LEDGER_EVENT_TYPES.has(entry.type) && entry.taskId) taskIds.add(entry.taskId);
+    if (!COMPLETION_LEDGER_EVENT_TYPES.has(entry.type) || !entry.taskId) continue;
+    // 并行 admission 事件对失败结局也会写同名类型并带 status 字段；
+    // 只有真正 completed 的结局才算完成证据。
+    if (entry.type === "parallel_agent_admission_completed" && entry.status && entry.status !== "completed") continue;
+    taskIds.add(entry.taskId);
   }
   return taskIds;
 }

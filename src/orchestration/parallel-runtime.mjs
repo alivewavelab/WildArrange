@@ -184,6 +184,50 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
     throw new Error("parallel result has no result.files or result.patch to admit");
   }
 
+  // Task status is adjudicated BEFORE any file is applied to the workspace
+  // (cross-review P1, round 4, 2026-07-21). A completed task is either an
+  // idempotent resume (this run already admitted it but the lifecycle release
+  // was interrupted — finish the release, touch no files) or a hard refusal.
+  const current = await getAdmissionTask(rootDir, options.taskId);
+  if (current.task.status === "completed") {
+    const admissionEvidence = [...(current.task.evidence || [])].reverse().find(
+      (entry) => entry?.kind === "parallel_agent_admission" && entry.runId === options.runId,
+    );
+    if (!admissionEvidence) {
+      throw new Error(`task ${options.taskId} is already completed; refusing to apply parallel result from run ${options.runId}`);
+    }
+    await updateAgentRunLifecycle(rootDir, options.runId, options.taskId, "released", {
+      admissionStatus: "completed",
+      releasedAt: nowIso(),
+      rollback: null,
+      resumed: true,
+    });
+    await writeSnapshot(rootDir, "parallel_agent_admission_completed", {
+      runId: options.runId,
+      taskId: options.taskId,
+      status: "completed",
+      appliedPaths: admissionEvidence.appliedPaths || [],
+      resumed: true,
+    });
+    return {
+      kind: "parallel_agent_admission",
+      runId: options.runId,
+      taskId: options.taskId,
+      status: "completed",
+      resumed: true,
+      appliedPaths: admissionEvidence.appliedPaths || [],
+      verifyResult: current.task.last_verify_result || null,
+      scopeResult: current.task.last_scope_result || null,
+      reviewResult: current.task.last_review_result || null,
+      acceptanceProof: null,
+      rollback: null,
+      task: current.task,
+    };
+  }
+  if (!["pending", "in_progress", "verifying"].includes(current.task.status)) {
+    throw new Error(`task ${options.taskId} status ${current.task.status} cannot admit parallel result`);
+  }
+
   const prepared = await prepareAdmission(rootDir, options.taskId, result, files);
   const finalized = await finalizeAdmission(rootDir, options.taskId, {
     workerResult: prepared.workerResult,
@@ -269,6 +313,9 @@ async function readParallelAgentResult(rootDir, runId, taskId) {
 
 async function prepareAdmission(rootDir, taskId, result, files) {
   const current = await getAdmissionTask(rootDir, taskId);
+  if (!["pending", "in_progress", "verifying"].includes(current.task.status)) {
+    throw new Error(`task ${current.task.id} status ${current.task.status} cannot admit parallel result`);
+  }
   const proposedPaths = files.length > 0 ? files.map((file) => file.path) : normalizePatchPaths(result.result?.patchPaths || result.result?.changedPaths || extractPatchPaths(result.result?.patch || ""));
   const denied = proposedPaths.filter((filePath) => !pathAllowed(filePath, current.task.writable_paths || []));
   if (denied.length > 0) {

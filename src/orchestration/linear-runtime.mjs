@@ -41,6 +41,21 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
 
   const task = findRunnableTask(taskState.tasks);
   if (!task) {
+    // Recoverable-transaction protocol (cross-review P1, round 4,
+    // 2026-07-21): a task stuck in "verifying" means a completion was
+    // interrupted mid-transaction (e.g. the completion ledger event exists
+    // but the canonical persist failed). Instead of reporting "blocked",
+    // adjudicate it with the same logic as the single-step checkpoint node:
+    // fresh all-pass gate evidence -> complete idempotently (checkpoint and
+    // ledger writes are re-appliable); anything else -> back to pending for
+    // a clean re-run. Tasks in "in_progress" are deliberately NOT touched:
+    // they may be legitimately claimed and being worked on right now.
+    const interrupted = taskState.tasks.find((candidate) => candidate.status === "verifying");
+    if (interrupted) {
+      await appendLedger(rootDir, { type: "run_resumed_verifying_task", planId: taskState.planId, taskId: interrupted.id });
+      const adjudicated = await checkpointTaskNodeUnlocked(rootDir, { taskId: interrupted.id });
+      return { ...adjudicated, resumed: "verifying_task_adjudicated" };
+    }
     const unfinished = taskState.tasks.filter((candidate) => candidate.status !== "completed");
     const status = unfinished.length === 0 ? "complete" : "blocked";
     await appendLedger(rootDir, { type: "run_idle", status });
