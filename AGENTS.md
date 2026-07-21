@@ -58,6 +58,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | [doc/concept.md](./doc/concept.md)                           | 产品概念与外部参考边界                                   |
 | [doc/project-architecture.md](./doc/project-architecture.md) | 运行时架构、状态文件和 gate 模型                           |
 | [doc/development-plan.md](./doc/development-plan.md)         | P0 / P1 / P2 路线                               |
+| [doc/2026-07-21-five-zone-refactor-handoff.md](./doc/2026-07-21-five-zone-refactor-handoff.md) | 五区解耦重构总结与交接（六个 Phase、关键决策、已知遗留、改 X 去哪改速查） |
 | `bin/helix.mjs`                                              | CLI 入口                                        |
 | `src/helix-core.mjs`                                         | 兼容导出层，禁止继续堆实现                                 |
 | **interface/**（宿主/人机交互边界，只依赖 orchestration、infra） |  |

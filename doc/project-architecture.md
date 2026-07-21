@@ -1,5 +1,7 @@
 # WildArrange Project Architecture
 
+> Refactor history and handoff notes for the five-zone layout described below: [doc/2026-07-21-five-zone-refactor-handoff.md](./2026-07-21-five-zone-refactor-handoff.md).
+
 ## Runtime Shape
 
 The codebase is laid out in five dependency zones. Dependencies only flow downward; `test/dependency-boundary.test.mjs` enforces this on every `npm test` run, so it is not just a diagram.
