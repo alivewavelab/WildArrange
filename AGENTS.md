@@ -39,7 +39,8 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 
 - `src/helix-core.mjs` 只作为兼容导出层，不允许继续堆业务实现。
 - 项目按五区分层：`interface/ → orchestration/ → ai/ / capabilities/ → infra/`，新增功能必须先归属到对应区目录；无合适归属时才新增顶层 `src/<zone>/helix-*.mjs`。
-- 依赖方向只能从上往下：`interface` 可依赖 `orchestration`/`infra`；`orchestration` 可依赖 `ai`/`capabilities`/`infra`；`ai` 可依赖 `orchestration`/`capabilities`/`infra`（`ai → orchestration`、`ai → capabilities` 均只读，且 `ai → capabilities` 必须走 `capabilities/gateway.mjs`）；`capabilities` 只能依赖 `infra`；`infra` 不依赖任何上层。反向依赖由 `test/dependency-boundary.test.mjs` 强制拦截，不得为了让测试变绿而放宽这些规则。
+- 依赖方向只能从上往下：`interface` 可依赖 `orchestration`/`infra`；`orchestration` 可依赖 `ai`/`capabilities`/`infra`，其中 `orchestration → ai` 限定在 `test/dependency-boundary.test.mjs` 钉死的白名单边（目前仅 `linear-runtime.mjs → ai/routing.mjs`），新增必须显式改白名单；`ai` 可依赖 `orchestration`/`capabilities`/`infra`（`ai → orchestration`、`ai → capabilities` 均只读，且 `ai → capabilities` 必须走 `capabilities/gateway.mjs`）；`capabilities` 只能依赖 `infra`；`infra` 不依赖任何上层。反向依赖与模块级 import 环由 `test/dependency-boundary.test.mjs` 强制拦截，不得为了让测试变绿而放宽这些规则。
+- 五区内文件不得 import 任何旧 `src/helix-*.mjs` shim（含 `helix-core.mjs`）；shim 只服务外部旧调用方，五区内必须直接 import 分区实现文件。
 - `orchestration/` 和 `ai/` 都不得直接 import 具体能力实现文件（`capabilities/verify.mjs` 等），必须统一经 `capabilities/gateway.mjs` 的 `invokeCapability(name, ctx)`。
 - 单文件默认保持 1000 行以内；超过 700 行必须评估是否按职责拆分。
 - 模块内部必须直接 import 目标实现文件，不要通过 `src/helix-core.mjs` 绕一层。
@@ -102,6 +103,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/infra/git-worktree.mjs`                                   | Git worktree 隔离、patch 提取与 patch admission        |
 | `src/infra/git-diff.mjs`                                       | git diff / changed-paths 收集与 manifest 变更分类     |
 | `src/infra/path-match.mjs`                                     | 路径归一化与 glob/精确/目录匹配（`pathAllowed`）           |
+| `src/infra/route-table.mjs`                                    | 确定性路由表加载（含 overrides）与信号匹配（`loadRoutesConfig`/`resolveRouteDecision`），无 LLM |
 | `src/infra/failure-analysis.mjs`                                | 失败原因分类、返工提示与失败摘要                              |
 | `src/infra/task-reports.mjs`                                    | wisdom / failure report / review report 落盘      |
 | `src/infra/task-state-store.mjs`                                | 任务状态文件加载                                       |

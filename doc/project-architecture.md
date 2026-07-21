@@ -29,15 +29,18 @@ Every old flat `src/helix-*.mjs` path still exists as a two-line `@deprecated` r
 | Zone | Directory | Owns | Allowed to depend on |
 | --- | --- | --- | --- |
 | Interface | `src/interface/` | Dashboard HTTP API, Codex/Cursor adapter install, `doctor` health report — anything a human or host IDE talks to directly | `orchestration`, `infra` |
-| Orchestration | `src/orchestration/` | Task/plan state, linear + parallel runtime loops, the shared `delivery-pipeline`, task board, change governance, status/attention report | `ai`, `capabilities` (gateway only), `infra` |
+| Orchestration | `src/orchestration/` | Task/plan state, linear + parallel runtime loops, the shared `delivery-pipeline`, task board, change governance, status/attention report | `ai` (pinned edge list only), `capabilities` (gateway only), `infra` |
 | AI | `src/ai/` | Routing, ArchivistRouter, prompt injection, skill matcher, agent context builder, host lifecycle hooks | `orchestration` (read-only), `capabilities` (gateway only), `infra` |
 | Capabilities | `src/capabilities/` | The atomic gates themselves (verify, scope-guard, worker, review-gate, code-intel, acceptance-proof, checkpoint) plus `gateway.mjs`, the single seam every caller above must go through | `infra` |
 | Infra | `src/infra/` | Foundation (paths/JSON/locks/config/snapshots), ledger, security, command-runner/safety, git diff/worktree, rule scanner, LLM provider, memory digest, path matching, success criteria, task predicates | nothing above it |
 
-Two invariants beyond simple layering, both checked by `test/dependency-boundary.test.mjs`:
+Five invariants beyond simple layering, all checked by `test/dependency-boundary.test.mjs`:
 
 1. **Gateway-only capability access.** Neither `orchestration/` nor `ai/` may `import` a capability implementation file (e.g. `capabilities/verify.mjs`) directly — they must call `invokeCapability(name, ctx)` from `capabilities/gateway.mjs`. This is the one seam where a new gate can be registered without touching orchestration or AI code, and where every gate outcome is reported through the same six-field envelope (`capability`, `status`, `evidence`, `sideEffect`, `duration_ms`, `cost`, `error`).
 2. **One-way `ai` <-> `capabilities`.** `ai/` may call into `capabilities/` (through the gateway) because hooks and context builders need to ask "is this path in scope" the same way orchestration does. `capabilities/` must never import anything from `ai/` — that direction is permanently blocked.
+3. **Pinned `orchestration -> ai` edge list.** Because `ai -> orchestration` is also allowed, coupling between these two zones is kept in check by naming every `orchestration -> ai` edge explicitly in the test (currently only `linear-runtime.mjs -> ai/routing.mjs` for the workflow "route" node). Deterministic route-table reading lives in `infra/route-table.mjs`, so plan import and the task board do not touch the ai zone at all.
+4. **No zoned file may import a legacy `src/helix-*.mjs` shim** (including `helix-core.mjs`). Shims re-export zoned files, so allowing them as import targets would be a laundering channel around the zone rules. Shims exist only for external/old callers.
+5. **No module-level import cycles anywhere in `src/`**, guarding against a real cycle quietly forming inside the mutually-allowed `ai`/`orchestration` pair.
 
 ## Main Files
 
@@ -49,7 +52,8 @@ Two invariants beyond simple layering, both checked by `test/dependency-boundary
 - `src/orchestration/change-governance.mjs`: steering proposals, review blockers, ChangeRequest review, and explicit accept/reject resolution.
 - `src/infra/failure-analysis.mjs`: failure reason classification, retry hints, and actionable failure summaries.
 - `src/capabilities/acceptance-proof.mjs`: checkpoint proof chain that verifies worker, verifier, success criteria, scope, review, and review lanes before completion; also rejects no-op tasks whose worker and verify commands are all trivial with no writable paths.
-- `src/ai/routing.mjs`: intent/domain/complexity routing, route request persistence, deterministic confidence, and optional semantic shadow routing.
+- `src/ai/routing.mjs`: the full `routeRequest` flow (route request persistence, semantic shadow governance, optional LLM second opinion); re-exports the deterministic table helpers for compatibility.
+- `src/infra/route-table.mjs`: deterministic route-table loading (routes.json + reviewed overrides) and signal matching (`loadRoutesConfig` / `resolveRouteDecision`), no LLM involved — usable from orchestration without touching the ai zone.
 - `src/ai/archivist-router.mjs`: DeepSeek flash based archivist/router runtime, routing packet construction, deterministic fallback, hook-triggered archive updates, context injection packs, and keyword suggestion artifacts.
 - `src/infra/memory-digest.mjs`: structured session/task/checkpoint digest generation for cross-session recovery.
 - `src/infra/rule-scanner.mjs`: project rule scanning and rule-context generation from AGENTS/CLAUDE/Cursor-style files.
@@ -72,7 +76,7 @@ Plan approval gate: when `planApproval.required` is true, `importPlan` marks the
 - `src/orchestration/task-board.mjs`: team-lite tasks, claims, evidence recording, task-state persistence, outbox, and durable message board.
 - `src/infra/agent-spawn.mjs`: host-neutral child-agent spawn command rendering for Codex/Cursor/custom command adapters.
 - `src/infra/git-worktree.mjs`: Git worktree isolation, patch extraction, patch path parsing, patch admission helpers, and pre-execute workspace snapshots (`git stash create` based) recorded before every worker run.
-- `src/orchestration/parallel-runtime.mjs`: command-based child-agent batch runner, run-dir or Git worktree isolation, skipped-run detection, result collection, lifecycle status, explicit close/release/cleanup, team message publication, file/patch admission, and agent-run index; gate calls go through `invokeCapability`.
+- `src/orchestration/parallel-runtime.mjs`: command-based child-agent batch runner, run-dir or Git worktree isolation, skipped-run detection, result collection, lifecycle status, explicit close/release/cleanup, team message publication, file/patch admission, and agent-run index; admission gating runs through the shared `delivery-pipeline` under the task-state lock.
 - `src/capabilities/gateway.mjs`: static capability registry + unified result envelope (`capability`/`status`/`evidence`/`sideEffect`/`duration_ms`/`cost`/`error`); the only door `orchestration/` and `ai/` may use to reach `capabilities/verify.mjs`, `scope-guard.mjs`, `checkpoint.mjs`, `worker.mjs`, `review-gate.mjs`, `acceptance-proof.mjs`.
 - `src/interface/dashboard.mjs`: local dashboard HTTP API and HTML UI with POST token, Host, and Origin protections.
 - `packs/wildarrange-linear/agents`: role prompts.

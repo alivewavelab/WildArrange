@@ -1,20 +1,16 @@
 import http from "node:http";
 import { timingSafeEqual } from "node:crypto";
+import { DEFAULT_EXECUTOR_AGENT, DEFAULT_LEAD_AGENT, PRODUCT_NAME } from "../infra/foundation.mjs";
 import {
   claimTeamTask,
   createTeamTask,
-  dashboardData,
-  DEFAULT_EXECUTOR_AGENT,
-  DEFAULT_LEAD_AGENT,
   getTeamTask,
   listTeamMessages,
   listTeamTasks,
-  PRODUCT_NAME,
-  runNextTask,
-  runWorkflowNode,
   sendTeamMessage,
-  writeWorkflowSummary,
-} from "../helix-core.mjs";
+} from "../orchestration/task-board.mjs";
+import { dashboardData, writeWorkflowSummary } from "../orchestration/status.mjs";
+import { runNextTask, runWorkflowNode } from "../orchestration/linear-runtime.mjs";
 
 class DashboardBadRequest extends Error {}
 

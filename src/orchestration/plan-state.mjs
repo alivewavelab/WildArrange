@@ -14,7 +14,7 @@ import {
   writeJsonAtomic,
   writeSnapshot,
 } from "../infra/foundation.mjs";
-import { loadRoutesConfig, resolveRouteDecision } from "../ai/routing.mjs";
+import { loadRoutesConfig, resolveRouteDecision } from "../infra/route-table.mjs";
 import { isPossibleNoopTask, isTrivialCommand } from "../infra/task-predicates.mjs";
 
 export function normalizePlan(rawPlan) {

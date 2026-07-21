@@ -21,8 +21,7 @@ import { resolveAgentSpawn } from "../infra/agent-spawn.mjs";
 import { applyAgentPatch, collectAgentWorktreePatch, extractPatchPaths, prepareAgentWorktree } from "../infra/git-worktree.mjs";
 import { runCommand } from "../infra/command-runner.mjs";
 import { pathAllowed } from "../infra/path-match.mjs";
-import { applyVerifierEvidenceToCriteria, criteriaStatus } from "../infra/success-criteria.mjs";
-import { invokeCapability } from "../capabilities/gateway.mjs";
+import { runDeliveryPipeline } from "./delivery-pipeline.mjs";
 import { loadTaskState } from "./plan-state.mjs";
 import { findRunnableTask, persistTaskState, sendTeamMessage } from "./task-board.mjs";
 
@@ -186,43 +185,11 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
   }
 
   const prepared = await prepareAdmission(rootDir, options.taskId, result, files);
-  const verifyEnvelope = await invokeCapability("verify", { rootDir, task: prepared.task });
-  const verifyResult = verifyEnvelope.evidence;
-  await updateAdmissionTask(rootDir, options.taskId, (task) => {
-    task.evidence.push(verifyResult);
-    task.last_verify_result = verifyResult;
-    applyVerifierEvidenceToCriteria(task, verifyResult);
-    task.updatedAt = nowIso();
-    return task;
-  });
-
-  const scopeEnvelope = await invokeCapability("scope", {
-    rootDir,
-    task: prepared.task,
-    options: { changedPaths: prepared.appliedPaths },
-  });
-  const scopeResult = scopeEnvelope.evidence;
-  await updateAdmissionTask(rootDir, options.taskId, (task) => {
-    task.evidence.push({ kind: "scope_guard", at: nowIso(), ...scopeResult });
-    task.last_scope_result = scopeResult;
-    task.updatedAt = nowIso();
-    return task;
-  });
-
-  const reviewTask = await getAdmissionTask(rootDir, options.taskId);
-  const reviewEnvelope = await invokeCapability("review", {
-    rootDir,
-    task: reviewTask.task,
-    evidence: { workerResult: prepared.workerResult, verifyResult, scopeResult },
-  });
-  const reviewResult = reviewEnvelope.evidence;
-  await writeReviewReport(rootDir, reviewTask.planId, reviewTask.task, reviewResult);
   const finalized = await finalizeAdmission(rootDir, options.taskId, {
     workerResult: prepared.workerResult,
-    verifyResult,
-    scopeResult,
-    reviewResult,
+    changedPaths: prepared.appliedPaths,
   });
+  const { verifyResult, scopeResult, reviewResult } = finalized;
   let rollback = null;
   if (finalized.status !== "completed") {
     rollback = await rollbackAdmissionChanges(rootDir, prepared.rollbackPlan);
@@ -429,77 +396,60 @@ async function rollbackAdmissionChanges(rootDir, rollbackPlan) {
   }
 }
 
-async function finalizeAdmission(rootDir, taskId, evidence) {
+async function finalizeAdmission(rootDir, taskId, { workerResult, changedPaths }) {
   return withTaskStateLock(rootDir, `parallel-admit-finalize:${taskId}`, async () => {
     const taskState = await loadTaskState(rootDir);
     if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
     const task = taskState.tasks.find((candidate) => candidate.id === taskId);
     if (!task) throw new Error(`unknown task: ${taskId}`);
-    task.evidence.push(evidence.reviewResult);
-    task.last_review_result = evidence.reviewResult;
-    const criteria = criteriaStatus(task);
-    if (
-      evidence.workerResult.exitCode === 0
-      && evidence.verifyResult.pass
-      && criteria.pass
-      && evidence.scopeResult.status === "pass"
-      && evidence.reviewResult.pass
-    ) {
-      const acceptanceProofEnvelope = await invokeCapability("acceptance-proof", {
-        rootDir,
-        planId: taskState.planId,
-        task,
-        evidence,
-      });
-      const acceptanceProof = acceptanceProofEnvelope.evidence;
-      if (!acceptanceProof.pass) {
-        task.status = shouldFailAdmission(task, evidence.verifyResult, evidence.scopeResult, evidence.reviewResult) ? "failed" : "pending";
-        task.last_failure = buildFailureSummary(task, {
-          workerResult: evidence.workerResult,
-          verifyResult: evidence.verifyResult,
-          scopeResult: evidence.scopeResult,
-          reviewResult: evidence.reviewResult,
-          criteriaResult: criteria,
-          nextStatus: task.status,
-        });
-        task.last_failure.reason = "acceptance_proof_failed";
-        task.last_failure.summary = `acceptance proof failed: ${acceptanceProof.checks.filter((check) => check.status === "fail").map((check) => check.name).join(", ")}`;
-        task.updatedAt = nowIso();
-        await writeFailureReport(rootDir, taskState.planId, task);
-        await persistTaskState(rootDir, taskState);
-        return { status: task.status === "failed" ? "failed" : "retry", planId: taskState.planId, task, acceptanceProof };
-      }
+
+    // Same shared pipeline as the linear runtime: gate order lives in
+    // delivery-pipeline.mjs only. This function keeps owning the evidence
+    // shape, reports, and task status transitions.
+    const pipelineResult = await runDeliveryPipeline(rootDir, taskState.planId, task, {
+      initialEvidence: { workerResult },
+      changedPaths,
+    });
+    const verifyResult = pipelineResult.evidence.verifyResult;
+    const scopeResult = pipelineResult.evidence.scopeResult;
+    const reviewResult = pipelineResult.evidence.reviewResult;
+    const acceptanceProof = pipelineResult.evidence.acceptanceProof || null;
+    const criteria = pipelineResult.criteria;
+
+    task.evidence.push(verifyResult);
+    task.last_verify_result = verifyResult;
+    task.evidence.push({ kind: "scope_guard", at: nowIso(), ...scopeResult });
+    task.last_scope_result = scopeResult;
+    task.evidence.push(reviewResult);
+    task.last_review_result = reviewResult;
+    await writeReviewReport(rootDir, taskState.planId, task, reviewResult);
+
+    if (pipelineResult.status === "completed") {
       task.status = "completed";
       task.updatedAt = nowIso();
       await persistTaskState(rootDir, taskState);
-      await invokeCapability("checkpoint", {
-        rootDir,
-        planId: taskState.planId,
-        task,
-        evidence: {
-          verifyResult: evidence.verifyResult,
-          scopeResult: evidence.scopeResult,
-          reviewResult: evidence.reviewResult,
-        },
-      });
-      await appendWisdom(rootDir, task, evidence.verifyResult);
+      await appendWisdom(rootDir, task, verifyResult);
       await writeMemoryDigest(rootDir, { reason: "parallel_admission_completed", stage: "checkpoint", task, taskId });
-      return { status: "completed", planId: taskState.planId, task, acceptanceProof };
+      return { status: "completed", planId: taskState.planId, task, acceptanceProof, verifyResult, scopeResult, reviewResult };
     }
 
-    task.status = shouldFailAdmission(task, evidence.verifyResult, evidence.scopeResult, evidence.reviewResult) ? "failed" : "pending";
+    task.status = shouldFailAdmission(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
     task.last_failure = buildFailureSummary(task, {
-      workerResult: evidence.workerResult,
-      verifyResult: evidence.verifyResult,
-      scopeResult: evidence.scopeResult,
-      reviewResult: evidence.reviewResult,
+      workerResult,
+      verifyResult,
+      scopeResult,
+      reviewResult,
       criteriaResult: criteria,
       nextStatus: task.status,
     });
+    if (acceptanceProof && !acceptanceProof.pass) {
+      task.last_failure.reason = "acceptance_proof_failed";
+      task.last_failure.summary = `acceptance proof failed: ${acceptanceProof.checks.filter((check) => check.status === "fail").map((check) => check.name).join(", ")}`;
+    }
     task.updatedAt = nowIso();
     await writeFailureReport(rootDir, taskState.planId, task);
     await persistTaskState(rootDir, taskState);
-    return { status: task.status === "failed" ? "failed" : "retry", planId: taskState.planId, task };
+    return { status: task.status === "failed" ? "failed" : "retry", planId: taskState.planId, task, acceptanceProof, verifyResult, scopeResult, reviewResult };
   });
 }
 

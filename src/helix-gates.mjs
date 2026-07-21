@@ -26,4 +26,4 @@ export {
   renderChangeRequestMarkdown,
   writeChangeRequest,
   writeOpenChangesIndex,
-} from "./helix-change.mjs";
+} from "./orchestration/change-governance.mjs";

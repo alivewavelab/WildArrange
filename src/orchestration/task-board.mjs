@@ -14,7 +14,7 @@ import {
   writeJsonAtomic,
   writeSnapshot,
 } from "../infra/foundation.mjs";
-import { loadRoutesConfig } from "../ai/routing.mjs";
+import { loadRoutesConfig } from "../infra/route-table.mjs";
 import {
   enrichTaskWithRouteDecision,
   loadTaskState,

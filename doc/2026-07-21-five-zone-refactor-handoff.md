@@ -46,15 +46,19 @@ infra/           foundation、ledger、security、command-runner/safety、git、
 ## 三个关键设计决策
 
 1. **能力网关（Capability Gateway）**：`orchestration/` 和 `ai/` 都不能直接 `import` 某个具体的检查文件（比如 `capabilities/verify.mjs`），必须走 `invokeCapability(name, ctx)`。每次调用都会拿到统一的六字段结果信封：`capability / status / evidence / sideEffect / duration_ms / cost / error`。好处：以后想加一种新检查，只要在 `capabilities/` 里新增文件 + 在 `gateway.mjs` 注册一行，编排层和 AI 层代码完全不用动。
-2. **共享交付流水线（delivery-pipeline）**：`verify → scope → review → acceptance-proof → checkpoint` 这条门控顺序原来在线性主流程和并行子 Agent admission 里各写一遍，现在两边都调用同一个 `orchestration/delivery-pipeline.mjs`。以后想调整门控顺序或加减一道门，只改这一个文件。
-3. **依赖边界用测试锁死，不是靠文档口头约定**：`test/dependency-boundary.test.mjs` 会扫描 `src/` 下所有 `.mjs` 文件的 import 语句，按五区分类，凡是违反允许依赖表的都会让 `npm test` 直接失败。这个测试本身也在过程中改过一次——发现 `ai/hooks.mjs` 和 `ai/context.mjs` 确实需要读取 `orchestration/`（当前任务、attentionReport）和经网关调用 `capabilities/`（scope 检查），所以把 `ai → orchestration`（只读）、`ai → capabilities`（仅经 gateway）列为允许项，但反方向（`capabilities`/`orchestration` 依赖 `ai`）永久禁止。这是唯一一次调整边界规则，调整原因写在测试文件的注释里，不是为了让测试变绿而放宽。
+2. **共享交付流水线（delivery-pipeline）**：`verify → scope → review → acceptance-proof → checkpoint` 这条门控顺序原来在线性主流程和并行子 Agent admission 里各写一遍，现在两边都调用同一个 `orchestration/delivery-pipeline.mjs`（线性在 `linear-runtime.mjs` 主循环，并行在 `parallel-runtime.mjs` 的 `finalizeAdmission` 里，均在任务状态锁内执行）。以后想调整门控顺序或加减一道门，只改这一个文件。
+3. **依赖边界用测试锁死，不是靠文档口头约定**：`test/dependency-boundary.test.mjs` 会扫描 `src/` 下所有 `.mjs` 文件的 import 语句（提取前先剥掉注释，避免注释里的路径造成误报），按五区分类，凡是违反允许依赖表的都会让 `npm test` 直接失败。边界规则在复查后收紧为：
+   - `ai → orchestration`（只读，hooks/context 需要读任务板和 attentionReport）和 `ai → capabilities`（仅经 gateway）是允许项；反方向永久禁止。
+   - `orchestration → ai` 收紧为**逐条钉死的白名单**，目前只有一条边（`linear-runtime.mjs → ai/routing.mjs` 的 `routeRequest`，工作流 route 节点需要语义路由）；新增任何一条都得改测试里的白名单，是显式决策。确定性路由表读取（`loadRoutesConfig`/`resolveRouteDecision`）已下沉到 `infra/route-table.mjs`，`plan-state`/`task-board` 不再碰 `ai/`。
+   - 五区文件**禁止 import 任何旧 `helix-*.mjs` shim**（shim 转发到分区文件，若放行等于给了绕过分区规则的洗白通道）；shim 只服务外部旧调用方。
+   - 另有一个全图**模块级循环依赖检测**子测试，防止 `ai ↔ orchestration` 双向放行下悄悄长出真环。
 
 ## 兼容策略（这次重构承诺"零破坏"）
 
 | 不变的东西 | 怎么保证的 |
 | --- | --- |
 | 所有旧的 `import ... from "./helix-xxx.mjs"` | 每个旧路径都留了一个两行的 `@deprecated` re-export shim，内容就是 `export * from "./<zone>/<file>.mjs"` |
-| `src/helix-core.mjs` 这个兼容总入口 | 保留在原路径，继续汇总导出所有函数，`bin/helix.mjs`、`dashboard.mjs` 等都还在用它 |
+| `src/helix-core.mjs` 这个兼容总入口 | 保留在原路径，继续汇总导出所有函数供 `bin/helix.mjs` 和外部旧调用方使用（五区内部文件已全部直连分区实现，不再经它中转） |
 | CLI 命令和参数 | `bin/helix.mjs` 的子命令、参数语义完全没变 |
 | `.helix/` 下的数据格式 | JSON schema、ledger 格式、snapshot 格式零改动 |
 | 全部既有测试 | 109 个测试全程保持绿；重构过程每个 Phase 结束都跑一次 `npm test` |
@@ -63,9 +67,9 @@ infra/           foundation、ledger、security、command-runner/safety、git、
 ## 验证结果（最终状态）
 
 - `npm test`：**109/109 全绿**。
-- `npm pack --dry-run --cache /private/tmp/helix-npm-cache`：135 个文件，188.0 kB，正常出包。
+- `npm pack --dry-run --cache /private/tmp/helix-npm-cache`：正常出包。
 - 五区下每个 `.mjs` 文件单独 `import()` 都能独立加载，没有循环依赖、没有断链。
-- `test/dependency-boundary.test.mjs` 三个子测试全部通过：①五区依赖方向合法 ②`orchestration`/`ai` 只能经 `gateway.mjs` 调 `capabilities` ③`capabilities` 不依赖 `ai`。
+- `test/dependency-boundary.test.mjs` 五个子测试全部通过：①五区依赖方向合法 ②`orchestration`/`ai` 只能经 `gateway.mjs` 调 `capabilities` ③`capabilities` 不依赖 `ai` ④`orchestration → ai` 限定在钉死的白名单内 ⑤全 `src/` 无模块级 import 环。
 
 ## 已知遗留（下一个人接手时要知道的）
 
