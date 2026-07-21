@@ -15,6 +15,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { runDeliveryPipeline } from "../src/orchestration/delivery-pipeline.mjs";
+import { persistTaskState } from "../src/orchestration/task-board.mjs";
 import {
   admitParallelAgentResult,
   importPlan,
@@ -185,6 +186,92 @@ test("adversarial: single-step node checkpoint refuses to complete the task when
     assert.equal(stateAfterRepair.tasks[0].status, "completed");
     const checkpoint = await readJson(resolveHelixPath(dir, "checkpoints", `${stateAfterRepair.planId}-T001.json`));
     assert.equal(checkpoint.taskId, "T001");
+  });
+});
+
+test("adversarial: a new execute round cannot complete against the previous round's gate evidence", async () => {
+  // Exact reproduction of the cross-review P0 (round 2, 2026-07-21):
+  // round 1 passes every gate but the checkpoint write fails; round 2
+  // produces a BAD artifact and then calls `node checkpoint` directly,
+  // skipping verify/scope/review. The stale passing evidence from round 1
+  // must not certify round 2's artifact.
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    const ctrlPath = resolveHelixPath(dir, "artifacts", "ctrl.txt");
+    await writeFile(ctrlPath, "ok\n");
+    const planPath = resolveHelixPath(dir, "artifacts", "stale-evidence-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Stale gate evidence",
+      tasks: [
+        {
+          id: "T001",
+          subject: "Artifact must match ctrl content",
+          worker_command: nodeEval("const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/out.txt', fs.readFileSync('.helix/artifacts/ctrl.txt','utf8'));"),
+          verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/out.txt','utf8').trim()!=='ok') process.exit(1);")],
+          writable_paths: ["src/**"],
+        },
+      ],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    // Round 1: all gates pass, checkpoint write fails, task returns to pending.
+    await runWorkflowNode(dir, "execute", { taskId: "T001" });
+    await runWorkflowNode(dir, "verify", { taskId: "T001" });
+    await runWorkflowNode(dir, "scope", { taskId: "T001" });
+    await runWorkflowNode(dir, "review", { taskId: "T001" });
+    await sabotageCheckpoints(dir);
+    const firstCheckpoint = await runWorkflowNode(dir, "checkpoint", { taskId: "T001" });
+    assert.equal(firstCheckpoint.status, "retry");
+    // Repair the directory so a completion attempt would now succeed on disk:
+    // any block from here on comes from evidence freshness, not the sabotage.
+    await repairCheckpoints(dir);
+
+    // Round 2: worker produces a bad artifact, then checkpoint is called
+    // directly without re-running verify/scope/review.
+    await writeFile(ctrlPath, "bad\n");
+    await runWorkflowNode(dir, "execute", { taskId: "T001" });
+    const secondCheckpoint = await runWorkflowNode(dir, "checkpoint", { taskId: "T001" });
+    assert.notEqual(secondCheckpoint.status, "completed", "round 2 must not complete on round 1's gate evidence");
+
+    const persisted = await loadTaskState(dir);
+    assert.notEqual(persisted.tasks[0].status, "completed");
+    assert.equal((await readFile(path.join(dir, "src", "out.txt"), "utf8")).trim(), "bad", "sanity: round 2 really produced the bad artifact");
+    await assert.rejects(
+      () => readJson(resolveHelixPath(dir, "checkpoints", `${persisted.planId}-T001.json`)),
+      undefined,
+      "no checkpoint may exist for a task that never passed gates in its current round",
+    );
+  });
+});
+
+test("adversarial: persistTaskState keeps canonical tasks.json at the old state when a derived artifact write fails", async () => {
+  // Cross-review P1 (round 2, 2026-07-21): completion used to be written to
+  // tasks.json first, so a later tasks.md failure left a half-committed
+  // "completed" with no ledger/markdown trail. Canonical tasks.json is now
+  // the last write (the commit point).
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    await importPassingPlan(dir);
+    const tasksMdPath = resolveHelixPath(dir, "team", "tasks.md");
+    await chmod(tasksMdPath, 0o444);
+    try {
+      const taskState = await loadTaskState(dir);
+      taskState.tasks[0].status = "completed";
+      await assert.rejects(() => persistTaskState(dir, taskState), /EACCES|permission denied/i);
+      const reloaded = await loadTaskState(dir);
+      assert.equal(reloaded.tasks[0].status, "pending", "canonical state must not advance when a derived write fails");
+    } finally {
+      await chmod(tasksMdPath, 0o644);
+    }
+
+    // After repair the same persist succeeds and all three artifacts agree.
+    const taskState = await loadTaskState(dir);
+    taskState.tasks[0].status = "completed";
+    await persistTaskState(dir, taskState);
+    const reloaded = await loadTaskState(dir);
+    assert.equal(reloaded.tasks[0].status, "completed");
+    assert.match(await readFile(tasksMdPath, "utf8"), /\[x\] T001/);
   });
 });
 

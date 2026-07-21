@@ -87,17 +87,27 @@ export async function runCompletionSegment(rootDir, planId, task, evidence) {
 }
 
 /**
- * Read back, from persisted task fields/evidence, the outcome of every gate
+ * Read back, from the persisted evidence trail, the outcome of every gate
  * the pipeline runs. Used by the single-step workflow so its "may this task
  * complete" precondition follows GATE_STEPS instead of a hand-maintained
  * list: adding a gate step here makes the node workflow require it too.
+ *
+ * Freshness rule (cross-review P0, 2026-07-21): a gate result only counts if
+ * its evidence entry was appended AFTER the latest worker run. The evidence
+ * array is append-only, so array order is execution order — gate evidence
+ * sitting before the last worker entry belongs to a previous execution round
+ * (e.g. a round whose checkpoint failed) and must not certify the current
+ * round's artifacts. last_* convenience fields are deliberately NOT trusted
+ * here for the same reason.
  */
 export function collectGateEvidenceFromTask(task) {
   const specs = {
-    verify: { key: "verifyResult", lastField: "last_verify_result", kind: "verifier", passed: (record) => record?.pass === true },
-    scope: { key: "scopeResult", lastField: "last_scope_result", kind: "scope_guard", passed: (record) => record?.status === "pass" },
-    review: { key: "reviewResult", lastField: "last_review_result", kind: "review_gate", passed: (record) => record?.pass === true },
+    verify: { key: "verifyResult", kind: "verifier", passed: (record) => record?.pass === true },
+    scope: { key: "scopeResult", kind: "scope_guard", passed: (record) => record?.status === "pass" },
+    review: { key: "reviewResult", kind: "review_gate", passed: (record) => record?.pass === true },
   };
+  const trail = task.evidence || [];
+  const lastWorkerIndex = trail.reduce((found, entry, index) => (entry?.kind === "worker" ? index : found), -1);
   const evidence = {};
   const failedSteps = [];
   for (const stepName of GATE_STEPS) {
@@ -106,9 +116,15 @@ export function collectGateEvidenceFromTask(task) {
       failedSteps.push(stepName);
       continue;
     }
-    const record = task[spec.lastField]
-      || [...(task.evidence || [])].reverse().find((entry) => entry.kind === spec.kind)
-      || null;
+    let record = null;
+    if (lastWorkerIndex >= 0) {
+      for (let index = trail.length - 1; index > lastWorkerIndex; index -= 1) {
+        if (trail[index]?.kind === spec.kind) {
+          record = trail[index];
+          break;
+        }
+      }
+    }
     evidence[spec.key] = record;
     if (!spec.passed(record)) failedSteps.push(stepName);
   }

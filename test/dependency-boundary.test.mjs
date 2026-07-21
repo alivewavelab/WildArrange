@@ -161,6 +161,26 @@ test("dependency boundary: orchestration -> ai stays limited to the pinned edge 
   assert.deepEqual(unexpected, [], `new orchestration -> ai dependency introduced: ${JSON.stringify(unexpected)}`);
 });
 
+test("dependency boundary: no non-literal dynamic imports anywhere in src/", async () => {
+  // The other boundary tests only see static imports and import("literal").
+  // import(someVariable) would be invisible to them and could smuggle in a
+  // reverse-zone dependency at runtime, so it is banned outright: every
+  // dynamic import in src/ must use a plain string literal.
+  const files = await listMjsFiles(SRC_DIR);
+  const violations = [];
+  const nonLiteralDynamicImport = /(?<![\w.$])import\s*\(\s*(?!["'])/;
+  for (const filePath of files) {
+    const source = stripComments(await readFile(filePath, "utf8"));
+    const lines = source.split("\n");
+    for (let index = 0; index < lines.length; index += 1) {
+      if (nonLiteralDynamicImport.test(lines[index])) {
+        violations.push(`${path.relative(SRC_DIR, filePath)}:${index + 1}: ${lines[index].trim()}`);
+      }
+    }
+  }
+  assert.deepEqual(violations, [], `dynamic import() with a non-literal argument found (invisible to zone checks):\n${violations.join("\n")}`);
+});
+
 test("dependency boundary: no module-level import cycles anywhere in src/", async () => {
   // Zone rules allow ai <-> orchestration in both directions (each edge is
   // legitimate on its own), so a module-level cycle between the two zones

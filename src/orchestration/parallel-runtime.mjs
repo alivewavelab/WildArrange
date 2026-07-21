@@ -314,6 +314,11 @@ async function prepareAdmission(rootDir, taskId, result, files) {
       candidate.attempts += 1;
     }
     candidate.status = "verifying";
+    // New admission round invalidates gate results from previous rounds
+    // (same rule as the linear runtime's new-worker-round clearing).
+    candidate.last_verify_result = null;
+    candidate.last_scope_result = null;
+    candidate.last_review_result = null;
     candidate.evidence.push(workerResult);
     candidate.evidence.push({
       kind: "parallel_agent_admission",

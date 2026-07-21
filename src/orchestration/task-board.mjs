@@ -163,12 +163,18 @@ export function findRunnableTask(tasks) {
 
 export async function persistTaskState(rootDir, taskState) {
   taskState.updatedAt = nowIso();
-  await writeJsonAtomic(resolveHelixPath(rootDir, "team", "tasks.json"), taskState);
   const plan = await readJson(resolveHelixPath(rootDir, "plans", `${taskState.planId}.json`));
   plan.tasks = taskState.tasks;
   plan.updatedAt = nowIso();
-  await writeJsonAtomic(resolveHelixPath(rootDir, "plans", `${taskState.planId}.json`), plan);
+  // Write order = derived artifacts first, canonical state last. tasks.json
+  // is the single load source (loadTaskState), so it acts as the commit
+  // point: if the markdown or plan mirror fails to write, the canonical
+  // state stays at its previous value and the caller's throw leaves a
+  // re-runnable (not half-completed) task instead of a completed task with
+  // missing ledger/markdown trail (cross-review P1, 2026-07-21).
   await writeTasksMarkdown(rootDir, plan);
+  await writeJsonAtomic(resolveHelixPath(rootDir, "plans", `${taskState.planId}.json`), plan);
+  await writeJsonAtomic(resolveHelixPath(rootDir, "team", "tasks.json"), taskState);
 }
 
 export async function writeOutbox(rootDir, task, workerResult) {

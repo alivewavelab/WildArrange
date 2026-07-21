@@ -63,6 +63,13 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   const afterChanged = await collectGitChangedPaths(rootDir);
 
   task.status = "verifying";
+  // New worker round: stale gate results from previous rounds must not
+  // survive (see the same clearing in executeTaskNodeUnlocked). The pipeline
+  // below re-runs every gate anyway; this keeps persisted state honest if
+  // the process dies between worker and pipeline.
+  task.last_verify_result = null;
+  task.last_scope_result = null;
+  task.last_review_result = null;
   if (workspaceSnapshot) task.evidence.push(workspaceSnapshot);
   task.evidence.push(workerResult);
   task.evidence.push({
@@ -252,6 +259,13 @@ async function executeTaskNodeUnlocked(rootDir, options = {}) {
   const afterChanged = await collectGitChangedPaths(rootDir);
 
   task.status = "verifying";
+  // A new worker round invalidates every gate result from previous rounds:
+  // without this, a round whose checkpoint failed could leave passing
+  // verify/scope/review evidence behind and let a later, unverified round
+  // complete against it (cross-review P0, 2026-07-21).
+  task.last_verify_result = null;
+  task.last_scope_result = null;
+  task.last_review_result = null;
   if (workspaceSnapshot) task.evidence.push(workspaceSnapshot);
   task.evidence.push(workerResult);
   task.evidence.push({
