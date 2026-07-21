@@ -123,8 +123,15 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   if (pipelineResult.status === "completed") {
     task.status = "completed";
     task.updatedAt = nowIso();
-    await persistTaskState(rootDir, taskState);
+    // Completion ledger event BEFORE the canonical state write: tasks.json is
+    // the commit point every consumer reads, so a ledger outage must leave
+    // the task re-runnable (not completed-without-evidence). The reverse
+    // ordering produced completed state with no completion ledger event
+    // (cross-review P0, round 3, 2026-07-21). If the persist below fails
+    // instead, the ledger is one event ahead of state, which the append-only
+    // journal tolerates: the rerun appends a fresh event.
     await appendLedger(rootDir, { type: "task_verified", planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult.status, reviewStatus: "pass" });
+    await persistTaskState(rootDir, taskState);
     await appendWisdom(rootDir, task, verifyResult);
     await writeMemoryDigest(rootDir, { reason: "task_completed", stage: "checkpoint", task, taskId: task.id });
     await writeSnapshot(rootDir, "checkpointed", { planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult.status });
@@ -469,10 +476,12 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
       return { status: "retry", task, verifyResult, scopeResult, reviewResult, acceptanceProof };
     }
     // Checkpoint durably written — only now may the task become completed.
+    // Ledger event first, canonical tasks.json last (commit point); see the
+    // same ordering rationale in runNextTaskUnlocked.
     task.status = "completed";
     task.updatedAt = nowIso();
-    await persistTaskState(rootDir, taskState);
     await appendLedger(rootDir, { type: "node_checkpoint_completed", planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult?.status || "missing", reviewStatus: "pass" });
+    await persistTaskState(rootDir, taskState);
     await appendWisdom(rootDir, task, verifyResult);
     await writeMemoryDigest(rootDir, { reason: "task_completed", stage: "checkpoint", task, taskId: task.id });
     await writeSnapshot(rootDir, "node_checkpoint_completed", { planId: taskState.planId, taskId: task.id });

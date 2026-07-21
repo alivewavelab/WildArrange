@@ -163,22 +163,29 @@ test("dependency boundary: orchestration -> ai stays limited to the pinned edge 
 
 test("dependency boundary: no non-literal dynamic imports anywhere in src/", async () => {
   // The other boundary tests only see static imports and import("literal").
-  // import(someVariable) would be invisible to them and could smuggle in a
-  // reverse-zone dependency at runtime, so it is banned outright: every
-  // dynamic import in src/ must use a plain string literal.
+  // Anything else — import(variable), template literals, and expressions
+  // like import("../x.mjs" + "") — is invisible to static scanning and could
+  // smuggle in a reverse-zone dependency at runtime, so the ENTIRE argument
+  // must be exactly one plain string literal immediately followed by the
+  // closing paren. Checking only the first character was bypassable via
+  // string concatenation (cross-review P1, round 3, 2026-07-21).
   const files = await listMjsFiles(SRC_DIR);
   const violations = [];
-  const nonLiteralDynamicImport = /(?<![\w.$])import\s*\(\s*(?!["'])/;
+  const dynamicImportCall = /(?<![\w.$])import\s*\(/g;
+  const singleLiteralArgument = /^\s*(["'])(?:(?!\1)[^\\\n]|\\.)*\1\s*\)/;
   for (const filePath of files) {
     const source = stripComments(await readFile(filePath, "utf8"));
-    const lines = source.split("\n");
-    for (let index = 0; index < lines.length; index += 1) {
-      if (nonLiteralDynamicImport.test(lines[index])) {
-        violations.push(`${path.relative(SRC_DIR, filePath)}:${index + 1}: ${lines[index].trim()}`);
+    let match;
+    while ((match = dynamicImportCall.exec(source)) !== null) {
+      const tail = source.slice(match.index + match[0].length);
+      if (!singleLiteralArgument.test(tail)) {
+        const line = source.slice(0, match.index).split("\n").length;
+        const snippet = source.slice(match.index, match.index + 80).split("\n")[0];
+        violations.push(`${path.relative(SRC_DIR, filePath)}:${line}: ${snippet.trim()}`);
       }
     }
   }
-  assert.deepEqual(violations, [], `dynamic import() with a non-literal argument found (invisible to zone checks):\n${violations.join("\n")}`);
+  assert.deepEqual(violations, [], `dynamic import() whose argument is not a single string literal (invisible to zone checks):\n${violations.join("\n")}`);
 });
 
 test("dependency boundary: no module-level import cycles anywhere in src/", async () => {

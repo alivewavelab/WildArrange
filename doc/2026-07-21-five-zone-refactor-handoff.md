@@ -50,6 +50,7 @@ infra/           foundation、ledger、security、command-runner/safety、git、
    - **checkpoint 写入失败绝不会静默当成完成**：流水线检查 checkpoint 信封状态，失败时返回 `checkpoint_failed`，任务回 `pending` 并写失败报告、ledger 记 `checkpoint_write_failed`（网关会把能力抛出的异常吞成 fail 信封，所以必须查信封状态）。
    - **门控证据绑定执行轮**：每次新的 worker 运行（线性/单步 execute/并行 admission）都会清空 `last_verify_result` 等旧字段；`collectGateEvidenceFromTask()` 只认证据链上**位于最后一次 worker 记录之后**的门控证据（证据数组只追加，顺序即执行顺序）。上一轮全绿但 checkpoint 失败后，新一轮 execute 产出的工件必须重新过全部门，不能拿旧轮证据直接 checkpoint。
    - 配套的持久化保障：`persistTaskState()` 按"派生文件（tasks.md、plan 镜像）先写，权威 `tasks.json` 最后写"的顺序执行，`tasks.json` 是唯一读取源，充当提交点——派生写失败时任务状态不会半提交为 completed。
+   - **完成事务顺序**（第三轮交叉走查 P0）：三条完成路径（线性 `task_verified`、单步 `node_checkpoint_completed`、并行 `parallel_agent_admission_completed`）统一为**完成 ledger 事件先写、权威 `tasks.json` 最后落盘**；并行的子 Agent `released` 生命周期更新也排在 ledger 与落盘之后。ledger 断供时任务保持可重跑状态，绝不会出现"状态已 completed / 子 Agent 已 released，但完成账目不存在"；反向的"账目多一条、状态未前进"由追加式账本天然容忍（重跑会补一条新事件）。
 3. **依赖边界用测试锁死，不是靠文档口头约定**：`test/dependency-boundary.test.mjs` 会扫描 `src/` 下所有 `.mjs` 文件的 import 语句（提取前先剥掉注释，避免注释里的路径造成误报），按五区分类，凡是违反允许依赖表的都会让 `npm test` 直接失败。边界规则在复查后收紧为：
    - `ai → orchestration`（只读，hooks/context 需要读任务板和 attentionReport）和 `ai → capabilities`（仅经 gateway）是允许项；反方向永久禁止。
    - `orchestration → ai` 收紧为**逐条钉死的白名单**，目前只有一条边（`linear-runtime.mjs → ai/routing.mjs` 的 `routeRequest`，工作流 route 节点需要语义路由）；新增任何一条都得改测试里的白名单，是显式决策。确定性路由表读取（`loadRoutesConfig`/`resolveRouteDecision`）已下沉到 `infra/route-table.mjs`，`plan-state`/`task-board` 不再碰 `ai/`。
@@ -72,8 +73,8 @@ infra/           foundation、ledger、security、command-runner/safety、git、
 - `npm test`：**全绿**（复查修复后 111+ 个测试，具体数字以 `npm test` 输出为准）。
 - `npm pack --dry-run --cache /private/tmp/helix-npm-cache`：正常出包。
 - 五区下每个 `.mjs` 文件单独 `import()` 都能独立加载，没有循环依赖、没有断链。
-- `test/dependency-boundary.test.mjs` 六个子测试全部通过：①五区依赖方向合法 ②`orchestration`/`ai` 只能经 `gateway.mjs` 调 `capabilities` ③`capabilities` 不依赖 `ai` ④`orchestration → ai` 限定在钉死的白名单内 ⑤禁止非字面量动态 `import()`（`import(变量)` 对静态扫描不可见，可能夹带反向依赖，一律不准写）⑥全 `src/` 无模块级 import 环。
-- `test/checkpoint-integrity.test.mjs`：7 个故障注入用例，覆盖 checkpoint 写失败（流水线/线性/单步/并行四条路径）、验收证明能力抛异常、**跨执行轮证据复用**（旧轮门控证据不得为新轮工件作证）、**持久化提交点**（派生文件写失败时权威 `tasks.json` 不得前进）。
+- `test/dependency-boundary.test.mjs` 六个子测试全部通过：①五区依赖方向合法 ②`orchestration`/`ai` 只能经 `gateway.mjs` 调 `capabilities` ③`capabilities` 不依赖 `ai` ④`orchestration → ai` 限定在钉死的白名单内 ⑤动态 `import()` 的**整个参数必须是单一字符串字面量**（`import(变量)`、模板字符串、`import("…" + "")` 拼接等对静态扫描不可见的写法一律拦截）⑥全 `src/` 无模块级 import 环。
+- `test/checkpoint-integrity.test.mjs`：10 个故障注入用例，覆盖 checkpoint 写失败（流水线/线性/单步/并行四条路径）、验收证明能力抛异常、**跨执行轮证据复用**（旧轮门控证据不得为新轮工件作证）、**持久化提交点**（派生文件写失败时权威 `tasks.json` 不得前进）、**完成账目断供**（ledger 只读时线性/单步/并行三条路径都不得产生 completed/released，修复后可正常续跑）。
 
 ## 架构决策变更记录（对照原批准方案）
 

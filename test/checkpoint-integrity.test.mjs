@@ -275,6 +275,123 @@ test("adversarial: persistTaskState keeps canonical tasks.json at the old state 
   });
 });
 
+async function sabotageLedger(dir) {
+  await chmod(resolveHelixPath(dir, "ledger.jsonl"), 0o444);
+}
+
+async function repairLedger(dir) {
+  await chmod(resolveHelixPath(dir, "ledger.jsonl"), 0o644);
+}
+
+test("adversarial: node checkpoint does not persist completed when the completion ledger write fails", async () => {
+  // Cross-review P0 (round 3, 2026-07-21): completed used to be persisted
+  // BEFORE the completion ledger event, so a ledger outage produced
+  // completed state with no completion evidence. The ledger event is now
+  // written first; canonical tasks.json stays the commit point.
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    await importPassingPlan(dir);
+
+    await runWorkflowNode(dir, "execute", { taskId: "T001" });
+    await runWorkflowNode(dir, "verify", { taskId: "T001" });
+    await runWorkflowNode(dir, "scope", { taskId: "T001" });
+    await runWorkflowNode(dir, "review", { taskId: "T001" });
+
+    await sabotageLedger(dir);
+    try {
+      await assert.rejects(() => runWorkflowNode(dir, "checkpoint", { taskId: "T001" }), /EACCES|permission denied/i);
+    } finally {
+      await repairLedger(dir);
+    }
+    const stateAfterOutage = await loadTaskState(dir);
+    assert.notEqual(stateAfterOutage.tasks[0].status, "completed", "ledger outage must never yield a completed task");
+
+    // Same round, gate evidence still fresh: re-running checkpoint completes,
+    // and state + ledger completion event now exist together.
+    const completed = await runWorkflowNode(dir, "checkpoint", { taskId: "T001" });
+    assert.equal(completed.status, "completed");
+    const stateAfterRepair = await loadTaskState(dir);
+    assert.equal(stateAfterRepair.tasks[0].status, "completed");
+    assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /node_checkpoint_completed/);
+  });
+});
+
+test("adversarial: parallel admission never reaches completed/released when the ledger is unavailable", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = resolveHelixPath(dir, "artifacts", "parallel-ledger-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Parallel admission ledger integrity",
+      tasks: [
+        {
+          id: "T001",
+          subject: "Admit child artifact",
+          verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/parallel.txt','utf8').trim()!=='ok') process.exit(1);")],
+          writable_paths: ["src/**"],
+        },
+      ],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    const command = [
+      "node -e",
+      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
+      "{outputJson}",
+    ].join(" ");
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+
+    await sabotageLedger(dir);
+    try {
+      await assert.rejects(() => admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" }), /EACCES|permission denied/i);
+    } finally {
+      await repairLedger(dir);
+    }
+    const stateAfterOutage = await loadTaskState(dir);
+    assert.notEqual(stateAfterOutage.tasks[0].status, "completed");
+    const lifecycleAfterOutage = await readJson(resolveHelixPath(dir, "agent-runs", batch.runId, "T001", "result.json"));
+    assert.notEqual(lifecycleAfterOutage.lifecycle?.status, "released", "child result must not be released during a ledger outage");
+
+    const admitted = await admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" });
+    assert.equal(admitted.status, "completed");
+    const ledger = await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8");
+    assert.match(ledger, /"type":"parallel_agent_admission_completed"[^\n]*"status":"completed"/);
+    const lifecycleAfterRepair = await readJson(resolveHelixPath(dir, "agent-runs", batch.runId, "T001", "result.json"));
+    assert.equal(lifecycleAfterRepair.lifecycle.status, "released");
+  });
+});
+
+test("adversarial: linear runNextTask never yields completed during a ledger outage", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    await importPassingPlan(dir);
+
+    await sabotageLedger(dir);
+    try {
+      await assert.rejects(() => runNextTask(dir), /EACCES|permission denied/i);
+    } finally {
+      await repairLedger(dir);
+    }
+    const stateAfterOutage = await loadTaskState(dir);
+    assert.notEqual(stateAfterOutage.tasks[0].status, "completed");
+    assert.ok(!/"type":"task_verified"/.test(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8")), "no completion event may exist for the aborted run");
+
+    // The outage aborted the run right after the task was claimed
+    // (in_progress persisted, task_started ledger threw). The single-step
+    // workflow accepts in_progress, so recovery completes through it.
+    await runWorkflowNode(dir, "execute", { taskId: "T001" });
+    await runWorkflowNode(dir, "verify", { taskId: "T001" });
+    await runWorkflowNode(dir, "scope", { taskId: "T001" });
+    await runWorkflowNode(dir, "review", { taskId: "T001" });
+    const completed = await runWorkflowNode(dir, "checkpoint", { taskId: "T001" });
+    assert.equal(completed.status, "completed");
+    const stateAfterRepair = await loadTaskState(dir);
+    assert.equal(stateAfterRepair.tasks[0].status, "completed");
+    assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /node_checkpoint_completed/);
+  });
+});
+
 test("adversarial: parallel admission does not release the child result when the checkpoint write fails", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);

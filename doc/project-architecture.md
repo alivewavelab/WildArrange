@@ -22,7 +22,7 @@ bin/helix.mjs
   -> .helix/*
 ```
 
-Every old flat `src/helix-*.mjs` path still exists as a two-line `@deprecated` re-export shim (`export * from "./<zone>/<file>.mjs"`), so existing imports keep working while new code targets the zoned path directly.
+Every old flat `src/helix-*.mjs` path still exists as a declarative `@deprecated` re-export shim with no business logic — most are a single `export * from "./<zone>/<file>.mjs"`, while modules whose implementation was split across several zoned files (e.g. `helix-gates.mjs`, `helix-review.mjs`) aggregate multiple named re-exports. Existing imports keep working while new code targets the zoned path directly.
 
 ## Five-Zone Layering
 
@@ -41,7 +41,7 @@ Six invariants beyond simple layering, all checked by `test/dependency-boundary.
 3. **Pinned `orchestration -> ai` edge list.** Because `ai -> orchestration` is also allowed, coupling between these two zones is kept in check by naming every `orchestration -> ai` edge explicitly in the test (currently only `linear-runtime.mjs -> ai/routing.mjs` for the workflow "route" node). Deterministic route-table reading lives in `infra/route-table.mjs`, so plan import and the task board do not touch the ai zone at all.
 4. **No zoned file may import a legacy `src/helix-*.mjs` shim** (including `helix-core.mjs`). Shims re-export zoned files, so allowing them as import targets would be a laundering channel around the zone rules. Shims exist only for external/old callers.
 5. **No module-level import cycles anywhere in `src/`**, guarding against a real cycle quietly forming inside the mutually-allowed `ai`/`orchestration` pair.
-6. **No non-literal dynamic imports anywhere in `src/`**: `import(someVariable)` is invisible to static import scanning and could smuggle a reverse-zone dependency at runtime, so every dynamic import must use a plain string literal.
+6. **No non-literal dynamic imports anywhere in `src/`**: the entire argument of every dynamic `import()` must be a single plain string literal. Variables, template literals, and concatenation expressions like `import("../x.mjs" + "")` are all invisible to static import scanning and could smuggle a reverse-zone dependency at runtime, so they are rejected outright.
 
 ## Main Files
 
@@ -228,7 +228,7 @@ Adapter-specific behavior belongs in `src/interface/adapters.mjs` or host-specif
 
 ## Known Architecture Debt
 
-`src/helix-core.mjs` is now a compatibility barrel over the five zoned directories. New implementation should go into the focused zoned modules rather than growing `helix-core.mjs`, and the ~29 flat `src/helix-*.mjs` shim files should shrink toward zero usage over time as callers migrate their imports to the zoned paths directly (the shims themselves must stay two-line re-exports, not grow logic).
+`src/helix-core.mjs` is now a compatibility barrel over the five zoned directories. New implementation should go into the focused zoned modules rather than growing `helix-core.mjs`, and the ~29 flat `src/helix-*.mjs` shim files should shrink toward zero usage over time as callers migrate their imports to the zoned paths directly (the shims themselves must stay declarative re-exports, not grow logic).
 
 ## Maintenance Rules
 

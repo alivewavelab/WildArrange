@@ -188,23 +188,30 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
   const finalized = await finalizeAdmission(rootDir, options.taskId, {
     workerResult: prepared.workerResult,
     changedPaths: prepared.appliedPaths,
+    runId: options.runId,
   });
   const { verifyResult, scopeResult, reviewResult } = finalized;
   let rollback = null;
   if (finalized.status !== "completed") {
     rollback = await rollbackAdmissionChanges(rootDir, prepared.rollbackPlan);
   }
+  // For the completed outcome the admission ledger event was already written
+  // inside finalizeAdmission, BEFORE the canonical completed persist (ledger
+  // first, state last — same completion-transaction ordering as the linear
+  // runtime). Only non-completed outcomes are logged here, with rollback info.
+  if (finalized.status !== "completed") {
+    await appendLedger(rootDir, {
+      type: "parallel_agent_admission_completed",
+      runId: options.runId,
+      taskId: options.taskId,
+      status: finalized.status,
+      appliedPaths: prepared.appliedPaths,
+      rollback,
+    });
+  }
   await updateAgentRunLifecycle(rootDir, options.runId, options.taskId, finalized.status === "completed" ? "released" : "awaiting_revision", {
     admissionStatus: finalized.status,
     releasedAt: finalized.status === "completed" ? nowIso() : null,
-    rollback,
-  });
-  await appendLedger(rootDir, {
-    type: "parallel_agent_admission_completed",
-    runId: options.runId,
-    taskId: options.taskId,
-    status: finalized.status,
-    appliedPaths: prepared.appliedPaths,
     rollback,
   });
   await writeSnapshot(rootDir, "parallel_agent_admission_completed", {
@@ -401,7 +408,7 @@ async function rollbackAdmissionChanges(rootDir, rollbackPlan) {
   }
 }
 
-async function finalizeAdmission(rootDir, taskId, { workerResult, changedPaths }) {
+async function finalizeAdmission(rootDir, taskId, { workerResult, changedPaths, runId }) {
   return withTaskStateLock(rootDir, `parallel-admit-finalize:${taskId}`, async () => {
     const taskState = await loadTaskState(rootDir);
     if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
@@ -432,6 +439,17 @@ async function finalizeAdmission(rootDir, taskId, { workerResult, changedPaths }
     if (pipelineResult.status === "completed") {
       task.status = "completed";
       task.updatedAt = nowIso();
+      // Ledger first, canonical tasks.json last (commit point): a ledger
+      // outage must never leave a completed/released admission without its
+      // completion ledger event (cross-review P0, round 3, 2026-07-21).
+      await appendLedger(rootDir, {
+        type: "parallel_agent_admission_completed",
+        runId: runId || null,
+        taskId,
+        status: "completed",
+        appliedPaths: changedPaths || [],
+        rollback: null,
+      });
       await persistTaskState(rootDir, taskState);
       await appendWisdom(rootDir, task, verifyResult);
       await writeMemoryDigest(rootDir, { reason: "parallel_admission_completed", stage: "checkpoint", task, taskId });
