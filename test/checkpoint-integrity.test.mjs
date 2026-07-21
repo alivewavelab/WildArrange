@@ -21,6 +21,7 @@ import {
   importPlan,
   initRuntime,
   loadTaskState,
+  parallelAgentStatus,
   readJson,
   resolveHelixPath,
   runCommand,
@@ -575,6 +576,226 @@ test("adversarial: parallel admission resumes idempotently after a lifecycle wri
     const lifecycleAfterResume = await readJson(path.join(runTaskDir, "result.json"));
     assert.equal(lifecycleAfterResume.lifecycle.status, "released");
     assert.equal((await loadTaskState(dir)).tasks[0].status, "completed");
+  });
+});
+
+test("adversarial: a mid-apply failure rolls the workspace back and releases the admission claim", async () => {
+  // Cross-review P0 (round 5, 2026-07-21): admission used to apply files
+  // first and only then establish the transaction (claim + started ledger),
+  // so a failure in between left half-applied files, a task stuck in
+  // verifying, and no retryable path. Now the claim comes first and ANY
+  // apply failure rolls back the workspace and releases the claim.
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = resolveHelixPath(dir, "artifacts", "parallel-apply-fail-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Admission apply failure",
+      tasks: [
+        {
+          id: "T001",
+          subject: "Two files, second one fails to write",
+          verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/a.txt','utf8').trim()!=='A'||fs.readFileSync('src/sub/b.txt','utf8').trim()!=='B') process.exit(1);")],
+          writable_paths: ["src/**"],
+        },
+      ],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    const command = [
+      "node -e",
+      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'two files', files:[{path:'src/a.txt', content:'A\\n'},{path:'src/sub/b.txt', content:'B\\n'}]}));"),
+      "{outputJson}",
+    ].join(" ");
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+
+    // Read-only src/sub: the first file write succeeds, the second fails.
+    await mkdir(path.join(dir, "src", "sub"), { recursive: true });
+    await chmod(path.join(dir, "src", "sub"), 0o555);
+    try {
+      await assert.rejects(
+        () => admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" }),
+        /parallel admission failed while applying files/,
+      );
+    } finally {
+      await chmod(path.join(dir, "src", "sub"), 0o755);
+    }
+
+    // Workspace rolled back: the half-applied first file is gone again.
+    await assert.rejects(() => readFile(path.join(dir, "src", "a.txt"), "utf8"), /ENOENT/);
+    // Claim released: the task is retryable, not stuck in verifying.
+    const stateAfterFailure = await loadTaskState(dir);
+    assert.equal(stateAfterFailure.tasks[0].status, "pending");
+    assert.equal(stateAfterFailure.tasks[0].last_failure.reason, "admission_apply_failed");
+    const ledger = await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8");
+    assert.match(ledger, /parallel_agent_admission_apply_failed/);
+    const lifecycle = await readJson(resolveHelixPath(dir, "agent-runs", batch.runId, "T001", "result.json"));
+    assert.equal(lifecycle.lifecycle?.status, "awaiting_revision");
+
+    // After repair the SAME run can be admitted again and completes.
+    const admitted = await admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" });
+    assert.equal(admitted.status, "completed");
+    assert.equal((await readFile(path.join(dir, "src", "a.txt"), "utf8")).trim(), "A");
+    assert.equal((await readFile(path.join(dir, "src", "sub", "b.txt"), "utf8")).trim(), "B");
+  });
+});
+
+test("adversarial: a run whose admission failed earlier cannot fake-resume a task completed by other means", async () => {
+  // Cross-review P1 (round 5, 2026-07-21): the resume branch used to accept
+  // any matching runId in the task evidence — but a FAILED admission also
+  // leaves that evidence behind. Resume now requires the chain-verified
+  // completed ledger event for that exact run.
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    const planPath = resolveHelixPath(dir, "artifacts", "fake-resume-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Fake resume",
+      tasks: [
+        {
+          id: "T001",
+          subject: "Content must be linear",
+          worker_command: nodeEval("const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/out.txt','linear\\n');"),
+          verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/out.txt','utf8').trim()!=='linear') process.exit(1);")],
+          writable_paths: ["src/**"],
+        },
+      ],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    // Run R proposes content that fails verify: its admission is rejected
+    // and rolled back, but it leaves admission evidence with its runId.
+    const command = [
+      "node -e",
+      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'bad content', files:[{path:'src/out.txt', content:'from child\\n'}]}));"),
+      "{outputJson}",
+    ].join(" ");
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+    const failed = await admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" });
+    assert.notEqual(failed.status, "completed", "sanity: run R's admission must fail its gates");
+
+    // The task is then completed through the linear flow, NOT by run R.
+    const completed = await runNextTask(dir);
+    assert.equal(completed.status, "completed");
+    assert.equal((await readFile(path.join(dir, "src", "out.txt"), "utf8")).trim(), "linear");
+
+    // Re-admitting run R must be refused — not treated as a resume that
+    // marks the failed run released.
+    await assert.rejects(
+      () => admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" }),
+      /already completed/,
+    );
+    assert.equal((await readFile(path.join(dir, "src", "out.txt"), "utf8")).trim(), "linear", "the refusal must not touch the workspace");
+    const lifecycle = await readJson(resolveHelixPath(dir, "agent-runs", batch.runId, "T001", "result.json"));
+    assert.notEqual(lifecycle.lifecycle?.status, "released", "a failed run must never be marked released");
+  });
+});
+
+test("adversarial: a wisdom write failure keeps the completion recoverable instead of completing without it", async () => {
+  // Cross-review P1 (round 5, 2026-07-21): wisdom/digest used to be written
+  // AFTER the completed persist, so their failure left a completed task
+  // permanently missing them. They now sit inside the completion
+  // transaction: a failure keeps the task in verifying, and the run
+  // auto-recovery re-runs the whole completion including the missed writes.
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    await importPassingPlan(dir);
+
+    await runWorkflowNode(dir, "execute", { taskId: "T001" });
+    await runWorkflowNode(dir, "verify", { taskId: "T001" });
+    await runWorkflowNode(dir, "scope", { taskId: "T001" });
+    await runWorkflowNode(dir, "review", { taskId: "T001" });
+
+    const wisdomPath = resolveHelixPath(dir, "wisdom", "verification.md");
+    await writeFile(wisdomPath, "", "utf8");
+    await chmod(wisdomPath, 0o444);
+    try {
+      await assert.rejects(() => runWorkflowNode(dir, "checkpoint", { taskId: "T001" }), /EACCES|permission denied/i);
+    } finally {
+      await chmod(wisdomPath, 0o644);
+    }
+    const interrupted = await loadTaskState(dir);
+    assert.equal(interrupted.tasks[0].status, "verifying", "wisdom failure must not commit the completion");
+
+    const recovered = await runNextTask(dir);
+    assert.equal(recovered.status, "completed");
+    assert.equal((await loadTaskState(dir)).tasks[0].status, "completed");
+    assert.match(await readFile(wisdomPath, "utf8"), /T001/, "the recovery re-run must write the wisdom line");
+  });
+});
+
+test("adversarial: a post-commit snapshot failure does not un-complete the task but stays visible", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    await importPassingPlan(dir);
+
+    await runWorkflowNode(dir, "execute", { taskId: "T001" });
+    await runWorkflowNode(dir, "verify", { taskId: "T001" });
+    await runWorkflowNode(dir, "scope", { taskId: "T001" });
+    await runWorkflowNode(dir, "review", { taskId: "T001" });
+
+    // Sabotage the snapshots dir only for the final post-commit snapshot.
+    await chmod(resolveHelixPath(dir, "snapshots"), 0o555);
+    let completed;
+    try {
+      completed = await runWorkflowNode(dir, "checkpoint", { taskId: "T001" });
+    } finally {
+      await chmod(resolveHelixPath(dir, "snapshots"), 0o755);
+    }
+    assert.equal(completed.status, "completed", "post-commit snapshot failure must not fail the completion");
+    assert.equal(completed.sideEffectWarnings.length, 1);
+    assert.equal((await loadTaskState(dir)).tasks[0].status, "completed");
+    const ledger = await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8");
+    assert.match(ledger, /completion_side_effect_failed/, "the failed side effect must leave a ledger trace");
+
+    const report = await runDoctor(dir);
+    assert.ok(
+      report.findings.some((finding) => finding.section === "completion_audit" && /post-completion side effect failed/.test(finding.message)),
+      "doctor must surface the missing snapshot",
+    );
+  });
+});
+
+test("adversarial: a run missing from index.json is rediscovered instead of staying invisible", async () => {
+  // Cross-review P1 (round 5, 2026-07-21): per-task result.json files were
+  // written before the index, so an index write failure produced results on
+  // disk that `parallel status` could never see again.
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = resolveHelixPath(dir, "artifacts", "orphan-run-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Orphan run discovery",
+      tasks: [
+        {
+          id: "T001",
+          subject: "Admit child artifact",
+          verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/parallel.txt','utf8').trim()!=='ok') process.exit(1);")],
+          writable_paths: ["src/**"],
+        },
+      ],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    const command = [
+      "node -e",
+      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
+      "{outputJson}",
+    ].join(" ");
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+
+    // Simulate the lost index (failed write / crash before write).
+    await rm(resolveHelixPath(dir, "agent-runs", "index.json"), { force: true });
+
+    const status = await parallelAgentStatus(dir, {});
+    const rediscovered = status.runs.find((run) => run.runId === batch.runId);
+    assert.ok(rediscovered, "the orphan run must be adopted back into the index");
+    assert.equal(rediscovered.results.length, 1);
+    assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /parallel_run_index_reconciled/);
+
+    // And the rediscovered run is still admissible.
+    const admitted = await admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" });
+    assert.equal(admitted.status, "completed");
   });
 });
 

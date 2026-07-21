@@ -60,16 +60,24 @@ async function listMjsFiles(dir) {
 }
 
 /**
- * Lexical comment stripping. A plain regex cannot tell a real comment from
- * "/*" sitting inside a string literal, which let a crafted-but-legal file
- * hide an import between a string containing a block-comment opener and a
- * later closer (cross-review P1, round 4, 2026-07-21). This walks the source as a small
- * state machine: line/block comments are blanked out (newlines preserved so
- * reported line numbers stay right), while string literals, template
- * literals (including ${} nesting) and regex literals are copied through
- * untouched — import specifiers live in strings, so they must survive.
+ * Lexical source masking. Round-4 kept string contents intact, which meant
+ * an import statement WRITTEN INSIDE a string or template (documentation
+ * text, generated snippets) was still regex-matched as a real edge — and,
+ * worse, the code/string ambiguity could be steered either way by legal
+ * source (cross-review P1, round 5, 2026-07-21). The masked view removes the
+ * ambiguity completely:
+ *   - line/block comments -> blanks (newlines kept for line numbers);
+ *   - string/template/regex literal CONTENT -> NUL bytes, delimiters kept
+ *     (template ${} interpolations stay code);
+ *   - everything else copied verbatim, so output length === input length.
+ * Import syntax is then matched on the masked view (only real code can
+ * match), and the actual specifier text is sliced from the ORIGINAL source
+ * at the same offsets and unescaped — so `"\u002e./ai/x.mjs"` is seen as
+ * `../ai/x.mjs`, not as a bare specifier.
  */
-function stripComments(source) {
+const MASK = "\u0000";
+
+function maskSource(source) {
   let out = "";
   let i = 0;
   const n = source.length;
@@ -95,8 +103,8 @@ function stripComments(source) {
       out += ch;
       i += 1;
       while (i < n && source[i] !== ch && source[i] !== "\n") {
-        if (source[i] === "\\") { out += source[i] + (source[i + 1] ?? ""); i += 2; continue; }
-        out += source[i];
+        if (source[i] === "\\") { out += MASK + MASK; i += 2; continue; }
+        out += MASK;
         i += 1;
       }
       if (i < n && source[i] === ch) { out += ch; i += 1; }
@@ -109,12 +117,13 @@ function stripComments(source) {
       let braceDepth = 0;
       while (i < n) {
         const c = source[i];
-        if (c === "\\") { out += c + (source[i + 1] ?? ""); i += 2; continue; }
+        if (c === "\\") { out += MASK + MASK; i += 2; continue; }
         if (braceDepth === 0 && c === "`") { out += c; i += 1; break; }
         if (braceDepth === 0 && c === "$" && source[i + 1] === "{") { braceDepth = 1; out += "${"; i += 2; continue; }
         if (braceDepth > 0 && c === "{") braceDepth += 1;
         if (braceDepth > 0 && c === "}") braceDepth -= 1;
-        out += c;
+        // Interpolation bodies are code; top-level template text is content.
+        out += braceDepth > 0 ? c : (c === "\n" ? "\n" : MASK);
         i += 1;
       }
       lastSignificant = "`";
@@ -124,7 +133,8 @@ function stripComments(source) {
       // Regex literal vs division, by what precedes the slash: after a value
       // (identifier, number, closing bracket, string) it is division; after
       // an operator/opening bracket/keyword it starts a regex literal whose
-      // body must be skipped so its content can't fake a comment marker.
+      // body must be masked so its content can't fake comment markers or
+      // import syntax.
       const afterKeyword = /(?:^|[^\w$])(?:return|typeof|case|in|of|new|delete|void|do|else|yield|await)\s*$/.test(out);
       const regexCanStart = lastSignificant === "" || "([{,;=:!&|?+-*%<>~^".includes(lastSignificant) || afterKeyword;
       if (regexCanStart) {
@@ -133,12 +143,13 @@ function stripComments(source) {
         let inClass = false;
         while (i < n) {
           const c = source[i];
-          if (c === "\\") { out += c + (source[i + 1] ?? ""); i += 2; continue; }
+          if (c === "\\") { out += MASK + MASK; i += 2; continue; }
           if (c === "[") inClass = true;
           else if (c === "]") inClass = false;
-          out += c;
+          const terminal = (c === "/" && !inClass) || c === "\n";
+          out += terminal ? c : MASK;
           i += 1;
-          if ((c === "/" && !inClass) || c === "\n") break;
+          if (terminal) break;
         }
         lastSignificant = ")";
         continue;
@@ -151,17 +162,48 @@ function stripComments(source) {
   return out;
 }
 
-function extractImportSpecifiers(source) {
-  const code = stripComments(source);
-  const specifiers = [];
-  const importRegex = /(?:import|export)\s+(?:[^'"]*?from\s+)?["']([^"']+)["']/g;
-  let match;
-  while ((match = importRegex.exec(code)) !== null) {
-    specifiers.push(match[1]);
+/** Decodes a quoted JS string literal (with quotes) into its runtime value. */
+function decodeStringLiteral(raw) {
+  const body = raw.slice(1, -1);
+  let out = "";
+  for (let i = 0; i < body.length; i += 1) {
+    const ch = body[i];
+    if (ch !== "\\") { out += ch; continue; }
+    const next = body[i + 1];
+    if (next === "u") {
+      if (body[i + 2] === "{") {
+        const end = body.indexOf("}", i + 3);
+        out += String.fromCodePoint(Number.parseInt(body.slice(i + 3, end), 16));
+        i = end;
+      } else {
+        out += String.fromCharCode(Number.parseInt(body.slice(i + 2, i + 6), 16));
+        i += 5;
+      }
+    } else if (next === "x") {
+      out += String.fromCharCode(Number.parseInt(body.slice(i + 2, i + 4), 16));
+      i += 3;
+    } else {
+      const simple = { n: "\n", t: "\t", r: "\r", b: "\b", f: "\f", v: "\v", "0": "\0" };
+      out += simple[next] ?? next;
+      i += 1;
+    }
   }
-  const dynamicImportRegex = /import\(\s*["']([^"']+)["']\s*\)/g;
-  while ((match = dynamicImportRegex.exec(code)) !== null) {
-    specifiers.push(match[1]);
+  return out;
+}
+
+const STATIC_IMPORT_REGEX = /(?<![\w.$])(?:import|export)\s+(?:[^'"`]*?from\s+)?((["'])\u0000*\2)/dg;
+const DYNAMIC_IMPORT_REGEX = /(?<![\w.$])import\s*\(\s*((["'])\u0000*\2)/dg;
+
+function extractImportSpecifiers(source) {
+  const masked = maskSource(source);
+  const specifiers = [];
+  for (const regex of [STATIC_IMPORT_REGEX, DYNAMIC_IMPORT_REGEX]) {
+    regex.lastIndex = 0;
+    let match;
+    while ((match = regex.exec(masked)) !== null) {
+      const [start, end] = match.indices[1];
+      specifiers.push(decodeStringLiteral(source.slice(start, end)));
+    }
   }
   return specifiers;
 }
@@ -258,9 +300,11 @@ test("dependency boundary: no non-literal dynamic imports anywhere in src/", asy
   const files = await listMjsFiles(SRC_DIR);
   const violations = [];
   const dynamicImportCall = /(?<![\w.$])import\s*\(/g;
-  const singleLiteralArgument = /^\s*(["'])(?:(?!\1)[^\\\n]|\\.)*\1\s*\)/;
+  // Matched against the MASKED source (string contents are NUL bytes), so a
+  // single plain literal argument is exactly quote + NULs + same quote + ')'.
+  const singleLiteralArgument = /^\s*(["'])\u0000*\1\s*\)/;
   for (const filePath of files) {
-    const source = stripComments(await readFile(filePath, "utf8"));
+    const source = maskSource(await readFile(filePath, "utf8"));
     let match;
     while ((match = dynamicImportCall.exec(source)) !== null) {
       const tail = source.slice(match.index + match[0].length);
@@ -272,6 +316,28 @@ test("dependency boundary: no non-literal dynamic imports anywhere in src/", asy
     }
   }
   assert.deepEqual(violations, [], `dynamic import() whose argument is not a single string literal (invisible to zone checks):\n${violations.join("\n")}`);
+});
+
+test("dependency boundary: only relative, bare-package, and node: specifiers are allowed in src/", async () => {
+  // Escape hatches that bypass zone classification (cross-review P1,
+  // round 5, 2026-07-21): a `file:` URL or an absolute path can load
+  // src/ai/* while looking like a bare specifier to the edge builder, and a
+  // `data:` URL can carry arbitrary module code inline. None of them has a
+  // legitimate use inside src/, so anything that is not a relative path
+  // ("./", "../"), a bare package name, or a node: builtin is a violation.
+  // Specifiers are unescape-decoded first, so "\u002e./ai/x.mjs" counts as
+  // the relative path it really is instead of slipping through as bare.
+  const files = await listMjsFiles(SRC_DIR);
+  const violations = [];
+  for (const filePath of files) {
+    const source = await readFile(filePath, "utf8");
+    for (const specifier of extractImportSpecifiers(source)) {
+      if (specifier.startsWith("./") || specifier.startsWith("../") || specifier.startsWith("node:")) continue;
+      if (/^[a-zA-Z@][\w.@/-]*$/.test(specifier) && !specifier.includes(":")) continue; // bare package
+      violations.push(`${path.relative(SRC_DIR, filePath)}: ${JSON.stringify(specifier)}`);
+    }
+  }
+  assert.deepEqual(violations, [], `import specifiers that bypass zone classification (file:/data:/absolute/escaped):\n${violations.join("\n")}`);
 });
 
 test("dependency boundary: comment stripping is string-aware and cannot be blinded by block-comment markers inside literals", () => {
@@ -314,6 +380,39 @@ test("dependency boundary: comment stripping is string-aware and cannot be blind
   assert.ok(
     extractImportSpecifiers(trickyRegexAndTemplate).includes("../infra/path-match.mjs"),
     "regex literals, template literals and quotes in comments must not derail the scanner",
+  );
+});
+
+test("dependency boundary: import syntax written inside strings is not an edge, escaped specifiers are decoded", () => {
+  // Round-5 adversarial findings for the scanner itself:
+  // 1) documentation-only import text inside string/template literals used
+  //    to be extracted as a real edge (false positive);
+  // 2) a specifier whose leading dots hide behind Unicode escapes loads the
+  //    parent directory at runtime but looked like a bare specifier to the
+  //    scanner (false negative).
+  const docOnly = [
+    `const usage = 'import { routeRequest } from "../ai/routing.mjs"';`,
+    "const snippet = `import { hooks } from \"../ai/hooks.mjs\"`;",
+    `import { real } from "../infra/foundation.mjs";`,
+  ].join("\n");
+  assert.deepEqual(
+    extractImportSpecifiers(docOnly),
+    ["../infra/foundation.mjs"],
+    "import statements quoted inside strings/templates must not create edges",
+  );
+
+  const escaped = `import { routeRequest } from "\\u002e./ai/routing.mjs";`;
+  assert.deepEqual(
+    extractImportSpecifiers(escaped),
+    ["../ai/routing.mjs"],
+    "escape sequences in specifiers must be decoded before zone classification",
+  );
+
+  const dynamicEscaped = `const mod = await import("\\x2e./ai/context.mjs");`;
+  assert.deepEqual(
+    extractImportSpecifiers(dynamicEscaped),
+    ["../ai/context.mjs"],
+    "dynamic import specifiers must be decoded too",
   );
 });
 

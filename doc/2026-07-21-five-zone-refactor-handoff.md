@@ -51,11 +51,13 @@ infra/           foundation、ledger、security、command-runner/safety、git、
    - **门控证据绑定执行轮**：每次新的 worker 运行（线性/单步 execute/并行 admission）都会清空 `last_verify_result` 等旧字段；`collectGateEvidenceFromTask()` 只认证据链上**位于最后一次 worker 记录之后**的门控证据（证据数组只追加，顺序即执行顺序）。上一轮全绿但 checkpoint 失败后，新一轮 execute 产出的工件必须重新过全部门，不能拿旧轮证据直接 checkpoint。
    - 配套的持久化保障：`persistTaskState()` 按"派生文件（tasks.md、plan 镜像）先写，权威 `tasks.json` 最后写"的顺序执行，`tasks.json` 是唯一读取源，充当提交点——派生写失败时任务状态不会半提交为 completed。
    - **完成事务顺序**（第三轮交叉走查 P0）：三条完成路径（线性 `task_verified`、单步 `node_checkpoint_completed`、并行 `parallel_agent_admission_completed`）统一为**完成 ledger 事件先写、权威 `tasks.json` 最后落盘**；并行的子 Agent `released` 生命周期更新也排在 ledger 与落盘之后。ledger 断供时任务保持可重跑状态，绝不会出现"状态已 completed / 子 Agent 已 released，但完成账目不存在"；反向的"账目多一条、状态未前进"由追加式账本天然容忍（重跑会补一条新事件）。
-   - **幂等恢复协议**（第四轮交叉走查 P1）：完成事务在任何一步被打断后，都有一条明确定义的恢复路径，且恢复动作可以重复执行：
+   - **恢复协议**（第四、五轮交叉走查逐步补齐；下面写清各场景的准确保障，不做笼统的"任何一步都幂等"承诺）：
      - **卡在 `verifying`**（ledger 完成事件已写、权威 `tasks.json` 未落盘）：`helix run` 发现没有 pending 任务但有 `verifying` 任务时，不再报 `blocked`，而是自动用单步 checkpoint 节点的裁决逻辑接管——本轮门控证据全绿就幂等补完（checkpoint/账目可重写重追加），证据缺失或过期就退回 `pending` 重新跑全流程；`in_progress` 任务刻意不碰（可能正被认领执行中）。
-     - **并行任务已 completed、子 Agent 生命周期未 released**（释放写入失败）：重新 `parallel admit` 同一 run 会识别出"该任务就是被这个 run 完成的"（核对证据链上的 admission 记录），只补做生命周期释放，**不重新应用任何文件**（返回 `resumed: true`）；若任务是被别的途径完成的则硬拒绝。
-     - **应用文件前先裁决任务状态**：并行 admission 把任务状态合法性校验挪到写任何工作区文件之前，注定被拒绝的 admission 不会先污染工作区。
-3. **依赖边界用测试锁死，不是靠文档口头约定**：`test/dependency-boundary.test.mjs` 会扫描 `src/` 下所有 `.mjs` 文件的 import 语句，按五区分类，凡是违反允许依赖表的都会让 `npm test` 直接失败。注释剥离用的是**词法级状态机**而不是正则（第四轮交叉走查 P1）：它能区分真注释与字符串/模板字符串/正则字面量里的 `/*`、`*/` 标记，堵住了"在字符串里埋注释开符号、把真实 import 藏进被误剥区间"的合法源码欺骗手法；配套的回归子测试固化了这些对抗样例。边界规则在复查后收紧为：
+     - **并行 admission 是 claim 先行的**（第五轮 P0）：状态裁决、writable_paths 预检、任务 claim（置 verifying + 写入 admission 证据）、`parallel_agent_admission_started` 账目，全部在**同一把任务状态锁内、写任何工作区文件之前**完成，关掉了"检查与写文件之间"的竞态窗口。文件应用阶段的**任何失败**（写入报错、patch 失败、实际改动越界）都会回滚工作区并释放 claim：任务回 `pending` 并带 `admission_apply_failed` 失败记录，账目记 `parallel_agent_admission_apply_failed`，同一 run 修复后可直接重新 admit。
+     - **并行任务已 completed、子 Agent 生命周期未 released**（释放写入失败）：重新 `parallel admit` 同一 run 会核验**链上是否存在该 run 的 completed 完成事件**——证据链上的 admission 记录不算数，因为失败后回滚的 run 也会留下同样的记录（第五轮 P1）。核验通过才只补做生命周期释放、不重新应用任何文件（返回 `resumed: true`）；任务是被别的途径完成的一律硬拒绝，且拒绝发生在碰任何文件之前。
+     - **完成必备产物 vs 后置便利产物**（第五轮 P1）：wisdom 与 memory digest 写在完成事务**内部**（完成账目之后、权威落盘之前），写失败任务停在 `verifying`，恢复裁决会连它们一起重做，completed 任务不可能永久缺失它们；快照与 workflow summary 是提交后的便利产物，失败不回退完成状态，但会记 `completion_side_effect_failed` 账目并出现在返回值的 `sideEffectWarnings` 里，doctor 会晒出来。
+     - **并行 run 不会失踪**（第五轮 P1）：run 在任何 Agent 启动前就预注册进 `index.json` 并写入 `running` 状态的批次 JSON；每次读 index 还会扫描 `agent-runs/` 目录，把有 result.json 却不在 index 里的孤儿 run 认领回来（记 `parallel_run_index_reconciled` 账目），落盘的结果不会对 `parallel status` 永久不可见。
+3. **依赖边界用测试锁死，不是靠文档口头约定**：`test/dependency-boundary.test.mjs` 会扫描 `src/` 下所有 `.mjs` 文件的 import 语句，按五区分类，凡是违反允许依赖表的都会让 `npm test` 直接失败。扫描器经过两轮加固（第四、五轮交叉走查 P1）：词法状态机产出**掩码视图**——注释置空、字符串/模板/正则字面量的内容替换成哨兵字节（分隔符保留、`${}` 插值仍是代码）——import 语法只在掩码视图上匹配，所以字符串里的注释标记骗不了它（假阴性），文档字符串里写的 import 语句也不会被当成真实依赖（假阳性）；specifier 文本从原始源码切出并做转义解码，`"\u002e./ai/x.mjs"` 会被识别为它真正指向的相对路径；另有一个子测试把 `src/` 内允许的 specifier 限定为相对路径、裸包名和 `node:` 内建——`file:`/`data:` URL 和绝对路径（能加载真实模块但对静态扫描不透明）一律拒绝。对抗样例都固化成了回归子测试。边界规则在复查后收紧为：
    - `ai → orchestration`（只读，hooks/context 需要读任务板和 attentionReport）和 `ai → capabilities`（仅经 gateway）是允许项；反方向永久禁止。
    - `orchestration → ai` 收紧为**逐条钉死的白名单**，目前只有一条边（`linear-runtime.mjs → ai/routing.mjs` 的 `routeRequest`，工作流 route 节点需要语义路由）；新增任何一条都得改测试里的白名单，是显式决策。确定性路由表读取（`loadRoutesConfig`/`resolveRouteDecision`）已下沉到 `infra/route-table.mjs`，`plan-state`/`task-board` 不再碰 `ai/`。
    - 五区文件**禁止 import 任何旧 `helix-*.mjs` shim**（shim 转发到分区文件，若放行等于给了绕过分区规则的洗白通道）；shim 只服务外部旧调用方。
@@ -69,17 +71,17 @@ infra/           foundation、ledger、security、command-runner/safety、git、
 | `src/helix-core.mjs` 这个兼容总入口 | 保留在原路径，继续汇总导出所有函数供 `bin/helix.mjs` 和外部旧调用方使用（五区内部文件已全部直连分区实现，不再经它中转） |
 | CLI 命令和参数 | `bin/helix.mjs` 的子命令、参数语义完全没变 |
 | `.helix/` 下的数据格式 | JSON schema、ledger 格式、snapshot 格式零改动 |
-| 全部既有测试 | 重构起点 109 个测试全程保持绿（复查修复后新增至 111+）；重构过程每个 Phase 结束都跑一次 `npm test` |
+| 全部既有测试 | 重构起点 109 个测试全程保持绿（五轮交叉走查修复后新增至 134）；重构过程每个 Phase 结束都跑一次 `npm test` |
 | npm 包内容 | `npm pack --dry-run` 验证过，正常打包（文件数随修复微增，以最新一次输出为准） |
 
 ## 验证结果（最终状态）
 
-- `npm test`：**全绿**（复查修复后 111+ 个测试，具体数字以 `npm test` 输出为准）。
+- `npm test`：**全绿**（五轮交叉走查修复后 134 个测试，具体数字以 `npm test` 输出为准）。
 - `npm pack --dry-run --cache /private/tmp/helix-npm-cache`：正常出包。
 - 五区下每个 `.mjs` 文件单独 `import()` 都能独立加载，没有循环依赖、没有断链。
-- `test/dependency-boundary.test.mjs` 七个子测试全部通过：①五区依赖方向合法 ②`orchestration`/`ai` 只能经 `gateway.mjs` 调 `capabilities` ③`capabilities` 不依赖 `ai` ④`orchestration → ai` 限定在钉死的白名单内 ⑤动态 `import()` 的**整个参数必须是单一字符串字面量**（`import(变量)`、模板字符串、`import("…" + "")` 拼接等对静态扫描不可见的写法一律拦截）⑥注释剥离为词法级、不会被字符串里的注释标记欺骗（含对抗样例回归）⑦全 `src/` 无模块级 import 环。
-- `test/checkpoint-integrity.test.mjs`：14 个故障注入用例，覆盖 checkpoint 写失败（流水线/线性/单步/并行四条路径）、验收证明能力抛异常、**跨执行轮证据复用**（旧轮门控证据不得为新轮工件作证）、**持久化提交点**（派生文件写失败时权威 `tasks.json` 不得前进）、**完成账目断供**（ledger 只读时线性/单步/并行三条路径都不得产生 completed/released，修复后可正常续跑）、**中断事务的可见与自愈**（doctor 能报出孤立完成事件与派生分叉，`run` 能自动裁决卡在 `verifying` 的任务，且证据不全时只会退回 pending 不会盖章）、**并行 admission 幂等恢复**（生命周期写失败后重 admit 只补释放、不重写文件；被别的途径完成的任务在碰任何文件之前就被拒绝）。
-- `helix doctor` 的完成审计除了"completed 但缺完成证据"，还反向检查**孤立完成事件**（任务未 completed、账本却已有完成事件——即被打断的完成事务，报 warn 并给出 `helix run` 恢复指引）和 **canonical/派生分叉**（plan 镜像、`tasks.md` 的任务状态与权威 `tasks.json` 不一致时逐条报出）。
+- `test/dependency-boundary.test.mjs` 九个子测试全部通过：①五区依赖方向合法 ②`orchestration`/`ai` 只能经 `gateway.mjs` 调 `capabilities` ③`capabilities` 不依赖 `ai` ④`orchestration → ai` 限定在钉死的白名单内 ⑤动态 `import()` 的**整个参数必须是单一字符串字面量**（`import(变量)`、模板字符串、`import("…" + "")` 拼接等对静态扫描不可见的写法一律拦截）⑥specifier 只允许相对路径/裸包名/`node:` 内建（`file:`/`data:`/绝对路径拒绝）⑦掩码扫描不被字符串里的注释标记欺骗（含对抗样例回归）⑧字符串里的 import 文本不算依赖、转义 specifier 会被解码（含对抗样例回归）⑨全 `src/` 无模块级 import 环。
+- `test/checkpoint-integrity.test.mjs`：19 个故障注入用例，覆盖 checkpoint 写失败（流水线/线性/单步/并行四条路径）、验收证明能力抛异常、**跨执行轮证据复用**（旧轮门控证据不得为新轮工件作证）、**持久化提交点**（派生文件写失败时权威 `tasks.json` 不得前进）、**完成账目断供**（ledger 只读时线性/单步/并行三条路径都不得产生 completed/released，修复后可正常续跑）、**中断事务的可见与自愈**（doctor 能报出孤立完成事件与派生分叉，`run` 能自动裁决卡在 `verifying` 的任务，且证据不全时只会退回 pending 不会盖章）、**并行 admission 恢复语义**（半应用失败回滚工作区并释放 claim、同一 run 修复后可重 admit；生命周期写失败后重 admit 只补释放、不重写文件；失败过的 run 不能假冒 resume；被别的途径完成的任务在碰任何文件之前就被拒绝）、**完成产物分级**（wisdom 写失败任务停在 verifying 可自愈；提交后快照失败不回退完成但留下账目痕迹）、**孤儿 run 认领**（index 丢失后 `parallel status` 能重新发现并照常 admit）。
+- `helix doctor` 的完成审计除了"completed 但缺完成证据"，还反向检查**孤立完成事件**（任务未 completed、账本却已有完成事件——即被打断的完成事务，报 warn 并给出 `helix run` 恢复指引）、**完成后置副产物失败**（`completion_side_effect_failed` 账目逐条晒出）和 **canonical/派生分叉**（plan 镜像、`tasks.md` 的任务状态与权威 `tasks.json` 不一致时逐条报出）。
 
 ## 架构决策变更记录（对照原批准方案）
 

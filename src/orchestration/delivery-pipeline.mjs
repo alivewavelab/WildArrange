@@ -13,7 +13,33 @@
  * review) already passed.
  */
 import { invokeCapability } from "../capabilities/gateway.mjs";
+import { appendLedger } from "../infra/foundation.mjs";
 import { applyVerifierEvidenceToCriteria, criteriaStatus } from "../infra/success-criteria.mjs";
+
+/**
+ * Runs post-commit conveniences (snapshot, workflow summary, …) after a task
+ * is already durably completed. Their failure must not un-complete the task,
+ * but it must not vanish either (cross-review P1, round 5, 2026-07-21): the
+ * failure is recorded as a `completion_side_effect_failed` ledger event
+ * (best-effort) and returned to the caller as a warning list. Anything that
+ * MUST exist for a completed task (wisdom, digest) belongs BEFORE the
+ * canonical persist instead, where a failure keeps the task recoverable.
+ */
+export async function runPostCompletionSideEffects(rootDir, planId, task, effects) {
+  try {
+    await effects();
+    return [];
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await appendLedger(rootDir, {
+      type: "completion_side_effect_failed",
+      planId,
+      taskId: task.id,
+      error: message,
+    }).catch(() => {});
+    return [{ kind: "post_completion_side_effect", error: message }];
+  }
+}
 
 const GATE_STEPS = ["verify", "scope", "review"];
 

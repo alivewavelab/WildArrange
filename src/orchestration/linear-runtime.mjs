@@ -14,7 +14,7 @@ import { captureWorkspaceSnapshot } from "../infra/git-worktree.mjs";
 import { changedPathsIntroducedByTask, collectGitChangedPaths, collectGitDiff } from "../infra/git-diff.mjs";
 import { applyVerifierEvidenceToCriteria, criteriaStatus } from "../infra/success-criteria.mjs";
 import { invokeCapability } from "../capabilities/gateway.mjs";
-import { collectGateEvidenceFromTask, runCompletionSegment, runDeliveryPipeline } from "./delivery-pipeline.mjs";
+import { collectGateEvidenceFromTask, runCompletionSegment, runDeliveryPipeline, runPostCompletionSideEffects } from "./delivery-pipeline.mjs";
 import { writeWorkflowSummary } from "./status.mjs";
 import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
 import { findRunnableTask, persistTaskState, writeOutbox } from "./task-board.mjs";
@@ -146,14 +146,23 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
     // instead, the ledger is one event ahead of state, which the append-only
     // journal tolerates: the rerun appends a fresh event.
     await appendLedger(rootDir, { type: "task_verified", planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult.status, reviewStatus: "pass" });
-    await persistTaskState(rootDir, taskState);
+    // Wisdom and digest sit INSIDE the completion transaction (before the
+    // canonical persist): a failure here leaves the task in verifying, which
+    // the recovery adjudication re-runs — so a completed task can never
+    // permanently miss its wisdom/digest (cross-review P1, round 5,
+    // 2026-07-21). Snapshot and workflow summary are post-commit
+    // conveniences; their failure must not un-complete the task, so they are
+    // best-effort with a ledger warning instead.
     await appendWisdom(rootDir, task, verifyResult);
     await writeMemoryDigest(rootDir, { reason: "task_completed", stage: "checkpoint", task, taskId: task.id });
-    await writeSnapshot(rootDir, "checkpointed", { planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult.status });
-    if (taskState.tasks.every((candidate) => candidate.status === "completed")) {
-      await writeWorkflowSummary(rootDir, { reason: "all_tasks_completed" });
-    }
-    return { status: "completed", task, workerResult, verifyResult, scopeResult, reviewResult, acceptanceProof };
+    await persistTaskState(rootDir, taskState);
+    const sideEffectWarnings = await runPostCompletionSideEffects(rootDir, taskState.planId, task, async () => {
+      await writeSnapshot(rootDir, "checkpointed", { planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult.status });
+      if (taskState.tasks.every((candidate) => candidate.status === "completed")) {
+        await writeWorkflowSummary(rootDir, { reason: "all_tasks_completed" });
+      }
+    });
+    return { status: "completed", task, workerResult, verifyResult, scopeResult, reviewResult, acceptanceProof, sideEffectWarnings };
   }
 
   if (pipelineResult.status === "checkpoint_failed") {
@@ -491,16 +500,20 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
       return { status: "retry", task, verifyResult, scopeResult, reviewResult, acceptanceProof };
     }
     // Checkpoint durably written — only now may the task become completed.
-    // Ledger event first, canonical tasks.json last (commit point); see the
-    // same ordering rationale in runNextTaskUnlocked.
+    // Ledger event first, then wisdom/digest (inside the transaction: a
+    // failure leaves the task in verifying for recovery re-adjudication),
+    // canonical tasks.json last (commit point); snapshot is post-commit and
+    // best-effort. See the same ordering rationale in runNextTaskUnlocked.
     task.status = "completed";
     task.updatedAt = nowIso();
     await appendLedger(rootDir, { type: "node_checkpoint_completed", planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult?.status || "missing", reviewStatus: "pass" });
-    await persistTaskState(rootDir, taskState);
     await appendWisdom(rootDir, task, verifyResult);
     await writeMemoryDigest(rootDir, { reason: "task_completed", stage: "checkpoint", task, taskId: task.id });
-    await writeSnapshot(rootDir, "node_checkpoint_completed", { planId: taskState.planId, taskId: task.id });
-    return { status: "completed", task, verifyResult, scopeResult, reviewResult, acceptanceProof };
+    await persistTaskState(rootDir, taskState);
+    const sideEffectWarnings = await runPostCompletionSideEffects(rootDir, taskState.planId, task, async () => {
+      await writeSnapshot(rootDir, "node_checkpoint_completed", { planId: taskState.planId, taskId: task.id });
+    });
+    return { status: "completed", task, verifyResult, scopeResult, reviewResult, acceptanceProof, sideEffectWarnings };
   }
 
   task.status = shouldFailTask(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";

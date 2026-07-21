@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   DEFAULT_LEAD_AGENT,
@@ -14,6 +14,7 @@ import {
   writeJsonAtomic,
   writeSnapshot,
 } from "../infra/foundation.mjs";
+import { readVerifiedLedgerEntries } from "../infra/ledger.mjs";
 import { buildFailureSummary } from "../infra/failure-analysis.mjs";
 import { appendWisdom, writeFailureReport, writeReviewReport } from "../infra/task-reports.mjs";
 import { writeMemoryDigest } from "../infra/memory-digest.mjs";
@@ -21,7 +22,7 @@ import { resolveAgentSpawn } from "../infra/agent-spawn.mjs";
 import { applyAgentPatch, collectAgentWorktreePatch, extractPatchPaths, prepareAgentWorktree } from "../infra/git-worktree.mjs";
 import { runCommand } from "../infra/command-runner.mjs";
 import { pathAllowed } from "../infra/path-match.mjs";
-import { runDeliveryPipeline } from "./delivery-pipeline.mjs";
+import { runDeliveryPipeline, runPostCompletionSideEffects } from "./delivery-pipeline.mjs";
 import { loadTaskState } from "./plan-state.mjs";
 import { findRunnableTask, persistTaskState, sendTeamMessage } from "./task-board.mjs";
 
@@ -44,6 +45,22 @@ export async function runParallelAgents(rootDir, options = {}) {
   await mkdir(runDir, { recursive: true });
   const startedAt = nowIso();
   await appendLedger(rootDir, { type: "parallel_agents_started", runId, taskIds: tasks.map((task) => task.id) });
+  // Pre-register the run in index.json AND as a running batch JSON before
+  // any agent starts: if the process dies mid-run (or the final index write
+  // fails), the run is still discoverable by `parallel status` instead of
+  // silently invisible with orphan result.json files on disk
+  // (cross-review P1, round 5, 2026-07-21).
+  await registerRunIndexEntry(rootDir, runId);
+  await writeJsonAtomic(resolveHelixPath(rootDir, "agent-runs", `${runId}.json`), {
+    kind: "parallel_agent_batch",
+    runId,
+    at: startedAt,
+    startedAt,
+    status: "running",
+    planId: taskState.planId,
+    taskCount: tasks.length,
+    results: [],
+  });
   await writeSnapshot(rootDir, "parallel_agents_started", { runId, taskIds: tasks.map((task) => task.id) });
 
   const results = await Promise.all(tasks.map((task, index) => runOneAgent(rootDir, runDir, runId, task, {
@@ -74,7 +91,68 @@ export async function runParallelAgents(rootDir, options = {}) {
 export async function listParallelAgentRuns(rootDir) {
   await ensureHelixDirs(rootDir);
   const index = await readJson(resolveHelixPath(rootDir, "agent-runs", "index.json"), { runs: [] });
+  return reconcileRunIndex(rootDir, index);
+}
+
+/**
+ * Self-healing for the run index: a run whose per-task result.json files
+ * exist on disk but which never made it into index.json (index write failed
+ * or the process died mid-run) used to be permanently invisible to
+ * `parallel status` (cross-review P1, round 5, 2026-07-21). Every index read
+ * scans the agent-runs directory and adopts orphan run dirs back into the
+ * index, rebuilding their entries from the result.json files.
+ */
+async function reconcileRunIndex(rootDir, index) {
+  const runsDir = resolveHelixPath(rootDir, "agent-runs");
+  let dirEntries = [];
+  try {
+    dirEntries = await readdir(runsDir, { withFileTypes: true });
+  } catch {
+    return index;
+  }
+  const known = new Set((index.runs || []).map((run) => run.runId));
+  const adopted = [];
+  for (const entry of dirEntries) {
+    if (!entry.isDirectory() || known.has(entry.name)) continue;
+    const runDir = path.join(runsDir, entry.name);
+    const results = [];
+    for (const taskEntry of await readdir(runDir, { withFileTypes: true }).catch(() => [])) {
+      if (!taskEntry.isDirectory()) continue;
+      const result = await readJson(path.join(runDir, taskEntry.name, "result.json"), null);
+      if (!result) continue;
+      results.push({
+        taskId: result.taskId || taskEntry.name,
+        agent: result.agent || null,
+        pass: result.pass ?? null,
+        runDir: result.runDir || path.relative(rootDir, path.join(runDir, taskEntry.name)),
+        lifecycle: result.lifecycle || null,
+      });
+    }
+    if (results.length === 0) continue;
+    index.runs = index.runs || [];
+    index.runs.push({
+      runId: entry.name,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      recovered: true,
+      results,
+    });
+    adopted.push(entry.name);
+  }
+  if (adopted.length > 0) {
+    await writeJsonAtomic(resolveHelixPath(rootDir, "agent-runs", "index.json"), index);
+    await appendLedger(rootDir, { type: "parallel_run_index_reconciled", adoptedRunIds: adopted }).catch(() => {});
+  }
   return index;
+}
+
+async function registerRunIndexEntry(rootDir, runId) {
+  const indexPath = resolveHelixPath(rootDir, "agent-runs", "index.json");
+  const index = await readJson(indexPath, { runs: [] });
+  if (!index.runs.some((run) => run.runId === runId)) {
+    index.runs.push({ runId, createdAt: nowIso(), updatedAt: nowIso(), results: [] });
+    await writeJsonAtomic(indexPath, index);
+  }
 }
 
 export async function parallelAgentStatus(rootDir, options = {}) {
@@ -183,19 +261,91 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
   if (files.length === 0 && typeof result.result?.patch !== "string") {
     throw new Error("parallel result has no result.files or result.patch to admit");
   }
+  const proposedPaths = files.length > 0
+    ? files.map((file) => file.path)
+    : normalizePatchPaths(result.result?.patchPaths || result.result?.changedPaths || extractPatchPaths(result.result?.patch || ""));
 
-  // Task status is adjudicated BEFORE any file is applied to the workspace
-  // (cross-review P1, round 4, 2026-07-21). A completed task is either an
-  // idempotent resume (this run already admitted it but the lifecycle release
-  // was interrupted — finish the release, touch no files) or a hard refusal.
-  const current = await getAdmissionTask(rootDir, options.taskId);
-  if (current.task.status === "completed") {
-    const admissionEvidence = [...(current.task.evidence || [])].reverse().find(
-      (entry) => entry?.kind === "parallel_agent_admission" && entry.runId === options.runId,
-    );
-    if (!admissionEvidence) {
-      throw new Error(`task ${options.taskId} is already completed; refusing to apply parallel result from run ${options.runId}`);
+  // Phase 1 — claim. Status adjudication, writable-paths precheck, the task
+  // claim (verifying + admission evidence) and the started ledger event all
+  // happen under one task-state lock, BEFORE any workspace file is touched
+  // (cross-review P0, round 5, 2026-07-21). This both closes the
+  // check-then-write race and guarantees that every workspace mutation has
+  // an established transaction (started ledger + claimed task) behind it.
+  const claim = await withTaskStateLock(rootDir, `parallel-admit:${options.taskId}`, async () => {
+    const taskState = await loadTaskState(rootDir);
+    if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
+    const task = taskState.tasks.find((candidate) => candidate.id === options.taskId);
+    if (!task) throw new Error(`unknown task: ${options.taskId}`);
+
+    if (task.status === "completed") {
+      // A completed task is either an idempotent resume (THIS run completed
+      // it through the gates, only the lifecycle release was interrupted) or
+      // a hard refusal. "This run completed it" requires a chain-verified
+      // completed ledger event for this exact run — the admission-started
+      // evidence entry alone is not enough, because a run whose admission
+      // failed and rolled back also left one behind (cross-review P1,
+      // round 5, 2026-07-21).
+      const completedByThisRun = await hasVerifiedRunCompletionEvent(rootDir, options.runId, options.taskId);
+      if (!completedByThisRun) {
+        throw new Error(`task ${options.taskId} is already completed; refusing to apply parallel result from run ${options.runId}`);
+      }
+      const admissionEvidence = [...(task.evidence || [])].reverse().find(
+        (entry) => entry?.kind === "parallel_agent_admission" && entry.runId === options.runId,
+      );
+      return { kind: "resume", task, appliedPaths: admissionEvidence?.appliedPaths || [] };
     }
+    if (!["pending", "in_progress", "verifying"].includes(task.status)) {
+      throw new Error(`task ${options.taskId} status ${task.status} cannot admit parallel result`);
+    }
+    const denied = proposedPaths.filter((filePath) => !pathAllowed(filePath, task.writable_paths || []));
+    if (denied.length > 0) {
+      throw new Error(`parallel admission denied by writable_paths: ${denied.join(", ")}`);
+    }
+
+    const workerResult = {
+      kind: "worker",
+      at: nowIso(),
+      command: `parallel_admit:${options.runId}:${options.taskId}`,
+      exitCode: 0,
+      stdout: files.length > 0
+        ? `Admitted ${files.length} file(s) from ${result.agent}`
+        : `Admitted patch with ${proposedPaths.length} path(s) from ${result.agent}`,
+      stderr: "",
+      source: "parallel_agent_admission",
+      runId: options.runId,
+      agent: result.agent,
+      resultPath: result.runDir ? `${result.runDir}/result.json` : null,
+    };
+    if (task.status === "pending") task.attempts += 1;
+    task.status = "verifying";
+    // New admission round invalidates gate results from previous rounds
+    // (same rule as the linear runtime's new-worker-round clearing).
+    task.last_verify_result = null;
+    task.last_scope_result = null;
+    task.last_review_result = null;
+    task.evidence.push(workerResult);
+    task.evidence.push({
+      kind: "parallel_agent_admission",
+      at: nowIso(),
+      runId: options.runId,
+      agent: result.agent,
+      appliedPaths: proposedPaths,
+      admissionMode: files.length > 0 ? "files" : "patch",
+      summary: result.result?.summary || "",
+    });
+    task.updatedAt = nowIso();
+    await appendLedger(rootDir, {
+      type: "parallel_agent_admission_started",
+      runId: options.runId,
+      taskId: options.taskId,
+      agent: result.agent,
+      appliedPaths: proposedPaths,
+    });
+    await persistTaskState(rootDir, taskState);
+    return { kind: "claimed", workerResult, writablePaths: task.writable_paths || [] };
+  });
+
+  if (claim.kind === "resume") {
     await updateAgentRunLifecycle(rootDir, options.runId, options.taskId, "released", {
       admissionStatus: "completed",
       releasedAt: nowIso(),
@@ -206,7 +356,7 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
       runId: options.runId,
       taskId: options.taskId,
       status: "completed",
-      appliedPaths: admissionEvidence.appliedPaths || [],
+      appliedPaths: claim.appliedPaths,
       resumed: true,
     });
     return {
@@ -215,29 +365,68 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
       taskId: options.taskId,
       status: "completed",
       resumed: true,
-      appliedPaths: admissionEvidence.appliedPaths || [],
-      verifyResult: current.task.last_verify_result || null,
-      scopeResult: current.task.last_scope_result || null,
-      reviewResult: current.task.last_review_result || null,
+      appliedPaths: claim.appliedPaths,
+      verifyResult: claim.task.last_verify_result || null,
+      scopeResult: claim.task.last_scope_result || null,
+      reviewResult: claim.task.last_review_result || null,
       acceptanceProof: null,
       rollback: null,
-      task: current.task,
+      task: claim.task,
     };
   }
-  if (!["pending", "in_progress", "verifying"].includes(current.task.status)) {
-    throw new Error(`task ${options.taskId} status ${current.task.status} cannot admit parallel result`);
+
+  // Phase 2 — apply the child's changes. ANY failure in here (write error,
+  // patch failure, denied actual paths, even the mid-apply crash of a later
+  // step) rolls the workspace back to its pre-admission content and releases
+  // the claim, so a failed admission never leaves half-applied files plus a
+  // task stuck in verifying (cross-review P0, round 5, 2026-07-21).
+  let rollbackPlan = { mode: "none", paths: [] };
+  let appliedPaths = proposedPaths;
+  try {
+    if (files.length > 0) {
+      rollbackPlan = await createFileRollbackPlan(rootDir, files);
+      for (const file of files) {
+        const absolutePath = path.join(rootDir, file.path);
+        assertInsideRoot(rootDir, absolutePath, file.path);
+        await mkdir(path.dirname(absolutePath), { recursive: true });
+        await writeFile(absolutePath, file.content, "utf8");
+      }
+    } else {
+      rollbackPlan = { mode: "patch", patch: result.result.patch, paths: proposedPaths };
+      await applyAgentPatch(rootDir, result.result.patch);
+      const actualPaths = await collectActualAdmissionPaths(rootDir, proposedPaths);
+      const actualDenied = actualPaths.filter((filePath) => !pathAllowed(filePath, claim.writablePaths));
+      if (actualDenied.length > 0) {
+        throw new Error(`parallel admission denied by actual written paths: ${actualDenied.join(", ")}`);
+      }
+      rollbackPlan.paths = actualPaths;
+      appliedPaths = actualPaths;
+    }
+  } catch (error) {
+    const applyError = error instanceof Error ? error : new Error(String(error));
+    const rollback = await rollbackAdmissionChanges(rootDir, rollbackPlan);
+    await releaseAdmissionClaim(rootDir, options.taskId, {
+      runId: options.runId,
+      error: applyError,
+      rollback,
+    });
+    await updateAgentRunLifecycle(rootDir, options.runId, options.taskId, "awaiting_revision", {
+      admissionStatus: "apply_failed",
+      rollback,
+    }).catch(() => {});
+    throw new Error(`parallel admission failed while applying files (workspace rollback: ${rollback.status}): ${applyError.message}`);
   }
 
-  const prepared = await prepareAdmission(rootDir, options.taskId, result, files);
+  // Phase 3 — gates through the shared delivery pipeline.
   const finalized = await finalizeAdmission(rootDir, options.taskId, {
-    workerResult: prepared.workerResult,
-    changedPaths: prepared.appliedPaths,
+    workerResult: claim.workerResult,
+    changedPaths: appliedPaths,
     runId: options.runId,
   });
   const { verifyResult, scopeResult, reviewResult } = finalized;
   let rollback = null;
   if (finalized.status !== "completed") {
-    rollback = await rollbackAdmissionChanges(rootDir, prepared.rollbackPlan);
+    rollback = await rollbackAdmissionChanges(rootDir, rollbackPlan);
   }
   // For the completed outcome the admission ledger event was already written
   // inside finalizeAdmission, BEFORE the canonical completed persist (ledger
@@ -249,7 +438,7 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
       runId: options.runId,
       taskId: options.taskId,
       status: finalized.status,
-      appliedPaths: prepared.appliedPaths,
+      appliedPaths,
       rollback,
     });
   }
@@ -258,24 +447,29 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
     releasedAt: finalized.status === "completed" ? nowIso() : null,
     rollback,
   });
-  await writeSnapshot(rootDir, "parallel_agent_admission_completed", {
-    runId: options.runId,
-    taskId: options.taskId,
-    status: finalized.status,
-    appliedPaths: prepared.appliedPaths,
-    rollback,
+  // Post-commit convenience: a snapshot failure after the completion has
+  // been persisted must not fail the admission, only leave a ledger trace.
+  const sideEffectWarnings = await runPostCompletionSideEffects(rootDir, finalized.planId, finalized.task, async () => {
+    await writeSnapshot(rootDir, "parallel_agent_admission_completed", {
+      runId: options.runId,
+      taskId: options.taskId,
+      status: finalized.status,
+      appliedPaths,
+      rollback,
+    });
   });
   return {
     kind: "parallel_agent_admission",
     runId: options.runId,
     taskId: options.taskId,
     status: finalized.status,
-    appliedPaths: prepared.appliedPaths,
+    appliedPaths,
     verifyResult,
     scopeResult,
     reviewResult,
     acceptanceProof: finalized.acceptanceProof || null,
     rollback,
+    sideEffectWarnings,
     task: finalized.task,
   };
 }
@@ -311,89 +505,55 @@ async function readParallelAgentResult(rootDir, runId, taskId) {
   return result;
 }
 
-async function prepareAdmission(rootDir, taskId, result, files) {
-  const current = await getAdmissionTask(rootDir, taskId);
-  if (!["pending", "in_progress", "verifying"].includes(current.task.status)) {
-    throw new Error(`task ${current.task.id} status ${current.task.status} cannot admit parallel result`);
-  }
-  const proposedPaths = files.length > 0 ? files.map((file) => file.path) : normalizePatchPaths(result.result?.patchPaths || result.result?.changedPaths || extractPatchPaths(result.result?.patch || ""));
-  const denied = proposedPaths.filter((filePath) => !pathAllowed(filePath, current.task.writable_paths || []));
-  if (denied.length > 0) {
-    throw new Error(`parallel admission denied by writable_paths: ${denied.join(", ")}`);
-  }
-
-  let rollbackPlan = { mode: "none", paths: [] };
-  if (files.length > 0) {
-    rollbackPlan = await createFileRollbackPlan(rootDir, files);
-    for (const file of files) {
-      const absolutePath = path.join(rootDir, file.path);
-      assertInsideRoot(rootDir, absolutePath, file.path);
-      await mkdir(path.dirname(absolutePath), { recursive: true });
-      await writeFile(absolutePath, file.content, "utf8");
-    }
-  } else if (typeof result.result?.patch === "string") {
-    rollbackPlan = { mode: "patch", patch: result.result.patch, paths: proposedPaths };
-    await applyAgentPatch(rootDir, result.result.patch);
-    const actualPaths = await collectActualAdmissionPaths(rootDir, proposedPaths);
-    const actualDenied = actualPaths.filter((filePath) => !pathAllowed(filePath, current.task.writable_paths || []));
-    if (actualDenied.length > 0) {
-      const rollback = await rollbackAdmissionChanges(rootDir, rollbackPlan);
-      throw new Error(`parallel admission denied by actual written paths: ${actualDenied.join(", ")}; rollback=${rollback.status}`);
-    }
-    rollbackPlan.paths = actualPaths;
-    proposedPaths.splice(0, proposedPaths.length, ...actualPaths);
-  } else {
-    throw new Error("parallel result has no result.files or result.patch to admit");
-  }
-
-  const workerResult = {
-    kind: "worker",
-    at: nowIso(),
-    command: `parallel_admit:${result.runId}:${taskId}`,
-    exitCode: 0,
-    stdout: files.length > 0
-      ? `Admitted ${files.length} file(s) from ${result.agent}`
-      : `Admitted patch with ${proposedPaths.length} path(s) from ${result.agent}`,
-    stderr: "",
-    source: "parallel_agent_admission",
-    runId: result.runId,
-    agent: result.agent,
-    resultPath: result.runDir ? `${result.runDir}/result.json` : null,
-  };
-  const task = await updateAdmissionTask(rootDir, taskId, (candidate) => {
-    if (!["pending", "in_progress", "verifying"].includes(candidate.status)) {
-      throw new Error(`task ${candidate.id} status ${candidate.status} cannot admit parallel result`);
-    }
-    if (candidate.status === "pending") {
-      candidate.attempts += 1;
-    }
-    candidate.status = "verifying";
-    // New admission round invalidates gate results from previous rounds
-    // (same rule as the linear runtime's new-worker-round clearing).
-    candidate.last_verify_result = null;
-    candidate.last_scope_result = null;
-    candidate.last_review_result = null;
-    candidate.evidence.push(workerResult);
-    candidate.evidence.push({
-      kind: "parallel_agent_admission",
+/**
+ * Releases the admission claim after a failed file application: the task
+ * goes back to pending with an apply-failure record so a later admission or
+ * linear run can retry cleanly, instead of leaving the task stuck in
+ * verifying with a half-applied workspace (cross-review P0, round 5,
+ * 2026-07-21).
+ */
+async function releaseAdmissionClaim(rootDir, taskId, { runId, error, rollback }) {
+  await withTaskStateLock(rootDir, `parallel-admit-release:${taskId}`, async () => {
+    const taskState = await loadTaskState(rootDir);
+    if (!taskState) return;
+    const task = taskState.tasks.find((candidate) => candidate.id === taskId);
+    if (!task || task.status !== "verifying") return;
+    task.status = "pending";
+    task.last_failure = {
       at: nowIso(),
-      runId: result.runId,
-      agent: result.agent,
-      appliedPaths: proposedPaths,
-      admissionMode: files.length > 0 ? "files" : "patch",
-      summary: result.result?.summary || "",
+      reason: "admission_apply_failed",
+      summary: `parallel admission failed while applying files: ${error.message}`,
+      retryHint: rollback?.status === "rolled_back"
+        ? "工作区已回滚到 admission 前的内容，修复失败原因后重新 admit 即可"
+        : `工作区回滚状态: ${rollback?.status || "unknown"}，请先人工核对 ${(rollback?.paths || []).join(", ") || "改动文件"} 再重新 admit`,
+    };
+    task.updatedAt = nowIso();
+    await appendLedger(rootDir, {
+      type: "parallel_agent_admission_apply_failed",
+      runId: runId || null,
+      taskId,
+      error: error.message,
+      rollback: rollback?.status || null,
+      rollbackPaths: rollback?.paths || [],
     });
-    candidate.updatedAt = nowIso();
-    return candidate;
+    await persistTaskState(rootDir, taskState);
   });
-  await appendLedger(rootDir, {
-    type: "parallel_agent_admission_started",
-    runId: result.runId,
-    taskId,
-    agent: result.agent,
-    appliedPaths: proposedPaths,
-  });
-  return { task, workerResult, appliedPaths: proposedPaths, rollbackPlan };
+}
+
+/**
+ * True only when the chain-verified ledger contains a completed admission
+ * event for this exact run+task. Used by the resume branch: an admission
+ * that failed and rolled back also left admission evidence on the task, so
+ * evidence alone cannot prove "this run is the one that completed the task".
+ */
+async function hasVerifiedRunCompletionEvent(rootDir, runId, taskId) {
+  const entries = await readVerifiedLedgerEntries(rootDir);
+  return entries.some(
+    (entry) => entry.type === "parallel_agent_admission_completed"
+      && entry.runId === runId
+      && entry.taskId === taskId
+      && entry.status === "completed",
+  );
 }
 
 async function collectActualAdmissionPaths(rootDir, fallbackPaths) {
@@ -497,9 +657,14 @@ async function finalizeAdmission(rootDir, taskId, { workerResult, changedPaths, 
         appliedPaths: changedPaths || [],
         rollback: null,
       });
-      await persistTaskState(rootDir, taskState);
+      // Wisdom and digest are INSIDE the completion transaction (before the
+      // canonical persist): if either write fails, the task stays verifying
+      // and the recovery adjudication re-runs the whole completion, so a
+      // completed task can never permanently miss them (cross-review P1,
+      // round 5, 2026-07-21).
       await appendWisdom(rootDir, task, verifyResult);
       await writeMemoryDigest(rootDir, { reason: "parallel_admission_completed", stage: "checkpoint", task, taskId });
+      await persistTaskState(rootDir, taskState);
       return { status: "completed", planId: taskState.planId, task, acceptanceProof, verifyResult, scopeResult, reviewResult };
     }
 
@@ -541,26 +706,6 @@ async function finalizeAdmission(rootDir, taskId, { workerResult, changedPaths, 
     await persistTaskState(rootDir, taskState);
     return { status: task.status === "failed" ? "failed" : "retry", planId: taskState.planId, task, acceptanceProof, verifyResult, scopeResult, reviewResult };
   });
-}
-
-async function updateAdmissionTask(rootDir, taskId, mutate) {
-  return withTaskStateLock(rootDir, `parallel-admit:${taskId}`, async () => {
-    const taskState = await loadTaskState(rootDir);
-    if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
-    const task = taskState.tasks.find((candidate) => candidate.id === taskId);
-    if (!task) throw new Error(`unknown task: ${taskId}`);
-    const updated = mutate(task);
-    await persistTaskState(rootDir, taskState);
-    return updated;
-  });
-}
-
-async function getAdmissionTask(rootDir, taskId) {
-  const taskState = await loadTaskState(rootDir);
-  if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
-  const task = taskState.tasks.find((candidate) => candidate.id === taskId);
-  if (!task) throw new Error(`unknown task: ${taskId}`);
-  return { planId: taskState.planId, task };
 }
 
 async function runOneAgent(rootDir, runDir, runId, task, options) {

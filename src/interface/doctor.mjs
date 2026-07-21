@@ -180,7 +180,17 @@ async function checkCompletionIntegrity(rootDir, findings) {
     }
   }
 
-  // 2) 派生视图（plan JSON / tasks.md）与 canonical tasks.json 的状态分叉。
+  // 2) 完成后置副产物（快照/总结）写失败：完成状态本身不回退，但失败会
+  //    以 completion_side_effect_failed 事件入账（round 5, 2026-07-21），
+  //    doctor 把它们晒出来，避免"完成了但快照缺失"永远无人知晓。
+  let sideEffectFailures = 0;
+  for (const entry of await readVerifiedLedgerEntries(rootDir)) {
+    if (entry.type !== "completion_side_effect_failed") continue;
+    sideEffectFailures += 1;
+    addFinding(findings, "warn", "completion_audit", `task ${entry.taskId} completed but a post-completion side effect failed (${entry.error || "unknown error"}); the snapshot/summary for that completion may be missing`, { taskId: entry.taskId });
+  }
+
+  // 3) 派生视图（plan JSON / tasks.md）与 canonical tasks.json 的状态分叉。
   const canonicalStatus = new Map((taskState.tasks || []).map((task) => [task.id, task.status]));
   let derivedDivergences = 0;
   const planPath = resolveHelixPath(rootDir, "plans", `${taskState.planId}.json`);
@@ -206,7 +216,7 @@ async function checkCompletionIntegrity(rootDir, findings) {
     }
   }
 
-  return { checkedCompleted: audited, totalTasks: (taskState.tasks || []).length, planId: taskState.planId, orphanCompletionEvents, derivedDivergences };
+  return { checkedCompleted: audited, totalTasks: (taskState.tasks || []).length, planId: taskState.planId, orphanCompletionEvents, sideEffectFailures, derivedDivergences };
 }
 
 function parseTasksMarkdownStatuses(markdown) {
