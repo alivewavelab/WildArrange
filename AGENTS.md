@@ -70,6 +70,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/orchestration/plan-state.mjs`                            | 计划导入、校验、路由 enrichment、任务状态加载                 |
 | `src/orchestration/linear-runtime.mjs`                        | 线性任务节点运行时、重试 / checkpoint，经 gateway 调用能力       |
 | `src/orchestration/parallel-runtime.mjs`                      | 命令型子 Agent 并行运行、隔离结果、skipped/cleanup 生命周期状态与消息发布 |
+| `src/orchestration/admission.mjs`                             | 并行 admission 事务：claim → apply → gates → commit/rollback，全程持全局任务锁 |
 | `src/orchestration/delivery-pipeline.mjs`                     | 共享交付流水线：verify → scope → review → acceptance-proof → checkpoint 顺序 |
 | `src/orchestration/task-board.mjs`                            | 轻量任务板与消息板                                     |
 | `src/orchestration/change-governance.mjs`                     | 任务变更治理、Review Blocker、ChangeRequest           |

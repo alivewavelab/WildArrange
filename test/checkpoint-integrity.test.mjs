@@ -10,7 +10,7 @@
  * EACCES — exactly the "disk said no at the last moment" scenario.
  */
 import assert from "node:assert/strict";
-import { chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
@@ -938,6 +938,245 @@ test("adversarial: a crash while finalizing keeps the workspace and resumes with
     assert.match(ledger, /parallel_agent_admission_reclaimed/);
     const lifecycle = await readJson(resolveHelixPath(dir, "agent-runs", batch.runId, "T001", "result.json"));
     assert.equal(lifecycle.lifecycle?.status, "released");
+  });
+});
+
+test("adversarial: two tasks with overlapping paths admit concurrently without disturbing each other's gates", async () => {
+  // Cross-review P0 (round 7, 2026-07-21): there was no workspace mutex
+  // across tasks — task B's file apply could land in the middle of task A's
+  // verify, so A got verified against content it never produced. Admission
+  // now holds the global task-state lock for the whole apply+gates section.
+  // Each verify below reads the shared file twice with a pause in between
+  // and fails if the content changed mid-gate.
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const stableVerify = (expected) => nodeEval(
+      `const fs=require('fs'); const a=fs.readFileSync('src/shared.txt','utf8'); if(a.trim()!=='${expected}') process.exit(1); setTimeout(()=>{ const b=fs.readFileSync('src/shared.txt','utf8'); process.exit(a===b?0:1); }, 400);`,
+    );
+    const planPath = resolveHelixPath(dir, "artifacts", "overlap-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Overlapping writable paths",
+      tasks: [
+        { id: "T001", subject: "writes alpha", verify_commands: [stableVerify("alpha")], writable_paths: ["src/**"] },
+        { id: "T002", subject: "writes beta", verify_commands: [stableVerify("beta")], writable_paths: ["src/**"] },
+      ],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    const command = [
+      "node -e",
+      JSON.stringify("const fs=require('fs'); const t=process.argv[2]; fs.writeFileSync(process.argv[1], JSON.stringify({summary:t, files:[{path:'src/shared.txt', content:(t==='T001'?'alpha':'beta')+'\\n'}]}));"),
+      "{outputJson}",
+      "{taskId}",
+    ].join(" ");
+    const batch = await runParallelAgents(dir, { taskIds: ["T001", "T002"], maxAgents: 2, agent: "Kui", command });
+
+    const outcomes = await Promise.allSettled([
+      admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" }),
+      admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T002" }),
+    ]);
+    for (const outcome of outcomes) {
+      assert.equal(outcome.status, "fulfilled", `admission must not fail: ${outcome.reason?.message || ""}`);
+      assert.equal(outcome.value.status, "completed", "both tasks must pass their own gates without interference");
+    }
+    const finalContent = (await readFile(path.join(dir, "src", "shared.txt"), "utf8")).trim();
+    assert.ok(["alpha", "beta"].includes(finalContent));
+  });
+});
+
+test("adversarial: a linear run and a parallel admission writing the same file do not interleave", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    const stableVerify = (expected) => nodeEval(
+      `const fs=require('fs'); const a=fs.readFileSync('src/shared.txt','utf8'); if(a.trim()!=='${expected}') process.exit(1); setTimeout(()=>{ const b=fs.readFileSync('src/shared.txt','utf8'); process.exit(a===b?0:1); }, 400);`,
+    );
+    const planPath = resolveHelixPath(dir, "artifacts", "linear-vs-admit-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Linear run vs parallel admission",
+      tasks: [
+        {
+          id: "T001",
+          subject: "linear task writes linear",
+          worker_command: nodeEval("const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/shared.txt','linear\\n');"),
+          verify_commands: [stableVerify("linear")],
+          writable_paths: ["src/**"],
+        },
+        { id: "T002", subject: "parallel task writes parallel", verify_commands: [stableVerify("parallel")], writable_paths: ["src/**"] },
+      ],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    const command = [
+      "node -e",
+      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'parallel', files:[{path:'src/shared.txt', content:'parallel\\n'}]}));"),
+      "{outputJson}",
+    ].join(" ");
+    const batch = await runParallelAgents(dir, { taskIds: ["T002"], agent: "Kui", command });
+
+    const [linearOutcome, admitOutcome] = await Promise.allSettled([
+      runNextTask(dir),
+      admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T002" }),
+    ]);
+    assert.equal(linearOutcome.status, "fulfilled", linearOutcome.reason?.message);
+    assert.equal(linearOutcome.value.status, "completed", "the linear task must pass its stability gate");
+    assert.equal(admitOutcome.status, "fulfilled", admitOutcome.reason?.message);
+    assert.equal(admitOutcome.value.status, "completed", "the parallel task must pass its stability gate");
+  });
+});
+
+test("adversarial: a failing admission's rollback can never clobber a successor's completed files", async () => {
+  // Cross-review P0 (round 7, 2026-07-21): the gate-failure path used to
+  // release the claim (task back to pending) BEFORE rolling the files back.
+  // A successor run could claim, complete, and then have its files
+  // overwritten by the old rollback — task completed, content stale. The
+  // rollback now runs inside the transaction lock, before the release.
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = resolveHelixPath(dir, "artifacts", "rollback-race-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Rollback vs successor",
+      tasks: [
+        {
+          id: "T001",
+          subject: "Content must be good",
+          verify_commands: [nodeEval("const fs=require('fs'); const c=fs.readFileSync('src/out.txt','utf8'); if(c.trim()!=='good') process.exit(1); setTimeout(()=>process.exit(0),300);")],
+          writable_paths: ["src/**"],
+        },
+      ],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    const command = [
+      "node -e",
+      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'bad', files:[{path:'src/out.txt', content:'bad\\n'}]}));"),
+      "{outputJson}",
+    ].join(" ");
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+    // Forge a second run whose proposed content passes the gates.
+    const runGood = `${batch.runId}-good`;
+    await cp(resolveHelixPath(dir, "agent-runs", batch.runId), resolveHelixPath(dir, "agent-runs", runGood), { recursive: true });
+    const goodResultPath = resolveHelixPath(dir, "agent-runs", runGood, "T001", "result.json");
+    const goodResult = await readJson(goodResultPath);
+    goodResult.result.files = [{ path: "src/out.txt", content: "good\n" }];
+    await writeFile(goodResultPath, JSON.stringify(goodResult, null, 2));
+
+    const outcomes = await Promise.allSettled([
+      admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" }),
+      admitParallelAgentResult(dir, { runId: runGood, taskId: "T001" }),
+    ]);
+    const finalState = await loadTaskState(dir);
+    if (finalState.tasks[0].status === "completed") {
+      assert.equal(
+        (await readFile(path.join(dir, "src", "out.txt"), "utf8")).trim(),
+        "good",
+        `a completed task must keep the content its gates verified; outcomes: ${JSON.stringify(outcomes.map((o) => (o.status === "fulfilled" ? o.value.status : o.reason?.message)))}`,
+      );
+    } else {
+      // Neither admission won (e.g. the good run was refused while the bad
+      // one held the claim): the workspace must be back to pre-admission.
+      await assert.rejects(() => readFile(path.join(dir, "src", "out.txt"), "utf8"), /ENOENT/);
+    }
+  });
+});
+
+test("adversarial: an applying-phase crash cannot lose the original file contents", async () => {
+  // Cross-review P0 (round 7, 2026-07-21): the rollback plan lived only in
+  // memory. A crash during the file writes meant the reclaim re-planned the
+  // rollback against the already-mutated workspace — "rollback" then
+  // restored the child's content, not the original. The pre-image plan is
+  // now persisted to disk before the first write and is the authority on
+  // resume.
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    await mkdir(path.join(dir, "src"), { recursive: true });
+    await writeFile(path.join(dir, "src", "data.txt"), "before\n");
+    const planPath = resolveHelixPath(dir, "artifacts", "applying-crash-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Applying crash",
+      tasks: [
+        {
+          id: "T001",
+          subject: "Gates will reject the child content",
+          verify_commands: [nodeEval("process.exit(1)")],
+          writable_paths: ["src/**"],
+        },
+      ],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    const command = [
+      "node -e",
+      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'mutates data', files:[{path:'src/data.txt', content:'after\\n'}]}));"),
+      "{outputJson}",
+    ].join(" ");
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+
+    // Simulate a crash in the middle of the apply phase: the claim is
+    // persisted at phase "applying", the workspace file is already mutated,
+    // and the pre-image plan (written before the first file write) is on
+    // disk — exactly the state the interrupted process leaves behind.
+    const taskState = await loadTaskState(dir);
+    const task = taskState.tasks.find((candidate) => candidate.id === "T001");
+    task.status = "verifying";
+    task.attempts += 1;
+    task.admission_claim = {
+      runId: batch.runId,
+      agent: "Kui",
+      claimedAt: new Date().toISOString(),
+      phase: "applying",
+      appliedPaths: ["src/data.txt"],
+    };
+    await persistTaskState(dir, taskState);
+    await writeFile(path.join(dir, "src", "data.txt"), "after\n");
+    await writeFile(
+      resolveHelixPath(dir, "agent-runs", batch.runId, "T001.rollback-plan.json"),
+      JSON.stringify({
+        runId: batch.runId,
+        taskId: "T001",
+        persistedAt: new Date().toISOString(),
+        plan: { mode: "files", paths: ["src/data.txt"], entries: [{ path: "src/data.txt", existed: true, content: "before\n" }] },
+      }, null, 2),
+    );
+
+    // Reclaim by the same run: gates reject, and the rollback must restore
+    // the ORIGINAL content from the persisted pre-image — not the child's.
+    const outcome = await admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" });
+    assert.notEqual(outcome.status, "completed");
+    assert.equal(
+      (await readFile(path.join(dir, "src", "data.txt"), "utf8")).trim(),
+      "before",
+      "the rejected admission must restore the pre-admission content, not the child's mutation",
+    );
+    assert.notEqual((await loadTaskState(dir)).tasks[0].status, "verifying", "the claim must be released after the rejection");
+  });
+});
+
+test("adversarial: empty and dead-pid lock files do not deadlock the runtime", async () => {
+  // Cross-review P1 (round 7, 2026-07-21): a crash between creating the
+  // lock file and writing the owner line left an empty lock that was
+  // treated as "not stale" forever; a dead-pid lock had to age 300s before
+  // cleanup, so "re-admit the same run after a crash" first failed for
+  // minutes. Empty locks now go stale on a short mtime grace, dead-pid
+  // locks immediately.
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    await importPassingPlan(dir);
+    const lockPath = resolveHelixPath(dir, "team", "tasks.lock");
+
+    // 1. Empty lock file with an old mtime (owner line never written).
+    await writeFile(lockPath, "");
+    const past = new Date(Date.now() - 60_000);
+    await utimes(lockPath, past, past);
+    const afterEmptyLock = await runNextTask(dir);
+    assert.equal(afterEmptyLock.status, "completed", "an orphaned empty lock must not block the runtime");
+
+    // 2. Fresh lock owned by a dead pid: stale immediately, no 300s wait.
+    await writeFile(lockPath, `crashed-owner\n999999\n${Date.now()}\n`);
+    const afterDeadPidLock = await runNextTask(dir);
+    assert.notEqual(afterDeadPidLock.status, undefined);
+    await assert.rejects(() => readFile(lockPath, "utf8"), /ENOENT/, "the stale lock must be cleaned up after use");
   });
 });
 

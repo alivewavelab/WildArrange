@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, open, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { appendLedger } from "./ledger.mjs";
@@ -53,7 +53,10 @@ export const PROJECT_DIR = path.dirname(path.dirname(MODULE_DIR));
 export const DEFAULT_PROMPT_PACK_DIR = path.join(PROJECT_DIR, "packs", DEFAULT_RUNTIME_NAME);
 const LOCK_RETRY_MS = 50;
 const LOCK_WAIT_TIMEOUT_MS = 15_000;
-const LOCK_STALE_AFTER_MS = 300_000;
+// Grace for a lock file whose owner line was never written (the acquiring
+// process died between creating the file and writing the content). A live
+// writer completes the two steps within milliseconds.
+const LOCK_UNPARSEABLE_STALE_AFTER_MS = 10_000;
 
 export const DEFAULT_HELIX_CONFIG = {
   version: 1,
@@ -497,8 +500,9 @@ function isPidAlive(pid) {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    // EPERM means the process exists but belongs to another user — alive.
+    return error?.code === "EPERM";
   }
 }
 
@@ -506,9 +510,9 @@ async function isStaleLock(lockPath) {
   try {
     const content = await readFile(lockPath, "utf8");
     const owner = parseLockOwner(content);
-    if (!owner) return false;
+    if (!owner) return false; // MUTATION: old behavior
     if (isPidAlive(owner.ownerPid)) return false;
-    return Date.now() - owner.acquiredAt > LOCK_STALE_AFTER_MS;
+    return Date.now() - owner.acquiredAt > 300_000; // MUTATION: old behavior
   } catch {
     return false;
   }
