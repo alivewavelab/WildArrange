@@ -50,6 +50,25 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
     // ledger writes are re-appliable); anything else -> back to pending for
     // a clean re-run. Tasks in "in_progress" are deliberately NOT touched:
     // they may be legitimately claimed and being worked on right now.
+    // Likewise a verifying task holding an admission_claim is a parallel
+    // admission in flight (or crashed and resumable by re-admitting the same
+    // run) — adjudicating it here would hijack that transaction and send the
+    // task back to pending under the admitter's feet (cross-review P1,
+    // round 6, 2026-07-21).
+    const claimed = taskState.tasks.find((candidate) => candidate.status === "verifying" && candidate.admission_claim?.runId);
+    if (claimed) {
+      await appendLedger(rootDir, { type: "run_blocked_by_admission_claim", planId: taskState.planId, taskId: claimed.id, runId: claimed.admission_claim.runId });
+      return {
+        status: "blocked",
+        task: null,
+        blockedBy: {
+          taskId: claimed.id,
+          reason: "parallel_admission_in_flight",
+          runId: claimed.admission_claim.runId,
+          hint: `任务 ${claimed.id} 正被并行 admission（run ${claimed.admission_claim.runId}）认领。若那次 admission 已崩溃，用同一 run 重新 admit 即可续跑`,
+        },
+      };
+    }
     const interrupted = taskState.tasks.find((candidate) => candidate.status === "verifying");
     if (interrupted) {
       await appendLedger(rootDir, { type: "run_resumed_verifying_task", planId: taskState.planId, taskId: interrupted.id });
@@ -445,6 +464,12 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
   const taskState = await loadTaskState(rootDir);
   if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["verifying", "in_progress"]);
+  // A verifying task holding an admission_claim belongs to an in-flight (or
+  // crash-resumable) parallel admission; the single-step checkpoint must not
+  // complete it on that run's behalf (cross-review P1, round 6, 2026-07-21).
+  if (task.admission_claim?.runId) {
+    throw new Error(`task ${task.id} is claimed by parallel admission run ${task.admission_claim.runId}; 用同一 run 重新 admit 续跑，单步 checkpoint 不接管进行中的 admission`);
+  }
   const workerResult = [...task.evidence].reverse().find((entry) => entry.kind === "worker");
   // Gate outcomes are read back via the pipeline's own step list, so the
   // single-step workflow cannot complete a task while skipping a gate that

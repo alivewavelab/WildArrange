@@ -294,6 +294,43 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
       );
       return { kind: "resume", task, appliedPaths: admissionEvidence?.appliedPaths || [] };
     }
+    // Ownership: an active admission claim is persisted on the task, so a
+    // "verifying" task can tell apart "another run is admitting right now"
+    // (refuse — otherwise two runs can both complete the same task, cross-
+    // review P0, round 6, 2026-07-21) from "MY admission crashed mid-flight"
+    // (reclaim and continue from the recorded phase, without re-running the
+    // parts that already happened).
+    if (task.admission_claim?.runId && task.status === "verifying") {
+      if (task.admission_claim.runId !== options.runId) {
+        throw new Error(`task ${options.taskId} is currently claimed by parallel admission run ${task.admission_claim.runId} (phase: ${task.admission_claim.phase}); refusing run ${options.runId}. 若那次 admission 已崩溃，用原 run 重新 admit 即可续跑`);
+      }
+      const priorWorker = [...(task.evidence || [])].reverse().find(
+        (entry) => entry?.kind === "worker" && entry.source === "parallel_agent_admission" && entry.runId === options.runId,
+      );
+      await appendLedger(rootDir, {
+        type: "parallel_agent_admission_reclaimed",
+        runId: options.runId,
+        taskId: options.taskId,
+        phase: task.admission_claim.phase,
+      });
+      return {
+        kind: "reclaimed",
+        phase: task.admission_claim.phase,
+        workerResult: priorWorker || {
+          kind: "worker",
+          at: nowIso(),
+          command: `parallel_admit:${options.runId}:${options.taskId}`,
+          exitCode: 0,
+          stdout: "reclaimed admission (original worker evidence missing)",
+          stderr: "",
+          source: "parallel_agent_admission",
+          runId: options.runId,
+          agent: result.agent,
+        },
+        writablePaths: task.writable_paths || [],
+        claimAppliedPaths: task.admission_claim.appliedPaths || proposedPaths,
+      };
+    }
     if (!["pending", "in_progress", "verifying"].includes(task.status)) {
       throw new Error(`task ${options.taskId} status ${task.status} cannot admit parallel result`);
     }
@@ -318,6 +355,15 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
     };
     if (task.status === "pending") task.attempts += 1;
     task.status = "verifying";
+    // The claim carries the owner and the phase, so concurrent admissions
+    // are refused above and a crashed admission can resume deterministically.
+    task.admission_claim = {
+      runId: options.runId,
+      agent: result.agent,
+      claimedAt: nowIso(),
+      phase: "applying",
+      appliedPaths: proposedPaths,
+    };
     // New admission round invalidates gate results from previous rounds
     // (same rule as the linear runtime's new-worker-round clearing).
     task.last_verify_result = null;
@@ -380,49 +426,88 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
   // step) rolls the workspace back to its pre-admission content and releases
   // the claim, so a failed admission never leaves half-applied files plus a
   // task stuck in verifying (cross-review P0, round 5, 2026-07-21).
+  // A reclaimed admission that already reached the "finalizing" phase skips
+  // this whole block: its files are on disk, re-applying (and above all
+  // re-planning a rollback against the already-mutated workspace) would be
+  // wrong (cross-review P0, round 6, 2026-07-21).
   let rollbackPlan = { mode: "none", paths: [] };
-  let appliedPaths = proposedPaths;
-  try {
-    if (files.length > 0) {
-      rollbackPlan = await createFileRollbackPlan(rootDir, files);
-      for (const file of files) {
-        const absolutePath = path.join(rootDir, file.path);
-        assertInsideRoot(rootDir, absolutePath, file.path);
-        await mkdir(path.dirname(absolutePath), { recursive: true });
-        await writeFile(absolutePath, file.content, "utf8");
-      }
-    } else {
-      rollbackPlan = { mode: "patch", patch: result.result.patch, paths: proposedPaths };
-      await applyAgentPatch(rootDir, result.result.patch);
-      const actualPaths = await collectActualAdmissionPaths(rootDir, proposedPaths);
-      const actualDenied = actualPaths.filter((filePath) => !pathAllowed(filePath, claim.writablePaths));
-      if (actualDenied.length > 0) {
-        throw new Error(`parallel admission denied by actual written paths: ${actualDenied.join(", ")}`);
-      }
-      rollbackPlan.paths = actualPaths;
-      appliedPaths = actualPaths;
+  let appliedPaths = claim.kind === "reclaimed" && claim.phase === "finalizing"
+    ? claim.claimAppliedPaths
+    : proposedPaths;
+  if (claim.kind === "reclaimed" && claim.phase === "finalizing") {
+    // If the resumed gates fail, a patch can still be reverse-applied; the
+    // pre-admission file contents from the crashed attempt are gone, so
+    // files-mode keeps mode "none" (the failure hint asks for manual review
+    // instead of pretending a rollback happened).
+    if (typeof result.result?.patch === "string" && files.length === 0) {
+      rollbackPlan = { mode: "patch", patch: result.result.patch, paths: claim.claimAppliedPaths };
     }
-  } catch (error) {
-    const applyError = error instanceof Error ? error : new Error(String(error));
-    const rollback = await rollbackAdmissionChanges(rootDir, rollbackPlan);
-    await releaseAdmissionClaim(rootDir, options.taskId, {
-      runId: options.runId,
-      error: applyError,
-      rollback,
-    });
-    await updateAgentRunLifecycle(rootDir, options.runId, options.taskId, "awaiting_revision", {
-      admissionStatus: "apply_failed",
-      rollback,
-    }).catch(() => {});
-    throw new Error(`parallel admission failed while applying files (workspace rollback: ${rollback.status}): ${applyError.message}`);
+  } else {
+    try {
+      if (files.length > 0) {
+        rollbackPlan = await createFileRollbackPlan(rootDir, files);
+        for (const file of files) {
+          const absolutePath = path.join(rootDir, file.path);
+          assertInsideRoot(rootDir, absolutePath, file.path);
+          await mkdir(path.dirname(absolutePath), { recursive: true });
+          await writeFile(absolutePath, file.content, "utf8");
+        }
+      } else {
+        rollbackPlan = { mode: "patch", patch: result.result.patch, paths: proposedPaths };
+        const alreadyApplied = claim.kind === "reclaimed" && (await patchAlreadyApplied(rootDir, result.result.patch));
+        if (!alreadyApplied) await applyAgentPatch(rootDir, result.result.patch);
+        const actualPaths = await collectActualAdmissionPaths(rootDir, proposedPaths);
+        const actualDenied = actualPaths.filter((filePath) => !pathAllowed(filePath, claim.writablePaths));
+        if (actualDenied.length > 0) {
+          throw new Error(`parallel admission denied by actual written paths: ${actualDenied.join(", ")}`);
+        }
+        rollbackPlan.paths = actualPaths;
+        appliedPaths = actualPaths;
+      }
+    } catch (error) {
+      const applyError = error instanceof Error ? error : new Error(String(error));
+      const rollback = await rollbackAdmissionChanges(rootDir, rollbackPlan);
+      await releaseAdmissionClaim(rootDir, options.taskId, {
+        runId: options.runId,
+        error: applyError,
+        rollback,
+      });
+      await updateAgentRunLifecycle(rootDir, options.runId, options.taskId, "awaiting_revision", {
+        admissionStatus: "apply_failed",
+        rollback,
+      }).catch(() => {});
+      throw new Error(`parallel admission failed while applying files (workspace rollback: ${rollback.status}): ${applyError.message}`);
+    }
+    // Files are on disk: advance the persisted claim phase so a crash from
+    // here on resumes into finalize instead of re-applying (or worse,
+    // rollback-deleting a patch that a fresh retry could not re-apply).
+    await advanceAdmissionClaimPhase(rootDir, options.taskId, options.runId, "finalizing", appliedPaths);
   }
 
-  // Phase 3 — gates through the shared delivery pipeline.
-  const finalized = await finalizeAdmission(rootDir, options.taskId, {
-    workerResult: claim.workerResult,
-    changedPaths: appliedPaths,
-    runId: options.runId,
-  });
+  // Phase 3 — gates through the shared delivery pipeline. A crash anywhere
+  // in here (review report, completion ledger, wisdom, digest, canonical
+  // persist) must NOT roll the workspace back: the artifact may be good and
+  // parts of the completion transaction may already be on the ledger. The
+  // claim stays persisted at phase "finalizing", which is exactly the
+  // resumable state — re-admitting the same run skips the apply and re-runs
+  // the gates (cross-review P0, round 6, 2026-07-21).
+  let finalized;
+  try {
+    finalized = await finalizeAdmission(rootDir, options.taskId, {
+      workerResult: claim.workerResult,
+      changedPaths: appliedPaths,
+      runId: options.runId,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await appendLedger(rootDir, {
+      type: "parallel_agent_admission_finalize_interrupted",
+      runId: options.runId,
+      taskId: options.taskId,
+      error: message,
+    }).catch(() => {});
+    throw new Error(`parallel admission was interrupted while finalizing (workspace changes kept, claim held by run ${options.runId}): ${message}。修复故障后用同一 run 重新 admit 即可从中断处续跑`);
+  }
   const { verifyResult, scopeResult, reviewResult } = finalized;
   let rollback = null;
   if (finalized.status !== "completed") {
@@ -519,6 +604,7 @@ async function releaseAdmissionClaim(rootDir, taskId, { runId, error, rollback }
     const task = taskState.tasks.find((candidate) => candidate.id === taskId);
     if (!task || task.status !== "verifying") return;
     task.status = "pending";
+    task.admission_claim = null;
     task.last_failure = {
       at: nowIso(),
       reason: "admission_apply_failed",
@@ -538,6 +624,40 @@ async function releaseAdmissionClaim(rootDir, taskId, { runId, error, rollback }
     });
     await persistTaskState(rootDir, taskState);
   });
+}
+
+/**
+ * Advances the persisted claim phase (applying -> finalizing) once the
+ * child's files are on disk, so a crash after this point resumes into the
+ * finalize step instead of re-applying files (cross-review P0, round 6,
+ * 2026-07-21). No-op if the claim was lost or taken over in the meantime.
+ */
+async function advanceAdmissionClaimPhase(rootDir, taskId, runId, phase, appliedPaths) {
+  await withTaskStateLock(rootDir, `parallel-admit-phase:${taskId}`, async () => {
+    const taskState = await loadTaskState(rootDir);
+    const task = taskState?.tasks.find((candidate) => candidate.id === taskId);
+    if (!task || task.admission_claim?.runId !== runId) return;
+    task.admission_claim.phase = phase;
+    task.admission_claim.appliedPaths = appliedPaths;
+    task.updatedAt = nowIso();
+    await persistTaskState(rootDir, taskState);
+  });
+}
+
+/**
+ * True when the patch is already present in the workspace (git can apply it
+ * in reverse). Used by the crash-resume path of an "applying"-phase claim,
+ * where we cannot know whether the interrupted attempt got the patch in.
+ */
+async function patchAlreadyApplied(rootDir, patch) {
+  const patchPath = path.join(rootDir, ".helix", "agent-runs", `recheck-${Date.now()}-${process.pid}.patch`);
+  await writeFile(patchPath, patch, "utf8");
+  try {
+    const reverseCheck = await runCommand(`git -C ${shellEscape(rootDir)} apply --reverse --check --whitespace=nowarn ${shellEscape(patchPath)}`, rootDir, 30_000);
+    return reverseCheck.exitCode === 0;
+  } finally {
+    await rm(patchPath, { force: true });
+  }
 }
 
 /**
@@ -621,6 +741,14 @@ async function finalizeAdmission(rootDir, taskId, { workerResult, changedPaths, 
     if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
     const task = taskState.tasks.find((candidate) => candidate.id === taskId);
     if (!task) throw new Error(`unknown task: ${taskId}`);
+    // Ownership gate: finalize may only commit on behalf of the run that
+    // holds the persisted claim. Without this, a stale in-flight admission
+    // could complete a task that has since been released and re-claimed by
+    // another run — two owners for one task (cross-review P0, round 6,
+    // 2026-07-21).
+    if (task.admission_claim?.runId !== runId) {
+      throw new Error(`task ${taskId} admission claim is ${task.admission_claim ? `held by run ${task.admission_claim.runId}` : "no longer held"}; refusing to finalize on behalf of run ${runId}`);
+    }
 
     // Same shared pipeline as the linear runtime: gate order lives in
     // delivery-pipeline.mjs only. This function keeps owning the evidence
@@ -645,6 +773,7 @@ async function finalizeAdmission(rootDir, taskId, { workerResult, changedPaths, 
 
     if (pipelineResult.status === "completed") {
       task.status = "completed";
+      task.admission_claim = null;
       task.updatedAt = nowIso();
       // Ledger first, canonical tasks.json last (commit point): a ledger
       // outage must never leave a completed/released admission without its
@@ -670,6 +799,7 @@ async function finalizeAdmission(rootDir, taskId, { workerResult, changedPaths, 
 
     if (pipelineResult.status === "checkpoint_failed") {
       task.status = "pending";
+      task.admission_claim = null;
       task.last_failure = buildFailureSummary(task, {
         workerResult,
         verifyResult,
@@ -689,6 +819,7 @@ async function finalizeAdmission(rootDir, taskId, { workerResult, changedPaths, 
     }
 
     task.status = shouldFailAdmission(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
+    task.admission_claim = null;
     task.last_failure = buildFailureSummary(task, {
       workerResult,
       verifyResult,

@@ -10,7 +10,7 @@
  * EACCES — exactly the "disk said no at the last moment" scenario.
  */
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
@@ -796,6 +796,148 @@ test("adversarial: a run missing from index.json is rediscovered instead of stay
     // And the rediscovered run is still admissible.
     const admitted = await admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" });
     assert.equal(admitted.status, "completed");
+  });
+});
+
+test("adversarial: two runs admitting the same task concurrently produce exactly one owner", async () => {
+  // Cross-review P0 (round 6, 2026-07-21): the admission claim was not
+  // persisted with an owner, so two runs could both pass the status check,
+  // both finalize, and both mark the same task completed — two completion
+  // ledger events, two released child agents, one task. The persisted
+  // admission_claim (runId + phase) makes the second claim attempt fail.
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = resolveHelixPath(dir, "artifacts", "double-admit-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Double admission",
+      tasks: [
+        {
+          id: "T001",
+          subject: "One task, two claimants",
+          verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/one.txt','utf8').trim()!=='one') process.exit(1);")],
+          writable_paths: ["src/**"],
+        },
+      ],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    const command = [
+      "node -e",
+      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'one', files:[{path:'src/one.txt', content:'one\\n'}]}));"),
+      "{outputJson}",
+    ].join(" ");
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+    // Forge a second run with an identical result for the same task.
+    const runB = `${batch.runId}-rival`;
+    await cp(resolveHelixPath(dir, "agent-runs", batch.runId), resolveHelixPath(dir, "agent-runs", runB), { recursive: true });
+
+    const outcomes = await Promise.allSettled([
+      admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" }),
+      admitParallelAgentResult(dir, { runId: runB, taskId: "T001" }),
+    ]);
+    const winners = outcomes.filter((outcome) => outcome.status === "fulfilled" && outcome.value.status === "completed");
+    const losers = outcomes.filter((outcome) => outcome.status === "rejected");
+    assert.equal(winners.length, 1, `exactly one admission may complete, got: ${JSON.stringify(outcomes.map((o) => o.status))}`);
+    assert.equal(losers.length, 1);
+    assert.match(losers[0].reason.message, /claimed by parallel admission run|already completed/);
+
+    // Exactly ONE completed admission event on the ledger for this task.
+    const ledger = await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8");
+    const completedEvents = ledger
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((entry) => entry.type === "parallel_agent_admission_completed" && entry.taskId === "T001" && entry.status === "completed");
+    assert.equal(completedEvents.length, 1, "one property deed, one owner");
+    const winnerRunId = winners[0].value.runId;
+    assert.equal(completedEvents[0].runId, winnerRunId);
+
+    // Only the winner's child result is released.
+    const loserRunId = winnerRunId === batch.runId ? runB : batch.runId;
+    const loserLifecycle = await readJson(resolveHelixPath(dir, "agent-runs", loserRunId, "T001", "result.json"));
+    assert.notEqual(loserLifecycle.lifecycle?.status, "released", "the losing run must not be released");
+  });
+});
+
+test("adversarial: a crash while finalizing keeps the workspace and resumes with the same run, and nobody else can hijack the claim", async () => {
+  // Cross-review P0 (round 6, 2026-07-21): the try/catch used to cover only
+  // the file-apply phase. A crash inside finalize (review report, ledger,
+  // wisdom, digest, persist) left applied files + a verifying task, and the
+  // "retry" then rollback-deleted the artifact. Now the claim persists at
+  // phase "finalizing": re-admitting the same run skips the apply and re-runs
+  // the gates, while other actors (another run, helix run, the single-step
+  // checkpoint) are all refused for the duration of the claim.
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = resolveHelixPath(dir, "artifacts", "finalize-crash-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Finalize crash resume",
+      tasks: [
+        {
+          id: "T001",
+          subject: "Artifact must survive a finalize crash",
+          verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/artifact.txt','utf8').trim()!=='good') process.exit(1);")],
+          writable_paths: ["src/**"],
+        },
+      ],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    const command = [
+      "node -e",
+      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact', files:[{path:'src/artifact.txt', content:'good\\n'}]}));"),
+      "{outputJson}",
+    ].join(" ");
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+    const runB = `${batch.runId}-rival`;
+    await cp(resolveHelixPath(dir, "agent-runs", batch.runId), resolveHelixPath(dir, "agent-runs", runB), { recursive: true });
+
+    // Crash inside finalize: wisdom write fails AFTER the files are applied
+    // and the gates have run.
+    const wisdomPath = resolveHelixPath(dir, "wisdom", "verification.md");
+    await writeFile(wisdomPath, "", "utf8");
+    await chmod(wisdomPath, 0o444);
+    try {
+      await assert.rejects(
+        () => admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" }),
+        /interrupted while finalizing/,
+      );
+    } finally {
+      await chmod(wisdomPath, 0o644);
+    }
+
+    // The artifact is KEPT (not rolled back) and the claim is persisted.
+    assert.equal((await readFile(path.join(dir, "src", "artifact.txt"), "utf8")).trim(), "good");
+    const stateDuringClaim = await loadTaskState(dir);
+    assert.equal(stateDuringClaim.tasks[0].status, "verifying");
+    assert.equal(stateDuringClaim.tasks[0].admission_claim?.runId, batch.runId);
+    assert.equal(stateDuringClaim.tasks[0].admission_claim?.phase, "finalizing");
+
+    // Nobody else may take over while the claim is held:
+    const hijackRun = await runNextTask(dir);
+    assert.equal(hijackRun.status, "blocked");
+    assert.equal(hijackRun.blockedBy?.reason, "parallel_admission_in_flight");
+    await assert.rejects(
+      () => runWorkflowNode(dir, "checkpoint", { taskId: "T001" }),
+      /claimed by parallel admission/,
+    );
+    await assert.rejects(
+      () => admitParallelAgentResult(dir, { runId: runB, taskId: "T001" }),
+      /claimed by parallel admission run/,
+    );
+    assert.equal((await readFile(path.join(dir, "src", "artifact.txt"), "utf8")).trim(), "good", "hijack attempts must not disturb the artifact");
+
+    // The SAME run resumes: apply is skipped, gates re-run, completion lands.
+    const resumed = await admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" });
+    assert.equal(resumed.status, "completed");
+    const finalState = await loadTaskState(dir);
+    assert.equal(finalState.tasks[0].status, "completed");
+    assert.equal(finalState.tasks[0].admission_claim, null);
+    assert.match(await readFile(wisdomPath, "utf8"), /T001/, "the resumed completion must write the missed wisdom line");
+    const ledger = await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8");
+    assert.match(ledger, /parallel_agent_admission_reclaimed/);
+    const lifecycle = await readJson(resolveHelixPath(dir, "agent-runs", batch.runId, "T001", "result.json"));
+    assert.equal(lifecycle.lifecycle?.status, "released");
   });
 });
 

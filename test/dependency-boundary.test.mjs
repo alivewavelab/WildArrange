@@ -416,6 +416,36 @@ test("dependency boundary: import syntax written inside strings is not an edge, 
   );
 });
 
+test("dependency boundary: legacy shims and helix-core stay declarative re-exports, no business logic", async () => {
+  // Cross-review P2 (round 6, 2026-07-21): legacy files are exempt from the
+  // zone rules ("unconstrained during migration"), which would let business
+  // logic quietly move back INTO a shim and bypass every boundary. This test
+  // closes that gap: every flat src/helix-*.mjs file (including
+  // helix-core.mjs) may contain nothing but export/import declarations.
+  const files = await listMjsFiles(SRC_DIR);
+  const violations = [];
+  for (const filePath of files) {
+    if (classifyZone(filePath) !== "legacy") continue;
+    const masked = maskSource(await readFile(filePath, "utf8"));
+    const withoutDeclarations = masked
+      // export * from "..."; / export * as ns from "...";
+      .replace(/export\s*\*\s*(?:as\s+[\w$]+\s*)?from\s*(["'])[^"']*\1\s*;?/g, " ")
+      // export { a, b as c } from "..."; (named re-exports, possibly multiline)
+      .replace(/export\s*\{[^}]*\}\s*from\s*(["'])[^"']*\1\s*;?/g, " ")
+      // import ... from "..."; (a shim may import solely to re-export by name)
+      .replace(/import\s*(?:[\w$]+\s*,?\s*)?(?:\{[^}]*\}|\*\s*as\s+[\w$]+)?\s*from\s*(["'])[^"']*\1\s*;?/g, " ");
+    // Masked comments are spaces and masked string contents are \u0000, so
+    // anything non-whitespace left over is real executable code.
+    const leftover = withoutDeclarations.replace(/\u0000/g, "").trim();
+    if (leftover.length > 0) {
+      violations.push(`  ${path.relative(SRC_DIR, filePath)}: non-declarative content starts with ${JSON.stringify(leftover.slice(0, 80))}`);
+    }
+  }
+  if (violations.length > 0) {
+    assert.fail(`legacy shim(s) contain business logic (only declarative re-exports are allowed):\n${violations.join("\n")}`);
+  }
+});
+
 test("dependency boundary: no module-level import cycles anywhere in src/", async () => {
   // Zone rules allow ai <-> orchestration in both directions (each edge is
   // legitimate on its own), so a module-level cycle between the two zones
