@@ -14,7 +14,7 @@ import { captureWorkspaceSnapshot } from "../infra/git-worktree.mjs";
 import { changedPathsIntroducedByTask, collectGitChangedPaths, collectGitDiff } from "../infra/git-diff.mjs";
 import { applyVerifierEvidenceToCriteria, criteriaStatus } from "../infra/success-criteria.mjs";
 import { invokeCapability } from "../capabilities/gateway.mjs";
-import { runDeliveryPipeline } from "./delivery-pipeline.mjs";
+import { collectGateEvidenceFromTask, runCompletionSegment, runDeliveryPipeline } from "./delivery-pipeline.mjs";
 import { writeWorkflowSummary } from "./status.mjs";
 import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
 import { findRunnableTask, persistTaskState, writeOutbox } from "./task-board.mjs";
@@ -125,6 +125,31 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
       await writeWorkflowSummary(rootDir, { reason: "all_tasks_completed" });
     }
     return { status: "completed", task, workerResult, verifyResult, scopeResult, reviewResult, acceptanceProof };
+  }
+
+  if (pipelineResult.status === "checkpoint_failed") {
+    // Every gate and the acceptance proof passed, but the checkpoint write
+    // itself failed (e.g. checkpoints dir unwritable). Completion requires a
+    // durable checkpoint, so the task goes back to pending for retry instead
+    // of being silently marked completed.
+    task.status = "pending";
+    task.last_failure = buildFailureSummary(task, {
+      workerResult,
+      verifyResult,
+      scopeResult,
+      reviewResult,
+      criteriaResult: criteria,
+      nextStatus: task.status,
+    });
+    task.last_failure.reason = "checkpoint_failed";
+    task.last_failure.summary = `checkpoint write failed: ${pipelineResult.evidence.checkpointError?.message || "unknown error"}`;
+    task.last_failure.retryHint = "checkpoint 写入失败（检查 .helix/checkpoints 目录是否可写），修复后重跑即可，所有质量门已通过";
+    task.updatedAt = nowIso();
+    await writeFailureReport(rootDir, taskState.planId, task);
+    await persistTaskState(rootDir, taskState);
+    await appendLedger(rootDir, { type: "checkpoint_write_failed", planId: taskState.planId, taskId: task.id, error: pipelineResult.evidence.checkpointError?.message || null });
+    await writeSnapshot(rootDir, "checkpoint_write_failed", { planId: taskState.planId, taskId: task.id });
+    return { status: "retry", task, workerResult, verifyResult, scopeResult, reviewResult, acceptanceProof };
   }
 
   if (acceptanceProof) {
@@ -376,20 +401,20 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
   if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["verifying", "in_progress"]);
   const workerResult = [...task.evidence].reverse().find((entry) => entry.kind === "worker");
-  const verifyResult = task.last_verify_result || [...task.evidence].reverse().find((entry) => entry.kind === "verifier");
-  const scopeResult = task.last_scope_result || [...task.evidence].reverse().find((entry) => entry.kind === "scope_guard");
-  const reviewResult = task.last_review_result || [...task.evidence].reverse().find((entry) => entry.kind === "review_gate");
+  // Gate outcomes are read back via the pipeline's own step list, so the
+  // single-step workflow cannot complete a task while skipping a gate that
+  // the shared delivery pipeline would have run.
+  const { evidence: gateEvidence, failedSteps } = collectGateEvidenceFromTask(task);
+  const { verifyResult, scopeResult, reviewResult } = gateEvidence;
   const criteria = criteriaStatus(task);
 
-  if (workerResult?.exitCode === 0 && verifyResult?.pass === true && criteria.pass && scopeResult?.status === "pass" && reviewResult?.pass === true) {
-    const acceptanceProofEnvelope = await invokeCapability("acceptance-proof", {
-      rootDir,
-      planId: taskState.planId,
-      task,
-      evidence: { workerResult, verifyResult, scopeResult, reviewResult },
+  if (workerResult?.exitCode === 0 && criteria.pass && failedSteps.length === 0) {
+    const completion = await runCompletionSegment(rootDir, taskState.planId, task, {
+      workerResult,
+      ...gateEvidence,
     });
-    const acceptanceProof = acceptanceProofEnvelope.evidence;
-    if (!acceptanceProof.pass) {
+    const acceptanceProof = completion.proofEnvelope.evidence;
+    if (completion.status === "proof_failed") {
       task.status = shouldFailTask(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
       task.last_failure = buildFailureSummary(task, {
         workerResult,
@@ -400,21 +425,39 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
         nextStatus: task.status,
       });
       task.last_failure.reason = "acceptance_proof_failed";
-      task.last_failure.summary = `acceptance proof failed: ${acceptanceProof.checks.filter((check) => check.status === "fail").map((check) => check.name).join(", ")}`;
+      // acceptanceProof can be null when the proof capability threw (the
+      // gateway converts throws into fail envelopes with null evidence).
+      const failedChecks = (acceptanceProof?.checks || []).filter((check) => check.status === "fail").map((check) => check.name).join(", ");
+      task.last_failure.summary = `acceptance proof failed: ${failedChecks || completion.proofEnvelope.error?.message || "acceptance proof capability failed"}`;
       task.updatedAt = nowIso();
       await writeFailureReport(rootDir, taskState.planId, task);
       await persistTaskState(rootDir, taskState);
       return { status: task.status === "failed" ? "failed" : "retry", task, verifyResult, scopeResult, reviewResult, acceptanceProof };
     }
+    if (completion.status === "checkpoint_failed") {
+      task.status = "pending";
+      task.last_failure = buildFailureSummary(task, {
+        workerResult,
+        verifyResult,
+        scopeResult,
+        reviewResult,
+        criteriaResult: criteria,
+        nextStatus: task.status,
+      });
+      task.last_failure.reason = "checkpoint_failed";
+      task.last_failure.summary = `checkpoint write failed: ${completion.checkpointEnvelope.error?.message || "unknown error"}`;
+      task.last_failure.retryHint = "checkpoint 写入失败（检查 .helix/checkpoints 目录是否可写），修复后重跑即可，所有质量门已通过";
+      task.updatedAt = nowIso();
+      await writeFailureReport(rootDir, taskState.planId, task);
+      await persistTaskState(rootDir, taskState);
+      await appendLedger(rootDir, { type: "checkpoint_write_failed", planId: taskState.planId, taskId: task.id, error: completion.checkpointEnvelope.error?.message || null });
+      await writeSnapshot(rootDir, "checkpoint_write_failed", { planId: taskState.planId, taskId: task.id });
+      return { status: "retry", task, verifyResult, scopeResult, reviewResult, acceptanceProof };
+    }
+    // Checkpoint durably written — only now may the task become completed.
     task.status = "completed";
     task.updatedAt = nowIso();
     await persistTaskState(rootDir, taskState);
-    await invokeCapability("checkpoint", {
-      rootDir,
-      planId: taskState.planId,
-      task,
-      evidence: { verifyResult, scopeResult, reviewResult },
-    });
     await appendLedger(rootDir, { type: "node_checkpoint_completed", planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult?.status || "missing", reviewStatus: "pass" });
     await appendWisdom(rootDir, task, verifyResult);
     await writeMemoryDigest(rootDir, { reason: "task_completed", stage: "checkpoint", task, taskId: task.id });

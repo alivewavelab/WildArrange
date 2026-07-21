@@ -433,6 +433,26 @@ async function finalizeAdmission(rootDir, taskId, { workerResult, changedPaths }
       return { status: "completed", planId: taskState.planId, task, acceptanceProof, verifyResult, scopeResult, reviewResult };
     }
 
+    if (pipelineResult.status === "checkpoint_failed") {
+      task.status = "pending";
+      task.last_failure = buildFailureSummary(task, {
+        workerResult,
+        verifyResult,
+        scopeResult,
+        reviewResult,
+        criteriaResult: criteria,
+        nextStatus: task.status,
+      });
+      task.last_failure.reason = "checkpoint_failed";
+      task.last_failure.summary = `checkpoint write failed: ${pipelineResult.evidence.checkpointError?.message || "unknown error"}`;
+      task.last_failure.retryHint = "checkpoint 写入失败（检查 .helix/checkpoints 目录是否可写），修复后重新 admit 即可，所有质量门已通过";
+      task.updatedAt = nowIso();
+      await writeFailureReport(rootDir, taskState.planId, task);
+      await persistTaskState(rootDir, taskState);
+      await appendLedger(rootDir, { type: "checkpoint_write_failed", planId: taskState.planId, taskId: task.id, error: pipelineResult.evidence.checkpointError?.message || null });
+      return { status: "retry", planId: taskState.planId, task, acceptanceProof, verifyResult, scopeResult, reviewResult };
+    }
+
     task.status = shouldFailAdmission(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
     task.last_failure = buildFailureSummary(task, {
       workerResult,

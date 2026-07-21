@@ -61,6 +61,15 @@ th{background:#eef1f6;font-size:12px}
 <body>
 <main>
 
+<div style="border:2px solid #d9534f;background:#fde8e8;border-radius:8px;padding:12px 16px;margin:0 0 16px;font-size:14px;line-height:1.7">
+<strong>⚠️ 本方案已部分被后续实施决策替代（2026-07-21）。</strong>
+依赖规则的最终版以 <code>test/dependency-boundary.test.mjs</code> 与 <code>doc/project-architecture.md</code>「Five-Zone Layering」为准。与本文的差异：
+① 实施 Phase 4 时发现 <code>hooks</code>/<code>context</code>（宿主生命周期钩子、Agent 上下文构建）必须读取任务板与 attention report，完全剥离编排状态的改造成本过高，故放宽为 <strong>AI → Orchestration（只读）</strong> 允许；
+② AI 层的 scope 预检需要与编排层同一条能力封缝，故放宽为 <strong>AI → Capabilities（仅经 gateway）</strong> 允许；
+③ Orchestration → AI 收紧为逐条钉死的白名单边（目前仅 <code>linear-runtime → ai/routing</code>）。
+本文中「AI 不得依赖 Orchestration」「L3a 与 L3b 同级互不依赖」两条按上述决策失效；准确的说法是「五区受控依赖 + 无模块级循环（测试强制）」而非「严格单向」。其余内容（五区划分、能力网关、共享交付流水线、Phase 划分）仍与实施一致。
+交接与验证记录见 <code>doc/2026-07-21-five-zone-refactor-handoff.md</code>。
+</div>
 <h1>WildArrange 五区解耦重构方案</h1>
 <p class="lead">五区 + 严格单向依赖 + 共享交付流水线 + 静态能力网关 + 零破坏兼容。<br>面向 vibe coding 维护者：改工作流只动编排区、改功能只动能力区、每步结果一行人话汇总。</p>
 

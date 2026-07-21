@@ -45,8 +45,8 @@ infra/           foundation、ledger、security、command-runner/safety、git、
 
 ## 三个关键设计决策
 
-1. **能力网关（Capability Gateway）**：`orchestration/` 和 `ai/` 都不能直接 `import` 某个具体的检查文件（比如 `capabilities/verify.mjs`），必须走 `invokeCapability(name, ctx)`。每次调用都会拿到统一的六字段结果信封：`capability / status / evidence / sideEffect / duration_ms / cost / error`。好处：以后想加一种新检查，只要在 `capabilities/` 里新增文件 + 在 `gateway.mjs` 注册一行，编排层和 AI 层代码完全不用动。
-2. **共享交付流水线（delivery-pipeline）**：`verify → scope → review → acceptance-proof → checkpoint` 这条门控顺序原来在线性主流程和并行子 Agent admission 里各写一遍，现在两边都调用同一个 `orchestration/delivery-pipeline.mjs`（线性在 `linear-runtime.mjs` 主循环，并行在 `parallel-runtime.mjs` 的 `finalizeAdmission` 里，均在任务状态锁内执行）。以后想调整门控顺序或加减一道门，只改这一个文件。
+1. **能力网关（Capability Gateway）**：`orchestration/` 和 `ai/` 都不能直接 `import` 某个具体的检查文件（比如 `capabilities/verify.mjs`），必须走 `invokeCapability(name, ctx)`。每次调用都会拿到统一的七字段结果信封：`capability / status / evidence / sideEffect / duration_ms / cost / error`。新增改动的成本要分两种情况说：**新增一种"可调用能力"**（编排层按需调用）只要在 `capabilities/` 里新增文件 + 在 `gateway.mjs` 注册一行，编排层和 AI 层代码不用动；**新增一道"强制质量门"**（每个任务必须过）除了上面两步，还要在 `delivery-pipeline.mjs` 的步骤序列里加入它——但也仅此一处，线性主循环、并行 admission、单步 node 工作流都会自动跟上。
+2. **共享交付流水线（delivery-pipeline）**：`verify → scope → review → acceptance-proof → checkpoint` 这条门控顺序原来在线性主流程和并行子 Agent admission 里各写一遍，现在统一收口到 `orchestration/delivery-pipeline.mjs`：线性主循环（`linear-runtime.mjs`）和并行 admission（`parallel-runtime.mjs` 的 `finalizeAdmission`）整条调用 `runDeliveryPipeline()`；单步 `node checkpoint` 工作流复用其中的完成段 `runCompletionSegment()`（acceptance-proof → checkpoint），并用 `collectGateEvidenceFromTask()` 按流水线自己的步骤清单回读各道门的证据，不再维护第二份门清单。**checkpoint 写入失败绝不会静默当成完成**：流水线检查 checkpoint 信封状态，失败时返回 `checkpoint_failed`，任务回 `pending` 并写失败报告、ledger 记 `checkpoint_write_failed`（网关会把能力抛出的异常吞成 fail 信封，所以必须查信封状态——这是 2026-07-21 交叉走查发现并修复的 P0）。
 3. **依赖边界用测试锁死，不是靠文档口头约定**：`test/dependency-boundary.test.mjs` 会扫描 `src/` 下所有 `.mjs` 文件的 import 语句（提取前先剥掉注释，避免注释里的路径造成误报），按五区分类，凡是违反允许依赖表的都会让 `npm test` 直接失败。边界规则在复查后收紧为：
    - `ai → orchestration`（只读，hooks/context 需要读任务板和 attentionReport）和 `ai → capabilities`（仅经 gateway）是允许项；反方向永久禁止。
    - `orchestration → ai` 收紧为**逐条钉死的白名单**，目前只有一条边（`linear-runtime.mjs → ai/routing.mjs` 的 `routeRequest`，工作流 route 节点需要语义路由）；新增任何一条都得改测试里的白名单，是显式决策。确定性路由表读取（`loadRoutesConfig`/`resolveRouteDecision`）已下沉到 `infra/route-table.mjs`，`plan-state`/`task-board` 不再碰 `ai/`。
@@ -61,15 +61,27 @@ infra/           foundation、ledger、security、command-runner/safety、git、
 | `src/helix-core.mjs` 这个兼容总入口 | 保留在原路径，继续汇总导出所有函数供 `bin/helix.mjs` 和外部旧调用方使用（五区内部文件已全部直连分区实现，不再经它中转） |
 | CLI 命令和参数 | `bin/helix.mjs` 的子命令、参数语义完全没变 |
 | `.helix/` 下的数据格式 | JSON schema、ledger 格式、snapshot 格式零改动 |
-| 全部既有测试 | 109 个测试全程保持绿；重构过程每个 Phase 结束都跑一次 `npm test` |
-| npm 包内容 | `npm pack --dry-run` 验证过，135 个文件正常打包 |
+| 全部既有测试 | 重构起点 109 个测试全程保持绿（复查修复后新增至 111+）；重构过程每个 Phase 结束都跑一次 `npm test` |
+| npm 包内容 | `npm pack --dry-run` 验证过，正常打包（文件数随修复微增，以最新一次输出为准） |
 
 ## 验证结果（最终状态）
 
-- `npm test`：**109/109 全绿**。
+- `npm test`：**全绿**（复查修复后 111+ 个测试，具体数字以 `npm test` 输出为准）。
 - `npm pack --dry-run --cache /private/tmp/helix-npm-cache`：正常出包。
 - 五区下每个 `.mjs` 文件单独 `import()` 都能独立加载，没有循环依赖、没有断链。
 - `test/dependency-boundary.test.mjs` 五个子测试全部通过：①五区依赖方向合法 ②`orchestration`/`ai` 只能经 `gateway.mjs` 调 `capabilities` ③`capabilities` 不依赖 `ai` ④`orchestration → ai` 限定在钉死的白名单内 ⑤全 `src/` 无模块级 import 环。
+
+## 架构决策变更记录（对照原批准方案）
+
+原方案（`doc/plans/2026-07-17-wildarrange-five-zone-refactor.html`，已在文首加"部分被替代"标注）规定严格单向：AI 只能依赖 Infra、AI 与 Capabilities 同级互不依赖。实施到 Phase 4/5 时发现两处放宽是必要的，均已写进边界测试的注释并由测试强制：
+
+| 变更 | 原方案 | 实施决策 | 理由 |
+| --- | --- | --- | --- |
+| AI → Orchestration | 禁止 | 允许（只读） | `ai/hooks.mjs`、`ai/context.mjs` 必须读任务板/attentionReport 才能决定注入什么、拦截什么；完全剥离需把宿主钩子整体上提到编排层，成本与收益不成比例 |
+| AI → Capabilities | 禁止（同级互不依赖） | 允许（仅经 gateway） | 钩子的 scope 预检必须与编排层用同一条能力封缝，否则会出现第二份 scope 逻辑 |
+| Orchestration → AI | 允许（不设限） | 收紧为逐条钉死的白名单（现仅 1 条边） | 双向放行后必须防耦合扩散；配套全图模块级循环检测 |
+
+因此本架构的准确称呼是**"五区受控依赖 + 无模块级循环（测试强制）"**，不是"严格单向"。
 
 ## 已知遗留（下一个人接手时要知道的）
 

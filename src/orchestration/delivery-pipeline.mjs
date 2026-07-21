@@ -48,24 +48,71 @@ export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
     return finalizePipelineResult("blocked", results, evidence, { criteria, criterionEvidenceRecorded });
   }
 
-  const proofEnvelope = await invokeCapability(
-    "acceptance-proof",
-    buildStepContext("acceptance-proof", { rootDir, planId, task, evidence, options }),
-  );
-  results.push(proofEnvelope);
-  recordStepEvidence("acceptance-proof", evidence, proofEnvelope, task);
+  const completion = await runCompletionSegment(rootDir, planId, task, evidence);
+  results.push(completion.proofEnvelope);
+  recordStepEvidence("acceptance-proof", evidence, completion.proofEnvelope, task);
 
-  if (proofEnvelope.status !== "pass") {
+  if (completion.status === "proof_failed") {
     return finalizePipelineResult("blocked", results, evidence, { criteria, criterionEvidenceRecorded });
   }
 
-  const checkpointEnvelope = await invokeCapability(
-    "checkpoint",
-    buildStepContext("checkpoint", { rootDir, planId, task, evidence, options }),
-  );
-  results.push(checkpointEnvelope);
+  results.push(completion.checkpointEnvelope);
+  if (completion.status === "checkpoint_failed") {
+    evidence.checkpointError = completion.checkpointEnvelope.error || { code: "checkpoint_failed", message: "checkpoint capability did not pass" };
+    return finalizePipelineResult("checkpoint_failed", results, evidence, { criteria, criterionEvidenceRecorded });
+  }
 
   return finalizePipelineResult("completed", results, evidence, { criteria, criterionEvidenceRecorded });
+}
+
+/**
+ * The completion segment (acceptance-proof -> checkpoint) shared by the
+ * pipeline above and by the single-step `node checkpoint` workflow, so
+ * completion semantics have exactly one definition. A task may only become
+ * `completed` when this returns status "completed": a failed or throwing
+ * checkpoint write must never be silently absorbed (the gateway converts
+ * throws into fail envelopes; we check the envelope status here).
+ */
+export async function runCompletionSegment(rootDir, planId, task, evidence) {
+  const proofEnvelope = await invokeCapability("acceptance-proof", { rootDir, planId, task, evidence });
+  if (proofEnvelope.status !== "pass") {
+    return { status: "proof_failed", proofEnvelope, checkpointEnvelope: null };
+  }
+  evidence.acceptanceProof = proofEnvelope.evidence;
+  const checkpointEnvelope = await invokeCapability("checkpoint", { rootDir, planId, task, evidence });
+  if (checkpointEnvelope.status !== "pass") {
+    return { status: "checkpoint_failed", proofEnvelope, checkpointEnvelope };
+  }
+  return { status: "completed", proofEnvelope, checkpointEnvelope };
+}
+
+/**
+ * Read back, from persisted task fields/evidence, the outcome of every gate
+ * the pipeline runs. Used by the single-step workflow so its "may this task
+ * complete" precondition follows GATE_STEPS instead of a hand-maintained
+ * list: adding a gate step here makes the node workflow require it too.
+ */
+export function collectGateEvidenceFromTask(task) {
+  const specs = {
+    verify: { key: "verifyResult", lastField: "last_verify_result", kind: "verifier", passed: (record) => record?.pass === true },
+    scope: { key: "scopeResult", lastField: "last_scope_result", kind: "scope_guard", passed: (record) => record?.status === "pass" },
+    review: { key: "reviewResult", lastField: "last_review_result", kind: "review_gate", passed: (record) => record?.pass === true },
+  };
+  const evidence = {};
+  const failedSteps = [];
+  for (const stepName of GATE_STEPS) {
+    const spec = specs[stepName];
+    if (!spec) {
+      failedSteps.push(stepName);
+      continue;
+    }
+    const record = task[spec.lastField]
+      || [...(task.evidence || [])].reverse().find((entry) => entry.kind === spec.kind)
+      || null;
+    evidence[spec.key] = record;
+    if (!spec.passed(record)) failedSteps.push(stepName);
+  }
+  return { evidence, failedSteps };
 }
 
 function buildStepContext(stepName, { rootDir, planId, task, evidence, options }) {
