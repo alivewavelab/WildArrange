@@ -23,7 +23,12 @@ const ZONES = ["interface", "orchestration", "ai", "capabilities", "infra"];
 const ALLOWED_DEPS = {
   interface: ["orchestration", "infra", "legacy"],
   orchestration: ["ai", "capabilities", "infra", "legacy"],
-  ai: ["infra", "legacy"],
+  // ai includes host-facing hooks/context builders that read orchestration
+  // state (current task, attention report) and call gates (via the gateway,
+  // same seam orchestration uses) to decide what to inject/block. That makes
+  // ai -> orchestration and ai -> capabilities legitimate one-way edges; the
+  // reverse (orchestration/capabilities depending on ai) stays forbidden.
+  ai: ["orchestration", "capabilities", "infra", "legacy"],
   capabilities: ["infra", "legacy"],
   infra: ["legacy"],
 };
@@ -107,25 +112,22 @@ test("dependency boundary: zoned files only import allowed lower zones", async (
   }
 });
 
-test("dependency boundary: capabilities/gateway.mjs is the only zoned file capabilities exposes to orchestration", async () => {
+test("dependency boundary: capabilities/gateway.mjs is the only zoned file capabilities exposes to orchestration or ai", async () => {
   const edges = await buildDependencyEdges();
-  const orchestrationToCapabilities = edges.filter(
-    (edge) => edge.sourceZone === "orchestration" && edge.targetZone === "capabilities",
+  const toCapabilities = edges.filter(
+    (edge) =>
+      (edge.sourceZone === "orchestration" || edge.sourceZone === "ai") && edge.targetZone === "capabilities",
   );
-  const nonGatewayTargets = orchestrationToCapabilities.filter((edge) => edge.to !== "capabilities/gateway.mjs");
+  const nonGatewayTargets = toCapabilities.filter((edge) => edge.to !== "capabilities/gateway.mjs");
   assert.deepEqual(
     nonGatewayTargets,
     [],
-    `orchestration must call capabilities only through capabilities/gateway.mjs, found: ${JSON.stringify(nonGatewayTargets)}`,
+    `orchestration/ai must call capabilities only through capabilities/gateway.mjs, found: ${JSON.stringify(nonGatewayTargets)}`,
   );
 });
 
-test("dependency boundary: ai and capabilities zones never import each other", async () => {
+test("dependency boundary: capabilities never imports ai", async () => {
   const edges = await buildDependencyEdges();
-  const violations = edges.filter(
-    (edge) =>
-      (edge.sourceZone === "ai" && edge.targetZone === "capabilities") ||
-      (edge.sourceZone === "capabilities" && edge.targetZone === "ai"),
-  );
-  assert.deepEqual(violations, [], `ai and capabilities must stay siblings, found: ${JSON.stringify(violations)}`);
+  const violations = edges.filter((edge) => edge.sourceZone === "capabilities" && edge.targetZone === "ai");
+  assert.deepEqual(violations, [], `capabilities must not depend on ai, found: ${JSON.stringify(violations)}`);
 });

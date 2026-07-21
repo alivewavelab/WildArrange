@@ -20,7 +20,7 @@ export {
   scopeGuard,
 } from "./capabilities/scope-guard.mjs";
 export { writeCheckpoint } from "./capabilities/checkpoint.mjs";
-export { appendWisdom, writeFailureReport, writeReviewReport } from "./capabilities/task-reports.mjs";
+export { appendWisdom, writeFailureReport, writeReviewReport } from "./infra/task-reports.mjs";
 export {
   listChangeRequests,
   renderChangeRequestMarkdown,

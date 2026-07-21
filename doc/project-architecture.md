@@ -2,71 +2,77 @@
 
 ## Runtime Shape
 
+The codebase is laid out in five dependency zones. Dependencies only flow downward; `test/dependency-boundary.test.mjs` enforces this on every `npm test` run, so it is not just a diagram.
+
 ```text
 bin/helix.mjs
-  -> src/helix-core.mjs
-     -> src/helix-foundation.mjs
-     -> src/helix-adapters.mjs
-     -> src/helix-change.mjs
-     -> src/helix-failure.mjs
-     -> src/helix-acceptance-proof.mjs
-     -> src/helix-routing.mjs
-     -> src/helix-archivist-router.mjs
-     -> src/helix-memory-digest.mjs
-     -> src/helix-rules.mjs
-     -> src/helix-review.mjs
-     -> src/helix-injection.mjs
-     -> src/helix-context.mjs
-     -> src/helix-hooks.mjs
-     -> src/helix-status.mjs
-     -> src/helix-workflow.mjs
-     -> src/helix-node-runtime.mjs
-     -> src/helix-plan.mjs
-     -> src/helix-team.mjs
-     -> src/helix-agent-spawn.mjs
-     -> src/helix-git-worktree.mjs
-     -> src/helix-parallel-agents.mjs
-     -> src/helix-gates.mjs
-  -> src/helix-dashboard.mjs
+  -> src/helix-core.mjs (compatibility barrel, re-exports everything below)
+  -> src/interface/*      (dashboard, adapters, doctor — host/human-facing edge)
+       -> src/orchestration/*, src/infra/*
+  -> src/orchestration/*  (workflow order, retry, gate sequencing)
+       -> src/ai/*, src/capabilities/* (via gateway only), src/infra/*
+  -> src/ai/*             (routing, injection, skills, hooks, context)
+       -> src/orchestration/* (read-only), src/capabilities/* (via gateway only), src/infra/*
+  -> src/capabilities/*   (verify, scope-guard, worker, review-gate, checkpoint, acceptance-proof, gateway)
+       -> src/infra/*
+  -> src/infra/*          (foundation, ledger, security, command-runner/safety, git, rules, llm, memory, ...)
   -> packs/wildarrange-linear/*
   -> .helix/*
 ```
 
+Every old flat `src/helix-*.mjs` path still exists as a two-line `@deprecated` re-export shim (`export * from "./<zone>/<file>.mjs"`), so existing imports keep working while new code targets the zoned path directly.
+
+## Five-Zone Layering
+
+| Zone | Directory | Owns | Allowed to depend on |
+| --- | --- | --- | --- |
+| Interface | `src/interface/` | Dashboard HTTP API, Codex/Cursor adapter install, `doctor` health report — anything a human or host IDE talks to directly | `orchestration`, `infra` |
+| Orchestration | `src/orchestration/` | Task/plan state, linear + parallel runtime loops, the shared `delivery-pipeline`, task board, change governance, status/attention report | `ai`, `capabilities` (gateway only), `infra` |
+| AI | `src/ai/` | Routing, ArchivistRouter, prompt injection, skill matcher, agent context builder, host lifecycle hooks | `orchestration` (read-only), `capabilities` (gateway only), `infra` |
+| Capabilities | `src/capabilities/` | The atomic gates themselves (verify, scope-guard, worker, review-gate, code-intel, acceptance-proof, checkpoint) plus `gateway.mjs`, the single seam every caller above must go through | `infra` |
+| Infra | `src/infra/` | Foundation (paths/JSON/locks/config/snapshots), ledger, security, command-runner/safety, git diff/worktree, rule scanner, LLM provider, memory digest, path matching, success criteria, task predicates | nothing above it |
+
+Two invariants beyond simple layering, both checked by `test/dependency-boundary.test.mjs`:
+
+1. **Gateway-only capability access.** Neither `orchestration/` nor `ai/` may `import` a capability implementation file (e.g. `capabilities/verify.mjs`) directly — they must call `invokeCapability(name, ctx)` from `capabilities/gateway.mjs`. This is the one seam where a new gate can be registered without touching orchestration or AI code, and where every gate outcome is reported through the same six-field envelope (`capability`, `status`, `evidence`, `sideEffect`, `duration_ms`, `cost`, `error`).
+2. **One-way `ai` <-> `capabilities`.** `ai/` may call into `capabilities/` (through the gateway) because hooks and context builders need to ask "is this path in scope" the same way orchestration does. `capabilities/` must never import anything from `ai/` — that direction is permanently blocked.
+
 ## Main Files
 
 - `bin/helix.mjs`: CLI routing.
-- `src/helix-core.mjs`: compatibility export surface for existing CLI/tests/imports.
-- `src/helix-foundation.mjs`: shared constants, runtime initialization, config, locks, prompt-pack registry, snapshots, and resume context basics.
-- `src/helix-ledger.mjs`: hash-chained ledger append, ledger verification, and verified-entry reads. Once the hash chain has started, unhashed appended lines are reported as tampering, and `doctor` only accepts chain-verified entries as completion evidence.
-- `src/helix-adapters.mjs`: Codex/Cursor adapter install, uninstall, restore, report, backup logic, Codex `.codex/hooks.json` generation, Cursor soft-rule generation, and shared slash-command generation (Cursor `.cursor/commands/*.md`, Codex `.agents/skills/*/SKILL.md`).
-- `src/helix-change.mjs`: steering proposals, review blockers, ChangeRequest review, and explicit accept/reject resolution.
-- `src/helix-failure.mjs`: failure reason classification, retry hints, and actionable failure summaries.
-- `src/helix-acceptance-proof.mjs`: checkpoint proof chain that verifies worker, verifier, success criteria, scope, review, and review lanes before completion; also rejects no-op tasks whose worker and verify commands are all trivial with no writable paths.
-- `src/helix-routing.mjs`: intent/domain/complexity routing, route request persistence, deterministic confidence, and optional semantic shadow routing.
-- `src/helix-archivist-router.mjs`: DeepSeek flash based archivist/router runtime, routing packet construction, deterministic fallback, hook-triggered archive updates, context injection packs, and keyword suggestion artifacts.
-- `src/helix-memory-digest.mjs`: structured session/task/checkpoint digest generation for cross-session recovery.
-- `src/helix-rules.mjs`: project rule scanning and rule-context generation from AGENTS/CLAUDE/Cursor-style files.
-- `src/helix-review.mjs`: worker execution and deterministic BaiZe/QiongQi/LuanNiao review lanes.
-- `src/helix-command-safety.mjs`: high-risk shell command preflight shared by worker, verifier, review commands, quality gates, and child-agent runners; blocks destructive system commands and recursive deletion of project source/test/doc directories. Built-in patterns are an immutable floor; `commandSafety.extraPatterns` in config adds project-specific blocks (`compileCommandSafetyPatterns` compiles them and callers thread them via `runCommand` options).
-- `src/helix-security.mjs`: config hash baselines, config verification, runtime state backup, backup listing, one-command state restore, and critical state verification.
-- `src/helix-doctor.mjs`: consistency doctor that audits config structure/mounts, reconciles completed tasks against checkpoints/acceptance proofs/ledger events, verifies the ledger hash chain, and cross-checks the ledger against the latest backup to detect rewrites.
-- `src/helix-code-intel.mjs`: host-neutral code intelligence gates for LSP/typecheck commands, AST/structure commands, hashline anchors, and comment checking.
-- `src/helix-injection.mjs`: injection-point resolution and mounted markdown/skill attachment loading.
-- `src/helix-skill-matcher.mjs`: stage/route/agent/keyword skill matching and configurable prompt model variants.
-- `src/helix-context.mjs`: agent context, resume snapshots, session lineage, and continuation directives.
-- `src/helix-hooks.mjs`: host lifecycle hook handling and pre-tool-use scope guard output.
-- `src/helix-status.mjs`: workflow summary, status report, dashboard data, attention report (open ChangeRequests, failed tasks, user decisions, plans awaiting approval, child agents awaiting acceptance), and ledger tail reads. The attention report is the source of truth for the generic human-decision push: hooks inject it into the host AI context (SessionStart / UserPromptSubmit / PostCompact / Stop) and instruct the AI to surface pending items to the developer with options — no external IM binding.
+- `src/helix-core.mjs`: compatibility export surface for existing CLI/tests/imports; re-exports every zoned module below and must not grow new implementation.
+- `src/infra/foundation.mjs`: shared constants, runtime initialization, config, locks, prompt-pack registry, snapshots, and resume context basics.
+- `src/infra/ledger.mjs`: hash-chained ledger append, ledger verification, and verified-entry reads. Once the hash chain has started, unhashed appended lines are reported as tampering, and `doctor` only accepts chain-verified entries as completion evidence.
+- `src/interface/adapters.mjs`: Codex/Cursor adapter install, uninstall, restore, report, backup logic, Codex `.codex/hooks.json` generation, Cursor soft-rule generation, and shared slash-command generation (Cursor `.cursor/commands/*.md`, Codex `.agents/skills/*/SKILL.md`).
+- `src/orchestration/change-governance.mjs`: steering proposals, review blockers, ChangeRequest review, and explicit accept/reject resolution.
+- `src/infra/failure-analysis.mjs`: failure reason classification, retry hints, and actionable failure summaries.
+- `src/capabilities/acceptance-proof.mjs`: checkpoint proof chain that verifies worker, verifier, success criteria, scope, review, and review lanes before completion; also rejects no-op tasks whose worker and verify commands are all trivial with no writable paths.
+- `src/ai/routing.mjs`: intent/domain/complexity routing, route request persistence, deterministic confidence, and optional semantic shadow routing.
+- `src/ai/archivist-router.mjs`: DeepSeek flash based archivist/router runtime, routing packet construction, deterministic fallback, hook-triggered archive updates, context injection packs, and keyword suggestion artifacts.
+- `src/infra/memory-digest.mjs`: structured session/task/checkpoint digest generation for cross-session recovery.
+- `src/infra/rule-scanner.mjs`: project rule scanning and rule-context generation from AGENTS/CLAUDE/Cursor-style files.
+- `src/capabilities/worker.mjs` / `src/capabilities/review-gate.mjs`: worker execution and deterministic BaiZe/QiongQi/LuanNiao review lanes.
+- `src/infra/command-safety.mjs`: high-risk shell command preflight shared by worker, verifier, review commands, quality gates, and child-agent runners; blocks destructive system commands and recursive deletion of project source/test/doc directories. Built-in patterns are an immutable floor; `commandSafety.extraPatterns` in config adds project-specific blocks (`compileCommandSafetyPatterns` compiles them and callers thread them via `runCommand` options).
+- `src/infra/security.mjs`: config hash baselines, config verification, runtime state backup, backup listing, one-command state restore, and critical state verification.
+- `src/interface/doctor.mjs`: consistency doctor that audits config structure/mounts, reconciles completed tasks against checkpoints/acceptance proofs/ledger events, verifies the ledger hash chain, and cross-checks the ledger against the latest backup to detect rewrites.
+- `src/capabilities/code-intel.mjs`: host-neutral code intelligence gates for LSP/typecheck commands, AST/structure commands, hashline anchors, and comment checking.
+- `src/ai/injection.mjs`: injection-point resolution and mounted markdown/skill attachment loading.
+- `src/ai/skill-matcher.mjs`: stage/route/agent/keyword skill matching and configurable prompt model variants.
+- `src/ai/context.mjs`: agent context, resume snapshots, session lineage, and continuation directives.
+- `src/ai/hooks.mjs`: host lifecycle hook handling and pre-tool-use scope guard output (scope checks go through `capabilities/gateway.mjs`, not a direct import).
+- `src/orchestration/status.mjs`: workflow summary, status report, dashboard data, attention report (open ChangeRequests, failed tasks, user decisions, plans awaiting approval, child agents awaiting acceptance), and ledger tail reads. The attention report is the source of truth for the generic human-decision push: hooks inject it into the host AI context (SessionStart / UserPromptSubmit / PostCompact / Stop) and instruct the AI to surface pending items to the developer with options — no external IM binding.
 
 Plan approval gate: when `planApproval.required` is true, `importPlan` marks the plan `awaiting_plan_approval` and `runNextTask` refuses to start tasks until `approvePlan` (CLI `plan approve` / slash `/helix-approve`) records approval. Off by default so the linear loop is unaffected unless opted in.
-- `src/helix-workflow.mjs`: workflow entrypoint, sample plan generation, and plan template copying.
-- `src/helix-node-runtime.mjs`: linear task node runtime for execute/verify/scope/review/checkpoint/retry.
-- `src/helix-plan.mjs`: plan normalization, graph validation, plan import, route enrichment, task-state loading, and plan approval state (`loadPlanApproval` / `approvePlan`).
-- `src/helix-team.mjs`: team-lite tasks, claims, evidence recording, task-state persistence, outbox, and durable message board.
-- `src/helix-agent-spawn.mjs`: host-neutral child-agent spawn command rendering for Codex/Cursor/custom command adapters.
-- `src/helix-git-worktree.mjs`: Git worktree isolation, patch extraction, patch path parsing, patch admission helpers, and pre-execute workspace snapshots (`git stash create` based) recorded before every worker run.
-- `src/helix-parallel-agents.mjs`: command-based child-agent batch runner, run-dir or Git worktree isolation, skipped-run detection, result collection, lifecycle status, explicit close/release/cleanup, team message publication, file/patch admission, and agent-run index.
-- `src/helix-gates.mjs`: command execution, verifier, scope guard, path and realpath checks, checkpoints, change requests, review/failure reports, and wisdom ledger.
-- `src/helix-dashboard.mjs`: local dashboard HTTP API and HTML UI with POST token, Host, and Origin protections.
+- `src/orchestration/workflow.mjs`: workflow entrypoint, sample plan generation, and plan template copying.
+- `src/orchestration/linear-runtime.mjs`: linear task node runtime for execute/verify/scope/review/checkpoint/retry; every gate call goes through `invokeCapability` from `capabilities/gateway.mjs`.
+- `src/orchestration/delivery-pipeline.mjs`: the shared verify -> scope -> review -> acceptance-proof -> checkpoint sequence used by both the linear runtime and parallel-agent admission, so there is one place to add/remove/reorder a gate.
+- `src/orchestration/plan-state.mjs`: plan normalization, graph validation, plan import, route enrichment, task-state loading, and plan approval state (`loadPlanApproval` / `approvePlan`).
+- `src/orchestration/task-board.mjs`: team-lite tasks, claims, evidence recording, task-state persistence, outbox, and durable message board.
+- `src/infra/agent-spawn.mjs`: host-neutral child-agent spawn command rendering for Codex/Cursor/custom command adapters.
+- `src/infra/git-worktree.mjs`: Git worktree isolation, patch extraction, patch path parsing, patch admission helpers, and pre-execute workspace snapshots (`git stash create` based) recorded before every worker run.
+- `src/orchestration/parallel-runtime.mjs`: command-based child-agent batch runner, run-dir or Git worktree isolation, skipped-run detection, result collection, lifecycle status, explicit close/release/cleanup, team message publication, file/patch admission, and agent-run index; gate calls go through `invokeCapability`.
+- `src/capabilities/gateway.mjs`: static capability registry + unified result envelope (`capability`/`status`/`evidence`/`sideEffect`/`duration_ms`/`cost`/`error`); the only door `orchestration/` and `ai/` may use to reach `capabilities/verify.mjs`, `scope-guard.mjs`, `checkpoint.mjs`, `worker.mjs`, `review-gate.mjs`, `acceptance-proof.mjs`.
+- `src/interface/dashboard.mjs`: local dashboard HTTP API and HTML UI with POST token, Host, and Origin protections.
 - `packs/wildarrange-linear/agents`: role prompts.
 - `packs/wildarrange-linear/skills`: skill prompts.
 - `packs/wildarrange-linear/tools/tool-contract.json`: tool contract inventory.
@@ -211,17 +217,19 @@ External providers use `type: "openai-compatible"` and are configured with:
 
 WildArrange core must remain original code. External workflow projects may inform concepts, node names, and quality gates, but commercial builds must not ship copied source, copied prompt text, or tool implementations from licenses that restrict commercial redistribution.
 
-Adapter-specific behavior belongs in `src/helix-adapters.mjs` or host-specific generated files. Core workflow, gates, ledger, and provider logic must run without Codex/Cursor private hooks.
+Adapter-specific behavior belongs in `src/interface/adapters.mjs` or host-specific generated files. Core workflow, gates, ledger, and provider logic must run without Codex/Cursor private hooks.
 
 ## Known Architecture Debt
 
-`src/helix-core.mjs` is now a compatibility barrel. New implementation should go into the focused modules above rather than growing `helix-core.mjs`.
+`src/helix-core.mjs` is now a compatibility barrel over the five zoned directories. New implementation should go into the focused zoned modules rather than growing `helix-core.mjs`, and the ~29 flat `src/helix-*.mjs` shim files should shrink toward zero usage over time as callers migrate their imports to the zoned paths directly (the shims themselves must stay two-line re-exports, not grow logic).
 
 ## Maintenance Rules
 
 - Keep `src/helix-core.mjs` as a compatibility export surface only.
-- Add implementation to the focused module that owns the behavior; create a new `src/helix-*.mjs` module when no current owner fits.
+- Place new implementation in the zone that owns the behavior (`interface`/`orchestration`/`ai`/`capabilities`/`infra`); create a new `src/<zone>/helix-*.mjs` module when no current owner fits.
+- Respect the one-way dependency graph in "Five-Zone Layering" above. `orchestration/` and `ai/` must reach `capabilities/` only through `capabilities/gateway.mjs`'s `invokeCapability(name, ctx)`; never import a capability implementation file directly.
 - Keep source files under 1000 lines by default. At 700+ lines, review whether the file has more than one domain responsibility.
-- Runtime modules should import concrete owner modules directly, not route internal dependencies through `src/helix-core.mjs`.
-- Any new runtime module must be listed in this architecture map and in `CLAUDE.md`.
+- Runtime modules should import concrete zoned owner modules directly, not route internal dependencies through `src/helix-core.mjs` or through a flat `src/helix-*.mjs` shim.
+- Any new runtime module must be listed in this architecture map and in `CLAUDE.md`/`AGENTS.md`.
+- `test/dependency-boundary.test.mjs` runs on every `npm test`; a failing boundary test means the dependency graph was violated, not that the test should be loosened.
 - Preserve gate invariants: verifier, scope, review, and success criteria must remain mandatory for completion.

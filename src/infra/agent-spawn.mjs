@@ -1,5 +1,5 @@
 import path from "node:path";
-import { normalizeAgentKey } from "../infra/foundation.mjs";
+import { normalizeAgentKey } from "./foundation.mjs";
 
 export function resolveAgentSpawn(rootDir, config, task, context, options = {}) {
   const explicitCommand = options.command || options.runnerCommand;

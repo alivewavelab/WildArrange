@@ -13,31 +13,18 @@ import {
   withTaskStateLock,
   writeJsonAtomic,
   writeSnapshot,
-} from "./helix-foundation.mjs";
-import { writeAcceptanceProof } from "./helix-acceptance-proof.mjs";
-import { buildFailureSummary } from "./helix-failure.mjs";
-import { writeMemoryDigest } from "./helix-memory-digest.mjs";
-import { resolveAgentSpawn } from "./helix-agent-spawn.mjs";
-import { applyAgentPatch, collectAgentWorktreePatch, extractPatchPaths, prepareAgentWorktree } from "./helix-git-worktree.mjs";
-import {
-  appendWisdom,
-  pathAllowed,
-  runCommand,
-  runVerifier,
-  scopeGuard,
-  writeCheckpoint,
-  writeFailureReport,
-  writeReviewReport,
-} from "./helix-gates.mjs";
-import { loadTaskState } from "./helix-plan.mjs";
-import { runReviewGate } from "./helix-review.mjs";
-import {
-  applyVerifierEvidenceToCriteria,
-  criteriaStatus,
-  findRunnableTask,
-  persistTaskState,
-  sendTeamMessage,
-} from "./helix-team.mjs";
+} from "../infra/foundation.mjs";
+import { buildFailureSummary } from "../infra/failure-analysis.mjs";
+import { appendWisdom, writeFailureReport, writeReviewReport } from "../infra/task-reports.mjs";
+import { writeMemoryDigest } from "../infra/memory-digest.mjs";
+import { resolveAgentSpawn } from "../infra/agent-spawn.mjs";
+import { applyAgentPatch, collectAgentWorktreePatch, extractPatchPaths, prepareAgentWorktree } from "../infra/git-worktree.mjs";
+import { runCommand } from "../infra/command-runner.mjs";
+import { pathAllowed } from "../infra/path-match.mjs";
+import { applyVerifierEvidenceToCriteria, criteriaStatus } from "../infra/success-criteria.mjs";
+import { invokeCapability } from "../capabilities/gateway.mjs";
+import { loadTaskState } from "./plan-state.mjs";
+import { findRunnableTask, persistTaskState, sendTeamMessage } from "./task-board.mjs";
 
 const DEFAULT_PARALLEL_TIMEOUT_MS = 120_000;
 
@@ -199,7 +186,8 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
   }
 
   const prepared = await prepareAdmission(rootDir, options.taskId, result, files);
-  const verifyResult = await runVerifier(rootDir, prepared.task);
+  const verifyEnvelope = await invokeCapability("verify", { rootDir, task: prepared.task });
+  const verifyResult = verifyEnvelope.evidence;
   await updateAdmissionTask(rootDir, options.taskId, (task) => {
     task.evidence.push(verifyResult);
     task.last_verify_result = verifyResult;
@@ -208,10 +196,12 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
     return task;
   });
 
-  const scopeResult = await scopeGuard(rootDir, {
-    taskId: options.taskId,
-    changedPaths: prepared.appliedPaths,
+  const scopeEnvelope = await invokeCapability("scope", {
+    rootDir,
+    task: prepared.task,
+    options: { changedPaths: prepared.appliedPaths },
   });
+  const scopeResult = scopeEnvelope.evidence;
   await updateAdmissionTask(rootDir, options.taskId, (task) => {
     task.evidence.push({ kind: "scope_guard", at: nowIso(), ...scopeResult });
     task.last_scope_result = scopeResult;
@@ -220,11 +210,12 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
   });
 
   const reviewTask = await getAdmissionTask(rootDir, options.taskId);
-  const reviewResult = await runReviewGate(rootDir, reviewTask.task, {
-    workerResult: prepared.workerResult,
-    verifyResult,
-    scopeResult,
+  const reviewEnvelope = await invokeCapability("review", {
+    rootDir,
+    task: reviewTask.task,
+    evidence: { workerResult: prepared.workerResult, verifyResult, scopeResult },
   });
+  const reviewResult = reviewEnvelope.evidence;
   await writeReviewReport(rootDir, reviewTask.planId, reviewTask.task, reviewResult);
   const finalized = await finalizeAdmission(rootDir, options.taskId, {
     workerResult: prepared.workerResult,
@@ -454,7 +445,13 @@ async function finalizeAdmission(rootDir, taskId, evidence) {
       && evidence.scopeResult.status === "pass"
       && evidence.reviewResult.pass
     ) {
-      const acceptanceProof = await writeAcceptanceProof(rootDir, taskState.planId, task, evidence);
+      const acceptanceProofEnvelope = await invokeCapability("acceptance-proof", {
+        rootDir,
+        planId: taskState.planId,
+        task,
+        evidence,
+      });
+      const acceptanceProof = acceptanceProofEnvelope.evidence;
       if (!acceptanceProof.pass) {
         task.status = shouldFailAdmission(task, evidence.verifyResult, evidence.scopeResult, evidence.reviewResult) ? "failed" : "pending";
         task.last_failure = buildFailureSummary(task, {
@@ -475,7 +472,16 @@ async function finalizeAdmission(rootDir, taskId, evidence) {
       task.status = "completed";
       task.updatedAt = nowIso();
       await persistTaskState(rootDir, taskState);
-      await writeCheckpoint(rootDir, taskState.planId, task, evidence.verifyResult, evidence.scopeResult, evidence.reviewResult);
+      await invokeCapability("checkpoint", {
+        rootDir,
+        planId: taskState.planId,
+        task,
+        evidence: {
+          verifyResult: evidence.verifyResult,
+          scopeResult: evidence.scopeResult,
+          reviewResult: evidence.reviewResult,
+        },
+      });
       await appendWisdom(rootDir, task, evidence.verifyResult);
       await writeMemoryDigest(rootDir, { reason: "parallel_admission_completed", stage: "checkpoint", task, taskId });
       return { status: "completed", planId: taskState.planId, task, acceptanceProof };

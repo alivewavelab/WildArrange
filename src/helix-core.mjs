@@ -39,8 +39,8 @@ export {
   writeConfigBaseline,
   writeRuntimeStateBackup,
 } from "./helix-security.mjs";
-export { runDoctor } from "./helix-doctor.mjs";
-export { installAdapter, restoreAdapterBackup, uninstallAdapter } from "./helix-adapters.mjs";
+export { runDoctor } from "./interface/doctor.mjs";
+export { installAdapter, restoreAdapterBackup, uninstallAdapter } from "./interface/adapters.mjs";
 export { recordReviewBlocker, resolveChangeRequest, reviewChangeRequest, steerWorkflow } from "./helix-change.mjs";
 export { buildFailureSummary } from "./helix-failure.mjs";
 export { buildAcceptanceProof, writeAcceptanceProof } from "./helix-acceptance-proof.mjs";
@@ -65,8 +65,8 @@ export {
   runLspDiagnosticsGate,
   runQualityGates,
 } from "./helix-code-intel.mjs";
-export { buildAgentContext, continuationDirective, recordRuntimeSession, resumeReport, writeContextSnapshot } from "./helix-context.mjs";
-export { preToolUseGuard, runInjectionHook } from "./helix-hooks.mjs";
+export { buildAgentContext, continuationDirective, recordRuntimeSession, resumeReport, writeContextSnapshot } from "./ai/context.mjs";
+export { preToolUseGuard, runInjectionHook } from "./ai/hooks.mjs";
 export { detectToolResultFindings, evaluateHookResultGate } from "./helix-hook-result-gate.mjs";
 export { resolveInjectionPoint } from "./helix-injection.mjs";
 export { matchSkills, resolvePromptVariant } from "./helix-skill-matcher.mjs";

@@ -14,7 +14,7 @@ import {
   runWorkflowNode,
   sendTeamMessage,
   writeWorkflowSummary,
-} from "./helix-core.mjs";
+} from "../helix-core.mjs";
 
 class DashboardBadRequest extends Error {}
 

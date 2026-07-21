@@ -13,9 +13,9 @@ import {
   withTaskStateLock,
   writeJsonAtomic,
   writeSnapshot,
-} from "./helix-foundation.mjs";
-import { loadRoutesConfig, resolveRouteDecision } from "./helix-routing.mjs";
-import { isPossibleNoopTask, isTrivialCommand } from "./infra/task-predicates.mjs";
+} from "../infra/foundation.mjs";
+import { loadRoutesConfig, resolveRouteDecision } from "../ai/routing.mjs";
+import { isPossibleNoopTask, isTrivialCommand } from "../infra/task-predicates.mjs";
 
 export function normalizePlan(rawPlan) {
   if (!rawPlan || typeof rawPlan !== "object") {
@@ -124,7 +124,7 @@ function detectTaskGovernanceWarnings({ workerCommand, verifyCommands, writableP
   return warnings;
 }
 
-export { isPossibleNoopTask, isTrivialCommand } from "./infra/task-predicates.mjs";
+export { isPossibleNoopTask, isTrivialCommand } from "../infra/task-predicates.mjs";
 
 export function normalizeSuccessCriteria(value, taskId, subject, verifyCommands) {
   if (value === undefined) return seedDefaultSuccessCriteria(taskId, subject, verifyCommands);
@@ -449,7 +449,7 @@ export async function writeTasksMarkdown(rootDir, plan) {
   await writeFile(resolveHelixPath(rootDir, "team", "tasks.md"), `${lines.join("\n")}\n`, "utf8");
 }
 
-export { loadTaskState } from "./infra/task-state-store.mjs";
+export { loadTaskState } from "../infra/task-state-store.mjs";
 
 function uniqueStrings(values) {
   return [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))];

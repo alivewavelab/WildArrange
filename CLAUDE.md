@@ -38,15 +38,19 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 ## 代码维护规范
 
 - `src/helix-core.mjs` 只作为兼容导出层，不允许继续堆业务实现。
-- 新增功能必须先归属到现有领域模块；无合适归属时新增 `src/helix-*.mjs`。
+- 项目按五区分层：`interface/ → orchestration/ → ai/ / capabilities/ → infra/`，新增功能必须先归属到对应区目录；无合适归属时才新增顶层 `src/<zone>/helix-*.mjs`。
+- 依赖方向只能从上往下：`interface` 可依赖 `orchestration`/`infra`；`orchestration` 可依赖 `ai`/`capabilities`/`infra`；`ai` 可依赖 `orchestration`/`capabilities`/`infra`（`ai → orchestration`、`ai → capabilities` 均只读，且 `ai → capabilities` 必须走 `capabilities/gateway.mjs`）；`capabilities` 只能依赖 `infra`；`infra` 不依赖任何上层。反向依赖由 `test/dependency-boundary.test.mjs` 强制拦截，不得为了让测试变绿而放宽这些规则。
+- `orchestration/` 和 `ai/` 都不得直接 import 具体能力实现文件（`capabilities/verify.mjs` 等），必须统一经 `capabilities/gateway.mjs` 的 `invokeCapability(name, ctx)`。
 - 单文件默认保持 1000 行以内；超过 700 行必须评估是否按职责拆分。
 - 模块内部必须直接 import 目标实现文件，不要通过 `src/helix-core.mjs` 绕一层。
+- 旧的 `src/helix-*.mjs` 扁平路径全部保留为 `@deprecated` 兼容 re-export shim，只做 `export * from "./<zone>/<file>.mjs"`，不得在 shim 里堆新逻辑。
 - 新增运行时能力必须同时更新 `doc/project-architecture.md` 和本文件的目录约定。
 - gate 安全不变量不能削弱：不得删除或清空 `verify_commands`，不得跳过 verifier / scope / review / successCriteria 完成 checkpoint。
 - 重构后必须验证 `npm test`；涉及包内容变化时同时验证 `npm pack --dry-run --cache /private/tmp/helix-npm-cache`。
 
 ## 目录约定
 
+按依赖方向从上到下列出五区（`interface → orchestration → ai/capabilities → infra`）；旧 `src/helix-*.mjs` 路径均已转为兼容 shim，新代码应直接 import 下表中的新路径。
 
 | 路径                                                           | 职责                                            |
 | ------------------------------------------------------------ | --------------------------------------------- |
@@ -56,39 +60,58 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | [doc/development-plan.md](./doc/development-plan.md)         | P0 / P1 / P2 路线                               |
 | `bin/helix.mjs`                                              | CLI 入口                                        |
 | `src/helix-core.mjs`                                         | 兼容导出层，禁止继续堆实现                                 |
-| `src/helix-foundation.mjs`                                   | 路径、JSON、锁、配置、快照、prompt-pack 注册等基础能力                      |
-| `src/helix-ledger.mjs`                                       | hash 链 ledger 追加、校验与可信条目读取（链开始后的无 hash 行按篡改上报） |
-| `src/helix-plan.mjs`                                         | 计划导入、校验、路由 enrichment                         |
-| `src/helix-node-runtime.mjs`                                 | 线性任务节点运行时、重试 / checkpoint                     |
-| `src/helix-workflow.mjs`                                     | Workflow 入口、样例计划生成                            |
-| `src/helix-gates.mjs`                                        | verifier、scope guard、realpath 范围校验、review gate              |
-| `src/helix-command-safety.mjs`                               | shell 命令高风险预检，阻断明显破坏性 worker/verifier/review 命令；内置正则为不可削弱底线，`commandSafety.extraPatterns` 可外置追加项目规则 |
-| `src/helix-security.mjs`                                     | config hash 基线、运行态备份、备份列表与一键恢复、关键状态完整性检查 |
-| `src/helix-doctor.mjs`                                       | 一键体检：config 结构校验、完成状态对账、ledger 与备份交叉验证 |
-| `src/helix-code-intel.mjs`                                   | LSP/typecheck、AST 结构命令、hashline anchor、注释检查门 |
-| `src/helix-review.mjs`                                       | Worker 执行与 BaiZe / QiongQi / LuanNiao 确定性复核门  |
-| `src/helix-review-findings.mjs`                              | LSP / AST / hashline / 注释检查等质量发现              |
-| `src/helix-llm.mjs`                                          | OpenAI-compatible LLM provider 与可选 LLM review |
-| `src/helix-agent-spawn.mjs`                                  | Codex / Cursor / 自定义命令型子 Agent spawn 模板渲染       |
-| `src/helix-git-worktree.mjs`                                 | Git worktree 隔离、patch 提取与 patch admission        |
-| `src/helix-change.mjs`                                       | 任务变更治理、Review Blocker、ChangeRequest           |
-| `src/helix-failure.mjs`                                      | 失败原因分类、返工提示与失败摘要                              |
-| `src/helix-acceptance-proof.mjs`                             | checkpoint 前验收证明链                                 |
-| `src/helix-rules.mjs`                                        | 项目规范扫描与规则上下文注入                                |
-| `src/helix-injection.mjs`                                    | 注入点解析、Markdown / Skill 分级预算与按需（动态匹配）挂载加载 |
-| `src/helix-skill-matcher.mjs`                                | Skill 匹配、优先级打分、提示词模型变体                       |
-| `src/helix-context.mjs`                                      | Agent 上下文、恢复快照、会话延续                           |
-| `src/helix-memory-digest.mjs`                                | 跨会话 digest、任务完成 digest 与恢复索引                   |
-| `src/helix-hooks.mjs`                                        | 宿主生命周期 Hook、PreToolUse 范围拦截                   |
-| `src/helix-adapters.mjs`                                     | Codex `.codex/hooks.json` hard hook、Cursor soft rule、slash 命令生成（Cursor `.cursor/commands/*.md` / Codex `.agents/skills/*/SKILL.md`）、adapter 安装、卸载与恢复 |
-| `src/helix-routing.mjs`                                      | 请求路由与类别决策                                     |
-| `src/helix-archivist-router.mjs`                             | 档案路由员：routing packet、结构化记忆、路由建议              |
-| `src/helix-team.mjs`                                         | 轻量任务板与消息板                                     |
-| `src/helix-parallel-agents.mjs`                              | 命令型子 Agent 并行运行、隔离结果、skipped/cleanup 生命周期状态与消息发布             |
-| `src/helix-status.mjs`                                       | 状态报告、Workflow 总结与 Dashboard 数据                |
-| `src/helix-dashboard.mjs`                                    | 本地 dashboard HTTP 服务、POST token 与 Host/Origin 防护                          |
-| `test/*.test.mjs`                                            | Node 内置测试                                     |
-| `.helix/`                                                    | 运行时状态目录，可由 CLI 生成                             |
+| **interface/**（宿主/人机交互边界，只依赖 orchestration、infra） |  |
+| `src/interface/dashboard.mjs`                                | 本地 dashboard HTTP 服务、POST token 与 Host/Origin 防护 |
+| `src/interface/adapters.mjs`                                 | Codex `.codex/hooks.json` hard hook、Cursor soft rule、slash 命令生成、adapter 安装/卸载/恢复 |
+| `src/interface/doctor.mjs`                                   | 一键体检：config 结构校验、完成状态对账、ledger 与备份交叉验证 |
+| **orchestration/**（工作流顺序、重试、gate 编排，只依赖 ai、capabilities、infra） |  |
+| `src/orchestration/plan-state.mjs`                            | 计划导入、校验、路由 enrichment、任务状态加载                 |
+| `src/orchestration/linear-runtime.mjs`                        | 线性任务节点运行时、重试 / checkpoint，经 gateway 调用能力       |
+| `src/orchestration/parallel-runtime.mjs`                      | 命令型子 Agent 并行运行、隔离结果、skipped/cleanup 生命周期状态与消息发布 |
+| `src/orchestration/delivery-pipeline.mjs`                     | 共享交付流水线：verify → scope → review → acceptance-proof → checkpoint 顺序 |
+| `src/orchestration/task-board.mjs`                            | 轻量任务板与消息板                                     |
+| `src/orchestration/change-governance.mjs`                     | 任务变更治理、Review Blocker、ChangeRequest           |
+| `src/orchestration/status.mjs`                                | 状态报告、Workflow 总结、attentionReport 与 Dashboard 数据 |
+| `src/orchestration/workflow.mjs`                               | Workflow 入口、样例计划生成                            |
+| **ai/**（AI 策略/prompt/技能匹配/hooks，只依赖 orchestration、capabilities、infra，且 capabilities 只能经 gateway） |  |
+| `src/ai/routing.mjs`                                          | 请求路由与类别决策                                     |
+| `src/ai/archivist-router.mjs`                                 | 档案路由员：routing packet、结构化记忆、路由建议              |
+| `src/ai/injection.mjs`                                        | 注入点解析、Markdown / Skill 分级预算与按需（动态匹配）挂载加载 |
+| `src/ai/skill-matcher.mjs`                                    | Skill 匹配、优先级打分、提示词模型变体                       |
+| `src/ai/context.mjs`                                          | Agent 上下文、恢复快照、会话延续                           |
+| `src/ai/hooks.mjs`                                            | 宿主生命周期 Hook、PreToolUse 范围拦截                   |
+| **capabilities/**（原子能力 + gateway，只依赖 infra；orchestration/ai 只能经 `gateway.mjs` 调用） |  |
+| `src/capabilities/gateway.mjs`                                | 能力网关：静态注册表 + 统一结果信封（capability/status/evidence/sideEffect/duration_ms/cost/error） |
+| `src/capabilities/verify.mjs`                                 | verifier                                       |
+| `src/capabilities/scope-guard.mjs`                             | scope guard、realpath 范围校验                      |
+| `src/capabilities/worker.mjs`                                 | Worker 执行                                      |
+| `src/capabilities/review-gate.mjs`                             | BaiZe / QiongQi / LuanNiao 确定性复核门              |
+| `src/capabilities/code-intel.mjs`                              | LSP/typecheck、AST 结构命令、hashline anchor、注释检查门 |
+| `src/capabilities/acceptance-proof.mjs`                        | checkpoint 前验收证明链                                 |
+| `src/capabilities/checkpoint.mjs`                              | checkpoint 落盘                                  |
+| **infra/**（基础设施，不依赖任何上层区） |  |
+| `src/infra/foundation.mjs`                                    | 路径、JSON、锁、配置、快照、prompt-pack 注册等基础能力                      |
+| `src/infra/ledger.mjs`                                        | hash 链 ledger 追加、校验与可信条目读取（链开始后的无 hash 行按篡改上报） |
+| `src/infra/command-runner.mjs`                                 | 子进程命令执行、输出截断与超时                              |
+| `src/infra/command-safety.mjs`                                 | shell 命令高风险预检，阻断明显破坏性 worker/verifier/review 命令；内置正则为不可削弱底线，`commandSafety.extraPatterns` 可外置追加项目规则 |
+| `src/infra/security.mjs`                                      | config hash 基线、运行态备份、备份列表与一键恢复、关键状态完整性检查 |
+| `src/infra/review-findings.mjs`                                | LSP / AST / hashline / 注释检查等质量发现              |
+| `src/infra/llm-provider.mjs`                                   | OpenAI-compatible LLM provider 与可选 LLM review |
+| `src/infra/agent-spawn.mjs`                                    | Codex / Cursor / 自定义命令型子 Agent spawn 模板渲染       |
+| `src/infra/git-worktree.mjs`                                   | Git worktree 隔离、patch 提取与 patch admission        |
+| `src/infra/git-diff.mjs`                                       | git diff / changed-paths 收集与 manifest 变更分类     |
+| `src/infra/path-match.mjs`                                     | 路径归一化与 glob/精确/目录匹配（`pathAllowed`）           |
+| `src/infra/failure-analysis.mjs`                                | 失败原因分类、返工提示与失败摘要                              |
+| `src/infra/task-reports.mjs`                                    | wisdom / failure report / review report 落盘      |
+| `src/infra/task-state-store.mjs`                                | 任务状态文件加载                                       |
+| `src/infra/task-predicates.mjs`                                 | no-op / trivial command 等纯任务形状判断              |
+| `src/infra/success-criteria.mjs`                                | 成功判据状态机与 verifier 证据回填                        |
+| `src/infra/rule-scanner.mjs`                                    | 项目规范扫描与规则上下文注入                                |
+| `src/infra/memory-digest.mjs`                                   | 跨会话 digest、任务完成 digest 与恢复索引                   |
+| `src/infra/hook-result-gate.mjs`                                | PostToolUse 结果门校验                              |
+| `test/dependency-boundary.test.mjs`                             | 五区依赖方向强制测试，每次 `npm test` 都会跑                |
+| `test/*.test.mjs`                                              | Node 内置测试                                     |
+| `.helix/`                                                      | 运行时状态目录，可由 CLI 生成                             |
 
 
 ## 常用命令

@@ -12,13 +12,14 @@ import {
   readJson,
   resolveHelixPath,
   writeJsonAtomic,
-} from "./helix-foundation.mjs";
-import { collectGitChangedPaths, listChangeRequests } from "./helix-gates.mjs";
-import { defaultInjectionPointForAgent, resolveInjectionPoint } from "./helix-injection.mjs";
-import { loadTaskState } from "./helix-plan.mjs";
-import { scanProjectRules } from "./helix-rules.mjs";
-import { findRunnableTask, normalizeAgentName } from "./helix-team.mjs";
-import { readLedgerTail, statusReport } from "./helix-status.mjs";
+} from "../infra/foundation.mjs";
+import { collectGitChangedPaths } from "../infra/git-diff.mjs";
+import { listChangeRequests } from "../orchestration/change-governance.mjs";
+import { defaultInjectionPointForAgent, resolveInjectionPoint } from "./injection.mjs";
+import { loadTaskState } from "../infra/task-state-store.mjs";
+import { scanProjectRules } from "../infra/rule-scanner.mjs";
+import { findRunnableTask, normalizeAgentName } from "../orchestration/task-board.mjs";
+import { readLedgerTail, statusReport } from "../orchestration/status.mjs";
 
 export async function buildAgentContext(rootDir, options = {}) {
   await ensureHelixDirs(rootDir);

@@ -8,10 +8,10 @@ import {
   readJson,
   resolveHelixPath,
   writeJsonAtomic,
-} from "./helix-foundation.mjs";
-import { listChangeRequests } from "./helix-gates.mjs";
-import { parallelAgentStatus } from "./helix-parallel-agents.mjs";
-import { loadPlanApproval, loadTaskState } from "./helix-plan.mjs";
+} from "../infra/foundation.mjs";
+import { listChangeRequests } from "./change-governance.mjs";
+import { parallelAgentStatus } from "./parallel-runtime.mjs";
+import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
 
 export async function writeWorkflowSummary(rootDir, options = {}) {
   await ensureHelixDirs(rootDir);

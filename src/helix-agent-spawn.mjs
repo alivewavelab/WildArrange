@@ -1,2 +1,2 @@
-/** @deprecated moved to src/capabilities/agent-spawn.mjs; this file is a compatibility re-export. */
-export * from "./capabilities/agent-spawn.mjs";
+/** @deprecated moved to src/infra/agent-spawn.mjs; this file is a compatibility re-export. */
+export * from "./infra/agent-spawn.mjs";

@@ -12,15 +12,15 @@ import {
   withTaskStateLock,
   writeJsonAtomic,
   writeSnapshot,
-} from "./helix-foundation.mjs";
+} from "../infra/foundation.mjs";
 import {
   loadTaskState,
   normalizeStringArray,
   normalizeSuccessCriteria,
   normalizeTask,
   validatePlanGraph,
-} from "./helix-plan.mjs";
-import { persistTaskState } from "./helix-team.mjs";
+} from "./plan-state.mjs";
+import { persistTaskState } from "./task-board.mjs";
 
 export async function steerWorkflow(rootDir, proposal = {}) {
   return withTaskStateLock(rootDir, `steer:${proposal.kind || "unknown"}`, async () => {

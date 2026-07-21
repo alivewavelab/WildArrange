@@ -10,18 +10,19 @@ import {
   nowIso,
   resolveHelixPath,
   writeJsonAtomic,
-} from "./helix-foundation.mjs";
-import { pathAllowed, scopeGuard } from "./helix-gates.mjs";
-import { resolveInjectionPoint } from "./helix-injection.mjs";
-import { loadTaskState } from "./helix-plan.mjs";
-import { routeRequest } from "./helix-routing.mjs";
-import { scanProjectRules } from "./helix-rules.mjs";
-import { findRunnableTask } from "./helix-team.mjs";
-import { buildAgentContext, continuationDirective, resumeReport } from "./helix-context.mjs";
-import { runArchivistRouter } from "./helix-archivist-router.mjs";
-import { evaluateHookResultGate } from "./helix-hook-result-gate.mjs";
-import { writeMemoryDigest } from "./helix-memory-digest.mjs";
-import { attentionReport } from "./helix-status.mjs";
+} from "../infra/foundation.mjs";
+import { pathAllowed } from "../infra/path-match.mjs";
+import { invokeCapability } from "../capabilities/gateway.mjs";
+import { resolveInjectionPoint } from "./injection.mjs";
+import { loadTaskState } from "../infra/task-state-store.mjs";
+import { routeRequest } from "./routing.mjs";
+import { scanProjectRules } from "../infra/rule-scanner.mjs";
+import { findRunnableTask } from "../orchestration/task-board.mjs";
+import { buildAgentContext, continuationDirective, resumeReport } from "./context.mjs";
+import { runArchivistRouter } from "./archivist-router.mjs";
+import { evaluateHookResultGate } from "../infra/hook-result-gate.mjs";
+import { writeMemoryDigest } from "../infra/memory-digest.mjs";
+import { attentionReport } from "../orchestration/status.mjs";
 
 export async function runInjectionHook(rootDir, input = {}) {
   const hookRootDir = input.cwd && typeof input.cwd === "string" ? input.cwd : rootDir;
@@ -70,7 +71,9 @@ export async function runInjectionHook(rootDir, input = {}) {
     facts.rules = await scanProjectRules(hookRootDir, { targetPaths });
     facts.resultGate = await evaluateHookResultGate(hookRootDir, input);
     if (taskId) {
-      facts.scope = await scopeGuard(hookRootDir, { taskId }).catch((error) => ({ status: "inconclusive", reason: error.message }));
+      facts.scope = await invokeCapability("scope", { rootDir: hookRootDir, task: { id: taskId } })
+        .then((envelope) => envelope.evidence)
+        .catch((error) => ({ status: "inconclusive", reason: error.message }));
     }
   } else if (event === "PostCompact") {
     facts.resume = await resumeReport(hookRootDir, { sessionId, source: "hook:post_compact" });

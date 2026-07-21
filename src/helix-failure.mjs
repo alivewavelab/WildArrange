@@ -1,2 +1,2 @@
-/** @deprecated moved to src/capabilities/failure-analysis.mjs; this file is a compatibility re-export. */
-export * from "./capabilities/failure-analysis.mjs";
+/** @deprecated moved to src/infra/failure-analysis.mjs; this file is a compatibility re-export. */
+export * from "./infra/failure-analysis.mjs";

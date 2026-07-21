@@ -1,4 +1,4 @@
-import { nowIso } from "../infra/foundation.mjs";
+import { nowIso } from "./foundation.mjs";
 
 export function buildFailureSummary(task, { workerResult, verifyResult, scopeResult, reviewResult, criteriaResult, nextStatus }) {
   const reason = gateRejectionReason(workerResult, verifyResult, scopeResult, reviewResult, criteriaResult);

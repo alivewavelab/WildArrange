@@ -13,15 +13,16 @@ import {
   withTaskStateLock,
   writeJsonAtomic,
   writeSnapshot,
-} from "./helix-foundation.mjs";
-import { loadRoutesConfig } from "./helix-routing.mjs";
+} from "../infra/foundation.mjs";
+import { loadRoutesConfig } from "../ai/routing.mjs";
 import {
   enrichTaskWithRouteDecision,
   loadTaskState,
   normalizeTask,
   validatePlanGraph,
   writeTasksMarkdown,
-} from "./helix-plan.mjs";
+} from "./plan-state.mjs";
+export { applyVerifierEvidenceToCriteria, criteriaStatus } from "../infra/success-criteria.mjs";
 
 export async function listTeamTasks(rootDir, options = {}) {
   const taskState = await loadTaskState(rootDir);
@@ -120,8 +121,6 @@ function unresolvedBlockers(task, tasks) {
     return blocker && blocker.status !== "completed";
   });
 }
-
-export { applyVerifierEvidenceToCriteria, criteriaStatus } from "./infra/success-criteria.mjs";
 
 export async function createTeamTask(rootDir, rawTask) {
   return withTaskStateLock(rootDir, "team-task-create", () => createTeamTaskUnlocked(rootDir, rawTask));

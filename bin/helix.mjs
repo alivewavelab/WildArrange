@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import path from "node:path";
-import { startDashboardServer } from "../src/helix-dashboard.mjs";
+import { startDashboardServer } from "../src/interface/dashboard.mjs";
 import {
   DEFAULT_EXECUTOR_AGENT,
   DEFAULT_LEAD_AGENT,

@@ -10,10 +10,11 @@ import {
   readJson,
   resolveHelixPath,
   writeJsonAtomic,
-} from "./helix-foundation.mjs";
-import { readVerifiedLedgerEntries, verifyLedger } from "./helix-ledger.mjs";
-import { isPossibleNoopTask, isTrivialCommand, loadTaskState } from "./helix-plan.mjs";
-import { listRuntimeStateBackups, verifyConfigBaseline, verifyRuntimeState } from "./helix-security.mjs";
+} from "../infra/foundation.mjs";
+import { readVerifiedLedgerEntries, verifyLedger } from "../infra/ledger.mjs";
+import { isPossibleNoopTask, isTrivialCommand } from "../infra/task-predicates.mjs";
+import { loadTaskState } from "../infra/task-state-store.mjs";
+import { listRuntimeStateBackups, verifyConfigBaseline, verifyRuntimeState } from "../infra/security.mjs";
 
 const COMPLETION_LEDGER_EVENT_TYPES = new Set([
   "task_verified",

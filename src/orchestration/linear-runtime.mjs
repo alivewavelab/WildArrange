@@ -4,36 +4,20 @@ import {
   nowIso,
   withTaskStateLock,
   writeSnapshot,
-} from "./helix-foundation.mjs";
-import { readChangeRequest } from "./helix-change.mjs";
-import { buildFailureSummary } from "./helix-failure.mjs";
-import { writeAcceptanceProof } from "./helix-acceptance-proof.mjs";
-import { writeMemoryDigest } from "./helix-memory-digest.mjs";
-import { routeRequest } from "./helix-routing.mjs";
-import { captureWorkspaceSnapshot } from "./helix-git-worktree.mjs";
-import { runReviewGate, runWorker } from "./helix-review.mjs";
-import { runDeliveryPipeline } from "./orchestration/delivery-pipeline.mjs";
-import { writeWorkflowSummary } from "./helix-status.mjs";
-import { loadPlanApproval, loadTaskState } from "./helix-plan.mjs";
-import {
-  applyVerifierEvidenceToCriteria,
-  criteriaStatus,
-  findRunnableTask,
-  persistTaskState,
-  writeOutbox,
-} from "./helix-team.mjs";
-import {
-  appendWisdom,
-  changedPathsIntroducedByTask,
-  collectGitChangedPaths,
-  collectGitDiff,
-  runVerifier,
-  scopeGuard,
-  writeChangeRequest,
-  writeCheckpoint,
-  writeFailureReport,
-  writeReviewReport,
-} from "./helix-gates.mjs";
+} from "../infra/foundation.mjs";
+import { readChangeRequest, writeChangeRequest } from "./change-governance.mjs";
+import { buildFailureSummary } from "../infra/failure-analysis.mjs";
+import { appendWisdom, writeFailureReport, writeReviewReport } from "../infra/task-reports.mjs";
+import { writeMemoryDigest } from "../infra/memory-digest.mjs";
+import { routeRequest } from "../ai/routing.mjs";
+import { captureWorkspaceSnapshot } from "../infra/git-worktree.mjs";
+import { changedPathsIntroducedByTask, collectGitChangedPaths, collectGitDiff } from "../infra/git-diff.mjs";
+import { applyVerifierEvidenceToCriteria, criteriaStatus } from "../infra/success-criteria.mjs";
+import { invokeCapability } from "../capabilities/gateway.mjs";
+import { runDeliveryPipeline } from "./delivery-pipeline.mjs";
+import { writeWorkflowSummary } from "./status.mjs";
+import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
+import { findRunnableTask, persistTaskState, writeOutbox } from "./task-board.mjs";
 
 export async function runNextTask(rootDir, options = {}) {
   return withTaskStateLock(rootDir, "run-next-task", () => runNextTaskUnlocked(rootDir, options));
@@ -73,7 +57,8 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   const workspaceSnapshot = await recordPreExecuteSnapshot(rootDir, taskState.planId, task);
   const beforeDiff = await collectGitDiff(rootDir);
   const beforeChanged = await collectGitChangedPaths(rootDir);
-  const workerResult = await runWorker(rootDir, task, options);
+  const workerEnvelope = await invokeCapability("worker", { rootDir, task, options });
+  const workerResult = workerEnvelope.evidence;
   const afterDiff = await collectGitDiff(rootDir);
   const afterChanged = await collectGitChangedPaths(rootDir);
 
@@ -236,7 +221,8 @@ async function executeTaskNodeUnlocked(rootDir, options = {}) {
   const workspaceSnapshot = await recordPreExecuteSnapshot(rootDir, taskState.planId, task);
   const beforeDiff = await collectGitDiff(rootDir);
   const beforeChanged = await collectGitChangedPaths(rootDir);
-  const workerResult = await runWorker(rootDir, task, options);
+  const workerEnvelope = await invokeCapability("worker", { rootDir, task, options });
+  const workerResult = workerEnvelope.evidence;
   const afterDiff = await collectGitDiff(rootDir);
   const afterChanged = await collectGitChangedPaths(rootDir);
 
@@ -279,7 +265,8 @@ async function verifyTaskNodeUnlocked(rootDir, options = {}) {
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["verifying", "in_progress"]);
 
   task.status = "verifying";
-  const verifyResult = await runVerifier(rootDir, task);
+  const verifyEnvelope = await invokeCapability("verify", { rootDir, task });
+  const verifyResult = verifyEnvelope.evidence;
   task.evidence.push(verifyResult);
   task.last_verify_result = verifyResult;
   const criterionEvidence = applyVerifierEvidenceToCriteria(task, verifyResult);
@@ -315,11 +302,15 @@ async function scopeTaskNodeUnlocked(rootDir, options = {}) {
   if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["verifying", "in_progress", "pending"]);
   const executionPaths = [...task.evidence].reverse().find((entry) => entry.kind === "execution_paths");
-  const scopeResult = await scopeGuard(rootDir, {
-    taskId: task.id,
-    changedPaths: executionPaths?.afterAvailable === true ? executionPaths.introducedPaths : undefined,
-    unavailableReason: executionPaths?.unavailableReason,
+  const scopeEnvelope = await invokeCapability("scope", {
+    rootDir,
+    task,
+    options: {
+      changedPaths: executionPaths?.afterAvailable === true ? executionPaths.introducedPaths : undefined,
+      unavailableReason: executionPaths?.unavailableReason,
+    },
   });
+  const scopeResult = scopeEnvelope.evidence;
   task.evidence.push({ kind: "scope_guard", at: nowIso(), ...scopeResult });
   task.last_scope_result = scopeResult;
   if (scopeResult.status === "fail") {
@@ -343,7 +334,8 @@ async function reviewTaskNodeUnlocked(rootDir, options = {}) {
   const workerResult = [...task.evidence].reverse().find((entry) => entry.kind === "worker");
   const verifyResult = task.last_verify_result || [...task.evidence].reverse().find((entry) => entry.kind === "verifier");
   const scopeResult = task.last_scope_result || [...task.evidence].reverse().find((entry) => entry.kind === "scope_guard");
-  const reviewResult = await runReviewGate(rootDir, task, { workerResult, verifyResult, scopeResult });
+  const reviewEnvelope = await invokeCapability("review", { rootDir, task, evidence: { workerResult, verifyResult, scopeResult } });
+  const reviewResult = reviewEnvelope.evidence;
 
   task.status = "verifying";
   task.evidence.push(reviewResult);
@@ -390,12 +382,13 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
   const criteria = criteriaStatus(task);
 
   if (workerResult?.exitCode === 0 && verifyResult?.pass === true && criteria.pass && scopeResult?.status === "pass" && reviewResult?.pass === true) {
-    const acceptanceProof = await writeAcceptanceProof(rootDir, taskState.planId, task, {
-      workerResult,
-      verifyResult,
-      scopeResult,
-      reviewResult,
+    const acceptanceProofEnvelope = await invokeCapability("acceptance-proof", {
+      rootDir,
+      planId: taskState.planId,
+      task,
+      evidence: { workerResult, verifyResult, scopeResult, reviewResult },
     });
+    const acceptanceProof = acceptanceProofEnvelope.evidence;
     if (!acceptanceProof.pass) {
       task.status = shouldFailTask(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
       task.last_failure = buildFailureSummary(task, {
@@ -416,7 +409,12 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
     task.status = "completed";
     task.updatedAt = nowIso();
     await persistTaskState(rootDir, taskState);
-    await writeCheckpoint(rootDir, taskState.planId, task, verifyResult, scopeResult, reviewResult);
+    await invokeCapability("checkpoint", {
+      rootDir,
+      planId: taskState.planId,
+      task,
+      evidence: { verifyResult, scopeResult, reviewResult },
+    });
     await appendLedger(rootDir, { type: "node_checkpoint_completed", planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult?.status || "missing", reviewStatus: "pass" });
     await appendWisdom(rootDir, task, verifyResult);
     await writeMemoryDigest(rootDir, { reason: "task_completed", stage: "checkpoint", task, taskId: task.id });
@@ -485,11 +483,12 @@ async function retryTaskNodeUnlocked(rootDir, options = {}) {
     const stillChangedDeniedPaths = currentChanged.available
       ? (changeRequest.deniedPaths || []).filter((filePath) => currentChanged.paths.map(normalizeRelativePath).includes(normalizeRelativePath(filePath)))
       : undefined;
-    const currentScope = await scopeGuard(rootDir, {
-      taskId: task.id,
-      changedPaths: stillChangedDeniedPaths,
-      unavailableReason: currentChanged.reason,
+    const currentScopeEnvelope = await invokeCapability("scope", {
+      rootDir,
+      task,
+      options: { changedPaths: stillChangedDeniedPaths, unavailableReason: currentChanged.reason },
     });
+    const currentScope = currentScopeEnvelope.evidence;
     if (currentScope.status === "fail") {
       await appendLedger(rootDir, {
         type: "node_retry_blocked",

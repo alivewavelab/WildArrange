@@ -6,10 +6,10 @@ import {
   resolveHelixPath,
   writeJsonAtomic,
   writeSnapshot,
-} from "./helix-foundation.mjs";
-import { importPlan } from "./helix-plan.mjs";
-import { statusReport, writeWorkflowSummary } from "./helix-status.mjs";
-import { runNextTask } from "./helix-node-runtime.mjs";
+} from "../infra/foundation.mjs";
+import { importPlan } from "./plan-state.mjs";
+import { statusReport, writeWorkflowSummary } from "./status.mjs";
+import { runNextTask } from "./linear-runtime.mjs";
 
 export async function runWorkflow(rootDir, options = {}) {
   await initRuntime(rootDir);

@@ -12,7 +12,7 @@ import {
   nowIso,
   resolveHelixPath,
   writeJsonAtomic,
-} from "./helix-foundation.mjs";
+} from "../infra/foundation.mjs";
 
 const SLASH_COMMAND_PREFIX = "helix";
 
