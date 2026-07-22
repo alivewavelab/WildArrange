@@ -508,11 +508,14 @@ function isPidAlive(pid) {
 
 async function isStaleLock(lockPath) {
   try {
-    const content = await readFile(lockPath, "utf8");
+    const [content, lockStat] = await Promise.all([
+      readFile(lockPath, "utf8"),
+      stat(lockPath),
+    ]);
     const owner = parseLockOwner(content);
-    if (!owner) return false; // MUTATION: old behavior
+    if (!owner) return Date.now() - lockStat.mtimeMs > LOCK_UNPARSEABLE_STALE_AFTER_MS;
     if (isPidAlive(owner.ownerPid)) return false;
-    return Date.now() - owner.acquiredAt > 300_000; // MUTATION: old behavior
+    return true;
   } catch {
     return false;
   }

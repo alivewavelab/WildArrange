@@ -859,6 +859,42 @@ test("adversarial: two runs admitting the same task concurrently produce exactly
   });
 });
 
+test("adversarial: duplicate admission calls from one run cannot downgrade a released lifecycle", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = resolveHelixPath(dir, "artifacts", "same-run-double-admit.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Same-run duplicate admission",
+      tasks: [
+        {
+          id: "T001",
+          subject: "Duplicate clicks remain idempotent",
+          verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/same.txt','utf8').trim()!=='same') process.exit(1);")],
+          writable_paths: ["src/**"],
+        },
+      ],
+    }, null, 2));
+    await importPlan(dir, planPath);
+    const command = [
+      "node -e",
+      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'same', files:[{path:'src/same.txt', content:'same\\n'}]}));"),
+      "{outputJson}",
+    ].join(" ");
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+
+    const outcomes = await Promise.allSettled(Array.from({ length: 4 }, () =>
+      admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" })));
+    assert.ok(
+      outcomes.some((outcome) => outcome.status === "fulfilled" && outcome.value.status === "completed"),
+      "at least one duplicate call must complete the admission",
+    );
+    assert.equal((await loadTaskState(dir)).tasks[0].status, "completed");
+    const result = await readJson(resolveHelixPath(dir, "agent-runs", batch.runId, "T001", "result.json"), null);
+    assert.equal(result.lifecycle?.status, "released", "a stale duplicate must not downgrade the winner's lifecycle");
+    assert.equal((await readFile(path.join(dir, "src", "same.txt"), "utf8")).trim(), "same");
+  });
+});
+
 test("adversarial: a crash while finalizing keeps the workspace and resumes with the same run, and nobody else can hijack the claim", async () => {
   // Cross-review P0 (round 6, 2026-07-21): the try/catch used to cover only
   // the file-apply phase. A crash inside finalize (review report, ledger,
@@ -1149,6 +1185,126 @@ test("adversarial: an applying-phase crash cannot lose the original file content
       "the rejected admission must restore the pre-admission content, not the child's mutation",
     );
     assert.notEqual((await loadTaskState(dir)).tasks[0].status, "verifying", "the claim must be released after the rejection");
+  });
+});
+
+test("adversarial: rollback failure keeps ownership until the same run recovers the workspace", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    await mkdir(path.join(dir, "src", "locked"), { recursive: true });
+    const planPath = resolveHelixPath(dir, "artifacts", "rollback-failure-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Rollback failure ownership",
+      tasks: [
+        {
+          id: "T001",
+          subject: "Reject a new file after making its directory read-only",
+          verify_commands: [nodeEval("const fs=require('fs'); fs.chmodSync('src/locked', 0o555); process.exit(1)")],
+          writable_paths: ["src/**"],
+        },
+      ],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    const command = [
+      "node -e",
+      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'adds rejected file', files:[{path:'src/locked/leak.txt', content:'after\\n'}]}));"),
+      "{outputJson}",
+    ].join(" ");
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+
+    const blocked = await admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" });
+    assert.equal(blocked.status, "recovery_required");
+    assert.equal(blocked.rollback.status, "rollback_failed");
+    assert.equal((await readFile(path.join(dir, "src", "locked", "leak.txt"), "utf8")).trim(), "after");
+    const blockedState = await loadTaskState(dir);
+    assert.equal(blockedState.tasks[0].status, "verifying");
+    assert.equal(blockedState.tasks[0].admission_claim?.runId, batch.runId, "rollback failure must retain ownership");
+    const rollbackPlanPath = resolveHelixPath(dir, "agent-runs", batch.runId, "T001.rollback-plan.json");
+    assert.ok(await readJson(rollbackPlanPath, null), "rollback authority must survive the failed attempt");
+
+    // Repair the filesystem and make the verifier fail without sabotaging it
+    // again. The same run reclaims its finalizing claim, rolls back the file,
+    // then releases ownership and removes the consumed rollback plan.
+    await chmod(path.join(dir, "src", "locked"), 0o755);
+    blockedState.tasks[0].verify_commands = [nodeEval("process.exit(1)")];
+    await persistTaskState(dir, blockedState);
+    const recovered = await admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" });
+    assert.notEqual(recovered.status, "recovery_required");
+    assert.equal(recovered.rollback.status, "rolled_back");
+    await assert.rejects(() => readFile(path.join(dir, "src", "locked", "leak.txt"), "utf8"), /ENOENT/);
+    const recoveredState = await loadTaskState(dir);
+    assert.notEqual(recoveredState.tasks[0].status, "verifying");
+    assert.equal(recoveredState.tasks[0].admission_claim, null);
+    assert.equal(await readJson(rollbackPlanPath, null), null);
+  });
+});
+
+test("adversarial: missing rollback authority fails closed and cannot be hijacked", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    await mkdir(path.join(dir, "src"), { recursive: true });
+    await writeFile(path.join(dir, "src", "data.txt"), "before\n");
+    const planPath = resolveHelixPath(dir, "artifacts", "missing-rollback-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Missing rollback authority",
+      tasks: [
+        {
+          id: "T001",
+          subject: "Never release an unrecoverable workspace",
+          verify_commands: [nodeEval("process.exit(1)")],
+          writable_paths: ["src/**"],
+        },
+      ],
+    }, null, 2));
+    await importPlan(dir, planPath);
+    const command = [
+      "node -e",
+      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'changes data', files:[{path:'src/data.txt', content:'after\\n'}]}));"),
+      "{outputJson}",
+    ].join(" ");
+    const ownerBatch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+
+    // Simulate a finalizing crash whose rollback-plan file was lost. There
+    // is no trustworthy pre-image left, so the only safe action is to keep
+    // the workspace and ownership frozen for explicit recovery.
+    const taskState = await loadTaskState(dir);
+    taskState.tasks[0].status = "verifying";
+    taskState.tasks[0].admission_claim = {
+      runId: ownerBatch.runId,
+      agent: "Kui",
+      claimedAt: new Date().toISOString(),
+      phase: "finalizing",
+      appliedPaths: ["src/data.txt"],
+    };
+    await persistTaskState(dir, taskState);
+    await writeFile(path.join(dir, "src", "data.txt"), "after\n");
+
+    await assert.rejects(
+      () => admitParallelAgentResult(dir, { runId: ownerBatch.runId, taskId: "T001" }),
+      /persisted rollback plan is missing/,
+    );
+    assert.equal((await readFile(path.join(dir, "src", "data.txt"), "utf8")).trim(), "after");
+    const stillOwned = await loadTaskState(dir);
+    assert.equal(stillOwned.tasks[0].status, "verifying");
+    assert.equal(stillOwned.tasks[0].admission_claim?.runId, ownerBatch.runId);
+
+    // Bypass the normal spawn guard by placing a structurally valid result
+    // directly on disk. Admission must still enforce ownership itself.
+    const intruderRunId = "run_intruder";
+    const intruderTaskDir = resolveHelixPath(dir, "agent-runs", intruderRunId, "T001");
+    await mkdir(intruderTaskDir, { recursive: true });
+    const intruderResult = await readJson(
+      resolveHelixPath(dir, "agent-runs", ownerBatch.runId, "T001", "result.json"),
+      null,
+    );
+    intruderResult.agent = "ZhuRong";
+    await writeFile(path.join(intruderTaskDir, "result.json"), JSON.stringify(intruderResult, null, 2));
+    await assert.rejects(
+      () => admitParallelAgentResult(dir, { runId: intruderRunId, taskId: "T001" }),
+      /currently claimed by parallel admission run/,
+    );
+    assert.equal((await loadTaskState(dir)).tasks[0].admission_claim?.runId, ownerBatch.runId);
   });
 });
 

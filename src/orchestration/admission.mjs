@@ -194,7 +194,6 @@ async function claimAdmission(rootDir, options, { result, files, proposedPaths }
     });
     return {
       kind: "reclaimed",
-      phase: task.admission_claim.phase,
       workerResult: priorWorker || {
         kind: "worker",
         at: nowIso(),
@@ -207,7 +206,6 @@ async function claimAdmission(rootDir, options, { result, files, proposedPaths }
         agent: result.agent,
       },
       writablePaths: task.writable_paths || [],
-      claimAppliedPaths: task.admission_claim.appliedPaths || proposedPaths,
     };
   }
   if (!["pending", "in_progress", "verifying"].includes(task.status)) {
@@ -272,9 +270,22 @@ async function claimAdmission(rootDir, options, { result, files, proposedPaths }
 
 /** Phases 2+3 body — runs under one continuous task-state lock hold. */
 async function runAdmissionTransaction(rootDir, options, { claim, result, files, proposedPaths }) {
-  const resumeFinalizing = claim.kind === "reclaimed" && claim.phase === "finalizing";
+  // Phase 1 and this transaction use separate lock holds. A duplicate call
+  // from the same run may have captured an older phase while waiting, so the
+  // persisted claim is the authority immediately before any workspace I/O.
+  const liveTaskState = await loadTaskState(rootDir);
+  const liveTask = liveTaskState?.tasks.find((candidate) => candidate.id === options.taskId);
+  if (liveTask?.status !== "verifying" || liveTask.admission_claim?.runId !== options.runId) {
+    throw new Error(`task ${options.taskId} admission ownership changed before apply; refusing stale transaction from run ${options.runId}`);
+  }
+  const livePhase = liveTask.admission_claim.phase;
+  if (!["applying", "finalizing"].includes(livePhase)) {
+    throw new Error(`task ${options.taskId} has unsupported admission phase ${livePhase || "missing"}; claim kept for manual recovery`);
+  }
+  const resumeFinalizing = livePhase === "finalizing";
+  const resumeApplying = claim.kind === "reclaimed" && livePhase === "applying";
   let rollbackPlan = { mode: "none", paths: [] };
-  let appliedPaths = resumeFinalizing ? claim.claimAppliedPaths : proposedPaths;
+  let appliedPaths = resumeFinalizing ? liveTask.admission_claim.appliedPaths : proposedPaths;
 
   if (resumeFinalizing) {
     // Files are already on disk from the interrupted attempt: re-applying
@@ -284,23 +295,34 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
     // 2026-07-21).
     rollbackPlan = await loadPersistedRollbackPlan(rootDir, options.runId, options.taskId)
       || (typeof result.result?.patch === "string" && files.length === 0
-        ? { mode: "patch", patch: result.result.patch, paths: claim.claimAppliedPaths }
-        : { mode: "none", paths: [] });
+        ? { mode: "patch", patch: result.result.patch, paths: appliedPaths }
+        : null);
+    if (!rollbackPlan) {
+      throw new Error(`parallel admission cannot resume ${options.taskId}: persisted rollback plan is missing; claim kept for manual recovery`);
+    }
   } else {
     // Phase 2 — apply the child's changes. ANY failure in here rolls the
-    // workspace back to its pre-admission content and releases the claim,
-    // so a failed admission never leaves half-applied files plus a task
-    // stuck in verifying (cross-review P0, round 5, 2026-07-21).
+    // workspace back to its pre-admission content before releasing the
+    // claim. If rollback itself fails, ownership is intentionally retained
+    // so no successor can build on a dirty workspace.
     try {
       if (files.length > 0) {
         // On an "applying"-phase crash resume the workspace may already be
         // mutated: the pre-image plan persisted by the interrupted attempt
         // is the only trustworthy source of the original contents
         // (cross-review P0, round 7, 2026-07-21).
-        rollbackPlan = await createFileRollbackPlan(rootDir, files); // MUTATION: re-plan from mutated workspace
-        // Persist the pre-images BEFORE the first write, so a crash during
-        // the writes cannot orphan the only copy of the original contents.
-        await persistRollbackPlan(rootDir, options.runId, options.taskId, rollbackPlan);
+        rollbackPlan = resumeApplying
+          ? await loadPersistedRollbackPlan(rootDir, options.runId, options.taskId)
+          : await createFileRollbackPlan(rootDir, files);
+        if (!rollbackPlan) {
+          throw new Error(`parallel admission cannot resume ${options.taskId}: persisted rollback plan is missing; claim kept for manual recovery`);
+        }
+        // A new admission persists its pre-images BEFORE the first write.
+        // A resumed admission must never overwrite that authority with a
+        // snapshot of the already-mutated workspace.
+        if (!resumeApplying) {
+          await persistRollbackPlan(rootDir, options.runId, options.taskId, rollbackPlan);
+        }
         for (const file of files) {
           const absolutePath = path.join(rootDir, file.path);
           assertInsideRoot(rootDir, absolutePath, file.path);
@@ -323,14 +345,16 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
     } catch (error) {
       const applyError = error instanceof Error ? error : new Error(String(error));
       const rollback = await rollbackAdmissionChanges(rootDir, rollbackPlan);
-      await releaseClaimWithinLock(rootDir, options.taskId, {
+      await recordApplyFailureWithinLock(rootDir, options.taskId, {
         runId: options.runId,
         error: applyError,
         rollback,
       });
-      await removePersistedRollbackPlan(rootDir, options.runId, options.taskId);
+      if (rollback.status === "rolled_back") {
+        await removePersistedRollbackPlan(rootDir, options.runId, options.taskId);
+      }
       await updateAgentRunLifecycle(rootDir, options.runId, options.taskId, "awaiting_revision", {
-        admissionStatus: "apply_failed",
+        admissionStatus: rollback.status === "rolled_back" ? "apply_failed" : "recovery_required",
         rollback,
       }).catch(() => {});
       throw new Error(`parallel admission failed while applying files (workspace rollback: ${rollback.status}): ${applyError.message}`);
@@ -436,6 +460,25 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
   // Non-completed: restore the workspace BEFORE releasing the claim.
   const rollback = await rollbackAdmissionChanges(rootDir, rollbackPlan);
 
+  if (rollback.status !== "rolled_back") {
+    task.status = "verifying";
+    task.last_failure = buildFailureSummary(task, {
+      workerResult,
+      verifyResult,
+      scopeResult,
+      reviewResult,
+      criteriaResult: criteria,
+      nextStatus: task.status,
+    });
+    task.last_failure.reason = "admission_rollback_failed";
+    task.last_failure.summary = `parallel admission rollback failed: ${rollback.error || rollback.reason || "unknown error"}`;
+    task.last_failure.retryHint = `任务所有权和 rollback plan 已保留；修复文件系统问题后，用同一 run 重新 admit。涉及路径：${(rollback.paths || []).join(", ") || "unknown"}`;
+    task.updatedAt = nowIso();
+    await writeFailureReport(rootDir, taskState.planId, task);
+    await persistTaskState(rootDir, taskState);
+    return { status: "recovery_required", planId: taskState.planId, task, acceptanceProof, verifyResult, scopeResult, reviewResult, rollback };
+  }
+
   if (pipelineResult.status === "checkpoint_failed") {
     task.status = "pending";
     task.admission_claim = null;
@@ -480,24 +523,28 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
 }
 
 /**
- * Releases the admission claim after a failed file application: the task
- * goes back to pending with an apply-failure record. Runs inside the
- * caller's lock hold; MUST NOT acquire the task-state lock.
+ * Records a failed file application. A successful rollback releases the
+ * claim; a failed rollback keeps ownership and the task in verifying so a
+ * successor cannot enter a dirty workspace. Runs inside the caller's lock
+ * hold; MUST NOT acquire the task-state lock.
  */
-async function releaseClaimWithinLock(rootDir, taskId, { runId, error, rollback }) {
+async function recordApplyFailureWithinLock(rootDir, taskId, { runId, error, rollback }) {
   const taskState = await loadTaskState(rootDir);
   if (!taskState) return;
   const task = taskState.tasks.find((candidate) => candidate.id === taskId);
   if (!task || task.status !== "verifying") return;
-  task.status = "pending";
-  task.admission_claim = null;
+  const rolledBack = rollback?.status === "rolled_back";
+  task.status = rolledBack ? "pending" : "verifying";
+  if (rolledBack) task.admission_claim = null;
   task.last_failure = {
     at: nowIso(),
-    reason: "admission_apply_failed",
-    summary: `parallel admission failed while applying files: ${error.message}`,
-    retryHint: rollback?.status === "rolled_back"
+    reason: rolledBack ? "admission_apply_failed" : "admission_rollback_failed",
+    summary: rolledBack
+      ? `parallel admission failed while applying files: ${error.message}`
+      : `parallel admission apply failed and workspace rollback did not complete: ${rollback?.error || error.message}`,
+    retryHint: rolledBack
       ? "工作区已回滚到 admission 前的内容，修复失败原因后重新 admit 即可"
-      : `工作区回滚状态: ${rollback?.status || "unknown"}，请先人工核对 ${(rollback?.paths || []).join(", ") || "改动文件"} 再重新 admit`,
+      : `工作区回滚失败；任务所有权和 rollback plan 已保留。修复文件系统问题后，用同一 run 重新 admit。涉及路径：${(rollback?.paths || []).join(", ") || "unknown"}`,
   };
   task.updatedAt = nowIso();
   await appendLedger(rootDir, {
@@ -537,7 +584,7 @@ function rollbackPlanPath(rootDir, runId, taskId) {
  * The pre-image rollback plan is persisted to the run directory BEFORE the
  * first workspace write, so a crash mid-apply (or later) never orphans the
  * only copy of the original file contents (cross-review P0, round 7,
- * 2026-07-21). It is removed on every terminal outcome.
+ * 2026-07-21). It is removed only after completion or a successful rollback.
  */
 async function persistRollbackPlan(rootDir, runId, taskId, rollbackPlan) {
   await writeJsonAtomic(rollbackPlanPath(rootDir, runId, taskId), {

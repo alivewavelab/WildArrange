@@ -20,6 +20,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 - 子 Agent 不能直接自证完成；结构化文件成果必须通过 writable_paths、verifier、scope、review、checkpoint 后才能进入 completed。
 - checkpoint 前必须写入 acceptance proof；proof 不通过不得把任务置为 completed。
 - 子 Agent 成功运行后默认保留为 `awaiting_user_acceptance`，只有主线 admission/checkpoint 完成后才释放。
+- admission 只有在成功提交或工作区成功回滚后才能释放任务所有权；回滚失败必须保留 `verifying` claim 与 rollback plan，并返回 `recovery_required`，直到原 run 完成恢复。
 - ArchivistRouter 只读取清洗后的结论包，不摄入代码块、raw diff 或完整命令输出；无 LLM key 时必须 fallback，不阻断主线或 hook。
 - 路由必须保留 deterministic 证据；semantic shadow 只能作为第二意见和低置信门控，不得无审计地覆盖路由表。
 - 商业发布包不得包含受限第三方源码、prompt 原文或近似改写文本；外部项目只能作为概念参考和对照证据。
@@ -70,7 +71,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/orchestration/plan-state.mjs`                            | 计划导入、校验、路由 enrichment、任务状态加载                 |
 | `src/orchestration/linear-runtime.mjs`                        | 线性任务节点运行时、重试 / checkpoint，经 gateway 调用能力       |
 | `src/orchestration/parallel-runtime.mjs`                      | 命令型子 Agent 并行运行、隔离结果、skipped/cleanup 生命周期状态与消息发布 |
-| `src/orchestration/admission.mjs`                             | 并行 admission 事务：claim → apply → gates → commit/rollback，全程持全局任务锁 |
+| `src/orchestration/admission.mjs`                             | 并行 admission 事务：claim → apply → gates → commit/rollback；回滚失败保持 ownership，全程持全局任务锁 |
 | `src/orchestration/delivery-pipeline.mjs`                     | 共享交付流水线：verify → scope → review → acceptance-proof → checkpoint 顺序 |
 | `src/orchestration/task-board.mjs`                            | 轻量任务板与消息板                                     |
 | `src/orchestration/change-governance.mjs`                     | 任务变更治理、Review Blocker、ChangeRequest           |
