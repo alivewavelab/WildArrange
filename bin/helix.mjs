@@ -95,8 +95,8 @@ Usage:
   wildarrange config show
   wildarrange config baseline [--reason "..."]
   wildarrange config verify
-  wildarrange adapter install [--target codex|cursor|all] [--mode local|npx] [--package ${DEFAULT_PACKAGE_NAME}]
-  wildarrange adapter uninstall [--target codex|cursor|all]
+  wildarrange adapter install [--target codex|cursor|kimi|all] [--mode local|npx] [--package ${DEFAULT_PACKAGE_NAME}]
+  wildarrange adapter uninstall [--target codex|cursor|kimi|all]
   wildarrange adapter restore --backup <backupId>
   wildarrange injection show --point before_review [--agent BaiZe] [--task T001] [--text "..."] [--stage plan]
   wildarrange hook run [--from hook.json] [--format text|json]

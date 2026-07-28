@@ -2,12 +2,13 @@
 
 ## 目的
 
-把 WildArrange 的运行时上下文挂载到关键节点，让 Codex、Cursor 或普通 CLI 会话拿到同一类治理信息。
+把 WildArrange 的运行时上下文挂载到关键节点，让 Codex、Cursor、Kimi Code 或普通 CLI 会话拿到同一类治理信息。
 
 核心目标不是把治理藏进某个宿主的私有能力，而是让不同宿主按能力分层接入同一套本地协议：
 
 - Codex：adapter 写入项目 `.codex/hooks.json`，并保留 `.helix/adapters/codex/hooks.json` 审计副本；只有在可信项目里通过 `/hooks` review / trust 后，才具备 hard hook 拦截。
 - Cursor：adapter 写入 `.cursor/rules/wildarrange.mdc`，属于 soft 规则注入；模型必须主动执行 CLI，不能假装宿主会强制拦截。
+- Kimi Code：adapter 生成 `.helix/adapters/kimi/plugin/`，用户显式安装后由 Hook bridge 转发宿主事件；复用 `AGENTS.md` 与 `.agents/skills/`，不改用户级配置。Kimi Hook 崩溃或超时时会 fail-open，最终完成仍以 WildArrange gate 为准。
 - 普通 CLI：手动运行 `node ./bin/helix.mjs ...`，用文件状态和 gate 命令完成治理闭环。
 
 无论宿主强弱，每个关键节点都应能读取：

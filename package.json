@@ -2,7 +2,7 @@
   "name": "@alivewavelab/wildarrange",
   "version": "0.1.0",
   "private": false,
-  "description": "Linear governance runtime for Codex and Cursor agent workflows",
+  "description": "Linear governance runtime for Codex, Cursor, and Kimi Code agent workflows",
   "type": "module",
   "bin": {
     "helix": "./bin/helix.mjs",

@@ -36,7 +36,7 @@
       "layer": "context_injection",
       "status": "implemented",
       "command": "node ./bin/helix.mjs injection show --point before_review --agent BaiZe --task T001",
-      "purpose": "解析某个注入点最终会挂载的 tools、markdown、skills 和 rules，用于调试 Codex/Cursor adapter 与 Agent 上下文是否接近预期。",
+      "purpose": "解析某个注入点最终会挂载的 tools、markdown、skills 和 rules，用于调试 Codex/Cursor/Kimi Code adapter 与 Agent 上下文是否接近预期。",
       "reads": [
         "helix.config.json",
         ".helix/config.json",
@@ -50,7 +50,7 @@
       "layer": "context_injection",
       "status": "implemented",
       "command": "node ./bin/helix.mjs hook run --from hook.json",
-      "purpose": "Codex/Cursor adapter 入口：读取 SessionStart/UserPromptSubmit/PostToolUse/PostCompact/Stop hook payload，执行对应规则扫描、路由、续跑或范围检查，并输出可直接注入模型上下文的 Markdown。",
+      "purpose": "Codex/Cursor/Kimi Code adapter 入口：读取 SessionStart/UserPromptSubmit/PreToolUse/PostToolUse/PostToolUseFailure/PostCompact/Stop hook payload，执行对应规则扫描、路由、续跑、命令安全或范围检查，并输出可直接注入模型上下文的 Markdown。",
       "reads": [
         "helix.config.json",
         ".helix/config.json",
@@ -71,7 +71,7 @@
       "layer": "host_adapter",
       "status": "implemented",
       "command": "node ./bin/helix.mjs adapter install --target all --mode local",
-      "purpose": "生成 Codex hooks 配置和 Cursor rule 配置，把 WildArrange 的 hook run 入口挂到宿主可调用的位置；默认不修改用户全局配置。",
+      "purpose": "生成 Codex hooks、Cursor rule 与 Kimi plugin，把 WildArrange 的 hook run 入口挂到宿主可调用的位置；Kimi plugin 必须由用户显式安装，默认不修改用户全局配置。",
       "reads": [
         "package.json",
         "helix.config.json",
@@ -81,6 +81,7 @@
         ".helix/adapters/**",
         ".codex/hooks.json",
         ".cursor/rules/wildarrange.mdc",
+        ".agents/skills/**",
         ".helix/ledger.jsonl"
       ]
     },
@@ -89,7 +90,7 @@
       "layer": "host_adapter",
       "status": "implemented",
       "command": "node ./bin/helix.mjs adapter restore --backup <backupId>",
-      "purpose": "从 `.helix/adapters/backups/<backupId>/` 恢复被安装或卸载流程备份的 Codex/Cursor adapter 文件，形成可撤销闭环。",
+      "purpose": "从 `.helix/adapters/backups/<backupId>/` 恢复被安装或卸载流程备份的 Codex/Cursor/Kimi Code adapter 文件，形成可撤销闭环。",
       "reads": [
         ".helix/adapters/backups/**"
       ],
@@ -98,6 +99,8 @@
         ".codex/hooks.json",
         ".cursor/rules/wildarrange.mdc",
         ".helix/adapters/codex/hooks.json",
+        ".helix/adapters/kimi/plugin/**",
+        ".agents/skills/**",
         ".helix/ledger.jsonl"
       ]
     },

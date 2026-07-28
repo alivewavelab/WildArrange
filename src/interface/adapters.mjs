@@ -13,12 +13,22 @@ import {
   resolveHelixPath,
   writeJsonAtomic,
 } from "../infra/foundation.mjs";
+import {
+  KIMI_ADAPTER_PLUGIN_NAME,
+  buildKimiPluginManifest,
+  renderKimiAdapterReadme,
+  renderKimiHookBridge,
+} from "./kimi-adapter.mjs";
 
 const SLASH_COMMAND_PREFIX = "helix";
+const ADAPTER_TARGETS = new Set(["all", "codex", "cursor", "kimi"]);
 
 export async function installAdapter(rootDir, options = {}) {
-  await initRuntime(rootDir);
   const target = options.target || "all";
+  if (!ADAPTER_TARGETS.has(target)) {
+    throw new Error("adapter target must be all, codex, cursor, or kimi");
+  }
+  await initRuntime(rootDir);
   const mode = options.mode || "local";
   const packageName = options.packageName || options.package || DEFAULT_PACKAGE_NAME;
   const hookCommand = adapterHookCommand({ mode, packageName });
@@ -46,13 +56,6 @@ export async function installAdapter(rootDir, options = {}) {
     await writeJsonAtomic(codexMirrorPath, codexHooks);
     outputs.push({ target: "codex", path: path.relative(rootDir, codexMirrorPath), status: "generated", backup: codexMirrorBackup, enforcement: "audit-copy" });
 
-    for (const command of slashCommands) {
-      const skillPath = path.join(rootDir, ".agents", "skills", command.name, "SKILL.md");
-      await mkdir(path.dirname(skillPath), { recursive: true });
-      const skillBackup = await backupExistingAdapterFile(rootDir, skillPath, backupId);
-      await writeFile(skillPath, renderCodexSkill(command), "utf8");
-      outputs.push({ target: "codex", path: path.relative(rootDir, skillPath), status: "generated", backup: skillBackup, enforcement: "slash-command" });
-    }
   }
 
   if (target === "all" || target === "cursor") {
@@ -77,8 +80,60 @@ export async function installAdapter(rootDir, options = {}) {
     }
   }
 
-  if (!["all", "codex", "cursor"].includes(target)) {
-    throw new Error("adapter target must be all, codex, or cursor");
+  if (target === "all" || target === "codex" || target === "kimi") {
+    const skillTarget = target === "all" ? "shared" : target;
+    for (const command of slashCommands) {
+      const skillPath = path.join(rootDir, ".agents", "skills", command.name, "SKILL.md");
+      await mkdir(path.dirname(skillPath), { recursive: true });
+      const skillBackup = await backupExistingAdapterFile(rootDir, skillPath, backupId);
+      await writeFile(skillPath, renderCodexSkill(command), "utf8");
+      outputs.push({ target: skillTarget, path: path.relative(rootDir, skillPath), status: "generated", backup: skillBackup, enforcement: "slash-command" });
+    }
+  }
+
+  if (target === "all" || target === "kimi") {
+    const kimiRoot = resolveHelixPath(rootDir, "adapters", "kimi");
+    const pluginRoot = path.join(kimiRoot, "plugin");
+    const manifestPath = path.join(pluginRoot, "kimi.plugin.json");
+    const bridgePath = path.join(pluginRoot, "hooks", "wildarrange-hook-bridge.mjs");
+    const readmePath = path.join(kimiRoot, "README.md");
+    const generated = [
+      {
+        path: manifestPath,
+        content: buildKimiPluginManifest(),
+        json: true,
+        enforcement: "pending-user-install",
+        trustAction: "从项目根启动 Kimi Code，执行 /plugins install .helix/adapters/kimi/plugin，确认后执行 /reload。",
+      },
+      {
+        path: bridgePath,
+        content: renderKimiHookBridge({
+          mode,
+          packageName,
+          localCliPath: path.join(PROJECT_DIR, "bin", "helix.mjs"),
+        }),
+        enforcement: "hook-bridge",
+      },
+      {
+        path: readmePath,
+        content: renderKimiAdapterReadme(),
+        enforcement: "documentation",
+      },
+    ];
+    for (const file of generated) {
+      const backup = await backupExistingAdapterFile(rootDir, file.path, backupId);
+      await mkdir(path.dirname(file.path), { recursive: true });
+      if (file.json) await writeJsonAtomic(file.path, file.content);
+      else await writeFile(file.path, file.content, "utf8");
+      outputs.push({
+        target: "kimi",
+        path: path.relative(rootDir, file.path),
+        status: "generated",
+        backup,
+        enforcement: file.enforcement,
+        ...(file.trustAction ? { trustAction: file.trustAction } : {}),
+      });
+    }
   }
 
   const report = {
@@ -103,11 +158,11 @@ export async function installAdapter(rootDir, options = {}) {
 }
 
 export async function uninstallAdapter(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
   const target = options.target || "all";
-  if (!["all", "codex", "cursor"].includes(target)) {
-    throw new Error("adapter target must be all, codex, or cursor");
+  if (!ADAPTER_TARGETS.has(target)) {
+    throw new Error("adapter target must be all, codex, cursor, or kimi");
   }
+  await ensureHelixDirs(rootDir);
 
   const backupId = createAdapterBackupId("uninstall");
   const slashCommands = buildSlashCommands("");
@@ -116,9 +171,6 @@ export async function uninstallAdapter(rootDir, options = {}) {
   if (target === "all" || target === "codex") {
     candidates.push({ target: "codex", path: path.join(rootDir, ".codex", "hooks.json") });
     candidates.push({ target: "codex", path: resolveHelixPath(rootDir, "adapters", "codex", "hooks.json") });
-    for (const command of slashCommands) {
-      candidates.push({ target: "codex", path: path.join(rootDir, ".agents", "skills", command.name, "SKILL.md") });
-    }
   }
   if (target === "all" || target === "cursor") {
     candidates.push({ target: "cursor", path: path.join(rootDir, ".cursor", "rules", "wildarrange.mdc") });
@@ -126,6 +178,26 @@ export async function uninstallAdapter(rootDir, options = {}) {
     candidates.push({ target: "cursor", path: resolveHelixPath(rootDir, "adapters", "cursor", "README.md") });
     for (const command of slashCommands) {
       candidates.push({ target: "cursor", path: path.join(rootDir, ".cursor", "commands", `${command.name}.md`) });
+    }
+  }
+  if (target === "all" || target === "kimi") {
+    candidates.push({ target: "kimi", path: resolveHelixPath(rootDir, "adapters", "kimi", "plugin", "kimi.plugin.json") });
+    candidates.push({ target: "kimi", path: resolveHelixPath(rootDir, "adapters", "kimi", "plugin", "hooks", "wildarrange-hook-bridge.mjs") });
+    candidates.push({ target: "kimi", path: resolveHelixPath(rootDir, "adapters", "kimi", "README.md") });
+  }
+  if (target === "all" || target === "codex" || target === "kimi") {
+    const siblingStillUsesSharedSkills = target === "kimi"
+      ? existsSync(path.join(rootDir, ".codex", "hooks.json"))
+      : target === "codex"
+        ? existsSync(resolveHelixPath(rootDir, "adapters", "kimi", "plugin", "kimi.plugin.json"))
+        : false;
+    for (const command of slashCommands) {
+      const skillPath = path.join(rootDir, ".agents", "skills", command.name, "SKILL.md");
+      if (siblingStillUsesSharedSkills) {
+        outputs.push({ target: "shared", path: path.relative(rootDir, skillPath), status: "retained-shared" });
+      } else {
+        candidates.push({ target: target === "all" ? "shared" : target, path: skillPath });
+      }
     }
   }
 
@@ -447,6 +519,7 @@ function renderAdapterInstallReport(report) {
   lines.push("");
   lines.push("- Codex project hooks are hard enforcement only after Codex trusts the project `.codex/` layer and the hook definition via `/hooks`.");
   lines.push("- Cursor rules are soft governance prompts unless Cursor exposes a command lifecycle hook for this project.");
+  lines.push("- Kimi Code reads the shared `.agents/skills/` directly. Its generated plugin becomes active only after `/plugins install <path>` and `/reload`; Kimi Hooks are fail-open on hook crashes/timeouts.");
   lines.push(`- Recommended user entry: \`npx ${DEFAULT_PACKAGE_NAME}@latest init\` or \`npx ${DEFAULT_PACKAGE_NAME}@latest adapter install\`.`);
   lines.push(`- Recommended persistent project setup after publish: add \`${DEFAULT_PACKAGE_NAME}\` as a devDependency so hook commands do not require network access.`);
   return `${lines.join("\n")}\n`;
@@ -468,6 +541,9 @@ function renderAdapterUninstallReport(report) {
   }
   lines.push("");
   lines.push("Removed files were copied under `.helix/adapters/backups/` before deletion when they existed.");
+  if (report.target === "all" || report.target === "kimi") {
+    lines.push(`The Kimi-managed plugin copy is user-scoped. Run \`/plugins remove ${KIMI_ADAPTER_PLUGIN_NAME}\` in Kimi Code to remove it.`);
+  }
   return `${lines.join("\n")}\n`;
 }
 

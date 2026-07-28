@@ -2,7 +2,7 @@
 
 [简体中文](./README.md) | English
 
-WildArrange is a local governance runtime for Codex and Cursor agent workflows. The first release is deliberately small: one recoverable linear loop before multi-agent parallel execution.
+WildArrange is a local governance runtime for Codex, Cursor, and Kimi Code agent workflows. The first release is deliberately small: one recoverable linear loop before multi-agent parallel execution.
 
 ## What It Does
 
@@ -14,7 +14,7 @@ init -> plan -> execute -> verify -> scope -> review -> checkpoint -> resume
 
 The key rule is simple: a worker can claim work is done, but only gates can complete it.
 
-The core runtime is host-neutral. Codex and Cursor adapters improve injection and recovery, but the workflow can run through CLI commands alone.
+The core runtime is host-neutral. Codex, Cursor, and Kimi adapters improve injection and recovery, but the workflow can run through CLI commands alone.
 
 ## Install
 
@@ -101,13 +101,16 @@ Install, uninstall, and restore write reports under `.helix/adapters/`. Existing
 
 - **Codex**: lifecycle hooks are written to `.codex/hooks.json`, with an audit copy at `.helix/adapters/codex/hooks.json`. Codex runs these hard hooks only after the trusted project layer and the hook definition are reviewed/trusted through `/hooks`.
 - **Cursor**: project rule at `.cursor/rules/wildarrange.mdc`. This is soft governance unless Cursor exposes a command lifecycle hook for the project.
+- **Kimi Code**: a project-specific plugin is generated under `.helix/adapters/kimi/plugin/`, while project instructions and Skills reuse `AGENTS.md` and `.agents/skills/`. WildArrange never silently edits the user-level `~/.kimi-code/config.toml`; start Kimi Code from the project root, run `/plugins install .helix/adapters/kimi/plugin`, then run `/reload`. Do not quote the path because Kimi Code 0.27 treats quote characters as part of the path. Although plugin installation is user-scoped, its bridge exits silently outside WildArrange projects.
 
-`adapter install` also generates slash commands so you don't have to open a terminal for common operations. Both surfaces render from one shared command set (`helix-config` / `helix-doctor` / `helix-refresh` / `helix-status` / `helix-plan` / `helix-approve` / `helix-run`):
+`adapter install` also generates shortcuts so you don't have to open a terminal for common operations. All three surfaces render from one shared command set (`helix-config` / `helix-doctor` / `helix-refresh` / `helix-status` / `helix-plan` / `helix-approve` / `helix-run`):
 
 - **Cursor**: `.cursor/commands/<name>.md` (plain-Markdown slash commands; type `/helix-doctor` in chat).
-- **Codex**: `.agents/skills/<name>/SKILL.md` (skill directory; invoke via `/skills` or `$helix-doctor`, since Codex 0.117 removed custom prompts in favor of skills).
+- **Codex / Kimi Code**: shared `.agents/skills/<name>/SKILL.md` project Skills. Codex can invoke them through `/skills` or `$helix-doctor`; Kimi Code discovers and invokes them through its project Skill mechanism.
 
 Each command is a prompt that tells the agent to run the matching `helix.mjs` subcommand and report back — a shortcut that lets the agent run the CLI, not a native button.
+
+A healthy Kimi Hook can deny out-of-scope Write/Edit calls and clearly destructive Bash commands. Kimi's Hook runner is fail-open on hook crashes and timeouts, so this is an early warning layer rather than the final security boundary. Verifier, scope, review, success criteria, acceptance proof, and checkpoint gates remain authoritative.
 
 ## Minimal Multi-Agent Loop
 

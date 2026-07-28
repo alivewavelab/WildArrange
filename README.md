@@ -2,7 +2,7 @@
 
 简体中文 | [English](./README.en.md)
 
-WildArrange 是面向 Codex 与 Cursor 的本地 Agent 治理运行时。第一版刻意保持精简：先跑通**可恢复、可验证的单线闭环**，再考虑多 Agent 并行。
+WildArrange 是面向 Codex、Cursor 与 Kimi Code 的本地 Agent 治理运行时。第一版刻意保持精简：先跑通**可恢复、可验证的单线闭环**，再考虑多 Agent 并行。
 
 ## 它能做什么
 
@@ -14,7 +14,7 @@ init -> plan -> execute -> verify -> scope -> review -> checkpoint -> resume
 
 核心规则：**worker 可以声称完成，但只有 gate 才能判定完成。**
 
-核心运行时是宿主中立的。Codex / Cursor adapter 负责注入与恢复增强，但仅凭 CLI 也能跑完整流程。
+核心运行时是宿主中立的。Codex / Cursor / Kimi adapter 负责注入与恢复增强，但仅凭 CLI 也能跑完整流程。
 
 ## 安装
 
@@ -101,13 +101,16 @@ node ./bin/helix.mjs adapter restore --backup <backupId>
 
 - **Codex**：生命周期 hook 写入 `.codex/hooks.json`，并在 `.helix/adapters/codex/hooks.json` 保留审计副本。Codex 需要在可信项目中通过 `/hooks` review / trust 后才会执行这些 hard hook。
 - **Cursor**：项目规则写入 `.cursor/rules/wildarrange.mdc`。当前 Cursor 侧是 soft governance，不等同于 Codex PreToolUse 硬拦截。
+- **Kimi Code**：生成项目专属 plugin 到 `.helix/adapters/kimi/plugin/`，复用项目根 `AGENTS.md` 和 `.agents/skills/`。WildArrange 不会静默改写用户级 `~/.kimi-code/config.toml`；从项目根启动 Kimi Code，显式执行 `/plugins install .helix/adapters/kimi/plugin`，再执行 `/reload`。不要给路径加引号，Kimi Code 0.27 会把引号当成路径字符。plugin 是用户级安装，但 bridge 会在非 WildArrange 项目中静默退出。
 
-`adapter install` 还会生成一组 slash 命令，省去手动开终端敲 `node ...`。两端从同一套命令集渲染（`helix-config` / `helix-doctor` / `helix-refresh` / `helix-status` / `helix-plan` / `helix-approve` / `helix-run`）：
+`adapter install` 还会生成一组快捷命令，省去手动开终端敲 `node ...`。三端从同一套命令集渲染（`helix-config` / `helix-doctor` / `helix-refresh` / `helix-status` / `helix-plan` / `helix-approve` / `helix-run`）：
 
 - **Cursor**：`.cursor/commands/<name>.md`（纯 Markdown 斜杠命令，聊天输入 `/helix-doctor` 触发）。
-- **Codex**：`.agents/skills/<name>/SKILL.md`（skill 目录，用 `/skills` 或 `$helix-doctor` 触发；Codex 0.117 已移除自定义 prompts，改用 skill）。
+- **Codex / Kimi Code**：共享 `.agents/skills/<name>/SKILL.md` 项目 Skill；Codex 可通过 `/skills` 或 `$helix-doctor` 触发，Kimi Code 按其项目 Skill 机制发现和调用。
 
 每个命令本质是一段提示词，指示 AI 去执行对应的 `helix.mjs` 子命令并汇报结果——是"让 AI 代你敲 CLI"的快捷方式，不是原生按钮。
+
+Kimi Hook 在正常运行时可拦截越界 Write/Edit 和明显高危 Bash，但 Kimi 的 Hook 执行器在 Hook 崩溃或超时时会 fail-open（失败放行）。因此它不能替代 WildArrange 的 verifier、scope、review、successCriteria、acceptance proof 与 checkpoint 最终质量门。
 
 ## 多 Agent 最小闭环
 

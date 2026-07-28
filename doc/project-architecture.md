@@ -1,6 +1,6 @@
 # WildArrange Project Architecture
 
-> Refactor history and handoff notes for the five-zone layout described below: [doc/2026-07-21-five-zone-refactor-handoff.md](./2026-07-21-five-zone-refactor-handoff.md).
+> Reusable five-zone rules: [five-zone-decoupling-guidelines.md](./five-zone-decoupling-guidelines.md). Refactor history and handoff notes: [2026-07-21-five-zone-refactor-handoff.md](./2026-07-21-five-zone-refactor-handoff.md).
 
 ## Runtime Shape
 
@@ -28,7 +28,7 @@ Every old flat `src/helix-*.mjs` path still exists as a declarative `@deprecated
 
 | Zone | Directory | Owns | Allowed to depend on |
 | --- | --- | --- | --- |
-| Interface | `src/interface/` | Dashboard HTTP API, Codex/Cursor adapter install, `doctor` health report — anything a human or host IDE talks to directly | `orchestration`, `infra` |
+| Interface | `src/interface/` | Dashboard HTTP API, Codex/Cursor/Kimi adapter install, `doctor` health report — anything a human or host IDE talks to directly | `orchestration`, `infra` |
 | Orchestration | `src/orchestration/` | Task/plan state, linear + parallel runtime loops, the shared `delivery-pipeline`, task board, change governance, status/attention report | `ai` (pinned edge list only), `capabilities` (gateway only), `infra` |
 | AI | `src/ai/` | Routing, ArchivistRouter, prompt injection, skill matcher, agent context builder, host lifecycle hooks | `orchestration` (read-only), `capabilities` (gateway only), `infra` |
 | Capabilities | `src/capabilities/` | The atomic gates themselves (verify, scope-guard, worker, review-gate, code-intel, acceptance-proof, checkpoint) plus `gateway.mjs`, the single seam every caller above must go through | `infra` |
@@ -52,7 +52,8 @@ The scanner itself is hardened against legal-source evasion: a lexical state mac
 - `src/helix-core.mjs`: compatibility export surface for existing CLI/tests/imports; re-exports every zoned module below and must not grow new implementation.
 - `src/infra/foundation.mjs`: shared constants, runtime initialization, config, locks, prompt-pack registry, snapshots, and resume context basics. The task-state lock (`.helix/team/tasks.lock`) is one global file lock: every `withTaskStateLock` caller serializes on it, which is what gives the linear run and parallel admission workspace-level mutual exclusion. Stale-lock recovery is self-healing: a lock owned by a dead pid is stale immediately (no fixed age wait), and an empty/unparseable lock (owner line never written because the acquiring process died between creating the file and writing it) goes stale after a short mtime grace instead of blocking forever.
 - `src/infra/ledger.mjs`: hash-chained ledger append, ledger verification, and verified-entry reads. Once the hash chain has started, unhashed appended lines are reported as tampering, and `doctor` only accepts chain-verified entries as completion evidence.
-- `src/interface/adapters.mjs`: Codex/Cursor adapter install, uninstall, restore, report, backup logic, Codex `.codex/hooks.json` generation, Cursor soft-rule generation, and shared slash-command generation (Cursor `.cursor/commands/*.md`, Codex `.agents/skills/*/SKILL.md`).
+- `src/interface/adapters.mjs`: Codex/Cursor/Kimi adapter install, uninstall, restore, report, backup logic, Codex `.codex/hooks.json` generation, Cursor soft-rule generation, Kimi plugin generation, and shared command Skill generation.
+- `src/interface/kimi-adapter.mjs`: pure rendering for the Kimi plugin manifest, project-aware Hook bridge, and Kimi install/readme instructions. Kimi-specific protocol translation stays here instead of entering the workflow core.
 - `src/orchestration/change-governance.mjs`: steering proposals, review blockers, ChangeRequest review, and explicit accept/reject resolution.
 - `src/infra/failure-analysis.mjs`: failure reason classification, retry hints, and actionable failure summaries.
 - `src/capabilities/acceptance-proof.mjs`: checkpoint proof chain that verifies worker, verifier, success criteria, scope, review, and review lanes before completion; also rejects no-op tasks whose worker and verify commands are all trivial with no writable paths.
@@ -166,10 +167,12 @@ Codex receives `.codex/hooks.json`. This is the real project-local Codex hook en
 
 WildArrange also writes `.helix/adapters/codex/hooks.json` as an audit copy. Cursor receives `.cursor/rules/wildarrange.mdc`; this is soft governance because Cursor does not expose the same command hook lifecycle here.
 
-Adapter install also generates a set of slash commands so users do not have to open a terminal for common operations. Both surfaces render from one shared command set (`helix-config`, `helix-doctor`, `helix-refresh`, `helix-status`, `helix-plan`, `helix-run`):
+Kimi receives a generated plugin under `.helix/adapters/kimi/plugin/`. The project CLI never edits user-level `~/.kimi-code/config.toml`; the developer starts Kimi Code from the project root, explicitly installs the generated plugin through `/plugins install .helix/adapters/kimi/plugin`, and activates it with `/reload`. The relative path avoids Kimi Code 0.27 treating quote characters as literal path characters. Kimi plugin installation is user-scoped, so its Hook bridge first verifies that the event `cwd` contains a real WildArrange runtime marker and exits without creating files in unrelated projects. Kimi's Hook runner is fail-open on hook crashes and timeouts: a healthy `PreToolUse` can deny out-of-scope Write/Edit/Bash calls, but final security and completion remain enforced by the host-neutral delivery pipeline and checkpoint gates.
+
+Adapter install also generates a set of commands so users do not have to open a terminal for common operations. All surfaces render from one shared command set (`helix-config`, `helix-doctor`, `helix-refresh`, `helix-status`, `helix-plan`, `helix-approve`, `helix-run`):
 
 - Cursor: `.cursor/commands/<name>.md` (plain-Markdown slash commands, filename = command name).
-- Codex: `.agents/skills/<name>/SKILL.md` (skill directory with `name`/`description` metadata, since custom prompts were removed in Codex 0.117).
+- Codex and Kimi: `.agents/skills/<name>/SKILL.md` (shared project Skill directory with `name`/`description` metadata).
 
 Each command is a prompt that instructs the agent to run the matching `helix.mjs` CLI subcommand and report the result; they are shortcuts that let the agent run the CLI, not native buttons.
 
@@ -228,7 +231,7 @@ External providers use `type: "openai-compatible"` and are configured with:
 
 WildArrange core must remain original code. External workflow projects may inform concepts, node names, and quality gates, but commercial builds must not ship copied source, copied prompt text, or tool implementations from licenses that restrict commercial redistribution.
 
-Adapter-specific behavior belongs in `src/interface/adapters.mjs` or host-specific generated files. Core workflow, gates, ledger, and provider logic must run without Codex/Cursor private hooks.
+Adapter-specific behavior belongs in `src/interface/adapters.mjs`, `src/interface/kimi-adapter.mjs`, or host-specific generated files. Core workflow, gates, ledger, and provider logic must run without Codex/Cursor/Kimi private hooks.
 
 ## Known Architecture Debt
 

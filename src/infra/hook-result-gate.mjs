@@ -9,7 +9,13 @@ const HARD_FAILURE_PATTERNS = [
 
 export async function evaluateHookResultGate(rootDir, input = {}) {
   const toolName = String(input.tool_name || input.toolName || "");
-  const response = input.tool_response ?? input.toolResponse ?? input.response ?? null;
+  const response = input.tool_response
+    ?? input.toolResponse
+    ?? input.tool_output
+    ?? input.toolOutput
+    ?? input.error
+    ?? input.response
+    ?? null;
   const findings = detectToolResultFindings(response);
   const decision = findings.some((finding) => finding.severity === "block")
     ? "block"

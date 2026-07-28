@@ -64,6 +64,7 @@ export const DEFAULT_HELIX_CONFIG = {
   adapters: {
     codex: { enabled: true, hookMode: "cli-adapter" },
     cursor: { enabled: true, hookMode: "cli-adapter" },
+    kimi: { enabled: true, hookMode: "plugin-adapter" },
   },
   modelProviders: {
     host: { type: "host", adapter: "auto" },

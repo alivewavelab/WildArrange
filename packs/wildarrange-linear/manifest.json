@@ -1,7 +1,7 @@
 {
   "version": 1,
   "name": "wildarrange-linear",
-  "description": "WildArrange M1 的提示词、技能与工具合同包，适配 Codex/Cursor 和普通 CLI 线性治理循环。",
+  "description": "WildArrange M1 的提示词、技能与工具合同包，适配 Codex/Cursor/Kimi Code 和普通 CLI 线性治理循环。",
   "source": {
     "project": "WildArrange",
     "commercialBoundary": "Original prompt/tool contract text for WildArrange runtime. External projects are conceptual references only."

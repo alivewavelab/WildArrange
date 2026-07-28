@@ -14,7 +14,9 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 
 - 先还原运行秩序：计划与执行分离、worker 不自证完成、独立验证、失败返工、证据入账。
 - 不把任何宿主专属工具硬塞进 core（例如特定 editor plugin hooks、tmux layout）。
-- Codex / Cursor 适配放在 runtime adapter 层；核心状态机必须是产品中立的本地文件协议。
+- Codex / Cursor / Kimi Code 适配放在 runtime adapter 层；核心状态机必须是产品中立的本地文件协议。
+- Kimi Code 项目接入复用根 `AGENTS.md` 与 `.agents/skills/`；生命周期能力通过用户明确安装的 Kimi plugin 转发，不得由项目 CLI 静默改写用户级 `~/.kimi-code/config.toml`。
+- Kimi Hook 为 fail-open：PreToolUse 可在 Hook 正常运行时阻断，但 Hook 崩溃或超时默认放行；不得把它宣传为唯一安全边界，最终完成仍必须经过 verifier / scope / review / successCriteria / acceptance proof / checkpoint。
 - LLM review 通过 OpenAI-compatible provider 配置化接入；默认关闭，无 key 时不阻断线性状态机。
 - 第一版不启动常驻多 Agent 集群；多 Agent 先以命令型子 Agent 的隔离运行目录跑通 spawn / collect / message / admission 闭环。
 - 子 Agent 不能直接自证完成；结构化文件成果必须通过 writable_paths、verifier、scope、review、checkpoint 后才能进入 completed。
@@ -27,7 +29,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 
 ## 工程约束
 
-- 使用 Node.js ESM，无外部 npm 依赖，保证 Codex / Cursor / 普通终端都能直接运行。
+- 使用 Node.js ESM，无外部 npm 依赖，保证 Codex / Cursor / Kimi Code / 普通终端都能直接运行。
 - 所有运行时状态写入 `.helix/`。
 - 计划、任务、回执、验证结果必须同时具备机器可读 JSON 和人工可读摘要。
 - worker 的 DoneClaim 不能直接让任务完成；必须有 verifier PASS。
@@ -59,13 +61,15 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | [README.md](./README.md) / [README.en.md](./README.en.md)    | 用户安装、初始化、最小工作流、dashboard 安全说明                 |
 | [doc/concept.md](./doc/concept.md)                           | 产品概念与外部参考边界                                   |
 | [doc/project-architecture.md](./doc/project-architecture.md) | 运行时架构、状态文件和 gate 模型                           |
+| [doc/five-zone-decoupling-guidelines.md](./doc/five-zone-decoupling-guidelines.md) | 可复制到其他项目的五区受控解耦准则、实施顺序与 Review 清单 |
 | [doc/development-plan.md](./doc/development-plan.md)         | P0 / P1 / P2 路线                               |
 | [doc/2026-07-21-five-zone-refactor-handoff.md](./doc/2026-07-21-five-zone-refactor-handoff.md) | 五区解耦重构总结与交接（六个 Phase、关键决策、已知遗留、改 X 去哪改速查） |
 | `bin/helix.mjs`                                              | CLI 入口                                        |
 | `src/helix-core.mjs`                                         | 兼容导出层，禁止继续堆实现                                 |
 | **interface/**（宿主/人机交互边界，只依赖 orchestration、infra） |  |
 | `src/interface/dashboard.mjs`                                | 本地 dashboard HTTP 服务、POST token 与 Host/Origin 防护 |
-| `src/interface/adapters.mjs`                                 | Codex `.codex/hooks.json` hard hook、Cursor soft rule、slash 命令生成、adapter 安装/卸载/恢复 |
+| `src/interface/adapters.mjs`                                 | Codex / Cursor / Kimi adapter 安装、卸载、恢复、共享 Skill 命令生成 |
+| `src/interface/kimi-adapter.mjs`                             | Kimi plugin manifest、Hook bridge 与安装说明的纯渲染逻辑 |
 | `src/interface/doctor.mjs`                                   | 一键体检：config 结构校验、完成状态对账、ledger 与备份交叉验证 |
 | **orchestration/**（工作流顺序、重试、gate 编排，只依赖 ai、capabilities、infra） |  |
 | `src/orchestration/plan-state.mjs`                            | 计划导入、校验、路由 enrichment、任务状态加载                 |

@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import {
   DEFAULT_EXECUTOR_AGENT,
@@ -7,6 +8,7 @@ import {
   appendLedger,
   createWorkId,
   initRuntime,
+  loadHelixConfig,
   nowIso,
   resolveHelixPath,
   writeJsonAtomic,
@@ -21,6 +23,7 @@ import { findRunnableTask } from "../orchestration/task-board.mjs";
 import { buildAgentContext, continuationDirective, resumeReport } from "./context.mjs";
 import { runArchivistRouter } from "./archivist-router.mjs";
 import { evaluateHookResultGate } from "../infra/hook-result-gate.mjs";
+import { compileCommandSafetyPatterns, evaluateCommandSafety } from "../infra/command-safety.mjs";
 import { writeMemoryDigest } from "../infra/memory-digest.mjs";
 import { attentionReport } from "../orchestration/status.mjs";
 
@@ -31,7 +34,7 @@ export async function runInjectionHook(rootDir, input = {}) {
   const pointName = injectionPointForHookEvent(event);
   const sessionId = normalizeHookSessionId(input);
   const taskId = normalizeHookTaskId(input);
-  const targetPaths = event === "PostToolUse" || event === "PreToolUse" ? extractHookTargetPaths(input) : [];
+  const targetPaths = event === "PostToolUse" || event === "PreToolUse" ? extractHookTargetPaths(input, hookRootDir) : [];
   const facts = {};
 
   if (event === "SessionStart") {
@@ -121,6 +124,11 @@ export async function runInjectionHook(rootDir, input = {}) {
     targetPaths,
     enabled: injectionPoint.enabled,
     decision: facts.preflight?.decision || facts.resultGate?.decision || null,
+    continuation: facts.continuation ? {
+      required: facts.continuation.shouldContinue === true,
+      reason: facts.continuation.reason || "",
+      nextCommand: facts.continuation.nextCommand || null,
+    } : null,
     output,
   };
   const safeSessionId = sanitizeFileSegment(sessionId || "session");
@@ -144,9 +152,38 @@ export async function preToolUseGuard(rootDir, input = {}) {
   const event = normalizeHookEvent(input.hook_event_name || input.event || input.name);
   if (event !== "PreToolUse") throw new Error("preToolUseGuard requires PreToolUse input");
   const toolName = String(input.tool_name || input.toolName || "");
-  const targetPaths = extractHookTargetPaths(input);
+  const targetPaths = extractHookTargetPaths(input, rootDir);
+  const toolInput = input.tool_input || input.toolInput;
 
-  if (toolName === "create_goal" && hasInvalidCreateGoalPayload(input.tool_input || input.toolInput)) {
+  if (/^(Bash|bash|exec_command|functions\.exec_command)$/.test(toolName)) {
+    const command = toolInput && typeof toolInput === "object" ? toolInput.command || toolInput.cmd : "";
+    const { config } = await loadHelixConfig(rootDir);
+    const safety = evaluateCommandSafety(command, {
+      extraPatterns: compileCommandSafetyPatterns(config),
+    });
+    if (!safety.allowed) {
+      const reason = `high-risk shell command blocked: ${safety.findings.map((finding) => `${finding.id}: ${finding.reason}`).join("; ")}`;
+      await appendLedger(rootDir, {
+        type: "pre_tool_use_denied",
+        reason: "high_risk_command",
+        toolName,
+        targetPaths,
+        findings: safety.findings,
+      });
+      return {
+        kind: "pre_tool_use_guard",
+        at: nowIso(),
+        decision: "deny",
+        reason,
+        toolName,
+        taskId: normalizeHookTaskId(input) || null,
+        targetPaths,
+        deniedPaths: targetPaths,
+      };
+    }
+  }
+
+  if (toolName === "create_goal" && hasInvalidCreateGoalPayload(toolInput)) {
     return {
       kind: "pre_tool_use_guard",
       at: nowIso(),
@@ -255,6 +292,8 @@ function normalizeHookEvent(value) {
     PreToolUse: "PreToolUse",
     post_tool_use: "PostToolUse",
     PostToolUse: "PostToolUse",
+    post_tool_use_failure: "PostToolUse",
+    PostToolUseFailure: "PostToolUse",
     post_compact: "PostCompact",
     PostCompact: "PostCompact",
     stop: "Stop",
@@ -357,38 +396,60 @@ async function currentPlanId(rootDir) {
   return taskState?.planId || "";
 }
 
-function extractHookTargetPaths(input) {
+function extractHookTargetPaths(input, rootDir) {
   const values = [];
   collectPathLikeValues(input.tool_input || input.toolInput, values);
   collectPathLikeValues(input.tool_response || input.toolResponse, values);
-  collectPathLikeValues(input.paths || input.targetPaths, values);
-  return uniqueStrings(values.map(normalizeRelativePath).filter((value) => value && !value.startsWith("..")));
+  collectPathLikeValues(input.paths || input.targetPaths, values, true);
+  return uniqueStrings(values.map((value) => normalizeHookTargetPath(value, rootDir)).filter(Boolean));
 }
 
-function collectPathLikeValues(value, output) {
+function collectPathLikeValues(value, output, explicitPath = false) {
   if (typeof value === "string") {
-    if (looksLikeProjectPath(value)) output.push(value);
+    if (explicitPath && isCandidateFilePath(value)) output.push(value);
     return;
   }
   if (Array.isArray(value)) {
-    for (const item of value) collectPathLikeValues(item, output);
+    for (const item of value) collectPathLikeValues(item, output, explicitPath);
     return;
   }
   if (!value || typeof value !== "object") return;
   for (const [key, nested] of Object.entries(value)) {
-    if (/^(path|file|file_path|filepath|target|target_path|relative_path)$/i.test(key) && typeof nested === "string") {
-      if (looksLikeProjectPath(nested)) output.push(nested);
+    if (/^(path|paths|file|files|file_path|file_paths|filepath|target|targets|target_path|target_paths|relative_path)$/i.test(key)) {
+      collectPathLikeValues(nested, output, true);
       continue;
     }
-    collectPathLikeValues(nested, output);
+    if (nested && typeof nested === "object") collectPathLikeValues(nested, output);
   }
 }
 
-function looksLikeProjectPath(value) {
+function isCandidateFilePath(value) {
   if (!value || value.includes("\n") || value.includes("\0")) return false;
-  if (/^(https?:|data:|mailto:)/i.test(value)) return false;
-  if (path.isAbsolute(value)) return false;
-  return value.includes("/") || /\.[A-Za-z0-9]{1,8}$/.test(value);
+  return !/^(https?:|data:|mailto:)/i.test(value);
+}
+
+function normalizeHookTargetPath(value, rootDir) {
+  const absoluteTarget = path.isAbsolute(value) ? value : path.resolve(rootDir, value);
+  const relative = path.relative(
+    canonicalizePotentialPath(rootDir),
+    canonicalizePotentialPath(absoluteTarget),
+  );
+  return normalizeRelativePath(relative);
+}
+
+function canonicalizePotentialPath(value) {
+  let current = path.resolve(value);
+  const missingSegments = [];
+  while (true) {
+    try {
+      return path.join(realpathSync(current), ...missingSegments);
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return path.resolve(value);
+      missingSegments.unshift(path.basename(current));
+      current = parent;
+    }
+  }
 }
 
 function sanitizeFileSegment(value) {

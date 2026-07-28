@@ -7,7 +7,7 @@
       "delegate-task category/subagent resolver",
       "model-core category default and fallback model resolution"
     ],
-    "adaptation": "Codex/Cursor 线性 runtime 先使用确定性 intent/domain/category 路由；后续 adapter 再接真实模型与外部 Agent。"
+    "adaptation": "Codex/Cursor/Kimi Code 线性 runtime 先使用确定性 intent/domain/category 路由；后续 adapter 再接真实模型与外部 Agent。"
   },
   "intents": [
     {

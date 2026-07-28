@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WildArrange × Kimi Code 接入方案</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7fb;
+      --card: #ffffff;
+      --text: #172033;
+      --muted: #667085;
+      --line: #d9dfeb;
+      --p0: #c62828;
+      --p1: #ef6c00;
+      --p2: #1565c0;
+      --ok: #137333;
+      --warn: #a15c00;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main { max-width: 1120px; margin: 0 auto; padding: 36px 20px 64px; }
+    h1, h2, h3 { line-height: 1.25; }
+    h1 { margin: 0 0 10px; font-size: 34px; }
+    h2 { margin: 34px 0 14px; font-size: 23px; }
+    h3 { margin: 0 0 8px; font-size: 17px; }
+    p { margin: 8px 0; }
+    code {
+      padding: 2px 5px;
+      border-radius: 5px;
+      background: #eef2f8;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    pre {
+      overflow-x: auto;
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #111827;
+      color: #e5e7eb;
+    }
+    a { color: #1558b0; }
+    .lead {
+      padding: 18px 20px;
+      border-left: 6px solid var(--ok);
+      border-radius: 10px;
+      background: #eaf6ee;
+      font-size: 17px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 14px;
+    }
+    .card {
+      padding: 17px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--card);
+    }
+    .priority {
+      display: inline-block;
+      margin-bottom: 8px;
+      padding: 2px 9px;
+      border-radius: 999px;
+      color: white;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .p0 { background: var(--p0); }
+    .p1 { background: var(--p1); }
+    .p2 { background: var(--p2); }
+    .flow {
+      display: flex;
+      align-items: stretch;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 8px 0;
+    }
+    .node {
+      min-width: 170px;
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--card);
+      text-align: center;
+    }
+    .arrow { align-self: center; color: var(--muted); font-size: 24px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--card);
+    }
+    th, td {
+      padding: 11px 12px;
+      border: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: #edf2f9; }
+    ul, ol { margin: 8px 0 0; padding-left: 22px; }
+    .muted { color: var(--muted); }
+    .warning {
+      padding: 13px 15px;
+      border: 1px solid #f3c77a;
+      border-radius: 10px;
+      background: #fff7e8;
+      color: #6f4300;
+    }
+    .decision {
+      padding: 17px;
+      border: 2px solid #1558b0;
+      border-radius: 12px;
+      background: #edf5ff;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>WildArrange × Kimi Code 接入方案</h1>
+  <p class="muted">日期：2026-07-28　状态：P0 + P1 已实施并通过质量门；P2 暂缓</p>
+
+  <div class="lead">
+    <strong>结论：可以接，而且约 70% 已经天然兼容。</strong>
+    Kimi Code 原生读取项目 <code>AGENTS.md</code> 和 <code>.agents/skills/</code>；
+    现有 Helix 命令技能可以直接复用。真正要新增的是 Kimi Hook 插件、Hook 桥接器，以及可选的 Kimi 子 Agent 启动模板。
+  </div>
+
+  <h2>1. 生活类比</h2>
+  <p>
+    WildArrange 像一套工厂质检制度，Codex、Cursor、Kimi Code 是三个不同入口。
+    质检流水线本身不用重建；Kimi 已经认识工厂规章和操作手册，只缺一张能触发门禁检查的“Kimi 门禁卡”。
+    因此接入应只改入口适配层，不把 Kimi 专属逻辑塞进核心状态机。
+  </p>
+
+  <h2>2. 已核实的 Kimi Code 能力</h2>
+  <table>
+    <thead>
+      <tr><th>能力</th><th>官方事实</th><th>对 WildArrange 的意义</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>项目规范</td>
+        <td>项目根目录 <code>AGENTS.md</code> 会作为项目指令加载。</td>
+        <td>现有 WildArrange 项目规范无需复制或转换。</td>
+      </tr>
+      <tr>
+        <td>项目 Skills</td>
+        <td>Kimi 扫描项目 <code>.kimi-code/skills/</code> 和 <code>.agents/skills/</code>；目录型 Skill 使用 <code>SKILL.md</code>。</td>
+        <td>现有为 Codex 生成的 <code>.agents/skills/helix-*/SKILL.md</code> 可被 Kimi 直接识别。</td>
+      </tr>
+      <tr>
+        <td>Hooks</td>
+        <td>支持 <code>UserPromptSubmit</code>、<code>PreToolUse</code>、<code>PostToolUse</code>、<code>SessionStart</code>、<code>PostCompact</code>、<code>Stop</code>、<code>SubagentStop</code> 等事件；输入是 stdin JSON。</td>
+        <td>事件名和 snake_case 输入字段与现有 <code>hook run</code> 基本一致。</td>
+      </tr>
+      <tr>
+        <td>阻断协议</td>
+        <td><code>PreToolUse</code> 可用退出码 2，或 stdout 中的 <code>hookSpecificOutput.permissionDecision = "deny"</code> 阻断。</td>
+        <td>现有 WildArrange PreToolUse 输出协议可直接复用。</td>
+      </tr>
+      <tr>
+        <td>Plugins</td>
+        <td>Kimi 插件可打包 Skills、Slash Commands、MCP 和 Hooks；本地插件由用户通过 <code>/plugins install</code> 安装。</td>
+        <td>用插件承载 Hook，比自动改用户全局 <code>config.toml</code> 更安全、可见、可卸载。</td>
+      </tr>
+      <tr>
+        <td>非交互运行</td>
+        <td><code>kimi -p</code> 支持单次 prompt；<code>--auto</code> 可在非交互任务中自动处理工具许可。</td>
+        <td>后续可作为 WildArrange 命令型子 Agent 的 spawn adapter。</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="muted">
+    本机证据：<code>/opt/homebrew/bin/kimi</code> 当前为 <code>0.27.0</code>，其内置 Hook runner 已包含上述事件、stdin JSON 与 deny 输出协议。
+    当前官方文档展示的更新版本为 0.29.x；实施时以最新稳定版复测。
+  </p>
+
+  <h2>3. 推荐架构</h2>
+  <div class="flow">
+    <div class="node"><strong>Kimi Code</strong><br>Write / Edit / Bash<br>用户 Prompt</div>
+    <div class="arrow">→</div>
+    <div class="node"><strong>Kimi Plugin</strong><br>声明 Hook 事件<br>不放业务逻辑</div>
+    <div class="arrow">→</div>
+    <div class="node"><strong>Kimi Hook Bridge</strong><br>读取 cwd<br>转发 stdin/stdout</div>
+    <div class="arrow">→</div>
+    <div class="node"><strong>WildArrange CLI</strong><br><code>hook run</code><br>宿主中立</div>
+    <div class="arrow">→</div>
+    <div class="node"><strong>核心治理</strong><br>scope / verifier<br>review / checkpoint</div>
+  </div>
+
+  <p>
+    插件只负责“把 Kimi 的事件送进 WildArrange”；是否允许写入、是否完成任务、是否回滚，仍由现有
+    <code>ai/hooks</code>、delivery pipeline、capabilities 和 ledger 决定。
+  </p>
+
+  <h2>4. 分阶段实施</h2>
+  <div class="grid">
+    <section class="card">
+      <span class="priority p0">P0 必须</span>
+      <h3>Kimi 项目 Adapter</h3>
+      <ul>
+        <li>CLI 增加 <code>--target kimi</code>，<code>all</code> 同时包含 Kimi。</li>
+        <li>复用共享 <code>.agents/skills/helix-*</code> 生成器，不复制第二套命令正文。</li>
+        <li>生成 <code>.helix/adapters/kimi/plugin/</code>。</li>
+        <li>插件内只放 manifest 与轻量 Hook bridge。</li>
+        <li>安装报告要求从项目根执行 <code>/plugins install .helix/adapters/kimi/plugin</code> 和 <code>/reload</code>。</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <span class="priority p1">P1 建议同批</span>
+      <h3>完整 Hook 语义</h3>
+      <ul>
+        <li><code>UserPromptSubmit</code>：注入规则、路由与待人决策。</li>
+        <li><code>PreToolUse</code>：拦截越界的 Write / Edit / Bash。</li>
+        <li><code>PostToolUse</code>：记录结果、匹配规范；不可阻断。</li>
+        <li><code>SessionStart</code> / <code>PostCompact</code>：恢复状态；上下文在下一次 UserPromptSubmit 注入。</li>
+        <li><code>Stop</code>：当主线仍需继续时，由桥接器转换为 Kimi deny，让 Agent 继续一轮。</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <span class="priority p2">P2 可选</span>
+      <h3>Kimi 子 Agent Spawn</h3>
+      <ul>
+        <li>新增 <code>parallelAgents.spawnAdapters.kimi</code>。</li>
+        <li>支持 <code>parallel run --adapter kimi</code>。</li>
+        <li>使用 <code>kimi -p --auto</code> 在隔离工作目录执行任务包。</li>
+        <li>优先要求 <code>git-worktree</code> 隔离，再由现有 admission 合入。</li>
+        <li>延长默认超时，不把 headless 输出当作完成证据。</li>
+      </ul>
+    </section>
+  </div>
+
+  <h2>5. 生成物与用户动作</h2>
+  <pre>node ./bin/helix.mjs adapter install --target kimi --mode local
+
+# 从项目根启动 Kimi Code，执行（路径不要加引号）：
+/plugins install .helix/adapters/kimi/plugin
+/reload
+
+# 验证：
+/helix-doctor
+/helix-status</pre>
+
+  <p>
+    <code>adapter install</code> 只在项目内生成文件，不自动修改
+    <code>~/.kimi-code/config.toml</code>，也不替用户在 Kimi 中信任第三方插件。
+    <code>adapter uninstall --target kimi</code> 会备份并移除项目生成物，同时提示用户执行
+    <code>/plugins remove wildarrange-adapter</code>；全局插件卸载仍由用户确认。
+  </p>
+
+  <h2>6. 实际修改范围</h2>
+  <table>
+    <thead><tr><th>位置</th><th>修改</th><th>分区理由</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>src/interface/adapters.mjs</code></td>
+        <td>识别 kimi target、共用 Skills、安装/卸载/恢复报告。</td>
+        <td>宿主接入属于 Interface。</td>
+      </tr>
+      <tr>
+        <td><code>src/interface/kimi-adapter.mjs</code>（新增）</td>
+        <td>渲染 Kimi manifest、Hook bridge、README。</td>
+        <td>Kimi 专属协议不进入 core；独立变化原因明确。</td>
+      </tr>
+      <tr>
+        <td><code>src/ai/hooks.mjs</code></td>
+        <td>在通用结果中暴露结构化 <code>continuation</code>，补齐高危 Bash、绝对路径和无扩展名路径的 PreToolUse 检查；不写 Kimi 输出判断。</td>
+        <td>继续/停止属于通用 Hook 事实。</td>
+      </tr>
+      <tr>
+        <td><code>src/infra/foundation.mjs</code></td>
+        <td>默认 adapter 配置增加 <code>adapters.kimi</code>。</td>
+        <td>仅声明宿主接入能力；P2 spawn 配置尚未加入。</td>
+      </tr>
+      <tr>
+        <td><code>bin/helix.mjs</code></td>
+        <td>帮助文案与 target/adapter 枚举增加 kimi。</td>
+        <td>CLI 入口。</td>
+      </tr>
+      <tr>
+        <td><code>test/kimi-adapter.test.mjs</code>（新增）</td>
+        <td>独立验证生成物和 Kimi Hook 契约，避免继续膨胀巨量测试文件。</td>
+        <td>对应单一 adapter 职责。</td>
+      </tr>
+      <tr>
+        <td>README、README.en、AGENTS、架构文档</td>
+        <td>安装、限制、卸载与实机验证说明。</td>
+        <td>规范先于实现。</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>7. Kimi 与 Codex 的语义差异</h2>
+  <div class="warning">
+    <strong>Kimi Hook 是“可以阻断，但 Hook 自身失败时放行（fail-open）”。</strong>
+    因此不能把它宣传成绝对安全边界。PreToolUse 负责交互期尽早拦截；
+    verifier、scope、review、acceptance proof、checkpoint 才是最终完成门。
+  </div>
+  <table>
+    <thead><tr><th>事件</th><th>Kimi 行为</th><th>接入策略</th></tr></thead>
+    <tbody>
+      <tr><td>UserPromptSubmit</td><td>可注入上下文、可阻断</td><td>直接复用 WildArrange Markdown 输出。</td></tr>
+      <tr><td>PreToolUse</td><td>在权限确认前运行、可阻断</td><td>直接复用现有 deny JSON。</td></tr>
+      <tr><td>PostToolUse</td><td>仅观察</td><td>记录证据，不能假装可以撤销已执行工具。</td></tr>
+      <tr><td>SessionStart / PostCompact</td><td>仅观察，返回值不影响主流程</td><td>执行恢复落盘；在下一次 UserPromptSubmit 注入上下文。</td></tr>
+      <tr><td>Stop</td><td>可阻断并促使模型继续</td><td>桥接器依据结构化 continuation 事实生成 Kimi deny。</td></tr>
+      <tr><td>Hook 超时/崩溃</td><td>默认放行</td><td>写诊断；最终交付门保持失败关闭。</td></tr>
+    </tbody>
+  </table>
+
+  <h2>8. 为什么不走另外两条路</h2>
+  <div class="grid">
+    <section class="card">
+      <h3>不推荐：自动改全局 config.toml</h3>
+      <p>用户配置可能已有模型、权限和其他 Hooks。自动合并 TOML 容易破坏注释与现有设置，卸载也难以精确恢复。插件管理器更透明。</p>
+    </section>
+    <section class="card">
+      <h3>不推荐：把 WildArrange 做成 MCP</h3>
+      <p>MCP 适合提供“可调用工具”，不能天然截获 Kimi 内置 Write/Edit/Bash 的生命周期。WildArrange 的核心需求是治理 Hook，不是新增工具菜单。</p>
+    </section>
+    <section class="card">
+      <h3>不需要：ACP 作为项目接入层</h3>
+      <p>ACP 用于 IDE 驱动 Kimi 会话。无论 Kimi 在终端、VS Code 还是其他 ACP IDE 中运行，项目治理仍应通过 AGENTS、Skills 和 Hooks 生效。</p>
+    </section>
+  </div>
+
+  <h2>9. 测试与放行标准</h2>
+  <ol>
+    <li>安装目标测试：<code>kimi</code>、<code>all</code>、非法 target、重复安装、备份、卸载和恢复。</li>
+    <li>协议测试：用 Kimi 格式的 stdin JSON 覆盖 UserPromptSubmit、Edit allow、Edit deny、Bash、PostToolUse、Stop。</li>
+    <li>全局插件防串扰：非 WildArrange 项目必须立即 no-op，不得创建 <code>.helix/</code>。</li>
+    <li>P0 + P1 失败对抗：非项目目录、伪造 marker、畸形 JSON、绝对路径越界、无扩展名路径越界、高危 Bash、PostToolUseFailure、Stop 续跑。</li>
+    <li>P2 子 Agent 对抗（暂缓）：headless 退出 0 但无 patch、越界 patch、超时、结果文件伪造，均不得直接 completed。</li>
+    <li>运行 <code>npm test</code>。</li>
+    <li>运行 <code>npm pack --dry-run --cache /private/tmp/helix-npm-cache</code>，确认插件模板与新增模块进入发布包。</li>
+    <li>在已登录的 Kimi Code 最新稳定版做实机冒烟：技能可见、Prompt 注入、越界 Edit 被拒、合法 Edit 放行、卸载恢复。</li>
+  </ol>
+
+  <h2>10. 最终建议</h2>
+  <div class="decision">
+    <strong>P0 + P1 已完成，P2 子 Agent spawn 保持独立后续项。</strong>
+    当前版本已能在 Kimi Code 中读取规范、使用 Helix 命令、执行生命周期 Hook 和阻断越界写入；
+    同时未扩大 core、未改用户全局配置、未引入 MCP 服务器。自动测试 152/152 通过，npm 发布包预检通过。
+  </div>
+
+  <h2>11. 一手资料</h2>
+  <ul>
+    <li><a href="https://www.kimi.com/code/docs/en/kimi-code-cli/customization/skills.html">Kimi Code：Agent Skills</a></li>
+    <li><a href="https://www.kimi.com/code/docs/en/kimi-code-cli/customization/hooks.html">Kimi Code：Hooks</a></li>
+    <li><a href="https://www.kimi.com/code/docs/en/kimi-code-cli/customization/plugins.html">Kimi Code：Plugins</a></li>
+    <li><a href="https://www.kimi.com/code/docs/en/kimi-code-cli/customization/agents.html">Kimi Code：Agents and Sub-Agents</a></li>
+    <li><a href="https://www.kimi.com/code/docs/en/kimi-code-cli/reference/kimi-command.html">Kimi Code：kimi 命令</a></li>
+    <li><a href="https://github.com/MoonshotAI/kimi-cli">MoonshotAI/kimi-cli 官方仓库</a></li>
+  </ul>
+</main>
+</body>
+</html>
