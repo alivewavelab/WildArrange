@@ -3,6 +3,14 @@
   "version": "0.1.0",
   "private": false,
   "description": "Linear governance runtime for Codex, Cursor, and Kimi Code agent workflows",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alivewavelab/WildArrange.git"
+  },
+  "homepage": "https://github.com/alivewavelab/WildArrange#readme",
+  "bugs": {
+    "url": "https://github.com/alivewavelab/WildArrange/issues"
+  },
   "type": "module",
   "bin": {
     "helix": "./bin/helix.mjs",
