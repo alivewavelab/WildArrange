@@ -13,8 +13,8 @@
   },
   "type": "module",
   "bin": {
-    "helix": "./bin/helix.mjs",
-    "wildarrange": "./bin/helix.mjs"
+    "helix": "bin/helix.mjs",
+    "wildarrange": "bin/helix.mjs"
   },
   "files": [
     "README.md",
