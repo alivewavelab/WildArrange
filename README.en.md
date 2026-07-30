@@ -16,23 +16,102 @@ The key rule is simple: a worker can claim work is done, but only gates can comp
 
 The core runtime is host-neutral. Codex, Cursor, and Kimi adapters improve injection and recovery, but the workflow can run through CLI commands alone.
 
-## Install
+## Install, Move Between Devices, and Upgrade
 
-From a published package:
+### Requirements
+
+- Node.js 20 or newer.
+- The public npm package can be installed without signing in. Only maintainers need npm authentication for `npm publish`.
+- Git is required when using Git worktree isolation.
+
+### Try It Without Pinning
+
+For a quick trial in the current project:
 
 ```bash
 npx @alivewavelab/wildarrange@latest init
-npx @alivewavelab/wildarrange@latest adapter install
+npx @alivewavelab/wildarrange@latest adapter install --target all
+npx @alivewavelab/wildarrange@latest doctor
 ```
 
-For a long-running project, install it as a project dependency so hooks do not need network access:
+This resolves the package through `npx` on each invocation. It is useful for evaluation, but it is not the recommended setup for a long-lived team project.
+
+### Project-Local Installation (Recommended)
+
+Pin WildArrange as a project `devDependency`:
 
 ```bash
-npm i -D @alivewavelab/wildarrange
-npx wildarrange adapter install --mode local
+npm install --save-dev @alivewavelab/wildarrange@latest
+npx wildarrange init
+npx wildarrange adapter install --target all --mode local
+npx wildarrange doctor
 ```
 
-Local development (this repo):
+Commit `package.json` and `package-lock.json`. Teammates and CI can then use `npm ci` to install the same version instead of silently following a newer `latest`.
+
+`adapter install` is project-scoped. It generates Codex, Cursor, and Kimi Code integration files for the current project and device. Local runtime outputs such as `.helix/` and `.cursor/` are normally excluded from Git, so regenerate them on each device instead of copying generated files from another machine.
+
+### Install on Another Device
+
+Clone or update the application repository, then run from its root:
+
+```bash
+git clone <project-repository>
+cd <project-directory>
+npm ci
+npx wildarrange init
+npx wildarrange adapter install --target all --mode local
+npx wildarrange doctor
+```
+
+If the project already exists, start with `git pull` and `npm ci`.
+
+For Kimi Code, start Kimi Code from the project root and explicitly install the generated plugin on every device:
+
+```text
+/plugins install .helix/adapters/kimi/plugin
+/reload
+```
+
+### Upgrade
+
+Run from the project root:
+
+```bash
+npm install --save-dev @alivewavelab/wildarrange@latest
+npx wildarrange adapter install --target all --mode local
+npx wildarrange doctor
+```
+
+Commit the resulting `package.json` and `package-lock.json` changes. Other devices switch to the locked version by pulling the commit and running `npm ci`.
+
+Check the installed and latest published versions:
+
+```bash
+npm ls @alivewavelab/wildarrange
+npm view @alivewavelab/wildarrange version
+```
+
+The Kimi Code plugin is installed at user scope. After upgrading, refresh it so the Hook bridge uses the newly generated files:
+
+```text
+/plugins remove wildarrange-adapter
+/plugins install .helix/adapters/kimi/plugin
+/reload
+```
+
+### Runtime State and Device Boundaries
+
+npm and Git synchronize the program and committed project configuration; they do not synchronize an active workflow. `.helix/` contains task state, the ledger, checkpoints, backups, and Agent run records, and is excluded by the default `.gitignore`:
+
+- Do not let two devices write the same `.helix/` concurrently.
+- When only installing the program on a new device, follow `npm ci → init → adapter install → doctor`.
+- To move unfinished work, stop writes on the source device and transfer one complete, internally consistent runtime state. Do not copy only `tasks.json` or one checkpoint.
+- Before migration, run `npx wildarrange state backup --reason before-device-migration`. After migration, run `npx wildarrange state verify` and `npx wildarrange doctor`.
+
+### Developing This Repository
+
+When maintaining WildArrange itself:
 
 ```bash
 node ./bin/helix.mjs init
@@ -320,4 +399,5 @@ Current status: the linear governance loop is implemented and tested. Optional L
 | [CLAUDE.md](./CLAUDE.md) | Agent and developer governance rules |
 | [doc/concept.md](./doc/concept.md) | Product concept and external reference boundary |
 | [doc/project-architecture.md](./doc/project-architecture.md) | Runtime architecture and gate model |
+| [doc/five-zone-decoupling-guidelines.md](./doc/five-zone-decoupling-guidelines.md) | Reusable five-zone decoupling and directory-level AGENTS.md guidance |
 | [doc/development-plan.md](./doc/development-plan.md) | P0 / P1 / P2 roadmap |

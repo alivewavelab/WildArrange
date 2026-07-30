@@ -46,6 +46,26 @@ Seven invariants beyond simple layering, all checked by `test/dependency-boundar
 
 The scanner itself is hardened against legal-source evasion: a lexical state machine produces a masked view of every source file — comments blanked, string/template/regex literal contents replaced with sentinel bytes (delimiters kept, `${}` interpolations still code) — and import syntax is only matched on that masked view, so neither a comment marker inside a string nor an import statement quoted inside documentation text can mislead the edge builder (false negatives AND false positives). Specifier text is sliced from the original source and unescape-decoded before zone classification, so `"\u002e./ai/x.mjs"` counts as the relative path it really is; a companion subtest additionally restricts all specifiers in `src/` to relative paths, bare package names, and `node:` builtins — `file:`/`data:` URLs and absolute paths (which load real modules while looking opaque to static scanning) are rejected outright. The adversarial samples are pinned by regression subtests in the same file.
 
+## Progressive Governance Loading
+
+Project rules use nested `AGENTS.md` files so an Agent receives the global invariants first and the local working rules only when it enters a relevant directory.
+
+```text
+AGENTS.md                         # product goals, global boundaries, release gates
+  bin/AGENTS.md                   # CLI-only rules
+  doc/AGENTS.md                   # documentation hierarchy and parity
+  packs/wildarrange-linear/AGENTS.md
+  src/AGENTS.md                   # five-zone routing and shared source invariants
+    interface/AGENTS.md
+    orchestration/AGENTS.md
+    ai/AGENTS.md
+    capabilities/AGENTS.md
+    infra/AGENTS.md
+  test/AGENTS.md                  # test evidence and anti-weakening rules
+```
+
+Nested files are additive. They may narrow a directory's responsibilities and prescribe local evidence, but they cannot relax root-level dependency, gate, safety, testing, or commercial-release constraints. This keeps the root constitution stable while moving implementation-specific guidance next to the code it governs.
+
 ## Main Files
 
 - `bin/helix.mjs`: CLI routing.
@@ -245,5 +265,6 @@ Adapter-specific behavior belongs in `src/interface/adapters.mjs`, `src/interfac
 - Keep source files under 1000 lines by default. At 700+ lines, review whether the file has more than one domain responsibility.
 - Runtime modules should import concrete zoned owner modules directly, not route internal dependencies through `src/helix-core.mjs` or through a flat `src/helix-*.mjs` shim.
 - Any new runtime module must be listed in this architecture map and in `CLAUDE.md`/`AGENTS.md`.
+- Keep directory-level `AGENTS.md` guidance additive and local. Update the nearest file when a directory responsibility changes; do not duplicate the full root policy into every folder.
 - `test/dependency-boundary.test.mjs` runs on every `npm test`; a failing boundary test means the dependency graph was violated, not that the test should be loosened.
 - Preserve gate invariants: verifier, scope, review, and success criteria must remain mandatory for completion.

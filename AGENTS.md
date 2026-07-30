@@ -48,6 +48,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 - 单文件默认保持 1000 行以内；超过 700 行必须评估是否按职责拆分。
 - 模块内部必须直接 import 目标实现文件，不要通过 `src/helix-core.mjs` 绕一层。
 - 旧的 `src/helix-*.mjs` 扁平路径全部保留为 `@deprecated` 兼容 re-export shim，只做 `export * from "./<zone>/<file>.mjs"`，不得在 shim 里堆新逻辑。
+- 规范采用渐进式披露：根 `AGENTS.md` 保存全局目标与不可削弱不变量；`bin/`、`src/`、五区、`test/`、`doc/`、`packs/wildarrange-linear/` 的 `AGENTS.md` 只补充本目录职责和验收要求。进入目录修改前先读最近的 `AGENTS.md`，子目录规范不得覆盖根级安全约束。
 - 新增运行时能力必须同时更新 `doc/project-architecture.md` 和本文件的目录约定。
 - gate 安全不变量不能削弱：不得删除或清空 `verify_commands`，不得跳过 verifier / scope / review / successCriteria 完成 checkpoint。
 - 重构后必须验证 `npm test`；涉及包内容变化时同时验证 `npm pack --dry-run --cache /private/tmp/helix-npm-cache`。
@@ -64,14 +65,20 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | [doc/five-zone-decoupling-guidelines.md](./doc/five-zone-decoupling-guidelines.md) | 可复制到其他项目的五区受控解耦准则、实施顺序与 Review 清单 |
 | [doc/development-plan.md](./doc/development-plan.md)         | P0 / P1 / P2 路线                               |
 | [doc/2026-07-21-five-zone-refactor-handoff.md](./doc/2026-07-21-five-zone-refactor-handoff.md) | 五区解耦重构总结与交接（六个 Phase、关键决策、已知遗留、改 X 去哪改速查） |
+| `bin/AGENTS.md`                                             | CLI 参数、路由、帮助文本和退出码的局部约束 |
+| `doc/AGENTS.md`                                             | README / 架构 / 可复用准则 / HTML 方案的文档分层 |
+| `packs/wildarrange-linear/AGENTS.md`                        | Agent、Skill、路由与工具合同的发布边界 |
 | `bin/helix.mjs`                                              | CLI 入口                                        |
 | `src/helix-core.mjs`                                         | 兼容导出层，禁止继续堆实现                                 |
+| `src/AGENTS.md`                                              | 五区归属判断、全区依赖不变量和统一修改顺序 |
 | **interface/**（宿主/人机交互边界，只依赖 orchestration、infra） |  |
+| `src/interface/AGENTS.md`                                    | Interface 局部职责、宿主安全边界和验收要求 |
 | `src/interface/dashboard.mjs`                                | 本地 dashboard HTTP 服务、POST token 与 Host/Origin 防护 |
 | `src/interface/adapters.mjs`                                 | Codex / Cursor / Kimi adapter 安装、卸载、恢复、共享 Skill 命令生成 |
 | `src/interface/kimi-adapter.mjs`                             | Kimi plugin manifest、Hook bridge 与安装说明的纯渲染逻辑 |
 | `src/interface/doctor.mjs`                                   | 一键体检：config 结构校验、完成状态对账、ledger 与备份交叉验证 |
 | **orchestration/**（工作流顺序、重试、gate 编排，只依赖 ai、capabilities、infra） |  |
+| `src/orchestration/AGENTS.md`                                | 编排、事务、恢复与完成状态不变量 |
 | `src/orchestration/plan-state.mjs`                            | 计划导入、校验、路由 enrichment、任务状态加载                 |
 | `src/orchestration/linear-runtime.mjs`                        | 线性任务节点运行时、重试 / checkpoint，经 gateway 调用能力       |
 | `src/orchestration/parallel-runtime.mjs`                      | 命令型子 Agent 并行运行、隔离结果、skipped/cleanup 生命周期状态与消息发布 |
@@ -82,6 +89,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/orchestration/status.mjs`                                | 状态报告、Workflow 总结、attentionReport 与 Dashboard 数据 |
 | `src/orchestration/workflow.mjs`                               | Workflow 入口、样例计划生成                            |
 | **ai/**（AI 策略/prompt/技能匹配/hooks，只依赖 orchestration、capabilities、infra，且 capabilities 只能经 gateway） |  |
+| `src/ai/AGENTS.md`                                           | AI 策略、只读边、fallback 与上下文预算约束 |
 | `src/ai/routing.mjs`                                          | 请求路由与类别决策                                     |
 | `src/ai/archivist-router.mjs`                                 | 档案路由员：routing packet、结构化记忆、路由建议              |
 | `src/ai/injection.mjs`                                        | 注入点解析、Markdown / Skill 分级预算与按需（动态匹配）挂载加载 |
@@ -89,6 +97,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/ai/context.mjs`                                          | Agent 上下文、恢复快照、会话延续                           |
 | `src/ai/hooks.mjs`                                            | 宿主生命周期 Hook、PreToolUse 范围拦截                   |
 | **capabilities/**（原子能力 + gateway，只依赖 infra；orchestration/ai 只能经 `gateway.mjs` 调用） |  |
+| `src/capabilities/AGENTS.md`                                 | 原子能力、网关信封和失败语义约束 |
 | `src/capabilities/gateway.mjs`                                | 能力网关：静态注册表 + 统一结果信封（capability/status/evidence/sideEffect/duration_ms/cost/error） |
 | `src/capabilities/verify.mjs`                                 | verifier                                       |
 | `src/capabilities/scope-guard.mjs`                             | scope guard、realpath 范围校验                      |
@@ -98,6 +107,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/capabilities/acceptance-proof.mjs`                        | checkpoint 前验收证明链                                 |
 | `src/capabilities/checkpoint.mjs`                              | checkpoint 落盘                                  |
 | **infra/**（基础设施，不依赖任何上层区） |  |
+| `src/infra/AGENTS.md`                                        | 最低层依赖、确定性、文件/锁/命令安全约束 |
 | `src/infra/foundation.mjs`                                    | 路径、JSON、锁、配置、快照、prompt-pack 注册等基础能力                      |
 | `src/infra/ledger.mjs`                                        | hash 链 ledger 追加、校验与可信条目读取（链启动后无 hash 行视为篡改） |
 | `src/infra/command-runner.mjs`                                 | 子进程命令执行、输出截断与超时                              |
@@ -119,6 +129,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/infra/memory-digest.mjs`                                   | 跨会话 digest、任务完成 digest 与恢复索引                   |
 | `src/infra/hook-result-gate.mjs`                                | PostToolUse 结果门校验                              |
 | `test/dependency-boundary.test.mjs`                             | 五区依赖方向强制测试，每次 `npm test` 都会跑                |
+| `test/AGENTS.md`                                             | 单元、集成、对抗、包体测试的局部规范 |
 | `test/*.test.mjs`                                              | Node 内置测试                                     |
 | `.helix/`                                                      | 运行时状态目录，可由 CLI 生成                             |
 

@@ -16,23 +16,102 @@ init -> plan -> execute -> verify -> scope -> review -> checkpoint -> resume
 
 核心运行时是宿主中立的。Codex / Cursor / Kimi adapter 负责注入与恢复增强，但仅凭 CLI 也能跑完整流程。
 
-## 安装
+## 安装、跨设备与升级
 
-从 npm 包使用：
+### 环境要求
+
+- Node.js 20 或更高版本。
+- npm 公共包无需登录即可安装；只有发布者执行 `npm publish` 时需要登录。
+- 使用 Git worktree 隔离时，项目还需要安装 Git。
+
+### 临时体验
+
+只想在当前项目快速试用时，可直接运行：
 
 ```bash
 npx @alivewavelab/wildarrange@latest init
-npx @alivewavelab/wildarrange@latest adapter install
+npx @alivewavelab/wildarrange@latest adapter install --target all
+npx @alivewavelab/wildarrange@latest doctor
 ```
 
-长期使用的项目建议安装为 devDependency，避免 hook 每次走网络：
+这种方式每次通过 `npx` 解析版本，适合体验，不适合作为团队项目的固定依赖。
+
+### 项目内正式安装（推荐）
+
+长期使用时，把 WildArrange 固定为项目的 `devDependency`：
 
 ```bash
-npm i -D @alivewavelab/wildarrange
-npx wildarrange adapter install --mode local
+npm install --save-dev @alivewavelab/wildarrange@latest
+npx wildarrange init
+npx wildarrange adapter install --target all --mode local
+npx wildarrange doctor
 ```
 
-本地开发（本仓库）：
+把 `package.json` 和 `package-lock.json` 提交到项目仓库。这样团队成员与 CI 使用 `npm ci` 时会安装同一版本，不会因 `latest` 更新而悄悄改变行为。
+
+`adapter install` 是项目级安装：它会根据当前设备和当前项目生成 Codex、Cursor、Kimi Code 的接入文件。`.helix/`、`.cursor/` 等本地运行产物通常不进入 Git，因此每台设备都应重新执行一次，而不是复制另一台设备的生成结果。
+
+### 在另一台设备安装
+
+先克隆或拉取业务项目，然后在项目根目录运行：
+
+```bash
+git clone <project-repository>
+cd <project-directory>
+npm ci
+npx wildarrange init
+npx wildarrange adapter install --target all --mode local
+npx wildarrange doctor
+```
+
+如果项目已经存在，只需从 `git pull` 和 `npm ci` 开始。
+
+对于 Kimi Code，还需从项目根启动 Kimi Code，并在每台设备显式执行：
+
+```text
+/plugins install .helix/adapters/kimi/plugin
+/reload
+```
+
+### 升级
+
+在项目根目录执行：
+
+```bash
+npm install --save-dev @alivewavelab/wildarrange@latest
+npx wildarrange adapter install --target all --mode local
+npx wildarrange doctor
+```
+
+升级会修改 `package.json` / `package-lock.json`，应把这两个文件提交到项目仓库。其他设备拉取后运行 `npm ci`，即可切换到锁定的新版本。
+
+检查本项目安装版本与 npm 最新版本：
+
+```bash
+npm ls @alivewavelab/wildarrange
+npm view @alivewavelab/wildarrange version
+```
+
+Kimi Code 的 plugin 是用户级安装。升级后为确保 Hook bridge 使用新生成内容，在 Kimi Code 中执行：
+
+```text
+/plugins remove wildarrange-adapter
+/plugins install .helix/adapters/kimi/plugin
+/reload
+```
+
+### 运行状态与跨设备边界
+
+npm 和 Git 负责同步程序与项目配置，不负责同步正在运行的任务。`.helix/` 包含任务状态、ledger、checkpoint、备份和 Agent 运行记录，默认写入 `.gitignore`：
+
+- 不要让两台设备同时写同一份 `.helix/`。
+- 换设备只安装程序时，按上面的 `npm ci → init → adapter install → doctor` 流程操作。
+- 需要把未完成任务迁移到另一台设备时，应先停止原设备写入并迁移完整、相互一致的运行态；不要只复制 `tasks.json` 或单个 checkpoint。
+- 迁移前可执行 `npx wildarrange state backup --reason before-device-migration`，迁移后执行 `npx wildarrange state verify` 和 `npx wildarrange doctor`。
+
+### 本仓库开发
+
+维护 WildArrange 源码本身时使用：
 
 ```bash
 node ./bin/helix.mjs init
@@ -340,4 +419,5 @@ npm pack --dry-run --cache /private/tmp/helix-npm-cache
 | [CLAUDE.md](./CLAUDE.md) | Agent / 开发者治理规范 |
 | [doc/concept.md](./doc/concept.md) | 产品概念与外部参考边界 |
 | [doc/project-architecture.md](./doc/project-architecture.md) | 运行时架构与 gate 模型 |
+| [doc/five-zone-decoupling-guidelines.md](./doc/five-zone-decoupling-guidelines.md) | 可复用的五区受控解耦与目录级 AGENTS.md 准则 |
 | [doc/development-plan.md](./doc/development-plan.md) | P0 / P1 / P2 路线 |
