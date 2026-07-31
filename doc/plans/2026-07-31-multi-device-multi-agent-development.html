@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WildArrange 多设备与多 Agent 开发方案</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #10131a;
+      --panel: #181d27;
+      --line: #30394a;
+      --text: #edf2f7;
+      --muted: #a7b0c0;
+      --green: #40c98b;
+      --yellow: #f0bd4f;
+      --red: #ef6a74;
+      --blue: #6ba8ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.65;
+    }
+    main { width: min(1120px, calc(100% - 32px)); margin: 36px auto 72px; }
+    h1, h2, h3 { line-height: 1.25; }
+    h1 { margin-bottom: 8px; }
+    h2 { margin-top: 0; }
+    p { color: var(--muted); }
+    code {
+      color: #dce9ff;
+      background: #0c1017;
+      border: 1px solid #293244;
+      border-radius: 5px;
+      padding: 2px 6px;
+    }
+    .section {
+      margin-top: 22px;
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--panel);
+    }
+    .verdict {
+      color: var(--text);
+      font-size: 1.18rem;
+      font-weight: 700;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 14px;
+    }
+    .card {
+      min-width: 0;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #131821;
+    }
+    .tag {
+      display: inline-block;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #08110c;
+      background: var(--green);
+    }
+    .tag.p1 { background: var(--yellow); color: #171104; }
+    .tag.p0 { background: var(--red); color: #1a0709; }
+    .tag.info { background: var(--blue); color: #07111f; }
+    .flow {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr auto 1fr;
+      align-items: stretch;
+      gap: 10px;
+    }
+    .flow-box {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #131821;
+    }
+    .arrow { align-self: center; color: var(--blue); font-size: 24px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+    }
+    th, td {
+      padding: 12px;
+      border: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+    th { color: var(--text); background: #111620; }
+    td { color: var(--muted); }
+    li { margin: 6px 0; color: var(--muted); }
+    .decision {
+      border-color: #2d7054;
+      box-shadow: inset 4px 0 0 var(--green);
+    }
+    @media (max-width: 760px) {
+      .flow { grid-template-columns: 1fr; }
+      .arrow { transform: rotate(90deg); justify-self: center; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>WildArrange 多设备与多 Agent 开发方案</h1>
+  <p>讨论范围：跨设备接力、多台设备同时开发、同一设备多个 Agent 并行。目标是避免覆盖、重复劳动和“本机状态正常、另一台机器完全不知道”的问题。</p>
+
+  <section class="section decision">
+    <span class="tag">推荐结论</span>
+    <p class="verdict">Git 管跨设备持久化，worktree 管本机隔离，任务所有权管并发；不是每次修改都 commit，而是每次跨设备交接必须 commit + push。</p>
+    <p>最短路径先做第一版 Git-only，不引入常驻协调服务器。一个任务同时只能有一个写入 owner；不同任务可以在不同设备、不同 Agent 上并行。</p>
+  </section>
+
+  <section class="section">
+    <h2>三类场景分别处理</h2>
+    <div class="cards">
+      <article class="card">
+        <span class="tag info">跨设备接力</span>
+        <h3>MacBook → Mac mini</h3>
+        <p>同一个任务换设备继续。原设备必须生成任务 checkpoint commit 并 push；新设备只能从该远端 commit 恢复。</p>
+      </article>
+      <article class="card">
+        <span class="tag p1">多设备并行</span>
+        <h3>两台设备同时开发</h3>
+        <p>只能并行不同任务；每个任务有独立远端分支和 owner。路径重叠的任务必须建立依赖或串行 admission。</p>
+      </article>
+      <article class="card">
+        <span class="tag p1">本机多 Agent</span>
+        <h3>一个设备并行多个 Agent</h3>
+        <p>每个可写 Agent 使用独立 Git worktree。Agent 不直接合并主工作区，统一由 Jiuwei 串行 admission。</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>统一工作流</h2>
+    <div class="flow">
+      <div class="flow-box">
+        <h3>Claim</h3>
+        <p>领取任务，锁定 owner、base commit、writable paths 和设备标识。</p>
+      </div>
+      <div class="arrow">→</div>
+      <div class="flow-box">
+        <h3>Isolated Work</h3>
+        <p>在任务分支 + 独立 worktree 修改；其他 owner 不得同时修改同一任务。</p>
+      </div>
+      <div class="arrow">→</div>
+      <div class="flow-box">
+        <h3>Verify / Handoff</h3>
+        <p>验证后 commit；跨设备时必须 push 并记录 commit SHA，合入时走 admission gates。</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>什么时候强制 Git 提交</h2>
+    <table>
+      <thead>
+        <tr><th>动作</th><th>Commit</th><th>Push</th><th>原因</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>同设备、同任务、在批准范围内继续编辑</td><td>不强制</td><td>不强制</td><td>避免无意义碎片提交。</td></tr>
+        <tr><td>切换到另一台设备继续同一任务</td><td>强制</td><td>强制</td><td>未 push 的 commit 对另一台设备不可见。</td></tr>
+        <tr><td>把任务交给另一 Agent / owner</td><td>强制</td><td>跨设备时强制</td><td>明确交接基线，防止接手者读取半成品目录。</td></tr>
+        <tr><td>进入 review / admission</td><td>强制</td><td>远端协作时强制</td><td>验证证据必须绑定不可变 commit SHA。</td></tr>
+        <tr><td>修改超出 <code>writable_paths</code></td><td>不能直接提交解决</td><td>不能直接 push 解决</td><td>先创建并批准 ChangeRequest，再扩展任务范围。</td></tr>
+      </tbody>
+    </table>
+    <p><code>git stash</code> 不算跨设备交接证据；它默认只存在本地，也没有稳定的任务、验证和 owner 元数据。</p>
+  </section>
+
+  <section class="section">
+    <h2>分支、worktree 与所有权</h2>
+    <div class="cards">
+      <article class="card">
+        <span class="tag info">任务分支</span>
+        <p><code>wildarrange/task/&lt;planId&gt;/&lt;taskId&gt;</code></p>
+        <p>一个任务一个远端分支。分支 HEAD 是所有设备共同认可的最新持久状态。</p>
+      </article>
+      <article class="card">
+        <span class="tag info">本机 worktree</span>
+        <p><code>.helix/worktrees/&lt;planId&gt;/&lt;taskId&gt;/&lt;agent&gt;</code></p>
+        <p>每个可写 Agent 一份隔离目录；主工作区只承担计划、审查和 admission。</p>
+      </article>
+      <article class="card">
+        <span class="tag p0">任务 owner</span>
+        <p><code>taskId + agent + deviceId + baseSha + remoteHeadSha + ownerEpoch</code></p>
+        <p>同一任务只能有一个有效写 owner。远端任务分支 HEAD 是所有权凭证；接力必须显式 transfer，不能靠“谁先 push 算谁的”。</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>并发规则</h2>
+    <table>
+      <thead>
+        <tr><th>组合</th><th>允许方式</th><th>必须阻断</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>不同设备 + 不同任务 + 不重叠路径</td><td>完全并行，各自 task branch/worktree。</td><td>无。</td></tr>
+        <tr><td>不同设备 + 不同任务 + 路径重叠</td><td>建立 <code>blockedBy</code>，或由 Jiuwei 排定 admission 顺序。</td><td>两个任务同时修改并直接合主线。</td></tr>
+        <tr><td>不同设备 + 同一任务</td><td>只允许显式 handoff 后接力。</td><td>双 owner、双写、各自 force push。</td></tr>
+        <tr><td>同设备 + 多 Agent + 不同任务</td><td>独立 worktree 并行，结果串行 admission。</td><td>多个 Agent 共享同一可写 cwd。</td></tr>
+        <tr><td>同设备 + 多 Agent + 同一任务</td><td>只读 Agent 可并行审查；写 Agent 只能一个。</td><td>两个写 Agent 同时产出同一任务 patch。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="section">
+    <h2>建议的 Git checkpoint 合同</h2>
+    <p>任务提交除普通标题外，写入机器可读 trailer：</p>
+    <pre><code>feat(task): implement T012 parser
+
+WildArrange-Plan: P20260731
+WildArrange-Task: T012
+WildArrange-Agent: ZhuRong
+WildArrange-Device: macbook
+WildArrange-Base: &lt;baseSha&gt;
+WildArrange-Verify: pass
+WildArrange-Next: review</code></pre>
+    <p>新设备通过 commit SHA 和 trailer 重建任务上下文；`.helix/` 仍是本地运行态，不直接在多台设备间互相覆盖。</p>
+  </section>
+
+  <section class="section">
+    <h2>主分支集成规则</h2>
+    <div class="cards">
+      <article class="card">
+        <span class="tag">任意设备可集成</span>
+        <p>不指定一台常驻集成机器。Jiuwei 是逻辑集成者，不绑定 MacBook、Mac mini 或其他物理设备。</p>
+      </article>
+      <article class="card">
+        <span class="tag p1">远端 SHA 乐观锁</span>
+        <p>admission 开始时记录远端 main SHA；验证完成后只允许向该预期 SHA 做普通快进 push，禁止 force push。</p>
+      </article>
+      <article class="card">
+        <span class="tag p0">变化即重验</span>
+        <p>如果其他设备先合入导致远端 main 变化，本次集成返回 <code>revalidation_required</code>；拉取、重新应用任务成果并重跑全部 gates 后才能再次 push。</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="section decision">
+    <span class="tag">默认内置 + 可调强度</span>
+    <h2>配置合同</h2>
+    <p>能力内置在 WildArrange，不依赖 GitHub API 或额外服务器。默认使用 <code>guarded</code>：检测到 Git remote 时启用远端任务所有权与 worktree；普通本地目录或尚未配置 remote 的仓库继续可用，但必须明确提示已经降级为本地协调。</p>
+    <pre><code>{
+  "gitCoordination": {
+    "mode": "guarded",
+    "remote": "origin",
+    "integrationBranch": "auto",
+    "taskBranchPrefix": "wildarrange/task",
+    "requireWorktreeForParallelWrites": true,
+    "requireVerificationBeforeHandoff": false,
+    "requireCleanHandoff": true,
+    "requireTakeoverReason": true
+  }
+}</code></pre>
+    <table>
+      <thead>
+        <tr><th>模式</th><th>行为</th><th>适用场景</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>off</code></td><td>不启用跨设备 Git 协调；现有本地任务流保持不变。</td><td>明确只在单目录、单写者环境运行。</td></tr>
+        <tr><td><code>manual</code></td><td>提供 device、claim、handoff 命令，但不自动改变现有 <code>task claim</code> 与 <code>parallel run</code> 行为。</td><td>逐步迁移或只在需要时跨设备交接。</td></tr>
+        <tr><td><code>guarded</code>（默认）</td><td>有 Git remote 时自动接入远端 claim，并让可写并行 Agent 使用 worktree；无 remote 时保留本地流程并显示降级证据。</td><td>兼顾现有项目兼容性与默认安全。</td></tr>
+        <tr><td><code>strict</code></td><td>Git 仓库、remote、远端 claim 和独立 worktree 缺一即拒绝执行；handoff 前必须完成验证。</td><td>多设备、高并发或高风险仓库。</td></tr>
+      </tbody>
+    </table>
+    <p>可以增强或减弱的是“何时自动启用、是否要求交接前验证、无 remote 时是否允许降级”。只要模式不是 <code>off</code>，以下底线不可配置关闭：同一任务只能有一个写 owner；不得 force push；跨设备 handoff 必须绑定已 push 的 commit SHA；远端集成分支 SHA 变化后必须返回 <code>revalidation_required</code>；takeover 必须显式执行并留下理由和证据。</p>
+  </section>
+
+  <section class="section">
+    <h2>第一版实施阶段</h2>
+    <table>
+      <thead>
+        <tr><th>阶段</th><th>能力</th><th>放行证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Phase 1</td><td>稳定 <code>deviceId</code>、远端 task branch claim、单写 owner 与冲突拒绝。</td><td>两台设备并发 claim 同一任务，只有一个成功。</td></tr>
+        <tr><td>Phase 2</td><td><code>handoff prepare/push/accept</code>、checkpoint commit、任务包与 ledger hash 接续。</td><td>新设备可从远端 commit 重建本地任务；旧设备继续写时被拒绝。</td></tr>
+        <tr><td>Phase 3</td><td>同设备多 Agent 默认 Git worktree；不同任务可并行，同任务只允许一个写实例。</td><td>并行结果互不污染；重叠 writable paths 被阻断或串行化。</td></tr>
+        <tr><td>Phase 4</td><td>任意设备 admission、远端 main SHA 乐观锁、变化后重新应用并重验。</td><td>两台设备竞争集成时，一个成功，另一个返回 revalidation_required 且不能覆盖。</td></tr>
+      </tbody>
+    </table>
+    <ol>
+      <li><code>handoff prepare --task T012 --to-device-id &lt;uuid&gt; --to-device-name mac-mini</code>：用不可冒认的设备 UUID 绑定目标并校验 scope；仅在 strict 或开启 <code>requireVerificationBeforeHandoff</code> 时运行 verifier，随后生成 checkpoint commit。</li>
+      <li><code>handoff push --task T012</code>：推送任务分支，记录远端 commit SHA。</li>
+      <li><code>handoff accept --task T012</code>：新设备校验远端 SHA、owner transfer 和本地无冲突后恢复。</li>
+      <li><code>team claim</code> 增加 <code>deviceId/baseSha/remoteHeadSha/ownerEpoch</code>；创建远端任务分支时第一个成功 push 的 owner 获得写入权，第二个 claim 因非快进冲突而 fail-closed。</li>
+      <li><code>parallel run</code> 默认强制 Git worktree；同一设备的多个写 Agent 不再允许共享 run-dir 工作区。</li>
+      <li><code>parallel admit</code> 获取并绑定远端集成分支 SHA，校验当前工作目录包含该基线；全部 gates 和 acceptance proof 通过后生成集成 commit 并普通 push。远端 HEAD 变化或本地基线落后时必须重新应用并验证。</li>
+      <li>不做基于本机时间的自动 lease 过期：无中心时钟时无法可靠判断另一台离线设备是否仍在工作。陈旧 owner 只能显式 release、handoff 或由人确认后执行带证据的 takeover。</li>
+    </ol>
+  </section>
+
+  <section class="section">
+    <h2>暂不做</h2>
+    <ul>
+      <li>不在第一版引入中心服务器、数据库或常驻 Agent 集群。</li>
+      <li>不自动 force push、自动解决 merge conflict 或静默接管其他设备的任务。</li>
+      <li>不把整个 `.helix/` 提交到 Git；只同步任务代码、必要产物和 checkpoint 元数据。</li>
+      <li>不允许 commit/push 绕过 ChangeRequest、scope、review 或 checkpoint。</li>
+    </ul>
+  </section>
+
+  <section class="section decision">
+    <span class="tag">已对齐</span>
+    <p class="verdict">三个顶层产品决策已于 2026-07-31 确认，可以进入实现。</p>
+    <ol>
+      <li>同一任务严格禁止两台设备同时写，只支持显式 handoff。</li>
+      <li>第一版以现有 Git remote 作为唯一跨设备协调面，暂不引入 GitHub API 或中心服务。</li>
+      <li>不设固定集成设备；任意设备可以集成，但必须绑定远端 main SHA，远端变化后重新运行全部 gates。</li>
+    </ol>
+  </section>
+
+  <section class="section decision">
+    <span class="tag">已实施</span>
+    <p class="verdict">2026-07-31：Git-only M1 已按本方案接入默认运行时。</p>
+    <ul>
+      <li><code>gitCoordination</code> 四档配置、稳定设备 UUID、远端 task claim、UUID 绑定的 handoff prepare/push/accept 与显式 takeover 已落地。</li>
+      <li>默认 <code>guarded</code> 在存在 remote 时为可写并行 Agent 强制 worktree，并用 <code>parallel_run_claim</code> 阻断同任务双写。</li>
+      <li>并行 admission 在 gates 前及 acceptance proof 后复核任务 owner、工作目录基线、变更归属与远端集成分支 SHA；通过后真实生成集成 commit 并非强制 push。变化、基线落后或夹带无归属脏文件时只回滚本 run 路径并返回 <code>revalidation_required</code>。</li>
+      <li>远端集成一旦已知成功，之后的 checkpoint/审计失败、main 继续前进、owner 变化或异常改写都保留同一 run 的所有权与集成意图；禁止回滚或释放，只能同 run 对账恢复或保持 <code>recovery_required</code>。</li>
+      <li>Handoff push 前复核 prepare 树指纹；push/accept/takeover 支持远端成功后的同设备幂等补账。<code>parallel close</code> 可按 runId 清理强制终止留下的空结果幽灵 claim。</li>
+      <li>自动测试使用本地 bare Git remote 覆盖双设备 claim、UUID 冒认、已提交变更交接、prepare 后继续编辑、旧 owner 六个写入/质量入口、线性 run 中途 takeover、两设备集成竞争、主线中途变化、旧基线、无归属脏改动、幽灵 claim、部分批次失败、takeover 对账，以及 push 后 main 前进/owner 变化/历史改写的恢复。</li>
+    </ul>
+  </section>
+</main>
+</body>
+</html>

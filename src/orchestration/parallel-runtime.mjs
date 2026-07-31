@@ -11,15 +11,18 @@ import {
   nowIso,
   readJson,
   resolveHelixPath,
+  withTaskStateLock,
   writeJsonAtomic,
   writeSnapshot,
 } from "../infra/foundation.mjs";
 import { resolveAgentSpawn } from "../infra/agent-spawn.mjs";
 import { collectAgentWorktreePatch, prepareAgentWorktree } from "../infra/git-worktree.mjs";
+import { inspectGitCoordination } from "../infra/git-coordination.mjs";
 import { runCommand } from "../infra/command-runner.mjs";
 import { normalizeProposedFilesOrEmpty, updateAgentRunLifecycle } from "./admission.mjs";
 import { loadTaskState } from "./plan-state.mjs";
-import { findRunnableTask, sendTeamMessage } from "./task-board.mjs";
+import { findRunnableTask, persistTaskState, sendTeamMessage } from "./task-board.mjs";
+import { assertCurrentTaskOwnership, coordinateTaskClaim } from "./remote-ownership.mjs";
 
 // The admission transaction (claim -> apply -> gates -> commit/rollback)
 // lives in ./admission.mjs; re-exported here so existing callers of the
@@ -48,47 +51,106 @@ export async function runParallelAgents(rootDir, options = {}) {
   await mkdir(runDir, { recursive: true });
   const startedAt = nowIso();
   await appendLedger(rootDir, { type: "parallel_agents_started", runId, taskIds: tasks.map((task) => task.id) });
-  // Pre-register the run in index.json AND as a running batch JSON before
-  // any agent starts: if the process dies mid-run (or the final index write
-  // fails), the run is still discoverable by `parallel status` instead of
-  // silently invisible with orphan result.json files on disk
-  // (cross-review P1, round 5, 2026-07-21).
   await registerRunIndexEntry(rootDir, runId);
-  await writeJsonAtomic(resolveHelixPath(rootDir, "agent-runs", `${runId}.json`), {
+  const batchPath = resolveHelixPath(rootDir, "agent-runs", `${runId}.json`);
+  await writeJsonAtomic(batchPath, {
     kind: "parallel_agent_batch",
     runId,
     at: startedAt,
     startedAt,
-    status: "running",
+    status: "claiming",
     planId: taskState.planId,
     taskCount: tasks.length,
     results: [],
   });
-  await writeSnapshot(rootDir, "parallel_agents_started", { runId, taskIds: tasks.map((task) => task.id) });
+  const gitCoordination = await inspectGitCoordination(rootDir, config.gitCoordination);
+  const defaultIsolation = resolveParallelIsolation(config, gitCoordination, options);
+  try {
+    await claimParallelRunTasks(rootDir, taskState.planId, tasks, {
+      runId,
+      agent: options.agent,
+      forceCoordination: config.gitCoordination.mode === "manual" && options.coordinate === true,
+    });
+  } catch (error) {
+    await clearParallelRunClaims(rootDir, runId, tasks.map((task) => task.id));
+    await writeJsonAtomic(batchPath, {
+      kind: "parallel_agent_batch",
+      runId,
+      at: nowIso(),
+      startedAt,
+      status: "claim_failed",
+      planId: taskState.planId,
+      taskCount: tasks.length,
+      results: [],
+      error: error instanceof Error ? error.message : String(error),
+    });
+    await appendLedger(rootDir, {
+      type: "parallel_agents_claim_failed",
+      runId,
+      taskIds: tasks.map((task) => task.id),
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+  try {
+    await writeJsonAtomic(batchPath, {
+      kind: "parallel_agent_batch",
+      runId,
+      at: startedAt,
+      startedAt,
+      status: "running",
+      planId: taskState.planId,
+      taskCount: tasks.length,
+      results: [],
+    });
+    await writeSnapshot(rootDir, "parallel_agents_started", { runId, taskIds: tasks.map((task) => task.id) });
 
-  const results = await Promise.all(tasks.map((task, index) => runOneAgent(rootDir, runDir, runId, task, {
-    ...options,
-    config,
-    index,
-  })));
-  await appendRunIndex(rootDir, runId, results);
-  const skipped = results.length > 0 && results.every((result) => result.status === "skipped");
-  const pass = results.every((result) => result.pass === true);
-  const batch = {
-    kind: "parallel_agent_batch",
-    runId,
-    at: nowIso(),
-    startedAt,
-    status: skipped ? "skipped" : pass ? "completed" : "failed",
-    isolation: "run-dir",
-    planId: taskState.planId,
-    taskCount: results.length,
-    results,
-  };
-  await writeJsonAtomic(resolveHelixPath(rootDir, "agent-runs", `${runId}.json`), batch);
-  await appendLedger(rootDir, { type: "parallel_agents_completed", runId, status: batch.status, taskCount: results.length });
-  await writeSnapshot(rootDir, "parallel_agents_completed", { runId, status: batch.status, taskCount: results.length });
-  return batch;
+    const results = await Promise.all(tasks.map((task, index) => runOneAgent(rootDir, runDir, runId, task, {
+      ...options,
+      config,
+      defaultIsolation,
+      index,
+    })));
+    await releaseFailedParallelRunClaims(rootDir, runId, results);
+    await appendRunIndex(rootDir, runId, results);
+    const skipped = results.length > 0 && results.every((result) => result.status === "skipped");
+    const pass = results.every((result) => result.pass === true);
+    const batch = {
+      kind: "parallel_agent_batch",
+      runId,
+      at: nowIso(),
+      startedAt,
+      status: skipped ? "skipped" : pass ? "completed" : "failed",
+      isolation: uniqueIsolation(results),
+      planId: taskState.planId,
+      taskCount: results.length,
+      results,
+    };
+    await writeJsonAtomic(batchPath, batch);
+    await appendLedger(rootDir, { type: "parallel_agents_completed", runId, status: batch.status, taskCount: results.length });
+    await writeSnapshot(rootDir, "parallel_agents_completed", { runId, status: batch.status, taskCount: results.length });
+    return batch;
+  } catch (error) {
+    await clearParallelRunClaims(rootDir, runId, tasks.map((task) => task.id)).catch(() => {});
+    await writeJsonAtomic(batchPath, {
+      kind: "parallel_agent_batch",
+      runId,
+      at: nowIso(),
+      startedAt,
+      status: "interrupted",
+      planId: taskState.planId,
+      taskCount: tasks.length,
+      results: [],
+      error: error instanceof Error ? error.message : String(error),
+    }).catch(() => {});
+    await appendLedger(rootDir, {
+      type: "parallel_agents_interrupted",
+      runId,
+      taskIds: tasks.map((task) => task.id),
+      error: error instanceof Error ? error.message : String(error),
+    }).catch(() => {});
+    throw error;
+  }
 }
 
 export async function listParallelAgentRuns(rootDir) {
@@ -214,11 +276,18 @@ export async function closeParallelAgentRun(rootDir, options = {}) {
     });
     closed.push(entry.taskId);
   }
-  await appendLedger(rootDir, { type: "parallel_agent_run_closed", runId: options.runId, taskIds: closed, reason: options.reason || "user_closed" });
+  const taskState = await loadTaskState(rootDir);
+  const orphanClaims = (taskState?.tasks || [])
+    .filter((task) => task.parallel_run_claim?.runId === options.runId
+      && (!options.taskId || task.id === options.taskId))
+    .map((task) => task.id);
+  const releasable = [...new Set([...closed, ...orphanClaims])];
+  await clearParallelRunClaims(rootDir, options.runId, releasable);
+  await appendLedger(rootDir, { type: "parallel_agent_run_closed", runId: options.runId, taskIds: releasable, reason: options.reason || "user_closed" });
   return {
     kind: "parallel_agent_close",
     runId: options.runId,
-    closed,
+    closed: releasable,
   };
 }
 
@@ -283,7 +352,7 @@ async function runOneAgent(rootDir, runDir, runId, task, options) {
   const taskRunDir = path.join(runDir, task.id);
   await mkdir(taskRunDir, { recursive: true });
   const config = options.config || (await loadHelixConfig(rootDir)).config;
-  const isolation = options.isolation || task.isolation || config.parallelAgents?.isolation || "run-dir";
+  const isolation = options.defaultIsolation || options.isolation || task.isolation || config.parallelAgents?.isolation || "run-dir";
   const worktree = await prepareAgentWorktree(rootDir, taskRunDir, {
     isolation,
     timeoutMs: normalizeTimeout(options.timeoutMs || config.parallelAgents?.timeoutMs),
@@ -358,6 +427,77 @@ async function runOneAgent(rootDir, runDir, runId, task, options) {
   });
   await appendLedger(rootDir, { type: "parallel_agent_result", runId, taskId: task.id, agent, pass: result.pass });
   return result;
+}
+
+function resolveParallelIsolation(config, gitCoordination, options) {
+  const requested = options.isolation || config.parallelAgents?.isolation || "run-dir";
+  const coordination = config.gitCoordination || {};
+  const enforceWorktree = ["guarded", "strict"].includes(coordination.mode)
+    && coordination.requireWorktreeForParallelWrites !== false
+    && gitCoordination.active;
+  if (enforceWorktree && options.isolation && options.isolation !== "git-worktree") {
+    throw new Error("parallel writable agents require git-worktree isolation; weaken gitCoordination.requireWorktreeForParallelWrites in config to opt out");
+  }
+  return enforceWorktree ? "git-worktree" : requested;
+}
+
+async function claimParallelRunTasks(rootDir, planId, selectedTasks, options) {
+  return withTaskStateLock(rootDir, `parallel-run-claim:${options.runId}`, async () => {
+    const taskState = await loadTaskState(rootDir);
+    if (!taskState || taskState.planId !== planId) throw new Error(`active plan changed before parallel run ${options.runId}`);
+    for (const selected of selectedTasks) {
+      const task = taskState.tasks.find((candidate) => candidate.id === selected.id);
+      if (!task || task.status !== "pending") {
+        throw new Error(`task ${selected.id} is no longer pending; refusing parallel run ${options.runId}`);
+      }
+      if (task.parallel_run_claim?.runId) {
+        throw new Error(`task ${task.id} already has writable parallel run ${task.parallel_run_claim.runId}`);
+      }
+      const owner = normalizeAgentKey(options.agent || task.owner || "ZhuRong") || "ZhuRong";
+      if (task.coordination && ["claimed", "accepted"].includes(task.coordination.status)) {
+        await assertCurrentTaskOwnership(rootDir, task);
+      } else {
+        task.coordination = await coordinateTaskClaim(rootDir, {
+          planId,
+          task,
+          owner,
+          force: options.forceCoordination,
+        });
+      }
+      task.parallel_run_claim = { runId: options.runId, owner, claimedAt: nowIso() };
+      task.owner = owner;
+      task.updatedAt = nowIso();
+      Object.assign(selected, task);
+      await persistTaskState(rootDir, taskState);
+    }
+  });
+}
+
+async function releaseFailedParallelRunClaims(rootDir, runId, results) {
+  const failedIds = results.filter((result) => result.pass !== true).map((result) => result.taskId);
+  if (failedIds.length === 0) return;
+  await clearParallelRunClaims(rootDir, runId, failedIds);
+}
+
+async function clearParallelRunClaims(rootDir, runId, taskIds) {
+  await withTaskStateLock(rootDir, `parallel-run-release:${runId}`, async () => {
+    const taskState = await loadTaskState(rootDir);
+    if (!taskState) return;
+    let changed = false;
+    for (const task of taskState.tasks) {
+      if (taskIds.includes(task.id) && task.parallel_run_claim?.runId === runId) {
+        task.parallel_run_claim = null;
+        task.updatedAt = nowIso();
+        changed = true;
+      }
+    }
+    if (changed) await persistTaskState(rootDir, taskState);
+  });
+}
+
+function uniqueIsolation(results) {
+  const values = [...new Set(results.map((result) => result.isolation).filter(Boolean))];
+  return values.length === 1 ? values[0] : values.length === 0 ? null : "mixed";
 }
 
 function buildTaskPacket(task, context) {

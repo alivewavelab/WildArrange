@@ -22,6 +22,7 @@ import {
   validatePlanGraph,
   writeTasksMarkdown,
 } from "./plan-state.mjs";
+import { coordinateTaskClaim } from "./remote-ownership.mjs";
 export { applyVerifierEvidenceToCriteria, criteriaStatus } from "../infra/success-criteria.mjs";
 
 export async function listTeamTasks(rootDir, options = {}) {
@@ -100,8 +101,16 @@ async function claimTeamTaskUnlocked(rootDir, options = {}) {
   const blockers = unresolvedBlockers(task, taskState.tasks);
   if (blockers.length > 0) throw new Error(`task ${task.id} blocked by ${blockers.join(",")}`);
 
+  const owner = normalizeAgentName(options.owner || task.owner || DEFAULT_EXECUTOR_AGENT);
+  const coordination = await coordinateTaskClaim(rootDir, {
+    planId: taskState.planId,
+    task,
+    owner,
+    force: options.forceCoordination === true,
+  });
   task.status = "in_progress";
-  task.owner = normalizeAgentName(options.owner || task.owner || DEFAULT_EXECUTOR_AGENT);
+  task.owner = owner;
+  task.coordination = coordination;
   task.claimedAt = nowIso();
   task.updatedAt = nowIso();
   await persistTaskState(rootDir, taskState);
@@ -110,6 +119,7 @@ async function claimTeamTaskUnlocked(rootDir, options = {}) {
     planId: taskState.planId,
     taskId: task.id,
     owner: task.owner,
+    coordinationStatus: coordination.status,
   });
   await writeSnapshot(rootDir, "team_task_claimed", { planId: taskState.planId, taskId: task.id, owner: task.owner });
   return { planId: taskState.planId, task };

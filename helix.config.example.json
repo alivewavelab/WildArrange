@@ -78,6 +78,16 @@
       "enforceLowConfidence": true
     }
   },
+  "gitCoordination": {
+    "mode": "guarded",
+    "remote": "origin",
+    "integrationBranch": "auto",
+    "taskBranchPrefix": "wildarrange/task",
+    "requireWorktreeForParallelWrites": true,
+    "requireVerificationBeforeHandoff": false,
+    "requireCleanHandoff": true,
+    "requireTakeoverReason": true
+  },
   "parallelAgents": {
     "enabled": true,
     "defaultMaxAgents": 2,

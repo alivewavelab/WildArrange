@@ -124,6 +124,18 @@ export {
   parallelAgentStatus,
   runParallelAgents,
 } from "./helix-parallel-agents.mjs";
+export {
+  acceptTaskHandoff,
+  prepareTaskHandoff,
+  pushTaskHandoff,
+  takeoverTaskOwnership,
+} from "./orchestration/handoff.mjs";
+export {
+  assertCurrentTaskOwnership,
+  coordinateTaskClaim,
+  coordinationStatus,
+  registerCoordinationDevice,
+} from "./orchestration/remote-ownership.mjs";
 export { renderSpawnCommand, resolveAgentSpawn } from "./helix-agent-spawn.mjs";
 export { applyAgentPatch, captureWorkspaceSnapshot, collectAgentWorktreePatch, extractPatchPaths, prepareAgentWorktree } from "./helix-git-worktree.mjs";
 export {

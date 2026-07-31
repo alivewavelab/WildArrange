@@ -120,12 +120,76 @@ The Kimi Code plugin is installed at user scope. After upgrading, refresh it so 
 
 ### Runtime State and Device Boundaries
 
-npm and Git synchronize the program and committed project configuration; they do not synchronize an active workflow. `.helix/` contains task state, the ledger, checkpoints, backups, and Agent run records, and is excluded by the default `.gitignore`:
+npm and Git synchronize the program and committed configuration, while `.helix/` remains local runtime state on each device. WildArrange uses the existing Git remote as a handoff cabinet by default: one remote write owner per task, with cross-device continuation carried by a checkpoint commit containing a task packet and ledger hash.
 
-- Do not let two devices write the same `.helix/` concurrently.
-- When only installing the program on a new device, follow `npm ci → init → adapter install → doctor`.
-- To move unfinished work, stop writes on the source device and transfer one complete, internally consistent runtime state. Do not copy only `tasks.json` or one checkpoint.
-- Before migration, run `npx wildarrange state backup --reason before-device-migration`. After migration, run `npx wildarrange state verify` and `npx wildarrange doctor`.
+Register a stable identity once on every device. The name is descriptive; handoff authorization uses the returned `deviceId`:
+
+```bash
+npx wildarrange device register --name macbook
+npx wildarrange device status
+npx wildarrange coordination status
+```
+
+Claim and hand off a task:
+
+```bash
+# Source device: copy the target device's UUID into --to-device-id
+npx wildarrange coordination claim --task T001 --owner ZhuRong
+npx wildarrange handoff prepare --task T001 \
+  --to-device-id <target-device-uuid> --to-device-name mac-mini
+npx wildarrange handoff push --task T001
+
+# Target device: its deviceId must match the handoff target
+npx wildarrange device register --name mac-mini
+npx wildarrange handoff accept --plan <planId> --task T001
+```
+
+`prepare` includes both working-tree changes and local commits not yet present on the remote task branch, then builds a temporary Git tree containing only project files inside `writable_paths`; `.helix/` is never handed off and the current index is untouched. Before `push`, WildArrange compares the current tree with the prepare-time fingerprint and requires a fresh prepare if editing continued. Push is always non-force and retry-safe through remote-SHA reconciliation and audit backfill. `accept` verifies the remote packet, target device UUID, and clean local tree before taking ownership; a same-name device cannot impersonate the target. After acceptance, execute, verify, scope, review, checkpoint, admission, and the monolithic `run` completion fence all fail closed on the old device.
+
+Takeover is only for a confirmed abandoned owner and requires both the expected device and an evidence-bearing reason:
+
+```bash
+npx wildarrange handoff takeover --plan <planId> --task T001 \
+  --expected-device-id <old-device-uuid> --reason "source device is offline and writes were manually stopped"
+```
+
+WildArrange never expires ownership from a local clock and never force-pushes. Any device may run admission, but it fetches and binds the remote integration-branch SHA before gates start. The current workspace must contain that base and may not carry dirty paths other than the current run result and explicitly attributed handoff paths. Only after all gates and the acceptance proof pass does it create a commit parented by that SHA and push it normally to the remote integration branch. A changed remote head, stale local base, or unattributed workspace change returns `revalidation_required`, safely rolls back this run's files, and writes no checkpoint. Once a remote push is known to have succeeded, later checkpoint/audit failure, main advancement, ownership change, or abnormal remote history can never trigger rollback; the same run must reconcile or remain `recovery_required`.
+
+If a process was forcibly terminated and `parallel status` shows an empty run while a task is still claimed, confirm that the process is gone and run:
+
+```bash
+npx wildarrange parallel close --run <runId> --reason "confirmed process terminated"
+```
+
+The command scans task state by `runId` and releases a ghost `parallel_run_claim` even when the run has no result entries.
+
+### Git Coordination Strength
+
+Configure the built-in behavior in `helix.config.json`:
+
+```json
+{
+  "gitCoordination": {
+    "mode": "guarded",
+    "remote": "origin",
+    "integrationBranch": "auto",
+    "taskBranchPrefix": "wildarrange/task",
+    "requireWorktreeForParallelWrites": true,
+    "requireVerificationBeforeHandoff": false,
+    "requireCleanHandoff": true,
+    "requireTakeoverReason": true
+  }
+}
+```
+
+| Mode | Behavior |
+|---|---|
+| `off` | Disable Git coordination and keep the original single-device flow. |
+| `manual` | Only explicit `coordination` / `handoff` commands use the remote; `parallel run --coordinate` enables it for one run. |
+| `guarded` (default) | Automatically claim and use worktrees when a Git remote exists; otherwise continue locally and return a degradation reason. |
+| `strict` | Refuse execution unless the Git repository, remote, worktree, and pre-handoff verification are available. |
+
+You may tune automatic activation, local fallback, and pre-handoff verification. In every mode except `off`, these floors cannot be disabled: one writer per task, no force push, pushed-commit handoff, revalidation after remote-main movement, and explicit evidence-bearing takeover.
 
 ### Developing This Repository
 
@@ -211,7 +275,7 @@ A healthy Kimi Hook can deny out-of-scope Write/Edit calls and clearly destructi
 
 ## Minimal Multi-Agent Loop
 
-Command-based child agents can run concurrently in isolated run directories:
+Command-based child agents can run concurrently. In default `guarded` mode with a configured remote, writable agents automatically receive independent Git worktrees. Without a remote, or in `manual/off`, `parallelAgents.isolation` remains in control:
 
 ```bash
 node ./bin/helix.mjs parallel run --max-agents 2 --task T001,T002 --agent ZhuRong --command "..."
@@ -242,6 +306,13 @@ Successful child results remain `awaiting_user_acceptance` until admission/check
 
 ```bash
 node ./bin/helix.mjs parallel close --run <runId> --task T001 --reason user_accepted
+```
+
+You may also request worktree isolation explicitly. WildArrange extracts the patch and still runs `writable_paths` plus the full admission gates:
+
+```bash
+node ./bin/helix.mjs parallel run --task T001 --isolation git-worktree --command "..."
+node ./bin/helix.mjs parallel admit --run <runId> --task T001
 ```
 
 ## Defensive Checks

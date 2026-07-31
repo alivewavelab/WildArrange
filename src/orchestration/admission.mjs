@@ -21,6 +21,7 @@ import path from "node:path";
 import {
   appendLedger,
   ensureHelixDirs,
+  loadHelixConfig,
   nowIso,
   readJson,
   resolveHelixPath,
@@ -28,6 +29,10 @@ import {
   writeJsonAtomic,
   writeSnapshot,
 } from "../infra/foundation.mjs";
+import {
+  captureIntegrationGuard,
+  commitIsAncestor,
+} from "../infra/git-coordination.mjs";
 import { readVerifiedLedgerEntries } from "../infra/ledger.mjs";
 import { buildFailureSummary } from "../infra/failure-analysis.mjs";
 import { appendWisdom, writeFailureReport, writeReviewReport } from "../infra/task-reports.mjs";
@@ -36,8 +41,19 @@ import { applyAgentPatch, extractPatchPaths } from "../infra/git-worktree.mjs";
 import { runCommand } from "../infra/command-runner.mjs";
 import { pathAllowed } from "../infra/path-match.mjs";
 import { runDeliveryPipeline, runPostCompletionSideEffects } from "./delivery-pipeline.mjs";
+import {
+  persistAdmissionRevalidation,
+  persistPostIntegrationRecovery,
+} from "./admission-recovery.mjs";
+import {
+  collectIntegrationCandidatePaths,
+  integrateAdmissionCommit,
+  readIntegrationIntent,
+  verifyAdmissionFences,
+} from "./integration.mjs";
 import { loadTaskState } from "./plan-state.mjs";
 import { persistTaskState } from "./task-board.mjs";
+import { assertCurrentTaskOwnership } from "./remote-ownership.mjs";
 
 export async function admitParallelAgentResult(rootDir, options = {}) {
   await ensureHelixDirs(rootDir);
@@ -52,6 +68,12 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
   const proposedPaths = files.length > 0
     ? files.map((file) => file.path)
     : normalizePatchPaths(result.result?.patchPaths || result.result?.changedPaths || extractPatchPaths(result.result?.patch || ""));
+  const { config } = await loadHelixConfig(rootDir);
+  const guardTaskState = await loadTaskState(rootDir);
+  const guardTask = guardTaskState?.tasks.find((candidate) => candidate.id === options.taskId);
+  const integrationGuard = await captureIntegrationGuard(rootDir, config.gitCoordination, {
+    force: ["claimed", "accepted"].includes(guardTask?.coordination?.status),
+  });
 
   // Phase 1 — claim. Status adjudication, writable-paths precheck, the task
   // claim (verifying + admission evidence) and the started ledger event all
@@ -100,7 +122,7 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
   // could race a successor's freshly-completed files (cross-review P0 x2,
   // round 7, 2026-07-21).
   const finalized = await withTaskStateLock(rootDir, `parallel-admit-txn:${options.taskId}`, () =>
-    runAdmissionTransaction(rootDir, options, { claim, result, files, proposedPaths }));
+    runAdmissionTransaction(rootDir, options, { claim, result, files, proposedPaths, integrationGuard }));
 
   // For the completed outcome the admission ledger event was already written
   // inside the transaction, BEFORE the canonical completed persist (ledger
@@ -143,6 +165,7 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
     scopeResult: finalized.scopeResult,
     reviewResult: finalized.reviewResult,
     acceptanceProof: finalized.acceptanceProof || null,
+    integrationCommit: finalized.integrationCommit || null,
     rollback: finalized.rollback,
     sideEffectWarnings,
     task: finalized.task,
@@ -183,6 +206,14 @@ async function claimAdmission(rootDir, options, { result, files, proposedPaths }
     if (task.admission_claim.runId !== options.runId) {
       throw new Error(`task ${options.taskId} is currently claimed by parallel admission run ${task.admission_claim.runId} (phase: ${task.admission_claim.phase}); refusing run ${options.runId}. 若那次 admission 已崩溃，用原 run 重新 admit 即可续跑`);
     }
+    // A finalizing run may already have pushed its integration commit. Let
+    // the same run reach the durable intent reconciliation path even when
+    // task ownership changed; that path never rolls back a known push.
+    // An applying run has not reached that safety point and must still own
+    // the task before it may touch files again.
+    if (task.admission_claim.phase !== "finalizing") {
+      await assertCurrentTaskOwnership(rootDir, task);
+    }
     const priorWorker = [...(task.evidence || [])].reverse().find(
       (entry) => entry?.kind === "worker" && entry.source === "parallel_agent_admission" && entry.runId === options.runId,
     );
@@ -208,8 +239,12 @@ async function claimAdmission(rootDir, options, { result, files, proposedPaths }
       writablePaths: task.writable_paths || [],
     };
   }
+  await assertCurrentTaskOwnership(rootDir, task);
   if (!["pending", "in_progress", "verifying"].includes(task.status)) {
     throw new Error(`task ${options.taskId} status ${task.status} cannot admit parallel result`);
+  }
+  if (task.parallel_run_claim?.runId && task.parallel_run_claim.runId !== options.runId) {
+    throw new Error(`task ${options.taskId} is claimed by parallel admission run ${task.parallel_run_claim.runId}; refusing run ${options.runId}`);
   }
   const denied = proposedPaths.filter((filePath) => !pathAllowed(filePath, task.writable_paths || []));
   if (denied.length > 0) {
@@ -241,6 +276,7 @@ async function claimAdmission(rootDir, options, { result, files, proposedPaths }
     phase: "applying",
     appliedPaths: proposedPaths,
   };
+  task.parallel_run_claim = null;
   // New admission round invalidates gate results from previous rounds
   // (same rule as the linear runtime's new-worker-round clearing).
   task.last_verify_result = null;
@@ -269,7 +305,7 @@ async function claimAdmission(rootDir, options, { result, files, proposedPaths }
 }
 
 /** Phases 2+3 body — runs under one continuous task-state lock hold. */
-async function runAdmissionTransaction(rootDir, options, { claim, result, files, proposedPaths }) {
+async function runAdmissionTransaction(rootDir, options, { claim, result, files, proposedPaths, integrationGuard }) {
   // Phase 1 and this transaction use separate lock holds. A duplicate call
   // from the same run may have captured an older phase while waiting, so the
   // persisted claim is the authority immediately before any workspace I/O.
@@ -377,6 +413,7 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
       changedPaths: appliedPaths,
       runId: options.runId,
       rollbackPlan,
+      integrationGuard,
     });
     return { ...finalized, appliedPaths };
   } catch (error) {
@@ -400,7 +437,7 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
  * then be clobbered by the old rollback (cross-review P0, round 7,
  * 2026-07-21).
  */
-async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, changedPaths, runId, rollbackPlan }) {
+async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, changedPaths, runId, rollbackPlan, integrationGuard }) {
   const taskState = await loadTaskState(rootDir);
   if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
   const task = taskState.tasks.find((candidate) => candidate.id === taskId);
@@ -410,12 +447,133 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
   if (task.admission_claim?.runId !== runId) {
     throw new Error(`task ${taskId} admission claim is ${task.admission_claim ? `held by run ${task.admission_claim.runId}` : "no longer held"}; refusing to finalize on behalf of run ${runId}`);
   }
+  const integrationIntent = await readIntegrationIntent(rootDir, runId, taskId);
+  const initialFence = await verifyAdmissionFences(rootDir, taskId, integrationGuard, integrationIntent);
+  const integrationWasPushed = ["pushed", "push_outcome_unknown"].includes(integrationIntent?.status)
+    || Boolean(integrationIntent?.integrationSha
+      && integrationGuard?.expectedSha
+      && await commitIsAncestor(rootDir, integrationIntent.integrationSha, integrationGuard.expectedSha));
+  if (!initialFence.pass) {
+    if (integrationWasPushed) {
+      return persistPostIntegrationRecovery(rootDir, taskState, task, {
+        runId,
+        integrationCommit: {
+          ...integrationIntent,
+          pushed: true,
+          reason: integrationIntent?.status === "push_outcome_unknown"
+            ? "integration_push_outcome_unknown"
+            : initialFence.reason,
+          fenceReason: initialFence.reason,
+        },
+        summary: `integration ${integrationIntent.integrationSha} was already pushed, but recovery fence failed: ${initialFence.reason}`,
+        verifyResult: task.last_verify_result || null,
+        scopeResult: task.last_scope_result || null,
+        reviewResult: task.last_review_result || null,
+        acceptanceProof: null,
+      });
+    }
+    const rollback = await rollbackAdmissionChanges(rootDir, rollbackPlan);
+    if (rollback.status !== "rolled_back") {
+      task.status = "verifying";
+      task.last_failure = {
+        at: nowIso(),
+        reason: "admission_rollback_failed",
+        summary: `parallel admission revalidation failed and workspace rollback did not complete: ${rollback.error || rollback.reason || "unknown error"}`,
+        retryHint: `任务所有权和 rollback plan 已保留；修复文件系统问题后，用同一 run ${runId} 重新 admit`,
+      };
+      task.updatedAt = nowIso();
+      await writeFailureReport(rootDir, taskState.planId, task);
+      await persistTaskState(rootDir, taskState);
+      return {
+        status: "recovery_required",
+        planId: taskState.planId,
+        task,
+        acceptanceProof: null,
+        verifyResult: null,
+        scopeResult: null,
+        reviewResult: null,
+        rollback,
+      };
+    }
+    return persistAdmissionRevalidation(rootDir, taskState, task, {
+      fence: initialFence,
+      runId,
+      rollback,
+      acceptanceProof: null,
+      verifyResult: null,
+      scopeResult: null,
+      reviewResult: null,
+      removeRollbackPlan: () => removePersistedRollbackPlan(rootDir, runId, taskId),
+    });
+  }
+  const deliveryChangedPaths = integrationIntent && initialFence.remoteContainsPriorIntegration
+    ? integrationIntent.changedPaths || changedPaths
+    : integrationGuard?.active
+      ? await collectIntegrationCandidatePaths(rootDir, integrationGuard.expectedSha)
+    : changedPaths;
+  const authoritativePaths = new Set([
+    ...(changedPaths || []),
+    ...(task.coordination?.handoffChangedPaths || []),
+  ]);
+  const unattributedPaths = integrationGuard?.active
+    ? deliveryChangedPaths.filter((filePath) => !authoritativePaths.has(filePath))
+    : [];
+  if (unattributedPaths.length > 0) {
+    const rollback = await rollbackAdmissionChanges(rootDir, rollbackPlan);
+    if (rollback.status !== "rolled_back") {
+      task.status = "verifying";
+      task.last_failure = {
+        at: nowIso(),
+        reason: "admission_rollback_failed",
+        summary: `unattributed workspace changes were found and rollback failed: ${unattributedPaths.join(", ")}`,
+        retryHint: `任务所有权和 rollback plan 已保留；修复工作区后，用同一 run ${runId} 重新 admit`,
+      };
+      task.updatedAt = nowIso();
+      await writeFailureReport(rootDir, taskState.planId, task);
+      await persistTaskState(rootDir, taskState);
+      return {
+        status: "recovery_required",
+        planId: taskState.planId,
+        task,
+        acceptanceProof: null,
+        verifyResult: null,
+        scopeResult: null,
+        reviewResult: null,
+        rollback,
+      };
+    }
+    return persistAdmissionRevalidation(rootDir, taskState, task, {
+      fence: {
+        pass: false,
+        reason: "workspace_contains_unattributed_changes",
+        expectedSha: integrationGuard.expectedSha,
+        actualSha: integrationGuard.expectedSha,
+        unattributedPaths,
+      },
+      runId,
+      rollback,
+      acceptanceProof: null,
+      verifyResult: null,
+      scopeResult: null,
+      reviewResult: null,
+      removeRollbackPlan: () => removePersistedRollbackPlan(rootDir, runId, taskId),
+    });
+  }
 
   // Same shared pipeline as the linear runtime: gate order lives in
   // delivery-pipeline.mjs only.
   const pipelineResult = await runDeliveryPipeline(rootDir, taskState.planId, task, {
     initialEvidence: { workerResult },
-    changedPaths,
+    changedPaths: deliveryChangedPaths,
+    preCompletionGate: () => verifyAdmissionFences(rootDir, taskId, integrationGuard, integrationIntent),
+    beforeCheckpointGate: () => integrateAdmissionCommit(rootDir, {
+      planId: taskState.planId,
+      task,
+      taskId,
+      runId,
+      changedPaths: deliveryChangedPaths,
+      integrationGuard,
+    }),
   });
   const verifyResult = pipelineResult.evidence.verifyResult;
   const scopeResult = pipelineResult.evidence.scopeResult;
@@ -443,7 +601,7 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
       runId: runId || null,
       taskId,
       status: "completed",
-      appliedPaths: changedPaths || [],
+      appliedPaths: deliveryChangedPaths || [],
       rollback: null,
     });
     // Wisdom and digest are INSIDE the completion transaction (before the
@@ -454,7 +612,35 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
     await writeMemoryDigest(rootDir, { reason: "parallel_admission_completed", stage: "checkpoint", task, taskId });
     await persistTaskState(rootDir, taskState);
     await removePersistedRollbackPlan(rootDir, runId, taskId);
-    return { status: "completed", planId: taskState.planId, task, acceptanceProof, verifyResult, scopeResult, reviewResult, rollback: null };
+    return {
+      status: "completed",
+      planId: taskState.planId,
+      task,
+      acceptanceProof,
+      verifyResult,
+      scopeResult,
+      reviewResult,
+      integrationCommit: pipelineResult.evidence.integrationCommit || null,
+      rollback: null,
+    };
+  }
+
+  if (pipelineResult.status !== "completed" && pipelineResult.evidence.integrationCommit?.pushed === true) {
+    return persistPostIntegrationRecovery(rootDir, taskState, task, {
+      runId,
+      integrationCommit: pipelineResult.evidence.integrationCommit,
+      summary: pipelineResult.status === "checkpoint_failed"
+        ? `remote integration ${pipelineResult.evidence.integrationCommit.integrationSha} succeeded, but checkpoint failed: ${pipelineResult.evidence.checkpointError?.message || "unknown error"}`
+        : `integration ${pipelineResult.evidence.integrationCommit.integrationSha} was already pushed, but remote recovery validation failed: ${pipelineResult.evidence.integrationCommit.reason || pipelineResult.status}`,
+      error: pipelineResult.evidence.checkpointError?.message
+        || pipelineResult.evidence.integrationCommit.reason
+        || null,
+      checkpointFailed: pipelineResult.status === "checkpoint_failed",
+      acceptanceProof,
+      verifyResult,
+      scopeResult,
+      reviewResult,
+    });
   }
 
   // Non-completed: restore the workspace BEFORE releasing the claim.
@@ -499,6 +685,22 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
     await removePersistedRollbackPlan(rootDir, runId, taskId);
     await appendLedger(rootDir, { type: "checkpoint_write_failed", planId: taskState.planId, taskId: task.id, error: pipelineResult.evidence.checkpointError?.message || null });
     return { status: "retry", planId: taskState.planId, task, acceptanceProof, verifyResult, scopeResult, reviewResult, rollback };
+  }
+
+  if (pipelineResult.status === "revalidation_required") {
+    const fence = pipelineResult.evidence.integrationCommit?.pass === false
+      ? pipelineResult.evidence.integrationCommit
+      : pipelineResult.evidence.integrationGuard || {};
+    return persistAdmissionRevalidation(rootDir, taskState, task, {
+      fence,
+      runId,
+      rollback,
+      acceptanceProof,
+      verifyResult,
+      scopeResult,
+      reviewResult,
+      removeRollbackPlan: () => removePersistedRollbackPlan(rootDir, runId, taskId),
+    });
   }
 
   task.status = shouldFailAdmission(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";

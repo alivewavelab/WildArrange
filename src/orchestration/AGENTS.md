@@ -32,9 +32,13 @@
 - 回滚失败必须保留 owner、rollback plan 和 `recovery_required`，不能释放脏工作区。
 - `runNextTask().status` 表示下一步动作；持久状态以 `task.status` 为准。
 - 命令型并行运行必须在创建 run 之前拒绝 DiJiang、BaiZe、LuWu 这三个只读长期身份；Jiuwei、ZhuRong 可执行，非保留名的临时隔离子 Agent 仍可运行。
+- Git 协调开启时，同一任务只能存在一个远端写 owner 和一个本地 `parallel_run_claim`；handoff 后旧设备必须 fail-closed，整链 `run` 与分步 checkpoint 都要在完成前二次验权。
+- Handoff 必须按 `prepare → tree fingerprint recheck → non-force push → target accept` 推进；takeover 只能显式执行并记录预期旧设备与理由，不使用本机时间自动过期。push/accept/takeover 的远端成功、本地失败必须可由同一设备和原参数幂等补账。
+- Admission 在 acceptance proof 前必须复核任务 owner、远端集成分支 SHA、当前工作目录基线和变更归属；通过 proof 后、checkpoint 前必须生成并普通 push 集成 commit。前置复核失败时只回滚本 run 路径并返回 `revalidation_required`；远端 push 一旦已知成功，之后任何故障都必须保留同一 run 与集成意图，不得回滚或释放。
 
 ## 交付证据
 
 - 流程成功、失败、重试和崩溃恢复都要有测试。
 - 修改完成路径时，至少覆盖 ledger/checkpoint 故障注入和旧证据不可复用。
 - 修改并行 admission 时，至少覆盖并发 owner、apply 中断、回滚失败和幂等恢复。
+- 修改 Git 协调时，至少覆盖双设备 claim 竞争、handoff 后旧 owner 被拒绝，以及 gate 期间 main 变化不产生 checkpoint。

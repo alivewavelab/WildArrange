@@ -6,6 +6,7 @@ import {
   DEFAULT_LEAD_AGENT,
   DEFAULT_PACKAGE_NAME,
   PRODUCT_NAME,
+  acceptTaskHandoff,
   admitParallelAgentResult,
   buildArchivistPacket,
   buildAgentContext,
@@ -16,6 +17,7 @@ import {
   createTeamTask,
   approvePlan,
   claimTeamTask,
+  coordinationStatus,
   getTeamTask,
   importPlan,
   installAdapter,
@@ -27,6 +29,8 @@ import {
   listTeamTasks,
   matchSkills,
   parallelAgentStatus,
+  prepareTaskHandoff,
+  pushTaskHandoff,
   listTeamMessages,
   listChangeRequests,
   listPromptPack,
@@ -34,6 +38,7 @@ import {
   readJson,
   recordReviewBlocker,
   recordTaskEvidence,
+  registerCoordinationDevice,
   renderPromptPackEntry,
   resolvePromptVariant,
   resolveInjectionPoint,
@@ -56,6 +61,7 @@ import {
   scanProjectRules,
   statusReport,
   steerWorkflow,
+  takeoverTaskOwnership,
   uninstallAdapter,
   verifyLedger,
   verifyConfigBaseline,
@@ -96,6 +102,14 @@ Usage:
   wildarrange config show
   wildarrange config baseline [--reason "..."]
   wildarrange config verify
+  wildarrange device register [--name macbook] [--force]
+  wildarrange device status
+  wildarrange coordination status
+  wildarrange coordination claim --task T001 [--owner ZhuRong]
+  wildarrange handoff prepare --task T001 --to-device-id <uuid> [--to-device-name mac-mini] [--to-owner ZhuRong]
+  wildarrange handoff push --task T001
+  wildarrange handoff accept --task T001 [--plan P20260731]
+  wildarrange handoff takeover --plan P20260731 --task T001 --expected-device-id <uuid> --reason "owner offline"
   wildarrange adapter install [--target codex|cursor|kimi|all] [--mode local|npx] [--package ${DEFAULT_PACKAGE_NAME}]
   wildarrange adapter uninstall [--target codex|cursor|kimi|all]
   wildarrange adapter restore --backup <backupId>
@@ -105,7 +119,7 @@ Usage:
   wildarrange run
   wildarrange workflow --from <plan.json>
   wildarrange workflow --sample
-  wildarrange parallel run [--max-agents 2] [--task T001,T002] [--agent ZhuRong] [--adapter codex|cursor] [--isolation run-dir|git-worktree] [--command "..."]
+  wildarrange parallel run [--max-agents 2] [--task T001,T002] [--agent ZhuRong] [--adapter codex|cursor] [--isolation run-dir|git-worktree] [--coordinate] [--command "..."]
   wildarrange parallel admit --run <runId> --task T001
   wildarrange parallel list
   wildarrange parallel status [--run <runId>]
@@ -254,6 +268,82 @@ async function main() {
     throw new Error("helix adapter requires install, uninstall, or restore");
   }
 
+  if (command === "device") {
+    const subcommand = args._[1];
+    if (subcommand === "register") {
+      console.log(JSON.stringify(await registerCoordinationDevice(rootDir, {
+        name: args.name && args.name !== true ? args.name : undefined,
+        force: Boolean(args.force),
+      }), null, 2));
+      return;
+    }
+    if (subcommand === "status") {
+      console.log(JSON.stringify((await coordinationStatus(rootDir)).device, null, 2));
+      return;
+    }
+    throw new Error("helix device requires register or status");
+  }
+
+  if (command === "coordination") {
+    const subcommand = args._[1];
+    if (subcommand === "status") {
+      console.log(JSON.stringify(await coordinationStatus(rootDir), null, 2));
+      return;
+    }
+    if (subcommand === "claim") {
+      if (!args.task || args.task === true) throw new Error("helix coordination claim requires --task <taskId>");
+      console.log(JSON.stringify(await claimTeamTask(rootDir, {
+        taskId: args.task,
+        owner: args.owner && args.owner !== true ? args.owner : undefined,
+        forceCoordination: true,
+      }), null, 2));
+      return;
+    }
+    throw new Error("helix coordination requires status or claim");
+  }
+
+  if (command === "handoff") {
+    const subcommand = args._[1];
+    if (subcommand === "prepare") {
+      if (!args.task || args.task === true) throw new Error("helix handoff prepare requires --task <taskId>");
+      if (!args["to-device-id"] || args["to-device-id"] === true) throw new Error("helix handoff prepare requires --to-device-id <uuid>");
+      console.log(JSON.stringify(await prepareTaskHandoff(rootDir, {
+        taskId: args.task,
+        toDeviceId: args["to-device-id"],
+        toDeviceName: args["to-device-name"] && args["to-device-name"] !== true ? args["to-device-name"] : undefined,
+        toOwner: args["to-owner"] && args["to-owner"] !== true ? args["to-owner"] : undefined,
+      }), null, 2));
+      return;
+    }
+    if (subcommand === "push") {
+      if (!args.task || args.task === true) throw new Error("helix handoff push requires --task <taskId>");
+      console.log(JSON.stringify(await pushTaskHandoff(rootDir, { taskId: args.task }), null, 2));
+      return;
+    }
+    if (subcommand === "accept") {
+      if (!args.task || args.task === true) throw new Error("helix handoff accept requires --task <taskId>");
+      console.log(JSON.stringify(await acceptTaskHandoff(rootDir, {
+        taskId: args.task,
+        planId: args.plan && args.plan !== true ? args.plan : undefined,
+      }), null, 2));
+      return;
+    }
+    if (subcommand === "takeover") {
+      if (!args.plan || args.plan === true) throw new Error("helix handoff takeover requires --plan <planId>");
+      if (!args.task || args.task === true) throw new Error("helix handoff takeover requires --task <taskId>");
+      if (!args["expected-device-id"] || args["expected-device-id"] === true) throw new Error("helix handoff takeover requires --expected-device-id <uuid>");
+      console.log(JSON.stringify(await takeoverTaskOwnership(rootDir, {
+        planId: args.plan,
+        taskId: args.task,
+        expectedDeviceId: args["expected-device-id"],
+        owner: args.owner && args.owner !== true ? args.owner : undefined,
+        reason: args.reason,
+      }), null, 2));
+      return;
+    }
+    throw new Error("helix handoff requires prepare, push, accept, or takeover");
+  }
+
   if (command === "injection") {
     const subcommand = args._[1];
     if (subcommand === "show") {
@@ -345,6 +435,7 @@ async function main() {
         isolation: args.isolation && args.isolation !== true ? args.isolation : undefined,
         command: args.command && args.command !== true ? args.command : undefined,
         timeoutMs: args.timeout && args.timeout !== true ? Number(args.timeout) : undefined,
+        coordinate: Boolean(args.coordinate),
       }), null, 2));
       return;
     }
@@ -549,6 +640,7 @@ async function main() {
       console.log(JSON.stringify(await claimTeamTask(rootDir, {
         taskId: args.task && args.task !== true ? args.task : undefined,
         owner: args.owner && args.owner !== true ? args.owner : undefined,
+        forceCoordination: Boolean(args.coordinate),
       }), null, 2));
       return;
     }

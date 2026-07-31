@@ -24,6 +24,9 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 - checkpoint 前必须写入 acceptance proof；proof 不通过不得把任务置为 completed。
 - 子 Agent 成功运行后默认保留为 `awaiting_user_acceptance`，只有主线 admission/checkpoint 完成后才释放。
 - admission 只有在成功提交或工作区成功回滚后才能释放任务所有权；回滚失败必须保留 `verifying` claim 与 rollback plan，并返回 `recovery_required`，直到原 run 完成恢复。
+- Git 多设备协调默认使用 `guarded`：有 remote 时以任务分支 claim commit 维护单写 owner，可写并行 Agent 默认使用 worktree；无 remote 时明确降级为本地协调。`strict` 不允许降级。
+- Git 协调只允许普通非强制 push；同一任务禁止双写，跨设备 handoff 必须绑定已 push commit 且 push 前复核 prepare 树指纹，takeover 必须显式记录预期旧设备和理由，不允许按本机时间自动过期 owner。
+- 任意设备可执行 admission，但开始时必须获取并绑定远端集成分支 SHA，当前工作目录必须包含该基线，且候选树不得包含本 run / handoff 清单之外的无归属改动；gate 期间 owner/SHA 变化、基线落后或存在无归属改动必须安全回滚并返回 `revalidation_required`，不得写 acceptance proof/checkpoint。全部 gate 与 acceptance proof 通过后必须真实生成以该 SHA 为父提交的集成 commit 并普通 push，成功后才允许 checkpoint；push 已成功后任何本地/所有权/远端历史故障都不得回滚或释放原 run，只能对账恢复或保持 `recovery_required`。
 - ArchivistRouter 只读取清洗后的结论包，不摄入代码块、raw diff 或完整命令输出；无 LLM key 时必须 fallback，不阻断主线或 hook。
 - 路由必须保留 deterministic 证据；semantic shadow 只能作为第二意见和低置信门控，不得无审计地覆盖路由表。
 - 商业发布包不得包含受限第三方源码、prompt 原文或近似改写文本；外部项目只能作为概念参考和对照证据。
@@ -84,8 +87,12 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/orchestration/plan-state.mjs`                            | 计划导入、校验、路由 enrichment、任务状态加载                 |
 | `src/orchestration/linear-runtime.mjs`                        | 线性任务节点运行时、重试 / checkpoint，经 gateway 调用能力       |
 | `src/orchestration/parallel-runtime.mjs`                      | 命令型子 Agent 并行运行、隔离结果、skipped/cleanup 生命周期状态与消息发布 |
+| `src/orchestration/remote-ownership.mjs`                      | 设备登记、远端任务 claim、单写 owner 校验与协调状态 |
+| `src/orchestration/handoff.mjs`                               | 跨设备 prepare/push/accept 与显式 takeover |
 | `src/orchestration/admission.mjs`                             | 并行 admission 事务：claim → apply → gates → commit/rollback；回滚失败保持 ownership，全程持全局任务锁 |
+| `src/orchestration/admission-recovery.mjs`                    | admission 的 revalidation / 已集成恢复状态落盘，禁止已 push 成果回滚 |
 | `src/orchestration/delivery-pipeline.mjs`                     | 共享交付流水线：verify → scope → review → acceptance-proof → checkpoint 顺序 |
+| `src/orchestration/integration.mjs`                           | admission 集成事务：owner/base/main 三重 fence、临时索引 commit、普通 push 与故障对账 |
 | `src/orchestration/task-board.mjs`                            | 轻量任务板与消息板                                     |
 | `src/orchestration/change-governance.mjs`                     | 任务变更治理、Review Blocker、ChangeRequest           |
 | `src/orchestration/status.mjs`                                | 状态报告、Workflow 总结、attentionReport 与 Dashboard 数据 |
@@ -120,6 +127,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/infra/llm-provider.mjs`                                   | OpenAI-compatible LLM provider 与可选 LLM review |
 | `src/infra/agent-spawn.mjs`                                    | Codex / Cursor / 自定义命令型子 Agent spawn 模板渲染       |
 | `src/infra/git-worktree.mjs`                                   | Git worktree 隔离、patch 提取与 patch admission        |
+| `src/infra/git-coordination.mjs`                               | 设备安全的 Git remote/commit/push/fetch 与集成 SHA 乐观锁原语 |
 | `src/infra/git-diff.mjs`                                       | git diff / changed-paths 收集与 manifest 变更分类     |
 | `src/infra/path-match.mjs`                                     | 路径归一化与 glob/精确/目录匹配（`pathAllowed`）           |
 | `src/infra/route-table.mjs`                                    | 确定性路由表加载（含 overrides）与信号匹配（`loadRoutesConfig`/`resolveRouteDecision`），无 LLM |
@@ -145,6 +153,12 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | ----------------- | ---------------------------------------------------------------- |
 | 初始化运行时            | `node ./bin/helix.mjs init`                                      |
 | 生成默认配置            | `node ./bin/helix.mjs config init --root`                        |
+| 登记当前设备            | `node ./bin/helix.mjs device register --name macbook`             |
+| 查看 Git 协调状态       | `node ./bin/helix.mjs coordination status`                        |
+| 显式远端领取任务        | `node ./bin/helix.mjs coordination claim --task T001 --owner ZhuRong` |
+| 准备跨设备交接          | `node ./bin/helix.mjs handoff prepare --task T001 --to-device-id <uuid> --to-device-name mac-mini` |
+| 推送跨设备交接          | `node ./bin/helix.mjs handoff push --task T001`                    |
+| 接受跨设备交接          | `node ./bin/helix.mjs handoff accept --plan <planId> --task T001`  |
 | 安装 adapter        | `node ./bin/helix.mjs adapter install --target all --mode local` |
 | 卸载 adapter        | `node ./bin/helix.mjs adapter uninstall --target all`            |
 | 恢复 adapter        | `node ./bin/helix.mjs adapter restore --backup <backupId>`       |

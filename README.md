@@ -120,12 +120,76 @@ Kimi Code 的 plugin 是用户级安装。升级后为确保 Hook bridge 使用�
 
 ### 运行状态与跨设备边界
 
-npm 和 Git 负责同步程序与项目配置，不负责同步正在运行的任务。`.helix/` 包含任务状态、ledger、checkpoint、备份和 Agent 运行记录，默认写入 `.gitignore`：
+npm 和 Git 负责同步程序与项目配置；`.helix/` 仍是每台设备自己的运行态，不直接互相覆盖。WildArrange 默认把现有 Git remote 当作“交接柜”：一个任务只有一个远端写 owner，换设备时用带任务包和 ledger hash 的 checkpoint commit 接力。
 
-- 不要让两台设备同时写同一份 `.helix/`。
-- 换设备只安装程序时，按上面的 `npm ci → init → adapter install → doctor` 流程操作。
-- 需要把未完成任务迁移到另一台设备时，应先停止原设备写入并迁移完整、相互一致的运行态；不要只复制 `tasks.json` 或单个 checkpoint。
-- 迁移前可执行 `npx wildarrange state backup --reason before-device-migration`，迁移后执行 `npx wildarrange state verify` 和 `npx wildarrange doctor`。
+每台设备首次使用时登记稳定身份。名称只用于阅读，真正的交接目标是命令返回的 `deviceId`：
+
+```bash
+npx wildarrange device register --name macbook
+npx wildarrange device status
+npx wildarrange coordination status
+```
+
+领取和跨设备交接：
+
+```bash
+# 原设备：领取任务并工作；把目标设备查到的 UUID 填进 --to-device-id
+npx wildarrange coordination claim --task T001 --owner ZhuRong
+npx wildarrange handoff prepare --task T001 \
+  --to-device-id <target-device-uuid> --to-device-name mac-mini
+npx wildarrange handoff push --task T001
+
+# 新设备：deviceId 必须与交接目标一致
+npx wildarrange device register --name mac-mini
+npx wildarrange handoff accept --plan <planId> --task T001
+```
+
+`prepare` 同时收集工作区改动和已经本地 commit、尚未进入远端任务分支的改动，只把 `writable_paths` 内的项目文件写入临时 Git tree；`.helix/` 永不进入交接，当前 index 也不会被污染。`push` 前会复核当前树与 prepare 时的指纹，期间又发生编辑时要求重新 prepare；推送只做普通非强制 push，失败后重试会先对账远端 SHA 并补齐审计。`accept` 校验远端 commit 包、目标设备 UUID 和本地干净状态后取得所有权，同名设备不能冒领。接受成功后，原设备的 execute / verify / scope / review / checkpoint / admission 都会因所有权变化而被拒绝；一体化 `run` 也会在完成前再次验权。
+
+只有确认原 owner 不再工作时才能显式接管，并必须给出预期 owner 和理由：
+
+```bash
+npx wildarrange handoff takeover --plan <planId> --task T001 \
+  --expected-device-id <old-device-uuid> --reason "原设备离线，已人工确认停止写入"
+```
+
+不会使用本机时间自动判定 owner 过期，也不会 force push。任意设备都能执行 admission，但开始时会获取并绑定远端集成分支 SHA；当前工作目录必须包含该基线，且除本 run 结果与已确认 handoff 路径外不能夹带其他脏改动。全部质量门与 acceptance proof 通过后，WildArrange 才生成以该 SHA 为父提交的集成 commit，并普通 push 到远端主分支；主分支变化、本地基线落后或存在无归属改动时返回 `revalidation_required`，安全回滚本 run 文件且不写 checkpoint。若远端 push 已成功、仅本地 checkpoint/审计写入失败，则保留同一 run 的所有权和集成意图；即使随后 main 前进、任务 owner 变化或远端历史异常，也绝不回滚已知 push，只允许同 run 对账恢复或进入 `recovery_required`。
+
+进程被强制终止后，若 `parallel status` 显示 run 没有结果但任务仍被占用，可在人工确认进程已经结束后执行：
+
+```bash
+npx wildarrange parallel close --run <runId> --reason "confirmed process terminated"
+```
+
+该命令会按 `runId` 扫描任务状态并释放空结果的幽灵 `parallel_run_claim`，不依赖 `results` 列表。
+
+### Git 协调强度
+
+默认配置位于 `helix.config.json`：
+
+```json
+{
+  "gitCoordination": {
+    "mode": "guarded",
+    "remote": "origin",
+    "integrationBranch": "auto",
+    "taskBranchPrefix": "wildarrange/task",
+    "requireWorktreeForParallelWrites": true,
+    "requireVerificationBeforeHandoff": false,
+    "requireCleanHandoff": true,
+    "requireTakeoverReason": true
+  }
+}
+```
+
+| 模式 | 行为 |
+|---|---|
+| `off` | 关闭 Git 协调，保留原本的单机流程。 |
+| `manual` | 只有显式 `coordination` / `handoff` 命令使用远端协调；`parallel run --coordinate` 可单次启用。 |
+| `guarded`（默认） | 有 Git remote 时自动 claim，并让可写并行 Agent 使用 worktree；无 remote 时降级为本地模式并返回原因。 |
+| `strict` | Git 仓库、remote、worktree、交接前验证缺一即拒绝。 |
+
+可调的是自动启用程度、无 remote 时能否降级、交接前是否强制验证。只要不是 `off`，单任务单写者、禁止 force push、跨设备 handoff 绑定已 push commit、远端 main 变化后重验、接管必须显式留证这些底线不可关闭。
 
 ### 本仓库开发
 
@@ -211,7 +275,7 @@ Kimi Hook 在正常运行时可拦截越界 Write/Edit 和明显高危 Bash，�
 
 ## 多 Agent 最小闭环
 
-命令型子 Agent 可以先在隔离目录内并发运行；也可以通过 adapter 命令模板交给 Codex/Cursor 类宿主启动：
+命令型子 Agent 可以并发运行；默认 `guarded` 且仓库存在 remote 时，可写 Agent 自动使用独立 Git worktree。无 remote 或配置为 `manual/off` 时沿用配置中的 `parallelAgents.isolation`：
 
 ```bash
 node ./bin/helix.mjs parallel run --max-agents 2 --task T001,T002 --agent ZhuRong --command "..."
@@ -267,7 +331,7 @@ WildArrange 会在 shell 执行前阻断明显破坏性命令，例如删除 `.g
 node ./bin/helix.mjs parallel close --run <runId> --task T001 --reason user_accepted
 ```
 
-Git 项目可以使用 worktree 隔离。子 Agent 在独立 worktree 写文件，WildArrange 自动提取 patch；合入时同样先过 `writable_paths` 和完整 gate：
+也可以显式要求 worktree。子 Agent 在独立 worktree 写文件，WildArrange 自动提取 patch；合入时同样先过 `writable_paths` 和完整 gate：
 
 ```bash
 node ./bin/helix.mjs parallel run --task T001 --isolation git-worktree --command "..."

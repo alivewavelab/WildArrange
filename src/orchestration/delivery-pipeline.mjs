@@ -74,12 +74,29 @@ export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
     return finalizePipelineResult("blocked", results, evidence, { criteria, criterionEvidenceRecorded });
   }
 
-  const completion = await runCompletionSegment(rootDir, planId, task, evidence);
+  if (typeof options.preCompletionGate === "function") {
+    const completionGate = await options.preCompletionGate();
+    evidence.integrationGuard = completionGate;
+    if (completionGate?.pass !== true) {
+      return finalizePipelineResult("revalidation_required", results, evidence, { criteria, criterionEvidenceRecorded });
+    }
+  }
+
+  const completion = await runCompletionSegment(rootDir, planId, task, evidence, {
+    beforeCheckpointGate: options.beforeCheckpointGate,
+  });
   results.push(completion.proofEnvelope);
   recordStepEvidence("acceptance-proof", evidence, completion.proofEnvelope, task);
 
   if (completion.status === "proof_failed") {
     return finalizePipelineResult("blocked", results, evidence, { criteria, criterionEvidenceRecorded });
+  }
+
+  if (completion.integrationGate) {
+    evidence.integrationCommit = completion.integrationGate;
+  }
+  if (completion.status === "revalidation_required") {
+    return finalizePipelineResult("revalidation_required", results, evidence, { criteria, criterionEvidenceRecorded });
   }
 
   results.push(completion.checkpointEnvelope);
@@ -99,17 +116,25 @@ export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
  * checkpoint write must never be silently absorbed (the gateway converts
  * throws into fail envelopes; we check the envelope status here).
  */
-export async function runCompletionSegment(rootDir, planId, task, evidence) {
+export async function runCompletionSegment(rootDir, planId, task, evidence, options = {}) {
   const proofEnvelope = await invokeCapability("acceptance-proof", { rootDir, planId, task, evidence });
   if (proofEnvelope.status !== "pass") {
     return { status: "proof_failed", proofEnvelope, checkpointEnvelope: null };
   }
   evidence.acceptanceProof = proofEnvelope.evidence;
+  let integrationGate = null;
+  if (typeof options.beforeCheckpointGate === "function") {
+    integrationGate = await options.beforeCheckpointGate();
+    evidence.integrationCommit = integrationGate;
+    if (integrationGate?.pass !== true) {
+      return { status: "revalidation_required", proofEnvelope, integrationGate, checkpointEnvelope: null };
+    }
+  }
   const checkpointEnvelope = await invokeCapability("checkpoint", { rootDir, planId, task, evidence });
   if (checkpointEnvelope.status !== "pass") {
-    return { status: "checkpoint_failed", proofEnvelope, checkpointEnvelope };
+    return { status: "checkpoint_failed", proofEnvelope, integrationGate, checkpointEnvelope };
   }
-  return { status: "completed", proofEnvelope, checkpointEnvelope };
+  return { status: "completed", proofEnvelope, integrationGate, checkpointEnvelope };
 }
 
 /**

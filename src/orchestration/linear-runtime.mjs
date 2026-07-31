@@ -18,6 +18,7 @@ import { collectGateEvidenceFromTask, runCompletionSegment, runDeliveryPipeline,
 import { writeWorkflowSummary } from "./status.mjs";
 import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
 import { findRunnableTask, persistTaskState, writeOutbox } from "./task-board.mjs";
+import { assertCurrentTaskOwnership, coordinateTaskClaim } from "./remote-ownership.mjs";
 
 export async function runNextTask(rootDir, options = {}) {
   return withTaskStateLock(rootDir, "run-next-task", () => runNextTaskUnlocked(rootDir, options));
@@ -81,6 +82,12 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
     return { status, task: null };
   }
 
+  task.owner = task.owner || "Jiuwei";
+  task.coordination = await coordinateTaskClaim(rootDir, {
+    planId: taskState.planId,
+    task,
+    owner: task.owner,
+  });
   task.status = "in_progress";
   task.attempts += 1;
   task.updatedAt = nowIso();
@@ -128,6 +135,7 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
     initialEvidence: { workerResult },
     changedPaths: changedPathsIntroducedByTask(beforeChanged, afterChanged),
     unavailableReason: beforeChanged.available ? afterChanged.reason : beforeChanged.reason,
+    preCompletionGate: () => taskOwnershipGate(rootDir, task.id),
   });
   const verifyResult = pipelineResult.evidence.verifyResult;
   const scopeResult = pipelineResult.evidence.scopeResult;
@@ -153,6 +161,31 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   await writeReviewReport(rootDir, taskState.planId, task, reviewResult);
   await appendLedger(rootDir, { type: "review_gate_completed", planId: taskState.planId, taskId: task.id, pass: reviewResult.pass, failedLaneCount: reviewResult.lanes.filter((lane) => lane.status === "fail").length });
   await writeSnapshot(rootDir, "reviewed", { planId: taskState.planId, taskId: task.id, pass: reviewResult.pass });
+
+  if (pipelineResult.status === "revalidation_required") {
+    task.status = "pending";
+    task.coordination = {
+      ...task.coordination,
+      status: "stale",
+      staleReason: pipelineResult.evidence.integrationGuard?.reason || "task_ownership_changed",
+    };
+    task.last_failure = {
+      at: nowIso(),
+      reason: "task_ownership_changed",
+      summary: pipelineResult.evidence.integrationGuard?.error || "remote task ownership changed before completion",
+      retryHint: "旧设备必须停止写入；由当前远端 owner 继续任务并重新运行全部质量门",
+    };
+    task.updatedAt = nowIso();
+    await writeFailureReport(rootDir, taskState.planId, task);
+    await persistTaskState(rootDir, taskState);
+    await appendLedger(rootDir, {
+      type: "task_completion_revalidation_required",
+      planId: taskState.planId,
+      taskId: task.id,
+      reason: task.last_failure.reason,
+    });
+    return { status: "revalidation_required", task, workerResult, verifyResult, scopeResult, reviewResult, acceptanceProof };
+  }
 
   if (pipelineResult.status === "completed") {
     task.status = "completed";
@@ -292,12 +325,20 @@ async function executeTaskNodeUnlocked(rootDir, options = {}) {
 
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["pending", "in_progress"]);
   if (task.status === "pending") {
+    task.owner = task.owner || "Jiuwei";
+    task.coordination = await coordinateTaskClaim(rootDir, {
+      planId: taskState.planId,
+      task,
+      owner: task.owner,
+    });
     task.status = "in_progress";
     task.attempts += 1;
     task.updatedAt = nowIso();
     await persistTaskState(rootDir, taskState);
     await appendLedger(rootDir, { type: "node_execute_started", planId: taskState.planId, taskId: task.id, attempt: task.attempts });
     await writeSnapshot(rootDir, "node_execute_started", { planId: taskState.planId, taskId: task.id });
+  } else {
+    await assertCurrentTaskOwnership(rootDir, task);
   }
 
   const workspaceSnapshot = await recordPreExecuteSnapshot(rootDir, taskState.planId, task);
@@ -352,6 +393,7 @@ async function verifyTaskNodeUnlocked(rootDir, options = {}) {
   const taskState = await loadTaskState(rootDir);
   if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["verifying", "in_progress"]);
+  await assertCurrentTaskOwnership(rootDir, task);
 
   task.status = "verifying";
   const verifyEnvelope = await invokeCapability("verify", { rootDir, task });
@@ -390,6 +432,7 @@ async function scopeTaskNodeUnlocked(rootDir, options = {}) {
   const taskState = await loadTaskState(rootDir);
   if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["verifying", "in_progress", "pending"]);
+  await assertCurrentTaskOwnership(rootDir, task);
   const executionPaths = [...task.evidence].reverse().find((entry) => entry.kind === "execution_paths");
   const scopeEnvelope = await invokeCapability("scope", {
     rootDir,
@@ -420,6 +463,7 @@ async function reviewTaskNodeUnlocked(rootDir, options = {}) {
   const taskState = await loadTaskState(rootDir);
   if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["verifying", "in_progress"]);
+  await assertCurrentTaskOwnership(rootDir, task);
   const workerResult = [...task.evidence].reverse().find((entry) => entry.kind === "worker");
   const verifyResult = task.last_verify_result || [...task.evidence].reverse().find((entry) => entry.kind === "verifier");
   const scopeResult = task.last_scope_result || [...task.evidence].reverse().find((entry) => entry.kind === "scope_guard");
@@ -464,6 +508,7 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
   const taskState = await loadTaskState(rootDir);
   if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["verifying", "in_progress"]);
+  await assertCurrentTaskOwnership(rootDir, task);
   // A verifying task holding an admission_claim belongs to an in-flight (or
   // crash-resumable) parallel admission; the single-step checkpoint must not
   // complete it on that run's behalf (cross-review P1, round 6, 2026-07-21).
@@ -482,6 +527,8 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
     const completion = await runCompletionSegment(rootDir, taskState.planId, task, {
       workerResult,
       ...gateEvidence,
+    }, {
+      beforeCheckpointGate: () => taskOwnershipGate(rootDir, task.id),
     });
     const acceptanceProof = completion.proofEnvelope.evidence;
     if (completion.status === "proof_failed") {
@@ -523,6 +570,29 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
       await appendLedger(rootDir, { type: "checkpoint_write_failed", planId: taskState.planId, taskId: task.id, error: completion.checkpointEnvelope.error?.message || null });
       await writeSnapshot(rootDir, "checkpoint_write_failed", { planId: taskState.planId, taskId: task.id });
       return { status: "retry", task, verifyResult, scopeResult, reviewResult, acceptanceProof };
+    }
+    if (completion.status === "revalidation_required") {
+      task.status = "pending";
+      task.coordination = {
+        ...task.coordination,
+        status: "stale",
+        staleReason: completion.integrationGate?.reason || "task_ownership_changed",
+      };
+      task.last_failure = {
+        at: nowIso(),
+        reason: "task_ownership_changed",
+        summary: completion.integrationGate?.error || "remote task ownership changed before checkpoint",
+        retryHint: "旧设备必须停止写入；由当前远端 owner 重新运行质量门与 checkpoint",
+      };
+      task.updatedAt = nowIso();
+      await writeFailureReport(rootDir, taskState.planId, task);
+      await persistTaskState(rootDir, taskState);
+      await appendLedger(rootDir, {
+        type: "node_checkpoint_revalidation_required",
+        planId: taskState.planId,
+        taskId: task.id,
+      });
+      return { status: "revalidation_required", task, verifyResult, scopeResult, reviewResult, acceptanceProof };
     }
     // Checkpoint durably written — only now may the task become completed.
     // Ledger event first, then wisdom/digest (inside the transaction: a
@@ -683,6 +753,21 @@ function resolveRetryTask(tasks, taskId) {
     throw new Error(`task ${task.id} status ${task.status} cannot run retry`);
   }
   return task;
+}
+
+async function taskOwnershipGate(rootDir, taskId) {
+  const state = await loadTaskState(rootDir);
+  const task = state?.tasks.find((candidate) => candidate.id === taskId);
+  try {
+    const ownership = await assertCurrentTaskOwnership(rootDir, task);
+    return { pass: true, ownership };
+  } catch (error) {
+    return {
+      pass: false,
+      reason: "task_ownership_changed",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 function shouldFailTask(task, verifyResult, scopeResult, reviewResult) {

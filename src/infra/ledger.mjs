@@ -99,6 +99,10 @@ async function walkLedger(rootDir) {
   return { checked, legacy, failures, entries };
 }
 
+export async function readLedgerTailHash(rootDir) {
+  return readLedgerLastHash(resolveHelixPath(rootDir, "ledger.jsonl"));
+}
+
 async function readLedgerLastHash(ledgerPath) {
   try {
     const content = await readFile(ledgerPath, "utf8");

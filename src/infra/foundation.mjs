@@ -140,6 +140,16 @@ export const DEFAULT_HELIX_CONFIG = {
       enforceLowConfidence: true,
     },
   },
+  gitCoordination: {
+    mode: "guarded",
+    remote: "origin",
+    integrationBranch: "auto",
+    taskBranchPrefix: "wildarrange/task",
+    requireWorktreeForParallelWrites: true,
+    requireVerificationBeforeHandoff: false,
+    requireCleanHandoff: true,
+    requireTakeoverReason: true,
+  },
   parallelAgents: {
     enabled: true,
     defaultMaxAgents: 2,
@@ -487,6 +497,7 @@ function normalizeRuntimeConfig(config) {
   const normalized = { ...config };
   if (normalized.runtime === ["helix", "linear"].join("-")) normalized.runtime = DEFAULT_RUNTIME_NAME;
   normalized.agents = normalizeAgentMap(normalized.agents);
+  normalized.gitCoordination = normalizeGitCoordination(normalized.gitCoordination);
   if (Array.isArray(normalized.review?.llm?.agents)) {
     normalized.review = {
       ...normalized.review,
@@ -497,6 +508,39 @@ function normalizeRuntimeConfig(config) {
     };
   }
   return normalized;
+}
+
+function normalizeGitCoordination(value) {
+  const input = isPlainObject(value) ? value : {};
+  const mode = String(input.mode || "guarded").trim().toLowerCase();
+  if (!["off", "manual", "guarded", "strict"].includes(mode)) {
+    throw new Error(`gitCoordination.mode must be off, manual, guarded, or strict; received ${input.mode}`);
+  }
+  const normalized = {
+    ...input,
+    mode,
+    remote: nonEmptyConfigString(input.remote, "origin"),
+    integrationBranch: nonEmptyConfigString(input.integrationBranch, "auto"),
+    taskBranchPrefix: nonEmptyConfigString(input.taskBranchPrefix, "wildarrange/task").replace(/^\/+|\/+$/g, ""),
+    requireWorktreeForParallelWrites: input.requireWorktreeForParallelWrites !== false,
+    requireVerificationBeforeHandoff: input.requireVerificationBeforeHandoff === true,
+    requireCleanHandoff: input.requireCleanHandoff !== false,
+    // Takeover evidence is an immutable floor whenever this config exists;
+    // keep the explicit field visible, but never normalize it to false.
+    requireTakeoverReason: true,
+  };
+  // strict is a profile, not a collection of individually weakenable flags.
+  if (mode === "strict") {
+    normalized.requireWorktreeForParallelWrites = true;
+    normalized.requireVerificationBeforeHandoff = true;
+    normalized.requireCleanHandoff = true;
+    normalized.requireTakeoverReason = true;
+  }
+  return normalized;
+}
+
+function nonEmptyConfigString(value, fallback) {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
 function normalizeAgentMap(agents) {
