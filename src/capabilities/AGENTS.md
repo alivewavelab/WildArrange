@@ -4,7 +4,7 @@
 
 ## 负责
 
-- Worker、verifier、scope guard、review gate、code intelligence、acceptance proof、checkpoint。
+- Worker、verifier、scope guard、review gate、code intelligence、repository governance、acceptance proof、checkpoint。
 - 静态能力注册表与统一调用结果信封。
 
 ## 不负责
@@ -26,6 +26,7 @@
 - 新“强制质量门”除注册能力外，还必须由 `orchestration/delivery-pipeline.mjs` 接入；不要在多个运行时复制顺序。
 - `inconclusive` 不是完成证据。
 - Scope 判断必须覆盖 realpath 和符号链接逃逸。
+- Repository governance 只写报告与 ledger 证据，不直接移动、重命名或删除受检文件。
 
 ## 交付证据
 

@@ -47,6 +47,7 @@ import {
   routeRequest,
   runInjectionHook,
   runParallelAgents,
+  runRepositoryGovernanceAudit,
   runWorkflowNode,
   runNextTask,
   runWorkflow,
@@ -104,7 +105,7 @@ Usage:
   wildarrange run
   wildarrange workflow --from <plan.json>
   wildarrange workflow --sample
-  wildarrange parallel run [--max-agents 2] [--task T001,T002] [--agent Kui] [--adapter codex|cursor] [--isolation run-dir|git-worktree] [--command "..."]
+  wildarrange parallel run [--max-agents 2] [--task T001,T002] [--agent ZhuRong] [--adapter codex|cursor] [--isolation run-dir|git-worktree] [--command "..."]
   wildarrange parallel admit --run <runId> --task T001
   wildarrange parallel list
   wildarrange parallel status [--run <runId>]
@@ -126,6 +127,7 @@ Usage:
   wildarrange continuation check [--session <id>]
   wildarrange summary
   wildarrange rules collect [--target src/app.js]
+  wildarrange governance audit [--changed-only] [--force]
   wildarrange context build [--agent ${DEFAULT_EXECUTOR_AGENT}] [--task T001]
   wildarrange evidence record --task T001 --criterion C001 --status pass --evidence "..."
   wildarrange steer --from <proposal.json>
@@ -466,6 +468,20 @@ async function main() {
       return;
     }
     throw new Error("helix rules requires collect");
+  }
+
+  if (command === "governance") {
+    const subcommand = args._[1];
+    if (subcommand === "audit") {
+      const result = await runRepositoryGovernanceAudit(rootDir, {
+        changedOnly: Boolean(args["changed-only"]),
+        force: Boolean(args.force),
+      });
+      console.log(JSON.stringify(result, null, 2));
+      process.exitCode = result.pass ? 0 : 2;
+      return;
+    }
+    throw new Error("helix governance requires audit");
   }
 
   if (command === "context") {

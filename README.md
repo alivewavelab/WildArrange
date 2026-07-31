@@ -16,6 +16,24 @@ init -> plan -> execute -> verify -> scope -> review -> checkpoint -> resume
 
 核心运行时是宿主中立的。Codex / Cursor / Kimi adapter 负责注入与恢复增强，但仅凭 CLI 也能跑完整流程。
 
+## Agent 职责
+
+WildArrange 只保留 5 个长期 Agent。确定性 Router 是系统节点，不占 Agent 名额；专项能力用 Skill 按需挂载。Agent 提供分析和执行能力，最终完成状态仍由确定性 gate 决定。
+
+| Agent | 负责什么 |
+|---|---|
+| **Jiuwei（九尾狐）** | 主编排者兼线性执行官；组织计划、派发 worker，串联验证、复核、checkpoint、恢复和 ChangeRequest。 |
+| **DiJiang（帝江）** | 把目标整理成可执行计划、任务依赖、范围、验收标准与验证命令。 |
+| **ZhuRong（祝融）** | 在 `writable_paths` 内实现代码或文件改动，提交 DoneClaim 和证据。 |
+| **BaiZe（白泽）** | 唯一独立复核者；验证目标、证据、风险和验收，不接受 worker 自证。 |
+| **LuWu（陆吾）** | 只读维护仓库秩序；检查分层 `AGENTS.md`、README 同步、命名、文件归属及代码注释规则。 |
+
+系统 Router 负责判断请求属于咨询、计划、执行、验证或恢复，并选择主 Agent 与 Skill。`CangJie` 是可选的内部档案/语义路由配置，不是长期 Agent。
+
+专项职责改为 Skill：`review-product-intent` 检查产品目标，`map-user-journey` 补齐用户旅程，`design-acceptance` 设计可验证验收，`review-ux-interaction` 复核交互状态，`review-scope-tradeoff` 控制范围，`research-domain-benchmark` 做最小必要对标；`inspect-codebase` 与 `research-external-docs` 分别承接代码检索和外部研究。
+
+角色 Prompt 位于 `packs/wildarrange-linear/agents/`，Skill 位于 `packs/wildarrange-linear/skills/`；Prompt、Tool 和 Skill 均在开发时静态登记并随版本发布，不在任务运行期间临时注册。
+
 ## 安装、跨设备与升级
 
 ### 环境要求
@@ -196,8 +214,8 @@ Kimi Hook 在正常运行时可拦截越界 Write/Edit 和明显高危 Bash，�
 命令型子 Agent 可以先在隔离目录内并发运行；也可以通过 adapter 命令模板交给 Codex/Cursor 类宿主启动：
 
 ```bash
-node ./bin/helix.mjs parallel run --max-agents 2 --task T001,T002 --agent Kui --command "..."
-node ./bin/helix.mjs parallel run --task T001 --agent Kui --adapter codex
+node ./bin/helix.mjs parallel run --max-agents 2 --task T001,T002 --agent ZhuRong --command "..."
+node ./bin/helix.mjs parallel run --task T001 --agent ZhuRong --adapter codex
 node ./bin/helix.mjs parallel list
 node ./bin/helix.mjs parallel status --run <runId>
 node ./bin/helix.mjs parallel cleanup --run <runId>
@@ -232,9 +250,12 @@ node ./bin/helix.mjs state verify
 node ./bin/helix.mjs state list
 node ./bin/helix.mjs state restore --backup <backupId>
 node ./bin/helix.mjs doctor
+node ./bin/helix.mjs governance audit
 ```
 
 `doctor` 是一键体检：校验 config 结构与挂载、对账已完成任务（checkpoint / acceptance proof / ledger 事件必须齐全）、验证 ledger hash 链，并与最近一次备份交叉比对以发现整链重写。`state restore` 恢复前会自动再做一次备份，恢复错了可以再退回。
+
+`governance audit` 是 LuWu 的只读巡检：检查目录级 `AGENTS.md`、README 中英文命令对等、Prompt Pack 登记、命名和真实代码注释，报告写入 `.helix/reports/governance/`。只看当前改动可加 `--changed-only`，它只触发变更文件及相关祖先规则/成对文档/架构台账；Git 变更不可读取时会安全回退为全量扫描。LuWu 不会自动移动、重命名或删除项目文件，运行时也会拒绝 LuWu、DiJiang、BaiZe 进入 command worker。
 
 每次 worker 执行前，WildArrange 会在 Git 项目里自动记录一份工作区快照（`git stash create`），快照 hash 与恢复命令写入任务证据和 ledger，代码被改坏时可用 `git stash apply <hash>` 还原。
 
@@ -282,7 +303,7 @@ node ./bin/helix.mjs archivist suggestions resolve --id <id> --decision accept -
 Skill matcher 是路由之外的轻量解释层，用来判断当前阶段应加载哪些 skill：
 
 ```bash
-node ./bin/helix.mjs skills match --text "做一个网页版提醒事项 App" --stage design --agent YingLong
+node ./bin/helix.mjs skills match --text "做一个网页版提醒事项 App" --stage design --agent Jiuwei
 ```
 
 注入点的 Skill 挂载默认按需生效（`skillMatcher.dynamicInjection`）：有请求文本时，只有与本次请求匹配的已配置 skill 才注入全文，其余降级为"按需可加载"引用；`alwaysMount`（默认 `wildarrange-injection-runtime`）始终注入，`maxSkills`（默认 4）限制单次挂载数量。没有请求文本的注入点（如 `pre_tool_use`）回落到静态清单。动态匹配只做减法，不会把清单之外的 skill 全文塞进上下文。
@@ -296,8 +317,8 @@ node ./bin/helix.mjs skills match --text "做一个网页版提醒事项 App" --
 提示词变体不替代 Agent 原始提示词，只追加模型偏置。GPT 系列和 Codex/Cursor 主模型默认走 `host` / `gpt` 配置，外部模型可按 provider 选择：
 
 ```bash
-node ./bin/helix.mjs prompts variant --agent YingLong --model gpt-5.5
-node ./bin/helix.mjs prompts show --agent YingLong --variant gemini
+node ./bin/helix.mjs prompts variant --agent Jiuwei --model gpt-5.5
+node ./bin/helix.mjs prompts show --agent Jiuwei --variant gemini
 ```
 
 ## Dashboard

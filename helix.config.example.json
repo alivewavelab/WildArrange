@@ -14,15 +14,11 @@
     "gemini": { "type": "openai-compatible", "apiKeyEnv": "GEMINI_API_KEY", "baseUrlEnv": "GEMINI_BASE_URL" }
   },
   "agents": {
-    "Jiuwei": { "role": "lead_orchestrator", "provider": "host", "model": "host-default", "reasoning": "high" },
-    "YingLong": { "role": "linear_executor", "provider": "host", "model": "host-default", "reasoning": "medium" },
+    "Jiuwei": { "role": "workflow_orchestrator", "provider": "host", "model": "host-default", "reasoning": "high" },
+    "DiJiang": { "role": "planner", "provider": "host", "model": "host-default", "reasoning": "high" },
     "ZhuRong": { "role": "implementation_worker", "provider": "host", "model": "host-default", "reasoning": "medium" },
-    "BaiZe": { "role": "goal_verifier", "provider": "host", "model": "host-default", "reasoning": "high" },
-    "Taotie": { "role": "external_research", "provider": "deepseek", "model": "deepseek-v4-pro" },
-    "Kui": { "role": "fast_explorer", "provider": "deepseek", "model": "deepseek-v4-flash" },
-    "CangJie": { "role": "archivist_router", "provider": "deepseek", "model": "deepseek-v4-flash" },
-    "LuanNiao": { "role": "risk_reviewer", "provider": "host", "model": "host-default", "reasoning": "medium" },
-    "QiongQi": { "role": "skeptical_reviewer", "provider": "host", "model": "host-default", "reasoning": "xhigh" }
+    "BaiZe": { "role": "independent_reviewer", "provider": "host", "model": "host-default", "reasoning": "xhigh" },
+    "LuWu": { "role": "repository_steward", "provider": "host", "model": "host-default", "reasoning": "high" }
   },
   "archivistRouter": {
     "enabled": false,
@@ -144,6 +140,7 @@
       "before_execute": { "markdownMaxChars": 20000, "skillMaxChars": 80000 },
       "before_review": { "markdownMaxChars": 24000, "skillMaxChars": 80000 },
       "before_checkpoint": { "markdownMaxChars": 24000, "skillMaxChars": 60000 },
+      "repository_governance": { "markdownMaxChars": 20000, "skillMaxChars": 40000 },
       "stop": { "markdownMaxChars": 12000, "skillMaxChars": 24000 }
     }
   },
@@ -151,7 +148,7 @@
     "llm": {
       "enabled": false,
       "required": false,
-      "agents": ["BaiZe", "LuanNiao", "QiongQi"],
+      "agents": ["BaiZe"],
       "temperature": 0,
       "timeoutMs": 45000,
       "maxEvidenceChars": 12000
@@ -186,6 +183,30 @@
       ]
     }
   },
+  "repositoryGovernance": {
+    "enabled": false,
+    "governedRoots": ["src", "test", "doc", "bin", "packs/wildarrange-linear"],
+    "requiredAgentBoundaries": [],
+    "documentationPairs": [["README.md", "README.en.md"]],
+    "documentationRequirements": [
+      { "path": "README.md", "requiredPatterns": ["127\\.0\\.0\\.1", "HELIX_DASHBOARD_TOKEN", "governance audit"] },
+      { "path": "README.en.md", "requiredPatterns": ["127\\.0\\.0\\.1", "HELIX_DASHBOARD_TOKEN", "governance audit"] }
+    ],
+    "architectureLedgers": ["AGENTS.md", "doc/project-architecture.md"],
+    "ignoredPaths": [".git", ".helix", "node_modules", "coverage"],
+    "naming": {
+      "directories": "kebab-case",
+      "sourceFiles": "kebab-case.mjs",
+      "exceptions": []
+    },
+    "commentRules": [
+      {
+        "globs": ["src/helix-*.mjs"],
+        "requiredPatterns": ["@deprecated"],
+        "blockedPatterns": ["\\b(TODO|FIXME|HACK|XXX)\\b"]
+      }
+    ]
+  },
   "ruleInjection": {
     "mode": "both",
     "maxRuleChars": 12000,
@@ -207,7 +228,18 @@
       "enabled": true,
       "tools": ["helix_route", "helix_rules_collect"],
       "markdown": [".helix/snapshots/context.md", ".helix/rules/context.md"],
-      "skills": ["wildarrange-injection-runtime", "wa-ideate", "wa-plan", "review-work"],
+      "skills": [
+        "wildarrange-injection-runtime",
+        "wa-ideate",
+        "wa-plan",
+        "review-work",
+        "review-product-intent",
+        "map-user-journey",
+        "design-acceptance",
+        "review-ux-interaction",
+        "review-scope-tradeoff",
+        "research-domain-benchmark"
+      ],
       "rules": { "mode": "static" }
     },
     "pre_tool_use": {
@@ -234,8 +266,8 @@
     "before_execute": {
       "enabled": true,
       "tools": ["helix_context_build", "helix_node", "scope_guard"],
-      "markdown": [".helix/context-agents/YingLong-{taskId}.md", ".helix/rules/context.md"],
-      "skills": ["wildarrange-injection-runtime", "programming", "debugging", "refactor"],
+      "markdown": [".helix/context-agents/Jiuwei-{taskId}.md", ".helix/rules/context.md"],
+      "skills": ["wildarrange-injection-runtime", "run-linear-delivery", "programming", "debugging", "refactor"],
       "rules": { "mode": "dynamic" }
     },
     "before_review": {
@@ -243,11 +275,16 @@
       "tools": ["helix_context_build", "helix_evidence_record", "review_gate"],
       "markdown": [
         ".helix/context-agents/BaiZe-{taskId}.md",
-        ".helix/context-agents/QiongQi-{taskId}.md",
-        ".helix/context-agents/LuanNiao-{taskId}.md",
         ".helix/rules/context.md"
       ],
-      "skills": ["wildarrange-injection-runtime", "review-work", "wa-review", "visual-qa"],
+      "skills": ["wildarrange-injection-runtime", "review-work", "review-plan-risk", "review-plan-readiness", "wa-review", "visual-qa"],
+      "rules": { "mode": "dynamic" }
+    },
+    "repository_governance": {
+      "enabled": true,
+      "tools": ["repository_governance_audit", "helix_rules_collect", "comment_check", "config_verify"],
+      "markdown": [".helix/reports/governance/latest.md", ".helix/rules/context.md"],
+      "skills": ["wildarrange-injection-runtime", "repository-governance", "init-deep", "pre-publish-review", "remove-ai-slops"],
       "rules": { "mode": "dynamic" }
     },
     "before_checkpoint": {

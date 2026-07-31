@@ -32,6 +32,7 @@ export async function runDoctor(rootDir) {
   const backupSection = await checkLedgerAgainstBackup(rootDir, findings);
   const baselineSection = await checkConfigBaseline(rootDir, findings);
   const stateSection = await checkRuntimeState(rootDir, findings);
+  const governanceSection = await checkRepositoryGovernance(rootDir, findings);
 
   const report = {
     kind: "doctor_report",
@@ -47,6 +48,7 @@ export async function runDoctor(rootDir) {
       ledgerBackupCrossCheck: backupSection,
       configBaseline: baselineSection,
       runtimeState: stateSection,
+      repositoryGovernance: governanceSection,
     },
   };
 
@@ -336,6 +338,27 @@ async function checkRuntimeState(rootDir, findings) {
   return { status: result.status, failureCount: (result.failures || []).length };
 }
 
+async function checkRepositoryGovernance(rootDir, findings) {
+  const reportPath = resolveHelixPath(rootDir, "reports", "governance", "latest.json");
+  const report = await readJson(reportPath, null);
+  if (!report) {
+    return { checked: false, status: "not_run", findingCount: 0 };
+  }
+  const findingCount = Array.isArray(report.findings) ? report.findings.length : 0;
+  if (report.status === "fail") {
+    addFinding(findings, "error", "repository_governance", `latest repository governance audit failed with ${findingCount} finding(s); run \`helix governance audit\` after repairs`, { reportPath: path.relative(rootDir, reportPath) });
+  } else if (report.status === "warn") {
+    addFinding(findings, "warn", "repository_governance", `latest repository governance audit has ${findingCount} warning finding(s)`, { reportPath: path.relative(rootDir, reportPath) });
+  }
+  return {
+    checked: true,
+    status: report.status || "unknown",
+    findingCount,
+    at: report.at || null,
+    reportPath: path.relative(rootDir, reportPath),
+  };
+}
+
 function renderDoctorMarkdown(report) {
   const lines = [
     "# WildArrange Doctor Report",
@@ -365,5 +388,10 @@ function renderDoctorMarkdown(report) {
   }
   lines.push(`- Config baseline: ${report.sections.configBaseline.status}`);
   lines.push(`- Runtime state: ${report.sections.runtimeState.status}`);
+  if (report.sections.repositoryGovernance.checked) {
+    lines.push(`- Repository governance: ${report.sections.repositoryGovernance.status} (${report.sections.repositoryGovernance.findingCount} findings)`);
+  } else {
+    lines.push("- Repository governance: not run");
+  }
   return `${lines.join("\n")}\n`;
 }

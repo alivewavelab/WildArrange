@@ -35,4 +35,6 @@ M1 does not yet run a real multi-agent cluster. It first makes one linear path r
 
 ## Current Truth
 
-QiongQi, LuanNiao, and BaiZe are represented as review lanes and prompt roles today. They do not yet call real LLM providers. Until the provider layer is connected, review is deterministic governance, not full adversarial reasoning.
+WildArrange exposes five long-lived Agents: Jiuwei, DiJiang, ZhuRong, BaiZe, and LuWu. Router is a deterministic system node; CangJie is an optional internal archivist/semantic-routing profile. Product, journey, acceptance, UX, scope, research, inspection, risk-review, and skeptical-review duties are Skills mounted onto the appropriate Agent.
+
+BaiZe is the only independent reviewer. Deterministic gates remain authoritative, while optional OpenAI-compatible LLM review adds a second opinion when configured.

@@ -36,13 +36,13 @@
 
 | Intent | 信号 | 默认路由 |
 |---|---|---|
-| `answer` | “解释 / 怎么理解 / 是否 / 能不能 / 你觉得”且未要求改动 | Kui/Taotie/BaiZe 后回答 |
-| `investigate` | “看一下 / 查一下 / 了解 / 找原因”但未要求修复 | Kui 或 Taotie |
-| `plan` | “设计 / 方案 / 计划 / 架构 / 怎么做” | DiJiang + LuanNiao + QiongQi |
-| `execute` | “实现 / 添加 / 修复 / 改 / 跑通 / 优化”且范围明确 | YingLong |
-| `debug` | 报错、失败、broken、bug、异常 | Kui 取证后 YingLong/ZhuRong |
-| `review` | review、审核、复核、验收、检查质量 | BaiZe/QiongQi/LuanNiao |
-| `resume` | 继续、恢复、新会话、从上次开始 | Jiuwei recovery -> YingLong |
+| `answer` | “解释 / 怎么理解 / 是否 / 能不能 / 你觉得”且未要求改动 | BaiZe + 按需调查 Skill |
+| `investigate` | “看一下 / 查一下 / 了解 / 找原因”但未要求修复 | BaiZe + `inspect-codebase` / `research-external-docs` |
+| `plan` | “设计 / 方案 / 计划 / 架构 / 怎么做” | DiJiang + BaiZe review Skills |
+| `execute` | “实现 / 添加 / 修复 / 改 / 跑通 / 优化”且范围明确 | Jiuwei -> ZhuRong |
+| `debug` | 报错、失败、broken、bug、异常 | 调查 Skill 取证后 Jiuwei/ZhuRong |
+| `review` | review、审核、复核、验收、检查质量 | BaiZe |
+| `resume` | 继续、恢复、新会话、从上次开始 | Jiuwei |
 | `change_request` | 中途新增、设计变了、计划外必要修改 | Jiuwei change loop |
 | `release_git` | commit、push、branch、merge、PR、tag | git category |
 
@@ -53,7 +53,7 @@
 | `trivial` | 单文件、位置明确、小于 10 行、低风险 | 可 `quick`，但仍需验证 |
 | `bounded` | 范围明确，1-3 个文件，有验收命令 | `deep` 或领域 category |
 | `multi_step` | 多任务、多文件、需要依赖排序 | 先 `plan` |
-| `open_ended` | 改善、重构、优化、架构不清 | 先 Kui/LuanNiao/DiJiang |
+| `open_ended` | 改善、重构、优化、架构不清 | 先调查/风险 Skill，再交 DiJiang |
 | `blocked` | 缺少会改变结果的产品决策或 secret | ask |
 
 ## Step 3：Domain / Category 分类
@@ -66,7 +66,7 @@
 | 单文件小修、配置小改、文案小改 | `quick` | 只在非常明确时使用 |
 | 文档、写作、提示词、产品文案 | `writing` | 技术文档仍要验证结构 |
 | git、版本、提交、分支、发布 | `git` | 有外部副作用时 ask gate |
-| 调研外部库/API/上游源码 | `research` | Taotie，只读 |
+| 调研外部库/API/上游源码 | `research` | BaiZe + `research-external-docs`，只读 |
 
 当不确定时，默认不是 `quick`。先选更贴近领域的 category。
 
@@ -95,7 +95,7 @@
   "complexity": "trivial|bounded|multi_step|open_ended|blocked",
   "domain": "general|visual|logic|writing|git|research|debug|review|recovery",
   "route": "answer|explore|plan|execute|verify|recover|change_request|ask",
-  "primaryAgent": "Jiuwei|DiJiang|YingLong|ZhuRong|BaiZe|Kui|Taotie|LuanNiao|QiongQi",
+  "primaryAgent": "Jiuwei|DiJiang|ZhuRong|BaiZe|LuWu",
   "supportAgents": [],
   "category": "quick|deep|ultrabrain|visual-engineering|writing|git|research|null",
   "skills": [],
@@ -116,4 +116,3 @@
 - 不让 worker 处理计划外变更。
 - 不因为上一轮在执行，就把当前问答请求继续当执行。
 - 不输出非 JSON。
-

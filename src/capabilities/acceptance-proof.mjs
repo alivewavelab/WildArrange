@@ -76,7 +76,7 @@ export function buildAcceptanceProof(planId, task, evidence = {}) {
     }),
     proofCheck("review_lanes_complete", reviewLanes.length > 0 && reviewLanes.every((lane) => lane.status !== "fail"), {
       evidence: reviewLanes.length > 0 ? reviewLanes.map((lane) => `${lane.name}:${lane.status}`).join(", ") : "missing review lanes",
-      requiredFix: "确保 BaiZe/QiongQi/LuanNiao 等复核 lane 都有可审计结果。",
+      requiredFix: "确保 BaiZe 的独立复核 lane 都有可审计结果。",
     }),
   ];
 

@@ -77,7 +77,7 @@ fullstack-starter/
 
   // 各角色 Agent 用哪个 provider / model。provider=host 表示交给宿主（Cursor/Codex）当前主模型。
   "agents": {
-    "YingLong": { "role": "linear_executor", "provider": "host", "model": "host-default", "reasoning": "medium" },
+    "Jiuwei": { "role": "workflow_orchestrator", "provider": "host", "model": "host-default", "reasoning": "high" },
     "BaiZe":    { "role": "goal_verifier",    "provider": "host", "model": "host-default", "reasoning": "high" }
   },
 
@@ -91,7 +91,7 @@ fullstack-starter/
     "llm": {
       "enabled": false,
       "required": false,
-      "agents": ["BaiZe", "LuanNiao", "QiongQi"]
+      "agents": ["BaiZe"]
     }
   },
 

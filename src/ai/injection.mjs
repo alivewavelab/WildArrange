@@ -133,10 +133,13 @@ function normalizeMaxSkills(value, fallback) {
   return Math.min(parsed, 20);
 }
 
-export function defaultInjectionPointForAgent(agent) {
+export function defaultInjectionPointForAgent(agent, options = {}) {
   const normalized = normalizeAgentKey(agent);
-  if (normalized === "BaiZe" || normalized === "QiongQi" || normalized === "LuanNiao") return "before_review";
-  if (normalized === DEFAULT_LEAD_AGENT) return "user_prompt_submit";
+  if (normalized === "BaiZe") return "before_review";
+  if (normalized === "LuWu") return "repository_governance";
+  if (normalized === DEFAULT_LEAD_AGENT) {
+    return options.taskId ? "before_execute" : "user_prompt_submit";
+  }
   return "before_execute";
 }
 

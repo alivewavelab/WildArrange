@@ -24,6 +24,7 @@
 ## 本区不变量
 
 - Deterministic 路由与证据优先；semantic shadow 只能作为低置信门控或第二意见。
+- Router 是确定性系统节点，不是长期 Agent；路由结果只能选择 5 个长期 Agent 和已登记 Skill。
 - ArchivistRouter 只摄入清洗后的结论包，不摄入代码块、raw diff 或完整命令输出。
 - 无 LLM key 时必须 fallback，不阻断主线、Hook 或线性状态机。
 - Hook 崩溃/超时按宿主约定 fail-open 时，最终完成仍由 delivery pipeline 的质量门决定。

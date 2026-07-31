@@ -16,6 +16,24 @@ The key rule is simple: a worker can claim work is done, but only gates can comp
 
 The core runtime is host-neutral. Codex, Cursor, and Kimi adapters improve injection and recovery, but the workflow can run through CLI commands alone.
 
+## Agent Responsibilities
+
+WildArrange keeps five long-lived Agents. The deterministic Router is a system node rather than an Agent, while specialist capabilities are mounted as Skills. Agents provide analysis and execution, while deterministic gates remain authoritative for completion.
+
+| Agent | Responsibility |
+|---|---|
+| **Jiuwei (Nine-Tailed Fox)** | Lead orchestrator and linear executor; dispatches workers and connects verification, review, checkpoint, recovery, and ChangeRequests. |
+| **DiJiang (Di Jiang)** | Converts goals into executable plans, task dependencies, scope, acceptance criteria, and verification commands. |
+| **ZhuRong (Zhu Rong)** | Implements code or file changes within `writable_paths`, then returns a DoneClaim and evidence. |
+| **BaiZe (Bai Ze)** | The sole independent reviewer; validates goals, evidence, risk, and acceptance without accepting worker self-certification. |
+| **LuWu (Lu Wu)** | Read-only repository steward; checks layered `AGENTS.md`, README parity, naming, file placement, and code-comment policy. |
+
+The system Router classifies requests and selects the primary Agent and Skills. `CangJie` remains an optional internal archivist/semantic-routing profile, not a long-lived Agent.
+
+Specialist duties are Skills: `review-product-intent`, `map-user-journey`, `design-acceptance`, `review-ux-interaction`, `review-scope-tradeoff`, and `research-domain-benchmark`. `inspect-codebase` and `research-external-docs` absorb code exploration and external research.
+
+Role prompts live under `packs/wildarrange-linear/agents/`, and Skills live under `packs/wildarrange-linear/skills/`. Prompts, Tools, and Skills are registered statically during development and ship with a release; they are not registered temporarily while a task is running.
+
 ## Install, Move Between Devices, and Upgrade
 
 ### Requirements
@@ -196,8 +214,8 @@ A healthy Kimi Hook can deny out-of-scope Write/Edit calls and clearly destructi
 Command-based child agents can run concurrently in isolated run directories:
 
 ```bash
-node ./bin/helix.mjs parallel run --max-agents 2 --task T001,T002 --agent Kui --command "..."
-node ./bin/helix.mjs parallel run --task T001 --agent Kui --adapter codex
+node ./bin/helix.mjs parallel run --max-agents 2 --task T001,T002 --agent ZhuRong --command "..."
+node ./bin/helix.mjs parallel run --task T001 --agent ZhuRong --adapter codex
 node ./bin/helix.mjs parallel list
 node ./bin/helix.mjs parallel status --run <runId>
 node ./bin/helix.mjs parallel cleanup --run <runId>
@@ -236,9 +254,12 @@ node ./bin/helix.mjs state verify
 node ./bin/helix.mjs state list
 node ./bin/helix.mjs state restore --backup <backupId>
 node ./bin/helix.mjs doctor
+node ./bin/helix.mjs governance audit
 ```
 
 `doctor` is a one-command health check: it validates config structure and mounts, reconciles completed tasks against checkpoints, acceptance proofs, and ledger events, verifies the ledger hash chain, and cross-checks the ledger against the latest backup to detect wholesale rewrites. `state restore` automatically takes a pre-restore backup first, so a bad restore can itself be undone.
+
+`governance audit` is LuWu's read-only inspection. It checks directory-level `AGENTS.md`, Chinese/English README command parity, Prompt Pack registration, naming, and actual code comments, then writes evidence under `.helix/reports/governance/`. With `--changed-only`, only changed files and the related ancestor rules, paired docs, and architecture ledgers are inspected; if Git changes cannot be read, the audit safely falls back to a full scan. LuWu never moves, renames, or deletes project files automatically, and the runtime rejects LuWu, DiJiang, or BaiZe from command workers.
 
 Before every worker run in a Git project, WildArrange records a workspace snapshot (`git stash create`); the snapshot hash and restore command are stored in task evidence and the ledger, so broken changes can be recovered with `git stash apply <hash>`.
 
@@ -257,12 +278,19 @@ node ./bin/helix.mjs archivist run --text "build a web TODO app" --stage plan --
 
 When `archivistRouter.enabled` is `true`, `SessionStart`, `UserPromptSubmit`, and `PostCompact` hooks trigger ArchivistRouter automatically. Without a DeepSeek key it falls back to deterministic routing and does not block the main flow.
 
+Routing suggestions remain review-only until explicitly resolved:
+
+```bash
+node ./bin/helix.mjs archivist suggestions list
+node ./bin/helix.mjs archivist suggestions resolve --id <id> --decision accept --evidence "..." --rationale "..."
+```
+
 ## Skills and Prompt Variants
 
 Skill matcher gives an explainable hint for which skills should load at the current stage:
 
 ```bash
-node ./bin/helix.mjs skills match --text "build a web reminders app" --stage design --agent YingLong
+node ./bin/helix.mjs skills match --text "build a web reminders app" --stage design --agent Jiuwei
 ```
 
 Skill mounting at injection points is on-demand by default (`skillMatcher.dynamicInjection`). When request text is available, only configured skills that match the request are injected in full; the rest are demoted to on-demand references. `alwaysMount` skills (default `wildarrange-injection-runtime`) are always injected, and `maxSkills` (default 4) caps a single mount. Points without request text (such as `pre_tool_use`) fall back to the static list. Dynamic matching only subtracts; it never injects full text of skills outside the configured list.
@@ -276,8 +304,8 @@ Skill mounting at injection points is on-demand by default (`skillMatcher.dynami
 Prompt variants append model-specific bias without replacing the base agent prompt:
 
 ```bash
-node ./bin/helix.mjs prompts variant --agent YingLong --model gpt-5.5
-node ./bin/helix.mjs prompts show --agent YingLong --variant gemini
+node ./bin/helix.mjs prompts variant --agent Jiuwei --model gpt-5.5
+node ./bin/helix.mjs prompts show --agent Jiuwei --variant gemini
 ```
 
 ## Dashboard

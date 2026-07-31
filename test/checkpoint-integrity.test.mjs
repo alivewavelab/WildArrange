@@ -342,7 +342,7 @@ test("adversarial: parallel admission never reaches completed/released when the 
       JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
-    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
 
     await sabotageLedger(dir);
     try {
@@ -417,7 +417,7 @@ test("adversarial: parallel admission does not release the child result when the
       JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
-    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
 
     await sabotageCheckpoints(dir);
     const blocked = await admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" });
@@ -548,7 +548,7 @@ test("adversarial: parallel admission resumes idempotently after a lifecycle wri
       JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
-    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
 
     // Sabotage the per-task run directory: the admission itself completes
     // (task persisted completed) but updateAgentRunLifecycle cannot write
@@ -606,7 +606,7 @@ test("adversarial: a mid-apply failure rolls the workspace back and releases the
       JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'two files', files:[{path:'src/a.txt', content:'A\\n'},{path:'src/sub/b.txt', content:'B\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
-    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
 
     // Read-only src/sub: the first file write succeeds, the second fails.
     await mkdir(path.join(dir, "src", "sub"), { recursive: true });
@@ -669,7 +669,7 @@ test("adversarial: a run whose admission failed earlier cannot fake-resume a tas
       JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'bad content', files:[{path:'src/out.txt', content:'from child\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
-    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
     const failed = await admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" });
     assert.notEqual(failed.status, "completed", "sanity: run R's admission must fail its gates");
 
@@ -782,7 +782,7 @@ test("adversarial: a run missing from index.json is rediscovered instead of stay
       JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
-    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
 
     // Simulate the lost index (failed write / crash before write).
     await rm(resolveHelixPath(dir, "agent-runs", "index.json"), { force: true });
@@ -826,7 +826,7 @@ test("adversarial: two runs admitting the same task concurrently produce exactly
       JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'one', files:[{path:'src/one.txt', content:'one\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
-    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
     // Forge a second run with an identical result for the same task.
     const runB = `${batch.runId}-rival`;
     await cp(resolveHelixPath(dir, "agent-runs", batch.runId), resolveHelixPath(dir, "agent-runs", runB), { recursive: true });
@@ -880,7 +880,7 @@ test("adversarial: duplicate admission calls from one run cannot downgrade a rel
       JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'same', files:[{path:'src/same.txt', content:'same\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
-    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
 
     const outcomes = await Promise.allSettled(Array.from({ length: 4 }, () =>
       admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" })));
@@ -924,7 +924,7 @@ test("adversarial: a crash while finalizing keeps the workspace and resumes with
       JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact', files:[{path:'src/artifact.txt', content:'good\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
-    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
     const runB = `${batch.runId}-rival`;
     await cp(resolveHelixPath(dir, "agent-runs", batch.runId), resolveHelixPath(dir, "agent-runs", runB), { recursive: true });
 
@@ -1005,7 +1005,7 @@ test("adversarial: two tasks with overlapping paths admit concurrently without d
       "{outputJson}",
       "{taskId}",
     ].join(" ");
-    const batch = await runParallelAgents(dir, { taskIds: ["T001", "T002"], maxAgents: 2, agent: "Kui", command });
+    const batch = await runParallelAgents(dir, { taskIds: ["T001", "T002"], maxAgents: 2, agent: "ZhuRong", command });
 
     const outcomes = await Promise.allSettled([
       admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" }),
@@ -1048,7 +1048,7 @@ test("adversarial: a linear run and a parallel admission writing the same file d
       JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'parallel', files:[{path:'src/shared.txt', content:'parallel\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
-    const batch = await runParallelAgents(dir, { taskIds: ["T002"], agent: "Kui", command });
+    const batch = await runParallelAgents(dir, { taskIds: ["T002"], agent: "ZhuRong", command });
 
     const [linearOutcome, admitOutcome] = await Promise.allSettled([
       runNextTask(dir),
@@ -1088,7 +1088,7 @@ test("adversarial: a failing admission's rollback can never clobber a successor'
       JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'bad', files:[{path:'src/out.txt', content:'bad\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
-    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
     // Forge a second run whose proposed content passes the gates.
     const runGood = `${batch.runId}-good`;
     await cp(resolveHelixPath(dir, "agent-runs", batch.runId), resolveHelixPath(dir, "agent-runs", runGood), { recursive: true });
@@ -1146,7 +1146,7 @@ test("adversarial: an applying-phase crash cannot lose the original file content
       JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'mutates data', files:[{path:'src/data.txt', content:'after\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
-    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
 
     // Simulate a crash in the middle of the apply phase: the claim is
     // persisted at phase "applying", the workspace file is already mutated,
@@ -1158,7 +1158,7 @@ test("adversarial: an applying-phase crash cannot lose the original file content
     task.attempts += 1;
     task.admission_claim = {
       runId: batch.runId,
-      agent: "Kui",
+      agent: "ZhuRong",
       claimedAt: new Date().toISOString(),
       phase: "applying",
       appliedPaths: ["src/data.txt"],
@@ -1211,7 +1211,7 @@ test("adversarial: rollback failure keeps ownership until the same run recovers 
       JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'adds rejected file', files:[{path:'src/locked/leak.txt', content:'after\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
-    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
 
     const blocked = await admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" });
     assert.equal(blocked.status, "recovery_required");
@@ -1263,7 +1263,7 @@ test("adversarial: missing rollback authority fails closed and cannot be hijacke
       JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'changes data', files:[{path:'src/data.txt', content:'after\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
-    const ownerBatch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+    const ownerBatch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
 
     // Simulate a finalizing crash whose rollback-plan file was lost. There
     // is no trustworthy pre-image left, so the only safe action is to keep
@@ -1272,7 +1272,7 @@ test("adversarial: missing rollback authority fails closed and cannot be hijacke
     taskState.tasks[0].status = "verifying";
     taskState.tasks[0].admission_claim = {
       runId: ownerBatch.runId,
-      agent: "Kui",
+      agent: "ZhuRong",
       claimedAt: new Date().toISOString(),
       phase: "finalizing",
       appliedPaths: ["src/data.txt"],
@@ -1363,7 +1363,7 @@ test("adversarial: parallel admission refuses a task completed by other means BE
       JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'from child agent\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
-    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "Kui", command });
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
 
     // Complete the task through the linear flow, NOT through this admission.
     const completed = await runNextTask(dir);

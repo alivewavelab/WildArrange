@@ -88,7 +88,7 @@ critical/high finding 会阻塞完成。
 - 主 lane 必须 PASS。
 - Security high/critical 阻塞。
 - 证据缺失是 INCONCLUSIVE，不是 PASS。
-- 任一 FAIL 返回 YingLong retry 或 Jiuwei 升级。
+- 任一 FAIL 返回 Jiuwei retry 或升级。
 
 ## 输出格式
 

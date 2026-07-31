@@ -498,10 +498,10 @@ function appendHookFacts(lines, facts) {
     lines.push(`- 主 Agent：${facts.route.primaryAgent}`);
     lines.push(`- 类别：${facts.route.category || "(none)"}`);
     lines.push(`- 风险：${facts.route.risk || "(unknown)"}`);
-    if ((facts.route.planAgents || []).length > 0) {
-      lines.push("- 计划 Agent 组合：");
-      for (const agent of facts.route.planAgents) {
-        lines.push(`  - ${agent.name} (${agent.stage}): ${agent.purpose}`);
+    if ((facts.route.planSkills || []).length > 0) {
+      lines.push("- 计划 Skill 组合：");
+      for (const skill of facts.route.planSkills) {
+        lines.push(`  - ${skill.name} (${skill.stage}): ${skill.purpose}`);
       }
     }
     lines.push("");

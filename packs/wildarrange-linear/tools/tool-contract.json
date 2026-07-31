@@ -197,10 +197,30 @@
       ]
     },
     {
+      "name": "repository_governance_audit",
+      "layer": "quality_gate",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs governance audit [--changed-only] [--force]",
+      "purpose": "由 LuWu 只读检查目录级 AGENTS.md、README 中英文命令与关键安全标记、真实 CLI --help、固定五 Agent、Prompt Pack 清单、命名与真实代码注释，并写出结构化治理报告。",
+      "reads": [
+        "helix.config.json",
+        "AGENTS.md",
+        "README.md",
+        "README.en.md",
+        "packs/wildarrange-linear/manifest.json",
+        "configured governed roots"
+      ],
+      "writes": [
+        ".helix/reports/governance/latest.json",
+        ".helix/reports/governance/latest.md",
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
       "name": "helix_context_build",
       "layer": "context_injection",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs context build [--agent YingLong] [--task T001]",
+      "command": "node ./bin/helix.mjs context build [--agent Jiuwei] [--task T001]",
       "purpose": "为单个简单上下文 Agent 生成任务、规则、变更路径、恢复指令和不可破坏 invariants 的输入包；后续接真实模型时作为 Agent 上下文。",
       "reads": [
         ".helix/team/tasks.json",
@@ -609,7 +629,7 @@
       "layer": "gate",
       "status": "implemented",
       "command": "configured by helix.config.json review.llm",
-      "purpose": "通过 OpenAI-compatible HTTP provider 调用 QiongQi/LuanNiao/BaiZe 等审查角色。无 key 时默认跳过或告警；required=true 时才阻断。",
+      "purpose": "通过 OpenAI-compatible HTTP provider 调用 BaiZe 独立审查角色；风险复核和怀疑式验收由其专项 Skill 提供。无 key 时默认跳过或告警；required=true 时才阻断。",
       "reads": [
         "helix.config.json",
         "task.evidence",
@@ -671,7 +691,7 @@
       "layer": "team",
       "status": "implemented",
       "command": "node ./bin/helix.mjs parallel run --max-agents 2 --task <taskIds> --agent <agent> [--adapter codex|cursor] [--isolation run-dir|git-worktree] --command <runner>",
-      "purpose": "在隔离 run directory 或 Git worktree 中并发启动命令型子 Agent；可通过 Codex/Cursor adapter 命令模板渲染 task packet、result、team message 和 ledger 记录；成功结果默认保留为 awaiting_user_acceptance。",
+      "purpose": "在隔离 run directory 或 Git worktree 中并发启动命令型子 Agent；长期身份只允许 Jiuwei/ZhuRong，DiJiang/BaiZe/LuWu 会在创建 run 前被拒绝；可通过 Codex/Cursor adapter 命令模板渲染 task packet、result、team message 和 ledger 记录；成功结果默认保留为 awaiting_user_acceptance。",
       "reads": [
         ".helix/team/tasks.json",
         "helix.config.json"
@@ -843,7 +863,7 @@
       "layer": "code_intelligence",
       "status": "contract-only",
       "command": "rg <pattern>",
-      "purpose": "做快速文本搜索；优先 rg，输出文件和行号，供 Kui/Taotie/YingLong 共享。",
+      "purpose": "做快速文本搜索；优先 rg，输出文件和行号，供 inspect-codebase、research-external-docs 与 Jiuwei 共享。",
       "reads": [
         "workspace files"
       ],
@@ -890,7 +910,7 @@
       "layer": "code_intelligence",
       "status": "implemented",
       "command": "configured by helix.config.json qualityGates.lspDiagnostics.commands",
-      "purpose": "运行项目配置的 typecheck/LSP 诊断命令，作为 LuanNiao 找 BUG 和 BaiZe 验收的证据。",
+      "purpose": "运行项目配置的 typecheck/LSP 诊断命令，作为 BaiZe 风险复核与验收的证据。",
       "reads": [
         "workspace files",
         "helix.config.json"
@@ -1063,7 +1083,7 @@
       "layer": "team_lite",
       "status": "implemented",
       "command": "node ./bin/helix.mjs task get --task <taskId>",
-      "purpose": "读取单个任务完整对象，供 YingLong/Jiuwei 在恢复、失败分析、追加任务前确认当前状态。",
+      "purpose": "读取单个任务完整对象，供 Jiuwei 在恢复、失败分析、追加任务前确认当前状态。",
       "reads": [
         ".helix/team/tasks.json"
       ],

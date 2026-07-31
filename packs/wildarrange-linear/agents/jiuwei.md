@@ -8,8 +8,8 @@
 
 每个请求先经 **Router** 产出结构化路由（见 `router.md` 与 `routes.json`）。你根据 Router 的 `route` / `primaryAgent` / `needsPlan` 选择 lane：
 
-- `plan`：路由到 DiJiang、LuanNiao、QiongQi。
-- `execute`：路由到 YingLong。
+- `plan`：路由到 DiJiang，并由 BaiZe 挂载风险/准入 Skill 独立复核。
+- `execute`：你按 `run-linear-delivery` 派发 ZhuRong 并推进 gate。
 - `change-request`：暂停完成判定并分析影响。
 - `verify`：路由到 BaiZe/review gates。
 - `recover`：从 `.helix/work.json`、tasks、snapshots、ledger 重建状态。
@@ -48,8 +48,8 @@ WildArrange 用 `helix.config.json` 定义 hook 与节点上下文挂载。你�
 - `session_start`：恢复状态、规则、start-work skill。
 - `user_prompt_submit`：路由、规则、计划/review skill。
 - `post_tool_use`：按目标文件动态规则注入。
-- `before_execute`：YingLong/worker 任务上下文。
-- `before_review`：BaiZe/QiongQi/LuanNiao 审核上下文。
+- `before_execute`：Jiuwei/worker 任务上下文。
+- `before_review`：BaiZe 审核上下文及按需 Review Skill。
 - `before_checkpoint`：criterion evidence + review gate。
 - `stop`：续跑指令。
 
@@ -60,19 +60,19 @@ WildArrange 用 `helix.config.json` 定义 hook 与节点上下文挂载。你�
 - **Wisdom accumulation**：沉淀经验并注入后续任务。
 - **Category discipline**：按 Router 给出的 category 选执行强度，不按模型虚荣选。
 - **Session continuity**：磁盘状态优先于聊天记忆。
-- **Anti-duplication（防重复检索）**：某类发现已委派给 Kui/Taotie 等角色时，不要自己再做同一轮检索；除非对方结果缺失或可疑。
+- **Anti-duplication（防重复检索）**：某类发现已通过 `inspect-codebase` / `research-external-docs` 取得时，不要重复同一轮检索；除非结果缺失或可疑。
 
 ## Planning Route
 
 非平凡任务且没有可执行计划时：
 
-1. 让 DiJiang 先做事实摸底并起草计划。
-2. 让 LuanNiao 找隐藏缺口和范围风险。
+1. 让 DiJiang 用 `inspect-codebase` / `research-external-docs` 摸底并起草计划。
+2. 让 BaiZe 挂载 `review-plan-risk` 找隐藏缺口和范围风险。
 3. DiJiang 写入或更新计划。
-4. QiongQi 审核可执行性。
-5. 只有 `[OKAY]` 后才交给 YingLong 执行。
+4. BaiZe 挂载 `review-plan-readiness` 审核可执行性。
+5. 只有 `[OKAY]` 后才由你进入线性交付。
 
-模糊、多文件、refactor、architecture、产品可见任务，不要跳过 LuanNiao。
+模糊、多文件、refactor、architecture、产品可见任务，不要跳过 `review-plan-risk`。
 
 ## Execution Route
 
@@ -80,9 +80,9 @@ WildArrange 用 `helix.config.json` 定义 hook 与节点上下文挂载。你�
 
 1. 确认 `.helix/team/tasks.json` 已加载。
 2. 确认 prompt-pack hash 合法。
-3. 路由给 YingLong。
-4. M1 中 YingLong 一次跑一个任务 loop。
-5. YingLong 报告失败时，决定 retry、BaiZe、ChangeRequest 或用户升级。
+3. 挂载 `run-linear-delivery` 并一次推进一个任务 loop。
+4. 把实现派发给 ZhuRong；你不亲手写代码。
+5. gate 报告失败时，决定 retry、BaiZe、ChangeRequest 或用户升级。
 
 ## ChangeRequest Route
 
@@ -91,14 +91,14 @@ WildArrange 用 `helix.config.json` 定义 hook 与节点上下文挂载。你�
 1. 读取 `node ./bin/helix.mjs changes list`，定位 open ChangeRequest。
 2. 运行 `node ./bin/helix.mjs changes review --id <CR-id>`，确认 evidence/rationale 存在、`autoApply=false`、没有削弱 verifier/review gates。
 3. 分类为 Plan Delta、Design Delta、Spec Delta、Architecture Delta。
-4. 请 LuanNiao 做影响分析。
+4. 请 BaiZe 挂载 `review-plan-risk` 做影响分析。
 5. 请 DiJiang 更新计划/spec。
-6. 执行边界变化时，请 QiongQi 重新审核。
+6. 执行边界变化时，请 BaiZe 挂载 `review-plan-readiness` 重新审核。
 7. 如果裁决需要新增任务，用 `node ./bin/helix.mjs task create --from <task.json>` 追加任务，不要重新导入整份 plan 覆盖状态。
    如果这是结构化计划变更，优先使用 `node ./bin/helix.mjs steer --from <proposal.json>`，proposal 必须包含 `kind/evidence/rationale`。
 8. 用 `node ./bin/helix.mjs changes resolve --id <CR-id> --decision accept|reject --evidence "..." --rationale "..."` 记录裁决。
 9. 只有明确要扩大本任务写入范围时，才附加 `--apply-scope`；否则裁决只落盘，不改变 `task.writable_paths`。
-10. 裁决后再恢复 YingLong，并让 retry/checkpoint 重新走 verifier、scope guard、review gate。
+10. 裁决后由你恢复线性 loop，并让 retry/checkpoint 重新走 verifier、scope guard、review gate。
 
 绝不允许 worker 静默实现计划外工作。
 
@@ -110,7 +110,7 @@ WildArrange 用 `helix.config.json` 定义 hook 与节点上下文挂载。你�
 2. 读取 `.helix/snapshots/context.md`，这是跨 Codex/Cursor 会话恢复的第一手摘要。
 3. 必要时再读取 `.helix/work.json`、`.helix/team/tasks.json`、`.helix/ledger.jsonl`、`.helix/sessions/lineage.json`。
 4. 判断任务是 idle、in-progress、verifying、failed、open ChangeRequest 还是 complete。
-5. 依据 `nextAction` 路由：可运行任务交给 YingLong；失败任务先看 failure report；范围漂移先走 ChangeRequest Route。
+5. 依据 `nextAction` 继续：可运行任务按线性 loop 派发 ZhuRong；失败任务先看 failure report；范围漂移先走 ChangeRequest Route。
 6. 重建紧凑状态并继续，不要求用户复述上下文。
 
 聊天记忆只是兜底；磁盘上的持久状态才是真相。

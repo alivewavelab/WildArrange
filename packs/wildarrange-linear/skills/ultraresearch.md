@@ -26,8 +26,8 @@
 
 ## 来源
 
-- 本地代码：Kui。
-- 外部文档：Taotie。
+- 本地代码：`inspect-codebase`。
+- 外部文档：`research-external-docs`。
 - GitHub/开源：gh / web。
 - 官方文档：优先。
 - 浏览器页面：需要渲染时使用浏览器工具。

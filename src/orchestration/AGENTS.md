@@ -31,6 +31,7 @@
 - Admission 必须按 `claim → pre-image → apply → gates → commit/rollback → release` 执行。
 - 回滚失败必须保留 owner、rollback plan 和 `recovery_required`，不能释放脏工作区。
 - `runNextTask().status` 表示下一步动作；持久状态以 `task.status` 为准。
+- 命令型并行运行必须在创建 run 之前拒绝 DiJiang、BaiZe、LuWu 这三个只读长期身份；Jiuwei、ZhuRong 可执行，非保留名的临时隔离子 Agent 仍可运行。
 
 ## 交付证据
 

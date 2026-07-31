@@ -43,8 +43,8 @@ worker 不得：
 
 ## 验证循环
 
-1. YingLong 读取 changed files。
-2. YingLong 运行重构前/后验证命令。
+1. Jiuwei 读取 changed files。
+2. Jiuwei 运行重构前/后验证命令。
 3. 高风险时 BaiZe/reviewer 检查行为保持。
 4. PASS -> checkpoint。
 5. FAIL -> 用确切失败证据 retry 原任务。

@@ -365,7 +365,7 @@ export async function enrichPlanWithRoutes(rootDir, plan) {
       route: planRouteDecision.route,
       intent: planRouteDecision.intent,
       risk: planRouteDecision.risk,
-      planAgents: planRouteDecision.planAgents?.map((agent) => agent.name) || [],
+      planSkills: planRouteDecision.planSkills?.map((skill) => skill.name) || [],
     },
     routes: plan.tasks.map((task) => ({
       taskId: task.id,
@@ -381,7 +381,7 @@ export function validatePlanImportQuality(plan) {
   const route = plan.route_decision;
   const planText = `${plan.title}\n${plan.objective}\n${plan.tasks.map((task) => `${task.subject}\n${task.description}`).join("\n")}`;
   const productLike = /(产品|用户|体验|页面|网页|工具|上传|视频|pdf|txt|互动|游戏|mvp|流程|多步骤|权限|协作|可视化)/i.test(planText);
-  const highRiskPlanning = route?.route === "plan" && (route.risk === "high" || (route.planAgents || []).length >= 2);
+  const highRiskPlanning = route?.route === "plan" && (route.risk === "high" || (route.planSkills || []).length >= 2);
   if (!productLike || !highRiskPlanning) return plan;
 
   if (plan.tasks.length < 4) {

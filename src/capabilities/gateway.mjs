@@ -18,6 +18,7 @@ import { writeCheckpoint } from "./checkpoint.mjs";
 import { runWorker } from "./worker.mjs";
 import { runReviewGate } from "./review-gate.mjs";
 import { writeAcceptanceProof } from "./acceptance-proof.mjs";
+import { runRepositoryGovernanceAudit } from "./repository-governance.mjs";
 import { evaluateCommandSafety } from "../infra/command-safety.mjs";
 
 async function adaptVerify(ctx) {
@@ -77,6 +78,11 @@ async function adaptCommandSafety(ctx) {
   return { status: raw.allowed ? "pass" : "fail", evidence: raw, sideEffect: "none" };
 }
 
+async function adaptRepositoryGovernance(ctx) {
+  const raw = await runRepositoryGovernanceAudit(ctx.rootDir, ctx.options || {});
+  return { status: raw.status, evidence: raw, sideEffect: "state_written" };
+}
+
 const CAPABILITIES = {
   worker: adaptWorker,
   verify: adaptVerify,
@@ -86,6 +92,7 @@ const CAPABILITIES = {
   checkpoint: adaptCheckpoint,
   command: adaptCommand,
   "command-safety": adaptCommandSafety,
+  "repository-governance": adaptRepositoryGovernance,
 };
 
 export function listRegisteredCapabilities() {

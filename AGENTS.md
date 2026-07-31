@@ -4,7 +4,7 @@
 
 ## 当前目标
 
-实现 WildArrange M1 线性 Agent 循环，并开始补 M2 的最小多 Agent 与档案路由能力。第一阶段主线仍是可恢复、可验证的单线流程：
+实现 WildArrange M1 线性 Agent 循环，并以 5 个长期 Agent（Jiuwei、DiJiang、ZhuRong、BaiZe、LuWu）承载编排、计划、实现、独立复核与仓库治理。Router 是确定性系统节点，专项职责用 Skill 按需挂载。主线仍是可恢复、可验证的单线流程：
 
 ```text
 init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
@@ -19,6 +19,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 - Kimi Hook 为 fail-open：PreToolUse 可在 Hook 正常运行时阻断，但 Hook 崩溃或超时默认放行；不得把它宣传为唯一安全边界，最终完成仍必须经过 verifier / scope / review / successCriteria / acceptance proof / checkpoint。
 - LLM review 通过 OpenAI-compatible provider 配置化接入；默认关闭，无 key 时不阻断线性状态机。
 - 第一版不启动常驻多 Agent 集群；多 Agent 先以命令型子 Agent 的隔离运行目录跑通 spawn / collect / message / admission 闭环。
+- 长期 Agent 白名单固定为 Jiuwei、DiJiang、ZhuRong、BaiZe、LuWu；Router 仅为系统节点，CangJie 仅为内部 profile。DiJiang、BaiZe、LuWu 不得进入任意 command worker，临时命令型子 Agent 不能借用这些只读身份。
 - 子 Agent 不能直接自证完成；结构化文件成果必须通过 writable_paths、verifier、scope、review、checkpoint 后才能进入 completed。
 - checkpoint 前必须写入 acceptance proof；proof 不通过不得把任务置为 completed。
 - 子 Agent 成功运行后默认保留为 `awaiting_user_acceptance`，只有主线 admission/checkpoint 完成后才释放。
@@ -51,6 +52,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 - 规范采用渐进式披露：根 `AGENTS.md` 保存全局目标与不可削弱不变量；`bin/`、`src/`、五区、`test/`、`doc/`、`packs/wildarrange-linear/` 的 `AGENTS.md` 只补充本目录职责和验收要求。进入目录修改前先读最近的 `AGENTS.md`，子目录规范不得覆盖根级安全约束。
 - 新增运行时能力必须同时更新 `doc/project-architecture.md` 和本文件的目录约定。
 - gate 安全不变量不能削弱：不得删除或清空 `verify_commands`，不得跳过 verifier / scope / review / successCriteria 完成 checkpoint。
+- README 命令真实性必须对照真实 CLI `--help`，不得以源码中的注释或普通字符串充当实现证据；真实注释检查必须覆盖 JavaScript 模板表达式。
 - 重构后必须验证 `npm test`；涉及包内容变化时同时验证 `npm pack --dry-run --cache /private/tmp/helix-npm-cache`。
 
 ## 目录约定
@@ -102,8 +104,9 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/capabilities/verify.mjs`                                 | verifier                                       |
 | `src/capabilities/scope-guard.mjs`                             | scope guard、realpath 范围校验                      |
 | `src/capabilities/worker.mjs`                                 | Worker 执行                                      |
-| `src/capabilities/review-gate.mjs`                             | BaiZe / QiongQi / LuanNiao 确定性复核门              |
+| `src/capabilities/review-gate.mjs`                             | BaiZe 独立复核门（风险/怀疑模式由 Skill 挂载）              |
 | `src/capabilities/code-intel.mjs`                              | LSP/typecheck、AST 结构命令、hashline anchor、注释检查门 |
+| `src/capabilities/repository-governance.mjs`                  | LuWu 仓库治理报告能力，经 gateway 调用 |
 | `src/capabilities/acceptance-proof.mjs`                        | checkpoint 前验收证明链                                 |
 | `src/capabilities/checkpoint.mjs`                              | checkpoint 落盘                                  |
 | **infra/**（基础设施，不依赖任何上层区） |  |
@@ -126,6 +129,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/infra/task-predicates.mjs`                                 | no-op / trivial command 等纯任务形状判断              |
 | `src/infra/success-criteria.mjs`                                | 成功判据状态机与 verifier 证据回填                        |
 | `src/infra/rule-scanner.mjs`                                    | 项目规范扫描与规则上下文注入                                |
+| `src/infra/repository-layout.mjs`                                | 目录边界、README 对等、Prompt 清单、命名与真实注释的只读检查 |
 | `src/infra/memory-digest.mjs`                                   | 跨会话 digest、任务完成 digest 与恢复索引                   |
 | `src/infra/hook-result-gate.mjs`                                | PostToolUse 结果门校验                              |
 | `test/dependency-boundary.test.mjs`                             | 五区依赖方向强制测试，每次 `npm test` 都会跑                |
@@ -154,7 +158,8 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | 关闭保留的子 Agent 结果 | `node ./bin/helix.mjs parallel close --run <runId> --task T001 --reason user_accepted` |
 | 清理 Git worktree 隔离目录 | `node ./bin/helix.mjs parallel cleanup --run <runId>` |
 | 匹配 Skill          | `node ./bin/helix.mjs skills match --text "..." --stage plan`    |
-| 查看提示词变体          | `node ./bin/helix.mjs prompts variant --agent YingLong --model gpt-5.5` |
+| 查看提示词变体          | `node ./bin/helix.mjs prompts variant --agent Jiuwei --model gpt-5.5` |
+| 仓库治理检查           | `node ./bin/helix.mjs governance audit` |
 | 生成档案路由包         | `node ./bin/helix.mjs archivist packet --text "..." --stage plan` |
 | 运行档案路由员         | `node ./bin/helix.mjs archivist run --text "..." --stage plan --force` |
 | 查看路由建议           | `node ./bin/helix.mjs archivist suggestions list`                 |

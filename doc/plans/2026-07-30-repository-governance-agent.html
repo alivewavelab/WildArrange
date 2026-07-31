@@ -1,0 +1,716 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WildArrange 仓库秩序 Agent 方案</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #5b6475;
+      --line: #d9deea;
+      --panel: #ffffff;
+      --page: #f4f6fa;
+      --p0: #b42318;
+      --p0-bg: #fff0ee;
+      --p1: #9a6700;
+      --p1-bg: #fff8db;
+      --p2: #175cd3;
+      --p2-bg: #edf4ff;
+      --ok: #067647;
+      --ok-bg: #ecfdf3;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main { max-width: 1120px; margin: 0 auto; padding: 36px 22px 72px; }
+    h1, h2, h3 { line-height: 1.25; margin-top: 0; }
+    h1 { font-size: 30px; margin-bottom: 10px; }
+    h2 { font-size: 21px; margin-bottom: 16px; }
+    h3 { font-size: 16px; margin-bottom: 8px; }
+    p { margin: 8px 0; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    code { background: #eef1f6; padding: 1px 5px; border-radius: 4px; }
+    pre {
+      margin: 12px 0 0;
+      padding: 16px;
+      overflow: auto;
+      background: #111827;
+      color: #e5e7eb;
+      border-radius: 10px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .subtitle { color: var(--muted); margin-bottom: 26px; }
+    .section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 22px;
+      margin-top: 18px;
+    }
+    .decision {
+      border-left: 6px solid var(--ok);
+      background: var(--ok-bg);
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 12px;
+    }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 15px;
+      background: #fff;
+    }
+    .tag {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 9px;
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .p0 { color: var(--p0); background: var(--p0-bg); }
+    .p1 { color: var(--p1); background: var(--p1-bg); }
+    .p2 { color: var(--p2); background: var(--p2-bg); }
+    .ok { color: var(--ok); background: var(--ok-bg); }
+    .flow {
+      display: grid;
+      grid-template-columns: 1fr auto 1.35fr auto 1fr;
+      gap: 10px;
+      align-items: stretch;
+    }
+    .flow-box {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 16px;
+      background: #fafbfe;
+    }
+    .arrow { align-self: center; color: var(--muted); font-size: 22px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 9px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: #f8f9fc; font-size: 13px; }
+    ul, ol { margin: 8px 0 0; padding-left: 22px; }
+    .note { color: var(--muted); font-size: 13px; }
+    .verdict { font-size: 18px; font-weight: 700; color: var(--ok); }
+    @media (max-width: 760px) {
+      .flow { grid-template-columns: 1fr; }
+      .arrow { transform: rotate(90deg); justify-self: center; }
+      table { display: block; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>WildArrange 仓库秩序 Agent 方案</h1>
+  <p class="subtitle">目标：持续发现目录规则、文档同步、命名与文件归属漂移，并把修复送回现有交付流水线。日期：2026-07-30。</p>
+
+  <section class="section decision">
+    <span class="tag ok">推荐决策</span>
+    <p class="verdict">补全并激活已有占位的 LuWu（陆吾），将其明确为仓库秩序维护 Agent；同时新增确定性的 Repository Governance 扫描能力。</p>
+    <p>类比来说，LuWu 是“图书馆管理员”：负责解释规则、判断异常和开整改单；扫描器是“条码门禁”：按照明确目录政策逐项判定。不能让 Agent 凭审美决定 PASS，也不能让扫描器自己移动或删除文件。</p>
+    <p><strong>复用而不替代：</strong><code>init-deep</code> 继续负责初次建立分层规则，<code>inspect-codebase</code> 负责检索，BaiZe 负责独立复核；LuWu 负责持续巡检和闭环。</p>
+  </section>
+
+  <section class="section">
+    <h2>实施状态：LuWu 已补全并激活</h2>
+    <p>LuWu 已进入默认 <code>agents</code> 配置、prompt pack manifest 与注入点，并拥有 <code>agents/luwu.md</code> 角色 Prompt。确定性扫描由 <code>repository-governance</code> capability 提供，命令为 <code>governance audit</code>；LuWu 保持只读，只输出 finding 与修复要求。</p>
+  </section>
+
+  <section class="section">
+    <h2>调整前的相邻能力复用评估</h2>
+    <p>下表保留决策时的职责重叠证据；其中 Kui、QiongQi 已在实施中收敛为 Skill，不再是长期 Agent。</p>
+    <table>
+      <thead><tr><th>类型</th><th>现有组件</th><th>擅长</th><th>不适合作为长期所有者的原因</th></tr></thead>
+      <tbody>
+        <tr><td>Agent</td><td><strong>Kui（夔）</strong></td><td>只读代码库检索，定位文件和引用</td><td>只回答“在哪里”，没有规则判定、报告和修复闭环合同。</td></tr>
+        <tr><td>Agent</td><td><strong>BaiZe（白泽）</strong></td><td>技术验证、架构和调试复核</td><td>适合第二意见；若再承担目录台账、文档同步和命名治理，角色会过宽。</td></tr>
+        <tr><td>Skill</td><td><strong>init-deep</strong></td><td>首次生成或更新分层 <code>AGENTS.md</code></td><td>它是功能型 Skill，不是 Agent，因此不使用山海经角色名，也不承担持续所有权。</td></tr>
+        <tr><td>Agent</td><td><strong>QiongQi（穷奇）</strong></td><td>计划是否可执行的 blocker 审核</td><td>检查对象是计划，不是仓库当前结构。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="section">
+    <h2>调整前的完整角色盘点</h2>
+    <table>
+      <thead><tr><th>分组</th><th>角色</th><th>当前状态</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>系统路由节点</td>
+          <td><strong>Router</strong></td>
+          <td>功能型系统节点名，用于产生结构化路由，不按山海经角色命名。</td>
+        </tr>
+        <tr>
+          <td>山海经 / 神话主角色</td>
+          <td><strong>Jiuwei、DiJiang、YingLong、ZhuRong、BaiZe、Kui、Taotie、LuanNiao、QiongQi</strong></td>
+          <td>已进入 prompt pack，承担编排、计划、执行、验证、检索、研究和复核。</td>
+        </tr>
+        <tr>
+          <td>可选档案路由</td>
+          <td><strong>CangJie</strong></td>
+          <td>已进入运行时配置，用于 ArchivistRouter 和语义路由第二意见。</td>
+        </tr>
+        <tr>
+          <td>本轮已补全</td>
+          <td><strong>LuWu（陆吾）</strong></td>
+          <td>现已具备角色 Prompt、manifest、治理注入点和只读扫描能力。</td>
+        </tr>
+        <tr>
+          <td>专项计划复核视角</td>
+          <td><strong>ProductIntentReviewer、UserJourneyMapper、AcceptanceDesigner、UXInteractionReviewer、ScopeTradeoffReviewer、DomainBenchmarkResearcher</strong></td>
+          <td>已经登记在 <code>manifest.agents</code>，但运行时只把匹配结果写入 <code>route.planAgents</code> 并注入提示，没有独立 spawn 或生命周期；实际形态更接近按需 Review Skill。</td>
+        </tr>
+      </tbody>
+    </table>
+    <p><strong>建议固定命名规则：</strong>系统节点可保留功能名；有独立上下文、权限、执行或审核生命周期的 Agent 使用唯一的山海经 / 中国神话角色名；按需挂载的检查流程使用描述动作的 lowercase kebab-case Skill 名。因此 <code>init-deep</code> 的命名是正确的，六个专项复核角色应先确认是否真的需要升级为独立 Agent。</p>
+  </section>
+
+  <section class="section">
+    <h2>调整前主角色：谁负责推进流程</h2>
+    <table>
+      <thead><tr><th>角色</th><th>流程位置</th><th>核心问题</th><th>是否写项目代码</th><th>交给谁</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Router</strong></td><td>请求入口</td><td>这是什么请求，下一步该由谁负责、挂哪些 Skill？</td><td>否</td><td>Jiuwei 或对应主 Agent</td></tr>
+        <tr><td><strong>Jiuwei（九尾狐）</strong></td><td>总编排 / 恢复 / 变更</td><td>当前应该走 plan、execute、verify、recover 还是 ChangeRequest lane？</td><td>否</td><td>DiJiang、YingLong、BaiZe</td></tr>
+        <tr><td><strong>DiJiang（帝江）</strong></td><td>计划</td><td>怎样把目标变成边界明确、无需猜测、可验证的任务？</td><td>只写计划状态</td><td>QiongQi 审核后交 YingLong</td></tr>
+        <tr><td><strong>YingLong（应龙）</strong></td><td>执行编排</td><td>下一个任务是谁做，证据是否足以进入 gate？</td><td>否</td><td>ZhuRong、verifier、review gate</td></tr>
+        <tr><td><strong>ZhuRong（祝融）</strong></td><td>实现</td><td>如何在授权范围内用最小改动完成任务？</td><td>是，仅限 <code>writable_paths</code></td><td>DoneClaim 交回 YingLong</td></tr>
+        <tr><td><strong>BaiZe（白泽）</strong></td><td>技术咨询 / 实现后复核</td><td>目标、架构、代码和证据是否真的成立？</td><td>否</td><td>PASS / FAIL / INCONCLUSIVE</td></tr>
+        <tr><td><strong>LuanNiao（鸾鸟）</strong></td><td>计划前风险审查</td><td>隐藏意图、歧义、范围、验收和 AI-slop 风险漏了什么？</td><td>否</td><td>给 DiJiang 可执行修订指令</td></tr>
+        <tr><td><strong>QiongQi（穷奇）</strong></td><td>计划准入</td><td>worker 能否按计划直接开工，有没有真实 blocker？</td><td>否</td><td>OKAY 或最多三个 blocker</td></tr>
+        <tr><td><strong>Kui（夔）</strong></td><td>本地调查</td><td>相关代码、规则、符号、调用链和测试在哪里？</td><td>否</td><td>事实与路径交给 planner/reviewer</td></tr>
+        <tr><td><strong>Taotie（饕餮）</strong></td><td>外部调查</td><td>官方文档、上游实现和外部事实是什么？</td><td>否</td><td>来源与结论交给 planner/reviewer</td></tr>
+        <tr><td><strong>CangJie（仓颉）</strong></td><td>可选档案路由</td><td>历史结论是否会改变当前路由？</td><td>否</td><td>只提供第二意见，不覆盖确定性证据</td></tr>
+        <tr><td><strong>LuWu（陆吾，当时待补全）</strong></td><td>仓库治理</td><td>目录、文档、命名、文件归属和注释是否持续符合规则？</td><td>否</td><td>finding / 修复任务 / ChangeRequest</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="section">
+    <h2>调整前的六个专项角色：各自检查什么</h2>
+    <table>
+      <thead><tr><th>当前名称</th><th>只回答的问题</th><th>典型触发</th><th>产物</th><th>与主 Agent 的关系</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>ProductIntentReviewer</strong></td>
+          <td>用户为什么需要它，做到什么程度才有价值，什么明确不做？</td>
+          <td>目标、用户价值、MVP、成功标准、非目标</td>
+          <td>目标错读 finding、成功标准、scope 修改</td>
+          <td>把 LuanNiao 的“隐藏意图”拆成一张产品检查表，结果供 DiJiang 写计划。</td>
+        </tr>
+        <tr>
+          <td><strong>UserJourneyMapper</strong></td>
+          <td>用户从入口到完成、中断、失败和恢复，会经过哪些步骤与状态？</td>
+          <td>多步骤、协作、权限、通知、状态流转</td>
+          <td>happy / empty / error / recovery journey 缺口</td>
+          <td>补充 DiJiang 的任务拆分，也覆盖 LuanNiao 的缺失场景检查。</td>
+        </tr>
+        <tr>
+          <td><strong>AcceptanceDesigner</strong></td>
+          <td>怎样把需求变成 verifier 能消费的二元验收证据？</td>
+          <td>验收、测试、边界、反例、回归、证据</td>
+          <td>Given/When/Then、successCriteria、验证命令建议</td>
+          <td>细化 DiJiang 的验收设计；BaiZe 验证结果，QiongQi 只检查是否可执行。</td>
+        </tr>
+        <tr>
+          <td><strong>UXInteractionReviewer</strong></td>
+          <td>界面入口、操作、反馈以及 loading/empty/error/success 状态是否完整？</td>
+          <td>UI、UX、页面、按钮、表单、视觉</td>
+          <td>交互 finding、状态补充、截图 QA 要求</td>
+          <td>是视觉领域的专项检查表；结果进入 DiJiang 计划，最终由 BaiZe/visual QA 复核。</td>
+        </tr>
+        <tr>
+          <td><strong>ScopeTradeoffReviewer</strong></td>
+          <td>哪些必须本轮做、哪些延期，是否发生未审批的 scope creep？</td>
+          <td>MVP、一期、裁剪、计划外变更、ChangeRequest</td>
+          <td>SHALL/MUST/SHOULD、IN/OUT、延期或裁决建议</td>
+          <td>细化 LuanNiao 的范围风险；Jiuwei 执行 ChangeRequest，QiongQi 检查范围 blocker。</td>
+        </tr>
+        <tr>
+          <td><strong>DomainBenchmarkResearcher</strong></td>
+          <td>陌生领域有哪些已验证模式和坑会直接改变本轮计划？</td>
+          <td>竞品、行业、类似产品、最佳实践</td>
+          <td>带来源的对标 finding 和具体计划修改</td>
+          <td>与 Taotie 的外部研究高度重合，只多了“必须落回计划”的退出条件。</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="section decision">
+    <span class="tag ok">建议对齐</span>
+    <p class="verdict">六个专项角色改为按需 Review Skill，不再作为独立 Agent；主 Agent 的进一步合并见下一节。</p>
+    <p>理由：它们没有独立运行生命周期，调整前 runtime 也只把它们作为 <code>planAgents</code> 提示名单。现已改成 <code>planSkills</code>：Router 仍按同样信号匹配，但把 Skill 挂给对应主 Agent，既保留专业检查，又消除角色膨胀和命名不一致。</p>
+    <table>
+      <thead><tr><th>Review Skill</th><th>默认挂载给</th></tr></thead>
+      <tbody>
+        <tr><td><code>review-product-intent</code></td><td>DiJiang + BaiZe</td></tr>
+        <tr><td><code>map-user-journey</code></td><td>DiJiang</td></tr>
+        <tr><td><code>design-acceptance</code></td><td>DiJiang + BaiZe</td></tr>
+        <tr><td><code>review-ux-interaction</code></td><td>DiJiang + BaiZe</td></tr>
+        <tr><td><code>review-scope-tradeoff</code></td><td>DiJiang + BaiZe</td></tr>
+        <tr><td><code>research-domain-benchmark</code></td><td>DiJiang；BaiZe 只读复核证据</td></tr>
+      </tbody>
+    </table>
+    <p>只有未来需要独立模型、独立工具权限、并行 spawn、独立报告生命周期时，才把某个 Skill 晋升为山海经命名 Agent。</p>
+  </section>
+
+  <section class="section decision">
+    <span class="tag ok">主 Agent 精简建议</span>
+    <p class="verdict">从当前角色集合收敛为 5 个长期 Agent：Jiuwei、DiJiang、ZhuRong、BaiZe、LuWu。</p>
+    <p>Router 保持确定性系统节点；其他角色按职责分别合并为编排、复核、检索或研究 Skill。这样减少转手次数，同时保留计划/执行分离和 worker/reviewer 分离。</p>
+    <div class="flow">
+      <div class="flow-box">
+        <h3>输入与路由</h3>
+        <p><strong>Router（代码节点）</strong></p>
+        <p>只做确定性分类，不计入 Agent 数量。</p>
+      </div>
+      <div class="arrow">→</div>
+      <div class="flow-box">
+        <h3>5 个长期岗位</h3>
+        <p><strong>Jiuwei</strong> 编排 · <strong>DiJiang</strong> 计划 · <strong>ZhuRong</strong> 实现 · <strong>BaiZe</strong> 独立复核 · <strong>LuWu</strong> 仓库治理</p>
+      </div>
+      <div class="arrow">→</div>
+      <div class="flow-box">
+        <h3>确定性放行</h3>
+        <p>verifier → scope → review → acceptance proof → checkpoint</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>合并后的 5 个 Agent</h2>
+    <table>
+      <thead><tr><th>保留 Agent</th><th>合并后职责</th><th>静态挂载的主要 Skill</th><th>为什么必须独立</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Jiuwei（九尾狐）</strong></td>
+          <td>消费 Router 结果；负责总编排、任务派发、恢复、ChangeRequest、失败重试和交付推进。吸收 YingLong 的线性执行编排职责，但仍不写代码。</td>
+          <td><code>orchestrate-workflow</code>、<code>run-linear-delivery</code>、<code>recover-session</code>、<code>manage-change-request</code></td>
+          <td>是唯一控制面，负责“现在应该走哪一步”。</td>
+        </tr>
+        <tr>
+          <td><strong>DiJiang（帝江）</strong></td>
+          <td>负责需求澄清、事实摸底后的计划、任务拆分、范围、依赖和验收设计；按需挂产品意图、用户旅程、UX 和验收 Skill。</td>
+          <td><code>review-product-intent</code>、<code>map-user-journey</code>、<code>design-acceptance</code>、<code>review-ux-interaction</code></td>
+          <td>计划与执行必须分离，避免执行者边做边改目标。</td>
+        </tr>
+        <tr>
+          <td><strong>ZhuRong（祝融）</strong></td>
+          <td>唯一实现 worker；在 <code>writable_paths</code> 内修改文件、运行任务级验证并返回 DoneClaim。</td>
+          <td><code>programming</code>、<code>debugging</code>、<code>refactor</code>、领域实现 Skill</td>
+          <td>写入权限必须与计划者、最终复核者分离。</td>
+        </tr>
+        <tr>
+          <td><strong>BaiZe（白泽）</strong></td>
+          <td>唯一独立审查 Agent；覆盖计划前风险、计划准入、架构咨询、实现后 review 和证据判断。吸收 LuanNiao、QiongQi 的角色职责，通过不同 Skill 切换检查模式。</td>
+          <td><code>review-plan-risk</code>、<code>review-plan-readiness</code>、<code>review-work</code>、<code>design-acceptance</code>、<code>review-scope-tradeoff</code></td>
+          <td>必须独立于 DiJiang 和 ZhuRong，防止计划或实现自证。</td>
+        </tr>
+        <tr>
+          <td><strong>LuWu（陆吾）</strong></td>
+          <td>持续维护目录、AGENTS、README、命名、文件归属和注释规范；只产生 finding、修复任务与 ChangeRequest。</td>
+          <td><code>repository-governance</code>、<code>init-deep</code>、<code>pre-publish-review</code>、<code>remove-ai-slops</code></td>
+          <td>仓库秩序是持续、跨任务且有独立审计报告的职责，不能让实现者自查自改。</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="section">
+    <h2>旧角色如何归并</h2>
+    <table>
+      <thead><tr><th>当前角色</th><th>目标形态</th><th>归属</th><th>理由</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Router</strong></td><td>系统节点</td><td>确定性 route table + 可选 semantic shadow</td><td>它只产出分类 JSON，不需要独立人格或生命周期。</td></tr>
+        <tr><td><strong>YingLong</strong></td><td>合并</td><td>Jiuwei</td><td>两者都是只读编排者；线性 task loop 已由运行时代码控制，额外转手没有形成新的信任边界。</td></tr>
+        <tr><td><strong>LuanNiao</strong></td><td>Review Skill</td><td>BaiZe 的 <code>review-plan-risk</code></td><td>保留隐藏需求、歧义、范围和验收风险检查，但不需要独立 Agent。</td></tr>
+        <tr><td><strong>QiongQi</strong></td><td>Review Skill</td><td>BaiZe 的 <code>review-plan-readiness</code></td><td>保留 blocker-only 准入模式；复核者仍独立于 DiJiang。</td></tr>
+        <tr><td><strong>Kui</strong></td><td>调查 Skill + Tool</td><td><code>inspect-codebase</code>，挂给 Jiuwei / DiJiang / BaiZe / LuWu</td><td>本地搜索是一种工具方法，没有独立决策权或状态生命周期。</td></tr>
+        <tr><td><strong>Taotie</strong></td><td>研究 Skill + Tool</td><td><code>research-external-docs</code>，主要挂给 DiJiang / BaiZe</td><td>外部研究服务于计划或复核；需要并行时可用通用子 Agent 携带该 Skill，不必保留永久角色。</td></tr>
+        <tr><td><strong>CangJie</strong></td><td>内部 AI profile</td><td>ArchivistRouter / semantic shadow</td><td>它是可选路由模型配置，不参与主工作流交接，不计入主 Agent。</td></tr>
+        <tr><td><strong>六个专项计划角色</strong></td><td>按需 Review Skill</td><td>DiJiang / BaiZe</td><td>已经对齐：保留检查价值，取消伪独立 Agent 身份。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="section">
+    <h2>精简后仍保留的治理隔离</h2>
+    <div class="cards">
+      <article class="card">
+        <span class="tag p0">计划 ≠ 执行</span>
+        <p>DiJiang 产出计划；Jiuwei 只编排；ZhuRong 才能写代码。</p>
+      </article>
+      <article class="card">
+        <span class="tag p0">Worker ≠ Reviewer</span>
+        <p>ZhuRong 不能自证；BaiZe 独立审核，最终仍由确定性 gate 放行。</p>
+      </article>
+      <article class="card">
+        <span class="tag p1">治理 ≠ 修复</span>
+        <p>LuWu 只报 finding；真正修改必须回到 Jiuwei → ZhuRong → BaiZe 流水线。</p>
+      </article>
+      <article class="card">
+        <span class="tag p1">方法 ≠ 岗位</span>
+        <p>搜索、外部研究、产品意图、UX、范围和验收都按需挂载为 Skill，不常驻占一个 Agent。</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>核心流程</h2>
+    <div class="flow">
+      <div class="flow-box">
+        <h3>输入</h3>
+        <ul>
+          <li>Git changed paths 或完整目录树</li>
+          <li><code>helix.config.json</code> 中的结构政策</li>
+          <li>根与子目录 <code>AGENTS.md</code></li>
+          <li>README、架构文档、manifest、routes</li>
+        </ul>
+      </div>
+      <div class="arrow">→</div>
+      <div class="flow-box">
+        <h3>处理组件</h3>
+        <ol>
+          <li>确定性扫描器产生 finding</li>
+          <li>LuWu 解释影响、合并重复项、给最短修复方案</li>
+          <li>需要修改时创建任务，由 ZhuRong 执行</li>
+          <li>BaiZe + 现有 verifier 独立复核</li>
+        </ol>
+      </div>
+      <div class="arrow">→</div>
+      <div class="flow-box">
+        <h3>输出</h3>
+        <ul>
+          <li>机器可读 JSON</li>
+          <li>人工可读摘要</li>
+          <li>PASS / WARN / FAIL</li>
+          <li>证据路径与建议归属</li>
+          <li>修复后复扫结果与 ledger 记录</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>检查清单与优先级</h2>
+    <div class="cards">
+      <article class="card">
+        <span class="tag p0">P0 · 阻断</span>
+        <h3>文件归属与五区边界</h3>
+        <p>文件是否落在声明的职责区；旧 shim 是否只做 re-export；新增能力是否经 gateway；非法反向依赖沿用现有边界测试。</p>
+      </article>
+      <article class="card">
+        <span class="tag p0">P0 · 阻断</span>
+        <h3>清单同步</h3>
+        <p>Agent / Skill 的文件、<code>manifest.json</code>、<code>routes.json</code>、默认配置、tool contract 与测试是否同步。</p>
+      </article>
+      <article class="card">
+        <span class="tag p0">P0 · 阻断</span>
+        <h3>规则覆盖</h3>
+        <p>被政策列为独立职责边界的目录必须有 <code>AGENTS.md</code>；路径、命令和引用必须存在，子规则不得削弱根规则。</p>
+      </article>
+      <article class="card">
+        <span class="tag p1">P1 · 发布前阻断</span>
+        <h3>README 与实际命令</h3>
+        <p>中英文 README 核心章节和命令指纹一致；文档中的 CLI 命令可由 <code>--help</code> 或命令注册表证明存在。</p>
+      </article>
+      <article class="card">
+        <span class="tag p1">P1 · 发布前阻断</span>
+        <h3>架构目录台账</h3>
+        <p><code>doc/project-architecture.md</code> 中受治理的运行时模块与真实文件互相对账，发现过期路径和未登记的新模块。</p>
+      </article>
+      <article class="card">
+        <span class="tag p2">P2 · 警告</span>
+        <h3>命名与重复结构</h3>
+        <p>目录/文件命名遵守声明规则和例外表；发现同义目录、大小写漂移、空目录、重复 README 或职责含混的“杂物间”。</p>
+      </article>
+    </div>
+    <p class="note">“所有目录都有 AGENTS.md”不应按字面执行。只在独立职责、独立技术栈、高风险或高变更的边界设置；普通叶子目录继承最近父级规则，避免复制噪声。</p>
+  </section>
+
+  <section class="section">
+    <h2>政策必须声明，不能靠 Agent 猜</h2>
+    <p>建议在现有 <code>helix.config.json</code> 增加 <code>repositoryGovernance</code>，不再引入新的顶层配置文件。</p>
+    <pre>{
+  "repositoryGovernance": {
+    "enabled": true,
+    "governedRoots": ["src", "test", "doc", "bin", "packs/wildarrange-linear"],
+    "requiredAgentBoundaries": [
+      "src",
+      "src/interface",
+      "src/orchestration",
+      "src/ai",
+      "src/capabilities",
+      "src/infra",
+      "test",
+      "doc",
+      "bin",
+      "packs/wildarrange-linear"
+    ],
+    "naming": {
+      "directories": "kebab-case",
+      "sourceFiles": "kebab-case.mjs",
+      "exceptions": ["README.md", "README.en.md", "AGENTS.md"]
+    },
+    "documentationPairs": [
+      ["README.md", "README.en.md"]
+    ],
+    "ignoredPaths": [".git", ".helix", "node_modules", "coverage"]
+  }
+}</pre>
+    <p class="note">配置只表达项目事实。通用底线留在扫描器，项目差异放配置；未知规则先 WARN，经过一次真实仓库校准后再升级为 FAIL。</p>
+  </section>
+
+  <section class="section">
+    <h2>LuWu 的职责合同</h2>
+    <div class="cards">
+      <article class="card">
+        <span class="tag ok">允许</span>
+        <ul>
+          <li>读取结构报告、规则文件、目录树与 Git 变更</li>
+          <li>解释 finding、排序影响、指出证据</li>
+          <li>生成最小修复任务或 ChangeRequest</li>
+          <li>修复后触发复扫并汇总结果</li>
+        </ul>
+      </article>
+      <article class="card">
+        <span class="tag p0">禁止</span>
+        <ul>
+          <li>凭语言模型判断直接给合规 PASS</li>
+          <li>自行移动、改名、删除文件</li>
+          <li>为了通过扫描而放宽现有安全或依赖规则</li>
+          <li>把每个叶子目录都机械生成一份 AGENTS</li>
+        </ul>
+      </article>
+      <article class="card">
+        <span class="tag p1">输出合同</span>
+        <ul>
+          <li><code>status</code>: pass / warn / fail</li>
+          <li><code>findings[]</code>: rule、severity、path、evidence</li>
+          <li><code>proposedChanges[]</code>: 目标、原因、验证命令</li>
+          <li><code>unresolved[]</code>: 需要人决定的真实歧义</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>LuWu 的静态权限与挂载</h2>
+    <div class="cards">
+      <article class="card">
+        <span class="tag ok">可读取</span>
+        <ul>
+          <li>受治理目录树、Git changed paths 与 diff</li>
+          <li>根和目标目录祖先链上的 <code>AGENTS.md</code></li>
+          <li>README、架构文档、manifest、routes、tool contract 与项目配置</li>
+          <li>变更文件中的真实代码注释与现有治理报告</li>
+        </ul>
+      </article>
+      <article class="card">
+        <span class="tag p1">可调用 Tool</span>
+        <ul>
+          <li><code>repository_governance_audit</code>（新增，确定性只读审计）</li>
+          <li><code>helix_rules_collect</code></li>
+          <li><code>comment_check</code>、<code>config_verify</code></li>
+          <li>宿主提供的只读 Git diff、文本搜索、glob 与 AST 搜索（不作为 WildArrange Tool 合同伪注册）</li>
+        </ul>
+      </article>
+      <article class="card">
+        <span class="tag p2">挂载 Skill</span>
+        <ul>
+          <li><code>repository-governance</code>（新增，主工作流）</li>
+          <li><code>init-deep</code>（分层 AGENTS 建议）</li>
+          <li><code>pre-publish-review</code>（发布清单同步）</li>
+          <li><code>remove-ai-slops</code>（命名和文档噪声辅助检查）</li>
+        </ul>
+      </article>
+      <article class="card">
+        <span class="tag p0">不可执行</span>
+        <ul>
+          <li>直接编辑、移动、重命名或删除项目文件</li>
+          <li>直接修改 AGENTS、README、治理配置或门禁规则</li>
+          <li>为了 PASS 放宽依赖、注释、目录或验证政策</li>
+          <li>自行 checkpoint、自证完成或发布</li>
+        </ul>
+      </article>
+    </div>
+    <p>LuWu 可以把 finding 转成修复任务或 ChangeRequest，但实际修改仍交给 ZhuRong，随后经过 verifier、BaiZe/review 和 checkpoint。只读不能只靠 Prompt：parallel runner 和其他任意命令入口必须在执行前拒绝 LuWu、DiJiang、BaiZe 进入 command worker。</p>
+  </section>
+
+  <section class="section">
+    <h2>机器级角色与增量审计边界</h2>
+    <div class="cards">
+      <article class="card">
+        <span class="tag p0">固定白名单</span>
+        <p>长期 Agent 集合必须严格等于 <code>Jiuwei / DiJiang / ZhuRong / BaiZe / LuWu</code>。Prompt manifest 额外允许唯一系统节点 <code>Router</code>；CangJie 只能出现在 ArchivistRouter/semantic shadow 配置，不能进入正式 Agent 清单或确定性路由结果。</p>
+      </article>
+      <article class="card">
+        <span class="tag p1">执行权限</span>
+        <p>只有 Jiuwei、ZhuRong 可作为长期 Agent 进入 command worker。DiJiang、BaiZe、LuWu 属于只读长期角色；命令型临时子 Agent 仍可使用隔离运行目录，但不能借用这三个只读身份。</p>
+      </article>
+      <article class="card">
+        <span class="tag p2">changed-only</span>
+        <p><code>--changed-only</code> 只检查变更文件以及被变更触发的相关不变量：祖先 AGENTS、成对 README、Prompt Pack、命名、架构台账和注释。无相关变更时不得悄悄退化为全仓扫描。</p>
+      </article>
+      <article class="card">
+        <span class="tag p1">CLI 事实</span>
+        <p>README 命令必须与真实 <code>--help</code> 输出对账，不能通过 CLI 源码里的注释、普通字符串或错误消息伪造“已实现”。关键安全标记也必须分别存在于中英文 README。</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>代码注释也纳入目录治理</h2>
+    <p>复用现有 <code>comment_check</code>，但把检查从“全文关键词扫描”升级为“真实注释 + 路径规则”检查。通用交付中的注释质量门由 BaiZe 复核；LuWu 负责注释与仓库、目录规范之间的一致性，二者共用同一份确定性结果，不重复实现。</p>
+    <table>
+      <thead><tr><th>检查项</th><th>判定方式</th><th>默认级别</th></tr></thead>
+      <tbody>
+        <tr><td>禁止占位与署名</td><td>只在语言识别出的注释 token 中检查 <code>TODO/FIXME/HACK/XXX</code>、AI 署名与 lorem ipsum。</td><td>P1，可配置阻断</td></tr>
+        <tr><td>路径级禁止规则</td><td>根据变更文件匹配最近的 <code>AGENTS.md</code> 和机器可读 comment policy，执行对应 blocked patterns。</td><td>P1</td></tr>
+        <tr><td>路径级必需规则</td><td>例如旧 shim 必须包含 <code>@deprecated</code>；仅对配置明确声明的 glob 执行。</td><td>P1</td></tr>
+        <tr><td>过期路径与命令</td><td>注释中明确引用的项目路径或命令若已不存在，提供文件、行号和失败证据。</td><td>P1 / P2</td></tr>
+        <tr><td>语义质量</td><td>LuWu 可指出“注释重复代码”“说明与实现疑似冲突”，但模型判断只能作为建议。</td><td>P2，不阻断</td></tr>
+      </tbody>
+    </table>
+    <pre>{
+  "repositoryGovernance": {
+    "commentRules": [
+      {
+        "globs": ["src/helix-*.mjs"],
+        "requiredPatterns": ["@deprecated"],
+        "blockedPatterns": ["TODO", "FIXME", "HACK", "XXX"]
+      }
+    ]
+  }
+}</pre>
+    <p class="note">自然语言 AGENTS 用于给 Agent 解释上下文；会阻断发布的规则必须在机器可读 policy 中同步声明。否则只能提示，不能让 LLM 的主观解释直接决定 FAIL。</p>
+  </section>
+
+  <section class="section">
+    <h2>沿用当前静态装配机制</h2>
+    <p>LuWu 不需要动态注册或运行时临时扩权。开发时一次性配置好角色 Prompt、模型、注入点、Tool 和 Skill，随版本发布；后续调整继续走代码 Review、测试和发布流程。</p>
+    <pre>{
+  "agents": {
+    "LuWu": {
+      "role": "repository_steward",
+      "provider": "host",
+      "model": "host-default",
+      "reasoning": "high"
+    }
+  },
+  "injectionPoints": {
+    "repository_governance": {
+      "tools": ["repository_governance_audit", "helix_rules_collect"],
+      "skills": ["repository-governance", "init-deep"],
+      "markdown": [".helix/reports/governance/latest.md", ".helix/rules/context.md"]
+    }
+  }
+}</pre>
+    <p>角色 Prompt 固定写入 <code>agents/luwu.md</code> 并登记到 prompt pack manifest；工具登记到 gateway / tool contract，再挂入 <code>repository_governance</code> 注入点；Skill 写入 prompt pack 并挂到同一注入点。初始化或刷新 prompt pack 后生效，运行期间不修改这些注册关系。</p>
+  </section>
+
+  <section class="section">
+    <h2>触发方式：快扫、全扫、发布扫</h2>
+    <table>
+      <thead><tr><th>时机</th><th>范围</th><th>行为</th></tr></thead>
+      <tbody>
+        <tr><td>日常实现完成后</td><td>changed-only</td><td>只扫描变更文件及祖先目录，目标是几秒内给出反馈。</td></tr>
+        <tr><td>手动治理</td><td>full</td><td><code>wildarrange governance audit</code>，生成完整结构报告。</td></tr>
+        <tr><td>发布前 / CI</td><td>full + docs + package</td><td>复用 <code>pre-publish-review</code>，P0/P1 finding 阻断发布。</td></tr>
+        <tr><td>一键体检</td><td>摘要</td><td><code>doctor</code> 展示最近一次治理结果，不执行修改。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="section">
+    <h2>一个必须顺手修掉的现有缺口</h2>
+    <p>当前 <code>src/infra/rule-scanner.mjs</code> 只读取根级单文件和 <code>.claude/rules</code>、<code>.cursor/rules</code>、<code>.github/instructions</code> 等特殊目录；不会沿目标文件的祖先链发现普通子目录中的 <code>AGENTS.md</code>。</p>
+    <p><strong>建议：</strong>对每个 target path，按“根 → 最近父目录”加载适用的 <code>AGENTS.md</code>，去重后再应用预算。否则现有的渐进式目录规范主要依赖宿主原生行为，WildArrange 自己的 review gate 并不能完整看到它们。</p>
+  </section>
+
+  <section class="section">
+    <h2>分阶段落地</h2>
+    <div class="cards">
+      <article class="card">
+        <span class="tag p0">Phase 1 · 可判定</span>
+        <h3>政策、扫描器、CLI、测试</h3>
+        <p>先实现确定性检查和 JSON/Markdown 报告；补齐嵌套 AGENTS 发现；不接自动修复，不立刻阻断普通开发。</p>
+      </article>
+      <article class="card">
+        <span class="tag p1">Phase 2 · 可协作</span>
+        <h3>LuWu + repository-governance Skill</h3>
+        <p>按现有静态机制补全 Agent Prompt、manifest、routes、默认配置、Tool 与 Skill 注入点；Skill 保持短小，把详细规则表放到确定性配置和实现中。</p>
+      </article>
+      <article class="card">
+        <span class="tag p1">Phase 3 · 可闭环</span>
+        <h3>接入共享交付与 doctor</h3>
+        <p>changed-only 先以 WARN 运行；修复任务仍经过 worker → verifier → review → checkpoint，LuWu 不自证完成。</p>
+      </article>
+      <article class="card">
+        <span class="tag p2">Phase 4 · 稳定后门禁</span>
+        <h3>发布 / CI 强制执行</h3>
+        <p>用真实项目校准误报后，把稳定的 P0/P1 规则升级为发布阻断；命名偏好继续保持 WARN。</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>预计变更位置</h2>
+    <table>
+      <thead><tr><th>区域</th><th>文件</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td>Agent / Skill</td><td><code>packs/wildarrange-linear/agents/luwu.md</code><br><code>packs/wildarrange-linear/skills/repository-governance.md</code></td><td>角色合同与操作流程。</td></tr>
+        <tr><td>Prompt pack</td><td><code>manifest.json</code>、<code>routes.json</code>、agents README、tool contract</td><td>注册、路由和同步约束。</td></tr>
+        <tr><td>Infra</td><td><code>src/infra/repository-layout.mjs</code><br><code>src/infra/rule-scanner.mjs</code></td><td>目录政策解析、纯扫描、嵌套 AGENTS 发现。</td></tr>
+        <tr><td>Capability</td><td><code>src/capabilities/repository-governance.mjs</code><br><code>src/capabilities/gateway.mjs</code></td><td>统一结果信封、证据和报告。</td></tr>
+        <tr><td>Interface</td><td><code>bin/helix.mjs</code><br><code>src/interface/doctor.mjs</code></td><td>audit 命令和体检摘要。</td></tr>
+        <tr><td>Tests / Docs</td><td><code>test/repository-governance.test.mjs</code>、README、架构文档、AGENTS</td><td>正反例、命令说明、目录台账同步。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="section decision">
+    <span class="tag ok">实施结果</span>
+    <p class="verdict">Phase 1–3 与独立 Review 加固均已完成：5 个长期 Agent 由机器白名单锁定；LuWu 只读身份在 command worker 前被拒绝；CLI/README 使用真实 help 对账；模板表达式注释、changed-only 范围、Prompt/routes/架构台账和 doctor 摘要均已落地并有对抗测试。</p>
+    <p>Phase 4 保持显式控制：当前 <code>governance audit</code> 在 P0/P1 finding 时以退出码 2 失败，可直接接入 CI/发布脚本；不由普通开发命令静默开启新的外部发布动作。</p>
+  </section>
+
+  <section class="section">
+    <h2>验收标准</h2>
+    <ol>
+      <li>删除一个必需的子目录 <code>AGENTS.md</code>，审计稳定返回相同 finding ID 和证据路径。</li>
+      <li>新增 Agent 但遗漏 manifest 或 routes 时，发布审计 FAIL。</li>
+      <li>README 写入不存在的 CLI 命令时，发布审计 FAIL。</li>
+      <li>把能力文件放错五区时，审计或现有 dependency boundary 测试 FAIL。</li>
+      <li>合法例外、继承父级规则的叶子目录不会产生误报。</li>
+      <li>LuWu 只能提出修复任务；未经 verifier / review / checkpoint，不能标记治理完成。</li>
+      <li>以 LuWu、DiJiang 或 BaiZe 身份调用任意 command worker 时，必须在命令启动前拒绝且不产生工作区写入。</li>
+      <li>注册 Router + Rogue、把 CangJie 放入正式 routes 或遗漏固定 Agent 时，治理审计必须 FAIL。</li>
+      <li>CLI 源文件里放置伪命令字符串，不能让 README 中的不存在命令通过审计。</li>
+      <li>模板字符串 <code>${...}</code> 表达式中的真实 TODO/FIXME 注释必须触发注释门。</li>
+      <li><code>npm test</code> 与 <code>npm pack --dry-run --cache /private/tmp/helix-npm-cache</code> 均通过。</li>
+    </ol>
+  </section>
+
+  <section class="section">
+    <h2>最终边界</h2>
+    <p><strong>Agent 管“理解与协调”，代码管“判定与证据”，现有流水线管“修改与放行”。</strong></p>
+    <p>这样以后目录越多，规则也不会变成只能靠某个模型记住的隐性知识；同时不会为了追求形式整齐，在每个小目录里堆重复 README 和 AGENTS。</p>
+  </section>
+</main>
+</body>
+</html>

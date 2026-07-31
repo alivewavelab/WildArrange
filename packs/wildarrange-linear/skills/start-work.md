@@ -2,7 +2,7 @@
 
 ## 目的
 
-启动或恢复一个 WildArrange 计划：先读持久状态，再交给 YingLong 执行。
+启动或恢复一个 WildArrange 计划：先读持久状态，再由 Jiuwei 推进。
 
 ## 入口条件
 
@@ -21,7 +21,7 @@
 3. 读取 `.helix/ledger.jsonl`。
 4. 判断状态：
    - 无 tasks -> 需要导入计划。
-   - 有 pending runnable task -> YingLong run。
+   - 有 pending runnable task -> Jiuwei run。
    - 有 in_progress/verifying task -> 从最新 ledger 证据恢复。
    - 有 failed task -> Jiuwei 决定 retry、BaiZe 或用户升级。
    - 全部 completed -> final verification / report。
@@ -35,7 +35,7 @@
 node ./bin/helix.mjs run
 ```
 
-YingLong 必须处理完整的 worker -> verifier -> checkpoint/retry。不要绕过 YingLong 直接调用 worker。
+Jiuwei 必须处理完整的 worker -> verifier -> checkpoint/retry。不要绕过 Jiuwei 直接调用 worker。
 
 ## 完成协议
 

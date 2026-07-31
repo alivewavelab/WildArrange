@@ -1,3 +1,4 @@
+/** @deprecated Compatibility export surface; new internal code must import the five-zone implementation directly. */
 export {
   DEFAULT_HELIX_CONFIG,
   DEFAULT_CLI_COMMAND,
@@ -54,6 +55,7 @@ export {
   runArchivistRouter,
 } from "./helix-archivist-router.mjs";
 export { scanProjectRules } from "./helix-rules.mjs";
+export { runRepositoryGovernanceAudit } from "./capabilities/repository-governance.mjs";
 export { runReviewGate, runWorker } from "./helix-review.mjs";
 export { callOpenAICompatible, resolveAgentProvider, runLlmReview } from "./helix-llm.mjs";
 export { buildReviewFindingBundle, validateReviewFinding } from "./helix-review-findings.mjs";

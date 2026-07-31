@@ -79,3 +79,16 @@ test("cli smoke: doctor runs against an initialized project", async () => {
     assert.ok(parsed.reportJsonPath);
   });
 });
+
+test("cli smoke: governance audit writes a deterministic report", async () => {
+  await withTempProjectDir(async (dir) => {
+    const init = await runCli(["init"], dir);
+    assert.equal(init.code, 0, `init failed.\nstderr: ${init.stderr}`);
+
+    const result = await runCli(["governance", "audit", "--force"], dir);
+    assert.equal(result.code, 0, `governance audit failed.\nstderr: ${result.stderr}`);
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.kind, "repository_governance");
+    assert.ok(parsed.reportJsonPath);
+  });
+});

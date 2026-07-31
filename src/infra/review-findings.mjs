@@ -52,7 +52,7 @@ export function buildReviewFindingBundle({ lanes = [], qualityResults = {}, llmR
       id: `F-${String(findings.length + 1).padStart(3, "0")}`,
       source: "comment_checker",
       lane: "comment_checker",
-      agent: "LuanNiao",
+      agent: "BaiZe",
       severity: qualityResults.commentResult?.status === "fail" ? "P1" : "P2",
       title: `Blocked comment pattern: ${commentFinding.pattern}`,
       evidence: `${commentFinding.file}:${commentFinding.line} ${commentFinding.text || ""}`.trim(),

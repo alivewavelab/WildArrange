@@ -15,36 +15,38 @@ export const DEFAULT_PACKAGE_NAME = "@alivewavelab/wildarrange";
 export const DEFAULT_RUNTIME_NAME = "wildarrange-linear";
 export const DEFAULT_CLI_COMMAND = "wildarrange";
 export const DEFAULT_LEAD_AGENT = "Jiuwei";
-export const DEFAULT_EXECUTOR_AGENT = "YingLong";
-export const DEFAULT_REVIEW_AGENTS = ["BaiZe", "QiongQi", "LuanNiao"];
+export const DEFAULT_EXECUTOR_AGENT = "Jiuwei";
+export const DEFAULT_REVIEW_AGENTS = ["BaiZe"];
+export const LONG_LIVED_AGENTS = Object.freeze(["Jiuwei", "DiJiang", "ZhuRong", "BaiZe", "LuWu"]);
+export const COMMAND_WORKER_AGENTS = Object.freeze(["Jiuwei", "ZhuRong"]);
+export const READ_ONLY_LONG_LIVED_AGENTS = Object.freeze(["DiJiang", "BaiZe", "LuWu"]);
+const LONG_LIVED_AGENT_SET = new Set(LONG_LIVED_AGENTS);
+const READ_ONLY_LONG_LIVED_AGENT_SET = new Set(READ_ONLY_LONG_LIVED_AGENTS);
 const legacyAgentName = (...parts) => parts.join("");
 export const AGENT_ALIASES = {
   [legacyAgentName("Sisy", "phus")]: "Jiuwei",
   [legacyAgentName("Sisy", "phus", "-junior")]: "LuWu",
   [legacyAgentName("sisy", "phus_junior")]: "LuWu",
-  [legacyAgentName("At", "las")]: "YingLong",
+  [legacyAgentName("At", "las")]: "Jiuwei",
   [legacyAgentName("Hephae", "stus")]: "ZhuRong",
   [legacyAgentName("Prome", "theus")]: "DiJiang",
   [legacyAgentName("Ora", "cle")]: "BaiZe",
-  [legacyAgentName("Libra", "rian")]: "Taotie",
-  [legacyAgentName("Exp", "lore")]: "Kui",
-  [legacyAgentName("Me", "tis")]: "LuanNiao",
-  [legacyAgentName("Mo", "mus")]: "QiongQi",
-  [legacyAgentName("Multi", "modal-Looker")]: "KaimingShou",
-  multimodal_looker: "KaimingShou",
+  [legacyAgentName("Libra", "rian")]: "BaiZe",
+  [legacyAgentName("Exp", "lore")]: "BaiZe",
+  [legacyAgentName("Me", "tis")]: "BaiZe",
+  [legacyAgentName("Mo", "mus")]: "BaiZe",
+  YingLong: "Jiuwei",
+  LuanNiao: "BaiZe",
+  QiongQi: "BaiZe",
+  Kui: "BaiZe",
+  Taotie: "BaiZe",
 };
 export const AGENT_DISPLAY_NAMES = {
   Jiuwei: "九尾狐 / Nine-Tailed Fox",
   ZhuRong: "祝融 / Zhu Rong",
   DiJiang: "帝江 / Di Jiang",
-  YingLong: "应龙 / Ying Long",
   BaiZe: "白泽 / Bai Ze",
-  Taotie: "饕餮 / Taotie",
-  Kui: "夔 / Kui",
-  LuanNiao: "鸾鸟 / Luan Niao",
-  QiongQi: "穷奇 / Qiong Qi",
   LuWu: "陆吾 / Lu Wu",
-  KaimingShou: "开明兽 / Kaiming Shou",
 };
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -74,15 +76,11 @@ export const DEFAULT_HELIX_CONFIG = {
     gemini: { type: "openai-compatible", apiKeyEnv: "GEMINI_API_KEY", baseUrlEnv: "GEMINI_BASE_URL" },
   },
   agents: {
-    Jiuwei: { role: "lead_orchestrator", provider: "host", model: "host-default", reasoning: "high" },
-    YingLong: { role: "linear_executor", provider: "host", model: "host-default", reasoning: "medium" },
+    Jiuwei: { role: "workflow_orchestrator", provider: "host", model: "host-default", reasoning: "high" },
+    DiJiang: { role: "planner", provider: "host", model: "host-default", reasoning: "high" },
     ZhuRong: { role: "implementation_worker", provider: "host", model: "host-default", reasoning: "medium" },
-    BaiZe: { role: "goal_verifier", provider: "host", model: "host-default", reasoning: "high" },
-    Taotie: { role: "external_research", provider: "deepseek", model: "deepseek-v4-pro" },
-    Kui: { role: "fast_explorer", provider: "deepseek", model: "deepseek-v4-flash" },
-    CangJie: { role: "archivist_router", provider: "deepseek", model: "deepseek-v4-flash" },
-    LuanNiao: { role: "risk_reviewer", provider: "host", model: "host-default", reasoning: "medium" },
-    QiongQi: { role: "skeptical_reviewer", provider: "host", model: "host-default", reasoning: "xhigh" },
+    BaiZe: { role: "independent_reviewer", provider: "host", model: "host-default", reasoning: "xhigh" },
+    LuWu: { role: "repository_steward", provider: "host", model: "host-default", reasoning: "high" },
   },
   archivistRouter: {
     enabled: false,
@@ -187,11 +185,11 @@ export const DEFAULT_HELIX_CONFIG = {
     stageBoosts: {
       ideate: ["wa-ideate", "ultraresearch"],
       clarify: ["wa-spec", "start-work"],
-      plan: ["wa-plan", "wa-architect", "init-deep"],
+      plan: ["wa-plan", "wa-architect", "init-deep", "review-plan-risk", "review-plan-readiness"],
       design: ["wa-design", "frontend-ui-ux", "visual-qa"],
       execute: ["programming", "debugging", "refactor", "wa-work"],
       verify: ["wa-test", "review-work"],
-      review: ["wa-review", "review-work", "remove-ai-slops"],
+      review: ["wa-review", "review-work", "review-plan-risk", "review-plan-readiness", "remove-ai-slops"],
       deploy: ["wa-deploy", "publish", "pre-publish-review"],
       recall: ["wa-recall", "get-unpublished-changes"],
     },
@@ -209,6 +207,7 @@ export const DEFAULT_HELIX_CONFIG = {
       before_execute: { markdownMaxChars: 20_000, skillMaxChars: 80_000 },
       before_review: { markdownMaxChars: 24_000, skillMaxChars: 80_000 },
       before_checkpoint: { markdownMaxChars: 24_000, skillMaxChars: 60_000 },
+      repository_governance: { markdownMaxChars: 20_000, skillMaxChars: 40_000 },
       stop: { markdownMaxChars: 12_000, skillMaxChars: 24_000 },
     },
   },
@@ -216,7 +215,7 @@ export const DEFAULT_HELIX_CONFIG = {
     llm: {
       enabled: false,
       required: false,
-      agents: ["BaiZe", "LuanNiao", "QiongQi"],
+      agents: ["BaiZe"],
       temperature: 0,
       timeoutMs: 45000,
       maxEvidenceChars: 12000,
@@ -266,6 +265,21 @@ export const DEFAULT_HELIX_CONFIG = {
     projectSingleFiles: ["AGENTS.md", "CLAUDE.md", "CONTEXT.md", ".github/copilot-instructions.md"],
     projectRuleDirs: [".claude/rules", ".cursor/rules", ".github/instructions"],
   },
+  repositoryGovernance: {
+    enabled: false,
+    governedRoots: [],
+    requiredAgentBoundaries: [],
+    documentationPairs: [],
+    documentationRequirements: [],
+    architectureLedgers: [],
+    ignoredPaths: [".git", ".helix", "node_modules", "coverage"],
+    naming: {
+      directories: "kebab-case",
+      sourceFiles: "kebab-case.mjs",
+      exceptions: ["README.md", "README.en.md", "AGENTS.md"],
+    },
+    commentRules: [],
+  },
   injectionPoints: {
     session_start: {
       enabled: true,
@@ -278,7 +292,20 @@ export const DEFAULT_HELIX_CONFIG = {
       enabled: true,
       tools: ["helix_route", "helix_rules_collect"],
       markdown: [".helix/snapshots/context.md", ".helix/rules/context.md"],
-      skills: ["wildarrange-injection-runtime", "wa-ideate", "wa-plan", "review-work"],
+      skills: [
+        "wildarrange-injection-runtime",
+        "wa-ideate",
+        "wa-plan",
+        "review-work",
+        "review-product-intent",
+        "map-user-journey",
+        "design-acceptance",
+        "review-ux-interaction",
+        "review-scope-tradeoff",
+        "research-domain-benchmark",
+        "inspect-codebase",
+        "research-external-docs"
+      ],
       rules: { mode: "static" },
     },
     pre_tool_use: {
@@ -305,15 +332,22 @@ export const DEFAULT_HELIX_CONFIG = {
     before_execute: {
       enabled: true,
       tools: ["helix_context_build", "helix_node", "scope_guard"],
-      markdown: [".helix/context-agents/YingLong-{taskId}.md", ".helix/rules/context.md"],
-      skills: ["wildarrange-injection-runtime", "programming", "debugging", "refactor"],
+      markdown: [".helix/context-agents/Jiuwei-{taskId}.md", ".helix/rules/context.md"],
+      skills: ["wildarrange-injection-runtime", "run-linear-delivery", "programming", "debugging", "refactor"],
       rules: { mode: "dynamic" },
     },
     before_review: {
       enabled: true,
       tools: ["helix_context_build", "helix_evidence_record", "review_gate"],
-      markdown: [".helix/context-agents/BaiZe-{taskId}.md", ".helix/context-agents/QiongQi-{taskId}.md", ".helix/context-agents/LuanNiao-{taskId}.md", ".helix/rules/context.md"],
-      skills: ["wildarrange-injection-runtime", "review-work", "wa-review", "visual-qa"],
+      markdown: [".helix/context-agents/BaiZe-{taskId}.md", ".helix/rules/context.md"],
+      skills: ["wildarrange-injection-runtime", "review-work", "review-plan-risk", "review-plan-readiness", "review-scope-tradeoff", "wa-review", "visual-qa"],
+      rules: { mode: "dynamic" },
+    },
+    repository_governance: {
+      enabled: true,
+      tools: ["repository_governance_audit", "helix_rules_collect", "comment_check", "config_verify"],
+      markdown: [".helix/reports/governance/latest.md", ".helix/rules/context.md"],
+      skills: ["wildarrange-injection-runtime", "repository-governance", "init-deep", "pre-publish-review", "remove-ai-slops"],
       rules: { mode: "dynamic" },
     },
     before_checkpoint: {
@@ -426,6 +460,20 @@ export function normalizeAgentKey(value) {
   if (!trimmed) return null;
   const sanitized = trimmed.replace(/[^\w.-]/g, "_");
   return AGENT_ALIASES[sanitized] || AGENT_ALIASES[trimmed] || sanitized;
+}
+
+export function isLongLivedAgent(value) {
+  const normalized = normalizeAgentKey(value);
+  return normalized ? LONG_LIVED_AGENT_SET.has(normalized) : false;
+}
+
+export function assertCommandWorkerAgent(value) {
+  const normalized = normalizeAgentKey(value);
+  if (!normalized) throw new Error("command worker agent is required");
+  if (READ_ONLY_LONG_LIVED_AGENT_SET.has(normalized)) {
+    throw new Error(`agent ${normalized} is read-only and cannot enter a command worker`);
+  }
+  return normalized;
 }
 
 export function displayAgentName(value) {

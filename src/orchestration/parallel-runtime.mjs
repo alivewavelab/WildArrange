@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   DEFAULT_LEAD_AGENT,
   appendLedger,
+  assertCommandWorkerAgent,
   createWorkId,
   ensureHelixDirs,
   loadHelixConfig,
@@ -38,6 +39,9 @@ export async function runParallelAgents(rootDir, options = {}) {
     await appendLedger(rootDir, { type: "parallel_agents_idle", reason: "no runnable tasks" });
     return { status: "idle", runId: null, tasks: [] };
   }
+  tasks.forEach((task, index) => {
+    assertCommandWorkerAgent(options.agent || task.owner || `Agent${index + 1}`);
+  });
 
   const runId = createWorkId("agent_run");
   const runDir = resolveHelixPath(rootDir, "agent-runs", runId);

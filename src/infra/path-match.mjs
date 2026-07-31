@@ -26,9 +26,24 @@ export function pathMatchesPattern(filePath, pattern) {
     return filePath === literalPattern || filePath.startsWith(`${literalPattern}/`);
   }
 
-  const escaped = normalizedPattern
-    .split("*")
-    .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
-    .join(".*");
-  return new RegExp(`^${escaped}$`).test(filePath);
+  return new RegExp(`^${globPatternSource(normalizedPattern)}$`).test(filePath);
+}
+
+function globPatternSource(pattern) {
+  let source = "";
+  for (let index = 0; index < pattern.length; index += 1) {
+    const char = pattern[index];
+    if (char === "*" && pattern[index + 1] === "*" && pattern[index + 2] === "/") {
+      source += "(?:.*/)?";
+      index += 2;
+    } else if (char === "*" && pattern[index + 1] === "*") {
+      source += ".*";
+      index += 1;
+    } else if (char === "*") {
+      source += "[^/]*";
+    } else {
+      source += char.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
+    }
+  }
+  return source;
 }

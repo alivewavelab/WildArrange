@@ -9,7 +9,7 @@
 - Make adapter backup restore explicit. `DONE: adapter restore --backup <backupId>`
 - Decide npm package name or organization scope. `DONE: @alivewavelab/wildarrange`
 - Add ArchivistRouter runtime to the routing loop without making LLM calls mandatory. `DONE: packet/fallback/memory path + trigger scheduler + suggestion review flow`
-- Add real LLM review provider for BaiZe/LuanNiao/QiongQi lanes. `DONE: OpenAI-compatible provider path and three-role review contract`
+- Add real LLM review provider for BaiZe review lanes. `DONE: OpenAI-compatible provider path; former LuanNiao/QiongQi perspectives are BaiZe Skills`
 - Add checkpoint acceptance proof chain. `DONE: worker/verifier/successCriteria/scope/review proof artifact required before completion`
 - Add LSP diagnostics gate. `DONE: host-neutral CLI command gate`
 - Add AST/hashline code-intelligence gates. `DONE: astStructure command lane + hashline anchor lane in review_gate`

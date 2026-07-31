@@ -4,7 +4,7 @@
     "llm": {
       "enabled": false,
       "required": false,
-      "agents": ["BaiZe", "LuanNiao", "QiongQi"]
+      "agents": ["BaiZe"]
     }
   },
   "qualityGates": {

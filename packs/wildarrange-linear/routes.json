@@ -2,12 +2,11 @@
   "version": 1,
   "source": {
     "routingMechanism": [
-      "Jiuwei intent gate",
-      "Category + Skills Delegation System",
-      "delegate-task category/subagent resolver",
-      "model-core category default and fallback model resolution"
+      "deterministic intent gate",
+      "category and Skill delegation",
+      "optional semantic shadow"
     ],
-    "adaptation": "Codex/Cursor/Kimi Code 线性 runtime 先使用确定性 intent/domain/category 路由；后续 adapter 再接真实模型与外部 Agent。"
+    "adaptation": "Codex/Cursor/Kimi Code 线性 runtime 使用确定性 intent/domain/category 路由；Agent 固定为五个长期岗位，窄职责按需挂载为 Skill。"
   },
   "intents": [
     {
@@ -15,21 +14,34 @@
       "signals": ["继续", "恢复", "接着", "从上次", "新会话", "断点", "resume", "continue"],
       "route": "recover",
       "primaryAgent": "Jiuwei",
-      "supportAgents": ["YingLong"],
+      "supportAgents": [],
       "category": null,
-      "skills": ["start-work"],
+      "skills": ["start-work", "run-linear-delivery"],
       "nextCommand": "node ./bin/helix.mjs resume",
       "needsPlan": false,
       "risk": "low"
+    },
+    {
+      "name": "repository_governance",
+      "signals": ["仓库治理", "目录规范", "目录结构检查", "AGENTS 检查", "AGENTS是否完整", "README 同步", "README同步", "README 是否同步", "README是否同步", "代码注释是否合规", "注释是否合规", "注释规范检查", "文件位置检查", "命名检查", "governance audit", "repository governance"],
+      "route": "verify",
+      "primaryAgent": "LuWu",
+      "supportAgents": ["BaiZe"],
+      "category": null,
+      "skills": ["repository-governance", "inspect-codebase"],
+      "nextCommand": "node ./bin/helix.mjs governance audit --changed-only",
+      "needsPlan": false,
+      "lockPrimaryAgent": true,
+      "risk": "medium"
     },
     {
       "name": "change_request",
       "signals": ["临时加功能", "计划外新增", "设计变了", "计划外", "改需求", "需求变更", "change request", "scope"],
       "route": "change_request",
       "primaryAgent": "Jiuwei",
-      "supportAgents": ["LuanNiao", "DiJiang", "QiongQi"],
+      "supportAgents": ["DiJiang", "BaiZe"],
       "category": "deep",
-      "skills": ["review-work"],
+      "skills": ["review-work", "review-plan-risk", "review-plan-readiness", "review-scope-tradeoff"],
       "nextCommand": "node ./bin/helix.mjs route --text <request>",
       "needsPlan": true,
       "risk": "high"
@@ -39,9 +51,9 @@
       "signals": ["review", "审核", "复核", "验收", "检查质量", "质疑", "找问题", "代码审查"],
       "route": "verify",
       "primaryAgent": "BaiZe",
-      "supportAgents": ["QiongQi", "LuanNiao"],
+      "supportAgents": [],
       "category": null,
-      "skills": ["review-work"],
+      "skills": ["review-work", "review-plan-risk", "review-plan-readiness"],
       "nextCommand": "node ./bin/helix.mjs guard scope",
       "needsPlan": false,
       "risk": "medium"
@@ -50,10 +62,10 @@
       "name": "debug",
       "signals": ["bug", "报错", "失败", "broken", "error", "异常", "不工作", "修复", "fix"],
       "route": "execute",
-      "primaryAgent": "YingLong",
-      "supportAgents": ["Kui", "ZhuRong", "BaiZe"],
+      "primaryAgent": "Jiuwei",
+      "supportAgents": ["ZhuRong", "BaiZe"],
       "category": "deep",
-      "skills": ["debugging", "programming"],
+      "skills": ["debugging", "programming", "inspect-codebase", "run-linear-delivery"],
       "nextCommand": "node ./bin/helix.mjs workflow --from <plan.json>",
       "needsPlan": true,
       "risk": "medium"
@@ -63,9 +75,9 @@
       "signals": ["方案", "制定计划", "工作计划", "开发计划", "技术设计", "架构", "怎么做", "规划", "讨论", "从零", "新功能", "大功能", "新增功能", "产品设计", "需求澄清", "mvp", "一期", "plan", "architecture"],
       "route": "plan",
       "primaryAgent": "DiJiang",
-      "supportAgents": ["Kui", "Taotie", "LuanNiao", "QiongQi", "BaiZe"],
+      "supportAgents": ["BaiZe"],
       "category": null,
-      "skills": ["init-deep", "review-work"],
+      "skills": ["init-deep", "inspect-codebase", "research-external-docs", "review-work", "review-plan-risk", "review-plan-readiness"],
       "nextCommand": "node ./bin/helix.mjs plan --from <plan.json>",
       "needsPlan": false,
       "risk": "medium"
@@ -74,10 +86,10 @@
       "name": "investigate",
       "signals": ["看一下", "查一下", "了解", "源码阅读", "调查", "找原因", "确认", "verify source", "inspect", "research"],
       "route": "explore",
-      "primaryAgent": "Kui",
-      "supportAgents": ["Taotie", "BaiZe"],
+      "primaryAgent": "BaiZe",
+      "supportAgents": [],
       "category": "research",
-      "skills": ["ultraresearch"],
+      "skills": ["ultraresearch", "inspect-codebase", "research-external-docs"],
       "nextCommand": "node ./bin/helix.mjs route --text <request>",
       "needsPlan": false,
       "risk": "low"
@@ -86,10 +98,10 @@
       "name": "release_git",
       "signals": ["commit", "push", "branch", "merge", "pr", "tag", "发布", "提交", "分支", "合并"],
       "route": "execute",
-      "primaryAgent": "YingLong",
+      "primaryAgent": "Jiuwei",
       "supportAgents": ["BaiZe"],
       "category": "git",
-      "skills": ["git-master"],
+      "skills": ["git-master", "run-linear-delivery"],
       "nextCommand": "node ./bin/helix.mjs guard scope",
       "needsPlan": false,
       "risk": "high"
@@ -98,10 +110,10 @@
       "name": "execute",
       "signals": ["实现", "添加", "优化", "改", "跑通", "继续做", "开始做", "implement", "add", "build", "change", "write"],
       "route": "execute",
-      "primaryAgent": "YingLong",
+      "primaryAgent": "Jiuwei",
       "supportAgents": ["ZhuRong", "BaiZe"],
       "category": "deep",
-      "skills": ["programming"],
+      "skills": ["programming", "run-linear-delivery"],
       "nextCommand": "node ./bin/helix.mjs workflow --from <plan.json>",
       "needsPlan": true,
       "risk": "medium"
@@ -111,9 +123,9 @@
       "signals": ["是什么", "为什么", "解释", "是否", "能不能", "你觉得", "how", "why", "what"],
       "route": "answer",
       "primaryAgent": "BaiZe",
-      "supportAgents": ["Kui", "Taotie"],
+      "supportAgents": [],
       "category": null,
-      "skills": [],
+      "skills": ["inspect-codebase", "research-external-docs"],
       "nextCommand": "node ./bin/helix.mjs route --text <request>",
       "needsPlan": false,
       "risk": "low"
@@ -124,9 +136,9 @@
       "name": "visual",
       "signals": ["ui", "ux", "css", "样式", "布局", "视觉", "页面", "网页", "网页版", "前端", "web", "动效", "动画", "截图", "浏览器", "playwright"],
       "category": "visual-engineering",
-      "primaryAgent": "YingLong",
+      "primaryAgent": "Jiuwei",
       "supportAgents": ["ZhuRong", "BaiZe"],
-      "skills": ["frontend-ui-ux", "visual-qa"],
+      "skills": ["frontend-ui-ux", "visual-qa", "run-linear-delivery"],
       "risk": "medium",
       "hardRule": "视觉工作必须使用 visual-engineering，不得降级到 quick。"
     },
@@ -135,44 +147,44 @@
       "signals": ["算法", "架构", "复杂逻辑", "状态机", "编排", "路由", "并发", "事务", "权限", "安全", "architecture"],
       "category": "ultrabrain",
       "primaryAgent": "DiJiang",
-      "supportAgents": ["BaiZe", "LuanNiao"],
-      "skills": ["init-deep", "programming"],
+      "supportAgents": ["BaiZe"],
+      "skills": ["init-deep", "programming", "review-plan-risk"],
       "risk": "high"
     },
     {
       "name": "writing",
       "signals": ["文档", "写作", "提示词", "prompt", "说明", "README", "产品文案", "翻译"],
       "category": "writing",
-      "primaryAgent": "YingLong",
+      "primaryAgent": "Jiuwei",
       "supportAgents": ["BaiZe"],
-      "skills": ["remove-ai-slops"],
+      "skills": ["remove-ai-slops", "run-linear-delivery"],
       "risk": "low"
     },
     {
       "name": "git",
       "signals": ["git", "commit", "push", "branch", "merge", "pr", "tag", "提交", "分支"],
       "category": "git",
-      "primaryAgent": "YingLong",
+      "primaryAgent": "Jiuwei",
       "supportAgents": ["BaiZe"],
-      "skills": ["git-master"],
+      "skills": ["git-master", "run-linear-delivery"],
       "risk": "high"
     },
     {
       "name": "debug",
       "signals": ["bug", "报错", "失败", "异常", "error", "broken", "debug"],
       "category": "deep",
-      "primaryAgent": "YingLong",
-      "supportAgents": ["Kui", "ZhuRong", "BaiZe"],
-      "skills": ["debugging", "programming"],
+      "primaryAgent": "Jiuwei",
+      "supportAgents": ["ZhuRong", "BaiZe"],
+      "skills": ["debugging", "programming", "inspect-codebase", "run-linear-delivery"],
       "risk": "medium"
     },
     {
       "name": "research",
       "signals": ["源码", "官方文档", "开源", "上游", "API", "库", "依赖", "文档阅读"],
       "category": "research",
-      "primaryAgent": "Taotie",
-      "supportAgents": ["Kui"],
-      "skills": ["ultraresearch"],
+      "primaryAgent": "BaiZe",
+      "supportAgents": [],
+      "skills": ["ultraresearch", "research-external-docs", "inspect-codebase"],
       "risk": "low"
     },
     {
@@ -180,8 +192,8 @@
       "signals": ["review", "审核", "复核", "验收", "质疑", "检查"],
       "category": null,
       "primaryAgent": "BaiZe",
-      "supportAgents": ["QiongQi", "LuanNiao"],
-      "skills": ["review-work"],
+      "supportAgents": [],
+      "skills": ["review-work", "review-plan-risk", "review-plan-readiness"],
       "risk": "medium"
     },
     {
@@ -189,8 +201,8 @@
       "signals": ["恢复", "继续", "断点", "上下文", "会话"],
       "category": null,
       "primaryAgent": "Jiuwei",
-      "supportAgents": ["YingLong"],
-      "skills": ["start-work"],
+      "supportAgents": [],
+      "skills": ["start-work", "run-linear-delivery"],
       "risk": "low"
     }
   ],
@@ -211,44 +223,44 @@
       "routeBias": "plan"
     }
   ],
-  "planAgentBundles": [
+  "planSkillBundles": [
     {
-      "name": "ProductIntentReviewer",
+      "name": "review-product-intent",
       "signals": ["目标", "为什么", "用户价值", "业务结果", "成功标准", "不要做", "mvp", "优先级", "产品设计", "产品"],
       "stage": "wa-ideate",
       "risk": "medium",
       "purpose": "确认真实目标、成功标准、非目标和最短产品路径。"
     },
     {
-      "name": "UserJourneyMapper",
+      "name": "map-user-journey",
       "signals": ["流程", "多步骤", "提醒", "清单", "状态", "协作", "权限", "通知", "handoff", "旅程"],
       "stage": "wa-ideate",
       "risk": "high",
       "purpose": "补齐入口、步骤、状态、失败路径和恢复路径。"
     },
     {
-      "name": "AcceptanceDesigner",
+      "name": "design-acceptance",
       "signals": ["验收", "测试", "边界", "异常", "空状态", "失败", "回归", "证据", "criteria"],
       "stage": "wa-ideate",
       "risk": "high",
       "purpose": "把需求变成 Given/When/Then、successCriteria 和 verifier 证据。"
     },
     {
-      "name": "UXInteractionReviewer",
+      "name": "review-ux-interaction",
       "signals": ["ui", "ux", "页面", "网页", "交互", "视觉", "按钮", "表单", "空状态", "loading", "error"],
       "stage": "wa-design",
       "risk": "medium",
       "purpose": "检查界面入口、状态、反馈、组件槽位和截图验收。"
     },
     {
-      "name": "ScopeTradeoffReviewer",
+      "name": "review-scope-tradeoff",
       "signals": ["先做", "一期", "mvp", "裁剪", "复杂", "范围", "排除项", "临时加功能", "计划外", "取舍"],
       "stage": "wa-plan",
       "risk": "high",
       "purpose": "明确 SHALL/MUST/SHOULD、IN/OUT、延期项和 ChangeRequest。"
     },
     {
-      "name": "DomainBenchmarkResearcher",
+      "name": "research-domain-benchmark",
       "signals": ["类似", "竞品", "行业", "最佳实践", "对标", "参考", "市场"],
       "stage": "wa-ideate",
       "risk": "low",
@@ -260,10 +272,10 @@
     "complexity": "bounded",
     "domain": "general",
     "route": "execute",
-    "primaryAgent": "YingLong",
+    "primaryAgent": "Jiuwei",
     "supportAgents": ["ZhuRong", "BaiZe"],
     "category": "deep",
-    "skills": ["programming"],
+    "skills": ["programming", "run-linear-delivery"],
     "nextCommand": "node ./bin/helix.mjs workflow --from <plan.json>",
     "needsPlan": true,
     "needsUserInput": false,

@@ -50,7 +50,7 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
         : "worker or verifier evidence does not prove the task goal",
       fixBy: "修复实现或验收失败后，重新运行 execute/verify。",
     }),
-    reviewLane("scope_fidelity", "QiongQi", scopeResult?.status === "pass", {
+    reviewLane("scope_fidelity", "BaiZe", scopeResult?.status === "pass", {
       statusOverride: scopeResult?.status === "inconclusive" && (task.writable_paths || []).length === 0 ? "warn" : undefined,
       summary: scopeResult?.status === "fail"
         ? `out-of-scope paths: ${(scopeResult.deniedPaths || []).join(", ") || "unknown"}`
@@ -59,7 +59,7 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
           : "changed paths stay within writable_paths",
       fixBy: "移除范围外改动，或走 ChangeRequest 扩展任务边界。",
     }),
-    reviewLane("evidence_quality", "LuanNiao", verifierEvidenceOk, {
+    reviewLane("evidence_quality", "BaiZe", verifierEvidenceOk, {
       summary: verifierEvidenceOk
         ? "all verifier commands produced passing evidence"
         : "verifier evidence is missing, partial, or failing",
@@ -71,7 +71,7 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
         : `criteria not satisfied: pass=${criteria.passed}, pending=${criteria.pending}, fail=${criteria.failed}`,
       fixBy: "补齐 criterion evidence，或修复实现后重新运行 verifier；不要删除 successCriteria。",
     }),
-    reviewLane("project_rules_context", "QiongQi", rulesContext.matched > 0, {
+    reviewLane("project_rules_context", "BaiZe", rulesContext.matched > 0, {
       statusOverride: rulesContext.matched > 0 ? undefined : "warn",
       summary: rulesContext.matched > 0
         ? `${rulesContext.matched}/${rulesContext.total} project rule(s) injected from ${rulesContext.reportMdPath}`
@@ -87,7 +87,7 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
           : commandObservation(reviewCommandResults.find((result) => result.exitCode !== 0) || { exitCode: 1 }),
       fixBy: "按 review_commands 的失败输出修复，不要删除 review_commands 绕过复核。",
     }),
-    reviewLane("project_standards", "QiongQi", standardsCommandResults.every((result) => result.exitCode === 0), {
+    reviewLane("project_standards", "BaiZe", standardsCommandResults.every((result) => result.exitCode === 0), {
       statusOverride: standardsCommandResults.length === 0 ? "warn" : undefined,
       summary: standardsCommandResults.length === 0
         ? "no standards_commands configured; relying on project instructions and explicit review lanes"
@@ -96,7 +96,7 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
           : commandObservation(standardsCommandResults.find((result) => result.exitCode !== 0) || { exitCode: 1 }),
       fixBy: "按 standards_commands 的失败输出修复项目规范问题，不要删除规范门来制造 PASS。",
     }),
-    reviewLane("lsp_diagnostics", "LuanNiao", qualityResults.lspResult.pass === true, {
+    reviewLane("lsp_diagnostics", "BaiZe", qualityResults.lspResult.pass === true, {
       statusOverride: qualityResults.lspResult.status === "skipped" ? "warn" : undefined,
       summary: qualityResults.lspResult.status === "skipped"
         ? qualityResults.lspResult.reason
@@ -105,7 +105,7 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
           : commandObservation(qualityResults.lspResult.results.find((result) => result.exitCode !== 0) || { exitCode: 1 }),
       fixBy: "修复 LSP/typecheck 诊断，或在 helix.config.json 中明确关闭该 gate。",
     }),
-    reviewLane("ast_structure", "LuanNiao", qualityResults.astResult.pass === true, {
+    reviewLane("ast_structure", "BaiZe", qualityResults.astResult.pass === true, {
       statusOverride: qualityResults.astResult.status === "skipped" ? "warn" : undefined,
       summary: qualityResults.astResult.status === "skipped"
         ? qualityResults.astResult.reason
@@ -114,7 +114,7 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
           : commandObservation(qualityResults.astResult.results.find((result) => result.exitCode !== 0) || { exitCode: 1 }),
       fixBy: "修复 ast-grep/结构搜索发现，或在 helix.config.json 中明确关闭该 gate。",
     }),
-    reviewLane("hashline_anchors", "QiongQi", qualityResults.hashlineResult.pass === true, {
+    reviewLane("hashline_anchors", "BaiZe", qualityResults.hashlineResult.pass === true, {
       statusOverride: qualityResults.hashlineResult.status === "skipped" ? "warn" : undefined,
       summary: qualityResults.hashlineResult.status === "skipped"
         ? qualityResults.hashlineResult.reason
@@ -123,7 +123,7 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
           : `${qualityResults.hashlineResult.findings.length} hashline anchor finding(s): ${qualityResults.hashlineResult.findings.slice(0, 3).map((finding) => `${finding.file}:${finding.line} ${finding.reason}`).join("; ")}`,
       fixBy: "按最新文件内容刷新 hashline anchor，或重新规划基于稳定语义的改写。",
     }),
-    reviewLane("comment_checker", "LuanNiao", qualityResults.commentResult.pass === true, {
+    reviewLane("comment_checker", "BaiZe", qualityResults.commentResult.pass === true, {
       statusOverride: qualityResults.commentResult.status === "warn" || qualityResults.commentResult.status === "skipped" ? "warn" : undefined,
       summary: qualityResults.commentResult.findings.length === 0
         ? "no blocked comment/placeholder findings"
@@ -138,7 +138,7 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
   };
   const llmAgents = Array.isArray(config.review?.llm?.agents) && config.review.llm.agents.length > 0
     ? config.review.llm.agents
-    : ["QiongQi"];
+    : ["BaiZe"];
   const llmReviews = [];
   if (config.review?.llm?.enabled === true) {
     for (const rawAgentName of llmAgents) {

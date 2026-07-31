@@ -3,19 +3,9 @@ import { loadHelixConfig, nowIso } from "./foundation.mjs";
 const DEFAULT_CHAT_PATH = "/chat/completions";
 const REVIEW_AGENT_PROFILES = {
   BaiZe: {
-    lane: "goal_verifier",
-    focus: "Judge whether the task objective, success criteria, verifier evidence, and checkpoint evidence prove delivery.",
-    failBias: "Fail when the evidence chain is missing, verifier output does not match the task, or the goal is not actually satisfied.",
-  },
-  LuanNiao: {
-    lane: "risk_reviewer",
-    focus: "Find concrete bugs, regression risks, missing tests, LSP/typecheck problems, and maintainability risks that affect this task.",
-    failBias: "Fail only for reproducible defects, missing required tests, or risks that can break the delivered behavior.",
-  },
-  QiongQi: {
-    lane: "skeptical_acceptance",
-    focus: "Act as an adversarial reviewer. Try to disprove the completion claim using scope, verifier, project rules, and user intent.",
-    failBias: "Fail when a reasonable skeptical acceptance review would reject the worker's completion claim.",
+    lane: "independent_review",
+    focus: "Judge goal compliance, evidence integrity, scope, project rules, concrete regression risk, and skeptical acceptance before delivery.",
+    failBias: "Fail when the evidence chain is missing, a reproducible defect or required test gap exists, scope/rules are violated, or the completion claim cannot survive skeptical acceptance.",
   },
 };
 
@@ -92,7 +82,8 @@ export async function runLlmReview(rootDir, agentName, task, evidence = {}, opti
 }
 
 export function resolveAgentProvider(config, agentName) {
-  const agent = config.agents?.[agentName];
+  const archivistProfile = config.archivistRouter?.agent === agentName ? config.archivistRouter : null;
+  const agent = config.agents?.[agentName] || config.dynamicAgents?.[agentName] || archivistProfile;
   if (!agent) return { available: false, reason: `agent ${agentName} is not configured` };
   const providerName = agent.provider;
   const provider = config.modelProviders?.[providerName];
@@ -189,7 +180,7 @@ function buildReviewPrompt(agentName, task, evidence, llmConfig) {
 }
 
 function buildReviewSystemPrompt(agentName) {
-  const profile = REVIEW_AGENT_PROFILES[agentName] || REVIEW_AGENT_PROFILES.QiongQi;
+  const profile = REVIEW_AGENT_PROFILES[agentName] || REVIEW_AGENT_PROFILES.BaiZe;
   return [
     "You are a strict software delivery reviewer. Return only compact JSON.",
     `Reviewer lane: ${profile.lane}.`,

@@ -270,7 +270,7 @@ node ./bin/helix.mjs node review --task T001</code></pre>
 
     <h2>七、并行 Agent 怎么试</h2>
     <p>第一版并行 Agent 适合“计划已拆好，多个 worker 可分头做”的场景。不要用它处理还没澄清的大需求。</p>
-    <pre><code>node ./bin/helix.mjs parallel run --max-agents 2 --task T001,T002 --agent Kui --command "..."
+    <pre><code>node ./bin/helix.mjs parallel run --max-agents 2 --task T001,T002 --agent ZhuRong --command "..."
 node ./bin/helix.mjs parallel status --run &lt;runId&gt;
 node ./bin/helix.mjs parallel admit --run &lt;runId&gt; --task T001
 node ./bin/helix.mjs parallel close --run &lt;runId&gt; --task T001 --reason user_accepted</code></pre>

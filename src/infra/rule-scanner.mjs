@@ -39,6 +39,7 @@ export async function scanProjectRules(rootDir, options = {}) {
       if (rule) allRules.push(rule);
     }
   }
+  allRules.push(...await readApplicableNestedAgents(rootDir, targetPaths, new Set(allRules.map((rule) => rule.path))));
   for (const dirPath of ruleConfig.projectRuleDirs || PROJECT_RULE_DIRS) {
     allRules.push(...await readRuleDir(rootDir, path.join(rootDir, dirPath), dirPath));
   }
@@ -62,6 +63,37 @@ export async function scanProjectRules(rootDir, options = {}) {
   await writeFile(mdPath, renderRulesMarkdown(result), "utf8");
   await appendLedger(rootDir, { type: "project_rules_scanned", total: result.total, matched: result.matched, targetPathCount: targetPaths.length });
   return result;
+}
+
+async function readApplicableNestedAgents(rootDir, targetPaths, knownPaths) {
+  const relativeFiles = [];
+  for (const targetPath of targetPaths) {
+    const cleanTarget = targetPath.split(/[\*\?\[\{]/, 1)[0].replace(/\/+$/, "");
+    if (!cleanTarget || cleanTarget === ".") continue;
+    let current = path.extname(cleanTarget) ? path.dirname(cleanTarget) : cleanTarget;
+    const ancestors = [];
+    while (current && current !== ".") {
+      ancestors.push(current);
+      const parent = path.dirname(current);
+      if (!parent || parent === "." || parent === current) break;
+      current = parent;
+    }
+    for (const directory of ancestors.reverse()) {
+      const relativePath = normalizeRelativePath(path.join(directory, "AGENTS.md"));
+      if (!knownPaths.has(relativePath)) {
+        knownPaths.add(relativePath);
+        relativeFiles.push(relativePath);
+      }
+    }
+  }
+  const rules = [];
+  for (const relativePath of relativeFiles) {
+    const absolutePath = path.join(rootDir, relativePath);
+    if (!existsSync(absolutePath)) continue;
+    const rule = await readRuleFile(rootDir, absolutePath, "directory_agents");
+    if (rule) rules.push(rule);
+  }
+  return rules;
 }
 
 function applyRuleBudget(rules, ruleConfig) {

@@ -66,8 +66,8 @@ node ./bin/helix.mjs config init --root
 | `pre_tool_use` | 工具执行前范围阻断 | `hook run`，计划外写入返回 `permissionDecision=deny` |
 | `post_tool_use` | 工具执行后按目标文件刷新动态规则 | `rules collect --target <path>` + `scope_guard` |
 | `post_compact` | 上下文压缩后恢复工作状态 | `resume` + `rules collect` |
-| `before_execute` | worker 执行前注入任务包 | `context build --agent YingLong --task <id>` |
-| `before_review` | reviewer 审核前注入证据包 | `context build --agent BaiZe/QiongQi/LuanNiao --task <id>` |
+| `before_execute` | worker 执行前注入任务包 | `context build --agent Jiuwei --task <id>` |
+| `before_review` | reviewer 审核前注入证据包 | `context build --agent BaiZe --task <id>` |
 | `before_checkpoint` | checkpoint 前质量门 | `evidence record` + `review gate` |
 | `stop` | 会话停止前生成续跑指令 | `continuation check` |
 
@@ -103,17 +103,17 @@ node ./bin/helix.mjs hook run --from hook.json
 - 中途需求变化必须走 `helix steer` 或 ChangeRequest，不允许聊天里直接改计划。
 - 如果配置缺少关键模型或注入点，先报告配置缺口。
 
-### YingLong
+### Jiuwei
 
 - 执行前必须构建 `before_execute` 上下文。
 - 写文件前如果宿主支持 `pre_tool_use`，必须接受 `permissionDecision=deny`。
 - verifier PASS 后必须确认 `successCriteria` 证据；显式 criteria 只有绑定具体 `verifierCommandRefs` 且对应命令 PASS，或已有人工 evidence 时才可通过。
 - checkpoint 前必须跑 `before_checkpoint`，不能只凭 worker DoneClaim。
 
-### BaiZe / QiongQi / LuanNiao
+### BaiZe
 
 - 审核前必须构建各自 `before_review` 上下文。
-- BaiZe / LuanNiao 输出结构化 verdict：`PASS | FAIL | INCONCLUSIVE`；QiongQi 输出 `[OKAY] | [REJECT]`，缺上下文时必须 `[REJECT]`。
+- 实现后 review 输出结构化 verdict：`PASS | FAIL | INCONCLUSIVE`；计划准入挂载 `review-plan-readiness` 时输出 `[OKAY] | [REJECT]`。
 - 证据不足只能 INCONCLUSIVE，不得 PASS。
 
 ## 不变量

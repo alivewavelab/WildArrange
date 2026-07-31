@@ -8,6 +8,7 @@
 import {
   DEFAULT_EXECUTOR_AGENT,
   DEFAULT_LEAD_AGENT,
+  LONG_LIVED_AGENTS,
   normalizeAgentKey,
   readJson,
   renderPromptPackEntry,
@@ -47,16 +48,17 @@ export function resolveRouteDecision(routes, text) {
   const domain = bestMatch(routes.domains || [], lowerText);
   const complexity = bestMatch(routes.complexity || [], lowerText);
   const merged = mergeRoute(routes.defaults, intent, domain, complexity, lowerText);
-  merged.planAgents = matchPlanAgentBundles(routes.planAgentBundles || [], lowerText);
-  for (const planAgent of merged.planAgents) {
-    merged.risk = higherRisk(merged.risk, planAgent.risk);
+  merged.planSkills = matchPlanSkillBundles(routes.planSkillBundles || routes.planAgentBundles || [], lowerText);
+  merged.skills = uniqueStrings([...(merged.skills || []), ...merged.planSkills.map((skill) => skill.name)]);
+  for (const planSkill of merged.planSkills) {
+    merged.risk = higherRisk(merged.risk, planSkill.risk);
   }
   applyPlanningGate(merged, lowerText);
   return buildRouteResult(routes, text, merged, domain, complexity, [
     ...(intent?.matchedSignals || []),
     ...(domain?.matchedSignals || []),
     ...(complexity?.matchedSignals || []),
-    ...merged.planAgents.flatMap((agent) => agent.matchedSignals || []),
+    ...merged.planSkills.flatMap((skill) => skill.matchedSignals || []),
   ]);
 }
 
@@ -75,7 +77,7 @@ function matchSignals(lowerText, signals) {
   return signals.filter((signal) => signalMatches(lowerText, String(signal).toLowerCase()));
 }
 
-function matchPlanAgentBundles(entries, lowerText) {
+function matchPlanSkillBundles(entries, lowerText) {
   return entries
     .map((entry) => ({ ...entry, matchedSignals: matchSignals(lowerText, entry.signals || []) }))
     .filter((entry) => entry.matchedSignals.length > 0)
@@ -122,7 +124,7 @@ function mergeRoute(defaults, intent, domain, complexity, lowerText = "") {
   if (complexity?.routeBias === "plan" && !["review", "resume", "investigate", "answer", "release_git"].includes(merged.intent)) {
     merged.route = "plan";
     merged.primaryAgent = "DiJiang";
-    merged.supportAgents = uniqueStrings(["Kui", "Taotie", "LuanNiao", "QiongQi", "BaiZe", ...(merged.supportAgents || [])]);
+    merged.supportAgents = uniqueStrings(["BaiZe", ...(merged.supportAgents || [])]);
     merged.needsPlan = false;
   }
   if (complexity?.categoryBias && !domain?.category) {
@@ -138,6 +140,14 @@ function mergeRoute(defaults, intent, domain, complexity, lowerText = "") {
     merged.risk = higherRisk(merged.risk, domain.risk);
   } else {
     merged.domain = defaults.domain;
+  }
+
+  if (intent?.lockPrimaryAgent === true) {
+    merged.route = intent.route;
+    merged.primaryAgent = intent.primaryAgent;
+    merged.supportAgents = uniqueStrings(intent.supportAgents || []);
+    merged.category = intent.category ?? null;
+    merged.needsPlan = intent.needsPlan === true;
   }
 
   if (domain?.name === "visual") {
@@ -164,8 +174,8 @@ function applyPlanningGate(merged, lowerText) {
   if (
     merged.route !== "execute"
     || merged.needsPlan !== true
-    || !Array.isArray(merged.planAgents)
-    || merged.planAgents.length === 0
+    || !Array.isArray(merged.planSkills)
+    || merged.planSkills.length === 0
     || !hasProductPlanningSignal(lowerText)
     || hasExplicitContinuationSignal(lowerText)
   ) {
@@ -174,7 +184,7 @@ function applyPlanningGate(merged, lowerText) {
   merged.intent = "plan";
   merged.route = "plan";
   merged.primaryAgent = "DiJiang";
-  merged.supportAgents = uniqueStrings(["Kui", "Taotie", "LuanNiao", "QiongQi", "BaiZe", ...(merged.supportAgents || [])]);
+  merged.supportAgents = uniqueStrings(["BaiZe", ...(merged.supportAgents || [])]);
   merged.skills = uniqueStrings(["wa-plan", ...(merged.skills || [])]);
   merged.needsPlan = false;
   merged.routeAdjusted = true;
@@ -192,14 +202,17 @@ function buildRouteResult(routes, text, route, domain, complexity, matchedSignal
   if (signals.length > 0) {
     reasonParts.push(`matched=${signals.join(",")}`);
   }
+  const primaryAgent = normalizeRoutableAgent(route.primaryAgent || routes.defaults.primaryAgent, "primaryAgent");
+  const supportAgents = uniqueStrings(route.supportAgents || [])
+    .map((agent) => normalizeRoutableAgent(agent, "supportAgent"));
   return {
     intent: intentName,
     complexity: route.complexity || complexity?.name || routes.defaults.complexity,
     domain: route.domain || domain?.name || routes.defaults.domain,
     route: route.route || routes.defaults.route,
-    primaryAgent: normalizeAgentKey(route.primaryAgent || routes.defaults.primaryAgent) || DEFAULT_EXECUTOR_AGENT,
-    supportAgents: uniqueStrings(route.supportAgents || []).map(normalizeAgentKey).filter(Boolean),
-    planAgents: route.planAgents || [],
+    primaryAgent,
+    supportAgents,
+    planSkills: route.planSkills || [],
     category: route.category ?? null,
     skills: uniqueStrings(route.skills || []),
     nextCommand: route.nextCommand || routes.defaults.nextCommand,
@@ -213,6 +226,14 @@ function buildRouteResult(routes, text, route, domain, complexity, matchedSignal
     routeAdjusted: route.routeAdjusted === true,
     adjustmentReason: route.adjustmentReason || null,
   };
+}
+
+function normalizeRoutableAgent(value, fieldName) {
+  const normalized = normalizeAgentKey(value) || DEFAULT_EXECUTOR_AGENT;
+  if (!LONG_LIVED_AGENTS.includes(normalized)) {
+    throw new Error(`routes ${fieldName} must use one of ${LONG_LIVED_AGENTS.join(", ")}; received ${value || "(missing)"}`);
+  }
+  return normalized;
 }
 
 export function uniqueStrings(values) {

@@ -35,7 +35,7 @@ export async function buildAgentContext(rootDir, options = {}) {
   const agent = normalizeAgentName(options.agent || task?.owner || DEFAULT_EXECUTOR_AGENT) || DEFAULT_EXECUTOR_AGENT;
   const resumeContext = await writeContextSnapshot(rootDir, { reason: `agent-context:${agent}` });
   const role = options.role || roleForAgent(agent);
-  const injectionPointName = options.injectionPoint || defaultInjectionPointForAgent(agent);
+  const injectionPointName = options.injectionPoint || defaultInjectionPointForAgent(agent, { taskId: task?.id });
   const injectionPoint = await resolveInjectionPoint(rootDir, injectionPointName, {
     agent,
     taskId: task?.id || "",
@@ -212,6 +212,7 @@ export async function continuationDirective(rootDir, options = {}) {
 function stageForInjectionPoint(pointName) {
   if (pointName === "before_execute") return "execute";
   if (pointName === "before_review") return "review";
+  if (pointName === "repository_governance") return "review";
   if (pointName === "before_checkpoint") return "verify";
   if (pointName === "user_prompt_submit") return "plan";
   return "";
@@ -227,9 +228,10 @@ function resolveContextTask(tasks, taskId) {
 }
 
 function roleForAgent(agent) {
-  if (agent === "BaiZe") return "goal_verifier";
-  if (agent === "QiongQi") return "skeptical_scope_reviewer";
-  if (agent === "LuanNiao") return "bug_and_evidence_reviewer";
+  if (agent === "BaiZe") return "independent_reviewer";
+  if (agent === "DiJiang") return "planner";
+  if (agent === "ZhuRong") return "implementation_worker";
+  if (agent === "LuWu") return "repository_steward";
   if (agent === DEFAULT_LEAD_AGENT) return "lead_orchestrator";
   return "linear_worker";
 }

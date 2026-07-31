@@ -1,45 +1,34 @@
 # WildArrange Agent 提示词
 
-本目录是 `wildarrange-linear` prompt pack 的角色合同。提示词只写**当前 Helix 运行时行为**。
+本目录只保留具有独立目标、权限边界和生命周期的长期 Agent Prompt。窄职责检查、检索和研究方法统一放在 `../skills/`。
 
-## Agent 职责
+## 角色
 
-| Helix Agent | Helix 职责 |
+| 角色 | 职责 |
 |---|---|
-| Router | 只读当前请求与 `.helix/` 状态，输出结构化路由 JSON |
-| Jiuwei | 按 Router 裁决编排 plan / execute / verify / recover / change-request lane |
-| DiJiang | 产出决策完备的计划与 tasks |
-| LuanNiao | 计划前只读分析：意图、歧义、范围与验收风险 |
-| QiongQi | 计划执行就绪度审核：blocker only |
-| YingLong | 线性派发 worker、独立验证、checkpoint、ledger |
-| ZhuRong | 边界内实现 worker，返回 DoneClaim |
-| BaiZe | 只读技术验证与架构/调试顾问 |
-| Kui | 只读代码库检索 |
-| Taotie | 只读外部文档与开源研究 |
+| Router | 确定性路由系统节点；输出结构化路由，不计入五个长期 Agent |
+| Jiuwei | 总编排、任务派发、恢复、ChangeRequest 与线性交付推进 |
+| DiJiang | 需求澄清、计划、任务拆分、范围和验收设计 |
+| ZhuRong | `writable_paths` 内唯一实现 worker |
+| BaiZe | 独立计划准入、技术咨询、实现后 review 与证据判断 |
+| LuWu | 只读仓库治理：目录、AGENTS、README、命名、归属和注释 |
 
 ## 状态与路径映射
 
-| 概念 | Helix M1 |
+| 概念 | WildArrange |
 |---|---|
 | 计划文件 | `.helix/plans/*.json` + `.helix/team/tasks.md` |
 | 工作状态 | `.helix/work.json` |
 | 经验沉淀 | `.helix/wisdom/*` |
-| 执行任务 | `worker_command` 或 Codex/Cursor adapter |
+| 执行任务 | Jiuwei 派发 ZhuRong，或 Codex/Cursor adapter |
 | 外部验证 | `verify_commands` + BaiZe/review contract |
-| 完成标记 | 任务状态 `completed` + 重写 `tasks.md` |
+| 完成标记 | 任务状态 `completed` + checkpoint + ledger |
 
-## 路由裁剪说明
+## 维护原则
 
-Helix M1 把 intent 分类、category/skills 委派、subagent 解析拆成：
-
-1. **`router.md`**：intent → complexity → domain/category → skills → JSON 输出
-2. **`routes.json`**：确定性信号与默认 nextCommand（供 runtime/工具读取）
-3. **`jiuwei.md`**：收到 Router 裁决后，只负责 lane 编排与交付纪律
-
-Intent/category 细则**不要**再写进 Jiuwei、YingLong 等下游 agent；下游只消费 Router 输出或 `routes.json`。
-
-## 提示词维护原则
-
-- 身份段写角色与边界，不写外部项目溯源。
-- 历史对照和源码阅读证据只维护在 `doc/reports/`，不进入 prompt pack。
-- 同一规则只保留一处：路由归 Router，执行归 YingLong，计划归 DiJiang
+- Router 只维护 intent/category/Agent/Skill 路由。
+- Jiuwei 不写实现代码；ZhuRong 不自证完成。
+- DiJiang 与 ZhuRong 分离；BaiZe 与二者分离。
+- LuWu 只产生 finding、任务或 ChangeRequest，不直接修复。
+- 旧 YingLong/LuanNiao/QiongQi/Kui/Taotie 名称仅作为运行时兼容别名，不再拥有独立 Prompt。
+- 同一规则只保留一处；方法型内容进入 Skill，角色 Prompt 只写职责与边界。

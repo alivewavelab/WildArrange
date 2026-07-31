@@ -51,7 +51,7 @@ test("gateway: invokeCapability rejects unknown capability names", async () => {
 
 test("gateway: listRegisteredCapabilities exposes the static registry", () => {
   const names = listRegisteredCapabilities();
-  for (const expected of ["worker", "verify", "scope", "review", "acceptance-proof", "checkpoint", "command", "command-safety"]) {
+  for (const expected of ["worker", "verify", "scope", "review", "acceptance-proof", "checkpoint", "command", "command-safety", "repository-governance"]) {
     assert.ok(names.includes(expected), `expected ${expected} to be registered, got: ${names.join(", ")}`);
   }
 });

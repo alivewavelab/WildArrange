@@ -117,7 +117,7 @@ async function applySemanticRouteGovernance(rootDir, text, deterministic, input)
       route,
       intent: route === "ask" ? "ask" : "plan",
       primaryAgent: route === "ask" ? DEFAULT_LEAD_AGENT : "DiJiang",
-      supportAgents: uniqueStrings(["Kui", "Taotie", "BaiZe", ...(result.supportAgents || [])]),
+      supportAgents: uniqueStrings(["BaiZe", ...(result.supportAgents || [])]),
       needsPlan: route !== "ask",
       needsUserInput: route === "ask",
       routeAdjusted: true,

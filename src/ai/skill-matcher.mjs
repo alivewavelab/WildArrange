@@ -135,15 +135,21 @@ function collectRouteSignals(routes, text) {
       if (!signals.skills.includes(skill)) signals.skills.push(skill);
     }
   }
+  for (const bundle of routes?.planSkillBundles || routes?.planAgentBundles || []) {
+    const keywords = [...(bundle.signals || [])].map(normalizeText).filter(Boolean);
+    if (!keywords.some((keyword) => keyword && text.includes(keyword))) continue;
+    if (!signals.skills.includes(bundle.name)) signals.skills.push(bundle.name);
+  }
   return signals;
 }
 
 function inferAgentSkillBoosts(agent) {
   if (!agent) return [];
-  if (agent === "Jiuwei") return ["start-work", "wa-plan", "review-work"];
-  if (agent === "YingLong" || agent === "ZhuRong") return ["programming", "debugging", "refactor", "wa-work"];
-  if (agent === "BaiZe" || agent === "LuanNiao" || agent === "QiongQi") return ["review-work", "wa-review", "wa-test"];
-  if (agent === "Kui" || agent === "Taotie") return ["ultraresearch", "init-deep"];
+  if (agent === "Jiuwei") return ["start-work", "run-linear-delivery", "wa-plan", "review-work"];
+  if (agent === "ZhuRong") return ["programming", "debugging", "refactor", "wa-work"];
+  if (agent === "BaiZe") return ["review-work", "review-plan-risk", "review-plan-readiness", "wa-review", "wa-test"];
+  if (agent === "DiJiang") return ["inspect-codebase", "research-external-docs", "wa-plan", "design-acceptance"];
+  if (agent === "LuWu") return ["repository-governance", "init-deep", "pre-publish-review", "remove-ai-slops"];
   return [];
 }
 

@@ -186,22 +186,12 @@ test("init installs wildarrange-linear prompt, skill, and tool contracts", async
     assert.deepEqual(
       pack.agents.sort(),
       [
-        "YingLong",
-        "Kui",
         "ZhuRong",
-        "Taotie",
-        "LuanNiao",
-        "QiongQi",
         "BaiZe",
         "DiJiang",
         "Router",
         "Jiuwei",
-        "ProductIntentReviewer",
-        "UserJourneyMapper",
-        "AcceptanceDesigner",
-        "UXInteractionReviewer",
-        "ScopeTradeoffReviewer",
-        "DomainBenchmarkResearcher",
+        "LuWu",
       ].sort(),
     );
     assert.ok(pack.skills.includes("review-work"));
@@ -209,8 +199,8 @@ test("init installs wildarrange-linear prompt, skill, and tool contracts", async
     assert.equal(pack.routes, "routes.json");
     assert.ok(pack.skills.includes("wildarrange-injection-runtime"));
 
-    const yingLongPrompt = await renderPromptPackEntry(dir, { agent: "YingLong" });
-    assert.match(yingLongPrompt, /必须 verifier PASS/);
+    const jiuweiPrompt = await renderPromptPackEntry(dir, { agent: "Jiuwei" });
+    assert.match(jiuweiPrompt, /verifier/);
 
     const reviewSkill = await renderPromptPackEntry(dir, { skill: "review-work" });
     assert.match(reviewSkill, /目标验证器/);
@@ -221,15 +211,16 @@ test("init installs wildarrange-linear prompt, skill, and tool contracts", async
     assert.ok(toolContract.tools.some((tool) => tool.name === "scope_guard"));
     assert.ok(toolContract.tools.some((tool) => tool.name === "ast_grep_search"));
     assert.ok(toolContract.tools.some((tool) => tool.name === "team_send_message"));
+    assert.ok(toolContract.tools.some((tool) => tool.name === "repository_governance_audit"));
 
     const routeTable = JSON.parse(await renderPromptPackEntry(dir, { routes: true }));
     assert.equal(routeTable.version, 1);
     assert.ok(routeTable.intents.some((intent) => intent.name === "execute"));
-    assert.ok(routeTable.planAgentBundles.some((agent) => agent.name === "ProductIntentReviewer"));
+    assert.ok(routeTable.planSkillBundles.some((skill) => skill.name === "review-product-intent"));
   });
 });
 
-test("route decision loads product planning agent bundle on demand", async () => {
+test("route decision loads product planning skills on demand", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
     const route = await routeRequest(dir, {
@@ -238,11 +229,11 @@ test("route decision loads product planning agent bundle on demand", async () =>
 
     assert.equal(route.domain, "visual");
     assert.equal(route.category, "visual-engineering");
-    assert.ok(route.planAgents.some((agent) => agent.name === "ProductIntentReviewer"));
-    assert.ok(route.planAgents.some((agent) => agent.name === "UserJourneyMapper"));
-    assert.ok(route.planAgents.some((agent) => agent.name === "AcceptanceDesigner"));
-    assert.ok(route.planAgents.some((agent) => agent.name === "UXInteractionReviewer"));
-    assert.ok(route.planAgents.some((agent) => agent.name === "ScopeTradeoffReviewer"));
+    assert.ok(route.planSkills.some((skill) => skill.name === "review-product-intent"));
+    assert.ok(route.planSkills.some((skill) => skill.name === "map-user-journey"));
+    assert.ok(route.planSkills.some((skill) => skill.name === "design-acceptance"));
+    assert.ok(route.planSkills.some((skill) => skill.name === "review-ux-interaction"));
+    assert.ok(route.planSkills.some((skill) => skill.name === "review-scope-tradeoff"));
     assert.match(route.reason, /验收/);
   });
 });
@@ -254,15 +245,15 @@ test("skill matcher and prompt variants provide explainable loading hints", asyn
     const matched = await matchSkills(dir, {
       text: "做一个网页版提醒事项 App，需要空状态、视觉验收和实现计划。",
       stage: "design",
-      agent: "YingLong",
-      limit: 5,
+      agent: "Jiuwei",
+      limit: 20,
     });
     assert.ok(matched.matched.some((skill) => skill.name === "frontend-ui-ux"));
     assert.ok(matched.matched.some((skill) => skill.name === "visual-qa"));
     assert.ok(matched.matched.every((skill) => skill.score > 0));
     assert.ok(matched.matched.some((skill) => skill.reasons.some((reason) => reason.startsWith("stage:"))));
 
-    const gptVariant = await resolvePromptVariant(dir, { agent: "YingLong", model: "gpt-5.5" });
+    const gptVariant = await resolvePromptVariant(dir, { agent: "Jiuwei", model: "gpt-5.5" });
     assert.equal(gptVariant.variant, "gpt");
     assert.match(gptVariant.content, /验收标准/);
 
@@ -301,6 +292,22 @@ test("config controls models and injection point mounts", async () => {
     assert.ok(injection.markdown[0].content.includes("Use real verification"));
     assert.ok(injection.skills.some((skill) => skill.name === "review-work"));
     assert.ok(injection.skills.some((skill) => skill.name === "wildarrange-injection-runtime"));
+  });
+});
+
+test("LuWu governance injection mounts the declared read-only tools and Skills", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const injection = await resolveInjectionPoint(dir, "repository_governance", { agent: "LuWu" });
+    assert.deepEqual(injection.tools, [
+      "repository_governance_audit",
+      "helix_rules_collect",
+      "comment_check",
+      "config_verify",
+    ]);
+    for (const skill of ["repository-governance", "init-deep", "pre-publish-review", "remove-ai-slops"]) {
+      assert.ok(injection.skills.some((entry) => entry.name === skill), skill);
+    }
   });
 });
 
@@ -367,12 +374,12 @@ test("default GPT-family agents are delegated to the host provider", async () =>
     await initRuntime(dir);
     const { config } = await loadHelixConfig(dir);
     assert.equal(config.modelProviders.host.type, "host");
-    assert.equal(config.agents.YingLong.provider, "host");
-    assert.equal(config.agents.QiongQi.provider, "host");
+    assert.equal(config.agents.Jiuwei.provider, "host");
+    assert.equal(config.agents.BaiZe.provider, "host");
     assert.equal(config.modelProviders.openai, undefined);
-    assert.deepEqual(config.review.llm.agents, ["BaiZe", "LuanNiao", "QiongQi"]);
+    assert.deepEqual(config.review.llm.agents, ["BaiZe"]);
 
-    const resolved = resolveAgentProvider(config, "QiongQi");
+    const resolved = resolveAgentProvider(config, "BaiZe");
     assert.equal(resolved.available, false);
     assert.equal(resolved.hostManaged, true);
     assert.match(resolved.reason, /managed by the host adapter/);
@@ -396,16 +403,16 @@ test("legacy agent names resolve to WildArrange agent keys", async () => {
     await initRuntime(dir);
 
     const { config } = await loadHelixConfig(dir);
-    assert.equal(config.agents.YingLong.model, "legacy-executor");
-    assert.equal(config.agents.QiongQi.model, "legacy-reviewer");
-    assert.deepEqual(config.review.llm.agents, ["QiongQi"]);
+    assert.equal(config.agents.Jiuwei.model, "legacy-executor");
+    assert.equal(config.agents.BaiZe.model, "legacy-reviewer");
+    assert.deepEqual(config.review.llm.agents, ["BaiZe"]);
 
     const message = await sendTeamMessage(dir, { from: legacyLead, to: legacyExecutor, body: "legacy route" });
     assert.equal(message.from, "Jiuwei");
-    assert.equal(message.to, "YingLong");
+    assert.equal(message.to, "Jiuwei");
 
     const legacyPrompt = await renderPromptPackEntry(dir, { agent: legacyExecutor });
-    assert.match(legacyPrompt, /YingLong/);
+    assert.match(legacyPrompt, /Jiuwei/);
   });
 });
 
@@ -426,8 +433,8 @@ test("hook adapter emits WildArrange runtime injection for user prompt", async (
     assert.match(result.output, /<wildarrange-injection event="UserPromptSubmit" point="user_prompt_submit">/);
     assert.match(result.output, /## 路由决策/);
     assert.match(result.output, /类别：visual-engineering/);
-    assert.match(result.output, /计划 Agent 组合/);
-    assert.match(result.output, /UXInteractionReviewer/);
+    assert.match(result.output, /计划 Skill 组合/);
+    assert.match(result.output, /review-ux-interaction/);
     assert.match(result.output, /项目规则/);
     assert.match(result.output, /Always verify behavior/);
 
@@ -671,18 +678,18 @@ test("team-lite sends and lists durable inbox messages", async () => {
       summary: "continue T001",
     });
     assert.equal(message.from, "Jiuwei");
-    assert.equal(message.to, "YingLong");
+    assert.equal(message.to, "Jiuwei");
     assert.equal(message.status, "unread");
-    assert.match(message.inboxPath, /^\.helix\/team\/inbox\/YingLong\/msg_.+\.json$/);
+    assert.match(message.inboxPath, /^\.helix\/team\/inbox\/Jiuwei\/msg_.+\.json$/);
 
-    const yingLongInbox = await listTeamMessages(dir, { agent: "YingLong" });
-    assert.equal(yingLongInbox.length, 1);
-    assert.equal(yingLongInbox[0].id, message.id);
-    assert.equal(yingLongInbox[0].body, "Continue T001 after verifier passes.");
+    const jiuweiInbox = await listTeamMessages(dir, { agent: "YingLong" });
+    assert.equal(jiuweiInbox.length, 1);
+    assert.equal(jiuweiInbox[0].id, message.id);
+    assert.equal(jiuweiInbox[0].body, "Continue T001 after verifier passes.");
 
     const allInbox = await listTeamMessages(dir);
     assert.equal(allInbox.length, 1);
-    assert.match(await readFile(resolveHelixPath(dir, "team", "messages.md"), "utf8"), /Jiuwei -> YingLong: continue T001/);
+    assert.match(await readFile(resolveHelixPath(dir, "team", "messages.md"), "utf8"), /Jiuwei -> Jiuwei: continue T001/);
     assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /team_message_sent/);
   });
 });
@@ -713,13 +720,13 @@ test("parallel agents run task packets concurrently and publish results", async 
     const command = "node -e \"const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'parallel done'}));\" {outputJson}";
     const batch = await runParallelAgents(dir, {
       maxAgents: 2,
-      agent: "Kui",
+      agent: "ZhuRong",
       command,
     });
 
     assert.equal(batch.status, "completed");
     assert.equal(batch.taskCount, 2);
-    assert.ok(batch.results.every((result) => result.agent === "Kui" && result.pass));
+    assert.ok(batch.results.every((result) => result.agent === "ZhuRong" && result.pass));
     assert.ok(batch.results.every((result) => result.lifecycle.status === "awaiting_user_acceptance"));
     assert.ok(batch.results.every((result) => result.result.summary === "parallel done"));
 
@@ -744,6 +751,35 @@ test("parallel agents run task packets concurrently and publish results", async 
     assert.equal(closedTask.lifecycle.closeReason, "user_accepted");
     assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /parallel_agents_completed/);
     assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /parallel_agent_run_closed/);
+  });
+});
+
+test("read-only long-lived Agents cannot enter the parallel command worker", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = path.join(dir, "parallel-readonly-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Read-only Agent boundary",
+      tasks: [{
+        id: "T001",
+        subject: "Must not execute",
+        verify_commands: ["node -e \"process.exit(0)\""],
+        writable_paths: [],
+      }],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    for (const agent of ["DiJiang", "BaiZe", "LuWu"]) {
+      const markerPath = path.join(dir, `${agent}.wrote`);
+      const command = nodeEval(`require("fs").writeFileSync(${JSON.stringify(markerPath)}, "forbidden")`);
+      await assert.rejects(
+        runParallelAgents(dir, { taskIds: ["T001"], agent, command }),
+        new RegExp(`agent ${agent} is read-only`),
+      );
+      await assert.rejects(readFile(markerPath, "utf8"), /ENOENT/);
+    }
+    const ledger = await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8");
+    assert.doesNotMatch(ledger, /parallel_agents_started/);
   });
 });
 
@@ -796,7 +832,7 @@ test("parallel agents can use configured adapter command templates", async () =>
 
     const batch = await runParallelAgents(dir, {
       taskIds: ["T001"],
-      agent: "Kui",
+      agent: "ZhuRong",
       adapter: "codex",
     });
 
@@ -831,7 +867,7 @@ test("parallel admission applies child artifacts only after gates pass", async (
     ].join(" ");
     const batch = await runParallelAgents(dir, {
       taskIds: ["T001"],
-      agent: "Kui",
+      agent: "ZhuRong",
       command,
     });
     const admitted = await admitParallelAgentResult(dir, {
@@ -875,7 +911,7 @@ test("parallel admission rolls back child artifacts when gates fail", async () =
     ].join(" ");
     const batch = await runParallelAgents(dir, {
       taskIds: ["T001"],
-      agent: "Kui",
+      agent: "ZhuRong",
       command,
     });
     const admitted = await admitParallelAgentResult(dir, {
@@ -922,7 +958,7 @@ test("parallel agents can isolate edits in git worktrees and admit patches", asy
     ].join(" ");
     const batch = await runParallelAgents(dir, {
       taskIds: ["T001"],
-      agent: "Kui",
+      agent: "ZhuRong",
       isolation: "git-worktree",
       command,
     });
@@ -967,7 +1003,7 @@ test("parallel admission rejects artifacts outside writable paths", async () => 
     ].join(" ");
     const batch = await runParallelAgents(dir, {
       taskIds: ["T001"],
-      agent: "Kui",
+      agent: "ZhuRong",
       command,
     });
 
@@ -1127,6 +1163,17 @@ test("routeRequest maps high-risk domains to the right agents and categories", a
     assert.equal(dangerousDelete.intent, "ask");
     assert.equal(dangerousDelete.route, "ask");
     assert.equal(dangerousDelete.needsUserInput, true);
+
+    const governance = await routeRequest(dir, "检查仓库目录规范和 README 同步");
+    assert.equal(governance.primaryAgent, "LuWu");
+    assert.equal(governance.route, "verify");
+    assert.ok(governance.skills.includes("repository-governance"));
+    for (const request of ["检查 README 是否同步", "检查README是否同步", "检查代码注释是否合规"]) {
+      const naturalGovernance = await routeRequest(dir, request);
+      assert.equal(naturalGovernance.intent, "repository_governance", request);
+      assert.equal(naturalGovernance.primaryAgent, "LuWu", request);
+      assert.equal(naturalGovernance.route, "verify", request);
+    }
 
     const review = await routeRequest(dir, "帮我 review 这次代码是否满足目标");
     assert.equal(review.intent, "review");
@@ -1361,6 +1408,8 @@ test("plan import warns about possible no-op tasks", async () => {
 test("project rules and agent context collect matching local governance", async () => {
   await withTempDir(async (dir) => {
     await writeFile(path.join(dir, "AGENTS.md"), "# AGENTS\n\n必须运行真实测试。\n");
+    await mkdir(path.join(dir, "src"), { recursive: true });
+    await writeFile(path.join(dir, "src", "AGENTS.md"), "# Source Rules\n\nsrc 内修改必须遵守本目录职责。\n");
     await mkdir(path.join(dir, ".cursor", "rules"), { recursive: true });
     await writeFile(path.join(dir, ".cursor", "rules", "frontend.md"), [
       "---",
@@ -1386,17 +1435,18 @@ test("project rules and agent context collect matching local governance", async 
     await importPlan(dir, planPath);
 
     const rules = await scanProjectRules(dir, { targetPaths: ["src/app.js"] });
-    assert.equal(rules.total, 2);
-    assert.equal(rules.matched, 2);
+    assert.equal(rules.total, 3);
+    assert.equal(rules.matched, 3);
     assert.ok(rules.rules.some((rule) => rule.path === "AGENTS.md"));
+    assert.ok(rules.rules.some((rule) => rule.path === "src/AGENTS.md" && rule.source === "directory_agents"));
     assert.ok(rules.rules.some((rule) => rule.path === ".cursor/rules/frontend.md"));
     assert.match(await readFile(resolveHelixPath(dir, "rules", "context.md"), "utf8"), /UI 变更必须浏览器验收/);
 
     const context = await buildAgentContext(dir, { agent: "QiongQi", taskId: "T001" });
-    assert.equal(context.agent, "QiongQi");
+    assert.equal(context.agent, "BaiZe");
     assert.equal(context.task.id, "T001");
-    assert.equal(context.projectRules.matched, 2);
-    assert.match(await readFile(resolveHelixPath(dir, "context-agents", "QiongQi-T001.md"), "utf8"), /WildArrange Agent Context/);
+    assert.equal(context.projectRules.matched, 3);
+    assert.match(await readFile(resolveHelixPath(dir, "context-agents", "BaiZe-T001.md"), "utf8"), /WildArrange Agent Context/);
   });
 });
 
@@ -1828,10 +1878,10 @@ test("LLM review gate uses OpenAI-compatible provider when configured", async ()
           local: { apiKeyEnv: "HELIX_TEST_LLM_KEY", baseUrl },
         },
         agents: {
-          QiongQi: { provider: "local", model: "test-reviewer" },
+          BaiZe: { provider: "local", model: "test-reviewer" },
         },
         review: {
-          llm: { enabled: true, required: true, agents: ["QiongQi"] },
+          llm: { enabled: true, required: true, agents: ["BaiZe"] },
         },
       }, null, 2));
       process.env.HELIX_TEST_LLM_KEY = "test-key";
@@ -1851,7 +1901,7 @@ test("LLM review gate uses OpenAI-compatible provider when configured", async ()
 
       const result = await runNextTask(dir);
       assert.equal(result.status, "completed");
-      assert.ok(result.reviewResult.lanes.some((lane) => lane.name === "llm_QiongQi" && lane.status === "pass"));
+      assert.ok(result.reviewResult.lanes.some((lane) => lane.name === "llm_BaiZe" && lane.status === "pass"));
       assert.equal(result.reviewResult.llmReviews[0].model, "test-reviewer");
 
       const reviewReport = await readJson(resolveHelixPath(dir, "reports", "reviews", `${plan.id}-T001.json`));
@@ -1988,10 +2038,10 @@ test("simulation greenfield project runs from product planning to completed web 
       text: "从零做一个网页版提醒事项 App，一期 MVP 要有清单流程、空状态、验收标准和失败恢复。",
     });
     assert.equal(route.route, "plan");
-    assert.ok(route.planAgents.some((agent) => agent.name === "ProductIntentReviewer"));
-    assert.ok(route.planAgents.some((agent) => agent.name === "UserJourneyMapper"));
-    assert.ok(route.planAgents.some((agent) => agent.name === "AcceptanceDesigner"));
-    assert.ok(route.planAgents.some((agent) => agent.name === "UXInteractionReviewer"));
+    assert.ok(route.planSkills.some((skill) => skill.name === "review-product-intent"));
+    assert.ok(route.planSkills.some((skill) => skill.name === "map-user-journey"));
+    assert.ok(route.planSkills.some((skill) => skill.name === "design-acceptance"));
+    assert.ok(route.planSkills.some((skill) => skill.name === "review-ux-interaction"));
 
     const planPath = path.join(dir, "greenfield-plan.json");
     await writeFile(planPath, JSON.stringify({
@@ -2155,9 +2205,9 @@ test("simulation existing project handles large feature addition through plannin
       text: "已有项目新增一个提醒分组大功能，要处理权限、状态流程、回归验收和范围取舍。",
     });
     assert.equal(route.route, "plan");
-    assert.ok(route.planAgents.some((agent) => agent.name === "UserJourneyMapper"));
-    assert.ok(route.planAgents.some((agent) => agent.name === "AcceptanceDesigner"));
-    assert.ok(route.planAgents.some((agent) => agent.name === "ScopeTradeoffReviewer"));
+    assert.ok(route.planSkills.some((skill) => skill.name === "map-user-journey"));
+    assert.ok(route.planSkills.some((skill) => skill.name === "design-acceptance"));
+    assert.ok(route.planSkills.some((skill) => skill.name === "review-scope-tradeoff"));
 
     const planPath = path.join(dir, "existing-feature-plan.json");
     await writeFile(planPath, JSON.stringify({
@@ -2402,7 +2452,7 @@ test("team task claim respects blockers and does not bypass execution gates", as
 
     const claimed = await claimTeamTask(dir, { taskId: "T001", owner: "YingLong" });
     assert.equal(claimed.task.status, "in_progress");
-    assert.equal(claimed.task.owner, "YingLong");
+    assert.equal(claimed.task.owner, "Jiuwei");
     assert.ok(claimed.task.claimedAt);
 
     const readBack = await getTeamTask(dir, "T001");
@@ -2778,6 +2828,8 @@ test("pathAllowed supports exact paths, directories, globs, and empty scopes", (
   assert.equal(pathAllowed("src/index.js", ["src"]), true);
   assert.equal(pathAllowed("README.md", ["README.md"]), true);
   assert.equal(pathAllowed("test/core.test.mjs", ["test/*.mjs"]), true);
+  assert.equal(pathAllowed("src/example.mjs", ["src/**/*.mjs"]), true);
+  assert.equal(pathAllowed("src/infra/example.mjs", ["src/**/*.mjs"]), true);
   assert.equal(pathAllowed("src/index.js.map", ["src/index.js"]), false);
   assert.equal(pathAllowed("docs/plan.md", ["src/**"]), false);
   assert.equal(pathAllowed("src/index.js", []), false);
@@ -3001,7 +3053,7 @@ test("dashboard API drives task, inbox, and summary operations without bypassing
       const claimed = await postJson(`${baseUrl}/api/tasks/claim`, { taskId: "T001", owner: "YingLong" }, { headers: authHeaders });
       assert.equal(claimed.response.status, 200);
       assert.equal(claimed.body.result.task.status, "in_progress");
-      assert.equal(claimed.body.result.task.owner, "YingLong");
+      assert.equal(claimed.body.result.task.owner, "Jiuwei");
 
       const task = await fetchJson(`${baseUrl}/api/tasks/T001`);
       assert.equal(task.response.status, 200);
@@ -3019,7 +3071,7 @@ test("dashboard API drives task, inbox, and summary operations without bypassing
         body: "Continue T001 from dashboard.",
       }, { headers: authHeaders });
       assert.equal(message.response.status, 200);
-      assert.equal(message.body.result.to, "YingLong");
+      assert.equal(message.body.result.to, "Jiuwei");
 
       const inbox = await fetchJson(`${baseUrl}/api/team/inbox?agent=YingLong`);
       assert.equal(inbox.response.status, 200);
