@@ -189,6 +189,11 @@ export const DEFAULT_HELIX_CONFIG = {
   commandSafety: {
     extraPatterns: [],
   },
+  // 汇报分级：verbose = 每次 run 结束输出一次门决策汇总（框架初期默认，
+  // 让人能审判每一条门决策）；随信任建立可降 normal（一行）/ quiet（只 JSON）。
+  reporting: {
+    verbosity: "verbose",
+  },
   planApproval: {
     required: false,
   },
@@ -351,9 +356,36 @@ export async function writeDefaultHelixConfig(rootDir, options = {}) {
   if (!options.force && existsSync(targetPath)) {
     return { path: path.relative(rootDir, targetPath), created: false, config: await readJson(targetPath) };
   }
-  await writeJsonAtomic(targetPath, DEFAULT_HELIX_CONFIG);
-  await appendLedger(rootDir, { type: "config_written", configPath: path.relative(rootDir, targetPath), root: options.root === true });
-  return { path: path.relative(rootDir, targetPath), created: true, config: DEFAULT_HELIX_CONFIG };
+  const config = options.armed === true ? buildArmedConfig() : DEFAULT_HELIX_CONFIG;
+  await writeJsonAtomic(targetPath, config);
+  await appendLedger(rootDir, { type: "config_written", configPath: path.relative(rootDir, targetPath), root: options.root === true, armed: options.armed === true });
+  return { path: path.relative(rootDir, targetPath), created: true, config };
+}
+
+/**
+ * `config init --armed`：写出一份「门已武装」的配置——commentChecker 阻断发现
+ * （无需任何外部工具即可构成独立复核信号与 required 质量门），lspDiagnostics
+ * 留好命令位等用户填项目真实的 typecheck/test 命令。默认配置故意不武装
+ * （黄灯提醒），--armed 是给「我知道自己在做什么」的显式入口。
+ */
+function buildArmedConfig() {
+  return {
+    ...DEFAULT_HELIX_CONFIG,
+    qualityGates: {
+      ...DEFAULT_HELIX_CONFIG.qualityGates,
+      lspDiagnostics: {
+        ...DEFAULT_HELIX_CONFIG.qualityGates?.lspDiagnostics,
+        enabled: true,
+        required: true,
+        commands: ["node --test"],
+      },
+      commentChecker: {
+        ...DEFAULT_HELIX_CONFIG.qualityGates?.commentChecker,
+        enabled: true,
+        blockOnFindings: true,
+      },
+    },
+  };
 }
 
 function normalizeRuntimeConfig(config) {
@@ -371,6 +403,11 @@ function normalizeRuntimeConfig(config) {
       },
     };
   }
+  const verbosity = String(normalized.reporting?.verbosity || "verbose").trim().toLowerCase();
+  if (!["verbose", "normal", "quiet"].includes(verbosity)) {
+    throw new Error(`reporting.verbosity must be verbose, normal, or quiet; received ${normalized.reporting?.verbosity}`);
+  }
+  normalized.reporting = { ...normalized.reporting, verbosity };
   return normalized;
 }
 

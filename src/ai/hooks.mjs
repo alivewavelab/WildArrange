@@ -16,6 +16,7 @@ import {
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
+import { emitDecision } from "../infra/decision-log.mjs";
 import { initRuntime } from "../infra/runtime-bootstrap.mjs";
 import { pathAllowed } from "../infra/path-match.mjs";
 import { invokeCapability } from "../capabilities/gateway.mjs";
@@ -149,7 +150,35 @@ export async function runInjectionHook(rootDir, input = {}) {
     decision: result.decision,
     outputChars: output.length,
   });
+  // 决策投影：每次拦截/放行都进 decisions.jsonl，供 helix decisions 与
+  // 异步审查 Agent 复盘。best-effort，不反噬 hook 主流程。
+  if (result.decision) {
+    try {
+      await emitDecision(hookRootDir, {
+        gate: pointName,
+        decision: result.decision,
+        code: hookDecisionCode(facts.preflight, facts.resultGate),
+        reason: facts.preflight?.reason || facts.resultGate?.summary || null,
+        summary: `${input.tool_name || event}${targetPaths.length > 0 ? ` ${targetPaths.join(", ")}` : ""} -> ${result.decision}`,
+        evidencePath: result.reportJsonPath,
+        taskId: taskId || null,
+        sessionId,
+        // 拦截与非通过的结果门进标注队列；确定性 allow/pass 只进流水。
+        annotatable: result.decision !== "allow" && result.decision !== "pass",
+      });
+    } catch {
+      // 决策日志是派生物，任何故障都不反噬 hook 主流程。
+    }
+  }
   return result;
+}
+
+// code 是结构化字段，由 preToolUseGuard 的返回直接携带；绝不能从
+// reason 散文反推（改文案就会静默丢失投影的"命中规则"）。
+function hookDecisionCode(preflight, resultGate) {
+  if (preflight?.code) return preflight.code;
+  if (resultGate && resultGate.decision !== "pass") return "tool_result_gate";
+  return null;
 }
 
 export async function preToolUseGuard(rootDir, input = {}) {
@@ -178,6 +207,7 @@ export async function preToolUseGuard(rootDir, input = {}) {
         kind: "pre_tool_use_guard",
         at: nowIso(),
         decision: "deny",
+        code: "high_risk_command",
         reason,
         toolName,
         taskId: normalizeHookTaskId(input) || null,
@@ -192,6 +222,7 @@ export async function preToolUseGuard(rootDir, input = {}) {
       kind: "pre_tool_use_guard",
       at: nowIso(),
       decision: "deny",
+      code: "invalid_create_goal",
       reason: "Use create_goal with objective only. Put lifecycle status changes on update_goal.",
       toolName,
       taskId: null,
@@ -213,6 +244,7 @@ export async function preToolUseGuard(rootDir, input = {}) {
       kind: "pre_tool_use_guard",
       at: nowIso(),
       decision: "allow",
+      code: "no_file_target",
       reason: "no project file target detected",
       toolName,
       taskId: task?.id || taskId || null,
@@ -232,6 +264,7 @@ export async function preToolUseGuard(rootDir, input = {}) {
       kind: "pre_tool_use_guard",
       at: nowIso(),
       decision: "deny",
+      code: "no_active_task",
       reason: `file target detected but no active ${PRODUCT_NAME} task was found; create/import a plan task before editing files`,
       toolName,
       taskId: taskId || null,
@@ -258,6 +291,7 @@ export async function preToolUseGuard(rootDir, input = {}) {
     kind: "pre_tool_use_guard",
     at: nowIso(),
     decision,
+    code: deniedPaths.length > 0 ? "out_of_scope" : "in_scope",
     reason,
     toolName,
     taskId: task.id,

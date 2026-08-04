@@ -19,10 +19,13 @@
   "files": [
     "README.md",
     "README.en.md",
+    "使用说明书.md",
     ".env.wildarrange.example",
     "bin/",
     "src/",
     "packs/",
+    "doc/",
+    "examples/",
     "helix.config.example.json",
     "CLAUDE.md"
   ],

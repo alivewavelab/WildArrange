@@ -253,7 +253,8 @@ async function checkDocumentedCliCommands(rootDir, pairs, findings) {
   if (!existsSync(binPath)) return;
   let helpText = "";
   try {
-    const result = await execFileAsync(process.execPath, [binPath, "--help"], {
+    // CLI 分层后默认 --help 只显示核心六命令；文档真实性必须对照完整注册表。
+    const result = await execFileAsync(process.execPath, [binPath, "--help", "--all"], {
       cwd: rootDir,
       timeout: 10_000,
       maxBuffer: 2 * 1024 * 1024,

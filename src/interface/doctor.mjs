@@ -5,7 +5,6 @@ import {
   DEFAULT_HELIX_CONFIG,
   loadHelixConfig,
 } from "../infra/runtime-config.mjs";
-import { appendLedger } from "../infra/ledger.mjs";
 import {
   ensureHelixDirs,
   nowIso,
@@ -17,6 +16,8 @@ import { readVerifiedLedgerEntries, verifyLedger } from "../infra/ledger.mjs";
 import { isPossibleNoopTask, isTrivialCommand } from "../infra/task-predicates.mjs";
 import { loadTaskState } from "../infra/task-state-store.mjs";
 import { listRuntimeStateBackups, verifyConfigBaseline, verifyRuntimeState } from "../infra/security.mjs";
+import { evaluateGateArming } from "../infra/gate-arming.mjs";
+import { projectDecisionStats } from "./decisions.mjs";
 
 const COMPLETION_LEDGER_EVENT_TYPES = new Set([
   "task_verified",
@@ -24,17 +25,35 @@ const COMPLETION_LEDGER_EVENT_TYPES = new Set([
   "parallel_agent_admission_completed",
 ]);
 
+// 诊断与门控分离：每个检查独立 try/catch，单项崩溃只把自己的分项标红，
+// 其余分项照常输出；doctor 不再写 hash 链 ledger（诊断不该抢门控的锁）。
+const SECTION_CHECKS = [
+  ["config", checkConfigStructure],
+  ["gateArming", checkGateArming],
+  ["adapters", checkAdapters],
+  ["completionAudit", checkCompletionIntegrity],
+  ["ledger", checkLedgerIntegrity],
+  ["ledgerBackupCrossCheck", checkLedgerAgainstBackup],
+  ["configBaseline", checkConfigBaseline],
+  ["runtimeState", checkRuntimeState],
+  ["repositoryGovernance", checkRepositoryGovernance],
+  ["decisionHealth", checkDecisionHealth],
+];
+
 export async function runDoctor(rootDir) {
   await ensureHelixDirs(rootDir);
   const findings = [];
+  const sections = {};
 
-  const configSection = await checkConfigStructure(rootDir, findings);
-  const completionSection = await checkCompletionIntegrity(rootDir, findings);
-  const ledgerSection = await checkLedgerIntegrity(rootDir, findings);
-  const backupSection = await checkLedgerAgainstBackup(rootDir, findings);
-  const baselineSection = await checkConfigBaseline(rootDir, findings);
-  const stateSection = await checkRuntimeState(rootDir, findings);
-  const governanceSection = await checkRepositoryGovernance(rootDir, findings);
+  for (const [name, check] of SECTION_CHECKS) {
+    try {
+      sections[name] = await check(rootDir, findings);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      addFinding(findings, "error", name, `doctor check "${name}" itself failed: ${message}`, { checkFailed: true });
+      sections[name] = { status: "check_failed", error: message };
+    }
+  }
 
   const report = {
     kind: "doctor_report",
@@ -43,15 +62,7 @@ export async function runDoctor(rootDir) {
     errorCount: findings.filter((finding) => finding.severity === "error").length,
     warnCount: findings.filter((finding) => finding.severity === "warn").length,
     findings,
-    sections: {
-      config: configSection,
-      completionAudit: completionSection,
-      ledger: ledgerSection,
-      ledgerBackupCrossCheck: backupSection,
-      configBaseline: baselineSection,
-      runtimeState: stateSection,
-      repositoryGovernance: governanceSection,
-    },
+    sections,
   };
 
   const jsonPath = resolveHelixPath(rootDir, "reports", "doctor.json");
@@ -60,13 +71,6 @@ export async function runDoctor(rootDir) {
   report.reportMdPath = path.relative(rootDir, mdPath);
   await writeJsonAtomic(jsonPath, report);
   await writeFile(mdPath, renderDoctorMarkdown(report), "utf8");
-  await appendLedger(rootDir, {
-    type: "doctor_completed",
-    ok: report.ok,
-    errorCount: report.errorCount,
-    warnCount: report.warnCount,
-    reportPath: report.reportMdPath,
-  });
   return report;
 }
 
@@ -340,6 +344,107 @@ async function checkRuntimeState(rootDir, findings) {
   return { status: result.status, failureCount: (result.failures || []).length };
 }
 
+// 门武装分项：门未武装时 acceptance-proof 的 review_not_tautological 会把任务
+// 挡在 completed 之外——doctor 必须把这件事摆到台面上，而不是埋在 status JSON 里。
+async function checkGateArming(rootDir, findings) {
+  const { config } = await loadHelixConfig(rootDir);
+  const taskState = await loadTaskState(rootDir).catch(() => null);
+  const arming = evaluateGateArming({ config, tasks: taskState?.tasks || [] });
+  for (const issue of arming.issues) {
+    addFinding(findings, "warn", "gate_arming", `${issue.message}${issue.next_action ? `（${issue.next_action}）` : ""}`, { code: issue.code });
+  }
+  return { status: arming.armed ? "ok" : "warn", armed: arming.armed, issueCount: arming.issues.length };
+}
+
+// Adapter 分项：硬拦截装没装、装得对不对，必须有体检。`.cursor/` 不进 git，
+// 团队成员各自跑 adapter install，漏装的人机器上 AI 不受约束——这里兜底发现。
+async function checkAdapters(rootDir, findings) {
+  const { config, sourcePath } = await loadHelixConfig(rootDir);
+  if (!sourcePath) {
+    return { status: "skipped", reason: "no helix.config.json; adapter checks only run for configured projects" };
+  }
+  const targets = [];
+  const cursorEnabled = config.adapters?.cursor?.enabled === true;
+  const codexEnabled = config.adapters?.codex?.enabled === true;
+  const kimiEnabled = config.adapters?.kimi?.enabled === true;
+
+  if (cursorEnabled) {
+    const hooksPath = path.join(rootDir, ".cursor", "hooks.json");
+    const bridgePath = path.join(rootDir, ".cursor", "hooks", "wildarrange-hook-bridge.mjs");
+    if (!existsSync(hooksPath)) {
+      addFinding(findings, "warn", "adapters", "config 启用了 Cursor adapter 但 .cursor/hooks.json 不存在，本机没有硬拦截", { target: "cursor", nextAction: "node ./bin/helix.mjs adapter install --target cursor" });
+      targets.push({ target: "cursor", installed: false });
+    } else {
+      const raw = await readFile(hooksPath, "utf8").catch(() => "");
+      const referencesBridge = raw.includes("wildarrange-hook-bridge");
+      const bridgeExists = existsSync(bridgePath);
+      if (!referencesBridge || !bridgeExists) {
+        addFinding(findings, "warn", "adapters", ".cursor/hooks.json 未引用 bridge 或 bridge 文件缺失，硬拦截不完整", { target: "cursor", nextAction: "重新运行 node ./bin/helix.mjs adapter install --target cursor" });
+      }
+      targets.push({ target: "cursor", installed: referencesBridge && bridgeExists });
+    }
+  }
+  if (codexEnabled) {
+    const codexHooks = path.join(rootDir, ".codex", "hooks.json");
+    const installed = existsSync(codexHooks);
+    if (!installed) {
+      addFinding(findings, "warn", "adapters", "config 启用了 Codex adapter 但 .codex/hooks.json 不存在，本机没有硬拦截", { target: "codex", nextAction: "node ./bin/helix.mjs adapter install --target codex" });
+    }
+    targets.push({ target: "codex", installed });
+  }
+  if (kimiEnabled) {
+    const kimiBridge = resolveHelixPath(rootDir, "adapters", "kimi", "plugin", "hooks", "wildarrange-hook-bridge.mjs");
+    const installed = existsSync(kimiBridge);
+    if (!installed) {
+      addFinding(findings, "warn", "adapters", "config 启用了 Kimi adapter 但 plugin bridge 不存在", { target: "kimi", nextAction: "node ./bin/helix.mjs adapter install --target kimi" });
+    }
+    targets.push({ target: "kimi", installed });
+  }
+
+  // 陈旧规则检测：规则文件里指向不存在绝对路径的命令（如换机/换用户名后的
+  // 残留）会静默失效——注入给每个 Agent 的治理规则指向一条跑不通的路径。
+  const rulesDir = path.join(rootDir, ".cursor", "rules");
+  const staleRules = [];
+  if (existsSync(rulesDir)) {
+    const { readdir } = await import("node:fs/promises");
+    for (const entry of await readdir(rulesDir)) {
+      if (!entry.endsWith(".mdc")) continue;
+      const content = await readFile(path.join(rulesDir, entry), "utf8").catch(() => "");
+      for (const match of content.matchAll(/\/Users\/[^\s"')`]+/g)) {
+        if (!existsSync(match[0])) staleRules.push({ file: `.cursor/rules/${entry}`, missingPath: match[0] });
+      }
+    }
+  }
+  for (const stale of staleRules) {
+    addFinding(findings, "warn", "adapters", `${stale.file} 引用了不存在的路径 ${stale.missingPath}（规则会静默失效）`, { target: "cursor", nextAction: "修正为相对路径或当前机器的有效路径" });
+  }
+
+  const uninstalled = targets.filter((target) => !target.installed).length;
+  return {
+    status: uninstalled > 0 || staleRules.length > 0 ? "warn" : "ok",
+    targets,
+    staleRules,
+  };
+}
+
+// 周期健康摘要：门决策计数（纯计数不出率）、坏行与孤儿标注预警。
+async function checkDecisionHealth(rootDir, findings) {
+  const stats = await projectDecisionStats(rootDir);
+  if (stats.skippedLines > 0) {
+    addFinding(findings, "warn", "decision_health", `decisions.jsonl has ${stats.skippedLines} corrupt line(s) skipped on read`, { skippedLines: stats.skippedLines });
+  }
+  if (stats.annotations.unmatchedCount > 0) {
+    addFinding(findings, "warn", "decision_health", `${stats.annotations.unmatchedCount} annotation(s) point at decisions no longer present (log truncated?)`, { unmatchedCount: stats.annotations.unmatchedCount });
+  }
+  return {
+    status: "ok",
+    totalDecisions: stats.total,
+    gates: stats.gates.map((gate) => ({ gate: gate.gate, total: gate.total, decisions: gate.decisions })),
+    neverFiredGates: stats.neverFiredGates,
+    annotations: { total: stats.annotations.total, unmatchedCount: stats.annotations.unmatchedCount },
+  };
+}
+
 async function checkRepositoryGovernance(rootDir, findings) {
   const reportPath = resolveHelixPath(rootDir, "reports", "governance", "latest.json");
   const report = await readJson(reportPath, null);
@@ -380,20 +485,26 @@ function renderDoctorMarkdown(report) {
     }
   }
   lines.push("", "## Sections", "");
-  lines.push(`- Config source: ${report.sections.config.sourcePath}`);
-  lines.push(`- Completed tasks audited: ${report.sections.completionAudit.checkedCompleted}`);
-  lines.push(`- Ledger entries checked: ${report.sections.ledger.checked} (legacy: ${report.sections.ledger.legacy})`);
-  if (report.sections.ledgerBackupCrossCheck.checked) {
-    lines.push(`- Ledger vs backup ${report.sections.ledgerBackupCrossCheck.backupId}: ${report.sections.ledgerBackupCrossCheck.prefixIntact ? "history intact" : "HISTORY DIVERGED"}`);
-  } else {
-    lines.push(`- Ledger vs backup: not checked (${report.sections.ledgerBackupCrossCheck.reason})`);
-  }
-  lines.push(`- Config baseline: ${report.sections.configBaseline.status}`);
-  lines.push(`- Runtime state: ${report.sections.runtimeState.status}`);
-  if (report.sections.repositoryGovernance.checked) {
-    lines.push(`- Repository governance: ${report.sections.repositoryGovernance.status} (${report.sections.repositoryGovernance.findingCount} findings)`);
-  } else {
-    lines.push("- Repository governance: not run");
-  }
+  lines.push(`- Config source: ${sectionValue(report.sections.config, (s) => s.sourcePath)}`);
+  lines.push(`- Gate arming: ${sectionValue(report.sections.gateArming, (s) => s.armed ? "armed" : `NOT ARMED (${s.issueCount} issue(s))`)}`);
+  lines.push(`- Adapters: ${sectionValue(report.sections.adapters, (s) => s.status === "skipped" ? `skipped (${s.reason})` : `${(s.targets || []).map((target) => `${target.target}:${target.installed ? "installed" : "MISSING"}`).join(", ") || "none enabled"}${(s.staleRules || []).length ? `, stale rules: ${s.staleRules.length}` : ""}`)}`);
+  lines.push(`- Completed tasks audited: ${sectionValue(report.sections.completionAudit, (s) => s.checkedCompleted)}`);
+  lines.push(`- Ledger entries checked: ${sectionValue(report.sections.ledger, (s) => `${s.checked} (legacy: ${s.legacy})`)}`);
+  lines.push(`- Ledger vs backup: ${sectionValue(report.sections.ledgerBackupCrossCheck, (s) => s.checked ? `${s.backupId}: ${s.prefixIntact ? "history intact" : "HISTORY DIVERGED"}` : `not checked (${s.reason})`)}`);
+  lines.push(`- Config baseline: ${sectionValue(report.sections.configBaseline, (s) => s.status)}`);
+  lines.push(`- Runtime state: ${sectionValue(report.sections.runtimeState, (s) => s.status)}`);
+  lines.push(`- Repository governance: ${sectionValue(report.sections.repositoryGovernance, (s) => s.checked ? `${s.status} (${s.findingCount} findings)` : "not run")}`);
+  lines.push(`- Decision health: ${sectionValue(report.sections.decisionHealth, (s) => `${s.totalDecisions} decisions, never-fired gates: ${(s.neverFiredGates || []).join(", ") || "none"}, annotations: ${s.annotations?.total ?? 0} (orphans: ${s.annotations?.unmatchedCount ?? 0})`)}`);
   return `${lines.join("\n")}\n`;
+}
+
+function sectionValue(section, render) {
+  if (!section) return "not run";
+  if (section.status === "check_failed") return `CHECK FAILED (${section.error})`;
+  try {
+    const value = render(section);
+    return value === undefined || value === null ? "unknown" : String(value);
+  } catch {
+    return "unknown";
+  }
 }

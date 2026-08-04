@@ -7,12 +7,15 @@ import {
   resolveHelixPath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
-import { isPossibleNoopTask } from "../infra/task-predicates.mjs";
+import { isPossibleNoopTask, isTrivialCommand } from "../infra/task-predicates.mjs";
 import { criteriaStatus } from "../infra/success-criteria.mjs";
+import { hasRealReviewLane } from "../infra/gate-arming.mjs";
+import { loadHelixConfig } from "../infra/runtime-config.mjs";
 
 export async function writeAcceptanceProof(rootDir, planId, task, evidence = {}) {
   await ensureHelixDirs(rootDir);
-  const proof = buildAcceptanceProof(planId, task, evidence);
+  const { config } = await loadHelixConfig(rootDir);
+  const proof = buildAcceptanceProof(planId, task, evidence, config);
   const basePath = resolveHelixPath(rootDir, "reports", "acceptance", `${planId}-${task.id}`);
   const jsonPath = `${basePath}.json`;
   const mdPath = `${basePath}.md`;
@@ -30,7 +33,7 @@ export async function writeAcceptanceProof(rootDir, planId, task, evidence = {})
   return proof;
 }
 
-export function buildAcceptanceProof(planId, task, evidence = {}) {
+export function buildAcceptanceProof(planId, task, evidence = {}, config = null) {
   const verifyResult = evidence.verifyResult || task.last_verify_result || latestEvidence(task, "verifier");
   const scopeResult = evidence.scopeResult || task.last_scope_result || latestEvidence(task, "scope_guard");
   const reviewResult = evidence.reviewResult || task.last_review_result || latestEvidence(task, "review_gate");
@@ -47,6 +50,12 @@ export function buildAcceptanceProof(planId, task, evidence = {}) {
     proofCheck("verify_commands_present", verifyCommands.length > 0, {
       evidence: `${verifyCommands.length} verify command(s)`,
       requiredFix: "补充不可为空的 verify_commands，不允许清空验收门。",
+    }),
+    proofCheck("verify_not_trivial", verifyCommands.some((command) => !isTrivialCommand(command)), {
+      evidence: verifyCommands.some((command) => !isTrivialCommand(command))
+        ? "at least one verify command exercises real behavior"
+        : "every verify command is trivial (e.g. `true`); the verification proves nothing",
+      requiredFix: "把 verify_commands 换成覆盖真实行为的命令；trivial 验证不能作为完成证据。",
     }),
     proofCheck("not_noop_task", !isPossibleNoopTask(task), {
       evidence: isPossibleNoopTask(task)
@@ -77,6 +86,14 @@ export function buildAcceptanceProof(planId, task, evidence = {}) {
     proofCheck("review_lanes_complete", reviewLanes.length > 0 && reviewLanes.every((lane) => lane.status !== "fail"), {
       evidence: reviewLanes.length > 0 ? reviewLanes.map((lane) => `${lane.name}:${lane.status}`).join(", ") : "missing review lanes",
       requiredFix: "确保 BaiZe 的独立复核 lane 都有可审计结果。",
+    }),
+    // 与 verify_not_trivial 同类：同义反复的复核是「门在撒谎」——没有任何
+    // 独立信号 lane 时 review PASS 不证明任何东西，不得进入 completed。
+    proofCheck("review_not_tautological", hasRealReviewLane(task, config), {
+      evidence: hasRealReviewLane(task, config)
+        ? "review gate has at least one independent signal lane"
+        : "no review_commands / standards_commands / LLM review / enabled quality gate: the review adds no independent signal beyond verify itself",
+      requiredFix: "为任务配置 review_commands 或 standards_commands，或启用 review.llm / 质量门（qualityGates.*.enabled）；同义反复的复核不能作为完成证据。",
     }),
   ];
 

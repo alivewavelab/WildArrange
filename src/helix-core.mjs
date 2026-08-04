@@ -69,6 +69,7 @@ export {
 } from "./helix-code-intel.mjs";
 export { buildAgentContext, continuationDirective, recordRuntimeSession, resumeReport, writeContextSnapshot } from "./ai/context.mjs";
 export { preToolUseGuard, runInjectionHook } from "./ai/hooks.mjs";
+export { runSuspicionReview } from "./ai/suspicion-review.mjs";
 export { detectToolResultFindings, evaluateHookResultGate } from "./helix-hook-result-gate.mjs";
 export { resolveInjectionPoint } from "./helix-injection.mjs";
 export { matchSkills, resolvePromptVariant } from "./helix-skill-matcher.mjs";
@@ -122,6 +123,7 @@ export {
   closeParallelAgentRun,
   listParallelAgentRuns,
   parallelAgentStatus,
+  retryParallelAgentRun,
   runParallelAgents,
 } from "./helix-parallel-agents.mjs";
 export {
@@ -156,3 +158,11 @@ export {
   writeReviewReport,
 } from "./helix-gates.mjs";
 export { compileCommandSafetyPatterns, evaluateCommandSafety } from "./helix-command-safety.mjs";
+export { buildErrorProtocol, errorProtocolOf, formatErrorInline, helixError } from "./infra/error-protocol.mjs";
+export { computeImpact, computeZoneTests, listRepoTests } from "./infra/dependency-graph.mjs";
+export {
+  ANNOTATION_CATEGORIES,
+  annotationStats,
+  appendAnnotation,
+  readAnnotations,
+} from "./infra/annotation-log.mjs";

@@ -1,6 +1,7 @@
 # 五区受控解耦准则（可复用版）
 
-> 适用于带 CLI、工作流编排、AI 策略、原子能力和本地基础设施的 Agent/自动化项目。本文只定义可复用的架构治理规则，不绑定 WildArrange 的具体业务名称。
+> 适用于带 CLI、工作流编排、AI 策略、原子能力和本地基础设施的 Agent/自动化项目。本文只定义可复用的架构治理规则，不绑定 WildArrange 的具体业务名称。  
+> 人与 AI 的分工、日常掌控流程与成熟度分级见 [low-code-project-governance.md](./low-code-project-governance.md)。
 
 ## 1. 一句话原则
 

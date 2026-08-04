@@ -12,6 +12,9 @@
       "verify_commands": [
         "node -e \"const fs=require('fs'); const s=fs.readFileSync('src/frontend/hello.js','utf8'); if(!s.includes('HELLO')) process.exit(1)\""
       ],
+      "review_commands": [
+        "node -e \"const fs=require('fs'); const s=fs.readFileSync('src/frontend/hello.js','utf8'); if(!s.includes('export')) { console.error('review: frontend artifact missing export'); process.exit(1); }\""
+      ],
       "successCriteria": [
         {
           "id": "C001",
@@ -32,6 +35,9 @@
       "worker_command": "node -e \"const fs=require('fs'); fs.mkdirSync('src/backend',{recursive:true}); fs.writeFileSync('src/backend/health.js','module.exports.HEALTH = 200;\\n')\"",
       "verify_commands": [
         "node -e \"const fs=require('fs'); const s=fs.readFileSync('src/backend/health.js','utf8'); if(!s.includes('HEALTH')) process.exit(1)\""
+      ],
+      "review_commands": [
+        "node -e \"const fs=require('fs'); const s=fs.readFileSync('src/backend/health.js','utf8'); if(!s.includes('module.exports')) { console.error('review: backend artifact missing export'); process.exit(1); }\""
       ],
       "successCriteria": [
         {

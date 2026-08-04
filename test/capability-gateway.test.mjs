@@ -37,6 +37,7 @@ async function importSingleTaskPlan(dir, { verifyCommand, writablePaths = ["src/
           id: "T001",
           subject: "Exercise the shared delivery pipeline",
           verify_commands: [verifyCommand],
+          review_commands: ["node --version"],
           writable_paths: writablePaths,
         },
       ],
@@ -96,7 +97,7 @@ test("delivery pipeline: runs verify -> scope -> review -> acceptance-proof -> c
   await withTempDir(async (dir) => {
     await initRuntime(dir);
     assert.equal((await runCommand("git init", dir)).exitCode, 0);
-    const plan = await importSingleTaskPlan(dir, { verifyCommand: nodeEval("process.exit(0)") });
+    const plan = await importSingleTaskPlan(dir, { verifyCommand: nodeEval("if(!process.version)process.exit(1)") });
     const taskState = await loadTaskState(dir);
     const task = taskState.tasks.find((candidate) => candidate.id === "T001");
 

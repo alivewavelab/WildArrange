@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, readFile, readdir, stat } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { HELIX_CONFIG_FILE } from "./runtime-config.mjs";
 import { appendLedger } from "./ledger.mjs";
@@ -16,6 +16,9 @@ import {
 const CONFIG_BASELINE_PATH = ["security", "config-baseline.json"];
 const BACKUP_STATE_FILES = [
   [".helix", "ledger.jsonl"],
+  // 尾 hash 缓存必须与 ledger 同进同出，否则恢复后缓存尺寸对不上会被
+  // fail-closed 当成截断。
+  [".helix", "ledger-tail.json"],
   [".helix", "work.json"],
   [".helix", "team", "tasks.json"],
   [".helix", "snapshots", "context.json"],
@@ -182,6 +185,12 @@ export async function restoreRuntimeStateBackup(rootDir, options = {}) {
     await mkdir(path.dirname(targetPath), { recursive: true });
     await copyFile(sourcePath, targetPath);
     restored.push(file.path);
+  }
+
+  // 旧备份没有尾 hash 缓存：ledger 被恢复而缓存未恢复时，删掉现场缓存，
+  // 让下一次追加回退到全量扫描，而不是误判 ledger_truncated。
+  if (restored.includes(".helix/ledger.jsonl") && !restored.includes(".helix/ledger-tail.json")) {
+    await unlink(resolveHelixPath(rootDir, "ledger-tail.json")).catch(() => undefined);
   }
 
   await appendLedger(rootDir, {

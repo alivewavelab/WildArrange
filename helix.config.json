@@ -185,9 +185,9 @@
   },
   "qualityGates": {
     "lspDiagnostics": {
-      "enabled": false,
-      "required": false,
-      "commands": [],
+      "enabled": true,
+      "required": true,
+      "commands": ["node --test test/dependency-boundary.test.mjs"],
       "timeoutMs": 120000
     },
     "commentChecker": {

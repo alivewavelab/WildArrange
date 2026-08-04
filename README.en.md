@@ -214,11 +214,14 @@ Create `plan.json`:
       "subject": "Write smoke artifact",
       "writable_paths": [".helix/artifacts/smoke.txt"],
       "worker_command": "node -e \"const fs=require('fs'); fs.mkdirSync('.helix/artifacts',{recursive:true}); fs.writeFileSync('.helix/artifacts/smoke.txt','ok\\n')\"",
-      "verify_commands": ["node -e \"const fs=require('fs'); if(fs.readFileSync('.helix/artifacts/smoke.txt','utf8').trim()!=='ok') process.exit(1)\""]
+      "verify_commands": ["node -e \"const fs=require('fs'); if(fs.readFileSync('.helix/artifacts/smoke.txt','utf8').trim()!=='ok') process.exit(1)\""],
+      "review_commands": ["node -e \"const fs=require('fs'); if(!fs.readFileSync('.helix/artifacts/smoke.txt','utf8').includes('ok')) process.exit(1)\""]
     }
   ]
 }
 ```
+
+> `review_commands` is required in practice: the acceptance proof refuses to complete a task whose review gate has no independent signal lane (a tautological review proves nothing). An independent signal is any of `review_commands` / `standards_commands` / `review.llm` / an enabled quality gate.
 
 Run it:
 
@@ -261,7 +264,7 @@ node ./bin/helix.mjs adapter restore --backup <backupId>
 Install, uninstall, and restore write reports under `.helix/adapters/`. Existing adapter files are backed up before overwrite or removal. `restore` copies files from `.helix/adapters/backups/<backupId>/` back to their original paths.
 
 - **Codex**: lifecycle hooks are written to `.codex/hooks.json`, with an audit copy at `.helix/adapters/codex/hooks.json`. Codex runs these hard hooks only after the trusted project layer and the hook definition are reviewed/trusted through `/hooks`.
-- **Cursor**: project rule at `.cursor/rules/wildarrange.mdc`. This is soft governance unless Cursor exposes a command lifecycle hook for the project.
+- **Cursor**: project hooks at `.cursor/hooks.json` (with the `.cursor/hooks/wildarrange-hook-bridge.mjs` bridge) load automatically in a trusted workspace; `preToolUse` (Write/Delete/Edit/Shell) and `beforeShellExecution` (integrated terminal commands) can hard-deny and are fail-closed. `.cursor/rules/wildarrange.mdc` remains as the soft rule layer.
 - **Kimi Code**: a project-specific plugin is generated under `.helix/adapters/kimi/plugin/`, while project instructions and Skills reuse `AGENTS.md` and `.agents/skills/`. WildArrange never silently edits the user-level `~/.kimi-code/config.toml`; start Kimi Code from the project root, run `/plugins install .helix/adapters/kimi/plugin`, then run `/reload`. Do not quote the path because Kimi Code 0.27 treats quote characters as part of the path. Although plugin installation is user-scoped, its bridge exits silently outside WildArrange projects.
 
 `adapter install` also generates shortcuts so you don't have to open a terminal for common operations. All three surfaces render from one shared command set (`helix-config` / `helix-doctor` / `helix-refresh` / `helix-status` / `helix-plan` / `helix-approve` / `helix-run`):
@@ -326,9 +329,40 @@ node ./bin/helix.mjs state list
 node ./bin/helix.mjs state restore --backup <backupId>
 node ./bin/helix.mjs doctor
 node ./bin/helix.mjs governance audit
+node ./bin/helix.mjs impact src/infra/ledger.mjs
+node ./bin/helix.mjs decisions --limit 20
+node ./bin/helix.mjs decisions stats
+node ./bin/helix.mjs timeline --limit 30
+node ./bin/helix.mjs annotate --decision <decisionId> --category rule_wrong --reason "..."
+node ./bin/helix.mjs annotate stats
+node ./bin/helix.mjs test --zone infra
+node ./bin/helix.mjs docs commands --write
+node ./bin/helix.mjs review suspicious
 ```
 
-`doctor` is a one-command health check: it validates config structure and mounts, reconciles completed tasks against checkpoints, acceptance proofs, and ledger events, verifies the ledger hash chain, and cross-checks the ledger against the latest backup to detect wholesale rewrites. `state restore` automatically takes a pre-restore backup first, so a bad restore can itself be undone.
+`doctor` is a one-command health check: it validates config structure and mounts, reconciles completed tasks against checkpoints, acceptance proofs, and ledger events, verifies the ledger hash chain, and cross-checks the ledger against the latest backup to detect wholesale rewrites; the `decisionHealth` section adds a periodic health summary (per-gate trigger counts, never-fired gates, corrupt-line and orphan-annotation warnings). The checks are isolated — a crashed check only marks its own section — and doctor is read-only diagnostics that never appends to the ledger. `state restore` automatically takes a pre-restore backup first, so a bad restore can itself be undone.
+
+`impact` is change impact analysis: it lists which files import a changed file directly or transitively, plus the tests that should run (always including the five-zone boundary test), so an AI edit can machine-prove "nothing else was touched".
+
+`decisions` is the decision projection: every allow/deny across the four seams — the delivery-pipeline gates, PreToolUse/PostToolUse interception, admission, and routing — is appended to `.helix/decisions.jsonl` (a derived, droppable, truncatable log outside the hash chain). The command renders each record as three lines — what happened, which rule fired, where the evidence lives — so humans and asynchronous review agents can audit every decision. Supports `--task` / `--gate` filters and `--format json`. The reader streams backwards from the file tail, so `--limit` bounds real memory usage; after long runs you can simply `truncate -s 0 .helix/decisions.jsonl` (truncate to zero, not to a half line — even then the writer self-heals with a newline and the reader skips the bad line).
+
+`test` is zoned test selection: `--zone <zone>` runs the tests that import the zone plus naming-paired tests plus the always-on boundary test; with file arguments it runs the impact-derived list; with no arguments it runs everything. The exit code passes through from `node --test`, so you run exactly what your change touches without memorizing the test matrix.
+
+`annotate` is the annotation feedback loop: records marked `annotatable` in the decisions projection (denials and non-deterministic allows; deterministic PASS records are flow-only) can be challenged with `annotate --decision <id> --category rule_wrong|case_wrong|mislabeled`. The category is forced, the reason optional; `annotate stats` aggregates by rule × category so a single annotation never hijacks a rule. **Annotations can never move gates** — the annotation path never writes config, `verify_commands`, or any gate switch (pinned by tests); only a human editing config moves a gate.
+
+`decisions stats` is the deterministic statistical review (pure code, re-runnable, no LLM): per-gate trigger counts broken down by decision and rule code, the **never-fired gates** (the most direct signal that a gate exists only on paper), and annotation joins. Cold-start outputs counts, never rates. `timeline` merges the ledger (hash-chain-verified entries only), decisions, and annotations into one reverse-chronological feed answering "what happened in this repo recently", with `--task` / `--source` filters.
+
+The CLI is layered: `--help` shows only the core six commands (init / plan / run / status / decisions / doctor) covering the daily loop; the full list lives behind `--help --all`. The single source of truth for the command inventory is the registry in `src/interface/cli-help.mjs`, materialized to `doc/generated/commands.md` via `docs commands --write`; the README command-truthfulness check compares against the full `--help --all` output.
+
+`review suspicious` is the LLM suspicion pass (asynchronous audit, archivist invariants): it sends only a sanitized conclusion packet (ids/gates/rule codes/summaries — never code blocks, raw diffs, or full command output) to the configured external provider, and any returned suspicion must anchor to a decisionId present in the packet (hallucinated ids are dropped and counted). Without a key it falls back deterministically and never blocks. Conclusions land only in `.helix/reports/suspicion.*` — **never in the completion chain, never in config, never on a gate switch**.
+
+The dashboard (`serve`) gains two read-only panels: a decision panel (recent three-line decision projections + gate trigger stats + never-fired gates) and an ops panel (gate-arming status, tasks.lock/ledger.lock holder inspection, log sizes, parallel-run reconciliation).
+
+The end-of-run gate summary is leveled by `reporting.verbosity`: the default `verbose` prints the per-gate three-line projection to stderr after each `run` (so every gate decision can be judged while the framework is new); once trust builds, set `normal` (one line) or `quiet` (JSON only). The machine-readable stdout JSON never changes across levels.
+
+After an interrupted parallel run, `parallel status --run <runId>` shows `batchStatus` and `incompleteTasks` (claimed tasks with no passing result); `parallel retry --run <runId>` re-runs only the tasks that never passed (reusing the recorded command, overridable with `--command`), skipping tasks already passed, completed, or claimed by another run — the retry is a new run and never rewrites the original run's evidence.
+
+Every `status` output carries a persistent `gateArming` yellow lamp: under default configs (all quality gates off, no independent review signal) it reports "gates not armed" with remediation guidance, so an all-green gate stream that proves nothing cannot be mistaken for a healthy project. The acceptance proof enforces two hard floors: it refuses tasks whose `verify_commands` are all trivial (e.g. `true`), and it refuses tasks whose review gate has no independent signal lane (no `review_commands` / `standards_commands` / `review.llm` / enabled quality gate) — a tautological review proves nothing and must not reach completed. `config init --armed` writes a config with armed quality gates (blocking commentChecker + an lspDiagnostics command slot). `doctor` carries dedicated `gateArming` and `adapters` sections: unarmed gates, enabled adapters whose hooks are not installed on this machine, and rule files referencing paths that no longer exist all surface in the report.
 
 `governance audit` is LuWu's read-only inspection. It checks directory-level `AGENTS.md`, Chinese/English README command parity, Prompt Pack registration, naming, and actual code comments, then writes evidence under `.helix/reports/governance/`. With `--changed-only`, only changed files and the related ancestor rules, paired docs, and architecture ledgers are inspected; if Git changes cannot be read, the audit safely falls back to a full scan. LuWu never moves, renames, or deletes project files automatically, and the runtime rejects LuWu, DiJiang, or BaiZe from command workers.
 

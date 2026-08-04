@@ -6,6 +6,7 @@
  */
 import { DEFAULT_LEAD_AGENT } from "../infra/agent-registry.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
+import { emitDecision } from "../infra/decision-log.mjs";
 import { initRuntime } from "../infra/runtime-bootstrap.mjs";
 import { loadHelixConfig } from "../infra/runtime-config.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
@@ -35,6 +36,19 @@ export async function routeRequest(rootDir, input) {
     routeAdjusted: result.routeAdjusted || false,
   });
   await writeSnapshot(rootDir, "route_decided", { route: result });
+  // 决策投影：路由是四个决策缝之一。best-effort，不反噬路由主流程。
+  await emitDecision(rootDir, {
+    gate: "routing",
+    decision: result.route,
+    code: result.category || null,
+    reason: `intent=${result.intent} domain=${result.domain} confidence=${result.confidence}`
+      + ` semantic=${result.semanticShadow?.status || "off"} adjusted=${result.routeAdjusted === true}`,
+    summary: text.length > 120 ? `${text.slice(0, 120)}…` : text,
+    // 纯确定性路由（shadow skipped）只进流水；shadow 真正给出第二意见
+    // （含 warn 降级）或调整了路由的，属于非确定性放行，进标注队列。
+    annotatable: result.routeAdjusted === true
+      || (result.semanticShadow?.status !== undefined && result.semanticShadow?.status !== "skipped"),
+  });
   return result;
 }
 

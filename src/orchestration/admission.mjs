@@ -19,6 +19,7 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
+import { emitDecision } from "../infra/decision-log.mjs";
 import {
   ensureHelixDirs,
   nowIso,
@@ -98,6 +99,13 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
       appliedPaths: claim.appliedPaths,
       resumed: true,
     });
+    await emitAdmissionDecision(rootDir, options, {
+      status: "completed",
+      appliedPaths: claim.appliedPaths,
+      rollback: null,
+      acceptanceProof: null,
+      note: "resumed after a previously interrupted admission",
+    });
     return {
       kind: "parallel_agent_admission",
       runId: options.runId,
@@ -155,6 +163,7 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
       rollback: finalized.rollback,
     });
   });
+  await emitAdmissionDecision(rootDir, options, finalized);
   return {
     kind: "parallel_agent_admission",
     runId: options.runId,
@@ -170,6 +179,23 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
     sideEffectWarnings,
     task: finalized.task,
   };
+}
+
+/** 决策投影：admission 是四个决策缝之一，结果（含回滚原因）进 decisions.jsonl。 */
+async function emitAdmissionDecision(rootDir, options, finalized) {
+  const rollback = finalized.rollback || null;
+  await emitDecision(rootDir, {
+    gate: "admission",
+    decision: finalized.status,
+    code: rollback?.status === "rollback_failed" ? "rollback_failed" : finalized.status === "completed" ? null : finalized.status,
+    reason: finalized.note || rollback?.error || (rollback ? `rollback: ${rollback.status}` : null),
+    summary: `admit run ${options.runId} task ${options.taskId} -> ${finalized.status}${finalized.appliedPaths?.length ? ` (${finalized.appliedPaths.length} paths)` : ""}`,
+    evidencePath: finalized.acceptanceProof?.reportMdPath || finalized.acceptanceProof?.reportJsonPath || null,
+    taskId: options.taskId,
+    runId: options.runId,
+    // admission 是归属决策（非确定性放行）且失败即拦截：全部进标注队列。
+    annotatable: true,
+  });
 }
 
 /** Phase 1 body — runs under the task-state lock. */
@@ -565,6 +591,7 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
   const pipelineResult = await runDeliveryPipeline(rootDir, taskState.planId, task, {
     initialEvidence: { workerResult },
     changedPaths: deliveryChangedPaths,
+    runId,
     preCompletionGate: () => verifyAdmissionFences(rootDir, taskId, integrationGuard, integrationIntent),
     beforeCheckpointGate: () => integrateAdmissionCommit(rootDir, {
       planId: taskState.planId,

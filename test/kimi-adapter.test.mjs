@@ -85,8 +85,8 @@ test("Kimi Hook bridge injects prompts and enforces scoped Edit calls", async ()
         id: "T001",
         subject: "Edit one file",
         writable_paths: ["src/app.js", "src/link/**"],
-        worker_command: "node -e \"process.exit(0)\"",
-        verify_commands: ["node -e \"process.exit(0)\""],
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
       }],
     }, null, 2));
     await importPlan(dir, planPath);
@@ -255,8 +255,8 @@ test("Kimi Stop Hook converts unfinished work into a continuation block", async 
         id: "T001",
         subject: "Remain pending",
         writable_paths: ["src/app.js"],
-        worker_command: "node -e \"process.exit(0)\"",
-        verify_commands: ["node -e \"process.exit(0)\""],
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
       }],
     }, null, 2));
     await importPlan(dir, planPath);

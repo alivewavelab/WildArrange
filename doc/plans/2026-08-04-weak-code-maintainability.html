@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>弱代码可维护性方案 — 2026-08-04（v5 定稿：双评审裁决后）</title>
+<style>
+  body { font-family: -apple-system, "PingFang SC", sans-serif; max-width: 1080px; margin: 24px auto; padding: 0 16px; color: #222; }
+  h1 { font-size: 22px; } h2 { font-size: 17px; margin-top: 32px; border-left: 5px solid #555; padding-left: 8px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+  .card { border: 1px solid #ddd; border-radius: 8px; padding: 12px 14px; }
+  .card h3 { margin: 0 0 6px; font-size: 14px; }
+  .card p { margin: 4px 0; font-size: 13px; line-height: 1.55; }
+  .tag { display: inline-block; font-size: 11px; color: #fff; border-radius: 4px; padding: 1px 7px; margin-right: 6px; }
+  .p0 { background: #c0392b; } .p1 { background: #e67e22; } .p2 { background: #7f8c8d; }
+  .have { background: #27ae60; } .ext { background: #8e44ad; }
+  .src { color: #888; font-size: 11px; }
+  .principle { background: #f4f8ff; border: 1px solid #c9dafc; border-radius: 8px; padding: 12px 16px; font-size: 14px; }
+  .loop { background: #fef9e7; border: 1px solid #f0e0a8; border-radius: 8px; padding: 12px 16px; font-size: 14px; }
+  .warn { background: #fdf2f0; border: 1px solid #e6b8b0; border-radius: 8px; padding: 12px 16px; font-size: 14px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  td, th { border: 1px solid #ddd; padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: #f5f5f5; }
+  code { background: #f0f0f0; padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<h1>弱代码可维护性方案 v5（定稿）</h1>
+<p class="src">2026-08-04 · 四模型代码审查 → RuntimeSafetySDK 概念对照 → Opus/GLM 双方案评审 → 裁决定稿</p>
+
+<div class="principle">
+<b>前提：</b>开发者本人不读代码。维护操作者是 AI，人做三件事：<b>描述症状</b>、<b>看红绿灯</b>、<b>审判框架的每条决策</b>。
+可维护性 = AI 改一处能向人机器化证明「没碰别的模块、没破坏既有行为」；
+框架可信 = 每次拦截/放行都留痕、可读、可标注、可被复审。
+</div>
+
+<div class="warn">
+<b>双评审发现的两条顺序性铁律（违反则整个方案失效）：</b><br>
+1. <b>先武装门，再透明化</b>——默认配置下 review 门是同义反复、qualityGates 全关。若先做决策面板，人会对着一条稳定的绿灯流标「对了」，调参数据源从第一天就是垃圾。配置地板必须与决策记录同期或更早。<br>
+2. <b>决策记录不进 hash 链 ledger</b>——ledger 追加是 O(全文件) 且持全局锁，106 个发射点字段异构。决策记录走独立 <code>.helix/decisions.jsonl</code>（可丢、可截断、可重建），只在四个干净缝隙发射；历史 ledger 不回溯、不做读侧归一化。
+</div>
+
+<h2>块一（底线）：AI 定位 + 隔离修复闭环</h2>
+
+<div class="loop">
+人描述症状 → AI 按错误内联的 <code>{code, module, next_action}</code> 定位到单区单文件 → AI 在目录契约内修改 →
+<code>helix impact</code> 列出波及文件与应跑测试 → 分区测试 + 边界测试 + npm test 全绿 →
+人看到一句话：「影响 3 个文件，47 个测试全过」。
+</div>
+
+<table>
+  <tr><th>项</th><th>内容</th><th>归属分区</th><th>优先级</th></tr>
+  <tr><td>五区边界测试</td><td>已有，AI 无法跨区耦合而不变红。<b>补：bin/ 纳入扫描</b>（CLI 是产品主入口，目前在边界外）</td><td>test</td><td><span class="tag p0">P0</span></td></tr>
+  <tr><td>目录级 AGENTS.md</td><td>已有，AI 的修改契约，保持健康即可</td><td>各目录</td><td><span class="tag have">已有</span></td></tr>
+  <tr><td><code>helix impact</code></td><td><b>不重写扫描器</b>：把 dependency-boundary.test.mjs 里已被对抗加固的 buildDependencyEdges/maskSource 提取到 infra，命令与边界测试共用；扫描器自身的对抗测试为不可削弱底线</td><td>infra + bin 薄壳</td><td><span class="tag p0">P0</span></td></tr>
+  <tr><td>统一错误协议（收窄版）</td><td><b>不做全仓 refactor</b>。只覆盖三处：gateway 信封、delivery-pipeline 返回、CLI 非零退出。错误<b>内联</b> <code>{code, module, next_action}</code>（AI 只读错误消息，不会去翻文档）；契约表进 doc/contracts 仅作人用参考</td><td>capabilities + orchestration + bin</td><td><span class="tag p0">P0</span></td></tr>
+  <tr><td>分区测试入口</td><td><code>helix test --zone</code>，依赖 impact 的应跑测试清单；helix-core.test.mjs 已 158KB，秒级反馈是闭环前提</td><td>bin + test</td><td><span class="tag p0">P0</span></td></tr>
+  <tr><td>诊断/门控分离</td><td>真实缺陷很具体：runDoctor 7 个 check 顺序 await 无 try/catch，一个崩全崩；且 doctor 会写 hash 链 ledger（抢门控同一把锁）。修法：7 个独立 try/catch + 分项 status + <b>doctor 不再写 ledger</b></td><td>interface</td><td><span class="tag p0">P0</span></td></tr>
+  <tr><td>配置地板 + 门未武装灯</td><td>verify 非空非 trivial、review 至少一条非同义反复 lane、qualityGates 至少一项 required；不满足时 <code>helix status</code> 顶部常驻黄灯「门未武装」，不显示绿。trivial verify 从 doctor warn 升级为 acceptance-proof fail</td><td>infra + capabilities</td><td><span class="tag p0">P0</span>（自 P1 提升）</td></tr>
+  <tr><td>复现测试先行</td><td>写进 AGENTS.md 作为维护纪律。<b>承认这是纪律不是机制</b>，不放进 verifier 强制（机制化留待后续评估）</td><td>doc</td><td><span class="tag p2">P2 纪律</span></td></tr>
+</table>
+
+<h3>块一验收（可判定）</h3>
+<table>
+  <tr><th>场景</th><th>通过标准</th></tr>
+  <tr><td>人贴一段报错给 AI</td><td>错误消息内联 module 与 next_action；AI 不读无关模块直接落区；impact 清单 ≤ 预期，分区+全量测试绿</td></tr>
+  <tr><td>AI 改了一个 infra 原语</td><td>边界测试证明无跨区耦合；impact 受影响方对应测试全跑过</td></tr>
+  <tr><td>人为损坏 tasks.json / ledger / 锁</td><td>doctor 分项报告照常输出（坏的那项标红，其余正常）；所有新命令在损坏状态下输出部分结果而非崩溃</td></tr>
+  <tr><td>门未武装（默认空配置）</td><td>status 顶部显示黄灯「门未武装」；trivial verify 的任务无法 completed</td></tr>
+</table>
+
+<h2>块二（信任基石）：决策透明与调参回路</h2>
+
+<table>
+  <tr><th>项</th><th>内容</th><th>归属分区</th><th>优先级</th></tr>
+  <tr><td>决策记录发射</td><td>独立 <code>.helix/decisions.jsonl</code>，<b>只在四个缝发射</b>：delivery-pipeline（五门）、ai/hooks（已有 decision 字段）、admission、routing。结构 <code>{ts, gate, decision, code, reason, 输入摘要, evidence_path, taskId, runId}</code>。可丢可截断可重建，不进 hash 链</td><td>orchestration + ai 发射，infra 存储</td><td><span class="tag p0">P0</span></td></tr>
+  <tr><td><code>helix decisions</code> CLI 投影</td><td>只读派生，不二次写入；每条三行：发生了什么 → 命中哪条规则 → 证据在哪。必须处理半写 jsonl（跳过坏行并提示）。Dashboard 面板延后到第三阶段</td><td>interface</td><td><span class="tag p0">P0</span></td></tr>
+  <tr><td>Cursor hooks.json 硬拦截</td><td><b>从脚注升为第一阶段首项</b>。官方文档已确认 preToolUse(Write/Delete/Shell) 可事前 deny、failClosed 可配、exit 2 兼容。任务 = 渲染 .cursor/hooks.json + 输出协议映射 + 冒烟测试。没有它，块二验收第一条在开发者实际环境里永远达不成</td><td>interface</td><td><span class="tag p0">P0 首项</span></td></tr>
+  <tr><td>标注回写（带硬约束）</td><td>① 只有<b>拦截</b>和<b>非确定性放行</b>（LLM review、路由 shadow、admission 归属）进标注队列，确定性 PASS 只进流水——否则队列 99% 是无信息绿灯；② 标注强制分类（规则错/个案错/误标），理由可选；③ 统计以「规则 × 标注」为单位，单条标注不绑架整条规则；④ <b>标注永远不能自动改门</b>——新增测试钉死：标注数据任何路径不得写 config / verify_commands / gate 开关</td><td>interface + infra</td><td><span class="tag p1">P1</span></td></tr>
+  <tr><td>verbose 汇报分级</td><td>初期默认 verbose = <b>每次 run 结束一次门决策汇总</b>（不是实时逐条 tail）；随信任建立可降 normal/quiet</td><td>orchestration</td><td><span class="tag p1">P1</span></td></tr>
+  <tr><td>异步审查（拆分）</td><td>确定性统计（门触发计数、从未触发的门、规则同期触发）<b>用代码实现</b>，可重跑可复核；「可疑放行」类判断才用 LLM，且必须复用 archivist-router 既有不变量：deterministic 证据保留、只作第二意见、无 key fallback、结论进报告不进完成链、绑定 decisionId。冷启动 6-8 周只出计数不出率。<br><b>防自查原则（开发者裁决）</b>：凡不需要完整聊天上下文的审查，一律走外部 LLM 调用而非当前会话自查——① <b>上下文隔离是底线</b>：审查者必须是全新上下文，只读清洗后的决策投影 + 证据指针，绝不摄入执行 Agent 的会话/推理过程（同模型不同会话即可消除大部分自查偏袒）；② <b>模型家族不同是加分</b>：审查通道独立配置 provider/model（复用 llm-provider，OpenAI-compatible），默认建议与工作模型不同家族，消除同模型的系统性盲区；③ 类比 Codex：主 Agent 做计划、编码强制派给子 Agent——即使同为 GPT，职责与上下文分离本身就构成独立复核</td><td>ai（统计可放 infra/interface）</td><td><span class="tag p2">P2</span></td></tr>
+  <tr><td>周期健康摘要</td><td>扩 doctor 实现（修+扩比新建 Agent 便宜自洽），初期只出计数</td><td>interface</td><td><span class="tag p2">P2</span></td></tr>
+</table>
+
+<h3>块二验收（可判定）</h3>
+<table>
+  <tr><th>场景</th><th>通过标准</th></tr>
+  <tr><td>框架拦了一次文件写入（Cursor 内）</td><td>hooks.json 冒烟测试证明 deny 生效；decisions 投影显示：拦了什么、命中规则、证据路径</td></tr>
+  <tr><td>一个任务 completed</td><td>decisions 展开可见每个门的决策与证据链，无需翻 ledger 原文</td></tr>
+  <tr><td>投影正确性</td><td>测试钉死：给定构造的 decisions.jsonl fixture，投影输出与源记录逐条一致（含坏行降级）</td></tr>
+  <tr><td>调参回路</td><td>给定构造的决策+标注 fixture，统计输出四类清单条目数与预期完全相等；标注→配置无写入路径（测试钉死）</td></tr>
+</table>
+
+<h2>块三（进阶，✅ 已全部落地）</h2>
+<p>Dashboard 决策面板 + 运维面板（只读 ViewModel，独立 dashboard-panels.mjs 守拆分线）、CLI 分层 core 六命令（新命令一律先落 --help --all 非核心区）、文档单一事实源生成物化（cli-help.mjs 注册表 → doc/generated/commands.md）、admission 状态机表化（project-architecture.md）、helix timeline、decisions stats 确定性统计审查、doctor decisionHealth 周期摘要、review suspicious LLM 可疑判断（archivist 不变量）。</p>
+
+<h2>落地波次（第一阶段不并行，按依赖排序）</h2>
+<table>
+  <tr><th>波次</th><th>内容</th><th>依赖</th></tr>
+  <tr><td><b>波次 0</b>（✅ 2026-08-04 完成，Composer 复审 PASS_WITH_NITS 后补齐 beforeShellExecution/编辑工具 matcher/fail-closed 回归测试）</td><td>① Cursor hooks.json + 冒烟测试（首项）② bin/ 纳入边界扫描 ③ 错误协议收窄三处 + 内联 next_action</td><td>无，全部独立小项</td></tr>
+  <tr><td><b>波次 1</b>（✅ 2026-08-04 完成，224/224 测试通过）</td><td>④ 配置地板 + 门未武装黄灯 + trivial verify 升 fail ⑤ doctor 7 try/catch + 停写 ledger ⑥ 扫描器提取 infra + helix impact ⑦ ledger 尾行损坏 fail-closed + tail hash 缓存</td><td>④⑤ 依赖③的结构化错误；⑥ 依赖②</td></tr>
+  <tr><td><b>波次 2</b>（✅ 2026-08-04 完成，233/233 测试通过；顺带修复 helix test 在 runner 进程内 NODE_TEST_CONTEXT 继承导致空跑 exit 0 的真实 bug）</td><td>⑧ decisions.jsonl 四缝发射 + helix decisions CLI 投影 ⑨ helix test --zone</td><td>⑧ 依赖③④（决策结构带 code、门已武装）⑦；⑨ 依赖⑥</td></tr>
+  <tr><td><b>第二阶段</b>（✅ 2026-08-04 完成；波次 2 经 Grok/GLM5.2 双评审 PASS_WITH_NITS 后先修 2 个 P1：decisions 读侧尾部流式、hook code 结构化）</td><td>✅ file-lock 原语提取（ledger 锁 stale 恢复 + 锁超时带 owner/pid/存活诊断）✅ spawn error 处理（runCommand error 事件转 127、runner 崩溃逐任务容错）✅ 中断对账（batch 持久化 taskIds/command，status 显示 incompleteTasks）+ `parallel retry` partial 重试 ✅ 标注回写（decision id/annotatable、强制分类、规则×标注统计、标注→配置无写入路径硬约束测试）✅ verbose 分级（reporting.verbosity：verbose 逐门汇总/normal 一行/quiet 纯 JSON）</td><td>—</td></tr>
+  <tr><td><b>第三阶段</b>（✅ 2026-08-04 完成，266/266 测试通过；Composer/Grok 双轻评审 PASS_WITH_NITS 后修 4 项：门武装 issues 对象渲染、loadPanels 重复调用、stats 标注关联键兼容、doctor Markdown 补 decisionHealth 分项；timeline --task 保留锚定标注）</td><td>✅ 确定性统计审查（`decisions stats`：门×决策/规则计数、从未触发的门、标注关联，纯代码无 LLM）✅ `helix timeline`（ledger 校验条目+decisions+annotations 统一倒序时间线）✅ Dashboard 决策面板+运维面板（只读 ViewModel，独立 dashboard-panels.mjs 守拆分线）✅ CLI 分层（core 六命令默认 help，全量 --help --all；注册表单一事实源 cli-help.mjs + `docs commands --write` 物化 doc/generated/commands.md；README 真实性检查对照 --all）✅ admission 状态机表（project-architecture.md）✅ doctor decisionHealth 周期健康摘要 ✅ LLM 可疑判断（`review suspicious`：清洗结论包、无 key fallback、decisionId 防幻觉锚定、只进报告不进完成链）</td><td>—</td></tr>
+</table>
+
+<h2>附：双评审裁决记录（分歧点与最终判断）</h2>
+<table>
+  <tr><th>分歧点</th><th>Opus</th><th>GLM</th><th>裁决</th></tr>
+  <tr><td>决策记录从哪来</td><td>发射侧新增，四缝，独立 decisions.jsonl（106 个发射点字段异构，读侧归一化是 10 倍工作量）</td><td>ledger 已有决策，做只读投影即可，别建新记录源</td><td><b>采 Opus</b>：发射侧四缝 + 独立文件。decisions.jsonl 定位为可重建的派生日志，ledger 仍是唯一审计链——两者职责不重叠，GLM 担心的「并行真相源」不成立</td></tr>
+  <tr><td>异步审查 Agent</td><td>拆两半：统计用代码、判断用 LLM 且复用 archivist 不变量</td><td>降级为纯计数器，判断留给人</td><td><b>采 GLM 为主</b>：初期只做确定性计数；LLM 判断延后到第三阶段且必须满足 Opus 的 archivist 不变量约束</td></tr>
+  <tr><td>Cursor 硬拦截可行性</td><td>升为 P0 首项（逻辑已写好，没人调用）</td><td>可行性未验证，先验证再写进方案</td><td><b>已验证</b>：官方文档确认 preToolUse deny + failClosed + exit 2 兼容（2026-08 核查）。采 Opus 升 P0 首项，任务内含冒烟测试作为实证</td></tr>
+  <tr><td>错误码契约表</td><td>收窄到三处，防全仓 refactor</td><td>内联进错误消息，表只是人的参考</td><td><b>两者合并</b>：收窄范围 + 内联字段，一体两面</td></tr>
+  <tr><td>复现测试先行</td><td>—</td><td>纪律不是机制，移出第一阶段或降级</td><td><b>采 GLM</b>：保留为文档纪律 P2，不伪装成机制</td></tr>
+  <tr><td>配置地板时机</td><td>提第一阶段，先于/同期决策记录（S1 数据污染论证）</td><td>本质是 warn→fail 阈值调整，不是新建</td><td><b>采 Opus 时机 + GLM 定性</b>：第一阶段，按阈值调整实现，工作量小</td></tr>
+</table>
+
+<p class="src">评审成熟度评分：Opus 6/10（修改后 8/10）、GLM 6/10（修改后批准）。本定稿已落实全部放行条件。</p>
+
+<h2>终审（2026-08-04，Opus 5 / GLM 5.2 对照原始业务目标）与裁决落实</h2>
+<p>两评审独立结论一致：<b>机制层兑现、可以试用，但需先补三项</b>。双方高度收敛于同一组缺口，裁决全部采纳并当日修复（272/272 测试通过）：</p>
+<table>
+  <tr><th>终审缺口（双评审收敛）</th><th>裁决与修复</th><th>状态</th></tr>
+  <tr><td><b>① 门未武装仍一路绿灯 completed</b>：review 同义反复照样 PASS，doctor 报 ok，本仓库自己的配置都是未武装——方案铁律 1「先武装门再透明化」未真正落实</td><td><b>采纳硬阻断</b>（对齐 verify_not_trivial 先例，弃「只亮黄灯」方案）：acceptance-proof 新增 <code>review_not_tautological</code> 硬地板——无 review_commands / standards_commands / review.llm / 已启用质量门的任务不得 completed；<code>config init --armed</code> 提供命令化武装入口；本仓库 helix.config.json 已武装（lspDiagnostics 跑五区边界测试）；doctor 新增 gateArming 分项。测试面 93 处夹具机械补 review lane，样例计划/README/examples 同步武装</td><td>✅</td></tr>
+  <tr><td><b>② 决策记录「命中规则/证据」两行对几乎所有 FAIL 为空</b>：gateway 只在能力抛异常时填 error，业务失败（verify 非零/scope 拒绝/review blocker）code/reason 全 null——「可审判」核心承诺落空</td><td><b>采纳</b>：delivery-pipeline 新增 deriveGateFailure，从 evidence 推导结构化 code/reason（verify_failed 带失败命令与 exit 码、scope_violation 带越界路径、review_failed 带失败 lane、proof_* 带失败检查项）；review 决策回填约定报告路径。实测 FAIL 记录三行齐全</td><td>✅</td></tr>
+  <tr><td><b>③ Cursor 硬拦截无法团队化</b>：.cursor/ 被 gitignore，hooks 进不了 git，没人知道谁没装；本仓库残留指向不存在路径（/Users/boyanliu）的旧规则</td><td><b>采纳</b>：.gitignore 改为放行 .cursor/hooks.json 与 .cursor/hooks/（硬拦截可随仓库共享）；doctor 新增 adapters 分项（已启用但未安装 → warn + 修复命令；规则文件含失效绝对路径 → warn）；残留规则路径修为相对路径</td><td>✅</td></tr>
+  <tr><td>次级：decisions 时间序与门执行序不一致（finish 攒批发射）</td><td>采纳：每门跑完立即发射，顺序钉死为 verify→scope→review→proof→checkpoint→pipeline（有测试）</td><td>✅</td></tr>
+  <tr><td>次级：run 门决策汇总混历史记录；无 --annotatable 过滤；doc/使用说明书 不在 npm 包内</td><td>采纳：汇总按 since=run 开始时间过滤；decisions 支持 --annotatable；package.json files 补 doc/、examples/、使用说明书.md</td><td>✅</td></tr>
+  <tr><td>日志轮转（decisions/ledger 无界增长）</td><td><b>缓办</b>：读侧已尾部流式、写侧自愈半行，truncate -s 0 有文档指引；轮转机制列入后续迭代</td><td>⏸</td></tr>
+  <tr><td>裸 JSON 输出对弱代码用户不友好（status/doctor 无文本渲染）；helix-core.test.mjs 159KB 单体；--help --all 平铺</td><td><b>缓办</b>：不影响正确性与安全，列入体验迭代</td><td>⏸</td></tr>
+</table>
+<p class="src">终审后结论：三项必补项已落地，框架可从「单人单设备试用」进入「小团队真实项目试用」。剩余缓办项均为体验与规模问题，不阻断使用。</p>
+
+</body>
+</html>

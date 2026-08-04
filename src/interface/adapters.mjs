@@ -21,6 +21,12 @@ import {
   renderKimiAdapterReadme,
   renderKimiHookBridge,
 } from "./kimi-adapter.mjs";
+import {
+  CURSOR_BRIDGE_PATH,
+  buildCursorHooksConfig,
+  renderCursorAdapterReadme,
+  renderCursorHookBridge,
+} from "./cursor-adapter.mjs";
 
 const SLASH_COMMAND_PREFIX = "helix";
 const ADAPTER_TARGETS = new Set(["all", "codex", "cursor", "kimi"]);
@@ -61,6 +67,29 @@ export async function installAdapter(rootDir, options = {}) {
   }
 
   if (target === "all" || target === "cursor") {
+    const cursorHooksPath = path.join(rootDir, ".cursor", "hooks.json");
+    const cursorHooksBackup = await backupExistingAdapterFile(rootDir, cursorHooksPath, backupId);
+    await mkdir(path.dirname(cursorHooksPath), { recursive: true });
+    await writeJsonAtomic(cursorHooksPath, buildCursorHooksConfig({ bridgeCommand: `node ${CURSOR_BRIDGE_PATH}` }));
+    outputs.push({
+      target: "cursor",
+      path: path.relative(rootDir, cursorHooksPath),
+      status: "generated",
+      backup: cursorHooksBackup,
+      enforcement: "hard-in-trusted-workspace",
+      trustAction: "在 Cursor 中以受信任工作区（trusted workspace）打开本项目，.cursor/hooks.json 会自动加载生效。",
+    });
+
+    const cursorBridgePath = path.join(rootDir, CURSOR_BRIDGE_PATH);
+    const cursorBridgeBackup = await backupExistingAdapterFile(rootDir, cursorBridgePath, backupId);
+    await mkdir(path.dirname(cursorBridgePath), { recursive: true });
+    await writeFile(cursorBridgePath, renderCursorHookBridge({
+      mode,
+      packageName,
+      localCliPath: path.join(PROJECT_DIR, "bin", "helix.mjs"),
+    }), "utf8");
+    outputs.push({ target: "cursor", path: path.relative(rootDir, cursorBridgePath), status: "generated", backup: cursorBridgeBackup, enforcement: "hook-bridge" });
+
     const cursorDir = path.join(rootDir, ".cursor", "rules");
     await mkdir(cursorDir, { recursive: true });
     const cursorRulePath = path.join(cursorDir, "wildarrange.mdc");
@@ -175,6 +204,8 @@ export async function uninstallAdapter(rootDir, options = {}) {
     candidates.push({ target: "codex", path: resolveHelixPath(rootDir, "adapters", "codex", "hooks.json") });
   }
   if (target === "all" || target === "cursor") {
+    candidates.push({ target: "cursor", path: path.join(rootDir, ".cursor", "hooks.json") });
+    candidates.push({ target: "cursor", path: path.join(rootDir, CURSOR_BRIDGE_PATH) });
     candidates.push({ target: "cursor", path: path.join(rootDir, ".cursor", "rules", "wildarrange.mdc") });
     candidates.push({ target: "cursor", path: path.join(rootDir, ".cursor", "rules", ["helix", "flow.mdc"].join("")) });
     candidates.push({ target: "cursor", path: resolveHelixPath(rootDir, "adapters", "cursor", "README.md") });
@@ -479,21 +510,6 @@ Required behavior:
 `;
 }
 
-function renderCursorAdapterReadme({ hookCommand }) {
-  return `# ${PRODUCT_NAME} Cursor Adapter
-
-Cursor does not provide the same Codex plugin hook lifecycle in this runtime, so this adapter installs a persistent Cursor rule at \`.cursor/rules/wildarrange.mdc\`.
-
-Hook command for manual or future adapter use:
-
-\`\`\`bash
-${hookCommand}
-\`\`\`
-
-This gives Cursor the same governance contract, but hard blocking depends on Cursor exposing a lifecycle hook API. Codex can use the generated hooks JSON under \`.helix/adapters/codex/hooks.json\`.
-`;
-}
-
 function renderAdapterInstallReport(report) {
   const lines = [
     `# ${PRODUCT_NAME} Adapter Install Report`,
@@ -520,7 +536,7 @@ function renderAdapterInstallReport(report) {
   lines.push("## Install Model");
   lines.push("");
   lines.push("- Codex project hooks are hard enforcement only after Codex trusts the project `.codex/` layer and the hook definition via `/hooks`.");
-  lines.push("- Cursor rules are soft governance prompts unless Cursor exposes a command lifecycle hook for this project.");
+  lines.push("- Cursor project hooks (`.cursor/hooks.json`) are hard enforcement once the project is opened as a trusted workspace; `preToolUse` on Write/Delete/Shell is fail-closed. The `.cursor/rules/wildarrange.mdc` layer remains soft guidance.");
   lines.push("- Kimi Code reads the shared `.agents/skills/` directly. Its generated plugin becomes active only after `/plugins install <path>` and `/reload`; Kimi Hooks are fail-open on hook crashes/timeouts.");
   lines.push(`- Recommended user entry: \`npx ${DEFAULT_PACKAGE_NAME}@latest init\` or \`npx ${DEFAULT_PACKAGE_NAME}@latest adapter install\`.`);
   lines.push(`- Recommended persistent project setup after publish: add \`${DEFAULT_PACKAGE_NAME}\` as a devDependency so hook commands do not require network access.`);

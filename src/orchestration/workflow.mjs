@@ -45,6 +45,9 @@ export async function createSamplePlan(rootDir, targetPath = resolveHelixPath(ro
   await ensureHelixDirs(rootDir);
   const workerScript = "node -e \"const fs=require('fs'); fs.mkdirSync('.helix/artifacts',{recursive:true}); fs.writeFileSync('.helix/artifacts/linear-smoke.txt','ok\\\\n')\"";
   const verifyScript = "node -e \"const fs=require('fs'); const v=fs.readFileSync('.helix/artifacts/linear-smoke.txt','utf8').trim(); if(v!=='ok') process.exit(1)\"";
+  // review_not_tautological 是验收硬地板：样例计划必须自带真实复核信号，
+  // 否则 workflow --sample（README 快速上手路径）会在 proof 处被拦下。
+  const reviewScript = "node -e \"const fs=require('fs'); const v=fs.readFileSync('.helix/artifacts/linear-smoke.txt','utf8'); if(!v.includes('ok')) { console.error('review: artifact content mismatch'); process.exit(1); }\"";
   const sample = {
     title: "M1 linear loop smoke",
     objective: "Prove Jiuwei can run one worker task and verify it before checkpoint.",
@@ -57,6 +60,7 @@ export async function createSamplePlan(rootDir, targetPath = resolveHelixPath(ro
         writable_paths: [".helix/artifacts/linear-smoke.txt"],
         worker_command: workerScript,
         verify_commands: [verifyScript],
+        review_commands: [reviewScript],
         successCriteria: [
           {
             id: "C001",

@@ -214,11 +214,14 @@ node ./bin/helix.mjs adapter install --target all --mode local
       "subject": "Write smoke artifact",
       "writable_paths": [".helix/artifacts/smoke.txt"],
       "worker_command": "node -e \"const fs=require('fs'); fs.mkdirSync('.helix/artifacts',{recursive:true}); fs.writeFileSync('.helix/artifacts/smoke.txt','ok\\n')\"",
-      "verify_commands": ["node -e \"const fs=require('fs'); if(fs.readFileSync('.helix/artifacts/smoke.txt','utf8').trim()!=='ok') process.exit(1)\""]
+      "verify_commands": ["node -e \"const fs=require('fs'); if(fs.readFileSync('.helix/artifacts/smoke.txt','utf8').trim()!=='ok') process.exit(1)\""],
+      "review_commands": ["node -e \"const fs=require('fs'); if(!fs.readFileSync('.helix/artifacts/smoke.txt','utf8').includes('ok')) process.exit(1)\""]
     }
   ]
 }
 ```
+
+> `review_commands` 不能省：验收证明会拒绝「没有任何独立复核信号」的任务进入 completed（同义反复的复核不证明任何东西）。独立信号可以是 `review_commands` / `standards_commands` / `review.llm` / 已启用的质量门之一。
 
 运行：
 
@@ -261,7 +264,7 @@ node ./bin/helix.mjs adapter restore --backup <backupId>
 安装、卸载、恢复都会在 `.helix/adapters/` 写入报告；覆盖或删除前会备份已有 adapter 文件。`restore` 用于把 `.helix/adapters/backups/<backupId>/` 里的文件恢复回原位置。
 
 - **Codex**：生命周期 hook 写入 `.codex/hooks.json`，并在 `.helix/adapters/codex/hooks.json` 保留审计副本。Codex 需要在可信项目中通过 `/hooks` review / trust 后才会执行这些 hard hook。
-- **Cursor**：项目规则写入 `.cursor/rules/wildarrange.mdc`。当前 Cursor 侧是 soft governance，不等同于 Codex PreToolUse 硬拦截。
+- **Cursor**：项目级 hooks 写入 `.cursor/hooks.json`（含 `.cursor/hooks/wildarrange-hook-bridge.mjs` 桥接脚本），在受信任工作区中自动加载，`preToolUse`（Write/Delete/Edit/Shell）与 `beforeShellExecution`（集成终端命令）可硬拦截且 fail-closed；`.cursor/rules/wildarrange.mdc` 保留为软规则层。`.gitignore` 模板对 `.cursor/hooks.json` 与 `.cursor/hooks/` 留了例外，硬拦截配置可以随仓库提交共享给团队；每台机器是否真装了 hooks 由 `doctor` 的 `adapters` 分项检查。
 - **Kimi Code**：生成项目专属 plugin 到 `.helix/adapters/kimi/plugin/`，复用项目根 `AGENTS.md` 和 `.agents/skills/`。WildArrange 不会静默改写用户级 `~/.kimi-code/config.toml`；从项目根启动 Kimi Code，显式执行 `/plugins install .helix/adapters/kimi/plugin`，再执行 `/reload`。不要给路径加引号，Kimi Code 0.27 会把引号当成路径字符。plugin 是用户级安装，但 bridge 会在非 WildArrange 项目中静默退出。
 
 `adapter install` 还会生成一组快捷命令，省去手动开终端敲 `node ...`。三端从同一套命令集渲染（`helix-config` / `helix-doctor` / `helix-refresh` / `helix-status` / `helix-plan` / `helix-approve` / `helix-run`）：
@@ -315,9 +318,40 @@ node ./bin/helix.mjs state list
 node ./bin/helix.mjs state restore --backup <backupId>
 node ./bin/helix.mjs doctor
 node ./bin/helix.mjs governance audit
+node ./bin/helix.mjs impact src/infra/ledger.mjs
+node ./bin/helix.mjs decisions --limit 20
+node ./bin/helix.mjs decisions stats
+node ./bin/helix.mjs timeline --limit 30
+node ./bin/helix.mjs annotate --decision <decisionId> --category rule_wrong --reason "..."
+node ./bin/helix.mjs annotate stats
+node ./bin/helix.mjs test --zone infra
+node ./bin/helix.mjs docs commands --write
+node ./bin/helix.mjs review suspicious
 ```
 
-`doctor` 是一键体检：校验 config 结构与挂载、对账已完成任务（checkpoint / acceptance proof / ledger 事件必须齐全）、验证 ledger hash 链，并与最近一次备份交叉比对以发现整链重写。`state restore` 恢复前会自动再做一次备份，恢复错了可以再退回。
+`doctor` 是一键体检：校验 config 结构与挂载、对账已完成任务（checkpoint / acceptance proof / ledger 事件必须齐全）、验证 ledger hash 链，并与最近一次备份交叉比对以发现整链重写；`decisionHealth` 分项给出周期健康摘要（各门触发计数、从未触发的门、坏行与孤儿标注预警）。各项检查各自隔离，单项崩溃只标红对应分项；doctor 只读诊断，不写 ledger。`state restore` 恢复前会自动再做一次备份，恢复错了可以再退回。
+
+`impact` 是改动影响分析：列出一个文件被哪些文件直接或间接 import，以及应该跑哪些测试（含常驻的五区边界测试），让 AI 改一处后能机器化证明「没碰别的模块」。
+
+`decisions` 是决策投影：delivery-pipeline 五门、PreToolUse/PostToolUse 拦截、admission、routing 四个缝的每一次拦截/通过都会追加到 `.helix/decisions.jsonl`（可丢可截断的派生日志，不进 hash 链），`decisions` 命令把每条记录渲染成三行——发生了什么、命中哪条规则、证据在哪，方便人和异步审查 Agent 逐条复盘。支持 `--task` / `--gate` / `--annotatable`（只看可标注队列）过滤与 `--format json`。读侧从文件尾部流式倒读，`--limit` 约束真实内存占用；长期运行后可直接 `truncate -s 0 .helix/decisions.jsonl` 清空（请截到 0 而不是半行；即使截到半行，写入侧也会自动补换行，读侧跳过坏行）。
+
+`test` 是分区测试选择：`--zone <区>` 跑「引用了该区文件的测试 + 命名对位测试 + 常驻边界测试」，带文件参数时按 impact 的应跑清单跑，不带参数跑全量；退出码透传 `node --test`。改了哪就跑哪，不必背测试矩阵。
+
+`annotate` 是标注回写：decisions 投影里带 `可标注` 标记的记录（拦截与非确定性放行；确定性 PASS 只进流水）可以用 `annotate --decision <id> --category rule_wrong|case_wrong|mislabeled` 指认判错。分类是强制的（规则错/个案错/误标），理由可选；`annotate stats` 按「规则 × 标注」聚合，单条标注不绑架整条规则。**标注永远不能自动改门**——标注路径不写 config、不改 `verify_commands`、不动任何门开关（有测试钉死），调门只能由人显式改配置。
+
+`decisions stats` 是确定性统计审查（纯代码、可重跑、无 LLM）：每个门的触发计数（按决策/规则细分）、**从未触发的门**（门形同虚设的直接信号）、以及标注与规则的关联。冷启动期只出计数不出率。`timeline` 把 ledger（仅 hash 链校验通过的条目）、decisions、annotations 合并成一条倒序时间线，回答「这个仓库最近发生了什么」，支持 `--task` / `--source` 过滤。
+
+CLI 是分层的：`--help` 默认只显示核心六命令（init / plan / run / status / decisions / doctor），覆盖日常主循环；全部命令见 `--help --all`。命令清单的单一事实源是 `src/interface/cli-help.mjs` 的注册表，`docs commands --write` 把它物化成 `doc/generated/commands.md`；README 命令真实性检查对照的是 `--help --all` 全量输出。
+
+`review suspicious` 是 LLM 可疑判断（异步审查，archivist 不变量）：只把清洗后的结论包（id/门/规则/摘要，绝无代码块、raw diff 或完整命令输出）发给配置的外部 provider，返回的可疑清单必须锚定输入包内的 decisionId（幻觉 id 直接丢弃并计数）；无 key 时确定性 fallback，不阻断任何流程。结论只写入 `.helix/reports/suspicion.*`——**不进完成链、不改配置、不动门开关**。
+
+Dashboard（`serve`）新增两个只读面板：决策面板（最近决策三行投影 + 门触发统计 + 从未触发的门）与运维面板（门武装状态、tasks.lock/ledger.lock 持有者巡检、日志体积、并行 run 对账）。
+
+`run` 结束时的门决策汇总按 `reporting.verbosity` 分级：默认 `verbose` 在 stderr 输出本次任务每个门的三行投影（框架初期让人能审判每一条门决策）；信任建立后可改为 `normal`（一行结果）或 `quiet`（只输出 JSON）。stdout 的机器可读 JSON 在任何级别下都不变。
+
+并行运行中断后，`parallel status --run <runId>` 会显示 `batchStatus` 与 `incompleteTasks`（有头无尾的任务）；`parallel retry --run <runId>` 只重跑未通过的任务（复用原命令，可用 `--command` 覆盖），已通过/已完成/被其他 run 持有的任务跳过并说明，重试是新的 run，不改写原 run 证据。
+
+`status` 输出顶部常驻 `gateArming` 黄灯：默认配置下质量门全关、review 门没有独立信号时会显示「门未武装」及修复指引，避免对着一条全绿但不证明任何东西的门流误判项目健康。验收证明（acceptance proof）有两条硬地板：拒绝 `verify_commands` 全是 trivial 命令（如 `true`）的任务；拒绝 review 门没有任何独立信号 lane（无 `review_commands` / `standards_commands` / `review.llm` / 已启用质量门）的任务——同义反复的复核不证明任何东西，不得进入 completed。`config init --armed` 可以直接生成一份武装了质量门（commentChecker 阻断 + lspDiagnostics 命令位）的配置。`doctor` 有独立的 `gateArming` 与 `adapters` 分项：门未武装、已启用 adapter 但本机没装 hooks、规则文件里残留指向不存在路径的命令，都会在体检报告里摆到台面上。
 
 `governance audit` 是 LuWu 的只读巡检：检查目录级 `AGENTS.md`、README 中英文命令对等、Prompt Pack 登记、命名和真实代码注释，报告写入 `.helix/reports/governance/`。只看当前改动可加 `--changed-only`，它只触发变更文件及相关祖先规则/成对文档/架构台账；Git 变更不可读取时会安全回退为全量扫描。LuWu 不会自动移动、重命名或删除项目文件，运行时也会拒绝 LuWu、DiJiang、BaiZe 进入 command worker。
 
@@ -494,7 +528,7 @@ npm test
 npm pack --dry-run --cache /private/tmp/helix-npm-cache
 ```
 
-当前状态：线性治理闭环已实现并通过测试；checkpoint 前会生成验收证明链，显式 `successCriteria` 只有绑定具体 verifier 命令或人工证据后才会通过。Codex adapter 已能写入项目 `.codex/hooks.json`，通过 `/hooks` trust 后具备 hard hook 拦截；Cursor 仍是 soft 规则注入。跨会话 digest 与 ArchivistRouter 会进入 hook 注入块；ledger 具备 hash 链校验；多 Agent 已具备命令型并行、Codex/Cursor 命令模板 spawn、结构化文件 admission、Git worktree patch admission、验收前保留与 admission 后释放。
+当前状态：线性治理闭环已实现并通过测试；checkpoint 前会生成验收证明链，显式 `successCriteria` 只有绑定具体 verifier 命令或人工证据后才会通过。Codex adapter 已能写入项目 `.codex/hooks.json`，通过 `/hooks` trust 后具备 hard hook 拦截；Cursor adapter 已能写入项目 `.cursor/hooks.json`，受信任工作区中 `preToolUse` 与 `beforeShellExecution` 硬拦截且 fail-closed。跨会话 digest 与 ArchivistRouter 会进入 hook 注入块；ledger 具备 hash 链校验；多 Agent 已具备命令型并行、Codex/Cursor 命令模板 spawn、结构化文件 admission、Git worktree patch admission、验收前保留与 admission 后释放。
 
 ## 更多文档
 

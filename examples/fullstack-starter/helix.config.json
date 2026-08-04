@@ -20,7 +20,7 @@
     },
     "commentChecker": {
       "enabled": true,
-      "blockOnFindings": false
+      "blockOnFindings": true
     }
   },
   "skillMatcher": {

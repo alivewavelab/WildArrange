@@ -55,6 +55,13 @@ export async function runParallelAgents(rootDir, options = {}) {
   await appendLedger(rootDir, { type: "parallel_agents_started", runId, taskIds: tasks.map((task) => task.id) });
   await registerRunIndexEntry(rootDir, runId);
   const batchPath = resolveHelixPath(rootDir, "agent-runs", `${runId}.json`);
+  // taskIds/command/agent/isolation 必须随批次持久化：中断对账与
+  // `parallel retry` 依赖它们重建"这次跑了哪些任务、用什么命令"。
+  const batchSeed = {
+    taskIds: tasks.map((task) => task.id),
+    command: options.command || null,
+    agent: options.agent || null,
+  };
   await writeJsonAtomic(batchPath, {
     kind: "parallel_agent_batch",
     runId,
@@ -63,6 +70,7 @@ export async function runParallelAgents(rootDir, options = {}) {
     status: "claiming",
     planId: taskState.planId,
     taskCount: tasks.length,
+    ...batchSeed,
     results: [],
   });
   const gitCoordination = await inspectGitCoordination(rootDir, config.gitCoordination);
@@ -83,6 +91,7 @@ export async function runParallelAgents(rootDir, options = {}) {
       status: "claim_failed",
       planId: taskState.planId,
       taskCount: tasks.length,
+      ...batchSeed,
       results: [],
       error: error instanceof Error ? error.message : String(error),
     });
@@ -103,6 +112,7 @@ export async function runParallelAgents(rootDir, options = {}) {
       status: "running",
       planId: taskState.planId,
       taskCount: tasks.length,
+      ...batchSeed,
       results: [],
     });
     await writeSnapshot(rootDir, "parallel_agents_started", { runId, taskIds: tasks.map((task) => task.id) });
@@ -126,6 +136,7 @@ export async function runParallelAgents(rootDir, options = {}) {
       isolation: uniqueIsolation(results),
       planId: taskState.planId,
       taskCount: results.length,
+      ...batchSeed,
       results,
     };
     await writeJsonAtomic(batchPath, batch);
@@ -142,6 +153,7 @@ export async function runParallelAgents(rootDir, options = {}) {
       status: "interrupted",
       planId: taskState.planId,
       taskCount: tasks.length,
+      ...batchSeed,
       results: [],
       error: error instanceof Error ? error.message : String(error),
     }).catch(() => {});
@@ -246,10 +258,19 @@ export async function parallelAgentStatus(rootDir, options = {}) {
         resultPath: path.relative(rootDir, resultPath),
       });
     }
+    // 中断对账：batch 文件记录了本次跑了哪些任务；与结果集对比得出
+    // "有头无尾"的任务清单（进程被杀、runner 崩溃未落盘），供人和
+    // `parallel retry` 直接看到缺口。
+    const batch = await readJson(resolveHelixPath(rootDir, "agent-runs", `${run.runId}.json`), null);
+    const passedTaskIds = new Set((run.results || []).filter((entry) => entry.pass === true).map((entry) => entry.taskId));
+    const incompleteTasks = (batch?.taskIds || []).filter((taskId) => !passedTaskIds.has(taskId));
     runs.push({
       runId: run.runId,
       createdAt: run.createdAt,
       updatedAt: run.updatedAt,
+      batchStatus: batch?.status || null,
+      command: batch?.command || null,
+      incompleteTasks,
       summary: summarizeRunLifecycle(results),
       results,
     });
@@ -259,6 +280,82 @@ export async function parallelAgentStatus(rootDir, options = {}) {
     runId: options.runId || null,
     runCount: runs.length,
     runs,
+  };
+}
+
+/**
+ * partial 重试：对一个中断/部分失败的 run，只重跑"没有通过结果"的任务。
+ * 已通过的任务绝不重跑；已完成/进行中的任务跳过并说明。重跑是一个新 run
+ * （复用原批次的 command/agent/isolation），不改写原 run 的任何证据。
+ */
+export async function retryParallelAgentRun(rootDir, options = {}) {
+  await ensureHelixDirs(rootDir);
+  if (!options.runId) throw new Error("parallel retry requires --run <runId>");
+  const batch = await readJson(resolveHelixPath(rootDir, "agent-runs", `${options.runId}.json`), null);
+  if (!batch) throw new Error(`parallel run not found: ${options.runId}`);
+  const taskIds = Array.isArray(batch.taskIds) ? batch.taskIds : [];
+  if (taskIds.length === 0) {
+    throw new Error(`parallel run ${options.runId} has no recorded taskIds (batch predates retry support); retry manually with --task`);
+  }
+
+  const taskState = await loadTaskState(rootDir);
+  if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
+  const eligible = [];
+  const skipped = [];
+  for (const taskId of taskIds) {
+    const result = await readJson(resolveHelixPath(rootDir, "agent-runs", options.runId, taskId, "result.json"), null);
+    if (result?.pass === true) {
+      skipped.push({ taskId, reason: "already passed in this run" });
+      continue;
+    }
+    const task = (taskState.tasks || []).find((candidate) => candidate.id === taskId);
+    if (!task) {
+      skipped.push({ taskId, reason: "task no longer exists in the active plan" });
+      continue;
+    }
+    if (task.status !== "pending") {
+      skipped.push({ taskId, reason: `task is ${task.status}, not pending` });
+      continue;
+    }
+    // 任务可能已在别的 run 里通过并 awaiting_user_acceptance（本 run 的
+    // 旧失败结果不代表当前状态）；活 claim 的任务绝不重跑。
+    if (task.parallel_run_claim?.runId) {
+      skipped.push({ taskId, reason: `claimed by run ${task.parallel_run_claim.runId} (awaiting acceptance)` });
+      continue;
+    }
+    eligible.push(taskId);
+  }
+
+  if (eligible.length === 0) {
+    return {
+      kind: "parallel_agent_retry",
+      retryOf: options.runId,
+      status: "nothing_to_retry",
+      retried: [],
+      skipped,
+    };
+  }
+  const batch2 = await runParallelAgents(rootDir, {
+    command: options.command || batch.command || undefined,
+    agent: options.agent || batch.agent || undefined,
+    isolation: options.isolation || batch.isolation || undefined,
+    taskIds: eligible,
+    maxAgents: options.maxAgents,
+    timeoutMs: options.timeoutMs,
+  });
+  await appendLedger(rootDir, {
+    type: "parallel_agent_run_retried",
+    retryOf: options.runId,
+    newRunId: batch2.runId,
+    taskIds: eligible,
+  });
+  return {
+    kind: "parallel_agent_retry",
+    retryOf: options.runId,
+    status: "requeued",
+    newRunId: batch2.runId,
+    retried: eligible,
+    skipped,
   };
 }
 
@@ -349,7 +446,50 @@ function selectParallelTasks(tasks, options) {
   return selected;
 }
 
+/**
+ * 逐任务容错：一个任务的 runner 崩溃（worktree 失败、磁盘写失败等未预期
+ * 异常）只产生该任务的 fail 结果，绝不拒绝整个批次的 Promise.all——其他
+ * 任务的结果与磁盘证据必须照常入账（中断对账依赖这一点）。
+ */
 async function runOneAgent(rootDir, runDir, runId, task, options) {
+  try {
+    return await runOneAgentInner(rootDir, runDir, runId, task, options);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const agent = normalizeAgentKey(options.agent || task.owner || `Agent${options.index + 1}`) || `Agent${options.index + 1}`;
+    const config = options.config || (await loadHelixConfig(rootDir)).config;
+    const result = {
+      kind: "parallel_agent_result",
+      runId,
+      taskId: task.id,
+      agent,
+      at: nowIso(),
+      startedAt: nowIso(),
+      command: null,
+      adapter: null,
+      spawnSource: null,
+      isolation: options.defaultIsolation || options.isolation || "run-dir",
+      workDir: null,
+      worktreeAvailable: false,
+      worktreeReason: null,
+      exitCode: null,
+      status: "fail",
+      pass: false,
+      stdout: "",
+      stderr: `runner crashed before producing a result: ${message}`,
+      error: message,
+      result: {},
+      lifecycle: buildAgentLifecycle(false, config, null),
+      patch: null,
+      runDir: path.relative(rootDir, path.join(runDir, task.id)),
+    };
+    await writeJsonAtomic(path.join(runDir, task.id, "result.json"), result).catch(() => {});
+    await appendLedger(rootDir, { type: "parallel_agent_result", runId, taskId: task.id, agent, pass: false, runnerError: message }).catch(() => {});
+    return result;
+  }
+}
+
+async function runOneAgentInner(rootDir, runDir, runId, task, options) {
   const agent = normalizeAgentKey(options.agent || task.owner || `Agent${options.index + 1}`) || `Agent${options.index + 1}`;
   const taskRunDir = path.join(runDir, task.id);
   await mkdir(taskRunDir, { recursive: true });

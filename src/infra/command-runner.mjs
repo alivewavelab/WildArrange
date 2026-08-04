@@ -70,6 +70,17 @@ export function runCommand(command, cwd, timeoutMs = 120_000, options = {}) {
       }
       finish({ exitCode: code ?? 1, stdout, stderr, timedOut: false });
     });
+    // spawn 自身失败（shell 缺失、cwd 不存在、权限拒绝）走 error 事件而不是
+    // close；没有这个监听，unhandled 'error' 会直接击穿整个进程。
+    child.on("error", (error) => {
+      finish({
+        exitCode: 127,
+        stdout,
+        stderr: `${stderr}\nCommand failed to spawn: ${error instanceof Error ? error.message : String(error)}`.trim(),
+        timedOut: false,
+        spawnError: true,
+      });
+    });
   });
 }
 

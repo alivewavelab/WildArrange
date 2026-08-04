@@ -9,6 +9,8 @@ import {
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
+import { evaluateGateArming } from "../infra/gate-arming.mjs";
+import { loadHelixConfig } from "../infra/runtime-config.mjs";
 import { listChangeRequests } from "./change-governance.mjs";
 import { parallelAgentStatus } from "./parallel-runtime.mjs";
 import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
@@ -68,12 +70,16 @@ export async function statusReport(rootDir) {
   const taskState = await loadTaskState(rootDir);
   const changes = await listChangeRequests(rootDir);
   const openChanges = changes.filter((change) => change.status === "open").length;
-  if (!taskState) return { work, planId: null, total: 0, completed: 0, pending: 0, failed: 0, openChanges };
+  // 门未武装黄灯：配置地板不满足时常驻显示，绝不因任务全绿而显示绿。
+  const { config } = await loadHelixConfig(rootDir);
+  const gateArming = evaluateGateArming({ config, tasks: taskState?.tasks || [] });
+  if (!taskState) return { gateArming, work, planId: null, total: 0, completed: 0, pending: 0, failed: 0, openChanges };
   const counts = taskState.tasks.reduce((acc, task) => {
     acc[task.status] = (acc[task.status] || 0) + 1;
     return acc;
   }, {});
   return {
+    gateArming,
     work,
     planId: taskState.planId,
     total: taskState.tasks.length,

@@ -547,8 +547,9 @@ test("pre-tool-use guard denies out-of-scope file writes before they land", asyn
         id: "T001",
         subject: "Edit app",
         writable_paths: ["src/app.js"],
-        worker_command: "node -e \"process.exit(0)\"",
-        verify_commands: ["node -e \"process.exit(0)\""],
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
       }],
     }, null, 2));
     await importPlan(dir, planPath);
@@ -704,13 +705,15 @@ test("parallel agents run task packets concurrently and publish results", async 
         {
           id: "T001",
           subject: "Parallel research one",
-          verify_commands: ["node -e \"process.exit(0)\""],
+          verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+          review_commands: ["node --version"],
           writable_paths: [".helix/artifacts/one.txt"],
         },
         {
           id: "T002",
           subject: "Parallel research two",
-          verify_commands: ["node -e \"process.exit(0)\""],
+          verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+          review_commands: ["node --version"],
           writable_paths: [".helix/artifacts/two.txt"],
         },
       ],
@@ -763,7 +766,8 @@ test("read-only long-lived Agents cannot enter the parallel command worker", asy
       tasks: [{
         id: "T001",
         subject: "Must not execute",
-        verify_commands: ["node -e \"process.exit(0)\""],
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
         writable_paths: [],
       }],
     }, null, 2));
@@ -792,7 +796,8 @@ test("parallel agents without a runner command are marked skipped", async () => 
       tasks: [{
         id: "T001",
         subject: "Prepare packet only",
-        verify_commands: ["node -e \"process.exit(0)\""],
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
         writable_paths: [".helix/artifacts/one.txt"],
       }],
     }, null, 2));
@@ -824,7 +829,8 @@ test("parallel agents can use configured adapter command templates", async () =>
       tasks: [{
         id: "T001",
         subject: "Use adapter command",
-        verify_commands: ["node -e \"process.exit(0)\""],
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
         writable_paths: [".helix/artifacts/adapter.txt"],
       }],
     }, null, 2));
@@ -854,6 +860,7 @@ test("parallel admission applies child artifacts only after gates pass", async (
           id: "T001",
           subject: "Admit child artifact",
           verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/parallel.txt','utf8').trim()!=='ok') process.exit(1);")],
+          review_commands: ["node --version"],
           writable_paths: ["src/**"],
         },
       ],
@@ -899,6 +906,7 @@ test("parallel admission rolls back child artifacts when gates fail", async () =
         id: "T001",
         subject: "Reject bad child artifact",
         verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/parallel.txt','utf8').trim()!=='ok') process.exit(1);")],
+        review_commands: ["node --version"],
         writable_paths: ["src/**"],
       }],
     }, null, 2));
@@ -946,6 +954,7 @@ test("parallel agents can isolate edits in git worktrees and admit patches", asy
         id: "T001",
         subject: "Admit worktree patch",
         verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/worktree.txt','utf8').trim()!=='ok') process.exit(1);")],
+        review_commands: ["node --version"],
         writable_paths: ["src/**"],
       }],
     }, null, 2));
@@ -989,7 +998,8 @@ test("parallel admission rejects artifacts outside writable paths", async () => 
         {
           id: "T001",
           subject: "Reject leaked artifact",
-          verify_commands: ["node -e \"process.exit(0)\""],
+          verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+          review_commands: ["node --version"],
           writable_paths: ["src/**"],
         },
       ],
@@ -1251,7 +1261,8 @@ test("plan import rejects unknown blockedBy before writing task state", async ()
         id: "T001",
         subject: "Blocked by missing task",
         blockedBy: ["T999"],
-        verify_commands: ["node -e \"process.exit(0)\""],
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
       }],
     }));
 
@@ -1275,8 +1286,9 @@ test("plan import rejects high-risk product plans that are under-split", async (
           subject: "写产品 brief 和流程",
           description: "明确产品目标、流程、结构件和互动体验。",
           writable_paths: [".workflow/**"],
-          worker_command: "node -e \"process.exit(0)\"",
-          verify_commands: ["node -e \"process.exit(0)\""],
+          worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+          verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+          review_commands: ["node --version"],
         },
         {
           id: "T002",
@@ -1284,8 +1296,9 @@ test("plan import rejects high-risk product plans that are under-split", async (
           description: "实现页面和转换逻辑。",
           blockedBy: ["T001"],
           writable_paths: ["index.html", "src/**", "test/**"],
-          worker_command: "node -e \"process.exit(0)\"",
-          verify_commands: ["node -e \"process.exit(0)\""],
+          worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+          verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+          review_commands: ["node --version"],
         },
       ],
     }, null, 2));
@@ -1307,8 +1320,9 @@ test("plan import persists route decisions and fills missing task category and s
         subject: "优化页面 CSS 布局",
         description: "调整按钮样式和页面布局",
         writable_paths: ["src/**"],
-        worker_command: "node -e \"process.exit(0)\"",
-        verify_commands: ["node -e \"process.exit(0)\""],
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
       }],
     }));
 
@@ -1338,8 +1352,9 @@ test("plan import preserves explicit category while recording route decision", a
         subject: "单文件小改 README 文案",
         category: "quick",
         writable_paths: ["README.md"],
-        worker_command: "node -e \"process.exit(0)\"",
-        verify_commands: ["node -e \"process.exit(0)\""],
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
       }],
     }));
 
@@ -1361,25 +1376,25 @@ test("plan import applies default gates and scope to every task", async () => {
     await writeFile(planPath, JSON.stringify({
       title: "Default gates",
       defaults: {
-        verify_commands: ["node -e \"process.exit(0)\""],
-        review_commands: ["node -e \"process.exit(0)\""],
-        standards_commands: ["node -e \"process.exit(0)\""],
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        standards_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         writable_paths: ["src/**"],
         skills: ["project-standard"],
       },
       tasks: [{
         id: "T001",
         subject: "Use inherited gates",
-        worker_command: "node -e \"process.exit(0)\"",
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
       }],
     }));
 
     await importPlan(dir, planPath);
     const state = await readJson(resolveHelixPath(dir, "team", "tasks.json"));
     const task = state.tasks[0];
-    assert.deepEqual(task.verify_commands, ["node -e \"process.exit(0)\""]);
-    assert.deepEqual(task.review_commands, ["node -e \"process.exit(0)\""]);
-    assert.deepEqual(task.standards_commands, ["node -e \"process.exit(0)\""]);
+    assert.deepEqual(task.verify_commands, ["node -e \"if(!process.version)process.exit(1)\""]);
+    assert.deepEqual(task.review_commands, ["node -e \"if(!process.version)process.exit(1)\""]);
+    assert.deepEqual(task.standards_commands, ["node -e \"if(!process.version)process.exit(1)\""]);
     assert.deepEqual(task.writable_paths, ["src/**"]);
     assert.ok(task.skills.includes("project-standard"));
   });
@@ -1396,6 +1411,7 @@ test("plan import warns about possible no-op tasks", async () => {
         subject: "Suspicious task",
         worker_command: "node -e \"process.exit(0)\"",
         verify_commands: ["node -e \"process.exit(0)\""],
+        review_commands: ["node --version"],
       }],
     }));
 
@@ -1428,8 +1444,9 @@ test("project rules and agent context collect matching local governance", async 
         id: "T001",
         subject: "Implement src app",
         writable_paths: ["src/**"],
-        worker_command: "node -e \"process.exit(0)\"",
-        verify_commands: ["node -e \"process.exit(0)\""],
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
       }],
     }));
     await importPlan(dir, planPath);
@@ -1460,8 +1477,9 @@ test("success criteria evidence is recorded and required by checkpoint", async (
         id: "T001",
         subject: "Require manual criteria",
         writable_paths: ["src/**"],
-        worker_command: "node -e \"process.exit(0)\"",
-        verify_commands: ["node -e \"process.exit(0)\""],
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
         successCriteria: [
           { id: "C001", title: "Manual criterion", status: "pending", expectedEvidence: "manual proof" },
         ],
@@ -1492,8 +1510,9 @@ test("unbound success criteria are not auto-passed by verifier", async () => {
       tasks: [{
         id: "T001",
         subject: "Do not auto-pass manual criterion",
-        worker_command: "node -e \"process.exit(0)\"",
-        verify_commands: ["node -e \"process.exit(0)\""],
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
         successCriteria: [
           { id: "C001", title: "Manual criterion", status: "pending", expectedEvidence: "manual proof" },
         ],
@@ -1511,7 +1530,7 @@ test("unbound success criteria are not auto-passed by verifier", async () => {
 test("success criteria can be auto-passed only with explicit verifier command refs", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const verifyCommand = "node -e \"process.exit(0)\"";
+    const verifyCommand = "node -e \"if(!process.version)process.exit(1)\"";
     const planPath = path.join(dir, "criteria-bound-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Bound criteria evidence",
@@ -1519,8 +1538,9 @@ test("success criteria can be auto-passed only with explicit verifier command re
         id: "T001",
         subject: "Auto-pass bound criterion",
         writable_paths: ["src/**"],
-        worker_command: "node -e \"process.exit(0)\"",
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
         verify_commands: [verifyCommand],
+        review_commands: ["node --version"],
         successCriteria: [
           { id: "C001", title: "Bound criterion", status: "pending", verifierCommandRefs: [0] },
         ],
@@ -1544,8 +1564,9 @@ test("steering safely adds tasks and rejects weakening proposals", async () => {
       tasks: [{
         id: "T001",
         subject: "Original task",
-        worker_command: "node -e \"process.exit(0)\"",
-        verify_commands: ["node -e \"process.exit(0)\""],
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
       }],
     }));
     await importPlan(dir, planPath);
@@ -1555,7 +1576,8 @@ test("steering safely adds tasks and rejects weakening proposals", async () => {
       targetTaskId: "T001",
       evidence: "skip tests to complete faster",
       rationale: "remove verification",
-      verify_commands: ["node -e \"process.exit(0)\""],
+      verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+      review_commands: ["node --version"],
     });
     assert.equal(rejected.accepted, false);
     assert.ok(rejected.audit.invariant.rejectedReasons.includes("weakened completion"));
@@ -1566,6 +1588,7 @@ test("steering safely adds tasks and rejects weakening proposals", async () => {
       evidence: "Verifier removal was proposed by mistake.",
       rationale: "This should be rejected because empty verification is not evidence.",
       verify_commands: [],
+      review_commands: ["node --version"],
     });
     assert.equal(emptyVerifier.accepted, false);
     assert.ok(emptyVerifier.audit.invariant.rejectedReasons.includes("verify_commands cannot be empty"));
@@ -1576,6 +1599,7 @@ test("steering safely adds tasks and rejects weakening proposals", async () => {
       evidence: "Use a different command instead.",
       rationale: "This should be rejected because it removes the existing gate.",
       verify_commands: ["node -e \"console.log('new weaker gate')\""],
+      review_commands: ["node --version"],
     });
     assert.equal(removedVerifier.accepted, false);
     assert.ok(removedVerifier.audit.invariant.rejectedReasons.some((reason) => reason.includes("verify_commands cannot remove existing gate command")));
@@ -1588,8 +1612,9 @@ test("steering safely adds tasks and rejects weakening proposals", async () => {
       task: {
         id: "T002",
         subject: "Follow-up task",
-        worker_command: "node -e \"process.exit(0)\"",
-        verify_commands: ["node -e \"process.exit(0)\""],
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
       },
     });
     assert.equal(accepted.accepted, true);
@@ -1617,8 +1642,9 @@ test("empty verifier commands cannot complete even if task state is corrupted", 
       tasks: [{
         id: "T001",
         subject: "Corrupted task should not pass",
-        worker_command: "node -e \"process.exit(0)\"",
-        verify_commands: ["node -e \"process.exit(0)\""],
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
       }],
     }));
     await importPlan(dir, planPath);
@@ -1646,8 +1672,9 @@ test("review blockers create a resolution task without completing the blocked ta
       tasks: [{
         id: "T001",
         subject: "Task needing final review",
-        worker_command: "node -e \"process.exit(0)\"",
-        verify_commands: ["node -e \"process.exit(0)\""],
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
       }],
     }));
     await importPlan(dir, planPath);
@@ -1660,8 +1687,9 @@ test("review blockers create a resolution task without completing the blocked ta
       objective: "Run browser-level evidence before final checkpoint.",
       evidence: "BaiZe final review found missing browser evidence.",
       rationale: "The blocker must be resolved as a separate task.",
-      worker_command: "node -e \"process.exit(0)\"",
-      verify_commands: ["node -e \"process.exit(0)\""],
+      worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+      verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+      review_commands: ["node --version"],
     });
     assert.equal(blocked.blockedTask.status, "review_blocked");
     assert.equal(blocked.resolutionTask.reviewBlockerFor, "T001");
@@ -1895,6 +1923,7 @@ test("LLM review gate uses OpenAI-compatible provider when configured", async ()
           writable_paths: [".helix/artifacts/llm.txt"],
           worker_command: "node -e \"const fs=require('fs'); fs.writeFileSync('.helix/artifacts/llm.txt','ok')\"",
           verify_commands: ["node -e \"const fs=require('fs'); if(fs.readFileSync('.helix/artifacts/llm.txt','utf8')!=='ok') process.exit(1)\""],
+          review_commands: ["node --version"],
         }],
       }));
       const plan = await importPlan(dir, planPath);
@@ -1932,6 +1961,7 @@ test("comment checker can block checkpoint when configured", async () => {
         writable_paths: ["src/app.js"],
         worker_command: "node -e \"const fs=require('fs'); fs.writeFileSync('src/app.js','// TODO remove placeholder\\nexport const ok = true;\\n')\"",
         verify_commands: ["node -e \"const fs=require('fs'); if(!fs.readFileSync('src/app.js','utf8').includes('ok')) process.exit(1)\""],
+        review_commands: ["node --version"],
         maxAttempts: 2,
       }],
     }));
@@ -1977,6 +2007,7 @@ test("comment checker object patterns default to case-insensitive matching", asy
         writable_paths: ["src/app.js"],
         worker_command: "node -e \"const fs=require('fs'); fs.writeFileSync('src/app.js','// TODO uppercase placeholder\\nexport const ok = true;\\n')\"",
         verify_commands: ["node -e \"const fs=require('fs'); if(!fs.readFileSync('src/app.js','utf8').includes('ok')) process.exit(1)\""],
+        review_commands: ["node --version"],
       }],
     }));
     await importPlan(dir, planPath);
@@ -2015,6 +2046,7 @@ test("code intelligence gates block stale hashline and AST findings", async () =
         writable_paths: ["src/app.js"],
         worker_command: "node -e \"const fs=require('fs'); fs.writeFileSync('src/app.js','export const ok = false;\\n')\"",
         verify_commands: ["node -e \"const fs=require('fs'); if(!fs.readFileSync('src/app.js','utf8').includes('export const ok')) process.exit(1)\""],
+        review_commands: ["node --version"],
         hashline_anchors: [{ file: "src/app.js", line: 1, sha256: hashLine(expectedLine), note: "expected stable export line" }],
       }],
     }));
@@ -2084,6 +2116,7 @@ test("simulation greenfield project runs from product planning to completed web 
               if (!design.includes("empty state") || !design.includes("error feedback")) process.exit(1);
             `),
           ],
+          review_commands: ["node --version"],
         },
         {
           id: "T002",
@@ -2117,6 +2150,7 @@ test("simulation greenfield project runs from product planning to completed web 
             ].join("\\n"));
           `),
           verify_commands: ["npm test"],
+          review_commands: ["node --version"],
         },
         {
           id: "T003",
@@ -2145,6 +2179,7 @@ test("simulation greenfield project runs from product planning to completed web 
               if (report.includes("FAIL") || !report.includes("PASS empty state")) process.exit(1);
             `),
           ],
+          review_commands: ["node --version"],
         },
         {
           id: "T004",
@@ -2168,6 +2203,7 @@ test("simulation greenfield project runs from product planning to completed web 
               if (!summary.includes("Brief") || !summary.includes("QA report")) process.exit(1);
             `),
           ],
+          review_commands: ["node --version"],
         },
       ],
     }, null, 2));
@@ -2236,6 +2272,7 @@ test("simulation existing project handles large feature addition through plannin
               if (!plan.includes("OUT: sharing permissions") || !plan.includes("regression test")) process.exit(1);
             `),
           ],
+          review_commands: ["node --version"],
         },
         {
           id: "T002",
@@ -2266,6 +2303,7 @@ test("simulation existing project handles large feature addition through plannin
             ].join("\\n"));
           `),
           verify_commands: ["node test/app.test.cjs"],
+          review_commands: ["node --version"],
         },
         {
           id: "T003",
@@ -2292,6 +2330,7 @@ test("simulation existing project handles large feature addition through plannin
               if (report.includes("FAIL") || !report.includes("PASS existing behavior")) process.exit(1);
             `),
           ],
+          review_commands: ["node --version"],
         },
         {
           id: "T004",
@@ -2316,6 +2355,7 @@ test("simulation existing project handles large feature addition through plannin
               if (!summary.includes("regression evidence") || !summary.includes("OUT scope")) process.exit(1);
             `),
           ],
+          review_commands: ["node --version"],
         },
       ],
     }, null, 2));
@@ -2349,6 +2389,7 @@ test("linear loop honors blockedBy dependencies in order", async () => {
           subject: "Write first artifact",
           worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('.helix/artifacts',{recursive:true}); fs.writeFileSync('.helix/artifacts/first.txt','first')\"",
           verify_commands: ["node -e \"const fs=require('fs'); if(fs.readFileSync('.helix/artifacts/first.txt','utf8')!=='first') process.exit(1)\""],
+          review_commands: ["node --version"],
         },
         {
           id: "T002",
@@ -2356,6 +2397,7 @@ test("linear loop honors blockedBy dependencies in order", async () => {
           blockedBy: ["T001"],
           worker_command: "node -e \"const fs=require('fs'); fs.writeFileSync('.helix/artifacts/second.txt',fs.readFileSync('.helix/artifacts/first.txt','utf8')+'+second')\"",
           verify_commands: ["node -e \"const fs=require('fs'); if(fs.readFileSync('.helix/artifacts/second.txt','utf8')!=='first+second') process.exit(1)\""],
+          review_commands: ["node --version"],
         },
       ],
     }));
@@ -2383,14 +2425,15 @@ test("team task create appends a routed task and preserves dependency gates", as
     await writeFile(planPath, JSON.stringify({
       title: "Append task",
       defaults: {
-        verify_commands: ["node -e \"process.exit(0)\""],
-        standards_commands: ["node -e \"process.exit(0)\""],
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
+        standards_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         writable_paths: ["src/**"],
       },
       tasks: [{
         id: "T001",
         subject: "First task",
-        worker_command: "node -e \"process.exit(0)\"",
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
       }],
     }));
     await importPlan(dir, planPath);
@@ -2400,12 +2443,12 @@ test("team task create appends a routed task and preserves dependency gates", as
       subject: "实现追加任务按钮",
       description: "新增一个 UI 按钮任务",
       blockedBy: ["T001"],
-      worker_command: "node -e \"process.exit(0)\"",
+      worker_command: "node -e \"if(!process.version)process.exit(1)\"",
     });
     assert.equal(created.task.id, "T002");
     assert.equal(created.task.category, "visual-engineering");
-    assert.deepEqual(created.task.verify_commands, ["node -e \"process.exit(0)\""]);
-    assert.deepEqual(created.task.standards_commands, ["node -e \"process.exit(0)\""]);
+    assert.deepEqual(created.task.verify_commands, ["node -e \"if(!process.version)process.exit(1)\""]);
+    assert.deepEqual(created.task.standards_commands, ["node -e \"if(!process.version)process.exit(1)\""]);
 
     const listed = await listTeamTasks(dir, { status: "pending" });
     assert.deepEqual(listed.tasks.map((task) => task.id), ["T001", "T002"]);
@@ -2434,15 +2477,17 @@ test("team task claim respects blockers and does not bypass execution gates", as
         {
           id: "T001",
           subject: "Claimable task",
-          worker_command: "node -e \"process.exit(0)\"",
-          verify_commands: ["node -e \"process.exit(0)\""],
+          worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+          verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+          review_commands: ["node --version"],
         },
         {
           id: "T002",
           subject: "Blocked task",
           blockedBy: ["T001"],
-          worker_command: "node -e \"process.exit(0)\"",
-          verify_commands: ["node -e \"process.exit(0)\""],
+          worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+          verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+          review_commands: ["node --version"],
         },
       ],
     }));
@@ -2482,8 +2527,9 @@ test("verifier failure returns task to pending until max attempts", async () => 
       tasks: [{
         id: "T001",
         subject: "Bad verification",
-        worker_command: "node -e \"process.exit(0)\"",
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
         verify_commands: ["node -e \"process.exit(2)\""],
+        review_commands: ["node --version"],
         maxAttempts: 2,
       }],
     }));
@@ -2529,7 +2575,8 @@ test("runNextTask fails when automatic scope guard finds out-of-scope worker cha
         subject: "Only src allowed",
         writable_paths: ["src/**"],
         worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('docs',{recursive:true}); fs.writeFileSync('docs/leak.md','bad')\"",
-        verify_commands: ["node -e \"process.exit(0)\""],
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
       }],
     }));
     await importPlan(dir, planPath);
@@ -2576,7 +2623,8 @@ test("non-git projects use file manifest scope fallback before checkpoint", asyn
         subject: "Only src allowed without git",
         writable_paths: ["src/**"],
         worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('docs',{recursive:true}); fs.writeFileSync('docs/leak.md','bad')\"",
-        verify_commands: ["node -e \"process.exit(0)\""],
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
       }],
     }));
     await importPlan(dir, planPath);
@@ -2604,6 +2652,7 @@ test("accepted change request can explicitly apply scope and reopen retry", asyn
         writable_paths: ["src/**"],
         worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('docs',{recursive:true}); fs.writeFileSync('docs/leak.md','accepted')\"",
         verify_commands: ["node -e \"const fs=require('fs'); if(fs.readFileSync('docs/leak.md','utf8')!=='accepted') process.exit(1)\""],
+        review_commands: ["node --version"],
       }],
     }));
     await importPlan(dir, planPath);
@@ -2652,8 +2701,8 @@ test("review gate failure blocks checkpoint and writes actionable failure report
       tasks: [{
         id: "T001",
         subject: "Pass verifier but fail review command",
-        worker_command: "node -e \"process.exit(0)\"",
-        verify_commands: ["node -e \"process.exit(0)\""],
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node -e \"console.error('review says no'); process.exit(4)\""],
         maxAttempts: 2,
       }],
@@ -2684,8 +2733,9 @@ test("review gate fails when verifier evidence is missing", async () => {
       tasks: [{
         id: "T001",
         subject: "Do not review without verifier evidence",
-        worker_command: "node -e \"process.exit(0)\"",
-        verify_commands: ["node -e \"process.exit(0)\""],
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
       }],
     }));
     const plan = await importPlan(dir, planPath);
@@ -2713,8 +2763,9 @@ test("standards command failure blocks checkpoint through review gate", async ()
       tasks: [{
         id: "T001",
         subject: "Pass verifier but fail standards",
-        worker_command: "node -e \"process.exit(0)\"",
-        verify_commands: ["node -e \"process.exit(0)\""],
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
         maxAttempts: 2,
       }],
     }));
@@ -2742,8 +2793,9 @@ test("checkpoint node rejects tasks before review gate passes", async () => {
       tasks: [{
         id: "T001",
         subject: "Need review before checkpoint",
-        worker_command: "node -e \"process.exit(0)\"",
-        verify_commands: ["node -e \"process.exit(0)\""],
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
       }],
     }));
     await importPlan(dir, planPath);
@@ -2769,7 +2821,8 @@ test("scope guard checks git changed paths against task writable paths", async (
         id: "T001",
         subject: "Only touch src",
         writable_paths: ["src/**"],
-        verify_commands: ["node -e \"process.exit(0)\""],
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
       }],
     }));
     await importPlan(dir, planPath);
@@ -2810,8 +2863,9 @@ test("scope guard rejects symlink realpaths that escape the project", async () =
         id: "T001",
         subject: "Reject symlink escape",
         writable_paths: ["allowed-link.txt"],
-        worker_command: "node -e \"process.exit(0)\"",
-        verify_commands: ["node -e \"process.exit(0)\""],
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
       }],
     }));
     await importPlan(dir, planPath);
@@ -2883,8 +2937,9 @@ test("workflow summary records failed runs with failure evidence", async () => {
       tasks: [{
         id: "T001",
         subject: "Fail verifier for summary",
-        worker_command: "node -e \"process.exit(0)\"",
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
         verify_commands: ["node -e \"process.exit(9)\""],
+        review_commands: ["node --version"],
         maxAttempts: 1,
       }],
     }));
@@ -2952,6 +3007,7 @@ test("workflow nodes execute, verify, scope, review, and checkpoint independentl
         writable_paths: ["src/**"],
         worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/app.js','console.log(\\\\\\\"hello\\\\\\\")\\\\n')\"",
         verify_commands: ["node src/app.js | grep hello"],
+        review_commands: ["node --version"],
       }],
     }));
     await importPlan(dir, planPath);
@@ -2992,6 +3048,7 @@ test("workflow verify node returns failed verification to pending for retry", as
         writable_paths: ["src/**"],
         worker_command: nodeEval("process.exit(0);"),
         verify_commands: [nodeEval("process.exit(1);")],
+        review_commands: ["node --version"],
       }],
     }));
     await importPlan(dir, planPath);
@@ -3017,15 +3074,17 @@ test("dashboard API drives task, inbox, and summary operations without bypassing
         {
           id: "T001",
           subject: "Claim through dashboard",
-          worker_command: "node -e \"process.exit(0)\"",
-          verify_commands: ["node -e \"process.exit(0)\""],
+          worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+          verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+          review_commands: ["node --version"],
         },
         {
           id: "T002",
           subject: "Blocked dashboard task",
           blockedBy: ["T001"],
-          worker_command: "node -e \"process.exit(0)\"",
-          verify_commands: ["node -e \"process.exit(0)\""],
+          worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+          verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+          review_commands: ["node --version"],
         },
       ],
     }));
@@ -3082,8 +3141,9 @@ test("dashboard API drives task, inbox, and summary operations without bypassing
         id: "T003",
         subject: "Append task from dashboard",
         blockedBy: ["T001"],
-        worker_command: "node -e \"process.exit(0)\"",
-        verify_commands: ["node -e \"process.exit(0)\""],
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
       }, { headers: authHeaders });
       assert.equal(created.response.status, 200);
       assert.equal(created.body.result.task.id, "T003");
@@ -3160,6 +3220,7 @@ test("workflow node state updates are serialized under the task lock", async () 
         writable_paths: ["src/**"],
         worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/app.js','console.log(\\\\\\\"locked\\\\\\\")\\\\n')\"",
         verify_commands: ["node src/app.js | grep locked"],
+        review_commands: ["node --version"],
       }],
     }));
     await importPlan(dir, planPath);
@@ -3213,6 +3274,7 @@ test("acceptance proof rejects no-op tasks with trivial worker and verifier", as
         subject: "看似完成实则什么都没做",
         worker_command: "node -e \"process.exit(0)\"",
         verify_commands: ["true"],
+        review_commands: ["node --version"],
       }],
     }, null, 2));
     await importPlan(dir, planPath);
@@ -3247,6 +3309,7 @@ test("worker execution records a pre-execute workspace snapshot in a git repo", 
         writable_paths: [".helix/artifacts/**", "src/**"],
         worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/out.txt','snapshot')\"",
         verify_commands: ["node -e \"const fs=require('fs'); process.exit(fs.readFileSync('src/out.txt','utf8')==='snapshot'?0:1)\""],
+        review_commands: ["node --version"],
       }],
     }, null, 2));
     await importPlan(dir, planPath);
@@ -3282,7 +3345,8 @@ test("state restore recovers runtime files from a backup and keeps a pre-restore
         id: "T001",
         subject: "占位任务",
         writable_paths: ["src/**"],
-        verify_commands: ["node -e \"process.exit(0)\""],
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
       }],
     }, null, 2));
     await importPlan(dir, planPath);
@@ -3330,6 +3394,7 @@ test("doctor passes on a healthy runtime and flags hand-edited completion", asyn
       writable_paths: [],
       worker_command: null,
       verify_commands: ["true"],
+      review_commands: ["node --version"],
       evidence: [],
     });
     await writeFile(tasksPath, JSON.stringify(state, null, 2), "utf8");
@@ -3546,14 +3611,16 @@ test("adversarial round 2: completion forgery attempts are caught by gates and d
           subject: "试图删除源代码目录",
           writable_paths: ["src/**"],
           worker_command: "rm -rf src",
-          verify_commands: ["node -e \"process.exit(0)\""],
+          verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+          review_commands: ["node --version"],
         },
         {
           id: "T002",
           subject: "试图越界写文件",
           writable_paths: ["src/**"],
           worker_command: "node -e \"const fs=require('fs'); fs.writeFileSync('secrets.txt','leak')\"",
-          verify_commands: ["node -e \"process.exit(0)\""],
+          verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+          review_commands: ["node --version"],
         },
       ],
     }, null, 2));
@@ -3608,8 +3675,9 @@ test("attention report aggregates decisions waiting on the user", async () => {
         id: "T001",
         subject: "被审阅阻塞的任务",
         writable_paths: ["src/**"],
-        worker_command: "node -e \"process.exit(0)\"",
-        verify_commands: ["node -e \"process.exit(0)\""],
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
       }],
     }, null, 2));
     await importPlan(dir, planPath);
@@ -3621,8 +3689,9 @@ test("attention report aggregates decisions waiting on the user", async () => {
       objective: "补齐边界条件证据后再回到主任务。",
       evidence: "verifier evidence does not cover edge cases",
       rationale: "blocker 必须作为独立任务解决。",
-      worker_command: "node -e \"process.exit(0)\"",
-      verify_commands: ["node -e \"process.exit(0)\""],
+      worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+      verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+      review_commands: ["node --version"],
     });
 
     const attention = await attentionReport(dir);
@@ -3682,6 +3751,7 @@ test("plan approval gate blocks run until developer approves", async () => {
         writable_paths: ["src/**"],
         worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/a.js','X\\n')\"",
         verify_commands: ["node -e \"const fs=require('fs'); if(!fs.readFileSync('src/a.js','utf8').includes('X')) process.exit(1)\""],
+        review_commands: ["node --version"],
       }],
     }, null, 2));
     await importPlan(dir, planPath);

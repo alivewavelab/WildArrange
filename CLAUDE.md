@@ -41,6 +41,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 
 - `src/helix-core.mjs` 只作为兼容导出层，不允许继续堆业务实现。
 - 项目按五区分层：`interface/ → orchestration/ → ai/ / capabilities/ → infra/`，新增功能必须先归属到对应区目录；无合适归属时才新增顶层 `src/<zone>/helix-*.mjs`。
+- `bin/` 只做参数解析与命令路由，只能 import `interface/` 或 `helix-core` 兼容层，不得直接 import 其他分区实现文件。
 - 依赖方向只能从上往下：`interface` 可依赖 `orchestration`/`infra`；`orchestration` 可依赖 `ai`/`capabilities`/`infra`，其中 `orchestration → ai` 限定在 `test/dependency-boundary.test.mjs` 钉死的白名单边（目前仅 `linear-runtime.mjs → ai/routing.mjs`），新增必须显式改白名单；`ai` 可依赖 `orchestration`/`capabilities`/`infra`（`ai → orchestration`、`ai → capabilities` 均只读，且 `ai → capabilities` 必须走 `capabilities/gateway.mjs`）；`capabilities` 只能依赖 `infra`；`infra` 不依赖任何上层。反向依赖与模块级 import 环由 `test/dependency-boundary.test.mjs` 强制拦截，不得为了让测试变绿而放宽这些规则。
 - 五区内文件不得 import 任何旧 `src/helix-*.mjs` shim（含 `helix-core.mjs`）；shim 只服务外部旧调用方，五区内必须直接 import 分区实现文件。
 - `orchestration/` 和 `ai/` 都不得直接 import 具体能力实现文件（`capabilities/verify.mjs` 等），必须统一经 `capabilities/gateway.mjs` 的 `invokeCapability(name, ctx)`。
@@ -69,11 +70,16 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/interface/dashboard.mjs`                                | 本地 dashboard HTTP 服务、POST token 与 Host/Origin 防护 |
 | `src/interface/adapters.mjs`                                 | Codex / Cursor / Kimi adapter 安装、卸载、恢复、共享 Skill 命令生成 |
 | `src/interface/kimi-adapter.mjs`                             | Kimi plugin manifest、Hook bridge 与安装说明的纯渲染逻辑 |
-| `src/interface/doctor.mjs`                                   | 一键体检：config 结构校验、完成状态对账、ledger 与备份交叉验证 |
+| `src/interface/cursor-adapter.mjs` | Cursor `.cursor/hooks.json`、项目感知 Hook bridge（事件/工具名映射与输出协议翻译）与安装说明的纯渲染逻辑；preToolUse 对 Write/Delete/Shell fail-closed |
+| `src/interface/doctor.mjs`                                   | 一键体检：各项检查各自独立 try/catch（单项崩只标红本分项），含 gateArming 门武装、adapters 硬拦截安装/陈旧规则、decisionHealth 周期健康摘要；诊断不再写 ledger |
+| `src/interface/decisions.mjs` | `helix decisions` 只读投影：每条决策三行（发生了什么/命中规则/证据），坏行降级；`decisions stats` 确定性统计审查（计数/从未触发的门/标注关联，无 LLM） |
+| `src/interface/timeline.mjs` | `helix timeline`：ledger（仅校验通过条目）+ decisions + annotations 统一倒序时间线投影，只读 |
+| `src/interface/dashboard-panels.mjs` | Dashboard 决策面板 + 运维面板：只读 ViewModel 与渲染片段（防 dashboard.mjs 超拆分线） |
+| `src/interface/cli-help.mjs` | CLI 命令注册表单一事实源：core 六命令分层 help、`docs commands` Markdown 物化 |
 | **orchestration/**（工作流顺序、重试、gate 编排，只依赖 ai、capabilities、infra） |  |
 | `src/orchestration/plan-state.mjs`                            | 计划导入、校验、路由 enrichment、任务状态加载                 |
 | `src/orchestration/linear-runtime.mjs`                        | 线性任务节点运行时、重试 / checkpoint，经 gateway 调用能力       |
-| `src/orchestration/parallel-runtime.mjs`                      | 命令型子 Agent 并行运行、隔离结果、skipped/cleanup 生命周期状态与消息发布 |
+| `src/orchestration/parallel-runtime.mjs`                      | 命令型子 Agent 并行运行、隔离结果、skipped/cleanup 生命周期状态、runner 崩溃逐任务容错、中断对账与 `parallel retry` partial 重试 |
 | `src/orchestration/admission.mjs`                             | 并行 admission 事务：claim → apply → gates → commit/rollback，全程持全局任务锁 |
 | `src/orchestration/delivery-pipeline.mjs`                     | 共享交付流水线：verify → scope → review → acceptance-proof → checkpoint 顺序 |
 | `src/orchestration/task-board.mjs`                            | 轻量任务板与消息板                                     |
@@ -87,6 +93,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/ai/skill-matcher.mjs`                                    | Skill 匹配、优先级打分、提示词模型变体                       |
 | `src/ai/context.mjs`                                          | Agent 上下文、恢复快照、会话延续                           |
 | `src/ai/hooks.mjs`                                            | 宿主生命周期 Hook、PreToolUse 范围拦截                   |
+| `src/ai/suspicion-review.mjs` | LLM 可疑判断异步审查：只读清洗结论包、无 key 确定性 fallback、decisionId 防幻觉锚定；结论只进 `.helix/reports/suspicion.*`，不进完成链 |
 | **capabilities/**（原子能力 + gateway，只依赖 infra；orchestration/ai 只能经 `gateway.mjs` 调用） |  |
 | `src/capabilities/gateway.mjs`                                | 能力网关：静态注册表 + 统一结果信封（capability/status/evidence/sideEffect/duration_ms/cost/error） |
 | `src/capabilities/verify.mjs`                                 | verifier                                       |
@@ -100,15 +107,20 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | **infra/**（基础设施，不依赖任何上层区） |  |
 | `src/infra/foundation.mjs`                                    | Foundation 旧入口的声明式兼容导出；五区内部不得依赖 |
 | `src/infra/runtime-store.mjs`                                 | 路径、时间/ID、目录、JSON 原子写与 hash 原语 |
-| `src/infra/task-state-lock.mjs`                               | 全局任务状态锁、死进程/损坏 owner 恢复与超时语义 |
+| `src/infra/file-lock.mjs`                                     | 统一文件锁原语：stale 恢复与可诊断超时（错误带 owner/pid/存活状态） |
+| `src/infra/task-state-lock.mjs`                               | 全局任务状态锁（file-lock 原语的路径与默认参数封装） |
 | `src/infra/agent-registry.mjs`                                | 固定 Agent 白名单、别名、显示名与 command-worker 资格 |
-| `src/infra/runtime-config.mjs`                                | 默认配置、配置合并/归一化与 strict 安全底线 |
+| `src/infra/runtime-config.mjs`                                | 默认配置、配置合并/归一化（含 reporting.verbosity 汇报分级）与 strict 安全底线 |
 | `src/infra/runtime-snapshot.mjs`                              | 运行态 snapshot 与恢复上下文的确定性文件读取/渲染 owner |
 | `src/infra/prompt-pack.mjs`                                   | Prompt Pack 安装、注册、hash 校验与条目读取 |
 | `src/infra/runtime-bootstrap.mjs`                             | `initRuntime` 一次性初始化顺序 |
-| `src/infra/ledger.mjs`                                        | hash 链 ledger 追加、校验与可信条目读取（链开始后的无 hash 行按篡改上报） |
-| `src/infra/command-runner.mjs`                                 | 子进程命令执行、输出截断与超时                              |
+| `src/infra/ledger.mjs`                                        | hash 链 ledger 追加、校验与可信条目读取（链开始后的无 hash 行按篡改上报；锁经 file-lock 具备 stale 恢复） |
+| `src/infra/command-runner.mjs`                                 | 子进程命令执行、输出截断、超时与 spawn 级失败兜底（error 事件转 127 结果） |
+| `src/infra/annotation-log.mjs`                                 | 决策标注回写：强制分类、规则×标注统计；硬约束——绝不写 config/verify_commands/门开关 |
 | `src/infra/command-safety.mjs`                                 | shell 命令高风险预检，阻断明显破坏性 worker/verifier/review 命令；内置正则为不可削弱底线，`commandSafety.extraPatterns` 可外置追加项目规则 |
+| `src/infra/error-protocol.mjs` | 统一错误协议 `{code, module, message, next_action}` 与内联单行渲染；覆盖 gateway 信封、delivery-pipeline 返回、CLI 非零退出三处 |
+| `src/infra/gate-arming.mjs` | 门未武装黄灯地板：trivial/缺失 verify、同义反复 review、无 required 质量门的只读评估，status 常驻携带 |
+| `src/infra/dependency-graph.mjs` | 对抗加固的词法 import 扫描器（边界测试与 `helix impact` 共用）、反向波及分析 `computeImpact`、分区测试选择 `computeZoneTests`/`listRepoTests`（供 `helix test`） |
 | `src/infra/security.mjs`                                      | config hash 基线、运行态备份、备份列表与一键恢复、关键状态完整性检查 |
 | `src/infra/review-findings.mjs`                                | LSP / AST / hashline / 注释检查等质量发现              |
 | `src/infra/llm-provider.mjs`                                   | OpenAI-compatible LLM provider 与可选 LLM review |
@@ -125,6 +137,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/infra/rule-scanner.mjs`                                    | 项目规范扫描与规则上下文注入                                |
 | `src/infra/repository-layout.mjs`                                | 目录边界、README 对等、Prompt 清单、命名与真实注释的只读检查 |
 | `src/infra/memory-digest.mjs`                                   | 跨会话 digest、任务完成 digest 与恢复索引                   |
+| `src/infra/decision-log.mjs` | `.helix/decisions.jsonl` 统一决策记录：只在 pipeline/hooks/admission/routing 四缝发射，best-effort 不反噬主流程，坏行读侧跳过 |
 | `src/infra/hook-result-gate.mjs`                                | PostToolUse 结果门校验                              |
 | `test/dependency-boundary.test.mjs`                             | 五区依赖方向强制测试，每次 `npm test` 都会跑                |
 | `test/*.test.mjs`                                              | Node 内置测试                                     |
@@ -137,7 +150,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | 场景                | 命令                                                               |
 | ----------------- | ---------------------------------------------------------------- |
 | 初始化运行时            | `node ./bin/helix.mjs init`                                      |
-| 生成默认配置            | `node ./bin/helix.mjs config init --root`                        |
+| 生成默认配置            | `node ./bin/helix.mjs config init --root`（`--armed` 直接武装质量门） |
 | 安装 adapter        | `node ./bin/helix.mjs adapter install --target all --mode local` |
 | 卸载 adapter        | `node ./bin/helix.mjs adapter uninstall --target all`            |
 | 恢复 adapter        | `node ./bin/helix.mjs adapter restore --backup <backupId>`       |
@@ -149,6 +162,13 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | 合入子 Agent 成果     | `node ./bin/helix.mjs parallel admit --run <runId> --task T001`     |
 | 查看并行运行记录        | `node ./bin/helix.mjs parallel status --run <runId>`             |
 | 关闭保留的子 Agent 结果 | `node ./bin/helix.mjs parallel close --run <runId> --task T001 --reason user_accepted` |
+| 重跑 run 中未通过的任务 | `node ./bin/helix.mjs parallel retry --run <runId> [--command "..."]` |
+| 标注一条决策 | `node ./bin/helix.mjs annotate --decision <decisionId> --category rule_wrong --reason "..."` |
+| 查看标注与统计 | `node ./bin/helix.mjs annotate list` / `annotate stats` |
+| 门触发统计审查 | `node ./bin/helix.mjs decisions stats` |
+| 统一时间线 | `node ./bin/helix.mjs timeline [--limit N] [--task T001]` |
+| LLM 可疑判断（异步审查） | `node ./bin/helix.mjs review suspicious` |
+| 全量命令 / 物化命令文档 | `node ./bin/helix.mjs --help --all` / `docs commands --write` |
 | 清理 Git worktree 隔离目录 | `node ./bin/helix.mjs parallel cleanup --run <runId>` |
 | 匹配 Skill          | `node ./bin/helix.mjs skills match --text "..." --stage plan`    |
 | 查看提示词变体          | `node ./bin/helix.mjs prompts variant --agent Jiuwei --model gpt-5.5` |
@@ -161,6 +181,9 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | 写入 config 基线      | `node ./bin/helix.mjs config baseline --reason reviewed`          |
 | 校验 config 基线      | `node ./bin/helix.mjs config verify`                              |
 | 校验 ledger hash 链   | `node ./bin/helix.mjs ledger verify`                             |
+| 改动影响分析 | `node ./bin/helix.mjs impact src/infra/ledger.mjs` |
+| 查看决策投影 | `node ./bin/helix.mjs decisions --limit 20` |
+| 分区/影响面测试 | `node ./bin/helix.mjs test --zone infra` |
 | 备份运行态关键文件      | `node ./bin/helix.mjs state backup --reason before-risky-agent`   |
 | 校验运行态关键文件      | `node ./bin/helix.mjs state verify`                               |
 | 列出运行态备份        | `node ./bin/helix.mjs state list`                                 |

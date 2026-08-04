@@ -1,5 +1,7 @@
 .DS_Store
-.cursor/
+.cursor/*
+!.cursor/hooks.json
+!.cursor/hooks/
 .tmp/
 .helix/
 .archive/

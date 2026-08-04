@@ -1,19 +1,30 @@
 #!/usr/bin/env node
 import path from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import { startDashboardServer } from "../src/interface/dashboard.mjs";
+import { projectDecisions, projectDecisionStats } from "../src/interface/decisions.mjs";
+import { projectTimeline } from "../src/interface/timeline.mjs";
+import { COMMAND_REGISTRY, renderCommandsMarkdown, renderHelp } from "../src/interface/cli-help.mjs";
 import {
-  DEFAULT_EXECUTOR_AGENT,
-  DEFAULT_LEAD_AGENT,
   DEFAULT_PACKAGE_NAME,
-  PRODUCT_NAME,
   acceptTaskHandoff,
   admitParallelAgentResult,
+  annotationStats,
+  appendAnnotation,
+  readAnnotations,
   buildArchivistPacket,
   buildAgentContext,
   cleanupParallelAgentRun,
   closeParallelAgentRun,
+  retryParallelAgentRun,
+  computeImpact,
+  computeZoneTests,
+  listRepoTests,
   continuationDirective,
   createSamplePlan,
+  errorProtocolOf,
+  formatErrorInline,
   createTeamTask,
   approvePlan,
   claimTeamTask,
@@ -55,6 +66,7 @@ import {
   runRepositoryGovernanceAudit,
   runWorkflowNode,
   runNextTask,
+  runSuspicionReview,
   runWorkflow,
   scopeGuard,
   sendTeamMessage,
@@ -93,104 +105,8 @@ function parseArgs(argv) {
   return args;
 }
 
-function printHelp() {
-  console.log(`${PRODUCT_NAME} linear runtime
-
-Usage:
-  wildarrange init [--sample]
-  wildarrange config init [--root] [--force]
-  wildarrange config show
-  wildarrange config baseline [--reason "..."]
-  wildarrange config verify
-  wildarrange device register [--name macbook] [--force]
-  wildarrange device status
-  wildarrange coordination status
-  wildarrange coordination claim --task T001 [--owner ZhuRong]
-  wildarrange handoff prepare --task T001 --to-device-id <uuid> [--to-device-name mac-mini] [--to-owner ZhuRong]
-  wildarrange handoff push --task T001
-  wildarrange handoff accept --task T001 [--plan P20260731]
-  wildarrange handoff takeover --plan P20260731 --task T001 --expected-device-id <uuid> --reason "owner offline"
-  wildarrange adapter install [--target codex|cursor|kimi|all] [--mode local|npx] [--package ${DEFAULT_PACKAGE_NAME}]
-  wildarrange adapter uninstall [--target codex|cursor|kimi|all]
-  wildarrange adapter restore --backup <backupId>
-  wildarrange injection show --point before_review [--agent BaiZe] [--task T001] [--text "..."] [--stage plan]
-  wildarrange hook run [--from hook.json] [--format text|json]
-  wildarrange plan --from <plan.json>
-  wildarrange run
-  wildarrange workflow --from <plan.json>
-  wildarrange workflow --sample
-  wildarrange parallel run [--max-agents 2] [--task T001,T002] [--agent ZhuRong] [--adapter codex|cursor] [--isolation run-dir|git-worktree] [--coordinate] [--command "..."]
-  wildarrange parallel admit --run <runId> --task T001
-  wildarrange parallel list
-  wildarrange parallel status [--run <runId>]
-  wildarrange parallel close --run <runId> [--task T001] [--reason "..."]
-  wildarrange parallel cleanup --run <runId>
-  wildarrange archivist packet [--text "..."] [--stage plan] [--turns turns.json]
-  wildarrange archivist run [--text "..."] [--stage plan] [--turns turns.json] [--force]
-  wildarrange archivist suggestions list
-  wildarrange archivist suggestions resolve --id <id> --decision accept|reject --evidence "..." --rationale "..."
-  wildarrange node route --text "request"
-  wildarrange node execute [--task T001]
-  wildarrange node verify [--task T001]
-  wildarrange node scope [--task T001]
-  wildarrange node review [--task T001]
-  wildarrange node checkpoint [--task T001]
-  wildarrange node retry [--task T001]
-  wildarrange status
-  wildarrange resume [--session <id>]
-  wildarrange continuation check [--session <id>]
-  wildarrange summary
-  wildarrange rules collect [--target src/app.js]
-  wildarrange governance audit [--changed-only] [--force]
-  wildarrange context build [--agent ${DEFAULT_EXECUTOR_AGENT}] [--task T001]
-  wildarrange evidence record --task T001 --criterion C001 --status pass --evidence "..."
-  wildarrange steer --from <proposal.json>
-  wildarrange review-blockers record --from <blocker.json>
-  wildarrange task list [--status pending] [--owner ${DEFAULT_EXECUTOR_AGENT}]
-  wildarrange task get --task T001
-  wildarrange task claim [--task T001] [--owner ${DEFAULT_EXECUTOR_AGENT}]
-  wildarrange task create --from <task.json>
-  wildarrange team send --to ${DEFAULT_EXECUTOR_AGENT} --from ${DEFAULT_LEAD_AGENT} --body "..."
-  wildarrange team inbox [--agent ${DEFAULT_EXECUTOR_AGENT}]
-  wildarrange changes list
-  wildarrange changes review --id CR-xxxx
-  wildarrange changes resolve --id CR-xxxx --decision accept|reject --evidence "..." --rationale "..." [--apply-scope]
-  wildarrange ledger verify
-  wildarrange doctor
-  wildarrange state backup [--reason "..."]
-  wildarrange state verify
-  wildarrange state list
-  wildarrange state restore --backup <backupId>
-  wildarrange serve [--host 127.0.0.1] [--port 8765] [--token <token>]
-  wildarrange guard scope [--task T001]
-  wildarrange route --text "request"
-  wildarrange prompts list
-  wildarrange prompts show --agent ${DEFAULT_EXECUTOR_AGENT}
-  wildarrange prompts show --skill review-work
-  wildarrange prompts variant [--agent ${DEFAULT_EXECUTOR_AGENT}] [--provider host|deepseek|gemini|kimi] [--model "..."]
-  wildarrange skills match --text "request" [--stage plan] [--agent ${DEFAULT_EXECUTOR_AGENT}] [--limit 6]
-  wildarrange prompts show --tools
-  wildarrange prompts show --routes
-
-Plan schema:
-  {
-    "title": "Feature name",
-    "objective": "What must be true",
-    "defaults": {
-      "verify_commands": ["shared verifier for every task"],
-      "review_commands": ["shared review gate"],
-      "standards_commands": ["project standards gate"],
-      "writable_paths": ["src/**"]
-    },
-    "tasks": [{
-      "id": "T001",
-      "subject": "Implement one thing",
-      "category": "quick|deep|ultrabrain|visual-engineering",
-      "worker_command": "command that changes files",
-      "verify_commands": ["command that must pass"]
-    }]
-  }
-`);
+function printHelp({ all = false } = {}) {
+  console.log(renderHelp({ all }));
 }
 
 async function main() {
@@ -199,7 +115,20 @@ async function main() {
   const rootDir = process.cwd();
 
   if (!command || command === "help" || command === "--help") {
-    printHelp();
+    printHelp({ all: args.all === true || args._[1] === "--all" });
+    return;
+  }
+
+  if (command === "docs" && args._[1] === "commands") {
+    const markdown = renderCommandsMarkdown();
+    if (args.write === true) {
+      const target = path.join(rootDir, "doc", "generated", "commands.md");
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, markdown, "utf8");
+      console.log(JSON.stringify({ ok: true, path: path.relative(rootDir, target), commands: COMMAND_REGISTRY.length }));
+    } else {
+      process.stdout.write(markdown);
+    }
     return;
   }
 
@@ -220,6 +149,7 @@ async function main() {
       console.log(JSON.stringify(await writeDefaultHelixConfig(rootDir, {
         root: Boolean(args.root),
         force: Boolean(args.force),
+        armed: Boolean(args.armed),
       }), null, 2));
       return;
     }
@@ -407,8 +337,24 @@ async function main() {
   }
 
   if (command === "run") {
+    const runStartedAt = new Date().toISOString();
     const result = await runNextTask(rootDir);
     console.log(JSON.stringify(result, null, 2));
+    // 汇报分级（reporting.verbosity）：run 结束在 stderr 输出一次门决策
+    // 汇总，stdout 的 JSON 契约不变。verbose=逐门三行投影；normal=一行；
+    // quiet=不输出。框架初期默认 verbose，让人能审判每一条门决策。
+    // 汇总只含本次 run 的决策（since=run 开始时间），不混历史记录。
+    const { config } = await loadHelixConfig(rootDir);
+    const verbosity = config.reporting?.verbosity || "verbose";
+    const taskId = result.task?.id || result.taskId || null;
+    if (verbosity !== "quiet") {
+      if (verbosity === "verbose" && taskId) {
+        const projection = await projectDecisions(rootDir, { taskId, since: runStartedAt, limit: 15 });
+        process.stderr.write(`\n[门决策汇总] ${projection.text}\n`);
+      } else {
+        process.stderr.write(`[run] ${taskId || "(no task)"} -> ${result.status}\n`);
+      }
+    }
     return;
   }
 
@@ -462,6 +408,18 @@ async function main() {
       if (!args.run || args.run === true) throw new Error("helix parallel cleanup requires --run <runId>");
       console.log(JSON.stringify(await cleanupParallelAgentRun(rootDir, {
         runId: args.run,
+      }), null, 2));
+      return;
+    }
+    if (subcommand === "retry") {
+      if (!args.run || args.run === true) throw new Error("helix parallel retry requires --run <runId>");
+      console.log(JSON.stringify(await retryParallelAgentRun(rootDir, {
+        runId: args.run,
+        command: args.command && args.command !== true ? args.command : undefined,
+        agent: args.agent && args.agent !== true ? args.agent : undefined,
+        isolation: args.isolation && args.isolation !== true ? args.isolation : undefined,
+        maxAgents: args["max-agents"] && args["max-agents"] !== true ? Number(args["max-agents"]) : undefined,
+        timeoutMs: args.timeout && args.timeout !== true ? Number(args.timeout) : undefined,
       }), null, 2));
       return;
     }
@@ -531,6 +489,127 @@ async function main() {
 
   if (command === "status") {
     console.log(JSON.stringify(await statusReport(rootDir), null, 2));
+    return;
+  }
+
+  if (command === "impact") {
+    const changed = args._.slice(1);
+    if (changed.length === 0) throw new Error("helix impact requires at least one changed file path, e.g. helix impact src/infra/ledger.mjs");
+    console.log(JSON.stringify(await computeImpact(rootDir, changed), null, 2));
+    return;
+  }
+
+  if (command === "decisions") {
+    if (args._[1] === "stats") {
+      console.log(JSON.stringify(await projectDecisionStats(rootDir), null, 2));
+      return;
+    }
+    let limit = 50;
+    if (args.limit !== undefined && args.limit !== true) {
+      const parsed = Number(args.limit);
+      if (!Number.isInteger(parsed) || parsed < 0) {
+        throw new Error("helix decisions --limit must be a non-negative integer");
+      }
+      limit = parsed;
+    }
+    const projection = await projectDecisions(rootDir, {
+      limit,
+      taskId: args.task && args.task !== true ? args.task : undefined,
+      gate: args.gate && args.gate !== true ? args.gate : undefined,
+      annotatable: args.annotatable === true ? true : undefined,
+      format: args.format === "json" ? "json" : undefined,
+    });
+    if (args.format === "json") {
+      console.log(JSON.stringify(projection, null, 2));
+    } else {
+      console.log(projection.text);
+    }
+    return;
+  }
+
+  if (command === "timeline") {
+    const projection = await projectTimeline(rootDir, {
+      limit: Number.isInteger(Number(args.limit)) && args.limit !== true ? Number(args.limit) : 50,
+      taskId: args.task && args.task !== true ? args.task : undefined,
+      source: args.source && args.source !== true ? args.source : undefined,
+      format: args.format === "json" ? "json" : undefined,
+    });
+    if (args.format === "json") {
+      console.log(JSON.stringify(projection, null, 2));
+    } else {
+      process.stdout.write(`${projection.text}\n`);
+    }
+    return;
+  }
+
+  if (command === "review" && args._[1] === "suspicious") {
+    const report = await runSuspicionReview(rootDir, {
+      limit: Number.isInteger(Number(args.limit)) && args.limit !== true ? Number(args.limit) : undefined,
+    });
+    console.log(JSON.stringify(report, null, 2));
+    return;
+  }
+
+  if (command === "annotate") {
+    const subcommand = args._[1];
+    if (subcommand === "list") {
+      const { records, skippedLines } = await readAnnotations(rootDir);
+      const limit = Number.isInteger(Number(args.limit)) && args.limit !== true ? Number(args.limit) : 50;
+      console.log(JSON.stringify({
+        kind: "helix_annotations",
+        total: records.length,
+        shown: Math.min(records.length, limit),
+        skippedLines,
+        records: records.slice(-limit),
+      }, null, 2));
+      return;
+    }
+    if (subcommand === "stats") {
+      console.log(JSON.stringify(await annotationStats(rootDir), null, 2));
+      return;
+    }
+    const entry = await appendAnnotation(rootDir, {
+      decisionId: args.decision && args.decision !== true ? args.decision : undefined,
+      category: args.category && args.category !== true ? args.category : undefined,
+      reason: args.reason && args.reason !== true ? args.reason : undefined,
+      author: args.author && args.author !== true ? args.author : undefined,
+    });
+    console.log(JSON.stringify({ kind: "helix_annotation", recorded: entry }, null, 2));
+    return;
+  }
+
+  if (command === "test") {
+    // 分区/影响面测试选择：把"我改了哪"映射到最小应跑测试集，
+    // 退出码透传 node --test，CI 与本地表现一致。
+    const positional = args._.slice(1);
+    if (args.zone && args.zone !== true && positional.length > 0) {
+      throw new Error("helix test: --zone 与文件参数互斥，请只选一种选择方式");
+    }
+    let tests;
+    let selectionNote;
+    if (args.zone && args.zone !== true) {
+      const report = await computeZoneTests(rootDir, args.zone);
+      tests = report.testsToRun;
+      selectionNote = report.summary;
+    } else if (positional.length > 0) {
+      const report = await computeImpact(rootDir, positional);
+      tests = report.testsToRun;
+      selectionNote = report.summary;
+    } else {
+      tests = await listRepoTests(rootDir);
+      selectionNote = `全量测试 ${tests.length} 个`;
+    }
+    console.error(`[helix test] ${selectionNote}`);
+    for (const file of tests) console.error(`[helix test]   ${file}`);
+    // 继承 NODE_TEST_CONTEXT 时，子进程 node --test 会误以为自己是由
+    // 外层 runner 启动的 IPC 子进程而空跑退出（exit 0、零测试）——从
+    // 测试进程或 npm script 里调 helix test 必须剥掉这些 runner 私有变量。
+    const childEnv = { ...process.env };
+    for (const key of Object.keys(childEnv)) {
+      if (key.startsWith("NODE_TEST_")) delete childEnv[key];
+    }
+    const run = spawnSync(process.execPath, ["--test", ...tests], { cwd: rootDir, stdio: "inherit", env: childEnv });
+    process.exitCode = typeof run.status === "number" ? run.status : 1;
     return;
   }
 
@@ -849,6 +928,11 @@ async function readAllStdin() {
 }
 
 main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
+  const protocol = errorProtocolOf(error, {
+    code: "cli_error",
+    module: "bin/helix.mjs",
+    nextAction: "运行 node ./bin/helix.mjs doctor 体检；把本错误完整贴给 AI",
+  });
+  console.error(formatErrorInline(protocol));
   process.exit(1);
 });

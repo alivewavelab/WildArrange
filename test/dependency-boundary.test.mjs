@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
+import {
+  buildDependencyEdges,
+  classifyZone,
+  extractImportSpecifiers,
+  listMjsFiles,
+  maskSource,
+} from "../src/infra/dependency-graph.mjs";
 
 /**
  * Enforces strict one-way layering as source files migrate into the five
@@ -15,6 +22,13 @@ import test from "node:test";
  * rule immediately. As Phase 2-5 move files into zones, this test starts
  * enforcing the invariant on them automatically -- it is not a one-time
  * check, it runs on every `npm test`.
+ *
+ * bin/ entry points are also scanned: they sit above the zones and may
+ * only import interface/ or the legacy helix-core compat layer.
+ *
+ * The scanner itself (maskSource/extractImportSpecifiers/buildDependencyEdges)
+ * lives in src/infra/dependency-graph.mjs, shared with `helix impact`; the
+ * adversarial tests at the bottom of this file are its non-weakenable floor.
  */
 
 const SRC_DIR = path.join(process.cwd(), "src");
@@ -39,205 +53,8 @@ const ALLOWED_DEPS = {
   infra: [],
 };
 
-async function listMjsFiles(dir) {
-  let entries;
-  try {
-    entries = await readdir(dir, { withFileTypes: true });
-  } catch (error) {
-    if (error?.code === "ENOENT") return [];
-    throw error;
-  }
-  const files = [];
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...(await listMjsFiles(fullPath)));
-    } else if (entry.isFile() && entry.name.endsWith(".mjs")) {
-      files.push(fullPath);
-    }
-  }
-  return files;
-}
-
-/**
- * Lexical source masking. Round-4 kept string contents intact, which meant
- * an import statement WRITTEN INSIDE a string or template (documentation
- * text, generated snippets) was still regex-matched as a real edge — and,
- * worse, the code/string ambiguity could be steered either way by legal
- * source (cross-review P1, round 5, 2026-07-21). The masked view removes the
- * ambiguity completely:
- *   - line/block comments -> blanks (newlines kept for line numbers);
- *   - string/template/regex literal CONTENT -> NUL bytes, delimiters kept
- *     (template ${} interpolations stay code);
- *   - everything else copied verbatim, so output length === input length.
- * Import syntax is then matched on the masked view (only real code can
- * match), and the actual specifier text is sliced from the ORIGINAL source
- * at the same offsets and unescaped — so `"\u002e./ai/x.mjs"` is seen as
- * `../ai/x.mjs`, not as a bare specifier.
- */
-const MASK = "\u0000";
-
-function maskSource(source) {
-  let out = "";
-  let i = 0;
-  const n = source.length;
-  let lastSignificant = "";
-  while (i < n) {
-    const ch = source[i];
-    const next = source[i + 1];
-    if (ch === "/" && next === "/") {
-      while (i < n && source[i] !== "\n") { out += " "; i += 1; }
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      out += "  ";
-      i += 2;
-      while (i < n && !(source[i] === "*" && source[i + 1] === "/")) {
-        out += source[i] === "\n" ? "\n" : " ";
-        i += 1;
-      }
-      if (i < n) { out += "  "; i += 2; }
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      out += ch;
-      i += 1;
-      while (i < n && source[i] !== ch && source[i] !== "\n") {
-        if (source[i] === "\\") { out += MASK + MASK; i += 2; continue; }
-        out += MASK;
-        i += 1;
-      }
-      if (i < n && source[i] === ch) { out += ch; i += 1; }
-      lastSignificant = ch;
-      continue;
-    }
-    if (ch === "`") {
-      out += ch;
-      i += 1;
-      let braceDepth = 0;
-      while (i < n) {
-        const c = source[i];
-        if (c === "\\") { out += MASK + MASK; i += 2; continue; }
-        if (braceDepth === 0 && c === "`") { out += c; i += 1; break; }
-        if (braceDepth === 0 && c === "$" && source[i + 1] === "{") { braceDepth = 1; out += "${"; i += 2; continue; }
-        if (braceDepth > 0 && c === "{") braceDepth += 1;
-        if (braceDepth > 0 && c === "}") braceDepth -= 1;
-        // Interpolation bodies are code; top-level template text is content.
-        out += braceDepth > 0 ? c : (c === "\n" ? "\n" : MASK);
-        i += 1;
-      }
-      lastSignificant = "`";
-      continue;
-    }
-    if (ch === "/") {
-      // Regex literal vs division, by what precedes the slash: after a value
-      // (identifier, number, closing bracket, string) it is division; after
-      // an operator/opening bracket/keyword it starts a regex literal whose
-      // body must be masked so its content can't fake comment markers or
-      // import syntax.
-      const afterKeyword = /(?:^|[^\w$])(?:return|typeof|case|in|of|new|delete|void|do|else|yield|await)\s*$/.test(out);
-      const regexCanStart = lastSignificant === "" || "([{,;=:!&|?+-*%<>~^".includes(lastSignificant) || afterKeyword;
-      if (regexCanStart) {
-        out += ch;
-        i += 1;
-        let inClass = false;
-        while (i < n) {
-          const c = source[i];
-          if (c === "\\") { out += MASK + MASK; i += 2; continue; }
-          if (c === "[") inClass = true;
-          else if (c === "]") inClass = false;
-          const terminal = (c === "/" && !inClass) || c === "\n";
-          out += terminal ? c : MASK;
-          i += 1;
-          if (terminal) break;
-        }
-        lastSignificant = ")";
-        continue;
-      }
-    }
-    out += ch;
-    if (!/\s/.test(ch)) lastSignificant = ch;
-    i += 1;
-  }
-  return out;
-}
-
-/** Decodes a quoted JS string literal (with quotes) into its runtime value. */
-function decodeStringLiteral(raw) {
-  const body = raw.slice(1, -1);
-  let out = "";
-  for (let i = 0; i < body.length; i += 1) {
-    const ch = body[i];
-    if (ch !== "\\") { out += ch; continue; }
-    const next = body[i + 1];
-    if (next === "u") {
-      if (body[i + 2] === "{") {
-        const end = body.indexOf("}", i + 3);
-        out += String.fromCodePoint(Number.parseInt(body.slice(i + 3, end), 16));
-        i = end;
-      } else {
-        out += String.fromCharCode(Number.parseInt(body.slice(i + 2, i + 6), 16));
-        i += 5;
-      }
-    } else if (next === "x") {
-      out += String.fromCharCode(Number.parseInt(body.slice(i + 2, i + 4), 16));
-      i += 3;
-    } else {
-      const simple = { n: "\n", t: "\t", r: "\r", b: "\b", f: "\f", v: "\v", "0": "\0" };
-      out += simple[next] ?? next;
-      i += 1;
-    }
-  }
-  return out;
-}
-
-const STATIC_IMPORT_REGEX = /(?<![\w.$])(?:import|export)\s+(?:[^'"`]*?from\s+)?((["'])\u0000*\2)/dg;
-const DYNAMIC_IMPORT_REGEX = /(?<![\w.$])import\s*\(\s*((["'])\u0000*\2)/dg;
-
-function extractImportSpecifiers(source) {
-  const masked = maskSource(source);
-  const specifiers = [];
-  for (const regex of [STATIC_IMPORT_REGEX, DYNAMIC_IMPORT_REGEX]) {
-    regex.lastIndex = 0;
-    let match;
-    while ((match = regex.exec(masked)) !== null) {
-      const [start, end] = match.indices[1];
-      specifiers.push(decodeStringLiteral(source.slice(start, end)));
-    }
-  }
-  return specifiers;
-}
-
-function classifyZone(absolutePath) {
-  const relativeToSrc = path.relative(SRC_DIR, absolutePath);
-  const [firstSegment] = relativeToSrc.split(path.sep);
-  return ZONES.includes(firstSegment) ? firstSegment : "legacy";
-}
-
-async function buildDependencyEdges() {
-  const files = await listMjsFiles(SRC_DIR);
-  const edges = [];
-  for (const filePath of files) {
-    const source = await readFile(filePath, "utf8");
-    const sourceZone = classifyZone(filePath);
-    for (const specifier of extractImportSpecifiers(source)) {
-      if (!specifier.startsWith(".")) continue; // skip node builtins / bare package specifiers
-      const resolvedTarget = path.resolve(path.dirname(filePath), specifier);
-      if (!resolvedTarget.startsWith(SRC_DIR)) continue; // skip references outside src/ (e.g. ../test)
-      const targetZone = classifyZone(resolvedTarget);
-      edges.push({
-        from: path.relative(SRC_DIR, filePath),
-        to: path.relative(SRC_DIR, resolvedTarget),
-        sourceZone,
-        targetZone,
-      });
-    }
-  }
-  return edges;
-}
-
 test("dependency boundary: zoned files only import allowed lower zones", async () => {
-  const edges = await buildDependencyEdges();
+  const edges = await buildDependencyEdges(process.cwd());
   const violations = edges.filter((edge) => {
     if (edge.sourceZone === "legacy") return false; // legacy files are unconstrained during migration
     if (edge.sourceZone === edge.targetZone) return false; // same-zone imports are always fine
@@ -253,8 +70,36 @@ test("dependency boundary: zoned files only import allowed lower zones", async (
   }
 });
 
+test("dependency boundary: bin/ entry points only import the interface zone or the legacy compat layer", async () => {
+  // bin/ sits above the five zones (CLI parsing and command routing only).
+  // Letting it import orchestration/ai/capabilities/infra files directly
+  // would turn the CLI into a sixth layer that bypasses every zone rule,
+  // so its only legal src/ targets are interface/ and the helix-core
+  // compat surface (legacy).
+  const BIN_DIR = path.join(process.cwd(), "bin");
+  const files = await listMjsFiles(BIN_DIR);
+  assert.ok(files.length > 0, "bin/ should contain at least one .mjs entry point");
+  const violations = [];
+  for (const filePath of files) {
+    const source = await readFile(filePath, "utf8");
+    for (const specifier of extractImportSpecifiers(source)) {
+      if (!specifier.startsWith(".")) continue;
+      const resolvedTarget = path.resolve(path.dirname(filePath), specifier);
+      if (!resolvedTarget.startsWith(SRC_DIR)) continue;
+      const targetZone = classifyZone(SRC_DIR, resolvedTarget);
+      if (targetZone === "interface" || targetZone === "legacy") continue;
+      violations.push(`  ${path.relative(process.cwd(), filePath)} -> ${path.relative(SRC_DIR, resolvedTarget)} (${targetZone})`);
+    }
+  }
+  assert.deepEqual(
+    violations,
+    [],
+    `bin/ must route through interface/ or the helix-core compat layer only:\n${violations.join("\n")}`,
+  );
+});
+
 test("dependency boundary: capabilities/gateway.mjs is the only zoned file capabilities exposes to orchestration or ai", async () => {
-  const edges = await buildDependencyEdges();
+  const edges = await buildDependencyEdges(process.cwd());
   const toCapabilities = edges.filter(
     (edge) =>
       (edge.sourceZone === "orchestration" || edge.sourceZone === "ai") && edge.targetZone === "capabilities",
@@ -268,7 +113,7 @@ test("dependency boundary: capabilities/gateway.mjs is the only zoned file capab
 });
 
 test("dependency boundary: capabilities never imports ai", async () => {
-  const edges = await buildDependencyEdges();
+  const edges = await buildDependencyEdges(process.cwd());
   const violations = edges.filter((edge) => edge.sourceZone === "capabilities" && edge.targetZone === "ai");
   assert.deepEqual(violations, [], `capabilities must not depend on ai, found: ${JSON.stringify(violations)}`);
 });
@@ -281,7 +126,7 @@ test("dependency boundary: orchestration -> ai stays limited to the pinned edge 
   // routeRequest flow (deterministic + semantic shadow) used by the workflow
   // "route" node. Adding a new edge here must be a conscious decision.
   const PINNED_EDGES = new Set(["orchestration/linear-runtime.mjs -> ai/routing.mjs"]);
-  const edges = await buildDependencyEdges();
+  const edges = await buildDependencyEdges(process.cwd());
   const actual = edges
     .filter((edge) => edge.sourceZone === "orchestration" && edge.targetZone === "ai")
     .map((edge) => `${edge.from} -> ${edge.to}`);
@@ -425,7 +270,7 @@ test("dependency boundary: legacy shims and helix-core stay declarative re-expor
   const files = await listMjsFiles(SRC_DIR);
   const violations = [];
   for (const filePath of files) {
-    if (classifyZone(filePath) !== "legacy") continue;
+    if (classifyZone(SRC_DIR, filePath) !== "legacy") continue;
     const masked = maskSource(await readFile(filePath, "utf8"));
     const withoutDeclarations = masked
       // export * from "..."; / export * as ns from "...";
@@ -458,7 +303,7 @@ test("dependency boundary: infra/foundation.mjs is a declarative compatibility e
 });
 
 test("dependency boundary: zoned implementations import concrete infra owners, not foundation.mjs", async () => {
-  const edges = await buildDependencyEdges();
+  const edges = await buildDependencyEdges(process.cwd());
   const violations = edges.filter(
     (edge) => edge.sourceZone !== "legacy" && edge.from !== "infra/foundation.mjs" && edge.to === "infra/foundation.mjs",
   );
@@ -474,7 +319,7 @@ test("dependency boundary: no module-level import cycles anywhere in src/", asyn
   // legitimate on its own), so a module-level cycle between the two zones
   // would slip past the zone check. This test closes that gap for the whole
   // graph, shims included.
-  const edges = await buildDependencyEdges();
+  const edges = await buildDependencyEdges(process.cwd());
   const graph = new Map();
   for (const edge of edges) {
     if (!graph.has(edge.from)) graph.set(edge.from, []);

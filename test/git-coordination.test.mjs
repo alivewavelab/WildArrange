@@ -320,6 +320,7 @@ test("adversarial round 2 integration: admission rolls back before checkpoint wh
         subject: "Race remote main",
         writable_paths: ["src/**"],
         verify_commands: [`node ${JSON.stringify(advanceScript)}`],
+        review_commands: ["node --version"],
       }],
     }, null, 2), "utf8");
     await importPlan(cloneA, planPath);
@@ -668,7 +669,8 @@ test("monolithic linear run cannot complete after another device takes ownership
         subject: "Long worker",
         worker_command: "node -e \"setTimeout(()=>{require('fs').mkdirSync('src',{recursive:true});require('fs').writeFileSync('src/old-linear.txt','old\\\\n')},700)\"",
         writable_paths: ["src/**"],
-        verify_commands: ["node -e \"process.exit(0)\""],
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
       }],
     };
     await importPlanDefinition(cloneA, plan);
@@ -821,7 +823,8 @@ async function initializeTaskRuntime(rootDir, deviceName, taskIds = ["T001"]) {
       id: taskId,
       subject: `Coordinate task ${taskId}`,
       writable_paths: ["src/**"],
-      verify_commands: ["node -e \"process.exit(0)\""],
+      verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+      review_commands: ["node --version"],
     })),
   }, null, 2), "utf8");
   await importPlan(rootDir, planPath);

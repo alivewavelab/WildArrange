@@ -15,6 +15,12 @@ import {
 } from "../orchestration/task-board.mjs";
 import { dashboardData, writeWorkflowSummary } from "../orchestration/status.mjs";
 import { runNextTask, runWorkflowNode } from "../orchestration/linear-runtime.mjs";
+import {
+  PANELS_SCRIPT,
+  buildDecisionsPanelViewModel,
+  buildOpsPanelViewModel,
+  renderPanelsHtml,
+} from "./dashboard-panels.mjs";
 
 class DashboardBadRequest extends Error {}
 
@@ -107,6 +113,14 @@ export function startDashboardServer(rootDir, options = {}) {
         validateOptionalDashboardId(body.taskId, "taskId");
         const result = await runWorkflowNode(rootDir, nodeName, { taskId: body.taskId });
         sendJson(response, 200, { ok: true, result });
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/api/panels/decisions") {
+        sendJson(response, 200, await buildDecisionsPanelViewModel(rootDir));
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/api/panels/ops") {
+        sendJson(response, 200, await buildOpsPanelViewModel(rootDir));
         return;
       }
       if (url.pathname === "/" || url.pathname === "/index.html") {
@@ -461,6 +475,7 @@ function renderDashboardHtml(options = {}) {
       <h2>Ledger</h2>
       <pre id="ledger"></pre>
     </section>
+    ${renderPanelsHtml()}
   </main>
   <script>
     const DASHBOARD_TOKEN = ${JSON.stringify(dashboardToken)};
@@ -494,6 +509,7 @@ function renderDashboardHtml(options = {}) {
       el("snapshot").textContent = JSON.stringify(data.latestSnapshot || {}, null, 2);
       el("summary").textContent = JSON.stringify(data.summary || { status: "No summary generated" }, null, 2);
       el("ledger").textContent = JSON.stringify(data.ledger || [], null, 2);
+      loadPanels();
     }
     function renderInbox(messages) {
       el("inbox").textContent = JSON.stringify(messages || [], null, 2);
@@ -646,6 +662,7 @@ function renderDashboardHtml(options = {}) {
       renderInbox(payload.result);
       return payload;
     }
+    ${PANELS_SCRIPT}
     loadState();
   </script>
 </body>
