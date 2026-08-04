@@ -1,12 +1,12 @@
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
+import { appendLedger } from "../infra/ledger.mjs";
 import {
-  appendLedger,
   ensureHelixDirs,
   nowIso,
   resolveHelixPath,
   writeJsonAtomic,
-} from "../infra/foundation.mjs";
+} from "../infra/runtime-store.mjs";
 import { isPossibleNoopTask } from "../infra/task-predicates.mjs";
 import { criteriaStatus } from "../infra/success-criteria.mjs";
 

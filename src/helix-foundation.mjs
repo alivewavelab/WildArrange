@@ -1,2 +1,2 @@
-/** @deprecated moved to src/infra/foundation.mjs; this file is a compatibility re-export. */
+/** @deprecated compatibility umbrella for the split Infra Foundation owners. */
 export * from "./infra/foundation.mjs";

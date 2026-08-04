@@ -10,10 +10,12 @@ import {
   DEFAULT_LEAD_AGENT,
   LONG_LIVED_AGENTS,
   normalizeAgentKey,
+} from "./agent-registry.mjs";
+import {
   readJson,
-  renderPromptPackEntry,
   resolveHelixPath,
-} from "./foundation.mjs";
+} from "./runtime-store.mjs";
+import { renderPromptPackEntry } from "./prompt-pack.mjs";
 
 export async function loadRoutesConfig(rootDir) {
   const routes = JSON.parse(await renderPromptPackEntry(rootDir, { routes: true }));

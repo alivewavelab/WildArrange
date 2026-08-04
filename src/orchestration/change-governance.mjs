@@ -2,17 +2,19 @@ import { readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   DEFAULT_LEAD_AGENT,
-  appendLedger,
+  normalizeAgentKey,
+} from "../infra/agent-registry.mjs";
+import { appendLedger } from "../infra/ledger.mjs";
+import {
   ensureHelixDirs,
   hashContent,
-  normalizeAgentKey,
   nowIso,
   readJson,
   resolveHelixPath,
-  withTaskStateLock,
   writeJsonAtomic,
-  writeSnapshot,
-} from "../infra/foundation.mjs";
+} from "../infra/runtime-store.mjs";
+import { withTaskStateLock } from "../infra/task-state-lock.mjs";
+import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import {
   loadTaskState,
   normalizeStringArray,

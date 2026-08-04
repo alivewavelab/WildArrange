@@ -1,11 +1,11 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { loadHelixConfig } from "../infra/runtime-config.mjs";
+import { normalizeAgentKey } from "../infra/agent-registry.mjs";
 import {
-  loadHelixConfig,
-  normalizeAgentKey,
   readJson,
   resolveHelixPath,
-} from "../infra/foundation.mjs";
+} from "../infra/runtime-store.mjs";
 
 const DEFAULT_LIMIT = 6;
 

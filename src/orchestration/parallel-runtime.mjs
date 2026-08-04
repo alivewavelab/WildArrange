@@ -2,19 +2,21 @@ import { mkdir, readdir } from "node:fs/promises";
 import path from "node:path";
 import {
   DEFAULT_LEAD_AGENT,
-  appendLedger,
   assertCommandWorkerAgent,
+  normalizeAgentKey,
+} from "../infra/agent-registry.mjs";
+import { appendLedger } from "../infra/ledger.mjs";
+import {
   createWorkId,
   ensureHelixDirs,
-  loadHelixConfig,
-  normalizeAgentKey,
   nowIso,
   readJson,
   resolveHelixPath,
-  withTaskStateLock,
   writeJsonAtomic,
-  writeSnapshot,
-} from "../infra/foundation.mjs";
+} from "../infra/runtime-store.mjs";
+import { loadHelixConfig } from "../infra/runtime-config.mjs";
+import { withTaskStateLock } from "../infra/task-state-lock.mjs";
+import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { resolveAgentSpawn } from "../infra/agent-spawn.mjs";
 import { collectAgentWorktreePatch, prepareAgentWorktree } from "../infra/git-worktree.mjs";
 import { inspectGitCoordination } from "../infra/git-coordination.mjs";

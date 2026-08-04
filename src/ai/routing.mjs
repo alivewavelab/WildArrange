@@ -4,13 +4,11 @@
  * deterministic table itself lives in src/infra/route-table.mjs so
  * orchestration can read it without depending on this zone.
  */
-import {
-  DEFAULT_LEAD_AGENT,
-  appendLedger,
-  initRuntime,
-  loadHelixConfig,
-  writeSnapshot,
-} from "../infra/foundation.mjs";
+import { DEFAULT_LEAD_AGENT } from "../infra/agent-registry.mjs";
+import { appendLedger } from "../infra/ledger.mjs";
+import { initRuntime } from "../infra/runtime-bootstrap.mjs";
+import { loadHelixConfig } from "../infra/runtime-config.mjs";
+import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { loadRoutesConfig, resolveRouteDecision, uniqueStrings } from "../infra/route-table.mjs";
 import { callOpenAICompatible, resolveAgentProvider } from "../infra/llm-provider.mjs";
 

@@ -3,23 +3,25 @@ import path from "node:path";
 import {
   DEFAULT_EXECUTOR_AGENT,
   DEFAULT_LEAD_AGENT,
+} from "../infra/agent-registry.mjs";
+import {
   STATE_VERSION,
-  appendLedger,
   createWorkId,
   ensureHelixDirs,
-  loadHelixConfig,
   nowIso,
   readJson,
   resolveHelixPath,
   writeJsonAtomic,
-} from "../infra/foundation.mjs";
+} from "../infra/runtime-store.mjs";
+import { appendLedger } from "../infra/ledger.mjs";
+import { loadHelixConfig } from "../infra/runtime-config.mjs";
 import { collectGitChangedPaths } from "../infra/git-diff.mjs";
-import { listChangeRequests } from "../orchestration/change-governance.mjs";
+import { writeRuntimeContextSnapshot } from "../infra/runtime-snapshot.mjs";
 import { defaultInjectionPointForAgent, resolveInjectionPoint } from "./injection.mjs";
 import { loadTaskState } from "../infra/task-state-store.mjs";
 import { scanProjectRules } from "../infra/rule-scanner.mjs";
 import { findRunnableTask, normalizeAgentName } from "../orchestration/task-board.mjs";
-import { readLedgerTail, statusReport } from "../orchestration/status.mjs";
+import { statusReport } from "../orchestration/status.mjs";
 
 export async function buildAgentContext(rootDir, options = {}) {
   await ensureHelixDirs(rootDir);
@@ -92,38 +94,7 @@ export async function buildAgentContext(rootDir, options = {}) {
 }
 
 export async function writeContextSnapshot(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
-  const latestSnapshot = options.latestSnapshot || await readJson(resolveHelixPath(rootDir, "snapshots", "latest.json"), null);
-  const report = await statusReport(rootDir);
-  const taskState = await loadTaskState(rootDir);
-  const changes = await listChangeRequests(rootDir);
-  const ledger = await readLedgerTail(rootDir, 12);
-  const nextTask = taskState ? findRunnableTask(taskState.tasks) : null;
-  const failedTasks = (taskState?.tasks || []).filter((task) => task.status === "failed");
-  const verifyingTasks = (taskState?.tasks || []).filter((task) => task.status === "verifying" || task.status === "in_progress");
-  const lineage = await readSessionLineage(rootDir);
-  const context = {
-    kind: "helix_context_snapshot",
-    version: STATE_VERSION,
-    at: nowIso(),
-    reason: options.reason || "manual",
-    latestSnapshot: latestSnapshot ? { id: latestSnapshot.id, stage: latestSnapshot.stage, at: latestSnapshot.at } : null,
-    status: report,
-    nextAction: nextTask ? `run task ${nextTask.id}: ${nextTask.subject}` : report.failed > 0 ? "inspect failed task" : "no runnable task",
-    nextTask: nextTask ? summarizeTaskForContext(nextTask) : null,
-    activeTasks: verifyingTasks.map(summarizeTaskForContext),
-    failedTasks: failedTasks.map(summarizeTaskForContext),
-    openChanges: changes.filter((change) => change.status === "open").map(summarizeChangeForContext),
-    sessions: lineage,
-    ledgerTail: ledger,
-  };
-  const jsonPath = resolveHelixPath(rootDir, "snapshots", "context.json");
-  const mdPath = resolveHelixPath(rootDir, "snapshots", "context.md");
-  context.reportJsonPath = path.relative(rootDir, jsonPath);
-  context.reportMdPath = path.relative(rootDir, mdPath);
-  await writeJsonAtomic(jsonPath, context);
-  await writeFile(mdPath, renderContextMarkdown(context), "utf8");
-  return context;
+  return writeRuntimeContextSnapshot(rootDir, options);
 }
 
 export async function recordRuntimeSession(rootDir, options = {}) {
@@ -317,93 +288,6 @@ function summarizeTaskForContext(task) {
       failedLanes: (task.last_review_result.lanes || []).filter((lane) => lane.status === "fail").map((lane) => lane.name),
     } : null,
   };
-}
-
-function summarizeChangeForContext(change) {
-  return {
-    id: change.id,
-    status: change.status,
-    taskId: change.taskId,
-    subject: change.subject,
-    deniedPaths: change.deniedPaths || [],
-    reportMdPath: change.reportMdPath,
-  };
-}
-
-function renderContextMarkdown(context) {
-  const status = context.status || {};
-  const lines = [
-    "# WildArrange Resume Context",
-    "",
-    `Generated: ${context.at}`,
-    `Reason: ${context.reason}`,
-    `Latest snapshot: ${context.latestSnapshot ? `${context.latestSnapshot.stage} @ ${context.latestSnapshot.at}` : "none"}`,
-    "",
-    "## Status",
-    "",
-    `- Work: ${status.work?.workId || "(none)"}`,
-    `- Plan: ${status.planId || "(none)"}`,
-    `- Counts: total=${status.total || 0}, completed=${status.completed || 0}, pending=${status.pending || 0}, verifying=${status.verifying || 0}, failed=${status.failed || 0}, openChanges=${status.openChanges || 0}`,
-    `- Next action: ${context.nextAction}`,
-    "",
-    "## Session Lineage",
-    "",
-  ];
-  if (!context.sessions?.sessionIds?.length) {
-    lines.push("- No recorded sessions yet.");
-  } else {
-    lines.push(`- Current: ${context.sessions.currentSessionId || "(unknown)"}`);
-    lines.push(`- All: ${context.sessions.sessionIds.join(", ")}`);
-  }
-  lines.push("", "## Next Task", "");
-  if (context.nextTask) {
-    appendTaskContext(lines, context.nextTask);
-  } else {
-    lines.push("- None.");
-  }
-  lines.push("", "## Active Tasks", "");
-  if (context.activeTasks.length === 0) {
-    lines.push("- None.");
-  } else {
-    for (const task of context.activeTasks) appendTaskContext(lines, task);
-  }
-  lines.push("", "## Failed Tasks", "");
-  if (context.failedTasks.length === 0) {
-    lines.push("- None.");
-  } else {
-    for (const task of context.failedTasks) appendTaskContext(lines, task);
-  }
-  lines.push("", "## Open ChangeRequests", "");
-  if (context.openChanges.length === 0) {
-    lines.push("- None.");
-  } else {
-    for (const change of context.openChanges) {
-      lines.push(`- ${change.id} (${change.status}) task=${change.taskId}`);
-      lines.push(`  - Subject: ${change.subject}`);
-      lines.push(`  - Denied: ${change.deniedPaths.join(", ") || "(none)"}`);
-      lines.push(`  - Report: ${change.reportMdPath || "(none)"}`);
-    }
-  }
-  lines.push("", "## Resume Commands", "");
-  lines.push("- Inspect: `node ./bin/helix.mjs status`");
-  lines.push("- Refresh context: `node ./bin/helix.mjs resume`");
-  lines.push("- Run next task: `node ./bin/helix.mjs run`");
-  lines.push("- Node loop: `node ./bin/helix.mjs node execute|verify|scope|review|checkpoint|retry --task <taskId>`");
-  lines.push("- Open changes: `node ./bin/helix.mjs changes list`");
-  lines.push("", "## Invariants", "");
-  lines.push("- Worker done-claim is not completion.");
-  lines.push("- Checkpoint requires verifier PASS, scope guard non-fail, and review gate PASS.");
-  lines.push("- Scope drift requires ChangeRequest review before retry.");
-  lines.push("- Do not weaken `verify_commands` or `review_commands` to manufacture PASS.");
-  lines.push("", "## Ledger Tail", "");
-  if (context.ledgerTail.length === 0) {
-    lines.push("- None.");
-  } else {
-    for (const entry of context.ledgerTail) {
-      lines.push(`- ${entry.at || ""} ${entry.type || entry.kind || "event"} ${entry.taskId ? `task=${entry.taskId}` : ""} ${entry.stage ? `stage=${entry.stage}` : ""}`.trim());
-    }
-  }
-  return `${lines.join("\n")}\n`;
 }
 
 function appendTaskContext(lines, task) {

@@ -33,6 +33,9 @@
 - Git 协调命令必须使用参数数组调用 Git，不拼接用户输入到 shell；所有远端写入只允许普通 push，禁止提供 force push 原语。
 - Git 路径比较必须处理 macOS `/var` 与 `/private/var` 等 realpath 别名；`.helix/` 永远不进入 handoff 工作树变更清单。
 - Infra 可以返回事实和证据，不能把“完成任务”作为自己的业务结论。
+- `foundation.mjs` 仅为外部旧调用保留声明式 re-export；五区实现必须直接 import `runtime-store.mjs`、`runtime-config.mjs`、`task-state-lock.mjs`、`runtime-snapshot.mjs`、`prompt-pack.mjs`、`runtime-bootstrap.mjs`、`agent-registry.mjs` 或 `ledger.mjs` 的真实 owner。
+- 恢复上下文的确定性文件读取和 Markdown/JSON 渲染只允许存在于 `runtime-snapshot.mjs`；`ai/context.mjs` 可保留公开薄封装，但不得维护第二份渲染实现。
+- `TASK_STATUSES` 本轮作为持久化格式枚举归 `runtime-store.mjs`；若未来迁往 Orchestration，必须单独设计兼容边界，禁止 Infra 反向依赖上层。
 
 ## 交付证据
 

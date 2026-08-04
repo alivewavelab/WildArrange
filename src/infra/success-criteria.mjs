@@ -4,7 +4,7 @@
  * (review-gate, acceptance-proof) to answer "did this task's declared
  * criteria pass", so it lives in infra rather than either side.
  */
-import { nowIso } from "./foundation.mjs";
+import { nowIso } from "./runtime-store.mjs";
 
 export function criteriaStatus(task) {
   const criteria = task.successCriteria || [];

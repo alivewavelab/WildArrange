@@ -2,11 +2,11 @@ import { copyFile } from "node:fs/promises";
 import path from "node:path";
 import {
   ensureHelixDirs,
-  initRuntime,
   resolveHelixPath,
   writeJsonAtomic,
-  writeSnapshot,
-} from "../infra/foundation.mjs";
+} from "../infra/runtime-store.mjs";
+import { initRuntime } from "../infra/runtime-bootstrap.mjs";
+import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { importPlan } from "./plan-state.mjs";
 import { statusReport, writeWorkflowSummary } from "./status.mjs";
 import { runNextTask } from "./linear-runtime.mjs";

@@ -18,17 +18,17 @@
  */
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { appendLedger } from "../infra/ledger.mjs";
 import {
-  appendLedger,
   ensureHelixDirs,
-  loadHelixConfig,
   nowIso,
   readJson,
   resolveHelixPath,
-  withTaskStateLock,
   writeJsonAtomic,
-  writeSnapshot,
-} from "../infra/foundation.mjs";
+} from "../infra/runtime-store.mjs";
+import { loadHelixConfig } from "../infra/runtime-config.mjs";
+import { withTaskStateLock } from "../infra/task-state-lock.mjs";
+import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import {
   captureIntegrationGuard,
   commitIsAncestor,

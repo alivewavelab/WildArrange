@@ -118,7 +118,14 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/capabilities/checkpoint.mjs`                              | checkpoint 落盘                                  |
 | **infra/**（基础设施，不依赖任何上层区） |  |
 | `src/infra/AGENTS.md`                                        | 最低层依赖、确定性、文件/锁/命令安全约束 |
-| `src/infra/foundation.mjs`                                    | 路径、JSON、锁、配置、快照、prompt-pack 注册等基础能力                      |
+| `src/infra/foundation.mjs`                                    | Foundation 旧入口的声明式兼容导出；五区内部不得依赖 |
+| `src/infra/runtime-store.mjs`                                 | 路径、时间/ID、目录、JSON 原子写与 hash 原语 |
+| `src/infra/task-state-lock.mjs`                               | 全局任务状态锁、死进程/损坏 owner 恢复与超时语义 |
+| `src/infra/agent-registry.mjs`                                | 固定 Agent 白名单、别名、显示名与 command-worker 资格 |
+| `src/infra/runtime-config.mjs`                                | 默认配置、配置合并/归一化与 strict 安全底线 |
+| `src/infra/runtime-snapshot.mjs`                              | 运行态 snapshot 与恢复上下文的确定性文件读取/渲染 owner |
+| `src/infra/prompt-pack.mjs`                                   | Prompt Pack 安装、注册、hash 校验与条目读取 |
+| `src/infra/runtime-bootstrap.mjs`                             | `initRuntime` 一次性初始化顺序 |
 | `src/infra/ledger.mjs`                                        | hash 链 ledger 追加、校验与可信条目读取（链启动后无 hash 行视为篡改） |
 | `src/infra/command-runner.mjs`                                 | 子进程命令执行、输出截断与超时                              |
 | `src/infra/command-safety.mjs`                                 | shell 命令高风险预检，阻断明显破坏性 worker/verifier/review 命令；内置正则为不可削弱底线，`commandSafety.extraPatterns` 可外置追加项目规则 |

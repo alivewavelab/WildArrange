@@ -446,6 +446,29 @@ test("dependency boundary: legacy shims and helix-core stay declarative re-expor
   }
 });
 
+test("dependency boundary: infra/foundation.mjs is a declarative compatibility export", async () => {
+  const filePath = path.join(SRC_DIR, "infra", "foundation.mjs");
+  const masked = maskSource(await readFile(filePath, "utf8"));
+  const withoutDeclarations = masked
+    .replace(/export\s*\*\s*(?:as\s+[\w$]+\s*)?from\s*(["'])[^"']*\1\s*;?/g, " ")
+    .replace(/export\s*\{[^}]*\}\s*from\s*(["'])[^"']*\1\s*;?/g, " ")
+    .replace(/import\s*(?:[\w$]+\s*,?\s*)?(?:\{[^}]*\}|\*\s*as\s+[\w$]+)?\s*from\s*(["'])[^"']*\1\s*;?/g, " ");
+  const leftover = withoutDeclarations.replace(/\u0000/g, "").trim();
+  assert.equal(leftover, "", `infra/foundation.mjs must contain declarations only, found: ${leftover.slice(0, 120)}`);
+});
+
+test("dependency boundary: zoned implementations import concrete infra owners, not foundation.mjs", async () => {
+  const edges = await buildDependencyEdges();
+  const violations = edges.filter(
+    (edge) => edge.sourceZone !== "legacy" && edge.from !== "infra/foundation.mjs" && edge.to === "infra/foundation.mjs",
+  );
+  assert.deepEqual(
+    violations,
+    [],
+    `zoned implementation still imports infra/foundation.mjs: ${JSON.stringify(violations)}`,
+  );
+});
+
 test("dependency boundary: no module-level import cycles anywhere in src/", async () => {
   // Zone rules allow ai <-> orchestration in both directions (each edge is
   // legitimate on its own), so a module-level cycle between the two zones

@@ -59,7 +59,7 @@ Parallel admission captures and fetches the remote integration SHA before applyi
 | Orchestration | `src/orchestration/` | Task/plan state, linear + parallel runtime loops, the shared `delivery-pipeline`, task board, change governance, status/attention report | `ai` (pinned edge list only), `capabilities` (gateway only), `infra` |
 | AI | `src/ai/` | Routing, ArchivistRouter, prompt injection, skill matcher, agent context builder, host lifecycle hooks | `orchestration` (read-only), `capabilities` (gateway only), `infra` |
 | Capabilities | `src/capabilities/` | The atomic gates themselves (verify, scope-guard, worker, review-gate, code-intel, repository-governance, acceptance-proof, checkpoint) plus `gateway.mjs`, the single seam every caller above must go through | `infra` |
-| Infra | `src/infra/` | Foundation (paths/JSON/locks/config/snapshots), ledger, security, command-runner/safety, git diff/worktree, rule scanner, LLM provider, memory digest, path matching, success criteria, task predicates | nothing above it |
+| Infra | `src/infra/` | runtime-store、agent-registry、runtime-config、task-state-lock、runtime-snapshot、prompt-pack、runtime-bootstrap，以及 ledger、security、command-runner/safety、git diff/worktree、rule scanner、LLM provider、memory digest、path matching、success criteria、task predicates | nothing above it |
 
 Seven invariants beyond simple layering, all checked by `test/dependency-boundary.test.mjs`:
 
@@ -97,7 +97,14 @@ Nested files are additive. They may narrow a directory's responsibilities and pr
 
 - `bin/helix.mjs`: CLI routing.
 - `src/helix-core.mjs`: compatibility export surface for existing CLI/tests/imports; re-exports every zoned module below and must not grow new implementation.
-- `src/infra/foundation.mjs`: shared constants, runtime initialization, config, locks, prompt-pack registry, snapshots, and resume context basics. The task-state lock (`.helix/team/tasks.lock`) is one global file lock: every `withTaskStateLock` caller serializes on it, which is what gives the linear run and parallel admission workspace-level mutual exclusion. Stale-lock recovery is self-healing: a lock owned by a dead pid is stale immediately (no fixed age wait), and an empty/unparseable lock (owner line never written because the acquiring process died between creating the file and writing it) goes stale after a short mtime grace instead of blocking forever.
+- `src/infra/foundation.mjs`: declarative compatibility export for the former Foundation surface. Zoned implementation files must import the concrete owners below rather than using it as an internal barrel.
+- `src/infra/runtime-store.mjs`: runtime path, time/ID, directory creation, JSON atomic-write, persisted task-status enum, and hash primitives.
+- `src/infra/task-state-lock.mjs`: the one global task-state lock (`.helix/team/tasks.lock`). Every caller serializes on it, which gives the linear run and parallel admission workspace-level mutual exclusion. Stale-lock recovery is self-healing: a dead owner pid is stale immediately, while an empty/unparseable owner file goes stale after a short mtime grace.
+- `src/infra/agent-registry.mjs`: fixed long-lived Agent whitelist, read/write role sets, legacy aliases, display names, normalization, and command-worker eligibility.
+- `src/infra/runtime-config.mjs`: default configuration, layered root/runtime config loading, normalization, deep merge, and non-weakenable strict Git-coordination flags.
+- `src/infra/runtime-snapshot.mjs`: the single deterministic owner for runtime snapshot persistence and resume-context JSON/Markdown rendering. `src/ai/context.mjs::writeContextSnapshot` is a thin public wrapper over this owner, not a second implementation.
+- `src/infra/prompt-pack.mjs`: prompt-pack registry installation, entry loading, content hashing, listing, and verified rendering.
+- `src/infra/runtime-bootstrap.mjs`: one-time `initRuntime` sequencing across config, initial state files, prompt pack, ledger, and snapshot.
 - `src/infra/ledger.mjs`: hash-chained ledger append, ledger verification, and verified-entry reads. Once the hash chain has started, unhashed appended lines are reported as tampering, and `doctor` only accepts chain-verified entries as completion evidence.
 - `src/interface/adapters.mjs`: Codex/Cursor/Kimi adapter install, uninstall, restore, report, backup logic, Codex `.codex/hooks.json` generation, Cursor soft-rule generation, Kimi plugin generation, and shared command Skill generation.
 - `src/interface/kimi-adapter.mjs`: pure rendering for the Kimi plugin manifest, project-aware Hook bridge, and Kimi install/readme instructions. Kimi-specific protocol translation stays here instead of entering the workflow core.

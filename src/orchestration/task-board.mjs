@@ -1,19 +1,21 @@
 import { appendFile, readdir } from "node:fs/promises";
 import path from "node:path";
+import { appendLedger } from "../infra/ledger.mjs";
 import {
-  appendLedger,
   createWorkId,
-  DEFAULT_EXECUTOR_AGENT,
-  DEFAULT_LEAD_AGENT,
   ensureHelixDirs,
-  normalizeAgentKey,
   nowIso,
   readJson,
   resolveHelixPath,
-  withTaskStateLock,
   writeJsonAtomic,
-  writeSnapshot,
-} from "../infra/foundation.mjs";
+} from "../infra/runtime-store.mjs";
+import {
+  DEFAULT_EXECUTOR_AGENT,
+  DEFAULT_LEAD_AGENT,
+  normalizeAgentKey,
+} from "../infra/agent-registry.mjs";
+import { withTaskStateLock } from "../infra/task-state-lock.mjs";
+import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { loadRoutesConfig } from "../infra/route-table.mjs";
 import {
   enrichTaskWithRouteDecision,

@@ -6,7 +6,10 @@
  * and infra (memory-digest) can look up "what tasks exist right now" without
  * depending upward on orchestration.
  */
-import { readJson, resolveHelixPath } from "./foundation.mjs";
+import {
+  readJson,
+  resolveHelixPath,
+} from "./runtime-store.mjs";
 
 export async function loadTaskState(rootDir) {
   return readJson(resolveHelixPath(rootDir, "team", "tasks.json"), null);

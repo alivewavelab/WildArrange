@@ -13,7 +13,7 @@
  * review) already passed.
  */
 import { invokeCapability } from "../capabilities/gateway.mjs";
-import { appendLedger } from "../infra/foundation.mjs";
+import { appendLedger } from "../infra/ledger.mjs";
 import { applyVerifierEvidenceToCriteria, criteriaStatus } from "../infra/success-criteria.mjs";
 
 /**

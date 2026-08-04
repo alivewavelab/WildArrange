@@ -1,4 +1,4 @@
-import { nowIso } from "./foundation.mjs";
+import { nowIso } from "./runtime-store.mjs";
 
 const FAILING_LANE_SEVERITY = {
   goal_compliance: "P0",

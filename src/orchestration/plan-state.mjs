@@ -1,19 +1,19 @@
 import { writeFile } from "node:fs/promises";
+import { DEFAULT_EXECUTOR_AGENT } from "../infra/agent-registry.mjs";
 import {
-  DEFAULT_EXECUTOR_AGENT,
   STATE_VERSION,
   TASK_STATUSES,
-  appendLedger,
   createWorkId,
   ensureHelixDirs,
-  loadHelixConfig,
   nowIso,
   readJson,
   resolveHelixPath,
-  withTaskStateLock,
   writeJsonAtomic,
-  writeSnapshot,
-} from "../infra/foundation.mjs";
+} from "../infra/runtime-store.mjs";
+import { appendLedger } from "../infra/ledger.mjs";
+import { loadHelixConfig } from "../infra/runtime-config.mjs";
+import { withTaskStateLock } from "../infra/task-state-lock.mjs";
+import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { loadRoutesConfig, resolveRouteDecision } from "../infra/route-table.mjs";
 import { isPossibleNoopTask, isTrivialCommand } from "../infra/task-predicates.mjs";
 

@@ -1,4 +1,4 @@
-import { nowIso } from "./foundation.mjs";
+import { nowIso } from "./runtime-store.mjs";
 
 export function buildFailureSummary(task, { workerResult, verifyResult, scopeResult, reviewResult, criteriaResult, nextStatus }) {
   const reason = gateRejectionReason(workerResult, verifyResult, scopeResult, reviewResult, criteriaResult);

@@ -1,7 +1,10 @@
 import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { hashContent, nowIso } from "../infra/foundation.mjs";
+import {
+  hashContent,
+  nowIso,
+} from "../infra/runtime-store.mjs";
 import { runCommand } from "../infra/command-runner.mjs";
 import { pathMatchesPattern } from "../infra/path-match.mjs";
 import { extractComments } from "../infra/repository-layout.mjs";

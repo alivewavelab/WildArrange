@@ -1,0 +1,434 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { normalizeAgentKey } from "./agent-registry.mjs";
+import { appendLedger } from "./ledger.mjs";
+import {
+  ensureHelixDirs,
+  readJson,
+  resolveHelixPath,
+  writeJsonAtomic,
+} from "./runtime-store.mjs";
+
+export const HELIX_CONFIG_FILE = "helix.config.json";
+export const PRODUCT_NAME = "WildArrange";
+export const DEFAULT_PACKAGE_NAME = "@alivewavelab/wildarrange";
+export const DEFAULT_RUNTIME_NAME = "wildarrange-linear";
+export const DEFAULT_CLI_COMMAND = "wildarrange";
+
+export const DEFAULT_HELIX_CONFIG = {
+  version: 1,
+  runtime: DEFAULT_RUNTIME_NAME,
+  adapters: {
+    codex: { enabled: true, hookMode: "cli-adapter" },
+    cursor: { enabled: true, hookMode: "cli-adapter" },
+    kimi: { enabled: true, hookMode: "plugin-adapter" },
+  },
+  modelProviders: {
+    host: { type: "host", adapter: "auto" },
+    deepseek: { type: "openai-compatible", apiKeyEnv: "DEEPSEEK_API_KEY", baseUrlEnv: "DEEPSEEK_BASE_URL", defaultBaseUrl: "https://api.deepseek.com" },
+    kimi: { type: "openai-compatible", apiKeyEnv: "KIMI_API_KEY", baseUrlEnv: "KIMI_BASE_URL", defaultBaseUrl: "https://api.moonshot.cn/v1" },
+    qwen: { type: "openai-compatible", apiKeyEnv: "QWEN_API_KEY", baseUrlEnv: "QWEN_BASE_URL", defaultBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1" },
+    gemini: { type: "openai-compatible", apiKeyEnv: "GEMINI_API_KEY", baseUrlEnv: "GEMINI_BASE_URL" },
+  },
+  agents: {
+    Jiuwei: { role: "workflow_orchestrator", provider: "host", model: "host-default", reasoning: "high" },
+    DiJiang: { role: "planner", provider: "host", model: "host-default", reasoning: "high" },
+    ZhuRong: { role: "implementation_worker", provider: "host", model: "host-default", reasoning: "medium" },
+    BaiZe: { role: "independent_reviewer", provider: "host", model: "host-default", reasoning: "xhigh" },
+    LuWu: { role: "repository_steward", provider: "host", model: "host-default", reasoning: "high" },
+  },
+  archivistRouter: {
+    enabled: false,
+    agent: "CangJie",
+    provider: "deepseek",
+    model: "deepseek-v4-flash",
+    triggers: {
+      sessionStart: true,
+      gitHeadChanged: true,
+      lowConfidenceRoute: true,
+      everyUserPrompts: {
+        default: 10,
+        ideate: 5,
+        plan: 5,
+        clarify: 5,
+        execute: 15,
+        verify: 15,
+        review: 15,
+        min: 5,
+        max: 20,
+      },
+      workflowCheckpoint: true,
+    },
+    memory: {
+      backend: "structured-files",
+      root: ".helix/memory",
+      captureMode: "conclusions-only",
+      includeCodeBlocks: false,
+      maxRecentTurns: 10,
+      recentTurnWindows: {
+        default: 10,
+        ideate: 5,
+        plan: 5,
+        clarify: 5,
+        execute: 15,
+        verify: 15,
+        review: 15,
+        max: 20,
+      },
+      maxRoutingPacketChars: 12000,
+      injectFields: ["progress", "decisions", "artifacts", "implementationNotes", "researchNotes", "pitfalls", "openQuestions"],
+    },
+    keywordEvolution: {
+      suggestOnly: true,
+      autoApplyConfidence: 0.85,
+      minEvidenceCount: 2,
+      protectedTargets: ["askGate", "intents.review", "intents.release_git", "intents.change_request"],
+    },
+  },
+  routeGovernance: {
+    semanticShadow: {
+      enabled: true,
+      agent: "CangJie",
+      timeoutMs: 30000,
+      lowConfidenceThreshold: 0.5,
+      conflictRoute: "plan",
+      enforceLowConfidence: true,
+    },
+  },
+  gitCoordination: {
+    mode: "guarded",
+    remote: "origin",
+    integrationBranch: "auto",
+    taskBranchPrefix: "wildarrange/task",
+    requireWorktreeForParallelWrites: true,
+    requireVerificationBeforeHandoff: false,
+    requireCleanHandoff: true,
+    requireTakeoverReason: true,
+  },
+  parallelAgents: {
+    enabled: true,
+    defaultMaxAgents: 2,
+    isolation: "run-dir",
+    timeoutMs: 120000,
+    retainUntilUserAcceptance: true,
+    defaultAdapter: null,
+    spawnAdapters: {
+      codex: {
+        command: "",
+        note: "Set a Codex CLI command template here. Variables: {rootDir}, {runDir}, {workDir}, {taskJson}, {outputJson}, {taskId}, {agent}.",
+      },
+      cursor: {
+        command: "",
+        note: "Set a Cursor agent command template here. Variables: {rootDir}, {runDir}, {workDir}, {taskJson}, {outputJson}, {taskId}, {agent}.",
+      },
+    },
+  },
+  dynamicAgents: {
+    "visual-engineering": { provider: "gemini", model: "gemini-3.1-pro" },
+    ultrabrain: { provider: "host", model: "host-default", reasoning: "xhigh" },
+    artistry: { provider: "gemini", model: "gemini-3.1-pro" },
+    quick: { provider: "deepseek", model: "deepseek-v4-flash" },
+    deep: { provider: "host", model: "host-default", reasoning: "medium" },
+    writing: { provider: "kimi", model: "kimi-2.6" },
+    git: { provider: "deepseek", model: "deepseek-v4-flash" },
+  },
+  promptVariants: {
+    host: "使用宿主 Agent 已配置的主模型与推理策略，不假设具体供应商 API。",
+    gpt: "优先写清验收标准、工具调用纪律和简洁证据摘要。",
+    gemini: "涉及界面或多模态任务时，优先进行视觉检查、状态对比和可见证据记录。",
+    kimi: "优先处理长上下文写作、文档综合和审慎中文表达。",
+    deepseek: "优先快速探索、结构化摘要和成本敏感的路由判断。",
+  },
+  skillMatcher: {
+    enabled: true,
+    defaultLimit: 6,
+    dynamicInjection: {
+      enabled: true,
+      maxSkills: 4,
+      alwaysMount: ["wildarrange-injection-runtime"],
+    },
+    stageBoosts: {
+      ideate: ["wa-ideate", "ultraresearch"],
+      clarify: ["wa-spec", "start-work"],
+      plan: ["wa-plan", "wa-architect", "init-deep", "review-plan-risk", "review-plan-readiness"],
+      design: ["wa-design", "frontend-ui-ux", "visual-qa"],
+      execute: ["programming", "debugging", "refactor", "wa-work"],
+      verify: ["wa-test", "review-work"],
+      review: ["wa-review", "review-work", "review-plan-risk", "review-plan-readiness", "remove-ai-slops"],
+      deploy: ["wa-deploy", "publish", "pre-publish-review"],
+      recall: ["wa-recall", "get-unpublished-changes"],
+    },
+  },
+  contextBudgets: {
+    prompt: { maxChars: 12_000 },
+    markdown: { maxChars: 12_000 },
+    skill: { maxChars: 80_000 },
+    points: {
+      session_start: { markdownMaxChars: 12_000, skillMaxChars: 60_000 },
+      user_prompt_submit: { markdownMaxChars: 12_000, skillMaxChars: 60_000 },
+      pre_tool_use: { markdownMaxChars: 8_000, skillMaxChars: 16_000 },
+      post_tool_use: { markdownMaxChars: 8_000, skillMaxChars: 12_000 },
+      post_compact: { markdownMaxChars: 16_000, skillMaxChars: 60_000 },
+      before_execute: { markdownMaxChars: 20_000, skillMaxChars: 80_000 },
+      before_review: { markdownMaxChars: 24_000, skillMaxChars: 80_000 },
+      before_checkpoint: { markdownMaxChars: 24_000, skillMaxChars: 60_000 },
+      repository_governance: { markdownMaxChars: 20_000, skillMaxChars: 40_000 },
+      stop: { markdownMaxChars: 12_000, skillMaxChars: 24_000 },
+    },
+  },
+  review: {
+    llm: {
+      enabled: false,
+      required: false,
+      agents: ["BaiZe"],
+      temperature: 0,
+      timeoutMs: 45000,
+      maxEvidenceChars: 12000,
+    },
+  },
+  commandSafety: {
+    extraPatterns: [],
+  },
+  planApproval: {
+    required: false,
+  },
+  qualityGates: {
+    lspDiagnostics: {
+      enabled: false,
+      required: false,
+      commands: [],
+      timeoutMs: 120000,
+    },
+    astStructure: {
+      enabled: false,
+      required: false,
+      commands: [],
+      timeoutMs: 120000,
+    },
+    hashlineAnchors: {
+      enabled: false,
+      required: false,
+      anchors: [],
+    },
+    commentChecker: {
+      enabled: true,
+      blockOnFindings: false,
+      maxFileBytes: 500000,
+      patterns: [
+        { name: "ai_attribution", pattern: "\\b(as an ai|generated by ai|ai generated|chatgpt|claude generated)\\b" },
+        { name: "placeholder_comment", pattern: "\\b(todo|fixme|hack|xxx)\\b" },
+        { name: "lorem_ipsum", pattern: "lorem ipsum" },
+      ],
+    },
+  },
+  ruleInjection: {
+    mode: "both",
+    maxRuleChars: 12000,
+    maxResultChars: 40000,
+    dynamicMaxRuleChars: 4000,
+    dynamicMaxResultChars: 10000,
+    projectSingleFiles: ["AGENTS.md", "CLAUDE.md", "CONTEXT.md", ".github/copilot-instructions.md"],
+    projectRuleDirs: [".claude/rules", ".cursor/rules", ".github/instructions"],
+  },
+  repositoryGovernance: {
+    enabled: false,
+    governedRoots: [],
+    requiredAgentBoundaries: [],
+    documentationPairs: [],
+    documentationRequirements: [],
+    architectureLedgers: [],
+    ignoredPaths: [".git", ".helix", "node_modules", "coverage"],
+    naming: {
+      directories: "kebab-case",
+      sourceFiles: "kebab-case.mjs",
+      exceptions: ["README.md", "README.en.md", "AGENTS.md"],
+    },
+    commentRules: [],
+  },
+  injectionPoints: {
+    session_start: {
+      enabled: true,
+      tools: ["helix_resume", "helix_rules_collect", "helix_context_build"],
+      markdown: [".helix/snapshots/context.md", ".helix/rules/context.md"],
+      skills: ["wildarrange-injection-runtime", "start-work", "wa-recall"],
+      rules: { mode: "static" },
+    },
+    user_prompt_submit: {
+      enabled: true,
+      tools: ["helix_route", "helix_rules_collect"],
+      markdown: [".helix/snapshots/context.md", ".helix/rules/context.md"],
+      skills: [
+        "wildarrange-injection-runtime",
+        "wa-ideate",
+        "wa-plan",
+        "review-work",
+        "review-product-intent",
+        "map-user-journey",
+        "design-acceptance",
+        "review-ux-interaction",
+        "review-scope-tradeoff",
+        "research-domain-benchmark",
+        "inspect-codebase",
+        "research-external-docs"
+      ],
+      rules: { mode: "static" },
+    },
+    pre_tool_use: {
+      enabled: true,
+      tools: ["scope_guard", "helix_rules_collect"],
+      markdown: [".helix/rules/context.md"],
+      skills: ["wildarrange-injection-runtime"],
+      rules: { mode: "dynamic_blocker" },
+    },
+    post_tool_use: {
+      enabled: true,
+      tools: ["helix_rules_collect", "scope_guard"],
+      markdown: [".helix/rules/context.md"],
+      skills: [],
+      rules: { mode: "dynamic" },
+    },
+    post_compact: {
+      enabled: true,
+      tools: ["helix_resume", "helix_rules_collect"],
+      markdown: [".helix/snapshots/context.md", ".helix/rules/context.md"],
+      skills: ["wildarrange-injection-runtime", "wa-recall"],
+      rules: { mode: "recovery_marker" },
+    },
+    before_execute: {
+      enabled: true,
+      tools: ["helix_context_build", "helix_node", "scope_guard"],
+      markdown: [".helix/context-agents/Jiuwei-{taskId}.md", ".helix/rules/context.md"],
+      skills: ["wildarrange-injection-runtime", "run-linear-delivery", "programming", "debugging", "refactor"],
+      rules: { mode: "dynamic" },
+    },
+    before_review: {
+      enabled: true,
+      tools: ["helix_context_build", "helix_evidence_record", "review_gate"],
+      markdown: [".helix/context-agents/BaiZe-{taskId}.md", ".helix/rules/context.md"],
+      skills: ["wildarrange-injection-runtime", "review-work", "review-plan-risk", "review-plan-readiness", "review-scope-tradeoff", "wa-review", "visual-qa"],
+      rules: { mode: "dynamic" },
+    },
+    repository_governance: {
+      enabled: true,
+      tools: ["repository_governance_audit", "helix_rules_collect", "comment_check", "config_verify"],
+      markdown: [".helix/reports/governance/latest.md", ".helix/rules/context.md"],
+      skills: ["wildarrange-injection-runtime", "repository-governance", "init-deep", "pre-publish-review", "remove-ai-slops"],
+      rules: { mode: "dynamic" },
+    },
+    before_checkpoint: {
+      enabled: true,
+      tools: ["helix_evidence_record", "review_gate", "helix_summary"],
+      markdown: [".helix/reports/reviews/{planId}-{taskId}.md", ".helix/rules/context.md"],
+      skills: ["wildarrange-injection-runtime", "wa-test", "review-work"],
+      rules: { mode: "dynamic" },
+    },
+    stop: {
+      enabled: true,
+      tools: ["helix_continuation_check", "helix_resume"],
+      markdown: [".helix/sessions/continuation.md", ".helix/snapshots/context.md"],
+      skills: ["wildarrange-injection-runtime", "start-work"],
+      rules: { mode: "static" },
+    },
+  },
+};
+
+export async function loadHelixConfig(rootDir) {
+  const rootConfigPath = path.join(rootDir, HELIX_CONFIG_FILE);
+  const runtimeConfigPath = resolveHelixPath(rootDir, "config.json");
+  const rootConfig = await readJson(rootConfigPath, null);
+  const runtimeConfig = await readJson(runtimeConfigPath, null);
+  const sourcePath = rootConfig ? rootConfigPath : runtimeConfig ? runtimeConfigPath : null;
+  const config = normalizeRuntimeConfig(deepMerge(DEFAULT_HELIX_CONFIG, runtimeConfig || {}));
+  return {
+    config: normalizeRuntimeConfig(deepMerge(config, rootConfig || {})),
+    sourcePath: sourcePath ? path.relative(rootDir, sourcePath) : "default",
+  };
+}
+
+export async function writeDefaultHelixConfig(rootDir, options = {}) {
+  await ensureHelixDirs(rootDir);
+  const targetPath = options.root === true ? path.join(rootDir, HELIX_CONFIG_FILE) : resolveHelixPath(rootDir, "config.json");
+  if (!options.force && existsSync(targetPath)) {
+    return { path: path.relative(rootDir, targetPath), created: false, config: await readJson(targetPath) };
+  }
+  await writeJsonAtomic(targetPath, DEFAULT_HELIX_CONFIG);
+  await appendLedger(rootDir, { type: "config_written", configPath: path.relative(rootDir, targetPath), root: options.root === true });
+  return { path: path.relative(rootDir, targetPath), created: true, config: DEFAULT_HELIX_CONFIG };
+}
+
+function normalizeRuntimeConfig(config) {
+  if (!isPlainObject(config)) return config;
+  const normalized = { ...config };
+  if (normalized.runtime === ["helix", "linear"].join("-")) normalized.runtime = DEFAULT_RUNTIME_NAME;
+  normalized.agents = normalizeAgentMap(normalized.agents);
+  normalized.gitCoordination = normalizeGitCoordination(normalized.gitCoordination);
+  if (Array.isArray(normalized.review?.llm?.agents)) {
+    normalized.review = {
+      ...normalized.review,
+      llm: {
+        ...normalized.review.llm,
+        agents: normalized.review.llm.agents.map(normalizeAgentKey).filter(Boolean),
+      },
+    };
+  }
+  return normalized;
+}
+
+function normalizeGitCoordination(value) {
+  const input = isPlainObject(value) ? value : {};
+  const mode = String(input.mode || "guarded").trim().toLowerCase();
+  if (!["off", "manual", "guarded", "strict"].includes(mode)) {
+    throw new Error(`gitCoordination.mode must be off, manual, guarded, or strict; received ${input.mode}`);
+  }
+  const normalized = {
+    ...input,
+    mode,
+    remote: nonEmptyConfigString(input.remote, "origin"),
+    integrationBranch: nonEmptyConfigString(input.integrationBranch, "auto"),
+    taskBranchPrefix: nonEmptyConfigString(input.taskBranchPrefix, "wildarrange/task").replace(/^\/+|\/+$/g, ""),
+    requireWorktreeForParallelWrites: input.requireWorktreeForParallelWrites !== false,
+    requireVerificationBeforeHandoff: input.requireVerificationBeforeHandoff === true,
+    requireCleanHandoff: input.requireCleanHandoff !== false,
+    // Takeover evidence is an immutable floor whenever this config exists;
+    // keep the explicit field visible, but never normalize it to false.
+    requireTakeoverReason: true,
+  };
+  // strict is a profile, not a collection of individually weakenable flags.
+  if (mode === "strict") {
+    normalized.requireWorktreeForParallelWrites = true;
+    normalized.requireVerificationBeforeHandoff = true;
+    normalized.requireCleanHandoff = true;
+    normalized.requireTakeoverReason = true;
+  }
+  return normalized;
+}
+
+function nonEmptyConfigString(value, fallback) {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function normalizeAgentMap(agents) {
+  if (!isPlainObject(agents)) return agents;
+  const normalized = {};
+  for (const [name, value] of Object.entries(agents)) {
+    const key = normalizeAgentKey(name);
+    if (!key) continue;
+    normalized[key] = isPlainObject(value) && isPlainObject(normalized[key])
+      ? deepMerge(normalized[key], value)
+      : value;
+  }
+  return normalized;
+}
+
+function deepMerge(base, override) {
+  if (!isPlainObject(base) || !isPlainObject(override)) return override;
+  const result = { ...base };
+  for (const [key, value] of Object.entries(override)) {
+    result[key] = isPlainObject(value) && isPlainObject(result[key]) ? deepMerge(result[key], value) : value;
+  }
+  return result;
+}
+
+function isPlainObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}

@@ -1,6 +1,10 @@
 import http from "node:http";
 import { timingSafeEqual } from "node:crypto";
-import { DEFAULT_EXECUTOR_AGENT, DEFAULT_LEAD_AGENT, PRODUCT_NAME } from "../infra/foundation.mjs";
+import {
+  DEFAULT_EXECUTOR_AGENT,
+  DEFAULT_LEAD_AGENT,
+} from "../infra/agent-registry.mjs";
+import { PRODUCT_NAME } from "../infra/runtime-config.mjs";
 import {
   claimTeamTask,
   createTeamTask,

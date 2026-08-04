@@ -1,6 +1,7 @@
 import { realpath } from "node:fs/promises";
 import path from "node:path";
-import { appendLedger, ensureHelixDirs } from "../infra/foundation.mjs";
+import { appendLedger } from "../infra/ledger.mjs";
+import { ensureHelixDirs } from "../infra/runtime-store.mjs";
 import { collectGitChangedPaths } from "../infra/git-diff.mjs";
 import { normalizeRelativePath, pathAllowed } from "../infra/path-match.mjs";
 import { loadTaskState } from "../infra/task-state-store.mjs";

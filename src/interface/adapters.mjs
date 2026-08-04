@@ -1,18 +1,20 @@
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { PROJECT_DIR } from "../infra/prompt-pack.mjs";
 import {
-  PROJECT_DIR,
   DEFAULT_PACKAGE_NAME,
   PRODUCT_NAME,
+} from "../infra/runtime-config.mjs";
+import {
   STATE_VERSION,
-  appendLedger,
   ensureHelixDirs,
-  initRuntime,
   nowIso,
   resolveHelixPath,
   writeJsonAtomic,
-} from "../infra/foundation.mjs";
+} from "../infra/runtime-store.mjs";
+import { appendLedger } from "../infra/ledger.mjs";
+import { initRuntime } from "../infra/runtime-bootstrap.mjs";
 import {
   KIMI_ADAPTER_PLUGIN_NAME,
   buildKimiPluginManifest,

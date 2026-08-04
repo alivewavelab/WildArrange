@@ -1,11 +1,11 @@
 import path from "node:path";
+import { appendLedger } from "../infra/ledger.mjs";
 import {
-  appendLedger,
   nowIso,
   readJson,
   resolveHelixPath,
   writeJsonAtomic,
-} from "../infra/foundation.mjs";
+} from "../infra/runtime-store.mjs";
 import {
   commitIsAncestor,
   createTaskCheckpointCommit,

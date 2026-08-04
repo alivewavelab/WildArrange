@@ -1,8 +1,7 @@
-import { createHash, randomUUID } from "node:crypto";
 import { appendFile, mkdir, open, readFile, unlink } from "node:fs/promises";
 import path from "node:path";
+import { createWorkId, hashContent, nowIso, resolveHelixPath } from "./runtime-store.mjs";
 
-const HELIX_DIR = ".helix";
 const LEDGER_LOCK_RETRY_MS = 20;
 const LEDGER_LOCK_WAIT_TIMEOUT_MS = 10_000;
 
@@ -125,22 +124,6 @@ async function readLedgerLastHash(ledgerPath) {
 function hashLedgerEntry(entry) {
   const { hash, ...unsigned } = entry || {};
   return hashContent(JSON.stringify(unsigned));
-}
-
-function hashContent(content) {
-  return createHash("sha256").update(content).digest("hex");
-}
-
-function createWorkId(prefix = "work") {
-  return `${prefix}_${randomUUID()}`;
-}
-
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function resolveHelixPath(rootDir, ...segments) {
-  return path.join(rootDir, HELIX_DIR, ...segments);
 }
 
 async function withLedgerLock(rootDir, fn) {

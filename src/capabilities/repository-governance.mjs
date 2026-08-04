@@ -2,13 +2,13 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   STATE_VERSION,
-  appendLedger,
   ensureHelixDirs,
-  loadHelixConfig,
   nowIso,
   resolveHelixPath,
   writeJsonAtomic,
-} from "../infra/foundation.mjs";
+} from "../infra/runtime-store.mjs";
+import { appendLedger } from "../infra/ledger.mjs";
+import { loadHelixConfig } from "../infra/runtime-config.mjs";
 import { collectGitChangedPaths } from "../infra/git-diff.mjs";
 import { inspectRepositoryGovernance } from "../infra/repository-layout.mjs";
 

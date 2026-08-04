@@ -1,6 +1,14 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { DEFAULT_LEAD_AGENT, loadHelixConfig, normalizeAgentKey, readJson, resolveHelixPath } from "../infra/foundation.mjs";
+import {
+  DEFAULT_LEAD_AGENT,
+  normalizeAgentKey,
+} from "../infra/agent-registry.mjs";
+import { loadHelixConfig } from "../infra/runtime-config.mjs";
+import {
+  readJson,
+  resolveHelixPath,
+} from "../infra/runtime-store.mjs";
 import { matchSkills } from "./skill-matcher.mjs";
 
 const DEFAULT_DYNAMIC_ALWAYS_MOUNT = ["wildarrange-injection-runtime"];

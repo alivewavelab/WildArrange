@@ -1,10 +1,10 @@
+import { appendLedger } from "../infra/ledger.mjs";
 import {
-  appendLedger,
   ensureHelixDirs,
   nowIso,
-  withTaskStateLock,
-  writeSnapshot,
-} from "../infra/foundation.mjs";
+} from "../infra/runtime-store.mjs";
+import { withTaskStateLock } from "../infra/task-state-lock.mjs";
+import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { readChangeRequest, writeChangeRequest } from "./change-governance.mjs";
 import { buildFailureSummary } from "../infra/failure-analysis.mjs";
 import { appendWisdom, writeFailureReport, writeReviewReport } from "../infra/task-reports.mjs";

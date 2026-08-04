@@ -1,4 +1,5 @@
-import { appendLedger, nowIso } from "./foundation.mjs";
+import { appendLedger } from "./ledger.mjs";
+import { nowIso } from "./runtime-store.mjs";
 
 const HARD_FAILURE_PATTERNS = [
   { name: "mcp_transport_failure", regex: /\b(mcp|transport|socket|econnreset|econnrefused|timed out|timeout)\b/i },

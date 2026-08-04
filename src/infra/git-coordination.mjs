@@ -4,7 +4,12 @@ import { mkdir, realpath, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { nowIso, readJson, resolveHelixPath, writeJsonAtomic } from "./foundation.mjs";
+import {
+  nowIso,
+  readJson,
+  resolveHelixPath,
+  writeJsonAtomic,
+} from "./runtime-store.mjs";
 
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 30_000;

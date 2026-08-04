@@ -3,16 +3,20 @@ import path from "node:path";
 import {
   DEFAULT_EXECUTOR_AGENT,
   DEFAULT_LEAD_AGENT,
+} from "../infra/agent-registry.mjs";
+import {
   PRODUCT_NAME,
-  STATE_VERSION,
-  appendLedger,
-  createWorkId,
-  initRuntime,
   loadHelixConfig,
+} from "../infra/runtime-config.mjs";
+import {
+  STATE_VERSION,
+  createWorkId,
   nowIso,
   resolveHelixPath,
   writeJsonAtomic,
-} from "../infra/foundation.mjs";
+} from "../infra/runtime-store.mjs";
+import { appendLedger } from "../infra/ledger.mjs";
+import { initRuntime } from "../infra/runtime-bootstrap.mjs";
 import { pathAllowed } from "../infra/path-match.mjs";
 import { invokeCapability } from "../capabilities/gateway.mjs";
 import { resolveInjectionPoint } from "./injection.mjs";

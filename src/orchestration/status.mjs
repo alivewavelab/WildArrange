@@ -2,13 +2,13 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   STATE_VERSION,
-  appendLedger,
   ensureHelixDirs,
   nowIso,
   readJson,
   resolveHelixPath,
   writeJsonAtomic,
-} from "../infra/foundation.mjs";
+} from "../infra/runtime-store.mjs";
+import { appendLedger } from "../infra/ledger.mjs";
 import { listChangeRequests } from "./change-governance.mjs";
 import { parallelAgentStatus } from "./parallel-runtime.mjs";
 import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";

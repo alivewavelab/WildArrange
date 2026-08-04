@@ -4,7 +4,8 @@ import { existsSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { LONG_LIVED_AGENTS, loadHelixConfig } from "./foundation.mjs";
+import { LONG_LIVED_AGENTS } from "./agent-registry.mjs";
+import { loadHelixConfig } from "./runtime-config.mjs";
 import { normalizeRelativePath, pathMatchesPattern } from "./path-match.mjs";
 
 const DEFAULT_IGNORED = new Set([".git", ".helix", "node_modules", "coverage"]);
