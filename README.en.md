@@ -16,6 +16,8 @@ The key rule is simple: a worker can claim work is done, but only gates can comp
 
 The core runtime is host-neutral. Codex, Cursor, and Kimi adapters improve injection and recovery, but the workflow can run through CLI commands alone.
 
+**New here?** Open [doc/plans/2026-08-04-beginner-handbook.html](./doc/plans/2026-08-04-beginner-handbook.html) (Chinese beginner guide: deploy → insert your requirements at each step → judge every gate; covers Cursor / Codex / Kimi). Full reference: [使用说明书.md](./使用说明书.md).
+
 ## Agent Responsibilities
 
 WildArrange keeps five long-lived Agents. The deterministic Router is a system node rather than an Agent, while specialist capabilities are mounted as Skills. Agents provide analysis and execution, while deterministic gates remain authoritative for completion.

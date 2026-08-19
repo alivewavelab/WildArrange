@@ -16,6 +16,8 @@ init -> plan -> execute -> verify -> scope -> review -> checkpoint -> resume
 
 核心运行时是宿主中立的。Codex / Cursor / Kimi adapter 负责注入与恢复增强，但仅凭 CLI 也能跑完整流程。
 
+**小白从这里开始：** 浏览器打开 [doc/plans/2026-08-04-beginner-handbook.html](./doc/plans/2026-08-04-beginner-handbook.html)（部署 → 每步怎么塞自己的要求 → 怎么核对每一道门对错；含 Cursor / Codex / Kimi）。完整命令参考见 [使用说明书.md](./使用说明书.md)。
+
 ## Agent 职责
 
 WildArrange 只保留 5 个长期 Agent。确定性 Router 是系统节点，不占 Agent 名额；专项能力用 Skill 按需挂载。Agent 提供分析和执行能力，最终完成状态仍由确定性 gate 决定。

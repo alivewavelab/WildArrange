@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WildArrange 小白使用手册 — 从部署到核对每一步</title>
+<style>
+  :root {
+    --ink: #1c1917;
+    --muted: #57534e;
+    --line: #e7e5e4;
+    --bg: #fafaf9;
+    --card: #ffffff;
+    --deploy: #0f766e;
+    --you: #b45309;
+    --check: #1d4ed8;
+    --ok: #15803d;
+    --bad: #b91c1c;
+    --warn: #a16207;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Iowan Old Style", "Palatino Linotype", "Songti SC", Georgia, serif;
+    color: var(--ink);
+    background:
+      radial-gradient(circle at 12% 8%, #f0fdfa 0, transparent 36%),
+      radial-gradient(circle at 88% 0%, #fff7ed 0, transparent 32%),
+      var(--bg);
+    line-height: 1.6;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 40px 20px 80px; }
+  h1 { font-size: 2rem; margin: 0 0 8px; letter-spacing: -0.02em; }
+  h2 {
+    font-size: 1.25rem;
+    margin: 40px 0 14px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--ink);
+  }
+  h3 { font-size: 1.05rem; margin: 0 0 8px; }
+  p, li { font-size: 0.98rem; }
+  .lede { font-size: 1.08rem; color: var(--muted); max-width: 42em; }
+  .meta { color: var(--muted); font-size: 0.85rem; margin-bottom: 24px; }
+  .banner {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin: 24px 0 8px;
+  }
+  .banner div {
+    border-radius: 10px;
+    padding: 14px 16px;
+    color: #fff;
+    font-size: 0.92rem;
+  }
+  .banner strong { display: block; font-size: 1rem; margin-bottom: 4px; }
+  .b-deploy { background: var(--deploy); }
+  .b-you { background: var(--you); }
+  .b-check { background: var(--check); }
+  .flow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin: 16px 0 24px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.82rem;
+  }
+  .flow span {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 6px 12px;
+  }
+  .flow em { color: var(--muted); font-style: normal; }
+  .step {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 18px 18px 14px;
+    margin: 16px 0;
+    box-shadow: 0 1px 0 rgba(28,25,23,0.04);
+  }
+  .step-head {
+    display: flex;
+    gap: 12px;
+    align-items: baseline;
+    margin-bottom: 10px;
+  }
+  .num {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: #fff;
+    background: var(--ink);
+    border-radius: 999px;
+    min-width: 2rem;
+    height: 2rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .grid2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 10px;
+  }
+  @media (max-width: 760px) {
+    .banner, .grid2 { grid-template-columns: 1fr; }
+  }
+  .slot {
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 0.92rem;
+  }
+  .slot h4 { margin: 0 0 6px; font-size: 0.82rem; letter-spacing: 0.04em; text-transform: uppercase; }
+  .you-slot { background: #fff7ed; border: 1px solid #fed7aa; }
+  .check-slot { background: #eff6ff; border: 1px solid #bfdbfe; }
+  .cmd {
+    background: #1c1917;
+    color: #f5f5f4;
+    border-radius: 10px;
+    padding: 12px 14px;
+    overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.82rem;
+    line-height: 1.55;
+    margin: 10px 0;
+  }
+  .cmd .c { color: #a8a29e; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.86em;
+    background: #f5f5f4;
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin: 12px 0; background: #fff; }
+  th, td { border: 1px solid var(--line); padding: 8px 10px; vertical-align: top; text-align: left; }
+  th { background: #f5f5f4; font-size: 0.82rem; }
+  .ok { color: var(--ok); font-weight: 700; }
+  .bad { color: var(--bad); font-weight: 700; }
+  .warn { color: var(--warn); font-weight: 700; }
+  .host-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 12px 0; }
+  @media (max-width: 760px) { .host-tabs { grid-template-columns: 1fr; } }
+  .host {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #fff;
+    padding: 14px;
+    font-size: 0.92rem;
+  }
+  .host h3 { margin-top: 0; }
+  .pill {
+    display: inline-block;
+    font-size: 0.72rem;
+    border-radius: 999px;
+    padding: 2px 8px;
+    margin-right: 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: #e7e5e4;
+  }
+  .pill.fail-closed { background: #dcfce7; color: #166534; }
+  .pill.fail-open { background: #ffedd5; color: #9a3412; }
+  .note {
+    border-left: 4px solid var(--you);
+    background: #fffbeb;
+    padding: 10px 14px;
+    margin: 14px 0;
+    font-size: 0.92rem;
+  }
+  .danger {
+    border-left: 4px solid var(--bad);
+    background: #fef2f2;
+    padding: 10px 14px;
+    margin: 14px 0;
+    font-size: 0.92rem;
+  }
+  .toc a { color: var(--check); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .toc li { margin: 4px 0; }
+  footer { margin-top: 48px; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>WildArrange 小白使用手册</h1>
+<p class="meta">2026-08-04 · 面向「不怎么写代码、但要用 AI 把项目管住」的人 · 三宿主（Cursor / Codex / Kimi Code）</p>
+<p class="lede">你不需要读框架源码。你只做三件事：<b>部署一次</b>、<b>把自己的要求写进计划与规范</b>、<b>对着每道门的红绿灯判断对不对</b>。判错就标注，别偷偷关掉门。</p>
+
+<div class="banner">
+  <div class="b-deploy"><strong>部署</strong>装运行时 → 武装门 → 装宿主拦截 → 导入计划</div>
+  <div class="b-you"><strong>插入你的要求</strong>每一关都能塞命令、路径、规则、验收标准</div>
+  <div class="b-check"><strong>核验对错</strong>decisions 三行 + doctor 体检 + 网页面板 + 标注</div>
+</div>
+
+<div class="flow">
+  <span>1 部署</span><em>→</em>
+  <span>2 写要求</span><em>→</em>
+  <span>3 跑任务</span><em>→</em>
+  <span>4 看门</span><em>→</em>
+  <span>5 标对错</span><em>→</em>
+  <span>6 再武装 / 调计划</span>
+</div>
+
+<ol class="toc">
+  <li><a href="#s0">0. 先记住这 5 条铁律</a></li>
+  <li><a href="#s1">1. 部署：从空项目到可以用</a></li>
+  <li><a href="#s2">2. 三宿主分别怎么装硬拦截（必做）</a></li>
+  <li><a href="#s3">3. 写计划：每一字段怎么塞你自己的要求</a></li>
+  <li><a href="#s4">4. 跑任务：每个门干什么、你插什么、怎么核对</a></li>
+  <li><a href="#s5">5. 看对错：命令行 + 网页面板 + 标注回路</a></li>
+  <li><a href="#s6">6. 把项目规范塞进 AI（持续生效）</a></li>
+  <li><a href="#s7">7. 急救清单</a></li>
+</ol>
+
+<!-- ========== 0 ========== -->
+<h2 id="s0">0. 先记住这 5 条铁律</h2>
+<table>
+  <tr><th>铁律</th><th>人话</th><th>做错会怎样</th></tr>
+  <tr><td>先武装门，再干活</td><td>用 <code>config init --armed</code>，计划里必须有真实的 <code>verify_commands</code> 和独立复核信号（如 <code>review_commands</code>）</td><td>同义反复的「全绿」不证明任何事；现在验收证明会直接挡下来</td></tr>
+  <tr><td>worker 说完成 ≠ 真完成</td><td>AI/子 Agent 的 DoneClaim 只是自称，要过 verify / scope / review / acceptance-proof / checkpoint</td><td>半成品进仓库</td></tr>
+  <tr><td>判错用标注，别关开关</td><td><code>annotate</code> 只写意见，绝不改门；改门只能人显式改配置或计划</td><td>一关门 = 失去质量控制</td></tr>
+  <tr><td>硬拦截要装到本机</td><td>Cursor / Codex / Kimi 都要各自 <code>adapter install</code>；用 <code>doctor</code> 查装没装</td><td>有人机器上 AI 自由改文件，边界形同虚设</td></tr>
+  <tr><td>每一条拦截/放行都能复查</td><td>用 <code>decisions</code>、<code>timeline</code>、Dashboard 面板；FAIL 必须看到规则与证据</td><td>出事后说不清「当时为什么放行」</td></tr>
+</table>
+
+<!-- ========== 1 ========== -->
+<h2 id="s1">1. 部署：从空项目到可以用</h2>
+<p>下面命令默认你已经在<strong>目标业务项目</strong>根目录。把 <code>HELIX</code> 换成你机器上 WildArrange 的 CLI 路径（本仓库开发态示例）：</p>
+<div class="cmd">export HELIX="/绝对路径/工作范式/bin/helix.mjs"
+<span class="c"># npm 安装用户可把 HELIX 换成: npx wildarrange</span>
+<span class="c"># 或: npx @alivewavelab/wildarrange</span></div>
+
+<div class="step">
+  <div class="step-head"><span class="num">1</span><h3>初始化运行时目录</h3></div>
+  <div class="cmd">node "$HELIX" init
+git init   <span class="c"># 建议；scope 门依赖 Git 看改动范围</span></div>
+  <div class="grid2">
+    <div class="slot you-slot"><h4>你插什么</h4>这步几乎不用插。只要确认你<strong>站在业务项目根</strong>，不是站在 WildArrange 框架仓库根（除非你在维护框架本身）。</div>
+    <div class="slot check-slot"><h4>怎么核对</h4>出现 <code>.helix/</code> 目录。没有报错就过。</div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-head"><span class="num">2</span><h3>生成并武装配置</h3></div>
+  <div class="cmd">node "$HELIX" config init --root --armed
+node "$HELIX" config baseline --reason "首次武装后的基线"</div>
+  <div class="grid2">
+    <div class="slot you-slot"><h4>你插什么</h4>打开根目录 <code>helix.config.json</code>，按需改：
+      <ul>
+        <li><code>qualityGates.lspDiagnostics.commands</code> → 换成你项目真实的测试/类型检查（如 <code>npm test</code>）</li>
+        <li><code>agents.*.provider</code> → 要给 BaiZe / Archivist 配外部模型时改这里</li>
+        <li><code>reporting.verbosity</code> → 新手保持 <code>"verbose"</code>（默认）</li>
+      </ul>
+    </div>
+    <div class="slot check-slot"><h4>怎么核对</h4>
+      <div class="cmd">node "$HELIX" doctor</div>
+      看 <code>sections.gateArming.armed</code> 应为 <span class="ok">true</span>。<br>
+      若是 false，按 findings 里的 next_action 补配置，别先跑任务。
+    </div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-head"><span class="num">3</span><h3>装宿主硬拦截（三宿主示例见下一章）</h3></div>
+  <div class="cmd">node "$HELIX" adapter install --target all --mode local
+node "$HELIX" doctor   <span class="c"># 再查 adapters 分项</span></div>
+  <div class="grid2">
+    <div class="slot you-slot"><h4>你插什么</h4>只装你实际用的宿主也可以：
+      <code>--target cursor</code> / <code>codex</code> / <code>kimi</code>。<br>
+      Cursor：打开项目时选<strong>受信任工作区</strong>。<br>
+      Codex：在项目里用 <code>/hooks</code> trust 一次。<br>
+      Kimi：按安装说明启用用户侧 plugin（CLI 不会静默改你的全局配置）。
+    </div>
+    <div class="slot check-slot"><h4>怎么核对</h4>
+      <code>doctor</code> → <code>sections.adapters.targets</code> 里你要用的宿主显示 <span class="ok">installed: true</span>。<br>
+      仍是 MISSING → 重新 install；规则文件若告警「不存在路径」，把绝对路径改成相对路径。
+    </div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-head"><span class="num">4</span><h3>写计划并导入</h3></div>
+  <div class="cmd">cp 某处/plan.example.json ./plan.json
+<span class="c"># 编辑 plan.json，把要求换成你的（见第 3 章）</span>
+node "$HELIX" plan --from ./plan.json</div>
+  <div class="grid2">
+    <div class="slot you-slot"><h4>你插什么</h4>整份 <code>plan.json</code> 就是你的需求声明：要改哪些路径、worker 干什么、怎么验收、怎么复核。详见第 3 章模板。</div>
+    <div class="slot check-slot"><h4>怎么核对</h4>输出 <code>ok: true</code> 与 taskCount。若要求计划审批，先跑 <code>approve</code> 再 <code>run</code>。</div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-head"><span class="num">5</span><h3>跑第一个任务并审判门决策</h3></div>
+  <div class="cmd">node "$HELIX" run
+node "$HELIX" decisions --limit 20
+node "$HELIX" decisions --annotatable   <span class="c"># 只看该过你手的</span></div>
+  <div class="grid2">
+    <div class="slot you-slot"><h4>你插什么</h4>若 AI 在本机宿主里干活，你主要插的是对话里的产品要求；命令式跑则依赖计划里的 <code>worker_command</code>。卡住时把 <code>decisions</code> 三行原文贴给 AI 说「这条判错了」。</div>
+    <div class="slot check-slot"><h4>怎么核对</h4>stderr 末尾有「门决策汇总」（verbose）。每条至少看：发生了什么 / 命中规则 / 证据路径。FAIL 的规则与证据<strong>不能为空</strong>。网页：<code>node "$HELIX" serve</code> 开 Dashboard。</div>
+  </div>
+</div>
+
+<!-- ========== 2 ========== -->
+<h2 id="s2">2. 三宿主分别怎么装硬拦截（必做）</h2>
+<p>「硬拦截」= AI 动手改文件或跑危险命令前，必须先过 WildArrange 的范围/安全检查。软规则（mdc）只是提醒，不能替代。</p>
+
+<div class="host-tabs">
+  <div class="host">
+    <h3>Cursor</h3>
+    <span class="pill fail-closed">fail-closed</span>
+    <div class="cmd">node "$HELIX" adapter install --target cursor --mode local</div>
+    <p><b>生成物：</b><code>.cursor/hooks.json</code>、<code>.cursor/hooks/wildarrange-hook-bridge.mjs</code>、软规则 <code>.cursor/rules/wildarrange.mdc</code>、slash 命令。</p>
+    <p><b>你要做：</b>用 Cursor 以<strong>受信任工作区</strong>打开本项目。把 hooks 提交进 git（模板已例外放行 hooks；rules 默认仍本机）。</p>
+    <p><b>核验：</b>在 Cursor 里故意让 AI 改 <code>writable_paths</code> 之外的文件 → 应被拒绝；或看 <code>doctor</code> adapters 显示 cursor installed。</p>
+  </div>
+  <div class="host">
+    <h3>Codex</h3>
+    <span class="pill fail-closed">hard hooks</span>
+    <div class="cmd">node "$HELIX" adapter install --target codex --mode local</div>
+    <p><b>生成物：</b><code>.codex/hooks.json</code>（另有 <code>.helix/adapters/codex/</code> 审计副本）。</p>
+    <p><b>你要做：</b>在 Codex 会话里 <code>/hooks</code> review 并 trust 本项目 hooks。不 trust = 硬拦截不生效。</p>
+    <p><b>核验：</b><code>doctor</code> 显示 codex installed；越界编辑应被 hook 拦。</p>
+  </div>
+  <div class="host">
+    <h3>Kimi Code</h3>
+    <span class="pill fail-open">hook fail-open</span>
+    <div class="cmd">node "$HELIX" adapter install --target kimi</div>
+    <p><b>生成物：</b>项目内 plugin 清单与 bridge（在 <code>.helix/adapters/kimi/</code>），按 README 手动启用用户侧 plugin。</p>
+    <p><b>你要知道：</b>Kimi Hook 崩溃/超时默认放行，所以<strong>最终完成仍必须过 verifier 等主线门</strong>，别把 Hook 当唯一安全边界。</p>
+    <p><b>核验：</b><code>doctor</code> adapters 里 kimi installed；主线用 <code>run</code> 的门决策做终审。</p>
+  </div>
+</div>
+
+<div class="danger"><b>团队场景：</b>每人每台机器都要装一次 adapter。新人入职第一天先跑 <code>doctor</code>，看到本机 MISSING 立刻 install。不要假设「别人仓库里已经有 hooks」就等于你本机生效。</div>
+
+<!-- ========== 3 ========== -->
+<h2 id="s3">3. 写计划：每一字段怎么塞你自己的要求</h2>
+<p>计划是唯一「产品要求入口」。复制下面骨架改字即可（也可用仓库里 <code>examples/fullstack-starter/plan.example.json</code>）。</p>
+
+<div class="cmd">{
+  "title": "你的功能名",
+  "objective": "一句话成功标准（给人看的）",
+  "tasks": [
+    {
+      "id": "T001",
+      "subject": "这一单要交付什么",
+      "description": "给你自己的 AI worker 的说明：背景、禁忌、参考文档",
+      "writable_paths": ["src/foo/**", "doc/bar.md"],
+      "worker_command": "……可选：命令式 worker；宿主里由人/AI 手工改文件时可省略……",
+      "verify_commands": [
+        "node -e \"……必须能证明产物正确的真实命令……\""
+      ],
+      "review_commands": [
+        "node -e \"……与 verify 不同角度的独立检查……\""
+      ],
+      "standards_commands": [],
+      "successCriteria": [
+        {
+          "id": "C001",
+          "title": "人话验收句",
+          "status": "pending",
+          "expectedEvidence": "verifier 会检查什么",
+          "verifierCommandRefs": [0]
+        }
+      ]
+    }
+  ]
+}</div>
+
+<table>
+  <tr><th>字段</th><th>塞你的要求时怎么写</th><th>写错常见后果</th></tr>
+  <tr><td><code>writable_paths</code></td><td>AI 允许改的目录/文件白名单。越细则越安全。</td><td>写太宽 → 误伤别的模块；写太窄 → 正当改动被 scope 拦</td></tr>
+  <tr><td><code>worker_command</code></td><td>命令型自动化时用；在 Cursor/Codex 里人工让 AI 改文件，可省略或留简单 smoke。</td><td>空 + trivial verify → 可能被判定 no-op</td></tr>
+  <tr><td><code>verify_commands</code></td><td><b>必填且必须真实</b>。测行为：读文件、跑测试、调脚本。禁止只写 <code>true</code>。</td><td>全 trivial → acceptance-proof <span class="bad">FAIL</span></td></tr>
+  <tr><td><code>review_commands</code></td><td><b>强烈建议必填</b>。给独立复核信号：风格、清单、二次断言。也可改用 <code>standards_commands</code> / 打开 LLM review / 启用质量门。</td><td>无任何独立复核信号 → <code>review_not_tautological</code> <span class="bad">FAIL</span>，到不了 completed</td></tr>
+  <tr><td><code>successCriteria</code></td><td>用人话写「什么叫好了」，并绑定到某条 verify 命令下标。</td><td>不绑定证据 → criteria 不过关</td></tr>
+  <tr><td><code>description</code></td><td>把业务禁忌、参考链接、禁用库写清楚——这是塞「产品要求」的主战场之一。</td><td>太空 → AI 自由发挥</td></tr>
+</table>
+
+<div class="note"><b>插入规范文档：</b>在项目根放 <code>AGENTS.md</code> / <code>CLAUDE.md</code>，分类规范放 <code>.cursor/rules/*.md</code>（可带 globs）。这些会在 Hook / review 时注入。细节见第 6 章。</div>
+
+<!-- ========== 4 ========== -->
+<h2 id="s4">4. 跑任务：每个门干什么、你插什么、怎么核对</h2>
+<p>命令：</p>
+<div class="cmd">node "$HELIX" run          <span class="c"># 跑下一个待办任务</span>
+node "$HELIX" status       <span class="c"># 看 pending / completed / gateArming</span>
+node "$HELIX" serve --host 127.0.0.1 --port 8765   <span class="c"># 网页看面板</span></div>
+
+<table>
+  <tr>
+    <th>门</th>
+    <th>它在查什么</th>
+    <th class="you-slot">你怎么插入要求</th>
+    <th class="check-slot">怎么核对对错</th>
+  </tr>
+  <tr>
+    <td><b>worker</b></td>
+    <td>执行改动 / 命令</td>
+    <td>计划里的 <code>description</code> + 宿主会话里的指令 + <code>writable_paths</code></td>
+    <td>产物是否出现；ledger 有 worker 证据。自称完成不算数</td>
+  </tr>
+  <tr>
+    <td><b>verify</b></td>
+    <td>行为是否正确</td>
+    <td><code>verify_commands</code>：换成你的测试、脚本、断言</td>
+    <td><code>decisions --gate verify</code>。FAIL 应有 <code>verify_failed</code> + 失败命令/exit。绿了也要扫一眼命令是不是真测到了</td>
+  </tr>
+  <tr>
+    <td><b>scope</b></td>
+    <td>改动是否越界</td>
+    <td><code>writable_paths</code>；越界需求走 ChangeRequest，不要偷偷加路径</td>
+    <td>FAIL 看 <code>scope_violation</code> 与越界路径列表。若路径本该允许 → 标 <code>rule_wrong</code> 并改计划</td>
+  </tr>
+  <tr>
+    <td><b>review</b></td>
+    <td>独立复核是否还有问题</td>
+    <td><code>review_commands</code> / <code>standards_commands</code> / 质量门 /（可选）LLM review</td>
+    <td>证据路径指向 <code>.helix/reports/reviews/…md</code>。打开看各 lane。可标注（含 PASS）</td>
+  </tr>
+  <tr>
+    <td><b>acceptance-proof</b></td>
+    <td>能不能宣称完成的硬地板</td>
+    <td>确保 verify 非 trivial、review 有独立信号、successCriteria 齐</td>
+    <td>FAIL 看 <code>proof_*</code>（如 <code>proof_review_not_tautological</code>）。报告在 <code>.helix/reports/acceptance/</code></td>
+  </tr>
+  <tr>
+    <td><b>checkpoint</b></td>
+    <td>落盘存档</td>
+    <td>一般不用插；失败返回重试而不是假完成</td>
+    <td><code>status</code> 里任务变 completed；有 checkpoint 文件</td>
+  </tr>
+</table>
+
+<div class="step">
+  <div class="step-head"><span class="num">例</span><h3>一次「拦得对」的体验（故意无复核信号）</h3></div>
+  <p>计划只有 <code>verify_commands</code>、没有 <code>review_commands</code> 且质量门也关：</p>
+  <div class="cmd">node "$HELIX" run
+<span class="c"># 预期：acceptance-proof FAIL</span>
+<span class="c"># 命中规则: proof_review_not_tautological — review 没有独立信号…</span></div>
+  <p>这就是框架在保你：别对着假绿灯签字。回去给任务补 <code>review_commands</code>（或武装质量门）再跑。</p>
+</div>
+
+<!-- ========== 5 ========== -->
+<h2 id="s5">5. 看对错：命令行 + 网页面板 + 标注回路</h2>
+
+<div class="step">
+  <div class="step-head"><span class="num">A</span><h3>每条决策三行（日常主力）</h3></div>
+  <div class="cmd">node "$HELIX" decisions --limit 30
+node "$HELIX" decisions --task T001
+node "$HELIX" decisions --gate verify
+node "$HELIX" decisions --annotatable
+node "$HELIX" decisions --format json</div>
+  <p>三行模板：</p>
+  <table>
+    <tr><th>行</th><th>含义</th><th>你怎么判</th></tr>
+    <tr><td>发生了什么</td><td>哪扇门、放行还是拦截</td><td>和此刻业务动作是否对应</td></tr>
+    <tr><td>命中规则</td><td>稳定 code + 原因</td><td>规则本身不合理 → <code>rule_wrong</code>；这次特例 → <code>case_wrong</code>；分类标错 → <code>mislabeled</code></td></tr>
+    <tr><td>证据</td><td>报告文件路径</td><td>点开看原文；空证据的 FAIL 要当事故对待（当前版本已尽量填满）</td></tr>
+  </table>
+</div>
+
+<div class="step">
+  <div class="step-head"><span class="num">B</span><h3>标注（告诉框架「这条错了」）</h3></div>
+  <div class="cmd">node "$HELIX" annotate --decision dec_xxx --category rule_wrong --reason "这条路径本应允许"
+node "$HELIX" annotate list
+node "$HELIX" annotate stats
+node "$HELIX" decisions stats</div>
+  <div class="grid2">
+    <div class="slot you-slot"><h4>你插什么</h4>分类必选；理由写给未来的自己和异步审查 Agent。不要在标注里改配置。</div>
+    <div class="slot check-slot"><h4>怎么核对</h4><code>annotate stats</code> 会按「规则 × 标注」聚合。同条规则反复 <code>rule_wrong</code> → 你再动手改计划/配置。标注路径有硬测试保证不写门开关。</div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-head"><span class="num">C</span><h3>统一时间线 + 可疑审查 + 体检</h3></div>
+  <div class="cmd">node "$HELIX" timeline --limit 40
+node "$HELIX" timeline --task T001
+node "$HELIX" review suspicious      <span class="c"># 可选：有外部 LLM key 时给第二意见；无 key 也有确定性摘要</span>
+node "$HELIX" doctor
+node "$HELIX" state backup --reason "试用一周后"</div>
+</div>
+
+<div class="step">
+  <div class="step-head"><span class="num">D</span><h3>网页面板（给懒得盯终端的人）</h3></div>
+  <div class="cmd">node "$HELIX" serve --host 127.0.0.1 --port 8765
+<span class="c"># 浏览器打开 http://127.0.0.1:8765</span>
+<span class="c"># 非本机绑定必须设 HELIX_DASHBOARD_TOKEN</span></div>
+  <p>面板上看：最近决策三行、门触发统计、从未触发的门、门武装状态、锁持有者、并行 run 对账。只读，不能在网页上关门。</p>
+</div>
+
+<!-- ========== 6 ========== -->
+<h2 id="s6">6. 把项目规范塞进 AI（持续生效）</h2>
+<table>
+  <tr><th>你想约束什么</th><th>放哪里</th><th>何时生效</th></tr>
+  <tr><td>全局红线（密钥、禁止 force push…）</td><td>根 <code>AGENTS.md</code> / <code>CLAUDE.md</code></td><td>会话开始、提交前注入</td></tr>
+  <tr><td>前端/后端/数据库专项</td><td><code>.cursor/rules/*.md</code>（可配 globs）或宿主对应规则目录</td><td>改到匹配文件时动态注入</td></tr>
+  <tr><td>单次任务边界</td><td><code>plan.json</code> 的 <code>writable_paths</code> / description / verify / review</td><td>本任务全程</td></tr>
+  <tr><td>团队命令与门面</td><td><code>helix.config.json</code> 的 qualityGates / adapters / reporting</td><td>每次 run / review</td></tr>
+</table>
+<div class="note">改规范后建议：<code>doctor</code> 一眼 + 故意越界试一次硬拦截，确认「规则活着」。</div>
+
+<!-- ========== 7 ========== -->
+<h2 id="s7">7. 急救清单</h2>
+<table>
+  <tr><th>现象</th><th>先跑</th><th>人怎么处理</th></tr>
+  <tr><td>任务永远到不了 completed</td><td><code>decisions --annotatable</code>、<code>decisions --gate acceptance-proof</code></td><td>读 proof_* 原因；通常缺 review 信号或 verify 太假</td></tr>
+  <tr><td>绿灯但我怀疑假</td><td><code>status</code>（看 gateArming）、打开 review/acceptance 报告</td><td>若门未武装：停工，先 <code>config init --armed</code> / 补 review_commands</td></tr>
+  <tr><td>AI 改到范围外被拦，但我觉得该改</td><td>看 scope 决策的 deniedPaths</td><td>走变更扩展，或改计划 writable_paths 后重新 import；可 annotate case_wrong</td></tr>
+  <tr><td>同事机器上没约束</td><td>让他跑 <code>doctor</code></td><td>adapters MISSING → 当场 install；规则路径失效 → 改相对路径</td></tr>
+  <tr><td>不知道最近发生了啥</td><td><code>timeline</code> / Dashboard</td><td>按任务过滤；可疑集中跑 <code>review suspicious</code></td></tr>
+  <tr><td>想确认安装健康</td><td><code>doctor</code></td><td>error=0 且 gateArming.armed、本机 adapter installed 再开工</td></tr>
+</table>
+
+<div class="cmd"><span class="c"># 日常最小闭环（背这 6 条就够）</span>
+node "$HELIX" doctor
+node "$HELIX" plan --from ./plan.json
+node "$HELIX" run
+node "$HELIX" decisions --annotatable
+node "$HELIX" annotate --decision &lt;id&gt; --category case_wrong --reason "……"
+node "$HELIX" serve --host 127.0.0.1 --port 8765</div>
+
+<footer>
+  更细的命令全集与进阶专题见仓库根 <code>使用说明书.md</code> 与 <code>README.md</code>；架构不变量见 <code>doc/project-architecture.md</code>；低代码掌控方法论见 <code>doc/low-code-project-governance.md</code>。<br>
+  本手册路径：<code>doc/plans/2026-08-04-beginner-handbook.html</code>
+</footer>
+
+</div>
+</body>
+</html>
