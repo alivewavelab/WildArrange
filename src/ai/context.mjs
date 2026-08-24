@@ -16,6 +16,7 @@ import {
 import { appendLedger } from "../infra/ledger.mjs";
 import { loadHelixConfig } from "../infra/runtime-config.mjs";
 import { collectGitChangedPaths } from "../infra/git-diff.mjs";
+import { renderPromptPackEntry } from "../infra/prompt-pack.mjs";
 import { writeRuntimeContextSnapshot } from "../infra/runtime-snapshot.mjs";
 import { defaultInjectionPointForAgent, resolveInjectionPoint } from "./injection.mjs";
 import { loadTaskState } from "../infra/task-state-store.mjs";
@@ -47,6 +48,12 @@ export async function buildAgentContext(rootDir, options = {}) {
     stage: stageForInjectionPoint(injectionPointName),
   });
   const modelConfig = config.agents?.[agent] || config.dynamicAgents?.[agent] || null;
+  const agentPromptContent = await renderPromptPackEntry(rootDir, { agent });
+  const agentPrompt = prepareAgentPrompt(
+    agentPromptContent,
+    config.contextBudgets?.prompt?.maxChars,
+    agent,
+  );
   const context = {
     kind: "helix_agent_context",
     version: STATE_VERSION,
@@ -55,6 +62,7 @@ export async function buildAgentContext(rootDir, options = {}) {
     agent,
     role,
     model: modelConfig,
+    agentPrompt,
     injectionPoint,
     task: task ? summarizeTaskForContext(task) : null,
     status: resumeContext.status,
@@ -89,7 +97,17 @@ export async function buildAgentContext(rootDir, options = {}) {
   context.reportMdPath = path.relative(rootDir, mdPath);
   await writeJsonAtomic(jsonPath, context);
   await writeFile(mdPath, renderAgentContextMarkdown(context), "utf8");
-  await appendLedger(rootDir, { type: "agent_context_built", agent, role, taskId: task?.id || null, rulesMatched: rules.matched, contextPath: context.reportMdPath });
+  await appendLedger(rootDir, {
+    type: "agent_context_built",
+    agent,
+    role,
+    taskId: task?.id || null,
+    rulesMatched: rules.matched,
+    promptChars: agentPrompt.chars,
+    promptLoadedChars: agentPrompt.loadedChars,
+    promptTruncated: agentPrompt.truncated,
+    contextPath: context.reportMdPath,
+  });
   return context;
 }
 
@@ -216,13 +234,15 @@ function renderAgentContextMarkdown(context) {
     `Agent: ${context.agent}`,
     `Role: ${context.role}`,
     `Model: ${context.model ? `${context.model.provider || "unknown"}/${context.model.model || "unknown"}` : "(unconfigured)"}`,
+    `Bound skills: ${context.model?.skills?.join(", ") || "(none)"}`,
+    `Agent prompt: ${renderAttachmentSize(context.agentPrompt)}`,
     `Injection point: ${context.injectionPoint.name} (${context.injectionPoint.enabled ? "enabled" : "disabled"})`,
     `Resume context: ${context.resumeContextPath}`,
     `Rules context: ${context.rulesContextPath}`,
     "",
-    "## Task",
-    "",
   ];
+  lines.push("## Agent Prompt", "", context.agentPrompt.content, "");
+  lines.push("## Task", "");
   if (context.task) appendTaskContext(lines, context.task);
   else lines.push("- None.");
   lines.push("", "## Project Rules", "");
@@ -310,6 +330,40 @@ function renderAttachmentSize(item) {
   const budget = item.budgetChars ?? "unknown";
   const suffix = item.truncated ? ", truncated" : "";
   return `${loaded}/${item.chars} chars, budget ${budget}${suffix}`;
+}
+
+function prepareAgentPrompt(value, maxChars, agent) {
+  const original = String(value || "");
+  const budgetChars = normalizePromptBudget(maxChars);
+  if (original.length <= budgetChars) {
+    return {
+      source: "prompt-pack",
+      agent,
+      chars: original.length,
+      loadedChars: original.length,
+      budgetChars,
+      truncated: false,
+      content: original,
+    };
+  }
+  const marker = `\n\n[Agent Prompt 已截断：${agent} 原始 ${original.length} 字符，本次身份注入预算 ${budgetChars} 字符。完整 Prompt 仍保存在已安装且经过 hash 校验的 Prompt Pack 中。]`;
+  const sliceLength = Math.max(0, budgetChars - marker.length);
+  const content = `${original.slice(0, sliceLength)}${marker}`;
+  return {
+    source: "prompt-pack",
+    agent,
+    chars: original.length,
+    loadedChars: content.length,
+    budgetChars,
+    truncated: true,
+    content,
+  };
+}
+
+function normalizePromptBudget(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 12_000;
+  return Math.max(500, Math.min(Math.floor(parsed), 500_000));
 }
 
 async function readSessionLineage(rootDir) {

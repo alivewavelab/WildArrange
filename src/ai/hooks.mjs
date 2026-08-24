@@ -62,7 +62,7 @@ export async function runInjectionHook(rootDir, input = {}) {
       route: facts.route,
     }).catch((error) => ({ error: error.message }));
   } else if (event === "UserPromptSubmit") {
-    facts.route = input.prompt ? await routeRequest(hookRootDir, { text: input.prompt }) : null;
+    facts.route = input.prompt ? await routeRequest(hookRootDir, { text: input.prompt, sessionId }) : null;
     facts.rules = await scanProjectRules(hookRootDir);
     facts.archivist = await runArchivistForHook(hookRootDir, input, {
       event,
@@ -86,6 +86,11 @@ export async function runInjectionHook(rootDir, input = {}) {
   } else if (event === "PostCompact") {
     facts.resume = await resumeReport(hookRootDir, { sessionId, source: "hook:post_compact" });
     facts.rules = await scanProjectRules(hookRootDir);
+    facts.agentContext = await buildAgentContext(hookRootDir, {
+      agent: DEFAULT_LEAD_AGENT,
+      taskId,
+      injectionPoint: pointName,
+    }).catch((error) => ({ error: error.message }));
     facts.archivist = await runArchivistForHook(hookRootDir, input, {
       event,
       stage: "resume",
@@ -163,6 +168,9 @@ export async function runInjectionHook(rootDir, input = {}) {
         evidencePath: result.reportJsonPath,
         taskId: taskId || null,
         sessionId,
+        toolName: input.tool_name || input.toolName || null,
+        targetPaths,
+        toolInputSummary: summarizeHookToolInput(input.tool_input || input.toolInput),
         // 拦截与非通过的结果门进标注队列；确定性 allow/pass 只进流水。
         annotatable: result.decision !== "allow" && result.decision !== "pass",
       });
@@ -171,6 +179,25 @@ export async function runInjectionHook(rootDir, input = {}) {
     }
   }
   return result;
+}
+
+function summarizeHookToolInput(value) {
+  if (!value || typeof value !== "object") return null;
+  const redact = (item, key = "") => {
+    if (/(token|secret|password|api[_-]?key|authorization|cookie)/i.test(key)) return "[REDACTED]";
+    if (typeof item === "string") {
+      return item
+        .replace(/(bearer\s+)[^\s"']+/gi, "$1[REDACTED]")
+        .replace(/((?:api[_-]?key|token|secret|password)\s*[=:]\s*)[^\s"']+/gi, "$1[REDACTED]")
+        .slice(0, 500);
+    }
+    if (Array.isArray(item)) return item.slice(0, 20).map((entry) => redact(entry));
+    if (item && typeof item === "object") {
+      return Object.fromEntries(Object.entries(item).slice(0, 30).map(([childKey, child]) => [childKey, redact(child, childKey)]));
+    }
+    return item;
+  };
+  return redact(value);
 }
 
 // code 是结构化字段，由 preToolUseGuard 的返回直接携带；绝不能从
@@ -632,6 +659,11 @@ function appendHookFacts(lines, facts) {
       lines.push(`- 报告：${facts.agentContext.reportMdPath}`);
       lines.push(`- Agent：${facts.agentContext.agent}`);
       lines.push(`- 角色：${facts.agentContext.role}`);
+      const prompt = facts.agentContext.agentPrompt;
+      if (prompt) {
+        lines.push(`- 身份 Prompt：${prompt.loadedChars}/${prompt.chars} 字符；预算 ${prompt.budgetChars}${prompt.truncated ? "；已截断" : ""}`);
+        lines.push("", `### ${facts.agentContext.agent} 身份 Prompt`, "", prompt.content);
+      }
     }
     lines.push("");
   }
@@ -691,10 +723,18 @@ function appendInjectionAttachments(lines, injectionPoint) {
 }
 
 function appendSkillSelectionReport(lines, selection) {
-  if (!selection || selection.mode !== "dynamic") return;
+  if (!selection) return;
   const referenced = selection.referenced || [];
   const suggestions = selection.suggestions || [];
-  if (referenced.length === 0 && suggestions.length === 0) return;
+  const missing = selection.missing || [];
+  if (missing.length > 0) {
+    lines.push("## Skill 配置告警", "");
+    for (const item of missing) {
+      lines.push(`- ${item.name} 未找到：请安装到 \`.agents/skills/${item.name}/SKILL.md\`，或登记到 Prompt Pack。`);
+    }
+    lines.push("");
+  }
+  if (selection.mode !== "dynamic" || (referenced.length === 0 && suggestions.length === 0)) return;
   lines.push("## 按需可加载 Skill（未注入全文）", "");
   for (const item of referenced) {
     lines.push(`- ${item.name}（${item.reason === "over_max_skills" ? "超出本次挂载上限" : "与本次请求未匹配"}）：需要时执行 \`node ./bin/helix.mjs prompts show --skill ${item.name}\``);
@@ -707,11 +747,12 @@ function appendSkillSelectionReport(lines, selection) {
 
 function renderAttachmentMeta(item) {
   const source = item.path ? `path=${item.path}` : "";
+  const origin = item.source ? `source=${item.source}` : "";
   const chars = `chars=${item.chars ?? 0}`;
   const loaded = `loaded=${item.loadedChars ?? String(item.content || "").length}`;
   const budget = `budget=${item.budgetChars ?? "unknown"}`;
   const truncated = `truncated=${item.truncated === true}`;
-  return `> 挂载信息：${[source, chars, loaded, budget, truncated].filter(Boolean).join("; ")}`;
+  return `> 挂载信息：${[source, origin, chars, loaded, budget, truncated].filter(Boolean).join("; ")}`;
 }
 
 function isPlainObject(value) {

@@ -31,11 +31,11 @@ export const DEFAULT_HELIX_CONFIG = {
     gemini: { type: "openai-compatible", apiKeyEnv: "GEMINI_API_KEY", baseUrlEnv: "GEMINI_BASE_URL" },
   },
   agents: {
-    Jiuwei: { role: "workflow_orchestrator", provider: "host", model: "host-default", reasoning: "high" },
-    DiJiang: { role: "planner", provider: "host", model: "host-default", reasoning: "high" },
-    ZhuRong: { role: "implementation_worker", provider: "host", model: "host-default", reasoning: "medium" },
-    BaiZe: { role: "independent_reviewer", provider: "host", model: "host-default", reasoning: "xhigh" },
-    LuWu: { role: "repository_steward", provider: "host", model: "host-default", reasoning: "high" },
+    Jiuwei: { role: "workflow_orchestrator", provider: "host", model: "host-default", reasoning: "high", skills: [] },
+    DiJiang: { role: "planner", provider: "host", model: "host-default", reasoning: "high", skills: [] },
+    ZhuRong: { role: "implementation_worker", provider: "host", model: "host-default", reasoning: "medium", skills: [] },
+    BaiZe: { role: "independent_reviewer", provider: "host", model: "host-default", reasoning: "xhigh", skills: [] },
+    LuWu: { role: "repository_steward", provider: "host", model: "host-default", reasoning: "high", skills: [] },
   },
   archivistRouter: {
     enabled: false,
@@ -454,7 +454,28 @@ function normalizeAgentMap(agents) {
       ? deepMerge(normalized[key], value)
       : value;
   }
+  for (const [name, value] of Object.entries(normalized)) {
+    if (!isPlainObject(value)) continue;
+    normalized[name] = {
+      ...value,
+      skills: normalizeAgentSkills(value.skills, name),
+    };
+  }
   return normalized;
+}
+
+function normalizeAgentSkills(value, agentName) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error(`agents.${agentName}.skills must be an array`);
+  const skills = [];
+  for (const item of value) {
+    if (typeof item !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(item.trim())) {
+      throw new Error(`agents.${agentName}.skills contains an invalid skill name: ${String(item)}`);
+    }
+    const name = item.trim();
+    if (!skills.includes(name)) skills.push(name);
+  }
+  return skills;
 }
 
 function deepMerge(base, override) {

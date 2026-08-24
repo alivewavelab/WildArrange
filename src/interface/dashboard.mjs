@@ -17,8 +17,10 @@ import { dashboardData, writeWorkflowSummary } from "../orchestration/status.mjs
 import { runNextTask, runWorkflowNode } from "../orchestration/linear-runtime.mjs";
 import {
   PANELS_SCRIPT,
+  annotateRouteDecision,
   buildDecisionsPanelViewModel,
   buildOpsPanelViewModel,
+  buildRouteReviewPanelViewModel,
   renderPanelsHtml,
 } from "./dashboard-panels.mjs";
 
@@ -117,6 +119,19 @@ export function startDashboardServer(rootDir, options = {}) {
       }
       if (request.method === "GET" && url.pathname === "/api/panels/decisions") {
         sendJson(response, 200, await buildDecisionsPanelViewModel(rootDir));
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/api/panels/routes") {
+        const date = url.searchParams.get("date") || undefined;
+        if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new DashboardBadRequest("invalid route review date");
+        sendJson(response, 200, await buildRouteReviewPanelViewModel(rootDir, { date }));
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/panels/routes/annotate") {
+        const body = await readJsonBody(request);
+        validateDashboardId(body.decisionId, "decisionId");
+        const result = await annotateRouteDecision(rootDir, body);
+        sendJson(response, 200, { ok: true, result });
         return;
       }
       if (request.method === "GET" && url.pathname === "/api/panels/ops") {
@@ -386,6 +401,46 @@ function renderDashboardHtml(options = {}) {
       font-size: 12px;
     }
     .review-box ul { margin: 6px 0 0 18px; padding: 0; }
+    .route-review-shell {
+      position: relative;
+      overflow: hidden;
+      color: #edf4ff;
+      border: 1px solid #2c4263;
+      background: radial-gradient(circle at 88% -20%, #244f7d 0, transparent 42%), #101827;
+      box-shadow: 0 18px 55px rgba(16, 24, 39, 0.18);
+    }
+    .route-review-shell::before { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .13; background-image: linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px); background-size: 28px 28px; }
+    .route-review-shell > * { position: relative; }
+    .route-review-head { display: flex; justify-content: space-between; gap: 18px; align-items: end; margin-bottom: 16px; }
+    .route-review-head h2 { font-size: 22px; margin: 2px 0 3px; letter-spacing: -.02em; }
+    .route-review-head .muted { color: #9fb0c8; }
+    .route-review-head input { color-scheme: dark; background: #17243a; color: #edf4ff; border-color: #3d526f; }
+    .route-review-head button { background: #d7ff53; border-color: #d7ff53; color: #142012; font-weight: 700; }
+    .eyebrow { color: #d7ff53; letter-spacing: .14em; font: 700 10px/1.2 ui-monospace, monospace; }
+    .route-review-stats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+    .route-review-stats span { padding: 6px 10px; border: 1px solid #354963; border-radius: 999px; background: rgba(13, 23, 38, .75); }
+    .route-review-list { display: grid; gap: 10px; max-height: 760px; overflow: auto; padding-right: 4px; }
+    .route-review-card { border: 1px solid #30435d; border-left: 4px solid #6685ac; border-radius: 8px; padding: 13px; background: rgba(13, 23, 38, .92); }
+    .route-review-card.route-ok { border-left-color: #51d6a6; }
+    .route-review-card.route-issue { border-left-color: #ff806c; }
+    .route-review-meta { display: flex; gap: 10px; flex-wrap: wrap; color: #8fa3bf; font-size: 11px; }
+    .route-request { margin: 10px 0; font-size: 16px; font-weight: 650; color: #fff; white-space: pre-wrap; }
+    .route-result { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+    .route-result strong { padding: 4px 9px; border-radius: 5px; color: #142012; background: #d7ff53; text-transform: uppercase; }
+    .route-result span, .signal-chip { padding: 3px 7px; border: 1px solid #405675; border-radius: 5px; color: #c5d3e7; font-size: 12px; }
+    .route-reason, .route-semantic { margin-top: 8px; color: #aebed4; font-size: 12px; }
+    .signal-row { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 6px; }
+    .signal-chip { border-color: #596b2f; color: #d7ff53; }
+    .route-tools { margin-top: 10px; border-top: 1px solid #293b55; padding-top: 9px; }
+    .route-tools summary { cursor: pointer; color: #c8d6e8; }
+    .route-tool { margin-top: 7px; padding: 8px; border-radius: 5px; background: #16243a; font-size: 12px; }
+    .route-tool-stage { color: #73b5ff; margin-right: 7px; }
+    .route-tool pre { margin-top: 7px; background: #0d1726; color: #dce8f8; max-height: 180px; }
+    .route-review-actions { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 12px; }
+    .route-review-actions button { margin-left: 5px; background: transparent; border-color: #425976; color: #dbe7f7; font-size: 12px; }
+    .route-review-actions button:hover { border-color: #d7ff53; color: #d7ff53; }
+    .review-state { color: #9fb0c8; font-size: 12px; }
+    .route-empty { padding: 28px; text-align: center; border: 1px dashed #405675; color: #9fb0c8; }
     .failure-box pre {
       background: transparent;
       padding: 0;
@@ -395,6 +450,7 @@ function renderDashboardHtml(options = {}) {
     @media (max-width: 860px) {
       .metrics, .two { grid-template-columns: 1fr; }
       header { align-items: flex-start; flex-direction: column; }
+      .route-review-head, .route-review-actions { align-items: flex-start; flex-direction: column; }
     }
   </style>
 </head>

@@ -269,6 +269,8 @@ Install, uninstall, and restore write reports under `.helix/adapters/`. Existing
 - **Cursor**: project hooks at `.cursor/hooks.json` (with the `.cursor/hooks/wildarrange-hook-bridge.mjs` bridge) load automatically in a trusted workspace; `preToolUse` (Write/Delete/Edit/Shell) and `beforeShellExecution` (integrated terminal commands) can hard-deny and are fail-closed. `.cursor/rules/wildarrange.mdc` remains as the soft rule layer.
 - **Kimi Code**: a project-specific plugin is generated under `.helix/adapters/kimi/plugin/`, while project instructions and Skills reuse `AGENTS.md` and `.agents/skills/`. WildArrange never silently edits the user-level `~/.kimi-code/config.toml`; start Kimi Code from the project root, run `/plugins install .helix/adapters/kimi/plugin`, then run `/reload`. Do not quote the path because Kimi Code 0.27 treats quote characters as part of the path. Although plugin installation is user-scoped, its bridge exits silently outside WildArrange projects.
 
+For Codex, `SessionStart` automatically injects the complete Jiuwei identity prompt, and `PostCompact` injects it again to restore identity after context compaction. Ordinary `UserPromptSubmit` events do not repeat the prompt. The prompt comes from the installed, hash-verified Prompt Pack, respects `contextBudgets.prompt.maxChars`, and reports truncation explicitly.
+
 `adapter install` also generates shortcuts so you don't have to open a terminal for common operations. All three surfaces render from one shared command set (`helix-config` / `helix-doctor` / `helix-refresh` / `helix-status` / `helix-plan` / `helix-approve` / `helix-run`):
 
 - **Cursor**: `.cursor/commands/<name>.md` (plain-Markdown slash commands; type `/helix-doctor` in chat).
@@ -350,7 +352,7 @@ node ./bin/helix.mjs review suspicious
 
 `test` is zoned test selection: `--zone <zone>` runs the tests that import the zone plus naming-paired tests plus the always-on boundary test; with file arguments it runs the impact-derived list; with no arguments it runs everything. The exit code passes through from `node --test`, so you run exactly what your change touches without memorizing the test matrix.
 
-`annotate` is the annotation feedback loop: records marked `annotatable` in the decisions projection (denials and non-deterministic allows; deterministic PASS records are flow-only) can be challenged with `annotate --decision <id> --category rule_wrong|case_wrong|mislabeled`. The category is forced, the reason optional; `annotate stats` aggregates by rule × category so a single annotation never hijacks a rule. **Annotations can never move gates** — the annotation path never writes config, `verify_commands`, or any gate switch (pinned by tests); only a human editing config moves a gate.
+`annotate` is the annotation feedback loop: decisions can be marked with `annotate --decision <id> --category confirmed|rule_wrong|case_wrong|mislabeled` as confirmed, rule error, case error, or mislabeled. The reason is optional; `annotate stats` aggregates by rule × category so a single annotation never hijacks a rule. **Annotations can never move gates** — the annotation path never writes config, `verify_commands`, or any gate switch (pinned by tests); only a human editing config moves a gate.
 
 `decisions stats` is the deterministic statistical review (pure code, re-runnable, no LLM): per-gate trigger counts broken down by decision and rule code, the **never-fired gates** (the most direct signal that a gate exists only on paper), and annotation joins. Cold-start outputs counts, never rates. `timeline` merges the ledger (hash-chain-verified entries only), decisions, and annotations into one reverse-chronological feed answering "what happened in this repo recently", with `--task` / `--source` filters.
 
@@ -358,7 +360,7 @@ The CLI is layered: `--help` shows only the core six commands (init / plan / run
 
 `review suspicious` is the LLM suspicion pass (asynchronous audit, archivist invariants): it sends only a sanitized conclusion packet (ids/gates/rule codes/summaries — never code blocks, raw diffs, or full command output) to the configured external provider, and any returned suspicion must anchor to a decisionId present in the packet (hallucinated ids are dropped and counted). Without a key it falls back deterministically and never blocks. Conclusions land only in `.helix/reports/suspicion.*` — **never in the completion chain, never in config, never on a gate switch**.
 
-The dashboard (`serve`) gains two read-only panels: a decision panel (recent three-line decision projections + gate trigger stats + never-fired gates) and an ops panel (gate-arming status, tasks.lock/ledger.lock holder inspection, log sizes, parallel-run reconciliation).
+The dashboard (`serve`) includes a route review console, decision panel, and ops panel. The route console groups the original request, structured route result, matched signals, semantic second opinion, and subsequent tool summaries by session and date. Reviewers can mark a route confirmed, rule-wrong, or case-wrong; common secret fields in tool inputs are redacted. Reviews only append annotations and never edit `routes.json` automatically.
 
 The end-of-run gate summary is leveled by `reporting.verbosity`: the default `verbose` prints the per-gate three-line projection to stderr after each `run` (so every gate decision can be judged while the framework is new); once trust builds, set `normal` (one line) or `quiet` (JSON only). The machine-readable stdout JSON never changes across levels.
 
@@ -466,6 +468,22 @@ x-helix-token: <token>
 ## Configuration
 
 `helix.config.json` configures agents, model providers, dynamic categories, context budgets, and injection points.
+
+Each long-lived agent can also bind project Skills through `skills`. Put a custom Skill at `.agents/skills/<name>/SKILL.md` and list it on the target agent. The Skill stays available at that agent's injection points and is not inherited by other agents. An external agent CLI can be wrapped by such a Skill while the core remains vendor-neutral:
+
+```json
+{
+  "agents": {
+    "Jiuwei": {
+      "provider": "host",
+      "model": "host-default",
+      "skills": ["baize-cli"]
+    }
+  }
+}
+```
+
+Binding names may contain letters, numbers, `_`, and `-`. Missing Skills are reported explicitly; traversal names and symlinks that escape the project Skill root are not loaded.
 
 `contextBudgets` separates Prompt, Markdown, and Skill loading. Prompt / Markdown mounts keep shorter defaults, while activated Skills can load up to 80,000 chars by default. Over-budget mounts expose `truncated: true` instead of silently cutting context.
 

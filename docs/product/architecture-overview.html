@@ -51,7 +51,7 @@
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--gc-void); }
-  body { padding: var(--gc-space-4) var(--gc-space-4) 48px; color: var(--gc-ink); font: var(--gc-fs-body)/var(--gc-leading-body) var(--gc-font-display); }
+  body { padding: var(--gc-space-5) clamp(16px, 3vw, 48px) 56px; color: var(--gc-ink); font: var(--gc-fs-body)/var(--gc-leading-body) var(--gc-font-display); }
   a { color: var(--gc-bright); }
   h1 { margin: 0 0 var(--gc-space-1); font-size: var(--gc-fs-page); letter-spacing: 0.02em; }
   .sub { color: var(--gc-ink-2); }
@@ -98,7 +98,7 @@
   .drill-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--gc-space-2); padding: var(--gc-space-2) 0; }
   .drill-grid .node { text-align: left; }
   .drill-note { color: var(--gc-ink-3); font-size: var(--gc-fs-label); margin: var(--gc-space-2) 0 0; }
-  .drawer { --drawer-h: 48vh; position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; background: var(--gc-surface-1); border-top: 1px solid var(--gc-line-strong); }
+  .drawer { --drawer-h: 55vh; position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; background: var(--gc-surface-1); border-top: 1px solid var(--gc-line-strong); }
   .drawer-grip { height: 12px; margin-top: -6px; cursor: ns-resize; position: relative; z-index: 2; touch-action: none; display: flex; align-items: center; justify-content: center; gap: var(--gc-space-2); }
   .drawer-grip::after { content: ""; display: block; width: 46px; height: 4px; border-radius: 2px; background: var(--gc-line-strong); transition: background var(--gc-motion-fast); }
   .drawer-grip .grip-hint { color: var(--gc-ink-3); font-size: var(--gc-fs-micro); }
@@ -114,7 +114,7 @@
   .drawer-key { color: var(--gc-bright); font-family: var(--gc-font-data); letter-spacing: 0; text-transform: none; }
   .drawer-bd { display: none; overflow: hidden; padding: var(--gc-space-2) var(--gc-space-3) var(--gc-space-3); border-top: 1px solid var(--gc-line); }
   .drawer[data-open="true"] .drawer-bd { display: flex; gap: var(--gc-space-3); height: var(--drawer-h); }
-  .fx-side { width: 420px; flex: none; overflow: auto; padding-right: var(--gc-space-3); border-right: 1px solid var(--gc-line); }
+  .fx-side { width: 340px; flex: none; overflow: auto; padding-right: var(--gc-space-4); border-right: 1px solid var(--gc-line); }
   .fx-main { flex: 1; min-width: 0; overflow: hidden; position: relative; }
   .fx-viewport { width: 100%; height: 100%; overflow: hidden; cursor: grab; touch-action: none; }
   .fx-viewport.is-pan { cursor: grabbing; }
@@ -123,7 +123,7 @@
   .step { padding: 2px var(--gc-space-2); border-bottom: 2px solid var(--gc-surface-3); }
 
   .view { display: none; } .view.is-on { display: block; }
-  .canvas { padding: var(--gc-space-3); border: 1px solid var(--gc-line); border-radius: var(--gc-radius-control); background: var(--gc-surface-1); }
+  .canvas { padding: clamp(16px, 2.5vw, 36px); border: 1px solid var(--gc-line); border-radius: var(--gc-radius-control); background: var(--gc-surface-1); }
   .lane { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: var(--gc-space-2); align-items: stretch; }
   .lane > :not(.lane-t) { grid-column: 2; min-width: 0; }
   .lane-t { display: grid; place-items: center start; padding: var(--gc-space-2) var(--gc-space-1); border-right: 2px solid var(--gc-line); color: var(--gc-ink-2); font-family: var(--gc-font-stencil); font-size: var(--gc-fs-body); letter-spacing: 0.04em; }
@@ -139,20 +139,20 @@
   .flow.grid4 { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: var(--gc-space-2); }
   .flow.shell { grid-template-columns: minmax(148px, 200px) 36px minmax(0, 1fr); }
 
-  .node { display: block; width: 100%; min-width: 0; overflow: hidden; padding: var(--gc-space-3) var(--gc-space-2); border: 1px solid var(--gc-line); border-radius: var(--gc-radius-control); background: var(--gc-surface-2); text-align: center; font: inherit; color: inherit; cursor: pointer; transition: background var(--gc-motion-fast), border-color var(--gc-motion-fast); }
+  .node { display: block; width: 100%; min-width: 0; min-height: 132px; overflow: hidden; padding: 22px 18px 18px; border: 1px solid var(--gc-line); border-radius: var(--gc-radius-control); background: var(--gc-surface-2); text-align: left; font: inherit; color: inherit; cursor: pointer; transition: background var(--gc-motion-fast), border-color var(--gc-motion-fast); }
   .node:hover { background: var(--gc-surface-hover); }
   .node:focus-visible { outline: 2px solid var(--gc-amber-dk); outline-offset: 1px; }
-  .node b { font-size: var(--gc-fs-body); line-height: 1.4; }
-  .node small { margin-left: var(--gc-space-1); color: var(--gc-ink-2); font-size: var(--gc-fs-label); line-height: 1.4; }
-  .node .plain { display: block; margin-top: 2px; color: var(--gc-ink); font-size: var(--gc-fs-label); font-weight: 500; line-height: 1.4; }
+  .node b { display: block; padding-right: 76px; font-size: 14px; line-height: 1.45; }
+  .node small { display: block; margin: var(--gc-space-2) 0 0; color: var(--gc-ink-2); font-size: 11px; line-height: 1.55; }
+  .node .plain { display: block; margin-top: var(--gc-space-1); color: var(--gc-ink); font-size: 11px; font-weight: 500; line-height: 1.5; }
   .node { position: relative; }
-  .node .fcount { position: absolute; top: 4px; right: 6px; color: var(--gc-ink-3); font-size: var(--gc-fs-micro); font-family: var(--gc-font-data); }
+  .node .fcount { position: absolute; top: 10px; right: 12px; color: var(--gc-ink-3); font-size: var(--gc-fs-micro); font-family: var(--gc-font-data); }
   .node.ext .plain { color: var(--gc-ink-3); }
   .node.ext { border-style: dashed; }
   .node.ext b, .node.ext small { color: var(--gc-ink-3); }
   .node.on { border-color: var(--gc-bright); border-style: solid; box-shadow: inset 0 0 0 1px var(--gc-bright); }
   .node.on b { color: var(--gc-bright); }
-  .io { display: block; margin-top: var(--gc-space-2); padding-top: var(--gc-space-2); border-top: 1px solid var(--gc-line); color: var(--gc-ink-2); font-size: var(--gc-fs-label); line-height: 1.45; text-align: left; }
+  .io { display: block; margin-top: var(--gc-space-3); padding-top: var(--gc-space-2); border-top: 1px solid var(--gc-line); color: var(--gc-ink-2); font-size: var(--gc-fs-label); line-height: 1.55; text-align: left; }
   .io em { color: var(--gc-ink); font-style: normal; font-weight: 500; }
   .io em:nth-of-type(2)::before { content: "\A"; white-space: pre; }
 
@@ -169,6 +169,27 @@
   .loop { margin: var(--gc-space-1) 0 var(--gc-space-2) 102px; padding: 5px var(--gc-space-2); border: 1px dashed var(--gc-line); border-radius: var(--gc-radius-control); color: var(--gc-ink-2); text-align: center; font-size: var(--gc-fs-label); }
   .side { margin-top: var(--gc-space-1); padding: var(--gc-space-2); border: 1px dashed var(--gc-line); border-radius: var(--gc-radius-control); background: var(--gc-slot); }
   .side-t { margin-bottom: var(--gc-space-1); color: var(--gc-ink-2); font-size: var(--gc-fs-body); font-weight: 700; }
+
+  .responsibility { padding: clamp(18px, 2.4vw, 30px); border: 1px solid var(--gc-line); background: var(--gc-slot); }
+  .responsibility + .responsibility-link { margin-top: 0; }
+  .responsibility-hd { display: grid; grid-template-columns: 42px minmax(180px, 0.38fr) minmax(260px, 1fr); gap: var(--gc-space-4); align-items: baseline; margin-bottom: var(--gc-space-5); }
+  .responsibility-no { color: var(--gc-bright); font: 700 11px/1 var(--gc-font-data); letter-spacing: 0.12em; }
+  .responsibility-hd h2 { margin: 0; color: var(--gc-ink); font-size: 18px; line-height: 1.35; }
+  .responsibility-hd p { margin: 0; color: var(--gc-ink-2); font-size: 12px; line-height: 1.6; }
+  .responsibility-grid { display: grid; gap: var(--gc-space-4); }
+  .responsibility-grid.entry { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .responsibility-grid.core { grid-template-columns: minmax(0, 2fr) 56px minmax(0, 1fr); }
+  .core-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gc-space-4); }
+  .responsibility-grid.base { grid-template-columns: minmax(0, 1fr); }
+  .responsibility-link { display: flex; min-height: 76px; flex-direction: column; align-items: center; justify-content: center; gap: var(--gc-space-1); color: var(--gc-ink-3); }
+  .responsibility-link svg { width: 18px; height: 28px; }
+  .responsibility-link span { padding: 2px var(--gc-space-2); background: var(--gc-surface-3); color: var(--gc-ink-2); font-size: 10px; }
+
+  .job-shell { padding: clamp(18px, 2.4vw, 30px); border: 1px solid var(--gc-line); background: var(--gc-slot); }
+  .job-header { display: grid; grid-template-columns: minmax(220px, 0.45fr) minmax(260px, 1fr); gap: var(--gc-space-4); align-items: baseline; margin-bottom: var(--gc-space-5); }
+  .job-header h2 { margin: 0; color: var(--gc-ink); font-size: 18px; }
+  .job-header p { margin: 0; color: var(--gc-ink-2); line-height: 1.6; }
+  .job-shell .node { min-height: 144px; }
 
   .fx-hint { color: var(--gc-ink-3); }
   .fx-plain { margin: var(--gc-space-2) 0; padding: var(--gc-space-2) var(--gc-space-3); border-left: 2px solid var(--gc-bright); background: var(--gc-bright-dim); color: var(--gc-ink); font-size: var(--gc-fs-body); }
@@ -209,14 +230,20 @@
     .flow.n5 { grid-template-columns: 1fr; }
     .flow.n5 > .arr { height: 28px; transform: rotate(90deg); }
     .cols { grid-template-columns: 1fr; }
+    .responsibility-hd, .job-header { grid-template-columns: 1fr; gap: var(--gc-space-2); }
+    .responsibility-no { margin-bottom: 2px; }
+    .responsibility-grid.core { grid-template-columns: 1fr; }
+    .responsibility-grid.core > .arr { height: 34px; transform: rotate(90deg); }
   }
   @media (max-width: 760px) {
     .flow.n3, .flow.n4 { grid-template-columns: 1fr; }
     .flow.n3 > .arr, .flow.n4 > .arr { height: 28px; transform: rotate(90deg); }
     .drawer[data-open="true"] .drawer-bd { flex-direction: column; }
-    .fx-side { width: 100%; padding-right: 0; padding-bottom: var(--gc-space-2); border-right: 0; border-bottom: 1px solid var(--gc-line); }
+    .fx-side { width: 100%; max-height: 42%; padding-right: 0; padding-bottom: var(--gc-space-2); border-right: 0; border-bottom: 1px solid var(--gc-line); }
+    .fx-main { min-height: 220px; }
   }
   @media (max-width: 560px) {
+    body { padding-inline: 12px; }
     .lane, .vlink { grid-template-columns: 1fr; }
     .lane > :not(.lane-t) { grid-column: 1; }
     .lane-t { border-right: 0; border-bottom: 2px solid var(--gc-line); }
@@ -224,19 +251,25 @@
     .flow.n2 > .arr { height: 28px; transform: rotate(90deg); }
     .loop { margin-left: 0; }
     .fx-row { grid-template-columns: 1fr; gap: 2px; }
+    .responsibility, .job-shell { padding: var(--gc-space-4); }
+    .responsibility-grid.entry { grid-template-columns: 1fr; }
+    .core-pair { grid-template-columns: 1fr; }
+    .responsibility-link { min-height: 60px; }
+    .node { min-height: 0; padding: 20px 16px 16px; }
+    .job-shell .node { min-height: 0; }
   }
 </style>
 </head>
 <body>
 <h1>WildArrange 产品总图</h1>
-<!-- Agent：方框是模块（一揽子脚本的文件夹），右上角是脚本数。点任意模块：底部抽屉看它的脚本与上下游链路；点空白处或 × 收起。 -->
+<!-- Agent：方框是模块。右上角只标抽屉展示的关键组件数，不冒充完整文件数。点任意模块：底部抽屉看关键实现链路；完整归属仍由 module-file-map.json 和门禁维护。 -->
 
 <details class="note-details"><summary>本页维护规则（Agent 向，看架构不用展开）</summary><div class="note">本页是产品总架构与模块概要的唯一真源，改关系就改这里。新模块：在本页 module-registry 注册并补充节点。点任何模块都在底部抽屉展开脚本图，不给个别模块做跳页签特例。模块的实现文件必须进图（含职责与输入输出），否则归属门禁判失败。脚本关系图跨模块引用：extTo/extFrom 条目可带 p（真实路径）+ m（归属模块名）画成虚线脚本盒，extLinks 画外部节点之间的边。</div></details>
 
 <details class="guide">
 <summary>怎么读这张图（30 秒版）</summary>
 <div class="guide-bd">
-<div class="guide-flow">点任意方框 → 底部抽屉展开该模块的脚本与上下游</div>
+<div class="guide-flow">先看三块大职责与箭头；点任意模块 → 底部抽屉查看 3–6 个关键组件</div>
 <!-- Agent：每个方框是一类职责，框里小字是大白话解释；虚线框是还没开始做的模块。请求怎么在模块之间流动，看卡片之间的箭头。脚本再多也在底部展开，没有「大模块」特例。点空白处或 × 收起。 -->
 </div>
 </details>
@@ -259,12 +292,12 @@
 <div class="layout">
 <div class="main">
 
-<!-- Agent：页签筛选——全局流向 = 全部模块分层；其余页签 = 一条真实用户作业从界面追到最终执行者。不要给编排引擎开目录墙页签，引擎点全局卡片看底部抽屉。给人看的导读不要放大段说明。 -->
+<!-- Agent：页签筛选——全局框架 = 三个产品大职责；其余页签 = 三条真实交付闭环。不要按引擎/目录开页签。 -->
 <div class="tabs" role="group" aria-label="架构视图">
-  <button class="tab" type="button" data-view="overall" aria-pressed="true">全局流向</button>
-  <button class="tab" type="button" data-view="job-run" aria-pressed="false">运行下一个任务</button>
-  <button class="tab" type="button" data-view="job-dashboard" aria-pressed="false">打开本地面板</button>
-  <button class="tab" type="button" data-view="job-skills" aria-pressed="false">匹配 Skill</button>
+  <button class="tab" type="button" data-view="overall" aria-pressed="true">全局框架</button>
+  <button class="tab" type="button" data-view="job-linear" aria-pressed="false">线性完成任务</button>
+  <button class="tab" type="button" data-view="job-parallel" aria-pressed="false">并行成果合入</button>
+  <button class="tab" type="button" data-view="job-handoff" aria-pressed="false">跨设备接力</button>
 </div>
 
 <div class="legend">
@@ -290,39 +323,47 @@
 </svg>
 
 <section class="view is-on" data-panel="overall">
-  <div class="lane"><div class="lane-t">宿主入口</div>
-    <div class="flow grid4">
+  <div class="responsibility">
+    <header class="responsibility-hd"><span class="responsibility-no">01</span><h2>入口：把请求送到正确负责人</h2><p>CLI 是命令分发器；Interface 是 Dashboard、宿主适配器与诊断的人机边界。两者是并列入口，不是谁包着谁。</p></header>
+    <div class="responsibility-grid entry">
       <div role="button" tabindex="0" class="node" data-k="cli"><b>CLI（命令入口）</b><small>把用户命令送到对应流程</small><span class="io"><em>输入：</em>命令与参数　<em>输出：</em>运行时调用</span></div>
-      <div role="button" tabindex="0" class="node" data-k="interface"><b>Interface（人机与宿主边界）</b><small>接住 CLI、Dashboard 和宿主适配</small><span class="io"><em>输入：</em>人或宿主请求　<em>输出：</em>安全交互</span></div>
+      <div role="button" tabindex="0" class="node" data-k="interface"><b>Interface（人机与宿主边界）</b><small>承接 Dashboard、宿主适配器与诊断</small><span class="io"><em>输入：</em>人或宿主请求　<em>输出：</em>安全交互</span></div>
     </div>
   </div>
-  <div class="lane"><div class="lane-t">任务闭环</div>
-    <div class="flow grid4">
-      <div role="button" tabindex="0" class="node" data-k="orchestration"><b>Orchestration（流程编排）</b><small>管顺序、重试、事务和完成门</small><span class="io"><em>输入：</em>计划与任务状态　<em>输出：</em>下一步动作</span></div>
-      <div role="button" tabindex="0" class="node" data-k="ai"><b>AI（策略与语境）</b><small>做路由、注入、Skill 匹配和异步审查</small><span class="io"><em>输入：</em>请求与清洗上下文　<em>输出：</em>决策建议</span></div>
-      <div role="button" tabindex="0" class="node" data-k="capabilities"><b>Capabilities（原子能力）</b><small>通过统一网关执行工作、验证和检查点</small><span class="io"><em>输入：</em>能力名与上下文　<em>输出：</em>统一结果信封</span></div>
+  <div class="responsibility-link" aria-hidden="true"><svg><use href="#arr-down"/></svg><span>请求进入受控任务循环</span></div>
+  <div class="responsibility">
+    <header class="responsibility-hd"><span class="responsibility-no">02</span><h2>闭环：做事的人不能自己宣布完成</h2><p>Orchestration 管顺序与返工，AI 给策略和语境；两者只能通过统一能力网关调用 Worker、Verifier、Review 与 Checkpoint。</p></header>
+    <div class="responsibility-grid core">
+      <div class="core-pair">
+        <div role="button" tabindex="0" class="node" data-k="orchestration"><b>Orchestration（流程编排）</b><small>管顺序、重试、事务和完成门</small><span class="io"><em>输入：</em>计划与任务状态　<em>输出：</em>下一步动作</span></div>
+        <div role="button" tabindex="0" class="node" data-k="ai"><b>AI（策略与语境）</b><small>做路由、注入、Skill 匹配和异步审查</small><span class="io"><em>输入：</em>请求与清洗上下文　<em>输出：</em>决策建议</span></div>
+      </div>
+      <div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div>
+      <div role="button" tabindex="0" class="node" data-k="capabilities"><b>Capabilities（原子能力）</b><small>统一执行 Worker、Verifier、Review 与 Checkpoint</small><span class="io"><em>输入：</em>能力名与上下文　<em>输出：</em>结果与证据</span></div>
     </div>
   </div>
-  <div class="lane"><div class="lane-t">可靠底座</div>
-    <div class="flow"><div role="button" tabindex="0" class="node" data-k="infra"><b>Infra（基础设施）</b><small>负责文件、锁、Git、命令、配置与证据账本</small><span class="io"><em>输入：</em>文件与命令　<em>输出：</em>可恢复状态</span></div></div>
+  <div class="responsibility-link" aria-hidden="true"><svg><use href="#arr-down"/></svg><span>状态、副作用与验收证据统一落地</span></div>
+  <div class="responsibility">
+    <header class="responsibility-hd"><span class="responsibility-no">03</span><h2>底座：让每次执行都能恢复、核对、追责</h2><p>文件、锁、Git、命令、配置和 hash 链账本都集中在最低层；上层不各写一套基础设施。</p></header>
+    <div class="responsibility-grid base"><div role="button" tabindex="0" class="node" data-k="infra"><b>Infra（可信基础设施）</b><small>负责原子落盘、锁、Git 协调、命令安全与证据账本</small><span class="io"><em>输入：</em>文件、命令与运行时数据　<em>输出：</em>可恢复状态与可信证据</span></div></div>
   </div>
 </section>
-<section class="view" data-panel="job-run">
-  <div class="lane">
-    <div class="lane-t">运行下一个任务</div>
-    <div class="flow n4"><div role="button" tabindex="0" class="node" data-k="cli"><b>CLI</b><small>接收 run 命令</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="orchestration"><b>Orchestration</b><small>推进任务状态</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="capabilities"><b>Capabilities</b><small>执行与验证</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="infra"><b>Infra</b><small>状态与证据落盘</small></div></div>
+<section class="view" data-panel="job-linear">
+  <div class="job-shell">
+    <header class="job-header"><h2>线性完成任务</h2><p>目标不是“Worker 说做完了”，而是独立验证、质量门和验收证明全部通过后才 Checkpoint。</p></header>
+    <div class="flow n5"><div role="button" tabindex="0" class="node" data-k="cli"><b>1. 接收任务</b><small>CLI 接收 plan / run 命令</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="orchestration"><b>2. 推进计划</b><small>挑出下一项，管理状态与重试</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="capabilities"><b>3. Worker 执行</b><small>只产出 DoneClaim，不自证完成</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="capabilities"><b>4. 独立过门</b><small>Verifier → Scope → Review → Proof</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="infra"><b>5. 证据入账</b><small>Checkpoint 与 ledger 落盘</small></div></div>
   </div>
 </section>
-<section class="view" data-panel="job-dashboard">
-  <div class="lane">
-    <div class="lane-t">打开本地面板</div>
-    <div class="flow n4"><div role="button" tabindex="0" class="node" data-k="cli"><b>CLI</b><small>接收 serve 命令</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="interface"><b>Interface</b><small>启动本地 HTTP 面板</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="orchestration"><b>Orchestration</b><small>汇总状态投影</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="infra"><b>Infra</b><small>读取状态与配置</small></div></div>
+<section class="view" data-panel="job-parallel">
+  <div class="job-shell">
+    <header class="job-header"><h2>并行成果合入</h2><p>子 Agent 在隔离目录工作；成果必须经过 admission 事务与同一套质量门，成功提交或成功回滚后才释放所有权。</p></header>
+    <div class="flow n5"><div role="button" tabindex="0" class="node" data-k="cli"><b>1. 发起并行运行</b><small>CLI 接收 parallel run</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="orchestration"><b>2. 创建隔离执行</b><small>为子 Agent 分配独立结果目录</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="capabilities"><b>3. 产出候选成果</b><small>Worker 只能提交待验收结果</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="orchestration"><b>4. Admission 合入</b><small>锁定基线，过门，提交或回滚</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="infra"><b>5. 留下可恢复记录</b><small>Git、ownership 与 ledger 对账</small></div></div>
   </div>
 </section>
-<section class="view" data-panel="job-skills">
-  <div class="lane">
-    <div class="lane-t">匹配 Skill</div>
-    <div class="flow n3"><div role="button" tabindex="0" class="node" data-k="cli"><b>CLI</b><small>接收 skills match</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="ai"><b>AI</b><small>按请求与阶段匹配</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="infra"><b>Infra</b><small>读取 Skill 与配置</small></div></div>
+<section class="view" data-panel="job-handoff">
+  <div class="job-shell">
+    <header class="job-header"><h2>跨设备接力</h2><p>设备之间交接的不是一句“你继续”，而是远端已 push 的 commit、明确 owner 和绑定的集成基线 SHA。</p></header>
+    <div class="flow n5"><div role="button" tabindex="0" class="node" data-k="cli"><b>1. 准备交接</b><small>CLI 接收 claim / handoff 命令</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="orchestration"><b>2. 绑定任务所有权</b><small>记录设备、任务和预期接收方</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="infra"><b>3. 普通 Push 交接</b><small>Git 协调保存 commit 与基线</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="orchestration"><b>4. 接收方重新校验</b><small>检查 owner、SHA、候选树和质量门</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="infra"><b>5. 集成并对账</b><small>Push 集成 commit 后才 Checkpoint</small></div></div>
   </div>
 </section>
 
@@ -335,7 +376,7 @@
   <button class="drawer-close" type="button" id="drawer-close" title="关闭（或点图中空白处）" aria-label="关闭">×</button>
   </div>
   <div class="drawer-bd" id="drawer-bd">
-    <aside class="fx-side" id="fx-side"><span class="fx-hint">点击任一模块卡片：这里显示它的作用、输入、输出与现状，右侧列出实现脚本关系图。脚本多就多，一律在底部展开。</span></aside>
+    <aside class="fx-side" id="fx-side"><span class="fx-hint">点击任一模块卡片：这里显示作用、输入、输出与现状；右侧只画 3–6 个关键组件，完整文件归属由架构门禁维护。</span></aside>
     <div class="fx-main" id="fx-main"></div>
   </div>
 </div>
@@ -2041,30 +2082,65 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
 
 <script>
 const D = {
-  "cli": { name: "CLI（命令入口）", plain: "把用户命令解析后送到对应运行时流程", role: "命令解析与路由", inn: "终端命令与参数", out: "运行时调用与退出码", status: "已通", files: [
+  "cli": { name: "CLI（命令入口）", plain: "只解析命令并把它直接交给真实负责人，不承载业务流程", role: "命令解析与分发", inn: "终端命令与参数", out: "对应分区的函数调用与退出码", status: "已通", files: [
     { id: "entry", p: "bin/helix.mjs", r: "CLI 入口与命令路由", io: "终端参数 → 运行时命令" }
+  ], focusFiles: [
+    { id: "entry", p: "bin/helix.mjs", r: "解析参数并直接分发到真实负责人", io: "命令与参数 → 分区函数", extTo: [
+      { t: "dashboard.mjs", p: "src/interface/dashboard.mjs", m: "人机交互层", io: "启动本地面板" },
+      { t: "linear-runtime.mjs", p: "src/orchestration/linear-runtime.mjs", m: "流程编排层", io: "运行下一项任务" },
+      { t: "routing.mjs", p: "src/ai/routing.mjs", m: "智能策略层", io: "判断请求该交给谁" },
+      { t: "repository-governance.mjs", p: "src/capabilities/repository-governance.mjs", m: "原子能力层", io: "执行仓库治理检查" },
+      { t: "runtime-bootstrap.mjs", p: "src/infra/runtime-bootstrap.mjs", m: "可信基础设施层", io: "初始化运行环境" }
+    ] }
   ] },
-  "interface": { name: "Interface（人机与宿主边界）", plain: "接住 CLI、Dashboard 和 Codex/Cursor/Kimi 宿主", role: "安全交互边界", inn: "人或宿主请求", out: "命令说明、面板或适配器", status: "已通", files: [
+  "interface": { name: "Interface（人机与宿主边界）", plain: "提供 Dashboard、适配器和诊断等安全交互，不是 CLI 的总入口", role: "安全交互边界", inn: "人或宿主请求", out: "命令说明、面板或适配器", status: "已通", files: [
     { id: "dir", p: "src/interface/", r: "交互区全部实现", io: "宿主请求 → 安全交互" },
     { id: "help", p: "src/interface/cli-help.mjs", r: "CLI 帮助的单一事实源", io: "renderHelp({ all }) → 帮助文本" },
     { id: "dashboard", p: "src/interface/dashboard.mjs", r: "启动本地 Dashboard", io: "startDashboardServer(rootDir, options) → 本地服务" },
     { id: "adapters", p: "src/interface/adapters.mjs", r: "安装与恢复宿主适配器", io: "installAdapter(rootDir, options) → 安装结果" }
+  ], focusFiles: [
+    { id: "dashboard", p: "src/interface/dashboard.mjs", r: "本地面板与安全网络边界", io: "网络请求 → 状态与操作结果", extTo: [{ t: "linear-runtime.mjs", p: "src/orchestration/linear-runtime.mjs", m: "流程编排层", io: "请求运行下一项任务" }] },
+    { id: "adapters", p: "src/interface/adapters.mjs", r: "开发宿主适配", io: "安装选项 → 项目级适配器", extTo: [{ t: "runtime-bootstrap.mjs", p: "src/infra/runtime-bootstrap.mjs", m: "可信基础设施层", io: "安装前初始化运行环境" }] },
+    { id: "doctor", p: "src/interface/doctor.mjs", r: "一键体检与下一步建议", io: "项目状态 → 分项诊断", extTo: [{ t: "security.mjs", p: "src/infra/security.mjs", m: "可信基础设施层", io: "检查关键状态是否完整" }] },
+    { id: "decisions", p: "src/interface/decisions.mjs", r: "只读决策投影", io: "决策日志 → 人话审查视图", extTo: [{ t: "decision-log.mjs", p: "src/infra/decision-log.mjs", m: "可信基础设施层", io: "读取可信决策记录" }] }
   ] },
   "orchestration": { name: "Orchestration（流程编排）", plain: "把计划按顺序推进，失败返工，通过后才提交", role: "顺序、重试、事务与门编排", inn: "计划与任务状态", out: "下一步动作或集成结果", status: "已通", files: [
     { id: "dir", p: "src/orchestration/", r: "编排区全部实现", io: "任务状态 → 流程推进" },
     { id: "linear", p: "src/orchestration/linear-runtime.mjs", r: "M1 线性任务循环", io: "runNextTask(rootDir, options) → 下一步" },
     { id: "parallel", p: "src/orchestration/parallel-runtime.mjs", r: "命令型子 Agent 隔离运行", io: "runParallelAgents(rootDir, options) → run" },
     { id: "admission", p: "src/orchestration/admission.mjs", r: "子 Agent 成果集成事务", io: "admitParallelAgentResult(rootDir, options) → 集成结果" }
+  ], focusFiles: [
+    { id: "plan", p: "src/orchestration/plan-state.mjs", r: "计划导入与任务状态", io: "计划文件 → 可运行任务" },
+    { id: "linear", p: "src/orchestration/linear-runtime.mjs", r: "线性任务主循环", io: "任务状态 → 下一步动作", to: [{ t: "plan", io: "读取任务状态" }, { t: "delivery", io: "工作完成声明进入交付流水线" }] },
+    { id: "parallel", p: "src/orchestration/parallel-runtime.mjs", r: "隔离运行命令型子智能体", io: "并行任务 → 候选成果", to: [{ t: "admission", io: "把候选结果送去合入" }] },
+    { id: "admission", p: "src/orchestration/admission.mjs", r: "成果合入或安全回滚事务", io: "候选树与基线 → 集成结果", to: [{ t: "delivery", io: "候选成果 → 同一质量门" }] },
+    { id: "handoff", p: "src/orchestration/handoff.mjs", r: "跨设备准备、推送与接收", io: "任务负责人和提交记录 → 可接力交接", to: [{ t: "plan", io: "绑定任务状态" }] },
+    { id: "delivery", p: "src/orchestration/delivery-pipeline.mjs", r: "统一交付门顺序", io: "任务成果 → 验收证明或失败", extTo: [{ t: "gateway.mjs", p: "src/capabilities/gateway.mjs", m: "原子能力层", io: "通过统一网关调用能力" }] }
   ] },
   "ai": { name: "AI（策略与语境）", plain: "做路由、上下文注入、Skill 匹配和异步审查", role: "AI 决策与建议", inn: "请求与清洗上下文", out: "路由、注入或审查建议", status: "已通", files: [
     { id: "dir", p: "src/ai/", r: "AI 策略区全部实现", io: "请求与语境 → 决策建议" },
     { id: "routing", p: "src/ai/routing.mjs", r: "确定性路由与语义影子", io: "routeRequest(rootDir, input) → 路由决策" },
     { id: "hooks", p: "src/ai/hooks.mjs", r: "宿主生命周期注入与范围守卫", io: "preToolUseGuard(rootDir, input) → 放行结果" },
     { id: "suspicion", p: "src/ai/suspicion-review.mjs", r: "对可疑决策做异步复核", io: "runSuspicionReview(rootDir, options) → 审查报告" }
+  ], focusFiles: [
+    { id: "routing", p: "src/ai/routing.mjs", r: "确定性路由与语义影子", io: "请求 → 可审计路由决策" },
+    { id: "injection", p: "src/ai/injection.mjs", r: "按预算装载上下文", io: "阶段与规则 → 注入内容" },
+    { id: "context", p: "src/ai/context.mjs", r: "构造与恢复智能体上下文", io: "任务状态 → 智能体语境", to: [{ t: "injection", io: "按阶段选择注入位置" }] },
+    { id: "hooks", p: "src/ai/hooks.mjs", r: "宿主生命周期守卫", io: "工具事件 → 放行或阻断", to: [{ t: "routing", io: "判断请求归属" }, { t: "context", io: "恢复任务语境" }, { t: "injection", io: "选择内容注入位置" }], extTo: [{ t: "gateway.mjs", p: "src/capabilities/gateway.mjs", m: "原子能力层", io: "通过网关执行受控动作" }] },
+    { id: "skill", p: "src/ai/skill-matcher.mjs", r: "能力包匹配与模型变体", io: "文本与阶段 → 能力包建议" }
   ] },
   "capabilities": { name: "Capabilities（原子能力）", plain: "把工作、验证、审查和 checkpoint 包成统一能力", role: "可独立验证的原子操作", inn: "能力名与执行上下文", out: "状态、证据、副作用与错误", status: "已通", files: [
     { id: "dir", p: "src/capabilities/", r: "网关与所有原子能力", io: "能力请求 → 统一结果" },
     { id: "gateway", p: "src/capabilities/gateway.mjs", r: "静态能力注册表与统一信封", io: "invokeCapability(name, ctx) → 结果信封" }
+  ], focusFiles: [
+    { id: "gateway", p: "src/capabilities/gateway.mjs", r: "所有能力的唯一网关", io: "能力名与上下文 → 统一结果", to: [
+      { t: "worker", io: "派发执行任务" }, { t: "verify", io: "派发独立验证" }, { t: "review", io: "派发独立复核" }, { t: "proof", io: "生成验收证明" }, { t: "checkpoint", io: "写入最终完成状态" }
+    ] },
+    { id: "worker", p: "src/capabilities/worker.mjs", r: "执行任务，不自证完成", io: "任务说明 → 工作完成声明" },
+    { id: "verify", p: "src/capabilities/verify.mjs", r: "独立运行验证命令", io: "验证命令 → 通过或失败证据" },
+    { id: "review", p: "src/capabilities/review-gate.mjs", r: "白泽独立复核门", io: "候选成果 → 复核结论" },
+    { id: "proof", p: "src/capabilities/acceptance-proof.mjs", r: "写入验收证明链", io: "质量门证据 → 验收证明" },
+    { id: "checkpoint", p: "src/capabilities/checkpoint.mjs", r: "最终完成状态落盘", io: "验收证明 → 完成检查点" }
   ] },
   "infra": { name: "Infra（基础设施）", plain: "让文件、锁、Git、命令、配置与证据可恢复", role: "确定性技术底座", inn: "文件、命令和运行时数据", out: "原子状态、锁、账本与 Git 结果", status: "已通", files: [
     { id: "dir", p: "src/infra/", r: "基础设施区全部实现", io: "运行时输入 → 可恢复状态" },
@@ -2072,6 +2148,13 @@ const D = {
     { id: "store", p: "src/infra/runtime-store.mjs", r: "路径、JSON 原子写与 hash 原语", io: "writeJsonAtomic(filePath, value) → 落盘" },
     { id: "ledger", p: "src/infra/ledger.mjs", r: "hash 链证据账本", io: "appendLedger(rootDir, event) → 账本条目" },
     { id: "gate-arming", p: "src/infra/gate-arming.mjs", r: "门未武装黄灯评估", io: "evaluateGateArming({ config, tasks }) → { armed, issues }" }
+  ], focusFiles: [
+    { id: "bootstrap", p: "src/infra/runtime-bootstrap.mjs", r: "按固定顺序初始化运行时", io: "项目根目录 → 初始运行态", to: [{ t: "ledger", io: "初始化事件 → 账本" }] },
+    { id: "store", p: "src/infra/runtime-store.mjs", r: "路径、原子写与 hash 原语", io: "运行时数据 → 原子文件" },
+    { id: "ledger", p: "src/infra/ledger.mjs", r: "hash 链证据账本", io: "事件 → 可校验条目", to: [{ t: "store", io: "条目 → 原子落盘" }] },
+    { id: "command", p: "src/infra/command-runner.mjs", r: "受控子进程执行", io: "命令与超时 → 截断结果" },
+    { id: "git", p: "src/infra/git-coordination.mjs", r: "远端领取、拉取与推送原语", io: "负责人和版本指纹 → 版本协调结果" },
+    { id: "security", p: "src/infra/security.mjs", r: "关键状态备份与完整性检查", io: "运行态文件 → 校验或恢复结果", to: [{ t: "ledger", io: "恢复事件 → 账本" }, { t: "store", io: "关键状态 → 原子读写" }] }
   ] }
 };
 
@@ -2198,7 +2281,7 @@ const labelHtml = (lines, cx, cy) => {
   const h = lines.length * 12 + 5;
   const x = cx - w / 2, y = cy - h / 2;
   return "<g class='fx-lbl'><rect x='" + x.toFixed(1) + "' y='" + y.toFixed(1) + "' width='" + w.toFixed(1) + "' height='" + h + "' rx='2' fill='#24272b' stroke='#4a4f56' stroke-width='0.75'/>" +
-    "<text x='" + cx.toFixed(1) + "' y='" + (y + 12).toFixed(1) + "' text-anchor='middle' fill='#d4d9de' font-size='9.5' font-family=\"" + MONO + "\">" +
+    "<text x='" + cx.toFixed(1) + "' y='" + (y + 12).toFixed(1) + "' text-anchor='middle' fill='#d4d9de' font-size='10' font-family=\"" + SANS + "\">" +
     lines.map((ln, i) => "<tspan x='" + cx.toFixed(1) + "' dy='" + (i ? 12 : 0) + "'>" + esc(ln) + "</tspan>").join("") + "</text></g>";
 };
 
@@ -2230,7 +2313,7 @@ const edgeHtml = (edges, pos, offs) => edges.map((e) => {
 
 const bindViewport = (viewport, svg, edges, pos) => {
   const world = svg.querySelector(".fx-world");
-  let tx = 12, ty = 12, scale = 1;
+  let tx = 0, ty = 0, scale = 1;
   const apply = () => { world.setAttribute("transform", "translate(" + tx + " " + ty + ") scale(" + scale + ")"); };
   apply();
   const pt = svg.createSVGPoint();
@@ -2300,7 +2383,7 @@ const bindViewport = (viewport, svg, edges, pos) => {
 };
 
 const renderGraph = (d) => {
-  const files = d.files || [];
+  const files = d.focusFiles || d.files || [];
   if (!files.length) return null;
   if (typeof dagre === "undefined") return { err: "布局库未加载", html: "", edges: [], pos: new Map() };
   const ids = new Set(files.map((f) => f.id));
@@ -2355,7 +2438,7 @@ const renderGraph = (d) => {
   });
   const W = Math.round(g.graph().width), H = Math.round(g.graph().height);
 
-  let out = "<svg class='fx-svg' role='img' aria-label='实现脚本关系图'>";
+  let out = "<svg class='fx-svg' role='img' aria-label='关键实现组件关系图' viewBox='0 0 " + W + " " + H + "' preserveAspectRatio='xMidYMid meet'>";
   out += "<defs><marker id='fx-arr' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='6' markerHeight='6' orient='auto-start-reverse'><path d='M 0 0 L 10 5 L 0 10 z' fill='#5f656d'/></marker></defs>";
   out += "<g class='fx-world'><g class='fx-edges'>" + edgeHtml(edges, pos, new Map()) + "</g>";
   nodes.forEach((n) => {
@@ -2381,14 +2464,15 @@ const renderGraph = (d) => {
 document.querySelectorAll(".node[data-k]").forEach((n) => {
   const d = D[n.dataset.k];
   if (!d) return;
-  const count = (d.files || []).length;
-  if (count) {
+  const inJobFlow = Boolean(n.closest(".job-shell"));
+  const count = (d.focusFiles || []).length;
+  if (count && !inJobFlow) {
     const badge = document.createElement("span");
     badge.className = "fcount";
-    badge.textContent = count + " 脚本";
+    badge.textContent = "关键组件 " + count;
     n.appendChild(badge);
   }
-  if (!d.plain) return;
+  if (!d.plain || inJobFlow) return;
   const small = n.querySelector("small");
   if (!small) return;
   const span = document.createElement("span");
@@ -2459,7 +2543,7 @@ document.querySelectorAll(".node[data-k]").forEach((n) => {
   const d = D[n.dataset.k];
   if (!d) return;
   const title = n.querySelector("b");
-  if (title) title.textContent = d.name;
+  if (title && !n.closest(".job-shell")) title.textContent = d.name;
   n.addEventListener("click", () => pick(n));
   n.addEventListener("keydown", (e) => {
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(n); }

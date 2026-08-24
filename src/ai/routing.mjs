@@ -44,6 +44,27 @@ export async function routeRequest(rootDir, input) {
     reason: `intent=${result.intent} domain=${result.domain} confidence=${result.confidence}`
       + ` semantic=${result.semanticShadow?.status || "off"} adjusted=${result.routeAdjusted === true}`,
     summary: text.length > 120 ? `${text.slice(0, 120)}…` : text,
+    inputText: text,
+    sessionId: input?.sessionId || input?.session_id || null,
+    routeResult: {
+      intent: result.intent,
+      route: result.route,
+      domain: result.domain,
+      complexity: result.complexity,
+      category: result.category,
+      primaryAgent: result.primaryAgent,
+      supportAgents: result.supportAgents,
+      skills: result.skills,
+      risk: result.risk,
+      confidence: result.confidence,
+      matchedSignals: result.matchedSignals,
+      needsPlan: result.needsPlan,
+      needsUserInput: result.needsUserInput,
+      reason: result.reason,
+      routeAdjusted: result.routeAdjusted === true,
+      adjustmentReason: result.adjustmentReason || null,
+      semanticShadow: result.semanticShadow || null,
+    },
     // 纯确定性路由（shadow skipped）只进流水；shadow 真正给出第二意见
     // （含 warn 降级）或调整了路由的，属于非确定性放行，进标注队列。
     annotatable: result.routeAdjusted === true

@@ -108,7 +108,7 @@ export async function projectDecisionStats(rootDir) {
     // 按 gate 归属关联标注，兼容 annotationStats 的 gate:code 与 gate:decision 两种键。
     gate.annotatedRules = annotations.rules
       .filter((rule) => rule.gate === gate.gate)
-      .map((rule) => ({ code: rule.code, total: rule.total, rule_wrong: rule.rule_wrong, case_wrong: rule.case_wrong, mislabeled: rule.mislabeled }));
+      .map((rule) => ({ code: rule.code, total: rule.total, confirmed: rule.confirmed, rule_wrong: rule.rule_wrong, case_wrong: rule.case_wrong, mislabeled: rule.mislabeled }));
   }
   const observed = new Set(gates.keys());
   return {

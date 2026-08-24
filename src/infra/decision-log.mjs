@@ -27,6 +27,11 @@ const DECISION_FIELDS = [
   "planId",
   "sessionId",
   "annotatable",
+  "inputText",
+  "routeResult",
+  "toolName",
+  "targetPaths",
+  "toolInputSummary",
 ];
 
 const READ_CHUNK_BYTES = 64 * 1024;

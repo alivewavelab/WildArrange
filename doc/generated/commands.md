@@ -68,7 +68,7 @@
 | `wildarrange impact <changed-file...>` | 改动影响面分析（反向依赖闭包） |
 | `wildarrange decisions stats` | 门触发统计：计数/从未触发的门/标注关联 |
 | `wildarrange timeline [--limit N] [--task T001] [--source ledger|decision|annotation] [--format json]` | ledger+决策+标注统一时间线 |
-| `wildarrange annotate --decision <decisionId> --category <rule_wrong|case_wrong|mislabeled> [--reason "..."] [--author name]` | 标注门决策（只进报告，不改配置） |
+| `wildarrange annotate --decision <decisionId> --category <confirmed|rule_wrong|case_wrong|mislabeled> [--reason "..."] [--author name]` | 标注门决策（只进报告，不改配置） |
 | `wildarrange annotate list [--limit N]` | 列出标注 |
 | `wildarrange annotate stats` | 标注聚合统计 |
 | `wildarrange review suspicious [--limit N]` | LLM 可疑判断异步审查（只进报告，不进完成链） |

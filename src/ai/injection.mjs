@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import {
   DEFAULT_LEAD_AGENT,
@@ -30,9 +30,11 @@ export async function resolveInjectionPoint(rootDir, name, variables = {}, optio
     agent: variables.agent || "",
   });
   const skills = [];
+  const missingSkills = [];
   for (const skill of selection.mounted) {
     const loaded = await loadSkillAttachment(rootDir, skill, budgets.skillMaxChars);
     if (loaded) skills.push(loaded);
+    else missingSkills.push({ name: skill, reason: "not_found" });
   }
   return {
     name,
@@ -42,7 +44,7 @@ export async function resolveInjectionPoint(rootDir, name, variables = {}, optio
     tools: point.tools || [],
     markdown,
     skills,
-    skillSelection: selection.report,
+    skillSelection: { ...selection.report, missing: missingSkills },
     rules: point.rules || {},
   };
 }
@@ -50,13 +52,18 @@ export async function resolveInjectionPoint(rootDir, name, variables = {}, optio
 // 按需挂载只做"减法"：静态清单是上限，动态匹配决定哪些真正带全文进入上下文，
 // 未命中的降级为路径引用；绝不因为文本命中关键词就注入清单之外的技能全文。
 async function selectPointSkills(rootDir, config, point, context) {
-  const configured = (point.skills || []).filter((skill) => typeof skill === "string" && skill.length > 0);
+  const pointSkills = (point.skills || []).filter((skill) => typeof skill === "string" && skill.length > 0);
+  const normalizedAgent = normalizeAgentKey(context.agent);
+  const agentSkills = (config.agents?.[normalizedAgent]?.skills || [])
+    .filter((skill) => typeof skill === "string" && skill.length > 0);
+  const configured = [...new Set([...pointSkills, ...agentSkills])];
   const dynamicConfig = config.skillMatcher?.dynamicInjection || {};
   const enabled = dynamicConfig.enabled !== false && config.skillMatcher?.enabled !== false;
   const staticReport = {
     mode: "static",
     mounted: configured,
     referenced: [],
+    bound: agentSkills,
     reason: null,
   };
   if (!enabled) return { mounted: configured, report: { ...staticReport, reason: "dynamic_injection_disabled" } };
@@ -76,7 +83,10 @@ async function selectPointSkills(rootDir, config, point, context) {
     return { mounted: configured, report: { ...staticReport, reason: `matcher_unavailable: ${error instanceof Error ? error.message : String(error)}` } };
   }
 
-  const alwaysMount = normalizeStringList(dynamicConfig.alwaysMount, DEFAULT_DYNAMIC_ALWAYS_MOUNT);
+  const alwaysMount = [...new Set([
+    ...normalizeStringList(dynamicConfig.alwaysMount, DEFAULT_DYNAMIC_ALWAYS_MOUNT),
+    ...agentSkills,
+  ])];
   const maxSkills = normalizeMaxSkills(dynamicConfig.maxSkills, DEFAULT_DYNAMIC_MAX_SKILLS);
   // 只认与请求内容相关的信号（关键词/路由/阶段/名称命中）；
   // agent 身份加分对每次请求都恒定，等于回到静态挂载，不能作为按需依据。
@@ -122,6 +132,7 @@ async function selectPointSkills(rootDir, config, point, context) {
       mode: "dynamic",
       textChars: context.text.length,
       stage: context.stage || null,
+      bound: agentSkills,
       mounted: finalMounted,
       referenced,
       suggestions,
@@ -174,19 +185,46 @@ async function loadMarkdownAttachment(rootDir, relativePath, maxChars) {
 async function loadSkillAttachment(rootDir, skillName, maxChars) {
   const registry = await readJson(resolveHelixPath(rootDir, "prompt-pack.json"), null);
   const entry = registry?.skills?.[skillName];
-  if (!entry) return null;
-  const content = await readFile(path.join(registry.packDir, entry.path), "utf8").catch(() => null);
+  const promptPackPath = entry ? path.join(registry.packDir, entry.path) : null;
+  const projectSkill = entry ? null : await resolveProjectSkill(rootDir, skillName);
+  const filePath = promptPackPath || projectSkill?.filePath;
+  if (!filePath) return null;
+  const content = await readFile(filePath, "utf8").catch(() => null);
   if (content === null) return null;
   const prepared = prepareAttachmentContent(content.trim(), maxChars, `Skill ${skillName}`);
   return {
     name: skillName,
-    path: entry.path,
+    path: entry?.path || projectSkill.relativePath,
+    source: entry ? "prompt-pack" : "project",
     chars: content.length,
     loadedChars: prepared.loadedChars,
     budgetChars: prepared.budgetChars,
     truncated: prepared.truncated,
     content: prepared.content,
   };
+}
+
+async function resolveProjectSkill(rootDir, skillName) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(String(skillName))) return null;
+  const skillsRoot = path.join(rootDir, ".agents", "skills");
+  const candidate = path.join(skillsRoot, skillName, "SKILL.md");
+  try {
+    const [realProjectRoot, realSkillsRoot, realCandidate] = await Promise.all([
+      realpath(rootDir),
+      realpath(skillsRoot),
+      realpath(candidate),
+    ]);
+    const skillsRootFromProject = path.relative(realProjectRoot, realSkillsRoot);
+    if (!skillsRootFromProject || skillsRootFromProject.startsWith("..") || path.isAbsolute(skillsRootFromProject)) return null;
+    const relative = path.relative(realSkillsRoot, realCandidate);
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return null;
+    return {
+      filePath: realCandidate,
+      relativePath: normalizeRelativePath(path.relative(rootDir, candidate)),
+    };
+  } catch {
+    return null;
+  }
 }
 
 function normalizeRelativePath(filePath) {

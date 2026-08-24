@@ -33,6 +33,8 @@ test("Cursor adapter generates project hooks.json with fail-closed preToolUse", 
     assert.ok(hooks.hooks.sessionStart?.[0]);
     assert.ok(hooks.hooks.stop?.[0]);
     assert.ok(hooks.hooks.subagentStop?.[0]);
+    assert.equal(hooks.hooks.postToolUse?.[0]?.matcher, undefined, "PostToolUse 应记录全部工具活动");
+    assert.equal(hooks.hooks.postToolUseFailure?.[0]?.matcher, undefined, "失败工具也应进入复盘记录");
 
     const bridgePath = path.join(dir, BRIDGE_RELATIVE_PATH);
     assert.equal(existsSync(bridgePath), true);

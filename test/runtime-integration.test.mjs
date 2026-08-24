@@ -448,6 +448,62 @@ test("hook adapter emits WildArrange runtime injection for user prompt", async (
   });
 });
 
+test("Codex session hooks inject and rehydrate the full Jiuwei prompt without repeating it per user prompt", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
+      routeGovernance: {
+        semanticShadow: { enabled: false },
+      },
+    }, null, 2));
+    await initRuntime(dir);
+
+    const sessionStart = await runInjectionHook(dir, {
+      hook_event_name: "SessionStart",
+      session_id: "session-jiuwei",
+      cwd: dir,
+    });
+    assert.match(sessionStart.output, /### Jiuwei 身份 Prompt/);
+    assert.match(sessionStart.output, /你是 Jiuwei，WildArrange 的主编排器/);
+
+    const userPrompt = await runInjectionHook(dir, {
+      hook_event_name: "UserPromptSubmit",
+      session_id: "session-jiuwei",
+      cwd: dir,
+      prompt: "继续当前任务",
+    });
+    assert.doesNotMatch(userPrompt.output, /### Jiuwei 身份 Prompt/);
+    assert.doesNotMatch(userPrompt.output, /你是 Jiuwei，WildArrange 的主编排器/);
+
+    const postCompact = await runInjectionHook(dir, {
+      hook_event_name: "PostCompact",
+      session_id: "session-jiuwei",
+      cwd: dir,
+    });
+    assert.match(postCompact.output, /### Jiuwei 身份 Prompt/);
+    assert.match(postCompact.output, /你是 Jiuwei，WildArrange 的主编排器/);
+  });
+});
+
+test("Jiuwei prompt injection reports explicit truncation at the configured prompt budget", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
+      contextBudgets: {
+        prompt: { maxChars: 600 },
+      },
+    }, null, 2));
+    await initRuntime(dir);
+
+    const context = await buildAgentContext(dir, {
+      agent: "Jiuwei",
+      injectionPoint: "session_start",
+    });
+    assert.equal(context.agentPrompt.truncated, true);
+    assert.equal(context.agentPrompt.budgetChars, 600);
+    assert.ok(context.agentPrompt.loadedChars <= 600);
+    assert.match(context.agentPrompt.content, /Agent Prompt 已截断/);
+  });
+});
+
 test("hook adapter triggers ArchivistRouter without blocking user prompt injection", async () => {
   await withTempDir(async (dir) => {
     await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
@@ -639,6 +695,7 @@ test("adapter install writes codex hooks and cursor rules", async () => {
     assert.ok(report.outputs.some((output) => output.path === ".cursor/rules/wildarrange.mdc"));
 
     const codexHooks = await readJson(path.join(dir, ".codex", "hooks.json"));
+    assert.equal(codexHooks.hooks.PostToolUse?.[0]?.matcher, undefined, "Codex PostToolUse 应覆盖全部工具活动");
     assert.ok(codexHooks.hooks.PreToolUse);
     assert.match(codexHooks.hooks.PreToolUse[0].matcher, /Bash/);
     assert.match(codexHooks.hooks.PreToolUse[0].matcher, /apply_patch/);
@@ -1194,6 +1251,11 @@ test("routeRequest maps high-risk domains to the right agents and categories", a
     assert.equal(review.primaryAgent, "BaiZe");
     assert.equal(review.category, null);
     assert.ok(review.skills.includes("review-work"));
+
+    const routingReview = await routeRequest(dir, "复盘今天的路由误判");
+    assert.equal(routingReview.intent, "routing_review");
+    assert.equal(routingReview.primaryAgent, "BaiZe");
+    assert.ok(routingReview.skills.includes("review-routing-decisions"));
 
     const reviewableArtifact = await routeRequest(dir, "write a reviewable artifact");
     assert.equal(reviewableArtifact.intent, "execute");
@@ -3469,6 +3531,86 @@ test("injection mounts skills on demand when request text is available", async (
     assert.equal(fallback.skillSelection.mode, "static");
     assert.equal(fallback.skillSelection.reason, "no_request_text");
     assert.deepEqual(fallback.skills.map((skill) => skill.name), ["always-skill", "db-skill", "ui-skill"]);
+  });
+});
+
+test("agent config binds a project Skill without leaking it to other agents", async () => {
+  await withTempDir(async (dir) => {
+    const packDir = await writeMinimalPromptPack(dir, {
+      "always-skill": "# 保底运行时说明\n\n必须始终注入。\n",
+    });
+    const projectSkillDir = path.join(dir, ".agents", "skills", "baize-cli");
+    await mkdir(projectSkillDir, { recursive: true });
+    await writeFile(path.join(projectSkillDir, "SKILL.md"), [
+      "---",
+      "name: baize-cli",
+      "description: 调用隔离的外部 BaiZe CLI。",
+      "---",
+      "",
+      "# BaiZe CLI",
+      "",
+      "把任务包交给外部 CLI，并只接收结构化复核结果。",
+      "",
+    ].join("\n"));
+    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
+      agents: {
+        Jiuwei: { skills: ["baize-cli", "missing-cli"] },
+      },
+      skillMatcher: {
+        dynamicInjection: { enabled: true, maxSkills: 1, alwaysMount: ["always-skill"] },
+      },
+      injectionPoints: {
+        user_prompt_submit: {
+          enabled: true,
+          tools: [],
+          markdown: [],
+          skills: ["always-skill"],
+          rules: { mode: "dynamic" },
+        },
+      },
+    }, null, 2));
+    await initRuntime(dir, { promptPackDir: packDir });
+
+    const jiuwei = await resolveInjectionPoint(dir, "user_prompt_submit", { agent: "Jiuwei" }, {
+      text: "普通用户请求",
+      stage: "plan",
+    });
+    const bound = jiuwei.skills.find((skill) => skill.name === "baize-cli");
+    assert.equal(bound?.source, "project");
+    assert.equal(bound?.path, ".agents/skills/baize-cli/SKILL.md");
+    assert.deepEqual(jiuwei.skillSelection.bound, ["baize-cli", "missing-cli"]);
+    assert.deepEqual(jiuwei.skillSelection.missing, [{ name: "missing-cli", reason: "not_found" }]);
+
+    const zhurong = await resolveInjectionPoint(dir, "user_prompt_submit", { agent: "ZhuRong" }, {
+      text: "普通用户请求",
+      stage: "execute",
+    });
+    assert.ok(!zhurong.skills.some((skill) => skill.name === "baize-cli"));
+  });
+});
+
+test("agent Skill bindings reject traversal names and symlinks outside the project Skill root", async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
+      agents: { Jiuwei: { skills: ["../escape"] } },
+    }));
+    await assert.rejects(() => loadHelixConfig(dir), /invalid skill name/);
+
+    const packDir = await writeMinimalPromptPack(dir, {});
+    const skillDir = path.join(dir, ".agents", "skills", "escaped-cli");
+    await mkdir(skillDir, { recursive: true });
+    const outside = path.join(dir, "outside-skill.md");
+    await writeFile(outside, "# outside\n");
+    await symlink(outside, path.join(skillDir, "SKILL.md"));
+    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
+      agents: { Jiuwei: { skills: ["escaped-cli"] } },
+      injectionPoints: {
+        user_prompt_submit: { enabled: true, tools: [], markdown: [], skills: [], rules: {} },
+      },
+    }));
+    await initRuntime(dir, { promptPackDir: packDir });
+    const injection = await resolveInjectionPoint(dir, "user_prompt_submit", { agent: "Jiuwei" });
+    assert.deepEqual(injection.skillSelection.missing, [{ name: "escaped-cli", reason: "not_found" }]);
   });
 });
 

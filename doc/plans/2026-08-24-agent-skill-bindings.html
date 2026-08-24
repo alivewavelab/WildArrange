@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Agent 固定 Skill 绑定实施方案</title>
+  <style>
+    body{font-family:system-ui,sans-serif;margin:32px;max-width:980px;color:#20242b;background:#f6f7f9}h1{margin-bottom:8px}.flow{display:flex;gap:12px;align-items:stretch;flex-wrap:wrap;margin:24px 0}.card{background:white;border:1px solid #d8dde6;border-left:6px solid #3478f6;border-radius:10px;padding:16px;min-width:180px;flex:1}.p0{border-left-color:#d64545}.p1{border-left-color:#e69b24}.arrow{align-self:center;font-size:24px}code{background:#edf0f5;padding:2px 5px;border-radius:4px}small{color:#667085}
+  </style>
+</head>
+<body>
+  <h1>Agent 固定 Skill 绑定</h1>
+  <p>目标：每个长期 Agent 除了配置 <code>provider/model</code>，还能绑定项目 Skill；外部 Agent CLI 由 Skill 自己封装，Helix 不写死具体厂商。</p>
+  <div class="flow">
+    <section class="card p0"><b>输入</b><p><code>agents.Jiuwei.skills</code><br>项目 <code>.agents/skills/&lt;name&gt;/SKILL.md</code></p></section>
+    <div class="arrow">→</div>
+    <section class="card p0"><b>处理</b><p>校验安全名称<br>解析 Prompt Pack 或项目 Skill<br>固定挂载到该 Agent</p></section>
+    <div class="arrow">→</div>
+    <section class="card p0"><b>输出</b><p>Agent 上下文获得 Skill 全文与来源<br>缺失 Skill 显式报告</p></section>
+  </div>
+  <section class="card p1"><b>边界</b><p>Skill 只是可调用能力合同；是否真正隔离上下文由其封装的外部 CLI 决定。绑定 Skill 不绕过 verifier、scope、review、acceptance proof 或 checkpoint。</p></section>
+  <section class="card"><b>验收</b><p>项目 Skill 能被指定 Agent 挂载；其他 Agent 不继承；非法名称不能穿越目录；未知 Skill 不静默；现有动态 Skill 上限与按需注入保持不变。</p></section>
+  <p><small>状态：已实施并通过测试 · 2026-08-24</small></p>
+</body>
+</html>

@@ -29,8 +29,8 @@ export function buildCursorHooksConfig({ bridgeCommand }) {
       beforeSubmitPrompt: [hook({ timeout: 20, matcher: "UserPromptSubmit" })],
       preToolUse: [hook({ timeout: 20, matcher: CURSOR_WRITE_TOOL_MATCHER, failClosed: true })],
       beforeShellExecution: [hook({ timeout: 20, failClosed: true })],
-      postToolUse: [hook({ timeout: 15, matcher: CURSOR_WRITE_TOOL_MATCHER })],
-      postToolUseFailure: [hook({ timeout: 15, matcher: CURSOR_WRITE_TOOL_MATCHER })],
+      postToolUse: [hook({ timeout: 15 })],
+      postToolUseFailure: [hook({ timeout: 15 })],
       stop: [hook({ timeout: 15 })],
       subagentStop: [hook({ timeout: 15 })],
     },
@@ -239,7 +239,7 @@ ${hookCommand}
 ## Enforcement
 
 - \`preToolUse\` can deny out-of-scope \`Write\`/\`Delete\`/\`Edit\` and high-risk \`Shell\` calls before they happen; \`beforeShellExecution\` applies the same command-safety gate to integrated terminal commands. Denial reasons are fed back to the agent.
-- \`sessionStart\` and \`postToolUse\` inject governance context via \`additional_context\`.
+- \`sessionStart\` injects governance context; \`postToolUse\` records every tool result for route review and returns any applicable context via \`additional_context\`.
 - \`stop\`/\`subagentStop\` auto-continue unfinished tasks via \`followup_message\` (Cursor loop limit applies, default 5).
 - \`beforeSubmitPrompt\` has no context-injection channel in Cursor; it is used for routing and decision records only.
 - Hooks are early interception, not the final boundary: completion still requires verifier, scope, review, success criteria, acceptance proof, and checkpoint.

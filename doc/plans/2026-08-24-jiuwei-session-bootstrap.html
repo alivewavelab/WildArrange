@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jiuwei 主会话身份自动注入</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 32px; color: #172033; background: #f6f8fb; }
+    h1 { margin-bottom: 8px; }
+    .status { color: #805500; background: #fff3c4; display: inline-block; padding: 6px 10px; border-radius: 8px; }
+    .flow { display: flex; gap: 12px; align-items: stretch; margin-top: 24px; flex-wrap: wrap; }
+    .card { flex: 1; min-width: 180px; background: white; border: 1px solid #d9dfeb; border-left: 6px solid #3467eb; border-radius: 10px; padding: 16px; }
+    .arrow { align-self: center; font-size: 24px; }
+    .note { margin-top: 20px; background: white; border-radius: 10px; padding: 16px; }
+  </style>
+</head>
+<body>
+  <h1>Jiuwei 主会话身份自动注入</h1>
+  <p class="status">已完成 · P0 · 273 项测试通过</p>
+  <div class="flow">
+    <section class="card"><b>输入</b><p>Codex SessionStart 或 PostCompact Hook</p></section>
+    <div class="arrow">→</div>
+    <section class="card"><b>处理</b><p>读取已安装且 hash 校验通过的 Jiuwei Prompt，并按字符预算显式截断。</p></section>
+    <div class="arrow">→</div>
+    <section class="card"><b>输出</b><p>把完整身份、职责和行为约束注入 Codex 当前上下文。</p></section>
+  </div>
+  <div class="note">
+    <b>运行规则</b>
+    <p>会话启动时注入一次；上下文压缩后恢复一次；普通 UserPromptSubmit 不重复注入，避免浪费上下文。</p>
+  </div>
+</body>
+</html>

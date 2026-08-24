@@ -10,6 +10,19 @@
   },
   "intents": [
     {
+      "name": "routing_review",
+      "signals": ["路由复盘", "路由调试", "路由误判", "误判分析", "route review", "routing review"],
+      "route": "verify",
+      "primaryAgent": "BaiZe",
+      "supportAgents": [],
+      "category": null,
+      "skills": ["review-routing-decisions"],
+      "nextCommand": "node ./bin/helix.mjs decisions --gate routing --format json",
+      "needsPlan": false,
+      "lockPrimaryAgent": true,
+      "risk": "low"
+    },
+    {
       "name": "resume",
       "signals": ["继续", "恢复", "接着", "从上次", "新会话", "断点", "resume", "continue"],
       "route": "recover",

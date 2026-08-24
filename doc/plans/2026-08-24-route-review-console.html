@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>路由复盘台实施方案</title>
+  <style>
+    body{font:15px/1.6 system-ui,sans-serif;margin:0;background:#f4f5f7;color:#172033}main{max-width:980px;margin:auto;padding:36px 20px}h1{margin:0 0 8px}.sub{color:#667085}.flow{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:28px 0}.card{background:#fff;border:1px solid #d8dee9;border-top:5px solid #175cd3;border-radius:9px;padding:14px}.p0{border-top-color:#d92d20}.p1{border-top-color:#f79009}.arrow{text-align:center;color:#667085;margin-top:22px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:760px){.flow,.grid{grid-template-columns:1fr}.arrow{display:none}}
+  </style>
+</head>
+<body><main>
+  <h1>路由复盘台实施方案</h1>
+  <div class="sub">状态：已实施并通过验收 · 目标：每天能看见每次路由为何发生，并人工标记问题。</div>
+  <div class="flow">
+    <div class="card p0"><b>输入</b><br>用户原文、会话 ID</div><div class="arrow">→</div>
+    <div class="card p0"><b>判断</b><br>规则命中、语义第二意见、最终路线</div><div class="arrow">→</div>
+    <div class="card p0"><b>活动</b><br>同会话后续工具、目标路径、放行/拦截</div>
+  </div>
+  <div class="grid">
+    <div class="card p0"><b>P0 · Dashboard</b><br>日期筛选、路由卡片、工具时间线、正确/规则错/个案错标注。</div>
+    <div class="card p0"><b>P0 · 数据</b><br>决策日志保留完整路由输入与结构化结果；工具参数只留安全摘要。</div>
+    <div class="card p1"><b>P1 · 复盘 Skill</b><br>BaiZe 只读分析已标注记录，提出规则改进建议，不自动修改 routes.json。</div>
+    <div class="card p1"><b>P1 · 验收</b><br>API、坏行降级、写接口安全、Skill 清单、全量测试和 npm 包体预检。</div>
+  </div>
+</main></body></html>
