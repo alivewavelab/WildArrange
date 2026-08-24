@@ -119,7 +119,7 @@ AGENTS.md                         # product goals, global boundaries, release ga
 - `src/infra/error-protocol.mjs`：统一错误协议 `{code, module, message, next_action}` 与内联单行渲染；覆盖三处结构化错误面（gateway 信封、delivery-pipeline 结果、CLI 非零退出）。
 - `src/infra/gate-arming.mjs`：gate-arming 底线评估（「门未武装」黄灯）。纯只读：标记缺失/trivial `verify_commands`、同义反复 review（无 review/standards 命令、无 LLM review、无启用质量 gate）与无 required 质量 gate 的 config。`statusReport` 始终携带结果；自身不写 config 或翻转 gate。
 - `src/infra/dependency-graph.mjs`：对抗加固的词法 import 扫描器（`maskSource`/`extractImportSpecifiers`），由 `test/dependency-boundary.test.mjs`（保持不可削弱的对抗底线）与 `computeImpact` / `helix impact` 背后的全仓 import 图共用（反向传递 importer + 待跑测试投影）。同一图支撑 `computeZoneTests` / `helix test --zone`（import 该区的测试 + 命名配对测试 + 始终运行的边界测试）与 `listRepoTests`；`helix test` CLI 在 spawn `node --test` 时剥离 `NODE_TEST_CONTEXT`/`NODE_TEST_ID`，避免从另一 test-runner 进程内调用时空洞 exit 0。
-- `src/infra/decision-log.mjs`：统一决策记录（`.helix/decisions.jsonl`）。仅在四缝发射——delivery-pipeline gate（verify/scope/review/acceptance-proof/checkpoint + pipeline 结果）、`ai/hooks` pre/post-tool-use 决策、并行 admission 与路由——格式为 `{ts, gate, decision, code, reason, summary, evidencePath, taskId, runId, planId, sessionId}`。派生日志：非 hash 链（ledger 仍是审计权威）、无锁单行追加（行中途外部截断后自愈）、best-effort 发射且从不破坏 gate/hook/admission/routing 流；读侧跳过并计数损坏或半写行。读者从文件尾以 64KB 块向后流式读取，收集满 `--limit` 条匹配记录即停，投影内存由 limit 而非文件大小界定；`truncated=true` 标记尾窗结果。`src/interface/decisions.mjs` 渲染只读 `helix decisions` 投影——每条三行（发生了什么 → 命中哪条规则 → 证据在哪），支持 `--task`/`--gate` 过滤与 `--format json`——从不写状态。
+- `src/infra/decision-log.mjs`：统一决策记录（`.helix/decisions.jsonl`）。仅在四缝发射——delivery-pipeline gate（verify/scope/review/acceptance-proof/checkpoint + pipeline 结果）、`ai/hooks` pre/post-tool-use 决策、并行 admission 与路由。路由记录额外保留完整 `inputText` 与结构化 `routeResult`；工具 Hook 保留 `toolName`、目标路径和脱敏后的参数摘要，供同 `sessionId` 复盘。派生日志：非 hash 链（ledger 仍是审计权威）、无锁单行追加（行中途外部截断后自愈）、best-effort 发射且从不破坏主流程；读侧跳过并计数损坏或半写行。
 - `src/capabilities/worker.mjs` / `src/capabilities/review-gate.mjs`：worker 执行与 BaiZe 独立 review 通道。风险复核与怀疑式验收是 BaiZe Skill 模式，非独立长期 Agent。
 - `src/infra/command-safety.mjs`：worker、verifier、review 命令、质量 gate 与子 Agent runner 共用的高风险 shell 命令预检；阻断破坏性系统命令与对项目源/测试/文档目录的递归删除。内置模式为不可削弱底线；config 中 `commandSafety.extraPatterns` 追加项目规则（`compileCommandSafetyPatterns` 编译，调用方经 `runCommand` options 传入）。
 - `src/infra/security.mjs`：config hash 基线、config 校验、运行时状态备份、备份列表、一键状态恢复与关键状态校验。
@@ -164,7 +164,7 @@ AGENTS.md                         # product goals, global boundaries, release ga
 
 不变量：push 已成功后任何故障都不得回滚或释放原 run（只能对账恢复）；claim 只有在成功提交或工作区成功回滚后才释放。
 - `src/interface/dashboard.mjs`：本地 dashboard HTTP API 与 HTML UI，含 POST token、Host 与 Origin 防护。
-- `src/interface/dashboard-panels.mjs`：只读 dashboard 面板（决策面板：近期决策 + gate 统计 + 从未触发的 gate；运维面板：gate arming、锁 holder 检查、日志大小、并行 run 对账）。与 `dashboard.mjs` 分离以保持低于拆分线。
+- `src/interface/dashboard-panels.mjs`：Dashboard 路由复盘、决策与运维面板。路由复盘按日期和 `sessionId` 关联原始请求、路由结果、语义第二意见与工具摘要，并展示 Stop Hook 生成的当日可读报告摘要；受保护 POST 只写人工标注，不自动修改路由规则。与 `dashboard.mjs` 分离以保持低于拆分线。
 - `src/interface/timeline.mjs`：`helix timeline`——合并 hash 链校验 ledger 条目、decisions 与 annotations 为单一倒序只读投影。
 - `src/interface/cli-help.mjs`：CLI 命令注册表（单一事实源）。默认 `--help` 仅显示 core 六命令（init/plan/run/status/decisions/doctor）；`--help --all` 列出全部；`docs commands --write` 物化 `doc/generated/commands.md`。README 命令真实性检查对照 `--help --all`。
 - `src/ai/suspicion-review.mjs`：archivist 不变量下的异步 LLM 怀疑审查——仅 sanitized 结论包（无代码/diff/raw 输出）、无 key 时确定性 fallback、LLM decisionId 锚定 packet（幻觉 id 丢弃并计数），结论仅在 `.helix/reports/suspicion.*`，从不进入完成链。
@@ -178,7 +178,8 @@ AGENTS.md                         # product goals, global boundaries, release ga
 - `.helix/team/tasks.json`：持久任务状态。
 - `.helix/ledger.jsonl`：hash 链 append-only 审计日志。`ledger verify` 检测普通行编辑或断链。
 - `.helix/decisions.jsonl`：派生决策投影日志（四缝：pipeline gate、tool-use hook、admission、routing）。可丢弃与截断；非 hash 链部分。经 `helix decisions` 读取。每条记录带 `id` 锚点与 `annotatable` 标志——仅 deny 与非确定性 allow（LLM review、routing shadow、admission 归因）进入标注队列；确定性 PASS 记录仅作流式记录。
-- `.helix/annotations.jsonl`：决策记录的人工/复核标注（`helix annotate --decision <id> --category rule_wrong|case_wrong|mislabeled`）。类别强制；统计按 rule × category 聚合，单条标注不能劫持 rule。硬约束（`test/annotation.test.mjs` 钉死）：标注路径永不写 config、`verify_commands` 或任何 gate 开关——标注告知人，不移动 gate。
+- `.helix/reports/routing/latest.md`：IDE Stop Hook 自动更新的中文路由日报；同日归档位于 `.helix/reports/routing/YYYY-MM-DD.md`。先给结论，再列问题、待复盘项和每次判断/工具明细，只读不改规则。
+- `.helix/annotations.jsonl`：决策记录的人工/复核标注（`confirmed|rule_wrong|case_wrong|mislabeled`）。类别强制；统计按 rule × category 聚合，单条标注不能劫持 rule。硬约束（`test/annotation.test.mjs` 钉死）：标注路径永不写 config、`verify_commands`、路由表或任何 gate 开关——标注告知人，不移动 gate。
 - `.helix/security/config-baseline.json`：已审核 config 指纹。`config verify` 检测 baseline 之后增删改的 config 文件。
 - `.helix/backups`：`state backup` 创建的 ledger、work、tasks、snapshots 与 config baseline 时点副本；`state list` 列出，`state restore --backup <id>` 恢复（恢复前自动做 pre-restore 备份）。
 - `.helix/reports/doctor.json` / `.helix/reports/doctor.md`：最新 `doctor` 健康报告，覆盖 config mounts、完成对账、ledger 校验、ledger 与备份交叉检查及最新仓库治理摘要。

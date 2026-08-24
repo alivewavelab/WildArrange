@@ -639,6 +639,7 @@ test("adapter install writes codex hooks and cursor rules", async () => {
     assert.ok(report.outputs.some((output) => output.path === ".cursor/rules/wildarrange.mdc"));
 
     const codexHooks = await readJson(path.join(dir, ".codex", "hooks.json"));
+    assert.equal(codexHooks.hooks.PostToolUse?.[0]?.matcher, undefined, "Codex PostToolUse 应覆盖全部工具活动");
     assert.ok(codexHooks.hooks.PreToolUse);
     assert.match(codexHooks.hooks.PreToolUse[0].matcher, /Bash/);
     assert.match(codexHooks.hooks.PreToolUse[0].matcher, /apply_patch/);
@@ -1194,6 +1195,11 @@ test("routeRequest maps high-risk domains to the right agents and categories", a
     assert.equal(review.primaryAgent, "BaiZe");
     assert.equal(review.category, null);
     assert.ok(review.skills.includes("review-work"));
+
+    const routingReview = await routeRequest(dir, "复盘今天的路由误判");
+    assert.equal(routingReview.intent, "routing_review");
+    assert.equal(routingReview.primaryAgent, "BaiZe");
+    assert.ok(routingReview.skills.includes("review-routing-decisions"));
 
     const reviewableArtifact = await routeRequest(dir, "write a reviewable artifact");
     assert.equal(reviewableArtifact.intent, "execute");

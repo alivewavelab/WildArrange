@@ -6,7 +6,7 @@
  *
  * - 标注只写 annotations.jsonl，绝不写 config / verify_commands / 任何门开关——
  *   标注永远不能自动改门，调门只能由人显式改配置；
- * - 标注强制分类（rule_wrong 规则错 / case_wrong 个案错 / mislabeled 误标），
+ * - 标注强制分类（confirmed 确认正确 / rule_wrong 规则错 / case_wrong 个案错 / mislabeled 误标），
  *   理由可选；
  * - 统计以「规则 × 标注」为单位，单条标注不绑架整条规则；
  * - 与 decisions.jsonl 一样是派生日志：可丢、可截断、坏行跳过。
@@ -16,7 +16,7 @@ import path from "node:path";
 import { createWorkId, nowIso, resolveHelixPath } from "./runtime-store.mjs";
 import { readDecisions } from "./decision-log.mjs";
 
-export const ANNOTATION_CATEGORIES = ["rule_wrong", "case_wrong", "mislabeled"];
+export const ANNOTATION_CATEGORIES = ["confirmed", "rule_wrong", "case_wrong", "mislabeled"];
 
 export function annotationsLogPath(rootDir) {
   return resolveHelixPath(rootDir, "annotations.jsonl");
@@ -90,7 +90,7 @@ export async function annotationStats(rootDir) {
       continue;
     }
     const ruleKey = `${decision.gate || "unknown"}:${decision.code || decision.decision || "unknown"}`;
-    byRule[ruleKey] ||= { rule: ruleKey, gate: decision.gate || null, code: decision.code || null, total: 0, rule_wrong: 0, case_wrong: 0, mislabeled: 0 };
+    byRule[ruleKey] ||= { rule: ruleKey, gate: decision.gate || null, code: decision.code || null, total: 0, confirmed: 0, rule_wrong: 0, case_wrong: 0, mislabeled: 0 };
     byRule[ruleKey].total += 1;
     byRule[ruleKey][annotation.category] = (byRule[ruleKey][annotation.category] || 0) + 1;
   }

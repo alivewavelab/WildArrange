@@ -79,7 +79,7 @@ export const COMMAND_REGISTRY = [
   { usage: "impact <changed-file...>", desc: "改动影响面分析（反向依赖闭包）" },
   { usage: "decisions stats", desc: "门触发统计：计数/从未触发的门/标注关联" },
   { usage: "timeline [--limit N] [--task T001] [--source ledger|decision|annotation] [--format json]", desc: "ledger+决策+标注统一时间线" },
-  { usage: "annotate --decision <decisionId> --category <rule_wrong|case_wrong|mislabeled> [--reason \"...\"] [--author name]", desc: "标注门决策（只进报告，不改配置）" },
+  { usage: "annotate --decision <decisionId> --category <confirmed|rule_wrong|case_wrong|mislabeled> [--reason \"...\"] [--author name]", desc: "标注门决策（只进报告，不改配置）" },
   { usage: "annotate list [--limit N]", desc: "列出标注" },
   { usage: "annotate stats", desc: "标注聚合统计" },
   { usage: "review suspicious [--limit N]", desc: "LLM 可疑判断异步审查（只进报告，不进完成链）" },

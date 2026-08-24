@@ -131,16 +131,18 @@ test("stats aggregate by rule x category, never by single annotation", async () 
     assert.notEqual(first.id, second.id);
 
     await appendAnnotation(dir, { decisionId: first.id, category: "rule_wrong" });
+    await appendAnnotation(dir, { decisionId: first.id, category: "confirmed" });
     await appendAnnotation(dir, { decisionId: second.id, category: "case_wrong" });
     await appendAnnotation(dir, { decisionId: second.id, category: "mislabeled" });
 
     const stats = await annotationStats(dir);
-    assert.equal(stats.total, 3);
+    assert.equal(stats.total, 4);
     assert.equal(stats.rules.length, 1, "同一规则的两条决策聚合到一行");
     const rule = stats.rules[0];
     assert.equal(rule.rule, "pre_tool_use:out_of_scope");
-    assert.equal(rule.total, 3);
+    assert.equal(rule.total, 4);
     assert.equal(rule.rule_wrong, 1);
+    assert.equal(rule.confirmed, 1);
     assert.equal(rule.case_wrong, 1);
     assert.equal(rule.mislabeled, 1);
   });

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WildArrange 产品总图改造方案</title>
+  <style>
+    body { max-width: 980px; margin: 40px auto; padding: 0 20px; font: 16px/1.65 system-ui, sans-serif; color: #1f2937; }
+    .goal { padding: 16px; border-left: 6px solid #d97706; background: #fff7ed; }
+    .flow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin: 24px 0; }
+    .card { padding: 16px; border: 1px solid #d1d5db; border-top: 7px solid #dc2626; border-radius: 10px; }
+    .card:nth-child(2) { border-top-color: #d97706; }
+    .card:nth-child(3) { border-top-color: #16a34a; }
+    code { background: #f3f4f6; padding: 2px 5px; border-radius: 4px; }
+    @media (max-width: 720px) { .flow { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <h1>WildArrange 产品总图改造</h1>
+  <p><strong>已实施并通过视觉验收</strong> · 2026-08-24</p>
+  <div class="goal"><strong>唯一目标：</strong>让非研发读者一眼看懂“从哪里进入、系统怎样闭环、证据落在哪里”，不再把目录卡片和完整 import 图当作产品架构。</div>
+  <div class="flow">
+    <section class="card"><strong>P0：全局职责</strong><br>入口、任务闭环、可靠底座变成有留白的大区块；用箭头表达真实依赖，CLI 与 Interface 不再被误画成父子关系。</section>
+    <section class="card"><strong>P0：三条作业</strong><br>线性完成任务、并行成果合入、跨设备接力。每条都从用户动作画到 checkpoint / ledger。</section>
+    <section class="card"><strong>P0：模块抽屉</strong><br>每个模块只展示 3–6 个关键组件与关键跨区节点；禁止完整 import 扇出造成线团和裁切。</section>
+  </div>
+  <h2>验收</h2>
+  <ul>
+    <li><code>npm run check:arch</code> 保持 0 orphan、0 缺图。</li>
+    <li>1440px、1024px、360px 截图中职责标题、卡片和箭头均不拥挤。</li>
+    <li>打开 CLI、Orchestration、Capabilities 抽屉，关键链路可读且不超出画布。</li>
+    <li>文件归属仍由 <code>module-file-map.json</code> 决定；产品流程由人工核实的 D 数据表达。</li>
+  </ul>
+</body>
+</html>

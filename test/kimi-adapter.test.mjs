@@ -27,7 +27,8 @@ test("Kimi adapter generates a native plugin and shared project Skills", async (
     assert.equal(manifest.name, "wildarrange-adapter");
     assert.ok(manifest.hooks.some((hook) => hook.event === "PreToolUse" && hook.matcher === "^(Bash|Write|Edit)$"));
     assert.ok(manifest.hooks.some((hook) => hook.event === "UserPromptSubmit"));
-    assert.ok(manifest.hooks.some((hook) => hook.event === "PostToolUseFailure"));
+    assert.ok(manifest.hooks.some((hook) => hook.event === "PostToolUse" && hook.matcher === undefined));
+    assert.ok(manifest.hooks.some((hook) => hook.event === "PostToolUseFailure" && hook.matcher === undefined));
     assert.ok(manifest.hooks.some((hook) => hook.event === "Stop"));
     assert.match(await readFile(bridgePath, "utf8"), /HELIX_HOST_ADAPTER: "kimi"/);
 

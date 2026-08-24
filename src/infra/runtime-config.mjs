@@ -86,6 +86,11 @@ export const DEFAULT_HELIX_CONFIG = {
     },
   },
   routeGovernance: {
+    dailyReview: {
+      enabled: true,
+      trigger: "stop",
+      maxItems: 20,
+    },
     semanticShadow: {
       enabled: true,
       agent: "CangJie",
@@ -330,8 +335,8 @@ export const DEFAULT_HELIX_CONFIG = {
     stop: {
       enabled: true,
       tools: ["helix_continuation_check", "helix_resume"],
-      markdown: [".helix/sessions/continuation.md", ".helix/snapshots/context.md"],
-      skills: ["wildarrange-injection-runtime", "start-work"],
+      markdown: [".helix/sessions/continuation.md", ".helix/snapshots/context.md", ".helix/reports/routing/latest.md"],
+      skills: ["wildarrange-injection-runtime", "start-work", "review-routing-decisions"],
       rules: { mode: "static" },
     },
   },

@@ -339,7 +339,7 @@ node ./bin/helix.mjs review suspicious
 
 `test` 是分区测试选择：`--zone <区>` 跑「引用了该区文件的测试 + 命名对位测试 + 常驻边界测试」，带文件参数时按 impact 的应跑清单跑，不带参数跑全量；退出码透传 `node --test`。改了哪就跑哪，不必背测试矩阵。
 
-`annotate` 是标注回写：decisions 投影里带 `可标注` 标记的记录（拦截与非确定性放行；确定性 PASS 只进流水）可以用 `annotate --decision <id> --category rule_wrong|case_wrong|mislabeled` 指认判错。分类是强制的（规则错/个案错/误标），理由可选；`annotate stats` 按「规则 × 标注」聚合，单条标注不绑架整条规则。**标注永远不能自动改门**——标注路径不写 config、不改 `verify_commands`、不动任何门开关（有测试钉死），调门只能由人显式改配置。
+`annotate` 是标注回写：决策可用 `annotate --decision <id> --category confirmed|rule_wrong|case_wrong|mislabeled` 标为确认正确、规则错、个案错或误标。理由可选；`annotate stats` 按「规则 × 标注」聚合，单条标注不绑架整条规则。**标注永远不能自动改门**——标注路径不写 config、不改 `verify_commands`、不动任何门开关（有测试钉死），调门只能由人显式改配置。
 
 `decisions stats` 是确定性统计审查（纯代码、可重跑、无 LLM）：每个门的触发计数（按决策/规则细分）、**从未触发的门**（门形同虚设的直接信号）、以及标注与规则的关联。冷启动期只出计数不出率。`timeline` 把 ledger（仅 hash 链校验通过的条目）、decisions、annotations 合并成一条倒序时间线，回答「这个仓库最近发生了什么」，支持 `--task` / `--source` 过滤。
 
@@ -347,7 +347,7 @@ CLI 是分层的：`--help` 默认只显示核心六命令（init / plan / run /
 
 `review suspicious` 是 LLM 可疑判断（异步审查，archivist 不变量）：只把清洗后的结论包（id/门/规则/摘要，绝无代码块、raw diff 或完整命令输出）发给配置的外部 provider，返回的可疑清单必须锚定输入包内的 decisionId（幻觉 id 直接丢弃并计数）；无 key 时确定性 fallback，不阻断任何流程。结论只写入 `.helix/reports/suspicion.*`——**不进完成链、不改配置、不动门开关**。
 
-Dashboard（`serve`）新增两个只读面板：决策面板（最近决策三行投影 + 门触发统计 + 从未触发的门）与运维面板（门武装状态、tasks.lock/ledger.lock 持有者巡检、日志体积、并行 run 对账）。
+Dashboard（`serve`）包含路由复盘台、决策面板与运维面板。路由复盘台按日期展示用户原文、结构化路由结果、命中信号、语义第二意见及同会话后续工具摘要，并可人工标记正确/规则错/个案错；工具参数中的常见密钥字段会脱敏。IDE `Stop` Hook 会主动更新中文日报 `.helix/reports/routing/latest.md`（同日归档为 `YYYY-MM-DD.md`），先给结论，再列全部判断和工具明细。复盘只写 annotation，不自动修改 `routes.json`。
 
 `run` 结束时的门决策汇总按 `reporting.verbosity` 分级：默认 `verbose` 在 stderr 输出本次任务每个门的三行投影（框架初期让人能审判每一条门决策）；信任建立后可改为 `normal`（一行结果）或 `quiet`（只输出 JSON）。stdout 的机器可读 JSON 在任何级别下都不变。
 
@@ -428,6 +428,8 @@ node ./bin/helix.mjs prompts show --agent Jiuwei --variant gemini
 ```bash
 node ./bin/helix.mjs serve --host 127.0.0.1 --port 8765
 ```
+
+路由复盘数据可直接查看；如需在页面点击“正确/规则错/个案错”写入标注，请用 `--token` 启动，因为所有 Dashboard POST 写操作都要求 token。
 
 绑定非 loopback 地址时必须带 token：
 

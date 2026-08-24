@@ -22,7 +22,7 @@ import { pathAllowed } from "../infra/path-match.mjs";
 import { invokeCapability } from "../capabilities/gateway.mjs";
 import { resolveInjectionPoint } from "./injection.mjs";
 import { loadTaskState } from "../infra/task-state-store.mjs";
-import { routeRequest } from "./routing.mjs";
+import { routeRequest, writeDailyRoutingReview } from "./routing.mjs";
 import { scanProjectRules } from "../infra/rule-scanner.mjs";
 import { findRunnableTask } from "../orchestration/task-board.mjs";
 import { buildAgentContext, continuationDirective, resumeReport } from "./context.mjs";
@@ -62,7 +62,7 @@ export async function runInjectionHook(rootDir, input = {}) {
       route: facts.route,
     }).catch((error) => ({ error: error.message }));
   } else if (event === "UserPromptSubmit") {
-    facts.route = input.prompt ? await routeRequest(hookRootDir, { text: input.prompt }) : null;
+    facts.route = input.prompt ? await routeRequest(hookRootDir, { text: input.prompt, sessionId }) : null;
     facts.rules = await scanProjectRules(hookRootDir);
     facts.archivist = await runArchivistForHook(hookRootDir, input, {
       event,
@@ -98,6 +98,10 @@ export async function runInjectionHook(rootDir, input = {}) {
     }).catch((error) => ({ error: error.message }));
   } else if (event === "Stop") {
     facts.continuation = await continuationDirective(hookRootDir, { sessionId, source: "hook:stop" });
+    facts.routingReview = await writeDailyRoutingReview(hookRootDir, {
+      trigger: "hook:stop",
+      sessionId,
+    }).catch((error) => ({ status: "warn", reason: error instanceof Error ? error.message : String(error) }));
   }
 
   // 通用推送：在有"对话面"的事件里，把待人决策的事项主动注入，指示宿主 AI 直接问开发者。
@@ -163,6 +167,9 @@ export async function runInjectionHook(rootDir, input = {}) {
         evidencePath: result.reportJsonPath,
         taskId: taskId || null,
         sessionId,
+        toolName: input.tool_name || input.toolName || null,
+        targetPaths,
+        toolInputSummary: summarizeHookToolInput(input.tool_input || input.toolInput),
         // 拦截与非通过的结果门进标注队列；确定性 allow/pass 只进流水。
         annotatable: result.decision !== "allow" && result.decision !== "pass",
       });
@@ -171,6 +178,25 @@ export async function runInjectionHook(rootDir, input = {}) {
     }
   }
   return result;
+}
+
+function summarizeHookToolInput(value) {
+  if (!value || typeof value !== "object") return null;
+  const redact = (item, key = "") => {
+    if (/(token|secret|password|api[_-]?key|authorization|cookie)/i.test(key)) return "[REDACTED]";
+    if (typeof item === "string") {
+      return item
+        .replace(/(bearer\s+)[^\s"']+/gi, "$1[REDACTED]")
+        .replace(/((?:api[_-]?key|token|secret|password)\s*[=:]\s*)[^\s"']+/gi, "$1[REDACTED]")
+        .slice(0, 500);
+    }
+    if (Array.isArray(item)) return item.slice(0, 20).map((entry) => redact(entry));
+    if (item && typeof item === "object") {
+      return Object.fromEntries(Object.entries(item).slice(0, 30).map(([childKey, child]) => [childKey, redact(child, childKey)]));
+    }
+    return item;
+  };
+  return redact(value);
 }
 
 // code 是结构化字段，由 preToolUseGuard 的返回直接携带；绝不能从
@@ -556,6 +582,23 @@ function appendHookFacts(lines, facts) {
     lines.push(`- 原因：${facts.continuation.reason}`);
     lines.push(`- 下一命令：${facts.continuation.nextCommand || "(none)"}`);
     lines.push(`- 报告：${facts.continuation.reportMdPath}`);
+    lines.push("");
+  }
+  if (facts.routingReview) {
+    lines.push("## 今日路由复盘", "");
+    if (facts.routingReview.status === "warn" || facts.routingReview.status === "skipped") {
+      lines.push(`- 状态：${facts.routingReview.status}`);
+      lines.push(`- 原因：${facts.routingReview.reason || "(none)"}`);
+    } else {
+      lines.push(`- 今日判断：${facts.routingReview.summary.total} 次`);
+      lines.push(`- 已复盘：${facts.routingReview.summary.reviewed} 次`);
+      lines.push(`- 已发现问题：${facts.routingReview.summary.issues} 次`);
+      lines.push(`- 待人工复盘：${facts.routingReview.summary.unreviewed} 次`);
+      lines.push(`- 人类可读报告：${facts.routingReview.reportMdPath}`);
+      if (facts.routingReview.summary.issues > 0) {
+        lines.push("- 请主动提醒开发者查看问题判断，但不要自动修改路由规则。");
+      }
+    }
     lines.push("");
   }
   if (facts.digest) {

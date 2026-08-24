@@ -468,7 +468,6 @@ function renderCodexSkill(command) {
 
 function buildCodexHooksConfig(command) {
   const hook = (timeout, statusMessage) => ({ type: "command", command, timeout, statusMessage });
-  const writeToolMatcher = "^(Bash|apply_patch|functions\\.apply_patch|write|Write|edit|Edit|multi_edit|multiedit|MultiEdit)$";
   return {
     hooks: {
       SessionStart: [{ hooks: [hook(10, `${PRODUCT_NAME}: Loading governance context`)] }],
@@ -478,8 +477,7 @@ function buildCodexHooksConfig(command) {
         hooks: [hook(10, `${PRODUCT_NAME}: Checking planned scope before tool use`)],
       }],
       PostToolUse: [{
-        matcher: writeToolMatcher,
-        hooks: [hook(10, `${PRODUCT_NAME}: Matching project rules after tool use`)],
+        hooks: [hook(10, `${PRODUCT_NAME}: Recording tool result and matching project rules`)],
       }],
       PostCompact: [{
         matcher: "manual|auto",

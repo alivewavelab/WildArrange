@@ -105,7 +105,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/orchestration/workflow.mjs`                               | Workflow 入口、样例计划生成                            |
 | **ai/**（AI 策略/prompt/技能匹配/hooks，只依赖 orchestration、capabilities、infra，且 capabilities 只能经 gateway） |  |
 | `src/ai/AGENTS.md`                                           | AI 策略、只读边、fallback 与上下文预算约束 |
-| `src/ai/routing.mjs`                                          | 请求路由与类别决策                                     |
+| `src/ai/routing.mjs`                                          | 请求路由、类别决策与 Stop Hook 每日可读复盘报告                 |
 | `src/ai/archivist-router.mjs`                                 | 档案路由员：routing packet、结构化记忆、路由建议              |
 | `src/ai/injection.mjs`                                        | 注入点解析、Markdown / Skill 分级预算与按需（动态匹配）挂载加载 |
 | `src/ai/skill-matcher.mjs`                                    | Skill 匹配、优先级打分、提示词模型变体                       |
@@ -135,7 +135,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/infra/runtime-bootstrap.mjs`                             | `initRuntime` 一次性初始化顺序 |
 | `src/infra/ledger.mjs`                                        | hash 链 ledger 追加、校验与可信条目读取（链启动后无 hash 行视为篡改；锁经 file-lock 具备 stale 恢复） |
 | `src/infra/command-runner.mjs`                                 | 子进程命令执行、输出截断、超时与 spawn 级失败兜底（error 事件转 127 结果） |
-| `src/infra/annotation-log.mjs`                                 | 决策标注回写：强制分类（rule_wrong/case_wrong/mislabeled）、规则×标注统计；硬约束——绝不写 config/verify_commands/门开关 |
+| `src/infra/annotation-log.mjs`                                 | 决策标注回写：强制分类（confirmed/rule_wrong/case_wrong/mislabeled）、规则×标注统计；硬约束——绝不写 config/verify_commands/门开关 |
 | `src/infra/command-safety.mjs`                                 | shell 命令高风险预检，阻断明显破坏性 worker/verifier/review 命令；内置正则为不可削弱底线，`commandSafety.extraPatterns` 可外置追加项目规则 |
 | `src/infra/error-protocol.mjs` | 统一错误协议 `{code, module, message, next_action}` 与内联单行渲染；覆盖 gateway 信封、delivery-pipeline 返回、CLI 非零退出三处 |
 | `src/infra/gate-arming.mjs` | 门未武装黄灯地板：trivial/缺失 verify、同义反复 review、无 required 质量门的只读评估，status 常驻携带 |
