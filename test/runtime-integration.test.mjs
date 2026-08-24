@@ -30,6 +30,7 @@ import {
   getTeamTask,
   listTeamMessages,
   listTeamTasks,
+  readyTeamTask,
   recordTaskEvidence,
   sendTeamMessage,
 } from "../src/orchestration/task-board.mjs";
@@ -2530,6 +2531,83 @@ test("team task create appends a routed task and preserves dependency gates", as
   });
 });
 
+test("task ledger keeps tasks across plans in one canonical file", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    for (const [id, title, subject] of [
+      ["plan_alpha", "Alpha", "实现搜索功能"],
+      ["plan_beta", "Beta", "修复登录 Bug"],
+    ]) {
+      const planPath = path.join(dir, `${id}.json`);
+      await writeFile(planPath, JSON.stringify({
+        id,
+        title,
+        tasks: [{
+          id: "T001",
+          subject,
+          writable_paths: ["src/**"],
+          worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+          verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+          review_commands: ["node --version"],
+        }],
+      }));
+      await importPlan(dir, planPath);
+    }
+
+    const canonical = await readJson(resolveHelixPath(dir, "team", "tasks.json"));
+    assert.equal(canonical.kind, "task_ledger");
+    assert.equal(canonical.activePlanId, "plan_beta");
+    assert.equal(canonical.tasks.length, 2);
+    assert.deepEqual(canonical.tasks.map((task) => task.ref).sort(), ["plan_alpha:T001", "plan_beta:T001"]);
+
+    const all = await listTeamTasks(dir, { all: true });
+    assert.equal(all.total, 2);
+    assert.deepEqual(all.tasks.map((task) => task.workType).sort(), ["bug", "feature"]);
+    const active = await listTeamTasks(dir);
+    assert.deepEqual(active.tasks.map((task) => task.ref), ["plan_beta:T001"]);
+    const bugs = await listTeamTasks(dir, { all: true, workType: "bug" });
+    assert.deepEqual(bugs.tasks.map((task) => task.ref), ["plan_beta:T001"]);
+  });
+});
+
+test("task intake creates a traceable draft before any plan and readies it after validation details", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const created = await createTeamTask(dir, {
+      subject: "用户验收后要求修正文案",
+      workType: "acceptance_correction",
+      priority: "P0",
+      source: "user",
+      parentTaskRef: "plan_release:T009",
+      description: "验收反馈：按钮文案不清楚",
+    });
+    assert.equal(created.planId, "plan_inbox");
+    assert.equal(created.task.status, "draft");
+    assert.equal(created.task.ref, "plan_inbox:T001");
+    assert.equal(created.task.history[0].event, "created");
+    assert.equal((await runNextTask(dir)).status, "blocked");
+
+    await assert.rejects(() => readyTeamTask(dir, {
+      taskId: "T001",
+      patch: { verify_commands: ["node --version"] },
+    }), /writable_paths/);
+
+    const readied = await readyTeamTask(dir, {
+      taskId: "T001",
+      patch: {
+        writable_paths: ["src/**"],
+        verify_commands: ["node --version"],
+        review_commands: ["node --version"],
+      },
+    });
+    assert.equal(readied.task.status, "pending");
+    const canonical = await readJson(resolveHelixPath(dir, "team", "tasks.json"));
+    const task = canonical.tasks[0];
+    assert.equal(task.parentTaskRef, "plan_release:T009");
+    assert.ok(task.history.some((entry) => entry.event === "status_changed" && entry.from === "draft" && entry.to === "pending"));
+  });
+});
+
 test("team task claim respects blockers and does not bypass execution gates", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
@@ -3161,7 +3239,13 @@ test("dashboard API drives task, inbox, and summary operations without bypassing
       const state = await fetchJson(`${baseUrl}/api/state`);
       assert.equal(state.response.status, 200);
       assert.equal(state.body.status.pending, 2);
+      assert.equal(state.body.taskLedger.total, 2);
+      assert.equal(state.body.taskLedger.tasks.length, 2);
       assert.equal(state.body.summary, null);
+
+      const allTasks = await fetchJson(`${baseUrl}/api/tasks?all=true&type=maintenance`);
+      assert.equal(allTasks.response.status, 200);
+      assert.equal(allTasks.body.result.total, 2);
 
       const unauthenticatedRun = await postJson(`${baseUrl}/api/run-next`, {});
       assert.equal(unauthenticatedRun.response.status, 401);
@@ -3215,6 +3299,27 @@ test("dashboard API drives task, inbox, and summary operations without bypassing
       assert.equal(created.body.result.task.id, "T003");
       assert.equal(created.body.result.task.status, "pending");
 
+      const draft = await postJson(`${baseUrl}/api/tasks/create`, {
+        id: "T004",
+        subject: "Capture a dashboard bug before triage",
+        workType: "bug",
+        priority: "P0",
+        source: "user",
+      }, { headers: authHeaders });
+      assert.equal(draft.response.status, 200);
+      assert.equal(draft.body.result.task.status, "draft");
+
+      const readied = await postJson(`${baseUrl}/api/tasks/ready`, {
+        taskId: "T004",
+        patch: {
+          writable_paths: ["src/**"],
+          verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+          review_commands: ["node --version"],
+        },
+      }, { headers: authHeaders });
+      assert.equal(readied.response.status, 200);
+      assert.equal(readied.body.result.task.status, "pending");
+
       const summary = await postJson(`${baseUrl}/api/summary`, {}, { headers: authHeaders });
       assert.equal(summary.response.status, 200);
       assert.equal(summary.body.result.reason, "dashboard");
@@ -3226,7 +3331,8 @@ test("dashboard API drives task, inbox, and summary operations without bypassing
       const refreshed = await fetchJson(`${baseUrl}/api/state`);
       assert.equal(refreshed.response.status, 200);
       assert.equal(refreshed.body.summary.reason, "dashboard");
-      assert.equal(refreshed.body.tasks.length, 3);
+      assert.equal(refreshed.body.tasks.length, 4);
+      assert.equal(refreshed.body.taskLedger.total, 4);
     }, { token: "dashboard-token" });
   });
 });

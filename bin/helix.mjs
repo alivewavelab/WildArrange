@@ -40,6 +40,7 @@ import {
   getTeamTask,
   listTeamMessages,
   listTeamTasks,
+  readyTeamTask,
   recordTaskEvidence,
   sendTeamMessage,
 } from "../src/orchestration/task-board.mjs";
@@ -109,6 +110,11 @@ function parseArgs(argv) {
     }
   }
   return args;
+}
+
+function splitCliList(value) {
+  if (typeof value !== "string") return [];
+  return value.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
 function printHelp({ all = false } = {}) {
@@ -711,14 +717,21 @@ async function main() {
     const subcommand = args._[1];
     if (subcommand === "list") {
       console.log(JSON.stringify(await listTeamTasks(rootDir, {
+        all: Boolean(args.all),
         status: args.status && args.status !== true ? args.status : undefined,
         owner: args.owner && args.owner !== true ? args.owner : undefined,
+        workType: args.type && args.type !== true ? args.type : undefined,
+        priority: args.priority && args.priority !== true ? String(args.priority).toUpperCase() : undefined,
+        planId: args.plan && args.plan !== true ? args.plan : undefined,
+        search: args.search && args.search !== true ? args.search : undefined,
       }), null, 2));
       return;
     }
     if (subcommand === "get") {
       if (!args.task || args.task === true) throw new Error("helix task get requires --task <taskId>");
-      console.log(JSON.stringify(await getTeamTask(rootDir, args.task), null, 2));
+      console.log(JSON.stringify(await getTeamTask(rootDir, args.task, {
+        planId: args.plan && args.plan !== true ? args.plan : undefined,
+      }), null, 2));
       return;
     }
     if (subcommand === "claim") {
@@ -730,12 +743,39 @@ async function main() {
       return;
     }
     if (subcommand === "create") {
-      if (!args.from || args.from === true) throw new Error("helix task create requires --from <task.json>");
-      const task = await readJson(path.resolve(rootDir, args.from));
+      let task;
+      if (args.from && args.from !== true) {
+        task = await readJson(path.resolve(rootDir, args.from));
+      } else {
+        const subject = args.title && args.title !== true ? args.title : args.subject && args.subject !== true ? args.subject : null;
+        if (!subject) throw new Error("helix task create requires --from <task.json> or --title <text>");
+        task = {
+          subject,
+          description: args.description && args.description !== true ? args.description : subject,
+          workType: args.type && args.type !== true ? args.type : "maintenance",
+          priority: args.priority && args.priority !== true ? String(args.priority).toUpperCase() : "P1",
+          source: args.source && args.source !== true ? args.source : "user",
+          parentTaskRef: args.parent && args.parent !== true ? args.parent : null,
+          writable_paths: splitCliList(args.writable),
+          verify_commands: args.verify && args.verify !== true ? [args.verify] : [],
+          review_commands: args.review && args.review !== true ? [args.review] : [],
+        };
+      }
       console.log(JSON.stringify(await createTeamTask(rootDir, task), null, 2));
       return;
     }
-    throw new Error("helix task requires list, get, claim, or create");
+    if (subcommand === "ready") {
+      if (!args.task || args.task === true) throw new Error("helix task ready requires --task <taskId>");
+      if (!args.from || args.from === true) throw new Error("helix task ready requires --from <task-details.json>");
+      const patch = await readJson(path.resolve(rootDir, args.from));
+      console.log(JSON.stringify(await readyTeamTask(rootDir, {
+        taskId: args.task,
+        planId: args.plan && args.plan !== true ? args.plan : undefined,
+        patch,
+      }), null, 2));
+      return;
+    }
+    throw new Error("helix task requires list, get, claim, create, ready");
   }
 
   if (command === "team") {

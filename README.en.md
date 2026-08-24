@@ -240,6 +240,18 @@ Or run the built-in sample:
 node ./bin/helix.mjs workflow --sample
 ```
 
+### Project-wide Work-item Ledger
+
+Features, standalone bugs, post-completion acceptance corrections, and maintenance work all use the Task model and persist in `.helix/team/tasks.json`. Plans only group tasks; cross-plan references use `<planId>:<taskId>`. A request with incomplete verification details can be captured as a non-runnable `draft`:
+
+```bash
+node ./bin/helix.mjs task create --title "Fix login failure" --type bug --priority P0
+node ./bin/helix.mjs task list --all --type bug
+node ./bin/helix.mjs task ready --task T001 --from task-details.json
+```
+
+A verifier failure inside the same Task adds an attempt and history evidence instead of creating duplicate work items. If a completed Task is rejected during later acceptance, create an `acceptance_correction` Task and link the original with `--parent <planId>:<taskId>`. The Dashboard work-item ledger shows every Plan and filters by type, status, Plan, and search text.
+
 ## Important API Contract
 
 `runNextTask` returns a runtime action, not only the stored task status.
@@ -333,7 +345,7 @@ node ./bin/helix.mjs state list
 node ./bin/helix.mjs state restore --backup <backupId>
 node ./bin/helix.mjs doctor
 node ./bin/helix.mjs governance audit
-node ./bin/helix.mjs impact src/infra/ledger.mjs
+node ./bin/helix.mjs impact "src/infra/ledger.mjs"
 node ./bin/helix.mjs decisions --limit 20
 node ./bin/helix.mjs decisions stats
 node ./bin/helix.mjs timeline --limit 30
@@ -451,7 +463,7 @@ x-helix-token: <token>
 
 | Path | Purpose |
 |---|---|
-| `.helix/team/tasks.json` | Task state |
+| `.helix/team/tasks.json` | Single project-wide work-item ledger: Tasks, types, links, status, and compact history across all Plans |
 | `.helix/ledger.jsonl` | Hash-chained append-only event ledger; verify with `node ./bin/helix.mjs ledger verify` |
 | `.helix/security/config-baseline.json` | Config hash baseline; verify with `node ./bin/helix.mjs config verify` |
 | `.helix/backups/` | Runtime critical-file backups created by `state backup` |

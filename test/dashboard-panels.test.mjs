@@ -85,10 +85,18 @@ test("decisions and ops panels serve read-only view models", async () => {
       assert.ok(ops.files.some((file) => file.path === ".helix/decisions.jsonl"));
 
       const html = await (await fetch(`${base}/`, { cache: "no-store" })).text();
+      const inlineScripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
+      assert.ok(inlineScripts.length > 0, "Dashboard 必须包含可执行脚本");
+      for (const script of inlineScripts) {
+        assert.doesNotThrow(() => new Function(script), "渲染后的 Dashboard 内联脚本必须可编译");
+      }
       assert.match(html, /决策面板/);
       assert.match(html, /运维面板/);
       assert.match(html, /loadPanels/);
       assert.match(html, /WildArrange 驾驶舱/);
+      assert.match(html, /工单总账/);
+      assert.match(html, /ledgerTasks/);
+      assert.match(html, /taskWorkType/);
       assert.match(html, /data-view-panel="overview"/);
       assert.match(html, /当前任务/);
       assert.match(html, /运行下一任务/);

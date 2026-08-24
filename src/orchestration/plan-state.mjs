@@ -2,7 +2,10 @@ import { writeFile } from "node:fs/promises";
 import { DEFAULT_EXECUTOR_AGENT } from "../infra/agent-registry.mjs";
 import {
   STATE_VERSION,
+  TASK_PRIORITIES,
+  TASK_SOURCES,
   TASK_STATUSES,
+  TASK_WORK_TYPES,
   createWorkId,
   ensureHelixDirs,
   nowIso,
@@ -10,6 +13,11 @@ import {
   resolveHelixPath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
+import {
+  loadTaskLedger,
+  loadTaskState,
+  withTaskIdentity,
+} from "../infra/task-state-store.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
 import { loadHelixConfig } from "../infra/runtime-config.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
@@ -62,7 +70,7 @@ export function normalizeStringArray(value, label) {
   }));
 }
 
-export function normalizeTask(task, index, defaults = {}) {
+export function normalizeTask(task, index, defaults = {}, options = {}) {
   if (!task || typeof task !== "object") {
     throw new Error(`task ${index + 1} must be an object`);
   }
@@ -72,7 +80,8 @@ export function normalizeTask(task, index, defaults = {}) {
 
   const taskVerifyCommands = normalizeStringArray(task.verify_commands ?? task.verifyCommands ?? [], `task ${id} verify_commands`);
   const verifyCommands = uniqueStrings([...(defaults.verify_commands || []), ...taskVerifyCommands]);
-  if (verifyCommands.length === 0) {
+  const requestedStatus = task.status || (options.defaultDraftWhenIncomplete === true && verifyCommands.length === 0 ? "draft" : "pending");
+  if (verifyCommands.length === 0 && requestedStatus !== "draft") {
     throw new Error(`task ${id} requires at least one verify command`);
   }
   const taskReviewCommands = normalizeStringArray(task.review_commands ?? task.reviewCommands ?? [], `task ${id} review_commands`);
@@ -85,6 +94,12 @@ export function normalizeTask(task, index, defaults = {}) {
   const skills = uniqueStrings([...(defaults.skills || []), ...taskSkills]);
   const successCriteria = normalizeSuccessCriteria(task.successCriteria ?? task.success_criteria, id, subject, verifyCommands);
   const governanceWarnings = detectTaskGovernanceWarnings({ workerCommand: task.worker_command || task.workerCommand || null, verifyCommands, writablePaths });
+  const workType = normalizeWorkType(task.workType ?? task.work_type ?? inferWorkType(`${subject}\n${task.description || ""}`));
+  const source = normalizeTaskSource(task.source || options.defaultSource || "imported");
+  const priority = normalizeTaskPriority(task.priority || "P1");
+  const parentTaskRef = normalizeOptionalText(task.parentTaskRef ?? task.parent_task_ref, `task ${id} parentTaskRef`);
+  const request = normalizeTaskRequest(task.request, subject, source);
+  const createdAt = task.createdAt || nowIso();
 
   return {
     id,
@@ -92,7 +107,12 @@ export function normalizeTask(task, index, defaults = {}) {
     description: task.description || subject,
     category: task.category || null,
     category_source: task.category ? "explicit" : "unresolved",
-    status: validateStatus(task.status || "pending"),
+    workType,
+    source,
+    priority,
+    parentTaskRef,
+    request,
+    status: validateStatus(requestedStatus),
     owner: task.owner || DEFAULT_EXECUTOR_AGENT,
     attempts: Number.isInteger(task.attempts) ? task.attempts : 0,
     maxAttempts: Number.isInteger(task.maxAttempts) ? task.maxAttempts : 3,
@@ -107,8 +127,70 @@ export function normalizeTask(task, index, defaults = {}) {
     skills,
     route_decision: task.route_decision || null,
     evidence: Array.isArray(task.evidence) ? task.evidence : [],
-    createdAt: task.createdAt || nowIso(),
+    history: Array.isArray(task.history) ? task.history : [{ at: createdAt, event: "created", status: validateStatus(requestedStatus), source }],
+    createdAt,
     updatedAt: nowIso(),
+  };
+}
+
+export function validateTaskReady(task) {
+  if (!task || typeof task !== "object") throw new Error("task is required");
+  if (!Array.isArray(task.verify_commands) || task.verify_commands.length === 0) {
+    throw new Error(`task ${task.id} cannot become pending without verify_commands`);
+  }
+  if (!Array.isArray(task.writable_paths) || task.writable_paths.length === 0) {
+    throw new Error(`task ${task.id} cannot become pending without writable_paths`);
+  }
+  if (!Array.isArray(task.successCriteria) || task.successCriteria.length === 0) {
+    throw new Error(`task ${task.id} cannot become pending without successCriteria`);
+  }
+  if (task.workType === "acceptance_correction" && !task.parentTaskRef) {
+    throw new Error(`task ${task.id} acceptance_correction requires parentTaskRef`);
+  }
+  return task;
+}
+
+export function normalizeWorkType(value) {
+  if (typeof value !== "string" || !TASK_WORK_TYPES.has(value)) {
+    throw new Error(`invalid task workType: ${value}`);
+  }
+  return value;
+}
+
+export function normalizeTaskSource(value) {
+  if (typeof value !== "string" || !TASK_SOURCES.has(value)) {
+    throw new Error(`invalid task source: ${value}`);
+  }
+  return value;
+}
+
+export function normalizeTaskPriority(value) {
+  const normalized = typeof value === "string" ? value.toUpperCase() : value;
+  if (!TASK_PRIORITIES.has(normalized)) throw new Error(`invalid task priority: ${value}`);
+  return normalized;
+}
+
+function inferWorkType(text) {
+  if (/(验收.{0,8}(纠错|打回|修正)|acceptance.{0,8}(correction|rework))/i.test(text)) return "acceptance_correction";
+  if (/(bug|缺陷|故障|报错|崩溃|修复)/i.test(text)) return "bug";
+  if (/(新增|新功能|功能|feature|实现)/i.test(text)) return "feature";
+  return "maintenance";
+}
+
+function normalizeOptionalText(value, label) {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string" || value.trim().length === 0) throw new Error(`${label} must be a non-empty string`);
+  return value.trim();
+}
+
+function normalizeTaskRequest(value, subject, source) {
+  if (value === undefined || value === null) return { summary: subject, source, evidenceRefs: [] };
+  if (typeof value === "string") return { summary: value.trim() || subject, source, evidenceRefs: [] };
+  if (typeof value !== "object") throw new Error("task request must be a string or object");
+  return {
+    summary: typeof value.summary === "string" && value.summary.trim() ? value.summary.trim() : subject,
+    source: normalizeTaskSource(value.source || source),
+    evidenceRefs: normalizeStringArray(value.evidenceRefs ?? value.evidence_refs ?? [], "task request evidenceRefs"),
   };
 }
 
@@ -275,15 +357,12 @@ async function importPlanUnlocked(rootDir, planPath) {
   const plan = normalizePlan(rawPlan);
   await enrichPlanWithRoutes(rootDir, plan);
   validatePlanImportQuality(plan);
+  const existingLedger = await loadTaskLedger(rootDir);
+  const taskLedger = mergePlanIntoTaskLedger(existingLedger, plan);
   const targetPath = resolveHelixPath(rootDir, "plans", `${plan.id}.json`);
   await writeJsonAtomic(targetPath, plan);
-  await writeJsonAtomic(resolveHelixPath(rootDir, "team", "tasks.json"), {
-    version: STATE_VERSION,
-    planId: plan.id,
-    tasks: plan.tasks,
-    updatedAt: nowIso(),
-  });
   await writeTasksMarkdown(rootDir, plan);
+  await writeJsonAtomic(resolveHelixPath(rootDir, "team", "tasks.json"), taskLedger);
 
   const { config } = await loadHelixConfig(rootDir);
   const approvalRequired = config?.planApproval?.required === true;
@@ -305,10 +384,54 @@ async function importPlanUnlocked(rootDir, planPath) {
     },
     updatedAt: nowIso(),
   });
-
   await appendLedger(rootDir, { type: "plan_imported", planId: plan.id, taskCount: plan.tasks.length, approvalRequired });
   await writeSnapshot(rootDir, "planned", { planId: plan.id });
   return plan;
+}
+
+function mergePlanIntoTaskLedger(existingLedger, plan) {
+  const at = nowIso();
+  const previousTasks = new Map((existingLedger?.tasks || [])
+    .filter((task) => task.planId === plan.id)
+    .map((task) => [task.id, task]));
+  plan.tasks = plan.tasks.map((task) => {
+    const identified = withTaskIdentity(task, plan.id);
+    const previous = previousTasks.get(task.id);
+    if (!previous) return identified;
+    return {
+      ...identified,
+      createdAt: previous.createdAt || identified.createdAt,
+      history: [
+        ...(previous.history || []),
+        { at, event: "plan_reimported", status: identified.status, source: "imported" },
+      ],
+    };
+  });
+  const tasks = [
+    ...(existingLedger?.tasks || []).filter((task) => task.planId !== plan.id),
+    ...plan.tasks,
+  ];
+  const planEntry = {
+    id: plan.id,
+    title: plan.title,
+    objective: plan.objective,
+    taskIds: plan.tasks.map((task) => task.id),
+    createdAt: (existingLedger?.plans || []).find((candidate) => candidate.id === plan.id)?.createdAt || plan.createdAt,
+    updatedAt: at,
+  };
+  return {
+    version: STATE_VERSION,
+    kind: "task_ledger",
+    planId: plan.id,
+    activePlanId: plan.id,
+    plans: [
+      ...(existingLedger?.plans || []).filter((candidate) => candidate.id !== plan.id),
+      planEntry,
+    ],
+    tasks,
+    createdAt: existingLedger?.createdAt || at,
+    updatedAt: at,
+  };
 }
 
 export async function loadPlanApproval(rootDir) {
@@ -449,7 +572,7 @@ export async function writeTasksMarkdown(rootDir, plan) {
   await writeFile(resolveHelixPath(rootDir, "team", "tasks.md"), `${lines.join("\n")}\n`, "utf8");
 }
 
-export { loadTaskState } from "../infra/task-state-store.mjs";
+export { loadTaskState };
 
 function uniqueStrings(values) {
   return [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))];

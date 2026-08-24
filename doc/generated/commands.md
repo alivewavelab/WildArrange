@@ -55,10 +55,12 @@
 | `wildarrange evidence record --task T001 --criterion C001 --status pass --evidence "..."` | 回填成功判据证据 |
 | `wildarrange steer --from <proposal.json>` | 任务变更治理入口 |
 | `wildarrange review-blockers record --from <blocker.json>` | 登记 Review Blocker |
-| `wildarrange task list [--status pending] [--owner ZhuRong]` | 列出任务 |
-| `wildarrange task get --task T001` | 查看单个任务 |
+| `wildarrange task list [--all] [--status draft|pending|completed] [--type feature|bug|acceptance_correction|maintenance] [--priority P0|P1|P2] [--plan <planId>] [--search "text"]` | 列出当前计划或全项目工单 |
+| `wildarrange task get --task T001 [--plan <planId>]` | 查看单个任务与历史 |
 | `wildarrange task claim [--task T001] [--owner Jiuwei]` | 认领任务 |
-| `wildarrange task create --from <task.json>` | 追加计划内任务 |
+| `wildarrange task create --title "修复登录失败" [--type bug] [--priority P1] [--source user] [--parent <taskRef>] [--writable src/**] [--verify "npm test"] [--review "npm test"]` | 创建工单；验证信息不足时先进入 draft |
+| `wildarrange task create --from <task.json>` | 从 JSON 创建工单 |
+| `wildarrange task ready --task T001 --from <task-details.json> [--plan <planId>]` | 补齐 draft 并转为可执行 pending |
 | `wildarrange team send --to Jiuwei --from Jiuwei --body "..."` | 发送团队消息 |
 | `wildarrange team inbox [--agent Jiuwei]` | 查看团队收件箱 |
 | `wildarrange changes list` | 列出 ChangeRequest |

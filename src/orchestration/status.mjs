@@ -8,8 +8,9 @@ import {
   resolveHelixPath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
-import { appendLedger } from "../infra/ledger.mjs";
+import { appendLedger, readVerifiedLedgerEntries } from "../infra/ledger.mjs";
 import { evaluateGateArming } from "../infra/gate-arming.mjs";
+import { loadTaskLedger } from "../infra/task-state-store.mjs";
 import { loadHelixConfig } from "../infra/runtime-config.mjs";
 import { listChangeRequests } from "./change-governance.mjs";
 import { parallelAgentStatus } from "./parallel-runtime.mjs";
@@ -41,7 +42,7 @@ export async function writeWorkflowSummary(rootDir, options = {}) {
     version: STATE_VERSION,
     at: nowIso(),
     reason: options.reason || "manual",
-    ok: status.total > 0 && status.completed === status.total && status.failed === 0 && status.pending === 0 && status.in_progress === 0 && status.verifying === 0 && status.openChanges === 0,
+    ok: status.total > 0 && status.completed === status.total && status.invalidCompleted === 0 && status.draft === 0 && status.failed === 0 && status.pending === 0 && status.in_progress === 0 && status.verifying === 0 && status.openChanges === 0,
     planId: status.planId,
     status,
     latestSnapshot: latestSnapshot ? { id: latestSnapshot.id, stage: latestSnapshot.stage, at: latestSnapshot.at } : null,
@@ -73,7 +74,8 @@ export async function statusReport(rootDir) {
   // 门未武装黄灯：配置地板不满足时常驻显示，绝不因任务全绿而显示绿。
   const { config } = await loadHelixConfig(rootDir);
   const gateArming = evaluateGateArming({ config, tasks: taskState?.tasks || [] });
-  if (!taskState) return { gateArming, work, planId: null, total: 0, completed: 0, pending: 0, failed: 0, openChanges };
+  if (!taskState) return { gateArming, work, planId: null, total: 0, completed: 0, invalidCompleted: 0, draft: 0, pending: 0, failed: 0, openChanges };
+  const completionIntegrity = await inspectCompletedTaskEvidence(rootDir, taskState);
   const counts = taskState.tasks.reduce((acc, task) => {
     acc[task.status] = (acc[task.status] || 0) + 1;
     return acc;
@@ -83,7 +85,10 @@ export async function statusReport(rootDir) {
     work,
     planId: taskState.planId,
     total: taskState.tasks.length,
+    draft: counts.draft || 0,
     completed: counts.completed || 0,
+    invalidCompleted: completionIntegrity.invalid.length,
+    completionIntegrity,
     pending: counts.pending || 0,
     in_progress: counts.in_progress || 0,
     verifying: counts.verifying || 0,
@@ -91,6 +96,32 @@ export async function statusReport(rootDir) {
     review_blocked: counts.review_blocked || 0,
     needs_user_decision: counts.needs_user_decision || 0,
     openChanges,
+  };
+}
+
+async function inspectCompletedTaskEvidence(rootDir, taskState) {
+  const entries = await readVerifiedLedgerEntries(rootDir);
+  const completionEvents = new Set(entries
+    .filter((entry) => ["task_verified", "node_checkpoint_completed", "parallel_agent_admission_completed"].includes(entry.type))
+    .filter((entry) => entry.planId && entry.taskId)
+    .map((entry) => `${entry.planId}:${entry.taskId}`));
+  const invalid = [];
+  for (const task of taskState.tasks.filter((candidate) => candidate.status === "completed")) {
+    const ref = `${taskState.planId}:${task.id}`;
+    const proof = await readJson(resolveHelixPath(rootDir, "reports", "acceptance", `${taskState.planId}-${task.id}.json`), null);
+    const checkpoint = await readJson(resolveHelixPath(rootDir, "checkpoints", `${taskState.planId}-${task.id}.json`), null);
+    const failures = [];
+    if (proof?.kind !== "acceptance_proof" || proof.pass !== true || proof.planId !== taskState.planId || proof.taskId !== task.id) failures.push("acceptance_proof");
+    if (checkpoint?.planId !== taskState.planId || checkpoint?.taskId !== task.id) failures.push("checkpoint_identity");
+    if (checkpoint?.verifyResult?.pass !== true) failures.push("verifier");
+    if (checkpoint?.scopeResult?.status !== "pass") failures.push("scope");
+    if (checkpoint?.reviewResult?.pass !== true) failures.push("review");
+    if (!completionEvents.has(ref)) failures.push("ledger_event");
+    if (failures.length > 0) invalid.push({ taskId: task.id, taskRef: ref, failures });
+  }
+  return {
+    checked: taskState.tasks.filter((task) => task.status === "completed").length,
+    invalid,
   };
 }
 
@@ -102,10 +133,12 @@ export async function dashboardData(rootDir) {
   const ledger = await readLedgerTail(rootDir, 80);
   const changes = await listChangeRequests(rootDir);
   const attention = await attentionReport(rootDir, { taskState, changes });
+  const taskLedger = await taskLedgerReport(rootDir);
   return {
     generatedAt: nowIso(),
     status,
     tasks: taskState?.tasks || [],
+    taskLedger,
     changes,
     attention,
     summary,
@@ -116,6 +149,28 @@ export async function dashboardData(rootDir) {
       payload: latestSnapshot.payload,
     } : null,
     ledger,
+  };
+}
+
+export async function taskLedgerReport(rootDir) {
+  const ledger = await loadTaskLedger(rootDir);
+  if (!ledger) {
+    return { kind: "task_ledger_view", activePlanId: null, total: 0, counts: {}, typeCounts: {}, plans: [], tasks: [] };
+  }
+  const counts = {};
+  const typeCounts = {};
+  for (const task of ledger.tasks) {
+    counts[task.status] = (counts[task.status] || 0) + 1;
+    typeCounts[task.workType || "maintenance"] = (typeCounts[task.workType || "maintenance"] || 0) + 1;
+  }
+  return {
+    kind: "task_ledger_view",
+    activePlanId: ledger.activePlanId,
+    total: ledger.tasks.length,
+    counts,
+    typeCounts,
+    plans: ledger.plans,
+    tasks: [...ledger.tasks].sort((left, right) => String(right.updatedAt || right.createdAt || "").localeCompare(String(left.updatedAt || left.createdAt || ""))),
   };
 }
 
@@ -149,6 +204,17 @@ export async function attentionReport(rootDir, options = {}) {
     .filter((task) => task.status === "needs_user_decision" || task.status === "review_blocked")
     .map((task) => ({ id: task.id, subject: task.subject, status: task.status }));
 
+  const draftTasks = tasks
+    .filter((task) => task.status === "draft")
+    .map((task) => ({
+      id: task.id,
+      ref: task.ref,
+      subject: task.subject,
+      workType: task.workType,
+      priority: task.priority,
+      readyHint: `node ./bin/helix.mjs task ready --task ${task.id} --from <task-details.json>`,
+    }));
+
   const awaitingAcceptance = [];
   const parallel = await parallelAgentStatus(rootDir).catch(() => null);
   for (const run of parallel?.runs || []) {
@@ -175,10 +241,11 @@ export async function attentionReport(rootDir, options = {}) {
   return {
     kind: "attention_report",
     at: nowIso(),
-    total: openChanges.length + failedTasks.length + needsUserDecision.length + awaitingAcceptance.length + awaitingPlanApproval.length,
+    total: openChanges.length + failedTasks.length + needsUserDecision.length + draftTasks.length + awaitingAcceptance.length + awaitingPlanApproval.length,
     openChanges,
     failedTasks,
     needsUserDecision,
+    draftTasks,
     awaitingAcceptance,
     awaitingPlanApproval,
   };
@@ -225,7 +292,7 @@ function renderWorkflowSummaryMarkdown(summary) {
     "## Run State",
     "",
     `- Plan: ${summary.planId || "(none)"}`,
-    `- Counts: total=${status.total || 0}, completed=${status.completed || 0}, pending=${status.pending || 0}, verifying=${status.verifying || 0}, failed=${status.failed || 0}, openChanges=${status.openChanges || 0}`,
+    `- Counts: total=${status.total || 0}, completed=${status.completed || 0}, invalidCompleted=${status.invalidCompleted || 0}, draft=${status.draft || 0}, pending=${status.pending || 0}, verifying=${status.verifying || 0}, failed=${status.failed || 0}, openChanges=${status.openChanges || 0}`,
     `- Latest snapshot: ${summary.latestSnapshot ? `${summary.latestSnapshot.stage} @ ${summary.latestSnapshot.at}` : "none"}`,
     "",
     "## Task Breakdown",

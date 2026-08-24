@@ -4,7 +4,10 @@ import path from "node:path";
 
 export const HELIX_DIR = ".helix";
 export const STATE_VERSION = 1;
-export const TASK_STATUSES = new Set(["pending", "in_progress", "verifying", "completed", "failed", "review_blocked", "needs_user_decision"]);
+export const TASK_STATUSES = new Set(["draft", "pending", "in_progress", "verifying", "completed", "failed", "review_blocked", "needs_user_decision"]);
+export const TASK_WORK_TYPES = new Set(["feature", "bug", "acceptance_correction", "maintenance"]);
+export const TASK_SOURCES = new Set(["user", "verifier", "review", "incident", "imported"]);
+export const TASK_PRIORITIES = new Set(["P0", "P1", "P2"]);
 
 export function nowIso() {
   return new Date().toISOString();
