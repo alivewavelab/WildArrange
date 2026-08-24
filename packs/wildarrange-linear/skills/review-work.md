@@ -10,14 +10,14 @@ review 前收集：
 
 - 原始目标。
 - 约束和范围。
-- Changed files。
+- 变更文件。
 - git 可用时收集 diff。
-- 必要时收集 changed files 全文。
-- Verification command output。
-- Run command 或 surface QA path。
+- 必要时收集变更文件全文。
+- 验证命令输出。
+- 运行命令或界面/行为 QA 路径。
 - 相关项目规范。
 
-## Review Lanes
+## 复核通道
 
 ### 1. 目标验证器
 
@@ -37,11 +37,11 @@ review 前收集：
 
 检查：
 
-- Happy path。
-- Boundary condition。
-- Error path。
-- Regression scenario。
-- Evidence file/command/screenshot/log。
+- 主路径（happy path）。
+- 边界条件。
+- 错误路径。
+- 回归场景。
+- 证据文件/命令/截图/日志。
 
 ### 3. 代码审查器
 
@@ -49,10 +49,10 @@ review 前收集：
 
 检查：
 
-- Correctness。
+- 正确性。
 - 项目模式一致性。
-- Error handling。
-- Type safety。
+- 错误处理。
+- 类型安全。
 - 性能热点。
 - 抽象层级。
 - 测试质量。
@@ -61,13 +61,13 @@ review 前收集：
 
 相关时运行：
 
-- Inputs。
-- Auth/authz。
-- Secrets。
-- Data exposure。
-- File/path/network operations。
-- Dependencies。
-- Error leakage。
+- 输入。
+- 认证/授权。
+- 密钥与凭证。
+- 数据暴露。
+- 文件/路径/网络操作。
+- 依赖。
+- 错误信息泄露。
 
 critical/high finding 会阻塞完成。
 
@@ -77,13 +77,13 @@ critical/high finding 会阻塞完成。
 
 检查：
 
-- touched files 的 git history。
+-  touched files 的 git history。
 - 现有 docs。
 - 可用时相关 issues/PRs。
 - TODO/FIXME warnings。
 - 相邻 feature contracts。
 
-## Verdict 规则
+## 裁决规则
 
 - 主 lane 必须 PASS。
 - Security high/critical 阻塞。

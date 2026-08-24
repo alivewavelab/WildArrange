@@ -14,12 +14,10 @@ import test from "node:test";
 import { runInjectionHook } from "../src/ai/hooks.mjs";
 import { runSuspicionReview } from "../src/ai/suspicion-review.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
-import {
-  importPlan,
-  initRuntime,
-  resolveHelixPath,
-  runNextTask,
-} from "../src/helix-core.mjs";
+import { runNextTask } from "../src/orchestration/linear-runtime.mjs";
+import { importPlan } from "../src/orchestration/plan-state.mjs";
+import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
+import { resolveHelixPath } from "../src/infra/runtime-store.mjs";
 
 async function withTempDir(fn) {
   const baseDir = path.join(process.cwd(), ".tmp");

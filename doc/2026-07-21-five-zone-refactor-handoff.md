@@ -1,8 +1,8 @@
 # WildArrange 五区解耦重构 — 总结与交接文档
 
-> 分支：`refactor/five-zone`（尚未合并进 `main`）。
-> 原始方案：[doc/plans/2026-07-17-wildarrange-five-zone-refactor.html](./plans/2026-07-17-wildarrange-five-zone-refactor.html)（重构前批准的设计图）。
-> 落地后的架构细节：[doc/project-architecture.md](./project-architecture.md)（本文件只讲"做了什么、为什么、还剩什么"，具体每个文件的职责以那份文档为准）。
+> **历史交接（主体已落地）**：五区重构已合并进 `main`，不要再按「未合并 feature 分支」继续拆目录。
+> 本文只保留决策、恢复协议和「改 X 去哪改」速查；当前架构真相以 [doc/project-architecture.md](./project-architecture.md) 与根 `AGENTS.md` 为准。
+> 原始方案：[doc/plans/2026-07-17-wildarrange-five-zone-refactor.html](./plans/2026-07-17-wildarrange-five-zone-refactor.html)（重构前批准的设计图，文首已有替代说明）。
 
 ## 一句话总结
 
@@ -103,10 +103,9 @@ infra/           foundation、ledger、security、command-runner/safety、git、
 
 ## 已知遗留（下一个人接手时要知道的）
 
-1. **`refactor/five-zone` 分支还没合并进 `main`**。是否合并、要不要开 PR 走 review，需要用户决定。
-2. **旧 `src/helix-*.mjs` shim 还在，没有清理计划的时间表**。原方案里写的是"一个版本周期后删"，目前没有具体版本号绑定这件事；建议下次做一次全仓库 `grep` 统计还有多少地方在用旧路径 import，评估删除时机。
-3. **`interface/` 区还缺 `cli.mjs` 和 `facade.mjs` 两个占位**（原方案图里画了，但 `bin/helix.mjs` 留在仓库根目录、`helix-core.mjs` 按项目治理规则留在 `src/` 根，没有物理搬进 `src/interface/`）。这是有意的：`AGENTS.md`/`CLAUDE.md` 明确把 `src/helix-core.mjs` 的路径写成治理约束，不属于本次重构范围。
-4. **中间有一次会话被中断**，产生了一个叫 `initial` 的过渡 commit（`bf2578c`），内容就是几个 `git mv`，命名不规范但内容没问题，如果做 `git log` 整理/squash 时可以留意。
+1. **五区重构已在 `main`。** 不要再开「把 helix-* 搬进五区」的重复工作。
+2. **2026-08-24 后续更新：兼容出口已删除。** 项目未形成稳定旧 API，CLI 与测试已改为直接引用五区真实 owner；`src/` 根目录由依赖门禁禁止运行时 `.mjs`。
+3. **中间有一次会话被中断**，产生了一个叫 `initial` 的过渡 commit（`bf2578c`），内容就是几个 `git mv`，命名不规范但内容没问题，如果做 `git log` 整理/squash 时可以留意。
 
 ## 后续开发怎么改（"改 X 去哪改"速查）
 

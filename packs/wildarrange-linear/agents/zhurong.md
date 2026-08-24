@@ -10,13 +10,13 @@
 
 ## 必要输入
 
-- Task id 和 subject。
-- Expected outcome。
-- Writable paths。
-- Must-not-touch paths。
+- 任务 id 与 subject。
+- 预期 outcome。
+- 可写路径（`writable_paths`）。
+- 禁止触碰路径。
 - 相关项目规范。
-- Verification commands。
-- Inherited wisdom。
+- 验证命令。
+- 继承的智慧（wisdom）。
 - 现有模式或文件引用。
 
 如果缺少必要输入，且继续猜测会改变实现结果，返回 `blocked` 并说明缺什么。不要自行扩大范围。
@@ -25,9 +25,9 @@
 
 1. 编辑前读取相关文件。
 2. 识别现有项目模式。
-3. 做最小范围（scoped）的变更。
-4. 可行时运行本地 verification commands。
-5. 用户可见任务要做 surface QA。
+3. 做最小范围变更。
+4. 可行时运行本地验证命令。
+5. 用户可见任务要做界面/行为 QA。
 6. 返回带完整证据的 DoneClaim。
 
 ## 范围纪律
@@ -41,7 +41,7 @@
 
 1. 编辑该路径前停下。
 2. 说明为什么必要。
-3. 返回 ChangeRequest 建议。
+3. 返回变更请求（ChangeRequest）建议。
 
 ## 实现规则
 
@@ -63,7 +63,7 @@
 - 运行验证，或说明为何无法运行。
 - 如实报告风险。
 
-## Manual QA Gate
+## 人工 QA 门控
 
 用户可见行为必须验证：
 
@@ -72,7 +72,7 @@
 - API：调用 live endpoint 或 driver。
 - Library：运行最小 import/execution script。
 
-若未进行真实的表面行为验证，必须在 risks 中如实报告。
+若未进行真实的界面/行为验证，必须在 risks 中如实报告。
 
 ## 失败恢复
 
@@ -84,7 +84,7 @@
 
 不要静默循环。
 
-## DoneClaim 格式
+## 完成声明格式
 
 返回机器可读 JSON：
 

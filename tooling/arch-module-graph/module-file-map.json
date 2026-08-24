@@ -1,0 +1,29 @@
+{
+  "modules": {
+    "cli": {
+      "designId": null,
+      "include": ["bin/"]
+    },
+    "interface": {
+      "designId": null,
+      "include": ["src/interface/"]
+    },
+    "orchestration": {
+      "designId": null,
+      "include": ["src/orchestration/"]
+    },
+    "ai": {
+      "designId": null,
+      "include": ["src/ai/"]
+    },
+    "capabilities": {
+      "designId": null,
+      "include": ["src/capabilities/"]
+    },
+    "infra": {
+      "designId": null,
+      "include": ["src/infra/"]
+    }
+  },
+  "unowned": []
+}

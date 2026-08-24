@@ -9,7 +9,9 @@ import test from "node:test";
 
 import { startDashboardServer } from "../src/interface/dashboard.mjs";
 import { runInjectionHook } from "../src/ai/hooks.mjs";
-import { importPlan, initRuntime, resolveHelixPath } from "../src/helix-core.mjs";
+import { importPlan } from "../src/orchestration/plan-state.mjs";
+import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
+import { resolveHelixPath } from "../src/infra/runtime-store.mjs";
 
 async function withTempDir(fn) {
   const baseDir = path.join(process.cwd(), ".tmp");

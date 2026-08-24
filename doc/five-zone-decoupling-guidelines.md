@@ -77,8 +77,8 @@ Infra
 1. Infra 不得依赖 Interface、Orchestration、AI 或 Capabilities。
 2. Capabilities 只能依赖 Infra，不得知道工作流、界面或 AI 策略。
 3. Orchestration 和 AI 调用能力时，只能进入 `capabilities/gateway.*`，不得直接 import 具体能力文件。
-4. AI → Orchestration 只能读状态或报告，不得推进任务、提交事务或修改权威状态。
-5. Orchestration → AI 必须逐文件、逐目标加入白名单；禁止放宽为整区自由依赖。
+4. AI → Orchestration 只能读状态或报告，不得推进任务、提交事务或修改权威状态。边界测试可对整区放行这条只读边，但仍应按文件保持只读；不要把测试放行理解成可以写编排状态。
+5. Orchestration → AI 必须逐文件、逐目标加入白名单；禁止放宽为整区自由依赖。这是不对称约束：`orchestration → ai` 有文件级白名单，`ai → orchestration` 没有对等的写权限。
 6. 所有区域都不得形成模块级 import 环。
 7. 区内实现必须直接 import 目标实现文件，不能经过兼容 barrel/shim 绕路。
 
@@ -322,7 +322,6 @@ src/
   capabilities/
     gateway.*
   infra/
-  legacy-entry.*          # 仅声明式兼容导出
 
 test/
   dependency-boundary.*
@@ -366,7 +365,6 @@ test/
 | Shared delivery pipeline | `src/orchestration/delivery-pipeline.mjs` |
 | Dependency enforcement | `test/dependency-boundary.test.mjs` |
 | Recovery/adversarial tests | `test/checkpoint-integrity.test.mjs` |
-| Legacy compatibility shims | `src/helix-*.mjs`、`src/helix-core.mjs` |
 
 项目实现细节以 [`project-architecture.md`](./project-architecture.md) 为准；本文负责可复制的原则与检查清单。
 

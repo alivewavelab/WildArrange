@@ -58,7 +58,7 @@
 
 ### 3.3 统一错误协议与契约表
 
-- **要求**：对外/对运维暴露的错误结构固定（如 `{ code, module, paths?, next_action }`）；契约表进 `doc/contracts/` 并由测试钉死。
+- **要求**：对外/对运维暴露的错误结构固定（如 `{ code, module, paths?, next_action }`）；契约必须有机器可读 owner（独立 `doc/contracts/` 表，或实现模块 + 测试钉死的等价物）。WildArrange 的 owner 是 `src/infra/error-protocol.mjs`。
 - **为什么**：症状 → 模块的映射可机器化；人看 code 即知下一步该跑哪条命令。
 - **不做的后果**：同类故障多种字符串，AI 定位漂移，人无法建立「看到这个就做什么」的条件反射。
 
@@ -257,7 +257,7 @@ low-code-project-governance.md（本文）  →  人如何掌控、日常怎么�
 five-zone-decoupling-guidelines.md        →  代码如何分区、依赖怎么约束
 doc/AGENTS.md                             →  文档放哪、何时同步
 各目录 AGENTS.md                          →  AI 进入该目录时的行动契约
-doc/contracts/                            →  错误码与 API 的机器可读真相
+错误协议 owner（如 error-protocol.mjs 或 doc/contracts/） →  错误码与 API 的机器可读真相
 doc/plans/*.html                          →  需评审的方案与流程（单次决策证据）
 ```
 
@@ -272,7 +272,7 @@ doc/plans/*.html                          →  需评审的方案与流程（单
 
 - [ ] 根 `AGENTS.md` 写清全局目标、测试入口、不可削弱的不变量。
 - [ ] 各稳定模块目录有局部契约，且写清「交付前跑什么」。
-- [ ] `doc/contracts/` 有错误码表，测试引用关键 code。
+- [ ] 错误码有机器可读 owner（`doc/contracts/` 或等价实现模块），测试引用关键 code。
 - [ ] 存在依赖边界测试，CI 必跑。
 - [ ] 存在影响面分析工具，AI 修复流程文档化要求改前改后各跑一次。
 - [ ] 存在分区测试命令；交付前跑全量。
@@ -290,9 +290,9 @@ doc/plans/*.html                          →  需评审的方案与流程（单
 | --- | --- |
 | 边界强制测试 | `test/dependency-boundary.test.mjs` |
 | 目录契约 | 根与各 `src/<zone>/AGENTS.md` |
-| 影响面命令 | `helix impact`（规划中） |
-| 分区测试 | `helix test --zone <zone>`（规划中） |
-| 决策投影 | ledger → `helix decisions --tail`（规划中） |
+| 影响面命令 | `node ./bin/helix.mjs impact src/infra/ledger.mjs` |
+| 分区测试 | `node ./bin/helix.mjs test --zone infra` |
+| 决策投影 | ledger → `node ./bin/helix.mjs decisions --limit 20`（无 `--tail`） |
 | 质量门链 | `delivery-pipeline.mjs` |
 
 新团队应替换为自己的命令名与路径，保留**能力**而非复制**名称**。

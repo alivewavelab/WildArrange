@@ -8,26 +8,23 @@ import test from "node:test";
 
 import {
   acceptTaskHandoff,
-  admitParallelAgentResult,
-  assertCurrentTaskOwnership,
-  claimTeamTask,
-  closeParallelAgentRun,
-  coordinateTaskClaim,
-  coordinationStatus,
-  importPlan,
-  initRuntime,
-  loadHelixConfig,
-  loadTaskState,
-  persistTaskState,
-  readJson,
   prepareTaskHandoff,
   pushTaskHandoff,
-  registerCoordinationDevice,
-  runParallelAgents,
-  runNextTask,
-  runWorkflowNode,
   takeoverTaskOwnership,
-} from "../src/helix-core.mjs";
+} from "../src/orchestration/handoff.mjs";
+import { admitParallelAgentResult, closeParallelAgentRun, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
+import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtime.mjs";
+import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
+import { claimTeamTask, persistTaskState } from "../src/orchestration/task-board.mjs";
+import {
+  assertCurrentTaskOwnership,
+  coordinateTaskClaim,
+  coordinationStatus,
+  registerCoordinationDevice,
+} from "../src/orchestration/remote-ownership.mjs";
+import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
+import { loadHelixConfig } from "../src/infra/runtime-config.mjs";
+import { readJson } from "../src/infra/runtime-store.mjs";
 import {
   captureIntegrationGuard,
   pushCommit,

@@ -39,8 +39,8 @@ test("cli smoke: bin/helix.mjs loads without module resolution errors", async ()
   // Regression guard: bin/helix.mjs previously had duplicate named imports
   // (e.g. approvePlan, loadPlanApproval declared twice), which is an ESM
   // SyntaxError that crashes the process before any command runs. Every
-  // unit test that imports functions directly from src/helix-core.mjs was
-  // blind to this because it never loaded bin/helix.mjs at all.
+  // unit tests that import zoned owners directly are blind to this because
+  // they never load bin/helix.mjs itself.
   const result = await runCli(["--help"], process.cwd());
   assert.equal(result.code, 0, `CLI failed to start.\nstderr: ${result.stderr}`);
   assert.match(result.stdout, /WildArrange linear runtime/);

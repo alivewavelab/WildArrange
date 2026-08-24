@@ -21,7 +21,7 @@
 
 路由分三层：**intent**（用户要什么）→ **complexity / category**（怎么做、多深）→ **agent / skills**（谁来做）。不要把 category 当成装饰标签；它决定执行者、技能包和验证强度。
 
-## Step 0：先理解，不行动
+## 步骤 0：先理解，不行动
 
 先回答：
 
@@ -32,7 +32,7 @@
 - 有没有必须先查源码/文档的外部依赖？
 - 有没有可并行读取、搜索、咨询的上下文？
 
-## Step 1：Intent 分类
+## 步骤 1：Intent 分类
 
 | Intent | 信号 | 默认路由 |
 |---|---|---|
@@ -46,7 +46,7 @@
 | `change_request` | 中途新增、设计变了、计划外必要修改 | Jiuwei change loop |
 | `release_git` | commit、push、branch、merge、PR、tag | git category |
 
-## Step 2：Complexity 分类
+## 步骤 2：Complexity 分类
 
 | Complexity | 判断标准 | 执行策略 |
 |---|---|---|
@@ -56,7 +56,7 @@
 | `open_ended` | 改善、重构、优化、架构不清 | 先调查/风险 Skill，再交 DiJiang |
 | `blocked` | 缺少会改变结果的产品决策或 secret | ask |
 
-## Step 3：Domain / Category 分类
+## 步骤 3：Domain / Category 分类
 
 | Domain | 必须 category | 规则 |
 |---|---|---|
@@ -70,7 +70,7 @@
 
 当不确定时，默认不是 `quick`。先选更贴近领域的 category。
 
-## Step 4：Skill 选择
+## 步骤 4：Skill 选择
 
 检查所有可用 skills。只要 domain 有重叠，就加入 `skills`。遗漏相关 skill 的成本高于加载一个不完全相关的 skill。
 
@@ -85,7 +85,7 @@
 - AI 味清理：`remove-ai-slops`。
 - 深度初始化：`init-deep`。
 
-## Step 5：输出合同
+## 步骤 5：输出合同
 
 只输出 JSON，不加解释：
 

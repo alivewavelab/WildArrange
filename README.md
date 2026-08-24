@@ -9,7 +9,7 @@ WildArrange 是面向 Codex、Cursor 与 Kimi Code 的本地 Agent 治理运行�
 WildArrange 把一次编码请求变成带门禁的工作流：
 
 ```text
-init -> plan -> execute -> verify -> scope -> review -> checkpoint -> resume
+init -> plan -> execute -> verify -> scope -> review -> acceptance-proof -> checkpoint -> resume
 ```
 
 核心规则：**worker 可以声称完成，但只有 gate 才能判定完成。**

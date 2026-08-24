@@ -44,24 +44,24 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 
 ## 代码维护规范
 
-- `src/helix-core.mjs` 只作为兼容导出层，不允许继续堆业务实现。
 - 项目按五区分层：`interface/ → orchestration/ → ai/ / capabilities/ → infra/`，新增功能必须先归属到对应区目录；无合适归属时才新增顶层 `src/<zone>/helix-*.mjs`。
-- `bin/` 只做参数解析与命令路由，只能 import `interface/` 或 `helix-core` 兼容层，不得直接 import 其他分区实现文件。
+- `bin/` 是五区之上的 CLI 组合入口，只做参数解析与命令路由；它可以直接 import 五区中的真实 owner，但不得承载业务流程、复制实现或引用 `src/` 根级转发文件。
 - 依赖方向只能从上往下：`interface` 可依赖 `orchestration`/`infra`；`orchestration` 可依赖 `ai`/`capabilities`/`infra`，其中 `orchestration → ai` 限定在 `test/dependency-boundary.test.mjs` 钉死的白名单边（目前仅 `linear-runtime.mjs → ai/routing.mjs`），新增必须显式改白名单；`ai` 可依赖 `orchestration`/`capabilities`/`infra`（`ai → orchestration`、`ai → capabilities` 均只读，且 `ai → capabilities` 必须走 `capabilities/gateway.mjs`）；`capabilities` 只能依赖 `infra`；`infra` 不依赖任何上层。反向依赖与模块级 import 环由 `test/dependency-boundary.test.mjs` 强制拦截，不得为了让测试变绿而放宽这些规则。
-- 五区内文件不得 import 任何旧 `src/helix-*.mjs` shim（含 `helix-core.mjs`）；shim 只服务外部旧调用方，五区内必须直接 import 分区实现文件。
 - `orchestration/` 和 `ai/` 都不得直接 import 具体能力实现文件（`capabilities/verify.mjs` 等），必须统一经 `capabilities/gateway.mjs` 的 `invokeCapability(name, ctx)`。
 - 单文件默认保持 1000 行以内；超过 700 行必须评估是否按职责拆分。
-- 模块内部必须直接 import 目标实现文件，不要通过 `src/helix-core.mjs` 绕一层。
-- 旧的 `src/helix-*.mjs` 扁平路径全部保留为 `@deprecated` 兼容 re-export shim，只做 `export * from "./<zone>/<file>.mjs"`，不得在 shim 里堆新逻辑。
+- `src/` 根目录不放运行时 `.mjs` 文件；实现与公开 owner 必须位于五区目录，不建立兼容 shim 或综合 barrel。
 - 规范采用渐进式披露：根 `AGENTS.md` 保存全局目标与不可削弱不变量；`bin/`、`src/`、五区、`test/`、`doc/`、`packs/wildarrange-linear/` 的 `AGENTS.md` 只补充本目录职责和验收要求。进入目录修改前先读最近的 `AGENTS.md`，子目录规范不得覆盖根级安全约束。
 - 新增运行时能力必须同时更新 `doc/project-architecture.md` 和本文件的目录约定。
 - gate 安全不变量不能削弱：不得删除或清空 `verify_commands`，不得跳过 verifier / scope / review / successCriteria 完成 checkpoint。
 - README 命令真实性必须对照真实 CLI `--help`，不得以源码中的注释或普通字符串充当实现证据；真实注释检查必须覆盖 JavaScript 模板表达式。
+- 产品总图位于 `docs/product/architecture-overview.html`；新分区或新运行时模块必须同步登记 `tooling/arch-module-graph/module-file-map.json` 并更新总图。新脚本必须由映射表归属；总图的输入/输出必须来自真实导出签名或代码证据，不得编造。
+- 总图交互固定为“点模块卡片 → 底部抽屉”，不为单个大模块增加第二种展开方式；顶部页签只按真实用户作业切片，不按引擎或网关类型堆目录。
+- 总图门禁豁免测试文件、`index.*`、`mod.rs`、`__init__.py`、`*.types.*`、生成目录与 D 字典的目录节点；其余改动后运行 `npm run check:arch`。
 - 重构后必须验证 `npm test`；涉及包内容变化时同时验证 `npm pack --dry-run --cache /private/tmp/helix-npm-cache`。
 
 ## 目录约定
 
-按依赖方向从上到下列出五区（`interface → orchestration → ai/capabilities → infra`）；旧 `src/helix-*.mjs` 路径均已转为兼容 shim，新代码应直接 import 下表中的新路径。
+按依赖方向从上到下列出五区（`interface → orchestration → ai/capabilities → infra`）；CLI 与测试直接 import 下表中的真实 owner。
 
 | 路径                                                           | 职责                                            |
 | ------------------------------------------------------------ | --------------------------------------------- |
@@ -76,7 +76,6 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `doc/AGENTS.md`                                             | README / 架构 / 可复用准则 / HTML 方案的文档分层 |
 | `packs/wildarrange-linear/AGENTS.md`                        | Agent、Skill、路由与工具合同的发布边界 |
 | `bin/helix.mjs`                                              | CLI 入口                                        |
-| `src/helix-core.mjs`                                         | 兼容导出层，禁止继续堆实现                                 |
 | `src/AGENTS.md`                                              | 五区归属判断、全区依赖不变量和统一修改顺序 |
 | **interface/**（宿主/人机交互边界，只依赖 orchestration、infra） |  |
 | `src/interface/AGENTS.md`                                    | Interface 局部职责、宿主安全边界和验收要求 |
@@ -126,7 +125,6 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/capabilities/checkpoint.mjs`                              | checkpoint 落盘                                  |
 | **infra/**（基础设施，不依赖任何上层区） |  |
 | `src/infra/AGENTS.md`                                        | 最低层依赖、确定性、文件/锁/命令安全约束 |
-| `src/infra/foundation.mjs`                                    | Foundation 旧入口的声明式兼容导出；五区内部不得依赖 |
 | `src/infra/runtime-store.mjs`                                 | 路径、时间/ID、目录、JSON 原子写与 hash 原语 |
 | `src/infra/file-lock.mjs`                                     | 统一文件锁原语：stale 恢复（死 pid 立即、不可解析按 mtime 宽限）与可诊断超时（错误带 owner/pid/存活状态） |
 | `src/infra/task-state-lock.mjs`                               | 全局任务状态锁（file-lock 原语的路径与默认参数封装） |

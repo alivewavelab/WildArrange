@@ -14,6 +14,7 @@ export const CORE_COMMANDS = ["init", "plan", "run", "status", "decisions", "doc
 export const COMMAND_REGISTRY = [
   { usage: "init [--sample]", desc: "初始化运行时（可选导入样例计划）", core: true },
   { usage: "plan --from <plan.json>", desc: "导入计划并生成任务状态", core: true },
+  { usage: "plan approve [--plan <planId>]", desc: "确认已导入计划（开启 planApproval 时才能 run）" },
   { usage: "run", desc: "跑下一个任务（worker→verifier→scope→review→checkpoint）", core: true },
   { usage: "status", desc: "查看状态（含门武装黄灯）", core: true },
   { usage: "decisions [--limit N] [--task T001] [--gate pre_tool_use] [--annotatable] [--format json]", desc: "查看门决策记录（每一次拦截/放行；--annotatable 只看可标注队列）", core: true },

@@ -1,83 +1,87 @@
+/** End-to-end integration coverage across the five runtime zones. */
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import path from "node:path";
 import test from "node:test";
 
-import { startDashboardServer } from "../src/helix-dashboard.mjs";
+import { startDashboardServer } from "../src/interface/dashboard.mjs";
+import { installAdapter, restoreAdapterBackup, uninstallAdapter } from "../src/interface/adapters.mjs";
+import { runDoctor } from "../src/interface/doctor.mjs";
 import {
-  appendLedger,
   admitParallelAgentResult,
-  approvePlan,
-  buildAgentContext,
-  compileCommandSafetyPatterns,
-  evaluateCommandSafety,
-  loadPlanApproval,
-  writeDefaultHelixConfig,
-  buildArchivistPacket,
   closeParallelAgentRun,
   cleanupParallelAgentRun,
-  continuationDirective,
-  createSamplePlan,
-  createTeamTask,
-  claimTeamTask,
-  classifyManifestPathChanges,
-  dashboardData,
-  getTeamTask,
-  hashLine,
-  importPlan,
-  installAdapter,
-  initRuntime,
-  listArchivistRouteSuggestions,
   listParallelAgentRuns,
-  loadHelixConfig,
+  parallelAgentStatus,
+  runParallelAgents,
+} from "../src/orchestration/parallel-runtime.mjs";
+import {
+  approvePlan,
+  importPlan,
+  loadPlanApproval,
+  validatePlanGraph,
+} from "../src/orchestration/plan-state.mjs";
+import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtime.mjs";
+import { createSamplePlan, runWorkflow } from "../src/orchestration/workflow.mjs";
+import {
+  claimTeamTask,
+  createTeamTask,
+  getTeamTask,
   listTeamMessages,
   listTeamTasks,
-  attentionReport,
+  recordTaskEvidence,
+  sendTeamMessage,
+} from "../src/orchestration/task-board.mjs";
+import {
   listChangeRequests,
-  listPromptPack,
+  recordReviewBlocker,
+  resolveChangeRequest,
+  reviewChangeRequest,
+  steerWorkflow,
+} from "../src/orchestration/change-governance.mjs";
+import {
+  attentionReport,
+  dashboardData,
+  statusReport,
+  writeWorkflowSummary,
+} from "../src/orchestration/status.mjs";
+import {
+  buildAgentContext,
+  continuationDirective,
+  resumeReport,
+} from "../src/ai/context.mjs";
+import {
+  buildArchivistPacket,
+  listArchivistRouteSuggestions,
+  resolveArchivistRouteSuggestion,
+  runArchivistRouter,
+} from "../src/ai/archivist-router.mjs";
+import { preToolUseGuard, runInjectionHook } from "../src/ai/hooks.mjs";
+import { matchSkills, resolvePromptVariant } from "../src/ai/skill-matcher.mjs";
+import { resolveInjectionPoint } from "../src/ai/injection.mjs";
+import { routeRequest } from "../src/ai/routing.mjs";
+import { hashLine } from "../src/capabilities/code-intel.mjs";
+import { scopeGuard } from "../src/capabilities/scope-guard.mjs";
+import { compileCommandSafetyPatterns, evaluateCommandSafety } from "../src/infra/command-safety.mjs";
+import { runCommand } from "../src/infra/command-runner.mjs";
+import { classifyManifestPathChanges } from "../src/infra/git-diff.mjs";
+import { appendLedger, verifyLedger } from "../src/infra/ledger.mjs";
+import { resolveAgentProvider } from "../src/infra/llm-provider.mjs";
+import { pathAllowed } from "../src/infra/path-match.mjs";
+import { listPromptPack, renderPromptPackEntry } from "../src/infra/prompt-pack.mjs";
+import { scanProjectRules } from "../src/infra/rule-scanner.mjs";
+import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
+import { loadHelixConfig, writeDefaultHelixConfig } from "../src/infra/runtime-config.mjs";
+import { readJson, resolveHelixPath } from "../src/infra/runtime-store.mjs";
+import {
   listRuntimeStateBackups,
   restoreRuntimeStateBackup,
-  runDoctor,
-  pathAllowed,
-  parallelAgentStatus,
-  preToolUseGuard,
-  readJson,
-  recordReviewBlocker,
-  recordTaskEvidence,
-  renderPromptPackEntry,
-  resolvePromptVariant,
-  resolveChangeRequest,
-  resolveArchivistRouteSuggestion,
-  resolveInjectionPoint,
-  resumeReport,
-  reviewChangeRequest,
-  runArchivistRouter,
-  resolveAgentProvider,
-  resolveHelixPath,
-  routeRequest,
-  runInjectionHook,
-  runParallelAgents,
-  runCommand,
-  runWorkflowNode,
-  runNextTask,
-  runWorkflow,
-  sendTeamMessage,
-  scanProjectRules,
-  scopeGuard,
-  statusReport,
-  steerWorkflow,
-  uninstallAdapter,
-  restoreAdapterBackup,
-  matchSkills,
-  validatePlanGraph,
   verifyConfigBaseline,
-  verifyLedger,
   verifyRuntimeState,
   writeConfigBaseline,
   writeRuntimeStateBackup,
-  writeWorkflowSummary,
-} from "../src/helix-core.mjs";
+} from "../src/infra/security.mjs";
 
 async function withTempDir(fn) {
   const baseDir = path.join(process.cwd(), ".tmp");

@@ -17,7 +17,6 @@
 ## 依赖
 
 - 不得依赖 `interface/`、`orchestration/`、`ai/`、`capabilities/` 或旧 shim。
-- 区内 helper 应直接 import 具体文件，不能经过 `helix-core.mjs`。
 
 ## 本区不变量
 

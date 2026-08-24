@@ -4,7 +4,7 @@
   "description": "WildArrange M1 的提示词、技能与工具合同包，适配 Codex/Cursor/Kimi Code 和普通 CLI 线性治理循环。",
   "source": {
     "project": "WildArrange",
-    "commercialBoundary": "Original prompt/tool contract text for WildArrange runtime. External projects are conceptual references only."
+    "commercialBoundary": "WildArrange 运行时原创 prompt/工具合同文本。外部项目仅作概念参考。"
   },
   "agents": {
     "Router": "agents/router.md",

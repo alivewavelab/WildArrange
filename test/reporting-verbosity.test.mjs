@@ -9,7 +9,10 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
-import { importPlan, initRuntime, resolveHelixPath, runCommand } from "../src/helix-core.mjs";
+import { importPlan } from "../src/orchestration/plan-state.mjs";
+import { runCommand } from "../src/infra/command-runner.mjs";
+import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
+import { resolveHelixPath } from "../src/infra/runtime-store.mjs";
 
 const CLI_PATH = path.resolve(process.cwd(), "bin", "helix.mjs");
 

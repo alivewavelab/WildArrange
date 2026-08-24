@@ -14,15 +14,15 @@ import test from "node:test";
 
 import { runInjectionHook } from "../src/ai/hooks.mjs";
 import { routeRequest } from "../src/ai/routing.mjs";
+import { importPlan } from "../src/orchestration/plan-state.mjs";
+import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { readDecisions } from "../src/infra/decision-log.mjs";
 import {
   annotationStats,
   appendAnnotation,
-  importPlan,
-  initRuntime,
   readAnnotations,
-  resolveHelixPath,
-} from "../src/helix-core.mjs";
+} from "../src/infra/annotation-log.mjs";
+import { resolveHelixPath } from "../src/infra/runtime-store.mjs";
 
 const execFileAsync = promisify(execFile);
 const HELIX_BIN = path.resolve(import.meta.dirname, "..", "bin", "helix.mjs");

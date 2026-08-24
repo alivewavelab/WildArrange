@@ -71,7 +71,7 @@
       "layer": "host_adapter",
       "status": "implemented",
       "command": "node ./bin/helix.mjs adapter install --target all --mode local",
-      "purpose": "生成 Codex hooks、Cursor rule 与 Kimi plugin，把 WildArrange 的 hook run 入口挂到宿主可调用的位置；Kimi plugin 必须由用户显式安装，默认不修改用户全局配置。",
+      "purpose": "生成 Codex hooks、Cursor `.cursor/hooks.json`（受信任工作区中 preToolUse / beforeShellExecution fail-closed 硬拦截）与 `.cursor/rules/wildarrange.mdc` 软规则层，以及 Kimi plugin；Kimi plugin 必须由用户显式安装，默认不修改用户全局配置。",
       "reads": [
         "package.json",
         "helix.config.json",
@@ -80,6 +80,7 @@
       "writes": [
         ".helix/adapters/**",
         ".codex/hooks.json",
+        ".cursor/hooks.json",
         ".cursor/rules/wildarrange.mdc",
         ".agents/skills/**",
         ".helix/ledger.jsonl"
@@ -1245,10 +1246,127 @@
       "writes": [
         "tool-specific MCP config"
       ]
+    },
+    {
+      "name": "helix_plan_approve",
+      "layer": "planning",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs plan approve",
+      "purpose": "在 planApproval.required=true 时确认已导入计划，解除 awaiting_plan_approval 后才允许 run。",
+      "reads": [
+        ".helix/work.json",
+        ".helix/plans/**"
+      ],
+      "writes": [
+        ".helix/work.json",
+        ".helix/plans/**",
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "helix_device_register",
+      "layer": "runtime_state",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs device register --name macbook",
+      "purpose": "登记当前设备，供 Git 多设备协调与跨设备 handoff 绑定 owner。",
+      "reads": [
+        ".helix/**"
+      ],
+      "writes": [
+        ".helix/coordination/**",
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "helix_coordination",
+      "layer": "runtime_state",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs coordination status | node ./bin/helix.mjs coordination claim --task T001 --owner ZhuRong",
+      "purpose": "查看 Git 协调状态，或显式远端领取任务并维护单写 owner。",
+      "reads": [
+        ".helix/**",
+        "git remotes"
+      ],
+      "writes": [
+        ".helix/coordination/**",
+        ".helix/team/tasks.json",
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "helix_handoff",
+      "layer": "runtime_state",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs handoff prepare --task T001 --to-device-id <uuid> --to-device-name mac-mini | node ./bin/helix.mjs handoff push --task T001 | node ./bin/helix.mjs handoff accept --plan <planId> --task T001 | node ./bin/helix.mjs handoff takeover --plan <planId> --task T001 --expected-device-id <uuid> --reason <text>",
+      "purpose": "跨设备 prepare/push/accept/takeover；takeover 必须显式记录预期旧设备和理由，不允许按本机时间自动过期 owner。",
+      "reads": [
+        ".helix/**",
+        "git remotes"
+      ],
+      "writes": [
+        ".helix/coordination/**",
+        ".helix/handoff/**",
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "helix_impact",
+      "layer": "code_intelligence",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs impact <file>",
+      "purpose": "按改动文件做反向依赖闭包的影响面分析。",
+      "reads": [
+        "src/**",
+        "workspace files"
+      ],
+      "writes": []
+    },
+    {
+      "name": "helix_review_suspicious",
+      "layer": "gate",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs review suspicious",
+      "purpose": "LLM 可疑判断异步审查：只读清洗结论包，结论只进 `.helix/reports/suspicion.*`，不进完成链。",
+      "reads": [
+        ".helix/decisions.jsonl",
+        "helix.config.json"
+      ],
+      "writes": [
+        ".helix/reports/suspicion.*"
+      ]
+    },
+    {
+      "name": "helix_test",
+      "layer": "quality_gate",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs test --zone infra",
+      "purpose": "按分区或影响面选择最小测试集并运行。",
+      "reads": [
+        "src/**",
+        "test/**"
+      ],
+      "writes": []
+    },
+    {
+      "name": "helix_parallel_retry",
+      "layer": "team",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs parallel retry --run <runId>",
+      "purpose": "只重跑指定 run 中未通过或未完成的任务，不重跑已成功任务。",
+      "reads": [
+        ".helix/agent-runs/**",
+        ".helix/team/tasks.json"
+      ],
+      "writes": [
+        ".helix/agent-runs/**",
+        ".helix/team/inbox/**",
+        ".helix/team/outbox/**",
+        ".helix/ledger.jsonl"
+      ]
     }
   ],
   "adapterNotes": {
     "codex": "以 shell-backed commands 或 MCP tools 暴露这些能力；Codex 写文件必须保持在任务范围内。",
-    "cursor": "以本地 CLI commands 和 project rules 暴露；用 watcher 或 git hooks 强化 gate。"
+    "cursor": "以本地 CLI commands、`.cursor/hooks.json` fail-closed 硬拦截和 `.cursor/rules/wildarrange.mdc` 软规则层暴露；宿主拦截只是早期预警，最终完成仍走 verifier / scope / review / successCriteria / acceptance proof / checkpoint。"
   }
 }

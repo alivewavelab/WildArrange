@@ -8,12 +8,10 @@ import path from "node:path";
 import test from "node:test";
 
 import { runCommand } from "../src/infra/command-runner.mjs";
-import {
-  initRuntime,
-  importPlan,
-  resolveHelixPath,
-  runParallelAgents,
-} from "../src/helix-core.mjs";
+import { runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
+import { importPlan } from "../src/orchestration/plan-state.mjs";
+import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
+import { resolveHelixPath } from "../src/infra/runtime-store.mjs";
 
 async function withTempDir(fn) {
   const baseDir = path.join(process.cwd(), ".tmp");

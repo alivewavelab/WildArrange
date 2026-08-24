@@ -1,40 +1,40 @@
-# WildArrange Concept
+# WildArrange 产品概念
 
-WildArrange is a small-team governance layer for AI coding agents.
+WildArrange 是面向小团队的 AI 编程 Agent 治理层。
 
-The simple analogy: a worker can say "I finished", but the warehouse gate still checks the package before it leaves. WildArrange is that gate.
+简单类比：工人可以说「我干完了」，但出库前仓库门口仍会验货。WildArrange 就是那道门。
 
-## Product Intent
+## 产品意图
 
-The project exists to stop three common failures:
+本项目旨在阻止三种常见失败：
 
-1. Agent finishes without real verification.
-2. Agent changes files outside the agreed scope.
-3. Session context disappears when Codex or Cursor is closed.
+1. Agent 未经真实验证就宣称完成。
+2. Agent 修改了约定范围之外的文件。
+3. Codex 或 Cursor 关闭后会话上下文丢失。
 
-## Core Loop
+## 核心循环
 
 ```text
-Plan -> Worker -> Verifier -> Scope Guard -> Review Gate -> Checkpoint
+Plan -> Worker -> Verifier -> Scope Guard -> Review Gate -> Acceptance Proof -> Checkpoint
 ```
 
-Each step writes evidence to `.helix/`, so a new session can resume from disk.
+每一步都会把证据写入 `.helix/`，新会话可以从磁盘恢复。
 
-## External Pattern Boundary
+## 外部模式边界
 
-- Specialized agent roles.
-- Planning and execution separation.
-- Trust-but-verify review discipline.
-- Category-based routing.
-- Wisdom/context accumulation.
-- Session continuity through files.
+- 专项 Agent 角色。
+- 计划与执行分离。
+- 信任但验证的复核纪律。
+- 基于类别的路由。
+- 智慧/上下文累积。
+- 通过文件实现会话延续。
 
-## What Is Deliberately Smaller
+## 刻意保持更小的范围
 
-M1 does not yet run a real multi-agent cluster. It first makes one linear path reliable, then adds child agents and background workers.
+M1 不运行常驻多 Agent 集群。命令型子 Agent 已可在隔离目录或 Git worktree 中运行，之后仅通过 admission 进入主线（`writable_paths` → verify → scope → review → acceptance proof → checkpoint）。宿主私有的后台进程控制仍属于 adapter 工作。
 
-## Current Truth
+## 当前真相
 
-WildArrange exposes five long-lived Agents: Jiuwei, DiJiang, ZhuRong, BaiZe, and LuWu. Router is a deterministic system node; CangJie is an optional internal archivist/semantic-routing profile. Product, journey, acceptance, UX, scope, research, inspection, risk-review, and skeptical-review duties are Skills mounted onto the appropriate Agent.
+WildArrange 对外暴露五个长期 Agent：Jiuwei、DiJiang、ZhuRong、BaiZe、LuWu。Router 是确定性系统节点；CangJie 是可选的内部档案员/语义路由 profile。产品、旅程、验收、UX、范围、调研、检查、风险复核与怀疑式验收等职责，以 Skill 形式按需挂载到对应 Agent 上。
 
-BaiZe is the only independent reviewer. Deterministic gates remain authoritative, while optional OpenAI-compatible LLM review adds a second opinion when configured.
+BaiZe 是唯一的独立复核者。确定性门仍是权威；可选的 OpenAI 兼容 LLM review 在配置后提供第二意见。

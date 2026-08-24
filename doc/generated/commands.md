@@ -4,11 +4,12 @@
 | ---- | ---- |
 | `wildarrange init [--sample]` | 初始化运行时（可选导入样例计划） |
 | `wildarrange plan --from <plan.json>` | 导入计划并生成任务状态 |
+| `wildarrange plan approve [--plan <planId>]` | 确认已导入计划（开启 planApproval 时才能 run） |
 | `wildarrange run` | 跑下一个任务（worker→verifier→scope→review→checkpoint） |
 | `wildarrange status` | 查看状态（含门武装黄灯） |
-| `wildarrange decisions [--limit N] [--task T001] [--gate pre_tool_use] [--format json]` | 查看门决策记录（每一次拦截/放行） |
+| `wildarrange decisions [--limit N] [--task T001] [--gate pre_tool_use] [--annotatable] [--format json]` | 查看门决策记录（每一次拦截/放行；--annotatable 只看可标注队列） |
 | `wildarrange doctor` | 一键体检：配置/完成状态/ledger/备份对账 |
-| `wildarrange config init [--root] [--force]` | 生成默认配置 |
+| `wildarrange config init [--root] [--force] [--armed]` | 生成默认配置（--armed 直接武装质量门） |
 | `wildarrange config show` | 查看生效配置 |
 | `wildarrange config baseline [--reason "..."]` | 写入 config hash 基线 |
 | `wildarrange config verify` | 校验 config 基线 |
@@ -70,6 +71,7 @@
 | `wildarrange annotate --decision <decisionId> --category <rule_wrong|case_wrong|mislabeled> [--reason "..."] [--author name]` | 标注门决策（只进报告，不改配置） |
 | `wildarrange annotate list [--limit N]` | 列出标注 |
 | `wildarrange annotate stats` | 标注聚合统计 |
+| `wildarrange review suspicious [--limit N]` | LLM 可疑判断异步审查（只进报告，不进完成链） |
 | `wildarrange test [--zone interface|orchestration|ai|capabilities|infra] [changed-file...]` | 分区/影响面最小测试集 |
 | `wildarrange docs commands [--write]` | 从命令注册表生成命令文档（单一事实源） |
 | `wildarrange state backup [--reason "..."]` | 备份运行态关键文件 |

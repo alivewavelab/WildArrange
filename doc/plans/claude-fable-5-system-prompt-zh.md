@@ -1,3 +1,5 @@
+> ⚠️ **受限第三方 prompt 参考，不是 WildArrange 规范。** 禁止照抄进发布包。合法借鉴见 [`2026-06-16-claude-fable-governance-borrowings.html`](./2026-06-16-claude-fable-governance-borrowings.html)。
+
 # Claude Fable 5 — 系统提示词
 ---
 

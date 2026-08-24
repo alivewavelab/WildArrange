@@ -13,12 +13,10 @@ import test from "node:test";
 import { runInjectionHook } from "../src/ai/hooks.mjs";
 import { projectDecisionStats } from "../src/interface/decisions.mjs";
 import { projectTimeline } from "../src/interface/timeline.mjs";
-import {
-  appendAnnotation,
-  importPlan,
-  initRuntime,
-  resolveHelixPath,
-} from "../src/helix-core.mjs";
+import { importPlan } from "../src/orchestration/plan-state.mjs";
+import { appendAnnotation } from "../src/infra/annotation-log.mjs";
+import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
+import { resolveHelixPath } from "../src/infra/runtime-store.mjs";
 
 const execFileAsync = promisify(execFile);
 const HELIX_BIN = path.resolve(import.meta.dirname, "..", "bin", "helix.mjs");

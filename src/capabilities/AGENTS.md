@@ -5,7 +5,7 @@
 ## 负责
 
 - Worker、verifier、scope guard、review gate、code intelligence、repository governance、acceptance proof、checkpoint。
-- 静态能力注册表与统一调用结果信封。
+- 静态能力注册表与统一调用结果信封。gateway 当前注册名：`worker`、`verify`、`scope`、`review`、`acceptance-proof`、`checkpoint`、`command`、`command-safety`、`repository-governance`。`code-intel` 只被 `review-gate.mjs` 区内调用，不是 `invokeCapability` 名。
 
 ## 不负责
 

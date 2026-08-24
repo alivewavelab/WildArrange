@@ -14,8 +14,8 @@ test("impact lists the reverse-transitive importers of a changed infra file", as
   // ledger 被多区引用；至少这些直接进口方必须出现。
   assert.ok(report.affected.includes("src/interface/adapters.mjs"), "adapters.mjs imports ledger");
   assert.ok(report.affected.includes("src/orchestration/status.mjs"), "status.mjs imports ledger");
-  // 反向闭包必须到达间接进口方（gateway 之外的传递链）。
-  assert.ok(report.affected.includes("src/helix-core.mjs"), "compat layer re-export is affected");
+  // 反向闭包必须到达间接进口方（status → dashboard 的传递链）。
+  assert.ok(report.affected.includes("src/interface/dashboard.mjs"), "dashboard imports status which imports ledger");
   // 应跑测试：命中命名对位 + 直接引用 ledger 的测试 + 边界测试常驻。
   assert.ok(report.testsToRun.includes("test/ledger-tail.test.mjs"));
   assert.ok(report.testsToRun.includes("test/dependency-boundary.test.mjs"));

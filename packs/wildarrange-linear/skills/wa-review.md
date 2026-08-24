@@ -1,5 +1,7 @@
 # wa-review
 
+> **M1 当前真相**：WildArrange 产物写在 `.helix/`（计划 `.helix/plans/*.json`，任务 `.helix/team/tasks.json`）。本文若出现 `.workflow/`、`artifacts-server`、`gates-server`、`vault-server`、`SendMessage` 等，只是历史/概念词汇，**不得照做**。计划用 `node ./bin/helix.mjs plan --from plan.json`；并行用 `parallel run` / `parallel admit`；门控走 task 的 `verify_commands` / `review_commands` 与 `delivery-pipeline`。DiJiang / BaiZe / LuWu 不得进入 command worker。
+
 ## 用途
 
 代码 review 四段管线。机器交接 JSON / 人看 Markdown 双轨。
@@ -8,7 +10,7 @@
 
 ### 1. 扇出
 
-always-on reviewer：
+常驻 reviewer：
 
 - 正确性。
 - 测试。
@@ -17,12 +19,12 @@ always-on reviewer：
 
 按 diff 条件追加：
 
-- security。
-- performance。
-- migration。
+- 安全。
+- 性能。
+- 迁移。
 - 前端竞态。
 
-每个 reviewer 写全量 JSON 到 `/tmp/wildarrange/{run_id}/{reviewer}.json`，只回 compact JSON 省上下文。高风险三项 correctness / security / adversarial 使用顶配模型，其余中配。
+每个 reviewer 写全量 JSON 到 `/tmp/wildarrange/{run_id}/{reviewer}.json`，只回 compact JSON 省上下文。高风险三项（正确性 / 安全 / 对抗性）使用顶配模型，其余中配。
 
 ### 2. 去重
 
@@ -36,12 +38,12 @@ always-on reviewer：
 
 每个幸存 finding 派独立 validator 复核，绝不 batch。batch 会重现 persona 偏置。返回 `{validated, reason}`，false 即丢。
 
-对照 spec 做 Requirements Completeness 和 regression 影响分析。
+对照 spec 做需求完整性与回归影响分析。
 
 ## 输入 / 输出
 
 - 输入：diff + plan/REQ-ID。
-- 输出：agent mode 下 findings JSON；default mode 下 report.md；残留 finding 写 PR body 或 `docs/residual-review-findings/`。
+- 输出：Agent 模式下 findings JSON；默认模式下 report.md；残留 finding 写 PR body 或 `docs/residual-review-findings/`。
 
 ## 工具 / MCP
 

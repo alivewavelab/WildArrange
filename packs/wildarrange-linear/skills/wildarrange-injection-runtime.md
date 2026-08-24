@@ -7,7 +7,7 @@
 核心目标不是把治理藏进某个宿主的私有能力，而是让不同宿主按能力分层接入同一套本地协议：
 
 - Codex：adapter 写入项目 `.codex/hooks.json`，并保留 `.helix/adapters/codex/hooks.json` 审计副本；只有在可信项目里通过 `/hooks` review / trust 后，才具备 hard hook 拦截。
-- Cursor：adapter 写入 `.cursor/rules/wildarrange.mdc`，属于 soft 规则注入；模型必须主动执行 CLI，不能假装宿主会强制拦截。
+- Cursor：adapter 写入 `.cursor/hooks.json`（含 hook bridge），受信任工作区中 `preToolUse`（Write/Delete/Edit/Shell）与 `beforeShellExecution` **fail-closed 硬拦截**；`.cursor/rules/wildarrange.mdc` 仍是软规则层。宿主拦截只是早期预警，最终完成仍必须过 verifier / scope / review / successCriteria / acceptance proof / checkpoint。
 - Kimi Code：adapter 生成 `.helix/adapters/kimi/plugin/`，用户显式安装后由 Hook bridge 转发宿主事件；复用 `AGENTS.md` 与 `.agents/skills/`，不改用户级配置。Kimi Hook 崩溃或超时时会 fail-open，最终完成仍以 WildArrange gate 为准。
 - 普通 CLI：手动运行 `node ./bin/helix.mjs ...`，用文件状态和 gate 命令完成治理闭环。
 
@@ -96,14 +96,14 @@ node ./bin/helix.mjs hook run --from hook.json
 
 ## Agent 必须行为
 
-### Jiuwei
+### Jiuwei（编排）
 
 - 新会话先看 `session_start` / `stop` 注入结果。
 - 如果宿主提供 hook payload，优先执行 `node ./bin/helix.mjs hook run --from hook.json`。
 - 中途需求变化必须走 `helix steer` 或 ChangeRequest，不允许聊天里直接改计划。
 - 如果配置缺少关键模型或注入点，先报告配置缺口。
 
-### Jiuwei
+### Jiuwei（执行）
 
 - 执行前必须构建 `before_execute` 上下文。
 - 写文件前如果宿主支持 `pre_tool_use`，必须接受 `permissionDecision=deny`。

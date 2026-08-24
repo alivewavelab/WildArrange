@@ -44,11 +44,11 @@ npm pack --dry-run --cache /private/tmp/helix-npm-cache
 
 ## 输出
 
-- `changedFiles`
-- `commitsSinceLastRelease`
-- `releaseNotesDraft`
-- `riskFlags`
-- `recommendedVersionBump`: `patch` / `minor` / `major`
+- `changedFiles`（变更文件）
+- `commitsSinceLastRelease`（自上次发布以来的 commit）
+- `releaseNotesDraft`（发布说明草稿）
+- `riskFlags`（风险标记）
+- `recommendedVersionBump`（建议版本 bump）：`patch` / `minor` / `major`
 
 ## 规则
 

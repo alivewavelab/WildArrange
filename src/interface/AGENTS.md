@@ -19,7 +19,6 @@
 
 - 只允许依赖 `orchestration/` 与 `infra/`。
 - 不得直接依赖 `ai/` 或 `capabilities/`。
-- 不得通过旧 `src/helix-*.mjs` shim 绕过边界。
 
 ## 本区不变量
 

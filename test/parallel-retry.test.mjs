@@ -9,13 +9,13 @@ import path from "node:path";
 import test from "node:test";
 
 import {
-  initRuntime,
-  importPlan,
   parallelAgentStatus,
-  resolveHelixPath,
   retryParallelAgentRun,
   runParallelAgents,
-} from "../src/helix-core.mjs";
+} from "../src/orchestration/parallel-runtime.mjs";
+import { importPlan } from "../src/orchestration/plan-state.mjs";
+import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
+import { resolveHelixPath } from "../src/infra/runtime-store.mjs";
 
 const CLI_PATH = path.resolve(process.cwd(), "bin", "helix.mjs");
 

@@ -1,14 +1,14 @@
-# WildArrange Project Architecture
+# WildArrange 项目架构
 
-> Reusable five-zone rules: [five-zone-decoupling-guidelines.md](./five-zone-decoupling-guidelines.md). Refactor history and handoff notes: [2026-07-21-five-zone-refactor-handoff.md](./2026-07-21-five-zone-refactor-handoff.md).
+> 可复用的五区规则见 [five-zone-decoupling-guidelines.md](./five-zone-decoupling-guidelines.md)。重构历史与交接说明见 [2026-07-21-five-zone-refactor-handoff.md](./2026-07-21-five-zone-refactor-handoff.md)。
 
-## Runtime Shape
+## 运行时形态
 
-The codebase is laid out in five dependency zones. Dependencies only flow downward; `test/dependency-boundary.test.mjs` enforces this on every `npm test` run, so it is not just a diagram.
+代码库按五个依赖区分层。依赖只能自上而下流动；`test/dependency-boundary.test.mjs` 在每次 `npm test` 时强制校验，因此这不只是示意图。
 
 ```text
 bin/helix.mjs
-  -> src/helix-core.mjs (compatibility barrel, re-exports everything below)
+  -> 五区中的真实 owner（CLI 是组合入口，不经 barrel）
   -> src/interface/*      (dashboard, adapters, doctor — host/human-facing edge)
        -> src/orchestration/*, src/infra/*
   -> src/orchestration/*  (workflow order, retry, gate sequencing)
@@ -17,20 +17,20 @@ bin/helix.mjs
        -> src/orchestration/* (read-only), src/capabilities/* (via gateway only), src/infra/*
   -> src/capabilities/*   (verify, scope-guard, worker, review-gate, checkpoint, acceptance-proof, gateway)
        -> src/infra/*
-  -> src/infra/*          (foundation, ledger, security, command-runner/safety, git, rules, llm, memory, ...)
+  -> src/infra/*          (runtime store/config/bootstrap, ledger, security, command runner/safety, git, rules, llm, memory, ...)
   -> packs/wildarrange-linear/*
   -> .helix/*
 ```
 
-Every old flat `src/helix-*.mjs` path still exists as a declarative `@deprecated` re-export shim with no business logic — most are a single `export * from "./<zone>/<file>.mjs"`, while modules whose implementation was split across several zoned files (e.g. `helix-gates.mjs`, `helix-review.mjs`) aggregate multiple named re-exports. Existing imports keep working while new code targets the zoned path directly.
+`src/` 根目录不再承载运行时 `.mjs` 文件。项目尚未形成需要维护的历史 JavaScript API，因此 CLI、测试和模块调用方都直接 import 五区中的真实 owner，不建立兼容 shim 或综合 barrel。
 
-## Agent and Skill Model
+## Agent 与 Skill 模型
 
-WildArrange has exactly five long-lived Agents: Jiuwei (orchestration and linear delivery), DiJiang (planning), ZhuRong (implementation), BaiZe (independent review), and LuWu (read-only repository stewardship). The manifest, root config, and deterministic route result enforce this machine-level whitelist. Router is the only system node and is not a sixth Agent. CangJie is an optional internal ArchivistRouter/semantic-shadow profile and cannot enter the long-lived manifest or deterministic route. Product intent, user journey, acceptance design, UX review, scope tradeoff, domain research, code inspection, external research, risk review, and skeptical acceptance are Skills mounted onto those long-lived roles.
+WildArrange 恰好有五个长期 Agent：Jiuwei（编排与线性交付）、DiJiang（计划）、ZhuRong（实现）、BaiZe（独立复核）、LuWu（只读仓库治理）。manifest、根 config 与确定性路由结果在机器层强制这一白名单。Router 是唯一系统节点，不是第六个 Agent。CangJie 是可选的内部 ArchivistRouter/语义 shadow profile，不能进入长期 manifest 或确定性路由。产品意图、用户旅程、验收设计、UX 复核、范围权衡、领域调研、代码检查、外部调研、风险复核与怀疑式验收，均以 Skill 形式挂载到上述长期角色上。
 
-## Git-Only Multi-Device Coordination
+## 仅 Git 的多设备协调
 
-Cross-device state is coordinated through the existing Git remote rather than a central service. `.helix/` stays local; the shared durable facts are immutable coordination commits on `wildarrange/task/<planId>/<taskId>`.
+跨设备状态通过现有 Git remote 协调，而非中心服务。`.helix/` 保持本地；共享的持久事实是 `wildarrange/task/<planId>/<taskId>` 上不可变的协调 commit。
 
 ```text
 device identity
@@ -45,37 +45,37 @@ device identity
   -> durable checkpoint
 ```
 
-`gitCoordination.mode` selects `off`, `manual`, `guarded` (default), or `strict`. `guarded` activates remote ownership and worktree isolation when a remote exists and reports a local fallback otherwise. `strict` makes Git, the remote, worktree isolation, clean handoff, and pre-handoff verification mandatory. No enabled profile can permit two write owners, force push, clock-based automatic takeover, unpushed cross-device handoff, or checkpoint after a stale integration SHA.
+`gitCoordination.mode` 可选 `off`、`manual`、`guarded`（默认）或 `strict`。`guarded` 在有 remote 时启用远端 ownership 与 worktree 隔离，否则报告本地降级。`strict` 强制 Git、remote、worktree 隔离、干净 handoff 与 handoff 前验证。任何启用配置都不得允许双写 owner、force push、基于时钟的自动 takeover、未 push 的跨设备 handoff，或在 integration SHA 过期后 checkpoint。
 
-Coordination commits are built with `git commit-tree`. Handoff preparation uses a temporary index containing both working-tree changes and local committed changes not yet present on the remote task branch, limited to paths admitted by `writable_paths`; `.helix/` is always excluded and the developer's current index is untouched. The prepared tree SHA is persisted and recomputed immediately before push, so edits between `prepare` and `push` require a fresh prepare. Packets are base64url JSON with a SHA-256 digest in commit trailers; accepting devices verify the digest, target device UUID, current remote HEAD, and clean working tree before publishing a normal fast-forward acceptance commit. Push, accept, and takeover retries recognize their own already-published packet and backfill local task/audit state.
+协调 commit 用 `git commit-tree` 构建。handoff 准备使用临时 index，包含工作区变更与尚未出现在远端 task 分支上的本地已提交变更，且限于 `writable_paths` 允许的路径；`.helix/` 始终排除，开发者当前 index 不被触碰。准备的 tree SHA 会持久化，并在 push 前立即重算，因此 `prepare` 与 `push` 之间的编辑需要重新 prepare。packet 为带 SHA-256 digest（在 commit trailer 中）的 base64url JSON；接受方设备在发布普通 fast-forward acceptance commit 前验证 digest、目标设备 UUID、当前 remote HEAD 与干净工作区。push、accept、takeover 重试能识别自身已发布的 packet，并回填本地 task/audit 状态。
 
-Parallel admission captures and fetches the remote integration SHA before applying a child result. Before gates and again before completion it rechecks task ownership, verifies that the guarded SHA is an ancestor of the current workspace, confirms that the remote integration branch has not moved, and rejects candidate paths not attributed to the child result or accepted handoff. After gates and acceptance proof pass, it creates a temporary-index integration commit whose parent is the guarded remote SHA and pushes it without force. Only then may the local checkpoint complete. A remote movement, stale local base, or unattributed dirty path rolls back only this run's files with `revalidation_required`. Once an integration push is known to have succeeded, any later local failure, ownership change, descendant main commit, or abnormal history leaves the claim and intent in `recovery_required`; rollback and ownership release are forbidden.
+并行 admission 在应用子 Agent 结果前捕获并 fetch 远端 integration SHA。在 gate 之前及完成之前，它会再次检查 task ownership、验证 guarded SHA 是否为当前工作区祖先、确认远端 integration 分支未移动，并拒绝未归因于子 Agent 结果或已接受 handoff 的候选路径。gate 与 acceptance proof 全部通过后，创建以 guarded remote SHA 为父提交的临时 index integration commit，并普通 push（非 force）。只有此后本地 checkpoint 才能完成。远端移动、本地基线过期或无归属脏路径时，仅回滚本 run 的文件并返回 `revalidation_required`。一旦已知 integration push 成功，之后任何本地失败、ownership 变化、main 后代 commit 或异常历史都会使 claim 与 intent 处于 `recovery_required`；禁止回滚与释放 ownership。
 
-## Five-Zone Layering
+## 五区分层
 
-| Zone | Directory | Owns | Allowed to depend on |
+| 区 | 目录 | 职责 | 允许依赖 |
 | --- | --- | --- | --- |
-| Interface | `src/interface/` | Dashboard HTTP API, Codex/Cursor/Kimi adapter install, `doctor` health report — anything a human or host IDE talks to directly | `orchestration`, `infra` |
-| Orchestration | `src/orchestration/` | Task/plan state, linear + parallel runtime loops, the shared `delivery-pipeline`, task board, change governance, status/attention report | `ai` (pinned edge list only), `capabilities` (gateway only), `infra` |
-| AI | `src/ai/` | Routing, ArchivistRouter, prompt injection, skill matcher, agent context builder, host lifecycle hooks | `orchestration` (read-only), `capabilities` (gateway only), `infra` |
-| Capabilities | `src/capabilities/` | The atomic gates themselves (verify, scope-guard, worker, review-gate, code-intel, repository-governance, acceptance-proof, checkpoint) plus `gateway.mjs`, the single seam every caller above must go through | `infra` |
-| Infra | `src/infra/` | runtime-store、agent-registry、runtime-config、task-state-lock、runtime-snapshot、prompt-pack、runtime-bootstrap，以及 ledger、security、command-runner/safety、git diff/worktree、rule scanner、LLM provider、memory digest、path matching、success criteria、task predicates | nothing above it |
+| Interface | `src/interface/` | Dashboard HTTP API、Codex/Cursor/Kimi adapter 安装、`doctor` 体检报告——任何人或宿主 IDE 直接交互的边界 | `orchestration`, `infra` |
+| Orchestration | `src/orchestration/` | 任务/计划状态、线性 + 并行运行时循环、共享 `delivery-pipeline`、任务板、变更治理、status/attention 报告 | `ai`（仅白名单边）、`capabilities`（仅 gateway）、`infra` |
+| AI | `src/ai/` | 路由、ArchivistRouter、prompt 注入、skill matcher、Agent 上下文构建、宿主生命周期 hook | `orchestration`（只读）、`capabilities`（仅 gateway）、`infra` |
+| Capabilities | `src/capabilities/` | 原子 gate 本身（verify、scope-guard、worker、review-gate、code-intel、repository-governance、acceptance-proof、checkpoint）及 `gateway.mjs`——上层调用方必须经此单一接缝 | `infra` |
+| Infra | `src/infra/` | runtime-store、agent-registry、runtime-config、task-state-lock、runtime-snapshot、prompt-pack、runtime-bootstrap，以及 ledger、security、command-runner/safety、git diff/worktree、rule scanner、LLM provider、memory digest、path matching、success criteria、task predicates | 不依赖上层 |
 
-Seven invariants beyond simple layering, all checked by `test/dependency-boundary.test.mjs`:
+除简单分层外还有七条不变量，均由 `test/dependency-boundary.test.mjs` 检查：
 
-1. **Gateway-only capability access.** Neither `orchestration/` nor `ai/` may `import` a capability implementation file (e.g. `capabilities/verify.mjs`) directly — they must call `invokeCapability(name, ctx)` from `capabilities/gateway.mjs`. Every gate outcome is reported through the same seven-field envelope (`capability`, `status`, `evidence`, `sideEffect`, `duration_ms`, `cost`, `error`). Adding a new *callable capability* touches only the implementation file plus one gateway registration line; adding a new *mandatory quality gate* additionally requires inserting it into the step sequence in `orchestration/delivery-pipeline.mjs` — but only there: the linear loop, parallel admission, and the single-step node workflow all follow the pipeline's definition.
-2. **One-way `ai` <-> `capabilities`.** `ai/` may call into `capabilities/` (through the gateway) because hooks and context builders need to ask "is this path in scope" the same way orchestration does. `capabilities/` must never import anything from `ai/` — that direction is permanently blocked.
-3. **Pinned `orchestration -> ai` edge list.** Because `ai -> orchestration` is also allowed, coupling between these two zones is kept in check by naming every `orchestration -> ai` edge explicitly in the test (currently only `linear-runtime.mjs -> ai/routing.mjs` for the workflow "route" node). Deterministic route-table reading lives in `infra/route-table.mjs`, so plan import and the task board do not touch the ai zone at all.
-4. **No zoned file may import a legacy `src/helix-*.mjs` shim** (including `helix-core.mjs`). Shims re-export zoned files, so allowing them as import targets would be a laundering channel around the zone rules. Shims exist only for external/old callers.
-5. **No module-level import cycles anywhere in `src/`**, guarding against a real cycle quietly forming inside the mutually-allowed `ai`/`orchestration` pair.
-6. **No non-literal dynamic imports anywhere in `src/`**: the entire argument of every dynamic `import()` must be a single plain string literal. Variables, template literals, and concatenation expressions like `import("../x.mjs" + "")` are all invisible to static import scanning and could smuggle a reverse-zone dependency at runtime, so they are rejected outright.
-7. **Legacy shims stay declarative.** Legacy `src/helix-*.mjs` files (including `helix-core.mjs`) are exempt from the zone rules during migration, which would otherwise let business logic quietly move back into a shim and bypass every boundary — so a dedicated subtest asserts that these files contain nothing but export/import declarations.
+1. **仅经 gateway 访问 capability。** `orchestration/` 与 `ai/` 不得直接 `import` capability 实现文件（如 `capabilities/verify.mjs`）——必须调用 `capabilities/gateway.mjs` 的 `invokeCapability(name, ctx)`。每个 gate 结果经同一七字段信封报告（`capability`, `status`, `evidence`, `sideEffect`, `duration_ms`, `cost`, `error`）。新增*可调用 capability* 只需改实现文件 + gateway 一行注册；新增*强制质量 gate* 还需在 `orchestration/delivery-pipeline.mjs` 的步骤序列中插入——且仅在此处：线性循环、并行 admission 与单步 node workflow 都遵循 pipeline 定义。
+2. **`ai` ↔ `capabilities` 单向。** `ai/` 可经 gateway 调用 `capabilities/`（hook 与 context builder 需要与 orchestration 同样问「路径是否在范围内」）。`capabilities/` 永远不得 import `ai/`——该方向永久阻断。
+3. **钉死的 `orchestration -> ai` 边列表。** 因允许 `ai -> orchestration`，两区耦合通过测试中显式命名每条 `orchestration -> ai` 边来约束（目前仅 `linear-runtime.mjs -> ai/routing.mjs` 用于 workflow 的「route」节点）。确定性路由表读取在 `infra/route-table.mjs`，计划导入与任务板完全不触 ai 区。
+4. **`src/` 根目录不得放运行时 `.mjs`。** 所有实现必须归属五区，防止用根级 barrel 或 shim 绕开 owner 与依赖规则。
+5. **`src/` 内任意位置不得有模块级 import 环**，防止在互允许的 `ai`/`orchestration` 对内悄悄形成真环。
+6. **`src/` 内禁止非字面量动态 import**：每个动态 `import()` 的整个参数必须是单一纯字符串字面量。变量、模板字面量与 `import("../x.mjs" + "")` 等拼接对静态 import 扫描不可见，可能在运行时走私反向区依赖，因此一律拒绝。
+7. **CLI 只做组合。** `bin/` 可直接 import 五区真实 owner，但不得复制业务实现、创建根级聚合入口或绕过运行时质量门。
 
-The scanner itself is hardened against legal-source evasion: a lexical state machine produces a masked view of every source file — comments blanked, string/template/regex literal contents replaced with sentinel bytes (delimiters kept, `${}` interpolations still code) — and import syntax is only matched on that masked view, so neither a comment marker inside a string nor an import statement quoted inside documentation text can mislead the edge builder (false negatives AND false positives). Specifier text is sliced from the original source and unescape-decoded before zone classification, so `"\u002e./ai/x.mjs"` counts as the relative path it really is; a companion subtest additionally restricts all specifiers in `src/` to relative paths, bare package names, and `node:` builtins — `file:`/`data:` URLs and absolute paths (which load real modules while looking opaque to static scanning) are rejected outright. The adversarial samples are pinned by regression subtests in the same file.
+扫描器本身经对抗加固：词法状态机为每个源文件生成掩码视图——注释 blank、字符串/模板/正则字面量内容替换为 sentinel 字节（定界符保留，`${}` 插值仍为代码）——import 语法只在掩码视图上匹配，因此字符串内的注释标记或文档中引用的 import 语句都不会误导边构建（假阴性与假阳性均防）。specifier 文本从原源码切片并在区分类前 unescape 解码，故 `"\u002e./ai/x.mjs"` 计为其真实相对路径；配套子测试还限制 `src/` 内所有 specifier 为相对路径、裸包名与 `node:` 内置模块——`file:`/`data:` URL 与绝对路径（加载真实模块却对静态扫描不透明）一律拒绝。对抗样本由同文件回归子测试钉死。
 
-## Progressive Governance Loading
+## 渐进式治理加载
 
-Project rules use nested `AGENTS.md` files so an Agent receives the global invariants first and the local working rules only when it enters a relevant directory.
+项目规则使用嵌套 `AGENTS.md`，Agent 先收到全局不变量，进入相关目录时才收到局部工作规则。
 
 ```text
 AGENTS.md                         # product goals, global boundaries, release gates
@@ -91,65 +91,63 @@ AGENTS.md                         # product goals, global boundaries, release ga
   test/AGENTS.md                  # test evidence and anti-weakening rules
 ```
 
-Nested files are additive. They may narrow a directory's responsibilities and prescribe local evidence, but they cannot relax root-level dependency, gate, safety, testing, or commercial-release constraints. This keeps the root constitution stable while moving implementation-specific guidance next to the code it governs.
+嵌套文件是附加性的。它们可收窄目录职责并规定局部证据，但不得放松根级的依赖、gate、安全、测试或商业发布约束。这使根宪法稳定，同时将实现相关指引放在其治理的代码旁。
 
-## Main Files
+## 主要文件
 
-- `bin/helix.mjs`: CLI routing.
-- `src/helix-core.mjs`: compatibility export surface for existing CLI/tests/imports; re-exports every zoned module below and must not grow new implementation.
-- `src/infra/foundation.mjs`: declarative compatibility export for the former Foundation surface. Zoned implementation files must import the concrete owners below rather than using it as an internal barrel.
-- `src/infra/runtime-store.mjs`: runtime path, time/ID, directory creation, JSON atomic-write, persisted task-status enum, and hash primitives.
-- `src/infra/file-lock.mjs`: the shared file-lock primitive behind both `.helix/team/tasks.lock` and `.helix/ledger.lock`. Stale-lock recovery is self-healing: a dead owner pid is stale immediately, while an empty/unparseable owner file goes stale after a short mtime grace. Lock timeouts are diagnosable — the error names the current owner tag, pid, pid liveness, acquisition time and the wait budget, so a human can paste it to an AI and immediately see who holds the lock.
-- `src/infra/task-state-lock.mjs`: the one global task-state lock (`.helix/team/tasks.lock`), a path/defaults wrapper over `file-lock.mjs`. Every caller serializes on it, which gives the linear run and parallel admission workspace-level mutual exclusion.
-- `src/infra/agent-registry.mjs`: fixed long-lived Agent whitelist, read/write role sets, legacy aliases, display names, normalization, and command-worker eligibility.
-- `src/infra/runtime-config.mjs`: default configuration, layered root/runtime config loading, normalization, deep merge, and non-weakenable strict Git-coordination flags.
-- `src/infra/runtime-snapshot.mjs`: the single deterministic owner for runtime snapshot persistence and resume-context JSON/Markdown rendering. `src/ai/context.mjs::writeContextSnapshot` is a thin public wrapper over this owner, not a second implementation.
-- `src/infra/prompt-pack.mjs`: prompt-pack registry installation, entry loading, content hashing, listing, and verified rendering.
-- `src/infra/runtime-bootstrap.mjs`: one-time `initRuntime` sequencing across config, initial state files, prompt pack, ledger, and snapshot.
-- `src/infra/ledger.mjs`: hash-chained ledger append, ledger verification, and verified-entry reads. Once the hash chain has started, unhashed appended lines are reported as tampering, and `doctor` only accepts chain-verified entries as completion evidence. Appends are fail-closed on tail corruption (invalid JSON, unhashed tail lines after chain start, or file shrinkage versus the tail cache refuse the append instead of silently forking the chain), and a `.helix/ledger-tail.json` size+hash cache makes repeat appends O(1) with full-scan fallback; `verifyLedger` remains the only authority.
-- `src/interface/adapters.mjs`: Codex/Cursor/Kimi adapter install, uninstall, restore, report, backup logic, Codex `.codex/hooks.json` generation, Cursor hooks+rule generation, Kimi plugin generation, and shared command Skill generation.
-- `src/interface/kimi-adapter.mjs`: pure rendering for the Kimi plugin manifest, project-aware Hook bridge, and Kimi install/readme instructions. Kimi-specific protocol translation stays here instead of entering the workflow core.
-- `src/interface/cursor-adapter.mjs`: pure rendering for the Cursor `.cursor/hooks.json` config, the project-aware Hook bridge (camelCase event/tool mapping, `permission`/`additional_context`/`followup_message` output protocol), and Cursor install/readme instructions. `preToolUse` on Write/Delete/Edit/Shell and `beforeShellExecution` on integrated terminal commands are fail-closed, and the bridge treats any non-explicit-allow decision as a deny.
-- `src/orchestration/change-governance.mjs`: steering proposals, review blockers, ChangeRequest review, and explicit accept/reject resolution.
-- `src/infra/failure-analysis.mjs`: failure reason classification, retry hints, and actionable failure summaries.
-- `src/capabilities/acceptance-proof.mjs`: checkpoint proof chain that verifies worker, verifier, success criteria, scope, review, and review lanes before completion; also rejects no-op tasks whose worker and verify commands are all trivial with no writable paths, and fails any task whose `verify_commands` are all trivial (`verify_not_trivial` — trivial verification proves nothing). A second hard floor is `review_not_tautological`: a task whose review gate has no independent signal lane (no `review_commands` / `standards_commands` / `review.llm` / enabled quality gate — the same predicate as `infra/gate-arming.mjs`'s `hasRealReviewLane`) cannot reach `completed`, because a tautological review proves nothing. `config init --armed` writes a config with armed quality gates (blocking commentChecker + an lspDiagnostics command slot) so the floor has a command-level on-ramp.
-- `src/ai/routing.mjs`: the full `routeRequest` flow (route request persistence, semantic shadow governance, optional LLM second opinion); re-exports the deterministic table helpers for compatibility.
-- `src/infra/route-table.mjs`: deterministic route-table loading (routes.json + reviewed overrides) and signal matching (`loadRoutesConfig` / `resolveRouteDecision`), no LLM involved — usable from orchestration without touching the ai zone.
-- `src/ai/archivist-router.mjs`: DeepSeek flash based archivist/router runtime, routing packet construction, deterministic fallback, hook-triggered archive updates, context injection packs, and keyword suggestion artifacts.
-- `src/infra/memory-digest.mjs`: structured session/task/checkpoint digest generation for cross-session recovery.
-- `src/infra/rule-scanner.mjs`: project rule scanning and rule-context generation from AGENTS/CLAUDE/Cursor-style files, including the nearest nested `AGENTS.md` files on each target path.
-- `src/infra/error-protocol.mjs`: unified error protocol `{code, module, message, next_action}` with inline one-line rendering; covers the three structured error surfaces (gateway envelope, delivery-pipeline result, CLI non-zero exit).
-- `src/infra/gate-arming.mjs`: gate-arming floor evaluation ("门未武装" yellow lamp). Pure, read-only: flags tasks with missing/trivial `verify_commands`, tautological review (no review/standards commands, no LLM review, no enabled quality gate), and configs with no required quality gate. `statusReport` always carries the result; it never writes config or flips a gate by itself.
-- `src/infra/dependency-graph.mjs`: the adversarially hardened lexical import scanner (`maskSource`/`extractImportSpecifiers`) shared by `test/dependency-boundary.test.mjs` (which keeps the non-weakenable adversarial floor) and the repo-wide import graph behind `computeImpact` / `helix impact` (reverse-transitive importers + tests-to-run projection). The same graph backs `computeZoneTests` / `helix test --zone` (tests importing the zone + naming-paired tests + the always-on boundary test) and `listRepoTests`; the `helix test` CLI strips `NODE_TEST_CONTEXT`/`NODE_TEST_ID` when spawning `node --test` so a run invoked from inside another test-runner process cannot vacuously exit 0.
-- `src/infra/decision-log.mjs`: the unified decision record (`.helix/decisions.jsonl`). Emitted only at four seams — the delivery-pipeline gates (verify/scope/review/acceptance-proof/checkpoint + pipeline outcome), `ai/hooks` pre/post-tool-use decisions, parallel admission, and routing — as `{ts, gate, decision, code, reason, summary, evidencePath, taskId, runId, planId, sessionId}`. It is a derived log: not hash-chained (the ledger remains the audit authority), lock-free single-line appends (self-healing after mid-line external truncation), best-effort emission that never breaks the gate/hook/admission/routing flow, and corrupt or half-written lines are skipped and counted on read. The reader streams backwards from the file tail in 64KB chunks and stops once `--limit` matching records are collected, so projection memory is bounded by the limit, not the file size; `truncated=true` marks a tail-window result. `src/interface/decisions.mjs` renders the read-only `helix decisions` projection — three lines per record (what happened → which rule fired → where the evidence lives) with `--task`/`--gate` filters and `--format json` — and never writes state.
-- `src/capabilities/worker.mjs` / `src/capabilities/review-gate.mjs`: worker execution and BaiZe independent review lanes. Risk review and skeptical acceptance are BaiZe Skill modes rather than separate long-lived Agents.
-- `src/infra/command-safety.mjs`: high-risk shell command preflight shared by worker, verifier, review commands, quality gates, and child-agent runners; blocks destructive system commands and recursive deletion of project source/test/doc directories. Built-in patterns are an immutable floor; `commandSafety.extraPatterns` in config adds project-specific blocks (`compileCommandSafetyPatterns` compiles them and callers thread them via `runCommand` options).
-- `src/infra/security.mjs`: config hash baselines, config verification, runtime state backup, backup listing, one-command state restore, and critical state verification.
-- `src/interface/doctor.mjs`: consistency doctor that audits config structure/mounts, reconciles completed tasks against checkpoints/acceptance proofs/ledger events, verifies the ledger hash chain, cross-checks the ledger against the latest backup, and surfaces the latest repository-governance status. Dedicated `gateArming` and `adapters` sections surface unarmed gates (the yellow lamp is no longer buried in `status` JSON), enabled-but-uninstalled adapter hooks (`.cursor/` does not travel with every clone — `.gitignore` keeps exceptions for `.cursor/hooks.json` and `.cursor/hooks/` so hard enforcement can be committed, and doctor verifies each machine actually has it), and rule files referencing absolute paths that no longer exist (stale after a machine/username change). Diagnostics are isolated from gating: each of the seven checks runs in its own try/catch (a crashed check only marks its own section `check_failed`, the rest still report), and doctor never appends to the hash-chained ledger. It also checks the reverse direction: orphan completion events (a not-completed task that already has a chain-verified completion ledger event — an interrupted completion transaction, reported with a `helix run` recovery hint), post-completion side-effect failures (`completion_side_effect_failed` ledger events for snapshots/summaries that could not be written after the commit), and canonical/derived divergence (plan-mirror JSON or `tasks.md` task statuses disagreeing with the authoritative `team/tasks.json`).
-- `src/capabilities/code-intel.mjs`: host-neutral code intelligence gates for LSP/typecheck commands, AST/structure commands, hashline anchors, and comment checking.
-- `src/infra/repository-layout.mjs` / `src/capabilities/repository-governance.mjs`: LuWu's read-only repository audit. The deterministic checker covers directory-level `AGENTS.md`, bilingual README command and safety-marker parity, real CLI `--help`, the fixed five-Agent whitelist, prompt-pack registration, naming, file placement policy, and actual comment tokens including JavaScript template expressions; the capability writes JSON/Markdown evidence through the gateway. `--changed-only` scopes checks to changed files and the related structural invariants, with a full-scan fallback only when Git change discovery is unavailable.
-- `src/ai/injection.mjs`: injection-point resolution and mounted markdown/skill attachment loading.
-- `src/ai/skill-matcher.mjs`: stage/route/agent/keyword skill matching and configurable prompt model variants.
-- `src/ai/context.mjs`: agent context, resume snapshots, session lineage, and continuation directives.
-- `src/ai/hooks.mjs`: host lifecycle hook handling and pre-tool-use scope guard output (scope checks go through `capabilities/gateway.mjs`, not a direct import).
-- `src/orchestration/status.mjs`: workflow summary, status report, dashboard data, attention report (open ChangeRequests, failed tasks, user decisions, plans awaiting approval, child agents awaiting acceptance), and ledger tail reads. Every status report carries `gateArming` — the persistent "gates not armed" yellow lamp from `infra/gate-arming.mjs`, so a fully green task list can never masquerade as an armed governance setup. The attention report is the source of truth for the generic human-decision push: hooks inject it into the host AI context (SessionStart / UserPromptSubmit / PostCompact / Stop) and instruct the AI to surface pending items to the developer with options — no external IM binding.
+- `bin/helix.mjs`：CLI 路由。
+- `src/infra/runtime-store.mjs`：运行时路径、时间/ID、目录创建、JSON 原子写、持久化 task-status 枚举与 hash 原语。
+- `src/infra/file-lock.mjs`：`.helix/team/tasks.lock` 与 `.helix/ledger.lock` 背后的共享文件锁原语。stale 锁自愈：owner pid 已死则立即 stale；空/不可解析 owner 文件在短 mtime 宽限后 stale。锁超时可诊断——错误给出当前 owner 标签、pid、pid 存活、获取时间与等待预算，便于粘贴给 AI 立即看出谁持锁。
+- `src/infra/task-state-lock.mjs`：全局任务状态锁（`.helix/team/tasks.lock`），`file-lock.mjs` 的路径/默认参数封装。所有调用方在其上串行，为线性 run 与并行 admission 提供工作区级互斥。
+- `src/infra/agent-registry.mjs`：固定长期 Agent 白名单、读写角色集、旧别名、显示名、归一化与 command-worker 资格。
+- `src/infra/runtime-config.mjs`：默认配置、分层根/运行时 config 加载、归一化、深合并与不可削弱的 strict Git 协调标志。
+- `src/infra/runtime-snapshot.mjs`：运行时 snapshot 持久化与 resume-context JSON/Markdown 渲染的唯一确定性 owner。`src/ai/context.mjs::writeContextSnapshot` 是其薄 public 包装，非第二套实现。
+- `src/infra/prompt-pack.mjs`：prompt-pack 注册安装、条目加载、内容 hash、列表与校验渲染。
+- `src/infra/runtime-bootstrap.mjs`：跨 config、初始状态文件、prompt pack、ledger 与 snapshot 的一次性 `initRuntime` 顺序。
+- `src/infra/ledger.mjs`：hash 链 ledger 追加、ledger 校验与校验条目读取。hash 链启动后，无 hash 的追加行报告为篡改；`doctor` 仅接受链校验条目作为完成证据。追加在尾部损坏时 fail-closed（无效 JSON、链启动后的无 hash 尾行、或相对尾缓存的文件缩小会拒绝追加而非静默分叉链）；`.helix/ledger-tail.json` 的 size+hash 缓存使重复追加 O(1)，全扫描为 fallback；`verifyLedger` 仍是唯一权威。
+- `src/interface/adapters.mjs`：Codex/Cursor/Kimi adapter 安装、卸载、恢复、报告、备份逻辑、Codex `.codex/hooks.json` 生成、Cursor hooks+rule 生成、Kimi plugin 生成与共享 command Skill 生成。
+- `src/interface/kimi-adapter.mjs`：Kimi plugin manifest、项目感知 Hook bridge 与 Kimi 安装/readme 说明的纯渲染。Kimi 专用协议翻译留在此，不进入 workflow core。
+- `src/interface/cursor-adapter.mjs`：Cursor `.cursor/hooks.json` 配置、项目感知 Hook bridge（camelCase 事件/工具映射、`permission`/`additional_context`/`followup_message` 输出协议）与 Cursor 安装/readme 说明的纯渲染。Write/Delete/Edit/Shell 的 `preToolUse` 与集成终端命令的 `beforeShellExecution` 为 fail-closed；bridge 将任何非显式 allow 决策视为 deny。
+- `src/orchestration/change-governance.mjs`：转向提案、review blocker、ChangeRequest 复核与显式 accept/reject 决议。
+- `src/infra/failure-analysis.mjs`：失败原因分类、重试提示与可行动失败摘要。
+- `src/capabilities/acceptance-proof.mjs`：checkpoint 证明链，在完成前校验 worker、verifier、success criteria、scope、review 与 review 通道；还拒绝 worker 与 verify 命令全为 trivial 且无 writable_paths 的 no-op 任务，并失败于 `verify_commands` 全 trivial 的任务（`verify_not_trivial`——trivial 验证证明不了任何事）。第二硬底线是 `review_not_tautological`：review gate 无独立信号通道（无 `review_commands` / `standards_commands` / `review.llm` / 启用的质量 gate——与 `infra/gate-arming.mjs` 的 `hasRealReviewLane` 同谓词）的任务不能到 `completed`，因为同义反复的 review 证明不了任何事。`config init --armed` 写入 armed 质量 gate 的 config（blocking commentChecker + lspDiagnostics 命令槽），为底线提供命令级入门。
+- `src/ai/routing.mjs`：完整 `routeRequest` 流（路由请求持久化、语义 shadow 治理、可选 LLM 第二意见）。
+- `src/infra/route-table.mjs`：确定性路由表加载（routes.json + 已审核 overrides）与信号匹配（`loadRoutesConfig` / `resolveRouteDecision`），无 LLM——orchestration 可用而不触 ai 区。
+- `src/ai/archivist-router.mjs`：基于 DeepSeek flash 的档案员/路由运行时、routing packet 构建、确定性 fallback、hook 触发的档案更新、上下文注入包与关键词建议产物。
+- `src/infra/memory-digest.mjs`：跨会话恢复的结构化 session/task/checkpoint digest 生成。
+- `src/infra/rule-scanner.mjs`：从 AGENTS/CLAUDE/Cursor 风格文件扫描项目规则并生成 rule-context，含每条目标路径上最近的嵌套 `AGENTS.md`。
+- `src/infra/error-protocol.mjs`：统一错误协议 `{code, module, message, next_action}` 与内联单行渲染；覆盖三处结构化错误面（gateway 信封、delivery-pipeline 结果、CLI 非零退出）。
+- `src/infra/gate-arming.mjs`：gate-arming 底线评估（「门未武装」黄灯）。纯只读：标记缺失/trivial `verify_commands`、同义反复 review（无 review/standards 命令、无 LLM review、无启用质量 gate）与无 required 质量 gate 的 config。`statusReport` 始终携带结果；自身不写 config 或翻转 gate。
+- `src/infra/dependency-graph.mjs`：对抗加固的词法 import 扫描器（`maskSource`/`extractImportSpecifiers`），由 `test/dependency-boundary.test.mjs`（保持不可削弱的对抗底线）与 `computeImpact` / `helix impact` 背后的全仓 import 图共用（反向传递 importer + 待跑测试投影）。同一图支撑 `computeZoneTests` / `helix test --zone`（import 该区的测试 + 命名配对测试 + 始终运行的边界测试）与 `listRepoTests`；`helix test` CLI 在 spawn `node --test` 时剥离 `NODE_TEST_CONTEXT`/`NODE_TEST_ID`，避免从另一 test-runner 进程内调用时空洞 exit 0。
+- `src/infra/decision-log.mjs`：统一决策记录（`.helix/decisions.jsonl`）。仅在四缝发射——delivery-pipeline gate（verify/scope/review/acceptance-proof/checkpoint + pipeline 结果）、`ai/hooks` pre/post-tool-use 决策、并行 admission 与路由——格式为 `{ts, gate, decision, code, reason, summary, evidencePath, taskId, runId, planId, sessionId}`。派生日志：非 hash 链（ledger 仍是审计权威）、无锁单行追加（行中途外部截断后自愈）、best-effort 发射且从不破坏 gate/hook/admission/routing 流；读侧跳过并计数损坏或半写行。读者从文件尾以 64KB 块向后流式读取，收集满 `--limit` 条匹配记录即停，投影内存由 limit 而非文件大小界定；`truncated=true` 标记尾窗结果。`src/interface/decisions.mjs` 渲染只读 `helix decisions` 投影——每条三行（发生了什么 → 命中哪条规则 → 证据在哪），支持 `--task`/`--gate` 过滤与 `--format json`——从不写状态。
+- `src/capabilities/worker.mjs` / `src/capabilities/review-gate.mjs`：worker 执行与 BaiZe 独立 review 通道。风险复核与怀疑式验收是 BaiZe Skill 模式，非独立长期 Agent。
+- `src/infra/command-safety.mjs`：worker、verifier、review 命令、质量 gate 与子 Agent runner 共用的高风险 shell 命令预检；阻断破坏性系统命令与对项目源/测试/文档目录的递归删除。内置模式为不可削弱底线；config 中 `commandSafety.extraPatterns` 追加项目规则（`compileCommandSafetyPatterns` 编译，调用方经 `runCommand` options 传入）。
+- `src/infra/security.mjs`：config hash 基线、config 校验、运行时状态备份、备份列表、一键状态恢复与关键状态校验。
+- `src/interface/doctor.mjs`：一致性 doctor，审计 config 结构/mounts、将 completed 任务与 checkpoint/acceptance proof/ledger 事件对账、校验 ledger hash 链、ledger 与最新备份交叉检查，并展示最新仓库治理状态。专用 `gateArming` 与 `adapters` 段展示未武装 gate（黄灯不再埋在 `status` JSON 里）、已启用但未安装的 adapter hook（`.cursor/` 不随每次 clone 传播——`.gitignore` 对 `.cursor/hooks.json` 与 `.cursor/hooks/` 例外以便 hard enforcement 可提交，doctor 验证各机器实际拥有），以及引用已不存在绝对路径的规则文件（机器/用户名变更后 stale）。诊断与 gating 隔离：七项检查各自 try/catch（崩溃仅标红本段 `check_failed`，其余仍报告），doctor 从不追加 hash 链 ledger。还检查反向：orphan completion 事件（未 completed 任务已有链校验 completion ledger 事件——中断的完成事务，带 `helix run` 恢复提示）、完成后副作用失败（snapshot/summary 在 commit 后写不出的 `completion_side_effect_failed` ledger 事件），以及 canonical/derived 分歧（plan-mirror JSON 或 `tasks.md` 任务状态与权威 `team/tasks.json` 不一致）。
+- `src/capabilities/code-intel.mjs`：LSP/typecheck 命令、AST/结构命令、hashline anchor 与注释检查的宿主中立代码智能 gate。
+- `src/infra/repository-layout.mjs` / `src/capabilities/repository-governance.mjs`：LuWu 只读仓库审计。确定性检查覆盖目录级 `AGENTS.md`、双语 README 命令与安全标记对等、真实 CLI `--help`、固定五 Agent 白名单、prompt-pack 注册、命名、文件放置策略与实际注释 token（含 JavaScript 模板表达式）；capability 经 gateway 写 JSON/Markdown 证据。`--changed-only` 将检查范围限于变更文件及相关结构不变量；Git 变更发现不可用时才全扫描 fallback。
+- `src/ai/injection.mjs`：注入点解析与挂载 markdown/skill 附件加载。
+- `src/ai/skill-matcher.mjs`：stage/route/agent/keyword skill 匹配与可配置 prompt 模型变体。
+- `src/ai/context.mjs`：Agent 上下文、resume snapshot、session 谱系与 continuation 指令。
+- `src/ai/hooks.mjs`：宿主生命周期 hook 处理与 pre-tool-use scope guard 输出（scope 检查经 `capabilities/gateway.mjs`，非直接 import）。
+- `src/orchestration/status.mjs`：workflow 摘要、status 报告、dashboard 数据、attention 报告（开放 ChangeRequest、失败任务、用户决策、待批准计划、待 acceptance 子 Agent）与 ledger 尾读取。每个 status 报告携带 `gateArming`——来自 `infra/gate-arming.mjs` 的持久「门未武装」黄灯，任务列表全绿也不能伪装成已武装治理。attention 报告是通用人决策推送的真相源：hook 将其注入宿主 AI 上下文（SessionStart / UserPromptSubmit / PostCompact / Stop），指示 AI 向开发者展示待办与选项——无外部 IM 绑定。
 
-Plan approval gate: when `planApproval.required` is true, `importPlan` marks the plan `awaiting_plan_approval` and `runNextTask` refuses to start tasks until `approvePlan` (CLI `plan approve` / slash `/helix-approve`) records approval. Off by default so the linear loop is unaffected unless opted in.
-- `src/orchestration/workflow.mjs`: workflow entrypoint, sample plan generation, and plan template copying.
-- `src/orchestration/linear-runtime.mjs`: linear task node runtime for execute/verify/scope/review/checkpoint/retry; every gate call goes through `invokeCapability` from `capabilities/gateway.mjs`.
-- `src/orchestration/delivery-pipeline.mjs`: the shared verify -> scope -> review -> acceptance-proof -> checkpoint sequence used by the linear runtime and parallel-agent admission (full pipeline) and by the single-step `node checkpoint` workflow (via `runCompletionSegment` + `collectGateEvidenceFromTask`), so there is one place to add/remove/reorder a gate. A failed checkpoint write returns `checkpoint_failed` instead of `completed` — callers put the task back to `pending` with a `checkpoint_write_failed` ledger entry; completion strictly requires a durable checkpoint. Gate evidence is bound to the execution round: every new worker run clears the `last_*` gate fields, and `collectGateEvidenceFromTask` only accepts gate evidence appended after the latest worker entry in the append-only evidence trail, so a round whose checkpoint failed cannot lend its passing evidence to a later, unverified round. The completion transaction is idempotently recoverable: if it is interrupted after the completion ledger event but before the canonical `tasks.json` save, `run` detects the task stuck in `verifying` and adjudicates it with the checkpoint-node logic (fresh all-pass evidence completes idempotently; anything else goes back to `pending`); `in_progress` tasks are deliberately left alone because they may be legitimately claimed, and a `verifying` task holding an `admission_claim` is likewise left to its parallel admission owner (`run` reports `blocked` with a resume hint instead of hijacking the in-flight transaction). Artifacts that a completed task must have (wisdom line, memory digest) are written INSIDE the transaction — after the completion ledger event, before the canonical persist — so their failure keeps the task recoverable instead of completing without them; post-commit conveniences (snapshot, workflow summary) are best-effort via `runPostCompletionSideEffects`, which converts a failure into a `completion_side_effect_failed` ledger event plus a `sideEffectWarnings` entry on the result rather than un-completing the task.
-- `src/orchestration/plan-state.mjs`: plan normalization, graph validation, plan import, route enrichment, task-state loading, and plan approval state (`loadPlanApproval` / `approvePlan`).
-- `src/orchestration/task-board.mjs`: team-lite tasks, claims, evidence recording, task-state persistence, outbox, and durable message board.
-- `src/infra/agent-spawn.mjs`: host-neutral child-agent spawn command rendering for Codex/Cursor/custom command adapters.
-- `src/infra/git-worktree.mjs`: Git worktree isolation, patch extraction, patch path parsing, patch admission helpers, and pre-execute workspace snapshots (`git stash create` based) recorded before every worker run.
-- `src/infra/git-coordination.mjs`: argument-array Git primitives for device-safe remote inspection, metadata/checkpoint commits, normal push/fetch, task-branch switching, working/tree-diff inspection, ancestry checks, and integration-SHA guards. It never decides task status.
-- `src/orchestration/remote-ownership.mjs`: stable device registration, mode resolution, unique remote claim packets, ownership validation, and coordination status.
-- `src/orchestration/handoff.mjs`: UUID-bound `prepare -> push -> accept` and explicit evidence-bearing takeover. It restores the accepted task into local `.helix/` state while the remote commit remains the cross-device authority; push/accept retries reconcile remote state and restore any missing local audit record.
-- `src/orchestration/integration.mjs`: the remote-main integration fence and commit transaction used by admission: owner/base/main revalidation, durable integration intent, temporary-index commit creation, ordinary push, and same-run reconciliation.
-- `src/orchestration/admission-recovery.mjs`: persistence policy for pre-integration revalidation versus post-integration recovery. It releases ownership only after a safe rollback, and never rolls back or releases a run whose integration is known to have reached remote main.
-- `src/orchestration/parallel-runtime.mjs`: command-based child-agent batch runner, run-dir or Git worktree isolation, skipped-run detection, result collection, lifecycle status, explicit close/release/cleanup, team message publication, and agent-run index. With active default `guarded` coordination, writable runs automatically use worktrees and persist one `parallel_run_claim` per task before spawning. Before creating a run, it rejects the read-only long-lived identities DiJiang, BaiZe, and LuWu; only Jiuwei and ZhuRong may enter a command worker as long-lived Agents, while isolated ephemeral command agents remain supported under non-reserved names. Runs are pre-registered in `index.json` (plus a `running` batch JSON) before agents start, and every index read adopts orphan run directories back into the index, so results on disk can never become permanently invisible to `parallel status`. The admission transaction itself lives in `src/orchestration/admission.mjs` and is re-exported here.
-- `src/orchestration/admission.mjs`: the parallel-agent admission transaction (claim -> apply -> gates -> acceptance proof -> integration push -> checkpoint, or rollback), gated through the shared `delivery-pipeline`. Admission is claim-first with persisted ownership: status adjudication, the writable-paths precheck, the task claim, and the `parallel_agent_admission_started` ledger event all happen under the task-state lock BEFORE any workspace file is written, and the claim itself is persisted on the task (`admission_claim = { runId, phase }`). The apply and the gates then run under ONE continuous hold of the same global lock — the workspace mutation and the gates that judge it are a single critical section, so two admissions (same or different tasks, overlapping paths or not) and a concurrent linear `run` can never interleave workspace writes with each other's gate runs. Because claim and apply use two lock holds, the transaction re-reads the persisted owner and phase immediately before workspace I/O; a duplicate same-run request holding a stale phase therefore cannot re-apply files or downgrade a lifecycle that another call already completed. Before the first file write the pre-image rollback plan is persisted to `agent-runs/<runId>/<taskId>.rollback-plan.json`, so a crash mid-apply cannot orphan the only copy of the original contents — a reclaim uses that persisted plan as its authority and never replaces it with a snapshot of the already-mutated workspace. Before integration it revalidates the remote task owner, guarded main SHA, and local ancestry; only an all-pass result generates and non-force-pushes an integration commit. On a pre-push rejection the workspace rollback happens FIRST, while the admission still owns the claim. The claim and rollback plan are released only after rollback reports `rolled_back`; if rollback fails, the task stays `verifying`, ownership stays with the same run, and the admission returns `recovery_required`, preventing a successor from entering the dirty workspace. If integration push succeeds but checkpoint writing fails, rollback is deliberately forbidden because remote main already contains the change; the durable integration intent and same-run claim remain until retry reconciliation finishes the checkpoint. A second run trying to admit a claimed task is refused (no two owners for one task), and finalize re-validates that the committing run still holds the claim. Once the files are on disk the claim phase advances to `finalizing`, and a crash anywhere in the finalize segment deliberately keeps the workspace, the claim, rollback plan, and any integration intent — re-admitting the SAME run skips the apply and re-runs/reconciles to completion, while other runs, `helix run`, and the single-step checkpoint are all refused. Resuming a completed task requires a chain-verified completed ledger event for that exact run; a genuine resume only redoes the missing lifecycle release without re-applying files, and anything else is refused outright.
-- `src/capabilities/gateway.mjs`: static capability registry + unified result envelope (`capability`/`status`/`evidence`/`sideEffect`/`duration_ms`/`cost`/`error`); the only door `orchestration/` and `ai/` may use to reach `capabilities/verify.mjs`, `scope-guard.mjs`, `checkpoint.mjs`, `worker.mjs`, `review-gate.mjs`, `acceptance-proof.mjs`.
+计划批准 gate：当 `planApproval.required` 为 true，`importPlan` 将计划标为 `awaiting_plan_approval`，`runNextTask` 在 `approvePlan`（CLI `plan approve` / slash `/helix-approve`）记录批准前拒绝启动任务。默认关闭，线性循环不受影响除非显式开启。
+- `src/orchestration/workflow.mjs`：workflow 入口、样例计划生成与计划模板复制。
+- `src/orchestration/linear-runtime.mjs`：execute/verify/scope/review/checkpoint/retry 的线性任务节点运行时；每个 gate 调用经 `capabilities/gateway.mjs` 的 `invokeCapability`。
+- `src/orchestration/delivery-pipeline.mjs`：线性运行时与并行 Agent admission（完整 pipeline）及单步 `node checkpoint` workflow（经 `runCompletionSegment` + `collectGateEvidenceFromTask`）共用的 verify -> scope -> review -> acceptance-proof -> checkpoint 序列，因此增删重排 gate 只有一处。checkpoint 写失败返回 `checkpoint_failed` 而非 `completed`——调用方将任务回 `pending` 并写 `checkpoint_write_failed` ledger 条目；完成严格需要 durable checkpoint。Gate 证据绑定执行轮次：每次新 worker run 清空 `last_*` gate 字段；`collectGateEvidenceFromTask` 只接受 append-only 证据链中最新 worker 条目之后的 gate 证据，checkpoint 失败轮次的 passing 证据不能借给后续未验证轮次。完成事务可幂等恢复：若在 completion ledger 事件之后、canonical `tasks.json` 保存之前中断，`run` 检测任务卡在 `verifying` 并用 checkpoint-node 逻辑裁决（全新全 pass 证据则幂等完成；否则回 `pending`）；`in_progress` 任务故意不动（可能正当 claim）；持有 `admission_claim` 的 `verifying` 任务 likewise 留给并行 admission owner（`run` 报告 `blocked` 与 resume 提示而非劫持进行中事务）。completed 任务必须有的产物（wisdom 行、memory digest）在事务**内**写入——completion ledger 事件之后、canonical persist 之前——失败则任务保持可恢复而非无产物完成；提交后便利（snapshot、workflow summary）经 `runPostCompletionSideEffects` best-effort，失败转为 `completion_side_effect_failed` ledger 事件与结果上 `sideEffectWarnings` 条目，而非 un-complete 任务。
+- `src/orchestration/plan-state.mjs`：计划归一化、图校验、计划导入、路由 enrichment、任务状态加载与计划批准状态（`loadPlanApproval` / `approvePlan`）。
+- `src/orchestration/task-board.mjs`：team-lite 任务、claim、证据记录、任务状态持久化、outbox 与 durable 消息板。
+- `src/infra/agent-spawn.mjs`：Codex/Cursor/自定义 command adapter 的宿主中立子 Agent spawn 命令渲染。
+- `src/infra/git-worktree.mjs`：Git worktree 隔离、patch 提取、patch 路径解析、patch admission helper，以及每次 worker run 前基于 `git stash create` 的 pre-execute 工作区 snapshot。
+- `src/infra/git-coordination.mjs`：设备安全的 remote 检查、metadata/checkpoint commit、普通 push/fetch、task 分支切换、working/tree-diff 检查、祖先检查与 integration-SHA guard 的参数数组 Git 原语。不决定 task 状态。
+- `src/orchestration/remote-ownership.mjs`：稳定设备登记、模式解析、唯一 remote claim packet、ownership 校验与协调状态。
+- `src/orchestration/handoff.mjs`：UUID 绑定的 `prepare -> push -> accept` 与显式带证据 takeover。将接受任务恢复到本地 `.helix/` 状态，remote commit 仍是跨设备权威；push/accept 重试协调 remote 状态并恢复缺失的本地 audit 记录。
+- `src/orchestration/integration.mjs`：admission 使用的 remote-main integration fence 与 commit 事务：owner/base/main 重校验、durable integration intent、临时 index commit 创建、普通 push 与同 run 对账。
+- `src/orchestration/admission-recovery.mjs`：integration 前 revalidation 与 integration 后 recovery 的持久化策略。仅在安全回滚后释放 ownership；已知 integration 到达 remote main 的 run 永不回滚或释放。
+- `src/orchestration/parallel-runtime.mjs`：基于 command 的子 Agent 批跑、run-dir 或 Git worktree 隔离、skipped-run 检测、结果收集、生命周期 status、显式 close/release/cleanup、team 消息发布与 agent-run index。默认 `guarded` 协调激活时，可写 run 自动用 worktree 并在 spawn 前每 task 持久化一个 `parallel_run_claim`。创建 run 前拒绝只读长期身份 DiJiang、BaiZe、LuWu；仅 Jiuwei 与 ZhuRong 可作为长期 Agent 进入 command worker，隔离的 ephemeral command agent 仍支持非保留名。run 在 agent 启动前预注册到 `index.json`（加 `running` 批 JSON），每次 index 读将 orphan run 目录收编回 index，磁盘上的结果不会对 `parallel status` 永久不可见。admission 事务本身在 `src/orchestration/admission.mjs`，在此 re-export。
+- `src/orchestration/admission.mjs`：并行 Agent admission 事务（claim -> apply -> gates -> acceptance proof -> integration push -> checkpoint，或 rollback），经共享 `delivery-pipeline` gating。Admission 是 claim-first 且持久化 ownership：status 裁决、writable-paths 预检、task claim 与 `parallel_agent_admission_started` ledger 事件均在写任何工作区文件**之前**于 task-state lock 下发生，claim 本身持久化在 task 上（`admission_claim = { runId, phase }`）。apply 与 gate 在**同一次**全局锁连续持有下运行——工作区变更与评判它的 gate 是单一临界区，两个 admission（同 task 或不同 task、路径是否重叠）与并发线性 `run` 都不能在 gate run 之间交错工作区写。因 claim 与 apply 用两次锁持有，事务在 workspace I/O 前立即重读持久 owner 与 phase；持有 stale phase 的重复同 run 请求因此不能 re-apply 文件或将 lifecycle 降级为另一调用已完成的态。第一次文件写之前 pre-image rollback plan 持久化到 `agent-runs/<runId>/<taskId>.rollback-plan.json`，apply 中途崩溃不会 orphan 唯一原始内容副本——reclaim 以该持久 plan 为权威，永不用已变异工作区的 snapshot 替换。integration 前重校验 remote task owner、guarded main SHA 与本地祖先；仅全 pass 结果生成并 non-force push integration commit。push 前拒绝时工作区 rollback **先**发生，admission 仍拥有 claim。claim 与 rollback plan 仅在 rollback 报告 `rolled_back` 后释放；rollback 失败则 task 保持 `verifying`、ownership 留在同 run，admission 返回 `recovery_required`，阻止后继进入脏工作区。integration push 成功但 checkpoint 写失败时故意禁止 rollback，因 remote main 已含变更；durable integration intent 与同 run claim 保留直到 retry 对账完成 checkpoint。第二 run 试图 admit 已 claim task 被拒绝（一 task 无双 owner），finalize 重校验 committing run 仍持有 claim。文件落盘后 claim phase 推进到 `finalizing`；finalize 段任意处崩溃故意保留工作区、claim、rollback plan 与任何 integration intent——**同 run** 再 admit 跳过 apply 并 re-run/对账至完成，其他 run、`helix run` 与单步 checkpoint 均被拒绝。恢复 completed task 需要该 exact run 的链校验 completed ledger 事件； genuine resume 仅重做缺失 lifecycle release 而不 re-apply 文件，否则 outright 拒绝。
+- `src/capabilities/gateway.mjs`：静态 capability 注册表 + 统一结果信封（`capability`/`status`/`evidence`/`sideEffect`/`duration_ms`/`cost`/`error`）；`orchestration/` 与 `ai/` 到达 `capabilities/verify.mjs`、`scope-guard.mjs`、`checkpoint.mjs`、`worker.mjs`、`review-gate.mjs`、`acceptance-proof.mjs` 的唯一门。
 
 ### Admission 状态机表
 
@@ -165,176 +163,172 @@ Plan approval gate: when `planApproval.required` is true, `importPlan` marks the
 | `skipped` | 无可回滚计划等前置不满足 | 原状态 | 不变 | 按 reason 处理 |
 
 不变量：push 已成功后任何故障都不得回滚或释放原 run（只能对账恢复）；claim 只有在成功提交或工作区成功回滚后才释放。
-- `src/interface/dashboard.mjs`: local dashboard HTTP API and HTML UI with POST token, Host, and Origin protections.
-- `src/interface/dashboard-panels.mjs`: read-only dashboard panels (decision panel: recent decisions + gate stats + never-fired gates; ops panel: gate arming, lock holder inspection, log sizes, parallel-run reconciliation). Kept separate so `dashboard.mjs` stays under the split line.
-- `src/interface/timeline.mjs`: `helix timeline` — merges hash-chain-verified ledger entries, decisions, and annotations into one reverse-chronological read-only projection.
-- `src/interface/cli-help.mjs`: the CLI command registry (single source of truth). Default `--help` shows only the core six commands (init/plan/run/status/decisions/doctor); `--help --all` lists everything; `docs commands --write` materializes `doc/generated/commands.md`. The README command-truthfulness check compares against `--help --all`.
-- `src/ai/suspicion-review.mjs`: asynchronous LLM suspicion review under archivist invariants — sanitized conclusion packets only (no code/diffs/raw output), deterministic fallback without a key, LLM decisionIds anchored to the packet (hallucinated ids dropped and counted), conclusions only in `.helix/reports/suspicion.*`, never in the completion chain.
-- `packs/wildarrange-linear/agents`: role prompts.
-- `packs/wildarrange-linear/skills`: skill prompts.
-- `packs/wildarrange-linear/tools/tool-contract.json`: tool contract inventory.
-- `helix.config.json`: local runtime configuration.
+- `src/interface/dashboard.mjs`：本地 dashboard HTTP API 与 HTML UI，含 POST token、Host 与 Origin 防护。
+- `src/interface/dashboard-panels.mjs`：只读 dashboard 面板（决策面板：近期决策 + gate 统计 + 从未触发的 gate；运维面板：gate arming、锁 holder 检查、日志大小、并行 run 对账）。与 `dashboard.mjs` 分离以保持低于拆分线。
+- `src/interface/timeline.mjs`：`helix timeline`——合并 hash 链校验 ledger 条目、decisions 与 annotations 为单一倒序只读投影。
+- `src/interface/cli-help.mjs`：CLI 命令注册表（单一事实源）。默认 `--help` 仅显示 core 六命令（init/plan/run/status/decisions/doctor）；`--help --all` 列出全部；`docs commands --write` 物化 `doc/generated/commands.md`。README 命令真实性检查对照 `--help --all`。
+- `src/ai/suspicion-review.mjs`：archivist 不变量下的异步 LLM 怀疑审查——仅 sanitized 结论包（无代码/diff/raw 输出）、无 key 时确定性 fallback、LLM decisionId 锚定 packet（幻觉 id 丢弃并计数），结论仅在 `.helix/reports/suspicion.*`，从不进入完成链。
+- `packs/wildarrange-linear/agents`：角色 prompt。
+- `packs/wildarrange-linear/skills`：skill prompt。
+- `packs/wildarrange-linear/tools/tool-contract.json`：工具合同清单。
+- `helix.config.json`：本地运行时配置。
 
-## Runtime State
+## 运行时状态
 
-- `.helix/team/tasks.json`: durable task state.
-- `.helix/ledger.jsonl`: hash-chained append-only audit log. `ledger verify` detects ordinary line edits or broken chains.
-- `.helix/decisions.jsonl`: derived decision projection log (four seams: pipeline gates, tool-use hooks, admission, routing). Droppable and truncatable; not part of the hash chain. Read via `helix decisions`. Each record carries an `id` anchor and an `annotatable` flag — only denials and non-deterministic allows (LLM-backed review, routing shadow, admission attribution) enter the annotation queue; deterministic PASS records are flow-only.
-- `.helix/annotations.jsonl`: human/reviewer annotations of decision records (`helix annotate --decision <id> --category rule_wrong|case_wrong|mislabeled`). Categories are forced; stats aggregate by rule × category so a single annotation never hijacks a rule. Hard constraint (pinned by `test/annotation.test.mjs`): annotation paths never write config, `verify_commands`, or any gate switch — annotations inform humans, they never move gates.
-- `.helix/security/config-baseline.json`: reviewed config fingerprints. `config verify` detects config files added, removed, or changed after baseline.
-- `.helix/backups`: point-in-time copies of ledger, work, tasks, snapshots, and config baseline created by `state backup`; list with `state list`, restore with `state restore --backup <id>` (a pre-restore backup is taken automatically).
-- `.helix/reports/doctor.json` / `.helix/reports/doctor.md`: latest `doctor` health report covering config mounts, completion reconciliation, ledger verification, ledger-vs-backup cross-check, and the latest repository-governance summary.
-- `.helix/reports/governance/latest.json` / `.helix/reports/governance/latest.md`: LuWu's latest deterministic repository audit evidence.
-- `.helix/checkpoints`: checkpoint JSON after all gates pass.
-- `.helix/reports`: human-readable reports.
-- `.helix/snapshots/context.md`: resume context.
-- `.helix/agent-runs`: child-agent task packets, command results, structured result files, and run index.
-- `.helix/memory/events.jsonl`: structured memory event stream for routing and stage archive facts.
-- `.helix/memory/digests`: structured task/session/post-compact digest artifacts.
-- `.helix/memory/last-digest.json`: latest digest for session recovery and context injection.
-- `.helix/memory/stage-summaries`: structured summaries for progress, decisions, artifacts, implementation notes, research notes, pitfalls, and open questions.
-- `.helix/memory/index.json`: lightweight keyword/domain/artifact index for memory recall.
-- `.helix/routing/suggestions`: ArchivistRouter keyword suggestions and user-preference routing notes.
-- `.helix/routing/routes-overrides.json`: reviewed keyword patches applied on top of the installed route table.
-- `.helix/routing/archivist-trigger-state.json`: Git HEAD and stage-aware prompt-window counters for ArchivistRouter scheduling.
-- `.helix/adapters`: generated adapter files, reports, and backups.
+- `.helix/team/tasks.json`：持久任务状态。
+- `.helix/ledger.jsonl`：hash 链 append-only 审计日志。`ledger verify` 检测普通行编辑或断链。
+- `.helix/decisions.jsonl`：派生决策投影日志（四缝：pipeline gate、tool-use hook、admission、routing）。可丢弃与截断；非 hash 链部分。经 `helix decisions` 读取。每条记录带 `id` 锚点与 `annotatable` 标志——仅 deny 与非确定性 allow（LLM review、routing shadow、admission 归因）进入标注队列；确定性 PASS 记录仅作流式记录。
+- `.helix/annotations.jsonl`：决策记录的人工/复核标注（`helix annotate --decision <id> --category rule_wrong|case_wrong|mislabeled`）。类别强制；统计按 rule × category 聚合，单条标注不能劫持 rule。硬约束（`test/annotation.test.mjs` 钉死）：标注路径永不写 config、`verify_commands` 或任何 gate 开关——标注告知人，不移动 gate。
+- `.helix/security/config-baseline.json`：已审核 config 指纹。`config verify` 检测 baseline 之后增删改的 config 文件。
+- `.helix/backups`：`state backup` 创建的 ledger、work、tasks、snapshots 与 config baseline 时点副本；`state list` 列出，`state restore --backup <id>` 恢复（恢复前自动做 pre-restore 备份）。
+- `.helix/reports/doctor.json` / `.helix/reports/doctor.md`：最新 `doctor` 健康报告，覆盖 config mounts、完成对账、ledger 校验、ledger 与备份交叉检查及最新仓库治理摘要。
+- `.helix/reports/governance/latest.json` / `.helix/reports/governance/latest.md`：LuWu 最新确定性仓库审计证据。
+- `.helix/checkpoints`：全部 gate 通过后的 checkpoint JSON。
+- `.helix/reports`：人类可读报告。
+- `.helix/snapshots/context.md`：resume 上下文。
+- `.helix/agent-runs`：子 Agent task packet、command 结果、结构化结果文件与 run index。
+- `.helix/memory/events.jsonl`：路由与阶段档案事实的结构化记忆事件流。
+- `.helix/memory/digests`：结构化 task/session/post-compact digest 产物。
+- `.helix/memory/last-digest.json`：session 恢复与上下文注入的最新 digest。
+- `.helix/memory/stage-summaries`：进度、决策、产物、实现笔记、调研笔记、坑点与开放问题的结构化摘要。
+- `.helix/memory/index.json`：记忆召回的轻量 keyword/domain/artifact index。
+- `.helix/routing/suggestions`：ArchivistRouter 关键词建议与用户偏好路由笔记。
+- `.helix/routing/routes-overrides.json`：叠在已安装路由表上的已审核关键词 patch。
+- `.helix/routing/archivist-trigger-state.json`：ArchivistRouter 调度的 Git HEAD 与 stage 感知 prompt 窗口计数。
+- `.helix/adapters`：生成的 adapter 文件、报告与备份。
 
-## Routing Model
+## 路由模型
 
-Routing uses a hybrid model:
+路由采用混合模型：
 
-1. `src/infra/route-table.mjs` runs the deterministic hot path from `packs/wildarrange-linear/routes.json`; `src/ai/routing.mjs` layers the LLM/semantic parts on top (`src/helix-routing.mjs` is only a compatibility shim over them).
-2. `routeGovernance.semanticShadow` may ask configured `CangJie` for a semantic second opinion. The deterministic result remains visible, but low-confidence or conflicting execute routes can be downgraded to plan/ask.
-3. `ArchivistRouter` uses configured `CangJie` / `deepseek-v4-flash` when provider credentials exist, and falls back to deterministic routing when unavailable.
-4. Host hooks trigger ArchivistRouter on `SessionStart`, `UserPromptSubmit`, and `PostCompact`. The hook path is non-blocking: failures become warning facts, not denied prompts.
-5. Prompt-count triggers are stage aware: ideate/plan/clarify defaults to 5 turns, normal work defaults to 10 turns, and execute/verify/review defaults to 15 turns with a 20-turn cap.
-6. `ArchivistRouter` reads a bounded routing packet and structured memory instead of unlimited raw chat history.
-7. Routing packets use conclusions-only capture: keep user intent, visible assistant conclusions, summarized tool results, evidence, progress, decisions, artifacts, implementation conclusions, research notes, pitfalls, and open questions; strip code blocks, diffs, raw command output, and intermediate process text by default.
-8. It may produce route decisions, multi-intent segments, structured archive updates, context injection packs, user-preference notes, and keyword patch suggestions.
-9. Keyword suggestions are written for review first. Accepted suggestions update `.helix/routing/routes-overrides.json`, not the installed prompt-pack source. High-risk routing areas such as review, Git, permissions, safety, deletion, release, and scope changes require evidence and rationale.
+1. `src/infra/route-table.mjs` 从 `packs/wildarrange-linear/routes.json` 跑确定性热路径；`src/ai/routing.mjs` 在其上叠加 LLM/语义部分。
+2. `routeGovernance.semanticShadow` 可问已配置的 `CangJie` 要语义第二意见。确定性结果仍可见，但低置信或冲突的 execute 路由可降级为 plan/ask。
+3. `ArchivistRouter` 在 provider 凭证存在时使用已配置 `CangJie` / `deepseek-v4-flash`，不可用时 fallback 到确定性路由。
+4. 宿主 hook 在 `SessionStart`、`UserPromptSubmit`、`PostCompact` 触发 ArchivistRouter。hook 路径非阻塞：失败变为 warning 事实，不 deny prompt。
+5. Prompt 计数触发是 stage 感知的：ideate/plan/clarify 默认 5 轮，普通工作默认 10 轮，execute/verify/review 默认 15 轮，上限 20 轮。
+6. `ArchivistRouter` 读取有界 routing packet 与结构化记忆，而非无限 raw 聊天历史。
+7. Routing packet 采用仅结论捕获：保留用户意图、可见 assistant 结论、摘要化 tool 结果、证据、进度、决策、产物、实现结论、调研笔记、坑点与开放问题；默认剥离代码块、diff、raw 命令输出与中间过程文本。
+8. 可产出路由决策、多意图分段、结构化档案更新、上下文注入包、用户偏好笔记与关键词 patch 建议。
+9. 关键词建议先写待审。接受的建议更新 `.helix/routing/routes-overrides.json`，而非已安装 prompt-pack 源。review、Git、权限、安全、删除、发布与范围变更等高风险路由区需要证据与 rationale。
 
-## Parallel Agent Model
+## 并行 Agent 模型
 
-The first parallel runtime is intentionally narrow:
+第一版并行运行时故意收窄：
 
-1. `parallel run` selects runnable pending tasks or explicit task IDs.
-2. Each child receives a task packet under `.helix/agent-runs/<runId>/<taskId>/task.json`.
-3. The configured runner command executes inside an isolated run directory, or inside a Git worktree when `--isolation git-worktree` is used.
-4. Optional structured output is read from `agent-result.json`.
-5. Adapter command templates can be configured under `parallelAgents.spawnAdapters.codex` or `parallelAgents.spawnAdapters.cursor`; they receive `{taskJson}`, `{outputJson}`, `{runDir}`, `{workDir}`, `{taskId}`, and `{agent}`.
-6. Results are written to `.helix/agent-runs`, published to the team message board, and appended to the ledger.
-7. `parallel admit` accepts structured text file proposals from `agent-result.json.files` or Git worktree patches from `agent-result.json.patch`.
-8. Admission rejects paths outside `writable_paths`.
-9. Successful child results enter `awaiting_user_acceptance` instead of being treated as closed.
-10. Accepted files or patches are applied to the main workspace, then verifier, scope guard, review gate, acceptance proof, and checkpoint run before the task can become `completed`.
-11. If admission fails, file proposals or patches are rolled back before ownership is released. If rollback itself fails, the original run keeps its claim and rollback plan with `recovery_required` until recovery succeeds.
-12. After admission completes, the child result lifecycle moves to `released`; failed admission keeps it visible for revision.
-13. `parallel status` reads `.helix/agent-runs` and summarizes retained child-agent lifecycle states, plus interruption reconciliation: the batch JSON persists `taskIds`/`command`/`agent`, so `batchStatus` and `incompleteTasks` (claimed but no passing result) are always visible.
-14. `parallel close` lets a user release retained child results after human acceptance without deleting evidence.
-15. A crashing runner (spawn-level failure, worktree/disk errors) becomes a per-task `fail` result — it never rejects the whole batch or loses sibling results; spawn-level process failures surface as exit code 127 with `spawnError: true`.
-16. `parallel retry --run <runId>` re-runs only the tasks without a passing result (reusing the recorded command/agent/isolation, overridable via flags). Tasks already passed, completed, or claimed by another run are skipped with reasons; the retry is a new run and never rewrites the original run's evidence.
+1. `parallel run` 选择可跑的 pending 任务或显式 task ID。
+2. 每个子 Agent 在 `.helix/agent-runs/<runId>/<taskId>/task.json` 收到 task packet。
+3. 配置的 runner 命令在隔离 run 目录内执行，或 `--isolation git-worktree` 时在 Git worktree 内执行。
+4. 可选结构化输出从 `agent-result.json` 读取。
+5. adapter command 模板可配置在 `parallelAgents.spawnAdapters.codex` 或 `parallelAgents.spawnAdapters.cursor`；接收 `{taskJson}`、`{outputJson}`、`{runDir}`、`{workDir}`、`{taskId}`、`{agent}`。
+6. 结果写入 `.helix/agent-runs`、发布到 team 消息板并追加 ledger。
+7. `parallel admit` 接受来自 `agent-result.json.files` 的结构化文本文件提案，或来自 `agent-result.json.patch` 的 Git worktree patch。
+8. Admission 拒绝 `writable_paths` 外的路径。
+9. 成功的子 Agent 结果进入 `awaiting_user_acceptance`，而非视为已关闭。
+10. 接受的文件或 patch 应用到主工作区，然后 verifier、scope guard、review gate、acceptance proof 与 checkpoint 运行后任务才能 `completed`。
+11. admission 失败时，文件提案或 patch 在释放 ownership 前 rollback。若 rollback 本身失败，原 run 保持 claim 与 rollback plan，`recovery_required` 直到恢复成功。
+12. admission 完成后，子 Agent 结果 lifecycle 移至 `released`；失败 admission 保持可见以便修订。
+13. `parallel status` 读 `.helix/agent-runs` 并摘要保留的子 Agent lifecycle 状态，加中断对账：批 JSON 持久化 `taskIds`/`command`/`agent`，`batchStatus` 与 `incompleteTasks`（已 claim 但无 passing 结果）始终可见。
+14. `parallel close` 让用户在人工 acceptance 后释放保留的子 Agent 结果，不删证据。
+15. 崩溃的 runner（spawn 级失败、worktree/磁盘错误）变为 per-task `fail` 结果——从不拒绝整批或丢失 sibling 结果；spawn 级进程失败表现为 exit code 127 与 `spawnError: true`。
+16. `parallel retry --run <runId>` 仅重跑无 passing 结果的任务（复用记录的 command/agent/isolation，可用 flag 覆盖）。已通过、completed 或被另一 run claim 的任务带 reason 跳过；retry 是新 run，永不改写原 run 证据。
 
-This supports a narrow but real multi-agent admission loop: child agents can work in isolated directories or Git worktrees, but they still cannot self-certify completion.
+这支持窄但真实的 multi-agent admission 循环：子 Agent 可在隔离目录或 Git worktree 工作，但仍不能自证完成。
 
-## Gate Model
+## Gate 模型
 
-Completion requires:
+完成需要：
 
-1. `worker_command` exits 0.
-2. `verify_commands` exists and passes.
-3. `successCriteria` passes.
-4. `scope_guard` returns `pass`.
-5. `review_gate` returns `pass`.
-6. `acceptance_proof` returns `pass` and writes `.helix/reports/acceptance/<planId>-<taskId>.json`.
+1. `worker_command` exit 0。
+2. `verify_commands` 存在且通过。
+3. `successCriteria` 通过。
+4. `scope_guard` 返回 `pass`。
+5. `review_gate` 返回 `pass`。
+6. `acceptance_proof` 返回 `pass` 并写入 `.helix/reports/acceptance/<planId>-<taskId>.json`。
 
-`inconclusive` is not completion evidence.
+`inconclusive` 不是完成证据。
 
-The review gate is host-neutral. It runs from the CLI and may include deterministic lanes, configured `review_commands`, configured `standards_commands`, optional LSP/typecheck commands, AST/structure commands, hashline anchor checks, comment checking, and optional OpenAI-compatible LLM review. BaiZe is the only independent review Agent; goal/evidence, bug/risk, and skeptical-acceptance perspectives are selected as review Skills or modes.
+review gate 是宿主中立的。从 CLI 运行，可含确定性通道、配置的 `review_commands`、配置的 `standards_commands`、可选 LSP/typecheck 命令、AST/结构命令、hashline anchor 检查、注释检查与可选 OpenAI 兼容 LLM review。BaiZe 是唯一独立 review Agent；目标/证据、bug/风险与怀疑式验收视角作为 review Skill 或模式选择。
 
-## Adapter Model
+## Adapter 模型
 
-Codex receives `.codex/hooks.json`. This is the real project-local Codex hook entry and becomes hard enforcement after the project `.codex/` layer and hook definition are trusted through `/hooks`.
+Codex 收到 `.codex/hooks.json`。这是真实的项目本地 Codex hook 入口，在项目 `.codex/` 层与 hook 定义经 `/hooks` 信任后变为 hard enforcement。
 
-WildArrange also writes `.helix/adapters/codex/hooks.json` as an audit copy. Cursor receives `.cursor/hooks.json` plus a project-aware bridge at `.cursor/hooks/wildarrange-hook-bridge.mjs` (hard enforcement once the workspace is trusted; `preToolUse` is fail-closed), with `.cursor/rules/wildarrange.mdc` remaining as the soft fallback layer.
+WildArrange 还将 `.helix/adapters/codex/hooks.json` 写为审计副本。Cursor 收到 `.cursor/hooks.json` 与项目感知 bridge `.cursor/hooks/wildarrange-hook-bridge.mjs`（工作区信任后为 hard enforcement；`preToolUse` fail-closed），`.cursor/rules/wildarrange.mdc` 仍为 soft fallback 层。
 
-Kimi receives a generated plugin under `.helix/adapters/kimi/plugin/`. The project CLI never edits user-level `~/.kimi-code/config.toml`; the developer starts Kimi Code from the project root, explicitly installs the generated plugin through `/plugins install .helix/adapters/kimi/plugin`, and activates it with `/reload`. The relative path avoids Kimi Code 0.27 treating quote characters as literal path characters. Kimi plugin installation is user-scoped, so its Hook bridge first verifies that the event `cwd` contains a real WildArrange runtime marker and exits without creating files in unrelated projects. Kimi's Hook runner is fail-open on hook crashes and timeouts: a healthy `PreToolUse` can deny out-of-scope Write/Edit/Bash calls, but final security and completion remain enforced by the host-neutral delivery pipeline and checkpoint gates.
+Kimi 在 `.helix/adapters/kimi/plugin/` 下收到生成的 plugin。项目 CLI 永不编辑用户级 `~/.kimi-code/config.toml`；开发者从项目根启动 Kimi Code，通过 `/plugins install .helix/adapters/kimi/plugin` 显式安装生成的 plugin，并用 `/reload` 激活。相对路径避免 Kimi Code 0.27 将引号字符当作字面路径字符。Kimi plugin 安装是用户 scope，其 Hook bridge 先验证事件 `cwd` 含真实 WildArrange 运行时标记，无关项目不创建文件即退出。Kimi Hook runner 在 hook 崩溃与超时时 fail-open：健康的 `PreToolUse` 可 deny 范围外 Write/Edit/Bash，但最终安全与完成仍由宿主中立 delivery pipeline 与 checkpoint gate 强制。
 
-Adapter install also generates a set of commands so users do not have to open a terminal for common operations. All surfaces render from one shared command set (`helix-config`, `helix-doctor`, `helix-refresh`, `helix-status`, `helix-plan`, `helix-approve`, `helix-run`):
+adapter 安装还生成一组 command，用户不必开终端做常见操作。所有面从同一共享 command 集渲染（`helix-config`、`helix-doctor`、`helix-refresh`、`helix-status`、`helix-plan`、`helix-approve`、`helix-run`）：
 
-- Cursor: `.cursor/commands/<name>.md` (plain-Markdown slash commands, filename = command name).
-- Codex and Kimi: `.agents/skills/<name>/SKILL.md` (shared project Skill directory with `name`/`description` metadata).
+- Cursor：`.cursor/commands/<name>.md`（纯 Markdown slash command，文件名 = 命令名）。
+- Codex 与 Kimi：`.agents/skills/<name>/SKILL.md`（共享项目 Skill 目录，带 `name`/`description` metadata）。
 
-Each command is a prompt that instructs the agent to run the matching `helix.mjs` CLI subcommand and report the result; they are shortcuts that let the agent run the CLI, not native buttons.
+每个 command 是指示 agent 运行匹配 `helix.mjs` CLI 子命令并报告结果的 prompt；它们是让 agent 跑 CLI 的快捷方式，不是原生按钮。
 
-Adapter install and uninstall always back up overwritten or removed files, including generated slash commands. `adapter restore --backup <backupId>` restores one backup directory to its original project paths.
+adapter 安装与卸载始终备份被覆盖或删除的文件，含生成的 slash command。`adapter restore --backup <backupId>` 将一备份目录恢复到原项目路径。
 
-## Success Criteria Evidence Model
+## Success Criteria 证据模型
 
-`successCriteria` are independent completion evidence, not a mirror of verifier output. Explicit criteria remain pending until an agent records evidence or the criterion declares `verifierCommandRefs` that point to concrete passing `verify_commands`. Legacy tasks that omit `successCriteria` receive verifier-bound defaults for compatibility, but possible no-op tasks are marked with `governanceWarnings` so a trivial worker plus trivial verifier is visible.
+`successCriteria` 是独立的完成证据，不是 verifier 输出的镜像。显式 criteria 保持 pending，直到 agent 记录证据或 criterion 声明指向具体 passing `verify_commands` 的 `verifierCommandRefs`。省略 `successCriteria` 的旧任务为兼容收到 verifier 绑定默认值，但可能的 no-op 任务标 `governanceWarnings`，使 trivial worker + trivial verifier 可见。
 
-Checkpoint still requires worker success, verifier pass, success criteria pass, scope pass, review pass, and acceptance proof pass.
+Checkpoint 仍需要 worker 成功、verifier pass、success criteria pass、scope pass、review pass 与 acceptance proof pass。
 
-## Dashboard Security Model
+## Dashboard 安全模型
 
-The dashboard remains local-first. Loopback `GET /api/state` can be read without a token for lightweight status checks. Every `POST` endpoint requires `Authorization: Bearer <token>` or `x-helix-token`, including on `127.0.0.1`, because POST endpoints can execute worker commands. The server also validates Host and Origin / Sec-Fetch-Site to reduce DNS rebinding and browser cross-site trigger risk.
+dashboard 保持 local-first。loopback `GET /api/state` 可无 token 读取做轻量 status 检查。每个 `POST` 端点需要 `Authorization: Bearer <token>` 或 `x-helix-token`，包括在 `127.0.0.1` 上，因为 POST 可执行 worker 命令。服务器还校验 Host 与 Origin / Sec-Fetch-Site，降低 DNS rebinding 与浏览器跨站触发风险。
 
-## Skill And Prompt Variant Model
+## Skill 与 Prompt 变体模型
 
-The base prompt pack remains the source of truth. `skills match` is an explainable loading hint that scores installed skills by explicit selection, stage boosts, route keyword signals, agent role, category, and request keywords. It does not mutate the route table.
+基础 prompt pack 仍是真相源。`skills match` 是可解释的加载提示，按显式选择、stage boost、路由 keyword 信号、Agent 角色、category 与请求 keyword 对已安装 skill 打分。不 mutate 路由表。
 
-Skill mounting at injection points is on-demand when request text is available (`skillMatcher.dynamicInjection`, enabled by default):
+注入点的 Skill 挂载在请求文本可用时为按需（`skillMatcher.dynamicInjection`，默认启用）：
 
-- The static skill list configured on an injection point is the upper bound; dynamic matching only subtracts, it never injects full text of skills outside the configured list.
-- `alwaysMount` skills (default: `wildarrange-injection-runtime`) are always mounted; other configured skills are mounted only when the matcher scores them above zero on request-related signals. Agent-identity boosts alone do not qualify, because they are constant per agent and would degenerate into static mounting.
-- `maxSkills` (default 4) caps the number of dynamically mounted skills by score.
-- Unmounted skills are demoted to on-demand references (name + load command) in the injection output, so the agent can pull them explicitly when needed.
-- Without request text (for example `pre_tool_use`), the point falls back to static mounting and reports the reason in `skillSelection`.
+- 注入点配置的静态 skill 列表是上限；动态匹配只减不加，从不注入配置列表外 skill 的全文。
+- `alwaysMount` skill（默认：`wildarrange-injection-runtime`）始终挂载；其他配置 skill 仅当 matcher 在请求相关信号上得分 >0 时挂载。仅 Agent 身份 boost 不算匹配，因其 per agent 恒定，会退化为静态挂载。
+- `maxSkills`（默认 4）按分数 cap 动态挂载 skill 数。
+- 未挂载 skill 在注入输出中降级为按需引用（name + load command），agent 需要时可显式拉取。
+- 无请求文本时（如 `pre_tool_use`），该点回退静态挂载并在 `skillSelection` 报告原因。
 
-Skill mounting at injection points is on-demand when request text is available. `resolveInjectionPoint` accepts an optional `{ text, stage }` context (hooks pass the user prompt or resume next-action; agent context passes the task subject). Dynamic selection is subtractive only: the configured skill list of an injection point is the upper bound, matched skills are mounted with full content, unmatched skills are demoted to path references the agent can load later via `prompts show --skill <name>`, and skills outside the configured list are never injected as full text no matter how the request is phrased. Agent-identity score alone does not count as a match, since it is constant per request. `skillMatcher.dynamicInjection` controls this behavior (`enabled`, `maxSkills` for the dynamic slots, `alwaysMount` for baseline skills such as `wildarrange-injection-runtime`). Without request text, or when disabled, mounting falls back to the static list.
+注入点的 Skill 挂载在请求文本可用时为按需。`resolveInjectionPoint` 接受可选 `{ text, stage }` 上下文（hook 传用户 prompt 或 resume next-action；agent context 传 task subject）。动态选择仅减：注入点配置 skill 列表是上限，匹配 skill 以全文挂载，未匹配降级为 agent 稍后经 `prompts show --skill <name>` 加载的路径引用，配置列表外 skill 无论请求如何措辞都不注入全文。仅 Agent 身份分数不算匹配，因其 per request 恒定。`skillMatcher.dynamicInjection` 控制此行为（`enabled`、`maxSkills` 动态槽位、`alwaysMount` 基线 skill 如 `wildarrange-injection-runtime`）。无请求文本或禁用时，挂载回退静态列表。
 
-Prompt variants are config-driven appendices. Host-managed GPT-family agents can use Codex/Cursor defaults, while Gemini, Kimi, DeepSeek, and custom providers can add narrow behavioral bias without replacing the original agent prompt.
+Prompt 变体是 config 驱动的附录。宿主托管 GPT 族 agent 可用 Codex/Cursor 默认，Gemini、Kimi、DeepSeek 与自定义 provider 可加窄行为偏置而不替换原 agent prompt。
 
-## Context Budget Model
+## 上下文预算模型
 
-`src/ai/injection.mjs` treats prompt-like context as tiered material, not one flat blob:
+`src/ai/injection.mjs` 将类 prompt 上下文视为分级材料，非单一扁平 blob：
 
-1. Prompt variants stay short and stable. The default `contextBudgets.prompt.maxChars` is 12,000 chars.
-2. Markdown mounts are for rules, snapshots, and live state. The default Markdown budget is 12,000 chars, with lighter hook budgets for `pre_tool_use` and `post_tool_use`.
-3. Activated Skill mounts are workflow instructions. The default Skill budget is 80,000 chars, with narrower budgets on traffic-light hooks and wider budgets on execute/review hooks.
-4. Any over-budget mount must expose `truncated: true`, original chars, loaded chars, and budget chars. Silent truncation is not allowed.
+1. Prompt 变体保持短且稳定。默认 `contextBudgets.prompt.maxChars` 为 12,000 字符。
+2. Markdown 挂载用于规则、snapshot 与 live 状态。默认 Markdown 预算 12,000 字符，`pre_tool_use` 与 `post_tool_use` 用更轻 hook 预算。
+3. 激活的 Skill 挂载是工作流指令。默认 Skill 预算 80,000 字符，traffic-light hook 更窄，execute/review hook 更宽。
+4. 任何超预算挂载必须暴露 `truncated: true`、原始字符、加载字符与预算字符。不允许静默截断。
 
-This follows the runtime philosophy that system prompts act like a constitution, Skills act like task manuals, references act like an archive, and hooks act like traffic lights. Long Skills may be acceptable when they are the actual workflow, but they should be activated by stage or route rather than loaded at every session start.
+这遵循运行时哲学：system prompt 像宪法，Skill 像任务手册，reference 像档案，hook 像红绿灯。长 Skill 在确实是工作流时可接受，但应按 stage 或 route 激活而非每次 session start 全加载。
 
-## Provider Model
+## Provider 模型
 
-Default GPT-family agents use `provider: "host"`. That means Codex/Cursor owns model selection, authentication, and model routing. WildArrange does not require `OPENAI_API_KEY` for host-managed Jiuwei, DiJiang, ZhuRong, BaiZe, LuWu, or generic `deep`/`ultrabrain` lanes.
+默认 GPT 族 agent 用 `provider: "host"`。即 Codex/Cursor 拥有模型选择、认证与模型路由。WildArrange 对宿主托管的 Jiuwei、DiJiang、ZhuRong、BaiZe、LuWu 或 generic `deep`/`ultrabrain` 通道不要求 `OPENAI_API_KEY`。
 
-External providers use `type: "openai-compatible"` and are configured with:
+外部 provider 用 `type: "openai-compatible"` 配置：
 
-- `apiKeyEnv`: environment variable name that stores the API key.
-- `baseUrlEnv`: optional environment variable name that overrides the endpoint.
-- `defaultBaseUrl`: fallback endpoint when `baseUrlEnv` is not set.
+- `apiKeyEnv`：存 API key 的环境变量名。
+- `baseUrlEnv`：可选，覆盖 endpoint 的环境变量名。
+- `defaultBaseUrl`：未设 `baseUrlEnv` 时的 fallback endpoint。
 
-`apiKeyEnv` and `baseUrlEnv` must not contain raw secret values.
+`apiKeyEnv` 与 `baseUrlEnv` 不得含 raw secret 值。
 
-## Commercial Boundary
+## 商业边界
 
-WildArrange core must remain original code. External workflow projects may inform concepts, node names, and quality gates, but commercial builds must not ship copied source, copied prompt text, or tool implementations from licenses that restrict commercial redistribution.
+WildArrange core 必须保持原创代码。外部 workflow 项目可 inform 概念、节点名与质量 gate，但商业构建不得 ship 复制源码、复制 prompt 文本或限制商业再分发许可的工具实现。
 
-Adapter-specific behavior belongs in `src/interface/adapters.mjs`, `src/interface/kimi-adapter.mjs`, or host-specific generated files. Core workflow, gates, ledger, and provider logic must run without Codex/Cursor/Kimi private hooks.
+adapter 专用行为属于 `src/interface/adapters.mjs`、`src/interface/kimi-adapter.mjs` 或宿主专用生成文件。core workflow、gate、ledger 与 provider 逻辑必须在没有 Codex/Cursor/Kimi 私有 hook 的情况下运行。
 
-## Known Architecture Debt
+## 维护规则
 
-`src/helix-core.mjs` is now a compatibility barrel over the five zoned directories. New implementation should go into the focused zoned modules rather than growing `helix-core.mjs`, and the ~29 flat `src/helix-*.mjs` shim files should shrink toward zero usage over time as callers migrate their imports to the zoned paths directly (the shims themselves must stay declarative re-exports, not grow logic).
-
-## Maintenance Rules
-
-- Keep `src/helix-core.mjs` as a compatibility export surface only.
-- Place new implementation in the zone that owns the behavior (`interface`/`orchestration`/`ai`/`capabilities`/`infra`); create a new `src/<zone>/helix-*.mjs` module when no current owner fits.
-- Respect the one-way dependency graph in "Five-Zone Layering" above. `orchestration/` and `ai/` must reach `capabilities/` only through `capabilities/gateway.mjs`'s `invokeCapability(name, ctx)`; never import a capability implementation file directly.
-- Keep source files under 1000 lines by default. At 700+ lines, review whether the file has more than one domain responsibility.
-- Runtime modules should import concrete zoned owner modules directly, not route internal dependencies through `src/helix-core.mjs` or through a flat `src/helix-*.mjs` shim.
-- Any new runtime module must be listed in this architecture map and in `CLAUDE.md`/`AGENTS.md`.
-- Keep directory-level `AGENTS.md` guidance additive and local. Update the nearest file when a directory responsibility changes; do not duplicate the full root policy into every folder.
-- `test/dependency-boundary.test.mjs` runs on every `npm test`; a failing boundary test means the dependency graph was violated, not that the test should be loosened.
-- Preserve gate invariants: verifier, scope, review, and success criteria must remain mandatory for completion.
+- 新实现放在拥有该行为的区（`interface`/`orchestration`/`ai`/`capabilities`/`infra`）；无当前 owner 时新建 `src/<zone>/helix-*.mjs` 模块。
+- 尊重上文「五区分层」的单向依赖图。`orchestration/` 与 `ai/` 到达 `capabilities/` 只能经 `capabilities/gateway.mjs` 的 `invokeCapability(name, ctx)`；永不直接 import capability 实现文件。
+- 源文件默认保持 1000 行以内。700+ 行时评估是否超过一个领域职责。
+- CLI、测试与运行时模块直接 import 具体分区 owner，不建立根级 barrel 或兼容 shim。
+- 任何新运行时模块必须列入本架构图与根 `AGENTS.md`（`CLAUDE.md` 为同步的 Claude 宿主镜像）。还要登记 `tooling/arch-module-graph/module-file-map.json` 并更新 `docs/product/architecture-overview.html`；运行 `npm run check:arch`。
+- 经 gateway 调用的 capability 目前含 `worker`、`verify`、`scope`、`review`、`acceptance-proof`、`checkpoint`、`command`、`command-safety`、`repository-governance`。`code-intel` 是 `review-gate.mjs` 内 import 的 review 子 capability，非 `invokeCapability` 名。
+- 目录级 `AGENTS.md` 指引保持附加与局部。目录职责变化时更新最近文件；勿把完整根策略复制到每个文件夹。
+- `test/dependency-boundary.test.mjs` 每次 `npm test` 运行；边界测试失败意味着依赖图被违反，不是应放宽测试。
+- 保留 gate 不变量：verifier、scope、review 与 success criteria 对完成仍为 mandatory。

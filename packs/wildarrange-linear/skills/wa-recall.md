@@ -8,7 +8,7 @@
 
 如果 `CONCEPTS.md` 存在，先读它对齐项目术语；不存在时不阻塞，以项目规范、`.helix/memory/` 索引和当前代码事实为准，不要声称已读取词汇表。
 
-Grep-first：
+Grep 优先：
 
 1. 优先读取 `.helix/memory/last-digest.json`、`.helix/memory/digest-index.json` 和 `.helix/memory/last-archivist-result.json`。
 2. 按关键词、阶段、任务 ID、路由类别筛出候选 digest 或 stage summary。
@@ -21,7 +21,7 @@ Grep-first：
 ## 输入 / 输出
 
 - 输入：当前阶段 context，例如问题帧或 diff。
-- 输出：`## 历史经验召回` 段，包含 Key Insight 和 Recommendations。
+- 输出：`## 历史经验召回` 段，包含关键洞察与建议。
 
 ## 工具 / MCP
 

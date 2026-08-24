@@ -9,7 +9,8 @@
 - `five-zone-decoupling-guidelines.md`：面向复用，记录不依赖 WildArrange 业务名的通用准则。
 - `low-code-project-governance.md`：面向复用，记录「低代码开发者 + AI 维护」的掌控方法论、测试纪律与成熟度分级。
 - `development-plan.md`：只记录路线与状态，不替代当前架构事实。
-- `plans/*.html`：需要评审或确认的方案、计划与流程可视化。
+- `plans/*.html`：需要评审或确认的方案、计划与流程可视化；已落地或过期的方案必须在文首标明「历史方案」，不得当现行设计。
+- `docs/product/architecture-overview.html` + `tooling/arch-module-graph/module-file-map.json`：产品总图与模块归属；新运行时模块必须登记并跑 `npm run check:arch`。
 - 交接文档：记录一次变更的决策和遗留，不作为长期唯一真相。
 
 ## 硬规则

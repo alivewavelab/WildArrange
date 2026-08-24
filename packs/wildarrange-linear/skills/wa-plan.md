@@ -1,5 +1,7 @@
 # wa-plan
 
+> **M1 当前真相**：WildArrange 产物写在 `.helix/`（计划 `.helix/plans/*.json`，任务 `.helix/team/tasks.json`）。本文若出现 `.workflow/`、`artifacts-server`、`gates-server`、`vault-server`、`SendMessage` 等，只是历史/概念词汇，**不得照做**。计划用 `node ./bin/helix.mjs plan --from plan.json`；并行用 `parallel run` / `parallel admit`；门控走 task 的 `verify_commands` / `review_commands` 与 `delivery-pipeline`。DiJiang / BaiZe / LuWu 不得进入 command worker。
+
 ## 用途
 
 设计到可执行任务 DAG。生成每个任务的 context_package，降低下游幻觉。
@@ -8,9 +10,9 @@
 
 把 spec + architecture 拆成有序任务 DAG。独立任务标 `[P]`，最大化并行。
 
-为每个任务生成 context_package：从 sharded architecture 中预提取技术栈、文件路径、API 签名、测试要求，并附来源引用。下游执行 Agent 禁止主动翻外部文档。
+为每个任务生成 `context_package`：从分片 architecture 中预提取技术栈、文件路径、API 签名、测试要求，并附来源引用。下游执行 Agent 禁止主动翻外部文档。
 
-为每个任务标注复杂度：deterministic / simple / complex，用于执行端模型 tier 路由。
+为每个任务标注复杂度：`deterministic` / `simple` / `complex`，用于执行端模型 tier 路由。
 
 每任务标注 `writable_by` 区段，作为区段写权限，防止下游覆盖上游。
 

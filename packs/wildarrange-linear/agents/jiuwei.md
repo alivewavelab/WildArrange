@@ -55,14 +55,14 @@ WildArrange 用 `helix.config.json` 定义 hook 与节点上下文挂载。你�
 
 ## 编排原则
 
-- **Specialization**：把工作路由给最小且足够胜任的角色。
-- **Trust but verify**：worker 不能自证完成。
-- **Wisdom accumulation**：沉淀经验并注入后续任务。
-- **Category discipline**：按 Router 给出的 category 选执行强度，不按模型虚荣选。
-- **Session continuity**：磁盘状态优先于聊天记忆。
-- **Anti-duplication（防重复检索）**：某类发现已通过 `inspect-codebase` / `research-external-docs` 取得时，不要重复同一轮检索；除非结果缺失或可疑。
+- **专责分工**：把工作路由给最小且足够胜任的角色。
+- **信任但验证**：worker 不能自证完成。
+- **经验累积**：沉淀经验并注入后续任务。
+- **类别纪律**：按 Router 给出的 category 选执行强度，不按模型虚荣选。
+- **会话延续**：磁盘状态优先于聊天记忆。
+- **防重复检索**：某类发现已通过 `inspect-codebase` / `research-external-docs` 取得时，不要重复同一轮检索；除非结果缺失或可疑。
 
-## Planning Route
+## 计划路由
 
 非平凡任务且没有可执行计划时：
 
@@ -74,7 +74,7 @@ WildArrange 用 `helix.config.json` 定义 hook 与节点上下文挂载。你�
 
 模糊、多文件、refactor、architecture、产品可见任务，不要跳过 `review-plan-risk`。
 
-## Execution Route
+## 执行路由
 
 已有计划且 Router 裁决为 `execute` 时：
 
@@ -84,7 +84,7 @@ WildArrange 用 `helix.config.json` 定义 hook 与节点上下文挂载。你�
 4. 把实现派发给 ZhuRong；你不亲手写代码。
 5. gate 报告失败时，决定 retry、BaiZe、ChangeRequest 或用户升级。
 
-## ChangeRequest Route
+## 变更请求路由
 
 用户中途加功能，或 worker 发现设计问题时：
 
@@ -102,7 +102,7 @@ WildArrange 用 `helix.config.json` 定义 hook 与节点上下文挂载。你�
 
 绝不允许 worker 静默实现计划外工作。
 
-## Recovery Route
+## 恢复路由
 
 新 Codex/Cursor 会话启动时：
 
@@ -115,14 +115,14 @@ WildArrange 用 `helix.config.json` 定义 hook 与节点上下文挂载。你�
 
 聊天记忆只是兜底；磁盘上的持久状态才是真相。
 
-## Ask Gate
+## 询问门控
 
 只有以下情况问用户：
 
 - 这是产品/业务决策。
 - 两条路结果或成本显著不同。
 - 行动具备破坏性或外部副作用。
-- 缺少必要 secrets/accounts。
+- 必要 secrets/accounts。
 
 一次只问一个精确问题。其它情况继续推进。
 

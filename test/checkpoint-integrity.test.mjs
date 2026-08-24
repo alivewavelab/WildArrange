@@ -16,20 +16,13 @@ import test from "node:test";
 
 import { runDeliveryPipeline } from "../src/orchestration/delivery-pipeline.mjs";
 import { persistTaskState } from "../src/orchestration/task-board.mjs";
-import {
-  admitParallelAgentResult,
-  importPlan,
-  initRuntime,
-  loadTaskState,
-  parallelAgentStatus,
-  readJson,
-  resolveHelixPath,
-  runCommand,
-  runDoctor,
-  runNextTask,
-  runParallelAgents,
-  runWorkflowNode,
-} from "../src/helix-core.mjs";
+import { runDoctor } from "../src/interface/doctor.mjs";
+import { admitParallelAgentResult, parallelAgentStatus, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
+import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtime.mjs";
+import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
+import { runCommand } from "../src/infra/command-runner.mjs";
+import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
+import { readJson, resolveHelixPath } from "../src/infra/runtime-store.mjs";
 
 async function withTempDir(fn) {
   const baseDir = path.join(process.cwd(), ".tmp");

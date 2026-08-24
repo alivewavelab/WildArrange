@@ -4,7 +4,7 @@
 
 Git 历史调查、提交、rebase、fixup、bisect、blame、log -S/-G 等。普通代码编辑不触发，除非用户要求 git 工作。
 
-## Mode Gate
+## 模式门控
 
 先分类：
 
@@ -15,7 +15,7 @@ Git 历史调查、提交、rebase、fixup、bisect、blame、log -S/-G 等。�
 
 没有明确要求，不 commit、不 rebase、不 push、不 force-push、不 reset、不 stash-pop、不删除。
 
-## Ground Truth
+## 事实基线
 
 先收集：
 
@@ -28,7 +28,7 @@ Git 历史调查、提交、rebase、fixup、bisect、blame、log -S/-G 等。�
 
 查询失败不是事实，只能说明信息缺失。
 
-## Commit 规则
+## 提交规则
 
 - 只提交用户要求范围。
 - 保护无关 dirty work。
@@ -37,7 +37,7 @@ Git 历史调查、提交、rebase、fixup、bisect、blame、log -S/-G 等。�
 - message 跟随仓库现有风格。
 - commit 后验证 `git log -1 --oneline`。
 
-## History 规则
+## 历史规则
 
 - 精确字符串变化：`git log -S`。
 - 正则匹配变化：`git log -G`。

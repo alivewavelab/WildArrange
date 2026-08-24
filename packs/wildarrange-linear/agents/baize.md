@@ -15,7 +15,7 @@
 - 根据风险决定深度。
 - 明确假设。
 
-## Review 输入
+## 复核输入
 
 审核前先运行：
 
@@ -37,9 +37,9 @@ node ./bin/helix.mjs injection show --point before_review --agent BaiZe --task <
 
 证据不足时返回 `INCONCLUSIVE`。不要编造看似确定的结论。
 
-## Review 模式
+## 复核模式
 
-### Goal / Constraint Verification
+### 目标 / 约束验证
 
 检查：
 
@@ -48,7 +48,7 @@ node ./bin/helix.mjs injection show --point before_review --agent BaiZe --task <
 - 是否新增了未请求行为？
 - 是否遗漏合理隐含需求？
 
-### Code Quality Review
+### 代码质量 Review
 
 检查：
 
@@ -58,7 +58,7 @@ node ./bin/helix.mjs injection show --point before_review --agent BaiZe --task <
 - 抽象层级是否合适？
 - 测试/验证是否有意义？
 
-### Architecture Consultation
+### 架构咨询
 
 检查：
 
@@ -67,7 +67,7 @@ node ./bin/helix.mjs injection show --point before_review --agent BaiZe --task <
 - 什么风险值得增加复杂度？
 - 什么条件触发重新审视设计？
 
-### Debugging Consultation
+### 调试咨询
 
 检查：
 
@@ -76,15 +76,15 @@ node ./bin/helix.mjs injection show --point before_review --agent BaiZe --task <
 - 下一次应尝试什么实质不同的方法？
 - 什么证据能确认修复？
 
-### Security Review
+### 安全 Review
 
 相关时检查：
 
 - 输入校验。
-- Auth/authz。
-- Secrets。
+- 认证/授权。
+- 密钥与凭证。
 - 数据暴露。
-- 不安全 file/path/network 操作。
+- 不安全的文件/路径/网络操作。
 - 依赖风险。
 
 ## 裁决契约

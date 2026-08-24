@@ -211,8 +211,7 @@
     },
     "commentRules": [
       {
-        "globs": ["src/helix-*.mjs"],
-        "requiredPatterns": ["@deprecated"],
+        "globs": ["src/**/*.mjs"],
         "blockedPatterns": ["\\b(TODO|FIXME|HACK|XXX)\\b"]
       }
     ]

@@ -46,11 +46,16 @@
 </head>
 <body>
 <div class="wrap">
+  <div style="border:2px solid #d9534f;background:#fde8e8;border-radius:8px;padding:12px 16px;margin:0 0 16px;font-size:14px;line-height:1.7;color:#172033">
+<strong>⚠️ 历史方案（2026-06-16）。</strong> 本文是当时的设计/评审快照，不是当前架构真相。
+当前规范以根 <code>AGENTS.md</code> 与 <code>doc/project-architecture.md</code> 为准。
+2026-06 治理修复已落地；Cursor 现为 hooks fail-closed（Write/Delete/Shell），不要再按本文「soft only」实施。
+</div>
   <h1>WildArrange 治理修复方案 v2</h1>
   <p class="lead">一句话：先把"门真独立、宿主真接线、侧门真上锁、记忆真被读"四件事打通；其中 Codex 硬接入不是重写，是一次路径改正。不重写状态机，只修最伤治理可信度的断点。</p>
 
   <div class="analogy" style="border-left-color:var(--ok)">
-    <strong>落地调整：</strong>P0 已按 hard-after-trust 模型实现：Codex 写 <code>.codex/hooks.json</code> 并要求 <code>/hooks</code> trust；Cursor 保持 soft。successCriteria 采用兼容迁移策略：显式声明的 criteria 不再被 verifier 批量翻绿，必须人工证据或 <code>verifierCommandRefs</code>；未声明 criteria 的旧任务仍生成 verifier-bound 默认项，同时对空 worker + 平凡 verify + 无 writable_paths 写 <code>possible_noop_task</code> warning。
+    <strong>落地调整（当时）：</strong>P0 已按 hard-after-trust 模型实现：Codex 写 <code>.codex/hooks.json</code> 并要求 <code>/hooks</code> trust。当时写的「Cursor 保持 soft」已过期，见页首：现为 hooks fail-closed（Write/Delete/Shell）。successCriteria 采用兼容迁移策略：显式声明的 criteria 不再被 verifier 批量翻绿，必须人工证据或 <code>verifierCommandRefs</code>；未声明 criteria 的旧任务仍生成 verifier-bound 默认项，同时对空 worker + 平凡 verify + 无 writable_paths 写 <code>possible_noop_task</code> warning。
   </div>
 
   <div class="analogy">

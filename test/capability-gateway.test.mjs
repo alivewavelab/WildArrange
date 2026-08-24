@@ -5,7 +5,10 @@ import test from "node:test";
 
 import { invokeCapability, listRegisteredCapabilities } from "../src/capabilities/gateway.mjs";
 import { runDeliveryPipeline } from "../src/orchestration/delivery-pipeline.mjs";
-import { importPlan, initRuntime, loadTaskState, readJson, resolveHelixPath, runCommand } from "../src/helix-core.mjs";
+import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
+import { runCommand } from "../src/infra/command-runner.mjs";
+import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
+import { readJson, resolveHelixPath } from "../src/infra/runtime-store.mjs";
 
 async function withTempDir(fn) {
   const baseDir = path.join(process.cwd(), ".tmp");

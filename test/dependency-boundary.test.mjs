@@ -11,20 +11,14 @@ import {
 } from "../src/infra/dependency-graph.mjs";
 
 /**
- * Enforces strict one-way layering as source files migrate into the five
- * zone directories (see doc/plans .../wildarrange-five-zone-refactor).
+ * Enforces strict one-way layering across the five zone directories.
  *
- * Zoned files (anything under src/<zone>/) must only import from zones
- * lower in the stack, per ALLOWED_DEPS. Files still sitting at the flat
- * src/helix-*.mjs root are "legacy/unclassified" during the migration:
- * they are exempt from the rule (so today's codebase does not fail this
- * test) but any NEW file created inside a zone directory is bound by the
- * rule immediately. As Phase 2-5 move files into zones, this test starts
- * enforcing the invariant on them automatically -- it is not a one-time
- * check, it runs on every `npm test`.
+ * Zoned files (anything under src/<zone>/) must only import from allowed
+ * zones per ALLOWED_DEPS. Runtime .mjs files at src/ root are forbidden:
+ * every implementation must have one real owner inside the five zones.
  *
- * bin/ entry points are also scanned: they sit above the zones and may
- * only import interface/ or the legacy helix-core compat layer.
+ * bin/ entry points are also scanned: as the composition root they may
+ * import real owners from any zone, but never a root-level barrel/shim.
  *
  * The scanner itself (maskSource/extractImportSpecifiers/buildDependencyEdges)
  * lives in src/infra/dependency-graph.mjs, shared with `helix impact`; the
@@ -34,12 +28,6 @@ import {
 const SRC_DIR = path.join(process.cwd(), "src");
 const ZONES = ["interface", "orchestration", "ai", "capabilities", "infra"];
 
-// Note: "legacy" (flat src/helix-*.mjs shims) is deliberately NOT an allowed
-// target for any zoned file. A legacy shim re-exports a zoned file, so letting
-// a zoned file import a shim would be a laundering channel that bypasses zone
-// rules (e.g. capabilities -> helix-hooks.mjs -> ai/hooks.mjs). Legacy files
-// themselves remain unconstrained as sources: they exist only for backward
-// compatibility of external/old callers.
 const ALLOWED_DEPS = {
   interface: ["orchestration", "infra"],
   orchestration: ["ai", "capabilities", "infra"],
@@ -70,12 +58,9 @@ test("dependency boundary: zoned files only import allowed lower zones", async (
   }
 });
 
-test("dependency boundary: bin/ entry points only import the interface zone or the legacy compat layer", async () => {
-  // bin/ sits above the five zones (CLI parsing and command routing only).
-  // Letting it import orchestration/ai/capabilities/infra files directly
-  // would turn the CLI into a sixth layer that bypasses every zone rule,
-  // so its only legal src/ targets are interface/ and the helix-core
-  // compat surface (legacy).
+test("dependency boundary: bin/ entry points import only real five-zone owners", async () => {
+  // bin/ is the composition root: it wires commands to existing owners but
+  // contains no business implementation. Root-level barrels are forbidden.
   const BIN_DIR = path.join(process.cwd(), "bin");
   const files = await listMjsFiles(BIN_DIR);
   assert.ok(files.length > 0, "bin/ should contain at least one .mjs entry point");
@@ -87,14 +72,14 @@ test("dependency boundary: bin/ entry points only import the interface zone or t
       const resolvedTarget = path.resolve(path.dirname(filePath), specifier);
       if (!resolvedTarget.startsWith(SRC_DIR)) continue;
       const targetZone = classifyZone(SRC_DIR, resolvedTarget);
-      if (targetZone === "interface" || targetZone === "legacy") continue;
+      if (ZONES.includes(targetZone)) continue;
       violations.push(`  ${path.relative(process.cwd(), filePath)} -> ${path.relative(SRC_DIR, resolvedTarget)} (${targetZone})`);
     }
   }
   assert.deepEqual(
     violations,
     [],
-    `bin/ must route through interface/ or the helix-core compat layer only:\n${violations.join("\n")}`,
+    `bin/ must import real owners inside the five zones:\n${violations.join("\n")}`,
   );
 });
 
@@ -208,11 +193,11 @@ test("dependency boundary: comment stripping is string-aware and cannot be blind
   const realComment = [
     `${openComment} example: import { x } from "../ai/routing.mjs" ${closeComment}`,
     `// import { y } from "../ai/context.mjs"`,
-    `import { z } from "../infra/foundation.mjs";`,
+    `import { z } from "../infra/runtime-store.mjs";`,
   ].join("\n");
   assert.deepEqual(
     extractImportSpecifiers(realComment),
-    ["../infra/foundation.mjs"],
+    ["../infra/runtime-store.mjs"],
     "specifiers quoted inside real comments must not create edges",
   );
 
@@ -238,11 +223,11 @@ test("dependency boundary: import syntax written inside strings is not an edge, 
   const docOnly = [
     `const usage = 'import { routeRequest } from "../ai/routing.mjs"';`,
     "const snippet = `import { hooks } from \"../ai/hooks.mjs\"`;",
-    `import { real } from "../infra/foundation.mjs";`,
+    `import { real } from "../infra/runtime-store.mjs";`,
   ].join("\n");
   assert.deepEqual(
     extractImportSpecifiers(docOnly),
-    ["../infra/foundation.mjs"],
+    ["../infra/runtime-store.mjs"],
     "import statements quoted inside strings/templates must not create edges",
   );
 
@@ -261,57 +246,12 @@ test("dependency boundary: import syntax written inside strings is not an edge, 
   );
 });
 
-test("dependency boundary: legacy shims and helix-core stay declarative re-exports, no business logic", async () => {
-  // Cross-review P2 (round 6, 2026-07-21): legacy files are exempt from the
-  // zone rules ("unconstrained during migration"), which would let business
-  // logic quietly move back INTO a shim and bypass every boundary. This test
-  // closes that gap: every flat src/helix-*.mjs file (including
-  // helix-core.mjs) may contain nothing but export/import declarations.
+test("dependency boundary: src root contains no runtime .mjs files", async () => {
   const files = await listMjsFiles(SRC_DIR);
-  const violations = [];
-  for (const filePath of files) {
-    if (classifyZone(SRC_DIR, filePath) !== "legacy") continue;
-    const masked = maskSource(await readFile(filePath, "utf8"));
-    const withoutDeclarations = masked
-      // export * from "..."; / export * as ns from "...";
-      .replace(/export\s*\*\s*(?:as\s+[\w$]+\s*)?from\s*(["'])[^"']*\1\s*;?/g, " ")
-      // export { a, b as c } from "..."; (named re-exports, possibly multiline)
-      .replace(/export\s*\{[^}]*\}\s*from\s*(["'])[^"']*\1\s*;?/g, " ")
-      // import ... from "..."; (a shim may import solely to re-export by name)
-      .replace(/import\s*(?:[\w$]+\s*,?\s*)?(?:\{[^}]*\}|\*\s*as\s+[\w$]+)?\s*from\s*(["'])[^"']*\1\s*;?/g, " ");
-    // Masked comments are spaces and masked string contents are \u0000, so
-    // anything non-whitespace left over is real executable code.
-    const leftover = withoutDeclarations.replace(/\u0000/g, "").trim();
-    if (leftover.length > 0) {
-      violations.push(`  ${path.relative(SRC_DIR, filePath)}: non-declarative content starts with ${JSON.stringify(leftover.slice(0, 80))}`);
-    }
-  }
-  if (violations.length > 0) {
-    assert.fail(`legacy shim(s) contain business logic (only declarative re-exports are allowed):\n${violations.join("\n")}`);
-  }
-});
-
-test("dependency boundary: infra/foundation.mjs is a declarative compatibility export", async () => {
-  const filePath = path.join(SRC_DIR, "infra", "foundation.mjs");
-  const masked = maskSource(await readFile(filePath, "utf8"));
-  const withoutDeclarations = masked
-    .replace(/export\s*\*\s*(?:as\s+[\w$]+\s*)?from\s*(["'])[^"']*\1\s*;?/g, " ")
-    .replace(/export\s*\{[^}]*\}\s*from\s*(["'])[^"']*\1\s*;?/g, " ")
-    .replace(/import\s*(?:[\w$]+\s*,?\s*)?(?:\{[^}]*\}|\*\s*as\s+[\w$]+)?\s*from\s*(["'])[^"']*\1\s*;?/g, " ");
-  const leftover = withoutDeclarations.replace(/\u0000/g, "").trim();
-  assert.equal(leftover, "", `infra/foundation.mjs must contain declarations only, found: ${leftover.slice(0, 120)}`);
-});
-
-test("dependency boundary: zoned implementations import concrete infra owners, not foundation.mjs", async () => {
-  const edges = await buildDependencyEdges(process.cwd());
-  const violations = edges.filter(
-    (edge) => edge.sourceZone !== "legacy" && edge.from !== "infra/foundation.mjs" && edge.to === "infra/foundation.mjs",
-  );
-  assert.deepEqual(
-    violations,
-    [],
-    `zoned implementation still imports infra/foundation.mjs: ${JSON.stringify(violations)}`,
-  );
+  const rootFiles = files
+    .filter((filePath) => path.dirname(filePath) === SRC_DIR)
+    .map((filePath) => path.basename(filePath));
+  assert.deepEqual(rootFiles, [], `src/ root runtime files are forbidden: ${rootFiles.join(", ")}`);
 });
 
 test("dependency boundary: no module-level import cycles anywhere in src/", async () => {

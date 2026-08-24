@@ -8,7 +8,9 @@ import path from "node:path";
 import test from "node:test";
 
 import { withFileLock } from "../src/infra/file-lock.mjs";
-import { appendLedger, initRuntime, resolveHelixPath } from "../src/helix-core.mjs";
+import { appendLedger } from "../src/infra/ledger.mjs";
+import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
+import { resolveHelixPath } from "../src/infra/runtime-store.mjs";
 
 async function withTempDir(fn) {
   const baseDir = path.join(process.cwd(), ".tmp");

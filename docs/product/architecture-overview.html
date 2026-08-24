@@ -1,0 +1,2477 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WildArrange 产品总图</title>
+<style>
+  /*
+   * 深色「装备整备室」风格：圆角 2px；无外投影；琥珀是唯一强调色；无绿色成功态。
+   * 单文件离线：不引外部 CDN / 字体 / 脚本（布局库已内联）。
+   */
+  :root {
+    color-scheme: dark;
+    --gc-void: #1b1d20;
+    --gc-surface-1: #24272b;
+    --gc-surface-2: #2b2f34;
+    --gc-surface-3: #3a3e44;
+    --gc-surface-hover: #31363c;
+    --gc-slot: #17191c;
+    --gc-ink: #d7d9dc;
+    --gc-ink-2: #8a8f96;
+    --gc-ink-3: #5f656d;
+    --gc-line: #3a3e44;
+    --gc-line-strong: #4a4f56;
+    --gc-bright: #e8a33d;
+    --gc-bright-dim: rgba(232, 163, 61, 0.14);
+    --gc-amber-dk: #b97f28;
+    --gc-danger: #c0554a;
+    --gc-font-display: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    --gc-font-data: "IBM Plex Mono", Consolas, "Courier New", monospace;
+    --gc-font-stencil: "Saira Stencil One", "Noto Sans SC", "PingFang SC", sans-serif;
+    --gc-fs-micro: 9px;
+    --gc-fs-label: 10px;
+    --gc-fs-body: 12px;
+    --gc-fs-title: 15px;
+    --gc-fs-page: 20px;
+    --gc-leading-body: 1.5;
+    --gc-control-sm: 28px;
+    --gc-control-md: 32px;
+    --gc-space-1: 4px;
+    --gc-space-2: 8px;
+    --gc-space-3: 12px;
+    --gc-space-4: 16px;
+    --gc-space-5: 24px;
+    --gc-space-6: 32px;
+    --gc-radius-control: 2px;
+    --gc-radius-panel: 2px;
+    --gc-motion-fast: 120ms linear;
+    --gc-assistant-w: 320px;
+    --gc-slot-inset: inset 0 1px 0 rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--gc-void); }
+  body { padding: var(--gc-space-4) var(--gc-space-4) 48px; color: var(--gc-ink); font: var(--gc-fs-body)/var(--gc-leading-body) var(--gc-font-display); }
+  a { color: var(--gc-bright); }
+  h1 { margin: 0 0 var(--gc-space-1); font-size: var(--gc-fs-page); letter-spacing: 0.02em; }
+  .sub { color: var(--gc-ink-2); }
+  .note { margin-top: var(--gc-space-2); padding: var(--gc-space-2) var(--gc-space-3); border-left: 2px solid var(--gc-bright); background: var(--gc-bright-dim); color: var(--gc-ink-2); font-size: var(--gc-fs-body); }
+  .note-details { margin-top: var(--gc-space-2); }
+  .note-details > summary { display: inline-flex; align-items: center; min-height: var(--gc-control-sm); cursor: pointer; color: var(--gc-ink-3); font-size: var(--gc-fs-label); user-select: none; }
+  .note-details > summary:hover { color: var(--gc-ink-2); }
+  .note-details .note { margin-top: var(--gc-space-1); }
+  .note code, .kv code { font-family: var(--gc-font-data); font-size: 11px; }
+
+  .guide { margin-top: var(--gc-space-2); border: 1px solid var(--gc-line); border-radius: var(--gc-radius-control); background: var(--gc-surface-1); }
+  .guide summary { padding: var(--gc-space-2) var(--gc-space-3); cursor: pointer; color: var(--gc-bright); font-weight: 700; user-select: none; }
+  .guide-bd { padding: 0 var(--gc-space-3) var(--gc-space-2); color: var(--gc-ink-2); }
+  .guide-bd p { margin: var(--gc-space-1) 0; }
+  .guide-bd table { width: 100%; border-collapse: separate; border-spacing: 0; margin: var(--gc-space-2) 0 var(--gc-space-3); }
+  .guide-bd td { padding: var(--gc-space-2) var(--gc-space-3); border: 0; border-bottom: 1px solid var(--gc-line-strong); vertical-align: baseline; }
+  .guide-bd tr:last-child td { border-bottom: 0; }
+  .guide-bd td:first-child { width: 28%; color: var(--gc-ink); font-weight: 700; white-space: nowrap; }
+  .guide-bd tr:nth-child(even) td { background: var(--gc-slot); }
+  .guide-flow { margin: var(--gc-space-2) 0; padding: var(--gc-space-2) var(--gc-space-3); border-radius: var(--gc-radius-control); background: var(--gc-slot); color: var(--gc-ink); font-weight: 500; }
+
+  .rules { margin-top: var(--gc-space-3); border: 1px solid var(--gc-line); border-radius: var(--gc-radius-control); background: var(--gc-surface-1); }
+  .rules summary { padding: var(--gc-space-2) var(--gc-space-3); cursor: pointer; color: var(--gc-bright); font-weight: 700; user-select: none; }
+  .rules-bd { padding: 0 var(--gc-space-3) var(--gc-space-3); color: var(--gc-ink-2); }
+  .rules-bd h2 { margin: var(--gc-space-4) 0 var(--gc-space-2); color: var(--gc-ink); font-size: var(--gc-fs-title); }
+  .rules-bd h3 { margin: var(--gc-space-3) 0 var(--gc-space-1); color: var(--gc-ink); font-size: var(--gc-fs-body); }
+  .rules-bd p { margin: var(--gc-space-1) 0; }
+  .rules-bd ol { margin: var(--gc-space-1) 0; padding-left: var(--gc-space-5); }
+  .rules-bd table { width: 100%; border-collapse: collapse; margin: var(--gc-space-2) 0; }
+  .rules-bd th, .rules-bd td { padding: var(--gc-space-1) var(--gc-space-2); border: 1px solid var(--gc-line); text-align: left; vertical-align: top; }
+  .rules-bd th { background: var(--gc-surface-2); color: var(--gc-ink); }
+  .rules-bd pre { padding: var(--gc-space-2) var(--gc-space-3); border-radius: var(--gc-radius-control); background: var(--gc-slot); overflow: auto; font-family: var(--gc-font-data); font-size: 11px; }
+  .rules-bd blockquote { margin: var(--gc-space-2) 0; padding: var(--gc-space-2) var(--gc-space-3); border-left: 2px solid var(--gc-bright); background: var(--gc-bright-dim); }
+  .rules-bd code { font-family: var(--gc-font-data); font-size: 11px; }
+
+  .layout { display: block; margin-top: var(--gc-space-3); }
+  .main { width: 100%; min-width: 0; }
+
+  .tabs { display: flex; flex-wrap: wrap; gap: var(--gc-space-2); margin-bottom: var(--gc-space-3); }
+  .tab { height: var(--gc-control-md); padding: 0 var(--gc-space-3); border: 1px solid var(--gc-line); border-radius: var(--gc-radius-control); background: var(--gc-surface-2); color: var(--gc-ink-2); font: inherit; cursor: pointer; transition: var(--gc-motion-fast); }
+  .tab:hover { background: var(--gc-surface-hover); color: var(--gc-ink); }
+  .tab[aria-pressed="true"] { border-color: var(--gc-bright); background: var(--gc-bright-dim); color: var(--gc-bright); font-weight: 700; }
+
+  .drill-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--gc-space-2); padding: var(--gc-space-2) 0; }
+  .drill-grid .node { text-align: left; }
+  .drill-note { color: var(--gc-ink-3); font-size: var(--gc-fs-label); margin: var(--gc-space-2) 0 0; }
+  .drawer { --drawer-h: 48vh; position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; background: var(--gc-surface-1); border-top: 1px solid var(--gc-line-strong); }
+  .drawer-grip { height: 12px; margin-top: -6px; cursor: ns-resize; position: relative; z-index: 2; touch-action: none; display: flex; align-items: center; justify-content: center; gap: var(--gc-space-2); }
+  .drawer-grip::after { content: ""; display: block; width: 46px; height: 4px; border-radius: 2px; background: var(--gc-line-strong); transition: background var(--gc-motion-fast); }
+  .drawer-grip .grip-hint { color: var(--gc-ink-3); font-size: var(--gc-fs-micro); }
+  .drawer-grip:hover::after, .drawer-grip.drag::after { background: var(--gc-bright); }
+  .drawer-grip:hover .grip-hint, .drawer-grip.drag .grip-hint { color: var(--gc-bright); }
+  .drawer-bar { display: flex; align-items: center; }
+  .drawer-hd { display: flex; flex: 1; align-items: center; gap: var(--gc-space-2); min-width: 0; height: var(--gc-control-md); padding: 0 var(--gc-space-3); border: 0; background: transparent; color: var(--gc-ink-2); font-family: var(--gc-font-stencil); font-size: var(--gc-fs-label); letter-spacing: 0.12em; text-transform: uppercase; cursor: pointer; transition: var(--gc-motion-fast); }
+  .drawer-hd:hover { color: var(--gc-ink); }
+  .drawer-hd .caret { display: inline-block; transition: transform var(--gc-motion-fast); }
+  .drawer[data-open="true"] .drawer-hd .caret { transform: rotate(90deg); }
+  .drawer-close { flex: none; width: var(--gc-control-md); height: var(--gc-control-md); margin-right: var(--gc-space-2); border: 1px solid var(--gc-line); border-radius: var(--gc-radius-control); background: transparent; color: var(--gc-ink-2); font-size: 14px; line-height: 1; cursor: pointer; transition: var(--gc-motion-fast); }
+  .drawer-close:hover { color: var(--gc-ink); border-color: var(--gc-line-strong); }
+  .drawer-key { color: var(--gc-bright); font-family: var(--gc-font-data); letter-spacing: 0; text-transform: none; }
+  .drawer-bd { display: none; overflow: hidden; padding: var(--gc-space-2) var(--gc-space-3) var(--gc-space-3); border-top: 1px solid var(--gc-line); }
+  .drawer[data-open="true"] .drawer-bd { display: flex; gap: var(--gc-space-3); height: var(--drawer-h); }
+  .fx-side { width: 420px; flex: none; overflow: auto; padding-right: var(--gc-space-3); border-right: 1px solid var(--gc-line); }
+  .fx-main { flex: 1; min-width: 0; overflow: hidden; position: relative; }
+  .fx-viewport { width: 100%; height: 100%; overflow: hidden; cursor: grab; touch-action: none; }
+  .fx-viewport.is-pan { cursor: grabbing; }
+  .fx-svg { width: 100%; height: 100%; display: block; }
+  .fx-name { margin: 0 0 var(--gc-space-2); color: var(--gc-bright); font-size: var(--gc-fs-title); line-height: 1.3; }
+  .step { padding: 2px var(--gc-space-2); border-bottom: 2px solid var(--gc-surface-3); }
+
+  .view { display: none; } .view.is-on { display: block; }
+  .canvas { padding: var(--gc-space-3); border: 1px solid var(--gc-line); border-radius: var(--gc-radius-control); background: var(--gc-surface-1); }
+  .lane { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: var(--gc-space-2); align-items: stretch; }
+  .lane > :not(.lane-t) { grid-column: 2; min-width: 0; }
+  .lane-t { display: grid; place-items: center start; padding: var(--gc-space-2) var(--gc-space-1); border-right: 2px solid var(--gc-line); color: var(--gc-ink-2); font-family: var(--gc-font-stencil); font-size: var(--gc-fs-body); letter-spacing: 0.04em; }
+  .flow { display: grid; align-items: stretch; column-gap: 0; }
+  .flow:has(> :only-child) { grid-template-columns: minmax(0, 1fr); }
+  .flow.n2 { grid-template-columns: minmax(0,1fr) 44px minmax(0,1fr); }
+  .flow.n3 { grid-template-columns: minmax(0,1fr) 44px minmax(0,1fr) 44px minmax(0,1fr); }
+  .flow.n4 { grid-template-columns: minmax(0,1fr) 40px minmax(0,1fr) 40px minmax(0,1fr) 40px minmax(0,1fr); }
+  .flow.n5 { grid-template-columns: minmax(0,1fr) 36px minmax(0,1fr) 36px minmax(0,1fr) 36px minmax(0,1fr) 36px minmax(0,1fr); }
+  .flow.n6 { grid-template-columns: minmax(0,1fr) 32px minmax(0,1fr) 32px minmax(0,1fr) 32px minmax(0,1fr) 32px minmax(0,1fr) 32px minmax(0,1fr); }
+  .flow.n7 { grid-template-columns: minmax(0,1fr) 28px minmax(0,1fr) 28px minmax(0,1fr) 28px minmax(0,1fr) 28px minmax(0,1fr) 28px minmax(0,1fr) 28px minmax(0,1fr); }
+  .flow.n8 { grid-template-columns: minmax(0,1fr) 24px minmax(0,1fr) 24px minmax(0,1fr) 24px minmax(0,1fr) 24px minmax(0,1fr) 24px minmax(0,1fr) 24px minmax(0,1fr) 24px minmax(0,1fr); }
+  .flow.grid4 { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: var(--gc-space-2); }
+  .flow.shell { grid-template-columns: minmax(148px, 200px) 36px minmax(0, 1fr); }
+
+  .node { display: block; width: 100%; min-width: 0; overflow: hidden; padding: var(--gc-space-3) var(--gc-space-2); border: 1px solid var(--gc-line); border-radius: var(--gc-radius-control); background: var(--gc-surface-2); text-align: center; font: inherit; color: inherit; cursor: pointer; transition: background var(--gc-motion-fast), border-color var(--gc-motion-fast); }
+  .node:hover { background: var(--gc-surface-hover); }
+  .node:focus-visible { outline: 2px solid var(--gc-amber-dk); outline-offset: 1px; }
+  .node b { font-size: var(--gc-fs-body); line-height: 1.4; }
+  .node small { margin-left: var(--gc-space-1); color: var(--gc-ink-2); font-size: var(--gc-fs-label); line-height: 1.4; }
+  .node .plain { display: block; margin-top: 2px; color: var(--gc-ink); font-size: var(--gc-fs-label); font-weight: 500; line-height: 1.4; }
+  .node { position: relative; }
+  .node .fcount { position: absolute; top: 4px; right: 6px; color: var(--gc-ink-3); font-size: var(--gc-fs-micro); font-family: var(--gc-font-data); }
+  .node.ext .plain { color: var(--gc-ink-3); }
+  .node.ext { border-style: dashed; }
+  .node.ext b, .node.ext small { color: var(--gc-ink-3); }
+  .node.on { border-color: var(--gc-bright); border-style: solid; box-shadow: inset 0 0 0 1px var(--gc-bright); }
+  .node.on b { color: var(--gc-bright); }
+  .io { display: block; margin-top: var(--gc-space-2); padding-top: var(--gc-space-2); border-top: 1px solid var(--gc-line); color: var(--gc-ink-2); font-size: var(--gc-fs-label); line-height: 1.45; text-align: left; }
+  .io em { color: var(--gc-ink); font-style: normal; font-weight: 500; }
+  .io em:nth-of-type(2)::before { content: "\A"; white-space: pre; }
+
+  .arr { display: flex; align-items: center; justify-content: center; color: var(--gc-ink-2); }
+  .arr svg { display: block; width: 100%; height: 18px; overflow: visible; }
+  .arr.plus { font-size: 18px; font-weight: 800; line-height: 1; }
+  .vlink { display: grid; grid-template-columns: 92px minmax(0, 1fr); margin: 2px 0 var(--gc-space-2); }
+  .vlink-body { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 2px 0 var(--gc-space-1); color: var(--gc-ink-3); }
+  .vlink-body svg { display: block; width: 16px; height: 22px; }
+  .vcap { max-width: 100%; padding: 1px var(--gc-space-2); border-radius: var(--gc-radius-control); background: var(--gc-surface-3); color: var(--gc-ink); font-size: var(--gc-fs-label); font-weight: 700; text-align: center; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gc-space-2); }
+  .col { padding: var(--gc-space-2); border: 1px dashed var(--gc-line); border-radius: var(--gc-radius-control); }
+  .col-t { margin-bottom: var(--gc-space-1); color: var(--gc-ink-2); font-weight: 700; }
+  .loop { margin: var(--gc-space-1) 0 var(--gc-space-2) 102px; padding: 5px var(--gc-space-2); border: 1px dashed var(--gc-line); border-radius: var(--gc-radius-control); color: var(--gc-ink-2); text-align: center; font-size: var(--gc-fs-label); }
+  .side { margin-top: var(--gc-space-1); padding: var(--gc-space-2); border: 1px dashed var(--gc-line); border-radius: var(--gc-radius-control); background: var(--gc-slot); }
+  .side-t { margin-bottom: var(--gc-space-1); color: var(--gc-ink-2); font-size: var(--gc-fs-body); font-weight: 700; }
+
+  .fx-hint { color: var(--gc-ink-3); }
+  .fx-plain { margin: var(--gc-space-2) 0; padding: var(--gc-space-2) var(--gc-space-3); border-left: 2px solid var(--gc-bright); background: var(--gc-bright-dim); color: var(--gc-ink); font-size: var(--gc-fs-body); }
+  .fx-tech { margin-top: var(--gc-space-3); border-top: 1px solid var(--gc-line); padding-top: var(--gc-space-2); }
+  .fx-tech summary { cursor: pointer; color: var(--gc-ink-3); font-size: var(--gc-fs-label); user-select: none; }
+  .fx-tech summary:hover { color: var(--gc-ink-2); }
+  .fx-tech-tag { margin-bottom: var(--gc-space-1); color: var(--gc-ink-3); font-size: var(--gc-fs-label); }
+
+  .feat-hd { margin: 0 0 var(--gc-space-2); color: var(--gc-ink); font-weight: 700; }
+  .feat { margin-bottom: var(--gc-space-2); padding: var(--gc-space-2) var(--gc-space-3); border: 1px solid var(--gc-line); border-radius: var(--gc-radius-control); background: var(--gc-surface-2); }
+  .feat-name { margin-bottom: var(--gc-space-1); color: var(--gc-ink); font-weight: 700; }
+  .feat-planned { margin-left: var(--gc-space-1); padding: 0 var(--gc-space-1); border: 1px dashed var(--gc-line-strong); border-radius: var(--gc-radius-control); color: var(--gc-ink-3); font-size: var(--gc-fs-micro); font-weight: 400; }
+  .feat-step { display: flex; gap: var(--gc-space-2); padding: 3px 0; align-items: flex-start; }
+  .feat-n { flex: none; width: 18px; height: 18px; margin-top: 1px; border-radius: 50%; background: var(--gc-bright-dim); color: var(--gc-bright); font-size: 10px; display: grid; place-items: center; }
+  .feat-t { color: var(--gc-ink); font-size: var(--gc-fs-body); line-height: 1.45; }
+  .feat-f { margin-top: 1px; color: var(--gc-ink-3); font-size: var(--gc-fs-micro); font-family: var(--gc-font-data); }
+  .kv { margin-top: var(--gc-space-2); }
+  .kv .k { color: var(--gc-ink-3); font-family: var(--gc-font-stencil); font-size: var(--gc-fs-micro); letter-spacing: 0.12em; text-transform: uppercase; }
+  .kv .v { margin-top: 2px; color: var(--gc-ink); font-size: var(--gc-fs-body); line-height: var(--gc-leading-body); }
+
+  .fx-graph { padding: 0; }
+  .fx-node { cursor: grab; }
+  .fx-node.drag { cursor: grabbing; }
+  .fx-node text { user-select: none; pointer-events: none; }
+  .fx-empty { padding: var(--gc-space-2) 0; color: var(--gc-ink-3); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: var(--gc-space-4); margin: 0 0 var(--gc-space-3); color: var(--gc-ink-2); font-size: var(--gc-fs-body); }
+  .chip { display: inline-block; width: 10px; height: 10px; border: 1px solid var(--gc-line-strong); border-radius: var(--gc-radius-control); vertical-align: -1px; }
+  .chip.dash { border-style: dashed; }
+  .chip.amber { border-color: var(--gc-bright); box-shadow: inset 0 0 0 1px var(--gc-bright); }
+
+  @media (max-width: 1100px) {
+    .flow.n6, .flow.n7, .flow.n8, .flow.shell { grid-template-columns: 1fr; }
+    .flow.n6 > .arr, .flow.n7 > .arr, .flow.n8 > .arr, .flow.shell > .arr { height: 28px; transform: rotate(90deg); }
+    .flow.grid4 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  }
+  @media (max-width: 920px) {
+    .flow.n5 { grid-template-columns: 1fr; }
+    .flow.n5 > .arr { height: 28px; transform: rotate(90deg); }
+    .cols { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 760px) {
+    .flow.n3, .flow.n4 { grid-template-columns: 1fr; }
+    .flow.n3 > .arr, .flow.n4 > .arr { height: 28px; transform: rotate(90deg); }
+    .drawer[data-open="true"] .drawer-bd { flex-direction: column; }
+    .fx-side { width: 100%; padding-right: 0; padding-bottom: var(--gc-space-2); border-right: 0; border-bottom: 1px solid var(--gc-line); }
+  }
+  @media (max-width: 560px) {
+    .lane, .vlink { grid-template-columns: 1fr; }
+    .lane > :not(.lane-t) { grid-column: 1; }
+    .lane-t { border-right: 0; border-bottom: 2px solid var(--gc-line); }
+    .flow.n2, .flow.grid4 { grid-template-columns: 1fr; }
+    .flow.n2 > .arr { height: 28px; transform: rotate(90deg); }
+    .loop { margin-left: 0; }
+    .fx-row { grid-template-columns: 1fr; gap: 2px; }
+  }
+</style>
+</head>
+<body>
+<h1>WildArrange 产品总图</h1>
+<!-- Agent：方框是模块（一揽子脚本的文件夹），右上角是脚本数。点任意模块：底部抽屉看它的脚本与上下游链路；点空白处或 × 收起。 -->
+
+<details class="note-details"><summary>本页维护规则（Agent 向，看架构不用展开）</summary><div class="note">本页是产品总架构与模块概要的唯一真源，改关系就改这里。新模块：在本页 module-registry 注册并补充节点。点任何模块都在底部抽屉展开脚本图，不给个别模块做跳页签特例。模块的实现文件必须进图（含职责与输入输出），否则归属门禁判失败。脚本关系图跨模块引用：extTo/extFrom 条目可带 p（真实路径）+ m（归属模块名）画成虚线脚本盒，extLinks 画外部节点之间的边。</div></details>
+
+<details class="guide">
+<summary>怎么读这张图（30 秒版）</summary>
+<div class="guide-bd">
+<div class="guide-flow">点任意方框 → 底部抽屉展开该模块的脚本与上下游</div>
+<!-- Agent：每个方框是一类职责，框里小字是大白话解释；虚线框是还没开始做的模块。请求怎么在模块之间流动，看卡片之间的箭头。脚本再多也在底部展开，没有「大模块」特例。点空白处或 × 收起。 -->
+</div>
+</details>
+
+<details class="guide">
+<summary>名词解释（看不懂的词查这里）</summary>
+<div class="guide-bd">
+<table>
+<tr><td><b>模块</b></td><td>一揽子脚本的文件夹：一组相关脚本的命名前缀与归属</td></tr>
+<tr><td><b>脚本节点</b></td><td>图里的一个文件：文件名 / 职责 / 输入 → 输出</td></tr>
+<tr><td><b>虚线框</b></td><td>还没开始做的模块，或归属其他模块的引用文件</td></tr>
+</table>
+</div>
+</details>
+
+<script type="application/json" id="module-registry">
+[]
+</script>
+
+<div class="layout">
+<div class="main">
+
+<!-- Agent：页签筛选——全局流向 = 全部模块分层；其余页签 = 一条真实用户作业从界面追到最终执行者。不要给编排引擎开目录墙页签，引擎点全局卡片看底部抽屉。给人看的导读不要放大段说明。 -->
+<div class="tabs" role="group" aria-label="架构视图">
+  <button class="tab" type="button" data-view="overall" aria-pressed="true">全局流向</button>
+  <button class="tab" type="button" data-view="job-run" aria-pressed="false">运行下一个任务</button>
+  <button class="tab" type="button" data-view="job-dashboard" aria-pressed="false">打开本地面板</button>
+  <button class="tab" type="button" data-view="job-skills" aria-pressed="false">匹配 Skill</button>
+</div>
+
+<div class="legend">
+  <span><span class="chip"></span> 实线＝已经能用</span>
+  <span><span class="chip dash"></span> 虚线＝还没做 / 未接通</span>
+  <span><span class="chip amber"></span> 琥珀＝当前选中</span>
+</div>
+
+<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
+  <symbol id="arr-to" viewBox="0 0 32 16">
+    <line x1="1" y1="8" x2="20" y2="8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+    <polygon points="20,3 31,8 20,13" fill="currentColor"/>
+  </symbol>
+  <symbol id="arr-both" viewBox="0 0 32 16">
+    <polygon points="1,8 11,3 11,13" fill="currentColor"/>
+    <line x1="11" y1="8" x2="21" y2="8" stroke="currentColor" stroke-width="2.2"/>
+    <polygon points="31,8 21,3 21,13" fill="currentColor"/>
+  </symbol>
+  <symbol id="arr-down" viewBox="0 0 16 24">
+    <line x1="8" y1="1" x2="8" y2="15" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+    <polygon points="3,15 8,23 13,15" fill="currentColor"/>
+  </symbol>
+</svg>
+
+<section class="view is-on" data-panel="overall">
+  <div class="lane"><div class="lane-t">宿主入口</div>
+    <div class="flow grid4">
+      <div role="button" tabindex="0" class="node" data-k="cli"><b>CLI（命令入口）</b><small>把用户命令送到对应流程</small><span class="io"><em>输入：</em>命令与参数　<em>输出：</em>运行时调用</span></div>
+      <div role="button" tabindex="0" class="node" data-k="interface"><b>Interface（人机与宿主边界）</b><small>接住 CLI、Dashboard 和宿主适配</small><span class="io"><em>输入：</em>人或宿主请求　<em>输出：</em>安全交互</span></div>
+    </div>
+  </div>
+  <div class="lane"><div class="lane-t">任务闭环</div>
+    <div class="flow grid4">
+      <div role="button" tabindex="0" class="node" data-k="orchestration"><b>Orchestration（流程编排）</b><small>管顺序、重试、事务和完成门</small><span class="io"><em>输入：</em>计划与任务状态　<em>输出：</em>下一步动作</span></div>
+      <div role="button" tabindex="0" class="node" data-k="ai"><b>AI（策略与语境）</b><small>做路由、注入、Skill 匹配和异步审查</small><span class="io"><em>输入：</em>请求与清洗上下文　<em>输出：</em>决策建议</span></div>
+      <div role="button" tabindex="0" class="node" data-k="capabilities"><b>Capabilities（原子能力）</b><small>通过统一网关执行工作、验证和检查点</small><span class="io"><em>输入：</em>能力名与上下文　<em>输出：</em>统一结果信封</span></div>
+    </div>
+  </div>
+  <div class="lane"><div class="lane-t">可靠底座</div>
+    <div class="flow"><div role="button" tabindex="0" class="node" data-k="infra"><b>Infra（基础设施）</b><small>负责文件、锁、Git、命令、配置与证据账本</small><span class="io"><em>输入：</em>文件与命令　<em>输出：</em>可恢复状态</span></div></div>
+  </div>
+</section>
+<section class="view" data-panel="job-run">
+  <div class="lane">
+    <div class="lane-t">运行下一个任务</div>
+    <div class="flow n4"><div role="button" tabindex="0" class="node" data-k="cli"><b>CLI</b><small>接收 run 命令</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="orchestration"><b>Orchestration</b><small>推进任务状态</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="capabilities"><b>Capabilities</b><small>执行与验证</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="infra"><b>Infra</b><small>状态与证据落盘</small></div></div>
+  </div>
+</section>
+<section class="view" data-panel="job-dashboard">
+  <div class="lane">
+    <div class="lane-t">打开本地面板</div>
+    <div class="flow n4"><div role="button" tabindex="0" class="node" data-k="cli"><b>CLI</b><small>接收 serve 命令</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="interface"><b>Interface</b><small>启动本地 HTTP 面板</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="orchestration"><b>Orchestration</b><small>汇总状态投影</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="infra"><b>Infra</b><small>读取状态与配置</small></div></div>
+  </div>
+</section>
+<section class="view" data-panel="job-skills">
+  <div class="lane">
+    <div class="lane-t">匹配 Skill</div>
+    <div class="flow n3"><div role="button" tabindex="0" class="node" data-k="cli"><b>CLI</b><small>接收 skills match</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="ai"><b>AI</b><small>按请求与阶段匹配</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="infra"><b>Infra</b><small>读取 Skill 与配置</small></div></div>
+  </div>
+</section>
+
+<div class="drawer" id="drawer" data-open="false">
+  <div class="drawer-grip" id="drawer-grip" role="separator" aria-orientation="horizontal" title="拖拽调整高度"><span class="grip-hint">拖拽调高</span></div>
+  <div class="drawer-bar">
+  <button class="drawer-hd" type="button" id="drawer-hd" aria-expanded="false">
+    <span class="caret">▸</span><span>模块详情与实现脚本关系</span><span class="drawer-key" id="drawer-key">未选择模块</span>
+  </button>
+  <button class="drawer-close" type="button" id="drawer-close" title="关闭（或点图中空白处）" aria-label="关闭">×</button>
+  </div>
+  <div class="drawer-bd" id="drawer-bd">
+    <aside class="fx-side" id="fx-side"><span class="fx-hint">点击任一模块卡片：这里显示它的作用、输入、输出与现状，右侧列出实现脚本关系图。脚本多就多，一律在底部展开。</span></aside>
+    <div class="fx-main" id="fx-main"></div>
+  </div>
+</div>
+
+<script>
+(function(f){if(typeof exports==="object"&&typeof module!=="undefined"){module.exports=f()}else if(typeof define==="function"&&define.amd){define([],f)}else{var g;if(typeof window!=="undefined"){g=window}else if(typeof global!=="undefined"){g=global}else if(typeof self!=="undefined"){g=self}else{g=this}g.dagre=f()}})(function(){var define,module,exports;return function(){function r(e,n,t){function o(i,f){if(!n[i]){if(!e[i]){var c="function"==typeof require&&require;if(!f&&c)return c(i,!0);if(u)return u(i,!0);var a=new Error("Cannot find module '"+i+"'");throw a.code="MODULE_NOT_FOUND",a}var p=n[i]={exports:{}};e[i][0].call(p.exports,function(r){var n=e[i][1][r];return o(n||r)},p,p.exports,r,e,n,t)}return n[i].exports}for(var u="function"==typeof require&&require,i=0;i<t.length;i++)o(t[i]);return o}return r}()({1:[function(require,module,exports){
+/*
+Copyright (c) 2012-2014 Chris Pettitt
+
+特此免费授予任何获得本软件及相关文档文件（以下简称「软件」）副本的人不受限制地
+处置该软件的权利，包括但不限于使用、复制、修改、合并、发布、分发、再许可和/或
+出售该软件的副本，并允许向其提供软件的人这样做，但须满足以下条件：
+
+上述版权声明和本许可声明应包含在本软件的所有副本或重要部分中。
+
+本软件按「原样」提供，不提供任何形式的明示或暗示担保，包括但不限于对适销性、
+特定用途适用性和非侵权性的担保。在任何情况下，作者或版权持有人均不对任何索赔、
+损害或其他责任负责，无论是在合同诉讼、侵权行为还是其他方面，由软件或软件的使用
+或其他交易引起、产生或与之相关。
+*/
+module.exports={graphlib:require("@dagrejs/graphlib"),layout:require("./lib/layout"),debug:require("./lib/debug"),util:{time:require("./lib/util").time,notime:require("./lib/util").notime},version:require("./lib/version")}},{"./lib/debug":6,"./lib/layout":8,"./lib/util":27,"./lib/version":28,"@dagrejs/graphlib":29}],2:[function(require,module,exports){"use strict";let greedyFAS=require("./greedy-fas");let uniqueId=require("./util").uniqueId;module.exports={run:run,undo:undo};function run(g){let fas=g.graph().acyclicer==="greedy"?greedyFAS(g,weightFn(g)):dfsFAS(g);fas.forEach(e=>{let label=g.edge(e);g.removeEdge(e);label.forwardName=e.name;label.reversed=true;g.setEdge(e.w,e.v,label,uniqueId("rev"))});function weightFn(g){return e=>{return g.edge(e).weight}}}function dfsFAS(g){let fas=[];let stack={};let visited={};function dfs(v){if(Object.hasOwn(visited,v)){return}visited[v]=true;stack[v]=true;g.outEdges(v).forEach(e=>{if(Object.hasOwn(stack,e.w)){fas.push(e)}else{dfs(e.w)}});delete stack[v]}g.nodes().forEach(dfs);return fas}function undo(g){g.edges().forEach(e=>{let label=g.edge(e);if(label.reversed){g.removeEdge(e);let forwardName=label.forwardName;delete label.reversed;delete label.forwardName;g.setEdge(e.w,e.v,label,forwardName)}})}},{"./greedy-fas":7,"./util":27}],3:[function(require,module,exports){let util=require("./util");module.exports=addBorderSegments;function addBorderSegments(g){function dfs(v){let children=g.children(v);let node=g.node(v);if(children.length){children.forEach(dfs)}if(Object.hasOwn(node,"minRank")){node.borderLeft=[];node.borderRight=[];for(let rank=node.minRank,maxRank=node.maxRank+1;rank<maxRank;++rank){addBorderNode(g,"borderLeft","_bl",v,node,rank);addBorderNode(g,"borderRight","_br",v,node,rank)}}}g.children().forEach(dfs)}function addBorderNode(g,prop,prefix,sg,sgNode,rank){let label={width:0,height:0,rank:rank,borderType:prop};let prev=sgNode[prop][rank-1];let curr=util.addDummyNode(g,"border",label,prefix);sgNode[prop][rank]=curr;g.setParent(curr,sg);if(prev){g.setEdge(prev,curr,{weight:1})}}},{"./util":27}],4:[function(require,module,exports){"use strict";module.exports={adjust:adjust,undo:undo};function adjust(g){let rankDir=g.graph().rankdir.toLowerCase();if(rankDir==="lr"||rankDir==="rl"){swapWidthHeight(g)}}function undo(g){let rankDir=g.graph().rankdir.toLowerCase();if(rankDir==="bt"||rankDir==="rl"){reverseY(g)}if(rankDir==="lr"||rankDir==="rl"){swapXY(g);swapWidthHeight(g)}}function swapWidthHeight(g){g.nodes().forEach(v=>swapWidthHeightOne(g.node(v)));g.edges().forEach(e=>swapWidthHeightOne(g.edge(e)))}function swapWidthHeightOne(attrs){let w=attrs.width;attrs.width=attrs.height;attrs.height=w}function reverseY(g){g.nodes().forEach(v=>reverseYOne(g.node(v)));g.edges().forEach(e=>{let edge=g.edge(e);edge.points.forEach(reverseYOne);if(Object.hasOwn(edge,"y")){reverseYOne(edge)}})}function reverseYOne(attrs){attrs.y=-attrs.y}function swapXY(g){g.nodes().forEach(v=>swapXYOne(g.node(v)));g.edges().forEach(e=>{let edge=g.edge(e);edge.points.forEach(swapXYOne);if(Object.hasOwn(edge,"x")){swapXYOne(edge)}})}function swapXYOne(attrs){let x=attrs.x;attrs.x=attrs.y;attrs.y=x}},{}],5:[function(require,module,exports){
+/*
+ * 源自 Cormen 等人《算法导论》的简单双向链表实现。
+ */
+class List{constructor(){let sentinel={};sentinel._next=sentinel._prev=sentinel;this._sentinel=sentinel}dequeue(){let sentinel=this._sentinel;let entry=sentinel._prev;if(entry!==sentinel){unlink(entry);return entry}}enqueue(entry){let sentinel=this._sentinel;if(entry._prev&&entry._next){unlink(entry)}entry._next=sentinel._next;sentinel._next._prev=entry;sentinel._next=entry;entry._prev=sentinel}toString(){let strs=[];let sentinel=this._sentinel;let curr=sentinel._prev;while(curr!==sentinel){strs.push(JSON.stringify(curr,filterOutLinks));curr=curr._prev}return"["+strs.join(", ")+"]"}}function unlink(entry){entry._prev._next=entry._next;entry._next._prev=entry._prev;delete entry._next;delete entry._prev}function filterOutLinks(k,v){if(k!=="_next"&&k!=="_prev"){return v}}module.exports=List},{}],6:[function(require,module,exports){let util=require("./util");let Graph=require("@dagrejs/graphlib").Graph;module.exports={debugOrdering:debugOrdering};
+/* istanbul ignore next */function debugOrdering(g){let layerMatrix=util.buildLayerMatrix(g);let h=new Graph({compound:true,multigraph:true}).setGraph({});g.nodes().forEach(v=>{h.setNode(v,{label:v});h.setParent(v,"layer"+g.node(v).rank)});g.edges().forEach(e=>h.setEdge(e.v,e.w,{},e.name));layerMatrix.forEach((layer,i)=>{let layerV="layer"+i;h.setNode(layerV,{rank:"same"});layer.reduce((u,v)=>{h.setEdge(u,v,{style:"invis"});return v})});return h}},{"./util":27,"@dagrejs/graphlib":29}],7:[function(require,module,exports){let Graph=require("@dagrejs/graphlib").Graph;let List=require("./data/list");
+/*
+ * 用于寻找图反馈弧集的贪心启发式算法。反馈弧集是一组可移除的边，移除后图变为无环。
+ * 算法出自：P. Eades、X. Lin 和 W. F. Smyth，《A fast and effective heuristic for the
+ * feedback arc set problem》。本实现相对论文做了调整，以支持带权边。
+ */module.exports=greedyFAS;let DEFAULT_WEIGHT_FN=()=>1;function greedyFAS(g,weightFn){if(g.nodeCount()<=1){return[]}let state=buildState(g,weightFn||DEFAULT_WEIGHT_FN);let results=doGreedyFAS(state.graph,state.buckets,state.zeroIdx);
+// 展开多重边
+return results.flatMap(e=>g.outEdges(e.v,e.w))}function doGreedyFAS(g,buckets,zeroIdx){let results=[];let sources=buckets[buckets.length-1];let sinks=buckets[0];let entry;while(g.nodeCount()){while(entry=sinks.dequeue()){removeNode(g,buckets,zeroIdx,entry)}while(entry=sources.dequeue()){removeNode(g,buckets,zeroIdx,entry)}if(g.nodeCount()){for(let i=buckets.length-2;i>0;--i){entry=buckets[i].dequeue();if(entry){results=results.concat(removeNode(g,buckets,zeroIdx,entry,true));break}}}}return results}function removeNode(g,buckets,zeroIdx,entry,collectPredecessors){let results=collectPredecessors?[]:undefined;g.inEdges(entry.v).forEach(edge=>{let weight=g.edge(edge);let uEntry=g.node(edge.v);if(collectPredecessors){results.push({v:edge.v,w:edge.w})}uEntry.out-=weight;assignBucket(buckets,zeroIdx,uEntry)});g.outEdges(entry.v).forEach(edge=>{let weight=g.edge(edge);let w=edge.w;let wEntry=g.node(w);wEntry["in"]-=weight;assignBucket(buckets,zeroIdx,wEntry)});g.removeNode(entry.v);return results}function buildState(g,weightFn){let fasGraph=new Graph;let maxIn=0;let maxOut=0;g.nodes().forEach(v=>{fasGraph.setNode(v,{v:v,in:0,out:0})});
+// 在节点上聚合权重，同时将多重边的权重求和，
+// 在 fasGraph 中合并为单条边。
+g.edges().forEach(e=>{let prevWeight=fasGraph.edge(e.v,e.w)||0;let weight=weightFn(e);let edgeWeight=prevWeight+weight;fasGraph.setEdge(e.v,e.w,edgeWeight);maxOut=Math.max(maxOut,fasGraph.node(e.v).out+=weight);maxIn=Math.max(maxIn,fasGraph.node(e.w)["in"]+=weight)});let buckets=range(maxOut+maxIn+3).map(()=>new List);let zeroIdx=maxIn+1;fasGraph.nodes().forEach(v=>{assignBucket(buckets,zeroIdx,fasGraph.node(v))});return{graph:fasGraph,buckets:buckets,zeroIdx:zeroIdx}}function assignBucket(buckets,zeroIdx,entry){if(!entry.out){buckets[0].enqueue(entry)}else if(!entry["in"]){buckets[buckets.length-1].enqueue(entry)}else{buckets[entry.out-entry["in"]+zeroIdx].enqueue(entry)}}function range(limit){const range=[];for(let i=0;i<limit;i++){range.push(i)}return range}},{"./data/list":5,"@dagrejs/graphlib":29}],8:[function(require,module,exports){"use strict";let acyclic=require("./acyclic");let normalize=require("./normalize");let rank=require("./rank");let normalizeRanks=require("./util").normalizeRanks;let parentDummyChains=require("./parent-dummy-chains");let removeEmptyRanks=require("./util").removeEmptyRanks;let nestingGraph=require("./nesting-graph");let addBorderSegments=require("./add-border-segments");let coordinateSystem=require("./coordinate-system");let order=require("./order");let position=require("./position");let util=require("./util");let Graph=require("@dagrejs/graphlib").Graph;module.exports=layout;function layout(g,opts){let time=opts&&opts.debugTiming?util.time:util.notime;time("layout",()=>{let layoutGraph=time("  buildLayoutGraph",()=>buildLayoutGraph(g));time("  runLayout",()=>runLayout(layoutGraph,time,opts));time("  updateInputGraph",()=>updateInputGraph(g,layoutGraph))})}function runLayout(g,time,opts){time("    makeSpaceForEdgeLabels",()=>makeSpaceForEdgeLabels(g));time("    removeSelfEdges",()=>removeSelfEdges(g));time("    acyclic",()=>acyclic.run(g));time("    nestingGraph.run",()=>nestingGraph.run(g));time("    rank",()=>rank(util.asNonCompoundGraph(g)));time("    injectEdgeLabelProxies",()=>injectEdgeLabelProxies(g));time("    removeEmptyRanks",()=>removeEmptyRanks(g));time("    nestingGraph.cleanup",()=>nestingGraph.cleanup(g));time("    normalizeRanks",()=>normalizeRanks(g));time("    assignRankMinMax",()=>assignRankMinMax(g));time("    removeEdgeLabelProxies",()=>removeEdgeLabelProxies(g));time("    normalize.run",()=>normalize.run(g));time("    parentDummyChains",()=>parentDummyChains(g));time("    addBorderSegments",()=>addBorderSegments(g));time("    order",()=>order(g,opts));time("    insertSelfEdges",()=>insertSelfEdges(g));time("    adjustCoordinateSystem",()=>coordinateSystem.adjust(g));time("    position",()=>position(g));time("    positionSelfEdges",()=>positionSelfEdges(g));time("    removeBorderNodes",()=>removeBorderNodes(g));time("    normalize.undo",()=>normalize.undo(g));time("    fixupEdgeLabelCoords",()=>fixupEdgeLabelCoords(g));time("    undoCoordinateSystem",()=>coordinateSystem.undo(g));time("    translateGraph",()=>translateGraph(g));time("    assignNodeIntersects",()=>assignNodeIntersects(g));time("    reversePoints",()=>reversePointsForReversedEdges(g));time("    acyclic.undo",()=>acyclic.undo(g))}
+/*
+ * 将最终布局信息从布局图复制回输入图。此过程仅将布局图中的白名单属性复制到输入图，
+ * 因此可作为确定哪些属性能影响布局的合适位置。
+ */function updateInputGraph(inputGraph,layoutGraph){inputGraph.nodes().forEach(v=>{let inputLabel=inputGraph.node(v);let layoutLabel=layoutGraph.node(v);if(inputLabel){inputLabel.x=layoutLabel.x;inputLabel.y=layoutLabel.y;inputLabel.rank=layoutLabel.rank;if(layoutGraph.children(v).length){inputLabel.width=layoutLabel.width;inputLabel.height=layoutLabel.height}}});inputGraph.edges().forEach(e=>{let inputLabel=inputGraph.edge(e);let layoutLabel=layoutGraph.edge(e);inputLabel.points=layoutLabel.points;if(Object.hasOwn(layoutLabel,"x")){inputLabel.x=layoutLabel.x;inputLabel.y=layoutLabel.y}});inputGraph.graph().width=layoutGraph.graph().width;inputGraph.graph().height=layoutGraph.graph().height}let graphNumAttrs=["nodesep","edgesep","ranksep","marginx","marginy"];let graphDefaults={ranksep:50,edgesep:20,nodesep:50,rankdir:"tb"};let graphAttrs=["acyclicer","ranker","rankdir","align"];let nodeNumAttrs=["width","height"];let nodeDefaults={width:0,height:0};let edgeNumAttrs=["minlen","weight","width","height","labeloffset"];let edgeDefaults={minlen:1,weight:1,width:0,height:0,labeloffset:10,labelpos:"r"};let edgeAttrs=["labelpos"];
+/*
+ * 从输入图构造可用于布局的新图。此过程仅将输入图中的白名单属性复制到布局图。
+ * 因此该函数可作为确定哪些属性能影响布局的合适位置。
+ */function buildLayoutGraph(inputGraph){let g=new Graph({multigraph:true,compound:true});let graph=canonicalize(inputGraph.graph());g.setGraph(Object.assign({},graphDefaults,selectNumberAttrs(graph,graphNumAttrs),util.pick(graph,graphAttrs)));inputGraph.nodes().forEach(v=>{let node=canonicalize(inputGraph.node(v));const newNode=selectNumberAttrs(node,nodeNumAttrs);Object.keys(nodeDefaults).forEach(k=>{if(newNode[k]===undefined){newNode[k]=nodeDefaults[k]}});g.setNode(v,newNode);g.setParent(v,inputGraph.parent(v))});inputGraph.edges().forEach(e=>{let edge=canonicalize(inputGraph.edge(e));g.setEdge(e,Object.assign({},edgeDefaults,selectNumberAttrs(edge,edgeNumAttrs),util.pick(edge,edgeAttrs)))});return g}
+/*
+ * 此思路来自 Gansner 论文：为在布局中考虑边标签，我们将 minlen 加倍、ranksep 减半，
+ * 从而把每个 rank 一分为二，便可在节点之间的中点放置标签。
+ *
+ * 我们还在宽度上增加少量内边距，使边的标签与边本身稍微拉开距离。
+ */function makeSpaceForEdgeLabels(g){let graph=g.graph();graph.ranksep/=2;g.edges().forEach(e=>{let edge=g.edge(e);edge.minlen*=2;if(edge.labelpos.toLowerCase()!=="c"){if(graph.rankdir==="TB"||graph.rankdir==="BT"){edge.width+=edge.labeloffset}else{edge.height+=edge.labeloffset}}})}
+/*
+ * 为每条具有非零宽度和高度的边标签创建临时虚拟节点，记录其标签所在的 rank。
+ * 这样可在安全移除空 rank 的同时，保持标签位置的平衡。
+ */function injectEdgeLabelProxies(g){g.edges().forEach(e=>{let edge=g.edge(e);if(edge.width&&edge.height){let v=g.node(e.v);let w=g.node(e.w);let label={rank:(w.rank-v.rank)/2+v.rank,e:e};util.addDummyNode(g,"edge-proxy",label,"_ep")}})}function assignRankMinMax(g){let maxRank=0;g.nodes().forEach(v=>{let node=g.node(v);if(node.borderTop){node.minRank=g.node(node.borderTop).rank;node.maxRank=g.node(node.borderBottom).rank;maxRank=Math.max(maxRank,node.maxRank)}});g.graph().maxRank=maxRank}function removeEdgeLabelProxies(g){g.nodes().forEach(v=>{let node=g.node(v);if(node.dummy==="edge-proxy"){g.edge(node.e).labelRank=node.rank;g.removeNode(v)}})}function translateGraph(g){let minX=Number.POSITIVE_INFINITY;let maxX=0;let minY=Number.POSITIVE_INFINITY;let maxY=0;let graphLabel=g.graph();let marginX=graphLabel.marginx||0;let marginY=graphLabel.marginy||0;function getExtremes(attrs){let x=attrs.x;let y=attrs.y;let w=attrs.width;let h=attrs.height;minX=Math.min(minX,x-w/2);maxX=Math.max(maxX,x+w/2);minY=Math.min(minY,y-h/2);maxY=Math.max(maxY,y+h/2)}g.nodes().forEach(v=>getExtremes(g.node(v)));g.edges().forEach(e=>{let edge=g.edge(e);if(Object.hasOwn(edge,"x")){getExtremes(edge)}});minX-=marginX;minY-=marginY;g.nodes().forEach(v=>{let node=g.node(v);node.x-=minX;node.y-=minY});g.edges().forEach(e=>{let edge=g.edge(e);edge.points.forEach(p=>{p.x-=minX;p.y-=minY});if(Object.hasOwn(edge,"x")){edge.x-=minX}if(Object.hasOwn(edge,"y")){edge.y-=minY}});graphLabel.width=maxX-minX+marginX;graphLabel.height=maxY-minY+marginY}function assignNodeIntersects(g){g.edges().forEach(e=>{let edge=g.edge(e);let nodeV=g.node(e.v);let nodeW=g.node(e.w);let p1,p2;if(!edge.points){edge.points=[];p1=nodeW;p2=nodeV}else{p1=edge.points[0];p2=edge.points[edge.points.length-1]}edge.points.unshift(util.intersectRect(nodeV,p1));edge.points.push(util.intersectRect(nodeW,p2))})}function fixupEdgeLabelCoords(g){g.edges().forEach(e=>{let edge=g.edge(e);if(Object.hasOwn(edge,"x")){if(edge.labelpos==="l"||edge.labelpos==="r"){edge.width-=edge.labeloffset}switch(edge.labelpos){case"l":edge.x-=edge.width/2+edge.labeloffset;break;case"r":edge.x+=edge.width/2+edge.labeloffset;break}}})}function reversePointsForReversedEdges(g){g.edges().forEach(e=>{let edge=g.edge(e);if(edge.reversed){edge.points.reverse()}})}function removeBorderNodes(g){g.nodes().forEach(v=>{if(g.children(v).length){let node=g.node(v);let t=g.node(node.borderTop);let b=g.node(node.borderBottom);let l=g.node(node.borderLeft[node.borderLeft.length-1]);let r=g.node(node.borderRight[node.borderRight.length-1]);node.width=Math.abs(r.x-l.x);node.height=Math.abs(b.y-t.y);node.x=l.x+node.width/2;node.y=t.y+node.height/2}});g.nodes().forEach(v=>{if(g.node(v).dummy==="border"){g.removeNode(v)}})}function removeSelfEdges(g){g.edges().forEach(e=>{if(e.v===e.w){var node=g.node(e.v);if(!node.selfEdges){node.selfEdges=[]}node.selfEdges.push({e:e,label:g.edge(e)});g.removeEdge(e)}})}function insertSelfEdges(g){var layers=util.buildLayerMatrix(g);layers.forEach(layer=>{var orderShift=0;layer.forEach((v,i)=>{var node=g.node(v);node.order=i+orderShift;(node.selfEdges||[]).forEach(selfEdge=>{util.addDummyNode(g,"selfedge",{width:selfEdge.label.width,height:selfEdge.label.height,rank:node.rank,order:i+ ++orderShift,e:selfEdge.e,label:selfEdge.label},"_se")});delete node.selfEdges})})}function positionSelfEdges(g){g.nodes().forEach(v=>{var node=g.node(v);if(node.dummy==="selfedge"){var selfNode=g.node(node.e.v);var x=selfNode.x+selfNode.width/2;var y=selfNode.y;var dx=node.x-x;var dy=selfNode.height/2;g.setEdge(node.e,node.label);g.removeNode(v);node.label.points=[{x:x+2*dx/3,y:y-dy},{x:x+5*dx/6,y:y-dy},{x:x+dx,y:y},{x:x+5*dx/6,y:y+dy},{x:x+2*dx/3,y:y+dy}];node.label.x=node.x;node.label.y=node.y}})}function selectNumberAttrs(obj,attrs){return util.mapValues(util.pick(obj,attrs),Number)}function canonicalize(attrs){var newAttrs={};if(attrs){Object.entries(attrs).forEach(([k,v])=>{if(typeof k==="string"){k=k.toLowerCase()}newAttrs[k]=v})}return newAttrs}},{"./acyclic":2,"./add-border-segments":3,"./coordinate-system":4,"./nesting-graph":9,"./normalize":10,"./order":15,"./parent-dummy-chains":20,"./position":22,"./rank":24,"./util":27,"@dagrejs/graphlib":29}],9:[function(require,module,exports){let util=require("./util");module.exports={run:run,cleanup:cleanup};
+/*
+ * 嵌套图会为子图的顶部和底部创建虚拟节点，添加适当边以确保所有簇节点置于这些
+ * 边界之间，并保证图连通。
+ *
+ * 此外，通过 minlen 属性，我们确保节点与子图边界节点不会落在同一 rank 上。
+ *
+ * 前置条件：
+ *
+ *    1. 输入图为 DAG
+ *    2. 输入图中的节点具有 minlen 属性
+ *
+ * 后置条件：
+ *
+ *    1. 输入图连通。
+ *    2. 为子图顶部和底部添加了虚拟节点。
+ *    3. 调整节点的 minlen 属性，确保节点不会与子图边界节点落在同一 rank。
+ *
+ * 嵌套图思路来自 Sander，《Layout of Compound Directed Graphs》。
+ */function run(g){let root=util.addDummyNode(g,"root",{},"_root");let depths=treeDepths(g);let depthsArr=Object.values(depths);let height=util.applyWithChunking(Math.max,depthsArr)-1;// 注意：depths 是 Object，不是数组
+let nodeSep=2*height+1;g.graph().nestingRoot=root;
+// 将 minlen 乘以 nodeSep，使非边界 rank 上的节点对齐。
+g.edges().forEach(e=>g.edge(e).minlen*=nodeSep);
+// 计算足以保持子图垂直紧凑的权重
+let weight=sumWeights(g)+1;
+// 创建边界节点并连接它们
+g.children().forEach(child=>dfs(g,root,nodeSep,weight,height,depths,child));
+// 保存节点层乘数，供后续移除空边界层使用。
+g.graph().nodeRankFactor=nodeSep}function dfs(g,root,nodeSep,weight,height,depths,v){let children=g.children(v);if(!children.length){if(v!==root){g.setEdge(root,v,{weight:0,minlen:nodeSep})}return}let top=util.addBorderNode(g,"_bt");let bottom=util.addBorderNode(g,"_bb");let label=g.node(v);g.setParent(top,v);label.borderTop=top;g.setParent(bottom,v);label.borderBottom=bottom;children.forEach(child=>{dfs(g,root,nodeSep,weight,height,depths,child);let childNode=g.node(child);let childTop=childNode.borderTop?childNode.borderTop:child;let childBottom=childNode.borderBottom?childNode.borderBottom:child;let thisWeight=childNode.borderTop?weight:2*weight;let minlen=childTop!==childBottom?1:height-depths[v]+1;g.setEdge(top,childTop,{weight:thisWeight,minlen:minlen,nestingEdge:true});g.setEdge(childBottom,bottom,{weight:thisWeight,minlen:minlen,nestingEdge:true})});if(!g.parent(v)){g.setEdge(root,top,{weight:0,minlen:height+depths[v]})}}function treeDepths(g){var depths={};function dfs(v,depth){var children=g.children(v);if(children&&children.length){children.forEach(child=>dfs(child,depth+1))}depths[v]=depth}g.children().forEach(v=>dfs(v,1));return depths}function sumWeights(g){return g.edges().reduce((acc,e)=>acc+g.edge(e).weight,0)}function cleanup(g){var graphLabel=g.graph();g.removeNode(graphLabel.nestingRoot);delete graphLabel.nestingRoot;g.edges().forEach(e=>{var edge=g.edge(e);if(edge.nestingEdge){g.removeEdge(e)}})}},{"./util":27}],10:[function(require,module,exports){"use strict";let util=require("./util");module.exports={run:run,undo:undo};
+/*
+ * 将图中的长边拆分为各跨 1 层的短段。此操作可通过 denormalize 函数撤销。
+ *
+ * 前置条件：
+ *
+ *    1. 输入图为 DAG。
+ *    2. 图中每个节点具有 "rank" 属性。
+ *
+ * 后置条件：
+ *
+ *    1. 图中所有边长度为 1。
+ *    2. 边被拆分为段时添加虚拟节点。
+ *    3. 图为图增加 "dummyChains" 属性，包含所产生的每条虚拟节点链中的第一个虚拟节点。
+ */function run(g){g.graph().dummyChains=[];g.edges().forEach(edge=>normalizeEdge(g,edge))}function normalizeEdge(g,e){let v=e.v;let vRank=g.node(v).rank;let w=e.w;let wRank=g.node(w).rank;let name=e.name;let edgeLabel=g.edge(e);let labelRank=edgeLabel.labelRank;if(wRank===vRank+1)return;g.removeEdge(e);let dummy,attrs,i;for(i=0,++vRank;vRank<wRank;++i,++vRank){edgeLabel.points=[];attrs={width:0,height:0,edgeLabel:edgeLabel,edgeObj:e,rank:vRank};dummy=util.addDummyNode(g,"edge",attrs,"_d");if(vRank===labelRank){attrs.width=edgeLabel.width;attrs.height=edgeLabel.height;attrs.dummy="edge-label";attrs.labelpos=edgeLabel.labelpos}g.setEdge(v,dummy,{weight:edgeLabel.weight},name);if(i===0){g.graph().dummyChains.push(dummy)}v=dummy}g.setEdge(v,w,{weight:edgeLabel.weight},name)}function undo(g){g.graph().dummyChains.forEach(v=>{let node=g.node(v);let origLabel=node.edgeLabel;let w;g.setEdge(node.edgeObj,origLabel);while(node.dummy){w=g.successors(v)[0];g.removeNode(v);origLabel.points.push({x:node.x,y:node.y});if(node.dummy==="edge-label"){origLabel.x=node.x;origLabel.y=node.y;origLabel.width=node.width;origLabel.height=node.height}v=w;node=g.node(v)}})}},{"./util":27}],11:[function(require,module,exports){module.exports=addSubgraphConstraints;function addSubgraphConstraints(g,cg,vs){let prev={},rootPrev;vs.forEach(v=>{let child=g.parent(v),parent,prevChild;while(child){parent=g.parent(child);if(parent){prevChild=prev[parent];prev[parent]=child}else{prevChild=rootPrev;rootPrev=child}if(prevChild&&prevChild!==child){cg.setEdge(prevChild,child);return}child=parent}});
+/*
+  function dfs(v) {
+    var children = v ? g.children(v) : g.children();
+    if (children.length) {
+      var min = Number.POSITIVE_INFINITY,
+          subgraphs = [];
+      children.forEach(function(child) {
+        var childMin = dfs(child);
+        if (g.children(child).length) {
+          subgraphs.push({ v: child, order: childMin });
+        }
+        min = Math.min(min, childMin);
+      });
+      _.sortBy(subgraphs, "order").reduce(function(prev, curr) {
+        cg.setEdge(prev.v, curr.v);
+        return curr;
+      });
+      return min;
+    }
+    return g.node(v).order;
+  }
+  dfs(undefined);
+  */}},{}],12:[function(require,module,exports){module.exports=barycenter;function barycenter(g,movable=[]){return movable.map(v=>{let inV=g.inEdges(v);if(!inV.length){return{v:v}}else{let result=inV.reduce((acc,e)=>{let edge=g.edge(e),nodeU=g.node(e.v);return{sum:acc.sum+edge.weight*nodeU.order,weight:acc.weight+edge.weight}},{sum:0,weight:0});return{v:v,barycenter:result.sum/result.weight,weight:result.weight}}})}},{}],13:[function(require,module,exports){let Graph=require("@dagrejs/graphlib").Graph;let util=require("../util");module.exports=buildLayerGraph;
+/*
+ * 构造可用于对一层节点排序的图。该图包含请求层中所有基础节点和子图节点及其原有层次结构，
+ * 以及与这些节点关联且符合 "relationship" 参数所请求类型的边。
+ *
+ * 请求 rank 中没有父节点的节点，会在输出图中分配一个根节点，并写入图的 root 属性。
+ * 这样在排序时可方便遍历可移动节点的层次结构。
+ *
+ * 前置条件：
+ *
+ *    1. 输入图为 DAG
+ *    2. 输入图中的基础节点具有 rank 属性
+ *    3. 输入图中的子图节点具有 minRank 和 maxRank 属性
+ *    4. 边已分配权重
+ *
+ * 后置条件：
+ *
+ *    1. 输出图包含可移动 rank 中的所有节点，并保持层次结构。
+ *    2. 可移动层中的根节点成为图 root 属性所指节点的子节点。
+ *    3. 与可移动节点关联、由 relationship 参数选中的不可移动节点被纳入图中（无层次结构）。
+ *    4. 与可移动节点关联、由 relationship 参数选中的边被加入输出图。
+ *    5. 由于输出图不是多重图，复制边的权重会按需聚合。
+ */function buildLayerGraph(g,rank,relationship){let root=createRootNode(g),result=new Graph({compound:true}).setGraph({root:root}).setDefaultNodeLabel(v=>g.node(v));g.nodes().forEach(v=>{let node=g.node(v),parent=g.parent(v);if(node.rank===rank||node.minRank<=rank&&rank<=node.maxRank){result.setNode(v);result.setParent(v,parent||root);
+// 此处假设只有短边！
+g[relationship](v).forEach(e=>{let u=e.v===v?e.w:e.v,edge=result.edge(u,v),weight=edge!==undefined?edge.weight:0;result.setEdge(u,v,{weight:g.edge(e).weight+weight})});if(Object.hasOwn(node,"minRank")){result.setNode(v,{borderLeft:node.borderLeft[rank],borderRight:node.borderRight[rank]})}}});return result}function createRootNode(g){var v;while(g.hasNode(v=util.uniqueId("_root")));return v}},{"../util":27,"@dagrejs/graphlib":29}],14:[function(require,module,exports){"use strict";let zipObject=require("../util").zipObject;module.exports=crossCount;
+/*
+ * 接收分层（层数组，每层为有序节点数组）和图，返回加权交叉数。
+ *
+ * 前置条件：
+ *
+ *    1. 输入图必须是简单图（非多重图）、有向图，且仅包含简单边。
+ *    2. 输入图中的边必须已分配权重。
+ *
+ * 后置条件：
+ *
+ *    1. 图和分层矩阵保持不变。
+ *
+ * 该算法源自 Barth 等人，《Bilayer Cross Counting》。
+ */function crossCount(g,layering){let cc=0;for(let i=1;i<layering.length;++i){cc+=twoLayerCrossCount(g,layering[i-1],layering[i])}return cc}function twoLayerCrossCount(g,northLayer,southLayer){
+// 按北边层位置再按南边层位置，对南北层之间的所有边排序。
+// 将这些边映射到其在南边层中头节点所在位置。
+let southPos=zipObject(southLayer,southLayer.map((v,i)=>i));let southEntries=northLayer.flatMap(v=>{return g.outEdges(v).map(e=>{return{pos:southPos[e.w],weight:g.edge(e).weight}}).sort((a,b)=>a.pos-b.pos)});
+// 构建累加树
+let firstIndex=1;while(firstIndex<southLayer.length)firstIndex<<=1;let treeSize=2*firstIndex-1;firstIndex-=1;let tree=new Array(treeSize).fill(0);
+// 计算加权交叉数
+let cc=0;southEntries.forEach(entry=>{let index=entry.pos+firstIndex;tree[index]+=entry.weight;let weightSum=0;while(index>0){if(index%2){weightSum+=tree[index+1]}index=index-1>>1;tree[index]+=entry.weight}cc+=entry.weight*weightSum});return cc}},{"../util":27}],15:[function(require,module,exports){"use strict";let initOrder=require("./init-order");let crossCount=require("./cross-count");let sortSubgraph=require("./sort-subgraph");let buildLayerGraph=require("./build-layer-graph");let addSubgraphConstraints=require("./add-subgraph-constraints");let Graph=require("@dagrejs/graphlib").Graph;let util=require("../util");module.exports=order;
+/*
+ * 应用启发式以最小化图中边交叉，并将最优 order 解设为各节点的 order 属性。
+ *
+ * 前置条件：
+ *
+ *    1. 图必须是 DAG
+ *    2. 图节点必须是带 "rank" 属性的对象
+ *    3. 图边必须具有 "weight" 属性
+ *
+ * 后置条件：
+ *
+ *    1. 图节点将根据算法结果获得 "order" 属性。
+ */function order(g,opts){if(opts&&typeof opts.customOrder==="function"){opts.customOrder(g,order);return}let maxRank=util.maxRank(g),downLayerGraphs=buildLayerGraphs(g,util.range(1,maxRank+1),"inEdges"),upLayerGraphs=buildLayerGraphs(g,util.range(maxRank-1,-1,-1),"outEdges");let layering=initOrder(g);assignOrder(g,layering);if(opts&&opts.disableOptimalOrderHeuristic){return}let bestCC=Number.POSITIVE_INFINITY,best;for(let i=0,lastBest=0;lastBest<4;++i,++lastBest){sweepLayerGraphs(i%2?downLayerGraphs:upLayerGraphs,i%4>=2);layering=util.buildLayerMatrix(g);let cc=crossCount(g,layering);if(cc<bestCC){lastBest=0;best=Object.assign({},layering);bestCC=cc}}assignOrder(g,best)}function buildLayerGraphs(g,ranks,relationship){return ranks.map(function(rank){return buildLayerGraph(g,rank,relationship)})}function sweepLayerGraphs(layerGraphs,biasRight){let cg=new Graph;layerGraphs.forEach(function(lg){let root=lg.graph().root;let sorted=sortSubgraph(lg,root,cg,biasRight);sorted.vs.forEach((v,i)=>lg.node(v).order=i);addSubgraphConstraints(lg,cg,sorted.vs)})}function assignOrder(g,layering){Object.values(layering).forEach(layer=>layer.forEach((v,i)=>g.node(v).order=i))}},{"../util":27,"./add-subgraph-constraints":11,"./build-layer-graph":13,"./cross-count":14,"./init-order":16,"./sort-subgraph":18,"@dagrejs/graphlib":29}],16:[function(require,module,exports){"use strict";let util=require("../util");module.exports=initOrder;
+/*
+ * 从第一 rank 的节点出发执行 DFS，为每个节点分配初始 order 值。
+ * 节点在首次访问时于所在 rank 中获得 order。
+ *
+ * 此方法来自 Gansner 等人，《A Technique for Drawing Directed Graphs》。
+ *
+ * 返回分层矩阵：每层一个数组，各层按节点 order 排序。
+ */function initOrder(g){let visited={};let simpleNodes=g.nodes().filter(v=>!g.children(v).length);let simpleNodesRanks=simpleNodes.map(v=>g.node(v).rank);let maxRank=util.applyWithChunking(Math.max,simpleNodesRanks);let layers=util.range(maxRank+1).map(()=>[]);function dfs(v){if(visited[v])return;visited[v]=true;let node=g.node(v);layers[node.rank].push(v);g.successors(v).forEach(dfs)}let orderedVs=simpleNodes.sort((a,b)=>g.node(a).rank-g.node(b).rank);orderedVs.forEach(dfs);return layers}},{"../util":27}],17:[function(require,module,exports){"use strict";let util=require("../util");module.exports=resolveConflicts;
+/*
+ * 给定形如 {v, barycenter, weight} 的条目列表和约束图，本函数将解决约束图与条目
+ * 重心之间的冲突。若某条目的重心会违反约束图中的约束，则将冲突中的节点合并为一个
+ * 新节点，使其满足约束并聚合重心与权重信息。
+ *
+ * 本实现基于 Forster《A Fast and Simple Hueristic for Constrained Two-Level Crossing
+ * Reduction》中的描述，但在某些具体细节上有所不同。
+ *
+ * 前置条件：
+ *
+ *    1. 每个条目形如 {v, barycenter, weight}；若节点无重心，则为 {v}。
+ *
+ * 返回值：
+ *
+ *    新的条目列表，形如 {vs, i, barycenter, weight}。列表 `vs` 可为单元素，
+ *    也可为按序聚合的节点，使其不违反约束图约束。属性 `i` 是 `vs` 中任一元素的
+ *    最低原始索引。
+ */function resolveConflicts(entries,cg){let mappedEntries={};entries.forEach((entry,i)=>{let tmp=mappedEntries[entry.v]={indegree:0,in:[],out:[],vs:[entry.v],i:i};if(entry.barycenter!==undefined){tmp.barycenter=entry.barycenter;tmp.weight=entry.weight}});cg.edges().forEach(e=>{let entryV=mappedEntries[e.v];let entryW=mappedEntries[e.w];if(entryV!==undefined&&entryW!==undefined){entryW.indegree++;entryV.out.push(mappedEntries[e.w])}});let sourceSet=Object.values(mappedEntries).filter(entry=>!entry.indegree);return doResolveConflicts(sourceSet)}function doResolveConflicts(sourceSet){let entries=[];function handleIn(vEntry){return uEntry=>{if(uEntry.merged){return}if(uEntry.barycenter===undefined||vEntry.barycenter===undefined||uEntry.barycenter>=vEntry.barycenter){mergeEntries(vEntry,uEntry)}}}function handleOut(vEntry){return wEntry=>{wEntry["in"].push(vEntry);if(--wEntry.indegree===0){sourceSet.push(wEntry)}}}while(sourceSet.length){let entry=sourceSet.pop();entries.push(entry);entry["in"].reverse().forEach(handleIn(entry));entry.out.forEach(handleOut(entry))}return entries.filter(entry=>!entry.merged).map(entry=>{return util.pick(entry,["vs","i","barycenter","weight"])})}function mergeEntries(target,source){let sum=0;let weight=0;if(target.weight){sum+=target.barycenter*target.weight;weight+=target.weight}if(source.weight){sum+=source.barycenter*source.weight;weight+=source.weight}target.vs=source.vs.concat(target.vs);target.barycenter=sum/weight;target.weight=weight;target.i=Math.min(source.i,target.i);source.merged=true}},{"../util":27}],18:[function(require,module,exports){let barycenter=require("./barycenter");let resolveConflicts=require("./resolve-conflicts");let sort=require("./sort");module.exports=sortSubgraph;function sortSubgraph(g,v,cg,biasRight){let movable=g.children(v);let node=g.node(v);let bl=node?node.borderLeft:undefined;let br=node?node.borderRight:undefined;let subgraphs={};if(bl){movable=movable.filter(w=>w!==bl&&w!==br)}let barycenters=barycenter(g,movable);barycenters.forEach(entry=>{if(g.children(entry.v).length){let subgraphResult=sortSubgraph(g,entry.v,cg,biasRight);subgraphs[entry.v]=subgraphResult;if(Object.hasOwn(subgraphResult,"barycenter")){mergeBarycenters(entry,subgraphResult)}}});let entries=resolveConflicts(barycenters,cg);expandSubgraphs(entries,subgraphs);let result=sort(entries,biasRight);if(bl){result.vs=[bl,result.vs,br].flat(true);if(g.predecessors(bl).length){let blPred=g.node(g.predecessors(bl)[0]),brPred=g.node(g.predecessors(br)[0]);if(!Object.hasOwn(result,"barycenter")){result.barycenter=0;result.weight=0}result.barycenter=(result.barycenter*result.weight+blPred.order+brPred.order)/(result.weight+2);result.weight+=2}}return result}function expandSubgraphs(entries,subgraphs){entries.forEach(entry=>{entry.vs=entry.vs.flatMap(v=>{if(subgraphs[v]){return subgraphs[v].vs}return v})})}function mergeBarycenters(target,other){if(target.barycenter!==undefined){target.barycenter=(target.barycenter*target.weight+other.barycenter*other.weight)/(target.weight+other.weight);target.weight+=other.weight}else{target.barycenter=other.barycenter;target.weight=other.weight}}},{"./barycenter":12,"./resolve-conflicts":17,"./sort":19}],19:[function(require,module,exports){let util=require("../util");module.exports=sort;function sort(entries,biasRight){let parts=util.partition(entries,entry=>{return Object.hasOwn(entry,"barycenter")});let sortable=parts.lhs,unsortable=parts.rhs.sort((a,b)=>b.i-a.i),vs=[],sum=0,weight=0,vsIndex=0;sortable.sort(compareWithBias(!!biasRight));vsIndex=consumeUnsortable(vs,unsortable,vsIndex);sortable.forEach(entry=>{vsIndex+=entry.vs.length;vs.push(entry.vs);sum+=entry.barycenter*entry.weight;weight+=entry.weight;vsIndex=consumeUnsortable(vs,unsortable,vsIndex)});let result={vs:vs.flat(true)};if(weight){result.barycenter=sum/weight;result.weight=weight}return result}function consumeUnsortable(vs,unsortable,index){let last;while(unsortable.length&&(last=unsortable[unsortable.length-1]).i<=index){unsortable.pop();vs.push(last.vs);index++}return index}function compareWithBias(bias){return(entryV,entryW)=>{if(entryV.barycenter<entryW.barycenter){return-1}else if(entryV.barycenter>entryW.barycenter){return 1}return!bias?entryV.i-entryW.i:entryW.i-entryV.i}}},{"../util":27}],20:[function(require,module,exports){module.exports=parentDummyChains;function parentDummyChains(g){let postorderNums=postorder(g);g.graph().dummyChains.forEach(v=>{let node=g.node(v);let edgeObj=node.edgeObj;let pathData=findPath(g,postorderNums,edgeObj.v,edgeObj.w);let path=pathData.path;let lca=pathData.lca;let pathIdx=0;let pathV=path[pathIdx];let ascending=true;while(v!==edgeObj.w){node=g.node(v);if(ascending){while((pathV=path[pathIdx])!==lca&&g.node(pathV).maxRank<node.rank){pathIdx++}if(pathV===lca){ascending=false}}if(!ascending){while(pathIdx<path.length-1&&g.node(pathV=path[pathIdx+1]).minRank<=node.rank){pathIdx++}pathV=path[pathIdx]}g.setParent(v,pathV);v=g.successors(v)[0]}})}
+// 经最近公共祖先（LCA）寻找从 v 到 w 的路径。返回完整路径和 LCA。
+function findPath(g,postorderNums,v,w){let vPath=[];let wPath=[];let low=Math.min(postorderNums[v].low,postorderNums[w].low);let lim=Math.max(postorderNums[v].lim,postorderNums[w].lim);let parent;let lca;
+// 从 v 向上遍历以找到 LCA
+parent=v;do{parent=g.parent(parent);vPath.push(parent)}while(parent&&(postorderNums[parent].low>low||lim>postorderNums[parent].lim));lca=parent;
+// 从 w 遍历至 LCA
+parent=w;while((parent=g.parent(parent))!==lca){wPath.push(parent)}return{path:vPath.concat(wPath.reverse()),lca:lca}}function postorder(g){let result={};let lim=0;function dfs(v){let low=lim;g.children(v).forEach(dfs);result[v]={low:low,lim:lim++}}g.children().forEach(dfs);return result}},{}],21:[function(require,module,exports){"use strict";let Graph=require("@dagrejs/graphlib").Graph;let util=require("../util");
+/*
+ * 本模块基于 Brandes 和 Köpf《Fast and Simple Horizontal Coordinate Assignment》
+ * 提供坐标分配。
+ */module.exports={positionX:positionX,findType1Conflicts:findType1Conflicts,findType2Conflicts:findType2Conflicts,addConflict:addConflict,hasConflict:hasConflict,verticalAlignment:verticalAlignment,horizontalCompaction:horizontalCompaction,alignCoordinates:alignCoordinates,findSmallestWidthAlignment:findSmallestWidthAlignment,balance:balance};
+/*
+ * 为图中所有 type-1 冲突的边标记 "type1Conflict" 属性。type-1 冲突指非内部段
+ * 与内部段相交。内部段是两端节点均标记 "dummy" 属性的边。
+ *
+ * 该算法从第二层起逐层扫描，查找当前层与前一层的 type-1 冲突。对每一层从左到右
+ * 扫描节点，直到遇到与内部段关联的节点，再扫描前驱以确定是否有边与该内部段相交。
+ * 最后对当前 rank 上所有节点做最终扫描，看是否与其最后访问的内部段相交。
+ *
+ * 该算法（安全地）假设：在被扫描的层中，虚拟节点仅与一个节点关联。
+ */function findType1Conflicts(g,layering){let conflicts={};function visitLayer(prevLayer,layer){let
+// 前一层中与内部段关联的最后访问节点。
+k0=0,
+// 跟踪本层中为检测与 type-1 段交叉而扫描的最后节点。
+scanPos=0,prevLayerLength=prevLayer.length,lastNode=layer[layer.length-1];layer.forEach((v,i)=>{let w=findOtherInnerSegmentNode(g,v),k1=w?g.node(w).order:prevLayerLength;if(w||v===lastNode){layer.slice(scanPos,i+1).forEach(scanNode=>{g.predecessors(scanNode).forEach(u=>{let uLabel=g.node(u),uPos=uLabel.order;if((uPos<k0||k1<uPos)&&!(uLabel.dummy&&g.node(scanNode).dummy)){addConflict(conflicts,u,scanNode)}})});scanPos=i+1;k0=k1}});return layer}layering.length&&layering.reduce(visitLayer);return conflicts}function findType2Conflicts(g,layering){let conflicts={};function scan(south,southPos,southEnd,prevNorthBorder,nextNorthBorder){let v;util.range(southPos,southEnd).forEach(i=>{v=south[i];if(g.node(v).dummy){g.predecessors(v).forEach(u=>{let uNode=g.node(u);if(uNode.dummy&&(uNode.order<prevNorthBorder||uNode.order>nextNorthBorder)){addConflict(conflicts,u,v)}})}})}function visitLayer(north,south){let prevNorthPos=-1,nextNorthPos,southPos=0;south.forEach((v,southLookahead)=>{if(g.node(v).dummy==="border"){let predecessors=g.predecessors(v);if(predecessors.length){nextNorthPos=g.node(predecessors[0]).order;scan(south,southPos,southLookahead,prevNorthPos,nextNorthPos);southPos=southLookahead;prevNorthPos=nextNorthPos}}scan(south,southPos,south.length,nextNorthPos,north.length)});return south}layering.length&&layering.reduce(visitLayer);return conflicts}function findOtherInnerSegmentNode(g,v){if(g.node(v).dummy){return g.predecessors(v).find(u=>g.node(u).dummy)}}function addConflict(conflicts,v,w){if(v>w){let tmp=v;v=w;w=tmp}let conflictsV=conflicts[v];if(!conflictsV){conflicts[v]=conflictsV={}}conflictsV[w]=true}function hasConflict(conflicts,v,w){if(v>w){let tmp=v;v=w;w=tmp}return!!conflicts[v]&&Object.hasOwn(conflicts[v],w)}
+/*
+ * 尽可能将节点对齐为垂直「块」。该算法尝试将节点与其某个中位邻居对齐。
+ * 若连接邻居的边为 type-1 冲突，则忽略该可能。
+ * 若前一节点已与我们要对齐的节点之后的节点成块，也忽略该可能——否则块会被拆分。
+ */function verticalAlignment(g,layering,conflicts,neighborFn){let root={},align={},pos={};
+// 基于分层在此缓存位置，因为图与分层可能不同步。
+// 分层矩阵会被操纵以生成不同的极端对齐方式。
+layering.forEach(layer=>{layer.forEach((v,order)=>{root[v]=v;align[v]=v;pos[v]=order})});layering.forEach(layer=>{let prevIdx=-1;layer.forEach(v=>{let ws=neighborFn(v);if(ws.length){ws=ws.sort((a,b)=>pos[a]-pos[b]);let mp=(ws.length-1)/2;for(let i=Math.floor(mp),il=Math.ceil(mp);i<=il;++i){let w=ws[i];if(align[v]===v&&prevIdx<pos[w]&&!hasConflict(conflicts,v,w)){align[w]=v;align[v]=root[v]=root[w];prevIdx=pos[w]}}}})});return{root:root,align:align}}function horizontalCompaction(g,layering,root,align,reverseSep){
+// 由于若干问题，这部分算法与 BK 不同。
+// 我们不采用其算法，而是构造新的块图并做两次扫描：第一次将块置于最小可能坐标；
+// 第二次在不违反间距的前提下，将块移至最大坐标以去除未使用空间。
+let xs={},blockG=buildBlockGraph(g,layering,root,reverseSep),borderType=reverseSep?"borderLeft":"borderRight";function iterate(setXsFunc,nextNodesFunc){let stack=blockG.nodes();let elem=stack.pop();let visited={};while(elem){if(visited[elem]){setXsFunc(elem)}else{visited[elem]=true;stack.push(elem);stack=stack.concat(nextNodesFunc(elem))}elem=stack.pop()}}
+// 第一遍：分配最小坐标
+function pass1(elem){xs[elem]=blockG.inEdges(elem).reduce((acc,e)=>{return Math.max(acc,xs[e.v]+blockG.edge(e))},0)}
+// 第二遍：分配最大坐标
+function pass2(elem){let min=blockG.outEdges(elem).reduce((acc,e)=>{return Math.min(acc,xs[e.w]-blockG.edge(e))},Number.POSITIVE_INFINITY);let node=g.node(elem);if(min!==Number.POSITIVE_INFINITY&&node.borderType!==borderType){xs[elem]=Math.max(xs[elem],min)}}iterate(pass1,blockG.predecessors.bind(blockG));iterate(pass2,blockG.successors.bind(blockG));
+// 为所有节点分配 x 坐标
+Object.keys(align).forEach(v=>xs[v]=xs[root[v]]);return xs}function buildBlockGraph(g,layering,root,reverseSep){let blockGraph=new Graph,graphLabel=g.graph(),sepFn=sep(graphLabel.nodesep,graphLabel.edgesep,reverseSep);layering.forEach(layer=>{let u;layer.forEach(v=>{let vRoot=root[v];blockGraph.setNode(vRoot);if(u){var uRoot=root[u],prevMax=blockGraph.edge(uRoot,vRoot);blockGraph.setEdge(uRoot,vRoot,Math.max(sepFn(g,v,u),prevMax||0))}u=v})});return blockGraph}
+/*
+ * 返回给定对齐方式中宽度最小的对齐。
+ */function findSmallestWidthAlignment(g,xss){return Object.values(xss).reduce((currentMinAndXs,xs)=>{let max=Number.NEGATIVE_INFINITY;let min=Number.POSITIVE_INFINITY;Object.entries(xs).forEach(([v,x])=>{let halfWidth=width(g,v)/2;max=Math.max(x+halfWidth,max);min=Math.min(x-halfWidth,min)});const newMin=max-min;if(newMin<currentMinAndXs[0]){currentMinAndXs=[newMin,xs]}return currentMinAndXs},[Number.POSITIVE_INFINITY,null])[1]}
+/*
+ * 对齐各布局对齐方式的坐标，使左偏对齐的最小坐标与最小宽度对齐的最小坐标同点，
+ * 右偏对齐的最大坐标与最小宽度对齐的最大坐标同点。
+ */function alignCoordinates(xss,alignTo){let alignToVals=Object.values(alignTo),alignToMin=util.applyWithChunking(Math.min,alignToVals),alignToMax=util.applyWithChunking(Math.max,alignToVals);["u","d"].forEach(vert=>{["l","r"].forEach(horiz=>{let alignment=vert+horiz,xs=xss[alignment];if(xs===alignTo)return;let xsVals=Object.values(xs);let delta=alignToMin-util.applyWithChunking(Math.min,xsVals);if(horiz!=="l"){delta=alignToMax-util.applyWithChunking(Math.max,xsVals)}if(delta){xss[alignment]=util.mapValues(xs,x=>x+delta)}})})}function balance(xss,align){return util.mapValues(xss.ul,(num,v)=>{if(align){return xss[align.toLowerCase()][v]}else{let xs=Object.values(xss).map(xs=>xs[v]).sort((a,b)=>a-b);return(xs[1]+xs[2])/2}})}function positionX(g){let layering=util.buildLayerMatrix(g);let conflicts=Object.assign(findType1Conflicts(g,layering),findType2Conflicts(g,layering));let xss={};let adjustedLayering;["u","d"].forEach(vert=>{adjustedLayering=vert==="u"?layering:Object.values(layering).reverse();["l","r"].forEach(horiz=>{if(horiz==="r"){adjustedLayering=adjustedLayering.map(inner=>{return Object.values(inner).reverse()})}let neighborFn=(vert==="u"?g.predecessors:g.successors).bind(g);let align=verticalAlignment(g,adjustedLayering,conflicts,neighborFn);let xs=horizontalCompaction(g,adjustedLayering,align.root,align.align,horiz==="r");if(horiz==="r"){xs=util.mapValues(xs,x=>-x)}xss[vert+horiz]=xs})});let smallestWidth=findSmallestWidthAlignment(g,xss);alignCoordinates(xss,smallestWidth);return balance(xss,g.graph().align)}function sep(nodeSep,edgeSep,reverseSep){return(g,v,w)=>{let vLabel=g.node(v);let wLabel=g.node(w);let sum=0;let delta;sum+=vLabel.width/2;if(Object.hasOwn(vLabel,"labelpos")){switch(vLabel.labelpos.toLowerCase()){case"l":delta=-vLabel.width/2;break;case"r":delta=vLabel.width/2;break}}if(delta){sum+=reverseSep?delta:-delta}delta=0;sum+=(vLabel.dummy?edgeSep:nodeSep)/2;sum+=(wLabel.dummy?edgeSep:nodeSep)/2;sum+=wLabel.width/2;if(Object.hasOwn(wLabel,"labelpos")){switch(wLabel.labelpos.toLowerCase()){case"l":delta=wLabel.width/2;break;case"r":delta=-wLabel.width/2;break}}if(delta){sum+=reverseSep?delta:-delta}delta=0;return sum}}function width(g,v){return g.node(v).width}},{"../util":27,"@dagrejs/graphlib":29}],22:[function(require,module,exports){"use strict";let util=require("../util");let positionX=require("./bk").positionX;module.exports=position;function position(g){g=util.asNonCompoundGraph(g);positionY(g);Object.entries(positionX(g)).forEach(([v,x])=>g.node(v).x=x)}function positionY(g){let layering=util.buildLayerMatrix(g);let rankSep=g.graph().ranksep;let prevY=0;layering.forEach(layer=>{const maxHeight=layer.reduce((acc,v)=>{const height=g.node(v).height;if(acc>height){return acc}else{return height}},0);layer.forEach(v=>g.node(v).y=prevY+maxHeight/2);prevY+=maxHeight+rankSep})}},{"../util":27,"./bk":21}],23:[function(require,module,exports){"use strict";var Graph=require("@dagrejs/graphlib").Graph;var slack=require("./util").slack;module.exports=feasibleTree;
+/*
+ * 构造由紧边组成的生成树，并调整输入节点的 rank 以实现这一点。紧边指长度与其
+ * "minlen" 属性匹配的边。
+ *
+ * 本函数的基本结构来自 Gansner 等人，《A Technique for Drawing Directed Graphs》。
+ *
+ * 前置条件：
+ *
+ *    1. 图必须是 DAG。
+ *    2. 图必须连通。
+ *    3. 图至少有一个节点。
+ *    5. 图节点此前已分配 "rank" 属性，且满足关联边的 "minlen" 属性。
+ *    6. 图边必须具有 "minlen" 属性。
+ *
+ * 后置条件：
+ *
+ *    - 将调整图节点的 rank，确保所有边均为紧边。
+ *
+ * 返回仅由「紧边」构成的树（无向图）。
+ */function feasibleTree(g){var t=new Graph({directed:false});
+// 任选节点作为树的起点
+var start=g.nodes()[0];var size=g.nodeCount();t.setNode(start,{});var edge,delta;while(tightTree(t,g)<size){edge=findMinSlackEdge(t,g);delta=t.hasNode(edge.v)?slack(g,edge):-slack(g,edge);shiftRanks(t,g,delta)}return t}
+/*
+ * 寻找紧边的最大树，并返回树中节点数。
+ */function tightTree(t,g){function dfs(v){g.nodeEdges(v).forEach(e=>{var edgeV=e.v,w=v===edgeV?e.w:edgeV;if(!t.hasNode(w)&&!slack(g,e)){t.setNode(w,{});t.setEdge(v,w,{});dfs(w)}})}t.nodes().forEach(dfs);return t.nodeCount()}
+/*
+ * 寻找与树关联、松弛度最小的边并返回。
+ */function findMinSlackEdge(t,g){const edges=g.edges();return edges.reduce((acc,edge)=>{let edgeSlack=Number.POSITIVE_INFINITY;if(t.hasNode(edge.v)!==t.hasNode(edge.w)){edgeSlack=slack(g,edge)}if(edgeSlack<acc[0]){return[edgeSlack,edge]}return acc},[Number.POSITIVE_INFINITY,null])[1]}function shiftRanks(t,g,delta){t.nodes().forEach(v=>g.node(v).rank+=delta)}},{"./util":26,"@dagrejs/graphlib":29}],24:[function(require,module,exports){"use strict";var rankUtil=require("./util");var longestPath=rankUtil.longestPath;var feasibleTree=require("./feasible-tree");var networkSimplex=require("./network-simplex");module.exports=rank;
+/*
+ * 为输入图中每个节点分配 rank，使其满足节点间边上指定的 "minlen" 约束。
+ *
+ * 基本结构来自 Gansner 等人，《A Technique for Drawing Directed Graphs》。
+ *
+ * 前置条件：
+ *
+ *    1. 图必须是连通 DAG
+ *    2. 图节点必须是对象
+ *    3. 图边必须具有 "weight" 和 "minlen" 属性
+ *
+ * 后置条件：
+ *
+ *    1. 图节点将根据算法结果获得 "rank" 属性。rank 可从任意索引（含负数）开始，
+ *       后续会修正。
+ */function rank(g){switch(g.graph().ranker){case"network-simplex":networkSimplexRanker(g);break;case"tight-tree":tightTreeRanker(g);break;case"longest-path":longestPathRanker(g);break;default:networkSimplexRanker(g)}}
+// 快速简单的 rank 分配器，但结果远非最优。
+var longestPathRanker=longestPath;function tightTreeRanker(g){longestPath(g);feasibleTree(g)}function networkSimplexRanker(g){networkSimplex(g)}},{"./feasible-tree":23,"./network-simplex":25,"./util":26}],25:[function(require,module,exports){"use strict";var feasibleTree=require("./feasible-tree");var slack=require("./util").slack;var initRank=require("./util").longestPath;var preorder=require("@dagrejs/graphlib").alg.preorder;var postorder=require("@dagrejs/graphlib").alg.postorder;var simplify=require("../util").simplify;module.exports=networkSimplex;
+// 为测试目的暴露部分内部实现
+networkSimplex.initLowLimValues=initLowLimValues;networkSimplex.initCutValues=initCutValues;networkSimplex.calcCutValue=calcCutValue;networkSimplex.leaveEdge=leaveEdge;networkSimplex.enterEdge=enterEdge;networkSimplex.exchangeEdges=exchangeEdges;
+/*
+ * 网络单纯形算法为输入图中每个节点分配 rank，并迭代改进排序以缩短边长。
+ *
+ * 前置条件：
+ *
+ *    1. 输入图必须是 DAG。
+ *    2. 图中所有节点必须具有对象值。
+ *    3. 图中所有边必须具有 "minlen" 和 "weight" 属性。
+ *
+ * 后置条件：
+ *
+ *    1. 图中所有节点将获得经网络单纯形算法优化的 "rank" 属性。rank 从 0 开始。
+ *
+ *
+ * 算法大致如下：
+ *
+ *    1. 为每个节点分配初始 rank。我们使用最长路径算法，将 rank 置于尽可能低的位置。
+ *       这通常导致底部 rank 很宽、边不必要地长。
+ *    2. 构造可行紧树。紧树指树中所有边无松弛（边长与 minlen 之差为零）。
+ *       仅此一步就能通过缩短边大幅改善已分配的 rank。
+ *    3. 迭代寻找 cut 值为负的边。通常负 cut 值表示可移除该边并加入新的树边，
+ *       以得到更紧凑的图。
+ *
+ * 此处大量算法来自 Gansner 等人，《A Technique for Drawing Directed Graphs》。
+ * 文件结构大致遵循整体算法结构。
+ */function networkSimplex(g){g=simplify(g);initRank(g);var t=feasibleTree(g);initLowLimValues(t);initCutValues(t,g);var e,f;while(e=leaveEdge(t)){f=enterEdge(t,g,e);exchangeEdges(t,g,e,f)}}
+/*
+ * 初始化树中所有边的 cut 值。
+ */function initCutValues(t,g){var vs=postorder(t,t.nodes());vs=vs.slice(0,vs.length-1);vs.forEach(v=>assignCutValue(t,g,v))}function assignCutValue(t,g,child){var childLab=t.node(child);var parent=childLab.parent;t.edge(child,parent).cutvalue=calcCutValue(t,g,child)}
+/*
+ * 给定紧树、其图及图中的子节点，计算并返回该子节点与其父节点之间边的 cut 值。
+ */function calcCutValue(t,g,child){var childLab=t.node(child);var parent=childLab.parent;
+// 若子节点在有向图中位于边的尾端，则为 true
+var childIsTail=true;
+// 图对我们正在检查的树边的视图
+var graphEdge=g.edge(child,parent);
+// 该节点与其父节点之间边的累计 cut 值
+var cutValue=0;if(!graphEdge){childIsTail=false;graphEdge=g.edge(parent,child)}cutValue=graphEdge.weight;g.nodeEdges(child).forEach(e=>{var isOutEdge=e.v===child,other=isOutEdge?e.w:e.v;if(other!==parent){var pointsToHead=isOutEdge===childIsTail,otherWeight=g.edge(e).weight;cutValue+=pointsToHead?otherWeight:-otherWeight;if(isTreeEdge(t,child,other)){var otherCutValue=t.edge(child,other).cutvalue;cutValue+=pointsToHead?-otherCutValue:otherCutValue}}});return cutValue}function initLowLimValues(tree,root){if(arguments.length<2){root=tree.nodes()[0]}dfsAssignLowLim(tree,{},1,root)}function dfsAssignLowLim(tree,visited,nextLim,v,parent){var low=nextLim;var label=tree.node(v);visited[v]=true;tree.neighbors(v).forEach(w=>{if(!Object.hasOwn(visited,w)){nextLim=dfsAssignLowLim(tree,visited,nextLim,w,v)}});label.low=low;label.lim=nextLim++;if(parent){label.parent=parent}else{
+// TODO 在增量更新 low lim 时应可移除此处
+delete label.parent}return nextLim}function leaveEdge(tree){return tree.edges().find(e=>tree.edge(e).cutvalue<0)}function enterEdge(t,g,edge){var v=edge.v;var w=edge.w;
+// 本函数其余部分假设 v 为尾、w 为头；若图中无此边，应翻转以匹配正确方向。
+if(!g.hasEdge(v,w)){v=edge.w;w=edge.v}var vLabel=t.node(v);var wLabel=t.node(w);var tailLabel=vLabel;var flip=false;
+// 若根在边的尾端，则需翻转下方 candidates 函数中检查头尾节点的逻辑。
+if(vLabel.lim>wLabel.lim){tailLabel=wLabel;flip=true}var candidates=g.edges().filter(edge=>{return flip===isDescendant(t,t.node(edge.v),tailLabel)&&flip!==isDescendant(t,t.node(edge.w),tailLabel)});return candidates.reduce((acc,edge)=>{if(slack(g,edge)<slack(g,acc)){return edge}return acc})}function exchangeEdges(t,g,e,f){var v=e.v;var w=e.w;t.removeEdge(v,w);t.setEdge(f.v,f.w,{});initLowLimValues(t);initCutValues(t,g);updateRanks(t,g)}function updateRanks(t,g){var root=t.nodes().find(v=>!g.node(v).parent);var vs=preorder(t,root);vs=vs.slice(1);vs.forEach(v=>{var parent=t.node(v).parent,edge=g.edge(v,parent),flipped=false;if(!edge){edge=g.edge(parent,v);flipped=true}g.node(v).rank=g.node(parent).rank+(flipped?edge.minlen:-edge.minlen)})}
+/*
+ * 若边在树中则返回 true。
+ */function isTreeEdge(tree,u,v){return tree.hasEdge(u,v)}
+/*
+ * 按树中分配的 low 和 lim 属性，若指定节点是根节点的后代则返回 true。
+ */function isDescendant(tree,vLabel,rootLabel){return rootLabel.low<=vLabel.lim&&vLabel.lim<=rootLabel.lim}},{"../util":27,"./feasible-tree":23,"./util":26,"@dagrejs/graphlib":29}],26:[function(require,module,exports){"use strict";const{applyWithChunking}=require("../util");module.exports={longestPath:longestPath,slack:slack};
+/*
+ * 使用最长路径算法为输入图初始化 rank。该算法扩展性好、实践中很快，但解质量较差。
+ * 节点被压到尽可能低的层，使底部 rank 很宽、边比必要更长。不过因其速度，适合作为
+ * 可输入其他算法的初始 rank。
+ *
+ * 该算法不归一化层，因为多数情况下会由其他算法使用。若直接使用，务必在最后运行 normalize。
+ *
+ * 前置条件：
+ *
+ *    1. 输入图为 DAG。
+ *    2. 输入图节点标签可分配属性。
+ *
+ * 后置条件：
+ *
+ *    1. 每个节点将获得（未归一化的）"rank" 属性。
+ */function longestPath(g){var visited={};function dfs(v){var label=g.node(v);if(Object.hasOwn(visited,v)){return label.rank}visited[v]=true;let outEdgesMinLens=g.outEdges(v).map(e=>{if(e==null){return Number.POSITIVE_INFINITY}return dfs(e.w)-g.edge(e).minlen});var rank=applyWithChunking(Math.min,outEdgesMinLens);if(rank===Number.POSITIVE_INFINITY){rank=0}return label.rank=rank}g.sources().forEach(dfs)}
+/*
+ * 返回给定边的松弛量。松弛量定义为边长与其最小长度之差。
+ */function slack(g,e){return g.node(e.w).rank-g.node(e.v).rank-g.edge(e).minlen}},{"../util":27}],27:[function(require,module,exports){
+/* eslint "no-console": off */
+"use strict";let Graph=require("@dagrejs/graphlib").Graph;module.exports={addBorderNode:addBorderNode,addDummyNode:addDummyNode,applyWithChunking:applyWithChunking,asNonCompoundGraph:asNonCompoundGraph,buildLayerMatrix:buildLayerMatrix,intersectRect:intersectRect,mapValues:mapValues,maxRank:maxRank,normalizeRanks:normalizeRanks,notime:notime,partition:partition,pick:pick,predecessorWeights:predecessorWeights,range:range,removeEmptyRanks:removeEmptyRanks,simplify:simplify,successorWeights:successorWeights,time:time,uniqueId:uniqueId,zipObject:zipObject};
+/*
+ * 向图添加虚拟节点并返回 v。
+ */function addDummyNode(g,type,attrs,name){let v;do{v=uniqueId(name)}while(g.hasNode(v));attrs.dummy=type;g.setNode(v,attrs);return v}
+/*
+ * 返回仅含简单边的新图。处理与多重边关联数据的聚合。
+ */function simplify(g){let simplified=(new Graph).setGraph(g.graph());g.nodes().forEach(v=>simplified.setNode(v,g.node(v)));g.edges().forEach(e=>{let simpleLabel=simplified.edge(e.v,e.w)||{weight:0,minlen:1};let label=g.edge(e);simplified.setEdge(e.v,e.w,{weight:simpleLabel.weight+label.weight,minlen:Math.max(simpleLabel.minlen,label.minlen)})});return simplified}function asNonCompoundGraph(g){let simplified=new Graph({multigraph:g.isMultigraph()}).setGraph(g.graph());g.nodes().forEach(v=>{if(!g.children(v).length){simplified.setNode(v,g.node(v))}});g.edges().forEach(e=>{simplified.setEdge(e,g.edge(e))});return simplified}function successorWeights(g){let weightMap=g.nodes().map(v=>{let sucs={};g.outEdges(v).forEach(e=>{sucs[e.w]=(sucs[e.w]||0)+g.edge(e).weight});return sucs});return zipObject(g.nodes(),weightMap)}function predecessorWeights(g){let weightMap=g.nodes().map(v=>{let preds={};g.inEdges(v).forEach(e=>{preds[e.v]=(preds[e.v]||0)+g.edge(e).weight});return preds});return zipObject(g.nodes(),weightMap)}
+/*
+ * 求从点 ({x, y}) 出发、指向矩形中心的直线与矩形 ({x, y, width, height}) 的交点。
+ */function intersectRect(rect,point){let x=rect.x;let y=rect.y;
+// 矩形相交算法来自：
+// http://math.stackexchange.com/questions/108113/find-edge-between-two-boxes
+let dx=point.x-x;let dy=point.y-y;let w=rect.width/2;let h=rect.height/2;if(!dx&&!dy){throw new Error("Not possible to find intersection inside of the rectangle")}let sx,sy;if(Math.abs(dy)*w>Math.abs(dx)*h){
+// 交点在矩形顶部或底部。
+if(dy<0){h=-h}sx=h*dx/dy;sy=h}else{
+// 交点在矩形左侧或右侧。
+if(dx<0){w=-w}sx=w;sy=w*dy/dx}return{x:x+sx,y:y+sy}}
+/*
+ * 给定每个节点已分配 "rank" 和 "order" 的 DAG，本函数生成包含各节点 id 的矩阵。
+ */function buildLayerMatrix(g){let layering=range(maxRank(g)+1).map(()=>[]);g.nodes().forEach(v=>{let node=g.node(v);let rank=node.rank;if(rank!==undefined){layering[rank][node.order]=v}});return layering}
+/*
+ * 调整图中所有节点的 rank，使所有节点 v 满足 rank(v) >= 0，且至少一个节点 w 满足 rank(w) = 0。
+ */function normalizeRanks(g){let nodeRanks=g.nodes().map(v=>{let rank=g.node(v).rank;if(rank===undefined){return Number.MAX_VALUE}return rank});let min=applyWithChunking(Math.min,nodeRanks);g.nodes().forEach(v=>{let node=g.node(v);if(Object.hasOwn(node,"rank")){node.rank-=min}})}function removeEmptyRanks(g){
+// rank 可能不从 0 开始，因此需要偏移
+let nodeRanks=g.nodes().map(v=>g.node(v).rank);let offset=applyWithChunking(Math.min,nodeRanks);let layers=[];g.nodes().forEach(v=>{let rank=g.node(v).rank-offset;if(!layers[rank]){layers[rank]=[]}layers[rank].push(v)});let delta=0;let nodeRankFactor=g.graph().nodeRankFactor;Array.from(layers).forEach((vs,i)=>{if(vs===undefined&&i%nodeRankFactor!==0){--delta}else if(vs!==undefined&&delta){vs.forEach(v=>g.node(v).rank+=delta)}})}function addBorderNode(g,prefix,rank,order){let node={width:0,height:0};if(arguments.length>=4){node.rank=rank;node.order=order}return addDummyNode(g,"border",node,prefix)}function splitToChunks(array,chunkSize=CHUNKING_THRESHOLD){const chunks=[];for(let i=0;i<array.length;i+=chunkSize){const chunk=array.slice(i,i+chunkSize);chunks.push(chunk)}return chunks}const CHUNKING_THRESHOLD=65535;function applyWithChunking(fn,argsArray){if(argsArray.length>CHUNKING_THRESHOLD){const chunks=splitToChunks(argsArray);return fn.apply(null,chunks.map(chunk=>fn.apply(null,chunk)))}else{return fn.apply(null,argsArray)}}function maxRank(g){const nodes=g.nodes();const nodeRanks=nodes.map(v=>{let rank=g.node(v).rank;if(rank===undefined){return Number.MIN_VALUE}return rank});return applyWithChunking(Math.max,nodeRanks)}
+/*
+ * 将集合分为两组：`lhs` 和 `rhs`。若所供函数对某条目返回 true，则归入 `lhs`，否则归入 `rhs`。
+ */function partition(collection,fn){let result={lhs:[],rhs:[]};collection.forEach(value=>{if(fn(value)){result.lhs.push(value)}else{result.rhs.push(value)}});return result}
+/*
+ * 返回用计时器包装 `fn` 的新函数。包装器会记录函数执行耗时。
+ */function time(name,fn){let start=Date.now();try{return fn()}finally{console.log(name+" time: "+(Date.now()-start)+"ms")}}function notime(name,fn){return fn()}let idCounter=0;function uniqueId(prefix){var id=++idCounter;return toString(prefix)+id}function range(start,limit,step=1){if(limit==null){limit=start;start=0}let endCon=i=>i<limit;if(step<0){endCon=i=>limit<i}const range=[];for(let i=start;endCon(i);i+=step){range.push(i)}return range}function pick(source,keys){const dest={};for(const key of keys){if(source[key]!==undefined){dest[key]=source[key]}}return dest}function mapValues(obj,funcOrProp){let func=funcOrProp;if(typeof funcOrProp==="string"){func=val=>val[funcOrProp]}return Object.entries(obj).reduce((acc,[k,v])=>{acc[k]=func(v,k);return acc},{})}function zipObject(props,values){return props.reduce((acc,key,i)=>{acc[key]=values[i];return acc},{})}},{"@dagrejs/graphlib":29}],28:[function(require,module,exports){module.exports="1.1.4"},{}],29:[function(require,module,exports){
+/**
+ * Copyright (c) 2014, Chris Pettitt
+ * 保留所有权利。
+ *
+ * 在满足以下条件的前提下，允许以源码和二进制形式再分发和使用本软件（含修改）：
+ *
+ * 1. 源码再分发必须保留上述版权声明、本条件列表及以下免责声明。
+ *
+ * 2. 二进制再分发必须在随发行版提供的文档和/或其他材料中复制上述版权声明、
+ *    本条件列表及以下免责声明。
+ *
+ * 3. 未经事先书面许可，不得使用版权持有人或其贡献者名称，用于背书或推广源自本软件的
+ *    产品。
+ *
+ * 本软件由版权持有人和贡献者按「原样」提供，不提供任何明示或暗示担保，包括但不限于
+ * 对适销性和特定用途适用性的暗示担保。在任何情况下，版权持有人或贡献者均不对任何直接、
+ * 间接、附带、特殊、惩戒性或后果性损害（包括但不限于采购替代商品或服务；使用、数据或
+ * 利润损失；或业务中断）承担责任，无论成因及责任理论（合同、严格责任或侵权，含过失或
+ * 其他）如何，即使已被告知此类损害的可能性。
+ */
+var lib=require("./lib");module.exports={Graph:lib.Graph,json:require("./lib/json"),alg:require("./lib/alg"),version:lib.version}},{"./lib":45,"./lib/alg":36,"./lib/json":46}],30:[function(require,module,exports){module.exports=components;function components(g){var visited={};var cmpts=[];var cmpt;function dfs(v){if(Object.hasOwn(visited,v))return;visited[v]=true;cmpt.push(v);g.successors(v).forEach(dfs);g.predecessors(v).forEach(dfs)}g.nodes().forEach(function(v){cmpt=[];dfs(v);if(cmpt.length){cmpts.push(cmpt)}});return cmpts}},{}],31:[function(require,module,exports){module.exports=dfs;
+/*
+ * 对输入图执行前序或后序遍历的辅助函数，按访问顺序返回节点。
+ * 若图为无向图，则用邻居导航；若有向图，则用后继导航。
+ *
+ * 若 order 不是 "post"，则按 "pre" 处理。
+ */function dfs(g,vs,order){if(!Array.isArray(vs)){vs=[vs]}var navigation=g.isDirected()?v=>g.successors(v):v=>g.neighbors(v);var orderFunc=order==="post"?postOrderDfs:preOrderDfs;var acc=[];var visited={};vs.forEach(v=>{if(!g.hasNode(v)){throw new Error("Graph does not have node: "+v)}orderFunc(v,navigation,visited,acc)});return acc}function postOrderDfs(v,navigation,visited,acc){var stack=[[v,false]];while(stack.length>0){var curr=stack.pop();if(curr[1]){acc.push(curr[0])}else{if(!Object.hasOwn(visited,curr[0])){visited[curr[0]]=true;stack.push([curr[0],true]);forEachRight(navigation(curr[0]),w=>stack.push([w,false]))}}}}function preOrderDfs(v,navigation,visited,acc){var stack=[v];while(stack.length>0){var curr=stack.pop();if(!Object.hasOwn(visited,curr)){visited[curr]=true;acc.push(curr);forEachRight(navigation(curr),w=>stack.push(w))}}}function forEachRight(array,iteratee){var length=array.length;while(length--){iteratee(array[length],length,array)}return array}},{}],32:[function(require,module,exports){var dijkstra=require("./dijkstra");module.exports=dijkstraAll;function dijkstraAll(g,weightFunc,edgeFunc){return g.nodes().reduce(function(acc,v){acc[v]=dijkstra(g,v,weightFunc,edgeFunc);return acc},{})}},{"./dijkstra":33}],33:[function(require,module,exports){var PriorityQueue=require("../data/priority-queue");module.exports=dijkstra;var DEFAULT_WEIGHT_FUNC=()=>1;function dijkstra(g,source,weightFn,edgeFn){return runDijkstra(g,String(source),weightFn||DEFAULT_WEIGHT_FUNC,edgeFn||function(v){return g.outEdges(v)})}function runDijkstra(g,source,weightFn,edgeFn){var results={};var pq=new PriorityQueue;var v,vEntry;var updateNeighbors=function(edge){var w=edge.v!==v?edge.v:edge.w;var wEntry=results[w];var weight=weightFn(edge);var distance=vEntry.distance+weight;if(weight<0){throw new Error("dijkstra does not allow negative edge weights. "+"Bad edge: "+edge+" Weight: "+weight)}if(distance<wEntry.distance){wEntry.distance=distance;wEntry.predecessor=v;pq.decrease(w,distance)}};g.nodes().forEach(function(v){var distance=v===source?0:Number.POSITIVE_INFINITY;results[v]={distance:distance};pq.add(v,distance)});while(pq.size()>0){v=pq.removeMin();vEntry=results[v];if(vEntry.distance===Number.POSITIVE_INFINITY){break}edgeFn(v).forEach(updateNeighbors)}return results}},{"../data/priority-queue":43}],34:[function(require,module,exports){var tarjan=require("./tarjan");module.exports=findCycles;function findCycles(g){return tarjan(g).filter(function(cmpt){return cmpt.length>1||cmpt.length===1&&g.hasEdge(cmpt[0],cmpt[0])})}},{"./tarjan":41}],35:[function(require,module,exports){module.exports=floydWarshall;var DEFAULT_WEIGHT_FUNC=()=>1;function floydWarshall(g,weightFn,edgeFn){return runFloydWarshall(g,weightFn||DEFAULT_WEIGHT_FUNC,edgeFn||function(v){return g.outEdges(v)})}function runFloydWarshall(g,weightFn,edgeFn){var results={};var nodes=g.nodes();nodes.forEach(function(v){results[v]={};results[v][v]={distance:0};nodes.forEach(function(w){if(v!==w){results[v][w]={distance:Number.POSITIVE_INFINITY}}});edgeFn(v).forEach(function(edge){var w=edge.v===v?edge.w:edge.v;var d=weightFn(edge);results[v][w]={distance:d,predecessor:v}})});nodes.forEach(function(k){var rowK=results[k];nodes.forEach(function(i){var rowI=results[i];nodes.forEach(function(j){var ik=rowI[k];var kj=rowK[j];var ij=rowI[j];var altDistance=ik.distance+kj.distance;if(altDistance<ij.distance){ij.distance=altDistance;ij.predecessor=kj.predecessor}})})});return results}},{}],36:[function(require,module,exports){module.exports={components:require("./components"),dijkstra:require("./dijkstra"),dijkstraAll:require("./dijkstra-all"),findCycles:require("./find-cycles"),floydWarshall:require("./floyd-warshall"),isAcyclic:require("./is-acyclic"),postorder:require("./postorder"),preorder:require("./preorder"),prim:require("./prim"),tarjan:require("./tarjan"),topsort:require("./topsort")}},{"./components":30,"./dijkstra":33,"./dijkstra-all":32,"./find-cycles":34,"./floyd-warshall":35,"./is-acyclic":37,"./postorder":38,"./preorder":39,"./prim":40,"./tarjan":41,"./topsort":42}],37:[function(require,module,exports){var topsort=require("./topsort");module.exports=isAcyclic;function isAcyclic(g){try{topsort(g)}catch(e){if(e instanceof topsort.CycleException){return false}throw e}return true}},{"./topsort":42}],38:[function(require,module,exports){var dfs=require("./dfs");module.exports=postorder;function postorder(g,vs){return dfs(g,vs,"post")}},{"./dfs":31}],39:[function(require,module,exports){var dfs=require("./dfs");module.exports=preorder;function preorder(g,vs){return dfs(g,vs,"pre")}},{"./dfs":31}],40:[function(require,module,exports){var Graph=require("../graph");var PriorityQueue=require("../data/priority-queue");module.exports=prim;function prim(g,weightFunc){var result=new Graph;var parents={};var pq=new PriorityQueue;var v;function updateNeighbors(edge){var w=edge.v===v?edge.w:edge.v;var pri=pq.priority(w);if(pri!==undefined){var edgeWeight=weightFunc(edge);if(edgeWeight<pri){parents[w]=v;pq.decrease(w,edgeWeight)}}}if(g.nodeCount()===0){return result}g.nodes().forEach(function(v){pq.add(v,Number.POSITIVE_INFINITY);result.setNode(v)});
+// 从任意节点开始
+pq.decrease(g.nodes()[0],0);var init=false;while(pq.size()>0){v=pq.removeMin();if(Object.hasOwn(parents,v)){result.setEdge(v,parents[v])}else if(init){throw new Error("Input graph is not connected: "+g)}else{init=true}g.nodeEdges(v).forEach(updateNeighbors)}return result}},{"../data/priority-queue":43,"../graph":44}],41:[function(require,module,exports){module.exports=tarjan;function tarjan(g){var index=0;var stack=[];var visited={};// 节点 id -> { onStack, lowlink, index }
+var results=[];function dfs(v){var entry=visited[v]={onStack:true,lowlink:index,index:index++};stack.push(v);g.successors(v).forEach(function(w){if(!Object.hasOwn(visited,w)){dfs(w);entry.lowlink=Math.min(entry.lowlink,visited[w].lowlink)}else if(visited[w].onStack){entry.lowlink=Math.min(entry.lowlink,visited[w].index)}});if(entry.lowlink===entry.index){var cmpt=[];var w;do{w=stack.pop();visited[w].onStack=false;cmpt.push(w)}while(v!==w);results.push(cmpt)}}g.nodes().forEach(function(v){if(!Object.hasOwn(visited,v)){dfs(v)}});return results}},{}],42:[function(require,module,exports){function topsort(g){var visited={};var stack={};var results=[];function visit(node){if(Object.hasOwn(stack,node)){throw new CycleException}if(!Object.hasOwn(visited,node)){stack[node]=true;visited[node]=true;g.predecessors(node).forEach(visit);delete stack[node];results.push(node)}}g.sinks().forEach(visit);if(Object.keys(visited).length!==g.nodeCount()){throw new CycleException}return results}class CycleException extends Error{constructor(){super(...arguments)}}module.exports=topsort;topsort.CycleException=CycleException},{}],43:[function(require,module,exports){
+/**
+ * 最小优先队列数据结构。该算法源自 Cormen 等人《算法导论》。
+ * 最小优先队列的基本思想是：可高效（O(1) 时间）取得队列中最小键。
+ * 添加和移除元素需 O(log n) 时间。键的优先级可在 O(log n) 时间内降低。
+ */
+class PriorityQueue{_arr=[];_keyIndices={};
+/**
+   * 返回队列中元素数量。耗时 `O(1)`。
+   */size(){return this._arr.length}
+/**
+   * 返回队列中的键。耗时 `O(n)`。
+   */keys(){return this._arr.map(function(x){return x.key})}
+/**
+   * 若 **key** 在队列中则返回 `true`，否则返回 `false`。
+   */has(key){return Object.hasOwn(this._keyIndices,key)}
+/**
+   * 返回 **key** 的优先级。若 **key** 不在队列中则返回 `undefined`。耗时 `O(1)`。
+   *
+   * @param {Object} key
+   */priority(key){var index=this._keyIndices[key];if(index!==undefined){return this._arr[index].priority}}
+/**
+   * 返回本队列最小元素的键。若队列为空则抛出 Error。耗时 `O(1)`。
+   */min(){if(this.size()===0){throw new Error("Queue underflow")}return this._arr[0].key}
+/**
+   * 向优先队列插入新键。若键已存在则返回 `false`，否则返回 `true`。耗时 `O(n)`。
+   *
+   * @param {Object} key 要添加的键
+   * @param {Number} priority 该键的初始优先级
+   */add(key,priority){var keyIndices=this._keyIndices;key=String(key);if(!Object.hasOwn(keyIndices,key)){var arr=this._arr;var index=arr.length;keyIndices[key]=index;arr.push({key:key,priority:priority});this._decrease(index);return true}return false}
+/**
+   * 移除并返回队列中最小的键。耗时 `O(log n)`。
+   */removeMin(){this._swap(0,this._arr.length-1);var min=this._arr.pop();delete this._keyIndices[min.key];this._heapify(0);return min.key}
+/**
+   * 将 **key** 的优先级降低为 **priority**。若新优先级高于原优先级则抛出 Error。
+   *
+   * @param {Object} key 要降低优先级的键
+   * @param {Number} priority 该键的新优先级
+   */decrease(key,priority){var index=this._keyIndices[key];if(priority>this._arr[index].priority){throw new Error("New priority is greater than current priority. "+"Key: "+key+" Old: "+this._arr[index].priority+" New: "+priority)}this._arr[index].priority=priority;this._decrease(index)}_heapify(i){var arr=this._arr;var l=2*i;var r=l+1;var largest=i;if(l<arr.length){largest=arr[l].priority<arr[largest].priority?l:largest;if(r<arr.length){largest=arr[r].priority<arr[largest].priority?r:largest}if(largest!==i){this._swap(i,largest);this._heapify(largest)}}}_decrease(index){var arr=this._arr;var priority=arr[index].priority;var parent;while(index!==0){parent=index>>1;if(arr[parent].priority<priority){break}this._swap(index,parent);index=parent}}_swap(i,j){var arr=this._arr;var keyIndices=this._keyIndices;var origArrI=arr[i];var origArrJ=arr[j];arr[i]=origArrJ;arr[j]=origArrI;keyIndices[origArrJ.key]=i;keyIndices[origArrI.key]=j}}module.exports=PriorityQueue},{}],44:[function(require,module,exports){"use strict";var DEFAULT_EDGE_NAME="\0";var GRAPH_NODE="\0";var EDGE_KEY_DELIM="";
+// 实现说明：
+//
+//  * 节点 id 查询函数应返回节点的字符串 id
+//  * 边 id 查询函数应返回 "edgeObj"（边对象），含足以唯一标识边的信息：{v, w, name}。
+//  * 内部用 "edgeId"（edgeObj 的字符串形式）引用边，因为需要高效查找；
+//    在 JavaScript 中，带字符串键的对象属性是最接近高效哈希表的方式。
+class Graph{_isDirected=true;_isMultigraph=false;_isCompound=false;
+// 图本身的标签
+_label;
+// 创建新节点时设置的默认值
+_defaultNodeLabelFn=()=>undefined;
+// 创建新边时设置的默认值
+_defaultEdgeLabelFn=()=>undefined;
+// v -> 标签
+_nodes={};
+// v -> 边对象
+_in={};
+// u -> v -> 数值
+_preds={};
+// v -> 边对象
+_out={};
+// v -> w -> 数值
+_sucs={};
+// e -> 边对象
+_edgeObjs={};
+// e -> 标签
+_edgeLabels={};
+/* 图中节点数。仅应由实现修改。 */_nodeCount=0;
+/* 图中边数。仅应由实现修改。 */_edgeCount=0;_parent;_children;constructor(opts){if(opts){this._isDirected=Object.hasOwn(opts,"directed")?opts.directed:true;this._isMultigraph=Object.hasOwn(opts,"multigraph")?opts.multigraph:false;this._isCompound=Object.hasOwn(opts,"compound")?opts.compound:false}if(this._isCompound){
+// v -> 父节点
+this._parent={};
+// v -> 子节点
+this._children={};this._children[GRAPH_NODE]={}}}
+/* === 图函数 ========= */
+/**
+   * 图创建时 'directed' 标志是否为 true。
+   */isDirected(){return this._isDirected}
+/**
+   * 图创建时 'multigraph' 标志是否为 true。
+   */isMultigraph(){return this._isMultigraph}
+/**
+   * 图创建时 'compound' 标志是否为 true。
+   */isCompound(){return this._isCompound}
+/**
+   * 设置图的标签。
+   */setGraph(label){this._label=label;return this}
+/**
+   * 获取图的标签。
+   */graph(){return this._label}
+/* === 节点函数 ========== */
+/**
+   * 设置默认节点标签。若 newDefault 为函数，则在每次为节点设置标签时调用；
+   * 否则，在设置节点时若未指定标签，则使用此默认标签。
+   * 复杂度：O(1)。
+   */setDefaultNodeLabel(newDefault){this._defaultNodeLabelFn=newDefault;if(typeof newDefault!=="function"){this._defaultNodeLabelFn=()=>newDefault}return this}
+/**
+   * 获取图中节点数量。
+   * 复杂度：O(1)。
+   */nodeCount(){return this._nodeCount}
+/**
+   * 获取图的所有节点。注意：复合图的子节点不包含在列表中。
+   * 复杂度：O(1)。
+   */nodes(){return Object.keys(this._nodes)}
+/**
+   * 获取无入边的节点列表。
+   * 复杂度：O(|V|)。
+   */sources(){var self=this;return this.nodes().filter(v=>Object.keys(self._in[v]).length===0)}
+/**
+   * 获取无出边的节点列表。
+   * 复杂度：O(|V|)。
+   */sinks(){var self=this;return this.nodes().filter(v=>Object.keys(self._out[v]).length===0)}
+/**
+   * 对 names 列表中每个节点调用 setNode。
+   * 复杂度：O(|names|)。
+   */setNodes(vs,value){var args=arguments;var self=this;vs.forEach(function(v){if(args.length>1){self.setNode(v,value)}else{self.setNode(v)}});return this}
+/**
+   * 在图中创建或更新节点 v 的值。若提供 label 则设为节点值；
+   * 若未提供且节点由本次调用创建，则分配默认节点标签。
+   * 复杂度：O(1)。
+   */setNode(v,value){if(Object.hasOwn(this._nodes,v)){if(arguments.length>1){this._nodes[v]=value}return this}this._nodes[v]=arguments.length>1?value:this._defaultNodeLabelFn(v);if(this._isCompound){this._parent[v]=GRAPH_NODE;this._children[v]={};this._children[GRAPH_NODE][v]=true}this._in[v]={};this._preds[v]={};this._out[v]={};this._sucs[v]={};++this._nodeCount;return this}
+/**
+   * 获取指定名称节点的标签。
+   * 复杂度：O(|V|)。
+   */node(v){return this._nodes[v]}
+/**
+   * 检测图是否包含指定名称的节点。
+   */hasNode(v){return Object.hasOwn(this._nodes,v)}
+/**
+   * 从图中移除指定名称的节点；若节点不在图中则不操作。
+   * 若节点被移除，本函数也会移除所有关联边。
+   * 复杂度：O(1)。
+   */removeNode(v){var self=this;if(Object.hasOwn(this._nodes,v)){var removeEdge=e=>self.removeEdge(self._edgeObjs[e]);delete this._nodes[v];if(this._isCompound){this._removeFromParentsChildList(v);delete this._parent[v];this.children(v).forEach(function(child){self.setParent(child)});delete this._children[v]}Object.keys(this._in[v]).forEach(removeEdge);delete this._in[v];delete this._preds[v];Object.keys(this._out[v]).forEach(removeEdge);delete this._out[v];delete this._sucs[v];--this._nodeCount}return this}
+/**
+   * 若 p 已定义，则将节点 p 设为节点 v 的父节点；若 p 未定义则移除 v 的父节点。
+   * 在非复合图上下文中调用会抛出异常。
+   * 平均复杂度：O(1)。
+   */setParent(v,parent){if(!this._isCompound){throw new Error("Cannot set parent in a non-compound graph")}if(parent===undefined){parent=GRAPH_NODE}else{
+// 将 parent 强制转为字符串
+parent+="";for(var ancestor=parent;ancestor!==undefined;ancestor=this.parent(ancestor)){if(ancestor===v){throw new Error("Setting "+parent+" as parent of "+v+" would create a cycle")}}this.setNode(parent)}this.setNode(v);this._removeFromParentsChildList(v);this._parent[v]=parent;this._children[parent][v]=true;return this}_removeFromParentsChildList(v){delete this._children[this._parent[v]][v]}
+/**
+   * 获取节点 v 的父节点。
+   * 复杂度：O(1)。
+   */parent(v){if(this._isCompound){var parent=this._parent[v];if(parent!==GRAPH_NODE){return parent}}}
+/**
+   * 获取节点 v 的直接子节点列表。
+   * 复杂度：O(1)。
+   */children(v=GRAPH_NODE){if(this._isCompound){var children=this._children[v];if(children){return Object.keys(children)}}else if(v===GRAPH_NODE){return this.nodes()}else if(this.hasNode(v)){return[]}}
+/**
+   * 返回指定节点的所有前驱；若节点 v 不在图中则返回 undefined。
+   * 无向图行为未定义——请改用 neighbors。
+   * 复杂度：O(|V|)。
+   */predecessors(v){var predsV=this._preds[v];if(predsV){return Object.keys(predsV)}}
+/**
+   * 返回指定节点的所有后继；若节点 v 不在图中则返回 undefined。
+   * 无向图行为未定义——请改用 neighbors。
+   * 复杂度：O(|V|)。
+   */successors(v){var sucsV=this._sucs[v];if(sucsV){return Object.keys(sucsV)}}
+/**
+   * 返回指定节点的所有前驱或后继；若节点 v 不在图中则返回 undefined。
+   * 复杂度：O(|V|)。
+   */neighbors(v){var preds=this.predecessors(v);if(preds){const union=new Set(preds);for(var succ of this.successors(v)){union.add(succ)}return Array.from(union.values())}}isLeaf(v){var neighbors;if(this.isDirected()){neighbors=this.successors(v)}else{neighbors=this.neighbors(v)}return neighbors.length===0}
+/**
+   * 用 filter 过滤节点创建新图。与被拒绝节点关联的边也会被移除。
+   * 复合图中，若父节点被 filter 拒绝，则其所有子节点也被拒绝。
+   * 平均复杂度：O(|E|+|V|)。
+   */filterNodes(filter){var copy=new this.constructor({directed:this._isDirected,multigraph:this._isMultigraph,compound:this._isCompound});copy.setGraph(this.graph());var self=this;Object.entries(this._nodes).forEach(function([v,value]){if(filter(v)){copy.setNode(v,value)}});Object.values(this._edgeObjs).forEach(function(e){if(copy.hasNode(e.v)&&copy.hasNode(e.w)){copy.setEdge(e,self.edge(e))}});var parents={};function findParent(v){var parent=self.parent(v);if(parent===undefined||copy.hasNode(parent)){parents[v]=parent;return parent}else if(parent in parents){return parents[parent]}else{return findParent(parent)}}if(this._isCompound){copy.nodes().forEach(v=>copy.setParent(v,findParent(v)))}return copy}
+/* === 边函数 ========== */
+/**
+   * 设置默认边标签或工厂函数。设置边时若未指定标签则使用此默认标签；
+   * 或每次设置无标签的边时调用该函数，返回值用作边标签。
+   * 复杂度：O(1)。
+   */setDefaultEdgeLabel(newDefault){this._defaultEdgeLabelFn=newDefault;if(typeof newDefault!=="function"){this._defaultEdgeLabelFn=()=>newDefault}return this}
+/**
+   * 获取图中边的数量。
+   * 复杂度：O(1)。
+   */edgeCount(){return this._edgeCount}
+/**
+   * 获取图的边。复合图不考虑子图。
+   * 复杂度：O(|E|)。
+   */edges(){return Object.values(this._edgeObjs)}
+/**
+   * 在 nodes 列表的节点间建立边路径。若边已存在则更新其标签；
+   * 否则在节点对之间创建边，使用提供的标签或无标签时的默认标签。
+   * 复杂度：O(|nodes|)。
+   */setPath(vs,value){var self=this;var args=arguments;vs.reduce(function(v,w){if(args.length>1){self.setEdge(v,w,value)}else{self.setEdge(v,w)}return w});return this}
+/**
+   * 创建或更新边 (v, w) 的标签，可选 name。若提供 label 则设为边值；
+   * 若未提供且边由本次调用创建，则分配默认边标签。name 参数仅对多重图有用。
+   */setEdge(){var v,w,name,value;var valueSpecified=false;var arg0=arguments[0];if(typeof arg0==="object"&&arg0!==null&&"v"in arg0){v=arg0.v;w=arg0.w;name=arg0.name;if(arguments.length===2){value=arguments[1];valueSpecified=true}}else{v=arg0;w=arguments[1];name=arguments[3];if(arguments.length>2){value=arguments[2];valueSpecified=true}}v=""+v;w=""+w;if(name!==undefined){name=""+name}var e=edgeArgsToId(this._isDirected,v,w,name);if(Object.hasOwn(this._edgeLabels,e)){if(valueSpecified){this._edgeLabels[e]=value}return this}if(name!==undefined&&!this._isMultigraph){throw new Error("Cannot set a named edge when isMultigraph = false")}
+// 边不存在，需要创建。
+// 首先确保节点存在。
+this.setNode(v);this.setNode(w);this._edgeLabels[e]=valueSpecified?value:this._defaultEdgeLabelFn(v,w,name);var edgeObj=edgeArgsToObj(this._isDirected,v,w,name);
+// 确保以一致方式添加无向边。
+v=edgeObj.v;w=edgeObj.w;Object.freeze(edgeObj);this._edgeObjs[e]=edgeObj;incrementOrInitEntry(this._preds[w],v);incrementOrInitEntry(this._sucs[v],w);this._in[w][e]=edgeObj;this._out[v][e]=edgeObj;this._edgeCount++;return this}
+/**
+   * 获取指定边的标签。
+   * 复杂度：O(1)。
+   */edge(v,w,name){var e=arguments.length===1?edgeObjToId(this._isDirected,arguments[0]):edgeArgsToId(this._isDirected,v,w,name);return this._edgeLabels[e]}
+/**
+   * 获取指定边的标签并转换为对象。
+   * 复杂度：O(1)
+   */edgeAsObj(){const edge=this.edge(...arguments);if(typeof edge!=="object"){return{label:edge}}return edge}
+/**
+   * 检测图是否包含指定边。不考虑子图。
+   * 复杂度：O(1)。
+   */hasEdge(v,w,name){var e=arguments.length===1?edgeObjToId(this._isDirected,arguments[0]):edgeArgsToId(this._isDirected,v,w,name);return Object.hasOwn(this._edgeLabels,e)}
+/**
+   * 从图中移除指定边。不考虑子图。
+   * 复杂度：O(1)。
+   */removeEdge(v,w,name){var e=arguments.length===1?edgeObjToId(this._isDirected,arguments[0]):edgeArgsToId(this._isDirected,v,w,name);var edge=this._edgeObjs[e];if(edge){v=edge.v;w=edge.w;delete this._edgeLabels[e];delete this._edgeObjs[e];decrementOrRemoveEntry(this._preds[w],v);decrementOrRemoveEntry(this._sucs[v],w);delete this._in[w][e];delete this._out[v][e];this._edgeCount--}return this}
+/**
+   * 返回所有指向节点 v 的边。可选地仅保留来自节点 u 的边。
+   * 无向图行为未定义——请改用 nodeEdges。
+   * 复杂度：O(|E|)。
+   */inEdges(v,u){var inV=this._in[v];if(inV){var edges=Object.values(inV);if(!u){return edges}return edges.filter(edge=>edge.v===u)}}
+/**
+   * 返回节点 v 指向的所有边。可选地仅保留指向 w 的边。
+   * 无向图行为未定义——请改用 nodeEdges。
+   * 复杂度：O(|E|)。
+   */outEdges(v,w){var outV=this._out[v];if(outV){var edges=Object.values(outV);if(!w){return edges}return edges.filter(edge=>edge.w===w)}}
+/**
+   * 返回与节点 v 相关（入或出）的所有边，不限方向。
+   * 可选地仅保留 v 与 w 之间的边（不限方向）。
+   * 复杂度：O(|E|)。
+   */nodeEdges(v,w){var inEdges=this.inEdges(v,w);if(inEdges){return inEdges.concat(this.outEdges(v,w))}}}function incrementOrInitEntry(map,k){if(map[k]){map[k]++}else{map[k]=1}}function decrementOrRemoveEntry(map,k){if(!--map[k]){delete map[k]}}function edgeArgsToId(isDirected,v_,w_,name){var v=""+v_;var w=""+w_;if(!isDirected&&v>w){var tmp=v;v=w;w=tmp}return v+EDGE_KEY_DELIM+w+EDGE_KEY_DELIM+(name===undefined?DEFAULT_EDGE_NAME:name)}function edgeArgsToObj(isDirected,v_,w_,name){var v=""+v_;var w=""+w_;if(!isDirected&&v>w){var tmp=v;v=w;w=tmp}var edgeObj={v:v,w:w};if(name){edgeObj.name=name}return edgeObj}function edgeObjToId(isDirected,edgeObj){return edgeArgsToId(isDirected,edgeObj.v,edgeObj.w,edgeObj.name)}module.exports=Graph},{}],45:[function(require,module,exports){
+// 仅包含 graphlib 的「核心」部分
+module.exports={Graph:require("./graph"),version:require("./version")}},{"./graph":44,"./version":47}],46:[function(require,module,exports){var Graph=require("./graph");module.exports={write:write,read:read};
+/**
+ * 创建图的 JSON 表示，可用 JSON.stringify 序列化为字符串。
+ * 之后可用 json.read 恢复图。
+ */function write(g){var json={options:{directed:g.isDirected(),multigraph:g.isMultigraph(),compound:g.isCompound()},nodes:writeNodes(g),edges:writeEdges(g)};if(g.graph()!==undefined){json.value=structuredClone(g.graph())}return json}function writeNodes(g){return g.nodes().map(function(v){var nodeValue=g.node(v);var parent=g.parent(v);var node={v:v};if(nodeValue!==undefined){node.value=nodeValue}if(parent!==undefined){node.parent=parent}return node})}function writeEdges(g){return g.edges().map(function(e){var edgeValue=g.edge(e);var edge={v:e.v,w:e.w};if(e.name!==undefined){edge.name=e.name}if(edgeValue!==undefined){edge.value=edgeValue}return edge})}
+/**
+ * 接收 JSON 输入并返回图表示。
+ *
+ * @example
+ * var g2 = graphlib.json.read(JSON.parse(str));
+ * g2.nodes();
+ * // ['a', 'b']
+ * g2.edges()
+ * // [ { v: 'a', w: 'b' } ]
+ */function read(json){var g=new Graph(json.options).setGraph(json.value);json.nodes.forEach(function(entry){g.setNode(entry.v,entry.value);if(entry.parent){g.setParent(entry.v,entry.parent)}});json.edges.forEach(function(entry){g.setEdge({v:entry.v,w:entry.w,name:entry.name},entry.value)});return g}},{"./graph":44}],47:[function(require,module,exports){module.exports="2.2.4"},{}]},{},[1])(1)});
+</script>
+
+<!-- Agent：generated-graph 是 import 边骨架。mergeGeneratedGraph 只补缺口节点/边，不改 D 里的人话 io / r / plain。 -->
+<script type="application/json" id="generated-graph">
+{
+  "modules": {
+    "cli": {
+      "files": [
+        {
+          "id": "bin-helix-mjs",
+          "p": "bin/helix.mjs",
+          "r": "helix.mjs",
+          "io": "待读代码填写",
+          "extTo": [
+            {
+              "t": "dashboard.mjs",
+              "io": "dashboard.mjs",
+              "p": "src/interface/dashboard.mjs",
+              "m": "interface"
+            },
+            {
+              "t": "decisions.mjs",
+              "io": "decisions.mjs",
+              "p": "src/interface/decisions.mjs",
+              "m": "interface"
+            },
+            {
+              "t": "timeline.mjs",
+              "io": "timeline.mjs",
+              "p": "src/interface/timeline.mjs",
+              "m": "interface"
+            },
+            {
+              "t": "cli-help.mjs",
+              "io": "cli-help.mjs",
+              "p": "src/interface/cli-help.mjs",
+              "m": "interface"
+            },
+            {
+              "t": "adapters.mjs",
+              "io": "adapters.mjs",
+              "p": "src/interface/adapters.mjs",
+              "m": "interface"
+            },
+            {
+              "t": "doctor.mjs",
+              "io": "doctor.mjs",
+              "p": "src/interface/doctor.mjs",
+              "m": "interface"
+            },
+            {
+              "t": "handoff.mjs",
+              "io": "handoff.mjs",
+              "p": "src/orchestration/handoff.mjs",
+              "m": "orchestration"
+            },
+            {
+              "t": "parallel-runtime.mjs",
+              "io": "parallel-runtime.mjs",
+              "p": "src/orchestration/parallel-runtime.mjs",
+              "m": "orchestration"
+            },
+            {
+              "t": "remote-ownership.mjs",
+              "io": "remote-ownership.mjs",
+              "p": "src/orchestration/remote-ownership.mjs",
+              "m": "orchestration"
+            },
+            {
+              "t": "change-governance.mjs",
+              "io": "change-governance.mjs",
+              "p": "src/orchestration/change-governance.mjs",
+              "m": "orchestration"
+            },
+            {
+              "t": "task-board.mjs",
+              "io": "task-board.mjs",
+              "p": "src/orchestration/task-board.mjs",
+              "m": "orchestration"
+            },
+            {
+              "t": "plan-state.mjs",
+              "io": "plan-state.mjs",
+              "p": "src/orchestration/plan-state.mjs",
+              "m": "orchestration"
+            },
+            {
+              "t": "status.mjs",
+              "io": "status.mjs",
+              "p": "src/orchestration/status.mjs",
+              "m": "orchestration"
+            },
+            {
+              "t": "workflow.mjs",
+              "io": "workflow.mjs",
+              "p": "src/orchestration/workflow.mjs",
+              "m": "orchestration"
+            },
+            {
+              "t": "linear-runtime.mjs",
+              "io": "linear-runtime.mjs",
+              "p": "src/orchestration/linear-runtime.mjs",
+              "m": "orchestration"
+            },
+            {
+              "t": "archivist-router.mjs",
+              "io": "archivist-router.mjs",
+              "p": "src/ai/archivist-router.mjs",
+              "m": "ai"
+            },
+            {
+              "t": "context.mjs",
+              "io": "context.mjs",
+              "p": "src/ai/context.mjs",
+              "m": "ai"
+            },
+            {
+              "t": "skill-matcher.mjs",
+              "io": "skill-matcher.mjs",
+              "p": "src/ai/skill-matcher.mjs",
+              "m": "ai"
+            },
+            {
+              "t": "injection.mjs",
+              "io": "injection.mjs",
+              "p": "src/ai/injection.mjs",
+              "m": "ai"
+            },
+            {
+              "t": "hooks.mjs",
+              "io": "hooks.mjs",
+              "p": "src/ai/hooks.mjs",
+              "m": "ai"
+            },
+            {
+              "t": "routing.mjs",
+              "io": "routing.mjs",
+              "p": "src/ai/routing.mjs",
+              "m": "ai"
+            },
+            {
+              "t": "suspicion-review.mjs",
+              "io": "suspicion-review.mjs",
+              "p": "src/ai/suspicion-review.mjs",
+              "m": "ai"
+            },
+            {
+              "t": "repository-governance.mjs",
+              "io": "repository-governance.mjs",
+              "p": "src/capabilities/repository-governance.mjs",
+              "m": "capabilities"
+            },
+            {
+              "t": "scope-guard.mjs",
+              "io": "scope-guard.mjs",
+              "p": "src/capabilities/scope-guard.mjs",
+              "m": "capabilities"
+            },
+            {
+              "t": "annotation-log.mjs",
+              "io": "annotation-log.mjs",
+              "p": "src/infra/annotation-log.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "dependency-graph.mjs",
+              "io": "dependency-graph.mjs",
+              "p": "src/infra/dependency-graph.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "error-protocol.mjs",
+              "io": "error-protocol.mjs",
+              "p": "src/infra/error-protocol.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "ledger.mjs",
+              "io": "ledger.mjs",
+              "p": "src/infra/ledger.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "prompt-pack.mjs",
+              "io": "prompt-pack.mjs",
+              "p": "src/infra/prompt-pack.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "rule-scanner.mjs",
+              "io": "rule-scanner.mjs",
+              "p": "src/infra/rule-scanner.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-bootstrap.mjs",
+              "io": "runtime-bootstrap.mjs",
+              "p": "src/infra/runtime-bootstrap.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-config.mjs",
+              "io": "runtime-config.mjs",
+              "p": "src/infra/runtime-config.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-store.mjs",
+              "io": "runtime-store.mjs",
+              "p": "src/infra/runtime-store.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "security.mjs",
+              "io": "security.mjs",
+              "p": "src/infra/security.mjs",
+              "m": "infra"
+            }
+          ]
+        }
+      ]
+    },
+    "interface": {
+      "files": [
+        {
+          "id": "src-interface-cli-help-mjs",
+          "p": "src/interface/cli-help.mjs",
+          "r": "cli-help.mjs",
+          "io": "renderHelp({ all = false } = {}) → 导出；renderCommandsMarkdown() → 导出",
+          "extTo": [
+            {
+              "t": "agent-registry.mjs",
+              "io": "agent-registry.mjs",
+              "p": "src/infra/agent-registry.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-config.mjs",
+              "io": "runtime-config.mjs",
+              "p": "src/infra/runtime-config.mjs",
+              "m": "infra"
+            }
+          ]
+        },
+        {
+          "id": "src-interface-dashboard-mjs",
+          "p": "src/interface/dashboard.mjs",
+          "r": "dashboard.mjs",
+          "io": "startDashboardServer(rootDir, options = {) → 导出",
+          "to": [
+            {
+              "t": "src-interface-dashboard-panels-mjs",
+              "io": "dashboard-panels.mjs",
+              "p": "src/interface/dashboard-panels.mjs"
+            }
+          ],
+          "extTo": [
+            {
+              "t": "agent-registry.mjs",
+              "io": "agent-registry.mjs",
+              "p": "src/infra/agent-registry.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-config.mjs",
+              "io": "runtime-config.mjs",
+              "p": "src/infra/runtime-config.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "task-board.mjs",
+              "io": "task-board.mjs",
+              "p": "src/orchestration/task-board.mjs",
+              "m": "orchestration"
+            },
+            {
+              "t": "status.mjs",
+              "io": "status.mjs",
+              "p": "src/orchestration/status.mjs",
+              "m": "orchestration"
+            },
+            {
+              "t": "linear-runtime.mjs",
+              "io": "linear-runtime.mjs",
+              "p": "src/orchestration/linear-runtime.mjs",
+              "m": "orchestration"
+            }
+          ]
+        },
+        {
+          "id": "src-interface-adapters-mjs",
+          "p": "src/interface/adapters.mjs",
+          "r": "adapters.mjs",
+          "io": "installAdapter(rootDir, options = {) → 导出；uninstallAdapter(rootDir, options = {) → 导出",
+          "to": [
+            {
+              "t": "src-interface-kimi-adapter-mjs",
+              "io": "kimi-adapter.mjs",
+              "p": "src/interface/kimi-adapter.mjs"
+            },
+            {
+              "t": "src-interface-cursor-adapter-mjs",
+              "io": "cursor-adapter.mjs",
+              "p": "src/interface/cursor-adapter.mjs"
+            }
+          ],
+          "extTo": [
+            {
+              "t": "prompt-pack.mjs",
+              "io": "prompt-pack.mjs",
+              "p": "src/infra/prompt-pack.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-config.mjs",
+              "io": "runtime-config.mjs",
+              "p": "src/infra/runtime-config.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-store.mjs",
+              "io": "runtime-store.mjs",
+              "p": "src/infra/runtime-store.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "ledger.mjs",
+              "io": "ledger.mjs",
+              "p": "src/infra/ledger.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-bootstrap.mjs",
+              "io": "runtime-bootstrap.mjs",
+              "p": "src/infra/runtime-bootstrap.mjs",
+              "m": "infra"
+            }
+          ]
+        }
+      ]
+    },
+    "orchestration": {
+      "files": [
+        {
+          "id": "src-orchestration-linear-runtime-mjs",
+          "p": "src/orchestration/linear-runtime.mjs",
+          "r": "linear-runtime.mjs",
+          "io": "runNextTask(rootDir, options = {) → 导出；runWorkflowNode(rootDir, nodeName, o) → 导出",
+          "to": [
+            {
+              "t": "src-orchestration-change-governance-mjs",
+              "io": "change-governance.mjs",
+              "p": "src/orchestration/change-governance.mjs"
+            },
+            {
+              "t": "src-orchestration-delivery-pipeline-mjs",
+              "io": "delivery-pipeline.mjs",
+              "p": "src/orchestration/delivery-pipeline.mjs"
+            },
+            {
+              "t": "src-orchestration-status-mjs",
+              "io": "status.mjs",
+              "p": "src/orchestration/status.mjs"
+            },
+            {
+              "t": "src-orchestration-plan-state-mjs",
+              "io": "plan-state.mjs",
+              "p": "src/orchestration/plan-state.mjs"
+            },
+            {
+              "t": "src-orchestration-task-board-mjs",
+              "io": "task-board.mjs",
+              "p": "src/orchestration/task-board.mjs"
+            },
+            {
+              "t": "src-orchestration-remote-ownership-mjs",
+              "io": "remote-ownership.mjs",
+              "p": "src/orchestration/remote-ownership.mjs"
+            }
+          ],
+          "extTo": [
+            {
+              "t": "ledger.mjs",
+              "io": "ledger.mjs",
+              "p": "src/infra/ledger.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-store.mjs",
+              "io": "runtime-store.mjs",
+              "p": "src/infra/runtime-store.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "task-state-lock.mjs",
+              "io": "task-state-lock.mjs",
+              "p": "src/infra/task-state-lock.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-snapshot.mjs",
+              "io": "runtime-snapshot.mjs",
+              "p": "src/infra/runtime-snapshot.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "failure-analysis.mjs",
+              "io": "failure-analysis.mjs",
+              "p": "src/infra/failure-analysis.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "task-reports.mjs",
+              "io": "task-reports.mjs",
+              "p": "src/infra/task-reports.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "memory-digest.mjs",
+              "io": "memory-digest.mjs",
+              "p": "src/infra/memory-digest.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "routing.mjs",
+              "io": "routing.mjs",
+              "p": "src/ai/routing.mjs",
+              "m": "ai"
+            },
+            {
+              "t": "git-worktree.mjs",
+              "io": "git-worktree.mjs",
+              "p": "src/infra/git-worktree.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "git-diff.mjs",
+              "io": "git-diff.mjs",
+              "p": "src/infra/git-diff.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "success-criteria.mjs",
+              "io": "success-criteria.mjs",
+              "p": "src/infra/success-criteria.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "gateway.mjs",
+              "io": "gateway.mjs",
+              "p": "src/capabilities/gateway.mjs",
+              "m": "capabilities"
+            }
+          ]
+        },
+        {
+          "id": "src-orchestration-parallel-runtime-mjs",
+          "p": "src/orchestration/parallel-runtime.mjs",
+          "r": "parallel-runtime.mjs",
+          "io": "runParallelAgents(rootDir, options = {) → 导出；listParallelAgentRuns(rootDir) → 导出",
+          "to": [
+            {
+              "t": "src-orchestration-admission-mjs",
+              "io": "admission.mjs",
+              "p": "src/orchestration/admission.mjs"
+            },
+            {
+              "t": "src-orchestration-plan-state-mjs",
+              "io": "plan-state.mjs",
+              "p": "src/orchestration/plan-state.mjs"
+            },
+            {
+              "t": "src-orchestration-task-board-mjs",
+              "io": "task-board.mjs",
+              "p": "src/orchestration/task-board.mjs"
+            },
+            {
+              "t": "src-orchestration-remote-ownership-mjs",
+              "io": "remote-ownership.mjs",
+              "p": "src/orchestration/remote-ownership.mjs"
+            }
+          ],
+          "extTo": [
+            {
+              "t": "agent-registry.mjs",
+              "io": "agent-registry.mjs",
+              "p": "src/infra/agent-registry.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "ledger.mjs",
+              "io": "ledger.mjs",
+              "p": "src/infra/ledger.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-store.mjs",
+              "io": "runtime-store.mjs",
+              "p": "src/infra/runtime-store.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-config.mjs",
+              "io": "runtime-config.mjs",
+              "p": "src/infra/runtime-config.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "task-state-lock.mjs",
+              "io": "task-state-lock.mjs",
+              "p": "src/infra/task-state-lock.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-snapshot.mjs",
+              "io": "runtime-snapshot.mjs",
+              "p": "src/infra/runtime-snapshot.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "agent-spawn.mjs",
+              "io": "agent-spawn.mjs",
+              "p": "src/infra/agent-spawn.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "git-worktree.mjs",
+              "io": "git-worktree.mjs",
+              "p": "src/infra/git-worktree.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "git-coordination.mjs",
+              "io": "git-coordination.mjs",
+              "p": "src/infra/git-coordination.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "command-runner.mjs",
+              "io": "command-runner.mjs",
+              "p": "src/infra/command-runner.mjs",
+              "m": "infra"
+            }
+          ]
+        },
+        {
+          "id": "src-orchestration-admission-mjs",
+          "p": "src/orchestration/admission.mjs",
+          "r": "admission.mjs",
+          "io": "admitParallelAgentResult(rootDir, options = {) → 导出；readParallelAgentResult(rootDir, runId, task) → 导出",
+          "to": [
+            {
+              "t": "src-orchestration-delivery-pipeline-mjs",
+              "io": "delivery-pipeline.mjs",
+              "p": "src/orchestration/delivery-pipeline.mjs"
+            },
+            {
+              "t": "src-orchestration-admission-recovery-mjs",
+              "io": "admission-recovery.mjs",
+              "p": "src/orchestration/admission-recovery.mjs"
+            },
+            {
+              "t": "src-orchestration-integration-mjs",
+              "io": "integration.mjs",
+              "p": "src/orchestration/integration.mjs"
+            },
+            {
+              "t": "src-orchestration-plan-state-mjs",
+              "io": "plan-state.mjs",
+              "p": "src/orchestration/plan-state.mjs"
+            },
+            {
+              "t": "src-orchestration-task-board-mjs",
+              "io": "task-board.mjs",
+              "p": "src/orchestration/task-board.mjs"
+            },
+            {
+              "t": "src-orchestration-remote-ownership-mjs",
+              "io": "remote-ownership.mjs",
+              "p": "src/orchestration/remote-ownership.mjs"
+            }
+          ],
+          "extTo": [
+            {
+              "t": "ledger.mjs",
+              "io": "ledger.mjs",
+              "p": "src/infra/ledger.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "decision-log.mjs",
+              "io": "decision-log.mjs",
+              "p": "src/infra/decision-log.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-store.mjs",
+              "io": "runtime-store.mjs",
+              "p": "src/infra/runtime-store.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-config.mjs",
+              "io": "runtime-config.mjs",
+              "p": "src/infra/runtime-config.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "task-state-lock.mjs",
+              "io": "task-state-lock.mjs",
+              "p": "src/infra/task-state-lock.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-snapshot.mjs",
+              "io": "runtime-snapshot.mjs",
+              "p": "src/infra/runtime-snapshot.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "git-coordination.mjs",
+              "io": "git-coordination.mjs",
+              "p": "src/infra/git-coordination.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "failure-analysis.mjs",
+              "io": "failure-analysis.mjs",
+              "p": "src/infra/failure-analysis.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "task-reports.mjs",
+              "io": "task-reports.mjs",
+              "p": "src/infra/task-reports.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "memory-digest.mjs",
+              "io": "memory-digest.mjs",
+              "p": "src/infra/memory-digest.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "git-worktree.mjs",
+              "io": "git-worktree.mjs",
+              "p": "src/infra/git-worktree.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "command-runner.mjs",
+              "io": "command-runner.mjs",
+              "p": "src/infra/command-runner.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "path-match.mjs",
+              "io": "path-match.mjs",
+              "p": "src/infra/path-match.mjs",
+              "m": "infra"
+            }
+          ]
+        }
+      ]
+    },
+    "ai": {
+      "files": [
+        {
+          "id": "src-ai-routing-mjs",
+          "p": "src/ai/routing.mjs",
+          "r": "routing.mjs",
+          "io": "routeRequest(rootDir, input) → 导出；semanticRouteShadow(rootDir, text, deter) → 导出",
+          "extTo": [
+            {
+              "t": "agent-registry.mjs",
+              "io": "agent-registry.mjs",
+              "p": "src/infra/agent-registry.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "ledger.mjs",
+              "io": "ledger.mjs",
+              "p": "src/infra/ledger.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "decision-log.mjs",
+              "io": "decision-log.mjs",
+              "p": "src/infra/decision-log.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-bootstrap.mjs",
+              "io": "runtime-bootstrap.mjs",
+              "p": "src/infra/runtime-bootstrap.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-config.mjs",
+              "io": "runtime-config.mjs",
+              "p": "src/infra/runtime-config.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-snapshot.mjs",
+              "io": "runtime-snapshot.mjs",
+              "p": "src/infra/runtime-snapshot.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "route-table.mjs",
+              "io": "route-table.mjs",
+              "p": "src/infra/route-table.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "llm-provider.mjs",
+              "io": "llm-provider.mjs",
+              "p": "src/infra/llm-provider.mjs",
+              "m": "infra"
+            }
+          ]
+        },
+        {
+          "id": "src-ai-hooks-mjs",
+          "p": "src/ai/hooks.mjs",
+          "r": "hooks.mjs",
+          "io": "runInjectionHook(rootDir, input = {}) → 导出；preToolUseGuard(rootDir, input = {}) → 导出",
+          "to": [
+            {
+              "t": "src-ai-injection-mjs",
+              "io": "injection.mjs",
+              "p": "src/ai/injection.mjs"
+            },
+            {
+              "t": "src-ai-routing-mjs",
+              "io": "routing.mjs",
+              "p": "src/ai/routing.mjs"
+            },
+            {
+              "t": "src-ai-context-mjs",
+              "io": "context.mjs",
+              "p": "src/ai/context.mjs"
+            },
+            {
+              "t": "src-ai-archivist-router-mjs",
+              "io": "archivist-router.mjs",
+              "p": "src/ai/archivist-router.mjs"
+            }
+          ],
+          "extTo": [
+            {
+              "t": "agent-registry.mjs",
+              "io": "agent-registry.mjs",
+              "p": "src/infra/agent-registry.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-config.mjs",
+              "io": "runtime-config.mjs",
+              "p": "src/infra/runtime-config.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-store.mjs",
+              "io": "runtime-store.mjs",
+              "p": "src/infra/runtime-store.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "ledger.mjs",
+              "io": "ledger.mjs",
+              "p": "src/infra/ledger.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "decision-log.mjs",
+              "io": "decision-log.mjs",
+              "p": "src/infra/decision-log.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-bootstrap.mjs",
+              "io": "runtime-bootstrap.mjs",
+              "p": "src/infra/runtime-bootstrap.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "path-match.mjs",
+              "io": "path-match.mjs",
+              "p": "src/infra/path-match.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "gateway.mjs",
+              "io": "gateway.mjs",
+              "p": "src/capabilities/gateway.mjs",
+              "m": "capabilities"
+            },
+            {
+              "t": "task-state-store.mjs",
+              "io": "task-state-store.mjs",
+              "p": "src/infra/task-state-store.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "rule-scanner.mjs",
+              "io": "rule-scanner.mjs",
+              "p": "src/infra/rule-scanner.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "task-board.mjs",
+              "io": "task-board.mjs",
+              "p": "src/orchestration/task-board.mjs",
+              "m": "orchestration"
+            },
+            {
+              "t": "hook-result-gate.mjs",
+              "io": "hook-result-gate.mjs",
+              "p": "src/infra/hook-result-gate.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "command-safety.mjs",
+              "io": "command-safety.mjs",
+              "p": "src/infra/command-safety.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "memory-digest.mjs",
+              "io": "memory-digest.mjs",
+              "p": "src/infra/memory-digest.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "status.mjs",
+              "io": "status.mjs",
+              "p": "src/orchestration/status.mjs",
+              "m": "orchestration"
+            }
+          ]
+        },
+        {
+          "id": "src-ai-suspicion-review-mjs",
+          "p": "src/ai/suspicion-review.mjs",
+          "r": "suspicion-review.mjs",
+          "io": "runSuspicionReview(rootDir, { limit = P) → 导出",
+          "extTo": [
+            {
+              "t": "runtime-config.mjs",
+              "io": "runtime-config.mjs",
+              "p": "src/infra/runtime-config.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-store.mjs",
+              "io": "runtime-store.mjs",
+              "p": "src/infra/runtime-store.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "decision-log.mjs",
+              "io": "decision-log.mjs",
+              "p": "src/infra/decision-log.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "annotation-log.mjs",
+              "io": "annotation-log.mjs",
+              "p": "src/infra/annotation-log.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "llm-provider.mjs",
+              "io": "llm-provider.mjs",
+              "p": "src/infra/llm-provider.mjs",
+              "m": "infra"
+            }
+          ]
+        }
+      ]
+    },
+    "capabilities": {
+      "files": [
+        {
+          "id": "src-capabilities-gateway-mjs",
+          "p": "src/capabilities/gateway.mjs",
+          "r": "gateway.mjs",
+          "io": "listRegisteredCapabilities() → 导出；invokeCapability(name, ctx = {}) → 导出",
+          "to": [
+            {
+              "t": "src-capabilities-verify-mjs",
+              "io": "verify.mjs",
+              "p": "src/capabilities/verify.mjs"
+            },
+            {
+              "t": "src-capabilities-scope-guard-mjs",
+              "io": "scope-guard.mjs",
+              "p": "src/capabilities/scope-guard.mjs"
+            },
+            {
+              "t": "src-capabilities-checkpoint-mjs",
+              "io": "checkpoint.mjs",
+              "p": "src/capabilities/checkpoint.mjs"
+            },
+            {
+              "t": "src-capabilities-worker-mjs",
+              "io": "worker.mjs",
+              "p": "src/capabilities/worker.mjs"
+            },
+            {
+              "t": "src-capabilities-review-gate-mjs",
+              "io": "review-gate.mjs",
+              "p": "src/capabilities/review-gate.mjs"
+            },
+            {
+              "t": "src-capabilities-acceptance-proof-mjs",
+              "io": "acceptance-proof.mjs",
+              "p": "src/capabilities/acceptance-proof.mjs"
+            },
+            {
+              "t": "c-capabilities-repository-governance-mjs",
+              "io": "repository-governance.mjs",
+              "p": "src/capabilities/repository-governance.mjs"
+            }
+          ],
+          "extTo": [
+            {
+              "t": "command-runner.mjs",
+              "io": "command-runner.mjs",
+              "p": "src/infra/command-runner.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "error-protocol.mjs",
+              "io": "error-protocol.mjs",
+              "p": "src/infra/error-protocol.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "command-safety.mjs",
+              "io": "command-safety.mjs",
+              "p": "src/infra/command-safety.mjs",
+              "m": "infra"
+            }
+          ]
+        }
+      ]
+    },
+    "infra": {
+      "files": [
+        {
+          "id": "src-infra-runtime-bootstrap-mjs",
+          "p": "src/infra/runtime-bootstrap.mjs",
+          "r": "runtime-bootstrap.mjs",
+          "io": "initRuntime(rootDir, options = {) → 导出",
+          "to": [
+            {
+              "t": "src-infra-ledger-mjs",
+              "io": "ledger.mjs",
+              "p": "src/infra/ledger.mjs"
+            },
+            {
+              "t": "src-infra-prompt-pack-mjs",
+              "io": "prompt-pack.mjs",
+              "p": "src/infra/prompt-pack.mjs"
+            },
+            {
+              "t": "src-infra-runtime-config-mjs",
+              "io": "runtime-config.mjs",
+              "p": "src/infra/runtime-config.mjs"
+            },
+            {
+              "t": "src-infra-runtime-snapshot-mjs",
+              "io": "runtime-snapshot.mjs",
+              "p": "src/infra/runtime-snapshot.mjs"
+            },
+            {
+              "t": "src-infra-runtime-store-mjs",
+              "io": "runtime-store.mjs",
+              "p": "src/infra/runtime-store.mjs"
+            }
+          ]
+        },
+        {
+          "id": "src-infra-runtime-store-mjs",
+          "p": "src/infra/runtime-store.mjs",
+          "r": "runtime-store.mjs",
+          "io": "nowIso() → 导出；createWorkId(prefix = \"work\") → 导出"
+        },
+        {
+          "id": "src-infra-ledger-mjs",
+          "p": "src/infra/ledger.mjs",
+          "r": "ledger.mjs",
+          "io": "appendLedger(rootDir, event) → 导出；verifyLedger(rootDir) → 导出",
+          "to": [
+            {
+              "t": "src-infra-error-protocol-mjs",
+              "io": "error-protocol.mjs",
+              "p": "src/infra/error-protocol.mjs"
+            },
+            {
+              "t": "src-infra-file-lock-mjs",
+              "io": "file-lock.mjs",
+              "p": "src/infra/file-lock.mjs"
+            },
+            {
+              "t": "src-infra-runtime-store-mjs",
+              "io": "runtime-store.mjs",
+              "p": "src/infra/runtime-store.mjs"
+            }
+          ]
+        },
+        {
+          "id": "src-infra-gate-arming-mjs",
+          "p": "src/infra/gate-arming.mjs",
+          "r": "gate-arming.mjs",
+          "io": "evaluateGateArming({ config, tasks = []) → 导出；hasRealReviewLane(task, config) → 导出",
+          "to": [
+            {
+              "t": "src-infra-task-predicates-mjs",
+              "io": "task-predicates.mjs",
+              "p": "src/infra/task-predicates.mjs"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
+</script>
+
+<script>
+const D = {
+  "cli": { name: "CLI（命令入口）", plain: "把用户命令解析后送到对应运行时流程", role: "命令解析与路由", inn: "终端命令与参数", out: "运行时调用与退出码", status: "已通", files: [
+    { id: "entry", p: "bin/helix.mjs", r: "CLI 入口与命令路由", io: "终端参数 → 运行时命令" }
+  ] },
+  "interface": { name: "Interface（人机与宿主边界）", plain: "接住 CLI、Dashboard 和 Codex/Cursor/Kimi 宿主", role: "安全交互边界", inn: "人或宿主请求", out: "命令说明、面板或适配器", status: "已通", files: [
+    { id: "dir", p: "src/interface/", r: "交互区全部实现", io: "宿主请求 → 安全交互" },
+    { id: "help", p: "src/interface/cli-help.mjs", r: "CLI 帮助的单一事实源", io: "renderHelp({ all }) → 帮助文本" },
+    { id: "dashboard", p: "src/interface/dashboard.mjs", r: "启动本地 Dashboard", io: "startDashboardServer(rootDir, options) → 本地服务" },
+    { id: "adapters", p: "src/interface/adapters.mjs", r: "安装与恢复宿主适配器", io: "installAdapter(rootDir, options) → 安装结果" }
+  ] },
+  "orchestration": { name: "Orchestration（流程编排）", plain: "把计划按顺序推进，失败返工，通过后才提交", role: "顺序、重试、事务与门编排", inn: "计划与任务状态", out: "下一步动作或集成结果", status: "已通", files: [
+    { id: "dir", p: "src/orchestration/", r: "编排区全部实现", io: "任务状态 → 流程推进" },
+    { id: "linear", p: "src/orchestration/linear-runtime.mjs", r: "M1 线性任务循环", io: "runNextTask(rootDir, options) → 下一步" },
+    { id: "parallel", p: "src/orchestration/parallel-runtime.mjs", r: "命令型子 Agent 隔离运行", io: "runParallelAgents(rootDir, options) → run" },
+    { id: "admission", p: "src/orchestration/admission.mjs", r: "子 Agent 成果集成事务", io: "admitParallelAgentResult(rootDir, options) → 集成结果" }
+  ] },
+  "ai": { name: "AI（策略与语境）", plain: "做路由、上下文注入、Skill 匹配和异步审查", role: "AI 决策与建议", inn: "请求与清洗上下文", out: "路由、注入或审查建议", status: "已通", files: [
+    { id: "dir", p: "src/ai/", r: "AI 策略区全部实现", io: "请求与语境 → 决策建议" },
+    { id: "routing", p: "src/ai/routing.mjs", r: "确定性路由与语义影子", io: "routeRequest(rootDir, input) → 路由决策" },
+    { id: "hooks", p: "src/ai/hooks.mjs", r: "宿主生命周期注入与范围守卫", io: "preToolUseGuard(rootDir, input) → 放行结果" },
+    { id: "suspicion", p: "src/ai/suspicion-review.mjs", r: "对可疑决策做异步复核", io: "runSuspicionReview(rootDir, options) → 审查报告" }
+  ] },
+  "capabilities": { name: "Capabilities（原子能力）", plain: "把工作、验证、审查和 checkpoint 包成统一能力", role: "可独立验证的原子操作", inn: "能力名与执行上下文", out: "状态、证据、副作用与错误", status: "已通", files: [
+    { id: "dir", p: "src/capabilities/", r: "网关与所有原子能力", io: "能力请求 → 统一结果" },
+    { id: "gateway", p: "src/capabilities/gateway.mjs", r: "静态能力注册表与统一信封", io: "invokeCapability(name, ctx) → 结果信封" }
+  ] },
+  "infra": { name: "Infra（基础设施）", plain: "让文件、锁、Git、命令、配置与证据可恢复", role: "确定性技术底座", inn: "文件、命令和运行时数据", out: "原子状态、锁、账本与 Git 结果", status: "已通", files: [
+    { id: "dir", p: "src/infra/", r: "基础设施区全部实现", io: "运行时输入 → 可恢复状态" },
+    { id: "bootstrap", p: "src/infra/runtime-bootstrap.mjs", r: "按固定顺序初始化运行时", io: "initRuntime(rootDir, options) → 初始状态" },
+    { id: "store", p: "src/infra/runtime-store.mjs", r: "路径、JSON 原子写与 hash 原语", io: "writeJsonAtomic(filePath, value) → 落盘" },
+    { id: "ledger", p: "src/infra/ledger.mjs", r: "hash 链证据账本", io: "appendLedger(rootDir, event) → 账本条目" },
+    { id: "gate-arming", p: "src/infra/gate-arming.mjs", r: "门未武装黄灯评估", io: "evaluateGateArming({ config, tasks }) → { armed, issues }" }
+  ] }
+};
+
+const mergeGeneratedGraph = () => {
+  const el = document.getElementById("generated-graph");
+  if (!el) return;
+  let g;
+  try { g = JSON.parse(el.textContent || "{}"); } catch { return; }
+  for (const [key, rec] of Object.entries(g.modules || {})) {
+    if (!D[key]) continue;
+    D[key].files = D[key].files || [];
+    const byP = new Map(D[key].files.map((f) => [f.p, f]));
+    for (const f of rec.files || []) {
+      if (byP.has(f.p)) continue;
+      const node = { id: f.id, p: f.p, r: f.r || f.p.replace(/\/+$/, "").split("/").pop(), io: "待读代码填写" };
+      D[key].files.push(node);
+      byP.set(f.p, node);
+    }
+    for (const f of rec.files || []) {
+      const node = byP.get(f.p);
+      if (!node) continue;
+      (f.to || []).forEach((edge) => {
+        if (edge.p && !byP.has(edge.p)) {
+          const dest = { id: edge.t, p: edge.p, r: edge.p.replace(/\/+$/, "").split("/").pop(), io: "待读代码填写" };
+          D[key].files.push(dest);
+          byP.set(edge.p, dest);
+        }
+        const destId = (edge.p && byP.get(edge.p)?.id) || edge.t;
+        node.to = node.to || [];
+        if (node.to.some((e) => e.t === destId || (edge.p && e.p === edge.p))) return;
+        node.to.push({ t: destId, io: edge.io });
+      });
+      (f.extTo || []).forEach((edge) => {
+        node.extTo = node.extTo || [];
+        if (node.extTo.some((e) => (edge.p && e.p === edge.p) || e.t === edge.t)) return;
+        node.extTo.push(edge);
+      });
+    }
+  }
+};
+mergeGeneratedGraph();
+
+const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const views = [...document.querySelectorAll(".view")];
+const tabs = [...document.querySelectorAll(".tab")];
+const fxSide = document.getElementById("fx-side");
+const fxMain = document.getElementById("fx-main");
+const drawer = document.getElementById("drawer");
+const drawerHd = document.getElementById("drawer-hd");
+const drawerBd = document.getElementById("drawer-bd");
+const drawerKey = document.getElementById("drawer-key");
+
+const show = (id) => {
+  tabs.forEach((t) => t.setAttribute("aria-pressed", String(t.dataset.view === id)));
+  views.forEach((v) => {
+    v.classList.toggle("is-on", v.dataset.panel === id);
+  });
+  drawer.dataset.open = "false";
+  drawerHd.setAttribute("aria-expanded", "false");
+};
+tabs.forEach((t) => t.addEventListener("click", () => show(t.dataset.view)));
+
+const rich = (s) => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>");
+
+const metaHtml = (d) =>
+  "<div class='kv'><div class='k'>作用</div><div class='v'>" + esc(d.role) + "</div></div>" +
+  "<div class='kv'><div class='k'>输入</div><div class='v'>" + esc(d.inn) + "</div></div>" +
+  "<div class='kv'><div class='k'>输出</div><div class='v'>" + esc(d.out) + "</div></div>";
+
+const techHtml = (d) => {
+  const rows =
+    (d.contains ? "<div class='kv'><div class='k'>内部包含</div><div class='v'>" + rich(d.contains) + "</div></div>" : "") +
+    (d.actions ? "<div class='kv'><div class='k'>" + esc(d.aLabel || "主要动作") + "</div><div class='v'>" + rich(d.actions) + "</div></div>" : "") +
+    (d.deps ? "<div class='kv'><div class='k'>依赖</div><div class='v'>" + rich(d.deps) + "</div></div>" : "") +
+    (d.bounds ? "<div class='kv'><div class='k'>边界</div><div class='v'>" + rich(d.bounds) + "</div></div>" : "") +
+    (d.cur ? "<div class='kv'><div class='k'>当前状态</div><div class='v'>" + rich(d.cur) + "</div></div>" : "");
+  return rows ? "<details class='fx-tech'><summary>技术细节（工程师向）</summary>" + rows + "</details>" : "";
+};
+
+const renderSide = (d) => {
+  fxSide.innerHTML = "<h2 class='fx-name'>" + esc(d.name) + "</h2>" +
+    (d.plain ? "<div class='fx-plain'>" + esc(d.plain) + "</div>" : "") +
+    "<div class='kv'><div class='k'>现状</div><div class='v'>" + esc(d.status) +
+    (d.statusHref ? "（<a href='" + esc(d.statusHref) + "'>" + esc(d.statusHrefLabel || d.statusHref) + "</a>）" : "") +
+    "</div></div>" +
+    metaHtml(d) +
+    techHtml(d);
+};
+
+const renderDrawer = (d) => {
+  const g = renderGraph(d);
+  if (!g) { fxMain.innerHTML = "<div class='fx-empty'>未开始，尚无实现文件。</div>"; return; }
+  if (g.err) { fxMain.innerHTML = "<div class='fx-empty'>关系图渲染失败：" + esc(g.err) + "</div>"; return; }
+  fxMain.innerHTML = g.html;
+  bindViewport(fxMain.querySelector(".fx-viewport"), fxMain.querySelector("svg"), g.edges, g.pos);
+};
+
+const MONO = "'IBM Plex Mono', Consolas, 'Courier New', monospace";
+const SANS = "'Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif";
+const cut = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+const textW = (s) => [...s].reduce((w, c) => w + (c.charCodeAt(0) > 0xff ? 10 : 5.6), 0);
+const ioLines = (s) => {
+  const t = String(s).replace(/\s*([+/→])\s*/g, "$1").trim();
+  const m = t.match(/^([^（]+)（([^（）]*)）$/);
+  const en = m ? m[1] : t;
+  const zh = m && m[2] ? "（" + m[2] + "）" : "";
+  const lines = [];
+  if (en.length <= 22) lines.push(en);
+  else {
+    const parts = en.split(/(?<=[+/→])|(?=\()/);
+    let cur = "";
+    parts.forEach((p) => {
+      if (cur && (cur + p).length > 22) { lines.push(cur); cur = p; }
+      else cur += p;
+    });
+    if (cur) lines.push(cur);
+  }
+  if (zh) lines.push(zh);
+  return lines.slice(0, 3).map((ln, i, arr) => (i === arr.length - 1 ? cut(ln, 26) : ln));
+};
+
+const labelHtml = (lines, cx, cy) => {
+  const w = Math.max(...lines.map(textW)) + 10;
+  const h = lines.length * 12 + 5;
+  const x = cx - w / 2, y = cy - h / 2;
+  return "<g class='fx-lbl'><rect x='" + x.toFixed(1) + "' y='" + y.toFixed(1) + "' width='" + w.toFixed(1) + "' height='" + h + "' rx='2' fill='#24272b' stroke='#4a4f56' stroke-width='0.75'/>" +
+    "<text x='" + cx.toFixed(1) + "' y='" + (y + 12).toFixed(1) + "' text-anchor='middle' fill='#d4d9de' font-size='9.5' font-family=\"" + MONO + "\">" +
+    lines.map((ln, i) => "<tspan x='" + cx.toFixed(1) + "' dy='" + (i ? 12 : 0) + "'>" + esc(ln) + "</tspan>").join("") + "</text></g>";
+};
+
+const bezierEdge = (A, B, oa, ob) => {
+  const x1 = A.x + A.w + oa.dx, y1 = A.y + A.h / 2 + oa.dy;
+  const x2 = B.x + ob.dx, y2 = B.y + B.h / 2 + ob.dy;
+  const c = Math.max(48, Math.abs(x2 - x1) * 0.5);
+  const p1x = x1 + c, p2x = x2 - c;
+  const d = "M " + x1.toFixed(1) + " " + y1.toFixed(1) +
+    " C " + p1x.toFixed(1) + " " + y1.toFixed(1) + ", " +
+    p2x.toFixed(1) + " " + y2.toFixed(1) + ", " +
+    x2.toFixed(1) + " " + y2.toFixed(1);
+  return {
+    d,
+    lbl: {
+      cx: 0.125 * x1 + 0.375 * p1x + 0.375 * p2x + 0.125 * x2,
+      cy: 0.125 * y1 + 0.375 * y1 + 0.375 * y2 + 0.125 * y2,
+    },
+  };
+};
+
+const edgeHtml = (edges, pos, offs) => edges.map((e) => {
+  const oa = offs.get(e.a) || { dx: 0, dy: 0 }, ob = offs.get(e.b) || { dx: 0, dy: 0 };
+  const { d, lbl } = bezierEdge(pos.get(e.a), pos.get(e.b), oa, ob);
+  let s = "<path d='" + d + "' fill='none' stroke='#8a8f96' stroke-width='1.8' marker-end='url(#fx-arr)'/>";
+  if (e.lines.length && lbl) s += labelHtml(e.lines, lbl.cx, lbl.cy);
+  return s;
+}).join("");
+
+const bindViewport = (viewport, svg, edges, pos) => {
+  const world = svg.querySelector(".fx-world");
+  let tx = 12, ty = 12, scale = 1;
+  const apply = () => { world.setAttribute("transform", "translate(" + tx + " " + ty + ") scale(" + scale + ")"); };
+  apply();
+  const pt = svg.createSVGPoint();
+  const toSvg = (e) => { pt.x = e.clientX; pt.y = e.clientY; return pt.matrixTransform(svg.getScreenCTM().inverse()); };
+  const toWorld = (e) => { const p = toSvg(e); return { x: (p.x - tx) / scale, y: (p.y - ty) / scale }; };
+
+  viewport.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const p = toSvg(e);
+    const next = Math.min(3, Math.max(0.25, scale * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
+    tx = p.x - (p.x - tx) * (next / scale);
+    ty = p.y - (p.y - ty) * (next / scale);
+    scale = next;
+    apply();
+  }, { passive: false });
+
+  viewport.addEventListener("pointerdown", (e) => {
+    if (e.target.closest(".fx-node")) return;
+    e.preventDefault();
+    viewport.setPointerCapture(e.pointerId);
+    viewport.classList.add("is-pan");
+    const p0 = toSvg(e);
+    const tx0 = tx, ty0 = ty;
+    const move = (ev) => {
+      const p = toSvg(ev);
+      tx = tx0 + p.x - p0.x;
+      ty = ty0 + p.y - p0.y;
+      apply();
+    };
+    const up = () => {
+      viewport.classList.remove("is-pan");
+      viewport.removeEventListener("pointermove", move);
+      viewport.removeEventListener("pointerup", up);
+    };
+    viewport.addEventListener("pointermove", move);
+    viewport.addEventListener("pointerup", up);
+  });
+
+  const layer = svg.querySelector(".fx-edges");
+  const offs = new Map();
+  const redraw = () => { layer.innerHTML = edgeHtml(edges, pos, offs); };
+  svg.querySelectorAll(".fx-node").forEach((g) => {
+    g.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      g.setPointerCapture(e.pointerId);
+      g.classList.add("drag");
+      const id = g.dataset.id;
+      const start = toWorld(e);
+      const o0 = offs.get(id) || { dx: 0, dy: 0 };
+      const move = (ev) => {
+        const cur = toWorld(ev);
+        const o = { dx: o0.dx + cur.x - start.x, dy: o0.dy + cur.y - start.y };
+        offs.set(id, o);
+        g.setAttribute("transform", "translate(" + o.dx + " " + o.dy + ")");
+        redraw();
+      };
+      const up = () => {
+        g.classList.remove("drag");
+        g.removeEventListener("pointermove", move);
+        g.removeEventListener("pointerup", up);
+      };
+      g.addEventListener("pointermove", move);
+      g.addEventListener("pointerup", up);
+    });
+  });
+};
+
+const renderGraph = (d) => {
+  const files = d.files || [];
+  if (!files.length) return null;
+  if (typeof dagre === "undefined") return { err: "布局库未加载", html: "", edges: [], pos: new Map() };
+  const ids = new Set(files.map((f) => f.id));
+  const nodes = new Map();
+  files.forEach((f) => nodes.set(f.id, { id: f.id, label: f.p.replace(/\/+$/, "").split("/").pop(), sub: f.r, path: f.p, io: f.io || "", ext: false }));
+  const extAll = new Map();
+  const getExt = (e) => {
+    const key = e.p || e.t;
+    if (!extAll.has(key)) extAll.set(key, { id: "ext" + extAll.size, label: e.t, sub: e.m || "", path: e.p || "", ext: true, file: !!e.p });
+    return extAll.get(key);
+  };
+  const raw = [];
+  files.forEach((f) => {
+    (f.to || []).forEach((e) => { if (ids.has(e.t)) raw.push([f.id, e.t, e.io]); });
+    (f.extTo || []).forEach((e) => raw.push([f.id, getExt(e).id, e.io]));
+    (f.extFrom || []).forEach((e) => raw.push([getExt(e).id, f.id, e.io]));
+  });
+  (d.extLinks || []).forEach((l) => {
+    const an = getExt({ t: l.a.replace(/\/+$/, "").split("/").pop(), p: l.a, m: l.am });
+    const bn = getExt({ t: l.b.replace(/\/+$/, "").split("/").pop(), p: l.b, m: l.bm });
+    raw.push([an.id, bn.id, l.io]);
+  });
+  extAll.forEach((n) => nodes.set(n.id, n));
+
+  const NW = 190, NH = 46, NH2 = 64, NHX = 30;
+  const g = new dagre.graphlib.Graph({ multigraph: true });
+  g.setGraph({ rankdir: "LR", nodesep: 18, ranksep: 130, marginx: 20, marginy: 20 });
+  g.setDefaultEdgeLabel(() => ({}));
+  const nodeH = (n) => (n.ext && !n.file ? NHX : n.io ? NH2 : NH);
+  nodes.forEach((n) => g.setNode(n.id, { width: NW, height: nodeH(n) }));
+  const meta = [];
+  raw.forEach(([a, b, io], i) => {
+    const lines = io ? ioLines(io) : [];
+    g.setEdge(a, b, {
+      width: lines.length ? Math.max(...lines.map(textW)) + 12 : 12,
+      height: lines.length ? lines.length * 12 + 6 : 12,
+      labelpos: "c",
+    }, "e" + i);
+    meta.push({ a, b, lines });
+  });
+  dagre.layout(g);
+
+  const pos = new Map();
+  nodes.forEach((n, id) => {
+    const p = g.node(id);
+    const h = nodeH(n);
+    pos.set(id, { x: p.x - NW / 2, y: p.y - h / 2, w: NW, h });
+  });
+  const edges = meta.map((m, i) => {
+    const ge = g.edge(m.a, m.b, "e" + i);
+    return { a: m.a, b: m.b, lines: m.lines, pts: ge.points, lbl: ge.x != null ? { cx: ge.x, cy: ge.y } : null };
+  });
+  const W = Math.round(g.graph().width), H = Math.round(g.graph().height);
+
+  let out = "<svg class='fx-svg' role='img' aria-label='实现脚本关系图'>";
+  out += "<defs><marker id='fx-arr' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='6' markerHeight='6' orient='auto-start-reverse'><path d='M 0 0 L 10 5 L 0 10 z' fill='#5f656d'/></marker></defs>";
+  out += "<g class='fx-world'><g class='fx-edges'>" + edgeHtml(edges, pos, new Map()) + "</g>";
+  nodes.forEach((n) => {
+    const P = pos.get(n.id);
+    if (n.ext && n.file) {
+      out += "<g class='fx-node' data-id='" + n.id + "'><title>" + esc(n.path) + "</title><rect x='" + P.x + "' y='" + P.y + "' width='" + P.w + "' height='" + P.h + "' rx='2' fill='#1d2023' stroke='#4a4f56' stroke-dasharray='4 3'/>" +
+        "<text x='" + (P.x + 10) + "' y='" + (P.y + 19) + "' fill='#d7d9dc' font-size='11' font-family=\"" + MONO + "\">" + esc(cut(n.label, 28)) + "</text>" +
+        (n.sub ? "<text x='" + (P.x + 10) + "' y='" + (P.y + 35) + "' fill='#5f656d' font-size='10' font-family=\"" + SANS + "\">归 " + esc(cut(n.sub, 24)) + "</text>" : "") + "</g>";
+    } else if (n.ext) {
+      out += "<g class='fx-node' data-id='" + n.id + "'><rect x='" + P.x + "' y='" + P.y + "' width='" + P.w + "' height='" + P.h + "' rx='2' fill='#17191c' stroke='#4a4f56' stroke-dasharray='4 3'/>" +
+        "<text x='" + (P.x + P.w / 2) + "' y='" + (P.y + P.h / 2 + 3.5) + "' text-anchor='middle' fill='#8a8f96' font-size='10' font-family=\"" + MONO + "\">" + esc(cut(n.label, 32)) + "</text></g>";
+    } else {
+      out += "<g class='fx-node' data-id='" + n.id + "'><title>" + esc(n.path) + "</title><rect x='" + P.x + "' y='" + P.y + "' width='" + P.w + "' height='" + P.h + "' rx='2' fill='#2b2f34' stroke='#3a3e44'/>" +
+        "<text x='" + (P.x + 10) + "' y='" + (P.y + 19) + "' fill='#e8a33d' font-size='11' font-family=\"" + MONO + "\">" + esc(cut(n.label, 28)) + "</text>" +
+        "<text x='" + (P.x + 10) + "' y='" + (P.y + 35) + "' fill='#8a8f96' font-size='10' font-family=\"" + SANS + "\">" + esc(cut(n.sub, 26)) + "</text>" +
+        (n.io ? "<text x='" + (P.x + 10) + "' y='" + (P.y + 52) + "' fill='#d7d9dc' font-size='10' font-family=\"" + SANS + "\">" + esc(cut(n.io, 30)) + "</text>" : "") + "</g>";
+    }
+  });
+  out += "</g></svg>";
+  return { html: "<div class='fx-viewport'>" + out + "</div>", edges, pos };
+};
+
+document.querySelectorAll(".node[data-k]").forEach((n) => {
+  const d = D[n.dataset.k];
+  if (!d) return;
+  const count = (d.files || []).length;
+  if (count) {
+    const badge = document.createElement("span");
+    badge.className = "fcount";
+    badge.textContent = count + " 脚本";
+    n.appendChild(badge);
+  }
+  if (!d.plain) return;
+  const small = n.querySelector("small");
+  if (!small) return;
+  const span = document.createElement("span");
+  span.className = "plain";
+  span.textContent = d.plain;
+  small.after(span);
+});
+
+document.querySelectorAll(".view").forEach((v) => {
+  v.addEventListener("click", (e) => {
+    if (e.target.closest(".node")) return;
+    v.querySelectorAll(".node.on").forEach((x) => x.classList.remove("on"));
+    drawer.dataset.open = "false";
+    drawerHd.setAttribute("aria-expanded", "false");
+  });
+});
+
+document.getElementById("drawer-close").addEventListener("click", () => {
+  document.querySelectorAll(".node.on").forEach((x) => x.classList.remove("on"));
+  drawer.dataset.open = "false";
+  drawerHd.setAttribute("aria-expanded", "false");
+});
+
+const pick = (n) => {
+  const k = n.dataset.k;
+  const d = D[k];
+  if (!d) return;
+  const view = n.closest(".view");
+  view.querySelectorAll(".node.on").forEach((x) => x.classList.remove("on"));
+  n.classList.add("on");
+  renderSide(d);
+  renderDrawer(d);
+  drawerKey.textContent = d.name;
+  drawer.dataset.open = "true";
+  drawerHd.setAttribute("aria-expanded", "true");
+  n.scrollIntoView({ block: "center", behavior: "smooth" });
+};
+
+const syncBodyPad = () => { document.body.style.paddingBottom = (drawer.offsetHeight + 16) + "px"; };
+new ResizeObserver(syncBodyPad).observe(drawer);
+syncBodyPad();
+
+const grip = document.getElementById("drawer-grip");
+const drawerHKey = "arch-map-drawer-h:" + (document.title || location.pathname);
+const savedH = parseInt(localStorage.getItem(drawerHKey) || "0", 10);
+if (savedH) drawer.style.setProperty("--drawer-h", savedH + "px");
+grip.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  grip.setPointerCapture(e.pointerId);
+  grip.classList.add("drag");
+  const y0 = e.clientY;
+  const h0 = drawerBd.offsetHeight || Math.round(window.innerHeight * 0.48);
+  const mv = (ev) => {
+    const h = Math.min(window.innerHeight * 0.85, Math.max(140, h0 + y0 - ev.clientY));
+    drawer.style.setProperty("--drawer-h", Math.round(h) + "px");
+    localStorage.setItem(drawerHKey, String(Math.round(h)));
+  };
+  const up = () => {
+    grip.classList.remove("drag");
+    grip.removeEventListener("pointermove", mv);
+    grip.removeEventListener("pointerup", up);
+  };
+  grip.addEventListener("pointermove", mv);
+  grip.addEventListener("pointerup", up);
+});
+
+document.querySelectorAll(".node[data-k]").forEach((n) => {
+  const d = D[n.dataset.k];
+  if (!d) return;
+  const title = n.querySelector("b");
+  if (title) title.textContent = d.name;
+  n.addEventListener("click", () => pick(n));
+  n.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(n); }
+  });
+});
+
+drawerHd.addEventListener("click", () => {
+  const open = drawer.dataset.open === "true";
+  drawer.dataset.open = String(!open);
+  drawerHd.setAttribute("aria-expanded", String(!open));
+});
+
+</script>
+</body>
+</html>

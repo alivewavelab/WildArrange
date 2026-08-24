@@ -24,7 +24,7 @@
    - 有 pending runnable task -> Jiuwei run。
    - 有 in_progress/verifying task -> 从最新 ledger 证据恢复。
    - 有 failed task -> Jiuwei 决定 retry、BaiZe 或用户升级。
-   - 全部 completed -> final verification / report。
+   - 全部 completed → 最终验证 / 报告。
 5. 执行前写出紧凑状态摘要。
 
 ## 执行协议
@@ -44,7 +44,7 @@ Jiuwei 必须处理完整的 worker -> verifier -> checkpoint/retry。不要绕�
 - 检查 `helix status`。
 - 读取任务板。
 - 如果还有 pending runnable tasks，继续。
-- 如果全部 completed，按需运行 final verification lanes。
+- 如果全部 completed，按需运行最终验证通道。
 - 如果 blocked/failed，报告确切证据。
 
 ## 停止条件

@@ -16,15 +16,11 @@ import { runInjectionHook } from "../src/ai/hooks.mjs";
 import { routeRequest } from "../src/ai/routing.mjs";
 import { projectDecisions } from "../src/interface/decisions.mjs";
 import { readDecisions } from "../src/infra/decision-log.mjs";
-import {
-  admitParallelAgentResult,
-  importPlan,
-  initRuntime,
-  loadTaskState,
-  resolveHelixPath,
-  runCommand,
-  runParallelAgents,
-} from "../src/helix-core.mjs";
+import { admitParallelAgentResult, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
+import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
+import { runCommand } from "../src/infra/command-runner.mjs";
+import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
+import { resolveHelixPath } from "../src/infra/runtime-store.mjs";
 
 const execFileAsync = promisify(execFile);
 const HELIX_BIN = path.resolve(import.meta.dirname, "..", "bin", "helix.mjs");

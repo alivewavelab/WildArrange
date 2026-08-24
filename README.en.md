@@ -9,7 +9,7 @@ WildArrange is a local governance runtime for Codex, Cursor, and Kimi Code agent
 WildArrange turns a coding request into a gated workflow:
 
 ```text
-init -> plan -> execute -> verify -> scope -> review -> checkpoint -> resume
+init -> plan -> execute -> verify -> scope -> review -> acceptance-proof -> checkpoint -> resume
 ```
 
 The key rule is simple: a worker can claim work is done, but only gates can complete it.
@@ -301,7 +301,7 @@ To propose mainline artifacts, a child agent writes structured files to `agent-r
 }
 ```
 
-Admission does not trust the child agent directly. `parallel admit` checks `writable_paths`, then runs verifier, scope guard, review gate, and checkpoint:
+Admission does not trust the child agent directly. `parallel admit` checks `writable_paths`, then runs verifier, scope guard, review gate, acceptance proof, and checkpoint:
 
 ```bash
 node ./bin/helix.mjs parallel admit --run <runId> --task T001
@@ -384,6 +384,8 @@ node ./bin/helix.mjs archivist run --text "build a web TODO app" --stage plan --
 ```
 
 When `archivistRouter.enabled` is `true`, `SessionStart`, `UserPromptSubmit`, and `PostCompact` hooks trigger ArchivistRouter automatically. Without a DeepSeek key it falls back to deterministic routing and does not block the main flow.
+
+Cross-session memory is written to `.helix/memory/digests/`. Task completion, parallel admission completion, `SessionStart`, and `PostCompact` emit structured digests used to recover progress, decisions, artifacts, implementation notes, and pitfalls.
 
 Routing suggestions remain review-only until explicitly resolved:
 
@@ -524,7 +526,7 @@ npm test
 npm pack --dry-run --cache /private/tmp/helix-npm-cache
 ```
 
-Current status: the linear governance loop is implemented and tested. Optional LLM review, configurable LSP/typecheck diagnostics, AST/structure commands, hashline anchors, and comment checking are available through the CLI review gate. Multi-agent support now includes command-based parallel runs, structured artifact admission with rollback on failed gates, Git worktree patch admission, and the message board loop. The next layer is real Codex/Cursor child-agent spawning and background process management.
+Current status: the linear governance loop is implemented and tested; checkpoint writes an acceptance-proof chain first. Optional LLM review, configurable LSP/typecheck diagnostics, AST/structure commands, hashline anchors, and comment checking are available through the CLI review gate. Codex hooks become hard after `/hooks` trust; Cursor `preToolUse` / `beforeShellExecution` are fail-closed in trusted workspaces. Multi-agent support includes command-based parallel runs, Codex/Cursor command-template spawn, structured artifact admission, Git worktree patch admission, and retain-until-acceptance. Host-private background process management remains adapter work.
 
 ## More Docs
 

@@ -44,7 +44,7 @@ rg -n "SUL|copied from|verbatim|restricted source|third-party prompt" README.md 
 - `npm pack --dry-run` 包含 `.external/`、`.helix/`、`.tmp/`、密钥、临时报告或本机路径。
 - README 中的安装命令不可执行。
 - 发布包包含受限第三方源码或未确认可商业分发的文本资产。
-- `package.json.files` 遗漏 README、bin、src、packs、配置样例。
+- `package.json` 的 `files` 遗漏 README、bin、src、packs、配置样例。
 
 ## 输出
 

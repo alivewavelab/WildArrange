@@ -53,6 +53,11 @@
 </head>
 <body>
 <main>
+  <div style="border:2px solid #d9534f;background:#fde8e8;border-radius:8px;padding:12px 16px;margin:0 0 16px;font-size:14px;line-height:1.7">
+<strong>⚠️ 历史方案（2026-07-17）。</strong> 本文是当时的设计/评审快照，不是当前架构真相。
+当前规范以根 <code>AGENTS.md</code> 与 <code>doc/project-architecture.md</code> 为准。
+本文是重构前评审；文中 CLI 损坏、33 模块、95 测试与「严格 AI↔Cap 互不依赖」均已过期，五区已在 main 落地。
+</div>
   <h1>WildArrange 五区解耦重构对齐方案</h1>
   <p class="muted">日期：2026-07-17 ｜ 输入：全量源码、测试、项目文档与 Cursor 重构稿</p>
   <p class="lead"><strong>结论：</strong>接受“五区”作为目标架构，但不能只靠能力网关和目录搬迁。建议采用<strong>五区 + 严格单向依赖 + 共享交付流水线</strong>，先冻结行为与公共契约，再逐段迁移。</p>

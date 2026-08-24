@@ -30,7 +30,7 @@
       "subject": "Backend: 写一个可验证的后端产物",
       "description": "Worker 在 src/backend 下写一个文件；verifier 检查文件内容包含约定标记。用于验证后端路径命中后端规范。",
       "category": "quick",
-      "dependsOn": ["T001"],
+      "blockedBy": ["T001"],
       "writable_paths": ["src/backend/**"],
       "worker_command": "node -e \"const fs=require('fs'); fs.mkdirSync('src/backend',{recursive:true}); fs.writeFileSync('src/backend/health.js','module.exports.HEALTH = 200;\\n')\"",
       "verify_commands": [

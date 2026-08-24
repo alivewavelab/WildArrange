@@ -21,6 +21,11 @@
   </style>
 </head>
 <body>
+  <div style="border:2px solid #d9534f;background:#fde8e8;border-radius:8px;padding:12px 16px;margin:0 0 16px;font-size:14px;line-height:1.7">
+<strong>⚠️ 历史方案（2026-06-11）。</strong> 本文是当时的设计/评审快照，不是当前架构真相。
+当前规范以根 <code>AGENTS.md</code> 与 <code>doc/project-architecture.md</code> 为准。
+P0 已落地；实现路径在五区（<code>parallel-runtime</code> / <code>archivist-router</code> / <code>route-table</code>）；CLI 现为 <code>archivist suggestions</code>，不是 <code>route reflect</code>。
+</div>
   <h1>多 Agent 并行与 ArchivistRouter 最小闭环</h1>
   <p class="note">目标不是一步做满 OMO 集群，而是先让子 Agent 可并发、结果可落盘、档案路由可调用、主线不被脏写。</p>
 

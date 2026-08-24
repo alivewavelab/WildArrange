@@ -66,6 +66,11 @@
 </head>
 <body>
 <main>
+  <div style="border:2px solid #d9534f;background:#fde8e8;border-radius:8px;padding:12px 16px;margin:0 0 16px;font-size:14px;line-height:1.7">
+<strong>⚠️ 历史方案（2026-06-11）。</strong> 本文是当时的设计/评审快照，不是当前架构真相。
+当前规范以根 <code>AGENTS.md</code> 与 <code>doc/project-architecture.md</code> 为准。
+P0 已落地；实现路径在五区（<code>parallel-runtime</code> / <code>archivist-router</code> / <code>route-table</code>）；CLI 现为 <code>archivist suggestions</code>，不是 <code>route reflect</code>。
+</div>
   <h1>WildArrange 档案路由员与关键词自进化方案</h1>
   <p class="lead">结论：路由不要只靠关键词，也不要每轮都让大模型做全量裁判。第一版采用“确定性关键词热路径 + ArchivistRouter 档案路由员”的混合结构；大模型固定使用 <code>deepseek-v4-flash</code>，只在新会话、Git 提交边界、低置信度、固定轮次触发，负责识别多意图、整理阶段档案、生成上下文注入包，并提出关键词库补丁。</p>
 

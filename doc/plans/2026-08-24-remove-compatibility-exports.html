@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>移除 Compatibility 兼容出口</title>
+  <style>
+    body { font: 16px/1.6 system-ui, sans-serif; max-width: 980px; margin: 40px auto; padding: 0 20px; color: #1f2937; }
+    h1 { margin-bottom: 4px; }
+    .goal { background: #eef6ff; border-left: 6px solid #2563eb; padding: 16px; }
+    .flow { display: flex; gap: 12px; align-items: stretch; flex-wrap: wrap; margin: 24px 0; }
+    .card { flex: 1 1 190px; border: 1px solid #d1d5db; border-top: 7px solid #f59e0b; border-radius: 10px; padding: 14px; }
+    .p0 { border-top-color: #dc2626; }
+    .done { border-top-color: #16a34a; }
+    .arrow { align-self: center; font-size: 24px; color: #64748b; }
+    code { background: #f3f4f6; padding: 2px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <p><strong>历史方案（已落地）：</strong>本方案已于 2026-08-24 实施完成，当前架构事实以 <code>doc/project-architecture.md</code> 为准。</p>
+  <h1>移除 Compatibility（兼容出口）</h1>
+  <p>执行方案 · 2026-08-24</p>
+  <div class="goal"><strong>唯一目标：</strong>项目未形成历史用户与稳定旧 API，删除全部兼容出口，让 CLI、测试、文档只引用五区中的真实实现。</div>
+
+  <div class="flow">
+    <section class="card p0"><strong>P0 输入</strong><br>33 个根级 <code>src/helix-*.mjs</code>、<code>src/infra/foundation.mjs</code>、现有 CLI/测试引用。</section>
+    <div class="arrow">→</div>
+    <section class="card p0"><strong>P0 迁移</strong><br>先修改治理规则：CLI 是组合入口，可直接引用五区真实 owner；测试按被测职责引用 owner。</section>
+    <div class="arrow">→</div>
+    <section class="card p0"><strong>P0 删除</strong><br>删除全部兼容文件与兼容专用测试，不建立替代 barrel。</section>
+    <div class="arrow">→</div>
+    <section class="card done"><strong>输出</strong><br>源码只有五区真实模块；总图不再展示 Compatibility；全量门禁通过。</section>
+  </div>
+
+  <h2>验收证据</h2>
+  <ul>
+    <li><code>find src -maxdepth 1 -name 'helix-*.mjs'</code> 零结果，<code>src/infra/foundation.mjs</code> 不存在。</li>
+    <li>仓库现行代码与现行文档不再把旧路径描述成可用入口；历史方案保留历史事实。</li>
+    <li><code>npm test</code>、<code>npm run check:arch</code>、<code>npm pack --dry-run --cache /private/tmp/helix-npm-cache</code> 全部通过。</li>
+  </ul>
+
+  <h2>边界</h2>
+  <p>不改变状态机、质量门或用户命令；不覆盖当前工作区已有改动；不新增对外 JavaScript API。发布面只保留 CLI。</p>
+</body>
+</html>

@@ -6,84 +6,90 @@ import { startDashboardServer } from "../src/interface/dashboard.mjs";
 import { projectDecisions, projectDecisionStats } from "../src/interface/decisions.mjs";
 import { projectTimeline } from "../src/interface/timeline.mjs";
 import { COMMAND_REGISTRY, renderCommandsMarkdown, renderHelp } from "../src/interface/cli-help.mjs";
+import { installAdapter, restoreAdapterBackup, uninstallAdapter } from "../src/interface/adapters.mjs";
+import { runDoctor } from "../src/interface/doctor.mjs";
 import {
-  DEFAULT_PACKAGE_NAME,
   acceptTaskHandoff,
+  prepareTaskHandoff,
+  pushTaskHandoff,
+  takeoverTaskOwnership,
+} from "../src/orchestration/handoff.mjs";
+import {
   admitParallelAgentResult,
+  cleanupParallelAgentRun,
+  closeParallelAgentRun,
+  listParallelAgentRuns,
+  parallelAgentStatus,
+  retryParallelAgentRun,
+  runParallelAgents,
+} from "../src/orchestration/parallel-runtime.mjs";
+import {
+  coordinationStatus,
+  registerCoordinationDevice,
+} from "../src/orchestration/remote-ownership.mjs";
+import {
+  listChangeRequests,
+  recordReviewBlocker,
+  resolveChangeRequest,
+  reviewChangeRequest,
+  steerWorkflow,
+} from "../src/orchestration/change-governance.mjs";
+import {
+  claimTeamTask,
+  createTeamTask,
+  getTeamTask,
+  listTeamMessages,
+  listTeamTasks,
+  recordTaskEvidence,
+  sendTeamMessage,
+} from "../src/orchestration/task-board.mjs";
+import { approvePlan, importPlan, loadPlanApproval } from "../src/orchestration/plan-state.mjs";
+import { statusReport, writeWorkflowSummary } from "../src/orchestration/status.mjs";
+import { createSamplePlan, runWorkflow } from "../src/orchestration/workflow.mjs";
+import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtime.mjs";
+import {
+  buildArchivistPacket,
+  listArchivistRouteSuggestions,
+  resolveArchivistRouteSuggestion,
+  runArchivistRouter,
+} from "../src/ai/archivist-router.mjs";
+import {
+  buildAgentContext,
+  continuationDirective,
+  resumeReport,
+} from "../src/ai/context.mjs";
+import { matchSkills, resolvePromptVariant } from "../src/ai/skill-matcher.mjs";
+import { resolveInjectionPoint } from "../src/ai/injection.mjs";
+import { runInjectionHook } from "../src/ai/hooks.mjs";
+import { routeRequest } from "../src/ai/routing.mjs";
+import { runSuspicionReview } from "../src/ai/suspicion-review.mjs";
+import { runRepositoryGovernanceAudit } from "../src/capabilities/repository-governance.mjs";
+import { scopeGuard } from "../src/capabilities/scope-guard.mjs";
+import {
   annotationStats,
   appendAnnotation,
   readAnnotations,
-  buildArchivistPacket,
-  buildAgentContext,
-  cleanupParallelAgentRun,
-  closeParallelAgentRun,
-  retryParallelAgentRun,
-  computeImpact,
-  computeZoneTests,
-  listRepoTests,
-  continuationDirective,
-  createSamplePlan,
-  errorProtocolOf,
-  formatErrorInline,
-  createTeamTask,
-  approvePlan,
-  claimTeamTask,
-  coordinationStatus,
-  getTeamTask,
-  importPlan,
-  installAdapter,
-  initRuntime,
-  loadPlanApproval,
-  listArchivistRouteSuggestions,
-  listParallelAgentRuns,
+} from "../src/infra/annotation-log.mjs";
+import { computeImpact, computeZoneTests, listRepoTests } from "../src/infra/dependency-graph.mjs";
+import { errorProtocolOf, formatErrorInline } from "../src/infra/error-protocol.mjs";
+import { verifyLedger } from "../src/infra/ledger.mjs";
+import { listPromptPack, renderPromptPackEntry } from "../src/infra/prompt-pack.mjs";
+import { scanProjectRules } from "../src/infra/rule-scanner.mjs";
+import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
+import {
+  DEFAULT_PACKAGE_NAME,
   loadHelixConfig,
-  listTeamTasks,
-  matchSkills,
-  parallelAgentStatus,
-  prepareTaskHandoff,
-  pushTaskHandoff,
-  listTeamMessages,
-  listChangeRequests,
-  listPromptPack,
+  writeDefaultHelixConfig,
+} from "../src/infra/runtime-config.mjs";
+import { readJson } from "../src/infra/runtime-store.mjs";
+import {
   listRuntimeStateBackups,
-  readJson,
-  recordReviewBlocker,
-  recordTaskEvidence,
-  registerCoordinationDevice,
-  renderPromptPackEntry,
-  resolvePromptVariant,
-  resolveInjectionPoint,
-  resolveArchivistRouteSuggestion,
-  resolveChangeRequest,
   restoreRuntimeStateBackup,
-  resumeReport,
-  reviewChangeRequest,
-  runArchivistRouter,
-  runDoctor,
-  routeRequest,
-  runInjectionHook,
-  runParallelAgents,
-  runRepositoryGovernanceAudit,
-  runWorkflowNode,
-  runNextTask,
-  runSuspicionReview,
-  runWorkflow,
-  scopeGuard,
-  sendTeamMessage,
-  scanProjectRules,
-  statusReport,
-  steerWorkflow,
-  takeoverTaskOwnership,
-  uninstallAdapter,
-  verifyLedger,
   verifyConfigBaseline,
   verifyRuntimeState,
-  restoreAdapterBackup,
   writeConfigBaseline,
-  writeDefaultHelixConfig,
   writeRuntimeStateBackup,
-  writeWorkflowSummary,
-} from "../src/helix-core.mjs";
+} from "../src/infra/security.mjs";
 
 function parseArgs(argv) {
   const args = { _: [] };
