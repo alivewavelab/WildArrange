@@ -3,7 +3,7 @@
  * 路由复盘标注只写 annotations，不改配置或路由表。
  */
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
@@ -11,7 +11,7 @@ import { startDashboardServer } from "../src/interface/dashboard.mjs";
 import { runInjectionHook } from "../src/ai/hooks.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
-import { resolveHelixPath } from "../src/infra/runtime-store.mjs";
+import { readJson, resolveHelixPath } from "../src/infra/runtime-store.mjs";
 
 async function withTempDir(fn) {
   const baseDir = path.join(process.cwd(), ".tmp");
@@ -88,6 +88,11 @@ test("decisions and ops panels serve read-only view models", async () => {
       assert.match(html, /决策面板/);
       assert.match(html, /运维面板/);
       assert.match(html, /loadPanels/);
+      assert.match(html, /WildArrange 驾驶舱/);
+      assert.match(html, /data-view-panel="overview"/);
+      assert.match(html, /当前任务/);
+      assert.match(html, /运行下一任务/);
+      assert.doesNotMatch(html, />Run next</);
     });
   });
 });
@@ -113,6 +118,14 @@ test("route review panel links full prompt, route result, tool activity, and hum
     await runInjectionHook(dir, {
       hook_event_name: "UserPromptSubmit",
       prompt: "新增一个登录页面，并检查手机端体验",
+      cwd: dir,
+      session_id: "route-review-session",
+    });
+    await runInjectionHook(dir, {
+      hook_event_name: "PostToolUse",
+      tool_name: "Edit",
+      tool_input: { file_path: "src/login.mjs", apiKey: "must-not-leak" },
+      tool_response: { ok: true },
       cwd: dir,
       session_id: "route-review-session",
     });
@@ -145,9 +158,39 @@ test("route review panel links full prompt, route result, tool activity, and hum
       assert.equal(reviewed.reviewed, 1);
       assert.equal(reviewed.confirmed, 1);
 
+      const stop = await runInjectionHook(dir, {
+        hook_event_name: "Stop",
+        cwd: dir,
+        session_id: "route-review-session",
+      });
+      assert.match(stop.output, /今日路由复盘/);
+      assert.match(stop.output, /人类可读报告/);
+
+      const report = await readJson(resolveHelixPath(dir, "reports", "routing", "latest.json"));
+      assert.equal(report.kind, "helix_daily_routing_review");
+      assert.equal(report.summary.total, 1);
+      assert.equal(report.summary.confirmed, 1);
+      assert.equal(report.summary.toolCalls, 1);
+      assert.equal(report.decisions[0].inputText, "新增一个登录页面，并检查手机端体验");
+      assert.equal(report.decisions[0].tools[0].toolName, "Edit");
+      assert.equal(report.decisions[0].tools[0].input.apiKey, "[REDACTED]");
+
+      const readable = await readFile(resolveHelixPath(dir, "reports", "routing", "latest.md"), "utf8");
+      assert.match(readable, /^# Helix 路由每日复盘/m);
+      assert.match(readable, /## 一眼结论/);
+      assert.match(readable, /## 全部判断明细/);
+      assert.match(readable, /新增一个登录页面，并检查手机端体验/);
+      assert.match(readable, /后续工具：/);
+      assert.match(readable, /Edit → pass/);
+
+      const withDailyReport = await (await fetch(`${base}/api/panels/routes`, { cache: "no-store" })).json();
+      assert.equal(withDailyReport.dailyReport.summary.toolCalls, 1);
+      assert.match(withDailyReport.dailyReport.path, /\.helix\/reports\/routing\/\d{4}-\d{2}-\d{2}\.md/);
+
       const html = await (await fetch(`${base}/`, { cache: "no-store" })).text();
       assert.match(html, /路由复盘台/);
       assert.match(html, /routeReviewDate/);
+      assert.match(html, /今日自动复盘已生成/);
     }, { token: "review-token" });
   });
 });

@@ -22,7 +22,7 @@ import { pathAllowed } from "../infra/path-match.mjs";
 import { invokeCapability } from "../capabilities/gateway.mjs";
 import { resolveInjectionPoint } from "./injection.mjs";
 import { loadTaskState } from "../infra/task-state-store.mjs";
-import { routeRequest } from "./routing.mjs";
+import { routeRequest, writeDailyRoutingReview } from "./routing.mjs";
 import { scanProjectRules } from "../infra/rule-scanner.mjs";
 import { findRunnableTask } from "../orchestration/task-board.mjs";
 import { buildAgentContext, continuationDirective, resumeReport } from "./context.mjs";
@@ -103,6 +103,10 @@ export async function runInjectionHook(rootDir, input = {}) {
     }).catch((error) => ({ error: error.message }));
   } else if (event === "Stop") {
     facts.continuation = await continuationDirective(hookRootDir, { sessionId, source: "hook:stop" });
+    facts.routingReview = await writeDailyRoutingReview(hookRootDir, {
+      trigger: "hook:stop",
+      sessionId,
+    }).catch((error) => ({ status: "warn", reason: error instanceof Error ? error.message : String(error) }));
   }
 
   // 通用推送：在有"对话面"的事件里，把待人决策的事项主动注入，指示宿主 AI 直接问开发者。
@@ -583,6 +587,23 @@ function appendHookFacts(lines, facts) {
     lines.push(`- 原因：${facts.continuation.reason}`);
     lines.push(`- 下一命令：${facts.continuation.nextCommand || "(none)"}`);
     lines.push(`- 报告：${facts.continuation.reportMdPath}`);
+    lines.push("");
+  }
+  if (facts.routingReview) {
+    lines.push("## 今日路由复盘", "");
+    if (facts.routingReview.status === "warn" || facts.routingReview.status === "skipped") {
+      lines.push(`- 状态：${facts.routingReview.status}`);
+      lines.push(`- 原因：${facts.routingReview.reason || "(none)"}`);
+    } else {
+      lines.push(`- 今日判断：${facts.routingReview.summary.total} 次`);
+      lines.push(`- 已复盘：${facts.routingReview.summary.reviewed} 次`);
+      lines.push(`- 已发现问题：${facts.routingReview.summary.issues} 次`);
+      lines.push(`- 待人工复盘：${facts.routingReview.summary.unreviewed} 次`);
+      lines.push(`- 人类可读报告：${facts.routingReview.reportMdPath}`);
+      if (facts.routingReview.summary.issues > 0) {
+        lines.push("- 请主动提醒开发者查看问题判断，但不要自动修改路由规则。");
+      }
+    }
     lines.push("");
   }
   if (facts.digest) {

@@ -105,7 +105,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/orchestration/workflow.mjs`                               | Workflow 入口、样例计划生成                            |
 | **ai/**（AI 策略/prompt/技能匹配/hooks，只依赖 orchestration、capabilities、infra，且 capabilities 只能经 gateway） |  |
 | `src/ai/AGENTS.md`                                           | AI 策略、只读边、fallback 与上下文预算约束 |
-| `src/ai/routing.mjs`                                          | 请求路由与类别决策                                     |
+| `src/ai/routing.mjs`                                          | 请求路由、类别决策与 Stop Hook 每日可读复盘报告                 |
 | `src/ai/archivist-router.mjs`                                 | 档案路由员：routing packet、结构化记忆、路由建议              |
 | `src/ai/injection.mjs`                                        | 注入点解析、Agent 固定 Skill 绑定、项目 Skill 安全加载、Markdown / Skill 分级预算与按需（动态匹配）挂载 |
 | `src/ai/skill-matcher.mjs`                                    | Skill 匹配、优先级打分、提示词模型变体                       |

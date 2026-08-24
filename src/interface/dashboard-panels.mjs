@@ -8,7 +8,7 @@
 import { stat } from "node:fs/promises";
 import { loadHelixConfig } from "../infra/runtime-config.mjs";
 import { evaluateGateArming } from "../infra/gate-arming.mjs";
-import { resolveHelixPath } from "../infra/runtime-store.mjs";
+import { readJson, resolveHelixPath } from "../infra/runtime-store.mjs";
 import { inspectFileLock } from "../infra/file-lock.mjs";
 import { loadTaskState } from "../orchestration/plan-state.mjs";
 import { parallelAgentStatus } from "../orchestration/parallel-runtime.mjs";
@@ -19,9 +19,10 @@ import { appendAnnotation, readAnnotations } from "../infra/annotation-log.mjs";
 const ROUTE_REVIEW_CATEGORIES = ["confirmed", "rule_wrong", "case_wrong"];
 
 export async function buildRouteReviewPanelViewModel(rootDir, { date = localDate(), limit = 100 } = {}) {
-  const [{ records, skippedLines }, annotations] = await Promise.all([
-    readDecisions(rootDir, { filter: (record) => typeof record.ts === "string" && record.ts.startsWith(date) }),
+  const [{ records, skippedLines }, annotations, dailyReport] = await Promise.all([
+    readDecisions(rootDir, { filter: (record) => typeof record.ts === "string" && localDate(record.ts) === date }),
     readAnnotations(rootDir),
+    readJson(resolveHelixPath(rootDir, "reports", "routing", `${date}.json`), null),
   ]);
   const latestAnnotation = new Map();
   for (const annotation of annotations.records) latestAnnotation.set(annotation.decisionId, annotation);
@@ -72,6 +73,12 @@ export async function buildRouteReviewPanelViewModel(rootDir, { date = localDate
     reviewed: reviewed.length,
     confirmed: reviewed.filter((route) => route.review.category === "confirmed").length,
     issues: reviewed.filter((route) => ["rule_wrong", "case_wrong"].includes(route.review.category)).length,
+    dailyReport: dailyReport?.kind === "helix_daily_routing_review" ? {
+      generatedAt: dailyReport.generatedAt,
+      summary: dailyReport.summary,
+      patterns: dailyReport.patterns || [],
+      path: `.helix/reports/routing/${date}.md`,
+    } : null,
     skippedLines,
     routes: selected,
   };
@@ -87,8 +94,10 @@ export async function annotateRouteDecision(rootDir, { decisionId, category, rea
   return appendAnnotation(rootDir, { decisionId, category, reason, author: "dashboard" });
 }
 
-function localDate() {
-  return new Intl.DateTimeFormat("en-CA").format(new Date());
+function localDate(value = new Date()) {
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return new Intl.DateTimeFormat("en-CA").format(parsed);
 }
 
 export async function buildDecisionsPanelViewModel(rootDir, { limit = 20 } = {}) {
@@ -149,6 +158,7 @@ export function renderPanelsHtml() {
         <div><div class="eyebrow">ROUTER FLIGHT RECORDER</div><h2>路由复盘台</h2><div class="muted">逐条审查原始请求、路由判断和后续工具活动</div></div>
         <div class="toolbar"><input id="routeReviewDate" type="date"><button id="routeReviewRefresh">查看当天</button></div>
       </div>
+      <div id="routeReviewDaily" class="route-daily-summary"></div>
       <div id="routeReviewStats" class="route-review-stats"></div>
       <div id="routeReviews" class="route-review-list"><span class="muted">loading</span></div>
     </section>
@@ -192,6 +202,10 @@ export const PANELS_SCRIPT = `
         + "</article>";
     }
     function renderRouteReviews(payload) {
+      const daily = payload.dailyReport;
+      el("routeReviewDaily").innerHTML = daily
+        ? '<strong>今日自动复盘已生成</strong><span>问题 ' + daily.summary.issues + ' · 待人工 ' + daily.summary.unreviewed + ' · 工具 ' + daily.summary.toolCalls + '</span><code>' + esc(daily.path) + '</code>'
+        : '<span class="muted">IDE 会话结束时会自动生成当天中文复盘报告</span>';
       el("routeReviewStats").innerHTML = '<span><b>' + payload.total + '</b> 次判断</span><span><b>' + payload.reviewed + '</b> 已复盘</span><span class="completed"><b>' + payload.confirmed + '</b> 正确</span><span class="failed"><b>' + payload.issues + '</b> 有问题</span>';
       el("routeReviews").innerHTML = payload.routes.length ? payload.routes.map(renderRouteReview).join("") : '<div class="route-empty">当天还没有路由判断记录</div>';
     }

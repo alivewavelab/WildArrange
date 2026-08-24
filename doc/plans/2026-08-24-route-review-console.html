@@ -10,7 +10,7 @@
 </head>
 <body><main>
   <h1>路由复盘台实施方案</h1>
-  <div class="sub">状态：已实施并通过验收 · 目标：每天能看见每次路由为何发生，并人工标记问题。</div>
+  <div class="sub">状态：已实现并通过全量测试 · 目标：每天能看见每次路由为何发生，Stop Hook 自动产出人类可读复盘。</div>
   <div class="flow">
     <div class="card p0"><b>输入</b><br>用户原文、会话 ID</div><div class="arrow">→</div>
     <div class="card p0"><b>判断</b><br>规则命中、语义第二意见、最终路线</div><div class="arrow">→</div>
@@ -20,6 +20,7 @@
     <div class="card p0"><b>P0 · Dashboard</b><br>日期筛选、路由卡片、工具时间线、正确/规则错/个案错标注。</div>
     <div class="card p0"><b>P0 · 数据</b><br>决策日志保留完整路由输入与结构化结果；工具参数只留安全摘要。</div>
     <div class="card p1"><b>P1 · 复盘 Skill</b><br>BaiZe 只读分析已标注记录，提出规则改进建议，不自动修改 routes.json。</div>
+    <div class="card p0"><b>P0 · 主动触发</b><br>IDE 会话停止时自动生成当日中文 Markdown：先结论，再问题、待复盘项和重复模式。</div>
     <div class="card p1"><b>P1 · 验收</b><br>API、坏行降级、写接口安全、Skill 清单、全量测试和 npm 包体预检。</div>
   </div>
 </main></body></html>

@@ -283,142 +283,134 @@ function renderDashboardHtml(options = {}) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${PRODUCT_NAME} Runtime</title>
+  <title>${PRODUCT_NAME} 驾驶舱</title>
   <style>
     :root {
-      color-scheme: light;
-      --bg: #f6f7f9;
-      --panel: #ffffff;
-      --ink: #1d2430;
-      --muted: #667085;
-      --line: #d9dee7;
-      --good: #0f8a5f;
-      --bad: #b42318;
-      --warn: #b54708;
-      --accent: #1457d9;
-      --soft: #eef4ff;
+      --ink: #17211d; --muted: #65706a; --paper: #f4f0e7; --panel: #fffdf7;
+      --forest: #173d32; --forest-2: #245647; --mint: #bfe6cf; --signal: #ff6b42;
+      --gold: #e8b85c; --line: rgba(23,33,29,.13); --good: #278052; --bad: #b43b2f;
+      --warn: #a96c12; --shadow: 0 18px 58px rgba(36,44,38,.1); --radius: 20px;
     }
     * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--ink);
-      font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-    header {
-      padding: 18px 24px;
-      border-bottom: 1px solid var(--line);
-      background: var(--panel);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 16px;
-    }
-    h1 { font-size: 18px; margin: 0; }
-    main { padding: 20px 24px 28px; max-width: 1280px; margin: 0 auto; }
-    .grid { display: grid; gap: 14px; }
-    .metrics { grid-template-columns: repeat(8, minmax(120px, 1fr)); }
-    .two { grid-template-columns: minmax(0, 1.35fr) minmax(360px, 0.65fr); align-items: start; }
-    section, .metric {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-    }
-    section { padding: 14px; }
-    .metric { padding: 12px; min-height: 70px; }
+    html { background: var(--paper); }
+    body { margin: 0; min-width: 320px; overflow-x:hidden; color: var(--ink); background: radial-gradient(circle at 74% 9%, rgba(232,184,92,.18), transparent 30rem), var(--paper); font: 14px/1.55 "PingFang SC", "Hiragino Sans GB", sans-serif; -webkit-font-smoothing: antialiased; }
+    button, input, textarea { font: inherit; }
+    button { color: inherit; }
+    .app { display: grid; grid-template-columns: 242px minmax(0,1fr); min-height: 100vh; }
+    .rail { position: sticky; top: 0; height: 100vh; padding: 28px 22px; color: #eef7f0; background: linear-gradient(rgba(255,255,255,.026) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.026) 1px,transparent 1px),var(--forest); background-size: 22px 22px; overflow: hidden; }
+    .rail::after { content: ""; position: absolute; width: 190px; height: 190px; right: -92px; bottom: 82px; border: 1px solid rgba(191,230,207,.2); border-radius: 50%; box-shadow: 0 0 0 24px rgba(191,230,207,.025),0 0 0 48px rgba(191,230,207,.025); }
+    .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 42px; }
+    .mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 13px; color: var(--forest); background: var(--mint); font: 800 20px/1 "Iowan Old Style",Georgia,serif; transform: rotate(-5deg); }
+    .brand strong { display: block; font: 700 17px/1.1 "Iowan Old Style",Georgia,serif; }
+    .brand small { display: block; margin-top: 4px; color: #a9c6b7; font-size: 10px; letter-spacing: .14em; }
+    .nav-label,.eyebrow { color: #91b2a2; font-size: 10px; font-weight: 700; letter-spacing: .17em; text-transform: uppercase; }
+    .nav { display: grid; gap: 8px; margin-top: 13px; }
+    .nav button { display: flex; align-items: center; gap: 11px; width: 100%; padding: 11px 12px; border: 0; border-radius: 12px; color: #bcd0c6; background: transparent; text-align: left; cursor: pointer; transition: .2s ease; }
+    .nav button:hover { color: #fff; background: rgba(255,255,255,.06); transform: translateX(2px); }
+    .nav button.active { color: #fff; background: rgba(191,230,207,.13); box-shadow: inset 0 0 0 1px rgba(191,230,207,.12); }
+    .nav svg { width: 18px; height: 18px; stroke-width: 1.8; }
+    .rail-foot { position: absolute; left: 22px; right: 22px; bottom: 24px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,.1); color: #a9c6b7; font-size: 11px; }
+    .rail-foot i,.server-dot { display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: #68d59e; box-shadow: 0 0 0 5px rgba(104,213,158,.1); }
+    .shell { min-width: 0; }
+    .topbar { display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 24px clamp(24px,4vw,64px) 0; }
+    .crumb { color: var(--muted); font-size: 12px; }
+    .crumb b { color: var(--ink); }
+    .top-actions { display: flex; align-items: center; gap: 9px; }
+    .status-pill { display: flex; align-items: center; padding: 8px 12px; border: 1px solid var(--line); border-radius: 99px; background: rgba(255,253,247,.68); font-size: 11px; }
+    main { padding: 30px clamp(24px,4vw,64px) 64px; }
+    .view { display: none; }
+    .view.active { display: block; animation: rise .38s both; }
+    .hero { display: grid; grid-template-columns: minmax(0,1.35fr) minmax(250px,.65fr); gap: 28px; align-items: end; margin-bottom: 30px; }
+    h1 { max-width: 780px; margin: 8px 0 12px; font: 700 clamp(34px,4.2vw,62px)/1.04 "Songti SC","STSong",serif; letter-spacing: -.045em; }
+    .hero p { max-width: 680px; margin: 0; color: var(--muted); line-height: 1.8; }
+    .hero-stamp { justify-self: end; width: min(100%,320px); padding: 20px 22px; border: 1px solid var(--line); border-radius: var(--radius); background: rgba(255,253,247,.68); box-shadow: 0 12px 38px rgba(62,72,65,.06); }
+    .hero-stamp strong { display: block; margin: 5px 0 3px; font: 700 31px/1 "Iowan Old Style",Georgia,serif; }
+    .hero-stamp small { color: var(--muted); }
+    .pipeline { display: grid; grid-template-columns: repeat(6,1fr); gap: 7px; padding: 18px 20px; margin-bottom: 22px; border-radius: var(--radius); color: #fff; background: var(--forest); box-shadow: var(--shadow); }
+    .step { position: relative; min-width: 0; padding: 9px 8px 8px; opacity: .48; }
+    .step:not(:last-child)::after { content:""; position:absolute; top:18px; right:-7px; width:14px; height:1px; background:rgba(255,255,255,.22); }
+    .step-head { display:flex; align-items:center; gap:8px; margin-bottom:9px; }
+    .dot { width:9px; height:9px; border:2px solid #6e8d7f; border-radius:50%; }
+    .step.done,.step.active { opacity: 1; }
+    .step.done .dot { border-color:var(--mint); background:var(--mint); box-shadow:0 0 0 5px rgba(191,230,207,.1); }
+    .step.active .dot { border-color:var(--gold); background:var(--gold); box-shadow:0 0 0 5px rgba(232,184,92,.13); }
+    .step b { display:block; overflow:hidden; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
+    .step small { color:#9ab7a8; font-size:9px; letter-spacing:.05em; }
+    .dashboard-grid { display:grid; grid-template-columns:minmax(0,1.42fr) minmax(280px,.58fr); gap:22px; align-items:start; }
+    .stack { display:grid; gap:22px; }
+    section,.metric { border:1px solid var(--line); border-radius:var(--radius); background:rgba(255,253,247,.88); box-shadow:0 14px 46px rgba(52,61,55,.06); }
+    section { padding:20px 22px; }
+    .panel-head { display:flex; align-items:center; justify-content:space-between; gap:14px; margin-bottom:14px; }
+    h2 { margin:0; font:700 19px/1.2 "Songti SC","STSong",serif; }
+    h3 { margin:0 0 10px; font-size:13px; }
+    .label { color:var(--muted); font-size:11px; }
+    .value { margin-top:3px; font:700 25px/1 "Iowan Old Style",Georgia,serif; }
+    .metrics { display:grid; grid-template-columns:repeat(4,minmax(100px,1fr)); gap:10px; margin-bottom:22px; }
+    .metric { padding:14px; box-shadow:none; }
+    .task-list { display:grid; gap:1px; margin:0 -22px -20px; }
+    .task-card { display:grid; grid-template-columns:52px minmax(0,1fr) auto; gap:15px; align-items:center; padding:18px 22px; border-top:1px solid var(--line); background:transparent; }
+    .task-id { display:grid; place-items:center; width:45px; height:45px; border:1px solid var(--line); border-radius:14px; color:var(--forest); background:#eef3ec; font:700 12px/1 "Iowan Old Style",Georgia,serif; }
+    .task-title { margin-bottom:5px; font-weight:700; }
+    .task-meta { color:var(--muted); font-size:11px; }
+    .pill,.status-badge { display:inline-flex; align-items:center; padding:4px 8px; border-radius:99px; color:var(--forest-2); background:#e5f3e9; font-size:10px; font-weight:700; }
+    .task-detail { grid-column:2/-1; display:none; padding:12px 0 2px; }
+    .task-card.expanded .task-detail { display:block; }
+    .attention-panel { color:#fff; background:var(--signal); border:0; }
+    .attention-panel h2 { margin:8px 0 7px; font-size:21px; }
+    .attention-panel .muted { color:rgba(255,255,255,.78); }
+    .attention-panel .eyebrow { color:rgba(255,255,255,.7); }
+    .attention-panel button { width:100%; margin-top:15px; color:var(--signal); background:#fff; border-color:#fff; font-weight:800; }
+    .health-row { display:flex; justify-content:space-between; align-items:center; padding:12px 0; border-top:1px solid var(--line); font-size:11px; }
+    .health-row:first-child { border-top:0; }
+    .health-row b { color:var(--good); }
+    .grid { display:grid; gap:14px; }
+    .two { grid-template-columns:minmax(0,1.35fr) minmax(300px,.65fr); align-items:start; }
+    .ops { grid-template-columns:repeat(3,minmax(220px,1fr)); }
+    .op-block { min-width:0; padding:15px; border:1px solid var(--line); border-radius:15px; background:#f8f5ed; }
     .label { color: var(--muted); font-size: 12px; }
-    .value { font-size: 24px; font-weight: 650; margin-top: 4px; }
-    h2 { font-size: 14px; margin: 0 0 12px; }
     table { width: 100%; border-collapse: collapse; }
     th, td { text-align: left; border-bottom: 1px solid var(--line); padding: 9px 8px; vertical-align: top; }
     th { color: var(--muted); font-weight: 600; font-size: 12px; }
-    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    .pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 8px; background: #eef2ff; color: var(--accent); font-size: 12px; }
+    code,pre,textarea { font-family:"SFMono-Regular",Menlo,Consolas,monospace; }
     .completed { color: var(--good); }
     .failed { color: var(--bad); }
     .pending, .verifying, .in_progress, .review_blocked, .needs_user_decision { color: var(--warn); }
     .muted { color: var(--muted); }
-    pre {
-      margin: 0;
-      overflow: auto;
-      white-space: pre-wrap;
-      word-break: break-word;
-      background: #f1f3f7;
-      border-radius: 6px;
-      padding: 10px;
-      max-height: 460px;
-    }
+    pre { margin:0; overflow:auto; white-space:pre-wrap; word-break:break-word; padding:12px; max-height:460px; border-radius:12px; background:#eef0ea; }
     .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .notice { min-height: 20px; color: var(--muted); font-size: 12px; }
-    .ops { grid-template-columns: repeat(3, minmax(220px, 1fr)); }
-    .op-block {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 12px;
-      background: #fbfcfe;
-      min-width: 0;
-    }
-    .op-block h3 { margin: 0 0 10px; font-size: 13px; }
     .form-row { display: flex; gap: 8px; margin-bottom: 8px; }
-    input, textarea {
-      width: 100%;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      padding: 7px 9px;
-      background: #fff;
-      color: var(--ink);
-      font: inherit;
-      min-width: 0;
-    }
-    textarea { min-height: 92px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
-    button {
-      border: 1px solid var(--line);
-      background: #fff;
-      color: var(--ink);
-      border-radius: 6px;
-      padding: 7px 10px;
-      cursor: pointer;
-    }
-    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    input,textarea { width:100%; min-width:0; padding:9px 10px; border:1px solid var(--line); border-radius:10px; color:var(--ink); background:#fff; }
+    textarea { min-height:92px; resize:vertical; font-size:12px; }
+    button { padding:8px 11px; border:1px solid var(--line); border-radius:10px; color:var(--ink); background:#fff; cursor:pointer; transition:.18s ease; }
+    button:hover { transform:translateY(-1px); border-color:rgba(23,61,50,.35); }
+    button.primary { color:#fff; background:var(--signal); border-color:var(--signal); font-weight:700; }
     button:disabled { cursor: not-allowed; opacity: 0.45; }
     .actions { display: flex; gap: 6px; flex-wrap: wrap; min-width: 180px; }
     .actions button { padding: 5px 8px; font-size: 12px; }
-    .failure-box {
-      margin-top: 6px;
-      padding: 8px;
-      border-left: 3px solid var(--bad);
-      background: #fff4f2;
-      border-radius: 4px;
-      max-width: 360px;
-    }
-    .review-box {
-      margin-top: 6px;
-      padding: 8px;
-      border-left: 3px solid var(--accent);
-      background: var(--soft);
-      border-radius: 4px;
-      max-width: 360px;
-      font-size: 12px;
-    }
+    .failure-box { margin-top:6px; padding:9px; border-left:3px solid var(--bad); border-radius:8px; background:#fff0ec; max-width:420px; }
+    .review-box { margin-top:6px; padding:9px; border-left:3px solid var(--forest-2); border-radius:8px; background:#eaf2ed; max-width:420px; font-size:12px; }
     .review-box ul { margin: 6px 0 0 18px; padding: 0; }
     .route-review-shell {
       position: relative;
       overflow: hidden;
-      color: #edf4ff;
-      border: 1px solid #2c4263;
-      background: radial-gradient(circle at 88% -20%, #244f7d 0, transparent 42%), #101827;
-      box-shadow: 0 18px 55px rgba(16, 24, 39, 0.18);
+      color: #edf7f1;
+      border: 0;
+      background: radial-gradient(circle at 88% -20%, #2f6956 0, transparent 42%), var(--forest);
+      box-shadow: var(--shadow);
     }
     .route-review-shell::before { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .13; background-image: linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px); background-size: 28px 28px; }
     .route-review-shell > * { position: relative; }
     .route-review-head { display: flex; justify-content: space-between; gap: 18px; align-items: end; margin-bottom: 16px; }
     .route-review-head h2 { font-size: 22px; margin: 2px 0 3px; letter-spacing: -.02em; }
-    .route-review-head .muted { color: #9fb0c8; }
-    .route-review-head input { color-scheme: dark; background: #17243a; color: #edf4ff; border-color: #3d526f; }
-    .route-review-head button { background: #d7ff53; border-color: #d7ff53; color: #142012; font-weight: 700; }
-    .eyebrow { color: #d7ff53; letter-spacing: .14em; font: 700 10px/1.2 ui-monospace, monospace; }
+    .route-review-head .muted { color: #a9c6b7; }
+    .route-review-head input { color-scheme:dark; background:#21483c; color:#edf7f1; border-color:#4a7465; }
+    .route-review-head button { color:var(--forest); background:var(--mint); border-color:var(--mint); font-weight:700; }
+    .route-review-shell .eyebrow { color:var(--mint); }
     .route-review-stats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
     .route-review-stats span { padding: 6px 10px; border: 1px solid #354963; border-radius: 999px; background: rgba(13, 23, 38, .75); }
+    .route-daily-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 14px 0 10px; padding: 10px 12px; border: 1px solid #355a69; border-radius: 10px; background: rgba(20, 51, 62, .7); }
+    .route-daily-summary code { color: var(--mint); }
     .route-review-list { display: grid; gap: 10px; max-height: 760px; overflow: auto; padding-right: 4px; }
     .route-review-card { border: 1px solid #30435d; border-left: 4px solid #6685ac; border-radius: 8px; padding: 13px; background: rgba(13, 23, 38, .92); }
     .route-review-card.route-ok { border-left-color: #51d6a6; }
@@ -426,11 +418,11 @@ function renderDashboardHtml(options = {}) {
     .route-review-meta { display: flex; gap: 10px; flex-wrap: wrap; color: #8fa3bf; font-size: 11px; }
     .route-request { margin: 10px 0; font-size: 16px; font-weight: 650; color: #fff; white-space: pre-wrap; }
     .route-result { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
-    .route-result strong { padding: 4px 9px; border-radius: 5px; color: #142012; background: #d7ff53; text-transform: uppercase; }
+    .route-result strong { padding:4px 9px; border-radius:5px; color:var(--forest); background:var(--mint); text-transform:uppercase; }
     .route-result span, .signal-chip { padding: 3px 7px; border: 1px solid #405675; border-radius: 5px; color: #c5d3e7; font-size: 12px; }
     .route-reason, .route-semantic { margin-top: 8px; color: #aebed4; font-size: 12px; }
     .signal-row { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 6px; }
-    .signal-chip { border-color: #596b2f; color: #d7ff53; }
+    .signal-chip { border-color:#618b64; color:var(--mint); }
     .route-tools { margin-top: 10px; border-top: 1px solid #293b55; padding-top: 9px; }
     .route-tools summary { cursor: pointer; color: #c8d6e8; }
     .route-tool { margin-top: 7px; padding: 8px; border-radius: 5px; background: #16243a; font-size: 12px; }
@@ -438,7 +430,7 @@ function renderDashboardHtml(options = {}) {
     .route-tool pre { margin-top: 7px; background: #0d1726; color: #dce8f8; max-height: 180px; }
     .route-review-actions { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 12px; }
     .route-review-actions button { margin-left: 5px; background: transparent; border-color: #425976; color: #dbe7f7; font-size: 12px; }
-    .route-review-actions button:hover { border-color: #d7ff53; color: #d7ff53; }
+    .route-review-actions button:hover { border-color:var(--mint); color:var(--mint); }
     .review-state { color: #9fb0c8; font-size: 12px; }
     .route-empty { padding: 28px; text-align: center; border: 1px dashed #405675; color: #9fb0c8; }
     .failure-box pre {
@@ -447,121 +439,156 @@ function renderDashboardHtml(options = {}) {
       max-height: 160px;
       font-size: 12px;
     }
-    @media (max-width: 860px) {
-      .metrics, .two { grid-template-columns: 1fr; }
-      header { align-items: flex-start; flex-direction: column; }
-      .route-review-head, .route-review-actions { align-items: flex-start; flex-direction: column; }
-    }
+    .section-title { margin:0 0 18px; font:700 30px/1.1 "Songti SC","STSong",serif; }
+    .section-intro { margin:-8px 0 22px; color:var(--muted); }
+    .danger-count { display:inline-grid; place-items:center; min-width:20px; height:20px; padding:0 6px; margin-left:7px; border-radius:99px; color:#fff; background:var(--signal); font-size:10px; }
+    @keyframes rise { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+    @media (max-width: 980px) { .app{grid-template-columns:76px minmax(0,1fr)} .rail{padding-inline:17px}.brand-text,.nav span,.nav-label,.rail-foot{display:none}.nav button{justify-content:center;padding:12px 0}.hero,.dashboard-grid{grid-template-columns:1fr}.hero-stamp{justify-self:stretch;width:100%}.ops,.two{grid-template-columns:1fr} }
+    @media (max-width: 640px) { .app{display:block}.rail{position:static;width:100%;height:auto;padding:14px 18px}.rail::after{display:none}.brand{margin:0}.nav,.nav-label,.rail-foot{display:none}.topbar{padding:18px 16px 0}.status-pill,.top-actions .notice{display:none}main{padding:24px 16px 44px}h1{font-size:39px}.pipeline{grid-template-columns:repeat(3,minmax(0,1fr));overflow:hidden}.step:nth-child(3)::after{display:none}.step small{display:block;overflow:hidden;text-overflow:ellipsis}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.task-card{grid-template-columns:44px minmax(0,1fr)}.task-card>.status-badge{display:none}.panel-head{align-items:flex-start}.panel-head .primary{padding-inline:9px;font-size:12px}.route-review-head,.route-review-actions{align-items:flex-start;flex-direction:column} }
   </style>
 </head>
 <body>
-  <header>
-    <div>
-      <h1>${PRODUCT_NAME} Runtime</h1>
-      <div class="muted" id="subtitle">loading</div>
-    </div>
-    <div class="toolbar">
-      <span class="notice" id="notice"></span>
-      <button class="primary" id="runNext">Run next</button>
-      <button id="refresh">Refresh</button>
-    </div>
-  </header>
-  <main class="grid">
-    <div class="grid metrics" id="metrics"></div>
-    <section id="attentionSection">
-      <h2>Needs Attention / 待你处理</h2>
-      <div id="attention"></div>
-    </section>
-    <section>
-      <h2>Operations</h2>
-      <div class="grid ops">
-        <div class="op-block">
-          <h3>Task Claim</h3>
-          <div class="form-row">
-            <input id="claimTaskId" placeholder="T001 或留空认领下一个">
-            <input id="claimOwner" placeholder="${DEFAULT_EXECUTOR_AGENT}" value="${DEFAULT_EXECUTOR_AGENT}">
+  <div class="app">
+    <aside class="rail">
+      <div class="brand"><div class="mark">W</div><div class="brand-text"><strong>WildArrange</strong><small>本地智能驾驭系统</small></div></div>
+      <div class="nav-label">驾驶舱</div>
+      <nav class="nav" aria-label="主导航">
+        <button class="active" data-view="overview" data-label="总览"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg><span>总览</span></button>
+        <button data-view="operations" data-label="任务操作"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span>任务操作</span></button>
+        <button data-view="review" data-label="决策复盘"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 3v18h18"/><path d="M7 16l4-5 4 3 5-7"/></svg><span>决策复盘</span></button>
+        <button data-view="logs" data-label="运行与日志"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg><span>运行与日志</span></button>
+      </nav>
+      <div class="rail-foot"><i></i>本地服务正常 · 127.0.0.1</div>
+    </aside>
+
+    <div class="shell">
+      <header class="topbar">
+        <div class="crumb">项目 / <b>${PRODUCT_NAME}</b> / <span id="viewLabel">总览</span></div>
+        <div class="top-actions"><span class="notice" id="notice"></span><span class="status-pill"><i class="server-dot"></i><span id="gateStatus">正在读取质量门</span></span><button id="refresh">刷新</button></div>
+      </header>
+
+      <main>
+        <div class="view active" data-view-panel="overview">
+          <section class="hero" style="padding:0;border:0;background:transparent;box-shadow:none">
+            <div><div class="eyebrow">当前运行状态 · <span id="generatedAt">—</span></div><h1 id="heroTitle">正在读取任务状态。</h1><p id="heroText">正在连接本地 Helix 运行时，请稍候。</p></div>
+            <div class="hero-stamp"><div class="eyebrow">当前计划</div><strong id="planProgress">0 / 0</strong><small id="subtitle">正在加载</small></div>
+          </section>
+          <div class="pipeline" id="pipeline">
+            <div class="step" data-gate="worker"><div class="step-head"><i class="dot"></i><b>实现</b></div><small>WORKER</small></div>
+            <div class="step" data-gate="verify"><div class="step-head"><i class="dot"></i><b>验证</b></div><small>VERIFIER</small></div>
+            <div class="step" data-gate="scope"><div class="step-head"><i class="dot"></i><b>范围</b></div><small>SCOPE</small></div>
+            <div class="step" data-gate="review"><div class="step-head"><i class="dot"></i><b>复核</b></div><small>REVIEW</small></div>
+            <div class="step" data-gate="proof"><div class="step-head"><i class="dot"></i><b>验收</b></div><small>PROOF</small></div>
+            <div class="step" data-gate="checkpoint"><div class="step-head"><i class="dot"></i><b>归档</b></div><small>CHECKPOINT</small></div>
           </div>
-          <button id="claimTask">Claim</button>
-        </div>
-        <div class="op-block">
-          <h3>Task Create</h3>
-          <textarea id="taskJson">{"id":"T002","subject":"新增一个可验证任务","description":"追加计划内任务","blockedBy":["T001"],"worker_command":"node -e \\"process.exit(0)\\"","verify_commands":["node -e \\"process.exit(0)\\""]}</textarea>
-          <button id="createTask">Create</button>
-        </div>
-        <div class="op-block">
-          <h3>Team Message</h3>
-          <div class="form-row">
-            <input id="msgFrom" placeholder="${DEFAULT_LEAD_AGENT}" value="${DEFAULT_LEAD_AGENT}">
-            <input id="msgTo" placeholder="${DEFAULT_EXECUTOR_AGENT}" value="${DEFAULT_EXECUTOR_AGENT}">
-          </div>
-          <textarea id="msgBody">继续推进当前任务，完成后等待 verifier 与 review gate。</textarea>
-          <div class="form-row">
-            <button id="sendMessage">Send</button>
-            <button id="refreshInbox">Inbox</button>
+          <div class="dashboard-grid">
+            <div class="stack">
+              <section><div class="panel-head"><h2>当前任务</h2><button id="runNext" class="primary">运行下一任务</button></div><div class="task-list" id="tasks"></div></section>
+              <div class="metrics" id="metrics"></div>
+            </div>
+            <div class="stack">
+              <section class="attention-panel" id="attentionSection"><div class="eyebrow">需要你处理</div><h2 id="attentionTitle">当前没有异常</h2><div id="attention"></div><button data-jump="operations">查看任务操作</button></section>
+              <section><div class="panel-head"><h2>系统健康</h2><button data-jump="logs">查看详情</button></div><div id="healthSummary" class="muted">正在检查</div></section>
+            </div>
           </div>
         </div>
-      </div>
-    </section>
-    <div class="grid two">
-      <section>
-        <h2>Tasks</h2>
-        <div id="tasks"></div>
-      </section>
-      <section>
-        <h2>Latest Snapshot</h2>
-        <pre id="snapshot"></pre>
-      </section>
+
+        <div class="view" data-view-panel="operations">
+          <h1 class="section-title">任务操作</h1><p class="section-intro">创建、认领和推进任务；复杂操作集中在这里，避免干扰总览。</p>
+          <section><div class="grid ops">
+            <div class="op-block"><h3>认领任务</h3><div class="form-row"><input id="claimTaskId" placeholder="T001 或留空认领下一个"><input id="claimOwner" placeholder="${DEFAULT_EXECUTOR_AGENT}" value="${DEFAULT_EXECUTOR_AGENT}"></div><button id="claimTask">确认认领</button></div>
+            <div class="op-block"><h3>创建任务</h3><textarea id="taskJson">{"id":"T002","subject":"新增一个可验证任务","description":"追加计划内任务","blockedBy":["T001"],"worker_command":"node -e \\"process.exit(0)\\"","verify_commands":["node -e \\"process.exit(0)\\""]}</textarea><button id="createTask">创建任务</button></div>
+            <div class="op-block"><h3>发送团队消息</h3><div class="form-row"><input id="msgFrom" placeholder="${DEFAULT_LEAD_AGENT}" value="${DEFAULT_LEAD_AGENT}"><input id="msgTo" placeholder="${DEFAULT_EXECUTOR_AGENT}" value="${DEFAULT_EXECUTOR_AGENT}"></div><textarea id="msgBody">继续推进当前任务，完成后等待 verifier 与 review gate。</textarea><div class="form-row"><button id="sendMessage">发送</button><button id="refreshInbox">查看收件箱</button></div></div>
+          </div></section>
+          <div class="grid two" style="margin-top:22px"><section><div class="panel-head"><h2>变更请求</h2></div><div id="changes"></div></section><section><div class="panel-head"><h2>团队收件箱</h2></div><pre id="inbox"></pre></section></div>
+        </div>
+
+        <div class="view" data-view-panel="review">
+          <h1 class="section-title">决策复盘</h1><p class="section-intro">检查 Router 为什么这么判断，并用人工标注修正系统认知。</p>
+          <div class="stack">${renderPanelsHtml()}</div>
+        </div>
+
+        <div class="view" data-view-panel="logs">
+          <h1 class="section-title">运行与日志</h1><p class="section-intro">这里保留完整技术证据；日常使用无需逐条阅读。</p>
+          <div class="grid two"><section><div class="panel-head"><h2>最新快照</h2></div><pre id="snapshot"></pre></section><section><div class="panel-head"><h2>工作流摘要</h2><button id="generateSummary">重新生成</button></div><pre id="summary"></pre></section></div>
+          <section style="margin-top:22px"><div class="panel-head"><h2>可信账本</h2></div><pre id="ledger"></pre></section>
+        </div>
+      </main>
     </div>
-    <section>
-      <h2>ChangeRequests</h2>
-      <div id="changes"></div>
-    </section>
-    <section>
-      <h2>Team Inbox</h2>
-      <pre id="inbox"></pre>
-    </section>
-    <section>
-      <div class="toolbar" style="justify-content: space-between; margin-bottom: 10px;">
-        <h2 style="margin: 0;">Workflow Summary</h2>
-        <button id="generateSummary">Generate</button>
-      </div>
-      <pre id="summary"></pre>
-    </section>
-    <section>
-      <h2>Ledger</h2>
-      <pre id="ledger"></pre>
-    </section>
-    ${renderPanelsHtml()}
-  </main>
+  </div>
   <script>
     const DASHBOARD_TOKEN = ${JSON.stringify(dashboardToken)};
     const el = (id) => document.getElementById(id);
     const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+    const statusLabel = (status) => ({ completed:"已完成",pending:"待执行",in_progress:"执行中",verifying:"验证中",failed:"失败",review_blocked:"复核阻断",needs_user_decision:"等待决定" })[status] || status || "未知";
+    function switchView(name) {
+      document.querySelectorAll("[data-view-panel]").forEach((panel) => panel.classList.toggle("active", panel.dataset.viewPanel === name));
+      document.querySelectorAll(".nav [data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === name));
+      const source = document.querySelector('.nav [data-view="' + name + '"]');
+      el("viewLabel").textContent = source ? source.dataset.label : "总览";
+    }
+    function updatePipeline(task) {
+      const evidence = Array.isArray(task?.evidence) ? task.evidence : [];
+      const kinds = new Set(evidence.map((item) => item.kind));
+      const complete = task?.status === "completed";
+      const done = {
+        worker: complete || kinds.has("worker"),
+        verify: complete || task?.last_verify_result?.pass === true || evidence.some((item) => item.kind === "verifier" && item.pass),
+        scope: complete || kinds.has("scope_guard") || Boolean(task?.last_scope_result),
+        review: complete || task?.last_review_result?.pass === true,
+        proof: complete || Boolean(task?.acceptance_proof),
+        checkpoint: complete || Boolean(task?.checkpointPath || task?.checkpoint_path),
+      };
+      let activeAssigned = false;
+      document.querySelectorAll("#pipeline .step").forEach((step) => {
+        const isDone = done[step.dataset.gate] === true;
+        step.classList.toggle("done", isDone);
+        const active = !isDone && !activeAssigned && Boolean(task);
+        step.classList.toggle("active", active);
+        if (active) activeAssigned = true;
+      });
+    }
     async function loadState() {
       const response = await fetch("/api/state", { cache: "no-store" });
       const data = await response.json();
       const status = data.status || {};
       const work = status.work || {};
-      el("subtitle").textContent = [work.workId, status.planId, data.generatedAt].filter(Boolean).join(" | ");
+      const tasks = data.tasks || [];
+      const focusTask = tasks.find((task) => task.status !== "completed") || tasks[tasks.length - 1] || null;
+      const failed = (status.failed || 0) + (status.review_blocked || 0);
+      const waiting = (status.pending || 0) + (status.in_progress || 0) + (status.verifying || 0);
+      el("generatedAt").textContent = data.generatedAt ? new Date(data.generatedAt).toLocaleString("zh-CN", { hour12:false }) : "—";
+      el("planProgress").textContent = (status.completed ?? 0) + " / " + (status.total ?? 0);
+      el("subtitle").textContent = status.total ? "任务完成 · " + (data.attention?.total || 0) + " 项待处理" : "尚未导入计划";
+      el("gateStatus").textContent = status.gateArming?.armed ? "所有质量门已武装" : "质量门需要检查";
+      if (failed > 0) {
+        el("heroTitle").textContent = "任务遇到问题，需要你处理。";
+        el("heroText").textContent = "系统已停止继续放行。请查看待处理事项，修复后再重新运行。";
+      } else if (waiting > 0) {
+        el("heroTitle").textContent = "任务正在推进，一切有据可查。";
+        el("heroText").textContent = focusTask ? "当前正在处理：" + focusTask.subject + "。系统会依次经过实现、验证、范围检查和独立复核。" : "当前计划正在推进。";
+      } else if ((status.total || 0) > 0) {
+        el("heroTitle").textContent = "任务已完成，系统运行正常。";
+        el("heroText").textContent = "当前没有需要你处理的异常。最近一次任务已通过验证、范围检查与独立复核，可以安全进入下一项工作。";
+      } else {
+        el("heroTitle").textContent = "驾驶舱已就绪，等待第一项任务。";
+        el("heroText").textContent = "从 IDE 提出需求并导入计划后，这里会显示每一步进展和判断证据。";
+      }
+      updatePipeline(focusTask);
       const metrics = [
-        ["Total", status.total ?? 0, ""],
-        ["Completed", status.completed ?? 0, "completed"],
-        ["Pending", status.pending ?? 0, "pending"],
-        ["Verifying", status.verifying ?? 0, "verifying"],
-        ["Failed", status.failed ?? 0, "failed"],
-        ["Review Blocked", status.review_blocked ?? 0, "pending"],
-        ["Needs User", status.needs_user_decision ?? 0, "pending"],
-        ["Open Changes", status.openChanges ?? 0, "failed"],
+        ["全部任务", status.total ?? 0, ""],
+        ["已经完成", status.completed ?? 0, "completed"],
+        ["正在推进", waiting, "pending"],
+        ["需要处理", failed + (status.needs_user_decision || 0) + (status.openChanges || 0), "failed"],
       ];
       el("metrics").innerHTML = metrics.map(([label, value, cls]) => '<div class="metric"><div class="label">' + label + '</div><div class="value ' + cls + '">' + value + '</div></div>').join("");
-      const tasks = data.tasks || [];
-      el("tasks").innerHTML = tasks.length === 0 ? '<div class="muted">No tasks</div>' : '<table><thead><tr><th>ID</th><th>Status</th><th>Route</th><th>Category</th><th>Skills</th><th>Verify</th><th>Review</th><th>Failure</th><th>Controls</th></tr></thead><tbody>' + tasks.map((task) => {
-        const route = task.route_decision ? esc(task.route_decision.route + " -> " + task.route_decision.primaryAgent) : "";
-        const skills = Array.isArray(task.skills) ? task.skills.map((skill) => '<span class="pill">' + esc(skill) + '</span>').join(" ") : "";
-        return '<tr><td><strong>' + esc(task.id) + '</strong><br><span class="muted">' + esc(task.subject) + '</span></td><td class="' + esc(task.status) + '">' + esc(task.status) + '</td><td>' + route + '</td><td>' + esc(task.category) + '<br><span class="muted">' + esc(task.category_source) + '</span></td><td>' + skills + '</td><td><code>' + esc((task.verify_commands || []).join(" && ")) + '</code></td><td>' + reviewBox(task) + '</td><td>' + failureBox(task) + '</td><td>' + actionButtons(task) + '</td></tr>';
-      }).join("") + '</tbody></table>';
+      el("tasks").innerHTML = tasks.length === 0 ? '<div class="muted" style="padding:18px 22px;border-top:1px solid var(--line)">还没有任务</div>' : tasks.map((task) => {
+        const route = task.route_decision ? task.route_decision.route + " → " + task.route_decision.primaryAgent : "尚未路由";
+        return '<article class="task-card"><div class="task-id">' + esc(task.id) + '</div><div><div class="task-title">' + esc(task.subject) + '</div><div class="task-meta">' + esc(route) + ' · ' + (task.verify_commands || []).length + ' 条验证命令 · 已尝试 ' + esc(task.attempts || 0) + ' 次</div></div><span class="status-badge ' + esc(task.status) + '">' + esc(statusLabel(task.status)) + '</span><div class="task-detail"><div class="grid two"><div><div class="label">验证与复核</div>' + reviewBox(task) + '</div><div><div class="label">失败与操作</div>' + failureBox(task) + actionButtons(task) + '</div></div></div></article>';
+      }).join("");
       renderAttention(data.attention || null);
       renderChanges(data.changes || []);
+      el("healthSummary").innerHTML = '<div class="health-row"><span>配置基线</span><b>' + (status.gateArming?.armed ? "正常" : "需检查") + '</b></div><div class="health-row"><span>可信账本</span><b>已连接</b></div><div class="health-row"><span>IDE 适配器</span><b>查看体检</b></div>';
       el("snapshot").textContent = JSON.stringify(data.latestSnapshot || {}, null, 2);
       el("summary").textContent = JSON.stringify(data.summary || { status: "No summary generated" }, null, 2);
       el("ledger").textContent = JSON.stringify(data.ledger || [], null, 2);
@@ -572,9 +599,11 @@ function renderDashboardHtml(options = {}) {
     }
     function renderAttention(attention) {
       if (!attention || attention.total === 0) {
-        el("attention").innerHTML = '<div class="muted">没有等待你处理的事项 / Nothing is waiting on you.</div>';
+        el("attentionTitle").textContent = "当前没有异常";
+        el("attention").innerHTML = '<div class="muted">所有任务都在计划内运行，你现在不需要做任何处理。</div>';
         return;
       }
+      el("attentionTitle").innerHTML = "有 " + esc(attention.total) + " 项需要决定";
       const blocks = [];
       for (const change of attention.openChanges || []) {
         blocks.push('<div class="failure-box"><strong>越界审批 ' + esc(change.id) + '</strong> · 任务 ' + esc(change.taskId) +
@@ -599,7 +628,7 @@ function renderDashboardHtml(options = {}) {
     }
     function renderChanges(changes) {
       const openChanges = changes.filter((change) => change.status === "open");
-      el("changes").innerHTML = openChanges.length === 0 ? '<div class="muted">No open change requests</div>' : '<table><thead><tr><th>ID</th><th>Task</th><th>Denied Paths</th><th>Report</th></tr></thead><tbody>' + openChanges.map((change) => {
+      el("changes").innerHTML = openChanges.length === 0 ? '<div class="muted">没有待处理的变更请求</div>' : '<table><thead><tr><th>编号</th><th>任务</th><th>越界路径</th><th>报告</th></tr></thead><tbody>' + openChanges.map((change) => {
         return '<tr><td><strong>' + esc(change.id) + '</strong></td><td>' + esc(change.taskId) + '<br><span class="muted">' + esc(change.subject) + '</span></td><td>' + esc((change.deniedPaths || []).join(", ")) + '</td><td><span class="muted">' + esc(change.reportMdPath || "") + '</span></td></tr>';
       }).join("") + '</tbody></table>';
     }
@@ -624,13 +653,13 @@ function renderDashboardHtml(options = {}) {
       return '<div class="actions">' + buttons.join("") + '</div>';
     }
     function failureBox(task) {
-      if (!task.last_failure) return '<span class="muted">None</span>';
+      if (!task.last_failure) return '<span class="muted">没有失败记录</span>';
       const report = task.last_failure.reportMdPath ? '<div class="muted">' + esc(task.last_failure.reportMdPath) + '</div>' : "";
       return '<div class="failure-box"><pre>' + esc(task.last_failure.retryHint || task.last_failure.reason) + '</pre>' + report + '</div>';
     }
     function reviewBox(task) {
       const review = task.last_review_result;
-      if (!review) return '<span class="muted">Not run</span>';
+      if (!review) return '<span class="muted">尚未运行独立复核</span>';
       const lanes = (review.lanes || []).map((lane) => '<li><strong>' + esc(lane.status) + '</strong> ' + esc(lane.name) + ' · ' + esc(lane.agent) + '</li>').join("");
       const report = review.reportMdPath ? '<div class="muted">' + esc(review.reportMdPath) + '</div>' : "";
       return '<div class="review-box"><strong>' + (review.pass ? 'PASS' : 'FAIL') + '</strong><ul>' + lanes + '</ul>' + report + '</div>';
@@ -672,8 +701,9 @@ function renderDashboardHtml(options = {}) {
         return null;
       }
     }
+    document.querySelectorAll(".nav [data-view], [data-jump]").forEach((button) => button.addEventListener("click", () => switchView(button.dataset.view || button.dataset.jump)));
     el("refresh").addEventListener("click", loadState);
-    el("runNext").addEventListener("click", () => runAction("Run next", () => postJson("/api/run-next", {})));
+    el("runNext").addEventListener("click", () => runAction("运行下一任务", () => postJson("/api/run-next", {})));
     el("claimTask").addEventListener("click", () => {
       const taskId = el("claimTaskId").value.trim();
       const owner = el("claimOwner").value.trim() || "${DEFAULT_EXECUTOR_AGENT}";
@@ -703,7 +733,11 @@ function renderDashboardHtml(options = {}) {
     el("generateSummary").addEventListener("click", () => runQuiet("Generate summary", () => postJson("/api/summary", {})));
     el("tasks").addEventListener("click", (event) => {
       const button = event.target.closest("button[data-node]");
-      if (!button) return;
+      if (!button) {
+        const card = event.target.closest(".task-card");
+        if (card) card.classList.toggle("expanded");
+        return;
+      }
       const node = button.dataset.node;
       const taskId = button.dataset.task;
       runAction(node + " " + taskId, () => postJson("/api/node/" + encodeURIComponent(node), { taskId }));
