@@ -16,6 +16,7 @@ import { invokeCapability } from "../capabilities/gateway.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
 import { emitDecision } from "../infra/decision-log.mjs";
 import { buildErrorProtocol, capabilityModule } from "../infra/error-protocol.mjs";
+import { resolveTaskReportPath } from "../infra/runtime-store.mjs";
 import { applyVerifierEvidenceToCriteria, criteriaStatus } from "../infra/success-criteria.mjs";
 
 /**
@@ -139,7 +140,7 @@ function envelopeEvidencePath(envelope, planId, task) {
   // review 报告由 linear-runtime/admission 在 pipeline 返回后按固定路径写入；
   // 决策记录先给出约定路径，审计者按图索骥即可。
   if (envelope?.capability === "review" && planId && task?.id) {
-    return `.helix/reports/reviews/${planId}-${task.id}.md`;
+    return resolveTaskReportPath(".", "reviews", planId, task.id, "md");
   }
   return null;
 }

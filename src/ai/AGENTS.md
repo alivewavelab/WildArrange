@@ -5,7 +5,7 @@
 ## 负责
 
 - 请求路由、ArchivistRouter 和语义第二意见。
-- Prompt 注入、Skill 匹配与模型变体。
+- Prompt 注入、Skill 匹配与任务绑定。
 - Agent 上下文、会话恢复和生命周期 Hook 策略。
 
 ## 不负责
@@ -29,6 +29,7 @@
 - 无 LLM key 时必须 fallback，不阻断主线、Hook 或线性状态机。
 - Hook 崩溃/超时按宿主约定 fail-open 时，最终完成仍由 delivery pipeline 的质量门决定。
 - 动态 Skill 选择只能从配置的上界中做减法，不得通过请求文本加载未授权全文。
+- `task.skills` 只在真实接通的执行前公开宿主入口作为可信任务绑定；M1 的复核与 checkpoint 仍只使用各自静态 Skill，不宣称自动消费任务绑定。任务 Skill 必须经过 Prompt Pack manifest / 项目 Skill 安全解析、安装根/realpath/hash 校验、数量上限和字符预算，不得绕过加载器。
 - 截断必须显式报告，不能静默丢失上下文。
 
 ## 交付证据

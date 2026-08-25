@@ -119,7 +119,7 @@ test("delivery pipeline: runs verify -> scope -> review -> acceptance-proof -> c
     assert.match(result.summary, /存档/);
     assert.match(result.summary, /总耗时/);
 
-    const checkpoint = await readJson(resolveHelixPath(dir, "checkpoints", `${plan.id}-T001.json`));
+    const checkpoint = await readJson(resolveHelixPath(dir, "checkpoints", plan.id, "T001.json"));
     assert.equal(checkpoint.taskId, "T001");
   });
 });
@@ -145,7 +145,7 @@ test("delivery pipeline: stops before acceptance-proof/checkpoint when verify fa
     const verifyStep = result.steps.find((step) => step.capability === "verify");
     assert.equal(verifyStep.status, "fail");
 
-    const checkpointPath = resolveHelixPath(dir, "checkpoints", `${plan.id}-T001.json`);
+    const checkpointPath = resolveHelixPath(dir, "checkpoints", plan.id, "T001.json");
     await assert.rejects(() => readJson(checkpointPath));
   });
 });

@@ -35,11 +35,13 @@ import {
   steerWorkflow,
 } from "../src/orchestration/change-governance.mjs";
 import {
+  archiveAndDeleteTeamTask,
   claimTeamTask,
   createTeamTask,
   getTeamTask,
   listTeamMessages,
   listTeamTasks,
+  migrateTaskLedgerState,
   readyTeamTask,
   recordTaskEvidence,
   sendTeamMessage,
@@ -59,7 +61,7 @@ import {
   continuationDirective,
   resumeReport,
 } from "../src/ai/context.mjs";
-import { matchSkills, resolvePromptVariant } from "../src/ai/skill-matcher.mjs";
+import { matchSkills } from "../src/ai/skill-matcher.mjs";
 import { resolveInjectionPoint } from "../src/ai/injection.mjs";
 import { runInjectionHook } from "../src/ai/hooks.mjs";
 import { routeRequest } from "../src/ai/routing.mjs";
@@ -80,6 +82,7 @@ import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import {
   DEFAULT_PACKAGE_NAME,
   loadHelixConfig,
+  migrateRuntimeConfigState,
   writeDefaultHelixConfig,
 } from "../src/infra/runtime-config.mjs";
 import { readJson } from "../src/infra/runtime-store.mjs";
@@ -672,6 +675,8 @@ async function main() {
       console.log(JSON.stringify(await buildAgentContext(rootDir, {
         agent: args.agent && args.agent !== true ? args.agent : undefined,
         taskId: args.task && args.task !== true ? args.task : undefined,
+        planId: args.plan && args.plan !== true ? args.plan : undefined,
+        injectionPoint: args.point && args.point !== true ? args.point : undefined,
       }), null, 2));
       return;
     }
@@ -775,7 +780,19 @@ async function main() {
       }), null, 2));
       return;
     }
-    throw new Error("helix task requires list, get, claim, create, ready");
+    if (subcommand === "archive") {
+      if (!args.task || args.task === true) throw new Error("helix task archive requires --task <taskId>");
+      if (args.delete !== true) throw new Error("helix task archive requires explicit --delete confirmation");
+      const backup = await writeRuntimeStateBackup(rootDir, { reason: `pre-task-archive:${args.task}` });
+      console.log(JSON.stringify(await archiveAndDeleteTeamTask(rootDir, {
+        taskId: args.task,
+        planId: args.plan && args.plan !== true ? args.plan : undefined,
+        reason: args.reason && args.reason !== true ? args.reason : "user_archived",
+        backupId: backup.backupId,
+      }), null, 2));
+      return;
+    }
+    throw new Error("helix task requires list, get, claim, create, ready, or archive");
   }
 
   if (command === "team") {
@@ -876,7 +893,20 @@ async function main() {
       console.log(JSON.stringify(await restoreRuntimeStateBackup(rootDir, { backupId: args.backup }), null, 2));
       return;
     }
-    throw new Error("helix state requires backup, verify, list, or restore");
+    if (subcommand === "migrate") {
+      const backup = await writeRuntimeStateBackup(rootDir, { reason: "pre-state-migrate" });
+      const config = await migrateRuntimeConfigState(rootDir);
+      const tasks = await migrateTaskLedgerState(rootDir);
+      console.log(JSON.stringify({
+        kind: "runtime_state_migration",
+        status: "migrated",
+        backupId: backup.backupId,
+        config,
+        tasks,
+      }, null, 2));
+      return;
+    }
+    throw new Error("helix state requires backup, verify, list, restore, or migrate");
   }
 
   if (command === "doctor") {
@@ -916,30 +946,10 @@ async function main() {
         tools: Boolean(args.tools),
         routes: Boolean(args.routes),
       });
-      if (args.variant || args.provider || args.model) {
-        const variant = await resolvePromptVariant(rootDir, {
-          agent: args.agent && args.agent !== true ? args.agent : undefined,
-          provider: args.provider && args.provider !== true ? args.provider : undefined,
-          model: args.model && args.model !== true ? args.model : undefined,
-          variant: args.variant && args.variant !== true ? args.variant : undefined,
-        });
-        console.log(`${content.trim()}\n\n## 模型变体注入 / Model Variant\n\n${variant.content}\n`);
-      } else {
-        console.log(content);
-      }
+      console.log(content);
       return;
     }
-    if (subcommand === "variant") {
-      await initRuntime(rootDir);
-      console.log(JSON.stringify(await resolvePromptVariant(rootDir, {
-        agent: args.agent && args.agent !== true ? args.agent : undefined,
-        provider: args.provider && args.provider !== true ? args.provider : undefined,
-        model: args.model && args.model !== true ? args.model : undefined,
-        variant: args.variant && args.variant !== true ? args.variant : undefined,
-      }), null, 2));
-      return;
-    }
-    throw new Error("helix prompts requires list, show, or variant");
+    throw new Error("helix prompts requires list or show");
   }
 
   if (command === "skills") {

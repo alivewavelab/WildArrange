@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
@@ -8,6 +9,7 @@ import {
   extractImportSpecifiers,
   listMjsFiles,
   maskSource,
+  UNKNOWN_ZONE,
 } from "../src/infra/dependency-graph.mjs";
 
 /**
@@ -44,7 +46,6 @@ const ALLOWED_DEPS = {
 test("dependency boundary: zoned files only import allowed lower zones", async () => {
   const edges = await buildDependencyEdges(process.cwd());
   const violations = edges.filter((edge) => {
-    if (edge.sourceZone === "legacy") return false; // legacy files are unconstrained during migration
     if (edge.sourceZone === edge.targetZone) return false; // same-zone imports are always fine
     const allowed = ALLOWED_DEPS[edge.sourceZone] || [];
     return !allowed.includes(edge.targetZone);
@@ -56,6 +57,36 @@ test("dependency boundary: zoned files only import allowed lower zones", async (
       .join("\n");
     assert.fail(`Found ${violations.length} dependency boundary violation(s):\n${details}`);
   }
+});
+
+test("dependency boundary: unknown src top-level directories are rejected even without imports", async (t) => {
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), "wildarrange-unknown-zone-"));
+  t.after(() => rm(rootDir, { recursive: true, force: true }));
+  const unknownFile = path.join(rootDir, "src", "new-zone", "standalone.mjs");
+  await mkdir(path.dirname(unknownFile), { recursive: true });
+  await writeFile(unknownFile, "export const standalone = true;\n", "utf8");
+
+  assert.equal(classifyZone(path.join(rootDir, "src"), unknownFile), UNKNOWN_ZONE);
+  await assert.rejects(
+    buildDependencyEdges(rootDir),
+    (error) =>
+      error?.code === "UNKNOWN_SOURCE_ZONE"
+      && /runtime module is outside the five source zones/.test(error.message)
+      && error.message.includes("src/new-zone/standalone.mjs"),
+  );
+});
+
+test("dependency boundary: imports outside src remain outside the five-zone gate", async (t) => {
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), "wildarrange-outside-src-"));
+  t.after(() => rm(rootDir, { recursive: true, force: true }));
+  const infraFile = path.join(rootDir, "src", "infra", "reader.mjs");
+  const helperFile = path.join(rootDir, "test", "helper.mjs");
+  await mkdir(path.dirname(infraFile), { recursive: true });
+  await mkdir(path.dirname(helperFile), { recursive: true });
+  await writeFile(infraFile, 'import { helper } from "../../test/helper.mjs";\nexport { helper };\n', "utf8");
+  await writeFile(helperFile, "export const helper = true;\n", "utf8");
+
+  assert.deepEqual(await buildDependencyEdges(rootDir), []);
 });
 
 test("dependency boundary: bin/ entry points import only real five-zone owners", async () => {

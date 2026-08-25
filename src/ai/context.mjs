@@ -27,8 +27,8 @@ import { statusReport } from "../orchestration/status.mjs";
 export async function buildAgentContext(rootDir, options = {}) {
   await ensureHelixDirs(rootDir);
   const { config, sourcePath } = await loadHelixConfig(rootDir);
-  const taskState = await loadTaskState(rootDir);
-  const task = resolveContextTask(taskState?.tasks || [], options.taskId);
+  const taskState = await loadTaskState(rootDir, { planId: options.planId });
+  const task = resolveContextTask(taskState?.tasks || [], options.taskId, options.planId);
   const changed = await collectGitChangedPaths(rootDir);
   const targetPaths = uniqueStrings([
     ...(task?.writable_paths || []),
@@ -39,15 +39,19 @@ export async function buildAgentContext(rootDir, options = {}) {
   const resumeContext = await writeContextSnapshot(rootDir, { reason: `agent-context:${agent}` });
   const role = options.role || roleForAgent(agent);
   const injectionPointName = options.injectionPoint || defaultInjectionPointForAgent(agent, { taskId: task?.id });
+  const taskSkills = injectionPointName === "before_execute"
+    ? task?.skills || []
+    : [];
   const injectionPoint = await resolveInjectionPoint(rootDir, injectionPointName, {
     agent,
     taskId: task?.id || "",
-    planId: taskState?.planId || "",
+    planId: options.planId || task?.planId || taskState?.planId || "",
   }, {
     text: task ? `${task.subject}\n${task.description || ""}` : "",
     stage: stageForInjectionPoint(injectionPointName),
+    taskSkills,
   });
-  const modelConfig = config.agents?.[agent] || config.dynamicAgents?.[agent] || null;
+  const modelConfig = config.agents?.[agent] || null;
   const agentPromptContent = await renderPromptPackEntry(rootDir, { agent });
   const agentPrompt = prepareAgentPrompt(
     agentPromptContent,
@@ -207,13 +211,14 @@ function stageForInjectionPoint(pointName) {
   return "";
 }
 
-function resolveContextTask(tasks, taskId) {
+function resolveContextTask(tasks, taskId, planId) {
+  const scopedTasks = planId ? tasks.filter((task) => task.planId === planId) : tasks;
   if (taskId) {
-    const task = tasks.find((candidate) => candidate.id === taskId);
+    const task = scopedTasks.find((candidate) => candidate.id === taskId);
     if (!task) throw new Error(`unknown task: ${taskId}`);
     return task;
   }
-  return findRunnableTask(tasks) || tasks.find((task) => task.status === "in_progress" || task.status === "verifying" || task.status === "failed") || null;
+  return findRunnableTask(scopedTasks) || scopedTasks.find((task) => task.status === "in_progress" || task.status === "verifying" || task.status === "failed") || null;
 }
 
 function roleForAgent(agent) {

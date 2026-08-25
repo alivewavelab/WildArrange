@@ -340,9 +340,11 @@ node ./bin/helix.mjs parallel admit --run <runId> --task T001
 node ./bin/helix.mjs config baseline --reason reviewed
 node ./bin/helix.mjs config verify
 node ./bin/helix.mjs state backup --reason before-risky-agent
+node ./bin/helix.mjs state migrate
 node ./bin/helix.mjs state verify
 node ./bin/helix.mjs state list
 node ./bin/helix.mjs state restore --backup <backupId>
+node ./bin/helix.mjs task archive --task T001 --plan <planId> --delete --reason "obsolete"
 node ./bin/helix.mjs doctor
 node ./bin/helix.mjs governance audit
 node ./bin/helix.mjs impact "src/infra/ledger.mjs"
@@ -356,7 +358,9 @@ node ./bin/helix.mjs docs commands --write
 node ./bin/helix.mjs review suspicious
 ```
 
-`doctor` is a one-command health check: it validates config structure and mounts, reconciles completed tasks against checkpoints, acceptance proofs, and ledger events, verifies the ledger hash chain, and cross-checks the ledger against the latest backup to detect wholesale rewrites; the `decisionHealth` section adds a periodic health summary (per-gate trigger counts, never-fired gates, corrupt-line and orphan-annotation warnings). The checks are isolated — a crashed check only marks its own section — and doctor is read-only diagnostics that never appends to the ledger. `state restore` automatically takes a pre-restore backup first, so a bad restore can itself be undone.
+`doctor` is a one-command health check: it validates config structure and mounts, reconciles completed tasks across every Plan against checkpoints, acceptance proofs, and `planId:taskId` ledger events, verifies the ledger hash chain, and cross-checks the ledger against the latest backup to detect wholesale rewrites; the `decisionHealth` section adds a periodic health summary (per-gate trigger counts, never-fired gates, corrupt-line and orphan-annotation warnings). The checks are isolated — a crashed check only marks its own section — and doctor is read-only diagnostics that never appends to the ledger. `state migrate` first creates a backup, then migrates the runtime task ledger and removes retired runtime projections; it does not rewrite the root `helix.config.json`. Legacy `completed` tasks without the current proof chain become `needs_user_decision` instead of receiving fabricated proof. `state restore` also creates a pre-restore backup first.
+
+`task archive ... --delete` requires explicit deletion confirmation and first creates a runtime backup; `in_progress` and `verifying` tasks cannot be archived. Plan and Task IDs must be safe single-segment identifiers, canonical `planId:id` identities must be unique, and an explicit `--plan` must match exactly rather than falling back to another Plan. An unindexed legacy Plan also loses only the selected Task. Deletion is a rollback-capable transaction that commits the canonical task ledger last. It removes only the target Task, an emptied Plan, its checkpoint / acceptance reports, that task's outbox DoneClaims, and exact non-glob artifacts under `.helix/artifacts/` that are not shared by another task. The exact deletion set is added to the backup's recovery package, so `state restore --backup <backupId>` can recover the Plan, proofs, DoneClaims, and artifacts after an interruption or rollback request. Emptying the active Plan leaves the runtime `idle`; another Plan is never activated implicitly. Historical ledger entries and backups are never deleted with an archived task.
 
 `impact` is change impact analysis: it lists which files import a changed file directly or transitively, plus the tests that should run (always including the five-zone boundary test), so an AI edit can machine-prove "nothing else was touched".
 
@@ -408,7 +412,7 @@ node ./bin/helix.mjs archivist suggestions list
 node ./bin/helix.mjs archivist suggestions resolve --id <id> --decision accept --evidence "..." --rationale "..."
 ```
 
-## Skills and Prompt Variants
+## Skill Matching and Task Bindings
 
 Skill matcher gives an explainable hint for which skills should load at the current stage:
 
@@ -416,20 +420,17 @@ Skill matcher gives an explainable hint for which skills should load at the curr
 node ./bin/helix.mjs skills match --text "build a web reminders app" --stage design --agent Jiuwei
 ```
 
-Skill mounting at injection points is on-demand by default (`skillMatcher.dynamicInjection`). When request text is available, only configured skills that match the request are injected in full; the rest are demoted to on-demand references. `alwaysMount` skills (default `wildarrange-injection-runtime`) are always injected, and `maxSkills` (default 4) caps a single mount. Points without request text (such as `pre_tool_use`) fall back to the static list. Dynamic matching only subtracts; it never injects full text of skills outside the configured list.
+A stage is matching context, not a separate family of stage-prefixed Skills. Planning, execution, and verification are handled by the long-lived Agents, current specialist Skills, and the deterministic delivery pipeline.
+
+Skill mounting at injection points is on-demand by default (`skillMatcher.dynamicInjection`). When request text is available, only configured skills that match the request are injected in full; the rest are demoted to on-demand references. `alwaysMount` skills (default `wildarrange-injection-runtime`) are always injected, and `maxSkills` (default 4) caps task-bound skills per mount. Points without request text (such as `pre_tool_use`) fall back to the static list. The dynamic matcher only subtracts within the point- and agent-bound set; `task.skills` is an additional explicit source constrained by safe loading and the same count budget.
+
+Skills persisted in `task.skills` are mounted before execution through the PreToolUse Hook, `context build --point before_execute`, and the generated `/helix-run`. M1 review/checkpoint points still use their static Skills and do not claim automatic task-binding delivery. Task bindings only accept Prompt Pack manifest entries or `.agents/skills/<name>/SKILL.md` files; installed-root, realpath, and SHA-256 checks plus count/character budgets remain enforced. Unknown or integrity-failed names are reported in `skillSelection.missing` instead of being loaded silently.
 
 ### Human decision channel and safety switches
 
 - **Generic push (no external IM binding)**: all pending human decisions — plan awaiting approval, out-of-scope ChangeRequests, failed tasks, child agents awaiting acceptance — are injected into the host AI context by hooks (SessionStart / UserPromptSubmit / PostCompact / Stop), instructing the AI to proactively surface them to the developer with options. `attentionReport` is the source of truth; `status` / dashboard can also pull it.
 - **Plan approval gate**: when `planApproval.required=true`, an imported plan enters `awaiting_plan_approval` and `run` refuses to execute until the developer runs `plan approve` (or `/helix-approve` in chat). Off by default.
 - **Externalized command safety**: built-in high-risk command patterns are a floor that cannot be disabled; `commandSafety.extraPatterns` lets you add project-specific dangerous-command blocks (`{ id, pattern, flags, reason }`) without code changes.
-
-Prompt variants append model-specific bias without replacing the base agent prompt:
-
-```bash
-node ./bin/helix.mjs prompts variant --agent Jiuwei --model gpt-5.5
-node ./bin/helix.mjs prompts show --agent Jiuwei --variant gemini
-```
 
 ## Dashboard
 

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>旧任务归档并删除</title>
+  <style>
+    body{font-family:system-ui,sans-serif;max-width:960px;margin:40px auto;padding:0 20px;color:#172033;background:#f6f8fb}
+    .flow,.card{background:white;border:1px solid #dce3ee;border-radius:10px;padding:18px;margin:16px 0}.flow{text-align:center;background:#eaf2ff;font-weight:700}
+    .p0{border-left:7px solid #dc2626}.safe{border-left:7px solid #16a34a}code{background:#eef2f7;padding:2px 5px;border-radius:4px}
+  </style>
+</head>
+<body>
+  <h1>旧任务归档并删除</h1>
+  <p>状态：已完成。目标是让旧冒烟任务退出活动运行态，不重写审计历史。</p>
+  <div class="flow">自动备份 → ledger 写删除墓碑 → 删除活动 Task/空 Plan → 删除精确派生文件 → Doctor/状态/ledger 验收</div>
+  <section class="card p0"><h2>已删除目标</h2><p><code>plan_79f7119c-5edd-4f80-9a29-4c175ecc4a18:T001</code> 及其 Plan JSON、checkpoint、<code>.helix/artifacts/linear-smoke.txt</code>；另清理脱离总账的旧烟测 <code>plan_876b41ed-3eba-417b-a04e-b0e1139d3ee7:T001</code> 及其 Plan JSON、checkpoint。<code>sample-plan.json</code> 是初始化模板，不是归档记录，保留。</p></section>
+  <section class="card safe"><h2>必须保留</h2><p><code>.helix/ledger.jsonl</code>、迁移前 backups、其他 Plan/checkpoint、源码和用户工作区改动。归档不是把历史账本抹掉，而是在账本写明“该活动记录已删除”。</p></section>
+  <section class="card"><h2>执行回执</h2><p>备份：<code>backup_ea5bc5c1-0476-443e-be75-422f4ce85e52</code>、<code>backup_bd2cf4b1-30c2-432e-9ebe-4ed7b682e53a</code>。删除前后均写 ledger 墓碑；旧 Agent 上下文投影已删除，rules/resume/continuation 投影已刷新。</p></section>
+  <section class="card safe"><h2>验收结果</h2><p>活动 Task/Plan 均为 0，work 为 idle，planApproval 已清空；Doctor <code>ok:true</code>，ledger hash 链通过；全量测试 <code>289/289</code>，架构映射 <code>73 watched / 0 unowned / 0 orphan</code>，npm dry-run 包体 <code>152</code> 文件。</p></section>
+</body>
+</html>

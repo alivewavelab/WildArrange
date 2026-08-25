@@ -57,7 +57,7 @@ function normalizePlanDefaults(rawPlan) {
     review_commands: normalizeStringArray(rawDefaults.review_commands ?? rawDefaults.reviewCommands ?? rawPlan.review_commands ?? rawPlan.reviewCommands ?? [], "defaults.review_commands"),
     standards_commands: normalizeStringArray(rawDefaults.standards_commands ?? rawDefaults.standardsCommands ?? rawPlan.standards_commands ?? rawPlan.standardsCommands ?? [], "defaults.standards_commands"),
     writable_paths: normalizeStringArray(rawDefaults.writable_paths ?? rawDefaults.writablePaths ?? rawPlan.writable_paths ?? rawPlan.writablePaths ?? [], "defaults.writable_paths"),
-    skills: normalizeStringArray(rawDefaults.skills ?? rawPlan.skills ?? [], "defaults.skills"),
+    skills: normalizeSkillArray(rawDefaults.skills ?? rawPlan.skills ?? [], "defaults.skills"),
   };
   return defaults;
 }
@@ -68,6 +68,16 @@ export function normalizeStringArray(value, label) {
     if (typeof item !== "string" || item.trim().length === 0) throw new Error(`${label} must contain non-empty strings`);
     return item.trim();
   }));
+}
+
+function normalizeSkillArray(value, label) {
+  const skills = normalizeStringArray(value, label);
+  for (const skill of skills) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(skill)) {
+      throw new Error(`${label} contains an invalid skill name: ${skill}`);
+    }
+  }
+  return skills;
 }
 
 export function normalizeTask(task, index, defaults = {}, options = {}) {
@@ -90,7 +100,7 @@ export function normalizeTask(task, index, defaults = {}, options = {}) {
   const standardsCommands = uniqueStrings([...(defaults.standards_commands || []), ...taskStandardsCommands]);
   const taskWritablePaths = normalizeStringArray(task.writable_paths ?? task.writablePaths ?? [], `task ${id} writable_paths`);
   const writablePaths = uniqueStrings([...(defaults.writable_paths || []), ...taskWritablePaths]);
-  const taskSkills = normalizeStringArray(task.skills ?? [], `task ${id} skills`);
+  const taskSkills = normalizeSkillArray(task.skills ?? [], `task ${id} skills`);
   const skills = uniqueStrings([...(defaults.skills || []), ...taskSkills]);
   const successCriteria = normalizeSuccessCriteria(task.successCriteria ?? task.success_criteria, id, subject, verifyCommands);
   const governanceWarnings = detectTaskGovernanceWarnings({ workerCommand: task.worker_command || task.workerCommand || null, verifyCommands, writablePaths });

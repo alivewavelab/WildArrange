@@ -14,11 +14,13 @@
 npm test
 ```
 
-2. 检查包体：
+2. 检查真实包体清单：
 
 ```bash
-npm pack --dry-run --cache /private/tmp/helix-npm-cache
+npm pack --dry-run --json --cache /private/tmp/helix-npm-cache
 ```
+
+输出中的 `files[].path` 是复核边界的唯一事实源；不要根据 `package.json.files` 或手写目录猜测最终包体。
 
 3. 检查 Git 状态：
 
@@ -32,16 +34,18 @@ git status --short
 rg -n "API_KEY|SECRET|TOKEN|PRIVATE KEY|BEGIN .* KEY" .
 ```
 
-5. 检查商业发布隔离：
+5. 对真实 pack 清单执行商业发布隔离与相对链接检查：
 
 ```bash
-rg -n "SUL|copied from|verbatim|restricted source|third-party prompt" README.md src package.json packs --glob '!**/pre-publish-review.md'
+node --test test/package-boundary.test.mjs
 ```
+
+该测试必须真实调用 `npm pack --dry-run --json`，只允许命名白名单中的小白手册进入 `doc/plans/`，拒绝其余历史方案、受限 Prompt、运行态和临时产物，并逐一校验包内 Markdown 的相对链接目标仍在包中。
 
 ## 阻断条件
 
 - 测试失败。
-- `npm pack --dry-run` 包含 `.external/`、`.helix/`、`.tmp/`、密钥、临时报告或本机路径。
+- 真实 pack 清单包含未列入命名白名单的 `doc/plans/` 文件、`.external/`、`.helix/`、`.tmp/`、密钥、临时报告或本机路径。
 - README 中的安装命令不可执行。
 - 发布包包含受限第三方源码或未确认可商业分发的文本资产。
 - `package.json` 的 `files` 遗漏 README、bin、src、packs、配置样例。

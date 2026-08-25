@@ -296,7 +296,7 @@ test("completed pipeline emits gate decisions in execution order ending with the
     assert.deepEqual(order, ["verify", "scope", "review", "acceptance-proof", "checkpoint", "pipeline"]);
     // review 决策必须带出约定证据路径（报告在 pipeline 返回后写入该路径）。
     const review = records.find((candidate) => candidate.gate === "review");
-    assert.match(review.evidencePath, /^\.helix\/reports\/reviews\/.+-T001\.md$/);
+    assert.match(review.evidencePath, /^\.helix\/reports\/reviews\/.+\/T001\.md$/);
   });
 });
 

@@ -5,7 +5,11 @@ import {
   ensureHelixDirs,
   nowIso,
   readJson,
+  resolveLegacyTaskAcceptancePath,
+  resolveLegacyTaskCheckpointPath,
   resolveHelixPath,
+  resolveTaskAcceptancePath,
+  resolveTaskCheckpointPath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
 import { appendLedger, readVerifiedLedgerEntries } from "../infra/ledger.mjs";
@@ -32,7 +36,9 @@ export async function writeWorkflowSummary(rootDir, options = {}) {
     verifyCommands: task.verify_commands || [],
     reviewCommands: task.review_commands || [],
     standardsCommands: task.standards_commands || [],
-    checkpointPath: task.status === "completed" && taskState?.planId ? `.helix/checkpoints/${taskState.planId}-${task.id}.json` : null,
+    checkpointPath: task.status === "completed" && taskState?.planId
+      ? path.relative(rootDir, resolveTaskCheckpointPath(rootDir, taskState.planId, task.id))
+      : null,
     reviewReportPath: task.last_review_result?.reportMdPath || null,
     failureReportPath: task.last_failure?.reportMdPath || null,
     changeRequestPath: task.last_change_request?.reportMdPath || null,
@@ -108,8 +114,8 @@ async function inspectCompletedTaskEvidence(rootDir, taskState) {
   const invalid = [];
   for (const task of taskState.tasks.filter((candidate) => candidate.status === "completed")) {
     const ref = `${taskState.planId}:${task.id}`;
-    const proof = await readJson(resolveHelixPath(rootDir, "reports", "acceptance", `${taskState.planId}-${task.id}.json`), null);
-    const checkpoint = await readJson(resolveHelixPath(rootDir, "checkpoints", `${taskState.planId}-${task.id}.json`), null);
+    const proof = await readTaskEvidenceJson(rootDir, "acceptance", taskState.planId, task.id);
+    const checkpoint = await readTaskEvidenceJson(rootDir, "checkpoint", taskState.planId, task.id);
     const failures = [];
     if (proof?.kind !== "acceptance_proof" || proof.pass !== true || proof.planId !== taskState.planId || proof.taskId !== task.id) failures.push("acceptance_proof");
     if (checkpoint?.planId !== taskState.planId || checkpoint?.taskId !== task.id) failures.push("checkpoint_identity");
@@ -123,6 +129,19 @@ async function inspectCompletedTaskEvidence(rootDir, taskState) {
     checked: taskState.tasks.filter((task) => task.status === "completed").length,
     invalid,
   };
+}
+
+async function readTaskEvidenceJson(rootDir, kind, planId, taskId) {
+  const canonicalPath = kind === "checkpoint"
+    ? resolveTaskCheckpointPath(rootDir, planId, taskId)
+    : resolveTaskAcceptancePath(rootDir, planId, taskId, "json");
+  const canonical = await readJson(canonicalPath, null);
+  if (canonical) return canonical;
+  const legacyPath = kind === "checkpoint"
+    ? resolveLegacyTaskCheckpointPath(rootDir, planId, taskId)
+    : resolveLegacyTaskAcceptancePath(rootDir, planId, taskId, "json");
+  const legacy = await readJson(legacyPath, null);
+  return legacy?.planId === planId && legacy?.taskId === taskId ? legacy : null;
 }
 
 export async function dashboardData(rootDir) {

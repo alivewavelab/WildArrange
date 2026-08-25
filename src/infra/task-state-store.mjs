@@ -11,6 +11,7 @@ import {
   readJson,
   resolveHelixPath,
 } from "./runtime-store.mjs";
+import { normalizeAgentKey } from "./agent-registry.mjs";
 
 export async function loadTaskLedger(rootDir) {
   const raw = await readJson(resolveHelixPath(rootDir, "team", "tasks.json"), null);
@@ -32,16 +33,15 @@ export async function loadTaskState(rootDir, options = {}) {
 }
 
 export function normalizeTaskLedger(raw) {
+  assertSupportedTaskLedger(raw);
   const activePlanId = raw.activePlanId || raw.planId || null;
+  const legacyLedger = raw.kind !== "task_ledger" || !raw.activePlanId;
   const tasks = Array.isArray(raw.tasks)
-    ? raw.tasks.map((task) => withLegacyTrace(
-      withTaskIdentity(task, task.planId || activePlanId),
-      raw.updatedAt,
-    ))
+    ? raw.tasks.map((task) => normalizeStoredTask(task, activePlanId, raw.updatedAt, legacyLedger))
     : [];
   const plans = Array.isArray(raw.plans) ? raw.plans.map((plan) => ({ ...plan })) : inferPlans(tasks, activePlanId);
   return {
-    version: raw.version || STATE_VERSION,
+    version: STATE_VERSION,
     kind: "task_ledger",
     planId: activePlanId,
     activePlanId,
@@ -50,6 +50,57 @@ export function normalizeTaskLedger(raw) {
     createdAt: raw.createdAt || raw.updatedAt || null,
     updatedAt: raw.updatedAt || null,
   };
+}
+
+function assertSupportedTaskLedger(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("task ledger must be a JSON object");
+  }
+  const version = raw.version === undefined ? STATE_VERSION : Number(raw.version);
+  if (!Number.isInteger(version) || version < 1) {
+    throw new Error(`invalid task ledger version: ${raw.version}`);
+  }
+  if (version > STATE_VERSION) {
+    throw new Error(`task ledger version ${version} is newer than supported version ${STATE_VERSION}; upgrade WildArrange before reading it`);
+  }
+  if (raw.kind !== undefined && raw.kind !== "task_ledger") {
+    throw new Error(`unsupported task ledger kind: ${raw.kind}`);
+  }
+  if (raw.tasks !== undefined && !Array.isArray(raw.tasks)) {
+    throw new Error("task ledger tasks must be an array");
+  }
+}
+
+function normalizeStoredTask(task, activePlanId, fallbackAt, legacyLedger) {
+  const planId = task.planId || activePlanId;
+  const legacyTask = legacyLedger || !task.planId || !task.ref || !Array.isArray(task.history);
+  let normalized = withTaskIdentity(task, planId);
+  const owner = normalizeAgentKey(normalized.owner);
+  if (owner) normalized = { ...normalized, owner };
+  normalized = withLegacyTrace(normalized, fallbackAt);
+  if (legacyTask && normalized.status === "completed") {
+    const at = normalized.updatedAt || fallbackAt || null;
+    normalized = {
+      ...normalized,
+      status: "needs_user_decision",
+      completionRevalidation: {
+        required: true,
+        reason: "legacy_completed_without_current_proof_chain",
+        previousStatus: "completed",
+        detectedAt: at,
+      },
+      history: [
+        ...(normalized.history || []),
+        {
+          at,
+          event: "legacy_completion_requires_revalidation",
+          from: "completed",
+          to: "needs_user_decision",
+        },
+      ],
+    };
+  }
+  return normalized;
 }
 
 function withLegacyTrace(task, fallbackAt) {

@@ -59,7 +59,7 @@ import {
   runArchivistRouter,
 } from "../src/ai/archivist-router.mjs";
 import { preToolUseGuard, runInjectionHook } from "../src/ai/hooks.mjs";
-import { matchSkills, resolvePromptVariant } from "../src/ai/skill-matcher.mjs";
+import { matchSkills } from "../src/ai/skill-matcher.mjs";
 import { resolveInjectionPoint } from "../src/ai/injection.mjs";
 import { routeRequest } from "../src/ai/routing.mjs";
 import { hashLine } from "../src/capabilities/code-intel.mjs";
@@ -74,7 +74,7 @@ import { listPromptPack, renderPromptPackEntry } from "../src/infra/prompt-pack.
 import { scanProjectRules } from "../src/infra/rule-scanner.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { loadHelixConfig, writeDefaultHelixConfig } from "../src/infra/runtime-config.mjs";
-import { readJson, resolveHelixPath } from "../src/infra/runtime-store.mjs";
+import { hashContent, readJson, resolveHelixPath } from "../src/infra/runtime-store.mjs";
 import {
   listRuntimeStateBackups,
   restoreRuntimeStateBackup,
@@ -178,8 +178,8 @@ test("init creates durable runtime state", async () => {
   await withTempDir(async (dir) => {
     const work = await initRuntime(dir);
     assert.equal(work.stage, "initialized");
-    assert.ok(await readJson(resolveHelixPath(dir, "agents.json")));
-    assert.ok(await readJson(resolveHelixPath(dir, "categories.json")));
+    assert.equal(await readJson(resolveHelixPath(dir, "agents.json"), null), null);
+    assert.equal(await readJson(resolveHelixPath(dir, "categories.json"), null), null);
   });
 });
 
@@ -200,6 +200,8 @@ test("init installs wildarrange-linear prompt, skill, and tool contracts", async
       ].sort(),
     );
     assert.ok(pack.skills.includes("review-work"));
+    assert.ok(pack.skills.every((skill) => !skill.startsWith("wa-")));
+    assert.ok(pack.skills.every((skill) => !skill.startsWith("lcx-")));
     assert.equal(pack.tools, "tools/tool-contract.json");
     assert.equal(pack.routes, "routes.json");
     assert.ok(pack.skills.includes("wildarrange-injection-runtime"));
@@ -217,11 +219,15 @@ test("init installs wildarrange-linear prompt, skill, and tool contracts", async
     assert.ok(toolContract.tools.some((tool) => tool.name === "ast_grep_search"));
     assert.ok(toolContract.tools.some((tool) => tool.name === "team_send_message"));
     assert.ok(toolContract.tools.some((tool) => tool.name === "repository_governance_audit"));
+    assert.ok(toolContract.tools.some((tool) => tool.status === "host-provided"));
+    assert.ok(toolContract.tools.every((tool) => tool.status !== "contract-only"));
+    assert.ok(toolContract.tools.every((tool) => !String(tool.command || "").includes(" | node")));
 
     const routeTable = JSON.parse(await renderPromptPackEntry(dir, { routes: true }));
     assert.equal(routeTable.version, 1);
     assert.ok(routeTable.intents.some((intent) => intent.name === "execute"));
     assert.ok(routeTable.planSkillBundles.some((skill) => skill.name === "review-product-intent"));
+    assert.doesNotMatch(JSON.stringify(routeTable), /wa-[a-z-]+/);
   });
 });
 
@@ -243,7 +249,7 @@ test("route decision loads product planning skills on demand", async () => {
   });
 });
 
-test("skill matcher and prompt variants provide explainable loading hints", async () => {
+test("skill matcher provides explainable loading hints", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
 
@@ -258,13 +264,6 @@ test("skill matcher and prompt variants provide explainable loading hints", asyn
     assert.ok(matched.matched.every((skill) => skill.score > 0));
     assert.ok(matched.matched.some((skill) => skill.reasons.some((reason) => reason.startsWith("stage:"))));
 
-    const gptVariant = await resolvePromptVariant(dir, { agent: "Jiuwei", model: "gpt-5.5" });
-    assert.equal(gptVariant.variant, "gpt");
-    assert.match(gptVariant.content, /验收标准/);
-
-    const kimiVariant = await resolvePromptVariant(dir, { provider: "kimi", model: "kimi-2.6" });
-    assert.equal(kimiVariant.variant, "kimi");
-    assert.match(kimiVariant.content, /长上下文写作/);
   });
 });
 
@@ -297,6 +296,85 @@ test("config controls models and injection point mounts", async () => {
     assert.ok(injection.markdown[0].content.includes("Use real verification"));
     assert.ok(injection.skills.some((skill) => skill.name === "review-work"));
     assert.ok(injection.skills.some((skill) => skill.name === "wildarrange-injection-runtime"));
+  });
+});
+
+test("task-bound Skills mount through the public execution hook and budgeted loader", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = path.join(dir, "task-skill-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Task Skill Binding",
+      objective: "Mount persisted task skills",
+      tasks: [{
+        id: "T001",
+        subject: "Prepare a release receipt",
+        description: "Use the task-bound workflow.",
+        skills: ["publish", "missing-task-skill", "debugging", "refactor", "programming"],
+        writable_paths: ["receipt.txt"],
+        worker_command: nodeEval("require('fs').writeFileSync('receipt.txt', 'ok\\n')"),
+        verify_commands: [nodeEval("if (require('fs').readFileSync('receipt.txt', 'utf8').trim() !== 'ok') process.exit(1)")],
+      }],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    const delivery = await buildAgentContext(dir, {
+      agent: "ZhuRong",
+      taskId: "T001",
+      injectionPoint: "before_execute",
+    });
+    assert.ok(delivery.injectionPoint.skills.some((skill) => skill.name === "publish"));
+    assert.ok(delivery.injectionPoint.skillSelection.taskBound.includes("publish"));
+    assert.equal(delivery.injectionPoint.skillSelection.taskBound.length, 4);
+    assert.ok(delivery.injectionPoint.skillSelection.referenced.some(
+      (entry) => entry.name === "programming" && entry.reason === "task_binding_over_max",
+    ));
+    assert.deepEqual(
+      delivery.injectionPoint.skillSelection.missing.filter((entry) => entry.name === "missing-task-skill"),
+      [{ name: "missing-task-skill", reason: "not_found" }],
+    );
+    const inspected = await resolveInjectionPoint(dir, "before_execute", {
+      agent: "ZhuRong",
+      taskId: "T001",
+    });
+    assert.ok(inspected.skillSelection.taskBound.includes("publish"));
+
+    const cliPath = path.join(process.cwd(), "bin", "helix.mjs");
+    const cli = await runCommand(`node ${JSON.stringify(cliPath)} context build --point before_execute --task T001`, dir);
+    assert.equal(cli.exitCode, 0, cli.stderr);
+    const cliContext = JSON.parse(cli.stdout);
+    assert.equal(cliContext.injectionPoint.name, "before_execute");
+    assert.ok(cliContext.injectionPoint.skills.some((skill) => skill.name === "publish"));
+    assert.match(cliContext.injectionPoint.skills.find((skill) => skill.name === "publish").content, /npm publish --dry-run/);
+
+    const hook = await runInjectionHook(dir, {
+      hook_event_name: "PreToolUse",
+      session_id: "task-skill-delivery",
+      cwd: dir,
+      tool_name: "apply_patch",
+      tool_input: { file_path: "receipt.txt" },
+    });
+    const hookOutput = JSON.parse(hook.output);
+    assert.equal(hook.taskId, "T001", "public hook should resolve the runnable task without a private function call");
+    assert.match(hookOutput.hookSpecificOutput.additionalContext, /执行前任务 Skill/);
+    assert.match(hookOutput.hookSpecificOutput.additionalContext, /#### publish/);
+    assert.match(hookOutput.hookSpecificOutput.additionalContext, /npm publish --dry-run/);
+    assert.match(hookOutput.hookSpecificOutput.additionalContext, /missing-task-skill 未找到/);
+
+    const review = await buildAgentContext(dir, {
+      agent: "BaiZe",
+      taskId: "T001",
+      injectionPoint: "before_review",
+    });
+    assert.deepEqual(review.injectionPoint.skillSelection.taskBound, [], "M1 must not claim a task binding at an unconsumed review phase");
+
+    const session = await buildAgentContext(dir, {
+      agent: "Jiuwei",
+      taskId: "T001",
+      injectionPoint: "session_start",
+    });
+    assert.deepEqual(session.injectionPoint.skillSelection.taskBound, []);
+    assert.ok(!session.injectionPoint.skills.some((skill) => skill.name === "publish"));
   });
 });
 
@@ -371,6 +449,85 @@ test("injection budgets expose explicit truncation metadata", async () => {
     assert.ok(skill.content.length <= 3_000);
     assert.match(skill.content, /上下文已截断/);
     assert.doesNotMatch(skill.content, /末尾不应进入注入/);
+  });
+});
+
+test("Prompt Pack Skill loading rejects realpath escapes and hash tampering", async () => {
+  await withTempDir(async (dir) => {
+    const skillBody = "# Bound workflow\n\nDO_NOT_LOAD_FROM_OUTSIDE_PACK\n";
+    const packDir = await writeMinimalPromptPack(dir, { "bound-flow": skillBody });
+    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
+      injectionPoints: {
+        before_execute: {
+          enabled: true,
+          tools: [],
+          markdown: [],
+          skills: ["bound-flow"],
+        },
+      },
+    }, null, 2));
+    await initRuntime(dir, { promptPackDir: packDir });
+
+    const registeredFile = resolveHelixPath(dir, "prompt-pack", "installed", "skills", "bound-flow.md");
+    const outsideFile = path.join(dir, "outside-pack-skill.md");
+    await writeFile(outsideFile, skillBody);
+    await rm(registeredFile);
+    await symlink(outsideFile, registeredFile);
+
+    const escaped = await resolveInjectionPoint(dir, "before_execute", { taskId: "T001" });
+    assert.equal(escaped.skills.some((skill) => skill.name === "bound-flow"), false);
+    assert.ok(escaped.skillSelection.missing.some(
+      (item) => item.name === "bound-flow" && item.reason === "integrity_failed" && /escapes installed pack root/.test(item.detail),
+    ));
+    await assert.rejects(renderPromptPackEntry(dir, { skill: "bound-flow" }), /escapes installed pack root/);
+
+    await rm(registeredFile);
+    await writeFile(registeredFile, skillBody);
+    const registryPath = resolveHelixPath(dir, "prompt-pack.json");
+    const registry = await readJson(registryPath);
+    const originalHash = registry.skills["bound-flow"].sha256;
+    registry.skills["bound-flow"].sha256 = "0".repeat(64);
+    await writeFile(registryPath, JSON.stringify(registry, null, 2));
+
+    const tampered = await resolveInjectionPoint(dir, "before_execute", { taskId: "T001" });
+    assert.equal(tampered.skills.some((skill) => skill.name === "bound-flow"), false);
+    assert.ok(tampered.skillSelection.missing.some(
+      (item) => item.name === "bound-flow" && item.reason === "integrity_failed" && /changed after install/.test(item.detail),
+    ));
+    await assert.rejects(renderPromptPackEntry(dir, { skill: "bound-flow" }), /changed after install/);
+
+    const externalPack = path.join(dir, "attacker-pack");
+    await mkdir(path.join(externalPack, "skills"), { recursive: true });
+    const malicious = "# malicious\n\nREAD_OUTSIDE_RUNTIME_ROOT\n";
+    await writeFile(path.join(externalPack, "skills", "bound-flow.md"), malicious);
+    registry.packDir = externalPack;
+    registry.packRootRealpath = externalPack;
+    registry.installedRoot = externalPack;
+    registry.skills["bound-flow"].path = "skills/bound-flow.md";
+    registry.skills["bound-flow"].sha256 = hashContent(malicious);
+    await writeFile(registryPath, JSON.stringify(registry, null, 2));
+    await assert.rejects(renderPromptPackEntry(dir, { skill: "bound-flow" }), /changed after install/);
+    await assert.rejects(matchSkills(dir, { text: "bound workflow" }), /changed after install/);
+    assert.notEqual(originalHash, registry.skills["bound-flow"].sha256);
+
+    const sourceManifestPath = path.join(packDir, "manifest.json");
+    const sourceManifest = await readJson(sourceManifestPath);
+    sourceManifest.routes = "routes.json";
+    await writeFile(path.join(packDir, "routes.json"), JSON.stringify({ intents: [] }));
+    await writeFile(sourceManifestPath, JSON.stringify(sourceManifest, null, 2));
+    await initRuntime(dir, { promptPackDir: packDir });
+    const maliciousRoutes = JSON.stringify({
+      intents: [{ name: "attacker", signals: ["bound"], skills: ["bound-flow"] }],
+    });
+    await writeFile(path.join(externalPack, "routes.json"), maliciousRoutes);
+    const routeRegistry = await readJson(registryPath);
+    routeRegistry.packDir = externalPack;
+    routeRegistry.packRootRealpath = externalPack;
+    routeRegistry.installedRoot = externalPack;
+    routeRegistry.routes.path = "routes.json";
+    routeRegistry.routes.sha256 = hashContent(maliciousRoutes);
+    await writeFile(registryPath, JSON.stringify(routeRegistry, null, 2));
+    await assert.rejects(matchSkills(dir, { text: "bound workflow" }), /entry changed after install: routes/);
   });
 });
 
@@ -680,6 +837,11 @@ test("adapter install writes slash commands for cursor and codex", async () => {
     assert.match(codexSkill, /^description: /m);
     assert.match(codexSkill, /ledger verify/);
 
+    const runCommand = await readFile(path.join(dir, ".agents", "skills", "helix-run", "SKILL.md"), "utf8");
+    assert.match(runCommand, /context build --point before_execute/);
+    assert.ok(runCommand.indexOf("context build --point before_execute") < runCommand.indexOf("wildarrange run"));
+    assert.match(runCommand, /injectionPoint\.skills/);
+
     const uninstall = await uninstallAdapter(dir, { target: "all" });
     assert.ok(uninstall.outputs.some((output) => output.path === ".cursor/commands/helix-run.md" && output.status === "removed"));
     assert.ok(uninstall.outputs.some((output) => output.path === ".agents/skills/helix-run/SKILL.md" && output.status === "removed"));
@@ -689,11 +851,18 @@ test("adapter install writes slash commands for cursor and codex", async () => {
 
 test("adapter install writes codex hooks and cursor rules", async () => {
   await withTempDir(async (dir) => {
+    const legacyCursorRule = path.join(dir, ".cursor", "rules", ["helix", "flow.mdc"].join(""));
+    await mkdir(path.dirname(legacyCursorRule), { recursive: true });
+    await writeFile(legacyCursorRule, "legacy alwaysApply rule\n", "utf8");
     const report = await installAdapter(dir, { target: "all", mode: "npx", packageName: "wildarrange" });
     assert.equal(report.mode, "npx");
     assert.ok(report.outputs.some((output) => output.path === ".codex/hooks.json" && output.enforcement === "hard-after-trust"));
     assert.ok(report.outputs.some((output) => output.path === ".helix/adapters/codex/hooks.json"));
     assert.ok(report.outputs.some((output) => output.path === ".cursor/rules/wildarrange.mdc"));
+    const retiredLegacyRule = report.outputs.find((output) => output.path === ".cursor/rules/helixflow.mdc" && output.status === "legacy-removed");
+    assert.ok(retiredLegacyRule?.backup);
+    assert.equal(await readFile(path.join(dir, retiredLegacyRule.backup), "utf8"), "legacy alwaysApply rule\n");
+    await assert.rejects(readFile(legacyCursorRule, "utf8"), /ENOENT/);
 
     const codexHooks = await readJson(path.join(dir, ".codex", "hooks.json"));
     assert.equal(codexHooks.hooks.PostToolUse?.[0]?.matcher, undefined, "Codex PostToolUse 应覆盖全部工具活动");
@@ -950,7 +1119,7 @@ test("parallel admission applies child artifacts only after gates pass", async (
     assert.equal(await readFile(path.join(dir, "src", "parallel.txt"), "utf8"), "ok\n");
     const releasedResult = await readJson(resolveHelixPath(dir, "agent-runs", batch.runId, "T001", "result.json"));
     assert.equal(releasedResult.lifecycle.status, "released");
-    const checkpoint = await readJson(resolveHelixPath(dir, "checkpoints", `${plan.id}-T001.json`));
+    const checkpoint = await readJson(resolveHelixPath(dir, "checkpoints", plan.id, "T001.json"));
     assert.equal(checkpoint.taskId, "T001");
     assert.equal(checkpoint.verifyResult.pass, true);
     assert.equal(checkpoint.scopeResult.status, "pass");
@@ -1318,6 +1487,28 @@ test("plan graph validation rejects invalid task dependencies", () => {
   }), /dependency cycle/);
 });
 
+test("plan import rejects unsafe task Skill names before persisting", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = path.join(dir, "unsafe-skill-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Unsafe Skill",
+      objective: "Reject traversal",
+      tasks: [{
+        id: "T001",
+        subject: "Unsafe binding",
+        skills: ["../escape"],
+        writable_paths: ["receipt.txt"],
+        worker_command: "node -e \"process.exit(0)\"",
+        verify_commands: ["node -e \"process.exit(0)\""],
+      }],
+    }, null, 2));
+
+    await assert.rejects(importPlan(dir, planPath), /invalid skill name/);
+    assert.equal(await readJson(resolveHelixPath(dir, "team", "tasks.json"), null), null);
+  });
+});
+
 test("plan import rejects unknown blockedBy before writing task state", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
@@ -1352,7 +1543,7 @@ test("plan import rejects high-risk product plans that are under-split", async (
           id: "T001",
           subject: "写产品 brief 和流程",
           description: "明确产品目标、流程、结构件和互动体验。",
-          writable_paths: [".workflow/**"],
+          writable_paths: ["doc/product/**"],
           worker_command: "node -e \"if(!process.version)process.exit(1)\"",
           verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
           review_commands: ["node --version"],
@@ -1797,19 +1988,19 @@ test("linear loop runs worker, verifies, checkpoints, and records ledger", async
     const artifact = await readFile(path.join(dir, ".helix", "artifacts", "linear-smoke.txt"), "utf8");
     assert.equal(artifact.trim(), "ok");
 
-    const checkpoint = await readJson(resolveHelixPath(dir, "checkpoints", `${plan.id}-T001.json`));
+    const checkpoint = await readJson(resolveHelixPath(dir, "checkpoints", plan.id, "T001.json"));
     assert.equal(checkpoint.taskId, "T001");
     assert.equal(checkpoint.scopeResult.status, "pass");
     assert.equal(checkpoint.reviewResult.pass, true);
 
-    const acceptanceProof = await readJson(resolveHelixPath(dir, "reports", "acceptance", `${plan.id}-T001.json`));
+    const acceptanceProof = await readJson(resolveHelixPath(dir, "reports", "acceptance", plan.id, "T001.json"));
     assert.equal(acceptanceProof.pass, true);
     assert.ok(acceptanceProof.checks.every((check) => check.status === "pass"));
     const digest = await readJson(resolveHelixPath(dir, "memory", "last-digest.json"));
     assert.equal(digest.reason, "task_completed");
     assert.equal(digest.task.id, "T001");
 
-    const reviewReport = await readJson(resolveHelixPath(dir, "reports", "reviews", `${plan.id}-T001.json`));
+    const reviewReport = await readJson(resolveHelixPath(dir, "reports", "reviews", plan.id, "T001.json"));
     assert.equal(reviewReport.status, "pass");
     assert.ok(reviewReport.lanes.some((lane) => lane.name === "goal_compliance"));
 
@@ -2000,7 +2191,7 @@ test("LLM review gate uses OpenAI-compatible provider when configured", async ()
       assert.ok(result.reviewResult.lanes.some((lane) => lane.name === "llm_BaiZe" && lane.status === "pass"));
       assert.equal(result.reviewResult.llmReviews[0].model, "test-reviewer");
 
-      const reviewReport = await readJson(resolveHelixPath(dir, "reports", "reviews", `${plan.id}-T001.json`));
+      const reviewReport = await readJson(resolveHelixPath(dir, "reports", "reviews", plan.id, "T001.json"));
       assert.equal(reviewReport.llmReviews[0].summary, "evidence is sufficient");
     });
   });
@@ -2040,12 +2231,12 @@ test("comment checker can block checkpoint when configured", async () => {
     assert.ok(result.reviewResult.lanes.some((lane) => lane.name === "comment_checker" && lane.status === "fail"));
     assert.ok(result.reviewResult.findings.some((finding) => finding.source === "comment_checker" && finding.validator.status === "validated"));
 
-    const reviewReport = await readFile(resolveHelixPath(dir, "reports", "reviews", `${plan.id}-T001.md`), "utf8");
+    const reviewReport = await readFile(resolveHelixPath(dir, "reports", "reviews", plan.id, "T001.md"), "utf8");
     assert.match(reviewReport, /src\/app\.js:1 todo/);
     assert.match(reviewReport, /## Structured Findings/);
     assert.match(reviewReport, /Validator: validated/);
 
-    const reviewJson = await readJson(resolveHelixPath(dir, "reports", "reviews", `${plan.id}-T001.json`));
+    const reviewJson = await readJson(resolveHelixPath(dir, "reports", "reviews", plan.id, "T001.json"));
     assert.ok(reviewJson.findings.some((finding) => finding.source === "comment_checker"));
     assert.ok(Array.isArray(reviewJson.testingGaps));
     assert.ok(Array.isArray(reviewJson.residualRisks));
@@ -2151,25 +2342,24 @@ test("simulation greenfield project runs from product planning to completed web 
           id: "T001",
           subject: "产出提醒事项产品 brief、设计和计划",
           description: "澄清目标、用户旅程、空状态、失败恢复和验收口径。",
-          writable_paths: [".workflow/**"],
+          writable_paths: ["doc/product/**", "doc/plans/**"],
           worker_command: nodeEval(`
             const fs = require("fs");
-            fs.mkdirSync(".workflow/specs/reminders", { recursive: true });
-            fs.mkdirSync(".workflow/designs/reminders", { recursive: true });
-            fs.mkdirSync(".workflow/plans/reminders", { recursive: true });
-            fs.writeFileSync(".workflow/specs/reminders/brief.md", [
+            fs.mkdirSync("doc/product/reminders", { recursive: true });
+            fs.mkdirSync("doc/plans/reminders", { recursive: true });
+            fs.writeFileSync("doc/product/reminders/brief.md", [
               "# Reminders Brief",
               "REQ-REMINDER-001 SHALL let users add reminders.",
               "REQ-REMINDER-002 MUST show an empty state before any reminder exists.",
               "Given an empty list When the page opens Then empty guidance is visible.",
               "Given invalid text When adding Then the app keeps the user in flow."
             ].join("\\n"));
-            fs.writeFileSync(".workflow/designs/reminders/spec.md", [
+            fs.writeFileSync("doc/product/reminders/design.md", [
               "# Reminders Design",
               "Slots: header, input, add button, list, empty state, error feedback.",
               "States: loading, empty, success, error, repeated-use."
             ].join("\\n"));
-            fs.writeFileSync(".workflow/plans/reminders/tasks.md", [
+            fs.writeFileSync("doc/plans/reminders/tasks.md", [
               "# Reminders Tasks",
               "T002 implements the app with verifier evidence."
             ].join("\\n"));
@@ -2177,8 +2367,8 @@ test("simulation greenfield project runs from product planning to completed web 
           verify_commands: [
             nodeEval(`
               const fs = require("fs");
-              const brief = fs.readFileSync(".workflow/specs/reminders/brief.md", "utf8");
-              const design = fs.readFileSync(".workflow/designs/reminders/spec.md", "utf8");
+              const brief = fs.readFileSync("doc/product/reminders/brief.md", "utf8");
+              const design = fs.readFileSync("doc/product/reminders/design.md", "utf8");
               if (!brief.includes("REQ-REMINDER-001") || !brief.includes("Given an empty list")) process.exit(1);
               if (!design.includes("empty state") || !design.includes("error feedback")) process.exit(1);
             `),
@@ -2253,11 +2443,11 @@ test("simulation greenfield project runs from product planning to completed web 
           subject: "复核提醒事项 App 完成证据",
           description: "生成最终完成摘要，证明计划、实现和验收链路闭合。",
           blockedBy: ["T003"],
-          writable_paths: [".workflow/reports/**"],
+          writable_paths: ["doc/reports/**"],
           worker_command: nodeEval(`
             const fs = require("fs");
-            fs.mkdirSync(".workflow/reports", { recursive: true });
-            fs.writeFileSync(".workflow/reports/reminders-summary.md", [
+            fs.mkdirSync("doc/reports", { recursive: true });
+            fs.writeFileSync("doc/reports/reminders-summary.md", [
               "# Reminders Completion Summary",
               "Brief, implementation, tests, and QA report are complete.",
               "No direct coding happened before plan import."
@@ -2266,7 +2456,7 @@ test("simulation greenfield project runs from product planning to completed web 
           verify_commands: [
             nodeEval(`
               const fs = require("fs");
-              const summary = fs.readFileSync(".workflow/reports/reminders-summary.md", "utf8");
+              const summary = fs.readFileSync("doc/reports/reminders-summary.md", "utf8");
               if (!summary.includes("Brief") || !summary.includes("QA report")) process.exit(1);
             `),
           ],
@@ -2321,11 +2511,11 @@ test("simulation existing project handles large feature addition through plannin
           id: "T001",
           subject: "补充分组功能计划证据",
           description: "记录用户旅程、范围取舍和验收标准。",
-          writable_paths: [".workflow/**"],
+          writable_paths: ["doc/plans/**"],
           worker_command: nodeEval(`
             const fs = require("fs");
-            fs.mkdirSync(".workflow/plans/reminder-groups", { recursive: true });
-            fs.writeFileSync(".workflow/plans/reminder-groups/tasks.md", [
+            fs.mkdirSync("doc/plans/reminder-groups", { recursive: true });
+            fs.writeFileSync("doc/plans/reminder-groups/tasks.md", [
               "# Reminder Groups Plan",
               "IN: create group, assign reminder, preserve existing listItems behavior.",
               "OUT: sharing permissions and cloud sync are deferred.",
@@ -2335,7 +2525,7 @@ test("simulation existing project handles large feature addition through plannin
           verify_commands: [
             nodeEval(`
               const fs = require("fs");
-              const plan = fs.readFileSync(".workflow/plans/reminder-groups/tasks.md", "utf8");
+              const plan = fs.readFileSync("doc/plans/reminder-groups/tasks.md", "utf8");
               if (!plan.includes("OUT: sharing permissions") || !plan.includes("regression test")) process.exit(1);
             `),
           ],
@@ -2404,11 +2594,11 @@ test("simulation existing project handles large feature addition through plannin
           subject: "复核提醒分组范围取舍和交付摘要",
           description: "记录范围取舍、回归证据和交付状态。",
           blockedBy: ["T003"],
-          writable_paths: [".workflow/reports/**"],
+          writable_paths: ["doc/reports/**"],
           worker_command: nodeEval(`
             const fs = require("fs");
-            fs.mkdirSync(".workflow/reports", { recursive: true });
-            fs.writeFileSync(".workflow/reports/reminder-groups-summary.md", [
+            fs.mkdirSync("doc/reports", { recursive: true });
+            fs.writeFileSync("doc/reports/reminder-groups-summary.md", [
               "# Reminder Groups Completion Summary",
               "IN scope group creation and assignment are complete.",
               "Existing listItems regression evidence is preserved.",
@@ -2418,7 +2608,7 @@ test("simulation existing project handles large feature addition through plannin
           verify_commands: [
             nodeEval(`
               const fs = require("fs");
-              const summary = fs.readFileSync(".workflow/reports/reminder-groups-summary.md", "utf8");
+              const summary = fs.readFileSync("doc/reports/reminder-groups-summary.md", "utf8");
               if (!summary.includes("regression evidence") || !summary.includes("OUT scope")) process.exit(1);
             `),
           ],
@@ -2570,6 +2760,27 @@ test("task ledger keeps tasks across plans in one canonical file", async () => {
   });
 });
 
+test("legacy task-board files receive an explicit migration trace", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    await writeFile(resolveHelixPath(dir, "team", "tasks.json"), JSON.stringify({
+      version: 1,
+      planId: "legacy_plan",
+      updatedAt: "2026-08-24T00:00:00.000Z",
+      tasks: [{ id: "T001", subject: "Legacy task", status: "completed" }],
+    }));
+
+    const listed = await listTeamTasks(dir, { all: true });
+    assert.equal(listed.tasks[0].ref, "legacy_plan:T001");
+    assert.equal(listed.tasks[0].status, "needs_user_decision");
+    assert.equal(listed.tasks[0].completionRevalidation.required, true);
+    assert.deepEqual(listed.tasks[0].history.map((entry) => entry.event), [
+      "legacy_imported",
+      "legacy_completion_requires_revalidation",
+    ]);
+  });
+});
+
 test("task intake creates a traceable draft before any plan and readies it after validation details", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
@@ -2692,7 +2903,7 @@ test("verifier failure returns task to pending until max attempts", async () => 
     assert.match(state.tasks[0].last_failure.retryHint, /FAILED:/);
     assert.match(state.tasks[0].last_failure.retryHint, /DO NOT: 不要降低或删除 verify_commands/);
 
-    const reportMd = await readFile(resolveHelixPath(dir, "reports", "failures", `${state.planId}-T001.md`), "utf8");
+    const reportMd = await readFile(resolveHelixPath(dir, "reports", "failures", state.planId, "T001.md"), "utf8");
     assert.match(reportMd, /# Task Failure/);
     assert.match(reportMd, /verifier_failed/);
 
@@ -2751,7 +2962,7 @@ test("runNextTask fails when automatic scope guard finds out-of-scope worker cha
     assert.equal(afterRetry.tasks[0].status, "failed");
     assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /scope_guard_failed/);
     assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /node_retry_blocked/);
-    assert.match(await readFile(resolveHelixPath(dir, "reports", "failures", `${state.planId}-T001.md`), "utf8"), /ChangeRequest/);
+    assert.match(await readFile(resolveHelixPath(dir, "reports", "failures", state.planId, "T001.md"), "utf8"), /ChangeRequest/);
   });
 });
 
@@ -2859,11 +3070,11 @@ test("review gate failure blocks checkpoint and writes actionable failure report
     assert.equal(result.task.last_failure.reason, "review_gate_failed");
     assert.match(result.task.last_failure.retryHint, /review says no/);
 
-    const reviewReport = await readJson(resolveHelixPath(dir, "reports", "reviews", `${plan.id}-T001.json`));
+    const reviewReport = await readJson(resolveHelixPath(dir, "reports", "reviews", plan.id, "T001.json"));
     assert.equal(reviewReport.status, "fail");
     assert.ok(reviewReport.lanes.some((lane) => lane.name === "explicit_review_commands" && lane.status === "fail"));
 
-    const failureReport = await readFile(resolveHelixPath(dir, "reports", "failures", `${plan.id}-T001.md`), "utf8");
+    const failureReport = await readFile(resolveHelixPath(dir, "reports", "failures", plan.id, "T001.md"), "utf8");
     assert.match(failureReport, /review_gate_failed/);
   });
 });
@@ -2889,7 +3100,7 @@ test("review gate fails when verifier evidence is missing", async () => {
     assert.equal(reviewed.status, "review_failed");
     assert.ok(reviewed.reviewResult.lanes.some((lane) => lane.name === "evidence_integrity" && lane.status === "fail"));
 
-    const reviewReport = await readJson(resolveHelixPath(dir, "reports", "reviews", `${plan.id}-T001.json`));
+    const reviewReport = await readJson(resolveHelixPath(dir, "reports", "reviews", plan.id, "T001.json"));
     assert.equal(reviewReport.status, "fail");
     assert.ok(reviewReport.lanes.some((lane) => lane.name === "evidence_integrity" && /verifyResult/.test(lane.summary)));
   });
@@ -2921,9 +3132,9 @@ test("standards command failure blocks checkpoint through review gate", async ()
     assert.equal(result.task.last_failure.reason, "review_gate_failed");
     assert.ok(result.reviewResult.lanes.some((lane) => lane.name === "project_standards" && lane.status === "fail"));
 
-    const reviewReport = await readFile(resolveHelixPath(dir, "reports", "reviews", `${plan.id}-T001.md`), "utf8");
+    const reviewReport = await readFile(resolveHelixPath(dir, "reports", "reviews", plan.id, "T001.md"), "utf8");
     assert.match(reviewReport, /standards says no/);
-    const failureReport = await readFile(resolveHelixPath(dir, "reports", "failures", `${plan.id}-T001.md`), "utf8");
+    const failureReport = await readFile(resolveHelixPath(dir, "reports", "failures", plan.id, "T001.md"), "utf8");
     assert.match(failureReport, /project_standards/);
   });
 });
@@ -3095,7 +3306,7 @@ test("workflow summary records failed runs with failure evidence", async () => {
     const summary = await writeWorkflowSummary(dir, { reason: "test-refresh" });
     assert.equal(summary.ok, false);
     assert.equal(summary.tasks[0].status, "failed");
-    assert.match(summary.tasks[0].failureReportPath, /^\.helix\/reports\/failures\/plan_.+-T001\.md$/);
+    assert.match(summary.tasks[0].failureReportPath, /^\.helix\/reports\/failures\/plan_.+\/T001\.md$/);
     const summaryMd = await readFile(resolveHelixPath(dir, "reports", "workflow-summary.md"), "utf8");
     assert.match(summaryMd, /ATTENTION_REQUIRED/);
     assert.match(summaryMd, /Failure report:/);
@@ -3574,8 +3785,7 @@ test("doctor passes on a healthy runtime and flags hand-edited completion", asyn
     const flagged = await runDoctor(dir);
     assert.equal(flagged.ok, false);
     const messages = flagged.findings.map((finding) => finding.message).join("\n");
-    assert.match(messages, /T999 is completed but has no checkpoint file/);
-    assert.match(messages, /T999 is completed but the ledger has no completion event/);
+    assert.match(messages, /T999 was marked completed by legacy state but lacks the current proof chain/);
   });
 });
 
@@ -3768,7 +3978,6 @@ test("hook injection demotes unmatched skills to on-demand references", async ()
     assert.match(result.output, /prompts show --skill/);
     // 与请求无关的技能必须降级为引用，不注入全文
     assert.doesNotMatch(result.output, /### review-work\n/);
-    assert.doesNotMatch(result.output, /### wa-ideate\n/);
     assert.match(result.output, /- review-work（与本次请求未匹配）/);
   });
 });
@@ -3908,7 +4117,8 @@ test("adversarial round 2: completion forgery attempts are caught by gates and d
     const forgedState = await readJson(resolveHelixPath(dir, "team", "tasks.json"));
     forgedState.tasks.find((task) => task.id === "T002").status = "completed";
     await writeFile(resolveHelixPath(dir, "team", "tasks.json"), JSON.stringify(forgedState, null, 2), "utf8");
-    await writeFile(resolveHelixPath(dir, "checkpoints", `${forgedState.planId}-T002.json`), JSON.stringify({ forged: true }), "utf8");
+    await mkdir(resolveHelixPath(dir, "checkpoints", forgedState.planId), { recursive: true });
+    await writeFile(resolveHelixPath(dir, "checkpoints", forgedState.planId, "T002.json"), JSON.stringify({ forged: true }), "utf8");
     const report = await runDoctor(dir);
     assert.equal(report.ok, false);
     const messages = report.findings.map((finding) => finding.message).join("\n");

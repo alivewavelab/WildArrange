@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WildArrange 全量历史问题审计</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 1100px; margin: 40px auto; padding: 0 20px; color: #172033; background: #f6f8fb; }
+    h1 { margin-bottom: 8px; }
+    .lead { color: #526079; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin: 24px 0; }
+    .card { background: white; border: 1px solid #dce3ee; border-left: 7px solid #2563eb; border-radius: 10px; padding: 18px; }
+    .p0 { border-left-color: #dc2626; }
+    .p1 { border-left-color: #d97706; }
+    .p2 { border-left-color: #2563eb; }
+    code { background: #eef2f7; padding: 2px 5px; border-radius: 4px; }
+    .flow { padding: 18px; background: #eaf2ff; border-radius: 10px; text-align: center; font-weight: 650; }
+    table { width: 100%; border-collapse: collapse; background: white; }
+    th, td { border: 1px solid #dce3ee; padding: 10px; text-align: left; vertical-align: top; }
+    th { background: #eef2f7; }
+    .tag { display: inline-block; margin-right: 6px; padding: 2px 7px; border-radius: 999px; color: white; font-size: 12px; font-weight: 700; }
+    .tag.p0 { background: #dc2626; }
+    .tag.p1 { background: #d97706; }
+    .tag.p2 { background: #2563eb; }
+    .ok { color: #166534; font-weight: 700; }
+    .warn { color: #9a3412; font-weight: 700; }
+    .evidence { color: #526079; font-size: 14px; }
+    li { margin: 7px 0; }
+  </style>
+</head>
+<body>
+  <h1>WildArrange 全量历史问题审计</h1>
+  <p class="lead">状态：<span class="ok">审计完成；第一批 P0/P1 清理已落地</span>（2026-08-24）。目标是找出仍会影响当前产品的旧协议、旧命名、失效配置、兼容残留和文档漂移；历史证据本身不等于问题。</p>
+
+  <div class="flow">全仓扫描 → 多 Agent 独立分类 → 主 Agent 交叉验证 → 可清理 / 必须保留 / 需要迁移</div>
+
+  <div class="grid">
+    <section class="card p0"><h2>运行时与配置</h2><p>检查旧路径、旧 Agent、旧命令、旧状态字段、死分支和仍会生效的兼容逻辑。</p></section>
+    <section class="card p1"><h2>发布与文档</h2><p>检查 npm 包、README、使用说明、examples、Prompt Pack 和产品总图是否仍传播旧事实。</p></section>
+    <section class="card p1"><h2>测试与迁移</h2><p>区分真实兼容测试、无意义旧 fixture、过期生成物和未覆盖的退役边界。</p></section>
+    <section class="card p2"><h2>交叉验证</h2><p>用真实 CLI、manifest、引用图、Git 状态与包体证明问题是否仍可达。</p></section>
+  </div>
+
+  <h2>判定标准</h2>
+  <table>
+    <tr><th>分类</th><th>定义</th><th>动作</th></tr>
+    <tr><td>P0 活跃旧问题</td><td>旧数据仍影响路由、执行、门控、安全或发布。</td><td>优先根治并补回归测试。</td></tr>
+    <tr><td>P1 当前事实漂移</td><td>代码不执行，但当前文档、示例或生成物会误导用户。</td><td>同步当前真相与生成源。</td></tr>
+    <tr><td>P2 待收敛兼容层</td><td>仍有迁移价值，但缺少退出条件、告警或删除时间点。</td><td>先定义迁移合同，再删除。</td></tr>
+    <tr><td>历史证据</td><td>只存在于明确标记的历史方案，运行时不可达。</td><td>保留，不当作活动问题。</td></tr>
+  </table>
+
+  <h2>审计结论</h2>
+  <p><strong>一句话结论：</strong><code>wa-*</code> 已不再是活动问题；当前应先清理“旧状态仍被当作有效事实”和“历史资料进入发布包”两类问题。像整理仓库一样：旧账本要封存，不能当今天的库存；旧说明可以留档，但不能塞进卖给用户的箱子。</p>
+
+  <div class="grid">
+    <section class="card p0">
+      <h2>第一批：阻断错误结果</h2>
+      <p>修复旧 completed 假绿、Doctor 多 Plan 串证据、五区 legacy 免检，并建立带备份的状态迁移。</p>
+    </section>
+    <section class="card p0">
+      <h2>第一批：阻断错误发布</h2>
+      <p>发布包排除 <code>doc/plans/</code>，按真实 tgz 扫描受限内容和断链。</p>
+    </section>
+    <section class="card p1">
+      <h2>第二批：收敛产品合同</h2>
+      <p>修复未挂载 Skill、未生效 promptVariants、伪命令和宿主工具假合同。</p>
+    </section>
+    <section class="card p2">
+      <h2>第三批：退役尾部兼容</h2>
+      <p>迁移完成后再删旧 Agent alias、旧 task reader、死缓存和测试旧名。</p>
+    </section>
+  </div>
+
+  <h2>第一批：必须先处理</h2>
+  <table>
+    <tr><th>级别</th><th>问题与实际影响</th><th>证据</th><th>根治动作</th></tr>
+    <tr>
+      <td><span class="tag p0">P0</span></td>
+      <td><strong>旧 completed 会假绿。</strong> 当前 T001 是旧结构、旧 owner <code>Atlas</code>，缺 review / acceptance proof / successCriteria；但 <code>status</code> 仍报 completed，<code>summary</code> 返回 <code>ok:true</code>。</td>
+      <td class="evidence"><code>.helix/team/tasks.json</code>；<code>.helix/checkpoints/plan_2026-06-14T030111Z-T001.json</code>；<code>src/orchestration/status.mjs:26</code>。实际 Doctor 报 2 个错误：缺 acceptance proof、ledger 无可信完成事件。</td>
+      <td>增加显式 <code>state migrate</code>：迁移前备份；旧 completed 缺任一当前门证据时降级为 <code>revalidation_required</code>，绝不补造 proof。status / summary 必须验证完成链。</td>
+    </tr>
+    <tr>
+      <td><span class="tag p0">P0</span></td>
+      <td><strong>Doctor 多 Plan 会串单。</strong> 不同 Plan 都可有 T001，但完成事件只按 <code>taskId</code> 建集合；A 计划证据可能替 B 计划通过，非 active Plan 又完全不审。</td>
+      <td class="evidence"><code>src/interface/doctor.mjs:148,248</code>；<code>src/orchestration/admission.mjs:626</code> 的并行完成事件还缺 <code>planId</code>。</td>
+      <td>Doctor 改读全局 task ledger；按 <code>planId:taskId</code> 绑定证据；新 admission event 写 planId；旧事件无法唯一归属时报告 ambiguous，不猜。</td>
+    </tr>
+    <tr>
+      <td><span class="tag p0">P0</span></td>
+      <td><strong>受限第三方 Prompt 已进入真实 npm 包。</strong> 两份文件自身写明“禁止照抄进发布包”，却被 <code>package.json.files</code> 的整个 <code>doc/</code> 带入。</td>
+      <td class="evidence">实际 tgz 含英文 120,270 bytes、中文 101,566 bytes；共 186 文件，约 652.1 kB 压缩 / 2.2 MB 解包。<code>package.json:19</code>；两份 <code>doc/plans/claude-fable-5-system-prompt*.md</code>。</td>
+      <td>整个 <code>doc/plans/</code> 不发布；只白名单面向用户且商业可发布的文档；发布门读取真实 tarball 清单做受限内容、来源和相对链接检查。</td>
+    </tr>
+    <tr>
+      <td><span class="tag p0">P0</span></td>
+      <td><strong>五区依赖门有 legacy 逃生口。</strong> 任意未知 <code>src/&lt;dir&gt;</code> 都被归为 legacy，而边界测试直接跳过；新建 <code>src/old/x.mjs</code> 即可绕过五区门。</td>
+      <td class="evidence"><code>src/infra/dependency-graph.mjs:163</code>；<code>test/dependency-boundary.test.mjs:44,249</code>。当前没有已落地的未知分区，但门本身可被绕过。</td>
+      <td>未知首级目录直接失败；删除 legacy skip；增加 <code>src/unknown/x.mjs</code> 对抗测试。</td>
+    </tr>
+    <tr>
+      <td><span class="tag p1">P1</span></td>
+      <td><strong>旧 Cursor 规则仍会 alwaysApply。</strong> 安装新版只新增 <code>wildarrange.mdc</code>，旧 <code>helixflow.mdc</code> 不会被安装流程清理，新旧规则可能同时注入。</td>
+      <td class="evidence"><code>.cursor/rules/helixflow.mdc:1</code>；<code>src/infra/rule-scanner.mjs:31</code>；<code>src/interface/adapters.mjs:93,191</code>。</td>
+      <td>adapter install 识别受管旧文件，先备份再迁移；Doctor 增加 legacy managed-file / duplicate rule 检查。</td>
+    </tr>
+    <tr>
+      <td><span class="tag p1">P1</span></td>
+      <td><strong>旧 runtime config 会“复活”。</strong> <code>.helix/config.json</code> 仍含 helix-linear、Sisyphus / Atlas、omo、hf 等旧字段；根配置未覆盖的键仍会通过深合并进入有效配置。</td>
+      <td class="evidence"><code>.helix/config.json</code>；<code>src/infra/runtime-config.mjs:343</code>。<code>config show</code> 仍可见旧 provider / artistry。</td>
+      <td>纳入同一状态迁移：按当前 schema 重建 active config；根配置存在时不继承未声明 legacy 键。历史 ledger / snapshot 不批量删除。</td>
+    </tr>
+  </table>
+
+  <h2>第二批：活动合同与文档漂移</h2>
+  <table>
+    <tr><th>级别</th><th>问题</th><th>处理边界</th></tr>
+    <tr><td><span class="tag p1">P1</span></td><td><strong>路由选中的 task skills 没真正挂载。</strong> <code>plan-state</code> 写入 <code>task.skills</code>，但 context 没传，最终只能成为 suggestion。执行阶段“programming + wa-work”式的双挂载承诺目前并不成立。</td><td>把 manifest 内的 <code>task.skills</code> 作为有数量/预算上限的可信任务绑定；否则删除“路由后会挂载”的产品承诺。</td></tr>
+    <tr><td><span class="tag p1">P1</span></td><td><strong>promptVariants 可查询但不生效。</strong> matcher 能返回 variant，Agent context 不读取；tool contract 却宣称会追加到 prompt。</td><td>真正接入 context/spawn，或删除配置与合同。不要保留“看得见、用不上”的旋钮。</td></tr>
+    <tr><td><span class="tag p1">P1</span></td><td><strong>dynamicAgents / categories 基本无执行消费者。</strong> <code>agents.json</code>、<code>categories.json</code> 只写不读，且当前仍固化旧 Agent / 模型。</td><td>M1 不做模型分类调度则删除公开配置、缓存 writer 和存在性测试；若保留，必须接到真实 spawn 选择。</td></tr>
+    <tr><td><span class="tag p1">P1</span></td><td><strong>Agent 工具合同有伪命令。</strong> coordination / handoff 把互斥命令用 Shell 管道串联；另列出不存在或 roadmap-only 的 lsp rename、git checkpoint、mcp register 等。</td><td>状态变更命令拆成独立 tool 条目；宿主能力标 <code>host-provided</code>；未实现能力移出发布合同。</td></tr>
+    <tr><td><span class="tag p1">P1</span></td><td><strong><code>lcx-*</code> 仍可被 matcher 命中。</strong> 三个 Skill 无 routes / agent / point 正式归属，但 manifest 登记使其运行时可达。</td><td>确认 LCX 来源：若是旧产品线，删除 3 文件和 manifest 条目；能力仍需则改为 WildArrange 产品语义名并正式路由。</td></tr>
+    <tr><td><span class="tag p1">P1</span></td><td><strong>发布文档断链且多套事实漂移。</strong> 包内 <code>使用说明书.md</code> 引用未发布的 <code>架构解析.md</code>；<code>CLAUDE.md</code> 至少 7 处落后于 AGENTS，却仍被发布；36 个历史/进行中方案被一起打包。</td><td>AGENTS 生成 CLAUDE 或把 CLAUDE 缩成稳定入口；<code>架构解析.md</code> 只保留稳定类比，精确事实链接唯一架构文档；发布包增加断链测试。</td></tr>
+    <tr><td><span class="tag p1">P1</span></td><td><strong>示例默认命令不可执行。</strong> 复制 starter 后却运行目标项目通常不存在的 <code>./bin/helix.mjs</code>。</td><td>默认改为安装包后用 <code>npx wildarrange</code>；本仓库开发命令单列。</td></tr>
+    <tr><td><span class="tag p1">P1</span></td><td><strong>公共 npm 包没有 license / LICENSE。</strong></td><td>发布前明确许可证；若不开放复用则标 <code>UNLICENSED</code> 或调整发布策略。</td></tr>
+  </table>
+
+  <h2>第三批：迁移后再退役</h2>
+  <ul>
+    <li><span class="tag p2">P2</span> 把普通测试里的 <code>.workflow/</code> 换成 <code>.helix/artifacts/</code>；兼容测试单独保留，不让旧词继续污染普通场景。</li>
+    <li><span class="tag p2">P2</span> 普通测试改用 Jiuwei / DiJiang / ZhuRong / BaiZe / LuWu；旧 Agent 名只留在明确命名的 migration tests。</li>
+    <li><span class="tag p2">P2</span> 删除无消费者的 <code>agents.json</code> / <code>categories.json</code> 生成逻辑，或把它们升级为每次可重建、可校验的诊断投影。</li>
+    <li><span class="tag p2">P2</span> 为 snapshots / hooks / outbox 增加 retention / prune；outbox 必须包含 planId 或 task ref。无运行中任务后再清 <code>.tmp</code> 和孤儿 projection。</li>
+    <li><span class="tag p2">P2</span> 状态迁移完成后，评估删除 <code>requiresSisyphusReview</code>、<code>planAgentBundles</code> fallback 和旧 Agent alias；修正 <code>src/infra/AGENTS.md</code> 对不存在 <code>foundation.mjs</code> 的陈述。</li>
+    <li><span class="tag p2">P2</span> CLI 单一事实源补齐 <code>task list --owner</code>、<code>prompts show --variant</code>，并检查仓库内生成文档与 renderer 字节一致。</li>
+  </ul>
+
+  <h2>明确保留，不做“清空式清理”</h2>
+  <table>
+    <tr><th>对象</th><th>为什么保留</th><th>退出条件</th></tr>
+    <tr><td>旧 ledger 无 hash 前缀、历史 checkpoints / snapshots / reports</td><td>这是审计证据。旧条目不可信，但不能改写成可信，也不能用删除掩盖历史。</td><td>长期只读归档；可做 retention 的仅是重复投影，不是账本。</td></tr>
+    <tr><td>旧 Agent alias</td><td>当前 active config / task owner 仍有 Atlas 等真实迁移需求。</td><td>active config、task ledger、adapter 全部迁移，并经过一版 sunset 告警后再删。</td></tr>
+    <tr><td>旧 task shape reader</td><td>当前 <code>.helix/team/tasks.json</code> 仍依赖它才能读取。</td><td>幂等迁移完成；未来 schema 版本必须 fail-closed。</td></tr>
+    <tr><td>旧 adapter uninstall 路径、旧锁恢复、旧备份兼容</td><td>这些是安全退出和事故恢复能力，不是产品旧命名污染。</td><td>确认所有受管旧文件和旧备份已退场后，单独评估。</td></tr>
+  </table>
+
+  <h2>已确认干净的边界</h2>
+  <ul>
+    <li class="ok">当前 tracked 代码、根/示例配置、routes 和当前 Prompt Pack 正文中，没有活动 <code>wa-*</code>、<code>hf-*</code>、<code>omo-*</code>、<code>.workflow/</code>、<code>artifacts-server</code>、<code>gates-server</code>。</li>
+    <li class="ok">Prompt Pack 当前是 Router + 5 个长期 Agent、32 个 Skill；manifest 路径均存在，routes/config 引用均已注册。</li>
+    <li class="ok"><code>routes.json</code> 的 <code>nextCommand</code> 均能在真实 CLI <code>--help --all</code> 找到。</li>
+    <li class="ok">当前 <code>src/</code> 现实目录只有五区；架构映射检查通过：73 个受管文件，0 unowned，0 orphan。</li>
+  </ul>
+
+  <h2>执行顺序与验收</h2>
+  <div class="flow">备份 active 状态 → 修 Doctor / status / 依赖门 → 加失败回归测试 → 状态迁移并重跑 Doctor → 收紧真实 npm tgz → 修活动合同 → 迁移测试与尾部兼容 → 全量测试与 pack 复验</div>
+  <ol>
+    <li><strong>批次 1 验收：</strong>两个 Plan 同名任务不串证据；旧 completed 不再假绿；未知 src 分区必失败；Doctor 对迁移后 active 状态为绿。</li>
+    <li><strong>批次 2 验收：</strong>真实 tgz 不含 <code>doc/plans/**</code> 和受限材料；包内相对链接 0 断链；工具合同每条命令可独立执行或明确标为宿主能力。</li>
+    <li><strong>批次 3 验收：</strong><code>npm test</code>、<code>npm run check:arch</code>、<code>npm pack --dry-run --cache /private/tmp/helix-npm-cache</code> 全通过，Doctor / status / summary 对同一任务状态给出一致结果。</li>
+  </ol>
+
+  <h2>第一批实施回执</h2>
+  <ul>
+    <li class="ok">旧 completed 已 fail-closed：当前 T001 从 completed 迁为 needs_user_decision；status 显示 completed=0，summary.ok=false，不再假绿。</li>
+    <li class="ok">Doctor 已按 planId:taskId 审计全局任务总账；旧无 planId 事件多义时报告 ambiguous；并行 admission 新事件携带 planId。</li>
+    <li class="ok">根 helix.config.json 已成为权威源；旧 .helix/config.json、agents.json、categories.json 已按当前配置重建。迁移恢复点：backup_a2aecd44-00df-47d8-bf9c-5de499303e35。</li>
+    <li class="ok">旧 Cursor helixflow.mdc 已备份后移除，wildarrange.mdc 与 project hooks 已安装；Doctor legacyManagedRules=0。</li>
+    <li class="ok">未知 src 一级目录现在直接触发 UNKNOWN_SOURCE_ZONE；legacy 免检已删除并有对抗测试。</li>
+    <li class="ok">npm 发布改为显式白名单；受限 Prompt 不再进入 tarball。发布文件 186 → 152，解包约 2.18 MB → 1.60 MB；包内 Markdown 相对链接门通过。</li>
+    <li class="ok">完整测试 287/287、架构映射 73 files / 0 unowned / 0 orphan、真实 pack 预检、git diff --check 全部通过。</li>
+  </ul>
+
+  <p class="warn">第一批已完成；历史 ledger/checkpoint 保持不变。剩余工作是第二批活动合同收敛和第三批尾部兼容退役。</p>
+</body>
+</html>

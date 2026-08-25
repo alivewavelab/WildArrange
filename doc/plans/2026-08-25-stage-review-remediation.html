@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>阶段 Review 阻断项修复</title>
+  <style>
+    body{font-family:system-ui,sans-serif;max-width:980px;margin:40px auto;padding:0 20px;color:#172033;background:#f6f8fb}.card,.flow{background:#fff;border:1px solid #dce3ee;border-radius:10px;padding:18px;margin:16px 0}.flow{text-align:center;background:#eaf2ff;font-weight:700}.p0{border-left:7px solid #dc2626}.p1{border-left:7px solid #f59e0b}.safe{border-left:7px solid #16a34a}code{background:#eef2f7;padding:2px 5px;border-radius:4px}
+  </style>
+</head>
+<body>
+  <h1>阶段 Review 阻断项修复</h1>
+  <p>状态：已完成（2026-08-25）。异模型终审发现的合法连字符 ID 证据文件名碰撞，以及 dangling symlink 恢复被跳过，均已完成根因修复并重新封箱。</p>
+  <div class="flow">输入校验 → 准备可恢复删除事务 → 提交权威状态 → 交付上下文真实挂载 → 打包安装冒烟 → 第二轮 Review</div>
+  <section class="card p0"><h2>P0：归档作用域与事务</h2><p>Plan ID 必须是安全单段标识符；显式 <code>--plan</code> 不允许回退到其它 Plan。归档先准备删除清单与恢复材料，再提交权威状态；目录产物、损坏 outbox、非活动 Plan 镜像、Plan 切换批准状态都要有故障测试。</p></section>
+  <section class="card p1"><h2>P1：Skill 真实消费与完整性</h2><p>任务绑定必须进入公开 <code>context build</code>/宿主交付入口；Prompt Pack Skill 读取统一验证 pack 根 realpath 与安装 hash，不得信任可修改 registry 指向任意文件。</p></section>
+  <section class="card p1"><h2>P1：完成证据兼容</h2><p>无 Plan 的历史完成事件不得凭“当前 taskId 唯一”自动归属新 Plan；Doctor、status 与 admission 使用同一 fail-closed 规则。</p></section>
+  <section class="card p1"><h2>P1：发布与命令真值</h2><p>Starter 先安装 <code>@alivewavelab/wildarrange</code>；包体测试真实生成 tarball、离线安装并运行公开 CLI；补齐 <code>task list --owner</code> 帮助，清理测试临时目录。</p></section>
+  <section class="card safe"><h2>单独决策</h2><p><code>LICENSE</code> 类型属于法律/发布策略，不在技术修复中代选；本机生成的 Cursor bridge 不进入提交。</p></section>
+  <section class="card"><h2>验收</h2><p>新增对抗与失败注入测试；全量 <code>npm test</code>、架构门、Governance、Doctor、config、ledger、真实包安装冒烟及 npm dry-run 全部通过；最后再做一次只读阶段 Review。</p></section>
+  <section class="card safe"><h2>完成回执</h2><p>最终全量测试 <code>307/307</code>；架构映射 <code>73 watched / 0 unowned / 0 orphan</code>；Governance、Doctor、config baseline、ledger、真实 tarball 离线安装与 npm dry-run 全部通过。两名独立复验 Agent 分别重放归档中断恢复与 Prompt Pack 篡改场景，异模型交叉复验追加的两项 P1 也已加入回归测试。活动发布内容只保留负向测试中的 <code>wa-/lcx-</code> 字样，未包含旧 Skill、<code>.workflow/</code>、<code>artifacts-server</code> 或 <code>gates-server</code>。四个 Git 忽略的历史测试目录已移入废纸篓。</p></section>
+  <section class="card safe"><h2>异模型交叉复验追加项</h2><p>已修复：checkpoint、acceptance、review、failure 全部改为 <code>planId/taskId</code> 分目录；旧 checkpoint / acceptance 只有身份精确匹配或无碰撞时才兼容。已修复：恢复包用 <code>lstat</code> 区分 symlink、目录与普通文件，顶层相对或 dangling symlink 按原链接内容恢复。两项复现均已固化为自动测试。</p></section>
+</body>
+</html>

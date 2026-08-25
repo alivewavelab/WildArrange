@@ -5,10 +5,12 @@ import {
   normalizeAgentKey,
 } from "../infra/agent-registry.mjs";
 import { loadHelixConfig } from "../infra/runtime-config.mjs";
+import { renderPromptPackEntry } from "../infra/prompt-pack.mjs";
 import {
   readJson,
   resolveHelixPath,
 } from "../infra/runtime-store.mjs";
+import { loadTaskState } from "../infra/task-state-store.mjs";
 import { matchSkills } from "./skill-matcher.mjs";
 
 const DEFAULT_DYNAMIC_ALWAYS_MOUNT = ["wildarrange-injection-runtime"];
@@ -24,17 +26,27 @@ export async function resolveInjectionPoint(rootDir, name, variables = {}, optio
     const loaded = await loadMarkdownAttachment(rootDir, resolved, budgets.markdownMaxChars);
     if (loaded) markdown.push(loaded);
   }
+  const taskSkills = await resolveTaskBoundSkills(rootDir, name, variables, options);
   const selection = await selectPointSkills(rootDir, config, point, {
     text: typeof options.text === "string" ? options.text : "",
     stage: typeof options.stage === "string" ? options.stage : "",
     agent: variables.agent || "",
+    taskSkills,
   });
   const skills = [];
   const missingSkills = [];
   for (const skill of selection.mounted) {
-    const loaded = await loadSkillAttachment(rootDir, skill, budgets.skillMaxChars);
-    if (loaded) skills.push(loaded);
-    else missingSkills.push({ name: skill, reason: "not_found" });
+    try {
+      const loaded = await loadSkillAttachment(rootDir, skill, budgets.skillMaxChars);
+      if (loaded) skills.push(loaded);
+      else missingSkills.push({ name: skill, reason: "not_found" });
+    } catch (error) {
+      missingSkills.push({
+        name: skill,
+        reason: "integrity_failed",
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
   return {
     name,
@@ -49,6 +61,21 @@ export async function resolveInjectionPoint(rootDir, name, variables = {}, optio
   };
 }
 
+async function resolveTaskBoundSkills(rootDir, pointName, variables, options) {
+  // M1 只有执行前宿主入口会真实消费任务绑定；复核与 checkpoint 仍使用各自
+  // 注入点的静态 Skill，不把尚未接入宿主的阶段伪装成已挂载。
+  if (pointName !== "before_execute") return [];
+  if (Array.isArray(options.taskSkills)) return normalizeStringList(options.taskSkills, []);
+  if (!variables.taskId) return [];
+  const state = await loadTaskState(rootDir, { planId: variables.planId || undefined });
+  if (!state) return [];
+  const planId = variables.planId || state.activePlanId || state.planId || "";
+  const matches = (state.tasks || []).filter((task) =>
+    task.id === variables.taskId && (!planId || task.planId === planId));
+  const task = matches.length === 1 ? matches[0] : null;
+  return normalizeStringList(task?.skills, []);
+}
+
 // 按需挂载只做"减法"：静态清单是上限，动态匹配决定哪些真正带全文进入上下文，
 // 未命中的降级为路径引用；绝不因为文本命中关键词就注入清单之外的技能全文。
 async function selectPointSkills(rootDir, config, point, context) {
@@ -56,14 +83,20 @@ async function selectPointSkills(rootDir, config, point, context) {
   const normalizedAgent = normalizeAgentKey(context.agent);
   const agentSkills = (config.agents?.[normalizedAgent]?.skills || [])
     .filter((skill) => typeof skill === "string" && skill.length > 0);
-  const configured = [...new Set([...pointSkills, ...agentSkills])];
   const dynamicConfig = config.skillMatcher?.dynamicInjection || {};
+  const maxSkills = normalizeMaxSkills(dynamicConfig.maxSkills, DEFAULT_DYNAMIC_MAX_SKILLS);
+  const requestedTaskSkills = normalizeStringList(context.taskSkills, []);
+  const taskSkills = requestedTaskSkills.slice(0, maxSkills);
+  const taskOverflow = requestedTaskSkills.slice(maxSkills)
+    .map((name) => ({ name, reason: "task_binding_over_max" }));
+  const configured = [...new Set([...pointSkills, ...agentSkills, ...taskSkills])];
   const enabled = dynamicConfig.enabled !== false && config.skillMatcher?.enabled !== false;
   const staticReport = {
     mode: "static",
     mounted: configured,
-    referenced: [],
+    referenced: taskOverflow,
     bound: agentSkills,
+    taskBound: taskSkills,
     reason: null,
   };
   if (!enabled) return { mounted: configured, report: { ...staticReport, reason: "dynamic_injection_disabled" } };
@@ -86,8 +119,8 @@ async function selectPointSkills(rootDir, config, point, context) {
   const alwaysMount = [...new Set([
     ...normalizeStringList(dynamicConfig.alwaysMount, DEFAULT_DYNAMIC_ALWAYS_MOUNT),
     ...agentSkills,
+    ...taskSkills,
   ])];
-  const maxSkills = normalizeMaxSkills(dynamicConfig.maxSkills, DEFAULT_DYNAMIC_MAX_SKILLS);
   // 只认与请求内容相关的信号（关键词/路由/阶段/名称命中）；
   // agent 身份加分对每次请求都恒定，等于回到静态挂载，不能作为按需依据。
   const scores = new Map(
@@ -97,7 +130,7 @@ async function selectPointSkills(rootDir, config, point, context) {
   );
 
   const mounted = [];
-  const referenced = [];
+  const referenced = [...taskOverflow];
   for (const skill of configured) {
     if (alwaysMount.includes(skill)) {
       mounted.push(skill);
@@ -133,6 +166,7 @@ async function selectPointSkills(rootDir, config, point, context) {
       textChars: context.text.length,
       stage: context.stage || null,
       bound: agentSkills,
+      taskBound: taskSkills,
       mounted: finalMounted,
       referenced,
       suggestions,
@@ -185,11 +219,13 @@ async function loadMarkdownAttachment(rootDir, relativePath, maxChars) {
 async function loadSkillAttachment(rootDir, skillName, maxChars) {
   const registry = await readJson(resolveHelixPath(rootDir, "prompt-pack.json"), null);
   const entry = registry?.skills?.[skillName];
-  const promptPackPath = entry ? path.join(registry.packDir, entry.path) : null;
   const projectSkill = entry ? null : await resolveProjectSkill(rootDir, skillName);
-  const filePath = promptPackPath || projectSkill?.filePath;
-  if (!filePath) return null;
-  const content = await readFile(filePath, "utf8").catch(() => null);
+  if (!entry && !projectSkill) return null;
+  // Prompt Pack 的固定运行时根、路径边界与 sha256 必须由 infra 的单一 owner
+  // 校验，AI 层不能根据 registry 自行拼读取路径绕开完整性协议。
+  const content = entry
+    ? await renderPromptPackEntry(rootDir, { skill: skillName })
+    : await readFile(projectSkill.filePath, "utf8").catch(() => null);
   if (content === null) return null;
   const prepared = prepareAttachmentContent(content.trim(), maxChars, `Skill ${skillName}`);
   return {

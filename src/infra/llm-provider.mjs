@@ -84,7 +84,7 @@ export async function runLlmReview(rootDir, agentName, task, evidence = {}, opti
 
 export function resolveAgentProvider(config, agentName) {
   const archivistProfile = config.archivistRouter?.agent === agentName ? config.archivistRouter : null;
-  const agent = config.agents?.[agentName] || config.dynamicAgents?.[agentName] || archivistProfile;
+  const agent = config.agents?.[agentName] || archivistProfile;
   if (!agent) return { available: false, reason: `agent ${agentName} is not configured` };
   const providerName = agent.provider;
   const provider = config.modelProviders?.[providerName];

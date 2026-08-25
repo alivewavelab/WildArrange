@@ -332,7 +332,7 @@ test("adversarial round 2 integration: admission rolls back before checkpoint wh
     assert.equal(admitted.rollback.status, "rolled_back");
     await assert.rejects(readFile(path.join(cloneA, "src", "admit.txt"), "utf8"), /ENOENT/);
     await assert.rejects(
-      readFile(path.join(cloneA, ".helix", "checkpoints", "P-RACE-T001.json"), "utf8"),
+      readFile(path.join(cloneA, ".helix", "checkpoints", "P-RACE", "T001.json"), "utf8"),
       /ENOENT/,
     );
     const state = await loadTaskState(cloneA);
@@ -684,7 +684,7 @@ test("monolithic linear run cannot complete after another device takes ownership
     const result = await running;
     assert.equal(result.status, "revalidation_required");
     await assert.rejects(
-      readFile(path.join(cloneA, ".helix", "checkpoints", "P-LINEAR-RACE-T001.json"), "utf8"),
+      readFile(path.join(cloneA, ".helix", "checkpoints", "P-LINEAR-RACE", "T001.json"), "utf8"),
       /ENOENT/,
     );
     const stateA = await loadTaskState(cloneA);

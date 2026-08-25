@@ -111,35 +111,19 @@
       }
     }
   },
-  "dynamicAgents": {
-    "visual-engineering": { "provider": "gemini", "model": "gemini-3.1-pro" },
-    "ultrabrain": { "provider": "host", "model": "host-default", "reasoning": "xhigh" },
-    "artistry": { "provider": "gemini", "model": "gemini-3.1-pro" },
-    "quick": { "provider": "deepseek", "model": "deepseek-v4-flash" },
-    "deep": { "provider": "host", "model": "host-default", "reasoning": "medium" },
-    "writing": { "provider": "kimi", "model": "kimi-2.6" },
-    "git": { "provider": "deepseek", "model": "deepseek-v4-flash" }
-  },
-  "promptVariants": {
-    "host": "使用宿主 Agent 已配置的主模型与推理策略，不假设具体供应商 API。",
-    "gpt": "优先写清验收标准、工具调用纪律和简洁证据摘要。",
-    "gemini": "涉及界面或多模态任务时，优先进行视觉检查、状态对比和可见证据记录。",
-    "kimi": "优先处理长上下文写作、文档综合和审慎中文表达。",
-    "deepseek": "优先快速探索、结构化摘要和成本敏感的路由判断。"
-  },
   "skillMatcher": {
     "enabled": true,
     "defaultLimit": 6,
     "stageBoosts": {
-      "ideate": ["wa-ideate", "ultraresearch"],
-      "clarify": ["wa-spec", "start-work"],
-      "plan": ["wa-plan", "wa-architect", "init-deep"],
-      "design": ["wa-design", "frontend-ui-ux", "visual-qa"],
-      "execute": ["programming", "debugging", "refactor", "wa-work"],
-      "verify": ["wa-test", "review-work"],
-      "review": ["wa-review", "review-work", "remove-ai-slops"],
-      "deploy": ["wa-deploy", "publish", "pre-publish-review"],
-      "recall": ["wa-recall", "get-unpublished-changes"]
+      "ideate": ["review-product-intent", "map-user-journey", "research-domain-benchmark", "ultraresearch"],
+      "clarify": ["review-product-intent", "design-acceptance", "start-work"],
+      "plan": ["init-deep", "review-plan-risk", "review-plan-readiness", "review-scope-tradeoff", "design-acceptance"],
+      "design": ["frontend-ui-ux", "review-ux-interaction", "visual-qa"],
+      "execute": ["programming", "debugging", "refactor", "run-linear-delivery"],
+      "verify": ["review-work", "design-acceptance", "visual-qa"],
+      "review": ["review-work", "review-plan-risk", "review-plan-readiness", "remove-ai-slops"],
+      "deploy": ["publish", "pre-publish-review"],
+      "recall": ["get-unpublished-changes"]
     }
   },
   "contextBudgets": {
@@ -235,7 +219,7 @@
       "enabled": true,
       "tools": ["helix_resume", "helix_rules_collect", "helix_context_build"],
       "markdown": [".helix/snapshots/context.md", ".helix/rules/context.md"],
-      "skills": ["wildarrange-injection-runtime", "start-work", "wa-recall"],
+      "skills": ["wildarrange-injection-runtime", "start-work"],
       "rules": { "mode": "static" }
     },
     "user_prompt_submit": {
@@ -244,8 +228,6 @@
       "markdown": [".helix/snapshots/context.md", ".helix/rules/context.md"],
       "skills": [
         "wildarrange-injection-runtime",
-        "wa-ideate",
-        "wa-plan",
         "review-work",
         "review-product-intent",
         "map-user-journey",
@@ -274,7 +256,7 @@
       "enabled": true,
       "tools": ["helix_resume", "helix_rules_collect"],
       "markdown": [".helix/snapshots/context.md", ".helix/rules/context.md"],
-      "skills": ["wildarrange-injection-runtime", "wa-recall"],
+      "skills": ["wildarrange-injection-runtime"],
       "rules": { "mode": "recovery_marker" }
     },
     "before_execute": {
@@ -291,7 +273,7 @@
         ".helix/context-agents/BaiZe-{taskId}.md",
         ".helix/rules/context.md"
       ],
-      "skills": ["wildarrange-injection-runtime", "review-work", "review-plan-risk", "review-plan-readiness", "wa-review", "visual-qa"],
+      "skills": ["wildarrange-injection-runtime", "review-work", "review-plan-risk", "review-plan-readiness", "visual-qa"],
       "rules": { "mode": "dynamic" }
     },
     "repository_governance": {
@@ -304,8 +286,8 @@
     "before_checkpoint": {
       "enabled": true,
       "tools": ["helix_evidence_record", "review_gate", "helix_summary"],
-      "markdown": [".helix/reports/reviews/{planId}-{taskId}.md", ".helix/rules/context.md"],
-      "skills": ["wildarrange-injection-runtime", "wa-test", "review-work"],
+      "markdown": [".helix/reports/reviews/{planId}/{taskId}.md", ".helix/rules/context.md"],
+      "skills": ["wildarrange-injection-runtime", "review-work", "design-acceptance"],
       "rules": { "mode": "dynamic" }
     },
     "stop": {

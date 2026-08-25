@@ -26,6 +26,7 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
 export const ZONES = ["interface", "orchestration", "ai", "capabilities", "infra"];
+export const UNKNOWN_ZONE = "unknown";
 
 const MASK = "\u0000";
 
@@ -163,7 +164,18 @@ export function extractImportSpecifiers(source) {
 export function classifyZone(srcDir, absolutePath) {
   const relativeToSrc = path.relative(srcDir, absolutePath);
   const [firstSegment] = relativeToSrc.split(path.sep);
-  return ZONES.includes(firstSegment) ? firstSegment : "legacy";
+  return ZONES.includes(firstSegment) ? firstSegment : UNKNOWN_ZONE;
+}
+
+function assertKnownZone(srcDir, absolutePath, role) {
+  const zone = classifyZone(srcDir, absolutePath);
+  if (zone !== UNKNOWN_ZONE) return zone;
+  const relativePath = path.relative(srcDir, absolutePath) || ".";
+  const error = new Error(
+    `${role} is outside the five source zones: src/${relativePath} (expected src/<${ZONES.join("|")}>/...)`,
+  );
+  error.code = "UNKNOWN_SOURCE_ZONE";
+  throw error;
 }
 
 export async function listMjsFiles(dir) {
@@ -197,12 +209,14 @@ export async function buildDependencyEdges(rootDir) {
   const edges = [];
   for (const filePath of files) {
     const source = await readFile(filePath, "utf8");
-    const sourceZone = classifyZone(srcDir, filePath);
+    // Reject unknown owners before reading imports: a standalone runtime file
+    // with no dependency edges is still an architecture-boundary violation.
+    const sourceZone = assertKnownZone(srcDir, filePath, "runtime module");
     for (const specifier of extractImportSpecifiers(source)) {
       if (!specifier.startsWith(".")) continue; // skip node builtins / bare package specifiers
       const resolvedTarget = path.resolve(path.dirname(filePath), specifier);
-      if (!resolvedTarget.startsWith(srcDir)) continue; // skip references outside src/ (e.g. ../test)
-      const targetZone = classifyZone(srcDir, resolvedTarget);
+      if (resolvedTarget !== srcDir && !resolvedTarget.startsWith(`${srcDir}${path.sep}`)) continue;
+      const targetZone = assertKnownZone(srcDir, resolvedTarget, "dependency target");
       edges.push({
         from: path.relative(srcDir, filePath),
         to: path.relative(srcDir, resolvedTarget),
