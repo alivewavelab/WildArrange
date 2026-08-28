@@ -74,6 +74,15 @@ export async function runInjectionHook(rootDir, input = {}) {
     facts.targetPaths = targetPaths;
     facts.rules = await scanProjectRules(hookRootDir, { targetPaths });
     facts.preflight = await preToolUseGuard(hookRootDir, input);
+    const executionTaskId = facts.preflight?.taskId || taskId;
+    if (executionTaskId) {
+      facts.agentContext = await buildAgentContext(hookRootDir, {
+        agent: DEFAULT_EXECUTOR_AGENT,
+        taskId: executionTaskId,
+        planId: await currentPlanId(hookRootDir),
+        injectionPoint: "before_execute",
+      }).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
+    }
   } else if (event === "PostToolUse") {
     facts.targetPaths = targetPaths;
     facts.rules = await scanProjectRules(hookRootDir, { targetPaths });
@@ -114,16 +123,17 @@ export async function runInjectionHook(rootDir, input = {}) {
     facts.attention = await attentionReport(hookRootDir).catch(() => null);
   }
 
+  const effectiveTaskId = taskId || facts.preflight?.taskId || "";
   const variables = {
     agent: input.agent || defaultAgentForHookEvent(event),
-    taskId,
+    taskId: effectiveTaskId,
     planId: await currentPlanId(hookRootDir),
   };
   const injectionPoint = await resolveInjectionPoint(hookRootDir, pointName, variables, {
     text: injectionTextForHookEvent(event, input, facts),
     stage: injectionStageForHookEvent(event, facts),
   });
-  const contextMarkdown = injectionPoint.enabled ? renderHookInjectionMarkdown({ event, pointName, sessionId, taskId, targetPaths, facts, injectionPoint }) : "";
+  const contextMarkdown = injectionPoint.enabled ? renderHookInjectionMarkdown({ event, pointName, sessionId, taskId: effectiveTaskId, targetPaths, facts, injectionPoint }) : "";
   const output = event === "PreToolUse" && injectionPoint.enabled
     ? renderPreToolUseHookOutput(facts.preflight, contextMarkdown)
     : contextMarkdown;
@@ -134,7 +144,7 @@ export async function runInjectionHook(rootDir, input = {}) {
     event,
     pointName,
     sessionId,
-    taskId: taskId || null,
+    taskId: effectiveTaskId || null,
     targetPaths,
     enabled: injectionPoint.enabled,
     decision: facts.preflight?.decision || facts.resultGate?.decision || null,
@@ -155,7 +165,7 @@ export async function runInjectionHook(rootDir, input = {}) {
     event,
     pointName,
     sessionId,
-    taskId: taskId || null,
+    taskId: effectiveTaskId || null,
     decision: result.decision,
     outputChars: output.length,
   });
@@ -170,7 +180,7 @@ export async function runInjectionHook(rootDir, input = {}) {
         reason: facts.preflight?.reason || facts.resultGate?.summary || null,
         summary: `${input.tool_name || event}${targetPaths.length > 0 ? ` ${targetPaths.join(", ")}` : ""} -> ${result.decision}`,
         evidencePath: result.reportJsonPath,
-        taskId: taskId || null,
+        taskId: effectiveTaskId || null,
         sessionId,
         toolName: input.tool_name || input.toolName || null,
         targetPaths,
@@ -685,6 +695,18 @@ function appendHookFacts(lines, facts) {
         lines.push(`- 身份 Prompt：${prompt.loadedChars}/${prompt.chars} 字符；预算 ${prompt.budgetChars}${prompt.truncated ? "；已截断" : ""}`);
         lines.push("", `### ${facts.agentContext.agent} 身份 Prompt`, "", prompt.content);
       }
+      const delivery = facts.agentContext.injectionPoint;
+      if (delivery?.name === "before_execute") {
+        lines.push("", "### 执行前任务 Skill（宿主必须按此工作流执行）", "");
+        if ((delivery.skills || []).length === 0) {
+          lines.push("- (none)");
+        } else {
+          for (const skill of delivery.skills) {
+            lines.push(`#### ${skill.name}`, "", renderAttachmentMeta(skill), "", skill.content || "(empty)", "");
+          }
+        }
+        appendSkillSelectionReport(lines, delivery.skillSelection);
+      }
     }
     lines.push("");
   }
@@ -751,7 +773,11 @@ function appendSkillSelectionReport(lines, selection) {
   if (missing.length > 0) {
     lines.push("## Skill 配置告警", "");
     for (const item of missing) {
-      lines.push(`- ${item.name} 未找到：请安装到 \`.agents/skills/${item.name}/SKILL.md\`，或登记到 Prompt Pack。`);
+      if (item.reason === "integrity_failed") {
+        lines.push(`- ${item.name} 完整性校验失败，已拒绝加载：${item.detail || "Prompt Pack 路径或 hash 不可信"}`);
+      } else {
+        lines.push(`- ${item.name} 未找到：请安装到 \`.agents/skills/${item.name}/SKILL.md\`，或登记到 Prompt Pack。`);
+      }
     }
     lines.push("");
   }

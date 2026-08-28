@@ -9,12 +9,16 @@ import {
   ensureHelixDirs,
   nowIso,
   readJson,
+  resolveLegacyTaskAcceptancePath,
+  resolveLegacyTaskCheckpointPath,
   resolveHelixPath,
+  resolveTaskAcceptancePath,
+  resolveTaskCheckpointPath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
 import { readVerifiedLedgerEntries, verifyLedger } from "../infra/ledger.mjs";
 import { isPossibleNoopTask, isTrivialCommand } from "../infra/task-predicates.mjs";
-import { loadTaskState } from "../infra/task-state-store.mjs";
+import { loadTaskLedger, loadTaskState, taskRef } from "../infra/task-state-store.mjs";
 import { listRuntimeStateBackups, verifyConfigBaseline, verifyRuntimeState } from "../infra/security.mjs";
 import { evaluateGateArming } from "../infra/gate-arming.mjs";
 import { projectDecisionStats } from "./decisions.mjs";
@@ -146,33 +150,65 @@ async function checkConfigStructure(rootDir, findings) {
 }
 
 async function checkCompletionIntegrity(rootDir, findings) {
-  const taskState = await loadTaskState(rootDir);
-  if (!taskState) {
+  const taskLedger = await loadTaskLedger(rootDir);
+  if (!taskLedger) {
     return { checkedCompleted: 0, note: "no imported plan" };
   }
-  const ledgerTaskEvents = await collectCompletionLedgerEvents(rootDir);
-  const completedTasks = (taskState.tasks || []).filter((task) => task.status === "completed");
+  const tasks = taskLedger.tasks || [];
+  const completionEvents = await collectCompletionLedgerEvents(rootDir, tasks);
+  for (const ambiguous of completionEvents.ambiguousLegacy) {
+    addFinding(
+      findings,
+      "error",
+      "completion_audit",
+      `legacy completion event for task ${ambiguous.taskId} has no planId and cannot be assigned to a current Plan; current candidates: ${ambiguous.planIds.join(", ")}`,
+      {
+        code: "ambiguous_legacy_completion_event",
+        taskId: ambiguous.taskId,
+        planIds: ambiguous.planIds,
+        eventTypes: ambiguous.eventTypes,
+      },
+    );
+  }
+  const completedTasks = tasks.filter((task) => task.status === "completed");
   let audited = 0;
+  let revalidationRequired = 0;
+  for (const task of tasks) {
+    if (task.completionRevalidation?.required !== true) continue;
+    revalidationRequired += 1;
+    const migrated = Boolean(task.completionRevalidation.migratedAt);
+    addFinding(findings, migrated ? "warn" : "error", "completion_audit", `task ${task.ref || taskRef(task.planId, task.id)} was marked completed by legacy state but lacks the current proof chain; ${migrated ? "migration safely moved it to needs_user_decision" : "run state migrate, then revalidate it through the normal delivery pipeline"}`, {
+      planId: task.planId,
+      taskId: task.id,
+      taskRef: task.ref || taskRef(task.planId, task.id),
+      previousStatus: task.completionRevalidation.previousStatus,
+      migratedAt: task.completionRevalidation.migratedAt || null,
+    });
+  }
   for (const task of completedTasks) {
     audited += 1;
-    const checkpointPath = resolveHelixPath(rootDir, "checkpoints", `${taskState.planId}-${task.id}.json`);
-    if (!existsSync(checkpointPath)) {
-      addFinding(findings, "error", "completion_audit", `task ${task.id} is completed but has no checkpoint file; task state may have been edited by hand`, { taskId: task.id, expectedPath: path.relative(rootDir, checkpointPath) });
+    const planId = task.planId || taskLedger.activePlanId;
+    const ref = taskRef(planId, task.id);
+    const checkpointPath = resolveTaskCheckpointPath(rootDir, planId, task.id);
+    const checkpoint = await readTaskEvidenceJson(rootDir, "checkpoint", planId, task.id);
+    if (!checkpoint) {
+      addFinding(findings, "error", "completion_audit", `task ${ref} is completed but has no checkpoint file; task state may have been edited by hand`, { planId, taskId: task.id, taskRef: ref, expectedPath: path.relative(rootDir, checkpointPath) });
     }
-    const acceptancePath = resolveHelixPath(rootDir, "reports", "acceptance", `${taskState.planId}-${task.id}.json`);
-    if (!existsSync(acceptancePath)) {
-      addFinding(findings, "error", "completion_audit", `task ${task.id} is completed but has no acceptance proof report`, { taskId: task.id, expectedPath: path.relative(rootDir, acceptancePath) });
+    const acceptancePath = resolveTaskAcceptancePath(rootDir, planId, task.id, "json");
+    const acceptance = await readTaskEvidenceJson(rootDir, "acceptance", planId, task.id);
+    if (!acceptance) {
+      addFinding(findings, "error", "completion_audit", `task ${ref} is completed but has no acceptance proof report`, { planId, taskId: task.id, taskRef: ref, expectedPath: path.relative(rootDir, acceptancePath) });
     }
-    if (!ledgerTaskEvents.has(task.id)) {
-      addFinding(findings, "error", "completion_audit", `task ${task.id} is completed but the ledger has no completion event for it`, { taskId: task.id });
+    if (!completionEvents.refs.has(ref)) {
+      addFinding(findings, "error", "completion_audit", `task ${ref} is completed but the ledger has no completion event for it`, { planId, taskId: task.id, taskRef: ref });
     }
     if (!Array.isArray(task.verify_commands) || task.verify_commands.length === 0) {
-      addFinding(findings, "error", "completion_audit", `task ${task.id} is completed with empty verify_commands`, { taskId: task.id });
+      addFinding(findings, "error", "completion_audit", `task ${ref} is completed with empty verify_commands`, { planId, taskId: task.id, taskRef: ref });
     } else if (task.verify_commands.every(isTrivialCommand)) {
-      addFinding(findings, "warn", "completion_audit", `task ${task.id} is completed but every verify command is trivial (e.g. \`true\`); the verification proves nothing`, { taskId: task.id });
+      addFinding(findings, "warn", "completion_audit", `task ${ref} is completed but every verify command is trivial (e.g. \`true\`); the verification proves nothing`, { planId, taskId: task.id, taskRef: ref });
     }
     if (isPossibleNoopTask(task)) {
-      addFinding(findings, "warn", "completion_audit", `task ${task.id} looks like a no-op task (trivial worker + trivial verifier + no writable paths)`, { taskId: task.id });
+      addFinding(findings, "warn", "completion_audit", `task ${ref} looks like a no-op task (trivial worker + trivial verifier + no writable paths)`, { planId, taskId: task.id, taskRef: ref });
     }
   }
 
@@ -180,11 +216,13 @@ async function checkCompletionIntegrity(rootDir, findings) {
   // 1) 未完成任务却已有账本完成事件 → 完成事务被中断，canonical 落盘失败。
   //    这是可恢复状态：helix run 会自动裁决卡在 verifying 的任务。
   let orphanCompletionEvents = 0;
-  for (const task of taskState.tasks || []) {
+  for (const task of tasks) {
     if (task.status === "completed") continue;
-    if (ledgerTaskEvents.has(task.id)) {
+    const planId = task.planId || taskLedger.activePlanId;
+    const ref = taskRef(planId, task.id);
+    if (completionEvents.refs.has(ref)) {
       orphanCompletionEvents += 1;
-      addFinding(findings, "warn", "completion_audit", `task ${task.id} is ${task.status} but the ledger already has a completion event; the completion transaction was interrupted before the canonical state was saved — run \`helix run\` (or \`helix node checkpoint --task ${task.id}\`) to adjudicate it`, { taskId: task.id, taskStatus: task.status });
+      addFinding(findings, "warn", "completion_audit", `task ${ref} is ${task.status} but the ledger already has a completion event; the completion transaction was interrupted before the canonical state was saved — activate plan ${planId}, then run \`helix run\` (or \`helix node checkpoint --task ${task.id}\`) to adjudicate it`, { planId, taskId: task.id, taskRef: ref, taskStatus: task.status });
     }
   }
 
@@ -199,16 +237,20 @@ async function checkCompletionIntegrity(rootDir, findings) {
   }
 
   // 3) 派生视图（plan JSON / tasks.md）与 canonical tasks.json 的状态分叉。
-  const canonicalStatus = new Map((taskState.tasks || []).map((task) => [task.id, task.status]));
+  const canonicalStatus = new Map(tasks.map((task) => [taskRef(task.planId || taskLedger.activePlanId, task.id), task.status]));
   let derivedDivergences = 0;
-  const planPath = resolveHelixPath(rootDir, "plans", `${taskState.planId}.json`);
-  if (existsSync(planPath)) {
-    const plan = await readJson(planPath);
-    for (const planTask of plan?.tasks || []) {
-      const canonical = canonicalStatus.get(planTask.id);
-      if (canonical && planTask.status !== canonical) {
-        derivedDivergences += 1;
-        addFinding(findings, "warn", "completion_audit", `task ${planTask.id} status diverges between canonical tasks.json (${canonical}) and plan JSON (${planTask.status}); tasks.json is authoritative — the plan mirror was written by an interrupted transaction`, { taskId: planTask.id, canonical, planStatus: planTask.status });
+  const planIds = [...new Set(tasks.map((task) => task.planId).filter(Boolean))];
+  for (const planId of planIds) {
+    const planPath = resolveHelixPath(rootDir, "plans", `${planId}.json`);
+    if (existsSync(planPath)) {
+      const plan = await readJson(planPath);
+      for (const planTask of plan?.tasks || []) {
+        const ref = taskRef(planId, planTask.id);
+        const canonical = canonicalStatus.get(ref);
+        if (canonical && planTask.status !== canonical) {
+          derivedDivergences += 1;
+          addFinding(findings, "warn", "completion_audit", `task ${ref} status diverges between canonical tasks.json (${canonical}) and plan JSON (${planTask.status}); tasks.json is authoritative — the plan mirror was written by an interrupted transaction`, { planId, taskId: planTask.id, taskRef: ref, canonical, planStatus: planTask.status });
+        }
       }
     }
   }
@@ -216,15 +258,39 @@ async function checkCompletionIntegrity(rootDir, findings) {
   if (existsSync(markdownPath)) {
     const markdownStatus = parseTasksMarkdownStatuses(await readFile(markdownPath, "utf8"));
     for (const [taskId, mdStatus] of markdownStatus) {
-      const canonical = canonicalStatus.get(taskId);
+      const ref = taskRef(taskLedger.activePlanId, taskId);
+      const canonical = canonicalStatus.get(ref);
       if (canonical && mdStatus !== canonical) {
         derivedDivergences += 1;
-        addFinding(findings, "warn", "completion_audit", `task ${taskId} status diverges between canonical tasks.json (${canonical}) and tasks.md (${mdStatus}); tasks.json is authoritative`, { taskId, canonical, markdownStatus: mdStatus });
+        addFinding(findings, "warn", "completion_audit", `task ${ref} status diverges between canonical tasks.json (${canonical}) and tasks.md (${mdStatus}); tasks.json is authoritative`, { planId: taskLedger.activePlanId, taskId, taskRef: ref, canonical, markdownStatus: mdStatus });
       }
     }
   }
 
-  return { checkedCompleted: audited, totalTasks: (taskState.tasks || []).length, planId: taskState.planId, orphanCompletionEvents, sideEffectFailures, derivedDivergences };
+  return {
+    checkedCompleted: audited,
+    totalTasks: tasks.length,
+    planCount: planIds.length,
+    activePlanId: taskLedger.activePlanId,
+    revalidationRequired,
+    ambiguousLegacyCompletionEvents: completionEvents.ambiguousLegacy.length,
+    orphanCompletionEvents,
+    sideEffectFailures,
+    derivedDivergences,
+  };
+}
+
+async function readTaskEvidenceJson(rootDir, kind, planId, taskId) {
+  const canonicalPath = kind === "checkpoint"
+    ? resolveTaskCheckpointPath(rootDir, planId, taskId)
+    : resolveTaskAcceptancePath(rootDir, planId, taskId, "json");
+  const canonical = await readJson(canonicalPath, null);
+  if (canonical?.planId === planId && canonical?.taskId === taskId) return canonical;
+  const legacyPath = kind === "checkpoint"
+    ? resolveLegacyTaskCheckpointPath(rootDir, planId, taskId)
+    : resolveLegacyTaskAcceptancePath(rootDir, planId, taskId, "json");
+  const legacy = await readJson(legacyPath, null);
+  return legacy?.planId === planId && legacy?.taskId === taskId ? legacy : null;
 }
 
 function parseTasksMarkdownStatuses(markdown) {
@@ -245,8 +311,15 @@ function parseTasksMarkdownStatuses(markdown) {
   return statuses;
 }
 
-async function collectCompletionLedgerEvents(rootDir) {
-  const taskIds = new Set();
+async function collectCompletionLedgerEvents(rootDir, tasks) {
+  const refs = new Set();
+  const planIdsByTaskId = new Map();
+  for (const task of tasks) {
+    if (!task.id || !task.planId) continue;
+    if (!planIdsByTaskId.has(task.id)) planIdsByTaskId.set(task.id, new Set());
+    planIdsByTaskId.get(task.id).add(task.planId);
+  }
+  const ambiguousByTaskId = new Map();
   // 只统计通过 hash 链校验的条目，手工追加的伪造完成事件不算证据
   const entries = await readVerifiedLedgerEntries(rootDir);
   for (const entry of entries) {
@@ -254,9 +327,31 @@ async function collectCompletionLedgerEvents(rootDir) {
     // 并行 admission 事件对失败结局也会写同名类型并带 status 字段；
     // 只有真正 completed 的结局才算完成证据。
     if (entry.type === "parallel_agent_admission_completed" && entry.status && entry.status !== "completed") continue;
-    taskIds.add(entry.taskId);
+    if (entry.planId) {
+      refs.add(taskRef(entry.planId, entry.taskId));
+      continue;
+    }
+    const candidatePlanIds = planIdsByTaskId.get(entry.taskId) || new Set();
+    // Unscoped legacy events can never prove a current Plan completion. Even
+    // when taskId is currently unique, an archived older Plan may have reused
+    // it; inferring from today's ledger would silently transfer old evidence.
+    if (candidatePlanIds.size > 0) {
+      const current = ambiguousByTaskId.get(entry.taskId) || {
+        taskId: entry.taskId,
+        planIds: [...candidatePlanIds].sort(),
+        eventTypes: new Set(),
+      };
+      current.eventTypes.add(entry.type);
+      ambiguousByTaskId.set(entry.taskId, current);
+    }
   }
-  return taskIds;
+  return {
+    refs,
+    ambiguousLegacy: [...ambiguousByTaskId.values()].map((entry) => ({
+      ...entry,
+      eventTypes: [...entry.eventTypes].sort(),
+    })),
+  };
 }
 
 async function checkLedgerIntegrity(rootDir, findings) {
@@ -405,6 +500,7 @@ async function checkAdapters(rootDir, findings) {
   // 残留）会静默失效——注入给每个 Agent 的治理规则指向一条跑不通的路径。
   const rulesDir = path.join(rootDir, ".cursor", "rules");
   const staleRules = [];
+  const legacyManagedRules = [];
   if (existsSync(rulesDir)) {
     const { readdir } = await import("node:fs/promises");
     for (const entry of await readdir(rulesDir)) {
@@ -418,12 +514,23 @@ async function checkAdapters(rootDir, findings) {
   for (const stale of staleRules) {
     addFinding(findings, "warn", "adapters", `${stale.file} 引用了不存在的路径 ${stale.missingPath}（规则会静默失效）`, { target: "cursor", nextAction: "修正为相对路径或当前机器的有效路径" });
   }
+  const legacyCursorRule = path.join(rulesDir, ["helix", "flow.mdc"].join(""));
+  if (existsSync(legacyCursorRule)) {
+    const relativePath = path.relative(rootDir, legacyCursorRule);
+    legacyManagedRules.push({ path: relativePath });
+    addFinding(findings, "warn", "adapters", `legacy managed Cursor rule ${relativePath} is still active and may be injected alongside wildarrange.mdc`, {
+      target: "cursor",
+      path: relativePath,
+      nextAction: "node ./bin/helix.mjs adapter install --target cursor",
+    });
+  }
 
   const uninstalled = targets.filter((target) => !target.installed).length;
   return {
-    status: uninstalled > 0 || staleRules.length > 0 ? "warn" : "ok",
+    status: uninstalled > 0 || staleRules.length > 0 || legacyManagedRules.length > 0 ? "warn" : "ok",
     targets,
     staleRules,
+    legacyManagedRules,
   };
 }
 

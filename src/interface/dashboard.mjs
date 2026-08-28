@@ -11,6 +11,7 @@ import {
   getTeamTask,
   listTeamMessages,
   listTeamTasks,
+  readyTeamTask,
   sendTeamMessage,
 } from "../orchestration/task-board.mjs";
 import { dashboardData, writeWorkflowSummary } from "../orchestration/status.mjs";
@@ -60,8 +61,13 @@ export function startDashboardServer(rootDir, options = {}) {
       }
       if (request.method === "GET" && url.pathname === "/api/tasks") {
         const result = await listTeamTasks(rootDir, {
+          all: url.searchParams.get("all") === "true",
           status: url.searchParams.get("status") || undefined,
           owner: url.searchParams.get("owner") || undefined,
+          workType: url.searchParams.get("type") || undefined,
+          priority: url.searchParams.get("priority") || undefined,
+          planId: url.searchParams.get("plan") || undefined,
+          search: url.searchParams.get("search") || undefined,
         });
         sendJson(response, 200, { ok: true, result });
         return;
@@ -76,6 +82,18 @@ export function startDashboardServer(rootDir, options = {}) {
       if (request.method === "POST" && url.pathname === "/api/tasks/create") {
         const body = await readJsonBody(request);
         const result = await createTeamTask(rootDir, body);
+        sendJson(response, 200, { ok: true, result });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/tasks/ready") {
+        const body = await readJsonBody(request);
+        validateDashboardId(body.taskId, "taskId");
+        validateOptionalDashboardId(body.planId, "planId");
+        const result = await readyTeamTask(rootDir, {
+          taskId: body.taskId,
+          planId: body.planId,
+          patch: body.patch,
+        });
         sendJson(response, 200, { ok: true, result });
         return;
       }
@@ -374,13 +392,13 @@ function renderDashboardHtml(options = {}) {
     code,pre,textarea { font-family:"SFMono-Regular",Menlo,Consolas,monospace; }
     .completed { color: var(--good); }
     .failed { color: var(--bad); }
-    .pending, .verifying, .in_progress, .review_blocked, .needs_user_decision { color: var(--warn); }
+    .draft, .pending, .verifying, .in_progress, .review_blocked, .needs_user_decision { color: var(--warn); }
     .muted { color: var(--muted); }
     pre { margin:0; overflow:auto; white-space:pre-wrap; word-break:break-word; padding:12px; max-height:460px; border-radius:12px; background:#eef0ea; }
     .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .notice { min-height: 20px; color: var(--muted); font-size: 12px; }
     .form-row { display: flex; gap: 8px; margin-bottom: 8px; }
-    input,textarea { width:100%; min-width:0; padding:9px 10px; border:1px solid var(--line); border-radius:10px; color:var(--ink); background:#fff; }
+    input,textarea,select { width:100%; min-width:0; padding:9px 10px; border:1px solid var(--line); border-radius:10px; color:var(--ink); background:#fff; }
     textarea { min-height:92px; resize:vertical; font-size:12px; }
     button { padding:8px 11px; border:1px solid var(--line); border-radius:10px; color:var(--ink); background:#fff; cursor:pointer; transition:.18s ease; }
     button:hover { transform:translateY(-1px); border-color:rgba(23,61,50,.35); }
@@ -391,6 +409,17 @@ function renderDashboardHtml(options = {}) {
     .failure-box { margin-top:6px; padding:9px; border-left:3px solid var(--bad); border-radius:8px; background:#fff0ec; max-width:420px; }
     .review-box { margin-top:6px; padding:9px; border-left:3px solid var(--forest-2); border-radius:8px; background:#eaf2ed; max-width:420px; font-size:12px; }
     .review-box ul { margin: 6px 0 0 18px; padding: 0; }
+    .ledger-toolbar { display:grid; grid-template-columns:minmax(180px,1.6fr) repeat(3,minmax(120px,.7fr)); gap:8px; margin-bottom:14px; }
+    .ledger-list { display:grid; gap:10px; }
+    .ledger-card { padding:16px 18px; border:1px solid var(--line); border-radius:15px; background:#fffdf7; cursor:pointer; }
+    .ledger-card-head { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:start; }
+    .ledger-card h3 { margin:3px 0 6px; font-size:15px; }
+    .ledger-card .task-detail { grid-column:auto; padding-top:14px; }
+    .ledger-card.expanded .task-detail { display:block; }
+    .ticket-meta { display:flex; flex-wrap:wrap; gap:6px 10px; color:var(--muted); font-size:11px; }
+    .ticket-type { color:var(--forest); font-weight:800; }
+    .history { display:grid; gap:7px; margin-top:8px; }
+    .history-row { display:grid; grid-template-columns:150px 120px minmax(0,1fr); gap:10px; padding:7px 0; border-top:1px dashed var(--line); font-size:11px; }
     .route-review-shell {
       position: relative;
       overflow: hidden;
@@ -443,7 +472,7 @@ function renderDashboardHtml(options = {}) {
     .section-intro { margin:-8px 0 22px; color:var(--muted); }
     .danger-count { display:inline-grid; place-items:center; min-width:20px; height:20px; padding:0 6px; margin-left:7px; border-radius:99px; color:#fff; background:var(--signal); font-size:10px; }
     @keyframes rise { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
-    @media (max-width: 980px) { .app{grid-template-columns:76px minmax(0,1fr)} .rail{padding-inline:17px}.brand-text,.nav span,.nav-label,.rail-foot{display:none}.nav button{justify-content:center;padding:12px 0}.hero,.dashboard-grid{grid-template-columns:1fr}.hero-stamp{justify-self:stretch;width:100%}.ops,.two{grid-template-columns:1fr} }
+    @media (max-width: 980px) { .app{grid-template-columns:76px minmax(0,1fr)} .rail{padding-inline:17px}.brand-text,.nav span,.nav-label,.rail-foot{display:none}.nav button{justify-content:center;padding:12px 0}.hero,.dashboard-grid{grid-template-columns:1fr}.hero-stamp{justify-self:stretch;width:100%}.ops,.two{grid-template-columns:1fr}.ledger-toolbar{grid-template-columns:1fr 1fr} }
     @media (max-width: 640px) { .app{display:block}.rail{position:static;width:100%;height:auto;padding:14px 18px}.rail::after{display:none}.brand{margin:0}.nav,.nav-label,.rail-foot{display:none}.topbar{padding:18px 16px 0}.status-pill,.top-actions .notice{display:none}main{padding:24px 16px 44px}h1{font-size:39px}.pipeline{grid-template-columns:repeat(3,minmax(0,1fr));overflow:hidden}.step:nth-child(3)::after{display:none}.step small{display:block;overflow:hidden;text-overflow:ellipsis}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.task-card{grid-template-columns:44px minmax(0,1fr)}.task-card>.status-badge{display:none}.panel-head{align-items:flex-start}.panel-head .primary{padding-inline:9px;font-size:12px}.route-review-head,.route-review-actions{align-items:flex-start;flex-direction:column} }
   </style>
 </head>
@@ -454,6 +483,7 @@ function renderDashboardHtml(options = {}) {
       <div class="nav-label">驾驶舱</div>
       <nav class="nav" aria-label="主导航">
         <button class="active" data-view="overview" data-label="总览"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg><span>总览</span></button>
+        <button data-view="workitems" data-label="工单总账"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span>工单总账</span></button>
         <button data-view="operations" data-label="任务操作"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span>任务操作</span></button>
         <button data-view="review" data-label="决策复盘"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 3v18h18"/><path d="M7 16l4-5 4 3 5-7"/></svg><span>决策复盘</span></button>
         <button data-view="logs" data-label="运行与日志"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg><span>运行与日志</span></button>
@@ -493,11 +523,25 @@ function renderDashboardHtml(options = {}) {
           </div>
         </div>
 
+        <div class="view" data-view-panel="workitems">
+          <h1 class="section-title">工单总账</h1><p class="section-intro">所有 Plan 的新功能、Bug、验收纠错和维护任务都从同一份 <code>.helix/team/tasks.json</code> 读取。</p>
+          <div class="metrics" id="ledgerMetrics"></div>
+          <section>
+            <div class="ledger-toolbar">
+              <input id="ledgerSearch" placeholder="搜索编号、标题或原始诉求">
+              <select id="ledgerType"><option value="">全部类型</option><option value="feature">新功能</option><option value="bug">Bug</option><option value="acceptance_correction">验收纠错</option><option value="maintenance">维护</option></select>
+              <select id="ledgerStatus"><option value="">全部状态</option><option value="draft">待补齐</option><option value="pending">待执行</option><option value="in_progress">执行中</option><option value="verifying">验证中</option><option value="failed">失败</option><option value="completed">已完成</option></select>
+              <select id="ledgerPlan"><option value="">全部 Plan</option></select>
+            </div>
+            <div class="ledger-list" id="ledgerTasks"></div>
+          </section>
+        </div>
+
         <div class="view" data-view-panel="operations">
           <h1 class="section-title">任务操作</h1><p class="section-intro">创建、认领和推进任务；复杂操作集中在这里，避免干扰总览。</p>
           <section><div class="grid ops">
             <div class="op-block"><h3>认领任务</h3><div class="form-row"><input id="claimTaskId" placeholder="T001 或留空认领下一个"><input id="claimOwner" placeholder="${DEFAULT_EXECUTOR_AGENT}" value="${DEFAULT_EXECUTOR_AGENT}"></div><button id="claimTask">确认认领</button></div>
-            <div class="op-block"><h3>创建任务</h3><textarea id="taskJson">{"id":"T002","subject":"新增一个可验证任务","description":"追加计划内任务","blockedBy":["T001"],"worker_command":"node -e \\"process.exit(0)\\"","verify_commands":["node -e \\"process.exit(0)\\""]}</textarea><button id="createTask">创建任务</button></div>
+            <div class="op-block"><h3>创建工单</h3><input id="taskSubject" placeholder="一句话说明要做什么"><div class="form-row" style="margin-top:8px"><select id="taskWorkType"><option value="feature">新功能</option><option value="bug">Bug</option><option value="acceptance_correction">验收纠错</option><option value="maintenance">维护</option></select><select id="taskPriority"><option value="P0">P0 紧急</option><option value="P1" selected>P1 正常</option><option value="P2">P2 稍后</option></select></div><textarea id="taskDescription" placeholder="原始诉求、复现方式或验收意见"></textarea><input id="taskParent" placeholder="关联原任务，例如 plan_xxx:T001"><input id="taskWritable" placeholder="可写路径，逗号分隔，例如 src/**,test/**" style="margin-top:8px"><textarea id="taskVerify" placeholder="验证命令，每行一条；留空则先保存为 draft"></textarea><textarea id="taskReview" placeholder="独立复核命令，每行一条"></textarea><button id="createTask">创建工单</button></div>
             <div class="op-block"><h3>发送团队消息</h3><div class="form-row"><input id="msgFrom" placeholder="${DEFAULT_LEAD_AGENT}" value="${DEFAULT_LEAD_AGENT}"><input id="msgTo" placeholder="${DEFAULT_EXECUTOR_AGENT}" value="${DEFAULT_EXECUTOR_AGENT}"></div><textarea id="msgBody">继续推进当前任务，完成后等待 verifier 与 review gate。</textarea><div class="form-row"><button id="sendMessage">发送</button><button id="refreshInbox">查看收件箱</button></div></div>
           </div></section>
           <div class="grid two" style="margin-top:22px"><section><div class="panel-head"><h2>变更请求</h2></div><div id="changes"></div></section><section><div class="panel-head"><h2>团队收件箱</h2></div><pre id="inbox"></pre></section></div>
@@ -520,7 +564,9 @@ function renderDashboardHtml(options = {}) {
     const DASHBOARD_TOKEN = ${JSON.stringify(dashboardToken)};
     const el = (id) => document.getElementById(id);
     const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
-    const statusLabel = (status) => ({ completed:"已完成",pending:"待执行",in_progress:"执行中",verifying:"验证中",failed:"失败",review_blocked:"复核阻断",needs_user_decision:"等待决定" })[status] || status || "未知";
+    const statusLabel = (status) => ({ draft:"待补齐",completed:"已完成",pending:"待执行",in_progress:"执行中",verifying:"验证中",failed:"失败",review_blocked:"复核阻断",needs_user_decision:"等待决定" })[status] || status || "未知";
+    const workTypeLabel = (type) => ({ feature:"新功能",bug:"Bug",acceptance_correction:"验收纠错",maintenance:"维护" })[type] || type || "维护";
+    let latestTaskLedger = { tasks: [], plans: [], counts: {}, typeCounts: {} };
     function switchView(name) {
       document.querySelectorAll("[data-view-panel]").forEach((panel) => panel.classList.toggle("active", panel.dataset.viewPanel === name));
       document.querySelectorAll(".nav [data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === name));
@@ -584,8 +630,9 @@ function renderDashboardHtml(options = {}) {
       el("metrics").innerHTML = metrics.map(([label, value, cls]) => '<div class="metric"><div class="label">' + label + '</div><div class="value ' + cls + '">' + value + '</div></div>').join("");
       el("tasks").innerHTML = tasks.length === 0 ? '<div class="muted" style="padding:18px 22px;border-top:1px solid var(--line)">还没有任务</div>' : tasks.map((task) => {
         const route = task.route_decision ? task.route_decision.route + " → " + task.route_decision.primaryAgent : "尚未路由";
-        return '<article class="task-card"><div class="task-id">' + esc(task.id) + '</div><div><div class="task-title">' + esc(task.subject) + '</div><div class="task-meta">' + esc(route) + ' · ' + (task.verify_commands || []).length + ' 条验证命令 · 已尝试 ' + esc(task.attempts || 0) + ' 次</div></div><span class="status-badge ' + esc(task.status) + '">' + esc(statusLabel(task.status)) + '</span><div class="task-detail"><div class="grid two"><div><div class="label">验证与复核</div>' + reviewBox(task) + '</div><div><div class="label">失败与操作</div>' + failureBox(task) + actionButtons(task) + '</div></div></div></article>';
+        return '<article class="task-card"><div class="task-id">' + esc(task.id) + '</div><div><div class="task-title">' + esc(task.subject) + '</div><div class="task-meta">' + esc(workTypeLabel(task.workType)) + ' · ' + esc(task.priority || "P1") + ' · ' + esc(route) + ' · ' + (task.verify_commands || []).length + ' 条验证命令 · 已尝试 ' + esc(task.attempts || 0) + ' 次</div></div><span class="status-badge ' + esc(task.status) + '">' + esc(statusLabel(task.status)) + '</span><div class="task-detail"><div class="grid two"><div><div class="label">验证与复核</div>' + reviewBox(task) + '</div><div><div class="label">失败与操作</div>' + failureBox(task) + actionButtons(task) + '</div></div></div></article>';
       }).join("");
+      renderTaskLedger(data.taskLedger || null);
       renderAttention(data.attention || null);
       renderChanges(data.changes || []);
       el("healthSummary").innerHTML = '<div class="health-row"><span>配置基线</span><b>' + (status.gateArming?.armed ? "正常" : "需检查") + '</b></div><div class="health-row"><span>可信账本</span><b>已连接</b></div><div class="health-row"><span>IDE 适配器</span><b>查看体检</b></div>';
@@ -593,6 +640,50 @@ function renderDashboardHtml(options = {}) {
       el("summary").textContent = JSON.stringify(data.summary || { status: "No summary generated" }, null, 2);
       el("ledger").textContent = JSON.stringify(data.ledger || [], null, 2);
       loadPanels();
+    }
+    function renderTaskLedger(ledger) {
+      latestTaskLedger = ledger || { tasks: [], plans: [], counts: {}, typeCounts: {} };
+      const counts = latestTaskLedger.counts || {};
+      const open = (latestTaskLedger.total || 0) - (counts.completed || 0);
+      const metrics = [
+        ["全部工单", latestTaskLedger.total || 0, ""],
+        ["尚未关闭", open, "pending"],
+        ["Bug", latestTaskLedger.typeCounts?.bug || 0, "failed"],
+        ["验收纠错", latestTaskLedger.typeCounts?.acceptance_correction || 0, "pending"],
+      ];
+      el("ledgerMetrics").innerHTML = metrics.map(([label, value, cls]) => '<div class="metric"><div class="label">' + label + '</div><div class="value ' + cls + '">' + value + '</div></div>').join("");
+      const selectedPlan = el("ledgerPlan").value;
+      el("ledgerPlan").innerHTML = '<option value="">全部 Plan</option>' + (latestTaskLedger.plans || []).map((plan) => '<option value="' + esc(plan.id) + '">' + esc(plan.title || plan.id) + '</option>').join("");
+      el("ledgerPlan").value = selectedPlan;
+      applyTaskLedgerFilters();
+    }
+    function applyTaskLedgerFilters() {
+      const search = el("ledgerSearch").value.trim().toLowerCase();
+      const type = el("ledgerType").value;
+      const status = el("ledgerStatus").value;
+      const planId = el("ledgerPlan").value;
+      const plans = new Map((latestTaskLedger.plans || []).map((plan) => [plan.id, plan.title || plan.id]));
+      const tasks = (latestTaskLedger.tasks || []).filter((task) => {
+        if (type && task.workType !== type) return false;
+        if (status && task.status !== status) return false;
+        if (planId && task.planId !== planId) return false;
+        if (search && !(String(task.id) + "\\n" + String(task.subject) + "\\n" + String(task.description || "") + "\\n" + String(task.request?.summary || "")).toLowerCase().includes(search)) return false;
+        return true;
+      });
+      el("ledgerTasks").innerHTML = tasks.length === 0 ? '<div class="muted">没有符合筛选条件的工单</div>' : tasks.map((task) => renderLedgerTask(task, plans)).join("");
+    }
+    function renderLedgerTask(task, plans) {
+      const history = (task.history || []).slice(-10).reverse();
+      const historyHtml = history.length === 0 ? '<div class="muted">尚无历史</div>' : '<div class="history">' + history.map((item) => '<div class="history-row"><span>' + esc(item.at ? new Date(item.at).toLocaleString("zh-CN", { hour12:false }) : "—") + '</span><strong>' + esc(item.event || "event") + '</strong><span>' + esc(historySummary(item)) + '</span></div>').join("") + '</div>';
+      const parent = task.parentTaskRef ? '<div><span class="label">关联原任务</span><br><code>' + esc(task.parentTaskRef) + '</code></div>' : '';
+      return '<article class="ledger-card"><div class="ledger-card-head"><div><div class="ticket-meta"><span class="ticket-type">' + esc(workTypeLabel(task.workType)) + '</span><span>' + esc(task.priority || "P1") + '</span><span>' + esc(plans.get(task.planId) || task.planId) + '</span><code>' + esc(task.ref || task.id) + '</code></div><h3>' + esc(task.subject) + '</h3><div class="muted">' + esc(task.request?.summary || task.description || "") + '</div></div><span class="status-badge ' + esc(task.status) + '">' + esc(statusLabel(task.status)) + '</span></div><div class="task-detail"><div class="grid two"><div><div class="label">工单信息</div><p>' + esc(task.description || task.subject) + '</p><div class="ticket-meta"><span>来源：' + esc(task.source || "imported") + '</span><span>负责人：' + esc(task.owner || "—") + '</span><span>尝试：' + esc(task.attempts || 0) + '</span></div>' + parent + '</div><div><div class="label">最近历史</div>' + historyHtml + '</div></div></div></article>';
+    }
+    function historySummary(item) {
+      if (item.event === "status_changed") return String(item.from || "") + " → " + String(item.to || "");
+      if (item.event === "attempt_changed") return "尝试次数 " + String(item.from || 0) + " → " + String(item.to || 0);
+      if (item.event === "owner_changed") return String(item.from || "未分配") + " → " + String(item.to || "未分配");
+      if (item.event === "evidence_added") return "新增 " + String(item.count || 0) + " 条证据";
+      return item.status ? "状态 " + item.status : "已记录";
     }
     function renderInbox(messages) {
       el("inbox").textContent = JSON.stringify(messages || [], null, 2);
@@ -619,6 +710,11 @@ function renderDashboardHtml(options = {}) {
         blocks.push('<div class="review-box"><strong>等待决策 ' + esc(task.id) + '</strong> · ' + esc(task.subject) +
           '<div class="muted">状态: ' + esc(task.status) + '</div></div>');
       }
+      for (const task of attention.draftTasks || []) {
+        blocks.push('<div class="review-box"><strong>待补齐工单 ' + esc(task.id) + '</strong> · ' + esc(task.subject) +
+          '<div class="muted">' + esc(workTypeLabel(task.workType)) + ' · ' + esc(task.priority || "P1") + '</div>' +
+          '<pre>' + esc(task.readyHint || "") + '</pre></div>');
+      }
       for (const item of attention.awaitingAcceptance || []) {
         blocks.push('<div class="review-box"><strong>子 Agent 待验收</strong> · 任务 ' + esc(item.taskId) + ' · ' + esc(item.agent || "") +
           '<div class="muted">' + esc(item.resultPath || "") + '</div>' +
@@ -634,6 +730,7 @@ function renderDashboardHtml(options = {}) {
     }
     function actionButtons(task) {
       if (task.status === "completed") return '<span class="muted">Done</span>';
+      if (task.status === "draft") return '<span class="muted">补齐范围、验证命令和验收标准后才能执行</span>';
       if (task.status === "failed") {
         if (task.last_failure && task.last_failure.reason === "scope_guard_failed") {
           return '<span class="muted">Change request required</span>';
@@ -710,13 +807,23 @@ function renderDashboardHtml(options = {}) {
       runQuiet("Claim task", () => postJson("/api/tasks/claim", { taskId: taskId || undefined, owner }));
     });
     el("createTask").addEventListener("click", () => {
-      let task;
-      try {
-        task = JSON.parse(el("taskJson").value);
-      } catch {
-        el("notice").textContent = "Task JSON is invalid";
+      const subject = el("taskSubject").value.trim();
+      if (!subject) {
+        el("notice").textContent = "请先填写工单标题";
         return;
       }
+      const splitLines = (value) => value.split(/\\r?\\n/).map((item) => item.trim()).filter(Boolean);
+      const task = {
+        subject,
+        description: el("taskDescription").value.trim() || subject,
+        workType: el("taskWorkType").value,
+        priority: el("taskPriority").value,
+        source: "user",
+        parentTaskRef: el("taskParent").value.trim() || null,
+        writable_paths: el("taskWritable").value.split(",").map((item) => item.trim()).filter(Boolean),
+        verify_commands: splitLines(el("taskVerify").value),
+        review_commands: splitLines(el("taskReview").value),
+      };
       runQuiet("Create task", () => postJson("/api/tasks/create", task));
     });
     el("sendMessage").addEventListener("click", async () => {
@@ -741,6 +848,13 @@ function renderDashboardHtml(options = {}) {
       const node = button.dataset.node;
       const taskId = button.dataset.task;
       runAction(node + " " + taskId, () => postJson("/api/node/" + encodeURIComponent(node), { taskId }));
+    });
+    ["ledgerSearch", "ledgerType", "ledgerStatus", "ledgerPlan"].forEach((id) => {
+      el(id).addEventListener(id === "ledgerSearch" ? "input" : "change", applyTaskLedgerFilters);
+    });
+    el("ledgerTasks").addEventListener("click", (event) => {
+      const card = event.target.closest(".ledger-card");
+      if (card) card.classList.toggle("expanded");
     });
     async function loadInbox(agent) {
       const query = agent ? "?agent=" + encodeURIComponent(agent) : "";

@@ -4,7 +4,10 @@ import path from "node:path";
 
 export const HELIX_DIR = ".helix";
 export const STATE_VERSION = 1;
-export const TASK_STATUSES = new Set(["pending", "in_progress", "verifying", "completed", "failed", "review_blocked", "needs_user_decision"]);
+export const TASK_STATUSES = new Set(["draft", "pending", "in_progress", "verifying", "completed", "failed", "review_blocked", "needs_user_decision"]);
+export const TASK_WORK_TYPES = new Set(["feature", "bug", "acceptance_correction", "maintenance"]);
+export const TASK_SOURCES = new Set(["user", "verifier", "review", "incident", "imported"]);
+export const TASK_PRIORITIES = new Set(["P0", "P1", "P2"]);
 
 export function nowIso() {
   return new Date().toISOString();
@@ -16,6 +19,51 @@ export function createWorkId(prefix = "work") {
 
 export function resolveHelixPath(rootDir, ...segments) {
   return path.join(rootDir, HELIX_DIR, ...segments);
+}
+
+// Evidence identity must remain a one-to-one mapping even though both IDs may
+// contain "-". New files therefore use plan/task directory segments; the
+// legacy flat helpers exist only for guarded compatibility reads and cleanup.
+export function resolveTaskCheckpointPath(rootDir, planId, taskId) {
+  assertEvidenceSegment(planId, "planId");
+  assertEvidenceSegment(taskId, "taskId");
+  return resolveHelixPath(rootDir, "checkpoints", planId, `${taskId}.json`);
+}
+
+export function resolveLegacyTaskCheckpointPath(rootDir, planId, taskId) {
+  assertEvidenceSegment(planId, "planId");
+  assertEvidenceSegment(taskId, "taskId");
+  return resolveHelixPath(rootDir, "checkpoints", `${planId}-${taskId}.json`);
+}
+
+export function resolveTaskAcceptancePath(rootDir, planId, taskId, extension = "json") {
+  assertEvidenceSegment(planId, "planId");
+  assertEvidenceSegment(taskId, "taskId");
+  assertEvidenceExtension(extension);
+  return resolveHelixPath(rootDir, "reports", "acceptance", planId, `${taskId}.${extension}`);
+}
+
+export function resolveLegacyTaskAcceptancePath(rootDir, planId, taskId, extension = "json") {
+  assertEvidenceSegment(planId, "planId");
+  assertEvidenceSegment(taskId, "taskId");
+  assertEvidenceExtension(extension);
+  return resolveHelixPath(rootDir, "reports", "acceptance", `${planId}-${taskId}.${extension}`);
+}
+
+export function resolveTaskReportPath(rootDir, reportKind, planId, taskId, extension = "json") {
+  if (!new Set(["reviews", "failures"]).has(reportKind)) {
+    throw new Error(`unsupported task report kind: ${reportKind}`);
+  }
+  assertEvidenceSegment(planId, "planId");
+  assertEvidenceSegment(taskId, "taskId");
+  assertEvidenceExtension(extension);
+  return resolveHelixPath(rootDir, "reports", reportKind, planId, `${taskId}.${extension}`);
+}
+
+export function legacyTaskEvidenceStem(planId, taskId) {
+  assertEvidenceSegment(planId, "planId");
+  assertEvidenceSegment(taskId, "taskId");
+  return `${planId}-${taskId}`;
 }
 
 export async function ensureHelixDirs(rootDir) {
@@ -71,4 +119,16 @@ export async function writeJsonAtomic(filePath, value) {
 
 export function hashContent(content) {
   return createHash("sha256").update(content).digest("hex");
+}
+
+function assertEvidenceSegment(value, label) {
+  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)) {
+    throw new Error(`${label} must be a safe evidence path segment`);
+  }
+}
+
+function assertEvidenceExtension(value) {
+  if (!new Set(["json", "md"]).has(value)) {
+    throw new Error(`unsupported evidence extension: ${value}`);
+  }
 }

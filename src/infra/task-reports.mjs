@@ -5,14 +5,14 @@ import {
   ensureHelixDirs,
   nowIso,
   resolveHelixPath,
+  resolveTaskReportPath,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 
 export async function writeReviewReport(rootDir, planId, task, reviewResult) {
   await ensureHelixDirs(rootDir);
-  const basePath = resolveHelixPath(rootDir, "reports", "reviews", `${planId}-${task.id}`);
-  const jsonPath = `${basePath}.json`;
-  const mdPath = `${basePath}.md`;
+  const jsonPath = resolveTaskReportPath(rootDir, "reviews", planId, task.id, "json");
+  const mdPath = resolveTaskReportPath(rootDir, "reviews", planId, task.id, "md");
   reviewResult.reportJsonPath = path.relative(rootDir, jsonPath);
   reviewResult.reportMdPath = path.relative(rootDir, mdPath);
   const report = {
@@ -122,9 +122,8 @@ ${commentFindings.length > 0 ? commentFindings.map((finding) => `- ${finding.fil
 export async function writeFailureReport(rootDir, planId, task) {
   if (!task.last_failure) return null;
   await ensureHelixDirs(rootDir);
-  const basePath = resolveHelixPath(rootDir, "reports", "failures", `${planId}-${task.id}`);
-  const jsonPath = `${basePath}.json`;
-  const mdPath = `${basePath}.md`;
+  const jsonPath = resolveTaskReportPath(rootDir, "failures", planId, task.id, "json");
+  const mdPath = resolveTaskReportPath(rootDir, "failures", planId, task.id, "md");
   task.last_failure.reportJsonPath = path.relative(rootDir, jsonPath);
   task.last_failure.reportMdPath = path.relative(rootDir, mdPath);
   const report = {

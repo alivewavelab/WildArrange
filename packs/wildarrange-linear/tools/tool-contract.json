@@ -7,7 +7,7 @@
       "layer": "runtime_state",
       "status": "implemented",
       "command": "node ./bin/helix.mjs init",
-      "purpose": "创建 .helix 运行时状态、Agent 注册表、prompt-pack 注册表和 ledger。",
+      "purpose": "创建 .helix 核心运行态、prompt-pack 注册表和 ledger。",
       "reads": [
         "packs/wildarrange-linear/**"
       ],
@@ -16,11 +16,11 @@
       ]
     },
     {
-      "name": "helix_config",
+      "name": "helix_config_init",
       "layer": "runtime_state",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs config init --root | node ./bin/helix.mjs config show",
-      "purpose": "生成或读取 `helix.config.json` / `.helix/config.json`。用于配置模型 provider/model/reasoning，以及每个注入点挂载哪些 tool、markdown、skill、rules。",
+      "command": "node ./bin/helix.mjs config init --root",
+      "purpose": "生成根 `helix.config.json`；用于配置长期 Agent provider/model/reasoning，以及每个注入点挂载哪些 tool、markdown、skill、rules。",
       "reads": [
         "helix.config.json",
         ".helix/config.json"
@@ -30,6 +30,18 @@
         ".helix/config.json",
         ".helix/ledger.jsonl"
       ]
+    },
+    {
+      "name": "helix_config_show",
+      "layer": "runtime_state",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs config show",
+      "purpose": "读取当前生效配置，不修改运行态。",
+      "reads": [
+        "helix.config.json",
+        ".helix/config.json"
+      ],
+      "writes": []
     },
     {
       "name": "helix_injection_show",
@@ -221,7 +233,7 @@
       "name": "helix_context_build",
       "layer": "context_injection",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs context build [--agent Jiuwei] [--task T001]",
+      "command": "node ./bin/helix.mjs context build [--agent Jiuwei] [--task T001] [--plan <planId>] [--point before_execute]",
       "purpose": "为单个简单上下文 Agent 生成任务、规则、变更路径、恢复指令和不可破坏 invariants 的输入包；后续接真实模型时作为 Agent 上下文。",
       "reads": [
         ".helix/team/tasks.json",
@@ -419,6 +431,27 @@
         ".helix/team/tasks.json"
       ],
       "writes": []
+    },
+    {
+      "name": "state_migrate",
+      "layer": "runtime_state",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs state migrate",
+      "purpose": "先备份，再把旧 active config 与 task ledger 迁到当前结构；删除无消费者的 agents/categories 投影；旧 completed 缺少当前 proof chain 时降为 needs_user_decision。",
+      "reads": [
+        "helix.config.json",
+        ".helix/config.json",
+        ".helix/team/tasks.json",
+        ".helix/plans/**"
+      ],
+      "writes": [
+        ".helix/backups/**",
+        ".helix/config.json",
+        ".helix/team/tasks.json",
+        ".helix/team/tasks.md",
+        ".helix/plans/**",
+        ".helix/ledger.jsonl"
+      ]
     },
     {
       "name": "helix_summary",
@@ -862,7 +895,7 @@
     {
       "name": "grep_search",
       "layer": "code_intelligence",
-      "status": "contract-only",
+      "status": "host-provided",
       "command": "rg <pattern>",
       "purpose": "做快速文本搜索；优先 rg，输出文件和行号，供 inspect-codebase、research-external-docs 与 Jiuwei 共享。",
       "reads": [
@@ -873,7 +906,7 @@
     {
       "name": "glob_search",
       "layer": "code_intelligence",
-      "status": "contract-only",
+      "status": "host-provided",
       "command": "rg --files",
       "purpose": "枚举候选文件，替代慢速全盘查找。",
       "reads": [
@@ -894,17 +927,6 @@
       "writes": [
         ".helix/reports/reviews/**"
       ]
-    },
-    {
-      "name": "ast_grep_replace_dry_run",
-      "layer": "code_intelligence",
-      "status": "contract-only",
-      "command": "ast-grep --pattern <pattern> --rewrite <rewrite> --dry-run",
-      "purpose": "批量改代码前先做结构化 dry-run，避免正则误伤。",
-      "reads": [
-        "workspace files"
-      ],
-      "writes": []
     },
     {
       "name": "lsp_diagnostics",
@@ -938,35 +960,9 @@
       "commercialBoundary": "Local hash verification; no upstream hashline implementation copied."
     },
     {
-      "name": "lsp_references",
-      "layer": "code_intelligence",
-      "status": "contract-only",
-      "command": "contract-only",
-      "purpose": "跨文件查引用，支持安全重构和影响面判断。",
-      "reads": [
-        "workspace files",
-        "language server"
-      ],
-      "writes": []
-    },
-    {
-      "name": "lsp_rename",
-      "layer": "code_intelligence",
-      "status": "contract-only",
-      "command": "contract-only",
-      "purpose": "让语言服务器生成重命名 workspace edits，必须经过 scope_guard 后才能落盘。",
-      "reads": [
-        "workspace files",
-        "language server"
-      ],
-      "writes": [
-        "task.writable_paths"
-      ]
-    },
-    {
       "name": "git_status",
       "layer": "git",
-      "status": "contract-only",
+      "status": "host-provided",
       "command": "git status --short",
       "purpose": "所有任务前后读取工作区状态，识别用户未授权改动。",
       "reads": [
@@ -986,49 +982,6 @@
         "workspace files"
       ],
       "writes": []
-    },
-    {
-      "name": "git_checkpoint",
-      "layer": "git",
-      "status": "contract-only",
-      "command": "contract-only",
-      "purpose": "范围门控、测试门控、review 门控都 PASS 后，生成可追溯 checkpoint；未来可绑定 commit/branch/PR。",
-      "reads": [
-        ".helix/checkpoints/**",
-        ".helix/reports/reviews/**",
-        "git diff"
-      ],
-      "writes": [
-        "git index",
-        ".helix/ledger.jsonl"
-      ]
-    },
-    {
-      "name": "worktree_create",
-      "layer": "git",
-      "status": "contract-only",
-      "command": "contract-only",
-      "purpose": "多 Agent 并行前为任务创建隔离 worktree；M1 线性循环暂不启用。",
-      "reads": [
-        "git repository"
-      ],
-      "writes": [
-        "worktree path"
-      ]
-    },
-    {
-      "name": "merge_admit",
-      "layer": "git",
-      "status": "contract-only",
-      "command": "contract-only",
-      "purpose": "把 worker worktree 的成果合入主工作区前，要求 scope_guard、test_gate、review_gate 全部 PASS。",
-      "reads": [
-        "worktree diff",
-        ".helix/ledger.jsonl"
-      ],
-      "writes": [
-        "main workspace"
-      ]
     },
     {
       "name": "team_task_create",
@@ -1064,6 +1017,32 @@
         ".helix/team/tasks.md",
         ".helix/ledger.jsonl",
         ".helix/snapshots/**"
+      ]
+    },
+    {
+      "name": "team_task_archive_delete",
+      "layer": "team_lite",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs task archive --task <taskId> [--plan <planId>] --delete [--reason <reason>]",
+      "purpose": "先创建含精确 recovery package 的运行态备份，校验 canonical planId:id 身份唯一并拒绝运行中任务；显式 Plan 只精确删除目标 Task，权威总账最后提交，Plan/checkpoint/acceptance/DoneClaim/精确 artifact 可由 state restore 整套恢复；清空活动 Plan 后保持 idle，不自动激活其它 Plan。",
+      "reads": [
+        ".helix/team/tasks.json",
+        ".helix/work.json",
+        ".helix/plans/**",
+        ".helix/checkpoints/**",
+        ".helix/reports/acceptance/**",
+        ".helix/artifacts/**"
+      ],
+      "writes": [
+        ".helix/backups/**",
+        ".helix/team/tasks.json",
+        ".helix/team/tasks.md",
+        ".helix/work.json",
+        ".helix/plans/**",
+        ".helix/checkpoints/**",
+        ".helix/reports/acceptance/**",
+        ".helix/artifacts/**",
+        ".helix/ledger.jsonl"
       ]
     },
     {
@@ -1170,18 +1149,6 @@
       "writes": []
     },
     {
-      "name": "prompt_variant",
-      "layer": "prompt_pack",
-      "status": "implemented",
-      "command": "node ./bin/helix.mjs prompts variant --agent <agent> [--provider <provider>] [--model <model>]",
-      "purpose": "读取配置化提示词模型变体；作为原始 Agent prompt 的追加偏置，而不是替换 prompt-pack 真值源。",
-      "reads": [
-        "helix.config.json",
-        ".helix/config.json"
-      ],
-      "writes": []
-    },
-    {
       "name": "codex_spawn_agent",
       "layer": "adapter",
       "status": "implemented",
@@ -1222,32 +1189,6 @@
       "commercialBoundary": "Host-neutral command-template adapter; no private Cursor source or API dependency."
     },
     {
-      "name": "cursor_rule_sync",
-      "layer": "adapter",
-      "status": "contract-only",
-      "command": "contract-only",
-      "purpose": "Cursor 适配器：把 Agent/Skill 约束同步成 project rules，并让执行前后进入 Helix gate。",
-      "reads": [
-        "packs/wildarrange-linear/**"
-      ],
-      "writes": [
-        ".cursor/**"
-      ]
-    },
-    {
-      "name": "mcp_register",
-      "layer": "adapter",
-      "status": "contract-only",
-      "command": "contract-only",
-      "purpose": "把 ast-grep、LSP、git bash、team-lite 等能力注册为 Codex/Cursor 可调用 MCP。",
-      "reads": [
-        "tool configuration"
-      ],
-      "writes": [
-        "tool-specific MCP config"
-      ]
-    },
-    {
       "name": "helix_plan_approve",
       "layer": "planning",
       "status": "implemented",
@@ -1278,11 +1219,23 @@
       ]
     },
     {
-      "name": "helix_coordination",
+      "name": "helix_coordination_status",
       "layer": "runtime_state",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs coordination status | node ./bin/helix.mjs coordination claim --task T001 --owner ZhuRong",
-      "purpose": "查看 Git 协调状态，或显式远端领取任务并维护单写 owner。",
+      "command": "node ./bin/helix.mjs coordination status",
+      "purpose": "只读查看 Git 协调状态和当前单写 owner。",
+      "reads": [
+        ".helix/**",
+        "git remotes"
+      ],
+      "writes": []
+    },
+    {
+      "name": "helix_coordination_claim",
+      "layer": "runtime_state",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs coordination claim --task T001 --owner ZhuRong",
+      "purpose": "显式远端领取任务并维护单写 owner。",
       "reads": [
         ".helix/**",
         "git remotes"
@@ -1294,11 +1247,11 @@
       ]
     },
     {
-      "name": "helix_handoff",
+      "name": "helix_handoff_prepare",
       "layer": "runtime_state",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs handoff prepare --task T001 --to-device-id <uuid> --to-device-name mac-mini | node ./bin/helix.mjs handoff push --task T001 | node ./bin/helix.mjs handoff accept --plan <planId> --task T001 | node ./bin/helix.mjs handoff takeover --plan <planId> --task T001 --expected-device-id <uuid> --reason <text>",
-      "purpose": "跨设备 prepare/push/accept/takeover；takeover 必须显式记录预期旧设备和理由，不允许按本机时间自动过期 owner。",
+      "command": "node ./bin/helix.mjs handoff prepare --task T001 --to-device-id <uuid> --to-device-name mac-mini",
+      "purpose": "准备跨设备交接并绑定目标设备 UUID。",
       "reads": [
         ".helix/**",
         "git remotes"
@@ -1306,6 +1259,57 @@
       "writes": [
         ".helix/coordination/**",
         ".helix/handoff/**",
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "helix_handoff_push",
+      "layer": "runtime_state",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs handoff push --task T001",
+      "purpose": "复核 prepare 树指纹后普通 push 交接提交。",
+      "reads": [
+        ".helix/handoff/**",
+        "git repository",
+        "git remotes"
+      ],
+      "writes": [
+        ".helix/handoff/**",
+        ".helix/ledger.jsonl",
+        "git remote"
+      ]
+    },
+    {
+      "name": "helix_handoff_accept",
+      "layer": "runtime_state",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs handoff accept --plan <planId> --task T001",
+      "purpose": "由被绑定的目标设备接受已 push 的交接。",
+      "reads": [
+        ".helix/handoff/**",
+        ".helix/coordination/**",
+        "git remotes"
+      ],
+      "writes": [
+        ".helix/handoff/**",
+        ".helix/coordination/**",
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "helix_handoff_takeover",
+      "layer": "runtime_state",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs handoff takeover --plan <planId> --task T001 --expected-device-id <uuid> --reason <text>",
+      "purpose": "显式记录预期旧设备和理由后接管任务；不按本机时间自动过期 owner。",
+      "reads": [
+        ".helix/handoff/**",
+        ".helix/coordination/**",
+        "git remotes"
+      ],
+      "writes": [
+        ".helix/handoff/**",
+        ".helix/coordination/**",
         ".helix/ledger.jsonl"
       ]
     },

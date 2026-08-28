@@ -93,6 +93,7 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
       resumed: true,
     });
     await writeSnapshot(rootDir, "parallel_agent_admission_completed", {
+      planId: claim.task.planId || null,
       runId: options.runId,
       taskId: options.taskId,
       status: "completed",
@@ -110,6 +111,7 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
       kind: "parallel_agent_admission",
       runId: options.runId,
       taskId: options.taskId,
+      planId: claim.task.planId || null,
       status: "completed",
       resumed: true,
       appliedPaths: claim.appliedPaths,
@@ -140,6 +142,7 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
   if (finalized.status !== "completed") {
     await appendLedger(rootDir, {
       type: "parallel_agent_admission_completed",
+      planId: finalized.planId || finalized.task?.planId || null,
       runId: options.runId,
       taskId: options.taskId,
       status: finalized.status,
@@ -156,6 +159,7 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
   // been persisted must not fail the admission, only leave a ledger trace.
   const sideEffectWarnings = await runPostCompletionSideEffects(rootDir, finalized.planId, finalized.task, async () => {
     await writeSnapshot(rootDir, "parallel_agent_admission_completed", {
+      planId: finalized.planId || finalized.task?.planId || null,
       runId: options.runId,
       taskId: options.taskId,
       status: finalized.status,
@@ -168,6 +172,7 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
     kind: "parallel_agent_admission",
     runId: options.runId,
     taskId: options.taskId,
+    planId: finalized.planId || finalized.task?.planId || null,
     status: finalized.status,
     appliedPaths: finalized.appliedPaths,
     verifyResult: finalized.verifyResult,
@@ -213,7 +218,7 @@ async function claimAdmission(rootDir, options, { result, files, proposedPaths }
     // evidence entry alone is not enough, because a run whose admission
     // failed and rolled back also left one behind (cross-review P1,
     // round 5, 2026-07-21).
-    const completedByThisRun = await hasVerifiedRunCompletionEvent(rootDir, options.runId, options.taskId);
+    const completedByThisRun = await hasVerifiedRunCompletionEvent(rootDir, options.runId, taskState.planId, options.taskId);
     if (!completedByThisRun) {
       throw new Error(`task ${options.taskId} is already completed; refusing to apply parallel result from run ${options.runId}`);
     }
@@ -625,6 +630,7 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
     // completion ledger event (cross-review P0, round 3, 2026-07-21).
     await appendLedger(rootDir, {
       type: "parallel_agent_admission_completed",
+      planId: taskState.planId,
       runId: runId || null,
       taskId,
       status: "completed",
@@ -855,12 +861,13 @@ async function patchAlreadyApplied(rootDir, patch) {
  * that failed and rolled back also left admission evidence on the task, so
  * evidence alone cannot prove "this run is the one that completed the task".
  */
-async function hasVerifiedRunCompletionEvent(rootDir, runId, taskId) {
+async function hasVerifiedRunCompletionEvent(rootDir, runId, planId, taskId) {
   const entries = await readVerifiedLedgerEntries(rootDir);
   return entries.some(
     (entry) => entry.type === "parallel_agent_admission_completed"
       && entry.runId === runId
       && entry.taskId === taskId
+      && entry.planId === planId
       && entry.status === "completed",
   );
 }

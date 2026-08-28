@@ -240,42 +240,42 @@
     {
       "name": "review-product-intent",
       "signals": ["目标", "为什么", "用户价值", "业务结果", "成功标准", "不要做", "mvp", "优先级", "产品设计", "产品"],
-      "stage": "wa-ideate",
+      "stage": "ideate",
       "risk": "medium",
       "purpose": "确认真实目标、成功标准、非目标和最短产品路径。"
     },
     {
       "name": "map-user-journey",
       "signals": ["流程", "多步骤", "提醒", "清单", "状态", "协作", "权限", "通知", "handoff", "旅程"],
-      "stage": "wa-ideate",
+      "stage": "ideate",
       "risk": "high",
       "purpose": "补齐入口、步骤、状态、失败路径和恢复路径。"
     },
     {
       "name": "design-acceptance",
       "signals": ["验收", "测试", "边界", "异常", "空状态", "失败", "回归", "证据", "criteria"],
-      "stage": "wa-ideate",
+      "stage": "ideate",
       "risk": "high",
       "purpose": "把需求变成 Given/When/Then、successCriteria 和 verifier 证据。"
     },
     {
       "name": "review-ux-interaction",
       "signals": ["ui", "ux", "页面", "网页", "交互", "视觉", "按钮", "表单", "空状态", "loading", "error"],
-      "stage": "wa-design",
+      "stage": "design",
       "risk": "medium",
       "purpose": "检查界面入口、状态、反馈、组件槽位和截图验收。"
     },
     {
       "name": "review-scope-tradeoff",
       "signals": ["先做", "一期", "mvp", "裁剪", "复杂", "范围", "排除项", "临时加功能", "计划外", "取舍"],
-      "stage": "wa-plan",
+      "stage": "plan",
       "risk": "high",
       "purpose": "明确 SHALL/MUST/SHOULD、IN/OUT、延期项和 ChangeRequest。"
     },
     {
       "name": "research-domain-benchmark",
       "signals": ["类似", "竞品", "行业", "最佳实践", "对标", "参考", "市场"],
-      "stage": "wa-ideate",
+      "stage": "ideate",
       "risk": "low",
       "purpose": "只在陌生领域或用户要求时做最小必要对标。"
     }

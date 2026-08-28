@@ -139,38 +139,6 @@
     "isolation": "run-dir",
     "timeoutMs": 120000
   },
-  "dynamicAgents": {
-    "visual-engineering": {
-      "provider": "gemini",
-      "model": "gemini-3.1-pro"
-    },
-    "ultrabrain": {
-      "provider": "host",
-      "model": "host-default",
-      "reasoning": "xhigh"
-    },
-    "artistry": {
-      "provider": "gemini",
-      "model": "gemini-3.1-pro"
-    },
-    "quick": {
-      "provider": "deepseek",
-      "model": "deepseek-v4-flash"
-    },
-    "deep": {
-      "provider": "host",
-      "model": "host-default",
-      "reasoning": "medium"
-    },
-    "writing": {
-      "provider": "kimi",
-      "model": "kimi-2.6"
-    },
-    "git": {
-      "provider": "deepseek",
-      "model": "deepseek-v4-flash"
-    }
-  },
   "review": {
     "llm": {
       "enabled": false,
@@ -314,8 +282,7 @@
       ],
       "skills": [
         "wildarrange-injection-runtime",
-        "start-work",
-        "wa-recall"
+        "start-work"
       ],
       "rules": {
         "mode": "static"
@@ -333,8 +300,6 @@
       ],
       "skills": [
         "wildarrange-injection-runtime",
-        "wa-ideate",
-        "wa-plan",
         "review-work",
         "review-product-intent",
         "map-user-journey",
@@ -388,8 +353,7 @@
         ".helix/rules/context.md"
       ],
       "skills": [
-        "wildarrange-injection-runtime",
-        "wa-recall"
+        "wildarrange-injection-runtime"
       ],
       "rules": {
         "mode": "recovery_marker"
@@ -433,7 +397,6 @@
         "review-work",
         "review-plan-risk",
         "review-plan-readiness",
-        "wa-review",
         "visual-qa"
       ],
       "rules": {
@@ -471,13 +434,13 @@
         "helix_summary"
       ],
       "markdown": [
-        ".helix/reports/reviews/{planId}-{taskId}.md",
+        ".helix/reports/reviews/{planId}/{taskId}.md",
         ".helix/rules/context.md"
       ],
       "skills": [
         "wildarrange-injection-runtime",
-        "wa-test",
-        "review-work"
+        "review-work",
+        "design-acceptance"
       ],
       "rules": {
         "mode": "dynamic"

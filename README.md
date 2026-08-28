@@ -240,6 +240,18 @@ node ./bin/helix.mjs summary
 node ./bin/helix.mjs workflow --sample
 ```
 
+### 工单总账
+
+新功能、独立 Bug、已完成任务的验收纠错和维护工作都使用同一个 Task 模型，并落盘到 `.helix/team/tasks.json`。Plan 只负责分组；跨 Plan 引用使用 `<planId>:<taskId>`。验证信息还没准备好时可以先建 `draft` 留底，draft 不能执行：
+
+```bash
+node ./bin/helix.mjs task create --title "修复登录失败" --type bug --priority P0
+node ./bin/helix.mjs task list --all --type bug
+node ./bin/helix.mjs task ready --task T001 --from task-details.json
+```
+
+同一次 Task 内 verifier 失败只增加 attempt 和历史证据；已经完成后又被验收打回，创建 `acceptance_correction` Task，并用 `--parent <planId>:<taskId>` 关联原任务。Dashboard 的“工单总账”页显示全部 Plan，支持按类型、状态、Plan 和关键词筛选，并可展开状态历史。
+
 ## 重要 API 约定
 
 `runNextTask` 返回的是**运行时下一步动作**，不等于任务持久状态。
@@ -317,12 +329,14 @@ node ./bin/helix.mjs parallel admit --run <runId> --task T001
 node ./bin/helix.mjs config baseline --reason reviewed
 node ./bin/helix.mjs config verify
 node ./bin/helix.mjs state backup --reason before-risky-agent
+node ./bin/helix.mjs state migrate
 node ./bin/helix.mjs state verify
 node ./bin/helix.mjs state list
 node ./bin/helix.mjs state restore --backup <backupId>
+node ./bin/helix.mjs task archive --task T001 --plan <planId> --delete --reason "obsolete"
 node ./bin/helix.mjs doctor
 node ./bin/helix.mjs governance audit
-node ./bin/helix.mjs impact src/infra/ledger.mjs
+node ./bin/helix.mjs impact "src/infra/ledger.mjs"
 node ./bin/helix.mjs decisions --limit 20
 node ./bin/helix.mjs decisions stats
 node ./bin/helix.mjs timeline --limit 30
@@ -333,7 +347,9 @@ node ./bin/helix.mjs docs commands --write
 node ./bin/helix.mjs review suspicious
 ```
 
-`doctor` 是一键体检：校验 config 结构与挂载、对账已完成任务（checkpoint / acceptance proof / ledger 事件必须齐全）、验证 ledger hash 链，并与最近一次备份交叉比对以发现整链重写；`decisionHealth` 分项给出周期健康摘要（各门触发计数、从未触发的门、坏行与孤儿标注预警）。各项检查各自隔离，单项崩溃只标红对应分项；doctor 只读诊断，不写 ledger。`state restore` 恢复前会自动再做一次备份，恢复错了可以再退回。
+`doctor` 是一键体检：校验 config 结构与挂载、对账所有 Plan 的已完成任务（checkpoint / acceptance proof / ledger 事件必须以 `planId:taskId` 对齐）、验证 ledger hash 链，并与最近一次备份交叉比对以发现整链重写；`decisionHealth` 分项给出周期健康摘要（各门触发计数、从未触发的门、坏行与孤儿标注预警）。各项检查各自隔离，单项崩溃只标红对应分项；doctor 只读诊断，不写 ledger。`state migrate` 会先自动备份，再迁移运行态任务总账并删除已退役的运行态投影；它不会改写项目根的 `helix.config.json`。没有当前 proof chain 的旧 `completed` 会进入 `needs_user_decision`，不会伪造新验收证据。`state restore` 恢复前也会自动再做一次备份。
+
+`task archive ... --delete` 需要显式删除确认，并且会先做运行态备份；`in_progress` / `verifying` 任务不可归档。Plan/Task ID 必须是安全单段标识符，canonical `planId:id` 身份必须唯一，显式 `--plan` 必须精确命中，不能回退到其它 Plan；未索引旧 Plan 也只删除指定 Task。删除采用可回滚事务并最后提交权威任务总账，仅清理目标 Task、空 Plan、对应 checkpoint / acceptance report、该任务的 outbox DoneClaim，以及未被其它任务共用的 `.helix/artifacts/` 精确非 glob 产物。本次精确删除集会写入对应 backup 的 recovery package；进程中断或需要撤销时可执行 `state restore --backup <backupId>` 恢复 Plan、证明、DoneClaim 与 artifact。清空活动 Plan 后系统进入 `idle`，不会自动激活其它 Plan。历史 ledger 与 backups 不随归档删除。
 
 `impact` 是改动影响分析：列出一个文件被哪些文件直接或间接 import，以及应该跑哪些测试（含常驻的五区边界测试），让 AI 改一处后能机器化证明「没碰别的模块」。
 
@@ -349,7 +365,7 @@ CLI 是分层的：`--help` 默认只显示核心六命令（init / plan / run /
 
 `review suspicious` 是 LLM 可疑判断（异步审查，archivist 不变量）：只把清洗后的结论包（id/门/规则/摘要，绝无代码块、raw diff 或完整命令输出）发给配置的外部 provider，返回的可疑清单必须锚定输入包内的 decisionId（幻觉 id 直接丢弃并计数）；无 key 时确定性 fallback，不阻断任何流程。结论只写入 `.helix/reports/suspicion.*`——**不进完成链、不改配置、不动门开关**。
 
-Dashboard（`serve`）包含路由复盘台、决策面板与运维面板。路由复盘台按日期展示用户原文、结构化路由结果、命中信号、语义第二意见及同会话后续工具摘要，并可人工标记正确/规则错/个案错；工具参数中的常见密钥字段会脱敏。IDE `Stop` Hook 会主动更新中文日报 `.helix/reports/routing/latest.md`（同日归档为 `YYYY-MM-DD.md`），先给结论，再列全部判断和工具明细。复盘只写 annotation，不自动修改 `routes.json`。
+Dashboard（`serve`）包含全项目工单总账、路由复盘台、决策面板与运维面板。工单总账直接读取 `.helix/team/tasks.json`，展示全部 Plan、工单类型、优先级、关联任务与状态历史。路由复盘台按日期展示用户原文、结构化路由结果、命中信号、语义第二意见及同会话后续工具摘要，并可人工标记正确/规则错/个案错；工具参数中的常见密钥字段会脱敏。IDE `Stop` Hook 会主动更新中文日报 `.helix/reports/routing/latest.md`（同日归档为 `YYYY-MM-DD.md`），先给结论，再列全部判断和工具明细。复盘只写 annotation，不自动修改 `routes.json`。
 
 `run` 结束时的门决策汇总按 `reporting.verbosity` 分级：默认 `verbose` 在 stderr 输出本次任务每个门的三行投影（框架初期让人能审判每一条门决策）；信任建立后可改为 `normal`（一行结果）或 `quiet`（只输出 JSON）。stdout 的机器可读 JSON 在任何级别下都不变。
 
@@ -400,7 +416,7 @@ node ./bin/helix.mjs archivist suggestions resolve --id <id> --decision accept -
 
 跨会话记忆会写入 `.helix/memory/digests/`。任务完成、并行 admission 完成、`SessionStart` 和 `PostCompact` 会生成结构化 digest，用于恢复进展、决策、成果物、实现结论和踩坑记录。
 
-## Skill 与提示词变体
+## Skill 匹配与任务绑定
 
 Skill matcher 是路由之外的轻量解释层，用来判断当前阶段应加载哪些 skill：
 
@@ -408,20 +424,17 @@ Skill matcher 是路由之外的轻量解释层，用来判断当前阶段应加
 node ./bin/helix.mjs skills match --text "做一个网页版提醒事项 App" --stage design --agent Jiuwei
 ```
 
-注入点的 Skill 挂载默认按需生效（`skillMatcher.dynamicInjection`）：有请求文本时，只有与本次请求匹配的已配置 skill 才注入全文，其余降级为"按需可加载"引用；`alwaysMount`（默认 `wildarrange-injection-runtime`）始终注入，`maxSkills`（默认 4）限制单次挂载数量。没有请求文本的注入点（如 `pre_tool_use`）回落到静态清单。动态匹配只做减法，不会把清单之外的 skill 全文塞进上下文。
+阶段只作为匹配上下文，不对应另一套阶段前缀 Skill。计划、执行与验证分别由长期 Agent、当前专项 Skill 和确定性 delivery pipeline 承担。
+
+注入点的 Skill 挂载默认按需生效（`skillMatcher.dynamicInjection`）：有请求文本时，只有与本次请求匹配的已配置 skill 才注入全文，其余降级为"按需可加载"引用；`alwaysMount`（默认 `wildarrange-injection-runtime`）始终注入，`maxSkills`（默认 4）限制单次任务绑定数量。没有请求文本的注入点（如 `pre_tool_use`）回落到静态清单。动态 matcher 只在注入点与 Agent 的显式集合内做减法；`task.skills` 是受安全加载与数量预算约束的额外显式来源。
+
+路由写进任务总账的 `task.skills` 会由 PreToolUse Hook、`context build --point before_execute` 和生成的 `/helix-run` 在执行前真实挂载。M1 的 `before_review` / `before_checkpoint` 仍使用各自静态 Skill，不宣称自动消费任务绑定。任务绑定只认 Prompt Pack manifest 或 `.agents/skills/<name>/SKILL.md`，并校验安装根、realpath 与 SHA-256，继续受数量/字符预算约束；未知或完整性失败的 Skill 会显示在 `skillSelection.missing`，不会静默加载。
 
 ### 人工决策通道与安全开关
 
 - **通用推送（不绑任何外部 IM）**：所有"待人决策"的事项——计划待确认、改动越界的 ChangeRequest、失败任务、子 Agent 待验收——由 hook 在 SessionStart / UserPromptSubmit / PostCompact / Stop 时注入宿主 AI 上下文，要求 AI 主动向开发者复述并给出选项。`attentionReport` 是这份待办的真相源，`status` / dashboard 也能拉取。
 - **计划确认门**：`planApproval.required=true` 时，`plan --from` 导入的计划进入 `awaiting_plan_approval`，`run` 拒绝执行直到开发者 `plan approve`（或对话里用 `/helix-approve`）。默认关闭。
 - **命令安全外置**：内置高危命令正则是不可关闭的底线；`commandSafety.extraPatterns` 允许在其之上追加项目专属危险命令拦截（`{ id, pattern, flags, reason }`），无需改代码。
-
-提示词变体不替代 Agent 原始提示词，只追加模型偏置。GPT 系列和 Codex/Cursor 主模型默认走 `host` / `gpt` 配置，外部模型可按 provider 选择：
-
-```bash
-node ./bin/helix.mjs prompts variant --agent Jiuwei --model gpt-5.5
-node ./bin/helix.mjs prompts show --agent Jiuwei --variant gemini
-```
 
 ## Dashboard
 
@@ -457,7 +470,7 @@ x-helix-token: <token>
 
 | 路径 | 作用 |
 |---|---|
-| `.helix/team/tasks.json` | 任务状态 |
+| `.helix/team/tasks.json` | 全项目唯一工单总账：所有 Plan 的 Task、类型、关联、状态与精简历史 |
 | `.helix/ledger.jsonl` | 带 hash 链的追加式事件账本，可用 `node ./bin/helix.mjs ledger verify` 检查篡改 |
 | `.helix/security/config-baseline.json` | config hash 基线，可用 `node ./bin/helix.mjs config verify` 检查质量门是否被改弱 |
 | `.helix/backups/` | `state backup` 生成的运行态关键文件备份 |

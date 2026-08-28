@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { unlink } from "node:fs/promises";
 import path from "node:path";
 import { normalizeAgentKey } from "./agent-registry.mjs";
 import { appendLedger } from "./ledger.mjs";
@@ -128,22 +129,6 @@ export const DEFAULT_HELIX_CONFIG = {
       },
     },
   },
-  dynamicAgents: {
-    "visual-engineering": { provider: "gemini", model: "gemini-3.1-pro" },
-    ultrabrain: { provider: "host", model: "host-default", reasoning: "xhigh" },
-    artistry: { provider: "gemini", model: "gemini-3.1-pro" },
-    quick: { provider: "deepseek", model: "deepseek-v4-flash" },
-    deep: { provider: "host", model: "host-default", reasoning: "medium" },
-    writing: { provider: "kimi", model: "kimi-2.6" },
-    git: { provider: "deepseek", model: "deepseek-v4-flash" },
-  },
-  promptVariants: {
-    host: "使用宿主 Agent 已配置的主模型与推理策略，不假设具体供应商 API。",
-    gpt: "优先写清验收标准、工具调用纪律和简洁证据摘要。",
-    gemini: "涉及界面或多模态任务时，优先进行视觉检查、状态对比和可见证据记录。",
-    kimi: "优先处理长上下文写作、文档综合和审慎中文表达。",
-    deepseek: "优先快速探索、结构化摘要和成本敏感的路由判断。",
-  },
   skillMatcher: {
     enabled: true,
     defaultLimit: 6,
@@ -153,15 +138,15 @@ export const DEFAULT_HELIX_CONFIG = {
       alwaysMount: ["wildarrange-injection-runtime"],
     },
     stageBoosts: {
-      ideate: ["wa-ideate", "ultraresearch"],
-      clarify: ["wa-spec", "start-work"],
-      plan: ["wa-plan", "wa-architect", "init-deep", "review-plan-risk", "review-plan-readiness"],
-      design: ["wa-design", "frontend-ui-ux", "visual-qa"],
-      execute: ["programming", "debugging", "refactor", "wa-work"],
-      verify: ["wa-test", "review-work"],
-      review: ["wa-review", "review-work", "review-plan-risk", "review-plan-readiness", "remove-ai-slops"],
-      deploy: ["wa-deploy", "publish", "pre-publish-review"],
-      recall: ["wa-recall", "get-unpublished-changes"],
+      ideate: ["review-product-intent", "map-user-journey", "research-domain-benchmark", "ultraresearch"],
+      clarify: ["review-product-intent", "design-acceptance", "start-work"],
+      plan: ["init-deep", "review-plan-risk", "review-plan-readiness", "review-scope-tradeoff", "design-acceptance"],
+      design: ["frontend-ui-ux", "review-ux-interaction", "visual-qa"],
+      execute: ["programming", "debugging", "refactor", "run-linear-delivery"],
+      verify: ["review-work", "design-acceptance", "visual-qa"],
+      review: ["review-work", "review-plan-risk", "review-plan-readiness", "remove-ai-slops"],
+      deploy: ["publish", "pre-publish-review"],
+      recall: ["get-unpublished-changes"],
     },
   },
   contextBudgets: {
@@ -260,7 +245,7 @@ export const DEFAULT_HELIX_CONFIG = {
       enabled: true,
       tools: ["helix_resume", "helix_rules_collect", "helix_context_build"],
       markdown: [".helix/snapshots/context.md", ".helix/rules/context.md"],
-      skills: ["wildarrange-injection-runtime", "start-work", "wa-recall"],
+      skills: ["wildarrange-injection-runtime", "start-work"],
       rules: { mode: "static" },
     },
     user_prompt_submit: {
@@ -269,8 +254,6 @@ export const DEFAULT_HELIX_CONFIG = {
       markdown: [".helix/snapshots/context.md", ".helix/rules/context.md"],
       skills: [
         "wildarrange-injection-runtime",
-        "wa-ideate",
-        "wa-plan",
         "review-work",
         "review-product-intent",
         "map-user-journey",
@@ -301,7 +284,7 @@ export const DEFAULT_HELIX_CONFIG = {
       enabled: true,
       tools: ["helix_resume", "helix_rules_collect"],
       markdown: [".helix/snapshots/context.md", ".helix/rules/context.md"],
-      skills: ["wildarrange-injection-runtime", "wa-recall"],
+      skills: ["wildarrange-injection-runtime"],
       rules: { mode: "recovery_marker" },
     },
     before_execute: {
@@ -315,7 +298,7 @@ export const DEFAULT_HELIX_CONFIG = {
       enabled: true,
       tools: ["helix_context_build", "helix_evidence_record", "review_gate"],
       markdown: [".helix/context-agents/BaiZe-{taskId}.md", ".helix/rules/context.md"],
-      skills: ["wildarrange-injection-runtime", "review-work", "review-plan-risk", "review-plan-readiness", "review-scope-tradeoff", "wa-review", "visual-qa"],
+      skills: ["wildarrange-injection-runtime", "review-work", "review-plan-risk", "review-plan-readiness", "review-scope-tradeoff", "visual-qa"],
       rules: { mode: "dynamic" },
     },
     repository_governance: {
@@ -328,8 +311,8 @@ export const DEFAULT_HELIX_CONFIG = {
     before_checkpoint: {
       enabled: true,
       tools: ["helix_evidence_record", "review_gate", "helix_summary"],
-      markdown: [".helix/reports/reviews/{planId}-{taskId}.md", ".helix/rules/context.md"],
-      skills: ["wildarrange-injection-runtime", "wa-test", "review-work"],
+      markdown: [".helix/reports/reviews/{planId}/{taskId}.md", ".helix/rules/context.md"],
+      skills: ["wildarrange-injection-runtime", "review-work", "design-acceptance"],
       rules: { mode: "dynamic" },
     },
     stop: {
@@ -348,10 +331,39 @@ export async function loadHelixConfig(rootDir) {
   const rootConfig = await readJson(rootConfigPath, null);
   const runtimeConfig = await readJson(runtimeConfigPath, null);
   const sourcePath = rootConfig ? rootConfigPath : runtimeConfig ? runtimeConfigPath : null;
-  const config = normalizeRuntimeConfig(deepMerge(DEFAULT_HELIX_CONFIG, runtimeConfig || {}));
+  // A checked-in root config is authoritative. The runtime copy used to be
+  // treated as a hidden lower layer, which allowed removed legacy keys to
+  // reappear whenever the root stopped overriding them.
+  const selectedConfig = rootConfig || runtimeConfig || {};
   return {
-    config: normalizeRuntimeConfig(deepMerge(config, rootConfig || {})),
+    config: normalizeRuntimeConfig(deepMerge(DEFAULT_HELIX_CONFIG, selectedConfig)),
     sourcePath: sourcePath ? path.relative(rootDir, sourcePath) : "default",
+  };
+}
+
+export async function migrateRuntimeConfigState(rootDir) {
+  await ensureHelixDirs(rootDir);
+  const rootConfigPath = path.join(rootDir, HELIX_CONFIG_FILE);
+  const runtimeConfigPath = resolveHelixPath(rootDir, "config.json");
+  const rootConfig = await readJson(rootConfigPath, null);
+  const runtimeConfig = await readJson(runtimeConfigPath, null);
+  const source = rootConfig || runtimeConfig || {};
+  const config = normalizeRuntimeConfig(deepMerge(DEFAULT_HELIX_CONFIG, source));
+  await writeJsonAtomic(runtimeConfigPath, config);
+  const removedProjections = [];
+  for (const name of ["agents.json", "categories.json"]) {
+    try {
+      await unlink(resolveHelixPath(rootDir, name));
+      removedProjections.push(`.helix/${name}`);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+  return {
+    kind: "runtime_config_migration",
+    sourcePath: rootConfig ? HELIX_CONFIG_FILE : runtimeConfig ? ".helix/config.json" : "default",
+    runtimeConfigPath: path.relative(rootDir, runtimeConfigPath),
+    removedProjections,
   };
 }
 
@@ -396,6 +408,8 @@ function buildArmedConfig() {
 function normalizeRuntimeConfig(config) {
   if (!isPlainObject(config)) return config;
   const normalized = { ...config };
+  delete normalized.dynamicAgents;
+  delete normalized.promptVariants;
   if (normalized.runtime === ["helix", "linear"].join("-")) normalized.runtime = DEFAULT_RUNTIME_NAME;
   normalized.agents = normalizeAgentMap(normalized.agents);
   normalized.gitCoordination = normalizeGitCoordination(normalized.gitCoordination);

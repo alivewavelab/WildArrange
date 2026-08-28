@@ -22,6 +22,7 @@ import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtim
 import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { runCommand } from "../src/infra/command-runner.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
+import { appendLedger } from "../src/infra/ledger.mjs";
 import { readJson, resolveHelixPath } from "../src/infra/runtime-store.mjs";
 
 async function withTempDir(fn) {
@@ -147,7 +148,7 @@ test("adversarial: linear runNextTask puts the task back to pending when the che
     assert.equal(completed.status, "completed");
     const stateAfterRepair = await loadTaskState(dir);
     assert.equal(stateAfterRepair.tasks[0].status, "completed");
-    const checkpoint = await readJson(resolveHelixPath(dir, "checkpoints", `${stateAfterRepair.planId}-T001.json`));
+    const checkpoint = await readJson(resolveHelixPath(dir, "checkpoints", stateAfterRepair.planId, "T001.json"));
     assert.equal(checkpoint.taskId, "T001");
   });
 });
@@ -181,7 +182,7 @@ test("adversarial: single-step node checkpoint refuses to complete the task when
     assert.equal(completed.status, "completed");
     const stateAfterRepair = await loadTaskState(dir);
     assert.equal(stateAfterRepair.tasks[0].status, "completed");
-    const checkpoint = await readJson(resolveHelixPath(dir, "checkpoints", `${stateAfterRepair.planId}-T001.json`));
+    const checkpoint = await readJson(resolveHelixPath(dir, "checkpoints", stateAfterRepair.planId, "T001.json"));
     assert.equal(checkpoint.taskId, "T001");
   });
 });
@@ -236,7 +237,7 @@ test("adversarial: a new execute round cannot complete against the previous roun
     assert.notEqual(persisted.tasks[0].status, "completed");
     assert.equal((await readFile(path.join(dir, "src", "out.txt"), "utf8")).trim(), "bad", "sanity: round 2 really produced the bad artifact");
     await assert.rejects(
-      () => readJson(resolveHelixPath(dir, "checkpoints", `${persisted.planId}-T001.json`)),
+      () => readJson(resolveHelixPath(dir, "checkpoints", persisted.planId, "T001.json")),
       undefined,
       "no checkpoint may exist for a task that never passed gates in its current round",
     );
@@ -353,8 +354,15 @@ test("adversarial: parallel admission never reaches completed/released when the 
 
     const admitted = await admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" });
     assert.equal(admitted.status, "completed");
+    const stateAfterRepair = await loadTaskState(dir);
     const ledger = await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8");
     assert.match(ledger, /"type":"parallel_agent_admission_completed"[^\n]*"status":"completed"/);
+    const completionEvent = ledger
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .find((entry) => entry.type === "parallel_agent_admission_completed" && entry.status === "completed");
+    assert.equal(completionEvent.planId, stateAfterRepair.planId);
     const lifecycleAfterRepair = await readJson(resolveHelixPath(dir, "agent-runs", batch.runId, "T001", "result.json"));
     assert.equal(lifecycleAfterRepair.lifecycle.status, "released");
   });
@@ -677,6 +685,15 @@ test("adversarial: a run whose admission failed earlier cannot fake-resume a tas
     const completed = await runNextTask(dir);
     assert.equal(completed.status, "completed");
     assert.equal((await readFile(path.join(dir, "src", "out.txt"), "utf8")).trim(), "linear");
+
+    // A historical completion event without planId must not be transferred
+    // to today's Plan, even when runId/taskId happen to match.
+    await appendLedger(dir, {
+      type: "parallel_agent_admission_completed",
+      runId: batch.runId,
+      taskId: "T001",
+      status: "completed",
+    });
 
     // Re-admitting run R must be refused — not treated as a resume that
     // marks the failed run released.

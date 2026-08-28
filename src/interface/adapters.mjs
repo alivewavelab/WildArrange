@@ -92,6 +92,18 @@ export async function installAdapter(rootDir, options = {}) {
 
     const cursorDir = path.join(rootDir, ".cursor", "rules");
     await mkdir(cursorDir, { recursive: true });
+    const legacyCursorRulePath = path.join(cursorDir, ["helix", "flow.mdc"].join(""));
+    if (existsSync(legacyCursorRulePath)) {
+      const legacyRuleBackup = await backupExistingAdapterFile(rootDir, legacyCursorRulePath, backupId);
+      await unlink(legacyCursorRulePath);
+      outputs.push({
+        target: "cursor",
+        path: path.relative(rootDir, legacyCursorRulePath),
+        status: "legacy-removed",
+        backup: legacyRuleBackup,
+        enforcement: "retired-managed-rule",
+      });
+    }
     const cursorRulePath = path.join(cursorDir, "wildarrange.mdc");
     const cursorRuleBackup = await backupExistingAdapterFile(rootDir, cursorRulePath, backupId);
     await writeFile(cursorRulePath, renderCursorRule({ hookCommand }), "utf8");
@@ -448,7 +460,11 @@ function buildSlashCommands(cliPrefix) {
       title: `${PRODUCT_NAME} 跑下一个任务`,
       description: "运行下一个可运行任务，自动走 worker→verify→scope→review→验收证明→checkpoint 全部门禁。",
       body: [
-        "执行下列命令跑下一个可运行任务（会自动走 worker → verify → scope → review → 验收证明 → checkpoint 全部门禁）：",
+        "先构建执行前上下文。把输出中 `injectionPoint.skills` 的全文当作当前任务必须遵守的工作流；若 `skillSelection.missing` 非空，先报告并停止，不要在缺少任务 Skill 时盲跑：",
+        "",
+        fence([`${cliPrefix} context build --point before_execute`]),
+        "",
+        "确认任务 Skill 已加载后，再执行下列命令跑下一个可运行任务（会自动走 worker → verify → scope → review → 验收证明 → checkpoint 全部门禁）：",
         "",
         fence([`${cliPrefix} run`]),
         "",

@@ -4,7 +4,7 @@ import { appendLedger } from "../infra/ledger.mjs";
 import {
   ensureHelixDirs,
   nowIso,
-  resolveHelixPath,
+  resolveTaskAcceptancePath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
 import { isPossibleNoopTask, isTrivialCommand } from "../infra/task-predicates.mjs";
@@ -16,9 +16,8 @@ export async function writeAcceptanceProof(rootDir, planId, task, evidence = {})
   await ensureHelixDirs(rootDir);
   const { config } = await loadHelixConfig(rootDir);
   const proof = buildAcceptanceProof(planId, task, evidence, config);
-  const basePath = resolveHelixPath(rootDir, "reports", "acceptance", `${planId}-${task.id}`);
-  const jsonPath = `${basePath}.json`;
-  const mdPath = `${basePath}.md`;
+  const jsonPath = resolveTaskAcceptancePath(rootDir, planId, task.id, "json");
+  const mdPath = resolveTaskAcceptancePath(rootDir, planId, task.id, "md");
   proof.reportJsonPath = path.relative(rootDir, jsonPath);
   proof.reportMdPath = path.relative(rootDir, mdPath);
   await writeJsonAtomic(jsonPath, proof);

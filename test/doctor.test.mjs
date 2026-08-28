@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { runDoctor } from "../src/interface/doctor.mjs";
+import { appendLedger } from "../src/infra/ledger.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { resolveHelixPath } from "../src/infra/runtime-store.mjs";
 
@@ -80,12 +81,15 @@ test("doctor adapter check passes once hooks are installed and flags stale rule 
     // 换机残留：规则里指向不存在绝对路径的命令会静默失效。
     await mkdir(path.join(dir, ".cursor", "rules"), { recursive: true });
     await writeFile(path.join(dir, ".cursor", "rules", "stale.mdc"), "run `node \"/Users/ghost/nonexistent/bin/helix.mjs\" hook run`\n", "utf8");
+    await writeFile(path.join(dir, ".cursor", "rules", ["helix", "flow.mdc"].join("")), "alwaysApply: true\n", "utf8");
 
     const report = await runDoctor(dir);
     const cursor = report.sections.adapters.targets.find((target) => target.target === "cursor");
     assert.equal(cursor.installed, true);
     assert.equal(report.sections.adapters.staleRules.length, 1);
+    assert.deepEqual(report.sections.adapters.legacyManagedRules, [{ path: ".cursor/rules/helixflow.mdc" }]);
     assert.ok(report.findings.some((finding) => finding.message.includes("/Users/ghost/nonexistent")));
+    assert.ok(report.findings.some((finding) => finding.message.includes("legacy managed Cursor rule")));
   });
 });
 
@@ -101,6 +105,118 @@ test("config init --armed writes an armed config that passes the gate arming flo
     assert.equal(arming.issues.some((issue) => issue.code === "quality_gates_not_required"), false);
   });
 });
+
+test("doctor scopes completion evidence by plan when two plans reuse T001", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    await writeTwoPlanSameTaskLedger(dir);
+    await appendLedger(dir, {
+      type: "node_checkpoint_completed",
+      planId: "plan-a",
+      taskId: "T001",
+    });
+
+    const report = await runDoctor(dir);
+    const missingEvents = report.findings.filter((finding) =>
+      finding.section === "completion_audit"
+        && finding.message.includes("ledger has no completion event"));
+
+    assert.equal(report.sections.completionAudit.checkedCompleted, 2);
+    assert.equal(report.sections.completionAudit.planCount, 2);
+    assert.deepEqual(missingEvents.map((finding) => finding.taskRef), ["plan-b:T001"]);
+  });
+});
+
+test("doctor rejects an unscoped legacy completion event when T001 belongs to two plans", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    await writeTwoPlanSameTaskLedger(dir);
+    await appendLedger(dir, {
+      type: "node_checkpoint_completed",
+      taskId: "T001",
+    });
+
+    const report = await runDoctor(dir);
+    const ambiguous = report.findings.find((finding) => finding.code === "ambiguous_legacy_completion_event");
+    const missingEvents = report.findings.filter((finding) =>
+      finding.section === "completion_audit"
+        && finding.message.includes("ledger has no completion event"));
+
+    assert.ok(ambiguous);
+    assert.deepEqual(ambiguous.planIds, ["plan-a", "plan-b"]);
+    assert.equal(report.sections.completionAudit.ambiguousLegacyCompletionEvents, 1);
+    assert.deepEqual(missingEvents.map((finding) => finding.taskRef).sort(), ["plan-a:T001", "plan-b:T001"]);
+  });
+});
+
+test("doctor never assigns an archived Plan's unscoped completion event to a new same-id task", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const task = {
+      id: "T001",
+      planId: "plan-new",
+      ref: "plan-new:T001",
+      subject: "New task reusing an old id",
+      status: "completed",
+      verify_commands: ["node --version"],
+      review_commands: ["node --version"],
+      writable_paths: ["src/**"],
+      evidence: [],
+      history: [{ at: "2026-08-25T00:00:00.000Z", event: "completed", status: "completed" }],
+    };
+    await appendLedger(dir, { type: "node_checkpoint_completed", taskId: "T001" });
+    await writeFile(resolveHelixPath(dir, "team", "tasks.json"), JSON.stringify({
+      version: 1,
+      kind: "task_ledger",
+      activePlanId: "plan-new",
+      plans: [{ id: "plan-new", taskIds: ["T001"] }],
+      tasks: [task],
+    }, null, 2), "utf8");
+    await mkdir(resolveHelixPath(dir, "checkpoints", "plan-new"), { recursive: true });
+    await mkdir(resolveHelixPath(dir, "reports", "acceptance", "plan-new"), { recursive: true });
+    await writeFile(resolveHelixPath(dir, "checkpoints", "plan-new", "T001.json"), JSON.stringify({ planId: "plan-new", taskId: "T001" }), "utf8");
+    await writeFile(resolveHelixPath(dir, "reports", "acceptance", "plan-new", "T001.json"), JSON.stringify({ planId: "plan-new", taskId: "T001" }), "utf8");
+
+    const report = await runDoctor(dir);
+    assert.equal(report.ok, false);
+    assert.ok(report.findings.some((finding) =>
+      finding.taskRef === "plan-new:T001"
+      && finding.message.includes("ledger has no completion event")));
+    const unscoped = report.findings.find((finding) => finding.code === "ambiguous_legacy_completion_event");
+    assert.deepEqual(unscoped?.planIds, ["plan-new"]);
+  });
+});
+
+async function writeTwoPlanSameTaskLedger(dir) {
+  const task = (planId) => ({
+    id: "T001",
+    planId,
+    ref: `${planId}:T001`,
+    subject: `Completed task in ${planId}`,
+    status: "completed",
+    verify_commands: ["node --version"],
+    review_commands: ["node --version"],
+    writable_paths: ["src/**"],
+    evidence: [],
+    history: [{ at: "2026-08-24T00:00:00.000Z", event: "completed", status: "completed" }],
+  });
+  await writeFile(resolveHelixPath(dir, "team", "tasks.json"), JSON.stringify({
+    version: 1,
+    kind: "task_ledger",
+    activePlanId: "plan-b",
+    plans: [
+      { id: "plan-a", taskIds: ["T001"] },
+      { id: "plan-b", taskIds: ["T001"] },
+    ],
+    tasks: [task("plan-a"), task("plan-b")],
+  }, null, 2), "utf8");
+  for (const planId of ["plan-a", "plan-b"]) {
+    await mkdir(resolveHelixPath(dir, "checkpoints", planId), { recursive: true });
+    await mkdir(resolveHelixPath(dir, "reports", "acceptance", planId), { recursive: true });
+    await writeFile(resolveHelixPath(dir, "checkpoints", planId, "T001.json"), JSON.stringify({ planId, taskId: "T001" }), "utf8");
+    await writeFile(resolveHelixPath(dir, "reports", "acceptance", planId, "T001.json"), JSON.stringify({ planId, taskId: "T001" }), "utf8");
+  }
+}
 
 async function withTempDir(fn) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "wildarrange-doctor-"));

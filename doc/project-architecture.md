@@ -102,8 +102,8 @@ AGENTS.md                         # product goals, global boundaries, release ga
 - `src/infra/agent-registry.mjs`：固定长期 Agent 白名单、读写角色集、旧别名、显示名、归一化与 command-worker 资格。
 - `src/infra/runtime-config.mjs`：默认配置、分层根/运行时 config 加载、归一化、深合并与不可削弱的 strict Git 协调标志。
 - `src/infra/runtime-snapshot.mjs`：运行时 snapshot 持久化与 resume-context JSON/Markdown 渲染的唯一确定性 owner。`src/ai/context.mjs::writeContextSnapshot` 是其薄 public 包装，非第二套实现。
-- `src/infra/prompt-pack.mjs`：prompt-pack 注册安装、条目加载、内容 hash、列表与校验渲染。
-- `src/infra/runtime-bootstrap.mjs`：跨 config、初始状态文件、prompt pack、ledger 与 snapshot 的一次性 `initRuntime` 顺序。
+- `src/infra/prompt-pack.mjs`：prompt-pack 注册安装、固定运行时副本物化、条目加载、内容 hash、列表与校验渲染。外部/custom pack 先校验 source realpath，再复制到 `.helix/prompt-pack/installed`；运行时 Agent、Skill、routes、tool 与 matcher 全部只从这个固定根读取，不信任 registry 中可修改的根路径字段。
+- `src/infra/runtime-bootstrap.mjs`：跨 config、work、prompt pack、ledger 与 snapshot 的一次性 `initRuntime` 顺序；长期 Agent 配置只保留在权威 config，不再生成无消费者的 `agents.json` / `categories.json` 投影。
 - `src/infra/ledger.mjs`：hash 链 ledger 追加、ledger 校验与校验条目读取。hash 链启动后，无 hash 的追加行报告为篡改；`doctor` 仅接受链校验条目作为完成证据。追加在尾部损坏时 fail-closed（无效 JSON、链启动后的无 hash 尾行、或相对尾缓存的文件缩小会拒绝追加而非静默分叉链）；`.helix/ledger-tail.json` 的 size+hash 缓存使重复追加 O(1)，全扫描为 fallback；`verifyLedger` 仍是唯一权威。
 - `src/interface/adapters.mjs`：Codex/Cursor/Kimi adapter 安装、卸载、恢复、报告、备份逻辑、Codex `.codex/hooks.json` 生成、Cursor hooks+rule 生成、Kimi plugin 生成与共享 command Skill 生成。
 - `src/interface/kimi-adapter.mjs`：Kimi plugin manifest、项目感知 Hook bridge 与 Kimi 安装/readme 说明的纯渲染。Kimi 专用协议翻译留在此，不进入 workflow core。
@@ -122,22 +122,24 @@ AGENTS.md                         # product goals, global boundaries, release ga
 - `src/infra/decision-log.mjs`：统一决策记录（`.helix/decisions.jsonl`）。仅在四缝发射——delivery-pipeline gate（verify/scope/review/acceptance-proof/checkpoint + pipeline 结果）、`ai/hooks` pre/post-tool-use 决策、并行 admission 与路由。路由记录额外保留完整 `inputText` 与结构化 `routeResult`；工具 Hook 保留 `toolName`、目标路径和脱敏后的参数摘要，供同 `sessionId` 复盘。派生日志：非 hash 链（ledger 仍是审计权威）、无锁单行追加（行中途外部截断后自愈）、best-effort 发射且从不破坏主流程；读侧跳过并计数损坏或半写行。
 - `src/capabilities/worker.mjs` / `src/capabilities/review-gate.mjs`：worker 执行与 BaiZe 独立 review 通道。风险复核与怀疑式验收是 BaiZe Skill 模式，非独立长期 Agent。
 - `src/infra/command-safety.mjs`：worker、verifier、review 命令、质量 gate 与子 Agent runner 共用的高风险 shell 命令预检；阻断破坏性系统命令与对项目源/测试/文档目录的递归删除。内置模式为不可削弱底线；config 中 `commandSafety.extraPatterns` 追加项目规则（`compileCommandSafetyPatterns` 编译，调用方经 `runCommand` options 传入）。
-- `src/infra/security.mjs`：config hash 基线、config 校验、运行时状态备份、备份列表、一键状态恢复与关键状态校验。
-- `src/interface/doctor.mjs`：一致性 doctor，审计 config 结构/mounts、将 completed 任务与 checkpoint/acceptance proof/ledger 事件对账、校验 ledger hash 链、ledger 与最新备份交叉检查，并展示最新仓库治理状态。专用 `gateArming` 与 `adapters` 段展示未武装 gate（黄灯不再埋在 `status` JSON 里）、已启用但未安装的 adapter hook（`.cursor/` 不随每次 clone 传播——`.gitignore` 对 `.cursor/hooks.json` 与 `.cursor/hooks/` 例外以便 hard enforcement 可提交，doctor 验证各机器实际拥有），以及引用已不存在绝对路径的规则文件（机器/用户名变更后 stale）。诊断与 gating 隔离：七项检查各自 try/catch（崩溃仅标红本段 `check_failed`，其余仍报告），doctor 从不追加 hash 链 ledger。还检查反向：orphan completion 事件（未 completed 任务已有链校验 completion ledger 事件——中断的完成事务，带 `helix run` 恢复提示）、完成后副作用失败（snapshot/summary 在 commit 后写不出的 `completion_side_effect_failed` ledger 事件），以及 canonical/derived 分歧（plan-mirror JSON 或 `tasks.md` 任务状态与权威 `team/tasks.json` 不一致）。
+- `src/infra/security.mjs`：config hash 基线、config 校验、运行时状态备份、归档精确恢复包、备份列表、一键状态恢复与关键状态校验。
+- `src/interface/doctor.mjs`：一致性 doctor，审计 config 结构/mounts、将全局 task ledger 中所有 Plan 的 completed 任务与 checkpoint/acceptance proof/ledger 事件按 `<planId>:<taskId>` 对账、校验 ledger hash 链、ledger 与最新备份交叉检查，并展示最新仓库治理状态。旧完成事件缺 planId 时只在 taskId 全局唯一时兼容；无法唯一归属就报告 ambiguous，不猜。专用 `gateArming` 与 `adapters` 段展示未武装 gate（黄灯不再埋在 `status` JSON 里）、已启用但未安装的 adapter hook（`.cursor/` 不随每次 clone 传播——`.gitignore` 对 `.cursor/hooks.json` 与 `.cursor/hooks/` 例外以便 hard enforcement 可提交，doctor 验证各机器实际拥有），以及引用已不存在绝对路径的规则文件（机器/用户名变更后 stale）。诊断与 gating 隔离：各项检查独立 try/catch（崩溃仅标红本段 `check_failed`，其余仍报告），doctor 从不追加 hash 链 ledger。还检查反向：orphan completion 事件（未 completed 任务已有链校验 completion ledger 事件——中断的完成事务，带 `helix run` 恢复提示）、完成后副作用失败（snapshot/summary 在 commit 后写不出的 `completion_side_effect_failed` ledger 事件），以及 canonical/derived 分歧（各 Plan mirror JSON 或 active `tasks.md` 与权威 `team/tasks.json` 不一致）。
+- Cursor adapter 安装会识别受管旧规则 `.cursor/rules/helixflow.mdc`，先写入 adapter backup 再移除，并生成当前 `wildarrange.mdc`；Doctor 同时报告尚未迁移的旧规则，避免新旧 alwaysApply 双注入。
 - `src/capabilities/code-intel.mjs`：LSP/typecheck 命令、AST/结构命令、hashline anchor 与注释检查的宿主中立代码智能 gate。
 - `src/infra/repository-layout.mjs` / `src/capabilities/repository-governance.mjs`：LuWu 只读仓库审计。确定性检查覆盖目录级 `AGENTS.md`、双语 README 命令与安全标记对等、真实 CLI `--help`、固定五 Agent 白名单、prompt-pack 注册、命名、文件放置策略与实际注释 token（含 JavaScript 模板表达式）；capability 经 gateway 写 JSON/Markdown 证据。`--changed-only` 将检查范围限于变更文件及相关结构不变量；Git 变更发现不可用时才全扫描 fallback。
 - `src/ai/injection.mjs`：注入点解析与 markdown/skill 附件加载；把 `agents.<name>.skills` 作为该 Agent 的固定能力上界，安全读取 `.agents/skills/<name>/SKILL.md` 或 Prompt Pack Skill。固定绑定始终挂载，动态 Skill 仍按请求匹配和数量上限做减法；缺失项显式报告，路径穿越与越界软链接拒绝加载。
-- `src/ai/skill-matcher.mjs`：stage/route/agent/keyword skill 匹配与可配置 prompt 模型变体。
+- `src/ai/skill-matcher.mjs`：stage/route/agent/keyword Skill 匹配与可解释加载提示；不维护脱离 Agent Prompt 的模型偏置旋钮。
 - `src/ai/context.mjs`：Agent 上下文、hash 校验后的角色 Prompt 读取与预算化、resume snapshot、session 谱系与 continuation 指令。
 - `src/ai/hooks.mjs`：宿主生命周期 hook 处理与 pre-tool-use scope guard 输出（scope 检查经 `capabilities/gateway.mjs`，非直接 import）。`SessionStart` 注入完整 Jiuwei 身份 Prompt，`PostCompact` 再注入用于恢复；`UserPromptSubmit` 不重复身份 Prompt。
-- `src/orchestration/status.mjs`：workflow 摘要、status 报告、dashboard 数据、attention 报告（开放 ChangeRequest、失败任务、用户决策、待批准计划、待 acceptance 子 Agent）与 ledger 尾读取。每个 status 报告携带 `gateArming`——来自 `infra/gate-arming.mjs` 的持久「门未武装」黄灯，任务列表全绿也不能伪装成已武装治理。attention 报告是通用人决策推送的真相源：hook 将其注入宿主 AI 上下文（SessionStart / UserPromptSubmit / PostCompact / Stop），指示 AI 向开发者展示待办与选项——无外部 IM 绑定。
+- `src/orchestration/status.mjs`：workflow 摘要、active Plan status、全项目 task-ledger Dashboard ViewModel、attention 报告（含 draft 工单、开放 ChangeRequest、失败任务、用户决策、待批准计划、待 acceptance 子 Agent）与 ledger 尾读取。每个 status 报告携带 `gateArming`——来自 `infra/gate-arming.mjs` 的持久「门未武装」黄灯，任务列表全绿也不能伪装成已武装治理。attention 报告是通用人决策推送的真相源：hook 将其注入宿主 AI 上下文（SessionStart / UserPromptSubmit / PostCompact / Stop），指示 AI 向开发者展示待办与选项——无外部 IM 绑定。
 
 计划批准 gate：当 `planApproval.required` 为 true，`importPlan` 将计划标为 `awaiting_plan_approval`，`runNextTask` 在 `approvePlan`（CLI `plan approve` / slash `/helix-approve`）记录批准前拒绝启动任务。默认关闭，线性循环不受影响除非显式开启。
 - `src/orchestration/workflow.mjs`：workflow 入口、样例计划生成与计划模板复制。
 - `src/orchestration/linear-runtime.mjs`：execute/verify/scope/review/checkpoint/retry 的线性任务节点运行时；每个 gate 调用经 `capabilities/gateway.mjs` 的 `invokeCapability`。
 - `src/orchestration/delivery-pipeline.mjs`：线性运行时与并行 Agent admission（完整 pipeline）及单步 `node checkpoint` workflow（经 `runCompletionSegment` + `collectGateEvidenceFromTask`）共用的 verify -> scope -> review -> acceptance-proof -> checkpoint 序列，因此增删重排 gate 只有一处。checkpoint 写失败返回 `checkpoint_failed` 而非 `completed`——调用方将任务回 `pending` 并写 `checkpoint_write_failed` ledger 条目；完成严格需要 durable checkpoint。Gate 证据绑定执行轮次：每次新 worker run 清空 `last_*` gate 字段；`collectGateEvidenceFromTask` 只接受 append-only 证据链中最新 worker 条目之后的 gate 证据，checkpoint 失败轮次的 passing 证据不能借给后续未验证轮次。完成事务可幂等恢复：若在 completion ledger 事件之后、canonical `tasks.json` 保存之前中断，`run` 检测任务卡在 `verifying` 并用 checkpoint-node 逻辑裁决（全新全 pass 证据则幂等完成；否则回 `pending`）；`in_progress` 任务故意不动（可能正当 claim）；持有 `admission_claim` 的 `verifying` 任务 likewise 留给并行 admission owner（`run` 报告 `blocked` 与 resume 提示而非劫持进行中事务）。completed 任务必须有的产物（wisdom 行、memory digest）在事务**内**写入——completion ledger 事件之后、canonical persist 之前——失败则任务保持可恢复而非无产物完成；提交后便利（snapshot、workflow summary）经 `runPostCompletionSideEffects` best-effort，失败转为 `completion_side_effect_failed` ledger 事件与结果上 `sideEffectWarnings` 条目，而非 un-complete 任务。
 - `src/orchestration/plan-state.mjs`：计划归一化、图校验、计划导入、路由 enrichment、任务状态加载与计划批准状态（`loadPlanApproval` / `approvePlan`）。
-- `src/orchestration/task-board.mjs`：team-lite 任务、claim、证据记录、任务状态持久化、outbox 与 durable 消息板。
+- `src/orchestration/task-board.mjs`：全项目工单总账编排；新功能、Bug、验收纠错和维护任务共享 Task 模型。信息不足时先写 `draft`，补齐 writable paths、success criteria 与 verify commands 后经 `task ready` 转为 `pending`。负责跨 Plan list/get、claim、证据记录、单文件状态持久化、outbox 与 durable 消息板；同一 Task 内 verifier 失败只追加 attempt/history，不制造新工单。
+- `src/infra/task-state-store.mjs`：读取 `.helix/team/tasks.json` 的全项目 ledger，兼容旧 `{planId,tasks}` 格式，并向执行链投影 active Plan 的原有 `{planId,tasks}` 视图。未来 schema version fail-closed；旧 completed 不继承当前完成资格，而是投影为 `needs_user_decision` 等待重新验收。每个全局引用使用 `<planId>:<taskId>`，所以不同 Plan 可继续使用局部编号 `T001`。
 - `src/infra/agent-spawn.mjs`：Codex/Cursor/自定义 command adapter 的宿主中立子 Agent spawn 命令渲染。
 - `src/infra/git-worktree.mjs`：Git worktree 隔离、patch 提取、patch 路径解析、patch admission helper，以及每次 worker run 前基于 `git stash create` 的 pre-execute 工作区 snapshot。
 - `src/infra/git-coordination.mjs`：设备安全的 remote 检查、metadata/checkpoint commit、普通 push/fetch、task 分支切换、working/tree-diff 检查、祖先检查与 integration-SHA guard 的参数数组 Git 原语。不决定 task 状态。
@@ -163,7 +165,7 @@ AGENTS.md                         # product goals, global boundaries, release ga
 | `skipped` | 无可回滚计划等前置不满足 | 原状态 | 不变 | 按 reason 处理 |
 
 不变量：push 已成功后任何故障都不得回滚或释放原 run（只能对账恢复）；claim 只有在成功提交或工作区成功回滚后才释放。
-- `src/interface/dashboard.mjs`：本地 dashboard HTTP API 与 HTML UI，含 POST token、Host 与 Origin 防护。
+- `src/interface/dashboard.mjs`：本地 dashboard HTTP API 与 HTML UI，含全项目“工单总账”页（类型/状态/Plan/文本筛选、关联任务与状态历史）、人类表单建单，以及 POST token、Host 与 Origin 防护。
 - `src/interface/dashboard-panels.mjs`：Dashboard 路由复盘、决策与运维面板。路由复盘按日期和 `sessionId` 关联原始请求、路由结果、语义第二意见与工具摘要，并展示 Stop Hook 生成的当日可读报告摘要；受保护 POST 只写人工标注，不自动修改路由规则。与 `dashboard.mjs` 分离以保持低于拆分线。
 - `src/interface/timeline.mjs`：`helix timeline`——合并 hash 链校验 ledger 条目、decisions 与 annotations 为单一倒序只读投影。
 - `src/interface/cli-help.mjs`：CLI 命令注册表（单一事实源）。默认 `--help` 仅显示 core 六命令（init/plan/run/status/decisions/doctor）；`--help --all` 列出全部；`docs commands --write` 物化 `doc/generated/commands.md`。README 命令真实性检查对照 `--help --all`。
@@ -171,17 +173,19 @@ AGENTS.md                         # product goals, global boundaries, release ga
 - `packs/wildarrange-linear/agents`：角色 prompt。
 - `packs/wildarrange-linear/skills`：skill prompt。
 - `packs/wildarrange-linear/tools/tool-contract.json`：工具合同清单。
-- `helix.config.json`：本地运行时配置。
+- M1 发布工具合同只登记真实 CLI、运行时内建能力、配置驱动能力和明确的宿主只读工具；不发布 roadmap-only 条目，也不把多条状态变更命令用 shell 管道拼接。路由持久化到 `task.skills` 的 Skill 只在真实接通的 `before_execute` 公开宿主入口作为任务绑定进入统一预算化加载器；`before_review` / `before_checkpoint` 仍使用静态阶段 Skill，不宣称自动消费任务绑定。未知、越界或完整性失败的 Skill 只报告、不注入。
+- `helix.config.json`：项目根权威配置。它存在时不再把 `.helix/config.json` 当隐式底层，避免根配置删除字段后旧键复活。
 
 ## 运行时状态
 
-- `.helix/team/tasks.json`：持久任务状态。
+- `.helix/team/tasks.json`：全项目唯一工单总账。包含所有 Plan 的 Task、`workType/source/priority/parentTaskRef`、当前状态与精简 `history`；`activePlanId` 决定执行链当前投影。`state migrate` 自动先备份，再把旧单 Plan 格式、旧 Agent owner 与 active config 显式迁移，并删除无消费者的 `.helix/agents.json` / `.helix/categories.json`；缺少当前 proof chain 的旧 completed 进入 `needs_user_decision`，历史 checkpoint/ledger 保持不变。
 - `.helix/ledger.jsonl`：hash 链 append-only 审计日志。`ledger verify` 检测普通行编辑或断链。
 - `.helix/decisions.jsonl`：派生决策投影日志（四缝：pipeline gate、tool-use hook、admission、routing）。可丢弃与截断；非 hash 链部分。经 `helix decisions` 读取。每条记录带 `id` 锚点与 `annotatable` 标志——仅 deny 与非确定性 allow（LLM review、routing shadow、admission 归因）进入标注队列；确定性 PASS 记录仅作流式记录。
 - `.helix/reports/routing/latest.md`：IDE Stop Hook 自动更新的中文路由日报；同日归档位于 `.helix/reports/routing/YYYY-MM-DD.md`。先给结论，再列问题、待复盘项和每次判断/工具明细，只读不改规则。
 - `.helix/annotations.jsonl`：决策记录的人工/复核标注（`confirmed|rule_wrong|case_wrong|mislabeled`）。类别强制；统计按 rule × category 聚合，单条标注不能劫持 rule。硬约束（`test/annotation.test.mjs` 钉死）：标注路径永不写 config、`verify_commands`、路由表或任何 gate 开关——标注告知人，不移动 gate。
 - `.helix/security/config-baseline.json`：已审核 config 指纹。`config verify` 检测 baseline 之后增删改的 config 文件。
-- `.helix/backups`：`state backup` 创建的 ledger、work、tasks、snapshots 与 config baseline 时点副本；`state list` 列出，`state restore --backup <id>` 恢复（恢复前自动做 pre-restore 备份）。
+- `.helix/backups`：`state backup` 创建的 ledger、work、tasks、snapshots 与 config baseline 时点副本；归档操作会把本次 Plan/checkpoint/acceptance/DoneClaim/精确 artifact 删除集追加到同一 backup 的 recovery package，并记录 `prepared|committed|rolled_back|recovery_required` 事务状态与 staging 诊断路径。`state migrate` 与 `state restore --backup <id>` 都会先自动创建恢复点。
+- 任务退出活动运行态使用 `task archive --task <id> --delete`：CLI 先备份，编排层先校验 Plan/Task 为安全单段标识符、canonical `planId:id` 身份唯一，并拒绝归档 `in_progress` / `verifying`。显式 `--plan` 必须精确命中，不回退到其它 Plan；未索引旧 Plan 也只删除指定 Task 并保留其它任务。删除使用同卷 staging 与镜像/权威总账回滚事务，权威总账最后提交；随后写完成墓碑并清理目标 Task、空 Plan、精确 checkpoint/acceptance report、该任务的 outbox DoneClaim，以及未被其它任务共用的 `.helix/artifacts/` 精确非 glob 产物。进程中断时 recovery package 保留恢复材料，执行 `state restore --backup <id>` 可恢复整个精确删除集。清空活动 Plan 后进入 `idle`，不会自动激活其它 Plan；下一 Plan 必须显式选择并重新建立批准状态。Ledger 与 backups 不属于归档删除范围。
 - `.helix/reports/doctor.json` / `.helix/reports/doctor.md`：最新 `doctor` 健康报告，覆盖 config mounts、完成对账、ledger 校验、ledger 与备份交叉检查及最新仓库治理摘要。
 - `.helix/reports/governance/latest.json` / `.helix/reports/governance/latest.md`：LuWu 最新确定性仓库审计证据。
 - `.helix/checkpoints`：全部 gate 通过后的 checkpoint JSON。
@@ -244,7 +248,7 @@ AGENTS.md                         # product goals, global boundaries, release ga
 3. `successCriteria` 通过。
 4. `scope_guard` 返回 `pass`。
 5. `review_gate` 返回 `pass`。
-6. `acceptance_proof` 返回 `pass` 并写入 `.helix/reports/acceptance/<planId>-<taskId>.json`。
+6. `acceptance_proof` 返回 `pass` 并写入 `.helix/reports/acceptance/<planId>/<taskId>.json`；checkpoint 同样写入 `.helix/checkpoints/<planId>/<taskId>.json`。Plan/Task 分目录使两个允许连字符的 ID 仍保持一一对应；旧扁平路径只在 JSON 身份匹配或不存在碰撞时兼容读取/清理。
 
 `inconclusive` 不是完成证据。
 
@@ -279,27 +283,27 @@ Checkpoint 仍需要 worker 成功、verifier pass、success criteria pass、sco
 
 dashboard 保持 local-first。loopback `GET /api/state` 可无 token 读取做轻量 status 检查。每个 `POST` 端点需要 `Authorization: Bearer <token>` 或 `x-helix-token`，包括在 `127.0.0.1` 上，因为 POST 可执行 worker 命令。服务器还校验 Host 与 Origin / Sec-Fetch-Site，降低 DNS rebinding 与浏览器跨站触发风险。
 
-## Skill 与 Prompt 变体模型
+## Skill 匹配与任务绑定模型
 
 基础 prompt pack 仍是真相源。`skills match` 是可解释的加载提示，按显式选择、stage boost、路由 keyword 信号、Agent 角色、category 与请求 keyword 对已安装 skill 打分。不 mutate 路由表。
 
 注入点的 Skill 挂载在请求文本可用时为按需（`skillMatcher.dynamicInjection`，默认启用）：
 
-- 注入点配置的静态 skill 列表是上限；动态匹配只减不加，从不注入配置列表外 skill 的全文。
+- 动态 matcher 只在注入点与 Agent 的显式 skill 集合内做减法；`task.skills` 是独立的任务级显式来源，只会在真实接通的执行前交付入口加入候选集合。
 - `alwaysMount` skill（默认：`wildarrange-injection-runtime`）始终挂载；其他配置 skill 仅当 matcher 在请求相关信号上得分 >0 时挂载。仅 Agent 身份 boost 不算匹配，因其 per agent 恒定，会退化为静态挂载。
 - `maxSkills`（默认 4）按分数 cap 动态挂载 skill 数。
 - 未挂载 skill 在注入输出中降级为按需引用（name + load command），agent 需要时可显式拉取。
 - 无请求文本时（如 `pre_tool_use`），该点回退静态挂载并在 `skillSelection` 报告原因。
 
-注入点的 Skill 挂载在请求文本可用时为按需。`resolveInjectionPoint` 接受可选 `{ text, stage }` 上下文（hook 传用户 prompt 或 resume next-action；agent context 传 task subject）。动态选择仅减：注入点配置 skill 列表是上限，匹配 skill 以全文挂载，未匹配降级为 agent 稍后经 `prompts show --skill <name>` 加载的路径引用，配置列表外 skill 无论请求如何措辞都不注入全文。仅 Agent 身份分数不算匹配，因其 per request 恒定。`skillMatcher.dynamicInjection` 控制此行为（`enabled`、`maxSkills` 动态槽位、`alwaysMount` 基线 skill 如 `wildarrange-injection-runtime`）。无请求文本或禁用时，挂载回退静态列表。
+阶段名只作为 matcher 的上下文信号，不映射为另一套阶段前缀 Skill。阶段职责由五个长期 Agent、当前专项 Skill 与确定性 delivery pipeline 共同承担，Prompt Pack 不发布历史阶段剧本。
 
-Prompt 变体是 config 驱动的附录。宿主托管 GPT 族 agent 可用 Codex/Cursor 默认，Gemini、Kimi、DeepSeek 与自定义 provider 可加窄行为偏置而不替换原 agent prompt。
+`resolveInjectionPoint` 接受可选 `{ text, stage, taskSkills }` 上下文（hook 传用户 prompt 或 resume next-action；agent context 传 task subject 与任务绑定）。动态选择只在注入点与 Agent 的显式集合内做减法；任务绑定作为受限的额外显式来源，只在 `before_execute` 挂载。PreToolUse Hook 会解析当前 runnable Task、构建 ZhuRong 执行上下文并把任务 Skill 全文交给宿主；`context build --point before_execute` 与生成的 `/helix-run` 走同一路径。匹配或任务绑定的 Skill 以全文加载，未匹配项降级为 agent 稍后经 `prompts show --skill <name>` 加载的路径引用。任务绑定只认安全名称与 Prompt Pack manifest / 项目 Skill；Prompt Pack 读取校验安装根、相对路径、realpath 与 SHA-256，未知或完整性失败项进入 `skillSelection.missing`。`skillMatcher.dynamicInjection` 控制动态匹配（`enabled`、`maxSkills`、`alwaysMount`）；无请求文本或禁用时，注入点回退静态列表。独立 Prompt 变体因未进入真实上下文已退役，模型差异由 Agent provider/model/reasoning 与宿主 adapter 承担。
 
 ## 上下文预算模型
 
 `src/ai/injection.mjs` 将类 prompt 上下文视为分级材料，非单一扁平 blob：
 
-1. Agent 身份 Prompt 与 Prompt 变体保持稳定。默认 `contextBudgets.prompt.maxChars` 为 12,000 字符；身份 Prompt 只在会话启动和压缩恢复时进入 hook 输出。
+1. Agent 身份 Prompt 保持稳定。默认 `contextBudgets.prompt.maxChars` 为 12,000 字符；身份 Prompt 只在会话启动和压缩恢复时进入 hook 输出。
 2. Markdown 挂载用于规则、snapshot 与 live 状态。默认 Markdown 预算 12,000 字符，`pre_tool_use` 与 `post_tool_use` 用更轻 hook 预算。
 3. 激活的 Skill 挂载是工作流指令。默认 Skill 预算 80,000 字符，traffic-light hook 更窄，execute/review hook 更宽。
 4. 任何超预算挂载必须暴露 `truncated: true`、原始字符、加载字符与预算字符。不允许静默截断。
@@ -330,7 +334,7 @@ adapter 专用行为属于 `src/interface/adapters.mjs`、`src/interface/kimi-ad
 - 尊重上文「五区分层」的单向依赖图。`orchestration/` 与 `ai/` 到达 `capabilities/` 只能经 `capabilities/gateway.mjs` 的 `invokeCapability(name, ctx)`；永不直接 import capability 实现文件。
 - 源文件默认保持 1000 行以内。700+ 行时评估是否超过一个领域职责。
 - CLI、测试与运行时模块直接 import 具体分区 owner，不建立根级 barrel 或兼容 shim。
-- 任何新运行时模块必须列入本架构图与根 `AGENTS.md`（`CLAUDE.md` 为同步的 Claude 宿主镜像）。还要登记 `tooling/arch-module-graph/module-file-map.json` 并更新 `docs/product/architecture-overview.html`；运行 `npm run check:arch`。
+- 任何新运行时模块必须列入本架构图与根 `AGENTS.md`；`CLAUDE.md` 只作为宿主发现入口指向根规范，不复制第二份规则。还要登记 `tooling/arch-module-graph/module-file-map.json` 并更新 `docs/product/architecture-overview.html`；运行 `npm run check:arch`。
 - 经 gateway 调用的 capability 目前含 `worker`、`verify`、`scope`、`review`、`acceptance-proof`、`checkpoint`、`command`、`command-safety`、`repository-governance`。`code-intel` 是 `review-gate.mjs` 内 import 的 review 子 capability，非 `invokeCapability` 名。
 - 目录级 `AGENTS.md` 指引保持附加与局部。目录职责变化时更新最近文件；勿把完整根策略复制到每个文件夹。
 - `test/dependency-boundary.test.mjs` 每次 `npm test` 运行；边界测试失败意味着依赖图被违反，不是应放宽测试。

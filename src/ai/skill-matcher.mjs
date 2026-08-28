@@ -1,7 +1,6 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { loadHelixConfig } from "../infra/runtime-config.mjs";
 import { normalizeAgentKey } from "../infra/agent-registry.mjs";
+import { renderPromptPackEntry } from "../infra/prompt-pack.mjs";
 import {
   readJson,
   resolveHelixPath,
@@ -14,7 +13,7 @@ export async function matchSkills(rootDir, options = {}) {
   const registry = await readJson(resolveHelixPath(rootDir, "prompt-pack.json"), null);
   if (!registry) throw new Error("prompt pack is not installed; run helix init");
   const routes = registry.routes
-    ? await readJson(path.join(registry.packDir, registry.routes.path), null)
+    ? JSON.parse(await renderPromptPackEntry(rootDir, { routes: true }))
     : null;
   const text = normalizeText(options.text || options.query || "");
   const stage = normalizeText(options.stage || "");
@@ -22,7 +21,7 @@ export async function matchSkills(rootDir, options = {}) {
   const agent = normalizeAgentKey(options.agent || "") || "";
   const explicitSkills = normalizeStringArray(options.skills || []);
   const limit = normalizeLimit(options.limit || config.skillMatcher?.defaultLimit);
-  const entries = await loadSkillSummaries(registry);
+  const entries = await loadSkillSummaries(rootDir, registry);
   const routeSignals = collectRouteSignals(routes, text);
   const stageBoosts = normalizeStageBoosts(config.skillMatcher?.stageBoosts?.[stage]);
   const agentBoosts = inferAgentSkillBoosts(agent);
@@ -84,29 +83,10 @@ export async function matchSkills(rootDir, options = {}) {
   };
 }
 
-export async function resolvePromptVariant(rootDir, options = {}) {
-  const { config } = await loadHelixConfig(rootDir);
-  const agent = normalizeAgentKey(options.agent || "") || "";
-  const agentConfig = agent ? config.agents?.[agent] : null;
-  const provider = normalizeText(options.provider || agentConfig?.provider || "host");
-  const model = normalizeText(options.model || agentConfig?.model || "");
-  const variantKey = normalizeVariantKey(options.variant || provider, model);
-  const variants = config.promptVariants || {};
-  const variantText = variants[variantKey] || variants[provider] || variants.host || "";
-  return {
-    kind: "prompt_variant",
-    agent: agent || null,
-    provider,
-    model: model || null,
-    variant: variantKey,
-    content: variantText,
-  };
-}
-
-async function loadSkillSummaries(registry) {
+async function loadSkillSummaries(rootDir, registry) {
   const entries = [];
   for (const [name, entry] of Object.entries(registry.skills || {})) {
-    const content = await readFile(path.join(registry.packDir, entry.path), "utf8");
+    const content = await renderPromptPackEntry(rootDir, { skill: name });
     const excerpt = content
       .split(/\r?\n/)
       .map((line) => line.trim())
@@ -145,10 +125,10 @@ function collectRouteSignals(routes, text) {
 
 function inferAgentSkillBoosts(agent) {
   if (!agent) return [];
-  if (agent === "Jiuwei") return ["start-work", "run-linear-delivery", "wa-plan", "review-work"];
-  if (agent === "ZhuRong") return ["programming", "debugging", "refactor", "wa-work"];
-  if (agent === "BaiZe") return ["review-work", "review-plan-risk", "review-plan-readiness", "wa-review", "wa-test"];
-  if (agent === "DiJiang") return ["inspect-codebase", "research-external-docs", "wa-plan", "design-acceptance"];
+  if (agent === "Jiuwei") return ["start-work", "run-linear-delivery", "review-work"];
+  if (agent === "ZhuRong") return ["programming", "debugging", "refactor"];
+  if (agent === "BaiZe") return ["review-work", "review-plan-risk", "review-plan-readiness", "design-acceptance"];
+  if (agent === "DiJiang") return ["inspect-codebase", "research-external-docs", "review-product-intent", "design-acceptance", "review-plan-readiness"];
   if (agent === "LuWu") return ["repository-governance", "init-deep", "pre-publish-review", "remove-ai-slops"];
   return [];
 }
@@ -180,15 +160,6 @@ function normalizeLimit(value) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) return DEFAULT_LIMIT;
   return Math.min(parsed, 20);
-}
-
-function normalizeVariantKey(value, model) {
-  const raw = normalizeText(value || "");
-  if (raw === "openai" || raw.startsWith("gpt") || model.startsWith("gpt")) return "gpt";
-  if (raw.startsWith("gemini") || model.startsWith("gemini")) return "gemini";
-  if (raw.startsWith("kimi") || model.startsWith("kimi")) return "kimi";
-  if (raw.startsWith("deepseek") || model.startsWith("deepseek")) return "deepseek";
-  return raw || "host";
 }
 
 function normalizeText(value) {

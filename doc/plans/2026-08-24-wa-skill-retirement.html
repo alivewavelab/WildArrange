@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>wa-* 旧 Skill 退役方案</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 960px; margin: 40px auto; padding: 0 20px; color: #172033; background: #f6f8fb; }
+    h1 { margin-bottom: 8px; }
+    .lead { color: #526079; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin-top: 24px; }
+    .card { background: white; border: 1px solid #dce3ee; border-left: 7px solid #64748b; border-radius: 10px; padding: 18px; }
+    .p0 { border-left-color: #dc2626; }
+    .p1 { border-left-color: #d97706; }
+    .p2 { border-left-color: #2563eb; }
+    code { background: #eef2f7; padding: 2px 5px; border-radius: 4px; }
+    .flow { margin-top: 24px; padding: 18px; background: #eaf2ff; border-radius: 10px; text-align: center; font-weight: 650; }
+  </style>
+</head>
+<body>
+  <p><strong>历史方案（已落地）</strong></p>
+  <h1><code>wa-*</code> 旧 Skill 退役方案</h1>
+  <p class="lead">目标：旧阶段剧本不再被匹配、注入、发布或教给新项目；保留现有岗位 Skill 与确定性 Helix 流程。</p>
+
+  <div class="grid">
+    <section class="card p0">
+      <h2>P0 断开运行入口</h2>
+      <p>从默认配置、示例配置、注入点、Agent 偏好、路由修正中移除全部 <code>wa-*</code>。</p>
+    </section>
+    <section class="card p0">
+      <h2>P0 退出发布包</h2>
+      <p>删除 12 个旧 Skill 文件，并从 prompt pack manifest 与 routes 中移除登记和旧阶段元数据。</p>
+    </section>
+    <section class="card p1">
+      <h2>P1 更新当前真相</h2>
+      <p>当前文档只描述岗位 Skill、专项 Skill 与 <code>.helix/</code>、<code>helix plan</code>、delivery pipeline。</p>
+    </section>
+    <section class="card p1">
+      <h2>P1 测试退役边界</h2>
+      <p>新增回归断言：manifest、默认配置、路由结果和动态注入均不得出现 <code>wa-*</code>。</p>
+    </section>
+    <section class="card p2">
+      <h2>P2 保留历史证据</h2>
+      <p>历史方案可保留为历史记录，但不得成为运行配置、发布内容或当前用户说明。</p>
+    </section>
+  </div>
+
+  <div class="flow">用户请求 → 岗位/专项 Skill 匹配 → Helix 计划与交付流水线 → <code>.helix/</code> 证据</div>
+
+  <h2>验收</h2>
+  <p><code>rg</code> 检查活动代码与发布包无 <code>wa-*</code>；运行相关测试、<code>npm test</code>、<code>npm run check:arch</code> 和 <code>npm pack --dry-run</code>。</p>
+</body>
+</html>

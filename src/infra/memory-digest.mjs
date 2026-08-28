@@ -6,7 +6,9 @@ import {
   ensureHelixDirs,
   nowIso,
   readJson,
+  resolveLegacyTaskCheckpointPath,
   resolveHelixPath,
+  resolveTaskCheckpointPath,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 import { runCommand } from "./command-runner.mjs";
@@ -40,7 +42,9 @@ export async function buildMemoryDigest(rootDir, options = {}) {
   const work = await readJson(resolveHelixPath(rootDir, "work.json"), null);
   const latestArchivist = await readJson(resolveHelixPath(rootDir, "memory", "last-archivist-result.json"), null);
   const route = options.route || latestArchivist?.decision?.routeDecision || null;
-  const checkpoint = taskState && task ? await readJson(resolveHelixPath(rootDir, "checkpoints", `${taskState.planId}-${task.id}.json`), null) : null;
+  const checkpoint = taskState && task
+    ? await readTaskCheckpoint(rootDir, taskState.planId, task.id)
+    : null;
   const ledgerTail = await readLedgerTail(rootDir, Number(options.ledgerLimit) || 20);
   const gitHead = await readGitHead(rootDir);
   const stage = options.stage || route?.route || work?.stage || "default";
@@ -145,10 +149,19 @@ function decisionsFromTask(task, checkpoint, latestArchivist) {
 
 function artifactRefs(planId, task, checkpoint) {
   return [
-    checkpoint?.reportJsonPath || (planId && task?.id ? path.join(".helix", "checkpoints", `${planId}-${task.id}.json`) : null),
+    checkpoint?.reportJsonPath || (planId && task?.id
+      ? path.join(".helix", "checkpoints", planId, `${task.id}.json`)
+      : null),
     task?.last_review_result?.reportJsonPath,
     task?.last_failure?.reportJsonPath,
   ].filter(Boolean);
+}
+
+async function readTaskCheckpoint(rootDir, planId, taskId) {
+  const current = await readJson(resolveTaskCheckpointPath(rootDir, planId, taskId), null);
+  if (current?.planId === planId && current?.taskId === taskId) return current;
+  const legacy = await readJson(resolveLegacyTaskCheckpointPath(rootDir, planId, taskId), null);
+  return legacy?.planId === planId && legacy?.taskId === taskId ? legacy : null;
 }
 
 function implementationNotes(task) {

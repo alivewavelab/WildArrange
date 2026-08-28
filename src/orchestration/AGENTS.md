@@ -31,6 +31,8 @@
 - Admission 必须按 `claim → pre-image → apply → gates → commit/rollback → release` 执行。
 - 回滚失败必须保留 owner、rollback plan 和 `recovery_required`，不能释放脏工作区。
 - `runNextTask().status` 表示下一步动作；持久状态以 `task.status` 为准。
+- Plan/default/task 中的 Skill 名必须是安全的单段标识符；编排层只持久化绑定，不读取 Skill 文件，实际加载统一交给 AI 区预算化注入器。
+- Checkpoint/acceptance 证据按 `<planId>/<taskId>` 分目录；归档删除旧扁平证据前必须检查全账本 legacy stem 碰撞与证据内身份，宁可保留歧义旧文件也不能误删另一 Task 的完成证据。
 - 命令型并行运行必须在创建 run 之前拒绝 DiJiang、BaiZe、LuWu 这三个只读长期身份；Jiuwei、ZhuRong 可执行，非保留名的临时隔离子 Agent 仍可运行。
 - Git 协调开启时，同一任务只能存在一个远端写 owner 和一个本地 `parallel_run_claim`；handoff 后旧设备必须 fail-closed，整链 `run` 与分步 checkpoint 都要在完成前二次验权。
 - Handoff 必须按 `prepare → tree fingerprint recheck → non-force push → target accept` 推进；takeover 只能显式执行并记录预期旧设备与理由，不使用本机时间自动过期。push/accept/takeover 的远端成功、本地失败必须可由同一设备和原参数幂等补账。

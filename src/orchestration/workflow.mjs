@@ -33,7 +33,7 @@ export async function runWorkflow(rootDir, options = {}) {
   await writeSnapshot(rootDir, "workflow_finished", { status: report });
   const summary = await writeWorkflowSummary(rootDir, { reason: "workflow_finished" });
   return {
-    ok: report.failed === 0 && report.pending === 0 && report.in_progress === 0 && report.verifying === 0,
+    ok: report.draft === 0 && report.failed === 0 && report.pending === 0 && report.in_progress === 0 && report.verifying === 0,
     planId: plan?.id || report.planId,
     results,
     status: report,

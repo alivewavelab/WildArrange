@@ -29,6 +29,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 - 任意设备可执行 admission，但开始时必须获取并绑定远端集成分支 SHA，当前工作目录必须包含该基线，且候选树不得包含本 run / handoff 清单之外的无归属改动；gate 期间 owner/SHA 变化、基线落后或存在无归属改动必须安全回滚并返回 `revalidation_required`，不得写 acceptance proof/checkpoint。全部 gate 与 acceptance proof 通过后必须真实生成以该 SHA 为父提交的集成 commit 并普通 push，成功后才允许 checkpoint；push 已成功后任何本地/所有权/远端历史故障都不得回滚或释放原 run，只能对账恢复或保持 `recovery_required`。
 - ArchivistRouter 只读取清洗后的结论包，不摄入代码块、raw diff 或完整命令输出；无 LLM key 时必须 fallback，不阻断主线或 hook。
 - 路由必须保留 deterministic 证据；semantic shadow 只能作为第二意见和低置信门控，不得无审计地覆盖路由表。
+- 路由写入任务的 `task.skills` 必须由执行前公开宿主入口真实挂载；M1 不得宣称尚未接通的复核/checkpoint 自动挂载。只允许加载 Prompt Pack manifest 或项目 Skill 根内的已登记文件，并校验安装根、realpath 与 hash，继续受数量和字符预算约束。未知或完整性失败的 Skill 必须显式报告，不能静默加载。
 - 商业发布包不得包含受限第三方源码、prompt 原文或近似改写文本；外部项目只能作为概念参考和对照证据。
 
 ## 工程约束
@@ -50,6 +51,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 - `orchestration/` 和 `ai/` 都不得直接 import 具体能力实现文件（`capabilities/verify.mjs` 等），必须统一经 `capabilities/gateway.mjs` 的 `invokeCapability(name, ctx)`。
 - 单文件默认保持 1000 行以内；超过 700 行必须评估是否按职责拆分。
 - `src/` 根目录不放运行时 `.mjs` 文件；实现与公开 owner 必须位于五区目录，不建立兼容 shim 或综合 barrel。
+- `src/` 下未知一级目录必须被依赖边界门直接拒绝；不保留 `legacy` 免检分区。
 - 规范采用渐进式披露：根 `AGENTS.md` 保存全局目标与不可削弱不变量；`bin/`、`src/`、五区、`test/`、`doc/`、`packs/wildarrange-linear/` 的 `AGENTS.md` 只补充本目录职责和验收要求。进入目录修改前先读最近的 `AGENTS.md`，子目录规范不得覆盖根级安全约束。
 - 新增运行时能力必须同时更新 `doc/project-architecture.md` 和本文件的目录约定。
 - gate 安全不变量不能削弱：不得删除或清空 `verify_commands`，不得跳过 verifier / scope / review / successCriteria 完成 checkpoint。
@@ -66,6 +68,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | 路径                                                           | 职责                                            |
 | ------------------------------------------------------------ | --------------------------------------------- |
 | [README.md](./README.md) / [README.en.md](./README.en.md)    | 用户安装、初始化、最小工作流、dashboard 安全说明                 |
+| [CLAUDE.md](./CLAUDE.md)                                    | Claude 宿主发现入口；只指向本文件，不复制第二份规范                |
 | [doc/concept.md](./doc/concept.md)                           | 产品概念与外部参考边界                                   |
 | [doc/project-architecture.md](./doc/project-architecture.md) | 运行时架构、状态文件和 gate 模型                           |
 | [doc/five-zone-decoupling-guidelines.md](./doc/five-zone-decoupling-guidelines.md) | 可复制到其他项目的五区受控解耦准则、实施顺序与 Review 清单 |
@@ -99,7 +102,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/orchestration/admission-recovery.mjs`                    | admission 的 revalidation / 已集成恢复状态落盘，禁止已 push 成果回滚 |
 | `src/orchestration/delivery-pipeline.mjs`                     | 共享交付流水线：verify → scope → review → acceptance-proof → checkpoint 顺序 |
 | `src/orchestration/integration.mjs`                           | admission 集成事务：owner/base/main 三重 fence、临时索引 commit、普通 push 与故障对账 |
-| `src/orchestration/task-board.mjs`                            | 轻量任务板与消息板                                     |
+| `src/orchestration/task-board.mjs`                            | 全项目工单总账、draft/ready、任务 claim/证据/持久化与消息板 |
 | `src/orchestration/change-governance.mjs`                     | 任务变更治理、Review Blocker、ChangeRequest           |
 | `src/orchestration/status.mjs`                                | 状态报告、Workflow 总结、attentionReport 与 Dashboard 数据 |
 | `src/orchestration/workflow.mjs`                               | Workflow 入口、样例计划生成                            |
@@ -108,7 +111,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/ai/routing.mjs`                                          | 请求路由、类别决策与 Stop Hook 每日可读复盘报告                 |
 | `src/ai/archivist-router.mjs`                                 | 档案路由员：routing packet、结构化记忆、路由建议              |
 | `src/ai/injection.mjs`                                        | 注入点解析、Agent 固定 Skill 绑定、项目 Skill 安全加载、Markdown / Skill 分级预算与按需（动态匹配）挂载 |
-| `src/ai/skill-matcher.mjs`                                    | Skill 匹配、优先级打分、提示词模型变体                       |
+| `src/ai/skill-matcher.mjs`                                    | Skill 匹配、优先级打分与可解释路由提示                       |
 | `src/ai/context.mjs`                                          | Agent 上下文、身份 Prompt 预算化、恢复快照、会话延续           |
 | `src/ai/hooks.mjs`                                            | 宿主生命周期 Hook、Jiuwei 会话身份注入、PreToolUse 范围拦截    |
 | `src/ai/suspicion-review.mjs` | LLM 可疑判断异步审查：只读清洗结论包、无 key 确定性 fallback、decisionId 防幻觉锚定；结论只进 `.helix/reports/suspicion.*`，不进完成链 |
@@ -131,7 +134,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/infra/agent-registry.mjs`                                | 固定 Agent 白名单、别名、显示名与 command-worker 资格 |
 | `src/infra/runtime-config.mjs`                                | 默认配置、配置合并/归一化（含 reporting.verbosity 汇报分级）与 strict 安全底线 |
 | `src/infra/runtime-snapshot.mjs`                              | 运行态 snapshot 与恢复上下文的确定性文件读取/渲染 owner |
-| `src/infra/prompt-pack.mjs`                                   | Prompt Pack 安装、注册、hash 校验与条目读取 |
+| `src/infra/prompt-pack.mjs`                                   | Prompt Pack 安装后物化到固定运行时根，统一校验路径/realpath/hash 后读取 |
 | `src/infra/runtime-bootstrap.mjs`                             | `initRuntime` 一次性初始化顺序 |
 | `src/infra/ledger.mjs`                                        | hash 链 ledger 追加、校验与可信条目读取（链启动后无 hash 行视为篡改；锁经 file-lock 具备 stale 恢复） |
 | `src/infra/command-runner.mjs`                                 | 子进程命令执行、输出截断、超时与 spawn 级失败兜底（error 事件转 127 结果） |
@@ -140,7 +143,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/infra/error-protocol.mjs` | 统一错误协议 `{code, module, message, next_action}` 与内联单行渲染；覆盖 gateway 信封、delivery-pipeline 返回、CLI 非零退出三处 |
 | `src/infra/gate-arming.mjs` | 门未武装黄灯地板：trivial/缺失 verify、同义反复 review、无 required 质量门的只读评估，status 常驻携带 |
 | `src/infra/dependency-graph.mjs` | 对抗加固的词法 import 扫描器（边界测试与 `helix impact` 共用）、反向波及分析 `computeImpact`、分区测试选择 `computeZoneTests`/`listRepoTests`（供 `helix test`） |
-| `src/infra/security.mjs`                                      | config hash 基线、运行态备份、备份列表与一键恢复、关键状态完整性检查 |
+| `src/infra/security.mjs`                                      | config hash 基线、运行态备份、归档精确恢复包、备份列表与一键恢复、关键状态完整性检查 |
 | `src/infra/review-findings.mjs`                                | LSP / AST / hashline / 注释检查等质量发现              |
 | `src/infra/llm-provider.mjs`                                   | OpenAI-compatible LLM provider 与可选 LLM review |
 | `src/infra/agent-spawn.mjs`                                    | Codex / Cursor / 自定义命令型子 Agent spawn 模板渲染       |
@@ -151,7 +154,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/infra/route-table.mjs`                                    | 确定性路由表加载（含 overrides）与信号匹配（`loadRoutesConfig`/`resolveRouteDecision`），无 LLM |
 | `src/infra/failure-analysis.mjs`                                | 失败原因分类、返工提示与失败摘要                              |
 | `src/infra/task-reports.mjs`                                    | wisdom / failure report / review report 落盘      |
-| `src/infra/task-state-store.mjs`                                | 任务状态文件加载                                       |
+| `src/infra/task-state-store.mjs`                                | 单文件全项目 Task ledger 读取、旧格式兼容与 active Plan 投影 |
 | `src/infra/task-predicates.mjs`                                 | no-op / trivial command 等纯任务形状判断              |
 | `src/infra/success-criteria.mjs`                                | 成功判据状态机与 verifier 证据回填                        |
 | `src/infra/rule-scanner.mjs`                                    | 项目规范扫描与规则上下文注入                                |
@@ -198,7 +201,6 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | LLM 可疑判断（异步审查） | `node ./bin/helix.mjs review suspicious` |
 | 全量命令 / 物化命令文档 | `node ./bin/helix.mjs --help --all` / `docs commands --write` |
 | 匹配 Skill          | `node ./bin/helix.mjs skills match --text "..." --stage plan`    |
-| 查看提示词变体          | `node ./bin/helix.mjs prompts variant --agent Jiuwei --model gpt-5.5` |
 | 仓库治理检查           | `node ./bin/helix.mjs governance audit` |
 | 生成档案路由包         | `node ./bin/helix.mjs archivist packet --text "..." --stage plan` |
 | 运行档案路由员         | `node ./bin/helix.mjs archivist run --text "..." --stage plan --force` |
@@ -212,6 +214,8 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | 查看决策投影 | `node ./bin/helix.mjs decisions --limit 20` |
 | 分区/影响面测试 | `node ./bin/helix.mjs test --zone infra` |
 | 备份运行态关键文件      | `node ./bin/helix.mjs state backup --reason before-risky-agent`   |
+| 迁移旧运行态           | `node ./bin/helix.mjs state migrate`（自动先备份；旧 completed 无当前 proof 时回到待决策） |
+| 归档并删除旧任务        | `node ./bin/helix.mjs task archive --task T001 [--plan <planId>] --delete --reason "obsolete"` |
 | 校验运行态关键文件      | `node ./bin/helix.mjs state verify`                               |
 | 列出运行态备份        | `node ./bin/helix.mjs state list`                                 |
 | 恢复运行态备份        | `node ./bin/helix.mjs state restore --backup <backupId>`          |

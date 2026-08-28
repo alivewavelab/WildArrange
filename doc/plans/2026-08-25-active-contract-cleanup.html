@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>活动合同第二批清理</title>
+  <style>
+    body{font-family:system-ui,sans-serif;max-width:980px;margin:40px auto;padding:0 20px;color:#172033;background:#f6f8fb}
+    .flow,.card{background:#fff;border:1px solid #dce3ee;border-radius:10px;padding:18px;margin:16px 0}.flow{text-align:center;background:#eaf2ff;font-weight:700}
+    .p0{border-left:7px solid #dc2626}.p1{border-left:7px solid #f59e0b}.safe{border-left:7px solid #16a34a}code{background:#eef2f7;padding:2px 5px;border-radius:4px}
+  </style>
+</head>
+<body>
+  <h1>活动合同第二批清理</h1>
+  <p>状态：已完成。公开配置、Skill 挂载和工具合同现在都对应真实运行行为，旧入口已退出活动路径。</p>
+  <div class="flow">任务路由结果 → 可信 task.skills → 预算化上下文挂载 → 真实 Agent 执行</div>
+  <section class="card p0"><h2>P0：补上真实 Skill 挂载</h2><p>把任务总账中的 <code>task.skills</code> 作为受 manifest、数量和字符预算约束的任务绑定，送入 <code>before_execute</code>/<code>before_review</code>；未知 Skill 只报告，不加载。</p></section>
+  <section class="card p1"><h2>P1：删除无效旋钮</h2><p>删除只可查询、不影响 Prompt 的 <code>promptVariants</code>；删除无真实分类调度闭环的 <code>dynamicAgents</code>、<code>agents.json</code>、<code>categories.json</code> 投影。</p></section>
+  <section class="card p1"><h2>P1：退役旧产品入口</h2><p>删除三个 <code>lcx-*</code> Skill 及 manifest 注册，证明 matcher、注入和 npm 包均不可再触达。</p></section>
+  <section class="card p1"><h2>P1：收敛工具合同</h2><p>拆掉把多条命令用 shell 管道串联的伪命令；未实现的 <code>contract-only</code> 条目不再出现在 M1 发布合同。</p></section>
+  <section class="card p1"><h2>P1：唯一规范真相</h2><p>把重复整份规则的 <code>CLAUDE.md</code> 缩成宿主发现入口，强制指向根 <code>AGENTS.md</code> 与最近目录规范，消除双写漂移。</p></section>
+  <section class="card p1"><h2>P1：测试示范去旧词</h2><p>把模拟项目中的历史 <code>.workflow/</code> 路径改为普通项目文档目录，避免测试继续示范 M1 禁止的旧运行时约定。</p></section>
+  <section class="card safe"><h2>本批不做</h2><p>许可证、snapshot retention、Codex/Kimi adapter 安装分别需要发布策略、保留策略或宿主选择，不与活动合同混改。</p></section>
+  <section class="card"><h2>验收</h2><p>新增任务 Skill 挂载正反测试；配置和包体不再含上述旧入口；工具合同只含 implemented/host-provided 且每条 command 可独立调用；全量测试、架构门、npm pack、Doctor 全部通过。</p></section>
+  <section class="card safe"><h2>执行回执</h2><p>迁移前备份：<code>backup_7490cf02-ed7e-4f57-9a84-0b4295eb0711</code>。运行态已删除 <code>agents.json</code>/<code>categories.json</code> 与 2 个孤儿 DoneClaim；Prompt Pack 剩余 29 个 Skill，<code>wa-*</code>/<code>lcx-*</code> 均为 0；工具合同为 81 个 implemented、2 个 implemented-in-loop、1 个 implemented-via-configured-command、3 个 host-provided，<code>contract-only</code> 与管道伪命令均为 0。自动测试 292/292 通过，架构门 73 个受监控文件、0 未归属、0 孤儿，npm 包体预检 149 个文件；Doctor、config、ledger、governance 均通过。</p></section>
+</body>
+</html>

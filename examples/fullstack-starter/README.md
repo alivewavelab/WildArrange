@@ -24,23 +24,29 @@ fullstack-starter/
 ## 怎么用（把模板搬进你的项目）
 
 1. 把本目录的文件复制到你**项目根目录**（`AGENTS.md`、`.cursor/`、`helix.config.json`、`plan.example.json`）。
-2. 安装运行时与适配器。二选一：
+2. 先在你的项目中安装 WildArrange，再按宿主安装适配器：
+
+   ```bash
+   npm install --save-dev @alivewavelab/wildarrange
+   ```
+
+   然后二选一：
 
    **Cursor：**
    ```bash
-   node ./bin/helix.mjs init
-   node ./bin/helix.mjs adapter install --target cursor --mode local
+   npx wildarrange init
+   npx wildarrange adapter install --target cursor --mode local
    ```
    装完在 Cursor 聊天里可直接用 `/helix-config`、`/helix-doctor`、`/helix-plan`、`/helix-run`。
 
    **Codex：**
    ```bash
-   node ./bin/helix.mjs init
-   node ./bin/helix.mjs adapter install --target codex --mode local
+   npx wildarrange init
+   npx wildarrange adapter install --target codex --mode local
    ```
    适配器会写 `.codex/hooks.json`（在 Codex 里执行 `/hooks` review 并 trust 后成为硬拦截）和 `.agents/skills/helix-*/SKILL.md`。用 `/skills` 或 `$helix-doctor` 触发。
 
-   > 两端都要：`--target all`。用 npm 安装的把 `node ./bin/helix.mjs` 换成 `npx wildarrange`。
+   > 两端都要：`--target all`。只有在 WildArrange 源码仓库内开发运行时，才把 `npx wildarrange` 换成 `node ./bin/helix.mjs`。
 
 3. 先跑通一次冒烟（见下"自检清单"），确认架子是通的，再开始填规范。
 
@@ -48,13 +54,13 @@ fullstack-starter/
 
 按顺序做，每一步都应通过；任一步失败就停下来看它报的原因：
 
-- [ ] 1. 导入示例计划：`node ./bin/helix.mjs plan --from plan.example.json`（应报 `taskCount: 2`）
-- [ ] 2. 跑第一个任务：`node ./bin/helix.mjs run`（前端任务，走完 worker→verify→scope→review→验收→checkpoint）
-- [ ] 3. 再跑一次：`node ./bin/helix.mjs run`（后端任务）
-- [ ] 4. 再跑一次：`node ./bin/helix.mjs run`（应返回 `status: complete`，无剩余任务）
+- [ ] 1. 导入示例计划：`npx wildarrange plan --from plan.example.json`（应报 `taskCount: 2`）
+- [ ] 2. 跑第一个任务：`npx wildarrange run`（前端任务，走完 worker→verify→scope→review→验收→checkpoint）
+- [ ] 3. 再跑一次：`npx wildarrange run`（后端任务）
+- [ ] 4. 再跑一次：`npx wildarrange run`（应返回 `status: complete`，无剩余任务）
 - [ ] 5. 确认产物：`src/frontend/hello.js` 与 `src/backend/health.js` 已生成
-- [ ] 6. 体检：`node ./bin/helix.mjs doctor`（或 `/helix-doctor`），应无严重异常
-- [ ] 7. 校验配置：`node ./bin/helix.mjs config verify`
+- [ ] 6. 体检：`npx wildarrange doctor`（或 `/helix-doctor`），应无严重异常
+- [ ] 7. 校验配置：`npx wildarrange config verify`
 
 跑通后，删掉 `plan.example.json` 里的示例任务，换成你真实的任务即可。
 
@@ -62,7 +68,7 @@ fullstack-starter/
 
 1. **`AGENTS.md`**：先填红线和命令表（install/dev/test/lint/typecheck）。
 2. **`.cursor/rules/*.md`**：把 `globs` 改成你项目真实的前后端路径/后缀，再填每条规范。
-   - 验证命中：`node ./bin/helix.mjs rules collect --target src/frontend/anyfile.tsx`，看命中的规范是否符合预期（改前端只应命中前端规范）。
+   - 验证命中：`npx wildarrange rules collect --target src/frontend/anyfile.tsx`，看命中的规范是否符合预期（改前端只应命中前端规范）。
 3. **`helix.config.json`**：需要时再按下面的"完整配置详解"逐块开启（如接入 typecheck 门、LLM 复核）。
 
 ---

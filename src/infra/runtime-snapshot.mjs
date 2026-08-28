@@ -10,6 +10,7 @@ import {
   resolveHelixPath,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
+import { loadTaskState } from "./task-state-store.mjs";
 
 export async function writeSnapshot(rootDir, stage, payload = {}) {
   await ensureHelixDirs(rootDir);
@@ -34,7 +35,7 @@ export async function writeSnapshot(rootDir, stage, payload = {}) {
 export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
   const latestSnapshot = options.latestSnapshot || await readJson(resolveHelixPath(rootDir, "snapshots", "latest.json"), null);
   const work = await readJson(resolveHelixPath(rootDir, "work.json"), null);
-  const taskState = await readJson(resolveHelixPath(rootDir, "team", "tasks.json"), null);
+  const taskState = await loadTaskState(rootDir);
   const changes = await readChangeRequests(rootDir);
   const status = buildStatusReport(work, taskState, changes);
   const nextTask = taskState ? findRunnableTaskForContext(taskState.tasks || []) : null;
@@ -68,7 +69,7 @@ export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
 
 function buildStatusReport(work, taskState, changes) {
   const openChanges = changes.filter((change) => change.status === "open").length;
-  if (!taskState) return { work, planId: null, total: 0, completed: 0, pending: 0, failed: 0, openChanges };
+  if (!taskState) return { work, planId: null, total: 0, completed: 0, draft: 0, pending: 0, failed: 0, openChanges };
   const counts = (taskState.tasks || []).reduce((acc, task) => {
     acc[task.status] = (acc[task.status] || 0) + 1;
     return acc;
@@ -77,6 +78,7 @@ function buildStatusReport(work, taskState, changes) {
     work,
     planId: taskState.planId,
     total: taskState.tasks.length,
+    draft: counts.draft || 0,
     completed: counts.completed || 0,
     pending: counts.pending || 0,
     in_progress: counts.in_progress || 0,

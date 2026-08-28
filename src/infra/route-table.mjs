@@ -187,7 +187,6 @@ function applyPlanningGate(merged, lowerText) {
   merged.route = "plan";
   merged.primaryAgent = "DiJiang";
   merged.supportAgents = uniqueStrings(["BaiZe", ...(merged.supportAgents || [])]);
-  merged.skills = uniqueStrings(["wa-plan", ...(merged.skills || [])]);
   merged.needsPlan = false;
   merged.routeAdjusted = true;
   merged.adjustmentReason = "product/design signals require planning before execution";

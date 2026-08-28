@@ -2,7 +2,7 @@
 
 > **历史交接（主体已落地）**：五区重构已合并进 `main`，不要再按「未合并 feature 分支」继续拆目录。
 > 本文只保留决策、恢复协议和「改 X 去哪改」速查；当前架构真相以 [doc/project-architecture.md](./project-architecture.md) 与根 `AGENTS.md` 为准。
-> 原始方案：[doc/plans/2026-07-17-wildarrange-five-zone-refactor.html](./plans/2026-07-17-wildarrange-five-zone-refactor.html)（重构前批准的设计图，文首已有替代说明）。
+> 原始方案文件名：`doc/plans/2026-07-17-wildarrange-five-zone-refactor.html`（重构前批准的历史设计图，不随 npm 用户包发布）。
 
 ## 一句话总结
 

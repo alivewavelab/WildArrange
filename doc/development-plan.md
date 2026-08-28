@@ -26,9 +26,10 @@
 - 在 `.helix/routing/suggestions` 下加入路由建议产物及 apply/reject 审核流。`DONE: pending suggestions, accept/reject CLI, and reviewed route override layer`
 - 加入语义路由 shadow 与低置信 execute 降级。`DONE: deterministic route keeps evidence; CangJie shadow can force ambiguous execute into plan/ask`
 - 加入 session/task digest 文件，用于误关聊天后的恢复。`DONE: session_start/post_compact/task_completed/parallel_admission_completed digests`
-- 为 GPT、Gemini、Kimi、DeepSeek 与宿主托管模型加入 prompt 模型变体。`DONE: configurable promptVariants + prompts variant/show --variant`
+- 模型差异由长期 Agent 的 provider/model/reasoning 与宿主 adapter 承担；独立 `promptVariants` 因未进入真实上下文已退役。`RETIRED: 2026-08-25`
 - 加入 `pre-publish-review`、`publish`、`get-unpublished-changes` skill。`DONE: packs/wildarrange-linear/skills/`
 - 加入 skill matcher 与优先级加载。`DONE: stage/route/agent/keyword matcher with explainable scores`
+- 路由写入的 `task.skills` 进入执行/复核/checkpoint 的统一预算化加载器。`DONE: 2026-08-25`
 - 若 uninstall 备份不足，加入 adapter 备份恢复命令。`DONE`
 - 加入 LuWu 仓库治理能力及 `governance audit`。`DONE`
 - 加入 Kimi Code adapter P0/P1（plugin + fail-open Hook bridge）。`DONE`；宿主私有 spawn 仍为 P2
