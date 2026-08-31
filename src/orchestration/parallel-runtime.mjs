@@ -20,10 +20,16 @@ import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { resolveAgentSpawn } from "../infra/agent-spawn.mjs";
 import { collectAgentWorktreePatch, prepareAgentWorktree } from "../infra/git-worktree.mjs";
 import { inspectGitCoordination } from "../infra/git-coordination.mjs";
-import { runCommand } from "../infra/command-runner.mjs";
+import { runCommand, runCommandFile } from "../infra/command-runner.mjs";
 import { normalizeProposedFilesOrEmpty, updateAgentRunLifecycle } from "./admission.mjs";
 import { loadTaskState } from "./plan-state.mjs";
-import { findRunnableTask, persistTaskState, sendTeamMessage } from "./task-board.mjs";
+import {
+  findRunnableTask,
+  isTaskRunnable,
+  persistTaskState,
+  sendTeamMessage,
+  unresolvedTaskBlockers,
+} from "./task-board.mjs";
 import { assertCurrentTaskOwnership, coordinateTaskClaim } from "./remote-ownership.mjs";
 
 // The admission transaction (claim -> apply -> gates -> commit/rollback)
@@ -401,12 +407,12 @@ export async function cleanupParallelAgentRun(rootDir, options = {}) {
       const result = await readJson(resultPath, null);
       if (!result || result.isolation !== "git-worktree" || result.worktreeAvailable !== true) continue;
       const worktreeDir = path.join(rootDir, result.workDir || "");
-      const remove = await runCommand(`git -C ${shellEscape(rootDir)} worktree remove --force ${shellEscape(worktreeDir)}`, rootDir, 30_000);
+      const remove = await runCommandFile("git", ["-C", rootDir, "worktree", "remove", "--force", worktreeDir], rootDir, 30_000);
       if (remove.exitCode !== 0 && !/is not a working tree|No such file/i.test(remove.stderr || remove.stdout || "")) {
         cleaned.push({ taskId: entry.taskId, status: "failed", path: result.workDir, error: remove.stderr || remove.stdout });
         continue;
       }
-      await runCommand(`git -C ${shellEscape(rootDir)} worktree prune`, rootDir, 30_000);
+      await runCommandFile("git", ["-C", rootDir, "worktree", "prune"], rootDir, 30_000);
       await updateAgentRunLifecycle(rootDir, run.runId, entry.taskId, "cleaned", {
         cleanedAt: nowIso(),
         cleanedPath: result.workDir,
@@ -428,6 +434,9 @@ function selectParallelTasks(tasks, options) {
       const task = tasks.find((candidate) => candidate.id === taskId);
       if (!task) throw new Error(`unknown task: ${taskId}`);
       if (task.status !== "pending") throw new Error(`task ${taskId} is ${task.status}; only pending tasks can run in parallel`);
+      if (!isTaskRunnable(task, tasks)) {
+        throw new Error(`task ${taskId} blocked by ${unresolvedTaskBlockers(task, tasks).join(",")}`);
+      }
       return task;
     });
     return selected.slice(0, normalizeMaxAgents(options.maxAgents));
@@ -766,8 +775,4 @@ function normalizeTimeout(value) {
 
 function truncate(value, limit) {
   return value.length <= limit ? value : `${value.slice(0, limit - 20)}\n...[truncated]`;
-}
-
-function shellEscape(value) {
-  return `'${String(value).replaceAll("'", "'\\''")}'`;
 }

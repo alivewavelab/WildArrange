@@ -1,6 +1,7 @@
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendLedger } from "./ledger.mjs";
+import { normalizeRelativePath } from "./path-match.mjs";
 import {
   STATE_VERSION,
   createWorkId,
@@ -28,7 +29,7 @@ export async function writeSnapshot(rootDir, stage, payload = {}) {
   await writeJsonAtomic(snapshotPath, snapshot);
   await writeJsonAtomic(resolveHelixPath(rootDir, "snapshots", "latest.json"), snapshot);
   await writeRuntimeContextSnapshot(rootDir, { reason: `snapshot:${stage}`, latestSnapshot: snapshot });
-  await appendLedger(rootDir, { type: "snapshot_written", stage, snapshotPath: path.relative(rootDir, snapshotPath) });
+  await appendLedger(rootDir, { type: "snapshot_written", stage, snapshotPath: normalizeRelativePath(path.relative(rootDir, snapshotPath)) });
   return snapshot;
 }
 
@@ -60,8 +61,8 @@ export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
   };
   const jsonPath = resolveHelixPath(rootDir, "snapshots", "context.json");
   const mdPath = resolveHelixPath(rootDir, "snapshots", "context.md");
-  context.reportJsonPath = path.relative(rootDir, jsonPath);
-  context.reportMdPath = path.relative(rootDir, mdPath);
+  context.reportJsonPath = normalizeRelativePath(path.relative(rootDir, jsonPath));
+  context.reportMdPath = normalizeRelativePath(path.relative(rootDir, mdPath));
   await writeJsonAtomic(jsonPath, context);
   await writeFile(mdPath, renderContextMarkdown(context), "utf8");
   return context;

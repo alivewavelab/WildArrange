@@ -59,7 +59,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 - 产品总图位于 `docs/product/architecture-overview.html`；新分区或新运行时模块必须同步登记 `tooling/arch-module-graph/module-file-map.json` 并更新总图。新脚本必须由映射表归属；总图的输入/输出必须来自真实导出签名或代码证据，不得编造。
 - 总图交互固定为“点模块卡片 → 底部抽屉”，不为单个大模块增加第二种展开方式；顶部页签只按真实用户作业切片，不按引擎或网关类型堆目录。
 - 总图门禁豁免测试文件、`index.*`、`mod.rs`、`__init__.py`、`*.types.*`、生成目录与 D 字典的目录节点；其余改动后运行 `npm run check:arch`。
-- 重构后必须验证 `npm test`；涉及包内容变化时同时验证 `npm pack --dry-run --cache /private/tmp/helix-npm-cache`。
+- 重构后必须验证 `npm test`；该命令由 `tooling/run-tests.mjs` 逐文件隔离执行全部 `test/*.test.mjs`，避免 Windows 上 Git/npm/嵌套测试并发互锁。涉及包内容变化时同时验证 `npm pack --dry-run --cache /private/tmp/helix-npm-cache`。
 
 ## 目录约定
 
@@ -77,7 +77,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | [doc/2026-07-21-five-zone-refactor-handoff.md](./doc/2026-07-21-five-zone-refactor-handoff.md) | 五区解耦重构总结与交接（六个 Phase、关键决策、已知遗留、改 X 去哪改速查） |
 | `bin/AGENTS.md`                                             | CLI 参数、路由、帮助文本和退出码的局部约束 |
 | `doc/AGENTS.md`                                             | README / 架构 / 可复用准则 / HTML 方案的文档分层 |
-| `packs/wildarrange-linear/AGENTS.md`                        | Agent、Skill、路由与工具合同的发布边界 |
+| `packs/wildarrange-linear/AGENTS.md`                        | Agent、Skill、路由、工具合同与项目初始化模板的发布边界 |
 | `bin/helix.mjs`                                              | CLI 入口                                        |
 | `src/AGENTS.md`                                              | 五区归属判断、全区依赖不变量和统一修改顺序 |
 | **interface/**（宿主/人机交互边界，只依赖 orchestration、infra） |  |
@@ -86,11 +86,13 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/interface/adapters.mjs`                                 | Codex / Cursor / Kimi adapter 安装、卸载、恢复、共享 Skill 命令生成 |
 | `src/interface/kimi-adapter.mjs`                             | Kimi plugin manifest、Hook bridge 与安装说明的纯渲染逻辑 |
 | `src/interface/cursor-adapter.mjs` | Cursor `.cursor/hooks.json`、项目感知 Hook bridge（事件/工具名映射与输出协议翻译）与安装说明的纯渲染逻辑；preToolUse 对 Write/Delete/Shell fail-closed |
+| `src/interface/hook-bridge-core.mjs` | Kimi/Cursor bridge 共享的项目发现、CLI 子进程与输出解析渲染；宿主超时和失败策略由调用方显式传入 |
 | `src/interface/doctor.mjs`                                   | 一键体检：各项检查各自独立 try/catch（单项崩只标红本分项），含 gateArming 门武装、adapters 硬拦截安装/陈旧规则、decisionHealth 周期健康摘要；诊断不再写 ledger |
 | `src/interface/decisions.mjs` | `helix decisions` 只读投影：每条决策三行（发生了什么/命中规则/证据），坏行降级；`decisions stats` 确定性统计审查（计数/从未触发的门/标注关联，无 LLM） |
 | `src/interface/timeline.mjs` | `helix timeline`：ledger（仅校验通过条目）+ decisions + annotations 统一倒序时间线投影，只读 |
 | `src/interface/dashboard-panels.mjs` | Dashboard 决策面板 + 运维面板：只读 ViewModel 与渲染片段（防 dashboard.mjs 超拆分线） |
 | `src/interface/cli-help.mjs` | CLI 命令注册表单一事实源：core 六命令分层 help、`docs commands` Markdown 物化 |
+| `src/interface/project-init.mjs` | 显式、非覆盖式补建项目治理文档，并返回需要人类确认的清单 |
 | **orchestration/**（工作流顺序、重试、gate 编排，只依赖 ai、capabilities、infra） |  |
 | `src/orchestration/AGENTS.md`                                | 编排、事务、恢复与完成状态不变量 |
 | `src/orchestration/plan-state.mjs`                            | 计划导入、校验、路由 enrichment、任务状态加载                 |
@@ -99,8 +101,8 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/orchestration/remote-ownership.mjs`                      | 设备登记、远端任务 claim、单写 owner 校验与协调状态 |
 | `src/orchestration/handoff.mjs`                               | 跨设备 prepare/push/accept 与显式 takeover |
 | `src/orchestration/admission.mjs`                             | 并行 admission 事务：claim → apply → gates → commit/rollback；回滚失败保持 ownership，全程持全局任务锁 |
-| `src/orchestration/admission-recovery.mjs`                    | admission 的 revalidation / 已集成恢复状态落盘，禁止已 push 成果回滚 |
-| `src/orchestration/delivery-pipeline.mjs`                     | 共享交付流水线：verify → scope → review → acceptance-proof → checkpoint 顺序 |
+| `src/orchestration/admission-recovery.mjs`                    | admission 回滚计划、补丁恢复、revalidation / 已集成恢复状态落盘，禁止已 push 成果回滚 |
+| `src/orchestration/delivery-pipeline.mjs`                     | 共享交付流水线与完成提交顺序：verify → scope → review → acceptance-proof → checkpoint；ledger → wisdom → digest → tasks.json |
 | `src/orchestration/integration.mjs`                           | admission 集成事务：owner/base/main 三重 fence、临时索引 commit、普通 push 与故障对账 |
 | `src/orchestration/task-board.mjs`                            | 全项目工单总账、draft/ready、任务 claim/证据/持久化与消息板 |
 | `src/orchestration/change-governance.mjs`                     | 任务变更治理、Review Blocker、ChangeRequest           |
@@ -135,7 +137,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/infra/runtime-config.mjs`                                | 默认配置、配置合并/归一化（含 reporting.verbosity 汇报分级）与 strict 安全底线 |
 | `src/infra/runtime-snapshot.mjs`                              | 运行态 snapshot 与恢复上下文的确定性文件读取/渲染 owner |
 | `src/infra/prompt-pack.mjs`                                   | Prompt Pack 安装后物化到固定运行时根，统一校验路径/realpath/hash 后读取 |
-| `src/infra/runtime-bootstrap.mjs`                             | `initRuntime` 一次性初始化顺序 |
+| `src/infra/runtime-bootstrap.mjs`                             | `initRuntime` 一次性运行时初始化顺序 |
 | `src/infra/ledger.mjs`                                        | hash 链 ledger 追加、校验与可信条目读取（链启动后无 hash 行视为篡改；锁经 file-lock 具备 stale 恢复） |
 | `src/infra/command-runner.mjs`                                 | 子进程命令执行、输出截断、超时与 spawn 级失败兜底（error 事件转 127 结果） |
 | `src/infra/annotation-log.mjs`                                 | 决策标注回写：强制分类（confirmed/rule_wrong/case_wrong/mislabeled）、规则×标注统计；硬约束——绝不写 config/verify_commands/门开关 |
@@ -150,7 +152,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/infra/git-worktree.mjs`                                   | Git worktree 隔离、patch 提取与 patch admission        |
 | `src/infra/git-coordination.mjs`                               | 设备安全的 Git remote/commit/push/fetch 与集成 SHA 乐观锁原语 |
 | `src/infra/git-diff.mjs`                                       | git diff / changed-paths 收集与 manifest 变更分类     |
-| `src/infra/path-match.mjs`                                     | 路径归一化与 glob/精确/目录匹配（`pathAllowed`）           |
+| `src/infra/path-match.mjs`                                     | 路径归一化、项目根边界断言与 glob/精确/目录匹配（`pathAllowed`）           |
 | `src/infra/route-table.mjs`                                    | 确定性路由表加载（含 overrides）与信号匹配（`loadRoutesConfig`/`resolveRouteDecision`），无 LLM |
 | `src/infra/failure-analysis.mjs`                                | 失败原因分类、返工提示与失败摘要                              |
 | `src/infra/task-reports.mjs`                                    | wisdom / failure report / review report 落盘      |

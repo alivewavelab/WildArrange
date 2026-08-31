@@ -7,14 +7,21 @@ import { withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { readChangeRequest, writeChangeRequest } from "./change-governance.mjs";
 import { buildFailureSummary } from "../infra/failure-analysis.mjs";
-import { appendWisdom, writeFailureReport, writeReviewReport } from "../infra/task-reports.mjs";
-import { writeMemoryDigest } from "../infra/memory-digest.mjs";
+import { writeFailureReport, writeReviewReport } from "../infra/task-reports.mjs";
 import { routeRequest } from "../ai/routing.mjs";
 import { captureWorkspaceSnapshot } from "../infra/git-worktree.mjs";
 import { changedPathsIntroducedByTask, collectGitChangedPaths, collectGitDiff } from "../infra/git-diff.mjs";
 import { applyVerifierEvidenceToCriteria, criteriaStatus } from "../infra/success-criteria.mjs";
 import { invokeCapability } from "../capabilities/gateway.mjs";
-import { collectGateEvidenceFromTask, runCompletionSegment, runDeliveryPipeline, runPostCompletionSideEffects } from "./delivery-pipeline.mjs";
+import { normalizeRelativePath } from "../infra/path-match.mjs";
+import {
+  collectGateEvidenceFromTask,
+  commitTaskCompletionState,
+  runCompletionSegment,
+  runDeliveryPipeline,
+  runPostCompletionSideEffects,
+  shouldFailDeliveryAttempt,
+} from "./delivery-pipeline.mjs";
 import { writeWorkflowSummary } from "./status.mjs";
 import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
 import { findRunnableTask, persistTaskState, writeOutbox } from "./task-board.mjs";
@@ -188,8 +195,6 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   }
 
   if (pipelineResult.status === "completed") {
-    task.status = "completed";
-    task.updatedAt = nowIso();
     // Completion ledger event BEFORE the canonical state write: tasks.json is
     // the commit point every consumer reads, so a ledger outage must leave
     // the task re-runnable (not completed-without-evidence). The reverse
@@ -197,7 +202,6 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
     // (cross-review P0, round 3, 2026-07-21). If the persist below fails
     // instead, the ledger is one event ahead of state, which the append-only
     // journal tolerates: the rerun appends a fresh event.
-    await appendLedger(rootDir, { type: "task_verified", planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult.status, reviewStatus: "pass" });
     // Wisdom and digest sit INSIDE the completion transaction (before the
     // canonical persist): a failure here leaves the task in verifying, which
     // the recovery adjudication re-runs — so a completed task can never
@@ -205,9 +209,13 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
     // 2026-07-21). Snapshot and workflow summary are post-commit
     // conveniences; their failure must not un-complete the task, so they are
     // best-effort with a ledger warning instead.
-    await appendWisdom(rootDir, task, verifyResult);
-    await writeMemoryDigest(rootDir, { reason: "task_completed", stage: "checkpoint", task, taskId: task.id });
-    await persistTaskState(rootDir, taskState);
+    await commitTaskCompletionState(rootDir, {
+      taskState,
+      task,
+      verifyResult,
+      ledgerEvent: { type: "task_verified", planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult.status, reviewStatus: "pass" },
+      digestReason: "task_completed",
+    });
     const sideEffectWarnings = await runPostCompletionSideEffects(rootDir, taskState.planId, task, async () => {
       await writeSnapshot(rootDir, "checkpointed", { planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult.status });
       if (taskState.tasks.every((candidate) => candidate.status === "completed")) {
@@ -244,7 +252,7 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
 
   if (acceptanceProof) {
     // Every upstream gate passed, but acceptance-proof itself found a gap.
-    task.status = shouldFailTask(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
+    task.status = shouldFailDeliveryAttempt(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
     task.last_failure = buildFailureSummary(task, {
       workerResult,
       verifyResult,
@@ -261,7 +269,7 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
     return { status: task.status === "failed" ? "failed" : "retry", task, workerResult, verifyResult, scopeResult, reviewResult, acceptanceProof };
   }
 
-  task.status = shouldFailTask(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
+  task.status = shouldFailDeliveryAttempt(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
   if (scopeResult?.status === "fail" && !task.last_change_request) {
     task.last_change_request = await writeChangeRequest(rootDir, taskState.planId, task, scopeResult, "scope_guard");
   }
@@ -402,7 +410,7 @@ async function verifyTaskNodeUnlocked(rootDir, options = {}) {
   task.last_verify_result = verifyResult;
   const criterionEvidence = applyVerifierEvidenceToCriteria(task, verifyResult);
   if (!verifyResult.pass) {
-    task.status = shouldFailTask(task, verifyResult) ? "failed" : "pending";
+    task.status = shouldFailDeliveryAttempt(task, verifyResult) ? "failed" : "pending";
     task.last_failure = buildFailureSummary(task, {
       workerResult: [...task.evidence].reverse().find((entry) => entry.kind === "worker") || { exitCode: 0 },
       verifyResult,
@@ -532,7 +540,7 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
     });
     const acceptanceProof = completion.proofEnvelope.evidence;
     if (completion.status === "proof_failed") {
-      task.status = shouldFailTask(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
+      task.status = shouldFailDeliveryAttempt(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
       task.last_failure = buildFailureSummary(task, {
         workerResult,
         verifyResult,
@@ -599,19 +607,20 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
     // failure leaves the task in verifying for recovery re-adjudication),
     // canonical tasks.json last (commit point); snapshot is post-commit and
     // best-effort. See the same ordering rationale in runNextTaskUnlocked.
-    task.status = "completed";
-    task.updatedAt = nowIso();
-    await appendLedger(rootDir, { type: "node_checkpoint_completed", planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult?.status || "missing", reviewStatus: "pass" });
-    await appendWisdom(rootDir, task, verifyResult);
-    await writeMemoryDigest(rootDir, { reason: "task_completed", stage: "checkpoint", task, taskId: task.id });
-    await persistTaskState(rootDir, taskState);
+    await commitTaskCompletionState(rootDir, {
+      taskState,
+      task,
+      verifyResult,
+      ledgerEvent: { type: "node_checkpoint_completed", planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult?.status || "missing", reviewStatus: "pass" },
+      digestReason: "task_completed",
+    });
     const sideEffectWarnings = await runPostCompletionSideEffects(rootDir, taskState.planId, task, async () => {
       await writeSnapshot(rootDir, "node_checkpoint_completed", { planId: taskState.planId, taskId: task.id });
     });
     return { status: "completed", task, verifyResult, scopeResult, reviewResult, acceptanceProof, sideEffectWarnings };
   }
 
-  task.status = shouldFailTask(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
+  task.status = shouldFailDeliveryAttempt(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
   if (scopeResult?.status === "fail" && !task.last_change_request) {
     task.last_change_request = await writeChangeRequest(rootDir, taskState.planId, task, scopeResult, "checkpoint");
   }
@@ -768,19 +777,4 @@ async function taskOwnershipGate(rootDir, taskId) {
       error: error instanceof Error ? error.message : String(error),
     };
   }
-}
-
-function shouldFailTask(task, verifyResult, scopeResult, reviewResult) {
-  if (scopeResult?.status === "fail") return true;
-  if (scopeResult && scopeResult.status !== "pass") return true;
-  if (verifyResult?.pass === true && reviewResult?.kind === "review_gate" && reviewResult.pass === false) return true;
-  return task.attempts >= task.maxAttempts;
-}
-
-function uniqueStrings(values) {
-  return [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))];
-}
-
-function normalizeRelativePath(filePath) {
-  return filePath.replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+/g, "/");
 }

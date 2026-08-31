@@ -45,7 +45,7 @@
   },
   "scripts": {
     "check:arch": "node tooling/arch-module-graph/validate-module-file-map.mjs",
-    "test": "node --test",
+    "test": "node tooling/run-tests.mjs",
     "helix": "node ./bin/helix.mjs"
   }
 }

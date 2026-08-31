@@ -212,7 +212,7 @@ export const PANELS_SCRIPT = `
     async function loadRouteReviews() {
       const date = el("routeReviewDate").value;
       const query = date ? "?date=" + encodeURIComponent(date) : "";
-      const response = await fetch("/api/panels/routes" + query, { cache: "no-store" });
+      const response = await dashboardFetch("/api/panels/routes" + query, { cache: "no-store" });
       if (!response.ok) throw new Error("路由复盘数据加载失败");
       renderRouteReviews(await response.json());
     }
@@ -267,9 +267,9 @@ export const PANELS_SCRIPT = `
     async function loadPanels() {
       try {
         await loadRouteReviews();
-        const decisionsResponse = await fetch("/api/panels/decisions", { cache: "no-store" });
+        const decisionsResponse = await dashboardFetch("/api/panels/decisions", { cache: "no-store" });
         if (decisionsResponse.ok) renderDecisionsPanel(await decisionsResponse.json());
-        const opsResponse = await fetch("/api/panels/ops", { cache: "no-store" });
+        const opsResponse = await dashboardFetch("/api/panels/ops", { cache: "no-store" });
         if (opsResponse.ok) renderOpsPanel(await opsResponse.json());
       } catch (error) {
         el("decisionStats").textContent = error instanceof Error ? error.message : String(error);

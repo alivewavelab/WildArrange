@@ -65,7 +65,7 @@ import { routeRequest } from "../src/ai/routing.mjs";
 import { hashLine } from "../src/capabilities/code-intel.mjs";
 import { scopeGuard } from "../src/capabilities/scope-guard.mjs";
 import { compileCommandSafetyPatterns, evaluateCommandSafety } from "../src/infra/command-safety.mjs";
-import { runCommand } from "../src/infra/command-runner.mjs";
+import { runCommand, runCommandFile } from "../src/infra/command-runner.mjs";
 import { classifyManifestPathChanges } from "../src/infra/git-diff.mjs";
 import { appendLedger, verifyLedger } from "../src/infra/ledger.mjs";
 import { resolveAgentProvider } from "../src/infra/llm-provider.mjs";
@@ -171,7 +171,8 @@ async function postJson(url, body, options = {}) {
 }
 
 function nodeEval(source) {
-  return `node -e ${JSON.stringify(source.replace(/\s*\n\s*/g, " ").trim())}`;
+  const encoded = Buffer.from(source.replace(/\s*\n\s*/g, " ").trim(), "utf8").toString("base64");
+  return `node -e "eval(Buffer.from('${encoded}','base64').toString())"`;
 }
 
 test("init creates durable runtime state", async () => {
@@ -796,6 +797,25 @@ test("pre-tool-use guard denies out-of-scope file writes before they land", asyn
     assert.equal(output.hookSpecificOutput.hookEventName, "PreToolUse");
     assert.equal(output.hookSpecificOutput.permissionDecision, "deny");
     assert.match(output.hookSpecificOutput.permissionDecisionReason, /planned scope violation/);
+
+    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
+      injectionPoints: {
+        pre_tool_use: { enabled: false },
+      },
+    }, null, 2));
+    const disabledInjectionHook = await runInjectionHook(dir, {
+      hook_event_name: "PreToolUse",
+      session_id: "session-scope-disabled-injection",
+      cwd: dir,
+      taskId: "T001",
+      tool_name: "apply_patch",
+      tool_input: { file_path: "src/other.js" },
+    });
+    const disabledOutput = JSON.parse(disabledInjectionHook.output);
+    assert.equal(disabledInjectionHook.enabled, false);
+    assert.equal(disabledOutput.hookSpecificOutput.additionalContext, "");
+    assert.equal(disabledOutput.hookSpecificOutput.permissionDecision, "deny");
+    assert.match(disabledOutput.hookSpecificOutput.permissionDecisionReason, /planned scope violation/);
   });
 });
 
@@ -1018,6 +1038,44 @@ test("read-only long-lived Agents cannot enter the parallel command worker", asy
   });
 });
 
+test("parallel explicit task selection cannot bypass blockedBy", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = path.join(dir, "parallel-blocked-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Parallel dependency boundary",
+      tasks: [
+        {
+          id: "T001",
+          subject: "Finish prerequisite",
+          verify_commands: ["node --version"],
+          review_commands: ["node --version"],
+          writable_paths: ["src/one.js"],
+        },
+        {
+          id: "T002",
+          subject: "Must wait for prerequisite",
+          blockedBy: ["T001"],
+          verify_commands: ["node --version"],
+          review_commands: ["node --version"],
+          writable_paths: ["src/two.js"],
+        },
+      ],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    const markerPath = path.join(dir, "blocked-task-ran.txt");
+    const command = nodeEval(`require("fs").writeFileSync(${JSON.stringify(markerPath)}, "should not run")`);
+    await assert.rejects(
+      runParallelAgents(dir, { taskIds: ["T002"], agent: "ZhuRong", command }),
+      /task T002 blocked by T001/,
+    );
+    await assert.rejects(readFile(markerPath, "utf8"), /ENOENT/);
+    const runs = await listParallelAgentRuns(dir);
+    assert.equal(runs.runs.length, 0);
+  });
+});
+
 test("parallel agents without a runner command are marked skipped", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
@@ -1099,8 +1157,7 @@ test("parallel admission applies child artifacts only after gates pass", async (
     const plan = await importPlan(dir, planPath);
 
     const command = [
-      "node -e",
-      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
+      nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
     const batch = await runParallelAgents(dir, {
@@ -1144,8 +1201,7 @@ test("parallel admission rolls back child artifacts when gates fail", async () =
     await importPlan(dir, planPath);
 
     const command = [
-      "node -e",
-      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'bad artifact', files:[{path:'src/parallel.txt', content:'bad\\n'}]}));"),
+      nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'bad artifact', files:[{path:'src/parallel.txt', content:'bad\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
     const batch = await runParallelAgents(dir, {
@@ -1192,8 +1248,7 @@ test("parallel agents can isolate edits in git worktrees and admit patches", asy
     await importPlan(dir, planPath);
 
     const command = [
-      "node -e",
-      JSON.stringify("const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/worktree.txt','ok\\n'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'worktree patch ready'}));"),
+      nodeEval("const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/worktree.txt','ok\\n'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'worktree patch ready'}));"),
       "{outputJson}",
     ].join(" ");
     const batch = await runParallelAgents(dir, {
@@ -1215,7 +1270,7 @@ test("parallel agents can isolate edits in git worktrees and admit patches", asy
 
     assert.equal(admitted.status, "completed");
     assert.deepEqual(admitted.appliedPaths, ["src/worktree.txt"]);
-    assert.equal(await readFile(path.join(dir, "src", "worktree.txt"), "utf8"), "ok\n");
+    assert.equal((await readFile(path.join(dir, "src", "worktree.txt"), "utf8")).replaceAll("\r\n", "\n"), "ok\n");
   });
 });
 
@@ -1238,8 +1293,7 @@ test("parallel admission rejects artifacts outside writable paths", async () => 
     await importPlan(dir, planPath);
 
     const command = [
-      "node -e",
-      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'bad artifact', files:[{path:'docs/leak.md', content:'nope\\n'}]}));"),
+      nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'bad artifact', files:[{path:'docs/leak.md', content:'nope\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
     const batch = await runParallelAgents(dir, {
@@ -2072,10 +2126,16 @@ test("runCommand caps command output and reports timeout metadata", async () => 
     assert.equal(noisy.outputTruncated.stdout, true);
     assert.equal(noisy.outputTruncated.stderr, true);
 
-    const timedOut = await runCommand(nodeEval("setInterval(() => {}, 1000);"), dir, 10);
+    const timeoutPidPath = path.join(dir, "timeout-child.pid");
+    const timedOut = await runCommand(nodeEval(`
+      require("fs").writeFileSync(${JSON.stringify(timeoutPidPath)}, String(process.pid));
+      setInterval(() => {}, 1000);
+    `), dir, 200);
     assert.equal(timedOut.exitCode, 124);
     assert.equal(timedOut.timedOut, true);
-    assert.match(timedOut.stderr, /Command timed out after 10ms/);
+    assert.match(timedOut.stderr, /Command timed out after 200ms/);
+    const timedOutPid = Number(await readFile(timeoutPidPath, "utf8"));
+    assert.equal(processIsAlive(timedOutPid), false, "timed-out commands must not leave child processes behind");
   });
 });
 
@@ -3360,8 +3420,8 @@ test("workflow nodes execute, verify, scope, review, and checkpoint independentl
         subject: "实现一个简单 CLI 输出",
         description: "在 src/app.js 写入可执行的 hello 输出逻辑",
         writable_paths: ["src/**"],
-        worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/app.js','console.log(\\\\\\\"hello\\\\\\\")\\\\n')\"",
-        verify_commands: ["node src/app.js | grep hello"],
+        worker_command: nodeEval("const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/app.js','console.log(\\\"hello\\\")\\n')"),
+        verify_commands: [nodeEval("const fs=require('fs'); if(!fs.readFileSync('src/app.js','utf8').includes('hello')) process.exit(1)")],
         review_commands: ["node --version"],
       }],
     }));
@@ -3563,6 +3623,12 @@ test("dashboard requires a token for non-loopback hosts and enforces API auth", 
       assert.ok(port);
       const baseUrl = `http://127.0.0.1:${port}`;
 
+      const page = await fetch(baseUrl);
+      const pageHtml = await page.text();
+      assert.equal(page.status, 200);
+      assert.doesNotMatch(pageHtml, /secret-token/);
+      assert.match(pageHtml, /sessionStorage\.getItem/);
+
       const readable = await fetchJson(`${baseUrl}/api/state`);
       assert.equal(readable.response.status, 200);
 
@@ -3578,6 +3644,16 @@ test("dashboard requires a token for non-loopback hosts and enforces API auth", 
         headers: { authorization: "Bearer secret-token" },
       });
       assert.equal(writeAllowed.response.status, 200);
+
+      const oversized = await postJson(`${baseUrl}/api/team/send`, {
+        from: "Jiuwei",
+        to: "ZhuRong",
+        body: "x".repeat(65_000),
+      }, {
+        headers: { authorization: "Bearer secret-token" },
+      });
+      assert.equal(oversized.response.status, 413);
+      assert.equal(oversized.body.error, "request body too large");
     } finally {
       await new Promise((resolve, reject) => {
         server.close((error) => {
@@ -3601,8 +3677,8 @@ test("workflow node state updates are serialized under the task lock", async () 
         id: "T001",
         subject: "实现一个可验证文件",
         writable_paths: ["src/**"],
-        worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/app.js','console.log(\\\\\\\"locked\\\\\\\")\\\\n')\"",
-        verify_commands: ["node src/app.js | grep locked"],
+        worker_command: nodeEval("const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/app.js','console.log(\\\"locked\\\")\\n')"),
+        verify_commands: [nodeEval("const fs=require('fs'); if(!fs.readFileSync('src/app.js','utf8').includes('locked')) process.exit(1)")],
         review_commands: ["node --version"],
       }],
     }));
@@ -3641,8 +3717,26 @@ test("command safety blocks recursive deletion of project source directories", a
     assert.notEqual(blockedNested.exitCode, 0);
     assert.match(blockedNested.stderr, /project source, test, or doc directories/);
 
-    const allowed = await runCommand("rm -rf .tmp-scratch node_modules_cache", dir);
-    assert.equal(allowed.exitCode, 0);
+    const allowed = evaluateCommandSafety("rm -rf .tmp-scratch node_modules_cache");
+    assert.equal(allowed.allowed, true);
+  });
+});
+
+function processIsAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error?.code === "ESRCH") return false;
+    throw error;
+  }
+}
+
+test("argv command safety still blocks destructive Git subcommands after -C", async () => {
+  await withTempDir(async (dir) => {
+    const blocked = await runCommandFile("git", ["-C", dir, "clean", "-fd"], dir);
+    assert.equal(blocked.exitCode, 126);
+    assert.match(blocked.stderr, /git_history_destroy/);
   });
 });
 
@@ -3656,7 +3750,7 @@ test("acceptance proof rejects no-op tasks with trivial worker and verifier", as
         id: "T001",
         subject: "看似完成实则什么都没做",
         worker_command: "node -e \"process.exit(0)\"",
-        verify_commands: ["true"],
+        verify_commands: ["node -e \"process.exit(0)\""],
         review_commands: ["node --version"],
       }],
     }, null, 2));

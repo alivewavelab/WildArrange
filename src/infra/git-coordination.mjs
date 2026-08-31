@@ -1,9 +1,8 @@
-import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, realpath, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
+import { runCommandFile } from "./command-runner.mjs";
 import {
   nowIso,
   readJson,
@@ -11,7 +10,6 @@ import {
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 
-const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 30_000;
 
 export async function ensureDeviceIdentity(rootDir, options = {}) {
@@ -268,23 +266,16 @@ async function commitTree(rootDir, treeSha, parentSha, message) {
 }
 
 async function runGit(rootDir, args, options = {}) {
-  try {
-    const result = await execFileAsync("git", ["-C", rootDir, ...args], {
-      cwd: rootDir,
-      timeout: options.timeoutMs || GIT_TIMEOUT_MS,
-      maxBuffer: 2_000_000,
-      encoding: "utf8",
-      env: { ...process.env, ...(options.env || {}) },
-    });
-    return { ok: true, exitCode: 0, stdout: result.stdout || "", stderr: result.stderr || "" };
-  } catch (error) {
-    return {
-      ok: false,
-      exitCode: Number.isInteger(error?.code) ? error.code : 1,
-      stdout: error?.stdout || "",
-      stderr: error?.stderr || error?.message || String(error),
-    };
-  }
+  const result = await runCommandFile("git", ["-C", rootDir, ...args], rootDir, options.timeoutMs || GIT_TIMEOUT_MS, {
+    env: options.env,
+    maxOutputChars: 2_000_000,
+  });
+  return {
+    ok: result.exitCode === 0,
+    exitCode: result.exitCode,
+    stdout: result.stdout || "",
+    stderr: result.stderr || "",
+  };
 }
 
 function unavailable(mode, reason, extra = {}) {

@@ -71,6 +71,19 @@ npx wildarrange doctor
 
 `adapter install` 是项目级安装：它会根据当前设备和当前项目生成 Codex、Cursor、Kimi Code 的接入文件。`.helix/`、`.cursor/` 等本地运行产物通常不进入 Git，因此每台设备都应重新执行一次，而不是复制另一台设备的生成结果。
 
+### 初始化项目治理文档（可选）
+
+新项目可以显式补建最小治理文档：
+
+```bash
+npx wildarrange init --project-docs
+# 只有系统边界已经明确时才加：--architecture
+```
+
+该命令只创建缺失的 `AGENTS.md`、代码与接口规范、测试与验收规则、任务治理入口；已有文件一律保留，不合并也不覆盖。`doc/architecture.md` 仅在使用 `--architecture` 时创建。生成后的 `[待确认]` 必须由人类确认或删除，尤其是测试策略、标准命令、生产/测试入口和模块边界。
+
+WildArrange 的 `.helix/team/tasks.json` 继续作为唯一工单总账，Dashboard 与 `doc/progress.md` 只是入口和视图，不要再同步维护第二份 Markdown 任务表或 ClickUp 真源。
+
 ### 在另一台设备安装
 
 先克隆或拉取业务项目，然后在项目根目录运行：

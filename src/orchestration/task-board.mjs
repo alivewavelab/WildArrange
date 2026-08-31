@@ -1,6 +1,7 @@
 import { appendFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
+import { normalizeRelativePath } from "../infra/path-match.mjs";
 import {
   STATE_VERSION,
   createWorkId,
@@ -130,7 +131,7 @@ async function claimTeamTaskUnlocked(rootDir, options = {}) {
     : findRunnableTask(taskState.tasks);
   if (!task) throw new Error(options.taskId ? `unknown task: ${options.taskId}` : "no runnable task available to claim");
   if (task.status !== "pending") throw new Error(`task ${task.id} is ${task.status}; only pending tasks can be claimed`);
-  const blockers = unresolvedBlockers(task, taskState.tasks);
+  const blockers = unresolvedTaskBlockers(task, taskState.tasks);
   if (blockers.length > 0) throw new Error(`task ${task.id} blocked by ${blockers.join(",")}`);
 
   const owner = normalizeAgentName(options.owner || task.owner || DEFAULT_EXECUTOR_AGENT);
@@ -157,7 +158,7 @@ async function claimTeamTaskUnlocked(rootDir, options = {}) {
   return { planId: taskState.planId, task };
 }
 
-function unresolvedBlockers(task, tasks) {
+export function unresolvedTaskBlockers(task, tasks) {
   return (task.blockedBy || []).filter((blockerId) => {
     const blocker = tasks.find((candidate) => candidate.id === blockerId);
     return blocker && blocker.status !== "completed";
@@ -239,11 +240,11 @@ export async function readyTeamTask(rootDir, options = {}) {
 }
 
 export function findRunnableTask(tasks) {
-  const completed = new Set(tasks.filter((task) => task.status === "completed").map((task) => task.id));
-  return tasks.find((task) => {
-    if (task.status !== "pending") return false;
-    return task.blockedBy.every((blockedBy) => completed.has(blockedBy));
-  }) || null;
+  return tasks.find((task) => isTaskRunnable(task, tasks)) || null;
+}
+
+export function isTaskRunnable(task, tasks) {
+  return task?.status === "pending" && unresolvedTaskBlockers(task, tasks).length === 0;
 }
 
 export async function persistTaskState(rootDir, taskState) {
@@ -577,7 +578,7 @@ export async function archiveAndDeleteTeamTask(rootDir, options = {}) {
         try {
           await rename(filePath, stagedPath);
           staged.push({ originalPath: filePath, stagedPath });
-          deleted.push(path.relative(rootDir, filePath));
+          deleted.push(normalizeRelativePath(path.relative(rootDir, filePath)));
         } catch (error) {
           if (error?.code !== "ENOENT") throw error;
         }
@@ -826,8 +827,8 @@ export async function sendTeamMessage(rootDir, options = {}) {
   await appendLedger(rootDir, { type: "team_message_sent", messageId: id, from, to, summary: message.summary });
   return {
     ...message,
-    inboxPath: path.relative(rootDir, inboxPath),
-    outboxPath: path.relative(rootDir, outboxPath),
+    inboxPath: normalizeRelativePath(path.relative(rootDir, inboxPath)),
+    outboxPath: normalizeRelativePath(path.relative(rootDir, outboxPath)),
   };
 }
 

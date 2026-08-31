@@ -21,6 +21,7 @@ import { isPossibleNoopTask, isTrivialCommand } from "../infra/task-predicates.m
 import { loadTaskLedger, loadTaskState, taskRef } from "../infra/task-state-store.mjs";
 import { listRuntimeStateBackups, verifyConfigBaseline, verifyRuntimeState } from "../infra/security.mjs";
 import { evaluateGateArming } from "../infra/gate-arming.mjs";
+import { normalizeRelativePath } from "../infra/path-match.mjs";
 import { projectDecisionStats } from "./decisions.mjs";
 
 const COMPLETION_LEDGER_EVENT_TYPES = new Set([
@@ -516,7 +517,7 @@ async function checkAdapters(rootDir, findings) {
   }
   const legacyCursorRule = path.join(rulesDir, ["helix", "flow.mdc"].join(""));
   if (existsSync(legacyCursorRule)) {
-    const relativePath = path.relative(rootDir, legacyCursorRule);
+    const relativePath = normalizeRelativePath(path.relative(rootDir, legacyCursorRule));
     legacyManagedRules.push({ path: relativePath });
     addFinding(findings, "warn", "adapters", `legacy managed Cursor rule ${relativePath} is still active and may be injected alongside wildarrange.mdc`, {
       target: "cursor",

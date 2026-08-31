@@ -16,6 +16,26 @@
       ]
     },
     {
+      "name": "helix_init_project_docs",
+      "layer": "project_governance",
+      "status": "implemented",
+      "command": "node ./bin/helix.mjs init --project-docs [--architecture]",
+      "purpose": "显式、非覆盖式补建项目治理文档；人类必须处理返回的待确认项，架构模板只在边界已明确时创建。",
+      "reads": [
+        "packs/wildarrange-linear/project-init/**",
+        "AGENTS.md",
+        "doc/**"
+      ],
+      "writes": [
+        "AGENTS.md",
+        "doc/standards/code-and-interface-conventions.md",
+        "doc/testing-and-acceptance.md",
+        "doc/progress.md",
+        "doc/architecture.md",
+        ".helix/ledger.jsonl"
+      ]
+    },
+    {
       "name": "helix_config_init",
       "layer": "runtime_state",
       "status": "implemented",

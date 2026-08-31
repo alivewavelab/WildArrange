@@ -7,13 +7,13 @@
 import { existsSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
-import { runCommand } from "./command-runner.mjs";
+import { runCommandFile } from "./command-runner.mjs";
 import { normalizeRelativePath } from "./path-match.mjs";
 
 export async function collectGitDiff(rootDir) {
   const gitDir = path.join(rootDir, ".git");
   if (!existsSync(gitDir)) return "";
-  const result = await runCommand("git diff -- . ':!.helix'", rootDir, 30_000);
+  const result = await runCommandFile("git", ["-C", rootDir, "diff", "--", ".", ":!.helix"], rootDir, 30_000);
   return result.exitCode === 0 ? result.stdout : "";
 }
 
@@ -28,8 +28,8 @@ export async function collectGitChangedPaths(rootDir) {
     }
   }
 
-  const diff = await runCommand("git diff --name-only -- . ':!.helix'", rootDir, 30_000);
-  const untracked = await runCommand("git ls-files --others --exclude-standard -- . ':!.helix'", rootDir, 30_000);
+  const diff = await runCommandFile("git", ["-C", rootDir, "diff", "--name-only", "--", ".", ":!.helix"], rootDir, 30_000);
+  const untracked = await runCommandFile("git", ["-C", rootDir, "ls-files", "--others", "--exclude-standard", "--", ".", ":!.helix"], rootDir, 30_000);
   if (diff.exitCode !== 0 || untracked.exitCode !== 0) {
     return {
       available: false,

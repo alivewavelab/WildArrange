@@ -24,6 +24,7 @@
  */
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
+import { normalizeRelativePath } from "./path-match.mjs";
 
 export const ZONES = ["interface", "orchestration", "ai", "capabilities", "infra"];
 export const UNKNOWN_ZONE = "unknown";
@@ -170,7 +171,7 @@ export function classifyZone(srcDir, absolutePath) {
 function assertKnownZone(srcDir, absolutePath, role) {
   const zone = classifyZone(srcDir, absolutePath);
   if (zone !== UNKNOWN_ZONE) return zone;
-  const relativePath = path.relative(srcDir, absolutePath) || ".";
+  const relativePath = normalizeRelativePath(path.relative(srcDir, absolutePath)) || ".";
   const error = new Error(
     `${role} is outside the five source zones: src/${relativePath} (expected src/<${ZONES.join("|")}>/...)`,
   );
@@ -218,8 +219,8 @@ export async function buildDependencyEdges(rootDir) {
       if (resolvedTarget !== srcDir && !resolvedTarget.startsWith(`${srcDir}${path.sep}`)) continue;
       const targetZone = assertKnownZone(srcDir, resolvedTarget, "dependency target");
       edges.push({
-        from: path.relative(srcDir, filePath),
-        to: path.relative(srcDir, resolvedTarget),
+        from: normalizeRelativePath(path.relative(srcDir, filePath)),
+        to: normalizeRelativePath(path.relative(srcDir, resolvedTarget)),
         sourceZone,
         targetZone,
       });
@@ -244,12 +245,12 @@ export async function buildRepoImportGraph(rootDir, { dirs = ["src", "bin", "tes
       const resolvedTarget = path.resolve(path.dirname(filePath), specifier);
       if (!roots.some((dir) => resolvedTarget === dir || resolvedTarget.startsWith(dir + path.sep))) continue;
       edges.push({
-        from: path.relative(rootDir, filePath),
-        to: path.relative(rootDir, resolvedTarget),
+        from: normalizeRelativePath(path.relative(rootDir, filePath)),
+        to: normalizeRelativePath(path.relative(rootDir, resolvedTarget)),
       });
     }
   }
-  return { files: files.map((file) => path.relative(rootDir, file)), edges };
+  return { files: files.map((file) => normalizeRelativePath(path.relative(rootDir, file))), edges };
 }
 
 /**
@@ -261,7 +262,8 @@ export async function buildRepoImportGraph(rootDir, { dirs = ["src", "bin", "tes
 export async function computeImpact(rootDir, changedPaths) {
   const { files, edges } = await buildRepoImportGraph(rootDir);
   const known = new Set(files);
-  const changed = [...new Set(changedPaths.map((p) => path.normalize(p)))]
+  const normalizedChanged = [...new Set(changedPaths.map((p) => normalizeRelativePath(p)))];
+  const changed = normalizedChanged
     .filter((p) => known.has(p));
 
   const importers = new Map();
@@ -297,7 +299,7 @@ export async function computeImpact(rootDir, changedPaths) {
   return {
     kind: "impact_report",
     changed,
-    unknownChanged: [...new Set(changedPaths.map((p) => path.normalize(p)))].filter((p) => !known.has(p)),
+    unknownChanged: normalizedChanged.filter((p) => !known.has(p)),
     affected: affectedList,
     testsToRun: testList,
     summary: `影响 ${affectedList.length} 个文件，应跑 ${testList.length} 个测试`,
@@ -308,7 +310,7 @@ export async function computeImpact(rootDir, changedPaths) {
 export async function listRepoTests(rootDir) {
   const files = await listMjsFiles(path.join(rootDir, "test"));
   return files
-    .map((file) => path.relative(rootDir, file))
+    .map((file) => normalizeRelativePath(path.relative(rootDir, file)))
     .filter((file) => /^test\/.*\.test\.mjs$/.test(file))
     .sort();
 }

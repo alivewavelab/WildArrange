@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WildArrange 架构优化最终执行计划</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f6f8;
+      --paper: #ffffff;
+      --text: #172033;
+      --muted: #667085;
+      --line: #dfe5ec;
+      --red: #b42318;
+      --red-bg: #fff1ef;
+      --orange: #b54708;
+      --orange-bg: #fff7ed;
+      --blue: #175cd3;
+      --blue-bg: #eff8ff;
+      --green: #067647;
+      --green-bg: #ecfdf3;
+      --purple: #6938ef;
+      --purple-bg: #f4f3ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+      line-height: 1.65;
+    }
+    main { width: min(1180px, calc(100% - 32px)); margin: 28px auto 64px; }
+    header, section {
+      margin-bottom: 16px;
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--paper);
+    }
+    h1, h2, h3, h4 { margin-top: 0; line-height: 1.35; }
+    h1 { margin-bottom: 8px; font-size: 30px; }
+    h2 { margin-bottom: 14px; font-size: 22px; }
+    h3 { margin-bottom: 8px; font-size: 17px; }
+    h4 { margin-bottom: 6px; font-size: 15px; }
+    p { margin: 8px 0; }
+    ul, ol { margin: 8px 0; padding-left: 22px; }
+    li { margin-bottom: 6px; }
+    code {
+      padding: 2px 6px;
+      border-radius: 5px;
+      background: #f1f4f8;
+      font-family: Consolas, monospace;
+      font-size: 0.92em;
+    }
+    .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    .tag {
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: #eef2f6;
+      color: #344054;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .tag.final { background: var(--green-bg); color: var(--green); }
+    .lead {
+      margin-top: 18px;
+      padding: 15px 17px;
+      border-left: 5px solid var(--green);
+      border-radius: 8px;
+      background: var(--green-bg);
+      font-size: 17px;
+    }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .card {
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+    }
+    .plain { background: var(--blue-bg); border-color: #b9e6fe; }
+    .precise { background: var(--purple-bg); border-color: #d9d6fe; }
+    .m0 { border-left: 6px solid #475467; }
+    .m1 { border-left: 6px solid var(--red); background: var(--red-bg); }
+    .m2 { border-left: 6px solid var(--orange); background: var(--orange-bg); }
+    .m3 { border-left: 6px solid var(--blue); background: var(--blue-bg); }
+    .m4 { border-left: 6px solid var(--green); background: var(--green-bg); }
+    .priority { margin-bottom: 6px; font-weight: 800; }
+    .m1 .priority { color: var(--red); }
+    .m2 .priority { color: var(--orange); }
+    .m3 .priority { color: var(--blue); }
+    .m4 .priority { color: var(--green); }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .flow .node {
+      min-height: 118px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fbfcfe;
+    }
+    .flow .node strong { display: block; margin-bottom: 5px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { padding: 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: #f7f9fc; color: #344054; }
+    .check { color: var(--green); font-weight: 800; }
+    .stop { color: var(--red); font-weight: 800; }
+    .small { color: var(--muted); font-size: 13px; }
+    .decision {
+      padding: 16px;
+      border: 1px solid #a6f4c5;
+      border-radius: 10px;
+      background: var(--green-bg);
+    }
+    footer { padding: 10px; color: var(--muted); text-align: center; }
+    @media (max-width: 900px) {
+      .grid, .flow { grid-template-columns: 1fr; }
+      table { display: block; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>WildArrange 架构优化最终执行计划</h1>
+    <p>版本：2026-08-30 · 状态：方案已锁定，尚未修改生产代码</p>
+    <div class="meta">
+      <span class="tag final">最终执行版</span>
+      <span class="tag">四个里程碑</span>
+      <span class="tag">先修可信度</span>
+      <span class="tag">按职责归位</span>
+      <span class="tag">无数字评分门禁</span>
+    </div>
+    <div class="lead">
+      <strong>一句人话：</strong>先修四个会让治理结果不可信的漏洞，再把项目初始化放回产品层，然后收拢重复钥匙和恢复工具，最后让 Windows 测试重新可信并接受独立复验。不是推倒重建，也不为了分数制造新架构。
+    </div>
+  </header>
+
+  <section>
+    <h2>一、执行对象、目标和底线</h2>
+    <div class="grid">
+      <div class="card plain">
+        <h3>人话</h3>
+        <p>WildArrange 的地基是健康的。本轮不是换房子，而是修门锁、统一钥匙、把急救箱放回正确房间，并确保 Windows 上的报警器真的能响。</p>
+      </div>
+      <div class="card precise">
+        <h3>专业边界</h3>
+        <p>保留五区依赖、gateway 统一信封、delivery pipeline、全局任务锁、acceptance proof、checkpoint 和 ledger hash 链。只处理已有代码证据证明的缺陷、重复 owner 和职责错位。</p>
+      </div>
+    </div>
+    <h3 style="margin-top:18px">锁定的执行树</h3>
+    <p><code>C:\Users\Administrator\Documents\Codex\2026-08-28\project-initialization-docs\work\WildArrange</code></p>
+    <ul>
+      <li>该工作树已经包含尚未提交的 project-init 变更；执行时必须保留，不得用 D 盘主树覆盖。</li>
+      <li>开始前记录分支、HEAD 和 <code>git status</code>，把现有修改作为基线，不回滚、不重置。</li>
+      <li>交付不是达到某个分数，而是：已证明根因消除、P0/P1 修复、必要回归通过、独立复验如实评分。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>二、里程碑总览</h2>
+    <div class="flow">
+      <div class="node"><strong>M0 锁定现场</strong>记录当前工作树、已知失败和必须保留能力。</div>
+      <div class="node"><strong>M1 修可信度</strong>Git argv、blockedBy、Hook deny、Dashboard token。</div>
+      <div class="node"><strong>M2 初始化归位</strong>project-init 从 Infra 回到 Interface 产品用例。</div>
+      <div class="node"><strong>M3 收编 owner</strong>完成顺序、bridge、recovery、路径守卫与死代码。</div>
+      <div class="node"><strong>M4 恢复绿线</strong>Windows 回归、全量验收、包体检查和独立复验。</div>
+    </div>
+    <p class="small">依赖顺序：M1 → M3 中的 <code>patchAlreadyApplied</code>；M2 使用当前工作树里的 project-init 基线；M4 必须在前三个里程碑完成后执行。</p>
+  </section>
+
+  <section>
+    <h2>三、M0：锁定现场，不让两棵树串台</h2>
+    <div class="card m0">
+      <div class="priority">目标：所有后续修改都建立在同一个可追溯现场上</div>
+      <ol>
+        <li>记录当前分支、HEAD、未提交文件和 project-init 已有改动。</li>
+        <li>记录四个缺陷的当前复现证据，以及 Windows 测试基线。</li>
+        <li>写下必须保留的产品能力：五区、完成门顺序、任务所有权、回滚恢复、gateway 的 <code>command</code> 与 <code>command-safety</code>。</li>
+        <li>把高级测试排除项写进执行说明：不新增 Fuzz、属性测试、大组合矩阵、soak、额外 E2E、Golden/快照、哈希门禁或新测试框架。</li>
+      </ol>
+      <p><span class="check">完成证据：</span>一份基线记录，能回答“在哪棵树改、改前是什么状态、哪些能力不能丢”。</p>
+      <p><span class="stop">停止条件：</span>如果当前 project-init 改动来源不明或执行树与计划路径不一致，先停止，不进入 M1。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>四、M1：先修四个真实产品缺陷</h2>
+    <div class="grid">
+      <div class="card m1">
+        <div class="priority">M1.1 Git 改用 argv 参数数组</div>
+        <p><strong>人话：</strong>不再把一整句 shell 黑话交给 Windows 猜。</p>
+        <ol>
+          <li>在命令执行层提供明确的 <code>file + args</code> 入口，并保留超时、输出截断和 spawn 失败协议。</li>
+          <li>把 <code>git-diff.mjs</code>、<code>git-worktree.mjs</code>、<code>agent-spawn.mjs</code> 和 admission 中的 Git 调用迁移到统一入口。</li>
+          <li>删除对应的 POSIX <code>shellEscape</code> 与 Git shell 拼接；普通非 Git shell 命令不借机全仓重构。</li>
+          <li>路径比较统一采用规范化后的 <code>/</code> 语义，不把 Windows 分隔符写死在断言里。</li>
+        </ol>
+        <p><span class="check">验收：</span>Windows 上 <code>collectGitChangedPaths()</code> 返回 <code>available:true</code>；changed-only 与 zone test 能选出真实文件和测试。</p>
+      </div>
+
+      <div class="card m1">
+        <div class="priority">M1.2 blockedBy 不能被点名绕过</div>
+        <p><strong>人话：</strong>前置工作没完成，点名后续任务也不能让它偷跑。</p>
+        <ol>
+          <li>由 <code>task-board.isTaskRunnable()</code> 唯一判断任务是否可运行。</li>
+          <li>线性运行、显式 node、并行默认选择和 <code>parallel run --task</code> 全部复用。</li>
+          <li>拒绝必须发生在创建 run、claim 或启动 Agent 之前，并返回 blocker。</li>
+        </ol>
+        <p><span class="check">验收：</span>显式选择被阻塞任务时明确失败，且没有 run、claim、Agent 副作用。</p>
+      </div>
+
+      <div class="card m1">
+        <div class="priority">M1.3 Hook deny 与提示开关解耦</div>
+        <p><strong>人话：</strong>关掉提示文字，不能顺手把门锁拆掉。</p>
+        <ol>
+          <li><code>pre_tool_use.enabled</code> 只控制 <code>additionalContext</code>。</li>
+          <li>preflight 已给出 deny 时，始终输出宿主 deny 协议。</li>
+          <li>Kimi Hook 崩溃或宿主超时继续遵守既定 fail-open 合同；最终安全仍由 delivery pipeline 收口。</li>
+        </ol>
+        <p><span class="check">验收：</span>提示关闭后，越界写入和高危命令仍被 Hook 拒绝；Kimi fail-open 文档与行为不被改写。</p>
+      </div>
+
+      <div class="card m1">
+        <div class="priority">M1.4 Dashboard token 不进入页面</div>
+        <p><strong>人话：</strong>门禁密码不能印在欢迎页里。</p>
+        <ol>
+          <li>服务端渲染 HTML 不再携带 token。</li>
+          <li>非 loopback 页面和 API 使用明确认证；不把 token 放进可匿名获取的 GET 响应。</li>
+          <li>请求 body 超限后立即停止累计，返回明确的 413 类错误。</li>
+        </ol>
+        <p><span class="check">验收：</span>未认证请求拿不到 token；页面源码、响应体均无 token；正确认证后的现有功能保持可用。</p>
+      </div>
+    </div>
+    <h3 style="margin-top:18px">M1 关口</h3>
+    <ul>
+      <li>四个缺陷各补一个能复现真实问题的必要回归测试。</li>
+      <li>运行直接受影响测试和 dependency boundary。</li>
+      <li>任何安全语义回退、CLI 行为丢失或现有 project-init 改动被覆盖，都不得进入 M2。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>五、M2：把 project-init 放回产品层</h2>
+    <div class="card m2">
+      <div class="priority">目标：决定创建哪些治理文档的代码，由产品接口层负责</div>
+      <ol>
+        <li>把 <code>PROJECT_DOCUMENT_TEMPLATES</code> 与 <code>initProjectDocuments()</code> 从 <code>infra/runtime-bootstrap.mjs</code> 迁到 <code>interface/project-init.mjs</code>。</li>
+        <li>Infra 只保留目录、原子写入、ledger 等技术原语；bootstrap 只负责编排初始化顺序。</li>
+        <li>模板源文件使用 <code>AGENTS.template.md</code>，生成目标仍是项目根 <code>AGENTS.md</code>，避免模板被 Agent 当成现行规范。</li>
+        <li>保留既定行为：只创建缺失文件、不覆盖已有内容、<code>architecture.md</code> 按需、<code>progress.md</code> 仅作人类视图。</li>
+        <li>任务与 BUG 的机器真相源继续是 <code>.helix/team/tasks.json</code>，不建立第二份任务数据库。</li>
+        <li>同步根/分区 <code>AGENTS.md</code>、<code>doc/project-architecture.md</code>、模块映射、产品总图和 CLI 帮助。</li>
+      </ol>
+      <p><span class="check">验收：</span><code>project-document-init.test.mjs</code> 覆盖首次生成、已有文件跳过、可选 architecture 和重复执行幂等；<code>npm run check:arch</code> 通过。</p>
+      <p><span class="stop">停止条件：</span>如果迁移需要覆盖用户已有项目文件，或让 Infra 反向依赖 Interface，立即停止并修正归属。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>六、M3：把重复钥匙交给唯一负责人</h2>
+    <table>
+      <thead>
+        <tr><th>步骤</th><th>做什么</th><th>为什么</th><th>验收边界</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>M3.1</strong><br>失败判定</td>
+          <td>合并完全相同的 <code>shouldFailTask</code> / <code>shouldFailAdmission</code>。</td>
+          <td>同一个决定不能维护两份。</td>
+          <td>只共享纯判断；各流程的状态推进和错误返回继续留在原流程。</td>
+        </tr>
+        <tr>
+          <td><strong>M3.2</strong><br>完成提交顺序</td>
+          <td>抽取窄范围的完成提交原语，唯一保证 <code>ledger → wisdom → digest → canonical persist</code>。</td>
+          <td>三处同步修改容易漂移。</td>
+          <td>不造万能 <code>finalizeCompletion()</code>；claim 清理、rollback 删除、workflow summary 和返回结构仍由各流程负责。</td>
+        </tr>
+        <tr>
+          <td><strong>M3.3</strong><br>Bridge 核心</td>
+          <td>提取 Kimi/Cursor 共用的 stdin、项目发现、spawn、输出收集与协议骨架。</td>
+          <td>第三个宿主不应复制第三份约 90 行模板。</td>
+          <td>timeout/failure policy 显式参数化；Cursor 子进程 fail-closed 第二保险保留，Kimi 无自毁定时器明确标注为宿主 fail-open 合同。</td>
+        </tr>
+        <tr>
+          <td><strong>M3.4</strong><br>Admission recovery</td>
+          <td>把 rollback plan 路径、持久化、读取、删除、生成、执行和 <code>patchAlreadyApplied</code> 搬入 <code>admission-recovery.mjs</code>。</td>
+          <td>事务状态机与恢复工具具有不同变化原因，且已有接盘 owner。</td>
+          <td><code>admit → claim → apply → gates → commit/rollback</code> 主事务不拆；<code>patchAlreadyApplied</code> 必须使用 M1 的 argv Git 入口。</td>
+        </tr>
+        <tr>
+          <td><strong>M3.5</strong><br>路径守卫</td>
+          <td>把 admission 与 adapters 的两份 <code>assertInsideRoot</code> 收编到 <code>infra/path-match.mjs</code>。</td>
+          <td>相同的越界判断应有一个 owner。</td>
+          <td>共用判断语义，调用方可保留自己的错误文案；<code>normalizeProposedFiles*</code> 留在 admission 输入合同。</td>
+        </tr>
+        <tr>
+          <td><strong>M3.6</strong><br>死代码</td>
+          <td>删除已确认无调用方、无合同的局部函数，例如 <code>uniqueStrings</code>。</td>
+          <td>清掉真实垃圾，不碰挂牌能力。</td>
+          <td><code>command</code> 与 <code>command-safety</code> gateway 注册项、测试、文档和底层实现全部保留。</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="decision" style="margin-top:16px">
+      <h3>Route matcher 默认决定</h3>
+      <p>本轮默认不强行合并严格 route 匹配与模糊 Skill 推荐。它们服务不同业务目的；只有人类明确确认“同一 signal 必须同义”时，才共享 matcher。这样不阻塞 M3，也不擅自改变路由行为。</p>
+    </div>
+    <p><span class="check">M3 验收：</span>相关单元测试、admission 中断/回滚必要回归、adapter 测试、dependency boundary 和 <code>npm run check:arch</code> 通过；完成状态、恢复状态、Hook 宿主合同与 gateway 注册表不变。</p>
+  </section>
+
+  <section>
+    <h2>七、M4：恢复 Windows 绿线并独立复验</h2>
+    <div class="card m4">
+      <div class="priority">目标：测试结果重新值得相信，而不是把红灯涂成绿灯</div>
+      <ol>
+        <li>路径断言改为归一化语义比较，不硬编码 POSIX 路径。</li>
+        <li><code>chmod</code> 用例只在 Windows 不存在对应权限语义时 skip，并写清理由；不能用 skip 隐藏实现错误。</li>
+        <li>先运行各里程碑直接影响的测试，再运行标准 <code>npm test</code>。</li>
+        <li>运行 <code>npm run check:arch</code>，确认五区边界、模块映射和总图一致。</li>
+        <li>运行 npm 包体 dry run，确认发布内容、模板和用户文档正确。</li>
+        <li>对同一工作树执行独立 <code>architecture-code-review</code>，三项分别如实评分，不计算综合分，不回填目标数字。</li>
+      </ol>
+      <p><span class="check">完成证据：</span>测试命令、通过/失败/skip 数、失败分类、包体清单、架构校验和独立复验三件套全部留档。</p>
+      <p><span class="stop">停止条件：</span>若仍有 Windows 失败，必须区分产品缺陷、测试假设和环境限制；不得把未解决失败描述为全绿。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>八、每个里程碑的交付节奏</h2>
+    <table>
+      <thead><tr><th>阶段</th><th>执行者必须交付</th><th>进入下一阶段前</th></tr></thead>
+      <tbody>
+        <tr><td>开始</td><td>范围、受影响文件、必须保留行为、计划运行的测试</td><td>确认没有越过本里程碑边界</td></tr>
+        <tr><td>实现</td><td>最小代码修改和与复杂度匹配的基础单元/必要回归</td><td>不得顺手开展无关清理</td></tr>
+        <tr><td>自验</td><td>真实命令、输出摘要、失败与限制</td><td>直接影响测试通过</td></tr>
+        <tr><td>复核</td><td>行为保护清单、依赖方向、文档同步情况</td><td>没有能力丢失或安全边界削弱</td></tr>
+        <tr><td>放行</td><td>本里程碑结果和下一里程碑输入</td><td>人类可随时要求停在当前里程碑</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>九、明确不做</h2>
+    <ul>
+      <li>不设置 98/98/97 或其他数字评分门禁。</li>
+      <li>不因为文件超过 700、1000 或 2000 行机械拆分；admission 只搬已有独立 recovery owner 的部分。</li>
+      <li>不删除 gateway 的 <code>command</code>、<code>command-safety</code>，也不删除底层生产安全检查。</li>
+      <li>不统一业务语义不同的 route matcher 与 Skill matcher。</li>
+      <li>不新建万能工具箱、插件系统、第二套状态机或第二份任务真相源。</li>
+      <li>不通过放宽 dependency boundary、跳过真实失败或删除测试来换取绿色结果。</li>
+      <li>不扩张未经人类确认的高级测试和额外门禁。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>十、最终完成定义</h2>
+    <ol>
+      <li>四个已证实缺陷均有最小回归证据并完成修复。</li>
+      <li>project-init 归属 Interface，非覆盖、幂等、可选 architecture 等产品合同保持不变。</li>
+      <li>完成提交顺序、bridge 公共机制、admission recovery 和路径守卫各有唯一清晰 owner。</li>
+      <li>gateway 的 <code>command</code> 与 <code>command-safety</code> 能力完整保留。</li>
+      <li>Windows changed-path、zone test、dependency boundary 和默认测试提供可信信号。</li>
+      <li>架构、README、CLI 帮助、模块映射和产品总图与实现一致。</li>
+      <li>独立 Review 按同一工作树如实给出三项分数；若仍有扣分，只处理具有真实后果和清晰收益的问题。</li>
+    </ol>
+  </section>
+
+  <footer>WildArrange 架构优化最终执行计划 · 2026-08-30 · 本文件是实施合同，不代表生产代码已经完成</footer>
+</main>
+</body>
+</html>

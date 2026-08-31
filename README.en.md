@@ -71,6 +71,19 @@ Commit `package.json` and `package-lock.json`. Teammates and CI can then use `np
 
 `adapter install` is project-scoped. It generates Codex, Cursor, and Kimi Code integration files for the current project and device. Local runtime outputs such as `.helix/` and `.cursor/` are normally excluded from Git, so regenerate them on each device instead of copying generated files from another machine.
 
+### Initialize Project Governance Documents (Optional)
+
+For a new project, explicitly scaffold the minimum governance documents:
+
+```bash
+npx wildarrange init --project-docs
+# Add --architecture only after the system boundaries are known.
+```
+
+The command creates only missing files: `AGENTS.md`, code and interface conventions, testing and acceptance rules, and the task-governance entry point. Existing files are preserved without merging or overwriting. `doc/architecture.md` is created only with `--architecture`. A human must resolve or remove every `[待确认]` placeholder, especially the testing strategy, standard commands, production/test entry points, and module boundaries.
+
+WildArrange's `.helix/team/tasks.json` remains the only task ledger. The Dashboard and `doc/progress.md` are entry points and views; do not maintain a second Markdown task table or ClickUp source of truth.
+
 ### Install on Another Device
 
 Clone or update the application repository, then run from its root:

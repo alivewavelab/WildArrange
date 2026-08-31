@@ -1,5 +1,6 @@
 import path from "node:path";
 import { normalizeAgentKey } from "./agent-registry.mjs";
+import { quoteShellArgument } from "./command-runner.mjs";
 
 export function resolveAgentSpawn(rootDir, config, task, context, options = {}) {
   const explicitCommand = options.command || options.runnerCommand;
@@ -35,21 +36,17 @@ export function resolveAgentSpawn(rootDir, config, task, context, options = {}) 
 
 export function renderSpawnCommand(command, context) {
   return String(command)
-    .replaceAll("{rootDir}", shellEscape(context.rootDir))
-    .replaceAll("{runDir}", shellEscape(context.runDir))
-    .replaceAll("{workDir}", shellEscape(context.workDir))
-    .replaceAll("{taskId}", shellEscape(context.task.id))
-    .replaceAll("{agent}", shellEscape(context.agent))
-    .replaceAll("{taskJson}", shellEscape(context.taskPacketPath))
-    .replaceAll("{outputJson}", shellEscape(context.resultPath));
+    .replaceAll("{rootDir}", quoteShellArgument(context.rootDir))
+    .replaceAll("{runDir}", quoteShellArgument(context.runDir))
+    .replaceAll("{workDir}", quoteShellArgument(context.workDir))
+    .replaceAll("{taskId}", quoteShellArgument(context.task.id))
+    .replaceAll("{agent}", quoteShellArgument(context.agent))
+    .replaceAll("{taskJson}", quoteShellArgument(context.taskPacketPath))
+    .replaceAll("{outputJson}", quoteShellArgument(context.resultPath));
 }
 
 function normalizeAdapterName(value) {
   if (typeof value !== "string") return null;
   const trimmed = value.trim().toLowerCase();
   return trimmed || null;
-}
-
-function shellEscape(value) {
-  return `'${String(value).replaceAll("'", "'\\''")}'`;
 }

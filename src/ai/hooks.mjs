@@ -134,7 +134,9 @@ export async function runInjectionHook(rootDir, input = {}) {
     stage: injectionStageForHookEvent(event, facts),
   });
   const contextMarkdown = injectionPoint.enabled ? renderHookInjectionMarkdown({ event, pointName, sessionId, taskId: effectiveTaskId, targetPaths, facts, injectionPoint }) : "";
-  const output = event === "PreToolUse" && injectionPoint.enabled
+  const shouldRenderPreToolOutput = event === "PreToolUse"
+    && (injectionPoint.enabled || facts.preflight?.decision === "deny");
+  const output = shouldRenderPreToolOutput
     ? renderPreToolUseHookOutput(facts.preflight, contextMarkdown)
     : contextMarkdown;
   const result = {

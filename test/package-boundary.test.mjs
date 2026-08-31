@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -8,6 +8,10 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const NPM_EXECUTABLE = process.platform === "win32" ? process.execPath : "npm";
+const NPM_ARGS_PREFIX = process.platform === "win32"
+  ? [path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js")]
+  : [];
 const RESTRICTED_PROMPTS = [
   "doc/plans/claude-fable-5-system-prompt.md",
   "doc/plans/claude-fable-5-system-prompt-zh.md",
@@ -24,8 +28,8 @@ async function withPackedPackage(callback) {
 
   try {
     const output = execFileSync(
-      "npm",
-      ["pack", "--json", "--pack-destination", packDir, "--cache", cacheDir],
+      NPM_EXECUTABLE,
+      [...NPM_ARGS_PREFIX, "pack", "--json", "--pack-destination", packDir, "--cache", cacheDir],
       { cwd: REPO_ROOT, encoding: "utf8" },
     );
     const manifests = JSON.parse(output);
@@ -147,8 +151,9 @@ test("packed package installs offline and public CLI completes a minimal smoke r
       "utf8",
     );
     execFileSync(
-      "npm",
+      NPM_EXECUTABLE,
       [
+        ...NPM_ARGS_PREFIX,
         "install",
         "--ignore-scripts",
         "--offline",
@@ -161,16 +166,18 @@ test("packed package installs offline and public CLI completes a minimal smoke r
       { cwd: installDir, encoding: "utf8" },
     );
 
-    const wildarrange = path.join(installDir, "node_modules", ".bin", "wildarrange");
-    const help = execFileSync(wildarrange, ["--help"], { cwd: installDir, encoding: "utf8" });
+    const publicShim = path.join(installDir, "node_modules", ".bin", process.platform === "win32" ? "wildarrange.cmd" : "wildarrange");
+    assert.equal(existsSync(publicShim), true, "npm install must create the public wildarrange bin shim");
+    const installedCli = path.join(installDir, "node_modules", "@alivewavelab", "wildarrange", "bin", "helix.mjs");
+    const help = execFileSync(process.execPath, [installedCli, "--help"], { cwd: installDir, encoding: "utf8" });
     assert.match(help, /WildArrange linear runtime/);
 
     const initialized = JSON.parse(
-      execFileSync(wildarrange, ["init"], { cwd: installDir, encoding: "utf8" }),
+      execFileSync(process.execPath, [installedCli, "init"], { cwd: installDir, encoding: "utf8" }),
     );
     assert.equal(initialized.ok, true);
     const status = JSON.parse(
-      execFileSync(wildarrange, ["status"], { cwd: installDir, encoding: "utf8" }),
+      execFileSync(process.execPath, [installedCli, "status"], { cwd: installDir, encoding: "utf8" }),
     );
     assert.equal(status.work?.status, "idle");
     assert.equal(status.total, 0);

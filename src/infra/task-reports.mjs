@@ -1,5 +1,6 @@
 import { appendFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { normalizeRelativePath } from "./path-match.mjs";
 import { appendLedger } from "./ledger.mjs";
 import {
   ensureHelixDirs,
@@ -13,8 +14,8 @@ export async function writeReviewReport(rootDir, planId, task, reviewResult) {
   await ensureHelixDirs(rootDir);
   const jsonPath = resolveTaskReportPath(rootDir, "reviews", planId, task.id, "json");
   const mdPath = resolveTaskReportPath(rootDir, "reviews", planId, task.id, "md");
-  reviewResult.reportJsonPath = path.relative(rootDir, jsonPath);
-  reviewResult.reportMdPath = path.relative(rootDir, mdPath);
+  reviewResult.reportJsonPath = normalizeRelativePath(path.relative(rootDir, jsonPath));
+  reviewResult.reportMdPath = normalizeRelativePath(path.relative(rootDir, mdPath));
   const report = {
     planId,
     taskId: task.id,
@@ -124,8 +125,8 @@ export async function writeFailureReport(rootDir, planId, task) {
   await ensureHelixDirs(rootDir);
   const jsonPath = resolveTaskReportPath(rootDir, "failures", planId, task.id, "json");
   const mdPath = resolveTaskReportPath(rootDir, "failures", planId, task.id, "md");
-  task.last_failure.reportJsonPath = path.relative(rootDir, jsonPath);
-  task.last_failure.reportMdPath = path.relative(rootDir, mdPath);
+  task.last_failure.reportJsonPath = normalizeRelativePath(path.relative(rootDir, jsonPath));
+  task.last_failure.reportMdPath = normalizeRelativePath(path.relative(rootDir, mdPath));
   const report = {
     planId,
     taskId: task.id,

@@ -1,7 +1,105 @@
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
-import { nowIso } from "../infra/runtime-store.mjs";
+import { runCommandFile } from "../infra/command-runner.mjs";
+import { assertPathInsideRoot } from "../infra/path-match.mjs";
+import {
+  nowIso,
+  readJson,
+  resolveHelixPath,
+  writeJsonAtomic,
+} from "../infra/runtime-store.mjs";
 import { writeFailureReport } from "../infra/task-reports.mjs";
 import { persistTaskState } from "./task-board.mjs";
+
+function rollbackPlanPath(rootDir, runId, taskId) {
+  return resolveHelixPath(rootDir, "agent-runs", runId, `${taskId}.rollback-plan.json`);
+}
+
+export async function persistRollbackPlan(rootDir, runId, taskId, rollbackPlan) {
+  await writeJsonAtomic(rollbackPlanPath(rootDir, runId, taskId), {
+    runId,
+    taskId,
+    persistedAt: nowIso(),
+    plan: rollbackPlan,
+  });
+}
+
+export async function loadPersistedRollbackPlan(rootDir, runId, taskId) {
+  const stored = await readJson(rollbackPlanPath(rootDir, runId, taskId), null);
+  return stored?.plan || null;
+}
+
+export async function removePersistedRollbackPlan(rootDir, runId, taskId) {
+  await rm(rollbackPlanPath(rootDir, runId, taskId), { force: true }).catch(() => {});
+}
+
+export async function patchAlreadyApplied(rootDir, patch) {
+  const patchPath = path.join(rootDir, ".helix", "agent-runs", `recheck-${Date.now()}-${process.pid}.patch`);
+  await writeFile(patchPath, patch, "utf8");
+  try {
+    const reverseCheck = await runCommandFile("git", ["-C", rootDir, "apply", "--reverse", "--check", "--whitespace=nowarn", patchPath], rootDir, 30_000);
+    return reverseCheck.exitCode === 0;
+  } finally {
+    await rm(patchPath, { force: true });
+  }
+}
+
+export async function createFileRollbackPlan(rootDir, files) {
+  const entries = [];
+  for (const file of files) {
+    const absolutePath = path.join(rootDir, file.path);
+    assertPathInsideRoot(rootDir, absolutePath, file.path);
+    try {
+      entries.push({
+        path: file.path,
+        existed: true,
+        content: await readFile(absolutePath, "utf8"),
+      });
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      entries.push({ path: file.path, existed: false, content: "" });
+    }
+  }
+  return { mode: "files", paths: files.map((file) => file.path), entries };
+}
+
+export async function rollbackAdmissionChanges(rootDir, rollbackPlan) {
+  if (!rollbackPlan || rollbackPlan.mode === "none") {
+    return { status: "skipped", reason: "no rollback plan" };
+  }
+  try {
+    if (rollbackPlan.mode === "files") {
+      for (const entry of rollbackPlan.entries || []) {
+        const absolutePath = path.join(rootDir, entry.path);
+        assertPathInsideRoot(rootDir, absolutePath, entry.path);
+        if (entry.existed) {
+          await mkdir(path.dirname(absolutePath), { recursive: true });
+          await writeFile(absolutePath, entry.content, "utf8");
+        } else {
+          await rm(absolutePath, { force: true });
+        }
+      }
+    } else if (rollbackPlan.mode === "patch") {
+      const patchPath = path.join(rootDir, ".helix", "agent-runs", `rollback-${Date.now()}-${process.pid}.patch`);
+      await writeFile(patchPath, rollbackPlan.patch, "utf8");
+      try {
+        const reverse = await runCommandFile("git", ["-C", rootDir, "apply", "--reverse", "--whitespace=nowarn", patchPath], rootDir, 30_000);
+        if (reverse.exitCode !== 0) {
+          throw new Error(reverse.stderr || reverse.stdout || "git apply --reverse failed");
+        }
+      } finally {
+        await rm(patchPath, { force: true });
+      }
+    }
+    await appendLedger(rootDir, { type: "parallel_agent_admission_rolled_back", mode: rollbackPlan.mode, paths: rollbackPlan.paths || [] });
+    return { status: "rolled_back", mode: rollbackPlan.mode, paths: rollbackPlan.paths || [] };
+  } catch (error) {
+    const summary = error instanceof Error ? error.message : String(error);
+    await appendLedger(rootDir, { type: "parallel_agent_admission_rollback_failed", mode: rollbackPlan.mode, paths: rollbackPlan.paths || [], error: summary });
+    return { status: "rollback_failed", mode: rollbackPlan.mode, paths: rollbackPlan.paths || [], error: summary };
+  }
+}
 
 export async function persistAdmissionRevalidation(rootDir, taskState, task, options) {
   const fence = options.fence || {};

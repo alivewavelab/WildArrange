@@ -34,6 +34,36 @@ export async function installPromptPack(rootDir, packDir = DEFAULT_PROMPT_PACK_D
   const registry = {
     version: STATE_VERSION,
     installedAt: nowIso(),
+    ...registryIdentity(manifest, entries, canonicalPackDir),
+  };
+  await writeJsonAtomic(resolveHelixPath(rootDir, "prompt-pack.json"), registry);
+  return registry;
+}
+
+export async function isPromptPackCurrent(rootDir, packDir = DEFAULT_PROMPT_PACK_DIR) {
+  try {
+    const canonicalPackDir = await realpath(packDir);
+    const manifest = await readJson(path.join(canonicalPackDir, "manifest.json"));
+    const entries = await loadPromptPackEntries(canonicalPackDir, manifest);
+    const current = await readJson(resolveHelixPath(rootDir, "prompt-pack.json"), null);
+    if (!current) return false;
+    const expectedIdentity = registryIdentity(manifest, entries, canonicalPackDir);
+    if (JSON.stringify(registryIdentityFromRegistry(current)) !== JSON.stringify(expectedIdentity)) return false;
+
+    const installedRoot = await resolveTrustedInstalledRoot(rootDir, "prompt pack idempotency check");
+    for (const entry of materializedEntries(entries)) {
+      const installedPath = await resolvePackEntryPath(installedRoot, entry.relativePath, `${entry.kind} ${entry.name}`);
+      const content = await readFile(installedPath, "utf8");
+      if (content.length !== entry.content.length || hashContent(content) !== entry.sha256) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function registryIdentity(manifest, entries, canonicalPackDir) {
+  return {
     name: manifest.name,
     description: manifest.description,
     source: manifest.source,
@@ -45,8 +75,28 @@ export async function installPromptPack(rootDir, packDir = DEFAULT_PROMPT_PACK_D
     tools: registryEntry(entries.tools),
     routes: entries.routes ? registryEntry(entries.routes) : null,
   };
-  await writeJsonAtomic(resolveHelixPath(rootDir, "prompt-pack.json"), registry);
-  return registry;
+}
+
+function registryIdentityFromRegistry(registry) {
+  return {
+    name: registry.name,
+    description: registry.description,
+    source: registry.source,
+    sourcePackDir: registry.sourcePackDir,
+    agents: registry.agents || {},
+    skills: registry.skills || {},
+    tools: registry.tools || null,
+    routes: registry.routes || null,
+  };
+}
+
+function materializedEntries(entries) {
+  return [
+    ...entries.agents,
+    ...entries.skills,
+    entries.tools,
+    ...(entries.routes ? [entries.routes] : []),
+  ];
 }
 
 function registryEntry(entry) {
@@ -143,12 +193,7 @@ async function materializePromptPack(rootDir, entries) {
   const installedRoot = path.join(realPackParent, "installed");
   await mkdir(stagingRoot, { recursive: true });
   try {
-    const materialized = [
-      ...entries.agents,
-      ...entries.skills,
-      entries.tools,
-      ...(entries.routes ? [entries.routes] : []),
-    ];
+    const materialized = materializedEntries(entries);
     const written = new Map();
     for (const entry of materialized) {
       const previous = written.get(entry.relativePath);

@@ -73,16 +73,17 @@ test("zone tests select the tests that import the zone, plus naming pairs and th
 });
 
 test("helix test CLI runs the impact-selected subset and passes through the exit code", async () => {
-  // decisions.mjs 的闭包小（bin + decision-log 测试），适合验证 CLI 真跑测试。
+  // cli-help.mjs 的真实闭包稳定包含同名测试和依赖边界测试，足够证明
+  // CLI 会执行选中集合；不要在这条 CLI 自测里再嵌套一轮近全量测试。
   // 注意：本测试自身运行在 node --test 下，helix test 必须剥掉
   // NODE_TEST_CONTEXT，否则子进程会空跑退出——这里同时断言真实测试输出。
   const { stdout, stderr } = await execFileAsync(
     process.execPath,
-    ["bin/helix.mjs", "test", "src/interface/decisions.mjs"],
+    ["bin/helix.mjs", "test", "src/interface/cli-help.mjs"],
     { cwd: ROOT },
   );
   assert.match(stderr, /应跑 \d+ 个测试/);
-  assert.match(stderr, /test\/decision-log\.test\.mjs/);
+  assert.match(stderr, /test\/cli-help\.test\.mjs/);
   assert.match(stdout, /ℹ pass [1-9]/, "child test run must actually execute tests");
 });
 

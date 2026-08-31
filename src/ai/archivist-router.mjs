@@ -11,7 +11,7 @@ import {
 } from "../infra/runtime-store.mjs";
 import { loadHelixConfig } from "../infra/runtime-config.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
-import { runCommand } from "../infra/command-runner.mjs";
+import { runCommandFile } from "../infra/command-runner.mjs";
 import { callOpenAICompatible, resolveAgentProvider } from "../infra/llm-provider.mjs";
 import { routeRequest } from "./routing.mjs";
 
@@ -386,7 +386,7 @@ async function evaluateArchivistTrigger(rootDir, archivistConfig, options) {
 }
 
 async function readGitHead(rootDir) {
-  const result = await runCommand("git rev-parse HEAD", rootDir, 15_000);
+  const result = await runCommandFile("git", ["-C", rootDir, "rev-parse", "HEAD"], rootDir, 15_000);
   if (result.exitCode !== 0) return null;
   return result.stdout.trim() || null;
 }

@@ -3,6 +3,14 @@
  * rule scanning (ai/rules.mjs), and hook preflight checks (orchestration/hooks.mjs).
  * No side effects, no dependencies on any other zone.
  */
+import path from "node:path";
+
+export function assertPathInsideRoot(rootDir, absolutePath, displayPath, label = "path") {
+  const relative = path.relative(rootDir, absolutePath);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`${label} escapes project root: ${displayPath}`);
+  }
+}
 
 export function normalizeRelativePath(filePath) {
   return filePath.replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+/g, "/");

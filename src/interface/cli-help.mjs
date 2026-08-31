@@ -12,7 +12,7 @@ import { DEFAULT_PACKAGE_NAME, PRODUCT_NAME } from "../infra/runtime-config.mjs"
 export const CORE_COMMANDS = ["init", "plan", "run", "status", "decisions", "doctor"];
 
 export const COMMAND_REGISTRY = [
-  { usage: "init [--sample]", desc: "初始化运行时（可选导入样例计划）", core: true },
+  { usage: "init [--sample] [--project-docs] [--architecture]", desc: "初始化运行时；显式补建项目治理文档，可按需包含架构模板", core: true },
   { usage: "plan --from <plan.json>", desc: "导入计划并生成任务状态", core: true },
   { usage: "plan approve [--plan <planId>]", desc: "确认已导入计划（开启 planApproval 时才能 run）" },
   { usage: "run", desc: "跑下一个任务（worker→verifier→scope→review→checkpoint）", core: true },

@@ -16,8 +16,29 @@ import { invokeCapability } from "../capabilities/gateway.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
 import { emitDecision } from "../infra/decision-log.mjs";
 import { buildErrorProtocol, capabilityModule } from "../infra/error-protocol.mjs";
-import { resolveTaskReportPath } from "../infra/runtime-store.mjs";
+import { writeMemoryDigest } from "../infra/memory-digest.mjs";
+import { normalizeRelativePath } from "../infra/path-match.mjs";
+import { nowIso, resolveTaskReportPath } from "../infra/runtime-store.mjs";
 import { applyVerifierEvidenceToCriteria, criteriaStatus } from "../infra/success-criteria.mjs";
+import { appendWisdom } from "../infra/task-reports.mjs";
+import { persistTaskState } from "./task-board.mjs";
+
+export function shouldFailDeliveryAttempt(task, verifyResult, scopeResult, reviewResult) {
+  if (scopeResult?.status === "fail") return true;
+  if (scopeResult && scopeResult.status !== "pass") return true;
+  if (verifyResult?.pass === true && reviewResult?.kind === "review_gate" && reviewResult.pass === false) return true;
+  return task.attempts >= task.maxAttempts;
+}
+
+export async function commitTaskCompletionState(rootDir, options) {
+  const { taskState, task, verifyResult, ledgerEvent, digestReason } = options;
+  task.status = "completed";
+  task.updatedAt = nowIso();
+  await appendLedger(rootDir, ledgerEvent);
+  await appendWisdom(rootDir, task, verifyResult);
+  await writeMemoryDigest(rootDir, { reason: digestReason, stage: "checkpoint", task, taskId: task.id });
+  await persistTaskState(rootDir, taskState);
+}
 
 /**
  * Runs post-commit conveniences (snapshot, workflow summary, …) after a task
@@ -140,7 +161,7 @@ function envelopeEvidencePath(envelope, planId, task) {
   // review 报告由 linear-runtime/admission 在 pipeline 返回后按固定路径写入；
   // 决策记录先给出约定路径，审计者按图索骥即可。
   if (envelope?.capability === "review" && planId && task?.id) {
-    return resolveTaskReportPath(".", "reviews", planId, task.id, "md");
+    return normalizeRelativePath(resolveTaskReportPath(".", "reviews", planId, task.id, "md"));
   }
   return null;
 }
@@ -333,18 +354,61 @@ function buildStepContext(stepName, { rootDir, planId, task, evidence, options }
 }
 
 function recordStepEvidence(stepName, evidence, envelope, task) {
+  const stepEvidence = normalizeStepEvidence(stepName, envelope);
   if (stepName === "verify") {
-    evidence.verifyResult = envelope.evidence;
+    evidence.verifyResult = stepEvidence;
     // Mirrors helix-node-runtime.mjs: a passing verifier can auto-satisfy
     // successCriteria that declare verifierCommandRefs, so criteriaStatus()
     // reflects it without a separate manual step. The caller (orchestration)
     // still owns deciding whether this is ledger-worthy.
-    return applyVerifierEvidenceToCriteria(task, envelope.evidence);
+    return applyVerifierEvidenceToCriteria(task, stepEvidence);
   }
-  if (stepName === "scope") evidence.scopeResult = envelope.evidence;
-  if (stepName === "review") evidence.reviewResult = envelope.evidence;
-  if (stepName === "acceptance-proof") evidence.acceptanceProof = envelope.evidence;
+  if (stepName === "scope") evidence.scopeResult = stepEvidence;
+  if (stepName === "review") evidence.reviewResult = stepEvidence;
+  if (stepName === "acceptance-proof") evidence.acceptanceProof = stepEvidence;
   return undefined;
+}
+
+function normalizeStepEvidence(stepName, envelope) {
+  if (envelope.evidence && typeof envelope.evidence === "object") return envelope.evidence;
+  const error = envelope.error || null;
+  const message = error?.message || `${stepName} capability failed without evidence`;
+  if (stepName === "verify") {
+    return {
+      kind: "verifier",
+      at: nowIso(),
+      pass: false,
+      results: [{ command: null, exitCode: 1, stdout: "", stderr: message }],
+      error,
+    };
+  }
+  if (stepName === "scope") {
+    return {
+      kind: "scope_guard",
+      at: nowIso(),
+      status: "inconclusive",
+      reason: message,
+      changedPaths: [],
+      deniedPaths: [],
+      error,
+    };
+  }
+  if (stepName === "review") {
+    return {
+      kind: "review_gate",
+      at: nowIso(),
+      pass: false,
+      reviewerAgents: ["gateway"],
+      lanes: [{ name: "capability_error", agent: "gateway", status: "fail", summary: message, fixBy: error?.next_action || "运行 doctor 后修复能力异常" }],
+      findings: [],
+      testingGaps: [],
+      residualRisks: [],
+      reviewCommandResults: [],
+      standardsCommandResults: [],
+      error,
+    };
+  }
+  return { kind: `${stepName}_evidence`, at: nowIso(), pass: false, error };
 }
 
 const GATE_NEXT_ACTIONS = {

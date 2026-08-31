@@ -1,6 +1,6 @@
 import { mkdir, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { runCommand } from "./command-runner.mjs";
+import { runCommandFile } from "./command-runner.mjs";
 
 export async function prepareAgentWorktree(rootDir, taskRunDir, options = {}) {
   if (options.isolation !== "git-worktree") {
@@ -24,7 +24,7 @@ export async function prepareAgentWorktree(rootDir, taskRunDir, options = {}) {
 
   const worktreeDir = path.join(taskRunDir, "worktree");
   await mkdir(taskRunDir, { recursive: true });
-  const add = await runCommand(`git -C ${shellEscape(rootDir)} worktree add --detach ${shellEscape(worktreeDir)} HEAD`, rootDir, options.timeoutMs);
+  const add = await runCommandFile("git", ["-C", rootDir, "worktree", "add", "--detach", worktreeDir, "HEAD"], rootDir, options.timeoutMs);
   if (add.exitCode !== 0) {
     return {
       isolation: "git-worktree",
@@ -46,10 +46,10 @@ export async function collectAgentWorktreePatch(rootDir, worktree, options = {})
     return null;
   }
 
-  await runCommand(`git -C ${shellEscape(worktree.workDir)} add -N .`, worktree.workDir, options.timeoutMs);
-  const patchResult = await runCommand(`git -C ${shellEscape(worktree.workDir)} diff --binary -- .`, worktree.workDir, options.timeoutMs);
-  const namesResult = await runCommand(`git -C ${shellEscape(worktree.workDir)} diff --name-only -- .`, worktree.workDir, options.timeoutMs);
-  const statusResult = await runCommand(`git -C ${shellEscape(worktree.workDir)} status --short`, worktree.workDir, options.timeoutMs);
+  await runCommandFile("git", ["-C", worktree.workDir, "add", "-N", "."], worktree.workDir, options.timeoutMs);
+  const patchResult = await runCommandFile("git", ["-C", worktree.workDir, "diff", "--binary", "--", "."], worktree.workDir, options.timeoutMs);
+  const namesResult = await runCommandFile("git", ["-C", worktree.workDir, "diff", "--name-only", "--", "."], worktree.workDir, options.timeoutMs);
+  const statusResult = await runCommandFile("git", ["-C", worktree.workDir, "status", "--short"], worktree.workDir, options.timeoutMs);
   const patch = patchResult.stdout || "";
   const changedPaths = uniqueStrings([
     ...splitLines(namesResult.stdout),
@@ -81,9 +81,9 @@ export async function captureWorkspaceSnapshot(rootDir, options = {}) {
   if (!sameRoot) {
     return { kind: "workspace_snapshot", available: false, label, reason: "project root is not the git toplevel" };
   }
-  const head = await runCommand(`git -C ${shellEscape(rootDir)} rev-parse HEAD`, rootDir, 15_000);
+  const head = await runCommandFile("git", ["-C", rootDir, "rev-parse", "HEAD"], rootDir, 15_000);
   const headCommit = head.exitCode === 0 ? head.stdout.trim() : null;
-  const stash = await runCommand(`git -C ${shellEscape(rootDir)} stash create ${shellEscape(`wildarrange ${label}`)}`, rootDir, 30_000);
+  const stash = await runCommandFile("git", ["-C", rootDir, "stash", "create", `wildarrange ${label}`], rootDir, 30_000);
   const stashCommit = stash.exitCode === 0 ? stash.stdout.trim() : null;
   if (stash.exitCode !== 0) {
     return {
@@ -115,11 +115,11 @@ export async function applyAgentPatch(rootDir, patch, options = {}) {
   }
   const patchPath = path.join(rootDir, ".helix", "agent-runs", `admit-${Date.now()}-${process.pid}.patch`);
   await writeFile(patchPath, patch, "utf8");
-  const check = await runCommand(`git -C ${shellEscape(rootDir)} apply --check --whitespace=nowarn ${shellEscape(patchPath)}`, rootDir, options.timeoutMs);
+  const check = await runCommandFile("git", ["-C", rootDir, "apply", "--check", "--whitespace=nowarn", patchPath], rootDir, options.timeoutMs);
   if (check.exitCode !== 0) {
     throw new Error(`parallel admission patch check failed: ${check.stderr || check.stdout}`);
   }
-  const apply = await runCommand(`git -C ${shellEscape(rootDir)} apply --whitespace=nowarn ${shellEscape(patchPath)}`, rootDir, options.timeoutMs);
+  const apply = await runCommandFile("git", ["-C", rootDir, "apply", "--whitespace=nowarn", patchPath], rootDir, options.timeoutMs);
   if (apply.exitCode !== 0) {
     throw new Error(`parallel admission patch apply failed: ${apply.stderr || apply.stdout}`);
   }
@@ -139,7 +139,7 @@ export function extractPatchPaths(patch) {
 }
 
 async function gitAvailable(rootDir) {
-  const result = await runCommand(`git -C ${shellEscape(rootDir)} rev-parse --show-toplevel`, rootDir, 15_000);
+  const result = await runCommandFile("git", ["-C", rootDir, "rev-parse", "--show-toplevel"], rootDir, 15_000);
   if (result.exitCode !== 0) {
     return { available: false, reason: "project is not a Git repository" };
   }
@@ -168,8 +168,4 @@ function splitLines(value) {
 
 function uniqueStrings(values) {
   return [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))];
-}
-
-function shellEscape(value) {
-  return `'${String(value).replaceAll("'", "'\\''")}'`;
 }

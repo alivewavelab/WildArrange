@@ -16,7 +16,7 @@
  * concurrent linear run can never interleave their workspace writes with
  * each other's gate runs.
  */
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
 import { emitDecision } from "../infra/decision-log.mjs";
@@ -36,15 +36,25 @@ import {
 } from "../infra/git-coordination.mjs";
 import { readVerifiedLedgerEntries } from "../infra/ledger.mjs";
 import { buildFailureSummary } from "../infra/failure-analysis.mjs";
-import { appendWisdom, writeFailureReport, writeReviewReport } from "../infra/task-reports.mjs";
-import { writeMemoryDigest } from "../infra/memory-digest.mjs";
+import { writeFailureReport, writeReviewReport } from "../infra/task-reports.mjs";
 import { applyAgentPatch, extractPatchPaths } from "../infra/git-worktree.mjs";
-import { runCommand } from "../infra/command-runner.mjs";
-import { pathAllowed } from "../infra/path-match.mjs";
-import { runDeliveryPipeline, runPostCompletionSideEffects } from "./delivery-pipeline.mjs";
+import { runCommandFile } from "../infra/command-runner.mjs";
+import { assertPathInsideRoot, pathAllowed } from "../infra/path-match.mjs";
 import {
+  commitTaskCompletionState,
+  runDeliveryPipeline,
+  runPostCompletionSideEffects,
+  shouldFailDeliveryAttempt,
+} from "./delivery-pipeline.mjs";
+import {
+  createFileRollbackPlan,
+  loadPersistedRollbackPlan,
+  patchAlreadyApplied,
   persistAdmissionRevalidation,
+  persistRollbackPlan,
   persistPostIntegrationRecovery,
+  removePersistedRollbackPlan,
+  rollbackAdmissionChanges,
 } from "./admission-recovery.mjs";
 import {
   collectIntegrationCandidatePaths,
@@ -392,7 +402,7 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
         }
         for (const file of files) {
           const absolutePath = path.join(rootDir, file.path);
-          assertInsideRoot(rootDir, absolutePath, file.path);
+          assertPathInsideRoot(rootDir, absolutePath, file.path);
           await mkdir(path.dirname(absolutePath), { recursive: true });
           await writeFile(absolutePath, file.content, "utf8");
         }
@@ -622,28 +632,29 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
   await writeReviewReport(rootDir, taskState.planId, task, reviewResult);
 
   if (pipelineResult.status === "completed") {
-    task.status = "completed";
     task.admission_claim = null;
-    task.updatedAt = nowIso();
     // Ledger first, canonical tasks.json last (commit point): a ledger
     // outage must never leave a completed/released admission without its
     // completion ledger event (cross-review P0, round 3, 2026-07-21).
-    await appendLedger(rootDir, {
-      type: "parallel_agent_admission_completed",
-      planId: taskState.planId,
-      runId: runId || null,
-      taskId,
-      status: "completed",
-      appliedPaths: deliveryChangedPaths || [],
-      rollback: null,
-    });
     // Wisdom and digest are INSIDE the completion transaction (before the
     // canonical persist): if either write fails, the task stays verifying
     // and the recovery re-runs the whole completion (cross-review P1,
     // round 5, 2026-07-21).
-    await appendWisdom(rootDir, task, verifyResult);
-    await writeMemoryDigest(rootDir, { reason: "parallel_admission_completed", stage: "checkpoint", task, taskId });
-    await persistTaskState(rootDir, taskState);
+    await commitTaskCompletionState(rootDir, {
+      taskState,
+      task,
+      verifyResult,
+      ledgerEvent: {
+        type: "parallel_agent_admission_completed",
+        planId: taskState.planId,
+        runId: runId || null,
+        taskId,
+        status: "completed",
+        appliedPaths: deliveryChangedPaths || [],
+        rollback: null,
+      },
+      digestReason: "parallel_admission_completed",
+    });
     await removePersistedRollbackPlan(rootDir, runId, taskId);
     return {
       status: "completed",
@@ -736,7 +747,7 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
     });
   }
 
-  task.status = shouldFailAdmission(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
+  task.status = shouldFailDeliveryAttempt(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
   task.admission_claim = null;
   task.last_failure = buildFailureSummary(task, {
     workerResult,
@@ -808,53 +819,6 @@ async function advanceClaimPhaseWithinLock(rootDir, taskId, runId, phase, applie
   await persistTaskState(rootDir, taskState);
 }
 
-function rollbackPlanPath(rootDir, runId, taskId) {
-  // Lives in the run dir, NOT the per-task dir: the per-task dir belongs to
-  // the child's result/lifecycle, and a failure there (e.g. read-only dir)
-  // must interrupt the lifecycle release, not the apply phase.
-  return resolveHelixPath(rootDir, "agent-runs", runId, `${taskId}.rollback-plan.json`);
-}
-
-/**
- * The pre-image rollback plan is persisted to the run directory BEFORE the
- * first workspace write, so a crash mid-apply (or later) never orphans the
- * only copy of the original file contents (cross-review P0, round 7,
- * 2026-07-21). It is removed only after completion or a successful rollback.
- */
-async function persistRollbackPlan(rootDir, runId, taskId, rollbackPlan) {
-  await writeJsonAtomic(rollbackPlanPath(rootDir, runId, taskId), {
-    runId,
-    taskId,
-    persistedAt: nowIso(),
-    plan: rollbackPlan,
-  });
-}
-
-async function loadPersistedRollbackPlan(rootDir, runId, taskId) {
-  const stored = await readJson(rollbackPlanPath(rootDir, runId, taskId), null);
-  return stored?.plan || null;
-}
-
-async function removePersistedRollbackPlan(rootDir, runId, taskId) {
-  await rm(rollbackPlanPath(rootDir, runId, taskId), { force: true }).catch(() => {});
-}
-
-/**
- * True when the patch is already present in the workspace (git can apply it
- * in reverse). Used by the crash-resume path of an "applying"-phase claim,
- * where we cannot know whether the interrupted attempt got the patch in.
- */
-async function patchAlreadyApplied(rootDir, patch) {
-  const patchPath = path.join(rootDir, ".helix", "agent-runs", `recheck-${Date.now()}-${process.pid}.patch`);
-  await writeFile(patchPath, patch, "utf8");
-  try {
-    const reverseCheck = await runCommand(`git -C ${shellEscape(rootDir)} apply --reverse --check --whitespace=nowarn ${shellEscape(patchPath)}`, rootDir, 30_000);
-    return reverseCheck.exitCode === 0;
-  } finally {
-    await rm(patchPath, { force: true });
-  }
-}
-
 /**
  * True only when the chain-verified ledger contains a completed admission
  * event for this exact run+task. Used by the resume branch: an admission
@@ -873,62 +837,10 @@ async function hasVerifiedRunCompletionEvent(rootDir, runId, planId, taskId) {
 }
 
 async function collectActualAdmissionPaths(rootDir, fallbackPaths) {
-  const result = await runCommand("git diff --name-only -- . ':!.helix'", rootDir, 30_000);
+  const result = await runCommandFile("git", ["-C", rootDir, "diff", "--name-only", "--", ".", ":!.helix"], rootDir, 30_000);
   if (result.exitCode !== 0) return fallbackPaths;
   const paths = result.stdout.split(/\r?\n/).map((line) => normalizeRelativePath(line.trim())).filter(Boolean);
   return paths.length > 0 ? [...new Set(paths)] : fallbackPaths;
-}
-
-async function createFileRollbackPlan(rootDir, files) {
-  const entries = [];
-  for (const file of files) {
-    const absolutePath = path.join(rootDir, file.path);
-    assertInsideRoot(rootDir, absolutePath, file.path);
-    try {
-      entries.push({
-        path: file.path,
-        existed: true,
-        content: await readFile(absolutePath, "utf8"),
-      });
-    } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
-      entries.push({ path: file.path, existed: false, content: "" });
-    }
-  }
-  return { mode: "files", paths: files.map((file) => file.path), entries };
-}
-
-async function rollbackAdmissionChanges(rootDir, rollbackPlan) {
-  if (!rollbackPlan || rollbackPlan.mode === "none") {
-    return { status: "skipped", reason: "no rollback plan" };
-  }
-  try {
-    if (rollbackPlan.mode === "files") {
-      for (const entry of rollbackPlan.entries || []) {
-        const absolutePath = path.join(rootDir, entry.path);
-        assertInsideRoot(rootDir, absolutePath, entry.path);
-        if (entry.existed) {
-          await mkdir(path.dirname(absolutePath), { recursive: true });
-          await writeFile(absolutePath, entry.content, "utf8");
-        } else {
-          await rm(absolutePath, { force: true });
-        }
-      }
-    } else if (rollbackPlan.mode === "patch") {
-      const patchPath = path.join(rootDir, ".helix", "agent-runs", `rollback-${Date.now()}-${process.pid}.patch`);
-      await writeFile(patchPath, rollbackPlan.patch, "utf8");
-      const reverse = await runCommand(`git -C ${shellEscape(rootDir)} apply --reverse --whitespace=nowarn ${shellEscape(patchPath)}`, rootDir, 30_000);
-      if (reverse.exitCode !== 0) {
-        throw new Error(reverse.stderr || reverse.stdout || "git apply --reverse failed");
-      }
-    }
-    await appendLedger(rootDir, { type: "parallel_agent_admission_rolled_back", mode: rollbackPlan.mode, paths: rollbackPlan.paths || [] });
-    return { status: "rolled_back", mode: rollbackPlan.mode, paths: rollbackPlan.paths || [] };
-  } catch (error) {
-    const summary = error instanceof Error ? error.message : String(error);
-    await appendLedger(rootDir, { type: "parallel_agent_admission_rollback_failed", mode: rollbackPlan.mode, paths: rollbackPlan.paths || [], error: summary });
-    return { status: "rollback_failed", mode: rollbackPlan.mode, paths: rollbackPlan.paths || [], error: summary };
-  }
 }
 
 export async function readParallelAgentResult(rootDir, runId, taskId) {
@@ -1012,24 +924,6 @@ function normalizePatchPaths(paths) {
   return paths.map(normalizeRelativePath).filter((filePath) => filePath && !path.isAbsolute(filePath) && !filePath.startsWith("../") && !filePath.includes("/../"));
 }
 
-function assertInsideRoot(rootDir, absolutePath, displayPath) {
-  const relative = path.relative(rootDir, absolutePath);
-  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new Error(`path escapes project root: ${displayPath}`);
-  }
-}
-
-function shouldFailAdmission(task, verifyResult, scopeResult, reviewResult) {
-  if (scopeResult?.status === "fail") return true;
-  if (scopeResult && scopeResult.status !== "pass") return true;
-  if (verifyResult?.pass === true && reviewResult?.kind === "review_gate" && reviewResult.pass === false) return true;
-  return task.attempts >= task.maxAttempts;
-}
-
 function normalizeRelativePath(filePath) {
   return String(filePath || "").replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+/g, "/");
-}
-
-function shellEscape(value) {
-  return `'${String(value).replaceAll("'", "'\\''")}'`;
 }

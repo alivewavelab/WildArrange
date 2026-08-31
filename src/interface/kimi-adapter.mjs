@@ -1,4 +1,5 @@
 import path from "node:path";
+import { renderHookBridgeExecution, renderHookBridgeUtilities } from "./hook-bridge-core.mjs";
 
 export const KIMI_ADAPTER_PLUGIN_NAME = "wildarrange-adapter";
 export const KIMI_ADAPTER_VERSION = "1.0.0";
@@ -60,39 +61,8 @@ const projectDir = resolveWildArrangeProject(payload.cwd);
 if (!projectDir) process.exit(0);
 const normalizedPayload = { ...payload, cwd: projectDir };
 
-const invocation = resolveCliInvocation(cliSpec);
-const child = spawn(invocation.command, [...invocation.args, "hook", "run", "--format", "json"], {
-  cwd: projectDir,
-  stdio: ["pipe", "pipe", "pipe"],
-  windowsHide: true,
-  env: { ...process.env, HELIX_HOST_ADAPTER: "kimi" },
-});
-
-let stdout = "";
-let stderr = "";
-child.stdout.setEncoding("utf8");
-child.stderr.setEncoding("utf8");
-child.stdout.on("data", (chunk) => { stdout += chunk; });
-child.stderr.on("data", (chunk) => { stderr += chunk; });
-child.on("error", (error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
-});
-child.stdin.end(JSON.stringify(normalizedPayload));
-
-const exitCode = await new Promise((resolve) => child.on("close", (code) => resolve(code ?? 1)));
-if (exitCode !== 0) {
-  if (stderr.trim()) process.stderr.write(stderr);
-  process.exit(exitCode);
-}
-
-let result;
-try {
-  result = JSON.parse(stdout);
-} catch {
-  console.error("WildArrange Kimi bridge received invalid hook output.");
-  process.exit(1);
-}
+// Kimi 宿主合同是 fail-open：这里不增加自毁定时器；宿主 timeout 后放行。
+${renderHookBridgeExecution({ hostAdapter: "kimi", timeoutMs: null })}
 
 if (payload.hook_event_name === "Stop" && result.continuation?.required === true) {
   const reason = [
@@ -111,45 +81,11 @@ if (payload.hook_event_name === "Stop" && result.continuation?.required === true
 
 if (typeof result.output === "string") process.stdout.write(result.output);
 
-function resolveWildArrangeProject(cwd) {
-  if (typeof cwd !== "string" || !path.isAbsolute(cwd)) return null;
-  let current;
-  try {
-    current = realpathSync(cwd);
-  } catch {
-    return null;
-  }
-  while (true) {
-    const markers = [
-      path.join(current, ".helix", "config.json"),
-      path.join(current, "helix.config.json"),
-    ];
-    if (markers.some(isRegularFile)) return current;
-    if (existsSync(path.join(current, ".git"))) return null;
-    const parent = path.dirname(current);
-    if (parent === current) return null;
-    current = parent;
-  }
+function failHook(message, exitCode = 1) {
+  if (message) console.error(message);
+  process.exit(exitCode);
 }
-
-function isRegularFile(filePath) {
-  if (!existsSync(filePath)) return false;
-  try {
-    return statSync(filePath).isFile();
-  } catch {
-    return false;
-  }
-}
-
-function resolveCliInvocation(spec) {
-  if (spec.kind === "local") {
-    return { command: process.execPath, args: [spec.cliPath] };
-  }
-  return {
-    command: process.platform === "win32" ? "npx.cmd" : "npx",
-    args: ["-y", spec.packageName],
-  };
-}
+${renderHookBridgeUtilities()}
 `;
 }
 

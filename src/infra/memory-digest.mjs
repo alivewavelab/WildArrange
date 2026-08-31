@@ -11,7 +11,7 @@ import {
   resolveTaskCheckpointPath,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
-import { runCommand } from "./command-runner.mjs";
+import { runCommandFile } from "./command-runner.mjs";
 import { loadTaskState } from "./task-state-store.mjs";
 
 export async function writeMemoryDigest(rootDir, options = {}) {
@@ -111,7 +111,7 @@ async function readJsonLines(filePath) {
 }
 
 async function readGitHead(rootDir) {
-  const current = await runCommand("git rev-parse HEAD", rootDir, 15_000);
+  const current = await runCommandFile("git", ["-C", rootDir, "rev-parse", "HEAD"], rootDir, 15_000);
   if (current.exitCode === 0 && current.stdout.trim()) {
     return { value: current.stdout.trim(), source: "git" };
   }

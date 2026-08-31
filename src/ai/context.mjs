@@ -14,6 +14,7 @@ import {
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
+import { normalizeRelativePath } from "../infra/path-match.mjs";
 import { loadHelixConfig } from "../infra/runtime-config.mjs";
 import { collectGitChangedPaths } from "../infra/git-diff.mjs";
 import { renderPromptPackEntry } from "../infra/prompt-pack.mjs";
@@ -97,8 +98,8 @@ export async function buildAgentContext(rootDir, options = {}) {
   const suffix = task ? `${agent}-${task.id}` : `${agent}-general`;
   const jsonPath = resolveHelixPath(rootDir, "context-agents", `${suffix}.json`);
   const mdPath = resolveHelixPath(rootDir, "context-agents", `${suffix}.md`);
-  context.reportJsonPath = path.relative(rootDir, jsonPath);
-  context.reportMdPath = path.relative(rootDir, mdPath);
+  context.reportJsonPath = normalizeRelativePath(path.relative(rootDir, jsonPath));
+  context.reportMdPath = normalizeRelativePath(path.relative(rootDir, mdPath));
   await writeJsonAtomic(jsonPath, context);
   await writeFile(mdPath, renderAgentContextMarkdown(context), "utf8");
   await appendLedger(rootDir, {
@@ -194,8 +195,8 @@ export async function continuationDirective(rootDir, options = {}) {
   };
   const jsonPath = resolveHelixPath(rootDir, "sessions", "continuation.json");
   const mdPath = resolveHelixPath(rootDir, "sessions", "continuation.md");
-  directive.reportJsonPath = path.relative(rootDir, jsonPath);
-  directive.reportMdPath = path.relative(rootDir, mdPath);
+  directive.reportJsonPath = normalizeRelativePath(path.relative(rootDir, jsonPath));
+  directive.reportMdPath = normalizeRelativePath(path.relative(rootDir, mdPath));
   await writeJsonAtomic(jsonPath, directive);
   await writeFile(mdPath, renderContinuationMarkdown(directive), "utf8");
   await appendLedger(rootDir, { type: "continuation_checked", shouldContinue, reason: directive.reason, taskId: directive.taskId });
@@ -399,8 +400,4 @@ function renderContinuationMarkdown(directive) {
 
 function uniqueStrings(values) {
   return [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))];
-}
-
-function normalizeRelativePath(filePath) {
-  return filePath.replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+/g, "/");
 }

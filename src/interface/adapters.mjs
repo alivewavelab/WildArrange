@@ -15,6 +15,7 @@ import {
 } from "../infra/runtime-store.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
 import { initRuntime } from "../infra/runtime-bootstrap.mjs";
+import { assertPathInsideRoot, normalizeRelativePath } from "../infra/path-match.mjs";
 import {
   KIMI_ADAPTER_PLUGIN_NAME,
   buildKimiPluginManifest,
@@ -52,7 +53,7 @@ export async function installAdapter(rootDir, options = {}) {
     await writeJsonAtomic(codexRuntimePath, codexHooks);
     outputs.push({
       target: "codex",
-      path: path.relative(rootDir, codexRuntimePath),
+      path: reportPath(rootDir, codexRuntimePath),
       status: "generated",
       backup: codexRuntimeBackup,
       enforcement: "hard-after-trust",
@@ -62,7 +63,7 @@ export async function installAdapter(rootDir, options = {}) {
     const codexMirrorPath = resolveHelixPath(rootDir, "adapters", "codex", "hooks.json");
     const codexMirrorBackup = await backupExistingAdapterFile(rootDir, codexMirrorPath, backupId);
     await writeJsonAtomic(codexMirrorPath, codexHooks);
-    outputs.push({ target: "codex", path: path.relative(rootDir, codexMirrorPath), status: "generated", backup: codexMirrorBackup, enforcement: "audit-copy" });
+    outputs.push({ target: "codex", path: reportPath(rootDir, codexMirrorPath), status: "generated", backup: codexMirrorBackup, enforcement: "audit-copy" });
 
   }
 
@@ -73,7 +74,7 @@ export async function installAdapter(rootDir, options = {}) {
     await writeJsonAtomic(cursorHooksPath, buildCursorHooksConfig({ bridgeCommand: `node ${CURSOR_BRIDGE_PATH}` }));
     outputs.push({
       target: "cursor",
-      path: path.relative(rootDir, cursorHooksPath),
+      path: reportPath(rootDir, cursorHooksPath),
       status: "generated",
       backup: cursorHooksBackup,
       enforcement: "hard-in-trusted-workspace",
@@ -88,7 +89,7 @@ export async function installAdapter(rootDir, options = {}) {
       packageName,
       localCliPath: path.join(PROJECT_DIR, "bin", "helix.mjs"),
     }), "utf8");
-    outputs.push({ target: "cursor", path: path.relative(rootDir, cursorBridgePath), status: "generated", backup: cursorBridgeBackup, enforcement: "hook-bridge" });
+    outputs.push({ target: "cursor", path: reportPath(rootDir, cursorBridgePath), status: "generated", backup: cursorBridgeBackup, enforcement: "hook-bridge" });
 
     const cursorDir = path.join(rootDir, ".cursor", "rules");
     await mkdir(cursorDir, { recursive: true });
@@ -98,7 +99,7 @@ export async function installAdapter(rootDir, options = {}) {
       await unlink(legacyCursorRulePath);
       outputs.push({
         target: "cursor",
-        path: path.relative(rootDir, legacyCursorRulePath),
+        path: reportPath(rootDir, legacyCursorRulePath),
         status: "legacy-removed",
         backup: legacyRuleBackup,
         enforcement: "retired-managed-rule",
@@ -110,8 +111,8 @@ export async function installAdapter(rootDir, options = {}) {
     const cursorReadmePath = resolveHelixPath(rootDir, "adapters", "cursor", "README.md");
     const cursorReadmeBackup = await backupExistingAdapterFile(rootDir, cursorReadmePath, backupId);
     await writeFile(cursorReadmePath, renderCursorAdapterReadme({ hookCommand }), "utf8");
-    outputs.push({ target: "cursor", path: path.relative(rootDir, cursorRulePath), status: "generated", backup: cursorRuleBackup, enforcement: "soft" });
-    outputs.push({ target: "cursor", path: path.relative(rootDir, cursorReadmePath), status: "generated", backup: cursorReadmeBackup, enforcement: "documentation" });
+    outputs.push({ target: "cursor", path: reportPath(rootDir, cursorRulePath), status: "generated", backup: cursorRuleBackup, enforcement: "soft" });
+    outputs.push({ target: "cursor", path: reportPath(rootDir, cursorReadmePath), status: "generated", backup: cursorReadmeBackup, enforcement: "documentation" });
 
     const cursorCommandsDir = path.join(rootDir, ".cursor", "commands");
     await mkdir(cursorCommandsDir, { recursive: true });
@@ -119,7 +120,7 @@ export async function installAdapter(rootDir, options = {}) {
       const commandPath = path.join(cursorCommandsDir, `${command.name}.md`);
       const commandBackup = await backupExistingAdapterFile(rootDir, commandPath, backupId);
       await writeFile(commandPath, renderCursorCommand(command), "utf8");
-      outputs.push({ target: "cursor", path: path.relative(rootDir, commandPath), status: "generated", backup: commandBackup, enforcement: "slash-command" });
+      outputs.push({ target: "cursor", path: reportPath(rootDir, commandPath), status: "generated", backup: commandBackup, enforcement: "slash-command" });
     }
   }
 
@@ -130,7 +131,7 @@ export async function installAdapter(rootDir, options = {}) {
       await mkdir(path.dirname(skillPath), { recursive: true });
       const skillBackup = await backupExistingAdapterFile(rootDir, skillPath, backupId);
       await writeFile(skillPath, renderCodexSkill(command), "utf8");
-      outputs.push({ target: skillTarget, path: path.relative(rootDir, skillPath), status: "generated", backup: skillBackup, enforcement: "slash-command" });
+      outputs.push({ target: skillTarget, path: reportPath(rootDir, skillPath), status: "generated", backup: skillBackup, enforcement: "slash-command" });
     }
   }
 
@@ -170,7 +171,7 @@ export async function installAdapter(rootDir, options = {}) {
       else await writeFile(file.path, file.content, "utf8");
       outputs.push({
         target: "kimi",
-        path: path.relative(rootDir, file.path),
+        path: reportPath(rootDir, file.path),
         status: "generated",
         backup,
         enforcement: file.enforcement,
@@ -192,8 +193,8 @@ export async function installAdapter(rootDir, options = {}) {
   };
   const reportJsonPath = resolveHelixPath(rootDir, "adapters", "install-report.json");
   const reportMdPath = resolveHelixPath(rootDir, "adapters", "install-report.md");
-  report.reportJsonPath = path.relative(rootDir, reportJsonPath);
-  report.reportMdPath = path.relative(rootDir, reportMdPath);
+  report.reportJsonPath = reportPath(rootDir, reportJsonPath);
+  report.reportMdPath = reportPath(rootDir, reportMdPath);
   await writeJsonAtomic(reportJsonPath, report);
   await writeFile(reportMdPath, renderAdapterInstallReport(report), "utf8");
   await appendLedger(rootDir, { type: "adapter_installed", target, mode, packageName, outputCount: outputs.length });
@@ -239,7 +240,7 @@ export async function uninstallAdapter(rootDir, options = {}) {
     for (const command of slashCommands) {
       const skillPath = path.join(rootDir, ".agents", "skills", command.name, "SKILL.md");
       if (siblingStillUsesSharedSkills) {
-        outputs.push({ target: "shared", path: path.relative(rootDir, skillPath), status: "retained-shared" });
+        outputs.push({ target: "shared", path: reportPath(rootDir, skillPath), status: "retained-shared" });
       } else {
         candidates.push({ target: target === "all" ? "shared" : target, path: skillPath });
       }
@@ -247,7 +248,7 @@ export async function uninstallAdapter(rootDir, options = {}) {
   }
 
   for (const candidate of candidates) {
-    const relativePath = path.relative(rootDir, candidate.path);
+    const relativePath = reportPath(rootDir, candidate.path);
     if (!existsSync(candidate.path)) {
       outputs.push({ target: candidate.target, path: relativePath, status: "missing" });
       continue;
@@ -267,8 +268,8 @@ export async function uninstallAdapter(rootDir, options = {}) {
   };
   const reportJsonPath = resolveHelixPath(rootDir, "adapters", "uninstall-report.json");
   const reportMdPath = resolveHelixPath(rootDir, "adapters", "uninstall-report.md");
-  report.reportJsonPath = path.relative(rootDir, reportJsonPath);
-  report.reportMdPath = path.relative(rootDir, reportMdPath);
+  report.reportJsonPath = reportPath(rootDir, reportJsonPath);
+  report.reportMdPath = reportPath(rootDir, reportMdPath);
   await writeJsonAtomic(reportJsonPath, report);
   await writeFile(reportMdPath, renderAdapterUninstallReport(report), "utf8");
   await appendLedger(rootDir, { type: "adapter_uninstalled", target, outputCount: outputs.length });
@@ -286,7 +287,7 @@ export async function restoreAdapterBackup(rootDir, options = {}) {
   }
   const backupRoot = resolveHelixPath(rootDir, "adapters", "backups", backupId);
   if (!existsSync(backupRoot)) {
-    throw new Error(`adapter backup not found: ${path.relative(rootDir, backupRoot)}`);
+    throw new Error(`adapter backup not found: ${reportPath(rootDir, backupRoot)}`);
   }
 
   const files = await listBackupFiles(backupRoot);
@@ -294,7 +295,7 @@ export async function restoreAdapterBackup(rootDir, options = {}) {
   for (const relativePath of files) {
     const sourcePath = path.join(backupRoot, relativePath);
     const targetPath = path.join(rootDir, relativePath);
-    assertInsideRoot(rootDir, targetPath, relativePath);
+    assertPathInsideRoot(rootDir, targetPath, relativePath, "adapter restore path");
     const backup = await backupExistingAdapterFile(rootDir, targetPath, createAdapterBackupId("pre-restore"));
     await mkdir(path.dirname(targetPath), { recursive: true });
     await copyFile(sourcePath, targetPath);
@@ -314,8 +315,8 @@ export async function restoreAdapterBackup(rootDir, options = {}) {
   };
   const reportJsonPath = resolveHelixPath(rootDir, "adapters", "restore-report.json");
   const reportMdPath = resolveHelixPath(rootDir, "adapters", "restore-report.md");
-  report.reportJsonPath = path.relative(rootDir, reportJsonPath);
-  report.reportMdPath = path.relative(rootDir, reportMdPath);
+  report.reportJsonPath = reportPath(rootDir, reportJsonPath);
+  report.reportMdPath = reportPath(rootDir, reportMdPath);
   await writeJsonAtomic(reportJsonPath, report);
   await writeFile(reportMdPath, renderAdapterRestoreReport(report), "utf8");
   await appendLedger(rootDir, { type: "adapter_restored", backupId, outputCount: outputs.length });
@@ -328,11 +329,11 @@ function createAdapterBackupId(prefix) {
 
 async function backupExistingAdapterFile(rootDir, filePath, backupId) {
   if (!existsSync(filePath)) return null;
-  const relativePath = path.relative(rootDir, filePath);
+  const relativePath = reportPath(rootDir, filePath);
   const backupPath = resolveHelixPath(rootDir, "adapters", "backups", backupId, relativePath);
   await mkdir(path.dirname(backupPath), { recursive: true });
   await copyFile(filePath, backupPath);
-  return path.relative(rootDir, backupPath);
+  return reportPath(rootDir, backupPath);
 }
 
 function adapterCliPrefix({ mode, packageName }) {
@@ -612,13 +613,6 @@ async function listBackupFiles(rootDir, baseDir = rootDir) {
   return files.sort();
 }
 
-function assertInsideRoot(rootDir, absolutePath, displayPath) {
-  const relative = path.relative(rootDir, absolutePath);
-  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new Error(`adapter restore path escapes project root: ${displayPath}`);
-  }
-}
-
-function normalizeRelativePath(filePath) {
-  return String(filePath || "").replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+/g, "/");
+function reportPath(rootDir, filePath) {
+  return normalizeRelativePath(path.relative(rootDir, filePath));
 }

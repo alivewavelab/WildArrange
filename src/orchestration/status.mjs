@@ -14,6 +14,7 @@ import {
 } from "../infra/runtime-store.mjs";
 import { appendLedger, readVerifiedLedgerEntries } from "../infra/ledger.mjs";
 import { evaluateGateArming } from "../infra/gate-arming.mjs";
+import { normalizeRelativePath } from "../infra/path-match.mjs";
 import { loadTaskLedger } from "../infra/task-state-store.mjs";
 import { loadHelixConfig } from "../infra/runtime-config.mjs";
 import { listChangeRequests } from "./change-governance.mjs";
@@ -37,7 +38,7 @@ export async function writeWorkflowSummary(rootDir, options = {}) {
     reviewCommands: task.review_commands || [],
     standardsCommands: task.standards_commands || [],
     checkpointPath: task.status === "completed" && taskState?.planId
-      ? path.relative(rootDir, resolveTaskCheckpointPath(rootDir, taskState.planId, task.id))
+      ? normalizeRelativePath(path.relative(rootDir, resolveTaskCheckpointPath(rootDir, taskState.planId, task.id)))
       : null,
     reviewReportPath: task.last_review_result?.reportMdPath || null,
     failureReportPath: task.last_failure?.reportMdPath || null,
@@ -58,8 +59,8 @@ export async function writeWorkflowSummary(rootDir, options = {}) {
   };
   const jsonPath = resolveHelixPath(rootDir, "reports", "workflow-summary.json");
   const mdPath = resolveHelixPath(rootDir, "reports", "workflow-summary.md");
-  summary.reportJsonPath = path.relative(rootDir, jsonPath);
-  summary.reportMdPath = path.relative(rootDir, mdPath);
+  summary.reportJsonPath = normalizeRelativePath(path.relative(rootDir, jsonPath));
+  summary.reportMdPath = normalizeRelativePath(path.relative(rootDir, mdPath));
   await writeJsonAtomic(jsonPath, summary);
   await writeFile(mdPath, renderWorkflowSummaryMarkdown(summary), "utf8");
   await appendLedger(rootDir, {

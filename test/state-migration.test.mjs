@@ -800,6 +800,6 @@ test("state restore recreates a top-level dangling relative symlink from an arch
     const restored = await restoreRuntimeStateBackup(dir, { backupId: archived.backupId });
     assert.ok(restored.restored.includes(".helix/artifacts/P1-T001"));
     assert.equal((await lstat(artifactLink)).isSymbolicLink(), true);
-    assert.equal(await readlink(artifactLink), "./missing-payload.json");
+    assert.equal((await readlink(artifactLink)).replaceAll("\\", "/"), "./missing-payload.json");
   });
 });

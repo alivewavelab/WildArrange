@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { chmod, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -23,6 +23,7 @@ import {
   registerCoordinationDevice,
 } from "../src/orchestration/remote-ownership.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
+import { collectGitChangedPaths } from "../src/infra/git-diff.mjs";
 import { loadHelixConfig } from "../src/infra/runtime-config.mjs";
 import { readJson } from "../src/infra/runtime-store.mjs";
 import {
@@ -36,6 +37,25 @@ import {
 } from "../src/orchestration/integration.mjs";
 
 const execFileAsync = promisify(execFile);
+
+test("git changed-path probe uses argv safely and excludes .helix", async () => {
+  await withTempDir(async (dir) => {
+    const repo = path.join(dir, "repo with spaces");
+    await mkdir(repo, { recursive: true });
+    await git(repo, ["init", "--initial-branch=main"]);
+    await writeFile(path.join(repo, "tracked.txt"), "baseline\n", "utf8");
+    await git(repo, ["add", "tracked.txt"]);
+    await git(repo, ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "initial"]);
+    await writeFile(path.join(repo, "tracked.txt"), "changed\n", "utf8");
+    await writeFile(path.join(repo, "new file.txt"), "new\n", "utf8");
+    await mkdir(path.join(repo, ".helix"), { recursive: true });
+    await writeFile(path.join(repo, ".helix", "runtime.json"), "{}\n", "utf8");
+
+    const changed = await collectGitChangedPaths(repo);
+    assert.equal(changed.available, true);
+    assert.deepEqual(changed.paths, ["new file.txt", "tracked.txt"]);
+  });
+});
 
 test("git coordination defaults to guarded and strict mode restores mandatory safety flags", async () => {
   await withTempDir(async (dir) => {
@@ -165,7 +185,7 @@ test("handoff commit transfers the task and makes the previous device fail close
     assert.equal(accepted.status, "accepted");
     assert.equal(accepted.task.coordination.deviceName, "device-b");
     assert.equal(accepted.task.coordination.remoteHeadSha, accepted.acceptSha);
-    assert.equal(await readFile(path.join(cloneB, "src", "task.txt"), "utf8"), "handoff payload\n");
+    assert.equal((await readFile(path.join(cloneB, "src", "task.txt"), "utf8")).replaceAll("\r\n", "\n"), "handoff payload\n");
     await assert.rejects(
       readFile(path.join(cloneB, ".helix", "tracked-runtime.json"), "utf8"),
       /ENOENT/,
@@ -251,11 +271,7 @@ test("handoff push refuses source changes made after prepare", async () => {
 test("guarded mode gives writable parallel agents a worktree and one local run owner", async () => {
   await withRemoteClones(async ({ cloneA }) => {
     await initializeTaskRuntime(cloneA, "device-a");
-    const command = [
-      "node -e",
-      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'ready',files:[{path:'src/task.txt',content:'ok\\n'}]}));"),
-      "{outputJson}",
-    ].join(" ");
+    const command = resultCommand("src/task.txt", "ok\n");
     const outcomes = await Promise.allSettled([
       runParallelAgents(cloneA, { taskIds: ["T001"], agent: "ZhuRong", command }),
       runParallelAgents(cloneA, { taskIds: ["T001"], agent: "ZhuRong", command }),
@@ -321,11 +337,7 @@ test("adversarial round 2 integration: admission rolls back before checkpoint wh
       }],
     }, null, 2), "utf8");
     await importPlan(cloneA, planPath);
-    const command = [
-      "node -e",
-      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'ready',files:[{path:'src/admit.txt',content:'ok\\n'}]}));"),
-      "{outputJson}",
-    ].join(" ");
+    const command = resultCommand("src/admit.txt", "ok\n");
     const batch = await runParallelAgents(cloneA, { taskIds: ["T001"], agent: "ZhuRong", command });
     const admitted = await admitParallelAgentResult(cloneA, { runId: batch.runId, taskId: "T001" });
     assert.equal(admitted.status, "revalidation_required");
@@ -492,13 +504,13 @@ test("checkpoint failure after remote integration keeps ownership and resumes wi
       agent: "ZhuRong",
       command: resultCommand("src/recover.txt", "recover\n"),
     });
-    const checkpointsDir = path.join(cloneA, ".helix", "checkpoints");
-    await chmod(checkpointsDir, 0o555);
+    const checkpointPlanDir = path.join(cloneA, ".helix", "checkpoints", "P-GIT");
+    await replaceDirectoryWithBlockingFile(checkpointPlanDir);
     let first;
     try {
       first = await admitParallelAgentResult(cloneA, { runId: batch.runId, taskId: "T001" });
     } finally {
-      await chmod(checkpointsDir, 0o755);
+      await restoreBlockedDirectory(checkpointPlanDir);
     }
     assert.equal(first.status, "recovery_required");
     assert.equal(first.rollback.reason, "remote_integration_already_pushed");
@@ -840,13 +852,13 @@ async function createCheckpointFailureAfterIntegration(rootDir, filePath) {
     agent: "ZhuRong",
     command: resultCommand(filePath, "recover\n"),
   });
-  const checkpointsDir = path.join(rootDir, ".helix", "checkpoints");
-  await chmod(checkpointsDir, 0o555);
+  const checkpointPlanDir = path.join(rootDir, ".helix", "checkpoints", "P-GIT");
+  await replaceDirectoryWithBlockingFile(checkpointPlanDir);
   let result;
   try {
     result = await admitParallelAgentResult(rootDir, { runId: batch.runId, taskId: "T001" });
   } finally {
-    await chmod(checkpointsDir, 0o755);
+    await restoreBlockedDirectory(checkpointPlanDir);
   }
   assert.equal(result.status, "recovery_required");
   const intent = await readJson(
@@ -855,6 +867,16 @@ async function createCheckpointFailureAfterIntegration(rootDir, filePath) {
   );
   assert.equal(intent.status, "pushed");
   return { batch, result, integratedSha: intent.integrationSha };
+}
+
+async function replaceDirectoryWithBlockingFile(dirPath) {
+  await rm(dirPath, { recursive: true, force: true });
+  await writeFile(dirPath, "blocks checkpoint child paths\n", "utf8");
+}
+
+async function restoreBlockedDirectory(dirPath) {
+  await rm(dirPath, { force: true });
+  await mkdir(dirPath, { recursive: true });
 }
 
 async function waitForRemoteTaskBranch(rootDir, branch) {
@@ -867,9 +889,11 @@ async function waitForRemoteTaskBranch(rootDir, branch) {
 }
 
 function resultCommand(filePath, content) {
+  const encodedPath = Buffer.from(filePath, "utf8").toString("base64");
+  const encodedContent = Buffer.from(content, "utf8").toString("base64");
   return [
     "node -e",
-    JSON.stringify(`const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'ready',files:[{path:${JSON.stringify(filePath)},content:${JSON.stringify(content)}}]}));`),
+    JSON.stringify(`const fs=require('fs');const decode=(value)=>Buffer.from(value,'base64').toString('utf8');fs.writeFileSync(process.argv[1],JSON.stringify({summary:'ready',files:[{path:decode('${encodedPath}'),content:decode('${encodedContent}')}] }));`),
     "{outputJson}",
   ].join(" ");
 }

@@ -4,10 +4,9 @@
  * The gateway converts capability throws into fail envelopes, so every
  * completion path has to check the checkpoint envelope status explicitly.
  *
- * Sabotage technique: chmod the pre-created .helix/checkpoints directory to
- * read-only (0o555). ensureHelixDirs' recursive mkdir tolerates an existing
- * read-only dir, but writeJsonAtomic's temp-file write inside it fails with
- * EACCES — exactly the "disk said no at the last moment" scenario.
+ * Sabotage technique: occupy the exact plan checkpoint directory with a file.
+ * This behaves the same on Windows and POSIX: ensureHelixDirs still succeeds,
+ * but the final plan/task evidence path cannot be created.
  */
 import assert from "node:assert/strict";
 import { chmod, cp, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
@@ -40,15 +39,19 @@ async function withTempDir(fn) {
 }
 
 function nodeEval(source) {
-  return `node -e ${JSON.stringify(source.replace(/\s*\n\s*/g, " ").trim())}`;
+  const encoded = Buffer.from(source.replace(/\s*\n\s*/g, " ").trim(), "utf8").toString("base64");
+  return `node -e "eval(Buffer.from('${encoded}','base64').toString())"`;
 }
 
 async function sabotageCheckpoints(dir) {
-  await chmod(resolveHelixPath(dir, "checkpoints"), 0o555);
+  const { planId } = await loadTaskState(dir);
+  await writeFile(resolveHelixPath(dir, "checkpoints", planId), "occupied by fault injection\n", "utf8");
 }
 
 async function repairCheckpoints(dir) {
-  await chmod(resolveHelixPath(dir, "checkpoints"), 0o755);
+  const { planId } = await loadTaskState(dir);
+  await rm(resolveHelixPath(dir, "checkpoints", planId), { force: true });
+  await mkdir(resolveHelixPath(dir, "checkpoints", planId), { recursive: true });
 }
 
 async function importPassingPlan(dir, planFileName = "ckpt-plan.json") {
@@ -88,7 +91,7 @@ test("adversarial: delivery pipeline reports checkpoint_failed instead of comple
     const checkpointStep = result.steps.find((step) => step.capability === "checkpoint");
     assert.equal(checkpointStep.status, "fail");
     assert.ok(result.evidence.checkpointError, "expected checkpointError evidence");
-    assert.match(result.evidence.checkpointError.message, /EACCES|permission denied/i);
+    assert.match(result.evidence.checkpointError.message, /EACCES|EPERM|EEXIST|permission denied/i);
     // acceptance-proof itself passed; only the durable write failed
     const proofStep = result.steps.find((step) => step.capability === "acceptance-proof");
     assert.equal(proofStep.status, "pass");
@@ -105,9 +108,8 @@ test("adversarial: a throwing acceptance-proof capability blocks the pipeline an
 
     // Sabotage the acceptance report directory: writeAcceptanceProof throws,
     // the gateway converts it into a fail envelope with null evidence.
-    const acceptanceDir = resolveHelixPath(dir, "reports", "acceptance");
-    await mkdir(acceptanceDir, { recursive: true });
-    await chmod(acceptanceDir, 0o555);
+    const acceptancePlanDir = resolveHelixPath(dir, "reports", "acceptance", plan.id);
+    await writeFile(acceptancePlanDir, "occupied by fault injection\n", "utf8");
     try {
       const result = await runDeliveryPipeline(dir, plan.id, task, {
         initialEvidence: {
@@ -120,7 +122,7 @@ test("adversarial: a throwing acceptance-proof capability blocks the pipeline an
       assert.equal(proofStep.status, "fail");
       assert.ok(proofStep.error, "expected the throw to surface as envelope error");
     } finally {
-      await chmod(acceptanceDir, 0o755);
+      await rm(acceptancePlanDir, { force: true });
     }
   });
 });
@@ -257,7 +259,7 @@ test("adversarial: persistTaskState keeps canonical tasks.json at the old state 
     try {
       const taskState = await loadTaskState(dir);
       taskState.tasks[0].status = "completed";
-      await assert.rejects(() => persistTaskState(dir, taskState), /EACCES|permission denied/i);
+      await assert.rejects(() => persistTaskState(dir, taskState), /EACCES|EPERM|permission denied/i);
       const reloaded = await loadTaskState(dir);
       assert.equal(reloaded.tasks[0].status, "pending", "canonical state must not advance when a derived write fails");
     } finally {
@@ -299,7 +301,7 @@ test("adversarial: node checkpoint does not persist completed when the completio
 
     await sabotageLedger(dir);
     try {
-      await assert.rejects(() => runWorkflowNode(dir, "checkpoint", { taskId: "T001" }), /EACCES|permission denied/i);
+      await assert.rejects(() => runWorkflowNode(dir, "checkpoint", { taskId: "T001" }), /EACCES|EPERM|permission denied/i);
     } finally {
       await repairLedger(dir);
     }
@@ -335,15 +337,14 @@ test("adversarial: parallel admission never reaches completed/released when the 
     await importPlan(dir, planPath);
 
     const command = [
-      "node -e",
-      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
+      nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
     const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
 
     await sabotageLedger(dir);
     try {
-      await assert.rejects(() => admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" }), /EACCES|permission denied/i);
+      await assert.rejects(() => admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" }), /EACCES|EPERM|permission denied/i);
     } finally {
       await repairLedger(dir);
     }
@@ -376,7 +377,7 @@ test("adversarial: linear runNextTask never yields completed during a ledger out
 
     await sabotageLedger(dir);
     try {
-      await assert.rejects(() => runNextTask(dir), /EACCES|permission denied/i);
+      await assert.rejects(() => runNextTask(dir), /EACCES|EPERM|permission denied/i);
     } finally {
       await repairLedger(dir);
     }
@@ -418,8 +419,7 @@ test("adversarial: parallel admission does not release the child result when the
     await importPlan(dir, planPath);
 
     const command = [
-      "node -e",
-      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
+      nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
     const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
@@ -461,12 +461,13 @@ test("adversarial: an interrupted completion transaction is visible to doctor an
     // completed, but the plan-mirror write fails mid-persist — the canonical
     // tasks.json save is never reached. This is the exact divergence window
     // from the round-4 cross-review.
-    const plansDir = resolveHelixPath(dir, "plans");
-    await chmod(plansDir, 0o555);
+    const { planId } = await loadTaskState(dir);
+    const planMirrorPath = resolveHelixPath(dir, "plans", `${planId}.json`);
+    await chmod(planMirrorPath, 0o444);
     try {
-      await assert.rejects(() => runWorkflowNode(dir, "checkpoint", { taskId: "T001" }), /EACCES|permission denied/i);
+      await assert.rejects(() => runWorkflowNode(dir, "checkpoint", { taskId: "T001" }), /EACCES|EPERM|permission denied/i);
     } finally {
-      await chmod(plansDir, 0o755);
+      await chmod(planMirrorPath, 0o644);
     }
 
     const interrupted = await loadTaskState(dir);
@@ -550,8 +551,7 @@ test("adversarial: parallel admission resumes idempotently after a lifecycle wri
     await importPlan(dir, planPath);
 
     const command = [
-      "node -e",
-      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
+      nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
     const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
@@ -560,11 +560,12 @@ test("adversarial: parallel admission resumes idempotently after a lifecycle wri
     // (task persisted completed) but updateAgentRunLifecycle cannot write
     // result.json — the exact interruption from the cross-review.
     const runTaskDir = resolveHelixPath(dir, "agent-runs", batch.runId, "T001");
-    await chmod(runTaskDir, 0o555);
+    const resultPath = path.join(runTaskDir, "result.json");
+    await chmod(resultPath, 0o444);
     try {
-      await assert.rejects(() => admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" }), /EACCES|permission denied/i);
+      await assert.rejects(() => admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" }), /EACCES|EPERM|permission denied/i);
     } finally {
-      await chmod(runTaskDir, 0o755);
+      await chmod(resultPath, 0o644);
     }
     const stateAfterCrash = await loadTaskState(dir);
     assert.equal(stateAfterCrash.tasks[0].status, "completed", "sanity: the interruption happened after the completed persist");
@@ -609,22 +610,22 @@ test("adversarial: a mid-apply failure rolls the workspace back and releases the
     await importPlan(dir, planPath);
 
     const command = [
-      "node -e",
-      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'two files', files:[{path:'src/a.txt', content:'A\\n'},{path:'src/sub/b.txt', content:'B\\n'}]}));"),
+      nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'two files', files:[{path:'src/a.txt', content:'A\\n'},{path:'src/sub/b.txt', content:'B\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
     const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
 
     // Read-only src/sub: the first file write succeeds, the second fails.
-    await mkdir(path.join(dir, "src", "sub"), { recursive: true });
-    await chmod(path.join(dir, "src", "sub"), 0o555);
+    await mkdir(path.join(dir, "src"), { recursive: true });
+    await writeFile(path.join(dir, "src", "sub"), "occupied by fault injection\n", "utf8");
     try {
       await assert.rejects(
         () => admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" }),
         /parallel admission failed while applying files/,
       );
     } finally {
-      await chmod(path.join(dir, "src", "sub"), 0o755);
+      await rm(path.join(dir, "src", "sub"), { force: true });
+      await mkdir(path.join(dir, "src", "sub"), { recursive: true });
     }
 
     // Workspace rolled back: the half-applied first file is gone again.
@@ -673,8 +674,7 @@ test("adversarial: a run whose admission failed earlier cannot fake-resume a tas
     // Run R proposes content that fails verify: its admission is rejected
     // and rolled back, but it leaves admission evidence with its runId.
     const command = [
-      "node -e",
-      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'bad content', files:[{path:'src/out.txt', content:'from child\\n'}]}));"),
+      nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'bad content', files:[{path:'src/out.txt', content:'from child\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
     const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
@@ -727,7 +727,7 @@ test("adversarial: a wisdom write failure keeps the completion recoverable inste
     await writeFile(wisdomPath, "", "utf8");
     await chmod(wisdomPath, 0o444);
     try {
-      await assert.rejects(() => runWorkflowNode(dir, "checkpoint", { taskId: "T001" }), /EACCES|permission denied/i);
+      await assert.rejects(() => runWorkflowNode(dir, "checkpoint", { taskId: "T001" }), /EACCES|EPERM|permission denied/i);
     } finally {
       await chmod(wisdomPath, 0o644);
     }
@@ -752,13 +752,23 @@ test("adversarial: a post-commit snapshot failure does not un-complete the task 
     await runWorkflowNode(dir, "scope", { taskId: "T001" });
     await runWorkflowNode(dir, "review", { taskId: "T001" });
 
-    // Sabotage the snapshots dir only for the final post-commit snapshot.
-    await chmod(resolveHelixPath(dir, "snapshots"), 0o555);
+    // Freeze the timestamp and occupy the exact dynamic snapshot target.
+    // The snapshots directory itself remains healthy, so only the final
+    // post-commit side effect fails on both Windows and POSIX.
+    const RealDate = globalThis.Date;
+    const fixedIso = "2026-08-31T12:34:56.000Z";
+    globalThis.Date = class FixedDate extends RealDate {
+      constructor(...args) { super(...(args.length > 0 ? args : [fixedIso])); }
+      static now() { return new RealDate(fixedIso).getTime(); }
+    };
+    const blockedSnapshotPath = resolveHelixPath(dir, "snapshots", `${fixedIso.replaceAll(":", "-")}-node_checkpoint_completed.json`);
+    await mkdir(blockedSnapshotPath, { recursive: true });
     let completed;
     try {
       completed = await runWorkflowNode(dir, "checkpoint", { taskId: "T001" });
     } finally {
-      await chmod(resolveHelixPath(dir, "snapshots"), 0o755);
+      globalThis.Date = RealDate;
+      await rm(blockedSnapshotPath, { recursive: true, force: true });
     }
     assert.equal(completed.status, "completed", "post-commit snapshot failure must not fail the completion");
     assert.equal(completed.sideEffectWarnings.length, 1);
@@ -796,8 +806,7 @@ test("adversarial: a run missing from index.json is rediscovered instead of stay
     await importPlan(dir, planPath);
 
     const command = [
-      "node -e",
-      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
+      nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
     const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
@@ -841,8 +850,7 @@ test("adversarial: two runs admitting the same task concurrently produce exactly
     await importPlan(dir, planPath);
 
     const command = [
-      "node -e",
-      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'one', files:[{path:'src/one.txt', content:'one\\n'}]}));"),
+      nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'one', files:[{path:'src/one.txt', content:'one\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
     const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
@@ -896,8 +904,7 @@ test("adversarial: duplicate admission calls from one run cannot downgrade a rel
     }, null, 2));
     await importPlan(dir, planPath);
     const command = [
-      "node -e",
-      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'same', files:[{path:'src/same.txt', content:'same\\n'}]}));"),
+      nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'same', files:[{path:'src/same.txt', content:'same\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
     const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
@@ -941,8 +948,7 @@ test("adversarial: a crash while finalizing keeps the workspace and resumes with
     await importPlan(dir, planPath);
 
     const command = [
-      "node -e",
-      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact', files:[{path:'src/artifact.txt', content:'good\\n'}]}));"),
+      nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact', files:[{path:'src/artifact.txt', content:'good\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
     const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
@@ -1021,8 +1027,7 @@ test("adversarial: two tasks with overlapping paths admit concurrently without d
     await importPlan(dir, planPath);
 
     const command = [
-      "node -e",
-      JSON.stringify("const fs=require('fs'); const t=process.argv[2]; fs.writeFileSync(process.argv[1], JSON.stringify({summary:t, files:[{path:'src/shared.txt', content:(t==='T001'?'alpha':'beta')+'\\n'}]}));"),
+      nodeEval("const fs=require('fs'); const t=process.argv[2]; fs.writeFileSync(process.argv[1], JSON.stringify({summary:t, files:[{path:'src/shared.txt', content:(t==='T001'?'alpha':'beta')+'\\n'}]}));"),
       "{outputJson}",
       "{taskId}",
     ].join(" ");
@@ -1066,8 +1071,7 @@ test("adversarial: a linear run and a parallel admission writing the same file d
     await importPlan(dir, planPath);
 
     const command = [
-      "node -e",
-      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'parallel', files:[{path:'src/shared.txt', content:'parallel\\n'}]}));"),
+      nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'parallel', files:[{path:'src/shared.txt', content:'parallel\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
     const batch = await runParallelAgents(dir, { taskIds: ["T002"], agent: "ZhuRong", command });
@@ -1107,8 +1111,7 @@ test("adversarial: a failing admission's rollback can never clobber a successor'
     await importPlan(dir, planPath);
 
     const command = [
-      "node -e",
-      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'bad', files:[{path:'src/out.txt', content:'bad\\n'}]}));"),
+      nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'bad', files:[{path:'src/out.txt', content:'bad\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
     const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
@@ -1166,8 +1169,7 @@ test("adversarial: an applying-phase crash cannot lose the original file content
     await importPlan(dir, planPath);
 
     const command = [
-      "node -e",
-      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'mutates data', files:[{path:'src/data.txt', content:'after\\n'}]}));"),
+      nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'mutates data', files:[{path:'src/data.txt', content:'after\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
     const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
@@ -1222,8 +1224,8 @@ test("adversarial: rollback failure keeps ownership until the same run recovers 
       tasks: [
         {
           id: "T001",
-          subject: "Reject a new file after making its directory read-only",
-          verify_commands: [nodeEval("const fs=require('fs'); fs.chmodSync('src/locked', 0o555); process.exit(1)")],
+          subject: "Reject a new file after replacing it with a non-empty directory",
+          verify_commands: [nodeEval("const fs=require('fs'); fs.unlinkSync('src/locked/leak.txt'); fs.mkdirSync('src/locked/leak.txt'); fs.writeFileSync('src/locked/leak.txt/blocker.txt','occupied'); process.exit(1)")],
           review_commands: ["node --version"],
           writable_paths: ["src/**"],
         },
@@ -1232,8 +1234,7 @@ test("adversarial: rollback failure keeps ownership until the same run recovers 
     await importPlan(dir, planPath);
 
     const command = [
-      "node -e",
-      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'adds rejected file', files:[{path:'src/locked/leak.txt', content:'after\\n'}]}));"),
+      nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'adds rejected file', files:[{path:'src/locked/leak.txt', content:'after\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
     const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
@@ -1241,7 +1242,7 @@ test("adversarial: rollback failure keeps ownership until the same run recovers 
     const blocked = await admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" });
     assert.equal(blocked.status, "recovery_required");
     assert.equal(blocked.rollback.status, "rollback_failed");
-    assert.equal((await readFile(path.join(dir, "src", "locked", "leak.txt"), "utf8")).trim(), "after");
+    assert.equal((await readFile(path.join(dir, "src", "locked", "leak.txt", "blocker.txt"), "utf8")).trim(), "occupied");
     const blockedState = await loadTaskState(dir);
     assert.equal(blockedState.tasks[0].status, "verifying");
     assert.equal(blockedState.tasks[0].admission_claim?.runId, batch.runId, "rollback failure must retain ownership");
@@ -1251,7 +1252,7 @@ test("adversarial: rollback failure keeps ownership until the same run recovers 
     // Repair the filesystem and make the verifier fail without sabotaging it
     // again. The same run reclaims its finalizing claim, rolls back the file,
     // then releases ownership and removes the consumed rollback plan.
-    await chmod(path.join(dir, "src", "locked"), 0o755);
+    await rm(path.join(dir, "src", "locked", "leak.txt"), { recursive: true, force: true });
     blockedState.tasks[0].verify_commands = [nodeEval("process.exit(1)")];
     await persistTaskState(dir, blockedState);
     const recovered = await admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" });
@@ -1285,8 +1286,7 @@ test("adversarial: missing rollback authority fails closed and cannot be hijacke
     }, null, 2));
     await importPlan(dir, planPath);
     const command = [
-      "node -e",
-      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'changes data', files:[{path:'src/data.txt', content:'after\\n'}]}));"),
+      nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'changes data', files:[{path:'src/data.txt', content:'after\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
     const ownerBatch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
@@ -1386,8 +1386,7 @@ test("adversarial: parallel admission refuses a task completed by other means BE
     await importPlan(dir, planPath);
 
     const command = [
-      "node -e",
-      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'from child agent\\n'}]}));"),
+      nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'from child agent\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
     const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });

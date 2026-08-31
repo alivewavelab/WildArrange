@@ -3,6 +3,7 @@ import { copyFile, cp, lstat, mkdir, readFile, readdir, rm, stat, unlink } from 
 import path from "node:path";
 import { HELIX_CONFIG_FILE } from "./runtime-config.mjs";
 import { appendLedger } from "./ledger.mjs";
+import { normalizeRelativePath } from "./path-match.mjs";
 import {
   createWorkId,
   ensureHelixDirs,
@@ -46,7 +47,7 @@ export async function writeConfigBaseline(rootDir, options = {}) {
     type: "config_baseline_written",
     reason: baseline.reason,
     fileCount: baseline.files.length,
-    baselinePath: path.relative(rootDir, baselinePath),
+    baselinePath: normalizeRelativePath(path.relative(rootDir, baselinePath)),
   });
   return baseline;
 }
@@ -103,7 +104,7 @@ export async function writeRuntimeStateBackup(rootDir, options = {}) {
   const files = [];
   for (const segments of BACKUP_STATE_FILES) {
     const sourcePath = path.join(rootDir, ...segments);
-    const relativePath = path.relative(rootDir, sourcePath);
+    const relativePath = normalizeRelativePath(path.relative(rootDir, sourcePath));
     if (!existsSync(sourcePath)) {
       files.push({ path: relativePath, status: "missing" });
       continue;
@@ -153,7 +154,7 @@ export async function prepareArchiveRecoveryPackage(rootDir, options = {}) {
   const recoveryPaths = [];
   for (const candidate of [...new Set(options.paths || [])]) {
     const sourcePath = resolveBackupSourcePath(rootDir, candidate);
-    const relativePath = path.relative(rootDir, sourcePath);
+    const relativePath = normalizeRelativePath(path.relative(rootDir, sourcePath));
     recoveryPaths.push(relativePath);
     const existing = entriesByPath.get(relativePath);
     if (existing?.status === "copied") continue;
@@ -384,7 +385,7 @@ export async function verifyRuntimeState(rootDir) {
   const files = [];
   for (const segments of REQUIRED_STATE_FILES) {
     const filePath = path.join(rootDir, ...segments);
-    const relativePath = path.relative(rootDir, filePath);
+    const relativePath = normalizeRelativePath(path.relative(rootDir, filePath));
     if (!existsSync(filePath)) {
       files.push({ path: relativePath, status: "missing" });
       continue;
@@ -431,7 +432,7 @@ async function collectConfigFingerprints(rootDir) {
     if (!existsSync(filePath)) continue;
     const content = await readFile(filePath, "utf8");
     files.push({
-      path: path.relative(rootDir, filePath),
+      path: normalizeRelativePath(path.relative(rootDir, filePath)),
       hash: hashContent(content),
       bytes: Buffer.byteLength(content),
     });

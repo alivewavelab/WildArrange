@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { appendLedger } from "./ledger.mjs";
-import { DEFAULT_PROMPT_PACK_DIR, installPromptPack } from "./prompt-pack.mjs";
+import { DEFAULT_PROMPT_PACK_DIR, installPromptPack, isPromptPackCurrent } from "./prompt-pack.mjs";
 import { writeDefaultHelixConfig } from "./runtime-config.mjs";
 import { writeSnapshot } from "./runtime-snapshot.mjs";
 import {
@@ -18,6 +18,7 @@ export async function initRuntime(rootDir, options = {}) {
   const configResult = await writeDefaultHelixConfig(rootDir, { force: options.force });
 
   const workPath = resolveHelixPath(rootDir, "work.json");
+  let workCreated = false;
   if (!existsSync(workPath) || options.force) {
     await writeJsonAtomic(workPath, {
       version: STATE_VERSION,
@@ -28,10 +29,16 @@ export async function initRuntime(rootDir, options = {}) {
       createdAt: nowIso(),
       updatedAt: nowIso(),
     });
+    workCreated = true;
   }
 
-  await installPromptPack(rootDir, options.promptPackDir || DEFAULT_PROMPT_PACK_DIR);
-  await appendLedger(rootDir, { type: "runtime_initialized", configPath: configResult.path });
-  await writeSnapshot(rootDir, "initialized");
+  const promptPackDir = options.promptPackDir || DEFAULT_PROMPT_PACK_DIR;
+  const promptPackCurrent = options.force ? false : await isPromptPackCurrent(rootDir, promptPackDir);
+  if (!promptPackCurrent) await installPromptPack(rootDir, promptPackDir);
+
+  if (options.force || configResult.created || workCreated || !promptPackCurrent) {
+    await appendLedger(rootDir, { type: "runtime_initialized", configPath: configResult.path });
+    await writeSnapshot(rootDir, "initialized");
+  }
   return readJson(workPath);
 }

@@ -11,18 +11,56 @@ const DEFAULT_COMMAND_OUTPUT_MAX_CHARS = 200_000;
 const COMMAND_SIGKILL_GRACE_MS = 2_000;
 
 export function runCommand(command, cwd, timeoutMs = 120_000, options = {}) {
+  return runProcess(command, [], command, cwd, timeoutMs, { ...options, shell: true });
+}
+
+export function runCommandFile(file, args, cwd, timeoutMs = 120_000, options = {}) {
+  if (typeof file !== "string" || file.trim().length === 0) {
+    throw new TypeError("command file is required");
+  }
+  if (!Array.isArray(args) || args.some((arg) => typeof arg !== "string")) {
+    throw new TypeError("command args must be an array of strings");
+  }
+  const command = [file, ...args].map(formatCommandPart).join(" ");
+  return runProcess(file, args, command, cwd, timeoutMs, {
+    ...options,
+    shell: false,
+    safetyCommand: commandTextForSafety(file, args, command),
+  });
+}
+
+export function quoteShellArgument(value, platform = process.platform) {
+  const text = String(value);
+  if (platform === "win32") return `"${text.replaceAll('"', '""')}"`;
+  return `'${text.replaceAll("'", "'\\''")}'`;
+}
+
+function runProcess(file, args, command, cwd, timeoutMs, options) {
   return new Promise((resolve) => {
-    const safety = evaluateCommandSafety(command, { allowUnsafe: options.allowUnsafe === true, extraPatterns: options.extraPatterns });
+    const safety = evaluateCommandSafety(options.safetyCommand || command, { allowUnsafe: options.allowUnsafe === true, extraPatterns: options.extraPatterns });
     if (!safety.allowed) {
       resolve(blockedCommandResult(command, safety));
       return;
     }
-    const child = spawn(command, {
-      cwd,
-      shell: true,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, HELIX_RUNTIME: "1" },
-    });
+    let child;
+    try {
+      child = spawn(file, args, {
+        cwd,
+        shell: options.shell,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, HELIX_RUNTIME: "1", ...(options.env || {}) },
+      });
+    } catch (error) {
+      resolve({
+        exitCode: 127,
+        stdout: "",
+        stderr: `Command failed to spawn: ${error instanceof Error ? error.message : String(error)}`,
+        timedOut: false,
+        spawnError: true,
+        outputTruncated: { stdout: false, stderr: false },
+      });
+      return;
+    }
     let stdout = "";
     let stderr = "";
     const maxOutputChars = Number.isInteger(options.maxOutputChars) && options.maxOutputChars > 0
@@ -32,6 +70,7 @@ export function runCommand(command, cwd, timeoutMs = 120_000, options = {}) {
     let settled = false;
     let timedOut = false;
     let killTimer = null;
+    let terminationPromise = Promise.resolve();
     function finish(result) {
       if (settled) return;
       clearTimeout(timer);
@@ -42,10 +81,16 @@ export function runCommand(command, cwd, timeoutMs = 120_000, options = {}) {
     const timer = setTimeout(() => {
       if (settled) return;
       timedOut = true;
-      child.kill("SIGTERM");
-      killTimer = setTimeout(() => {
-        if (!settled) child.kill("SIGKILL");
-      }, COMMAND_SIGKILL_GRACE_MS);
+      if (process.platform === "win32" && child.pid) {
+        // Killing cmd.exe alone leaks its real child (for example a timed-out
+        // verifier) on Windows. taskkill /T closes the complete process tree.
+        terminationPromise = killWindowsProcessTree(child);
+      } else {
+        child.kill("SIGTERM");
+        killTimer = setTimeout(() => {
+          if (!settled) child.kill("SIGKILL");
+        }, COMMAND_SIGKILL_GRACE_MS);
+      }
     }, timeoutMs);
 
     child.stdout.on("data", (chunk) => {
@@ -58,8 +103,9 @@ export function runCommand(command, cwd, timeoutMs = 120_000, options = {}) {
       stderr = next.value;
       outputTruncated.stderr ||= next.truncated;
     });
-    child.on("close", (code) => {
+    child.on("close", async (code) => {
       if (timedOut) {
+        await terminationPromise;
         finish({
           exitCode: 124,
           stdout,
@@ -82,6 +128,48 @@ export function runCommand(command, cwd, timeoutMs = 120_000, options = {}) {
       });
     });
   });
+}
+
+function killWindowsProcessTree(child) {
+  return new Promise((resolve) => {
+    const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+      shell: false,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    killer.on("error", () => {
+      child.kill("SIGKILL");
+      resolve();
+    });
+    killer.on("close", resolve);
+  });
+}
+
+function formatCommandPart(value) {
+  return /^[A-Za-z0-9_./:@=+-]+$/.test(value) ? value : JSON.stringify(value);
+}
+
+function commandTextForSafety(file, args, command) {
+  if (!/(^|[\\/])git(?:\.exe)?$/i.test(file)) return command;
+  let index = 0;
+  while (index < args.length) {
+    const arg = args[index];
+    if (["-C", "-c", "--git-dir", "--work-tree", "--namespace"].includes(arg)) {
+      index += 2;
+      continue;
+    }
+    if (arg.startsWith("--git-dir=") || arg.startsWith("--work-tree=") || arg.startsWith("--namespace=")) {
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("-")) {
+      index += 1;
+      continue;
+    }
+    break;
+  }
+  const canonical = ["git", ...args.slice(index)].map(formatCommandPart).join(" ");
+  return `${command}\n${canonical}`;
 }
 
 function appendCapped(current, chunk, maxChars) {

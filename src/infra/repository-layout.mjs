@@ -163,7 +163,13 @@ async function checkPromptPackManifest(rootDir, findings) {
   const packDir = path.join(rootDir, "packs", "wildarrange-linear");
   const manifestPath = path.join(packDir, "manifest.json");
   if (!existsSync(manifestPath)) return;
-  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const manifest = await readPromptPackJson(
+    manifestPath,
+    "packs/wildarrange-linear/manifest.json",
+    "prompt_manifest_invalid_json",
+    findings,
+  );
+  if (!manifest) return;
   for (const [kind, entries] of [["agents", manifest.agents], ["skills", manifest.skills]]) {
     for (const [name, relativePath] of Object.entries(entries || {})) {
       if (!existsSync(path.join(packDir, relativePath))) {
@@ -190,7 +196,13 @@ async function checkPromptPackManifest(rootDir, findings) {
 
   const routesPath = path.join(packDir, manifest.routes || "routes.json");
   if (!existsSync(routesPath)) return;
-  const routes = JSON.parse(await readFile(routesPath, "utf8"));
+  const routes = await readPromptPackJson(
+    routesPath,
+    `packs/wildarrange-linear/${manifest.routes || "routes.json"}`,
+    "prompt_routes_invalid_json",
+    findings,
+  );
+  if (!routes) return;
   const registeredAgents = new Set(Object.keys(manifest.agents || {}));
   const registeredSkills = new Set(Object.keys(manifest.skills || {}));
   const expectedManifestAgents = new Set(["Router", ...LONG_LIVED_AGENTS]);
@@ -245,6 +257,22 @@ async function checkPromptPackManifest(rootDir, findings) {
     if (!configuredAgents.has(agent) || !effectiveConfig.agents?.[agent] || typeof effectiveConfig.agents[agent] !== "object") {
       findings.push(finding("configured_fixed_agent_missing", "P1", "helix.config.json", null, `fixed Agent ${agent} is missing from root configuration`, "补齐固定五 Agent 的静态 provider/model/role 配置。"));
     }
+  }
+}
+
+async function readPromptPackJson(filePath, relativePath, ruleId, findings) {
+  try {
+    return JSON.parse(await readFile(filePath, "utf8"));
+  } catch (error) {
+    findings.push(finding(
+      ruleId,
+      "P1",
+      relativePath,
+      null,
+      `Prompt Pack JSON cannot be parsed: ${error instanceof Error ? error.message : String(error)}`,
+      "修复 JSON 语法后重新运行 governance audit；不要跳过该清单。",
+    ));
+    return null;
   }
 }
 

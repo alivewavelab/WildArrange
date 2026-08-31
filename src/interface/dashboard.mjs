@@ -26,6 +26,7 @@ import {
 } from "./dashboard-panels.mjs";
 
 class DashboardBadRequest extends Error {}
+class DashboardPayloadTooLarge extends Error {}
 
 export function startDashboardServer(rootDir, options = {}) {
   const host = options.host || "127.0.0.1";
@@ -157,13 +158,17 @@ export function startDashboardServer(rootDir, options = {}) {
         return;
       }
       if (url.pathname === "/" || url.pathname === "/index.html") {
-        sendHtml(response, 200, renderDashboardHtml({ token }));
+        sendHtml(response, 200, renderDashboardHtml());
         return;
       }
       sendJson(response, 404, { error: "not_found" });
     } catch (error) {
       if (error instanceof DashboardBadRequest) {
         sendJson(response, 400, { ok: false, error: error.message });
+        return;
+      }
+      if (error instanceof DashboardPayloadTooLarge) {
+        sendJson(response, 413, { ok: false, error: error.message });
         return;
       }
       sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) });
@@ -263,13 +268,21 @@ function validateNodeName(value) {
 function readJsonBody(request) {
   return new Promise((resolve, reject) => {
     let body = "";
+    let bodyBytes = 0;
+    let settled = false;
     request.on("data", (chunk) => {
-      body += chunk.toString();
-      if (body.length > 64_000) {
-        reject(new Error("request body too large"));
+      if (settled) return;
+      bodyBytes += chunk.length;
+      if (bodyBytes > 64_000) {
+        settled = true;
+        reject(new DashboardPayloadTooLarge("request body too large"));
+        return;
       }
+      body += chunk.toString();
     });
     request.on("end", () => {
+      if (settled) return;
+      settled = true;
       if (!body.trim()) {
         resolve({});
         return;
@@ -280,7 +293,11 @@ function readJsonBody(request) {
         reject(new Error("invalid JSON body"));
       }
     });
-    request.on("error", reject);
+    request.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    });
   });
 }
 
@@ -294,8 +311,7 @@ function sendHtml(response, statusCode, html) {
   response.end(html);
 }
 
-function renderDashboardHtml(options = {}) {
-  const dashboardToken = typeof options.token === "string" ? options.token : "";
+function renderDashboardHtml() {
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -494,7 +510,7 @@ function renderDashboardHtml(options = {}) {
     <div class="shell">
       <header class="topbar">
         <div class="crumb">项目 / <b>${PRODUCT_NAME}</b> / <span id="viewLabel">总览</span></div>
-        <div class="top-actions"><span class="notice" id="notice"></span><span class="status-pill"><i class="server-dot"></i><span id="gateStatus">正在读取质量门</span></span><button id="refresh">刷新</button></div>
+        <div class="top-actions"><span class="notice" id="notice"></span><input id="dashboardToken" type="password" autocomplete="off" placeholder="API Token（仅当前标签页）"><button id="saveDashboardToken">连接</button><span class="status-pill"><i class="server-dot"></i><span id="gateStatus">正在读取质量门</span></span><button id="refresh">刷新</button></div>
       </header>
 
       <main>
@@ -561,9 +577,15 @@ function renderDashboardHtml(options = {}) {
     </div>
   </div>
   <script>
-    const DASHBOARD_TOKEN = ${JSON.stringify(dashboardToken)};
+    const DASHBOARD_TOKEN_KEY = "wildarrange.dashboard.token";
     const el = (id) => document.getElementById(id);
     const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+    function dashboardFetch(url, options = {}) {
+      const headers = new Headers(options.headers || {});
+      const token = sessionStorage.getItem(DASHBOARD_TOKEN_KEY) || "";
+      if (token) headers.set("authorization", "Bearer " + token);
+      return fetch(url, { ...options, headers });
+    }
     const statusLabel = (status) => ({ draft:"待补齐",completed:"已完成",pending:"待执行",in_progress:"执行中",verifying:"验证中",failed:"失败",review_blocked:"复核阻断",needs_user_decision:"等待决定" })[status] || status || "未知";
     const workTypeLabel = (type) => ({ feature:"新功能",bug:"Bug",acceptance_correction:"验收纠错",maintenance:"维护" })[type] || type || "维护";
     let latestTaskLedger = { tasks: [], plans: [], counts: {}, typeCounts: {} };
@@ -595,7 +617,8 @@ function renderDashboardHtml(options = {}) {
       });
     }
     async function loadState() {
-      const response = await fetch("/api/state", { cache: "no-store" });
+      const response = await dashboardFetch("/api/state", { cache: "no-store" });
+      if (!response.ok) throw new Error(response.status === 401 ? "请输入 Dashboard API Token 后连接" : "Dashboard state failed");
       const data = await response.json();
       const status = data.status || {};
       const work = status.work || {};
@@ -763,8 +786,7 @@ function renderDashboardHtml(options = {}) {
     }
     async function postJson(url, body) {
       const headers = { "content-type": "application/json" };
-      if (DASHBOARD_TOKEN) headers.authorization = "Bearer " + DASHBOARD_TOKEN;
-      const response = await fetch(url, {
+      const response = await dashboardFetch(url, {
         method: "POST",
         headers,
         body: JSON.stringify(body || {}),
@@ -799,6 +821,14 @@ function renderDashboardHtml(options = {}) {
       }
     }
     document.querySelectorAll(".nav [data-view], [data-jump]").forEach((button) => button.addEventListener("click", () => switchView(button.dataset.view || button.dataset.jump)));
+    el("dashboardToken").value = sessionStorage.getItem(DASHBOARD_TOKEN_KEY) || "";
+    el("saveDashboardToken").addEventListener("click", async () => {
+      const token = el("dashboardToken").value.trim();
+      if (token) sessionStorage.setItem(DASHBOARD_TOKEN_KEY, token);
+      else sessionStorage.removeItem(DASHBOARD_TOKEN_KEY);
+      el("notice").textContent = token ? "Token 已保存在当前标签页" : "Token 已清除";
+      try { await loadState(); } catch (error) { el("notice").textContent = error instanceof Error ? error.message : String(error); }
+    });
     el("refresh").addEventListener("click", loadState);
     el("runNext").addEventListener("click", () => runAction("运行下一任务", () => postJson("/api/run-next", {})));
     el("claimTask").addEventListener("click", () => {
@@ -858,7 +888,7 @@ function renderDashboardHtml(options = {}) {
     });
     async function loadInbox(agent) {
       const query = agent ? "?agent=" + encodeURIComponent(agent) : "";
-      const response = await fetch("/api/team/inbox" + query, { cache: "no-store" });
+      const response = await dashboardFetch("/api/team/inbox" + query, { cache: "no-store" });
       const payload = await response.json();
       if (!response.ok || payload.ok === false) {
         throw new Error(payload.error || "Inbox failed");

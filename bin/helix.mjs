@@ -94,6 +94,7 @@ import {
   writeConfigBaseline,
   writeRuntimeStateBackup,
 } from "../src/infra/security.mjs";
+import { initProjectDocuments } from "../src/interface/project-init.mjs";
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -149,11 +150,19 @@ async function main() {
 
   if (command === "init") {
     await initRuntime(rootDir);
+    const projectDocuments = args["project-docs"] === true
+      ? await initProjectDocuments(rootDir, { architecture: args.architecture === true })
+      : null;
     let samplePath = null;
     if (args.sample) {
       samplePath = await createSamplePlan(rootDir);
     }
-    console.log(JSON.stringify({ ok: true, runtime: path.join(rootDir, ".helix"), samplePlan: samplePath }, null, 2));
+    console.log(JSON.stringify({
+      ok: true,
+      runtime: path.join(rootDir, ".helix"),
+      samplePlan: samplePath,
+      projectDocuments,
+    }, null, 2));
     return;
   }
 

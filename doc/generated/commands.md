@@ -2,7 +2,7 @@
 
 | 命令 | 说明 |
 | ---- | ---- |
-| `wildarrange init [--sample]` | 初始化运行时（可选导入样例计划） |
+| `wildarrange init [--sample] [--project-docs] [--architecture]` | 初始化运行时；显式补建项目治理文档，可按需包含架构模板 |
 | `wildarrange plan --from <plan.json>` | 导入计划并生成任务状态 |
 | `wildarrange plan approve [--plan <planId>]` | 确认已导入计划（开启 planApproval 时才能 run） |
 | `wildarrange run` | 跑下一个任务（worker→verifier→scope→review→checkpoint） |

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WildArrange P2 稳定性收口计划</title>
+  <style>
+    body { margin: 0; padding: 32px; background: #f5f7fa; color: #172033; font: 16px/1.65 system-ui, sans-serif; }
+    main { max-width: 980px; margin: auto; }
+    h1 { margin-bottom: 8px; }
+    .lead { color: #526078; margin-top: 0; }
+    .flow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 24px 0; }
+    .step, .card { background: white; border: 1px solid #dce2ea; border-radius: 12px; padding: 16px; }
+    .step { text-align: center; position: relative; }
+    .step:not(:last-child)::after { content: "→"; position: absolute; right: -11px; top: 38%; color: #78859a; }
+    .cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+    .p2 { border-left: 6px solid #e08a21; }
+    .hygiene { border-left: 6px solid #3973c6; }
+    .keep { border-left: 6px solid #3a9b64; }
+    .stop { border-left: 6px solid #7b8798; }
+    h2, h3 { margin-top: 0; }
+    code { background: #eef2f7; border-radius: 4px; padding: 2px 5px; }
+    ul { padding-left: 22px; }
+    @media (max-width: 760px) { .flow, .cards { grid-template-columns: 1fr; } .step::after { display: none; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>WildArrange P2 稳定性收口</h1>
+  <p class="lead">目标只有一个：消除四个能够复现的运行缺陷，并恢复稳定的 LF 行尾；不为评分拆文件或扩张架构。</p>
+
+  <section class="flow" aria-label="执行流程">
+    <div class="step"><strong>输入</strong><br>复审证据</div>
+    <div class="step"><strong>锁定</strong><br>真实触发链</div>
+    <div class="step"><strong>保护</strong><br>最小回归测试</div>
+    <div class="step"><strong>处理</strong><br>单点修复</div>
+    <div class="step"><strong>输出</strong><br>全量绿线</div>
+  </section>
+
+  <section class="cards">
+    <article class="card p2">
+      <h3>P2 · 运行时幂等</h3>
+      <p>重复 <code>initRuntime</code> 时，若配置、工作状态和 Prompt Pack 均未变化，不再重复物化、写初始化 ledger 和 snapshot。首次初始化与 Pack 变化仍照常执行。</p>
+    </article>
+    <article class="card p2">
+      <h3>P2 · 门异常可诊断</h3>
+      <p>能力返回失败信封且 <code>evidence=null</code> 时，线性运行时先处理 pipeline 状态，不再发生二次 <code>TypeError</code>。</p>
+    </article>
+    <article class="card p2">
+      <h3>P2 · 等待态停止</h3>
+      <p><code>awaiting_plan_approval</code> 与 <code>revalidation_required</code> 是等待外部动作，不在一次 workflow 内重复空转。</p>
+    </article>
+    <article class="card p2">
+      <h3>P2 · 坏治理输入降级</h3>
+      <p>损坏的 Prompt Pack manifest/routes 转成明确 P1 finding，审计仍能生成报告，不被单个坏 JSON 击穿。</p>
+    </article>
+    <article class="card hygiene">
+      <h3>仓库卫生 · LF</h3>
+      <p>只机械归一已混合的文本文件，并添加 <code>.gitattributes</code>；不借机改写文件内容。</p>
+    </article>
+    <article class="card keep">
+      <h3>明确保留 · Gateway 合同</h3>
+      <p><code>command</code> 与 <code>command-safety</code> 已被项目规范和测试公开使用，不属于可删除死注册。</p>
+    </article>
+    <article class="card stop">
+      <h3>不做</h3>
+      <ul>
+        <li>不因 1000 行阈值拆 <code>bin/helix.mjs</code>。</li>
+        <li>不批量合并无漂移证据的小工具函数。</li>
+        <li>不建设通用 gate descriptor 框架。</li>
+        <li>不增加新测试框架或扩张测试矩阵。</li>
+      </ul>
+    </article>
+    <article class="card keep">
+      <h3>验收</h3>
+      <ul>
+        <li>新增回归测试逐项通过。</li>
+        <li><code>npm test</code> 全量通过。</li>
+        <li><code>npm run check:arch</code> 通过。</li>
+        <li><code>git diff --check</code> 通过，混合行尾为 0。</li>
+      </ul>
+    </article>
+  </section>
+</main>
+</body>
+</html>
