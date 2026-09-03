@@ -139,8 +139,8 @@ export const DEFAULT_HELIX_CONFIG = {
     },
     stageBoosts: {
       ideate: ["review-product-intent", "map-user-journey", "research-domain-benchmark", "ultraresearch"],
-      clarify: ["review-product-intent", "design-acceptance", "start-work"],
-      plan: ["init-deep", "review-plan-risk", "review-plan-readiness", "review-scope-tradeoff", "design-acceptance"],
+      clarify: ["clarify-feature-design", "review-product-intent", "design-acceptance", "start-work"],
+      plan: ["clarify-feature-design", "init-deep", "review-plan-risk", "review-plan-readiness", "review-scope-tradeoff", "design-acceptance"],
       design: ["frontend-ui-ux", "review-ux-interaction", "visual-qa"],
       execute: ["programming", "debugging", "refactor", "run-linear-delivery"],
       verify: ["review-work", "design-acceptance", "visual-qa"],
@@ -256,6 +256,7 @@ export const DEFAULT_HELIX_CONFIG = {
         "wildarrange-injection-runtime",
         "review-work",
         "review-product-intent",
+        "clarify-feature-design",
         "map-user-journey",
         "design-acceptance",
         "review-ux-interaction",

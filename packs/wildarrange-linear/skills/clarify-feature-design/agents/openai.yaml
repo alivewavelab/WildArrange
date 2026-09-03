@@ -1,0 +1,4 @@
+interface:
+  display_name: "功能设计澄清"
+  short_description: "通过编号问答澄清新增功能，并在当前对话中形成开发者确认稿"
+  default_prompt: "Use $clarify-feature-design to clarify this feature request in the conversation before creating a plan."

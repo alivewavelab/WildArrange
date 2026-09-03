@@ -30,6 +30,7 @@
     "lsp-setup": "skills/lsp-setup.md",
     "programming": "skills/programming.md",
     "map-user-journey": "skills/map-user-journey.md",
+    "clarify-feature-design": "skills/clarify-feature-design/SKILL.md",
     "remove-ai-slops": "skills/remove-ai-slops.md",
     "repository-governance": "skills/repository-governance.md",
     "research-domain-benchmark": "skills/research-domain-benchmark.md",
