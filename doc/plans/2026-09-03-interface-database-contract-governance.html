@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WildArrange 接口与数据库契约治理 V3（待确认）</title>
+  <style>
+    :root { color-scheme:dark; --bg:#091019; --panel:#111c29; --line:#294057; --text:#e7eef7; --muted:#9db0c4; --blue:#65adff; --green:#57d69a; --yellow:#f6c85f; --red:#ff7a7a; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font:15px/1.65 system-ui,"Microsoft YaHei",sans-serif; }
+    main { width:min(1180px,calc(100% - 32px)); margin:32px auto 72px; }
+    h1,h2,h3 { margin:0 0 12px; line-height:1.3; } h1 { font-size:30px; } h2 { margin-top:34px; font-size:21px; } h3 { font-size:16px; }
+    p { margin:8px 0; } code { color:#ffd978; } ul { margin:8px 0 0; padding-left:20px; }
+    .tag { display:inline-block; padding:3px 9px; border:1px solid var(--yellow); color:var(--yellow); border-radius:999px; font-size:12px; }
+    .lead { color:var(--muted); max-width:980px; }
+    .grid,.flow { display:grid; grid-template-columns:1fr; gap:14px; }
+    .card,.step { min-width:0; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:18px; }
+    .plain { margin-top:12px; padding:10px 12px; background:#0b1520; border-left:3px solid var(--blue); color:#c5d5e5; }
+    .plain::before { content:"小白解释："; color:var(--blue); font-weight:700; }
+    .arrow { justify-self:center; color:var(--yellow); font-size:22px; }
+    table { width:100%; border-collapse:collapse; background:var(--panel); }
+    th,td { border:1px solid var(--line); padding:12px; text-align:left; vertical-align:top; }
+    th { color:var(--blue); background:#0d1722; }
+    .good { border-left:4px solid var(--green); } .warn { border-left:4px solid var(--yellow); } .stop { border-left:4px solid var(--red); }
+    .path { overflow-wrap:anywhere; color:#c7dbef; }
+    @media (max-width:760px) { table { font-size:13px; } }
+  </style>
+</head>
+<body>
+<main>
+  <span class="tag">修订版 V3 · 待确认 · 尚未实现</span>
+  <h1>接口与数据库契约台账</h1>
+  <p class="lead">结论：用一份机器台账记录“系统答应外部怎样工作”，由通用核心比较新旧变化；能读懂的技术来源交给按栈发现器，读不懂的由功能设计对话人工申报。LuWu 复用现有交付链守门，不另造一套门禁。</p>
+
+  <h2>01. 它补上什么缺口</h2>
+  <div class="grid">
+    <section class="card"><h3>模块架构图</h3><p>回答文件属于哪个模块、模块之间怎样依赖。</p><div class="plain">像商场楼层图，知道店铺在哪一层，但不知道每个柜台收什么材料。</div></section>
+    <section class="card"><h3>接口与数据库契约台账</h3><p>登记跨模块、跨进程、持久化或对外可依赖的 API、事件、表、字段和调用关系。</p><div class="plain">像办事窗口名册：窗口叫什么、收什么、交付什么、谁会来办。</div></section>
+    <section class="card"><h3>验证治理登记册</h3><p>登记哪些测试、门和证据能够证明这些契约没有被改坏。</p><div class="plain">像消防检查表。它证明窗口可安全使用，但不是窗口名册本身。</div></section>
+  </div>
+
+  <h2>02. 真实工作流</h2>
+  <div class="flow" aria-label="接口与数据库契约治理流程">
+    <section class="step"><h3>真实来源</h3><p>源码、OpenAPI、Schema、Migration，以及功能设计对话中确认的人工申报。</p><div class="plain">标准门牌机器能读；藏在墙里的管线，由施工方案主动申报。</div></section>
+    <div class="arrow">↓</div>
+    <section class="step"><h3>发现器 + 治理 Skill</h3><p>发现器只解析自己真正理解的一种来源；<code>contract-governance</code> Skill 在功能规划时提醒 Jiuwei 补齐申报，在执行前把已确认内容交给 ZhuRong。</p><div class="plain">巡检员查得懂的门牌；填表助手负责提醒不能自动看到的改动。</div></section>
+    <div class="arrow">↓</div>
+    <section class="step"><h3>通用核心：比较与覆盖报告</h3><p>把发现结果和人工申报统一成记录，与已批准台账比较，同时列出已覆盖、未覆盖和未知区域。</p><div class="plain">不仅列变更，还把这次没有巡检到的盲区写在封面。</div></section>
+    <div class="arrow">↓</div>
+    <section class="step"><h3>进入现有交付链</h3><p>执行 <code>delivery-pipeline</code> 的既有 review 步骤时，先经 capability gateway 调用 <code>repository-governance</code> 的契约检查 lane，再把结果信封交给 <code>review-gate</code>，并合入同一个 <code>reviewResult</code>。acceptance-proof 继续只检查这一份 review 证据；不增加独立 gate。</p><div class="plain">还是一个验收窗口；窗口内部先查登记手续，再做代码复核，最后只盖一个验收章。</div></section>
+    <div class="arrow">↓</div>
+    <section class="step"><h3>批准后更新</h3><p>开发者批准后更新机器台账，并重新生成覆盖报告和人类可读 HTML。</p><div class="plain">手续通过后，官方名册和展示大屏一起刷新。</div></section>
+  </div>
+
+  <h2>03. 五个组成部分</h2>
+  <table>
+    <thead><tr><th>组成</th><th>建议位置</th><th>职责</th><th>不负责</th></tr></thead>
+    <tbody>
+      <tr><td>已批准契约台账</td><td class="path"><code>tooling/contracts/contract-registry.json</code></td><td>长期事实源，只保存契约本体和指向其他台账的 ID。</td><td>不复制模块说明、负责人资料、测试内容或运行日志。</td></tr>
+      <tr><td>通用契约核心</td><td class="path"><code>infra + capability gateway</code></td><td>定义 JSON 格式、合并发现/申报、比较差异、生成覆盖报告及退役状态。</td><td>不直接理解 Node、Rust、OpenAPI 或具体数据库。</td></tr>
+      <tr><td>按栈发现器</td><td class="path">首版一个静态登记的 Node ESM 发现器</td><td>只读取一种明确、可机读来源，返回标准记录。</td><td>不猜动态生成、源码字符串或运行时注册。</td></tr>
+      <tr><td>人工申报与差异卡</td><td class="path"><code>.wildarrange/contracts/</code> + Prompt Pack Skill</td><td>治理 Skill 挂在功能规划入口和任务执行前；保存扫描快照、申报及待决策差异。</td><td>未经开发者确认不得进入正式台账。</td></tr>
+      <tr><td>覆盖报告与人类视图</td><td class="path"><code>docs/contracts/contract-map.html</code></td><td>由台账生成，展示契约、来源、静态调用方、覆盖范围、未知区域和待决策项。</td><td>不能手改，也不能把“未知”显示成“没有变化”。</td></tr>
+    </tbody>
+  </table>
+
+  <h2>04. 台账登记什么：只存本体和引用，不复制别人的账</h2>
+  <div class="grid">
+    <section class="card"><h3>接口契约本体</h3><ul>
+      <li>接口 ID、协议类型、方法与路径，或事件名 / 函数签名。</li>
+      <li>输入、输出、错误结果、权限要求和生命周期。</li>
+      <li>真实源码位置；既有 import 图只派生“模块级潜在调用方”，不能冒充某个具体导出的真实调用方。</li>
+      <li><code>moduleRef</code> 指向 <code>module-file-map.json</code> 的模块 ID。</li>
+      <li><code>ownerRef</code> 指向任务的 <code>task.owner</code>；它表示本次变更负责人，不冒充长期模块负责人。</li>
+      <li><code>verificationRefs</code> 只保存 verification registry 的卡片 ID，不复制测试命令和证据。</li>
+    </ul><div class="plain">窗口名册只写窗口自己的规则；楼层、经办人和检查报告都写“去哪个登记册查”。</div></section>
+    <section class="card"><h3>数据库契约本体</h3><ul>
+      <li>表 / 视图 ID、Schema 或 Migration 来源。</li>
+      <li>字段名、类型、可空、默认值、主外键、唯一约束与索引。</li>
+      <li>读写方、迁移步骤、兼容窗口、回滚方法和生命周期。</li>
+      <li>同样只保存 <code>moduleRef</code>、<code>ownerRef</code>、<code>verificationRefs</code>。</li>
+    </ul><div class="plain">柜子名册写清楚放什么、谁会读写、换柜时怎么办；归属和检查证明仍去原登记册查。</div></section>
+    <section class="card warn"><h3>实现前必须裁决的唯一事实源</h3><p>当前 <code>module-file-map.json</code> 只有模块路径和 <code>designId</code>，没有长期负责人字段。因此 V3 不在契约台账另造长期 owner。若未来确需长期模块负责人，应先决定唯一 owner 真相源，再让 <code>ownerRef</code> 引用；本方案不擅自修改 module map schema。</p><div class="plain">现有楼层图没有“店长”栏，就先登记本次经办人；不能偷偷再做一本店长名册。</div></section>
+  </div>
+
+  <h2>05. 中间产物怎么退役</h2>
+  <div class="grid">
+    <section class="card"><h3>扫描快照</h3><p>工作区只展示“最近一次扫描快照 + 已批准基线的引用与摘要”。新快照成功写入后，旧快照先移入 <code>.wildarrange/contracts/archive/snapshots/</code>，用于复核误报、漏报和覆盖漂移；只能按项目既有备份/清理政策删除，不直接覆盖丢弃。</p><div class="plain">桌面只摆最新清点表，旧表先装进档案柜，确认不再需要后才按统一制度清理。</div></section>
+    <section class="card warn"><h3>待审核差异卡</h3><p>30 天未处理只自动标记为 <code>expired</code>，并进入覆盖报告“待决策”；不自动批准、不自动删除。</p><div class="plain">过期申请会被标红提醒，但系统不能替你签字或扔掉。</div></section>
+    <section class="card"><h3>已处理差异卡</h3><p>已批准和已拒绝的卡都移入 <code>.wildarrange/contracts/archive/</code>，保留决定、理由和证据引用；只有项目既有备份/清理政策才能删除归档。</p><div class="plain">办完的申请进档案柜，拒绝件也保留，避免以后重复争论。</div></section>
+  </div>
+
+  <h2>06. 谁提醒 Agent 人工申报</h2>
+  <div class="grid">
+    <section class="card good"><h3>规划时：Jiuwei</h3><p>首版必须把 <code>contract-governance</code> 同时登记进 Prompt Pack manifest、Skill matcher / 路由表，以及默认 <code>user_prompt_submit.skills</code> 清单。路由判定为功能设计或计划时，再通过现有安全加载路径挂载它；Skill 追问是否新增或修改 API、事件、表、字段，并把确认内容写入计划的契约变化字段。</p><div class="plain">先把填表助手登记到员工名册、排班表和窗口清单，用户提需求时它才真的会出现。</div></section>
+    <section class="card"><h3>执行前：ZhuRong</h3><p>计划生成 task 后，把同一 Skill 写入 <code>task.skills</code>，在 <code>before_execute</code> 重新挂载；ZhuRong 收到的是已确认申报，不重新替用户做产品决定。</p><div class="plain">施工队拿到的是已签字图纸，开工前再核对一遍，不现场猜需求。</div></section>
+    <section class="card stop"><h3>加载边界</h3><p>Skill 必须走现有安装根、realpath、hash 和上下文预算校验；未知或完整性失败必须报告。这里只定义挂载机制，不先设计动态插件框架。</p><div class="plain">填表助手也要验工牌，不能随便从陌生文件夹进来。</div></section>
+  </div>
+
+  <h2>07. 自动发现必须诚实报告边界</h2>
+  <div class="grid">
+    <section class="card good"><h3>已自动覆盖</h3><p>列出发现器名称、版本、扫描根、来源类型和识别数量。</p><div class="plain">明确告诉你机器这次真正检查了哪些柜子。</div></section>
+    <section class="card warn"><h3>需要人工申报</h3><p>动态生成、源码字符串中的 SQL、运行时注册或尚无发现器的技术栈，进入人工申报清单。</p><div class="plain">机器看不懂的地方必须点名交给负责人，不能成为无声盲区。</div></section>
+    <section class="card stop"><h3>未知或可疑</h3><p>发现疑似契约却无法确认时标记 <code>unknown</code>，给出文件位置与下一步，不自动断言“无变化”。</p><div class="plain">墙里可能有管线时先贴警示，不能假装什么都没有。</div></section>
+  </div>
+
+  <h2>08. 最短落地顺序</h2>
+  <div class="grid">
+    <section class="card"><h3>第一步：通用核心 + 人工申报 Skill</h3><p>实现契约 JSON、引用字段、差异卡、覆盖状态、生命周期规则和申报入口；数据库契约首版允许完全人工申报。</p><div class="plain">先建官方名册和可靠的人工登记窗口。</div></section>
+    <section class="card"><h3>第二步：一个 Node ESM 发现器</h3><p>只扫描项目内 <code>src/**/*.mjs</code> 的静态命名导出、默认导出和再导出。复用 <code>src/infra/dependency-graph.mjs</code> 的词法 import 图，只能派生“哪个模块可能使用了另一个模块”；除非以后实现导入符号关联，否则不能登记为某个具体导出契约的真实调用方。动态 import 或无法解析的关系仍标记 unknown。它只产出“模块导出契约”，不冒充 HTTP API，也不推断请求字段、数据库结构或业务含义。</p><div class="plain">线路图只能看出 A 店接了 B 店的线，看不出 A 店具体使用了 B 店哪个窗口。</div></section>
+    <section class="card"><h3>第三步：确认基线与覆盖范围</h3><p>开发者确认稳定契约、本次任务负责人、人工申报项和未知区域，生成首版正式台账与 HTML。</p><div class="plain">批准名册时，连“哪些地方还没清点”也一起签字。</div></section>
+    <section class="card"><h3>第四步：接入现有交付链</h3><p>扩展既有 review 步骤：经 gateway 调用 <code>repository-governance</code> 的契约检查 lane，把能力信封传给 <code>review-gate</code> 并合入 <code>reviewResult</code>；失败沿用 review FAIL，acceptance-proof 沿用现有 review 证据检查。只阻断当前任务触及区域的漏登记与未获批准的破坏性变更。</p><div class="plain">监督检查成为原验收单中的一个检查项，失败仍从原窗口退回，不另建第二个大厅。</div></section>
+  </div>
+
+  <h2>09. 本次产品决定</h2>
+  <section class="card warn">
+    <p><strong>建议确认：</strong>通用核心保持技术栈中立；首版一个 Node ESM 发现器 + 一个治理 Skill/人工申报入口；契约台账只保存契约本体及外部 ID 引用；中间产物按明确生命周期处理；LuWu 复用现有 review/acceptance-proof。</p>
+    <p><strong>明确不做：</strong>不承诺全仓自动发现，不删除数据库契约类别，不先建动态插件框架，不复制模块/负责人/验证登记册内容，不新增平行门禁，不把 HTML 当事实源。</p>
+    <div class="plain">系统必须同时告诉你“我发现了什么”“我不知道什么”“相关资料去哪里查”。</div>
+  </section>
+</main>
+</body>
+</html>
