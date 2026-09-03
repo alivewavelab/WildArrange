@@ -5,12 +5,12 @@ import path from "node:path";
 import test from "node:test";
 import { buildAcceptanceProof } from "../src/capabilities/acceptance-proof.mjs";
 import { evaluateGateArming } from "../src/infra/gate-arming.mjs";
-import { DEFAULT_HELIX_CONFIG } from "../src/infra/runtime-config.mjs";
+import { DEFAULT_WILDARRANGE_CONFIG } from "../src/infra/runtime-config.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
 import { statusReport } from "../src/orchestration/status.mjs";
 
-const UNARMED_CONFIG = structuredClone(DEFAULT_HELIX_CONFIG);
+const UNARMED_CONFIG = structuredClone(DEFAULT_WILDARRANGE_CONFIG);
 
 test("gate arming floor flags tautological review and unrequired quality gates", async () => {
   const result = evaluateGateArming({
@@ -38,7 +38,7 @@ test("gate arming floor flags missing and trivial verify commands per task", asy
 });
 
 test("gate arming floor goes green once gates are really armed", async () => {
-  const config = structuredClone(DEFAULT_HELIX_CONFIG);
+  const config = structuredClone(DEFAULT_WILDARRANGE_CONFIG);
   config.qualityGates.lspDiagnostics = { enabled: true, required: true, commands: ["node --check src"], timeoutMs: 1000 };
   const result = evaluateGateArming({
     config,

@@ -6,14 +6,14 @@ import { runCommandFile } from "./command-runner.mjs";
 import {
   nowIso,
   readJson,
-  resolveHelixPath,
+  resolveWildArrangePath,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 
 const GIT_TIMEOUT_MS = 30_000;
 
 export async function ensureDeviceIdentity(rootDir, options = {}) {
-  const devicePath = resolveHelixPath(rootDir, "device.json");
+  const devicePath = resolveWildArrangePath(rootDir, "device.json");
   const current = await readJson(devicePath, null);
   if (current && options.force !== true) return current;
   const device = {
@@ -108,7 +108,7 @@ export async function createMetadataCommit(rootDir, options) {
 }
 
 export async function createTaskCheckpointCommit(rootDir, options) {
-  const indexPath = resolveHelixPath(rootDir, "coordination", "tmp", `index-${process.pid}-${randomUUID()}`);
+  const indexPath = resolveWildArrangePath(rootDir, "coordination", "tmp", `index-${process.pid}-${randomUUID()}`);
   await mkdir(path.dirname(indexPath), { recursive: true });
   const env = { GIT_INDEX_FILE: indexPath };
   try {
@@ -168,7 +168,7 @@ export async function listWorkingTreeChanges(rootDir) {
     if (!result.ok) throw new Error(`cannot inspect Git working tree: ${result.stderr || result.stdout}`);
   }
   return [...new Set(groups.flatMap((result) => result.stdout.split("\0").filter(Boolean)))]
-    .filter((filePath) => filePath !== ".helix" && !filePath.startsWith(".helix/"))
+    .filter((filePath) => filePath !== ".wildarrange" && !filePath.startsWith(".wildarrange/"))
     .sort();
 }
 

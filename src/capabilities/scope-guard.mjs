@@ -1,7 +1,7 @@
 import { realpath } from "node:fs/promises";
 import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
-import { ensureHelixDirs } from "../infra/runtime-store.mjs";
+import { ensureWildArrangeDirs } from "../infra/runtime-store.mjs";
 import { collectGitChangedPaths } from "../infra/git-diff.mjs";
 import { normalizeRelativePath, pathAllowed } from "../infra/path-match.mjs";
 import { loadTaskState } from "../infra/task-state-store.mjs";
@@ -10,9 +10,9 @@ export { collectGitDiff, collectGitChangedPaths, changedPathsIntroducedByTask, c
 export { pathAllowed, pathMatchesPattern } from "../infra/path-match.mjs";
 
 export async function scopeGuard(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const taskState = await loadTaskState(rootDir);
-  if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
+  if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
 
   const task = resolveGuardTask(taskState.tasks, options.taskId);
   const collected = Array.isArray(options.changedPaths)

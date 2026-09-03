@@ -5,7 +5,7 @@ import test from "node:test";
 
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { inspectRepositoryGovernance } from "../src/infra/repository-layout.mjs";
-import { readJson, resolveHelixPath } from "../src/infra/runtime-store.mjs";
+import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
 import { runNextTask } from "../src/orchestration/linear-runtime.mjs";
 import { runWorkflow } from "../src/orchestration/workflow.mjs";
@@ -42,7 +42,7 @@ async function writeMinimalPromptPack(rootDir, toolContent = "{\"tools\":[]}") {
 }
 
 async function ledgerEntries(rootDir) {
-  const content = await readFile(resolveHelixPath(rootDir, "ledger.jsonl"), "utf8");
+  const content = await readFile(resolveWildArrangePath(rootDir, "ledger.jsonl"), "utf8");
   return content.trim().split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
 }
 
@@ -63,7 +63,7 @@ test("initRuntime is quiet when state and Prompt Pack are unchanged, but reinsta
     ledger = await ledgerEntries(dir);
     assert.equal(ledger.filter((entry) => entry.type === "runtime_initialized").length, 2);
     assert.equal(
-      await readFile(resolveHelixPath(dir, "prompt-pack", "installed", "tools", "tool-contract.json"), "utf8"),
+      await readFile(resolveWildArrangePath(dir, "prompt-pack", "installed", "tools", "tool-contract.json"), "utf8"),
       changedTools,
     );
   });
@@ -79,7 +79,7 @@ test("runNextTask reports a throwing gate without dereferencing null evidence", 
         id: "T001",
         subject: "Corrupt runtime config after worker startup",
         writable_paths: ["src/**"],
-        worker_command: nodeEval("require('fs').writeFileSync('.helix/config.json', '{ broken', 'utf8')"),
+        worker_command: nodeEval("require('fs').writeFileSync('.wildarrange/config.json', '{ broken', 'utf8')"),
         verify_commands: [nodeEval("process.exit(0)")],
         review_commands: [nodeEval("process.exit(0)")],
       }],
@@ -98,7 +98,7 @@ test("runNextTask reports a throwing gate without dereferencing null evidence", 
 test("runWorkflow stops after the first state that requires an external decision", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const configPath = resolveHelixPath(dir, "config.json");
+    const configPath = resolveWildArrangePath(dir, "config.json");
     const config = await readJson(configPath);
     await writeFile(configPath, JSON.stringify({
       ...config,

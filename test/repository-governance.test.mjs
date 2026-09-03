@@ -39,8 +39,8 @@ async function seedRepository(dir, source) {
   await mkdir(path.join(dir, "src"), { recursive: true });
   await writeFile(path.join(dir, "src", "AGENTS.md"), "# Source Rules\n\nAll source changes require tests.\n");
   await writeFile(path.join(dir, "src", "example.mjs"), source);
-  await writeFile(path.join(dir, "README.md"), "```bash\nnode ./bin/helix.mjs governance audit\n```\n");
-  await writeFile(path.join(dir, "README.en.md"), "```bash\nnode ./bin/helix.mjs governance audit\n```\n");
+  await writeFile(path.join(dir, "README.md"), "```bash\nnode ./bin/wildarrange.mjs governance audit\n```\n");
+  await writeFile(path.join(dir, "README.en.md"), "```bash\nnode ./bin/wildarrange.mjs governance audit\n```\n");
 }
 
 test("repository governance inspects real comments without flagging string literals", async () => {
@@ -79,14 +79,14 @@ test("repository governance detects comments inside JavaScript template expressi
 test("repository governance blocks comment violations and writes LuWu evidence", async () => {
   await withTempDir(async (dir) => {
     await seedRepository(dir, "// TODO replace placeholder\nexport const ready = false;\n");
-    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({ repositoryGovernance: policy }, null, 2));
+    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({ repositoryGovernance: policy }, null, 2));
 
     const report = await runRepositoryGovernanceAudit(dir);
     assert.equal(report.status, "fail");
     assert.ok(report.findings.some((finding) => finding.ruleId === "comment_pattern_blocked" && finding.path === "src/example.mjs"));
     assert.ok(report.proposedChanges.some((change) => change.path === "src/example.mjs" && change.verification.includes("governance audit")));
     assert.deepEqual(report.unresolved, []);
-    assert.match(await readFile(path.join(dir, ".helix", "reports", "governance", "latest.md"), "utf8"), /comment_pattern_blocked/);
+    assert.match(await readFile(path.join(dir, ".wildarrange", "reports", "governance", "latest.md"), "utf8"), /comment_pattern_blocked/);
 
     const doctor = await runDoctor(dir);
     assert.equal(doctor.sections.repositoryGovernance.status, "fail");
@@ -98,8 +98,8 @@ test("repository governance detects missing directory AGENTS and README command 
   await withTempDir(async (dir) => {
     await mkdir(path.join(dir, "src"), { recursive: true });
     await writeFile(path.join(dir, "src", "example.mjs"), "export const ready = true;\n");
-    await writeFile(path.join(dir, "README.md"), "node ./bin/helix.mjs governance audit\n");
-    await writeFile(path.join(dir, "README.en.md"), "node ./bin/helix.mjs doctor\n");
+    await writeFile(path.join(dir, "README.md"), "node ./bin/wildarrange.mjs governance audit\n");
+    await writeFile(path.join(dir, "README.en.md"), "node ./bin/wildarrange.mjs doctor\n");
 
     const result = await inspectRepositoryGovernance(dir, policy);
     const repeated = await inspectRepositoryGovernance(dir, policy);
@@ -118,7 +118,7 @@ test("repository governance enforces required safety markers in paired documenta
       ...policy,
       documentationRequirements: [{
         path: "README.en.md",
-        requiredPatterns: ["HELIX_DASHBOARD_TOKEN"],
+        requiredPatterns: ["WILDARRANGE_DASHBOARD_TOKEN"],
       }],
     });
     assert.equal(result.status, "fail");
@@ -130,10 +130,10 @@ test("repository governance rejects unrouted Agents and nonexistent documented C
   await withTempDir(async (dir) => {
     await mkdir(path.join(dir, "src"), { recursive: true });
     await writeFile(path.join(dir, "src", "AGENTS.md"), "# Source Rules\n\nSource rules.\n");
-    await writeFile(path.join(dir, "README.md"), "node ./bin/helix.mjs imaginary command\n");
-    await writeFile(path.join(dir, "README.en.md"), "node ./bin/helix.mjs imaginary command\n");
+    await writeFile(path.join(dir, "README.md"), "node ./bin/wildarrange.mjs imaginary command\n");
+    await writeFile(path.join(dir, "README.en.md"), "node ./bin/wildarrange.mjs imaginary command\n");
     await mkdir(path.join(dir, "bin"), { recursive: true });
-    await writeFile(path.join(dir, "bin", "helix.mjs"), [
+    await writeFile(path.join(dir, "bin", "wildarrange.mjs"), [
       "const decoy = 'wildarrange imaginary command';",
       "if (process.argv.includes('--help')) console.log('wildarrange doctor');",
       "void decoy;",
@@ -188,7 +188,7 @@ test("repository governance rejects a self-consistent sixth long-lived Agent", a
       tools: "tools/tool-contract.json",
       routes: "routes.json",
     }));
-    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
+    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
       agents: { Rogue: { role: "rogue", provider: "host", model: "host-default" } },
     }));
 

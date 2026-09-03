@@ -57,25 +57,25 @@
       <tr>
         <td>successCriteria 被 verifier 自动翻绿</td>
         <td>属实</td>
-        <td><code>src/helix-team.mjs</code> 的 <code>applyVerifierEvidenceToCriteria</code> 会在 verifier pass 后把未通过 criteria 统一置为 pass；<code>src/helix-node-runtime.mjs</code> 调用后再 checkpoint。</td>
+        <td><code>src/wildarrange-team.mjs</code> 的 <code>applyVerifierEvidenceToCriteria</code> 会在 verifier pass 后把未通过 criteria 统一置为 pass；<code>src/wildarrange-node-runtime.mjs</code> 调用后再 checkpoint。</td>
         <td>P0 修复：默认 criteria 不再自动通过；只有带明确绑定的 criteria 才可由 verifier 证据通过。</td>
       </tr>
       <tr>
         <td>digest / archivist 写了但 hook 注入没读</td>
         <td>基本属实</td>
-        <td><code>src/helix-hooks.mjs</code> 会计算 <code>facts.digest</code> 与 <code>facts.archivist</code>，但 <code>appendHookFacts</code> 只渲染 route/resume/continuation/scope/rules/agentContext。</td>
+        <td><code>src/wildarrange-hooks.mjs</code> 会计算 <code>facts.digest</code> 与 <code>facts.archivist</code>，但 <code>appendHookFacts</code> 只渲染 route/resume/continuation/scope/rules/agentContext。</td>
         <td>P0 修复：把最近 digest 与 archivist 结果渲染进运行时注入块。</td>
       </tr>
       <tr>
         <td>Codex/Cursor hook 没有真实硬接线</td>
         <td>属实但需分层</td>
-        <td><code>src/helix-adapters.mjs</code> 生成 <code>.helix/adapters/codex/hooks.json</code> 与 Cursor rule；项目文档也写了 Codex 深层插件安装仍是未来工作。</td>
+        <td><code>src/wildarrange-adapters.mjs</code> 生成 <code>.wildarrange/adapters/codex/hooks.json</code> 与 Cursor rule；项目文档也写了 Codex 深层插件安装仍是未来工作。</td>
         <td>P0 文档降级承诺；P1 做真实宿主能力探测与安装路径，不把软规则宣传成硬拦截。</td>
       </tr>
       <tr>
         <td>dashboard loopback 默认免 token，有本地 RCE 风险</td>
         <td>风险成立</td>
-        <td><code>src/helix-dashboard.mjs</code> 对 loopback 默认 <code>requireAuth=false</code>，但 <code>/api/run-next</code> 会触发真实 worker shell。</td>
+        <td><code>src/wildarrange-dashboard.mjs</code> 对 loopback 默认 <code>requireAuth=false</code>，但 <code>/api/run-next</code> 会触发真实 worker shell。</td>
         <td>P0 修复：写操作强制 token 或一次性 session token；Host/Origin 校验；恒定时间 token 比较。</td>
       </tr>
       <tr>
@@ -107,7 +107,7 @@
         <li><code>appendHookFacts</code> 增加“记忆摘要”和“档案路由”两段。</li>
         <li>只注入短摘要：进展、决策、产物、风险、开放问题各最多 3 条，避免新上下文预算再次膨胀。</li>
         <li>当 digest 生成失败时注入 warning，不阻断主流程。</li>
-        <li>把 wa-recall 的目录说明从 <code>docs/solutions/</code> 修正到实际 <code>.helix/memory/</code>。</li>
+        <li>把 wa-recall 的目录说明从 <code>docs/solutions/</code> 修正到实际 <code>.wildarrange/memory/</code>。</li>
       </ul>
     </article>
 
@@ -137,7 +137,7 @@
       <h3>ledger hash chain</h3>
       <ul>
         <li><code>appendLedger</code> 每条事件写入 <code>prevHash</code> 与 <code>hash</code>。</li>
-        <li>新增 <code>node ./bin/helix.mjs ledger verify</code>。</li>
+        <li>新增 <code>node ./bin/wildarrange.mjs ledger verify</code>。</li>
         <li>不追求防 root 篡改，只先做到“改了能发现”。</li>
       </ul>
     </article>
@@ -168,10 +168,10 @@
     <div class="box">
       <strong>处理组件</strong>
       <ul>
-        <li><code>helix-team</code>：criteria 证据归属</li>
-        <li><code>helix-hooks</code>：记忆注入</li>
-        <li><code>helix-dashboard</code>：写操作鉴权</li>
-        <li><code>helix-adapters</code>：承诺分级</li>
+        <li><code>wildarrange-team</code>：criteria 证据归属</li>
+        <li><code>wildarrange-hooks</code>：记忆注入</li>
+        <li><code>wildarrange-dashboard</code>：写操作鉴权</li>
+        <li><code>wildarrange-adapters</code>：承诺分级</li>
       </ul>
     </div>
     <div class="arrow">→</div>
@@ -193,7 +193,7 @@
     <li>新增测试：SessionStart / PostCompact hook 输出包含“记忆摘要”和“档案路由”。</li>
     <li>新增测试：dashboard POST 在无 token 时返回 401；带合法 token 才能执行；跨 Origin 被拒绝。</li>
     <li>文档测试：README 与架构文档不再暗示 Codex/Cursor 已具备宿主级硬拦截。</li>
-    <li>执行 <code>npm test</code>；涉及包内容变化后执行 <code>npm pack --dry-run --cache /private/tmp/helix-npm-cache</code>。</li>
+    <li>执行 <code>npm test</code>；涉及包内容变化后执行 <code>npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache</code>。</li>
   </ul>
 
   <h2>本轮不做</h2>

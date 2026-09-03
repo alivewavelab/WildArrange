@@ -2,7 +2,7 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
 import {
-  ensureHelixDirs,
+  ensureWildArrangeDirs,
   nowIso,
   resolveTaskAcceptancePath,
   writeJsonAtomic,
@@ -10,11 +10,11 @@ import {
 import { isPossibleNoopTask, isTrivialCommand } from "../infra/task-predicates.mjs";
 import { criteriaStatus } from "../infra/success-criteria.mjs";
 import { hasRealReviewLane } from "../infra/gate-arming.mjs";
-import { loadHelixConfig } from "../infra/runtime-config.mjs";
+import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 
 export async function writeAcceptanceProof(rootDir, planId, task, evidence = {}) {
-  await ensureHelixDirs(rootDir);
-  const { config } = await loadHelixConfig(rootDir);
+  await ensureWildArrangeDirs(rootDir);
+  const { config } = await loadWildArrangeConfig(rootDir);
   const proof = buildAcceptanceProof(planId, task, evidence, config);
   const jsonPath = resolveTaskAcceptancePath(rootDir, planId, task.id, "json");
   const mdPath = resolveTaskAcceptancePath(rootDir, planId, task.id, "md");

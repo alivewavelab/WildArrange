@@ -6,13 +6,13 @@ import {
 } from "../infra/agent-registry.mjs";
 import {
   PRODUCT_NAME,
-  loadHelixConfig,
+  loadWildArrangeConfig,
 } from "../infra/runtime-config.mjs";
 import {
   STATE_VERSION,
   createWorkId,
   nowIso,
-  resolveHelixPath,
+  resolveWildArrangePath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
@@ -140,7 +140,7 @@ export async function runInjectionHook(rootDir, input = {}) {
     ? renderPreToolUseHookOutput(facts.preflight, contextMarkdown)
     : contextMarkdown;
   const result = {
-    kind: "helix_hook_injection",
+    kind: "wildarrange_hook_injection",
     version: STATE_VERSION,
     at: nowIso(),
     event,
@@ -159,7 +159,7 @@ export async function runInjectionHook(rootDir, input = {}) {
   };
   const safeSessionId = sanitizeFileSegment(sessionId || "session");
   const safeEvent = sanitizeFileSegment(event);
-  const outputPath = resolveHelixPath(hookRootDir, "sessions", "hooks", `${safeSessionId}-${safeEvent}.json`);
+  const outputPath = resolveWildArrangePath(hookRootDir, "sessions", "hooks", `${safeSessionId}-${safeEvent}.json`);
   result.reportJsonPath = path.relative(hookRootDir, outputPath);
   await writeJsonAtomic(outputPath, result);
   await appendLedger(hookRootDir, {
@@ -171,7 +171,7 @@ export async function runInjectionHook(rootDir, input = {}) {
     decision: result.decision,
     outputChars: output.length,
   });
-  // 决策投影：每次拦截/放行都进 decisions.jsonl，供 helix decisions 与
+  // 决策投影：每次拦截/放行都进 decisions.jsonl，供 wildarrange decisions 与
   // 异步审查 Agent 复盘。best-effort，不反噬 hook 主流程。
   if (result.decision) {
     try {
@@ -233,7 +233,7 @@ export async function preToolUseGuard(rootDir, input = {}) {
 
   if (/^(Bash|bash|exec_command|functions\.exec_command)$/.test(toolName)) {
     const command = toolInput && typeof toolInput === "object" ? toolInput.command || toolInput.cmd : "";
-    const { config } = await loadHelixConfig(rootDir);
+    const { config } = await loadWildArrangeConfig(rootDir);
     const safety = evaluateCommandSafety(command, {
       extraPatterns: compileCommandSafetyPatterns(config),
     });
@@ -458,11 +458,11 @@ function extractHookTurns(input) {
 }
 
 function normalizeHookSessionId(input) {
-  return String(input.session_id || input.sessionId || process.env.HELIX_SESSION_ID || process.env.CODEX_SESSION_ID || process.env.CURSOR_SESSION_ID || createWorkId("session"));
+  return String(input.session_id || input.sessionId || process.env.WILDARRANGE_SESSION_ID || process.env.CODEX_SESSION_ID || process.env.CURSOR_SESSION_ID || createWorkId("session"));
 }
 
 function normalizeHookTaskId(input) {
-  const direct = input.taskId || input.task_id || process.env.HELIX_TASK_ID;
+  const direct = input.taskId || input.task_id || process.env.WILDARRANGE_TASK_ID;
   if (direct && typeof direct === "string") return direct;
   const toolInput = input.tool_input || input.toolInput;
   if (toolInput && typeof toolInput === "object") {
@@ -786,10 +786,10 @@ function appendSkillSelectionReport(lines, selection) {
   if (selection.mode !== "dynamic" || (referenced.length === 0 && suggestions.length === 0)) return;
   lines.push("## 按需可加载 Skill（未注入全文）", "");
   for (const item of referenced) {
-    lines.push(`- ${item.name}（${item.reason === "over_max_skills" ? "超出本次挂载上限" : "与本次请求未匹配"}）：需要时执行 \`node ./bin/helix.mjs prompts show --skill ${item.name}\``);
+    lines.push(`- ${item.name}（${item.reason === "over_max_skills" ? "超出本次挂载上限" : "与本次请求未匹配"}）：需要时执行 \`node ./bin/wildarrange.mjs prompts show --skill ${item.name}\``);
   }
   for (const item of suggestions) {
-    lines.push(`- ${item.name}（匹配分 ${item.score}，不在本注入点清单）：需要时执行 \`node ./bin/helix.mjs prompts show --skill ${item.name}\``);
+    lines.push(`- ${item.name}（匹配分 ${item.score}，不在本注入点清单）：需要时执行 \`node ./bin/wildarrange.mjs prompts show --skill ${item.name}\``);
   }
   lines.push("");
 }

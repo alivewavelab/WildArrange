@@ -69,7 +69,7 @@ npx wildarrange doctor
 
 Commit `package.json` and `package-lock.json`. Teammates and CI can then use `npm ci` to install the same version instead of silently following a newer `latest`.
 
-`adapter install` is project-scoped. It generates Codex, Cursor, and Kimi Code integration files for the current project and device. Local runtime outputs such as `.helix/` and `.cursor/` are normally excluded from Git, so regenerate them on each device instead of copying generated files from another machine.
+`adapter install` is project-scoped. It generates Codex, Cursor, and Kimi Code integration files for the current project and device. Local runtime outputs such as `.wildarrange/` and `.cursor/` are normally excluded from Git, so regenerate them on each device instead of copying generated files from another machine.
 
 ### Initialize Project Governance Documents (Optional)
 
@@ -82,7 +82,7 @@ npx wildarrange init --project-docs
 
 The command creates only missing files: `AGENTS.md`, code and interface conventions, testing and acceptance rules, and the task-governance entry point. Existing files are preserved without merging or overwriting. `doc/architecture.md` is created only with `--architecture`. A human must resolve or remove every `[待确认]` placeholder, especially the testing strategy, standard commands, production/test entry points, and module boundaries.
 
-WildArrange's `.helix/team/tasks.json` remains the only task ledger. The Dashboard and `doc/progress.md` are entry points and views; do not maintain a second Markdown task table or ClickUp source of truth.
+WildArrange's `.wildarrange/team/tasks.json` remains the only task ledger. The Dashboard and `doc/progress.md` are entry points and views; do not maintain a second Markdown task table or ClickUp source of truth.
 
 ### Install on Another Device
 
@@ -102,7 +102,7 @@ If the project already exists, start with `git pull` and `npm ci`.
 For Kimi Code, start Kimi Code from the project root and explicitly install the generated plugin on every device:
 
 ```text
-/plugins install .helix/adapters/kimi/plugin
+/plugins install .wildarrange/adapters/kimi/plugin
 /reload
 ```
 
@@ -129,13 +129,13 @@ The Kimi Code plugin is installed at user scope. After upgrading, refresh it so 
 
 ```text
 /plugins remove wildarrange-adapter
-/plugins install .helix/adapters/kimi/plugin
+/plugins install .wildarrange/adapters/kimi/plugin
 /reload
 ```
 
 ### Runtime State and Device Boundaries
 
-npm and Git synchronize the program and committed configuration, while `.helix/` remains local runtime state on each device. WildArrange uses the existing Git remote as a handoff cabinet by default: one remote write owner per task, with cross-device continuation carried by a checkpoint commit containing a task packet and ledger hash.
+npm and Git synchronize the program and committed configuration, while `.wildarrange/` remains local runtime state on each device. WildArrange uses the existing Git remote as a handoff cabinet by default: one remote write owner per task, with cross-device continuation carried by a checkpoint commit containing a task packet and ledger hash.
 
 Register a stable identity once on every device. The name is descriptive; handoff authorization uses the returned `deviceId`:
 
@@ -159,7 +159,7 @@ npx wildarrange device register --name mac-mini
 npx wildarrange handoff accept --plan <planId> --task T001
 ```
 
-`prepare` includes both working-tree changes and local commits not yet present on the remote task branch, then builds a temporary Git tree containing only project files inside `writable_paths`; `.helix/` is never handed off and the current index is untouched. Before `push`, WildArrange compares the current tree with the prepare-time fingerprint and requires a fresh prepare if editing continued. Push is always non-force and retry-safe through remote-SHA reconciliation and audit backfill. `accept` verifies the remote packet, target device UUID, and clean local tree before taking ownership; a same-name device cannot impersonate the target. After acceptance, execute, verify, scope, review, checkpoint, admission, and the monolithic `run` completion fence all fail closed on the old device.
+`prepare` includes both working-tree changes and local commits not yet present on the remote task branch, then builds a temporary Git tree containing only project files inside `writable_paths`; `.wildarrange/` is never handed off and the current index is untouched. Before `push`, WildArrange compares the current tree with the prepare-time fingerprint and requires a fresh prepare if editing continued. Push is always non-force and retry-safe through remote-SHA reconciliation and audit backfill. `accept` verifies the remote packet, target device UUID, and clean local tree before taking ownership; a same-name device cannot impersonate the target. After acceptance, execute, verify, scope, review, checkpoint, admission, and the monolithic `run` completion fence all fail closed on the old device.
 
 Takeover is only for a confirmed abandoned owner and requires both the expected device and an evidence-bearing reason:
 
@@ -180,7 +180,7 @@ The command scans task state by `runId` and releases a ghost `parallel_run_claim
 
 ### Git Coordination Strength
 
-Configure the built-in behavior in `helix.config.json`:
+Configure the built-in behavior in `wildarrange.config.json`:
 
 ```json
 {
@@ -211,8 +211,8 @@ You may tune automatic activation, local fallback, and pre-handoff verification.
 When maintaining WildArrange itself:
 
 ```bash
-node ./bin/helix.mjs init
-node ./bin/helix.mjs adapter install --target all --mode local
+node ./bin/wildarrange.mjs init
+node ./bin/wildarrange.mjs adapter install --target all --mode local
 ```
 
 ## Minimal Workflow
@@ -227,10 +227,10 @@ Create `plan.json`:
     {
       "id": "T001",
       "subject": "Write smoke artifact",
-      "writable_paths": [".helix/artifacts/smoke.txt"],
-      "worker_command": "node -e \"const fs=require('fs'); fs.mkdirSync('.helix/artifacts',{recursive:true}); fs.writeFileSync('.helix/artifacts/smoke.txt','ok\\n')\"",
-      "verify_commands": ["node -e \"const fs=require('fs'); if(fs.readFileSync('.helix/artifacts/smoke.txt','utf8').trim()!=='ok') process.exit(1)\""],
-      "review_commands": ["node -e \"const fs=require('fs'); if(!fs.readFileSync('.helix/artifacts/smoke.txt','utf8').includes('ok')) process.exit(1)\""]
+      "writable_paths": [".wildarrange/artifacts/smoke.txt"],
+      "worker_command": "node -e \"const fs=require('fs'); fs.mkdirSync('.wildarrange/artifacts',{recursive:true}); fs.writeFileSync('.wildarrange/artifacts/smoke.txt','ok\\n')\"",
+      "verify_commands": ["node -e \"const fs=require('fs'); if(fs.readFileSync('.wildarrange/artifacts/smoke.txt','utf8').trim()!=='ok') process.exit(1)\""],
+      "review_commands": ["node -e \"const fs=require('fs'); if(!fs.readFileSync('.wildarrange/artifacts/smoke.txt','utf8').includes('ok')) process.exit(1)\""]
     }
   ]
 }
@@ -241,26 +241,26 @@ Create `plan.json`:
 Run it:
 
 ```bash
-node ./bin/helix.mjs plan --from plan.json
-node ./bin/helix.mjs run
-node ./bin/helix.mjs status
-node ./bin/helix.mjs summary
+node ./bin/wildarrange.mjs plan --from plan.json
+node ./bin/wildarrange.mjs run
+node ./bin/wildarrange.mjs status
+node ./bin/wildarrange.mjs summary
 ```
 
 Or run the built-in sample:
 
 ```bash
-node ./bin/helix.mjs workflow --sample
+node ./bin/wildarrange.mjs workflow --sample
 ```
 
 ### Project-wide Work-item Ledger
 
-Features, standalone bugs, post-completion acceptance corrections, and maintenance work all use the Task model and persist in `.helix/team/tasks.json`. Plans only group tasks; cross-plan references use `<planId>:<taskId>`. A request with incomplete verification details can be captured as a non-runnable `draft`:
+Features, standalone bugs, post-completion acceptance corrections, and maintenance work all use the Task model and persist in `.wildarrange/team/tasks.json`. Plans only group tasks; cross-plan references use `<planId>:<taskId>`. A request with incomplete verification details can be captured as a non-runnable `draft`:
 
 ```bash
-node ./bin/helix.mjs task create --title "Fix login failure" --type bug --priority P0
-node ./bin/helix.mjs task list --all --type bug
-node ./bin/helix.mjs task ready --task T001 --from task-details.json
+node ./bin/wildarrange.mjs task create --title "Fix login failure" --type bug --priority P0
+node ./bin/wildarrange.mjs task list --all --type bug
+node ./bin/wildarrange.mjs task ready --task T001 --from task-details.json
 ```
 
 A verifier failure inside the same Task adds an attempt and history evidence instead of creating duplicate work items. If a completed Task is rejected during later acceptance, create an `acceptance_correction` Task and link the original with `--parent <planId>:<taskId>`. The Dashboard work-item ledger shows every Plan and filters by type, status, Plan, and search text.
@@ -283,25 +283,25 @@ This is intentional. `result.status` says what the runtime wants next; `task.sta
 ## Adapters
 
 ```bash
-node ./bin/helix.mjs adapter install --target all --mode local
-node ./bin/helix.mjs adapter uninstall --target all
-node ./bin/helix.mjs adapter restore --backup <backupId>
+node ./bin/wildarrange.mjs adapter install --target all --mode local
+node ./bin/wildarrange.mjs adapter uninstall --target all
+node ./bin/wildarrange.mjs adapter restore --backup <backupId>
 ```
 
-Install, uninstall, and restore write reports under `.helix/adapters/`. Existing adapter files are backed up before overwrite or removal. `restore` copies files from `.helix/adapters/backups/<backupId>/` back to their original paths.
+Install, uninstall, and restore write reports under `.wildarrange/adapters/`. Existing adapter files are backed up before overwrite or removal. `restore` copies files from `.wildarrange/adapters/backups/<backupId>/` back to their original paths.
 
-- **Codex**: lifecycle hooks are written to `.codex/hooks.json`, with an audit copy at `.helix/adapters/codex/hooks.json`. Codex runs these hard hooks only after the trusted project layer and the hook definition are reviewed/trusted through `/hooks`.
+- **Codex**: lifecycle hooks are written to `.codex/hooks.json`, with an audit copy at `.wildarrange/adapters/codex/hooks.json`. Codex runs these hard hooks only after the trusted project layer and the hook definition are reviewed/trusted through `/hooks`.
 - **Cursor**: project hooks at `.cursor/hooks.json` (with the `.cursor/hooks/wildarrange-hook-bridge.mjs` bridge) load automatically in a trusted workspace; `preToolUse` (Write/Delete/Edit/Shell) and `beforeShellExecution` (integrated terminal commands) can hard-deny and are fail-closed. `.cursor/rules/wildarrange.mdc` remains as the soft rule layer.
-- **Kimi Code**: a project-specific plugin is generated under `.helix/adapters/kimi/plugin/`, while project instructions and Skills reuse `AGENTS.md` and `.agents/skills/`. WildArrange never silently edits the user-level `~/.kimi-code/config.toml`; start Kimi Code from the project root, run `/plugins install .helix/adapters/kimi/plugin`, then run `/reload`. Do not quote the path because Kimi Code 0.27 treats quote characters as part of the path. Although plugin installation is user-scoped, its bridge exits silently outside WildArrange projects.
+- **Kimi Code**: a project-specific plugin is generated under `.wildarrange/adapters/kimi/plugin/`, while project instructions and Skills reuse `AGENTS.md` and `.agents/skills/`. WildArrange never silently edits the user-level `~/.kimi-code/config.toml`; start Kimi Code from the project root, run `/plugins install .wildarrange/adapters/kimi/plugin`, then run `/reload`. Do not quote the path because Kimi Code 0.27 treats quote characters as part of the path. Although plugin installation is user-scoped, its bridge exits silently outside WildArrange projects.
 
 For Codex, `SessionStart` automatically injects the complete Jiuwei identity prompt, and `PostCompact` injects it again to restore identity after context compaction. Ordinary `UserPromptSubmit` events do not repeat the prompt. The prompt comes from the installed, hash-verified Prompt Pack, respects `contextBudgets.prompt.maxChars`, and reports truncation explicitly.
 
-`adapter install` also generates shortcuts so you don't have to open a terminal for common operations. All three surfaces render from one shared command set (`helix-config` / `helix-doctor` / `helix-refresh` / `helix-status` / `helix-plan` / `helix-approve` / `helix-run`):
+`adapter install` also generates shortcuts so you don't have to open a terminal for common operations. All three surfaces render from one shared command set (`wildarrange-config` / `wildarrange-doctor` / `wildarrange-refresh` / `wildarrange-status` / `wildarrange-plan` / `wildarrange-approve` / `wildarrange-run`):
 
-- **Cursor**: `.cursor/commands/<name>.md` (plain-Markdown slash commands; type `/helix-doctor` in chat).
-- **Codex / Kimi Code**: shared `.agents/skills/<name>/SKILL.md` project Skills. Codex can invoke them through `/skills` or `$helix-doctor`; Kimi Code discovers and invokes them through its project Skill mechanism.
+- **Cursor**: `.cursor/commands/<name>.md` (plain-Markdown slash commands; type `/wildarrange-doctor` in chat).
+- **Codex / Kimi Code**: shared `.agents/skills/<name>/SKILL.md` project Skills. Codex can invoke them through `/skills` or `$wildarrange-doctor`; Kimi Code discovers and invokes them through its project Skill mechanism.
 
-Each command is a prompt that tells the agent to run the matching `helix.mjs` subcommand and report back — a shortcut that lets the agent run the CLI, not a native button.
+Each command is a prompt that tells the agent to run the matching `wildarrange.mjs` subcommand and report back — a shortcut that lets the agent run the CLI, not a native button.
 
 A healthy Kimi Hook can deny out-of-scope Write/Edit calls and clearly destructive Bash commands. Kimi's Hook runner is fail-open on hook crashes and timeouts, so this is an early warning layer rather than the final security boundary. Verifier, scope, review, success criteria, acceptance proof, and checkpoint gates remain authoritative.
 
@@ -310,11 +310,11 @@ A healthy Kimi Hook can deny out-of-scope Write/Edit calls and clearly destructi
 Command-based child agents can run concurrently. In default `guarded` mode with a configured remote, writable agents automatically receive independent Git worktrees. Without a remote, or in `manual/off`, `parallelAgents.isolation` remains in control:
 
 ```bash
-node ./bin/helix.mjs parallel run --max-agents 2 --task T001,T002 --agent ZhuRong --command "..."
-node ./bin/helix.mjs parallel run --task T001 --agent ZhuRong --adapter codex
-node ./bin/helix.mjs parallel list
-node ./bin/helix.mjs parallel status --run <runId>
-node ./bin/helix.mjs parallel cleanup --run <runId>
+node ./bin/wildarrange.mjs parallel run --max-agents 2 --task T001,T002 --agent ZhuRong --command "..."
+node ./bin/wildarrange.mjs parallel run --task T001 --agent ZhuRong --adapter codex
+node ./bin/wildarrange.mjs parallel list
+node ./bin/wildarrange.mjs parallel status --run <runId>
+node ./bin/wildarrange.mjs parallel cleanup --run <runId>
 ```
 
 To propose mainline artifacts, a child agent writes structured files to `agent-result.json`:
@@ -331,53 +331,53 @@ To propose mainline artifacts, a child agent writes structured files to `agent-r
 Admission does not trust the child agent directly. `parallel admit` checks `writable_paths`, then runs verifier, scope guard, review gate, acceptance proof, and checkpoint:
 
 ```bash
-node ./bin/helix.mjs parallel admit --run <runId> --task T001
+node ./bin/wildarrange.mjs parallel admit --run <runId> --task T001
 ```
 
 Successful child results remain `awaiting_user_acceptance` until admission/checkpoint releases them. After human acceptance, close retained results explicitly:
 
 ```bash
-node ./bin/helix.mjs parallel close --run <runId> --task T001 --reason user_accepted
+node ./bin/wildarrange.mjs parallel close --run <runId> --task T001 --reason user_accepted
 ```
 
 You may also request worktree isolation explicitly. WildArrange extracts the patch and still runs `writable_paths` plus the full admission gates:
 
 ```bash
-node ./bin/helix.mjs parallel run --task T001 --isolation git-worktree --command "..."
-node ./bin/helix.mjs parallel admit --run <runId> --task T001
+node ./bin/wildarrange.mjs parallel run --task T001 --isolation git-worktree --command "..."
+node ./bin/wildarrange.mjs parallel admit --run <runId> --task T001
 ```
 
 ## Defensive Checks
 
 ```bash
-node ./bin/helix.mjs config baseline --reason reviewed
-node ./bin/helix.mjs config verify
-node ./bin/helix.mjs state backup --reason before-risky-agent
-node ./bin/helix.mjs state migrate
-node ./bin/helix.mjs state verify
-node ./bin/helix.mjs state list
-node ./bin/helix.mjs state restore --backup <backupId>
-node ./bin/helix.mjs task archive --task T001 --plan <planId> --delete --reason "obsolete"
-node ./bin/helix.mjs doctor
-node ./bin/helix.mjs governance audit
-node ./bin/helix.mjs impact "src/infra/ledger.mjs"
-node ./bin/helix.mjs decisions --limit 20
-node ./bin/helix.mjs decisions stats
-node ./bin/helix.mjs timeline --limit 30
-node ./bin/helix.mjs annotate --decision <decisionId> --category rule_wrong --reason "..."
-node ./bin/helix.mjs annotate stats
-node ./bin/helix.mjs test --zone infra
-node ./bin/helix.mjs docs commands --write
-node ./bin/helix.mjs review suspicious
+node ./bin/wildarrange.mjs config baseline --reason reviewed
+node ./bin/wildarrange.mjs config verify
+node ./bin/wildarrange.mjs state backup --reason before-risky-agent
+node ./bin/wildarrange.mjs state migrate
+node ./bin/wildarrange.mjs state verify
+node ./bin/wildarrange.mjs state list
+node ./bin/wildarrange.mjs state restore --backup <backupId>
+node ./bin/wildarrange.mjs task archive --task T001 --plan <planId> --delete --reason "obsolete"
+node ./bin/wildarrange.mjs doctor
+node ./bin/wildarrange.mjs governance audit
+node ./bin/wildarrange.mjs impact "src/infra/ledger.mjs"
+node ./bin/wildarrange.mjs decisions --limit 20
+node ./bin/wildarrange.mjs decisions stats
+node ./bin/wildarrange.mjs timeline --limit 30
+node ./bin/wildarrange.mjs annotate --decision <decisionId> --category rule_wrong --reason "..."
+node ./bin/wildarrange.mjs annotate stats
+node ./bin/wildarrange.mjs test --zone infra
+node ./bin/wildarrange.mjs docs commands --write
+node ./bin/wildarrange.mjs review suspicious
 ```
 
-`doctor` is a one-command health check: it validates config structure and mounts, reconciles completed tasks across every Plan against checkpoints, acceptance proofs, and `planId:taskId` ledger events, verifies the ledger hash chain, and cross-checks the ledger against the latest backup to detect wholesale rewrites; the `decisionHealth` section adds a periodic health summary (per-gate trigger counts, never-fired gates, corrupt-line and orphan-annotation warnings). The checks are isolated — a crashed check only marks its own section — and doctor is read-only diagnostics that never appends to the ledger. `state migrate` first creates a backup, then migrates the runtime task ledger and removes retired runtime projections; it does not rewrite the root `helix.config.json`. Legacy `completed` tasks without the current proof chain become `needs_user_decision` instead of receiving fabricated proof. `state restore` also creates a pre-restore backup first.
+`doctor` is a one-command health check: it validates config structure and mounts, reconciles completed tasks across every Plan against checkpoints, acceptance proofs, and `planId:taskId` ledger events, verifies the ledger hash chain, and cross-checks the ledger against the latest backup to detect wholesale rewrites; the `decisionHealth` section adds a periodic health summary (per-gate trigger counts, never-fired gates, corrupt-line and orphan-annotation warnings). The checks are isolated — a crashed check only marks its own section — and doctor is read-only diagnostics that never appends to the ledger. `state migrate` first creates a backup, then migrates the runtime task ledger and removes retired runtime projections; it does not rewrite the root `wildarrange.config.json`. Legacy `completed` tasks without the current proof chain become `needs_user_decision` instead of receiving fabricated proof. `state restore` also creates a pre-restore backup first.
 
-`task archive ... --delete` requires explicit deletion confirmation and first creates a runtime backup; `in_progress` and `verifying` tasks cannot be archived. Plan and Task IDs must be safe single-segment identifiers, canonical `planId:id` identities must be unique, and an explicit `--plan` must match exactly rather than falling back to another Plan. An unindexed legacy Plan also loses only the selected Task. Deletion is a rollback-capable transaction that commits the canonical task ledger last. It removes only the target Task, an emptied Plan, its checkpoint / acceptance reports, that task's outbox DoneClaims, and exact non-glob artifacts under `.helix/artifacts/` that are not shared by another task. The exact deletion set is added to the backup's recovery package, so `state restore --backup <backupId>` can recover the Plan, proofs, DoneClaims, and artifacts after an interruption or rollback request. Emptying the active Plan leaves the runtime `idle`; another Plan is never activated implicitly. Historical ledger entries and backups are never deleted with an archived task.
+`task archive ... --delete` requires explicit deletion confirmation and first creates a runtime backup; `in_progress` and `verifying` tasks cannot be archived. Plan and Task IDs must be safe single-segment identifiers, canonical `planId:id` identities must be unique, and an explicit `--plan` must match exactly rather than falling back to another Plan. An unindexed legacy Plan also loses only the selected Task. Deletion is a rollback-capable transaction that commits the canonical task ledger last. It removes only the target Task, an emptied Plan, its checkpoint / acceptance reports, that task's outbox DoneClaims, and exact non-glob artifacts under `.wildarrange/artifacts/` that are not shared by another task. The exact deletion set is added to the backup's recovery package, so `state restore --backup <backupId>` can recover the Plan, proofs, DoneClaims, and artifacts after an interruption or rollback request. Emptying the active Plan leaves the runtime `idle`; another Plan is never activated implicitly. Historical ledger entries and backups are never deleted with an archived task.
 
 `impact` is change impact analysis: it lists which files import a changed file directly or transitively, plus the tests that should run (always including the five-zone boundary test), so an AI edit can machine-prove "nothing else was touched".
 
-`decisions` is the decision projection: every allow/deny across the four seams — the delivery-pipeline gates, PreToolUse/PostToolUse interception, admission, and routing — is appended to `.helix/decisions.jsonl` (a derived, droppable, truncatable log outside the hash chain). The command renders each record as three lines — what happened, which rule fired, where the evidence lives — so humans and asynchronous review agents can audit every decision. Supports `--task` / `--gate` filters and `--format json`. The reader streams backwards from the file tail, so `--limit` bounds real memory usage; after long runs you can simply `truncate -s 0 .helix/decisions.jsonl` (truncate to zero, not to a half line — even then the writer self-heals with a newline and the reader skips the bad line).
+`decisions` is the decision projection: every allow/deny across the four seams — the delivery-pipeline gates, PreToolUse/PostToolUse interception, admission, and routing — is appended to `.wildarrange/decisions.jsonl` (a derived, droppable, truncatable log outside the hash chain). The command renders each record as three lines — what happened, which rule fired, where the evidence lives — so humans and asynchronous review agents can audit every decision. Supports `--task` / `--gate` filters and `--format json`. The reader streams backwards from the file tail, so `--limit` bounds real memory usage; after long runs you can simply `truncate -s 0 .wildarrange/decisions.jsonl` (truncate to zero, not to a half line — even then the writer self-heals with a newline and the reader skips the bad line).
 
 `test` is zoned test selection: `--zone <zone>` runs the tests that import the zone plus naming-paired tests plus the always-on boundary test; with file arguments it runs the impact-derived list; with no arguments it runs everything. The exit code passes through from `node --test`, so you run exactly what your change touches without memorizing the test matrix.
 
@@ -387,9 +387,9 @@ node ./bin/helix.mjs review suspicious
 
 The CLI is layered: `--help` shows only the core six commands (init / plan / run / status / decisions / doctor) covering the daily loop; the full list lives behind `--help --all`. The single source of truth for the command inventory is the registry in `src/interface/cli-help.mjs`, materialized to `doc/generated/commands.md` via `docs commands --write`; the README command-truthfulness check compares against the full `--help --all` output.
 
-`review suspicious` is the LLM suspicion pass (asynchronous audit, archivist invariants): it sends only a sanitized conclusion packet (ids/gates/rule codes/summaries — never code blocks, raw diffs, or full command output) to the configured external provider, and any returned suspicion must anchor to a decisionId present in the packet (hallucinated ids are dropped and counted). Without a key it falls back deterministically and never blocks. Conclusions land only in `.helix/reports/suspicion.*` — **never in the completion chain, never in config, never on a gate switch**.
+`review suspicious` is the LLM suspicion pass (asynchronous audit, archivist invariants): it sends only a sanitized conclusion packet (ids/gates/rule codes/summaries — never code blocks, raw diffs, or full command output) to the configured external provider, and any returned suspicion must anchor to a decisionId present in the packet (hallucinated ids are dropped and counted). Without a key it falls back deterministically and never blocks. Conclusions land only in `.wildarrange/reports/suspicion.*` — **never in the completion chain, never in config, never on a gate switch**.
 
-The dashboard (`serve`) includes a route review console, decision panel, and ops panel. The route console groups the original request, structured route result, matched signals, semantic second opinion, and subsequent tool summaries by session and date. Reviewers can mark a route confirmed, rule-wrong, or case-wrong; common secret fields in tool inputs are redacted. The IDE `Stop` hook actively refreshes a human-readable daily report at `.helix/reports/routing/latest.md` (also archived as `YYYY-MM-DD.md`), with the conclusion first and full decision/tool details below. Reviews only append annotations and never edit `routes.json` automatically.
+The dashboard (`serve`) includes a route review console, decision panel, and ops panel. The route console groups the original request, structured route result, matched signals, semantic second opinion, and subsequent tool summaries by session and date. Reviewers can mark a route confirmed, rule-wrong, or case-wrong; common secret fields in tool inputs are redacted. The IDE `Stop` hook actively refreshes a human-readable daily report at `.wildarrange/reports/routing/latest.md` (also archived as `YYYY-MM-DD.md`), with the conclusion first and full decision/tool details below. Reviews only append annotations and never edit `routes.json` automatically.
 
 The end-of-run gate summary is leveled by `reporting.verbosity`: the default `verbose` prints the per-gate three-line projection to stderr after each `run` (so every gate decision can be judged while the framework is new); once trust builds, set `normal` (one line) or `quiet` (JSON only). The machine-readable stdout JSON never changes across levels.
 
@@ -397,11 +397,11 @@ After an interrupted parallel run, `parallel status --run <runId>` shows `batchS
 
 Every `status` output carries a persistent `gateArming` yellow lamp: under default configs (all quality gates off, no independent review signal) it reports "gates not armed" with remediation guidance, so an all-green gate stream that proves nothing cannot be mistaken for a healthy project. The acceptance proof enforces two hard floors: it refuses tasks whose `verify_commands` are all trivial (e.g. `true`), and it refuses tasks whose review gate has no independent signal lane (no `review_commands` / `standards_commands` / `review.llm` / enabled quality gate) — a tautological review proves nothing and must not reach completed. `config init --armed` writes a config with armed quality gates (blocking commentChecker + an lspDiagnostics command slot). `doctor` carries dedicated `gateArming` and `adapters` sections: unarmed gates, enabled adapters whose hooks are not installed on this machine, and rule files referencing paths that no longer exist all surface in the report.
 
-`governance audit` is LuWu's read-only inspection. It checks directory-level `AGENTS.md`, Chinese/English README command parity, Prompt Pack registration, naming, and actual code comments, then writes evidence under `.helix/reports/governance/`. With `--changed-only`, only changed files and the related ancestor rules, paired docs, and architecture ledgers are inspected; if Git changes cannot be read, the audit safely falls back to a full scan. LuWu never moves, renames, or deletes project files automatically, and the runtime rejects LuWu, DiJiang, or BaiZe from command workers.
+`governance audit` is LuWu's read-only inspection. It checks directory-level `AGENTS.md`, Chinese/English README command parity, Prompt Pack registration, naming, and actual code comments, then writes evidence under `.wildarrange/reports/governance/`. With `--changed-only`, only changed files and the related ancestor rules, paired docs, and architecture ledgers are inspected; if Git changes cannot be read, the audit safely falls back to a full scan. LuWu never moves, renames, or deletes project files automatically, and the runtime rejects LuWu, DiJiang, or BaiZe from command workers.
 
 Before every worker run in a Git project, WildArrange records a workspace snapshot (`git stash create`); the snapshot hash and restore command are stored in task evidence and the ledger, so broken changes can be recovered with `git stash apply <hash>`.
 
-WildArrange preflights shell commands and blocks clearly destructive commands such as deleting `.git/.helix`, recursively deleting project source/test/doc directories, `git reset --hard`, `git clean -fd`, `sudo`, or `curl | sh`. Normal project commands, verifiers, review commands, and child-agent runners continue to run.
+WildArrange preflights shell commands and blocks clearly destructive commands such as deleting `.git/.wildarrange`, recursively deleting project source/test/doc directories, `git reset --hard`, `git clean -fd`, `sudo`, or `curl | sh`. Normal project commands, verifiers, review commands, and child-agent runners continue to run.
 
 ## ArchivistRouter
 
@@ -410,19 +410,19 @@ ArchivistRouter is the archivist plus task-router node. It reads conclusions-onl
 Manual commands:
 
 ```bash
-node ./bin/helix.mjs archivist packet --text "build a web TODO app" --stage plan
-node ./bin/helix.mjs archivist run --text "build a web TODO app" --stage plan --force
+node ./bin/wildarrange.mjs archivist packet --text "build a web TODO app" --stage plan
+node ./bin/wildarrange.mjs archivist run --text "build a web TODO app" --stage plan --force
 ```
 
 When `archivistRouter.enabled` is `true`, `SessionStart`, `UserPromptSubmit`, and `PostCompact` hooks trigger ArchivistRouter automatically. Without a DeepSeek key it falls back to deterministic routing and does not block the main flow.
 
-Cross-session memory is written to `.helix/memory/digests/`. Task completion, parallel admission completion, `SessionStart`, and `PostCompact` emit structured digests used to recover progress, decisions, artifacts, implementation notes, and pitfalls.
+Cross-session memory is written to `.wildarrange/memory/digests/`. Task completion, parallel admission completion, `SessionStart`, and `PostCompact` emit structured digests used to recover progress, decisions, artifacts, implementation notes, and pitfalls.
 
 Routing suggestions remain review-only until explicitly resolved:
 
 ```bash
-node ./bin/helix.mjs archivist suggestions list
-node ./bin/helix.mjs archivist suggestions resolve --id <id> --decision accept --evidence "..." --rationale "..."
+node ./bin/wildarrange.mjs archivist suggestions list
+node ./bin/wildarrange.mjs archivist suggestions resolve --id <id> --decision accept --evidence "..." --rationale "..."
 ```
 
 ## Skill Matching and Task Bindings
@@ -430,19 +430,19 @@ node ./bin/helix.mjs archivist suggestions resolve --id <id> --decision accept -
 Skill matcher gives an explainable hint for which skills should load at the current stage:
 
 ```bash
-node ./bin/helix.mjs skills match --text "build a web reminders app" --stage design --agent Jiuwei
+node ./bin/wildarrange.mjs skills match --text "build a web reminders app" --stage design --agent Jiuwei
 ```
 
 A stage is matching context, not a separate family of stage-prefixed Skills. Planning, execution, and verification are handled by the long-lived Agents, current specialist Skills, and the deterministic delivery pipeline.
 
 Skill mounting at injection points is on-demand by default (`skillMatcher.dynamicInjection`). When request text is available, only configured skills that match the request are injected in full; the rest are demoted to on-demand references. `alwaysMount` skills (default `wildarrange-injection-runtime`) are always injected, and `maxSkills` (default 4) caps task-bound skills per mount. Points without request text (such as `pre_tool_use`) fall back to the static list. The dynamic matcher only subtracts within the point- and agent-bound set; `task.skills` is an additional explicit source constrained by safe loading and the same count budget.
 
-Skills persisted in `task.skills` are mounted before execution through the PreToolUse Hook, `context build --point before_execute`, and the generated `/helix-run`. M1 review/checkpoint points still use their static Skills and do not claim automatic task-binding delivery. Task bindings only accept Prompt Pack manifest entries or `.agents/skills/<name>/SKILL.md` files; installed-root, realpath, and SHA-256 checks plus count/character budgets remain enforced. Unknown or integrity-failed names are reported in `skillSelection.missing` instead of being loaded silently.
+Skills persisted in `task.skills` are mounted before execution through the PreToolUse Hook, `context build --point before_execute`, and the generated `/wildarrange-run`. M1 review/checkpoint points still use their static Skills and do not claim automatic task-binding delivery. Task bindings only accept Prompt Pack manifest entries or `.agents/skills/<name>/SKILL.md` files; installed-root, realpath, and SHA-256 checks plus count/character budgets remain enforced. Unknown or integrity-failed names are reported in `skillSelection.missing` instead of being loaded silently.
 
 ### Human decision channel and safety switches
 
 - **Generic push (no external IM binding)**: all pending human decisions — plan awaiting approval, out-of-scope ChangeRequests, failed tasks, child agents awaiting acceptance — are injected into the host AI context by hooks (SessionStart / UserPromptSubmit / PostCompact / Stop), instructing the AI to proactively surface them to the developer with options. `attentionReport` is the source of truth; `status` / dashboard can also pull it.
-- **Plan approval gate**: when `planApproval.required=true`, an imported plan enters `awaiting_plan_approval` and `run` refuses to execute until the developer runs `plan approve` (or `/helix-approve` in chat). Off by default.
+- **Plan approval gate**: when `planApproval.required=true`, an imported plan enters `awaiting_plan_approval` and `run` refuses to execute until the developer runs `plan approve` (or `/wildarrange-approve` in chat). Off by default.
 - **Externalized command safety**: built-in high-risk command patterns are a floor that cannot be disabled; `commandSafety.extraPatterns` lets you add project-specific dangerous-command blocks (`{ id, pattern, flags, reason }`) without code changes.
 
 ## Dashboard
@@ -450,13 +450,13 @@ Skills persisted in `task.skills` are mounted before execution through the PreTo
 Local dashboard:
 
 ```bash
-node ./bin/helix.mjs serve --host 127.0.0.1 --port 8765
+node ./bin/wildarrange.mjs serve --host 127.0.0.1 --port 8765
 ```
 
 Binding to a non-loopback host requires a token:
 
 ```bash
-node ./bin/helix.mjs serve --host 0.0.0.0 --port 8765 --token "$HELIX_DASHBOARD_TOKEN"
+node ./bin/wildarrange.mjs serve --host 0.0.0.0 --port 8765 --token "$WILDARRANGE_DASHBOARD_TOKEN"
 ```
 
 `GET /api/state` remains readable on loopback without a token. Every `POST` write operation requires a token even on `127.0.0.1`, and the server validates Host / Origin headers to prevent browser-triggered local command execution.
@@ -470,30 +470,30 @@ Authorization: Bearer <token>
 or:
 
 ```text
-x-helix-token: <token>
+x-wildarrange-token: <token>
 ```
 
 ## Runtime Files
 
 | Path | Purpose |
 |---|---|
-| `.helix/team/tasks.json` | Single project-wide work-item ledger: Tasks, types, links, status, and compact history across all Plans |
-| `.helix/ledger.jsonl` | Hash-chained append-only event ledger; verify with `node ./bin/helix.mjs ledger verify` |
-| `.helix/security/config-baseline.json` | Config hash baseline; verify with `node ./bin/helix.mjs config verify` |
-| `.helix/backups/` | Runtime critical-file backups created by `state backup` |
-| `.helix/checkpoints/` | Completed task checkpoints |
-| `.helix/reports/` | Workflow, review, and failure reports |
-| `.helix/reports/acceptance/` | Acceptance proof chain before checkpoint |
-| `.helix/snapshots/context.md` | Cross-session resume context |
-| `.helix/adapters/` | Adapter configs, reports, backups |
-| `.helix/agent-runs/` | Child-agent packets, results, and admission records |
-| `.helix/memory/` | ArchivistRouter structured memory |
-| `.helix/memory/digests/` | Cross-session recovery digests |
-| `.helix/routing/suggestions/` | Route keyword suggestions pending review |
+| `.wildarrange/team/tasks.json` | Single project-wide work-item ledger: Tasks, types, links, status, and compact history across all Plans |
+| `.wildarrange/ledger.jsonl` | Hash-chained append-only event ledger; verify with `node ./bin/wildarrange.mjs ledger verify` |
+| `.wildarrange/security/config-baseline.json` | Config hash baseline; verify with `node ./bin/wildarrange.mjs config verify` |
+| `.wildarrange/backups/` | Runtime critical-file backups created by `state backup` |
+| `.wildarrange/checkpoints/` | Completed task checkpoints |
+| `.wildarrange/reports/` | Workflow, review, and failure reports |
+| `.wildarrange/reports/acceptance/` | Acceptance proof chain before checkpoint |
+| `.wildarrange/snapshots/context.md` | Cross-session resume context |
+| `.wildarrange/adapters/` | Adapter configs, reports, backups |
+| `.wildarrange/agent-runs/` | Child-agent packets, results, and admission records |
+| `.wildarrange/memory/` | ArchivistRouter structured memory |
+| `.wildarrange/memory/digests/` | Cross-session recovery digests |
+| `.wildarrange/routing/suggestions/` | Route keyword suggestions pending review |
 
 ## Configuration
 
-`helix.config.json` configures agents, model providers, dynamic categories, context budgets, and injection points.
+`wildarrange.config.json` configures agents, model providers, dynamic categories, context budgets, and injection points.
 
 Each long-lived agent can also bind project Skills through `skills`. Put a custom Skill at `.agents/skills/<name>/SKILL.md` and list it on the target agent. The Skill stays available at that agent's injection points and is not inherited by other agents. An external agent CLI can be wrapped by such a Skill while the core remains vendor-neutral:
 
@@ -515,7 +515,7 @@ Binding names may contain letters, numbers, `_`, and `-`. Missing Skills are rep
 
 Agents with `"provider": "host"` are delegated to the installed host tool. In Codex, GPT-family model selection is handled by Codex. In Cursor, the default Cursor model is used by the adapter path. WildArrange does not need an OpenAI API key for those host-managed agents.
 
-External providers use OpenAI-compatible HTTP configuration. See `helix.config.example.json` for the full schema. Use `.env.wildarrange.example` as the environment variable template:
+External providers use OpenAI-compatible HTTP configuration. See `wildarrange.config.example.json` for the full schema. Use `.env.wildarrange.example` as the environment variable template:
 
 ```bash
 # Copy and fill in real values; never commit secrets
@@ -567,7 +567,7 @@ Before a commercial release, confirm:
 
 ```bash
 npm test
-npm pack --dry-run --cache /private/tmp/helix-npm-cache
+npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache
 ```
 
 Current status: the linear governance loop is implemented and tested; checkpoint writes an acceptance-proof chain first. Optional LLM review, configurable LSP/typecheck diagnostics, AST/structure commands, hashline anchors, and comment checking are available through the CLI review gate. Codex hooks become hard after `/hooks` trust; Cursor `preToolUse` / `beforeShellExecution` are fail-closed in trusted workspaces. Multi-agent support includes command-based parallel runs, Codex/Cursor command-template spawn, structured artifact admission, Git worktree patch admission, and retain-until-acceptance. Host-private background process management remains adapter work.

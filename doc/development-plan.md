@@ -23,7 +23,7 @@
 
 - 用 `deepseek-v4-flash` 实现 ArchivistRouter，覆盖 SessionStart、Git HEAD 变更、低置信路由与周期性 prompt 摘要。`DONE: runtime, manual CLI, hooks, Git HEAD trigger state, and stage-aware prompt windows`
 - 加入本地结构化记忆文件：进度、决策、产物、实现笔记、调研笔记、坑点与上下文注入。`DONE: minimal structured-files backend`
-- 在 `.helix/routing/suggestions` 下加入路由建议产物及 apply/reject 审核流。`DONE: pending suggestions, accept/reject CLI, and reviewed route override layer`
+- 在 `.wildarrange/routing/suggestions` 下加入路由建议产物及 apply/reject 审核流。`DONE: pending suggestions, accept/reject CLI, and reviewed route override layer`
 - 加入语义路由 shadow 与低置信 execute 降级。`DONE: deterministic route keeps evidence; CangJie shadow can force ambiguous execute into plan/ask`
 - 加入 session/task digest 文件，用于误关聊天后的恢复。`DONE: session_start/post_compact/task_completed/parallel_admission_completed digests`
 - 模型差异由长期 Agent 的 provider/model/reasoning 与宿主 adapter 承担；独立 `promptVariants` 因未进入真实上下文已退役。`RETIRED: 2026-08-25`

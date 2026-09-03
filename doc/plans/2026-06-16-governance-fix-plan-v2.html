@@ -68,32 +68,32 @@
     <tr>
       <td><strong>Codex hook 没接入宿主</strong></td>
       <td style="color:var(--ok)">可立即硬修，非"未来工作"</td>
-      <td>Codex 官方 hooks 文档：原生读 <code>&lt;repo&gt;/.codex/hooks.json</code>，事件名与 <code>permissionDecision:"deny"</code> 协议与本项目 <code>helix-adapters.mjs:186</code> / <code>helix-hooks.mjs:228</code> 完全一致；唯一错在写到了 <code>.helix/adapters/codex/hooks.json</code>（Codex 不读）。</td>
+      <td>Codex 官方 hooks 文档：原生读 <code>&lt;repo&gt;/.codex/hooks.json</code>，事件名与 <code>permissionDecision:"deny"</code> 协议与本项目 <code>wildarrange-adapters.mjs:186</code> / <code>wildarrange-hooks.mjs:228</code> 完全一致；唯一错在写到了 <code>.wildarrange/adapters/codex/hooks.json</code>（Codex 不读）。</td>
     </tr>
     <tr>
       <td>successCriteria 被 verifier 批量翻绿</td>
       <td>属实</td>
-      <td><code>helix-team.mjs:124</code> <code>applyVerifierEvidenceToCriteria</code> 在 verifier pass 后把所有 pending criteria 置 pass。</td>
+      <td><code>wildarrange-team.mjs:124</code> <code>applyVerifierEvidenceToCriteria</code> 在 verifier pass 后把所有 pending criteria 置 pass。</td>
     </tr>
     <tr>
       <td>dashboard loopback 免 token → 本地 RCE</td>
       <td>风险成立</td>
-      <td><code>helix-dashboard.mjs:24</code> loopback 默认 <code>requireAuth=false</code>，<code>POST /api/run-next</code> 触发真实 worker shell；token 比较非恒定时间（<code>:130</code>）。</td>
+      <td><code>wildarrange-dashboard.mjs:24</code> loopback 默认 <code>requireAuth=false</code>，<code>POST /api/run-next</code> 触发真实 worker shell；token 比较非恒定时间（<code>:130</code>）。</td>
     </tr>
     <tr>
       <td>digest/archivist 写了没人读</td>
       <td>属实</td>
-      <td><code>helix-hooks.mjs:407</code> <code>appendHookFacts</code> 未渲染 <code>facts.digest</code>/<code>facts.archivist</code>；<code>wa-recall</code> 指向 <code>docs/solutions/</code> 而非 <code>.helix/memory/</code>。</td>
+      <td><code>wildarrange-hooks.mjs:407</code> <code>appendHookFacts</code> 未渲染 <code>facts.digest</code>/<code>facts.archivist</code>；<code>wa-recall</code> 指向 <code>docs/solutions/</code> 而非 <code>.wildarrange/memory/</code>。</td>
     </tr>
     <tr>
       <td>ledger 无防篡改</td>
       <td>属实</td>
-      <td><code>helix-foundation.mjs:543</code> 仅 append JSONL，无 hash 链、无校验命令。</td>
+      <td><code>wildarrange-foundation.mjs:543</code> 仅 append JSONL，无 hash 链、无校验命令。</td>
     </tr>
     <tr>
       <td>worktree 永不清理 / admission 先合后验</td>
       <td>属实</td>
-      <td>全仓无 <code>worktree remove/prune</code>；<code>helix-parallel-agents.mjs:168</code> 先 apply 到主干再跑 gate，失败才回滚。</td>
+      <td>全仓无 <code>worktree remove/prune</code>；<code>wildarrange-parallel-agents.mjs:168</code> 先 apply 到主干再跑 gate，失败才回滚。</td>
     </tr>
   </table>
 
@@ -104,7 +104,7 @@
       <h3>Codex hook 接对路径 + 信任引导</h3>
       <p class="why">schema 已对，只差落点与 Codex 的信任审批流。这是把"D 级假接入"一次性拉到"真硬拦截"的最省力改动。</p>
       <ul>
-        <li>写入改为 <code>&lt;repo&gt;/.codex/hooks.json</code>（保留 <code>.helix/adapters/codex/</code> 作为备份副本）。</li>
+        <li>写入改为 <code>&lt;repo&gt;/.codex/hooks.json</code>（保留 <code>.wildarrange/adapters/codex/</code> 作为备份副本）。</li>
         <li>install 后打印引导：在 Codex 内执行 <code>/hooks</code> review 并 trust（Codex 默认对非托管 hook 要求一次信任审批后才运行）。</li>
         <li>uninstall 对称删除 <code>.codex/hooks.json</code>，并先备份。</li>
         <li>install 报告输出 <code>enforcement: hard</code>（Codex）/ <code>soft</code>（Cursor）。</li>
@@ -115,7 +115,7 @@
       <h3>successCriteria 不再被 verifier 自动满足</h3>
       <p class="why">否则"多维验收"是假的——verifier 一绿全绿。</p>
       <ul>
-        <li>移除"verifier pass → 所有 criteria pass"的默认行为（<code>helix-team.mjs:124</code>）。</li>
+        <li>移除"verifier pass → 所有 criteria pass"的默认行为（<code>wildarrange-team.mjs:124</code>）。</li>
         <li>新增字段 <code>verifierCommandRefs</code>：只有显式绑定到具体 verify 命令的 criterion 才能由证据自动通过。</li>
         <li>默认播种的 C001/C002/C003 保持 <code>pending</code>，缺证据则 checkpoint 真实阻断。</li>
       </ul>
@@ -137,7 +137,7 @@
       <ul>
         <li><code>appendHookFacts</code> 增"记忆摘要"+"档案路由"两段，各最多 3 条（进展/决策/产物/风险/开放问题）。</li>
         <li>挂到 <code>session_start</code> / <code>post_compact</code> 注入点；生成失败注入 warning，不阻断。</li>
-        <li>修正 <code>wa-recall</code> 目录指向 <code>.helix/memory/</code>。</li>
+        <li>修正 <code>wa-recall</code> 目录指向 <code>.wildarrange/memory/</code>。</li>
       </ul>
     </div>
   </div>
@@ -149,7 +149,7 @@
       <h3>ledger hash 链 + verify 命令</h3>
       <ul>
         <li>每条事件写 <code>prevHash</code> + <code>hash</code>。</li>
-        <li>新增 <code>helix ledger verify</code>。</li>
+        <li>新增 <code>wildarrange ledger verify</code>。</li>
         <li>checkpoint 信任 tasks.json 前先校验 <code>last_verify_result</code> 与 ledger 一致。</li>
         <li>目标是"改了能发现"，不追求抗 root 签名。</li>
       </ul>
@@ -185,11 +185,11 @@
   <h2>执行顺序（按杠杆/依赖）</h2>
   <ol class="seq">
     <li><strong>Codex hook 接对路径</strong>——最高杠杆，单点改动即让"治理"二字成立；先写测试断言 <code>.codex/hooks.json</code> 生成且 schema 合规。</li>
-    <li><strong>successCriteria 解耦</strong>——治理独立性的根；改 <code>helix-team.mjs</code> + plan 校验，配套"未绑定证据则 checkpoint 失败"测试。</li>
+    <li><strong>successCriteria 解耦</strong>——治理独立性的根；改 <code>wildarrange-team.mjs</code> + plan 校验，配套"未绑定证据则 checkpoint 失败"测试。</li>
     <li><strong>dashboard 写鉴权</strong>——安全止血，独立可并行。</li>
     <li><strong>digest 注入</strong>——记忆闭环，依赖第 2 步后的 hook 输出格式稳定。</li>
     <li><strong>ledger hash 链 → admission 先验后合 → worktree 清理</strong>——P1 加固，串行推进。</li>
-    <li>每步收尾 <code>npm test</code>；涉及包内容跑 <code>npm pack --dry-run --cache /private/tmp/helix-npm-cache</code>。</li>
+    <li>每步收尾 <code>npm test</code>；涉及包内容跑 <code>npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache</code>。</li>
   </ol>
 
   <h2>P0 数据流（修复后）</h2>
@@ -205,10 +205,10 @@
     <div class="arrow">→</div>
     <div class="col">
       <h4>处理组件</h4>
-      <div class="box">helix-adapters：写 <code>.codex/hooks.json</code>（hard）</div>
-      <div class="box">helix-team：criteria 按证据绑定通过</div>
-      <div class="box">helix-hooks：deny 越界 + 注入记忆摘要</div>
-      <div class="box">helix-dashboard：POST 强制 token + Host 校验</div>
+      <div class="box">wildarrange-adapters：写 <code>.codex/hooks.json</code>（hard）</div>
+      <div class="box">wildarrange-team：criteria 按证据绑定通过</div>
+      <div class="box">wildarrange-hooks：deny 越界 + 注入记忆摘要</div>
+      <div class="box">wildarrange-dashboard：POST 强制 token + Host 校验</div>
     </div>
     <div class="arrow">→</div>
     <div class="col">

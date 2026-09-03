@@ -81,9 +81,9 @@ import { scanProjectRules } from "../src/infra/rule-scanner.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import {
   DEFAULT_PACKAGE_NAME,
-  loadHelixConfig,
+  loadWildArrangeConfig,
   migrateRuntimeConfigState,
-  writeDefaultHelixConfig,
+  writeDefaultWildArrangeConfig,
 } from "../src/infra/runtime-config.mjs";
 import { readJson } from "../src/infra/runtime-store.mjs";
 import {
@@ -159,7 +159,7 @@ async function main() {
     }
     console.log(JSON.stringify({
       ok: true,
-      runtime: path.join(rootDir, ".helix"),
+      runtime: path.join(rootDir, ".wildarrange"),
       samplePlan: samplePath,
       projectDocuments,
     }, null, 2));
@@ -170,7 +170,7 @@ async function main() {
     const subcommand = args._[1];
     if (subcommand === "init") {
       await initRuntime(rootDir);
-      console.log(JSON.stringify(await writeDefaultHelixConfig(rootDir, {
+      console.log(JSON.stringify(await writeDefaultWildArrangeConfig(rootDir, {
         root: Boolean(args.root),
         force: Boolean(args.force),
         armed: Boolean(args.armed),
@@ -178,7 +178,7 @@ async function main() {
       return;
     }
     if (subcommand === "show") {
-      console.log(JSON.stringify(await loadHelixConfig(rootDir), null, 2));
+      console.log(JSON.stringify(await loadWildArrangeConfig(rootDir), null, 2));
       return;
     }
     if (subcommand === "baseline") {
@@ -193,7 +193,7 @@ async function main() {
       process.exitCode = result.ok ? 0 : 2;
       return;
     }
-    throw new Error("helix config requires init, show, baseline, or verify");
+    throw new Error("wildarrange config requires init, show, baseline, or verify");
   }
 
   if (command === "adapter") {
@@ -213,13 +213,13 @@ async function main() {
       return;
     }
     if (subcommand === "restore") {
-      if (!args.backup || args.backup === true) throw new Error("helix adapter restore requires --backup <backupId>");
+      if (!args.backup || args.backup === true) throw new Error("wildarrange adapter restore requires --backup <backupId>");
       console.log(JSON.stringify(await restoreAdapterBackup(rootDir, {
         backupId: args.backup,
       }), null, 2));
       return;
     }
-    throw new Error("helix adapter requires install, uninstall, or restore");
+    throw new Error("wildarrange adapter requires install, uninstall, or restore");
   }
 
   if (command === "device") {
@@ -235,7 +235,7 @@ async function main() {
       console.log(JSON.stringify((await coordinationStatus(rootDir)).device, null, 2));
       return;
     }
-    throw new Error("helix device requires register or status");
+    throw new Error("wildarrange device requires register or status");
   }
 
   if (command === "coordination") {
@@ -245,7 +245,7 @@ async function main() {
       return;
     }
     if (subcommand === "claim") {
-      if (!args.task || args.task === true) throw new Error("helix coordination claim requires --task <taskId>");
+      if (!args.task || args.task === true) throw new Error("wildarrange coordination claim requires --task <taskId>");
       console.log(JSON.stringify(await claimTeamTask(rootDir, {
         taskId: args.task,
         owner: args.owner && args.owner !== true ? args.owner : undefined,
@@ -253,14 +253,14 @@ async function main() {
       }), null, 2));
       return;
     }
-    throw new Error("helix coordination requires status or claim");
+    throw new Error("wildarrange coordination requires status or claim");
   }
 
   if (command === "handoff") {
     const subcommand = args._[1];
     if (subcommand === "prepare") {
-      if (!args.task || args.task === true) throw new Error("helix handoff prepare requires --task <taskId>");
-      if (!args["to-device-id"] || args["to-device-id"] === true) throw new Error("helix handoff prepare requires --to-device-id <uuid>");
+      if (!args.task || args.task === true) throw new Error("wildarrange handoff prepare requires --task <taskId>");
+      if (!args["to-device-id"] || args["to-device-id"] === true) throw new Error("wildarrange handoff prepare requires --to-device-id <uuid>");
       console.log(JSON.stringify(await prepareTaskHandoff(rootDir, {
         taskId: args.task,
         toDeviceId: args["to-device-id"],
@@ -270,12 +270,12 @@ async function main() {
       return;
     }
     if (subcommand === "push") {
-      if (!args.task || args.task === true) throw new Error("helix handoff push requires --task <taskId>");
+      if (!args.task || args.task === true) throw new Error("wildarrange handoff push requires --task <taskId>");
       console.log(JSON.stringify(await pushTaskHandoff(rootDir, { taskId: args.task }), null, 2));
       return;
     }
     if (subcommand === "accept") {
-      if (!args.task || args.task === true) throw new Error("helix handoff accept requires --task <taskId>");
+      if (!args.task || args.task === true) throw new Error("wildarrange handoff accept requires --task <taskId>");
       console.log(JSON.stringify(await acceptTaskHandoff(rootDir, {
         taskId: args.task,
         planId: args.plan && args.plan !== true ? args.plan : undefined,
@@ -283,9 +283,9 @@ async function main() {
       return;
     }
     if (subcommand === "takeover") {
-      if (!args.plan || args.plan === true) throw new Error("helix handoff takeover requires --plan <planId>");
-      if (!args.task || args.task === true) throw new Error("helix handoff takeover requires --task <taskId>");
-      if (!args["expected-device-id"] || args["expected-device-id"] === true) throw new Error("helix handoff takeover requires --expected-device-id <uuid>");
+      if (!args.plan || args.plan === true) throw new Error("wildarrange handoff takeover requires --plan <planId>");
+      if (!args.task || args.task === true) throw new Error("wildarrange handoff takeover requires --task <taskId>");
+      if (!args["expected-device-id"] || args["expected-device-id"] === true) throw new Error("wildarrange handoff takeover requires --expected-device-id <uuid>");
       console.log(JSON.stringify(await takeoverTaskOwnership(rootDir, {
         planId: args.plan,
         taskId: args.task,
@@ -295,13 +295,13 @@ async function main() {
       }), null, 2));
       return;
     }
-    throw new Error("helix handoff requires prepare, push, accept, or takeover");
+    throw new Error("wildarrange handoff requires prepare, push, accept, or takeover");
   }
 
   if (command === "injection") {
     const subcommand = args._[1];
     if (subcommand === "show") {
-      if (!args.point || args.point === true) throw new Error("helix injection show requires --point <name>");
+      if (!args.point || args.point === true) throw new Error("wildarrange injection show requires --point <name>");
       console.log(JSON.stringify(await resolveInjectionPoint(rootDir, args.point, {
         agent: args.agent && args.agent !== true ? args.agent : "",
         taskId: args.task && args.task !== true ? args.task : "",
@@ -312,7 +312,7 @@ async function main() {
       }), null, 2));
       return;
     }
-    throw new Error("helix injection requires show");
+    throw new Error("wildarrange injection requires show");
   }
 
   if (command === "hook") {
@@ -329,7 +329,7 @@ async function main() {
       }
       return;
     }
-    throw new Error("helix hook requires run");
+    throw new Error("wildarrange hook requires run");
   }
 
   if (command === "plan") {
@@ -343,7 +343,7 @@ async function main() {
       console.log(JSON.stringify(result, null, 2));
       return;
     }
-    if (!args.from) throw new Error("helix plan requires --from <plan.json>（或 helix plan approve 确认已导入计划）");
+    if (!args.from) throw new Error("wildarrange plan requires --from <plan.json>（或 wildarrange plan approve 确认已导入计划）");
     await initRuntime(rootDir);
     const plan = await importPlan(rootDir, path.resolve(rootDir, args.from));
     const approval = await loadPlanApproval(rootDir);
@@ -354,8 +354,8 @@ async function main() {
       approvalRequired: approval.required,
       approvalStatus: approval.status,
       nextStep: approval.required && approval.status !== "approved"
-        ? "计划待开发者确认；确认后才可 run。执行 node ./bin/helix.mjs plan approve 或在编辑器里用 /helix-approve。"
-        : "可直接 node ./bin/helix.mjs run。",
+        ? "计划待开发者确认；确认后才可 run。执行 node ./bin/wildarrange.mjs plan approve 或在编辑器里用 /wildarrange-approve。"
+        : "可直接 node ./bin/wildarrange.mjs run。",
     }, null, 2));
     return;
   }
@@ -368,7 +368,7 @@ async function main() {
     // 汇总，stdout 的 JSON 契约不变。verbose=逐门三行投影；normal=一行；
     // quiet=不输出。框架初期默认 verbose，让人能审判每一条门决策。
     // 汇总只含本次 run 的决策（since=run 开始时间），不混历史记录。
-    const { config } = await loadHelixConfig(rootDir);
+    const { config } = await loadWildArrangeConfig(rootDir);
     const verbosity = config.reporting?.verbosity || "verbose";
     const taskId = result.task?.id || result.taskId || null;
     if (verbosity !== "quiet") {
@@ -383,7 +383,7 @@ async function main() {
   }
 
   if (command === "workflow") {
-    if (!args.from && !args.sample) throw new Error("helix workflow requires --from <plan.json> or --sample");
+    if (!args.from && !args.sample) throw new Error("wildarrange workflow requires --from <plan.json> or --sample");
     const result = await runWorkflow(rootDir, {
       planPath: args.from ? path.resolve(rootDir, args.from) : null,
       sample: Boolean(args.sample),
@@ -420,7 +420,7 @@ async function main() {
       return;
     }
     if (subcommand === "close") {
-      if (!args.run || args.run === true) throw new Error("helix parallel close requires --run <runId>");
+      if (!args.run || args.run === true) throw new Error("wildarrange parallel close requires --run <runId>");
       console.log(JSON.stringify(await closeParallelAgentRun(rootDir, {
         runId: args.run,
         taskId: args.task && args.task !== true ? args.task : undefined,
@@ -429,14 +429,14 @@ async function main() {
       return;
     }
     if (subcommand === "cleanup") {
-      if (!args.run || args.run === true) throw new Error("helix parallel cleanup requires --run <runId>");
+      if (!args.run || args.run === true) throw new Error("wildarrange parallel cleanup requires --run <runId>");
       console.log(JSON.stringify(await cleanupParallelAgentRun(rootDir, {
         runId: args.run,
       }), null, 2));
       return;
     }
     if (subcommand === "retry") {
-      if (!args.run || args.run === true) throw new Error("helix parallel retry requires --run <runId>");
+      if (!args.run || args.run === true) throw new Error("wildarrange parallel retry requires --run <runId>");
       console.log(JSON.stringify(await retryParallelAgentRun(rootDir, {
         runId: args.run,
         command: args.command && args.command !== true ? args.command : undefined,
@@ -448,15 +448,15 @@ async function main() {
       return;
     }
     if (subcommand === "admit") {
-      if (!args.run || args.run === true) throw new Error("helix parallel admit requires --run <runId>");
-      if (!args.task || args.task === true) throw new Error("helix parallel admit requires --task <taskId>");
+      if (!args.run || args.run === true) throw new Error("wildarrange parallel admit requires --run <runId>");
+      if (!args.task || args.task === true) throw new Error("wildarrange parallel admit requires --task <taskId>");
       console.log(JSON.stringify(await admitParallelAgentResult(rootDir, {
         runId: args.run,
         taskId: args.task,
       }), null, 2));
       return;
     }
-    throw new Error("helix parallel requires run, admit, list, status, close, or cleanup");
+    throw new Error("wildarrange parallel requires run, admit, list, status, close, or cleanup");
   }
 
   if (command === "archivist") {
@@ -486,7 +486,7 @@ async function main() {
         return;
       }
       if (action === "resolve") {
-        if (!args.id || args.id === true) throw new Error("helix archivist suggestions resolve requires --id <id>");
+        if (!args.id || args.id === true) throw new Error("wildarrange archivist suggestions resolve requires --id <id>");
         console.log(JSON.stringify(await resolveArchivistRouteSuggestion(rootDir, {
           id: args.id,
           decision: args.decision,
@@ -495,14 +495,14 @@ async function main() {
         }), null, 2));
         return;
       }
-      throw new Error("helix archivist suggestions requires list or resolve");
+      throw new Error("wildarrange archivist suggestions requires list or resolve");
     }
-    throw new Error("helix archivist requires packet, run, or suggestions");
+    throw new Error("wildarrange archivist requires packet, run, or suggestions");
   }
 
   if (command === "node") {
     const nodeName = args._[1];
-    if (!nodeName) throw new Error("helix node requires route, execute, verify, scope, review, checkpoint, or retry");
+    if (!nodeName) throw new Error("wildarrange node requires route, execute, verify, scope, review, checkpoint, or retry");
     const result = await runWorkflowNode(rootDir, nodeName, {
       taskId: args.task === true ? undefined : args.task,
       text: args.text === true ? undefined : args.text,
@@ -518,7 +518,7 @@ async function main() {
 
   if (command === "impact") {
     const changed = args._.slice(1);
-    if (changed.length === 0) throw new Error("helix impact requires at least one changed file path, e.g. helix impact src/infra/ledger.mjs");
+    if (changed.length === 0) throw new Error("wildarrange impact requires at least one changed file path, e.g. wildarrange impact src/infra/ledger.mjs");
     console.log(JSON.stringify(await computeImpact(rootDir, changed), null, 2));
     return;
   }
@@ -532,7 +532,7 @@ async function main() {
     if (args.limit !== undefined && args.limit !== true) {
       const parsed = Number(args.limit);
       if (!Number.isInteger(parsed) || parsed < 0) {
-        throw new Error("helix decisions --limit must be a non-negative integer");
+        throw new Error("wildarrange decisions --limit must be a non-negative integer");
       }
       limit = parsed;
     }
@@ -580,7 +580,7 @@ async function main() {
       const { records, skippedLines } = await readAnnotations(rootDir);
       const limit = Number.isInteger(Number(args.limit)) && args.limit !== true ? Number(args.limit) : 50;
       console.log(JSON.stringify({
-        kind: "helix_annotations",
+        kind: "wildarrange_annotations",
         total: records.length,
         shown: Math.min(records.length, limit),
         skippedLines,
@@ -598,7 +598,7 @@ async function main() {
       reason: args.reason && args.reason !== true ? args.reason : undefined,
       author: args.author && args.author !== true ? args.author : undefined,
     });
-    console.log(JSON.stringify({ kind: "helix_annotation", recorded: entry }, null, 2));
+    console.log(JSON.stringify({ kind: "wildarrange_annotation", recorded: entry }, null, 2));
     return;
   }
 
@@ -607,7 +607,7 @@ async function main() {
     // 退出码透传 node --test，CI 与本地表现一致。
     const positional = args._.slice(1);
     if (args.zone && args.zone !== true && positional.length > 0) {
-      throw new Error("helix test: --zone 与文件参数互斥，请只选一种选择方式");
+      throw new Error("wildarrange test: --zone 与文件参数互斥，请只选一种选择方式");
     }
     let tests;
     let selectionNote;
@@ -623,11 +623,11 @@ async function main() {
       tests = await listRepoTests(rootDir);
       selectionNote = `全量测试 ${tests.length} 个`;
     }
-    console.error(`[helix test] ${selectionNote}`);
-    for (const file of tests) console.error(`[helix test]   ${file}`);
+    console.error(`[wildarrange test] ${selectionNote}`);
+    for (const file of tests) console.error(`[wildarrange test]   ${file}`);
     // 继承 NODE_TEST_CONTEXT 时，子进程 node --test 会误以为自己是由
     // 外层 runner 启动的 IPC 子进程而空跑退出（exit 0、零测试）——从
-    // 测试进程或 npm script 里调 helix test 必须剥掉这些 runner 私有变量。
+    // 测试进程或 npm script 里调 wildarrange test 必须剥掉这些 runner 私有变量。
     const childEnv = { ...process.env };
     for (const key of Object.keys(childEnv)) {
       if (key.startsWith("NODE_TEST_")) delete childEnv[key];
@@ -651,7 +651,7 @@ async function main() {
       }), null, 2));
       return;
     }
-    throw new Error("helix continuation requires check");
+    throw new Error("wildarrange continuation requires check");
   }
 
   if (command === "rules") {
@@ -661,7 +661,7 @@ async function main() {
       console.log(JSON.stringify(await scanProjectRules(rootDir, { targetPaths }), null, 2));
       return;
     }
-    throw new Error("helix rules requires collect");
+    throw new Error("wildarrange rules requires collect");
   }
 
   if (command === "governance") {
@@ -675,7 +675,7 @@ async function main() {
       process.exitCode = result.pass ? 0 : 2;
       return;
     }
-    throw new Error("helix governance requires audit");
+    throw new Error("wildarrange governance requires audit");
   }
 
   if (command === "context") {
@@ -689,14 +689,14 @@ async function main() {
       }), null, 2));
       return;
     }
-    throw new Error("helix context requires build");
+    throw new Error("wildarrange context requires build");
   }
 
   if (command === "evidence") {
     const subcommand = args._[1];
     if (subcommand === "record") {
-      if (!args.task || args.task === true) throw new Error("helix evidence record requires --task <taskId>");
-      if (!args.criterion || args.criterion === true) throw new Error("helix evidence record requires --criterion <criterionId>");
+      if (!args.task || args.task === true) throw new Error("wildarrange evidence record requires --task <taskId>");
+      if (!args.criterion || args.criterion === true) throw new Error("wildarrange evidence record requires --criterion <criterionId>");
       console.log(JSON.stringify(await recordTaskEvidence(rootDir, {
         taskId: args.task,
         criterionId: args.criterion,
@@ -706,11 +706,11 @@ async function main() {
       }), null, 2));
       return;
     }
-    throw new Error("helix evidence requires record");
+    throw new Error("wildarrange evidence requires record");
   }
 
   if (command === "steer") {
-    if (!args.from || args.from === true) throw new Error("helix steer requires --from <proposal.json>");
+    if (!args.from || args.from === true) throw new Error("wildarrange steer requires --from <proposal.json>");
     const proposal = await readJson(path.resolve(rootDir, args.from));
     console.log(JSON.stringify(await steerWorkflow(rootDir, proposal), null, 2));
     return;
@@ -719,12 +719,12 @@ async function main() {
   if (command === "review-blockers") {
     const subcommand = args._[1];
     if (subcommand === "record") {
-      if (!args.from || args.from === true) throw new Error("helix review-blockers record requires --from <blocker.json>");
+      if (!args.from || args.from === true) throw new Error("wildarrange review-blockers record requires --from <blocker.json>");
       const blocker = await readJson(path.resolve(rootDir, args.from));
       console.log(JSON.stringify(await recordReviewBlocker(rootDir, blocker), null, 2));
       return;
     }
-    throw new Error("helix review-blockers requires record");
+    throw new Error("wildarrange review-blockers requires record");
   }
 
   if (command === "task") {
@@ -742,7 +742,7 @@ async function main() {
       return;
     }
     if (subcommand === "get") {
-      if (!args.task || args.task === true) throw new Error("helix task get requires --task <taskId>");
+      if (!args.task || args.task === true) throw new Error("wildarrange task get requires --task <taskId>");
       console.log(JSON.stringify(await getTeamTask(rootDir, args.task, {
         planId: args.plan && args.plan !== true ? args.plan : undefined,
       }), null, 2));
@@ -762,7 +762,7 @@ async function main() {
         task = await readJson(path.resolve(rootDir, args.from));
       } else {
         const subject = args.title && args.title !== true ? args.title : args.subject && args.subject !== true ? args.subject : null;
-        if (!subject) throw new Error("helix task create requires --from <task.json> or --title <text>");
+        if (!subject) throw new Error("wildarrange task create requires --from <task.json> or --title <text>");
         task = {
           subject,
           description: args.description && args.description !== true ? args.description : subject,
@@ -779,8 +779,8 @@ async function main() {
       return;
     }
     if (subcommand === "ready") {
-      if (!args.task || args.task === true) throw new Error("helix task ready requires --task <taskId>");
-      if (!args.from || args.from === true) throw new Error("helix task ready requires --from <task-details.json>");
+      if (!args.task || args.task === true) throw new Error("wildarrange task ready requires --task <taskId>");
+      if (!args.from || args.from === true) throw new Error("wildarrange task ready requires --from <task-details.json>");
       const patch = await readJson(path.resolve(rootDir, args.from));
       console.log(JSON.stringify(await readyTeamTask(rootDir, {
         taskId: args.task,
@@ -790,8 +790,8 @@ async function main() {
       return;
     }
     if (subcommand === "archive") {
-      if (!args.task || args.task === true) throw new Error("helix task archive requires --task <taskId>");
-      if (args.delete !== true) throw new Error("helix task archive requires explicit --delete confirmation");
+      if (!args.task || args.task === true) throw new Error("wildarrange task archive requires --task <taskId>");
+      if (args.delete !== true) throw new Error("wildarrange task archive requires explicit --delete confirmation");
       const backup = await writeRuntimeStateBackup(rootDir, { reason: `pre-task-archive:${args.task}` });
       console.log(JSON.stringify(await archiveAndDeleteTeamTask(rootDir, {
         taskId: args.task,
@@ -801,7 +801,7 @@ async function main() {
       }), null, 2));
       return;
     }
-    throw new Error("helix task requires list, get, claim, create, ready, or archive");
+    throw new Error("wildarrange task requires list, get, claim, create, ready, or archive");
   }
 
   if (command === "team") {
@@ -822,7 +822,7 @@ async function main() {
       }), null, 2));
       return;
     }
-    throw new Error("helix team requires send or inbox");
+    throw new Error("wildarrange team requires send or inbox");
   }
 
   if (command === "resume") {
@@ -840,12 +840,12 @@ async function main() {
       return;
     }
     if (subcommand === "review") {
-      if (!args.id || args.id === true) throw new Error("helix changes review requires --id <CR-id>");
+      if (!args.id || args.id === true) throw new Error("wildarrange changes review requires --id <CR-id>");
       console.log(JSON.stringify(await reviewChangeRequest(rootDir, args.id), null, 2));
       return;
     }
     if (subcommand === "resolve") {
-      if (!args.id || args.id === true) throw new Error("helix changes resolve requires --id <CR-id>");
+      if (!args.id || args.id === true) throw new Error("wildarrange changes resolve requires --id <CR-id>");
       const result = await resolveChangeRequest(rootDir, {
         id: args.id,
         decision: args.decision,
@@ -856,7 +856,7 @@ async function main() {
       console.log(JSON.stringify(result, null, 2));
       return;
     }
-    throw new Error("helix changes requires list, review, or resolve");
+    throw new Error("wildarrange changes requires list, review, or resolve");
   }
 
   if (command === "serve") {
@@ -876,7 +876,7 @@ async function main() {
       process.exitCode = result.ok ? 0 : 2;
       return;
     }
-    throw new Error("helix ledger requires verify");
+    throw new Error("wildarrange ledger requires verify");
   }
 
   if (command === "state") {
@@ -898,7 +898,7 @@ async function main() {
       return;
     }
     if (subcommand === "restore") {
-      if (!args.backup || args.backup === true) throw new Error("helix state restore requires --backup <backupId>");
+      if (!args.backup || args.backup === true) throw new Error("wildarrange state restore requires --backup <backupId>");
       console.log(JSON.stringify(await restoreRuntimeStateBackup(rootDir, { backupId: args.backup }), null, 2));
       return;
     }
@@ -915,7 +915,7 @@ async function main() {
       }, null, 2));
       return;
     }
-    throw new Error("helix state requires backup, verify, list, restore, or migrate");
+    throw new Error("wildarrange state requires backup, verify, list, restore, or migrate");
   }
 
   if (command === "doctor") {
@@ -931,11 +931,11 @@ async function main() {
       console.log(JSON.stringify(await scopeGuard(rootDir, { taskId: args.task === true ? undefined : args.task }), null, 2));
       return;
     }
-    throw new Error("helix guard requires scope");
+    throw new Error("wildarrange guard requires scope");
   }
 
   if (command === "route") {
-    if (!args.text || args.text === true) throw new Error("helix route requires --text <request>");
+    if (!args.text || args.text === true) throw new Error("wildarrange route requires --text <request>");
     console.log(JSON.stringify(await routeRequest(rootDir, { text: args.text }), null, 2));
     return;
   }
@@ -958,7 +958,7 @@ async function main() {
       console.log(content);
       return;
     }
-    throw new Error("helix prompts requires list or show");
+    throw new Error("wildarrange prompts requires list or show");
   }
 
   if (command === "skills") {
@@ -975,7 +975,7 @@ async function main() {
       }), null, 2));
       return;
     }
-    throw new Error("helix skills requires match");
+    throw new Error("wildarrange skills requires match");
   }
 
   throw new Error(`unknown command: ${command}`);
@@ -983,7 +983,7 @@ async function main() {
 
 async function readAllStdin() {
   if (process.stdin.isTTY) {
-    throw new Error("helix hook run requires --from <hook.json> or JSON on stdin");
+    throw new Error("wildarrange hook run requires --from <hook.json> or JSON on stdin");
   }
   const chunks = [];
   for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
@@ -995,8 +995,8 @@ async function readAllStdin() {
 main().catch((error) => {
   const protocol = errorProtocolOf(error, {
     code: "cli_error",
-    module: "bin/helix.mjs",
-    nextAction: "运行 node ./bin/helix.mjs doctor 体检；把本错误完整贴给 AI",
+    module: "bin/wildarrange.mjs",
+    nextAction: "运行 node ./bin/wildarrange.mjs doctor 体检；把本错误完整贴给 AI",
   });
   console.error(formatErrorInline(protocol));
   process.exit(1);

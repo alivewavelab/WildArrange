@@ -124,7 +124,7 @@
 
   <h2>测试流程</h2>
   <div class="flow">
-    <div class="step pass"><h3>初始化</h3><p class="small"><code>helix init</code> 创建运行时。</p></div>
+    <div class="step pass"><h3>初始化</h3><p class="small"><code>wildarrange init</code> 创建运行时。</p></div>
     <div class="step pass"><h3>安装 adapter</h3><p class="small">生成 Codex hooks 与 Cursor rules。</p></div>
     <div class="step pass"><h3>模糊需求路由</h3><p class="small">“像提醒但别复杂” 被路由到 plan。</p></div>
     <div class="step pass"><h3>正向闭环</h3><p class="small">规划任务 + 编码任务全部 completed。</p></div>
@@ -145,8 +145,8 @@
     <tbody>
       <tr>
         <td>真实安装</td>
-        <td><code>node ../../bin/helix.mjs adapter install --target all --mode local</code></td>
-        <td>生成 <code>.helix/adapters/codex/hooks.json</code>、<code>.cursor/rules/wildarrange.mdc</code>、Cursor README。</td>
+        <td><code>node ../../bin/wildarrange.mjs adapter install --target all --mode local</code></td>
+        <td>生成 <code>.wildarrange/adapters/codex/hooks.json</code>、<code>.cursor/rules/wildarrange.mdc</code>、Cursor README。</td>
         <td class="pass">通过</td>
       </tr>
       <tr>

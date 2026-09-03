@@ -81,17 +81,17 @@
             
             <h3>1.1 分层架构</h3>
             <div class="architecture-diagram">
-Layer 4: helix-workflow / helix-parallel-agents (顶层入口)
+Layer 4: wildarrange-workflow / wildarrange-parallel-agents (顶层入口)
     ↓
-Layer 3: helix-node-runtime (核心编排)
+Layer 3: wildarrange-node-runtime (核心编排)
     ↓
-Layer 2: helix-review / helix-routing / helix-agent-spawn / helix-git-worktree
+Layer 2: wildarrange-review / wildarrange-routing / wildarrange-agent-spawn / wildarrange-git-worktree
     ↓
-Layer 1: helix-plan / helix-team / helix-gates / helix-failure / helix-acceptance-proof
+Layer 1: wildarrange-plan / wildarrange-team / wildarrange-gates / wildarrange-failure / wildarrange-acceptance-proof
     ↓
-Layer 0: helix-foundation (无内部依赖，纯基础设施)
+Layer 0: wildarrange-foundation (无内部依赖，纯基础设施)
 
-helix-core.mjs: 纯导出层，不属于分层</div>
+wildarrange-core.mjs: 纯导出层，不属于分层</div>
 
             <h3>1.2 设计优点</h3>
             <table>
@@ -108,19 +108,19 @@ helix-core.mjs: 纯导出层，不属于分层</div>
             <table>
                 <tr><th>问题</th><th>风险</th><th>建议</th></tr>
                 <tr>
-                    <td>helix-foundation.mjs 超过 1000 行</td>
+                    <td>wildarrange-foundation.mjs 超过 1000 行</td>
                     <td><span class="badge badge-medium">中</span></td>
                     <td>拆分为基础工具、文件IO、配置管理、运行时初始化四个模块</td>
                 </tr>
                 <tr>
-                    <td>helix-hooks.mjs 依赖 10 个模块</td>
+                    <td>wildarrange-hooks.mjs 依赖 10 个模块</td>
                     <td><span class="badge badge-medium">中</span></td>
                     <td>拆分为 scope、injection、context 三个子模块</td>
                 </tr>
                 <tr>
                     <td>3 个工具函数重复 27 次</td>
                     <td><span class="badge badge-high">高</span></td>
-                    <td>创建 helix-utils.mjs 公共模块</td>
+                    <td>创建 wildarrange-utils.mjs 公共模块</td>
                 </tr>
             </table>
 
@@ -386,19 +386,19 @@ pending → in_progress → verifying → reviewing → checkpointing → comple
                 <tr><th>函数</th><th>文件</th><th>圈复杂度</th><th>建议</th></tr>
                 <tr>
                     <td>runNextTask</td>
-                    <td>helix-node-runtime.mjs</td>
+                    <td>wildarrange-node-runtime.mjs</td>
                     <td>18-20</td>
                     <td>拆分为 executeAndVerify、handleSuccess、handleFailure</td>
                 </tr>
                 <tr>
                     <td>admitParallelAgentResult</td>
-                    <td>helix-parallel-agents.mjs</td>
+                    <td>wildarrange-parallel-agents.mjs</td>
                     <td>12-14</td>
                     <td>提取文件验证、拆分 prepareAdmission</td>
                 </tr>
                 <tr>
                     <td>scopeGuard</td>
-                    <td>helix-gates.mjs</td>
+                    <td>wildarrange-gates.mjs</td>
                     <td>10-12</td>
                     <td>添加防御性检查、提取 deniedPaths 构建</td>
                 </tr>
@@ -407,9 +407,9 @@ pending → in_progress → verifying → reviewing → checkpointing → comple
             <h3>5.2 代码重复统计</h3>
             <table>
                 <tr><th>函数</th><th>重复次数</th><th>涉及文件</th></tr>
-                <tr><td>normalizeRelativePath</td><td>9 次</td><td>helix-adapters, helix-context, helix-parallel-agents 等</td></tr>
-                <tr><td>uniqueStrings</td><td>9 次</td><td>helix-routing, helix-context, helix-plan 等</td></tr>
-                <tr><td>truncate/truncateForSummary</td><td>7 次</td><td>helix-parallel-agents, helix-failure 等</td></tr>
+                <tr><td>normalizeRelativePath</td><td>9 次</td><td>wildarrange-adapters, wildarrange-context, wildarrange-parallel-agents 等</td></tr>
+                <tr><td>uniqueStrings</td><td>9 次</td><td>wildarrange-routing, wildarrange-context, wildarrange-plan 等</td></tr>
+                <tr><td>truncate/truncateForSummary</td><td>7 次</td><td>wildarrange-parallel-agents, wildarrange-failure 等</td></tr>
             </table>
 
             <h3>5.3 错误处理问题</h3>
@@ -457,7 +457,7 @@ pending → in_progress → verifying → reviewing → checkpointing → comple
                 <tr><td>1</td><td>retryTaskNode 的 maxAttempts 无限扩大</td><td>死循环</td><td>0.5d</td></tr>
                 <tr><td>2</td><td>runNextTask 拆分锁粒度</td><td>并发阻塞</td><td>2d</td></tr>
                 <tr><td>3</td><td>evidence 数组截断</td><td>内存膨胀</td><td>1d</td></tr>
-                <tr><td>4</td><td>创建 helix-utils.mjs 消除代码重复</td><td>可维护性</td><td>1d</td></tr>
+                <tr><td>4</td><td>创建 wildarrange-utils.mjs 消除代码重复</td><td>可维护性</td><td>1d</td></tr>
             </table>
 
             <h3>P1：近期修复</h3>
@@ -475,10 +475,10 @@ pending → in_progress → verifying → reviewing → checkpointing → comple
             <table>
                 <tr><th>编号</th><th>问题</th><th>影响</th><th>工作量</th></tr>
                 <tr><td>11</td><td>快照轮转清理</td><td>磁盘耗尽</td><td>1d</td></tr>
-                <tr><td>12</td><td>ensureHelixDirs 单次初始化</td><td>性能</td><td>0.5d</td></tr>
+                <tr><td>12</td><td>ensureWildArrangeDirs 单次初始化</td><td>性能</td><td>0.5d</td></tr>
                 <tr><td>13</td><td>persistTaskState 延迟写入</td><td>性能</td><td>1d</td></tr>
-                <tr><td>14</td><td>拆分 helix-foundation.mjs</td><td>可维护性</td><td>2d</td></tr>
-                <tr><td>15</td><td>拆分 helix-hooks.mjs</td><td>耦合度</td><td>1d</td></tr>
+                <tr><td>14</td><td>拆分 wildarrange-foundation.mjs</td><td>可维护性</td><td>2d</td></tr>
+                <tr><td>15</td><td>拆分 wildarrange-hooks.mjs</td><td>耦合度</td><td>1d</td></tr>
                 <tr><td>16</td><td>补充测试覆盖</td><td>质量保障</td><td>3d</td></tr>
             </table>
         </div>

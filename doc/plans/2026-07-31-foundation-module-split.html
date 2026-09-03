@@ -50,7 +50,7 @@
   <div class="grid">
     <article class="card"><span class="tag p1">结构债务</span><p><strong>1052 行</strong>，超过项目“1000 行默认拆分”的阈值。</p></article>
     <article class="card"><span class="tag p1">高扇入</span><p><strong>44 个 src 调用方</strong>直接 import <code>foundation.mjs</code>，形成事实上的内部总 barrel。</p></article>
-    <article class="card"><span class="tag p2">热点集中</span><p><code>nowIso</code> 33 个调用方、<code>appendLedger</code>/<code>resolveHelixPath</code> 各 26 个、<code>writeJsonAtomic</code> 22 个。</p></article>
+    <article class="card"><span class="tag p2">热点集中</span><p><code>nowIso</code> 33 个调用方、<code>appendLedger</code>/<code>resolveWildArrangePath</code> 各 26 个、<code>writeJsonAtomic</code> 22 个。</p></article>
     <article class="card"><span class="tag p2">独立演化</span><p>近期 Git 协调、Agent 治理、Kimi 适配和锁恢复都分别修改过该文件，证明变化原因并不单一。</p></article>
   </div>
 
@@ -61,7 +61,7 @@
       <tr><td><code>infra/runtime-store.mjs</code></td><td>确定性存储原语</td><td>路径、时间/ID、目录、JSON 原子写与 hash</td><td>仅 Node 内置模块</td></tr>
       <tr><td><code>infra/task-state-lock.mjs</code></td><td>全局任务状态互斥</td><td>task lock 获取、死进程/损坏 owner 恢复、超时与释放</td><td>runtime-store</td></tr>
       <tr><td><code>infra/agent-registry.mjs</code></td><td>固定 Agent 身份与别名</td><td>长期 Agent 白名单、读写角色、别名、显示名、归一化与 worker 资格校验</td><td>无项目内依赖</td></tr>
-      <tr><td><code>infra/runtime-config.mjs</code></td><td>默认配置与配置归一化</td><td><code>DEFAULT_HELIX_CONFIG</code>、load/write、deep merge、strict 配置硬底线</td><td>store、agent-registry、ledger</td></tr>
+      <tr><td><code>infra/runtime-config.mjs</code></td><td>默认配置与配置归一化</td><td><code>DEFAULT_WILDARRANGE_CONFIG</code>、load/write、deep merge、strict 配置硬底线</td><td>store、agent-registry、ledger</td></tr>
       <tr><td><code>infra/runtime-snapshot.mjs</code></td><td>运行态快照与恢复摘要的唯一底层 owner</td><td><code>writeSnapshot</code>、<code>writeRuntimeContextSnapshot</code>、确定性文件读取与 context 渲染；<code>ai/context.mjs::writeContextSnapshot</code> 改为薄封装</td><td>store、ledger；禁止依赖 orchestration/ai</td></tr>
       <tr><td><code>infra/prompt-pack.mjs</code></td><td>Prompt Pack 文件注册表</td><td>安装、读取、hash 校验、列表和单项渲染</td><td>store、runtime-config、agent-registry</td></tr>
       <tr><td><code>infra/runtime-bootstrap.mjs</code></td><td>一次性运行时初始化</td><td><code>initRuntime</code>，串联配置、初始状态、Prompt Pack、ledger 与 snapshot</td><td>上述具体 owner，不依赖 foundation</td></tr>
@@ -74,9 +74,9 @@
     <thead><tr><th>Owner</th><th>数量</th><th>公开 symbols</th></tr></thead>
     <tbody>
       <tr><td><code>agent-registry.mjs</code></td><td>12</td><td><code>AGENT_ALIASES</code>、<code>AGENT_DISPLAY_NAMES</code>、<code>COMMAND_WORKER_AGENTS</code>、<code>DEFAULT_EXECUTOR_AGENT</code>、<code>DEFAULT_LEAD_AGENT</code>、<code>DEFAULT_REVIEW_AGENTS</code>、<code>LONG_LIVED_AGENTS</code>、<code>READ_ONLY_LONG_LIVED_AGENTS</code>、<code>assertCommandWorkerAgent</code>、<code>displayAgentName</code>、<code>isLongLivedAgent</code>、<code>normalizeAgentKey</code></td></tr>
-      <tr><td><code>runtime-config.mjs</code></td><td>8</td><td><code>DEFAULT_CLI_COMMAND</code>、<code>DEFAULT_HELIX_CONFIG</code>、<code>DEFAULT_PACKAGE_NAME</code>、<code>DEFAULT_RUNTIME_NAME</code>、<code>HELIX_CONFIG_FILE</code>、<code>PRODUCT_NAME</code>、<code>loadHelixConfig</code>、<code>writeDefaultHelixConfig</code></td></tr>
+      <tr><td><code>runtime-config.mjs</code></td><td>8</td><td><code>DEFAULT_CLI_COMMAND</code>、<code>DEFAULT_WILDARRANGE_CONFIG</code>、<code>DEFAULT_PACKAGE_NAME</code>、<code>DEFAULT_RUNTIME_NAME</code>、<code>WILDARRANGE_CONFIG_FILE</code>、<code>PRODUCT_NAME</code>、<code>loadWildArrangeConfig</code>、<code>writeDefaultWildArrangeConfig</code></td></tr>
       <tr><td><code>prompt-pack.mjs</code></td><td>6</td><td><code>DEFAULT_PROMPT_PACK_DIR</code>、<code>PROJECT_DIR</code>、<code>installPromptPack</code>、<code>listPromptPack</code>、<code>loadPromptPackEntries</code>、<code>renderPromptPackEntry</code></td></tr>
-      <tr><td><code>runtime-store.mjs</code></td><td>10</td><td><code>HELIX_DIR</code>、<code>STATE_VERSION</code>、<code>TASK_STATUSES</code>、<code>createWorkId</code>、<code>ensureHelixDirs</code>、<code>hashContent</code>、<code>nowIso</code>、<code>readJson</code>、<code>resolveHelixPath</code>、<code>writeJsonAtomic</code></td></tr>
+      <tr><td><code>runtime-store.mjs</code></td><td>10</td><td><code>WILDARRANGE_DIR</code>、<code>STATE_VERSION</code>、<code>TASK_STATUSES</code>、<code>createWorkId</code>、<code>ensureWildArrangeDirs</code>、<code>hashContent</code>、<code>nowIso</code>、<code>readJson</code>、<code>resolveWildArrangePath</code>、<code>writeJsonAtomic</code></td></tr>
       <tr><td><code>task-state-lock.mjs</code></td><td>1</td><td><code>withTaskStateLock</code></td></tr>
       <tr><td><code>runtime-snapshot.mjs</code></td><td>1</td><td><code>writeSnapshot</code></td></tr>
       <tr><td><code>runtime-bootstrap.mjs</code></td><td>1</td><td><code>initRuntime</code></td></tr>
@@ -94,11 +94,11 @@
     <span class="node">runtime-config</span><span class="arrow">→</span><span class="node">agent-registry / ledger / runtime-store</span><br>
     <span class="node">runtime-snapshot / task-state-lock / ledger</span><span class="arrow">→</span><span class="node">runtime-store</span>
   </div>
-  <p><code>foundation.mjs</code> 不在内部依赖主线上，只为 <code>helix-foundation.mjs</code>、<code>helix-core.mjs</code> 和外部旧调用方保持兼容。</p>
+  <p><code>foundation.mjs</code> 不在内部依赖主线上，只为 <code>wildarrange-foundation.mjs</code>、<code>wildarrange-core.mjs</code> 和外部旧调用方保持兼容。</p>
 
   <h2>实施顺序</h2>
   <ol>
-    <li><strong>先建约束：</strong>固化 41 项 Foundation 与 31 项 helix-core 基线，新增导出集合回归；禁止五区实现继续 import <code>infra/foundation.mjs</code>，允许 legacy shim 继续兼容导出。</li>
+    <li><strong>先建约束：</strong>固化 41 项 Foundation 与 31 项 wildarrange-core 基线，新增导出集合回归；禁止五区实现继续 import <code>infra/foundation.mjs</code>，允许 legacy shim 继续兼容导出。</li>
     <li><strong>移动但不改行为：</strong>把原函数按上表迁入真实 owner，<code>foundation.mjs</code> 改成纯 re-export；先让现有调用方继续工作。</li>
     <li><strong>从底向上迁移 import：</strong>先 Infra，再 Capabilities，再 AI/Orchestration，最后 Interface；<code>appendLedger</code> 全部直连 <code>ledger.mjs</code>。</li>
     <li><strong>消除重复：</strong><code>ledger.mjs</code> 改用 runtime-store 的时间、ID、路径与 hash 原语，保持 ledger 锁独立；Infra 成为 context 文件读取/渲染唯一 owner，AI 的同名 API 只做薄封装。</li>
@@ -116,7 +116,7 @@
   <h2>放行标准</h2>
   <ul>
     <li><code>foundation.mjs</code> 只含声明式 export，内部五区 import 数为 0。</li>
-    <li>外部兼容面不变：Foundation/helix-foundation 的 41 项导出集合完全相等，helix-core 既有 31 项 Foundation 导出全部保留。</li>
+    <li>外部兼容面不变：Foundation/wildarrange-foundation 的 41 项导出集合完全相等，wildarrange-core 既有 31 项 Foundation 导出全部保留。</li>
     <li>无模块级循环、无新增跨区边，dependency boundary 全绿。</li>
     <li>锁并发/死进程恢复、配置 strict 恢复、两条 context 入口行为等价、快照自动刷新、Prompt Pack、ledger hash 链专项测试通过。</li>
     <li><code>npm test</code>、LuWu governance、<code>npm pack --dry-run</code> 全部通过。</li>

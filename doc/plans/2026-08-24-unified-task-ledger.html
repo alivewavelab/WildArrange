@@ -65,7 +65,7 @@
   <section class="verdict">
     <h3>结论</h3>
     <p><strong>已将“当前 Plan 的任务板”升级为“全项目工单总账”。</strong></p>
-    <p>执行 Loop 保持不变；<code>.helix/team/tasks.json</code> 现在是全项目唯一工单总账，并已接入建单约束与 Dashboard 可视化。</p>
+    <p>执行 Loop 保持不变；<code>.wildarrange/team/tasks.json</code> 现在是全项目唯一工单总账，并已接入建单约束与 Dashboard 可视化。</p>
   </section>
 
   <h2>实施前现状证据</h2>
@@ -79,7 +79,7 @@
     <article class="card">
       <span class="tag p0">实施前缺口</span>
       <h3>只能看当前 Plan</h3>
-      <p><code>task list</code>、Dashboard 和 workflow summary 都读取当前 <code>.helix/team/tasks.json</code>。</p>
+      <p><code>task list</code>、Dashboard 和 workflow summary 都读取当前 <code>.wildarrange/team/tasks.json</code>。</p>
       <div class="io">切换 Plan 后，旧 Plan 文件还在，但不会进入当前任务汇总。</div>
     </article>
     <article class="card">
@@ -151,7 +151,7 @@
     <article class="card decision">
       <span class="tag ok">已确认</span>
       <h3>一个总账文件</h3>
-      <p><code>.helix/team/tasks.json</code> 保存所有 Plan 的 Task、当前状态、关联关系和精简历史，不再只代表 active Plan。</p>
+      <p><code>.wildarrange/team/tasks.json</code> 保存所有 Plan 的 Task、当前状态、关联关系和精简历史，不再只代表 active Plan。</p>
       <p class="muted">Dashboard 直接读取这一份文件；现有 hash-chain ledger 只负责底层审计，不作为第二套用户工单。</p>
     </article>
     <article class="card">
@@ -179,7 +179,7 @@
       <span class="tag p0">P0-1</span>
       <h3>统一建单入口</h3>
       <p>提供参数化命令和 Dashboard 简单表单，不再要求用户手写整段 JSON。</p>
-      <div class="io"><code>helix task create --type bug --title "登录失败" --source user</code></div>
+      <div class="io"><code>wildarrange task create --type bug --title "登录失败" --source user</code></div>
     </article>
     <article class="card">
       <span class="tag p0">P0-2</span>
@@ -190,8 +190,8 @@
     <article class="card">
       <span class="tag p0">P0-3</span>
       <h3>跨 Plan 总账</h3>
-      <p>把 <code>.helix/team/tasks.json</code> 从“当前 Plan 状态”升级为“全项目 Task 总账”；Plan 只保存 Task 引用和执行分组。</p>
-      <div class="io"><code>helix task list --all --type bug --status open</code></div>
+      <p>把 <code>.wildarrange/team/tasks.json</code> 从“当前 Plan 状态”升级为“全项目 Task 总账”；Plan 只保存 Task 引用和执行分组。</p>
+      <div class="io"><code>wildarrange task list --all --type bug --status open</code></div>
     </article>
     <article class="card">
       <span class="tag p0">P0-4</span>
@@ -220,7 +220,7 @@
     </ul>
   </div>
 
-  <p class="footer">方案原则：Task 是执行单元，也是工单；<code>.helix/team/tasks.json</code> 是唯一工单总账；Plan 只是任务分组；ledger 只保留防篡改审计轨迹；Dashboard 是同一总账的可视化。</p>
+  <p class="footer">方案原则：Task 是执行单元，也是工单；<code>.wildarrange/team/tasks.json</code> 是唯一工单总账；Plan 只是任务分组；ledger 只保留防篡改审计轨迹；Dashboard 是同一总账的可视化。</p>
 </main>
 </body>
 </html>

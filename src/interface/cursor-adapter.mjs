@@ -138,8 +138,8 @@ function failHook(message) {
     // fail-closed：钩子自身故障时阻断写操作，并给出可执行的下一步。
     writeCursorOutput({
       permission: "deny",
-      user_message: "WildArrange 治理钩子故障，已按 fail-closed 阻断写操作。请运行 node ./bin/helix.mjs doctor 诊断后重试。",
-      agent_message: "The WildArrange governance hook failed and is fail-closed for write operations. Ask the developer to run node ./bin/helix.mjs doctor, then retry.",
+      user_message: "WildArrange 治理钩子故障，已按 fail-closed 阻断写操作。请运行 node ./bin/wildarrange.mjs doctor 诊断后重试。",
+      agent_message: "The WildArrange governance hook failed and is fail-closed for write operations. Ask the developer to run node ./bin/wildarrange.mjs doctor, then retry.",
     });
     process.exit(0);
   }
@@ -175,7 +175,7 @@ ${hookCommand}
 ## Uninstall
 
 \`\`\`bash
-node ./bin/helix.mjs adapter uninstall --target cursor
+node ./bin/wildarrange.mjs adapter uninstall --target cursor
 \`\`\`
 `;
 }

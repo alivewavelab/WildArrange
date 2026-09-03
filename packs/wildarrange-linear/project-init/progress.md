@@ -1,6 +1,6 @@
 # 任务与缺陷治理入口
 
-本项目使用 WildArrange 管理任务与缺陷。`.helix/team/tasks.json` 是唯一工单总账；Dashboard、CLI 摘要和 Markdown 投影都是它的视图，不在本文件重复维护任务表。
+本项目使用 WildArrange 管理任务与缺陷。`.wildarrange/team/tasks.json` 是唯一工单总账；Dashboard、CLI 摘要和 Markdown 投影都是它的视图，不在本文件重复维护任务表。
 
 ## 查看与登记
 

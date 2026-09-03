@@ -13,7 +13,7 @@ import { normalizeRelativePath } from "./path-match.mjs";
 export async function collectGitDiff(rootDir) {
   const gitDir = path.join(rootDir, ".git");
   if (!existsSync(gitDir)) return "";
-  const result = await runCommandFile("git", ["-C", rootDir, "diff", "--", ".", ":!.helix"], rootDir, 30_000);
+  const result = await runCommandFile("git", ["-C", rootDir, "diff", "--", ".", ":!.wildarrange"], rootDir, 30_000);
   return result.exitCode === 0 ? result.stdout : "";
 }
 
@@ -28,8 +28,8 @@ export async function collectGitChangedPaths(rootDir) {
     }
   }
 
-  const diff = await runCommandFile("git", ["-C", rootDir, "diff", "--name-only", "--", ".", ":!.helix"], rootDir, 30_000);
-  const untracked = await runCommandFile("git", ["-C", rootDir, "ls-files", "--others", "--exclude-standard", "--", ".", ":!.helix"], rootDir, 30_000);
+  const diff = await runCommandFile("git", ["-C", rootDir, "diff", "--name-only", "--", ".", ":!.wildarrange"], rootDir, 30_000);
+  const untracked = await runCommandFile("git", ["-C", rootDir, "ls-files", "--others", "--exclude-standard", "--", ".", ":!.wildarrange"], rootDir, 30_000);
   if (diff.exitCode !== 0 || untracked.exitCode !== 0) {
     return {
       available: false,
@@ -75,7 +75,7 @@ export function classifyManifestPathChanges(beforeFingerprints = {}, afterFinger
     .sort((left, right) => left.path.localeCompare(right.path));
 }
 
-const FILE_MANIFEST_SKIP_DIRS = new Set([".git", ".helix", "node_modules"]);
+const FILE_MANIFEST_SKIP_DIRS = new Set([".git", ".wildarrange", "node_modules"]);
 
 async function collectFileManifest(rootDir, relativeDir = "") {
   const absoluteDir = path.join(rootDir, relativeDir);

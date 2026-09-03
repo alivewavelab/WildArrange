@@ -1,13 +1,13 @@
 import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
 import {
-  ensureHelixDirs,
+  ensureWildArrangeDirs,
   nowIso,
   readJson,
-  resolveHelixPath,
+  resolveWildArrangePath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
-import { loadHelixConfig } from "../infra/runtime-config.mjs";
+import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
 import {
   assertCleanWorkingTree,
@@ -46,7 +46,7 @@ async function prepareTaskHandoffUnlocked(rootDir, options = {}) {
   if (!options.taskId) throw new Error("handoff prepare requires taskId");
   const toDeviceId = String(options.toDeviceId || options.toDevice || "").trim();
   if (!isDeviceId(toDeviceId)) throw new Error("handoff prepare requires a target deviceId from `wildarrange device status`");
-  const { config } = await loadHelixConfig(rootDir);
+  const { config } = await loadWildArrangeConfig(rootDir);
   if (config.gitCoordination.mode === "off") throw new Error("git coordination is disabled");
   const context = await inspectGitCoordination(rootDir, config.gitCoordination);
   if (!context.active) throw new Error(`handoff requires Git remote coordination: ${context.reason}`);
@@ -84,8 +84,8 @@ async function prepareTaskHandoffUnlocked(rootDir, options = {}) {
   const workingChanges = await listWorkingTreeChanges(rootDir);
   const committedChanges = await listTreeChanges(rootDir, remoteHeadSha, "HEAD");
   const allChangedPaths = [...new Set([...workingChanges, ...committedChanges])].sort();
-  const runtimePathsExcluded = allChangedPaths.filter(isHelixRuntimePath);
-  const changedPaths = allChangedPaths.filter((filePath) => !isHelixRuntimePath(filePath));
+  const runtimePathsExcluded = allChangedPaths.filter(isWildArrangeRuntimePath);
+  const changedPaths = allChangedPaths.filter((filePath) => !isWildArrangeRuntimePath(filePath));
   const writablePaths = task.writable_paths || [];
   const deniedPaths = changedPaths.filter((filePath) => !pathAllowed(filePath, writablePaths));
   if (config.gitCoordination.requireCleanHandoff && deniedPaths.length > 0) {
@@ -168,7 +168,7 @@ async function pushTaskHandoffUnlocked(rootDir, options = {}) {
     listTreeChanges(rootDir, record.previousRemoteHeadSha, "HEAD"),
   ]);
   const currentPaths = [...new Set([...workingPaths, ...committedPaths])]
-    .filter((filePath) => !isHelixRuntimePath(filePath))
+    .filter((filePath) => !isWildArrangeRuntimePath(filePath))
     .sort();
   const deniedPaths = currentPaths.filter((filePath) => !pathAllowed(filePath, task.writable_paths || []));
   if (deniedPaths.length > 0) {
@@ -240,7 +240,7 @@ export async function acceptTaskHandoff(rootDir, options = {}) {
 
 async function acceptTaskHandoffUnlocked(rootDir, options = {}) {
   if (!options.taskId) throw new Error("handoff accept requires taskId");
-  const { config } = await loadHelixConfig(rootDir);
+  const { config } = await loadWildArrangeConfig(rootDir);
   if (config.gitCoordination.mode === "off") throw new Error("git coordination is disabled");
   const context = await inspectGitCoordination(rootDir, config.gitCoordination);
   if (!context.active) throw new Error(`handoff requires Git remote coordination: ${context.reason}`);
@@ -396,7 +396,7 @@ async function takeoverTaskOwnershipUnlocked(rootDir, options = {}) {
   if (!isDeviceId(options.expectedDeviceId || options.expectedDevice)) throw new Error("handoff takeover requires expectedDeviceId");
   const reason = String(options.reason || "").trim();
   if (!reason) throw new Error("handoff takeover requires a non-empty reason");
-  const { config } = await loadHelixConfig(rootDir);
+  const { config } = await loadWildArrangeConfig(rootDir);
   if (config.gitCoordination.mode === "off") throw new Error("git coordination is disabled");
   const context = await inspectGitCoordination(rootDir, config.gitCoordination);
   if (!context.active) throw new Error(`takeover requires Git remote coordination: ${context.reason}`);
@@ -507,7 +507,7 @@ async function takeoverTaskOwnershipUnlocked(rootDir, options = {}) {
 }
 
 async function restoreAcceptedTask(rootDir, options) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   let state = await loadTaskState(rootDir);
   if (state && state.planId !== options.planId) {
     throw new Error(`local active plan ${state.planId} differs from handoff plan ${options.planId}`);
@@ -515,7 +515,7 @@ async function restoreAcceptedTask(rootDir, options) {
   if (!state) {
     const task = normalizeTask(options.task, 0, {});
     state = { version: 1, planId: options.planId, tasks: [task], updatedAt: nowIso() };
-    await writeJsonAtomic(resolveHelixPath(rootDir, "plans", `${options.planId}.json`), {
+    await writeJsonAtomic(resolveWildArrangePath(rootDir, "plans", `${options.planId}.json`), {
       version: 1,
       id: options.planId,
       title: `Restored handoff ${options.planId}`,
@@ -552,11 +552,11 @@ function requireTask(taskState, taskId) {
 
 function handoffRecordPath(rootDir, taskId) {
   const safeTaskId = String(taskId).replace(/[^A-Za-z0-9._-]/g, "_");
-  return resolveHelixPath(rootDir, "coordination", "handoffs", `${safeTaskId}.json`);
+  return resolveWildArrangePath(rootDir, "coordination", "handoffs", `${safeTaskId}.json`);
 }
 
-function isHelixRuntimePath(filePath) {
-  return filePath === ".helix" || filePath.startsWith(".helix/");
+function isWildArrangeRuntimePath(filePath) {
+  return filePath === ".wildarrange" || filePath.startsWith(".wildarrange/");
 }
 
 function isDeviceId(value) {

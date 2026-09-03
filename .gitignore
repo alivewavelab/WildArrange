@@ -3,7 +3,7 @@
 !.cursor/hooks.json
 !.cursor/hooks/
 .tmp/
-.helix/
+.wildarrange/
 .archive/
 .backups/
 node_modules/

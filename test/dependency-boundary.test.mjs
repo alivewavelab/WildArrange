@@ -23,7 +23,7 @@ import {
  * import real owners from any zone, but never a root-level barrel/shim.
  *
  * The scanner itself (maskSource/extractImportSpecifiers/buildDependencyEdges)
- * lives in src/infra/dependency-graph.mjs, shared with `helix impact`; the
+ * lives in src/infra/dependency-graph.mjs, shared with `wildarrange impact`; the
  * adversarial tests at the bottom of this file are its non-weakenable floor.
  */
 

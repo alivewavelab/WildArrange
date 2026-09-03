@@ -9,7 +9,7 @@
  *
  * Concurrency model (cross-review P0, round 7, 2026-07-21): every
  * `withTaskStateLock` call in the codebase serializes on ONE lock file
- * (`.helix/team/tasks.lock`), and the linear `helix run` holds it for its
+ * (`.wildarrange/team/tasks.lock`), and the linear `wildarrange run` holds it for its
  * whole worker+gates cycle. Admission therefore holds that same lock for
  * the entire apply -> gates -> commit/rollback critical section, so two
  * admissions (same or different tasks, overlapping paths or not) and a
@@ -21,13 +21,13 @@ import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
 import { emitDecision } from "../infra/decision-log.mjs";
 import {
-  ensureHelixDirs,
+  ensureWildArrangeDirs,
   nowIso,
   readJson,
-  resolveHelixPath,
+  resolveWildArrangePath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
-import { loadHelixConfig } from "../infra/runtime-config.mjs";
+import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import {
@@ -67,7 +67,7 @@ import { persistTaskState } from "./task-board.mjs";
 import { assertCurrentTaskOwnership } from "./remote-ownership.mjs";
 
 export async function admitParallelAgentResult(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   if (!options.runId) throw new Error("parallel admit requires runId");
   if (!options.taskId) throw new Error("parallel admit requires taskId");
   const result = await readParallelAgentResult(rootDir, options.runId, options.taskId);
@@ -79,7 +79,7 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
   const proposedPaths = files.length > 0
     ? files.map((file) => file.path)
     : normalizePatchPaths(result.result?.patchPaths || result.result?.changedPaths || extractPatchPaths(result.result?.patch || ""));
-  const { config } = await loadHelixConfig(rootDir);
+  const { config } = await loadWildArrangeConfig(rootDir);
   const guardTaskState = await loadTaskState(rootDir);
   const guardTask = guardTaskState?.tasks.find((candidate) => candidate.id === options.taskId);
   const integrationGuard = await captureIntegrationGuard(rootDir, config.gitCoordination, {
@@ -216,7 +216,7 @@ async function emitAdmissionDecision(rootDir, options, finalized) {
 /** Phase 1 body — runs under the task-state lock. */
 async function claimAdmission(rootDir, options, { result, files, proposedPaths }) {
   const taskState = await loadTaskState(rootDir);
-  if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
+  if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
   const task = taskState.tasks.find((candidate) => candidate.id === options.taskId);
   if (!task) throw new Error(`unknown task: ${options.taskId}`);
 
@@ -480,7 +480,7 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
  */
 async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, changedPaths, runId, rollbackPlan, integrationGuard }) {
   const taskState = await loadTaskState(rootDir);
-  if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
+  if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
   const task = taskState.tasks.find((candidate) => candidate.id === taskId);
   if (!task) throw new Error(`unknown task: ${taskId}`);
   // Ownership gate: finalize may only commit on behalf of the run that
@@ -722,7 +722,7 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
     });
     task.last_failure.reason = "checkpoint_failed";
     task.last_failure.summary = `checkpoint write failed: ${pipelineResult.evidence.checkpointError?.message || "unknown error"}`;
-    task.last_failure.retryHint = "checkpoint 写入失败（检查 .helix/checkpoints 目录是否可写），修复后重新 admit 即可，所有质量门已通过";
+    task.last_failure.retryHint = "checkpoint 写入失败（检查 .wildarrange/checkpoints 目录是否可写），修复后重新 admit 即可，所有质量门已通过";
     task.updatedAt = nowIso();
     await writeFailureReport(rootDir, taskState.planId, task);
     await persistTaskState(rootDir, taskState);
@@ -837,21 +837,21 @@ async function hasVerifiedRunCompletionEvent(rootDir, runId, planId, taskId) {
 }
 
 async function collectActualAdmissionPaths(rootDir, fallbackPaths) {
-  const result = await runCommandFile("git", ["-C", rootDir, "diff", "--name-only", "--", ".", ":!.helix"], rootDir, 30_000);
+  const result = await runCommandFile("git", ["-C", rootDir, "diff", "--name-only", "--", ".", ":!.wildarrange"], rootDir, 30_000);
   if (result.exitCode !== 0) return fallbackPaths;
   const paths = result.stdout.split(/\r?\n/).map((line) => normalizeRelativePath(line.trim())).filter(Boolean);
   return paths.length > 0 ? [...new Set(paths)] : fallbackPaths;
 }
 
 export async function readParallelAgentResult(rootDir, runId, taskId) {
-  const directPath = resolveHelixPath(rootDir, "agent-runs", runId, taskId, "result.json");
+  const directPath = resolveWildArrangePath(rootDir, "agent-runs", runId, taskId, "result.json");
   const result = await readJson(directPath, null);
   if (!result) throw new Error(`parallel result not found: ${path.relative(rootDir, directPath)}`);
   return result;
 }
 
 export async function updateAgentRunLifecycle(rootDir, runId, taskId, status, details = {}) {
-  const resultPath = resolveHelixPath(rootDir, "agent-runs", runId, taskId, "result.json");
+  const resultPath = resolveWildArrangePath(rootDir, "agent-runs", runId, taskId, "result.json");
   const result = await readJson(resultPath, null);
   if (result) {
     result.lifecycle = {
@@ -863,7 +863,7 @@ export async function updateAgentRunLifecycle(rootDir, runId, taskId, status, de
     await writeJsonAtomic(resultPath, result);
   }
 
-  const batchPath = resolveHelixPath(rootDir, "agent-runs", `${runId}.json`);
+  const batchPath = resolveWildArrangePath(rootDir, "agent-runs", `${runId}.json`);
   const batch = await readJson(batchPath, null);
   if (batch) {
     for (const entry of batch.results || []) {
@@ -878,7 +878,7 @@ export async function updateAgentRunLifecycle(rootDir, runId, taskId, status, de
     await writeJsonAtomic(batchPath, batch);
   }
 
-  const indexPath = resolveHelixPath(rootDir, "agent-runs", "index.json");
+  const indexPath = resolveWildArrangePath(rootDir, "agent-runs", "index.json");
   const index = await readJson(indexPath, { runs: [] });
   for (const run of index.runs || []) {
     if (run.runId !== runId) continue;

@@ -253,7 +253,7 @@
         <li>Infra 只保留目录、原子写入、ledger 等技术原语；bootstrap 只负责编排初始化顺序。</li>
         <li>模板源文件使用 <code>AGENTS.template.md</code>，生成目标仍是项目根 <code>AGENTS.md</code>，避免模板被 Agent 当成现行规范。</li>
         <li>保留既定行为：只创建缺失文件、不覆盖已有内容、<code>architecture.md</code> 按需、<code>progress.md</code> 仅作人类视图。</li>
-        <li>任务与 BUG 的机器真相源继续是 <code>.helix/team/tasks.json</code>，不建立第二份任务数据库。</li>
+        <li>任务与 BUG 的机器真相源继续是 <code>.wildarrange/team/tasks.json</code>，不建立第二份任务数据库。</li>
         <li>同步根/分区 <code>AGENTS.md</code>、<code>doc/project-architecture.md</code>、模块映射、产品总图和 CLI 帮助。</li>
       </ol>
       <p><span class="check">验收：</span><code>project-document-init.test.mjs</code> 覆盖首次生成、已有文件跳过、可选 architecture 和重复执行幂等；<code>npm run check:arch</code> 通过。</p>

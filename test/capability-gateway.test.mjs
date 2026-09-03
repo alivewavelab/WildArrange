@@ -8,7 +8,7 @@ import { runDeliveryPipeline } from "../src/orchestration/delivery-pipeline.mjs"
 import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { runCommand } from "../src/infra/command-runner.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
-import { readJson, resolveHelixPath } from "../src/infra/runtime-store.mjs";
+import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 
 async function withTempDir(fn) {
   const baseDir = path.join(process.cwd(), ".tmp");
@@ -26,10 +26,10 @@ function nodeEval(source) {
 }
 
 async function importSingleTaskPlan(dir, { verifyCommand, writablePaths = ["src/**"] }) {
-  // Written under .helix/artifacts/ (not the project root) so it is excluded
-  // from the scope guard's git diff pathspec (`git diff -- . ':!.helix'`);
+  // Written under .wildarrange/artifacts/ (not the project root) so it is excluded
+  // from the scope guard's git diff pathspec (`git diff -- . ':!.wildarrange'`);
   // otherwise the plan file itself would show up as an "out of scope" change.
-  const planPath = resolveHelixPath(dir, "artifacts", "pipeline-plan.json");
+  const planPath = resolveWildArrangePath(dir, "artifacts", "pipeline-plan.json");
   const { writeFile } = await import("node:fs/promises");
   await writeFile(
     planPath,
@@ -119,7 +119,7 @@ test("delivery pipeline: runs verify -> scope -> review -> acceptance-proof -> c
     assert.match(result.summary, /存档/);
     assert.match(result.summary, /总耗时/);
 
-    const checkpoint = await readJson(resolveHelixPath(dir, "checkpoints", plan.id, "T001.json"));
+    const checkpoint = await readJson(resolveWildArrangePath(dir, "checkpoints", plan.id, "T001.json"));
     assert.equal(checkpoint.taskId, "T001");
   });
 });
@@ -145,7 +145,7 @@ test("delivery pipeline: stops before acceptance-proof/checkpoint when verify fa
     const verifyStep = result.steps.find((step) => step.capability === "verify");
     assert.equal(verifyStep.status, "fail");
 
-    const checkpointPath = resolveHelixPath(dir, "checkpoints", plan.id, "T001.json");
+    const checkpointPath = resolveWildArrangePath(dir, "checkpoints", plan.id, "T001.json");
     await assert.rejects(() => readJson(checkpointPath));
   });
 });

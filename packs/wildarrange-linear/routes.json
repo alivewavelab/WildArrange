@@ -17,7 +17,7 @@
       "supportAgents": [],
       "category": null,
       "skills": ["review-routing-decisions"],
-      "nextCommand": "node ./bin/helix.mjs decisions --gate routing --format json",
+      "nextCommand": "node ./bin/wildarrange.mjs decisions --gate routing --format json",
       "needsPlan": false,
       "lockPrimaryAgent": true,
       "risk": "low"
@@ -30,7 +30,7 @@
       "supportAgents": [],
       "category": null,
       "skills": ["start-work", "run-linear-delivery"],
-      "nextCommand": "node ./bin/helix.mjs resume",
+      "nextCommand": "node ./bin/wildarrange.mjs resume",
       "needsPlan": false,
       "risk": "low"
     },
@@ -42,7 +42,7 @@
       "supportAgents": ["BaiZe"],
       "category": null,
       "skills": ["repository-governance", "inspect-codebase"],
-      "nextCommand": "node ./bin/helix.mjs governance audit --changed-only",
+      "nextCommand": "node ./bin/wildarrange.mjs governance audit --changed-only",
       "needsPlan": false,
       "lockPrimaryAgent": true,
       "risk": "medium"
@@ -55,7 +55,7 @@
       "supportAgents": ["DiJiang", "BaiZe"],
       "category": "deep",
       "skills": ["review-work", "review-plan-risk", "review-plan-readiness", "review-scope-tradeoff"],
-      "nextCommand": "node ./bin/helix.mjs route --text <request>",
+      "nextCommand": "node ./bin/wildarrange.mjs route --text <request>",
       "needsPlan": true,
       "risk": "high"
     },
@@ -67,7 +67,7 @@
       "supportAgents": [],
       "category": null,
       "skills": ["review-work", "review-plan-risk", "review-plan-readiness"],
-      "nextCommand": "node ./bin/helix.mjs guard scope",
+      "nextCommand": "node ./bin/wildarrange.mjs guard scope",
       "needsPlan": false,
       "risk": "medium"
     },
@@ -79,7 +79,7 @@
       "supportAgents": ["ZhuRong", "BaiZe"],
       "category": "deep",
       "skills": ["debugging", "programming", "inspect-codebase", "run-linear-delivery"],
-      "nextCommand": "node ./bin/helix.mjs workflow --from <plan.json>",
+      "nextCommand": "node ./bin/wildarrange.mjs workflow --from <plan.json>",
       "needsPlan": true,
       "risk": "medium"
     },
@@ -91,7 +91,7 @@
       "supportAgents": ["BaiZe"],
       "category": null,
       "skills": ["init-deep", "inspect-codebase", "research-external-docs", "review-work", "review-plan-risk", "review-plan-readiness"],
-      "nextCommand": "node ./bin/helix.mjs plan --from <plan.json>",
+      "nextCommand": "node ./bin/wildarrange.mjs plan --from <plan.json>",
       "needsPlan": false,
       "risk": "medium"
     },
@@ -103,7 +103,7 @@
       "supportAgents": [],
       "category": "research",
       "skills": ["ultraresearch", "inspect-codebase", "research-external-docs"],
-      "nextCommand": "node ./bin/helix.mjs route --text <request>",
+      "nextCommand": "node ./bin/wildarrange.mjs route --text <request>",
       "needsPlan": false,
       "risk": "low"
     },
@@ -115,7 +115,7 @@
       "supportAgents": ["BaiZe"],
       "category": "git",
       "skills": ["git-master", "run-linear-delivery"],
-      "nextCommand": "node ./bin/helix.mjs guard scope",
+      "nextCommand": "node ./bin/wildarrange.mjs guard scope",
       "needsPlan": false,
       "risk": "high"
     },
@@ -127,7 +127,7 @@
       "supportAgents": ["ZhuRong", "BaiZe"],
       "category": "deep",
       "skills": ["programming", "run-linear-delivery"],
-      "nextCommand": "node ./bin/helix.mjs workflow --from <plan.json>",
+      "nextCommand": "node ./bin/wildarrange.mjs workflow --from <plan.json>",
       "needsPlan": true,
       "risk": "medium"
     },
@@ -139,7 +139,7 @@
       "supportAgents": [],
       "category": null,
       "skills": ["inspect-codebase", "research-external-docs"],
-      "nextCommand": "node ./bin/helix.mjs route --text <request>",
+      "nextCommand": "node ./bin/wildarrange.mjs route --text <request>",
       "needsPlan": false,
       "risk": "low"
     }
@@ -296,7 +296,7 @@
     "supportAgents": ["ZhuRong", "BaiZe"],
     "category": "deep",
     "skills": ["programming", "run-linear-delivery"],
-    "nextCommand": "node ./bin/helix.mjs workflow --from <plan.json>",
+    "nextCommand": "node ./bin/wildarrange.mjs workflow --from <plan.json>",
     "needsPlan": true,
     "needsUserInput": false,
     "risk": "medium"

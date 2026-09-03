@@ -1,47 +1,47 @@
 import { existsSync } from "node:fs";
 import { copyFile, cp, lstat, mkdir, readFile, readdir, rm, stat, unlink } from "node:fs/promises";
 import path from "node:path";
-import { HELIX_CONFIG_FILE } from "./runtime-config.mjs";
+import { WILDARRANGE_CONFIG_FILE } from "./runtime-config.mjs";
 import { appendLedger } from "./ledger.mjs";
 import { normalizeRelativePath } from "./path-match.mjs";
 import {
   createWorkId,
-  ensureHelixDirs,
+  ensureWildArrangeDirs,
   hashContent,
   nowIso,
   readJson,
-  resolveHelixPath,
+  resolveWildArrangePath,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 
 const CONFIG_BASELINE_PATH = ["security", "config-baseline.json"];
 const BACKUP_STATE_FILES = [
-  [".helix", "ledger.jsonl"],
+  [".wildarrange", "ledger.jsonl"],
   // 尾 hash 缓存必须与 ledger 同进同出，否则恢复后缓存尺寸对不上会被
   // fail-closed 当成截断。
-  [".helix", "ledger-tail.json"],
-  [".helix", "work.json"],
-  [".helix", "team", "tasks.json"],
-  [".helix", "snapshots", "context.json"],
-  [".helix", "snapshots", "context.md"],
-  [".helix", "security", "config-baseline.json"],
-  [HELIX_CONFIG_FILE],
-  [".helix", "config.json"],
+  [".wildarrange", "ledger-tail.json"],
+  [".wildarrange", "work.json"],
+  [".wildarrange", "team", "tasks.json"],
+  [".wildarrange", "snapshots", "context.json"],
+  [".wildarrange", "snapshots", "context.md"],
+  [".wildarrange", "security", "config-baseline.json"],
+  [WILDARRANGE_CONFIG_FILE],
+  [".wildarrange", "config.json"],
 ];
 const REQUIRED_STATE_FILES = [
-  [".helix", "ledger.jsonl"],
-  [".helix", "work.json"],
+  [".wildarrange", "ledger.jsonl"],
+  [".wildarrange", "work.json"],
 ];
 
 export async function writeConfigBaseline(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const baseline = {
     kind: "config_baseline",
     at: nowIso(),
     reason: options.reason || "manual",
     files: await collectConfigFingerprints(rootDir),
   };
-  const baselinePath = resolveHelixPath(rootDir, ...CONFIG_BASELINE_PATH);
+  const baselinePath = resolveWildArrangePath(rootDir, ...CONFIG_BASELINE_PATH);
   await writeJsonAtomic(baselinePath, baseline);
   await appendLedger(rootDir, {
     type: "config_baseline_written",
@@ -53,8 +53,8 @@ export async function writeConfigBaseline(rootDir, options = {}) {
 }
 
 export async function verifyConfigBaseline(rootDir) {
-  await ensureHelixDirs(rootDir);
-  const baselinePath = resolveHelixPath(rootDir, ...CONFIG_BASELINE_PATH);
+  await ensureWildArrangeDirs(rootDir);
+  const baselinePath = resolveWildArrangePath(rootDir, ...CONFIG_BASELINE_PATH);
   const baseline = await readJson(baselinePath, null);
   const currentFiles = await collectConfigFingerprints(rootDir);
   if (!baseline) {
@@ -62,7 +62,7 @@ export async function verifyConfigBaseline(rootDir) {
       kind: "config_integrity",
       ok: false,
       status: "missing_baseline",
-      message: "No config baseline found. Run `node ./bin/helix.mjs config baseline` after reviewing config.",
+      message: "No config baseline found. Run `node ./bin/wildarrange.mjs config baseline` after reviewing config.",
       files: currentFiles,
       failures: [],
     };
@@ -97,9 +97,9 @@ export async function verifyConfigBaseline(rootDir) {
 }
 
 export async function writeRuntimeStateBackup(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const backupId = createWorkId("backup");
-  const backupDir = resolveHelixPath(rootDir, "backups", backupId);
+  const backupDir = resolveWildArrangePath(rootDir, "backups", backupId);
   await mkdir(backupDir, { recursive: true });
   const files = [];
   for (const segments of BACKUP_STATE_FILES) {
@@ -143,7 +143,7 @@ export async function prepareArchiveRecoveryPackage(rootDir, options = {}) {
   assertSafeBackupId(backupId);
   const transactionId = options.transactionId || createWorkId("archive");
   assertSafeBackupId(transactionId, "archive transaction id");
-  const backupDir = resolveHelixPath(rootDir, "backups", backupId);
+  const backupDir = resolveWildArrangePath(rootDir, "backups", backupId);
   const manifestPath = path.join(backupDir, "manifest.json");
   const manifest = await readJson(manifestPath, null);
   if (!manifest || manifest.kind !== "runtime_state_backup") {
@@ -167,7 +167,7 @@ export async function prepareArchiveRecoveryPackage(rootDir, options = {}) {
     taskRef: options.taskRef || null,
     status: "prepared",
     preparedAt: nowIso(),
-    stagingPath: path.join(".helix", "archive-staging", transactionId),
+    stagingPath: path.join(".wildarrange", "archive-staging", transactionId),
     paths: recoveryPaths,
   };
   const archivePackages = (manifest.archivePackages || [])
@@ -187,7 +187,7 @@ export async function updateArchiveRecoveryPackage(rootDir, options = {}) {
   if (!["committed", "rolled_back", "recovery_required"].includes(options.status)) {
     throw new Error(`invalid archive recovery status: ${options.status}`);
   }
-  const manifestPath = resolveHelixPath(rootDir, "backups", options.backupId, "manifest.json");
+  const manifestPath = resolveWildArrangePath(rootDir, "backups", options.backupId, "manifest.json");
   const manifest = await readJson(manifestPath, null);
   if (!manifest || manifest.kind !== "runtime_state_backup") {
     throw new Error(`unknown state backup: ${options.backupId}`);
@@ -209,7 +209,7 @@ export async function updateArchiveRecoveryPackage(rootDir, options = {}) {
 }
 
 export async function listRuntimeStateBackups(rootDir) {
-  const backupsDir = resolveHelixPath(rootDir, "backups");
+  const backupsDir = resolveWildArrangePath(rootDir, "backups");
   let entries = [];
   try {
     entries = await readdir(backupsDir);
@@ -244,7 +244,7 @@ export async function restoreRuntimeStateBackup(rootDir, options = {}) {
     throw new Error("state restore requires --backup <backupId>");
   }
   assertSafeBackupId(backupId);
-  const backupDir = resolveHelixPath(rootDir, "backups", backupId);
+  const backupDir = resolveWildArrangePath(rootDir, "backups", backupId);
   const manifest = await readJson(path.join(backupDir, "manifest.json"), null);
   if (!manifest || manifest.kind !== "runtime_state_backup") {
     throw new Error(`unknown state backup: ${backupId}`);
@@ -301,8 +301,8 @@ export async function restoreRuntimeStateBackup(rootDir, options = {}) {
 
   // 旧备份没有尾 hash 缓存：ledger 被恢复而缓存未恢复时，删掉现场缓存，
   // 让下一次追加回退到全量扫描，而不是误判 ledger_truncated。
-  if (restored.includes(".helix/ledger.jsonl") && !restored.includes(".helix/ledger-tail.json")) {
-    await unlink(resolveHelixPath(rootDir, "ledger-tail.json")).catch(() => undefined);
+  if (restored.includes(".wildarrange/ledger.jsonl") && !restored.includes(".wildarrange/ledger-tail.json")) {
+    await unlink(resolveWildArrangePath(rootDir, "ledger-tail.json")).catch(() => undefined);
   }
 
   await appendLedger(rootDir, {
@@ -338,7 +338,7 @@ function resolveBackupSourcePath(rootDir, candidate) {
   if (sourcePath !== rootPath && !sourcePath.startsWith(`${rootPath}${path.sep}`)) {
     throw new Error(`archive recovery path escapes project root: ${candidate}`);
   }
-  const backupsPath = resolveHelixPath(rootDir, "backups");
+  const backupsPath = resolveWildArrangePath(rootDir, "backups");
   if (sourcePath === backupsPath || sourcePath.startsWith(`${backupsPath}${path.sep}`)) {
     throw new Error(`archive recovery path cannot include backups: ${candidate}`);
   }
@@ -393,18 +393,18 @@ export async function verifyRuntimeState(rootDir) {
     const fileStat = await stat(filePath);
     files.push({ path: relativePath, status: "present", bytes: fileStat.size });
   }
-  const work = await readJson(resolveHelixPath(rootDir, "work.json"), null);
-  const tasksPath = path.join(rootDir, ".helix", "team", "tasks.json");
+  const work = await readJson(resolveWildArrangePath(rootDir, "work.json"), null);
+  const tasksPath = path.join(rootDir, ".wildarrange", "team", "tasks.json");
   if (work?.activePlanId) {
     if (!existsSync(tasksPath)) {
-      files.push({ path: ".helix/team/tasks.json", status: "missing" });
+      files.push({ path: ".wildarrange/team/tasks.json", status: "missing" });
     } else {
       const fileStat = await stat(tasksPath);
-      files.push({ path: ".helix/team/tasks.json", status: "present", bytes: fileStat.size });
+      files.push({ path: ".wildarrange/team/tasks.json", status: "present", bytes: fileStat.size });
     }
   } else {
     files.push({
-      path: ".helix/team/tasks.json",
+      path: ".wildarrange/team/tasks.json",
       status: existsSync(tasksPath) ? "present" : "not_required",
       reason: "no active plan",
     });
@@ -424,8 +424,8 @@ export async function verifyRuntimeState(rootDir) {
 
 async function collectConfigFingerprints(rootDir) {
   const candidates = [
-    path.join(rootDir, HELIX_CONFIG_FILE),
-    resolveHelixPath(rootDir, "config.json"),
+    path.join(rootDir, WILDARRANGE_CONFIG_FILE),
+    resolveWildArrangePath(rootDir, "config.json"),
   ];
   const files = [];
   for (const filePath of candidates) {

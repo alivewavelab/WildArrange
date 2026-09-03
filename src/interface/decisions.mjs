@@ -1,5 +1,5 @@
 /**
- * helix decisions — decisions.jsonl 的只读投影。
+ * wildarrange decisions — decisions.jsonl 的只读投影。
  *
  * 每条决策渲染三行：发生了什么 → 命中哪条规则 → 证据在哪。
  * 投影是纯派生：只读 decisions.jsonl，绝不二次写入任何状态。
@@ -31,7 +31,7 @@ export async function projectDecisions(rootDir, { limit = 50, taskId, gate, sinc
     : undefined;
   const { records, skippedLines, total, truncated } = await readDecisions(rootDir, { limit, filter });
   const projection = {
-    kind: "helix_decisions_projection",
+    kind: "wildarrange_decisions_projection",
     total,
     matched: records.length,
     shown: records.length,
@@ -81,7 +81,7 @@ function renderRuleLine(record) {
 }
 
 /**
- * 确定性统计审查（helix decisions stats）：纯代码、可重跑、可复核。
+ * 确定性统计审查（wildarrange decisions stats）：纯代码、可重跑、可复核。
  * 回答三个问题：每个门触发过多少次（按决策/规则细分）、哪些门从未触发
  * （门形同虚设的直接信号）、哪些规则被标注过。LLM 判断不在这里——
  * 这里只出计数，冷启动期不出率。
@@ -112,7 +112,7 @@ export async function projectDecisionStats(rootDir) {
   }
   const observed = new Set(gates.keys());
   return {
-    kind: "helix_decision_stats",
+    kind: "wildarrange_decision_stats",
     total,
     skippedLines,
     timeRange: {

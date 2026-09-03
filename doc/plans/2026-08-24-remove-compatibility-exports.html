@@ -23,7 +23,7 @@
   <div class="goal"><strong>唯一目标：</strong>项目未形成历史用户与稳定旧 API，删除全部兼容出口，让 CLI、测试、文档只引用五区中的真实实现。</div>
 
   <div class="flow">
-    <section class="card p0"><strong>P0 输入</strong><br>33 个根级 <code>src/helix-*.mjs</code>、<code>src/infra/foundation.mjs</code>、现有 CLI/测试引用。</section>
+    <section class="card p0"><strong>P0 输入</strong><br>33 个根级 <code>src/wildarrange-*.mjs</code>、<code>src/infra/foundation.mjs</code>、现有 CLI/测试引用。</section>
     <div class="arrow">→</div>
     <section class="card p0"><strong>P0 迁移</strong><br>先修改治理规则：CLI 是组合入口，可直接引用五区真实 owner；测试按被测职责引用 owner。</section>
     <div class="arrow">→</div>
@@ -34,9 +34,9 @@
 
   <h2>验收证据</h2>
   <ul>
-    <li><code>find src -maxdepth 1 -name 'helix-*.mjs'</code> 零结果，<code>src/infra/foundation.mjs</code> 不存在。</li>
+    <li><code>find src -maxdepth 1 -name 'wildarrange-*.mjs'</code> 零结果，<code>src/infra/foundation.mjs</code> 不存在。</li>
     <li>仓库现行代码与现行文档不再把旧路径描述成可用入口；历史方案保留历史事实。</li>
-    <li><code>npm test</code>、<code>npm run check:arch</code>、<code>npm pack --dry-run --cache /private/tmp/helix-npm-cache</code> 全部通过。</li>
+    <li><code>npm test</code>、<code>npm run check:arch</code>、<code>npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache</code> 全部通过。</li>
   </ul>
 
   <h2>边界</h2>

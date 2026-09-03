@@ -2,19 +2,19 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   STATE_VERSION,
-  ensureHelixDirs,
+  ensureWildArrangeDirs,
   nowIso,
-  resolveHelixPath,
+  resolveWildArrangePath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
-import { loadHelixConfig } from "../infra/runtime-config.mjs";
+import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { collectGitChangedPaths } from "../infra/git-diff.mjs";
 import { inspectRepositoryGovernance } from "../infra/repository-layout.mjs";
 
 export async function runRepositoryGovernanceAudit(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
-  const { config, sourcePath } = await loadHelixConfig(rootDir);
+  await ensureWildArrangeDirs(rootDir);
+  const { config, sourcePath } = await loadWildArrangeConfig(rootDir);
   const changed = options.changedOnly === true ? await collectGitChangedPaths(rootDir) : null;
   const effectiveChangedOnly = options.changedOnly === true && changed?.available === true;
   const result = await inspectRepositoryGovernance(rootDir, config.repositoryGovernance || {}, {
@@ -32,8 +32,8 @@ export async function runRepositoryGovernanceAudit(rootDir, options = {}) {
     changedOnlyRequested: options.changedOnly === true,
     changedOnlyFallback: options.changedOnly === true && !effectiveChangedOnly,
   };
-  const jsonPath = resolveHelixPath(rootDir, "reports", "governance", "latest.json");
-  const mdPath = resolveHelixPath(rootDir, "reports", "governance", "latest.md");
+  const jsonPath = resolveWildArrangePath(rootDir, "reports", "governance", "latest.json");
+  const mdPath = resolveWildArrangePath(rootDir, "reports", "governance", "latest.md");
   report.reportJsonPath = path.relative(rootDir, jsonPath);
   report.reportMdPath = path.relative(rootDir, mdPath);
   await writeJsonAtomic(jsonPath, report);

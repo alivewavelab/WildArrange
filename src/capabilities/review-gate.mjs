@@ -2,7 +2,7 @@ import {
   DEFAULT_REVIEW_AGENTS,
   normalizeAgentKey,
 } from "../infra/agent-registry.mjs";
-import { loadHelixConfig } from "../infra/runtime-config.mjs";
+import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { nowIso } from "../infra/runtime-store.mjs";
 import { compileCommandSafetyPatterns } from "../infra/command-safety.mjs";
 import { runCommand } from "../infra/command-runner.mjs";
@@ -13,7 +13,7 @@ import { criteriaStatus } from "../infra/success-criteria.mjs";
 import { runQualityGates } from "./code-intel.mjs";
 
 export async function runReviewGate(rootDir, task, evidence = {}) {
-  const { config } = await loadHelixConfig(rootDir);
+  const { config } = await loadWildArrangeConfig(rootDir);
   const workerResult = evidence.workerResult || [...task.evidence].reverse().find((entry) => entry.kind === "worker");
   const verifyResult = evidence.verifyResult || task.last_verify_result || [...task.evidence].reverse().find((entry) => entry.kind === "verifier");
   const scopeResult = evidence.scopeResult || task.last_scope_result || [...task.evidence].reverse().find((entry) => entry.kind === "scope_guard");
@@ -108,7 +108,7 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
         : qualityResults.lspResult.pass
           ? `${qualityResults.lspResult.results.length} LSP/typecheck command(s) passed`
           : commandObservation(qualityResults.lspResult.results.find((result) => result.exitCode !== 0) || { exitCode: 1 }),
-      fixBy: "修复 LSP/typecheck 诊断，或在 helix.config.json 中明确关闭该 gate。",
+      fixBy: "修复 LSP/typecheck 诊断，或在 wildarrange.config.json 中明确关闭该 gate。",
     }),
     reviewLane("ast_structure", "BaiZe", qualityResults.astResult.pass === true, {
       statusOverride: qualityResults.astResult.status === "skipped" ? "warn" : undefined,
@@ -117,7 +117,7 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
         : qualityResults.astResult.pass
           ? `${qualityResults.astResult.results.length} AST/structure command(s) passed`
           : commandObservation(qualityResults.astResult.results.find((result) => result.exitCode !== 0) || { exitCode: 1 }),
-      fixBy: "修复 ast-grep/结构搜索发现，或在 helix.config.json 中明确关闭该 gate。",
+      fixBy: "修复 ast-grep/结构搜索发现，或在 wildarrange.config.json 中明确关闭该 gate。",
     }),
     reviewLane("hashline_anchors", "BaiZe", qualityResults.hashlineResult.pass === true, {
       statusOverride: qualityResults.hashlineResult.status === "skipped" ? "warn" : undefined,

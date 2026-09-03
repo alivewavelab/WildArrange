@@ -1,4 +1,4 @@
-<!-- 由 `node ./bin/helix.mjs docs commands --write` 从 src/interface/cli-help.mjs 生成，请勿手改 -->
+<!-- 由 `node ./bin/wildarrange.mjs docs commands --write` 从 src/interface/cli-help.mjs 生成，请勿手改 -->
 
 | 命令 | 说明 |
 | ---- | ---- |
@@ -78,7 +78,7 @@
 | `wildarrange test [--zone interface|orchestration|ai|capabilities|infra] [changed-file...]` | 分区/影响面最小测试集 |
 | `wildarrange docs commands [--write]` | 从命令注册表生成命令文档（单一事实源） |
 | `wildarrange state backup [--reason "..."]` | 备份运行态关键文件 |
-| `wildarrange state migrate` | 备份后迁移运行态任务总账与旧投影；不改根 helix.config.json |
+| `wildarrange state migrate` | 备份后迁移运行态任务总账与旧投影；不改根 wildarrange.config.json |
 | `wildarrange state verify` | 校验运行态关键文件 |
 | `wildarrange state list` | 列出运行态备份 |
 | `wildarrange state restore --backup <backupId>` | 恢复运行态备份 |

@@ -30,10 +30,10 @@
 - README 命令事实从真实 CLI `--help` 读取，不能扫描源码字符串代替；JavaScript 注释词法检查必须进入模板表达式并跳过字符串/正则正文。
 - Provider 缺失或网络失败不能越权改变确定性质量门结果。
 - Git 协调命令必须使用参数数组调用 Git，不拼接用户输入到 shell；所有远端写入只允许普通 push，禁止提供 force push 原语。
-- Git 路径比较必须处理 macOS `/var` 与 `/private/var` 等 realpath 别名；`.helix/` 永远不进入 handoff 工作树变更清单。
+- Git 路径比较必须处理 macOS `/var` 与 `/private/var` 等 realpath 别名；`.wildarrange/` 永远不进入 handoff 工作树变更清单。
 - Infra 可以返回事实和证据，不能把“完成任务”作为自己的业务结论。
 - 项目没有 `foundation.mjs` 兼容 shim；五区实现必须直接 import `runtime-store.mjs`、`runtime-config.mjs`、`task-state-lock.mjs`、`runtime-snapshot.mjs`、`prompt-pack.mjs`、`runtime-bootstrap.mjs`、`agent-registry.mjs` 或 `ledger.mjs` 的真实 owner。
-- Prompt Pack 运行时读取根固定为 `.helix/prompt-pack/installed`；外部/custom pack 必须先校验 source realpath 再物化，读取侧不得信任 registry 提供的根路径，所有 Agent/Skill/routes/tool 条目统一校验相对路径、realpath 与安装 hash。
+- Prompt Pack 运行时读取根固定为 `.wildarrange/prompt-pack/installed`；外部/custom pack 必须先校验 source realpath 再物化，读取侧不得信任 registry 提供的根路径，所有 Agent/Skill/routes/tool 条目统一校验相对路径、realpath 与安装 hash。
 - 归档删除必须把精确删除集加入对应 state backup 的 recovery package；manifest 路径先完整校验，`state restore` 必须能恢复文件、目录与符号链接，不能只恢复 canonical task ledger。
 - Task 证据路径必须使用 `<planId>/<taskId>` 分目录编码；不得把两个都允许连字符的 ID 用单个 `-` 拼成文件名。旧扁平证据只可在 JSON 身份匹配或全账本无同 stem 碰撞时兼容。
 - 恢复上下文的确定性文件读取和 Markdown/JSON 渲染只允许存在于 `runtime-snapshot.mjs`；`ai/context.mjs` 可保留公开薄封装，但不得维护第二份渲染实现。

@@ -48,7 +48,7 @@ function runProcess(file, args, command, cwd, timeoutMs, options) {
         cwd,
         shell: options.shell,
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, HELIX_RUNTIME: "1", ...(options.env || {}) },
+        env: { ...process.env, WILDARRANGE_RUNTIME: "1", ...(options.env || {}) },
       });
     } catch (error) {
       resolve({

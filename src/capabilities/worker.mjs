@@ -1,4 +1,4 @@
-import { loadHelixConfig } from "../infra/runtime-config.mjs";
+import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { nowIso } from "../infra/runtime-store.mjs";
 import { compileCommandSafetyPatterns } from "../infra/command-safety.mjs";
 import { runCommand } from "../infra/command-runner.mjs";
@@ -15,7 +15,7 @@ export async function runWorker(rootDir, task, options = {}) {
       stderr: "",
     };
   }
-  const { config } = await loadHelixConfig(rootDir);
+  const { config } = await loadWildArrangeConfig(rootDir);
   const extraPatterns = compileCommandSafetyPatterns(config);
   const result = await runCommand(command, rootDir, options.timeoutMs, { extraPatterns });
   return { kind: "worker", at: nowIso(), command, ...result };

@@ -39,10 +39,10 @@ test("impact reports unknown paths instead of crashing", async () => {
   assert.deepEqual(report.testsToRun, ["test/dependency-boundary.test.mjs"]);
 });
 
-test("helix impact CLI prints the report for a changed file", async () => {
+test("wildarrange impact CLI prints the report for a changed file", async () => {
   const { stdout } = await execFileAsync(
     process.execPath,
-    ["bin/helix.mjs", "impact", "src/infra/ledger.mjs"],
+    ["bin/wildarrange.mjs", "impact", "src/infra/ledger.mjs"],
     { cwd: ROOT },
   );
   const report = JSON.parse(stdout);
@@ -72,14 +72,14 @@ test("zone tests select the tests that import the zone, plus naming pairs and th
   await assert.rejects(computeZoneTests(ROOT, "no-such-zone"), /unknown zone/);
 });
 
-test("helix test CLI runs the impact-selected subset and passes through the exit code", async () => {
+test("wildarrange test CLI runs the impact-selected subset and passes through the exit code", async () => {
   // cli-help.mjs 的真实闭包稳定包含同名测试和依赖边界测试，足够证明
   // CLI 会执行选中集合；不要在这条 CLI 自测里再嵌套一轮近全量测试。
-  // 注意：本测试自身运行在 node --test 下，helix test 必须剥掉
+  // 注意：本测试自身运行在 node --test 下，wildarrange test 必须剥掉
   // NODE_TEST_CONTEXT，否则子进程会空跑退出——这里同时断言真实测试输出。
   const { stdout, stderr } = await execFileAsync(
     process.execPath,
-    ["bin/helix.mjs", "test", "src/interface/cli-help.mjs"],
+    ["bin/wildarrange.mjs", "test", "src/interface/cli-help.mjs"],
     { cwd: ROOT },
   );
   assert.match(stderr, /应跑 \d+ 个测试/);
@@ -87,9 +87,9 @@ test("helix test CLI runs the impact-selected subset and passes through the exit
   assert.match(stdout, /ℹ pass [1-9]/, "child test run must actually execute tests");
 });
 
-test("helix test CLI rejects an unknown zone with a non-zero exit code", async () => {
+test("wildarrange test CLI rejects an unknown zone with a non-zero exit code", async () => {
   await assert.rejects(
-    execFileAsync(process.execPath, ["bin/helix.mjs", "test", "--zone", "no-such-zone"], { cwd: ROOT }),
+    execFileAsync(process.execPath, ["bin/wildarrange.mjs", "test", "--zone", "no-such-zone"], { cwd: ROOT }),
     (error) => {
       assert.notEqual(error.code, 0);
       assert.match(String(error.stderr), /unknown zone/);

@@ -14,11 +14,11 @@ import test from "node:test";
 import { COMMAND_REGISTRY, CORE_COMMANDS, renderCommandsMarkdown, renderHelp } from "../src/interface/cli-help.mjs";
 
 const execFileAsync = promisify(execFile);
-const HELIX_BIN = path.resolve(import.meta.dirname, "..", "bin", "helix.mjs");
+const WILDARRANGE_BIN = path.resolve(import.meta.dirname, "..", "bin", "wildarrange.mjs");
 const ROOT = path.resolve(import.meta.dirname, "..");
 
 test("default help shows only the core six commands with a pointer to --all", async () => {
-  const { stdout } = await execFileAsync(process.execPath, [HELIX_BIN, "--help"], { cwd: ROOT });
+  const { stdout } = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "--help"], { cwd: ROOT });
   for (const core of CORE_COMMANDS) {
     assert.ok(stdout.includes(`wildarrange ${core}`), `core command ${core} must be in default help`);
   }
@@ -27,7 +27,7 @@ test("default help shows only the core six commands with a pointer to --all", as
 });
 
 test("--help --all lists every registered command", async () => {
-  const { stdout } = await execFileAsync(process.execPath, [HELIX_BIN, "--help", "--all"], { cwd: ROOT });
+  const { stdout } = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "--help", "--all"], { cwd: ROOT });
   for (const entry of COMMAND_REGISTRY) {
     assert.ok(stdout.includes(entry.usage), `missing from --help --all: ${entry.usage}`);
   }
@@ -35,7 +35,7 @@ test("--help --all lists every registered command", async () => {
 });
 
 test("help --all (subcommand form) also works", async () => {
-  const { stdout } = await execFileAsync(process.execPath, [HELIX_BIN, "help", "--all"], { cwd: ROOT });
+  const { stdout } = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "help", "--all"], { cwd: ROOT });
   assert.ok(stdout.includes("parallel retry"));
 });
 
@@ -45,7 +45,7 @@ test("docs commands materializes the registry as markdown", async () => {
   const rows = markdown.split("\n").filter((line) => line.startsWith("| `wildarrange"));
   assert.equal(rows.length, COMMAND_REGISTRY.length, "每一条注册命令都必须物化");
 
-  const { stdout } = await execFileAsync(process.execPath, [HELIX_BIN, "docs", "commands"], { cwd: ROOT });
+  const { stdout } = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "docs", "commands"], { cwd: ROOT });
   assert.equal(stdout, markdown, "CLI 输出必须与注册表渲染一致");
 });
 
@@ -54,7 +54,7 @@ test("docs commands --write writes doc/generated/commands.md", async () => {
   await mkdir(baseDir, { recursive: true });
   const dir = await mkdtemp(path.join(baseDir, "wildarrange-docs-"));
   try {
-    const { stdout } = await execFileAsync(process.execPath, [HELIX_BIN, "docs", "commands", "--write"], { cwd: dir });
+    const { stdout } = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "docs", "commands", "--write"], { cwd: dir });
     const payload = JSON.parse(stdout);
     assert.equal(payload.ok, true);
     const written = await readFile(path.join(dir, "doc", "generated", "commands.md"), "utf8");

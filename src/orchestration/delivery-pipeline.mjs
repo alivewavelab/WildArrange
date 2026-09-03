@@ -6,7 +6,7 @@
  * acceptance-proof -> checkpoint sequence themselves. Changing gate order,
  * or inserting a new gate, only happens here.
  *
- * Faithfully mirrors the existing gating semantics in helix-node-runtime.mjs:
+ * Faithfully mirrors the existing gating semantics in wildarrange-node-runtime.mjs:
  * verify / scope / review always run in full (no early bail between them so
  * every gate's evidence is always collected), and acceptance-proof +
  * checkpoint only run if every prior gate (worker, verify, criteria, scope,
@@ -357,7 +357,7 @@ function recordStepEvidence(stepName, evidence, envelope, task) {
   const stepEvidence = normalizeStepEvidence(stepName, envelope);
   if (stepName === "verify") {
     evidence.verifyResult = stepEvidence;
-    // Mirrors helix-node-runtime.mjs: a passing verifier can auto-satisfy
+    // Mirrors wildarrange-node-runtime.mjs: a passing verifier can auto-satisfy
     // successCriteria that declare verifierCommandRefs, so criteriaStatus()
     // reflects it without a separate manual step. The caller (orchestration)
     // still owns deciding whether this is ledger-worthy.
@@ -412,11 +412,11 @@ function normalizeStepEvidence(stepName, envelope) {
 }
 
 const GATE_NEXT_ACTIONS = {
-  verify: "查看 .helix 下最新 verify report，修复验证失败后重跑 node ./bin/helix.mjs run",
+  verify: "查看 .wildarrange 下最新 verify report，修复验证失败后重跑 node ./bin/wildarrange.mjs run",
   scope: "改动超出任务 writable_paths；缩小改动范围或走 ChangeRequest 调整计划",
   review: "查看 review report 处理复核发现后重跑",
   "acceptance-proof": "验收证明未通过：确认 verifier/scope/review 证据齐全且属于最新一轮执行",
-  checkpoint: "运行 node ./bin/helix.mjs doctor 检查状态完整性",
+  checkpoint: "运行 node ./bin/wildarrange.mjs doctor 检查状态完整性",
 };
 
 function finalizePipelineResult(status, results, evidence, extra = {}) {
@@ -451,7 +451,7 @@ function pipelineErrorProtocol(status, results, extra) {
       code: status === "checkpoint_failed" ? "checkpoint_failed" : "gate_failed",
       module: capabilityModule(failedStep.capability),
       message: `${STEP_LABELS[failedStep.capability] || failedStep.capability}门未通过（${failedStep.capability}: ${failedStep.status}）`,
-      nextAction: GATE_NEXT_ACTIONS[failedStep.capability] || "运行 node ./bin/helix.mjs doctor；把本错误完整贴给 AI",
+      nextAction: GATE_NEXT_ACTIONS[failedStep.capability] || "运行 node ./bin/wildarrange.mjs doctor；把本错误完整贴给 AI",
     });
   }
   if (extra.criteria && extra.criteria.pass === false) {
@@ -466,7 +466,7 @@ function pipelineErrorProtocol(status, results, extra) {
     code: "worker_failed",
     module: "capabilities/worker.mjs",
     message: "worker 执行未成功",
-    nextAction: "查看 worker 输出，修复后重跑 node ./bin/helix.mjs run",
+    nextAction: "查看 worker 输出，修复后重跑 node ./bin/wildarrange.mjs run",
   });
 }
 

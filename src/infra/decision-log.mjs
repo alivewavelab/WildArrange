@@ -13,7 +13,7 @@
  */
 import { appendFile, mkdir, open } from "node:fs/promises";
 import path from "node:path";
-import { createWorkId, nowIso, resolveHelixPath } from "./runtime-store.mjs";
+import { createWorkId, nowIso, resolveWildArrangePath } from "./runtime-store.mjs";
 
 const DECISION_FIELDS = [
   "gate",
@@ -38,11 +38,11 @@ const READ_CHUNK_BYTES = 64 * 1024;
 const ensuredDirs = new Set();
 
 export function decisionsLogPath(rootDir) {
-  return resolveHelixPath(rootDir, "decisions.jsonl");
+  return resolveWildArrangePath(rootDir, "decisions.jsonl");
 }
 
 export async function appendDecision(rootDir, record) {
-  // id 是标注回写的锚点：人/审查 Agent 用 `helix annotate --decision <id>`
+  // id 是标注回写的锚点：人/审查 Agent 用 `wildarrange annotate --decision <id>`
   // 指认某条决策。annotatable 标记该决策是否进标注队列（拦截与非确定性
   // 放行才进，确定性 PASS 只进流水）。
   const entry = { ts: nowIso(), id: record?.id || createWorkId("dec") };

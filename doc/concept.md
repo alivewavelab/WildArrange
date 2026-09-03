@@ -18,7 +18,7 @@ WildArrange 是面向小团队的 AI 编程 Agent 治理层。
 Plan -> Worker -> Verifier -> Scope Guard -> Review Gate -> Acceptance Proof -> Checkpoint
 ```
 
-每一步都会把证据写入 `.helix/`，新会话可以从磁盘恢复。
+每一步都会把证据写入 `.wildarrange/`，新会话可以从磁盘恢复。
 
 ## 外部模式边界
 

@@ -3,7 +3,7 @@ import { appendLedger } from "../infra/ledger.mjs";
 import {
   nowIso,
   readJson,
-  resolveHelixPath,
+  resolveWildArrangePath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
 import {
@@ -36,7 +36,7 @@ export async function collectIntegrationCandidatePaths(rootDir, baseSha) {
     listTreeChanges(rootDir, baseSha, "HEAD"),
   ]);
   return [...new Set([...workingPaths, ...committedPaths])]
-    .filter((filePath) => filePath !== ".helix" && !filePath.startsWith(".helix/"))
+    .filter((filePath) => filePath !== ".wildarrange" && !filePath.startsWith(".wildarrange/"))
     .sort();
 }
 
@@ -352,7 +352,7 @@ async function inspectRemoteCommitContainment(rootDir, remote, branch, commitSha
 }
 
 function integrationIntentPath(rootDir, runId, taskId) {
-  return resolveHelixPath(
+  return resolveWildArrangePath(
     rootDir,
     "agent-runs",
     runId,

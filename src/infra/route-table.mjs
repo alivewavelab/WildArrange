@@ -13,13 +13,13 @@ import {
 } from "./agent-registry.mjs";
 import {
   readJson,
-  resolveHelixPath,
+  resolveWildArrangePath,
 } from "./runtime-store.mjs";
 import { renderPromptPackEntry } from "./prompt-pack.mjs";
 
 export async function loadRoutesConfig(rootDir) {
   const routes = JSON.parse(await renderPromptPackEntry(rootDir, { routes: true }));
-  const overrides = await readJson(resolveHelixPath(rootDir, "routing", "routes-overrides.json"), null);
+  const overrides = await readJson(resolveWildArrangePath(rootDir, "routing", "routes-overrides.json"), null);
   return applyRouteOverrides(routes, overrides);
 }
 
@@ -163,7 +163,7 @@ function mergeRoute(defaults, intent, domain, complexity, lowerText = "") {
     merged.primaryAgent = "BaiZe";
   }
   if (merged.intent === "resume") {
-    merged.nextCommand = "node ./bin/helix.mjs resume";
+    merged.nextCommand = "node ./bin/wildarrange.mjs resume";
     merged.needsPlan = false;
   }
 

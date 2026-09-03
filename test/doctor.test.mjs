@@ -7,13 +7,13 @@ import test from "node:test";
 import { runDoctor } from "../src/interface/doctor.mjs";
 import { appendLedger } from "../src/infra/ledger.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
-import { resolveHelixPath } from "../src/infra/runtime-store.mjs";
+import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 
 test("doctor keeps reporting when one check crashes on corrupted state", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
     // 人为损坏 tasks.json：completionAudit 检查会抛错，其余检查必须照常。
-    const tasksPath = resolveHelixPath(dir, "team", "tasks.json");
+    const tasksPath = resolveWildArrangePath(dir, "team", "tasks.json");
     await writeFile(tasksPath, "{corrupted json", "utf8");
 
     const report = await runDoctor(dir);
@@ -27,7 +27,7 @@ test("doctor keeps reporting when one check crashes on corrupted state", async (
     assert.notEqual(report.sections.ledger.status, "check_failed");
     assert.notEqual(report.sections.runtimeState.status, "check_failed");
 
-    const markdown = await readFile(resolveHelixPath(dir, "reports", "doctor.md"), "utf8");
+    const markdown = await readFile(resolveWildArrangePath(dir, "reports", "doctor.md"), "utf8");
     assert.match(markdown, /CHECK FAILED/);
     assert.match(markdown, /Config source:/);
   });
@@ -36,7 +36,7 @@ test("doctor keeps reporting when one check crashes on corrupted state", async (
 test("doctor is diagnostic-only and never appends to the hash-chained ledger", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const ledgerPath = resolveHelixPath(dir, "ledger.jsonl");
+    const ledgerPath = resolveWildArrangePath(dir, "ledger.jsonl");
     const before = existsSync(ledgerPath) ? await readFile(ledgerPath, "utf8") : "";
 
     await runDoctor(dir);
@@ -59,7 +59,7 @@ test("doctor surfaces unarmed gates and missing adapter hooks instead of burying
     assert.equal(cursor.installed, false);
     assert.ok(report.findings.some((finding) => finding.section === "adapters" && finding.message.includes(".cursor/hooks.json")));
 
-    const markdown = await readFile(resolveHelixPath(dir, "reports", "doctor.md"), "utf8");
+    const markdown = await readFile(resolveWildArrangePath(dir, "reports", "doctor.md"), "utf8");
     assert.match(markdown, /Gate arming: NOT ARMED/);
     assert.match(markdown, /cursor:MISSING/);
   });
@@ -76,18 +76,18 @@ test("doctor adapter check passes once hooks are installed and flags stale rule 
     await writeFile(path.join(dir, ".cursor", "hooks", "wildarrange-hook-bridge.mjs"), "// bridge\n", "utf8");
     await mkdir(path.join(dir, ".codex"), { recursive: true });
     await writeFile(path.join(dir, ".codex", "hooks.json"), "{}", "utf8");
-    await mkdir(resolveHelixPath(dir, "adapters", "kimi", "plugin", "hooks"), { recursive: true });
-    await writeFile(resolveHelixPath(dir, "adapters", "kimi", "plugin", "hooks", "wildarrange-hook-bridge.mjs"), "// bridge\n", "utf8");
+    await mkdir(resolveWildArrangePath(dir, "adapters", "kimi", "plugin", "hooks"), { recursive: true });
+    await writeFile(resolveWildArrangePath(dir, "adapters", "kimi", "plugin", "hooks", "wildarrange-hook-bridge.mjs"), "// bridge\n", "utf8");
     // 换机残留：规则里指向不存在绝对路径的命令会静默失效。
     await mkdir(path.join(dir, ".cursor", "rules"), { recursive: true });
-    await writeFile(path.join(dir, ".cursor", "rules", "stale.mdc"), "run `node \"/Users/ghost/nonexistent/bin/helix.mjs\" hook run`\n", "utf8");
-    await writeFile(path.join(dir, ".cursor", "rules", ["helix", "flow.mdc"].join("")), "alwaysApply: true\n", "utf8");
+    await writeFile(path.join(dir, ".cursor", "rules", "stale.mdc"), "run `node \"/Users/ghost/nonexistent/bin/wildarrange.mjs\" hook run`\n", "utf8");
+    await writeFile(path.join(dir, ".cursor", "rules", ["wildarrange", "flow.mdc"].join("")), "alwaysApply: true\n", "utf8");
 
     const report = await runDoctor(dir);
     const cursor = report.sections.adapters.targets.find((target) => target.target === "cursor");
     assert.equal(cursor.installed, true);
     assert.equal(report.sections.adapters.staleRules.length, 1);
-    assert.deepEqual(report.sections.adapters.legacyManagedRules, [{ path: ".cursor/rules/helixflow.mdc" }]);
+    assert.deepEqual(report.sections.adapters.legacyManagedRules, [{ path: ".cursor/rules/wildarrangeflow.mdc" }]);
     assert.ok(report.findings.some((finding) => finding.message.includes("/Users/ghost/nonexistent")));
     assert.ok(report.findings.some((finding) => finding.message.includes("legacy managed Cursor rule")));
   });
@@ -96,9 +96,9 @@ test("doctor adapter check passes once hooks are installed and flags stale rule 
 test("config init --armed writes an armed config that passes the gate arming floor", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const { writeDefaultHelixConfig } = await import("../src/infra/runtime-config.mjs");
+    const { writeDefaultWildArrangeConfig } = await import("../src/infra/runtime-config.mjs");
     const { evaluateGateArming } = await import("../src/infra/gate-arming.mjs");
-    const written = await writeDefaultHelixConfig(dir, { root: true, force: true, armed: true });
+    const written = await writeDefaultWildArrangeConfig(dir, { root: true, force: true, armed: true });
     assert.equal(written.created, true);
     assert.equal(written.config.qualityGates.commentChecker.blockOnFindings, true);
     const arming = evaluateGateArming({ config: written.config, tasks: [] });
@@ -165,17 +165,17 @@ test("doctor never assigns an archived Plan's unscoped completion event to a new
       history: [{ at: "2026-08-25T00:00:00.000Z", event: "completed", status: "completed" }],
     };
     await appendLedger(dir, { type: "node_checkpoint_completed", taskId: "T001" });
-    await writeFile(resolveHelixPath(dir, "team", "tasks.json"), JSON.stringify({
+    await writeFile(resolveWildArrangePath(dir, "team", "tasks.json"), JSON.stringify({
       version: 1,
       kind: "task_ledger",
       activePlanId: "plan-new",
       plans: [{ id: "plan-new", taskIds: ["T001"] }],
       tasks: [task],
     }, null, 2), "utf8");
-    await mkdir(resolveHelixPath(dir, "checkpoints", "plan-new"), { recursive: true });
-    await mkdir(resolveHelixPath(dir, "reports", "acceptance", "plan-new"), { recursive: true });
-    await writeFile(resolveHelixPath(dir, "checkpoints", "plan-new", "T001.json"), JSON.stringify({ planId: "plan-new", taskId: "T001" }), "utf8");
-    await writeFile(resolveHelixPath(dir, "reports", "acceptance", "plan-new", "T001.json"), JSON.stringify({ planId: "plan-new", taskId: "T001" }), "utf8");
+    await mkdir(resolveWildArrangePath(dir, "checkpoints", "plan-new"), { recursive: true });
+    await mkdir(resolveWildArrangePath(dir, "reports", "acceptance", "plan-new"), { recursive: true });
+    await writeFile(resolveWildArrangePath(dir, "checkpoints", "plan-new", "T001.json"), JSON.stringify({ planId: "plan-new", taskId: "T001" }), "utf8");
+    await writeFile(resolveWildArrangePath(dir, "reports", "acceptance", "plan-new", "T001.json"), JSON.stringify({ planId: "plan-new", taskId: "T001" }), "utf8");
 
     const report = await runDoctor(dir);
     assert.equal(report.ok, false);
@@ -200,7 +200,7 @@ async function writeTwoPlanSameTaskLedger(dir) {
     evidence: [],
     history: [{ at: "2026-08-24T00:00:00.000Z", event: "completed", status: "completed" }],
   });
-  await writeFile(resolveHelixPath(dir, "team", "tasks.json"), JSON.stringify({
+  await writeFile(resolveWildArrangePath(dir, "team", "tasks.json"), JSON.stringify({
     version: 1,
     kind: "task_ledger",
     activePlanId: "plan-b",
@@ -211,10 +211,10 @@ async function writeTwoPlanSameTaskLedger(dir) {
     tasks: [task("plan-a"), task("plan-b")],
   }, null, 2), "utf8");
   for (const planId of ["plan-a", "plan-b"]) {
-    await mkdir(resolveHelixPath(dir, "checkpoints", planId), { recursive: true });
-    await mkdir(resolveHelixPath(dir, "reports", "acceptance", planId), { recursive: true });
-    await writeFile(resolveHelixPath(dir, "checkpoints", planId, "T001.json"), JSON.stringify({ planId, taskId: "T001" }), "utf8");
-    await writeFile(resolveHelixPath(dir, "reports", "acceptance", planId, "T001.json"), JSON.stringify({ planId, taskId: "T001" }), "utf8");
+    await mkdir(resolveWildArrangePath(dir, "checkpoints", planId), { recursive: true });
+    await mkdir(resolveWildArrangePath(dir, "reports", "acceptance", planId), { recursive: true });
+    await writeFile(resolveWildArrangePath(dir, "checkpoints", planId, "T001.json"), JSON.stringify({ planId, taskId: "T001" }), "utf8");
+    await writeFile(resolveWildArrangePath(dir, "reports", "acceptance", planId, "T001.json"), JSON.stringify({ planId, taskId: "T001" }), "utf8");
   }
 }
 

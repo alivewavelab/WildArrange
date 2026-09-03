@@ -48,7 +48,7 @@
 <div style="border:2px solid #d9534f;background:#fde8e8;border-radius:8px;padding:12px 16px;margin:0 auto 16px;max-width:960px;font-size:14px;line-height:1.7;color:#172033">
 <strong>⚠️ 历史方案（2026-06-16）。</strong> 本文是当时的设计/评审快照，不是当前架构真相。
 当前规范以根 <code>AGENTS.md</code> 与 <code>doc/project-architecture.md</code> 为准。
-本文是平铺 helix-* 架构 Review；长期 Agent 已收敛为 Jiuwei/DiJiang/ZhuRong/BaiZe/LuWu。
+本文是平铺 wildarrange-* 架构 Review；长期 Agent 已收敛为 Jiuwei/DiJiang/ZhuRong/BaiZe/LuWu。
 </div>
 <header>
 <h1>WildArrange 完整性审查</h1>
@@ -77,13 +77,13 @@
 <h3 style="font-size:13px;margin-top:12px;">职责拆分</h3>
 <table>
 <tr><th>层</th><th>模块</th><th>行数</th><th>职责</th></tr>
-<tr><td>⏚ 基础</td><td>helix-foundation</td><td>1,021 <span class="tag tag-warn">边界</span></td><td>路径/JSON/锁/配置/ledger/快照/提示包</td></tr>
-<tr><td>⎍ 核心</td><td>helix-core</td><td>130</td><td>兼容导出层（薄）</td></tr>
-<tr><td>⚙ 流程</td><td>helix-plan · team · node-runtime · workflow</td><td>80 – 541</td><td>计划导入/任务状态/线性执行/workflow</td></tr>
-<tr><td>🛡 门控</td><td>helix-gates · acceptance-proof · code-intel · review · review-findings</td><td>118 – 615</td><td>验证/范围/复核/验收证明/代码质量</td></tr>
-<tr><td>🔀 路由</td><td>helix-routing · archivist-router · skill-matcher</td><td>190 – 588</td><td>确定性+语义混合路由/档案路由/技能匹配</td></tr>
-<tr><td>🔧 适配</td><td>helix-adapters · agent-spawn · git-worktree · parallel-agents</td><td>55 – 822</td><td>Codex/Cursor 适配/子 Agent spawn/worktree/并行</td></tr>
-<tr><td>🖥 UI</td><td>helix-dashboard</td><td>621</td><td>内联 HTML dashboard + API</td></tr>
+<tr><td>⏚ 基础</td><td>wildarrange-foundation</td><td>1,021 <span class="tag tag-warn">边界</span></td><td>路径/JSON/锁/配置/ledger/快照/提示包</td></tr>
+<tr><td>⎍ 核心</td><td>wildarrange-core</td><td>130</td><td>兼容导出层（薄）</td></tr>
+<tr><td>⚙ 流程</td><td>wildarrange-plan · team · node-runtime · workflow</td><td>80 – 541</td><td>计划导入/任务状态/线性执行/workflow</td></tr>
+<tr><td>🛡 门控</td><td>wildarrange-gates · acceptance-proof · code-intel · review · review-findings</td><td>118 – 615</td><td>验证/范围/复核/验收证明/代码质量</td></tr>
+<tr><td>🔀 路由</td><td>wildarrange-routing · archivist-router · skill-matcher</td><td>190 – 588</td><td>确定性+语义混合路由/档案路由/技能匹配</td></tr>
+<tr><td>🔧 适配</td><td>wildarrange-adapters · agent-spawn · git-worktree · parallel-agents</td><td>55 – 822</td><td>Codex/Cursor 适配/子 Agent spawn/worktree/并行</td></tr>
+<tr><td>🖥 UI</td><td>wildarrange-dashboard</td><td>621</td><td>内联 HTML dashboard + API</td></tr>
 </table>
 
 <h3 style="font-size:13px;margin-top:16px;">状态机</h3>
@@ -93,8 +93,8 @@
 
 <h3 style="font-size:13px;margin-top:12px;">优点</h3>
 <ul>
-<li><span class="severity sev-low"></span>模块边界清晰：每个 <code>helix-*.mjs</code> 只做一个域的事</li>
-<li><span class="severity sev-low"></span>helix-core 真正做到了纯兼容导出层，没有堆业务逻辑</li>
+<li><span class="severity sev-low"></span>模块边界清晰：每个 <code>wildarrange-*.mjs</code> 只做一个域的事</li>
+<li><span class="severity sev-low"></span>wildarrange-core 真正做到了纯兼容导出层，没有堆业务逻辑</li>
 <li><span class="severity sev-low"></span>状态持久化与状态机执行分离（task.json 是真相，runNextTask 是动作）</li>
 <li><span class="severity sev-low"></span>锁机制（withTaskStateLock）保证并发安全，支持 stale lock 回收</li>
 <li><span class="severity sev-low"></span>原子写入（temp + rename）避免写一半崩溃</li>
@@ -102,9 +102,9 @@
 
 <h3 style="font-size:13px;margin-top:12px;">问题</h3>
 <ul>
-<li><span class="severity sev-med"></span>helix-foundation 1021 行刚好压在 1000 行红线，且混杂了路径工具、锁、配置、ledger、快照、context 渲染、提示包管理等 6+ 个域</li>
-<li><span class="severity sev-low"></span>helix-parallel-agents 822 行，已超 700 行审计线；同时承担了并行调度、patch admission、rollback、生命周期、worktree 集成，差不多 3 个域</li>
-<li><span class="severity sev-low"></span>helix-dashboard 621 行中 HTML 模板占了 ~350 行，可考虑外挂 template 文件（但无外部依赖约束下内联也可接受）</li>
+<li><span class="severity sev-med"></span>wildarrange-foundation 1021 行刚好压在 1000 行红线，且混杂了路径工具、锁、配置、ledger、快照、context 渲染、提示包管理等 6+ 个域</li>
+<li><span class="severity sev-low"></span>wildarrange-parallel-agents 822 行，已超 700 行审计线；同时承担了并行调度、patch admission、rollback、生命周期、worktree 集成，差不多 3 个域</li>
+<li><span class="severity sev-low"></span>wildarrange-dashboard 621 行中 HTML 模板占了 ~350 行，可考虑外挂 template 文件（但无外部依赖约束下内联也可接受）</li>
 </ul>
 </div>
 
@@ -115,14 +115,14 @@
 <h3 style="font-size:13px;margin-top:8px;">安全不变量 → 逐一验证</h3>
 <table>
 <tr><th>不变量</th><th>实现</th><th>能否绕过</th></tr>
-<tr><td>verify_commands 不可为空</td><td><code>helix-gates:50-63</code> 强制检查；<code>helix-plan:73</code> 导入时校验</td><td><span class="tag tag-good">❌ 不可</span></td></tr>
-<tr><td>verify_commands 不可被 steering 削弱</td><td><code>helix-change:278-287</code> 拒绝删除已有门命令</td><td><span class="tag tag-good">❌ 不可</span></td></tr>
-<tr><td>worker done-claim 不是完成</td><td><code>helix-node-runtime:111</code> 同时检查 5 个条件</td><td><span class="tag tag-good">❌ 不可</span></td></tr>
-<tr><td>scope guard 必须 pass</td><td>realpath 解析防止符号链接逃逸 <code>helix-gates:222-244</code></td><td><span class="tag tag-good">❌ 不可</span></td></tr>
+<tr><td>verify_commands 不可为空</td><td><code>wildarrange-gates:50-63</code> 强制检查；<code>wildarrange-plan:73</code> 导入时校验</td><td><span class="tag tag-good">❌ 不可</span></td></tr>
+<tr><td>verify_commands 不可被 steering 削弱</td><td><code>wildarrange-change:278-287</code> 拒绝删除已有门命令</td><td><span class="tag tag-good">❌ 不可</span></td></tr>
+<tr><td>worker done-claim 不是完成</td><td><code>wildarrange-node-runtime:111</code> 同时检查 5 个条件</td><td><span class="tag tag-good">❌ 不可</span></td></tr>
+<tr><td>scope guard 必须 pass</td><td>realpath 解析防止符号链接逃逸 <code>wildarrange-gates:222-244</code></td><td><span class="tag tag-good">❌ 不可</span></td></tr>
 <tr><td>review gate 必须 pass</td><td>13 条确定性 review lane + 可选 LLM lane</td><td><span class="tag tag-good">❌ 不可</span></td></tr>
-<tr><td>acceptance proof 必须 pass</td><td>8 项独立检查 <code>helix-acceptance-proof:41-74</code></td><td><span class="tag tag-good">❌ 不可</span></td></tr>
+<tr><td>acceptance proof 必须 pass</td><td>8 项独立检查 <code>wildarrange-acceptance-proof:41-74</code></td><td><span class="tag tag-good">❌ 不可</span></td></tr>
 <tr><td>ledger 可审计</td><td>SHA-256 hash 链，verify 可检测篡改</td><td><span class="tag tag-good">❌ 不可</span></td></tr>
-<tr><td>ChangeRequest 必须人工审批</td><td>autoApply=false 强制；weakening 语言检测 <code>helix-change:384-387</code></td><td><span class="tag tag-good">❌ 不可</span></td></tr>
+<tr><td>ChangeRequest 必须人工审批</td><td>autoApply=false 强制；weakening 语言检测 <code>wildarrange-change:384-387</code></td><td><span class="tag tag-good">❌ 不可</span></td></tr>
 </table>
 
 <h3 style="font-size:13px;margin-top:12px;">弱项发现</h3>
@@ -179,7 +179,7 @@ Plan → Worker → Verifier → ScopeGuard → ReviewGate(13 lanes) → Accepta
 <li><span class="severity sev-low"></span><b>MCP server 生命周期管理</b> 是 PARTIAL（skill 可安装可匹配，但 MCP server 启动/停止是 "adapter work"）</li>
 <li><span class="severity sev-low"></span><b>常驻多 Agent 集群</b> 未启动（P2 设计如此）</li>
 <li><span class="severity sev-low"></span><b>tmux/cmux 可视化</b> 已推迟</li>
-<li><span class="severity sev-low"></span><b>并行 Agent 的 <code>awaiting_user_acceptance</code> 状态</b>：子 Agent 成功后默认保留等待 admission，但如果用户忘记 close，结果会一直堆在 <code>.helix/agent-runs</code> 里</li>
+<li><span class="severity sev-low"></span><b>并行 Agent 的 <code>awaiting_user_acceptance</code> 状态</b>：子 Agent 成功后默认保留等待 admission，但如果用户忘记 close，结果会一直堆在 <code>.wildarrange/agent-runs</code> 里</li>
 <li><span class="severity sev-low"></span><b>没有 lint/format 配置</b>（package.json 里无 eslint/prettier 脚本）</li>
 </ul>
 </div>
@@ -195,7 +195,7 @@ Plan → Worker → Verifier → ScopeGuard → ReviewGate(13 lanes) → Accepta
 <!-- Agent Execution -->
 <div class="card">
 <h2>4. Agent 执行问题分析 <span class="badge badge-warn">B</span></h2>
-<p style="color:var(--muted);">WildArrange 的独特之处：它是被 Agent 安装和运行的工具。Agent 可能会误用它、绕开它、甚至直接删掉 .helix/。以下分析从 "Agent 当作工具调用时" 的角度出发。</p>
+<p style="color:var(--muted);">WildArrange 的独特之处：它是被 Agent 安装和运行的工具。Agent 可能会误用它、绕开它、甚至直接删掉 .wildarrange/。以下分析从 "Agent 当作工具调用时" 的角度出发。</p>
 
 <table>
 <tr><th>#</th><th>问题</th><th>严重度</th><th>详情</th></tr>
@@ -203,13 +203,13 @@ Plan → Worker → Verifier → ScopeGuard → ReviewGate(13 lanes) → Accepta
 <td>1</td>
 <td><b>shell:true 无沙箱</b></td>
 <td><span class="tag tag-bad">高</span></td>
-<td><code>helix-gates:17-48 runCommand</code> 使用 <code>shell:true</code>。当 Agent 调用 <code>helix node execute --task T001</code> 时，worker_command 在 shell 中执行。如果 plan.json 里的 worker_command 被篡改为 <code>rm -rf /</code>，没有沙箱兜底。建议：至少加一个 <code>--dry-run</code> 模式和命令白名单。</td>
+<td><code>wildarrange-gates:17-48 runCommand</code> 使用 <code>shell:true</code>。当 Agent 调用 <code>wildarrange node execute --task T001</code> 时，worker_command 在 shell 中执行。如果 plan.json 里的 worker_command 被篡改为 <code>rm -rf /</code>，没有沙箱兜底。建议：至少加一个 <code>--dry-run</code> 模式和命令白名单。</td>
 </tr>
 <tr>
 <td>2</td>
-<td><b>.helix/ 目录无完整性保护</b></td>
+<td><b>.wildarrange/ 目录无完整性保护</b></td>
 <td><span class="tag tag-bad">高</span></td>
-<td>Agent 可以直接删除 .helix/ledger.jsonl 或 .helix/team/tasks.json。ledger hash 链能检测篡改但无法阻止删除。建议：考虑 .helix/ 目录的定期备份或 Git 自动提交。</td>
+<td>Agent 可以直接删除 .wildarrange/ledger.jsonl 或 .wildarrange/team/tasks.json。ledger hash 链能检测篡改但无法阻止删除。建议：考虑 .wildarrange/ 目录的定期备份或 Git 自动提交。</td>
 </tr>
 <tr>
 <td>3</td>
@@ -221,13 +221,13 @@ Plan → Worker → Verifier → ScopeGuard → ReviewGate(13 lanes) → Accepta
 <td>4</td>
 <td><b>config 可被 Agent 热修改</b></td>
 <td><span class="tag tag-warn">中</span></td>
-<td>Agent 可以编辑 helix.config.json 关闭 commentChecker、关闭 review.llm.required 等。目前没有 config 文件自身的 hash 或签名保护。Agent 可能关掉质量门然后通过 checkpoint。</td>
+<td>Agent 可以编辑 wildarrange.config.json 关闭 commentChecker、关闭 review.llm.required 等。目前没有 config 文件自身的 hash 或签名保护。Agent 可能关掉质量门然后通过 checkpoint。</td>
 </tr>
 <tr>
 <td>5</td>
 <td><b>并行 Agent admission 依赖 task state lock</b></td>
 <td><span class="tag tag-warn">中</span></td>
-<td>admit 过程中 task state 分步更新（prepareAdmission → finalizeAdmission），中间如果 Agent 并发操作 task state，虽然 finalizeAdmission 加了锁，但 prepareAdmission 阶段没有全局锁。<code>helix-parallel-agents:305-380</code> 里的 updateAdmissionTask 有锁，但 getAdmissionTask 无锁。</td>
+<td>admit 过程中 task state 分步更新（prepareAdmission → finalizeAdmission），中间如果 Agent 并发操作 task state，虽然 finalizeAdmission 加了锁，但 prepareAdmission 阶段没有全局锁。<code>wildarrange-parallel-agents:305-380</code> 里的 updateAdmissionTask 有锁，但 getAdmissionTask 无锁。</td>
 </tr>
 <tr>
 <td>6</td>
@@ -258,7 +258,7 @@ Plan → Worker → Verifier → ScopeGuard → ReviewGate(13 lanes) → Accepta
 <ul>
 <li><span class="severity sev-low"></span>ESM 统一、无外部 npm 依赖、纯 Node.js 内置模块 → 零依赖债务</li>
 <li><span class="severity sev-low"></span>写文件统一 <code>writeJsonAtomic</code>（temp + rename），无直接 writeFileSync</li>
-<li><span class="severity sev-low"></span>命名规范一致：<code>helix-{domain}.mjs</code>，导出的函数 camelCase，常量 UPPER_SNAKE</li>
+<li><span class="severity sev-low"></span>命名规范一致：<code>wildarrange-{domain}.mjs</code>，导出的函数 camelCase，常量 UPPER_SNAKE</li>
 <li><span class="severity sev-low"></span>错误处理统一 throw Error，无 silent swallow</li>
 </ul>
 
@@ -273,8 +273,8 @@ Plan → Worker → Verifier → ScopeGuard → ReviewGate(13 lanes) → Accepta
 <h3 style="font-size:13px;margin-top:12px;">依赖方向</h3>
 <ul>
 <li><span class="severity sev-low"></span>依赖图基本是单向的：foundation ← domain modules ← core barrel</li>
-<li><span class="severity sev-med"></span>helix-gates 引用了 helix-plan 的 loadTaskState → 轻微的双向耦合</li>
-<li><span class="severity sev-low"></span>helix-parallel-agents 同时 import 了 9 个其他模块 → 扇入很高但符合编排器角色</li>
+<li><span class="severity sev-med"></span>wildarrange-gates 引用了 wildarrange-plan 的 loadTaskState → 轻微的双向耦合</li>
+<li><span class="severity sev-low"></span>wildarrange-parallel-agents 同时 import 了 9 个其他模块 → 扇入很高但符合编排器角色</li>
 </ul>
 
 <h3 style="font-size:13px;margin-top:12px;">测试覆盖</h3>
@@ -289,7 +289,7 @@ Plan → Worker → Verifier → ScopeGuard → ReviewGate(13 lanes) → Accepta
 <li><span class="severity sev-low"></span>ledger hash 链篡改检测有测试</li>
 <li><span class="severity sev-low"></span>Dashboard token 认证有测试</li>
 <li><span class="severity sev-med"></span><b>缺少</b>：并发锁竞争测试、大文件/超长命令的边界测试、注入点安全测试（恶意 payload）</li>
-<li><span class="severity sev-low"></span>所有测试在单文件 <code>test/helix-core.test.mjs</code> 2,972 行中 → 建议按模块拆分</li>
+<li><span class="severity sev-low"></span>所有测试在单文件 <code>test/wildarrange-core.test.mjs</code> 2,972 行中 → 建议按模块拆分</li>
 </ul>
 </div>
 
@@ -298,11 +298,11 @@ Plan → Worker → Verifier → ScopeGuard → ReviewGate(13 lanes) → Accepta
 <h2>6. 文件行数审计 <span class="badge badge-info">信息</span></h2>
 <table>
 <tr><th>文件</th><th>行数</th><th>审计线</th><th>建议</th></tr>
-<tr><td>helix-foundation.mjs</td><td>1,021 <span class="tag tag-warn">边界</span></td><td>1,000</td><td>拆出 helix-ledger.mjs / helix-snapshot.mjs</td></tr>
-<tr><td>helix-parallel-agents.mjs</td><td>822 <span class="tag tag-warn">超 700</span></td><td>1,000</td><td>拆出 helix-admission.mjs（admit/rollback 逻辑）</td></tr>
-<tr><td>helix-dashboard.mjs</td><td>621</td><td>—</td><td>HTML 模板可外挂，但无外部依赖下内联可接受</td></tr>
-<tr><td>helix-gates.mjs</td><td>615</td><td>—</td><td>合理</td></tr>
-<tr><td>helix-archivist-router.mjs</td><td>588</td><td>—</td><td>合理</td></tr>
+<tr><td>wildarrange-foundation.mjs</td><td>1,021 <span class="tag tag-warn">边界</span></td><td>1,000</td><td>拆出 wildarrange-ledger.mjs / wildarrange-snapshot.mjs</td></tr>
+<tr><td>wildarrange-parallel-agents.mjs</td><td>822 <span class="tag tag-warn">超 700</span></td><td>1,000</td><td>拆出 wildarrange-admission.mjs（admit/rollback 逻辑）</td></tr>
+<tr><td>wildarrange-dashboard.mjs</td><td>621</td><td>—</td><td>HTML 模板可外挂，但无外部依赖下内联可接受</td></tr>
+<tr><td>wildarrange-gates.mjs</td><td>615</td><td>—</td><td>合理</td></tr>
+<tr><td>wildarrange-archivist-router.mjs</td><td>588</td><td>—</td><td>合理</td></tr>
 <tr><td>其他 24 个文件</td><td>&lt; 570</td><td>—</td><td>全部健康</td></tr>
 </table>
 </div>
@@ -319,7 +319,7 @@ Plan → Worker → Verifier → ScopeGuard → ReviewGate(13 lanes) → Accepta
 </tr>
 <tr>
 <td><span class="tag tag-bad">P0</span></td>
-<td><b>.helix/ 目录防删除</b>：自动 Git 提交 .helix/ 下的 ledger/tasks，或用 chattr 锁（至少文档说明风险）</td>
+<td><b>.wildarrange/ 目录防删除</b>：自动 Git 提交 .wildarrange/ 下的 ledger/tasks，或用 chattr 锁（至少文档说明风险）</td>
 <td>证据链丢失</td>
 </tr>
 <tr>
@@ -329,12 +329,12 @@ Plan → Worker → Verifier → ScopeGuard → ReviewGate(13 lanes) → Accepta
 </tr>
 <tr>
 <td><span class="tag tag-warn">P1</span></td>
-<td><b>helix-foundation 拆分</b>：ledger 相关（hash/verify/append）和 snapshot/context 各自成独立模块</td>
+<td><b>wildarrange-foundation 拆分</b>：ledger 相关（hash/verify/append）和 snapshot/context 各自成独立模块</td>
 <td>维护性</td>
 </tr>
 <tr>
 <td><span class="tag tag-warn">P1</span></td>
-<td><b>config 完整性保护</b>：对 helix.config.json 做 hash 或签名，检测 Agent 对质量门的篡改</td>
+<td><b>config 完整性保护</b>：对 wildarrange.config.json 做 hash 或签名，检测 Agent 对质量门的篡改</td>
 <td>治理不可削弱</td>
 </tr>
 <tr>
@@ -344,7 +344,7 @@ Plan → Worker → Verifier → ScopeGuard → ReviewGate(13 lanes) → Accepta
 </tr>
 <tr>
 <td><span class="tag tag-warn">P2</span></td>
-<td><b>测试文件拆分</b>：test/helix-core.test.mjs (2,972行) 按模块拆分</td>
+<td><b>测试文件拆分</b>：test/wildarrange-core.test.mjs (2,972行) 按模块拆分</td>
 <td>维护性</td>
 </tr>
 <tr>

@@ -1,4 +1,4 @@
-import { loadHelixConfig } from "./runtime-config.mjs";
+import { loadWildArrangeConfig } from "./runtime-config.mjs";
 import { nowIso } from "./runtime-store.mjs";
 
 const DEFAULT_CHAT_PATH = "/chat/completions";
@@ -11,7 +11,7 @@ const REVIEW_AGENT_PROFILES = {
 };
 
 export async function runLlmReview(rootDir, agentName, task, evidence = {}, options = {}) {
-  const { config } = options.config ? { config: options.config } : await loadHelixConfig(rootDir);
+  const { config } = options.config ? { config: options.config } : await loadWildArrangeConfig(rootDir);
   const llmConfig = config.review?.llm || {};
   if (llmConfig.enabled !== true) {
     return {

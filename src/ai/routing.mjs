@@ -10,8 +10,8 @@ import { appendLedger } from "../infra/ledger.mjs";
 import { emitDecision, readDecisions } from "../infra/decision-log.mjs";
 import { readAnnotations } from "../infra/annotation-log.mjs";
 import { initRuntime } from "../infra/runtime-bootstrap.mjs";
-import { loadHelixConfig } from "../infra/runtime-config.mjs";
-import { nowIso, resolveHelixPath, writeJsonAtomic } from "../infra/runtime-store.mjs";
+import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
+import { nowIso, resolveWildArrangePath, writeJsonAtomic } from "../infra/runtime-store.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { loadRoutesConfig, resolveRouteDecision, uniqueStrings } from "../infra/route-table.mjs";
 import { callOpenAICompatible, resolveAgentProvider } from "../infra/llm-provider.mjs";
@@ -78,7 +78,7 @@ export async function routeRequest(rootDir, input) {
 
 export async function writeDailyRoutingReview(rootDir, options = {}) {
   await initRuntime(rootDir);
-  const { config } = await loadHelixConfig(rootDir);
+  const { config } = await loadWildArrangeConfig(rootDir);
   const reviewConfig = config.routeGovernance?.dailyReview || {};
   const date = options.date || localDate(new Date());
   if (reviewConfig.enabled === false) {
@@ -144,7 +144,7 @@ export async function writeDailyRoutingReview(rootDir, options = {}) {
   const patterns = routingIssuePatterns(issues);
   const maxItems = Math.max(5, Math.min(Number(reviewConfig.maxItems) || 20, 100));
   const report = {
-    kind: "helix_daily_routing_review",
+    kind: "wildarrange_daily_routing_review",
     status: "generated",
     date,
     generatedAt: nowIso(),
@@ -167,19 +167,19 @@ export async function writeDailyRoutingReview(rootDir, options = {}) {
     skippedDecisionLines: skippedLines,
     skippedAnnotationLines: annotations.skippedLines,
   };
-  const jsonPath = resolveHelixPath(rootDir, "reports", "routing", `${date}.json`);
-  const mdPath = resolveHelixPath(rootDir, "reports", "routing", `${date}.md`);
-  const latestJsonPath = resolveHelixPath(rootDir, "reports", "routing", "latest.json");
-  const latestMdPath = resolveHelixPath(rootDir, "reports", "routing", "latest.md");
+  const jsonPath = resolveWildArrangePath(rootDir, "reports", "routing", `${date}.json`);
+  const mdPath = resolveWildArrangePath(rootDir, "reports", "routing", `${date}.md`);
+  const latestJsonPath = resolveWildArrangePath(rootDir, "reports", "routing", "latest.json");
+  const latestMdPath = resolveWildArrangePath(rootDir, "reports", "routing", "latest.md");
   await writeJsonAtomic(jsonPath, report);
   await writeFile(mdPath, renderDailyRoutingReview(report), "utf8");
   await writeJsonAtomic(latestJsonPath, report);
   await writeFile(latestMdPath, renderDailyRoutingReview(report), "utf8");
   return {
     ...report,
-    reportJsonPath: `.helix/reports/routing/${date}.json`,
-    reportMdPath: `.helix/reports/routing/${date}.md`,
-    latestMdPath: ".helix/reports/routing/latest.md",
+    reportJsonPath: `.wildarrange/reports/routing/${date}.json`,
+    reportMdPath: `.wildarrange/reports/routing/${date}.md`,
+    latestMdPath: ".wildarrange/reports/routing/latest.md",
   };
 }
 
@@ -200,7 +200,7 @@ function routingIssuePatterns(issues) {
 
 function renderDailyRoutingReview(report) {
   const lines = [
-    `# Helix 路由每日复盘｜${report.date}`,
+    `# WildArrange 路由每日复盘｜${report.date}`,
     "",
     "> 由 IDE Stop Hook 自动生成。它只整理证据和提示改进点，不会自动修改 routes.json。",
     "",
@@ -314,7 +314,7 @@ function localDateFromTimestamp(value) {
 }
 
 export async function semanticRouteShadow(rootDir, text, deterministicRoute, options = {}) {
-  const { config } = options.config ? { config: options.config } : await loadHelixConfig(rootDir);
+  const { config } = options.config ? { config: options.config } : await loadWildArrangeConfig(rootDir);
   const shadowConfig = config.routeGovernance?.semanticShadow || {};
   if (shadowConfig.enabled !== true) {
     return { status: "skipped", reason: "routeGovernance.semanticShadow.enabled is not true" };
@@ -352,7 +352,7 @@ export async function semanticRouteShadow(rootDir, text, deterministicRoute, opt
 }
 
 async function applySemanticRouteGovernance(rootDir, text, deterministic, input) {
-  const { config } = await loadHelixConfig(rootDir);
+  const { config } = await loadWildArrangeConfig(rootDir);
   const shadowConfig = config.routeGovernance?.semanticShadow || {};
   const semantic = await semanticRouteShadow(rootDir, text, deterministic, { config });
   const result = { ...deterministic, semanticShadow: semantic };

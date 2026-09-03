@@ -1056,9 +1056,9 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
     "cli": {
       "files": [
         {
-          "id": "bin-helix-mjs",
-          "p": "bin/helix.mjs",
-          "r": "helix.mjs",
+          "id": "bin-wildarrange-mjs",
+          "p": "bin/wildarrange.mjs",
+          "r": "wildarrange.mjs",
           "io": "待读代码填写",
           "extTo": [
             {
@@ -1274,9 +1274,9 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
           ]
         },
         {
-          "id": "bin-helix-mjs",
-          "p": "bin/helix.mjs",
-          "r": "helix.mjs",
+          "id": "bin-wildarrange-mjs",
+          "p": "bin/wildarrange.mjs",
+          "r": "wildarrange.mjs",
           "io": "待读代码填写",
           "extTo": [
             {
@@ -3770,9 +3770,9 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
 <script>
 const D = {
   "cli": { name: "CLI（命令入口）", plain: "只解析命令并把它直接交给真实负责人，不承载业务流程", role: "命令解析与分发", inn: "终端命令与参数", out: "对应分区的函数调用与退出码", status: "已通", files: [
-    { id: "entry", p: "bin/helix.mjs", r: "CLI 入口与命令路由", io: "终端参数 → 运行时命令" }
+    { id: "entry", p: "bin/wildarrange.mjs", r: "CLI 入口与命令路由", io: "终端参数 → 运行时命令" }
   ], focusFiles: [
-    { id: "entry", p: "bin/helix.mjs", r: "解析参数并直接分发到真实负责人", io: "命令与参数 → 分区函数", extTo: [
+    { id: "entry", p: "bin/wildarrange.mjs", r: "解析参数并直接分发到真实负责人", io: "命令与参数 → 分区函数", extTo: [
       { t: "dashboard.mjs", p: "src/interface/dashboard.mjs", m: "人机交互层", io: "启动本地面板" },
       { t: "linear-runtime.mjs", p: "src/orchestration/linear-runtime.mjs", m: "流程编排层", io: "运行下一项任务" },
       { t: "routing.mjs", p: "src/ai/routing.mjs", m: "智能策略层", io: "判断请求该交给谁" },

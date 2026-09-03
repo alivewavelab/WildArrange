@@ -15,9 +15,9 @@ import {
 } from "../src/orchestration/parallel-runtime.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
-import { resolveHelixPath } from "../src/infra/runtime-store.mjs";
+import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 
-const CLI_PATH = path.resolve(process.cwd(), "bin", "helix.mjs");
+const CLI_PATH = path.resolve(process.cwd(), "bin", "wildarrange.mjs");
 
 async function withTempDir(fn) {
   const baseDir = path.join(process.cwd(), ".tmp");
@@ -31,7 +31,7 @@ async function withTempDir(fn) {
 }
 
 async function importTwoTaskPlan(dir) {
-  const planPath = resolveHelixPath(dir, "artifacts", "retry-plan.json");
+  const planPath = resolveWildArrangePath(dir, "artifacts", "retry-plan.json");
   await mkdir(path.dirname(planPath), { recursive: true });
   await writeFile(planPath, JSON.stringify({
     planId: "retry-plan",

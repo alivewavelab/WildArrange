@@ -5,13 +5,13 @@ import { normalizeRelativePath } from "../infra/path-match.mjs";
 import {
   STATE_VERSION,
   createWorkId,
-  ensureHelixDirs,
+  ensureWildArrangeDirs,
   legacyTaskEvidenceStem,
   nowIso,
   readJson,
   resolveLegacyTaskAcceptancePath,
   resolveLegacyTaskCheckpointPath,
-  resolveHelixPath,
+  resolveWildArrangePath,
   resolveTaskAcceptancePath,
   resolveTaskCheckpointPath,
   writeJsonAtomic,
@@ -87,9 +87,9 @@ export async function getTeamTask(rootDir, taskId, options = {}) {
 
 export async function recordTaskEvidence(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `evidence-record:${options.taskId || "unknown"}`, async () => {
-    await ensureHelixDirs(rootDir);
+    await ensureWildArrangeDirs(rootDir);
     const taskState = await loadTaskState(rootDir);
-    if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
+    if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
     const task = taskState.tasks.find((candidate) => candidate.id === options.taskId);
     if (!task) throw new Error(`unknown task: ${options.taskId}`);
     const criterion = (task.successCriteria || []).find((candidate) => candidate.id === options.criterionId);
@@ -123,9 +123,9 @@ export async function claimTeamTask(rootDir, options = {}) {
 }
 
 async function claimTeamTaskUnlocked(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const taskState = await loadTaskState(rootDir);
-  if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
+  if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
   const task = options.taskId
     ? taskState.tasks.find((candidate) => candidate.id === options.taskId)
     : findRunnableTask(taskState.tasks);
@@ -170,9 +170,9 @@ export async function createTeamTask(rootDir, rawTask) {
 }
 
 async function createTeamTaskUnlocked(rootDir, rawTask) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const taskState = await ensureTaskCreationState(rootDir);
-  const planPath = resolveHelixPath(rootDir, "plans", `${taskState.planId}.json`);
+  const planPath = resolveWildArrangePath(rootDir, "plans", `${taskState.planId}.json`);
   const plan = await readJson(planPath);
   const normalizedTask = withTaskIdentity(normalizeTask(rawTask, taskState.tasks.length, plan.defaults || {}, {
     defaultDraftWhenIncomplete: true,
@@ -213,7 +213,7 @@ export async function readyTeamTask(rootDir, options = {}) {
     if (!existing) throw new Error(`unknown task: ${options.taskId}`);
     if (existing.status !== "draft") throw new Error(`task ${existing.id} is ${existing.status}; only draft tasks can become pending`);
     const taskState = await loadTaskState(rootDir, { planId: existing.planId });
-    const plan = await readJson(resolveHelixPath(rootDir, "plans", `${existing.planId}.json`));
+    const plan = await readJson(resolveWildArrangePath(rootDir, "plans", `${existing.planId}.json`));
     const patch = options.patch && typeof options.patch === "object" ? options.patch : {};
     const nextTask = withTaskIdentity(normalizeTask({
       ...existing,
@@ -251,7 +251,7 @@ export async function persistTaskState(rootDir, taskState) {
   const at = nowIso();
   taskState.updatedAt = at;
   const ledger = await loadTaskLedger(rootDir);
-  const plan = await readJson(resolveHelixPath(rootDir, "plans", `${taskState.planId}.json`));
+  const plan = await readJson(resolveWildArrangePath(rootDir, "plans", `${taskState.planId}.json`));
   const previousTasks = new Map((ledger?.tasks || [])
     .filter((task) => task.planId === taskState.planId)
     .map((task) => [task.id, task]));
@@ -298,13 +298,13 @@ export async function persistTaskState(rootDir, taskState) {
   // re-runnable (not half-completed) task instead of a completed task with
   // missing ledger/markdown trail (cross-review P1, 2026-07-21).
   await writeTasksMarkdown(rootDir, plan);
-  await writeJsonAtomic(resolveHelixPath(rootDir, "plans", `${taskState.planId}.json`), plan);
-  await writeJsonAtomic(resolveHelixPath(rootDir, "team", "tasks.json"), nextLedger);
+  await writeJsonAtomic(resolveWildArrangePath(rootDir, "plans", `${taskState.planId}.json`), plan);
+  await writeJsonAtomic(resolveWildArrangePath(rootDir, "team", "tasks.json"), nextLedger);
 }
 
 export async function migrateTaskLedgerState(rootDir) {
   return withTaskStateLock(rootDir, "task-ledger-migrate", async () => {
-    await ensureHelixDirs(rootDir);
+    await ensureWildArrangeDirs(rootDir);
     const ledger = await loadTaskLedger(rootDir);
     if (!ledger) {
       return {
@@ -336,7 +336,7 @@ export async function migrateTaskLedgerState(rootDir) {
 
     // Keep plan JSON mirrors aligned before committing the canonical ledger.
     for (const planEntry of nextLedger.plans || []) {
-      const planPath = resolveHelixPath(rootDir, "plans", `${planEntry.id}.json`);
+      const planPath = resolveWildArrangePath(rootDir, "plans", `${planEntry.id}.json`);
       const plan = await readJson(planPath, null);
       if (!plan) continue;
       const tasks = nextLedger.tasks.filter((task) => task.planId === planEntry.id);
@@ -347,7 +347,7 @@ export async function migrateTaskLedgerState(rootDir) {
       }
     }
 
-    await writeJsonAtomic(resolveHelixPath(rootDir, "team", "tasks.json"), nextLedger);
+    await writeJsonAtomic(resolveWildArrangePath(rootDir, "team", "tasks.json"), nextLedger);
     const revalidationRequired = nextLedger.tasks.filter((task) => task.completionRevalidation?.required === true).length;
     const normalizedOwners = nextLedger.tasks.filter((task) => task.owner && task.history?.some((entry) => entry.event === "legacy_imported")).length;
     await appendLedger(rootDir, {
@@ -382,7 +382,7 @@ export async function archiveAndDeleteTeamTask(rootDir, options = {}) {
         || (ledger.plans || []).some((plan) => plan.id === options.planId)
         || ledger.tasks.some((candidate) => candidate.planId === options.planId);
       if (!planIsIndexed) {
-        legacyPlan = await readJson(resolveHelixPath(rootDir, "plans", `${options.planId}.json`), null);
+        legacyPlan = await readJson(resolveWildArrangePath(rootDir, "plans", `${options.planId}.json`), null);
         const matches = (legacyPlan?.tasks || []).filter((candidate) => candidate.id === options.taskId);
         if (matches.length === 1) {
           task = {
@@ -431,7 +431,7 @@ export async function archiveAndDeleteTeamTask(rootDir, options = {}) {
       tasks: remainingTasks,
       updatedAt: at,
     };
-    const workPath = resolveHelixPath(rootDir, "work.json");
+    const workPath = resolveWildArrangePath(rootDir, "work.json");
     const work = await readJson(workPath, null);
     const nextWork = work
       ? {
@@ -472,7 +472,7 @@ export async function archiveAndDeleteTeamTask(rootDir, options = {}) {
     if (!legacyStemCollides || evidenceBelongsToTask(legacyAcceptance, task)) {
       purgeCandidates.push(legacyAcceptanceJsonPath, legacyAcceptanceMdPath);
     }
-    const outboxDir = resolveHelixPath(rootDir, "team", "outbox");
+    const outboxDir = resolveWildArrangePath(rootDir, "team", "outbox");
     try {
       const outboxEntries = await readdir(outboxDir, { withFileTypes: true });
       const duplicateTaskIdRemains = remainingTasks.some((candidate) => candidate.id === task.id);
@@ -489,7 +489,7 @@ export async function archiveAndDeleteTeamTask(rootDir, options = {}) {
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
     }
-    if (!planHasTasks) purgeCandidates.push(resolveHelixPath(rootDir, "plans", `${task.planId}.json`));
+    if (!planHasTasks) purgeCandidates.push(resolveWildArrangePath(rootDir, "plans", `${task.planId}.json`));
     const tasksRemainingInSource = archiveSource === "unindexed_legacy_plan"
       ? remainingLegacyTasks
       : remainingTasks;
@@ -499,11 +499,11 @@ export async function archiveAndDeleteTeamTask(rootDir, options = {}) {
         (candidate.writable_paths || []).includes(writablePath));
       if (sharedByRemainingTask) continue;
       const absolutePath = path.resolve(rootDir, writablePath);
-      const artifactsRoot = `${resolveHelixPath(rootDir, "artifacts")}${path.sep}`;
+      const artifactsRoot = `${resolveWildArrangePath(rootDir, "artifacts")}${path.sep}`;
       if (absolutePath.startsWith(artifactsRoot)) purgeCandidates.push(absolutePath);
     }
 
-    const targetPlanPath = resolveHelixPath(rootDir, "plans", `${task.planId}.json`);
+    const targetPlanPath = resolveWildArrangePath(rootDir, "plans", `${task.planId}.json`);
     const targetPlan = await readJson(targetPlanPath, null);
     const nextTargetPlan = planHasTasks
       ? {
@@ -520,7 +520,7 @@ export async function archiveAndDeleteTeamTask(rootDir, options = {}) {
         activePlanForMarkdown = nextTargetPlan;
       } else {
         assertSafeStateId(activePlanId, "active planId");
-        const activePlan = await readJson(resolveHelixPath(rootDir, "plans", `${activePlanId}.json`), null);
+        const activePlan = await readJson(resolveWildArrangePath(rootDir, "plans", `${activePlanId}.json`), null);
         if (!activePlan) throw new Error(`active plan mirror not found: ${activePlanId}`);
         activePlanForMarkdown = {
           ...activePlan,
@@ -529,8 +529,8 @@ export async function archiveAndDeleteTeamTask(rootDir, options = {}) {
       }
     }
 
-    const canonicalPath = resolveHelixPath(rootDir, "team", "tasks.json");
-    const tasksMarkdownPath = resolveHelixPath(rootDir, "team", "tasks.md");
+    const canonicalPath = resolveWildArrangePath(rootDir, "team", "tasks.json");
+    const tasksMarkdownPath = resolveWildArrangePath(rootDir, "team", "tasks.md");
     const transactionId = createWorkId("archive");
     const recovery = await prepareArchiveRecoveryPackage(rootDir, {
       backupId: options.backupId || null,
@@ -567,7 +567,7 @@ export async function archiveAndDeleteTeamTask(rootDir, options = {}) {
       preimages.set(projectionPath, await captureFilePreimage(projectionPath));
     }
 
-    const stagingRoot = resolveHelixPath(rootDir, "archive-staging", transactionId);
+    const stagingRoot = resolveWildArrangePath(rootDir, "archive-staging", transactionId);
     const staged = [];
     const deleted = [];
     try {
@@ -762,8 +762,8 @@ async function ensureTaskCreationState(rootDir) {
     updatedAt: at,
     tasks: [],
   };
-  await writeJsonAtomic(resolveHelixPath(rootDir, "plans", `${planId}.json`), plan);
-  await writeJsonAtomic(resolveHelixPath(rootDir, "team", "tasks.json"), {
+  await writeJsonAtomic(resolveWildArrangePath(rootDir, "plans", `${planId}.json`), plan);
+  await writeJsonAtomic(resolveWildArrangePath(rootDir, "team", "tasks.json"), {
     version: STATE_VERSION,
     kind: "task_ledger",
     planId,
@@ -773,7 +773,7 @@ async function ensureTaskCreationState(rootDir) {
     createdAt: at,
     updatedAt: at,
   });
-  const workPath = resolveHelixPath(rootDir, "work.json");
+  const workPath = resolveWildArrangePath(rootDir, "work.json");
   const work = await readJson(workPath, { version: STATE_VERSION, workId: createWorkId(), createdAt: at });
   await writeJsonAtomic(workPath, {
     ...work,
@@ -788,7 +788,7 @@ async function ensureTaskCreationState(rootDir) {
 }
 
 export async function writeOutbox(rootDir, task, workerResult) {
-  const outboxPath = resolveHelixPath(rootDir, "team", "outbox", `${task.id}-${Date.now()}.json`);
+  const outboxPath = resolveWildArrangePath(rootDir, "team", "outbox", `${task.id}-${Date.now()}.json`);
   await writeJsonAtomic(outboxPath, {
     to: DEFAULT_EXECUTOR_AGENT,
     from: task.owner || "worker",
@@ -802,7 +802,7 @@ export async function writeOutbox(rootDir, task, workerResult) {
 }
 
 export async function sendTeamMessage(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const to = normalizeAgentName(options.to);
   const from = normalizeAgentName(options.from || DEFAULT_LEAD_AGENT);
   const body = typeof options.body === "string" ? options.body.trim() : "";
@@ -819,8 +819,8 @@ export async function sendTeamMessage(rootDir, options = {}) {
     body,
     status: "unread",
   };
-  const inboxPath = resolveHelixPath(rootDir, "team", "inbox", to, `${id}.json`);
-  const outboxPath = resolveHelixPath(rootDir, "team", "outbox", from, `${id}.json`);
+  const inboxPath = resolveWildArrangePath(rootDir, "team", "inbox", to, `${id}.json`);
+  const outboxPath = resolveWildArrangePath(rootDir, "team", "outbox", from, `${id}.json`);
   await writeJsonAtomic(inboxPath, message);
   await writeJsonAtomic(outboxPath, message);
   await appendTeamMessageIndex(rootDir, message);
@@ -838,13 +838,13 @@ export function normalizeAgentName(value) {
 
 async function appendTeamMessageIndex(rootDir, message) {
   const line = `- ${message.at} ${message.from} -> ${message.to}: ${message.summary} (${message.id})\n`;
-  await appendFile(resolveHelixPath(rootDir, "team", "messages.md"), line, "utf8");
+  await appendFile(resolveWildArrangePath(rootDir, "team", "messages.md"), line, "utf8");
 }
 
 export async function listTeamMessages(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const agent = normalizeAgentName(options.agent || options.to);
-  const baseDir = agent ? resolveHelixPath(rootDir, "team", "inbox", agent) : resolveHelixPath(rootDir, "team", "inbox");
+  const baseDir = agent ? resolveWildArrangePath(rootDir, "team", "inbox", agent) : resolveWildArrangePath(rootDir, "team", "inbox");
   const messages = [];
   if (agent) {
     for (const fileName of await safeReadDir(baseDir)) {

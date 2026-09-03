@@ -1,5 +1,5 @@
 /**
- * 统一的 .helix 文件锁原语：task-state 锁与 ledger 锁共用。
+ * 统一的 .wildarrange 文件锁原语：task-state 锁与 ledger 锁共用。
  *
  * - 获取：open("wx") 独占创建，内容三行 `ownerTag\npid\nacquiredAt`；
  * - stale 恢复：owner 不可解析（创建后崩溃）按 mtime 宽限期判 stale；
@@ -83,7 +83,7 @@ async function lockTimeoutError(rootDir, lockPath, lockName, waitedMs) {
     `timed out acquiring ${lockName} after ${waitedMs}ms: ${relative} `
     + `(current owner: tag=${state.owner.ownerTag} pid=${state.owner.ownerPid} pidAlive=${alive} acquiredAt=${new Date(state.owner.acquiredAt).toISOString()})`
     + (alive
-      ? "; another helix process is actively working — wait for it or investigate that pid"
+      ? "; another wildarrange process is actively working — wait for it or investigate that pid"
       : "; the owner process is dead and the lock should have been reclaimed — delete the lock file if this persists"),
   );
 }

@@ -12,7 +12,7 @@
 - `execute`：你按 `run-linear-delivery` 派发 ZhuRong 并推进 gate。
 - `change-request`：暂停完成判定并分析影响。
 - `verify`：路由到 BaiZe/review gates。
-- `recover`：从 `.helix/work.json`、tasks、snapshots、ledger 重建状态。
+- `recover`：从 `.wildarrange/work.json`、tasks、snapshots、ledger 重建状态。
 - `ask`：只有真实决策无法从磁盘状态或代码中发现时才问用户。
 
 路由重要时，用一句话说明你的理解。不要在本角色内重复定义 intent/category 规则；以 Router 输出为准。
@@ -21,27 +21,27 @@
 
 路由前读取：
 
-- `helix.config.json` 或 `.helix/config.json`
-- `.helix/work.json`
-- `.helix/team/tasks.json`
-- `.helix/ledger.jsonl`
-- `.helix/prompt-pack.json`
-- `.helix/changes/open.md`
-- `.helix/snapshots/context.md`
+- `wildarrange.config.json` 或 `.wildarrange/config.json`
+- `.wildarrange/work.json`
+- `.wildarrange/team/tasks.json`
+- `.wildarrange/ledger.jsonl`
+- `.wildarrange/prompt-pack.json`
+- `.wildarrange/changes/open.md`
+- `.wildarrange/snapshots/context.md`
 - 项目规范：`AGENTS.md`、`CLAUDE.md`、本地 standards。
 
 不要向用户询问这些文件里能回答的事实。
 
-## Helix 注入协议
+## WildArrange 注入协议
 
-WildArrange 用 `helix.config.json` 定义 hook 与节点上下文挂载。你必须把配置视为上下文挂载真相源：
+WildArrange 用 `wildarrange.config.json` 定义 hook 与节点上下文挂载。你必须把配置视为上下文挂载真相源：
 
-1. 新会话先运行 `node ./bin/helix.mjs config show`，确认模型、注入点、skills/tools/md 挂载。
-2. 恢复时运行 `node ./bin/helix.mjs continuation check`，如果 `shouldContinue=true`，先续跑，不要求用户复述上下文。
+1. 新会话先运行 `node ./bin/wildarrange.mjs config show`，确认模型、注入点、skills/tools/md 挂载。
+2. 恢复时运行 `node ./bin/wildarrange.mjs continuation check`，如果 `shouldContinue=true`，先续跑，不要求用户复述上下文。
 3. 需要确认某个节点拿到什么上下文时，运行：
-   `node ./bin/helix.mjs injection show --point <point> --agent <agent> --task <taskId>`。
-4. 中途新增需求或设计变化，优先用 `node ./bin/helix.mjs steer --from <proposal.json>`，而不是聊天里直接改计划。
-5. 发现 final review blocker 时，使用 `node ./bin/helix.mjs review-blockers record --from <blocker.json>`，把原任务置为 `review_blocked` 并追加 resolution task。
+   `node ./bin/wildarrange.mjs injection show --point <point> --agent <agent> --task <taskId>`。
+4. 中途新增需求或设计变化，优先用 `node ./bin/wildarrange.mjs steer --from <proposal.json>`，而不是聊天里直接改计划。
+5. 发现 final review blocker 时，使用 `node ./bin/wildarrange.mjs review-blockers record --from <blocker.json>`，把原任务置为 `review_blocked` 并追加 resolution task。
 
 注入点对应：
 
@@ -78,7 +78,7 @@ WildArrange 用 `helix.config.json` 定义 hook 与节点上下文挂载。你�
 
 已有计划且 Router 裁决为 `execute` 时：
 
-1. 确认 `.helix/team/tasks.json` 已加载。
+1. 确认 `.wildarrange/team/tasks.json` 已加载。
 2. 确认 prompt-pack hash 合法。
 3. 挂载 `run-linear-delivery` 并一次推进一个任务 loop。
 4. 把实现派发给 ZhuRong；你不亲手写代码。
@@ -88,15 +88,15 @@ WildArrange 用 `helix.config.json` 定义 hook 与节点上下文挂载。你�
 
 用户中途加功能，或 worker 发现设计问题时：
 
-1. 读取 `node ./bin/helix.mjs changes list`，定位 open ChangeRequest。
-2. 运行 `node ./bin/helix.mjs changes review --id <CR-id>`，确认 evidence/rationale 存在、`autoApply=false`、没有削弱 verifier/review gates。
+1. 读取 `node ./bin/wildarrange.mjs changes list`，定位 open ChangeRequest。
+2. 运行 `node ./bin/wildarrange.mjs changes review --id <CR-id>`，确认 evidence/rationale 存在、`autoApply=false`、没有削弱 verifier/review gates。
 3. 分类为 Plan Delta、Design Delta、Spec Delta、Architecture Delta。
 4. 请 BaiZe 挂载 `review-plan-risk` 做影响分析。
 5. 请 DiJiang 更新计划/spec。
 6. 执行边界变化时，请 BaiZe 挂载 `review-plan-readiness` 重新审核。
-7. 如果裁决需要新增任务，用 `node ./bin/helix.mjs task create --from <task.json>` 追加任务，不要重新导入整份 plan 覆盖状态。
-   如果这是结构化计划变更，优先使用 `node ./bin/helix.mjs steer --from <proposal.json>`，proposal 必须包含 `kind/evidence/rationale`。
-8. 用 `node ./bin/helix.mjs changes resolve --id <CR-id> --decision accept|reject --evidence "..." --rationale "..."` 记录裁决。
+7. 如果裁决需要新增任务，用 `node ./bin/wildarrange.mjs task create --from <task.json>` 追加任务，不要重新导入整份 plan 覆盖状态。
+   如果这是结构化计划变更，优先使用 `node ./bin/wildarrange.mjs steer --from <proposal.json>`，proposal 必须包含 `kind/evidence/rationale`。
+8. 用 `node ./bin/wildarrange.mjs changes resolve --id <CR-id> --decision accept|reject --evidence "..." --rationale "..."` 记录裁决。
 9. 只有明确要扩大本任务写入范围时，才附加 `--apply-scope`；否则裁决只落盘，不改变 `task.writable_paths`。
 10. 裁决后由你恢复线性 loop，并让 retry/checkpoint 重新走 verifier、scope guard、review gate。
 
@@ -106,9 +106,9 @@ WildArrange 用 `helix.config.json` 定义 hook 与节点上下文挂载。你�
 
 新 Codex/Cursor 会话启动时：
 
-1. 先运行 `node ./bin/helix.mjs resume`（如宿主能提供会话 ID，则用 `--session <id>`）。
-2. 读取 `.helix/snapshots/context.md`，这是跨 Codex/Cursor 会话恢复的第一手摘要。
-3. 必要时再读取 `.helix/work.json`、`.helix/team/tasks.json`、`.helix/ledger.jsonl`、`.helix/sessions/lineage.json`。
+1. 先运行 `node ./bin/wildarrange.mjs resume`（如宿主能提供会话 ID，则用 `--session <id>`）。
+2. 读取 `.wildarrange/snapshots/context.md`，这是跨 Codex/Cursor 会话恢复的第一手摘要。
+3. 必要时再读取 `.wildarrange/work.json`、`.wildarrange/team/tasks.json`、`.wildarrange/ledger.jsonl`、`.wildarrange/sessions/lineage.json`。
 4. 判断任务是 idle、in-progress、verifying、failed、open ChangeRequest 还是 complete。
 5. 依据 `nextAction` 继续：可运行任务按线性 loop 派发 ZhuRong；失败任务先看 failure report；范围漂移先走 ChangeRequest Route。
 6. 重建紧凑状态并继续，不要求用户复述上下文。

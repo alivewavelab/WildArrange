@@ -1,6 +1,6 @@
 import { appendLedger } from "../infra/ledger.mjs";
 import {
-  ensureHelixDirs,
+  ensureWildArrangeDirs,
   nowIso,
 } from "../infra/runtime-store.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
@@ -32,9 +32,9 @@ export async function runNextTask(rootDir, options = {}) {
 }
 
 async function runNextTaskUnlocked(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const taskState = await loadTaskState(rootDir);
-  if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
+  if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
 
   const approval = await loadPlanApproval(rootDir);
   if (approval.required && approval.status !== "approved" && approval.planId === taskState.planId) {
@@ -43,7 +43,7 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
       status: "awaiting_plan_approval",
       task: null,
       planId: taskState.planId,
-      approveHint: "开发者确认计划后放行：node ./bin/helix.mjs plan approve（或在编辑器里用 /helix-approve）",
+      approveHint: "开发者确认计划后放行：node ./bin/wildarrange.mjs plan approve（或在编辑器里用 /wildarrange-approve）",
     };
   }
 
@@ -241,7 +241,7 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
     });
     task.last_failure.reason = "checkpoint_failed";
     task.last_failure.summary = `checkpoint write failed: ${pipelineResult.evidence.checkpointError?.message || "unknown error"}`;
-    task.last_failure.retryHint = "checkpoint 写入失败（检查 .helix/checkpoints 目录是否可写），修复后重跑即可，所有质量门已通过";
+    task.last_failure.retryHint = "checkpoint 写入失败（检查 .wildarrange/checkpoints 目录是否可写），修复后重跑即可，所有质量门已通过";
     task.updatedAt = nowIso();
     await writeFailureReport(rootDir, taskState.planId, task);
     await persistTaskState(rootDir, taskState);
@@ -327,9 +327,9 @@ export async function executeTaskNode(rootDir, options = {}) {
 }
 
 async function executeTaskNodeUnlocked(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const taskState = await loadTaskState(rootDir);
-  if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
+  if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
 
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["pending", "in_progress"]);
   if (task.status === "pending") {
@@ -397,9 +397,9 @@ export async function verifyTaskNode(rootDir, options = {}) {
 }
 
 async function verifyTaskNodeUnlocked(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const taskState = await loadTaskState(rootDir);
-  if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
+  if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["verifying", "in_progress"]);
   await assertCurrentTaskOwnership(rootDir, task);
 
@@ -436,9 +436,9 @@ export async function scopeTaskNode(rootDir, options = {}) {
 }
 
 async function scopeTaskNodeUnlocked(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const taskState = await loadTaskState(rootDir);
-  if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
+  if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["verifying", "in_progress", "pending"]);
   await assertCurrentTaskOwnership(rootDir, task);
   const executionPaths = [...task.evidence].reverse().find((entry) => entry.kind === "execution_paths");
@@ -467,9 +467,9 @@ export async function reviewTaskNode(rootDir, options = {}) {
 }
 
 async function reviewTaskNodeUnlocked(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const taskState = await loadTaskState(rootDir);
-  if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
+  if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["verifying", "in_progress"]);
   await assertCurrentTaskOwnership(rootDir, task);
   const workerResult = [...task.evidence].reverse().find((entry) => entry.kind === "worker");
@@ -512,9 +512,9 @@ export async function checkpointTaskNode(rootDir, options = {}) {
 }
 
 async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const taskState = await loadTaskState(rootDir);
-  if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
+  if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["verifying", "in_progress"]);
   await assertCurrentTaskOwnership(rootDir, task);
   // A verifying task holding an admission_claim belongs to an in-flight (or
@@ -571,7 +571,7 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
       });
       task.last_failure.reason = "checkpoint_failed";
       task.last_failure.summary = `checkpoint write failed: ${completion.checkpointEnvelope.error?.message || "unknown error"}`;
-      task.last_failure.retryHint = "checkpoint 写入失败（检查 .helix/checkpoints 目录是否可写），修复后重跑即可，所有质量门已通过";
+      task.last_failure.retryHint = "checkpoint 写入失败（检查 .wildarrange/checkpoints 目录是否可写），修复后重跑即可，所有质量门已通过";
       task.updatedAt = nowIso();
       await writeFailureReport(rootDir, taskState.planId, task);
       await persistTaskState(rootDir, taskState);
@@ -652,9 +652,9 @@ export async function retryTaskNode(rootDir, options = {}) {
 }
 
 async function retryTaskNodeUnlocked(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const taskState = await loadTaskState(rootDir);
-  if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
+  if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
   const task = resolveRetryTask(taskState.tasks, options.taskId);
   const failure = task.last_failure;
 

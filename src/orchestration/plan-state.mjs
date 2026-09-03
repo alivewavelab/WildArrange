@@ -7,10 +7,10 @@ import {
   TASK_STATUSES,
   TASK_WORK_TYPES,
   createWorkId,
-  ensureHelixDirs,
+  ensureWildArrangeDirs,
   nowIso,
   readJson,
-  resolveHelixPath,
+  resolveWildArrangePath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
 import {
@@ -19,7 +19,7 @@ import {
   withTaskIdentity,
 } from "../infra/task-state-store.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
-import { loadHelixConfig } from "../infra/runtime-config.mjs";
+import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { loadRoutesConfig, resolveRouteDecision } from "../infra/route-table.mjs";
@@ -362,26 +362,26 @@ export async function importPlan(rootDir, planPath) {
 }
 
 async function importPlanUnlocked(rootDir, planPath) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const rawPlan = await readJson(planPath);
   const plan = normalizePlan(rawPlan);
   await enrichPlanWithRoutes(rootDir, plan);
   validatePlanImportQuality(plan);
   const existingLedger = await loadTaskLedger(rootDir);
   const taskLedger = mergePlanIntoTaskLedger(existingLedger, plan);
-  const targetPath = resolveHelixPath(rootDir, "plans", `${plan.id}.json`);
+  const targetPath = resolveWildArrangePath(rootDir, "plans", `${plan.id}.json`);
   await writeJsonAtomic(targetPath, plan);
   await writeTasksMarkdown(rootDir, plan);
-  await writeJsonAtomic(resolveHelixPath(rootDir, "team", "tasks.json"), taskLedger);
+  await writeJsonAtomic(resolveWildArrangePath(rootDir, "team", "tasks.json"), taskLedger);
 
-  const { config } = await loadHelixConfig(rootDir);
+  const { config } = await loadWildArrangeConfig(rootDir);
   const approvalRequired = config?.planApproval?.required === true;
-  const work = await readJson(resolveHelixPath(rootDir, "work.json"), {
+  const work = await readJson(resolveWildArrangePath(rootDir, "work.json"), {
     version: STATE_VERSION,
     workId: createWorkId(),
     createdAt: nowIso(),
   });
-  await writeJsonAtomic(resolveHelixPath(rootDir, "work.json"), {
+  await writeJsonAtomic(resolveWildArrangePath(rootDir, "work.json"), {
     ...work,
     stage: "planned",
     activePlanId: plan.id,
@@ -445,7 +445,7 @@ function mergePlanIntoTaskLedger(existingLedger, plan) {
 }
 
 export async function loadPlanApproval(rootDir) {
-  const work = await readJson(resolveHelixPath(rootDir, "work.json"), null);
+  const work = await readJson(resolveWildArrangePath(rootDir, "work.json"), null);
   const approval = work?.planApproval;
   if (!approval || approval.required !== true) {
     return { required: false, status: "approved", planId: approval?.planId || work?.activePlanId || null };
@@ -459,9 +459,9 @@ export async function loadPlanApproval(rootDir) {
 
 export async function approvePlan(rootDir, options = {}) {
   return withTaskStateLock(rootDir, "approve-plan", async () => {
-    const workPath = resolveHelixPath(rootDir, "work.json");
+    const workPath = resolveWildArrangePath(rootDir, "work.json");
     const work = await readJson(workPath, null);
-    if (!work || !work.activePlanId) throw new Error("no imported plan found; run helix plan --from <file>");
+    if (!work || !work.activePlanId) throw new Error("no imported plan found; run wildarrange plan --from <file>");
     if (options.planId && options.planId !== work.activePlanId) {
       throw new Error(`plan ${options.planId} is not the active plan (${work.activePlanId})`);
     }
@@ -579,7 +579,7 @@ export async function writeTasksMarkdown(rootDir, plan) {
     }
   }
 
-  await writeFile(resolveHelixPath(rootDir, "team", "tasks.md"), `${lines.join("\n")}\n`, "utf8");
+  await writeFile(resolveWildArrangePath(rootDir, "team", "tasks.md"), `${lines.join("\n")}\n`, "utf8");
 }
 
 export { loadTaskState };

@@ -2,12 +2,12 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   STATE_VERSION,
-  ensureHelixDirs,
+  ensureWildArrangeDirs,
   nowIso,
   readJson,
   resolveLegacyTaskAcceptancePath,
   resolveLegacyTaskCheckpointPath,
-  resolveHelixPath,
+  resolveWildArrangePath,
   resolveTaskAcceptancePath,
   resolveTaskCheckpointPath,
   writeJsonAtomic,
@@ -16,18 +16,18 @@ import { appendLedger, readVerifiedLedgerEntries } from "../infra/ledger.mjs";
 import { evaluateGateArming } from "../infra/gate-arming.mjs";
 import { normalizeRelativePath } from "../infra/path-match.mjs";
 import { loadTaskLedger } from "../infra/task-state-store.mjs";
-import { loadHelixConfig } from "../infra/runtime-config.mjs";
+import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { listChangeRequests } from "./change-governance.mjs";
 import { parallelAgentStatus } from "./parallel-runtime.mjs";
 import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
 
 export async function writeWorkflowSummary(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const status = await statusReport(rootDir);
   const taskState = await loadTaskState(rootDir);
   const changes = await listChangeRequests(rootDir);
-  const latestSnapshot = await readJson(resolveHelixPath(rootDir, "snapshots", "latest.json"), null);
-  const wisdom = await readTextFile(resolveHelixPath(rootDir, "wisdom", "verification.md"), "");
+  const latestSnapshot = await readJson(resolveWildArrangePath(rootDir, "snapshots", "latest.json"), null);
+  const wisdom = await readTextFile(resolveWildArrangePath(rootDir, "wisdom", "verification.md"), "");
   const tasks = (taskState?.tasks || []).map((task) => ({
     id: task.id,
     subject: task.subject,
@@ -57,8 +57,8 @@ export async function writeWorkflowSummary(rootDir, options = {}) {
     changes: changes.map(summarizeChangeForSummary),
     wisdom: wisdom.trim().split(/\r?\n/).filter(Boolean).slice(-20),
   };
-  const jsonPath = resolveHelixPath(rootDir, "reports", "workflow-summary.json");
-  const mdPath = resolveHelixPath(rootDir, "reports", "workflow-summary.md");
+  const jsonPath = resolveWildArrangePath(rootDir, "reports", "workflow-summary.json");
+  const mdPath = resolveWildArrangePath(rootDir, "reports", "workflow-summary.md");
   summary.reportJsonPath = normalizeRelativePath(path.relative(rootDir, jsonPath));
   summary.reportMdPath = normalizeRelativePath(path.relative(rootDir, mdPath));
   await writeJsonAtomic(jsonPath, summary);
@@ -74,12 +74,12 @@ export async function writeWorkflowSummary(rootDir, options = {}) {
 }
 
 export async function statusReport(rootDir) {
-  const work = await readJson(resolveHelixPath(rootDir, "work.json"), null);
+  const work = await readJson(resolveWildArrangePath(rootDir, "work.json"), null);
   const taskState = await loadTaskState(rootDir);
   const changes = await listChangeRequests(rootDir);
   const openChanges = changes.filter((change) => change.status === "open").length;
   // 门未武装黄灯：配置地板不满足时常驻显示，绝不因任务全绿而显示绿。
-  const { config } = await loadHelixConfig(rootDir);
+  const { config } = await loadWildArrangeConfig(rootDir);
   const gateArming = evaluateGateArming({ config, tasks: taskState?.tasks || [] });
   if (!taskState) return { gateArming, work, planId: null, total: 0, completed: 0, invalidCompleted: 0, draft: 0, pending: 0, failed: 0, openChanges };
   const completionIntegrity = await inspectCompletedTaskEvidence(rootDir, taskState);
@@ -148,8 +148,8 @@ async function readTaskEvidenceJson(rootDir, kind, planId, taskId) {
 export async function dashboardData(rootDir) {
   const status = await statusReport(rootDir);
   const taskState = await loadTaskState(rootDir);
-  const latestSnapshot = await readJson(resolveHelixPath(rootDir, "snapshots", "latest.json"), null);
-  const summary = await readJson(resolveHelixPath(rootDir, "reports", "workflow-summary.json"), null);
+  const latestSnapshot = await readJson(resolveWildArrangePath(rootDir, "snapshots", "latest.json"), null);
+  const summary = await readJson(resolveWildArrangePath(rootDir, "reports", "workflow-summary.json"), null);
   const ledger = await readLedgerTail(rootDir, 80);
   const changes = await listChangeRequests(rootDir);
   const attention = await attentionReport(rootDir, { taskState, changes });
@@ -207,7 +207,7 @@ export async function attentionReport(rootDir, options = {}) {
       subject: change.subject,
       deniedPaths: change.deniedPaths || [],
       reportMdPath: change.reportMdPath || null,
-      resolveHint: `node ./bin/helix.mjs changes resolve --id ${change.id} --decision accept|reject --evidence "..." --rationale "..."`,
+      resolveHint: `node ./bin/wildarrange.mjs changes resolve --id ${change.id} --decision accept|reject --evidence "..." --rationale "..."`,
     }));
 
   const failedTasks = tasks
@@ -232,7 +232,7 @@ export async function attentionReport(rootDir, options = {}) {
       subject: task.subject,
       workType: task.workType,
       priority: task.priority,
-      readyHint: `node ./bin/helix.mjs task ready --task ${task.id} --from <task-details.json>`,
+      readyHint: `node ./bin/wildarrange.mjs task ready --task ${task.id} --from <task-details.json>`,
     }));
 
   const awaitingAcceptance = [];
@@ -245,7 +245,7 @@ export async function attentionReport(rootDir, options = {}) {
         taskId: result.taskId,
         agent: result.agent,
         resultPath: result.resultPath,
-        admitHint: `node ./bin/helix.mjs parallel admit --run ${run.runId} --task ${result.taskId}`,
+        admitHint: `node ./bin/wildarrange.mjs parallel admit --run ${run.runId} --task ${result.taskId}`,
       });
     }
   }
@@ -254,7 +254,7 @@ export async function attentionReport(rootDir, options = {}) {
   const awaitingPlanApproval = approval.required && approval.status !== "approved"
     ? [{
         planId: approval.planId,
-        approveHint: `node ./bin/helix.mjs plan approve`,
+        approveHint: `node ./bin/wildarrange.mjs plan approve`,
       }]
     : [];
 
@@ -273,7 +273,7 @@ export async function attentionReport(rootDir, options = {}) {
 
 export async function readLedgerTail(rootDir, limit) {
   try {
-    const content = await readFile(resolveHelixPath(rootDir, "ledger.jsonl"), "utf8");
+    const content = await readFile(resolveWildArrangePath(rootDir, "ledger.jsonl"), "utf8");
     return content
       .split(/\r?\n/)
       .filter(Boolean)

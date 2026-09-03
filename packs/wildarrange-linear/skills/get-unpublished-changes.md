@@ -39,7 +39,7 @@ git diff --stat
 5. 对 npm 包体做确认：
 
 ```bash
-npm pack --dry-run --cache /private/tmp/helix-npm-cache
+npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache
 ```
 
 ## 输出

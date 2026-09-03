@@ -27,7 +27,7 @@
   <div class="grid">
     <section class="card p0">
       <h2>P0 取消静默截断</h2>
-      <p><code>src/helix-injection.mjs</code> 返回 <code>chars</code>、<code>loadedChars</code>、<code>budgetChars</code>、<code>truncated</code>。超过预算时正文内加入中文截断提示。</p>
+      <p><code>src/wildarrange-injection.mjs</code> 返回 <code>chars</code>、<code>loadedChars</code>、<code>budgetChars</code>、<code>truncated</code>。超过预算时正文内加入中文截断提示。</p>
     </section>
     <section class="card p0">
       <h2>P0 Skill 宽预算</h2>
@@ -50,7 +50,7 @@
   <section class="card">
     <h2>证据与边界</h2>
     <ul>
-      <li>原问题位置：<code>src/helix-injection.mjs</code> 曾对 Markdown 和 Skill 都使用 6000 字符截断。</li>
+      <li>原问题位置：<code>src/wildarrange-injection.mjs</code> 曾对 Markdown 和 Skill 都使用 6000 字符截断。</li>
       <li>项目边界：<code>AGENTS.md</code> 要求商业发布包不得包含外部 prompt 原文或近似改写文本。</li>
       <li>本次改造只抽象治理机制，不搬运外部提示词文本。</li>
       <li>新增运行时能力已同步 <code>doc/project-architecture.md</code>、<code>AGENTS.md</code>、README 与测试。</li>

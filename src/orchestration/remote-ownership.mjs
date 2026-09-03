@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { appendLedger } from "../infra/ledger.mjs";
-import { loadHelixConfig } from "../infra/runtime-config.mjs";
+import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { nowIso } from "../infra/runtime-store.mjs";
 import {
   createRemoteClaim,
@@ -25,7 +25,7 @@ export async function registerCoordinationDevice(rootDir, options = {}) {
 }
 
 export async function coordinationStatus(rootDir) {
-  const { config, sourcePath } = await loadHelixConfig(rootDir);
+  const { config, sourcePath } = await loadWildArrangeConfig(rootDir);
   const device = await ensureDeviceIdentity(rootDir);
   const context = await inspectGitCoordination(rootDir, config.gitCoordination);
   return {
@@ -45,7 +45,7 @@ export async function coordinationStatus(rootDir) {
 }
 
 export async function coordinateTaskClaim(rootDir, options) {
-  const { config } = await loadHelixConfig(rootDir);
+  const { config } = await loadWildArrangeConfig(rootDir);
   const coordination = config.gitCoordination;
   const forced = options.force === true;
   if (options.task?.coordination && ["claimed", "accepted"].includes(options.task.coordination.status)) {

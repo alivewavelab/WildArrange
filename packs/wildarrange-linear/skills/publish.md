@@ -7,7 +7,7 @@ WildArrange 发布 skill。用于把本地已验证版本发布到 npm 或准备
 - `pre-publish-review` 通过。
 - `get-unpublished-changes` 已生成发布摘要。
 - `npm test` 通过。
-- `npm pack --dry-run --cache /private/tmp/helix-npm-cache` 通过。
+- `npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache` 通过。
 - `git status --short` 中没有意外改动。
 
 ## npm 发布路径

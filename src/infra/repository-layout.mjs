@@ -5,10 +5,10 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { LONG_LIVED_AGENTS } from "./agent-registry.mjs";
-import { loadHelixConfig } from "./runtime-config.mjs";
+import { loadWildArrangeConfig } from "./runtime-config.mjs";
 import { normalizeRelativePath, pathMatchesPattern } from "./path-match.mjs";
 
-const DEFAULT_IGNORED = new Set([".git", ".helix", "node_modules", "coverage"]);
+const DEFAULT_IGNORED = new Set([".git", ".wildarrange", "node_modules", "coverage"]);
 const SOURCE_EXTENSIONS = new Set([".cjs", ".js", ".jsx", ".mjs", ".ts", ".tsx"]);
 const execFileAsync = promisify(execFile);
 
@@ -40,7 +40,7 @@ export async function inspectRepositoryGovernance(rootDir, policy = {}, options 
   const documentationPairs = changedOnly
     ? (Array.isArray(policy.documentationPairs) ? policy.documentationPairs : []).filter((pair) => Array.isArray(pair) && pair.some((filePath) => changedPaths.includes(normalizeRelativePath(filePath))))
     : policy.documentationPairs;
-  const cliDocumentationPairs = changedOnly && changedPaths.includes("bin/helix.mjs")
+  const cliDocumentationPairs = changedOnly && changedPaths.includes("bin/wildarrange.mjs")
     ? policy.documentationPairs
     : documentationPairs;
   const documentationRequirements = changedOnly
@@ -89,7 +89,7 @@ export async function inspectRepositoryGovernance(rootDir, policy = {}, options 
       path: findingValue.path,
       reason: findingValue.evidence,
       requiredFix: findingValue.requiredFix,
-      verification: "node ./bin/helix.mjs governance audit",
+      verification: "node ./bin/wildarrange.mjs governance audit",
     })),
     unresolved: [],
   };
@@ -243,19 +243,19 @@ async function checkPromptPackManifest(rootDir, findings) {
     }
   }
 
-  const { config: effectiveConfig } = await loadHelixConfig(rootDir);
+  const { config: effectiveConfig } = await loadWildArrangeConfig(rootDir);
   const configuredAgents = new Set(Object.keys(effectiveConfig.agents || {}));
   for (const agent of configuredAgents) {
     if (!registeredAgents.has(agent)) {
-      findings.push(finding("configured_agent_unregistered", "P1", "helix.config.json", null, `configured Agent ${agent} is absent from prompt-pack manifest`, "同步 Agent Prompt 与 manifest，或从长期 agents 配置移除该角色。"));
+      findings.push(finding("configured_agent_unregistered", "P1", "wildarrange.config.json", null, `configured Agent ${agent} is absent from prompt-pack manifest`, "同步 Agent Prompt 与 manifest，或从长期 agents 配置移除该角色。"));
     }
     if (!LONG_LIVED_AGENTS.includes(agent)) {
-      findings.push(finding("configured_agent_not_fixed", "P1", "helix.config.json", null, `configured Agent ${agent} is outside the fixed five-Agent set`, "只保留 Jiuwei、DiJiang、ZhuRong、BaiZe、LuWu；内部 profile 和临时子 Agent 不得进入长期 agents。"));
+      findings.push(finding("configured_agent_not_fixed", "P1", "wildarrange.config.json", null, `configured Agent ${agent} is outside the fixed five-Agent set`, "只保留 Jiuwei、DiJiang、ZhuRong、BaiZe、LuWu；内部 profile 和临时子 Agent 不得进入长期 agents。"));
     }
   }
   for (const agent of LONG_LIVED_AGENTS) {
     if (!configuredAgents.has(agent) || !effectiveConfig.agents?.[agent] || typeof effectiveConfig.agents[agent] !== "object") {
-      findings.push(finding("configured_fixed_agent_missing", "P1", "helix.config.json", null, `fixed Agent ${agent} is missing from root configuration`, "补齐固定五 Agent 的静态 provider/model/role 配置。"));
+      findings.push(finding("configured_fixed_agent_missing", "P1", "wildarrange.config.json", null, `fixed Agent ${agent} is missing from root configuration`, "补齐固定五 Agent 的静态 provider/model/role 配置。"));
     }
   }
 }
@@ -277,7 +277,7 @@ async function readPromptPackJson(filePath, relativePath, ruleId, findings) {
 }
 
 async function checkDocumentedCliCommands(rootDir, pairs, findings) {
-  const binPath = path.join(rootDir, "bin", "helix.mjs");
+  const binPath = path.join(rootDir, "bin", "wildarrange.mjs");
   if (!existsSync(binPath)) return;
   let helpText = "";
   try {
@@ -290,7 +290,7 @@ async function checkDocumentedCliCommands(rootDir, pairs, findings) {
     });
     helpText = `${result.stdout || ""}\n${result.stderr || ""}`;
   } catch (error) {
-    findings.push(finding("cli_help_unavailable", "P1", "bin/helix.mjs", null, `failed to read real CLI help: ${error instanceof Error ? error.message : String(error)}`, "确保 `node ./bin/helix.mjs --help` 可在项目根无副作用运行并返回命令清单。"));
+    findings.push(finding("cli_help_unavailable", "P1", "bin/wildarrange.mjs", null, `failed to read real CLI help: ${error instanceof Error ? error.message : String(error)}`, "确保 `node ./bin/wildarrange.mjs --help` 可在项目根无副作用运行并返回命令清单。"));
     return;
   }
   const implemented = extractCliFingerprints(helpText);
@@ -301,7 +301,7 @@ async function checkDocumentedCliCommands(rootDir, pairs, findings) {
     const documented = extractCliFingerprints(await readFile(absolutePath, "utf8"));
     for (const command of documented) {
       if (implemented.has(command)) continue;
-      findings.push(finding("documented_cli_unknown", "P1", documentationPath, null, `documented CLI command is absent from bin/helix.mjs --help: ${command}`, "修正文档命令，或先在 CLI 实现并登记该命令。"));
+      findings.push(finding("documented_cli_unknown", "P1", documentationPath, null, `documented CLI command is absent from bin/wildarrange.mjs --help: ${command}`, "修正文档命令，或先在 CLI 实现并登记该命令。"));
     }
   }
 }
@@ -620,7 +620,7 @@ async function walk(rootDir, relativeDir, ignored, visitor) {
 
 function extractCliFingerprints(content) {
   const commands = new Set();
-  const commandPattern = /(?:node\s+\.\/bin\/helix\.mjs|npx\s+wildarrange|(?<![@/A-Za-z0-9_-])wildarrange)\s+([a-z-]+)(?:[ \t]+(?!-{1,2})([a-z-]+))?/g;
+  const commandPattern = /(?:node\s+\.\/bin\/wildarrange\.mjs|npx\s+wildarrange|(?<![@/A-Za-z0-9_-])wildarrange)\s+([a-z-]+)(?:[ \t]+(?!-{1,2})([a-z-]+))?/g;
   for (const line of content.split(/\r?\n/)) {
     for (const match of line.matchAll(commandPattern)) {
       commands.add([match[1], match[2]].filter(Boolean).join(" "));

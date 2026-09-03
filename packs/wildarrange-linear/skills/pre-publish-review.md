@@ -17,7 +17,7 @@ npm test
 2. 检查真实包体清单：
 
 ```bash
-npm pack --dry-run --json --cache /private/tmp/helix-npm-cache
+npm pack --dry-run --json --cache /private/tmp/wildarrange-npm-cache
 ```
 
 输出中的 `files[].path` 是复核边界的唯一事实源；不要根据 `package.json.files` 或手写目录猜测最终包体。
@@ -45,7 +45,7 @@ node --test test/package-boundary.test.mjs
 ## 阻断条件
 
 - 测试失败。
-- 真实 pack 清单包含未列入命名白名单的 `doc/plans/` 文件、`.external/`、`.helix/`、`.tmp/`、密钥、临时报告或本机路径。
+- 真实 pack 清单包含未列入命名白名单的 `doc/plans/` 文件、`.external/`、`.wildarrange/`、`.tmp/`、密钥、临时报告或本机路径。
 - README 中的安装命令不可执行。
 - 发布包包含受限第三方源码或未确认可商业分发的文本资产。
 - `package.json` 的 `files` 遗漏 README、bin、src、packs、配置样例。

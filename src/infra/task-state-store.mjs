@@ -1,5 +1,5 @@
 /**
- * `.helix/team/tasks.json` is the single project-wide task ledger. Runtime
+ * `.wildarrange/team/tasks.json` is the single project-wide task ledger. Runtime
  * consumers still need an active-plan projection, so this infra owner exposes
  * both views without making capabilities depend on orchestration.
  *
@@ -9,12 +9,12 @@
 import {
   STATE_VERSION,
   readJson,
-  resolveHelixPath,
+  resolveWildArrangePath,
 } from "./runtime-store.mjs";
 import { normalizeAgentKey } from "./agent-registry.mjs";
 
 export async function loadTaskLedger(rootDir) {
-  const raw = await readJson(resolveHelixPath(rootDir, "team", "tasks.json"), null);
+  const raw = await readJson(resolveWildArrangePath(rootDir, "team", "tasks.json"), null);
   if (!raw) return null;
   return normalizeTaskLedger(raw);
 }

@@ -6,11 +6,11 @@ import {
 } from "../infra/agent-registry.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
 import {
-  ensureHelixDirs,
+  ensureWildArrangeDirs,
   hashContent,
   nowIso,
   readJson,
-  resolveHelixPath,
+  resolveWildArrangePath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
@@ -26,9 +26,9 @@ import { persistTaskState } from "./task-board.mjs";
 
 export async function steerWorkflow(rootDir, proposal = {}) {
   return withTaskStateLock(rootDir, `steer:${proposal.kind || "unknown"}`, async () => {
-    await ensureHelixDirs(rootDir);
+    await ensureWildArrangeDirs(rootDir);
     const taskState = await loadTaskState(rootDir);
-    if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
+    if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
     const audit = validateSteeringProposal(taskState, proposal);
     if (!audit.invariant.accepted) {
       await appendLedger(rootDir, { type: "steering_rejected", kind: audit.kind, reasons: audit.invariant.rejectedReasons });
@@ -49,9 +49,9 @@ export async function steerWorkflow(rootDir, proposal = {}) {
 
 export async function recordReviewBlocker(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `review-blocker:${options.taskId || "unknown"}`, async () => {
-    await ensureHelixDirs(rootDir);
+    await ensureWildArrangeDirs(rootDir);
     const taskState = await loadTaskState(rootDir);
-    if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
+    if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
     const task = taskState.tasks.find((candidate) => candidate.id === options.taskId);
     if (!task) throw new Error(`unknown task: ${options.taskId}`);
     if (!["verifying", "failed", "in_progress"].includes(task.status)) throw new Error(`task ${task.id} is ${task.status}; cannot record review blocker`);
@@ -130,13 +130,13 @@ export async function resolveChangeRequest(rootDir, options = {}) {
 
 export async function readChangeRequest(rootDir, id) {
   if (!/^CR-[a-z0-9]+$/i.test(id || "")) throw new Error(`invalid change request id: ${id}`);
-  const changeRequest = await readJson(resolveHelixPath(rootDir, "changes", `${id}.json`), null);
+  const changeRequest = await readJson(resolveWildArrangePath(rootDir, "changes", `${id}.json`), null);
   if (!changeRequest) throw new Error(`unknown change request: ${id}`);
   return changeRequest;
 }
 
 async function resolveChangeRequestUnlocked(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const id = options.id;
   if (!id || typeof id !== "string") throw new Error("change request id is required");
   const decision = normalizeDecision(options.decision);
@@ -195,8 +195,8 @@ async function resolveChangeRequestUnlocked(rootDir, options = {}) {
 
   if (taskState && task) await persistTaskState(rootDir, taskState);
 
-  const jsonPath = resolveHelixPath(rootDir, "changes", `${id}.json`);
-  const mdPath = resolveHelixPath(rootDir, "changes", `${id}.md`);
+  const jsonPath = resolveWildArrangePath(rootDir, "changes", `${id}.json`);
+  const mdPath = resolveWildArrangePath(rootDir, "changes", `${id}.md`);
   changeRequest.reportJsonPath = path.relative(rootDir, jsonPath);
   changeRequest.reportMdPath = path.relative(rootDir, mdPath);
   await writeJsonAtomic(jsonPath, changeRequest);
@@ -396,7 +396,7 @@ function uniqueStrings(values) {
 }
 
 export async function writeChangeRequest(rootDir, planId, task, scopeResult, source = "scope_guard") {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const signature = hashContent(JSON.stringify({
     planId,
     taskId: task.id,
@@ -404,8 +404,8 @@ export async function writeChangeRequest(rootDir, planId, task, scopeResult, sou
     writablePaths: scopeResult.writablePaths || task.writable_paths || [],
   })).slice(0, 12);
   const id = `CR-${signature}`;
-  const jsonPath = resolveHelixPath(rootDir, "changes", `${id}.json`);
-  const mdPath = resolveHelixPath(rootDir, "changes", `${id}.md`);
+  const jsonPath = resolveWildArrangePath(rootDir, "changes", `${id}.json`);
+  const mdPath = resolveWildArrangePath(rootDir, "changes", `${id}.md`);
   const existing = await readJson(jsonPath, null);
   const changeRequest = existing || {
     id,
@@ -522,21 +522,21 @@ export async function writeOpenChangesIndex(rootDir) {
       lines.push(`  - Report: ${change.reportMdPath}`);
     }
   }
-  await writeFile(resolveHelixPath(rootDir, "changes", "open.md"), `${lines.join("\n")}\n`, "utf8");
+  await writeFile(resolveWildArrangePath(rootDir, "changes", "open.md"), `${lines.join("\n")}\n`, "utf8");
 }
 
 export async function listChangeRequests(rootDir) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   let entries = [];
   try {
-    entries = await readdir(resolveHelixPath(rootDir, "changes"));
+    entries = await readdir(resolveWildArrangePath(rootDir, "changes"));
   } catch (error) {
     if (error?.code === "ENOENT") return [];
     throw error;
   }
   const changes = [];
   for (const entry of entries.filter((name) => /^CR-.+\.json$/.test(name)).sort()) {
-    changes.push(await readJson(resolveHelixPath(rootDir, "changes", entry)));
+    changes.push(await readJson(resolveWildArrangePath(rootDir, "changes", entry)));
   }
   return changes;
 }

@@ -38,7 +38,7 @@ test("Cursor adapter generates project hooks.json with fail-closed preToolUse", 
 
     const bridgePath = path.join(dir, BRIDGE_RELATIVE_PATH);
     assert.equal(existsSync(bridgePath), true);
-    assert.match(await readFile(bridgePath, "utf8"), /HELIX_HOST_ADAPTER: "cursor"/);
+    assert.match(await readFile(bridgePath, "utf8"), /WILDARRANGE_HOST_ADAPTER: "cursor"/);
 
     const hooksOutput = report.outputs.find((output) => output.path === ".cursor/hooks.json");
     assert.equal(hooksOutput.enforcement, "hard-in-trusted-workspace");
@@ -46,7 +46,7 @@ test("Cursor adapter generates project hooks.json with fail-closed preToolUse", 
   });
 });
 
-test("Cursor Hook bridge ignores unrelated projects without creating .helix", async () => {
+test("Cursor Hook bridge ignores unrelated projects without creating .wildarrange", async () => {
   await withTempDir(async (wildArrangeDir) => {
     await installAdapter(wildArrangeDir, { target: "cursor", mode: "local" });
     const bridgePath = path.join(wildArrangeDir, BRIDGE_RELATIVE_PATH);
@@ -61,7 +61,7 @@ test("Cursor Hook bridge ignores unrelated projects without creating .helix", as
       });
       assert.equal(result.exitCode, 0);
       assert.equal(result.stdout, "");
-      assert.equal(existsSync(path.join(unrelatedDir, ".helix")), false);
+      assert.equal(existsSync(path.join(unrelatedDir, ".wildarrange")), false);
     });
   });
 });
@@ -144,7 +144,7 @@ test("Cursor beforeShellExecution gates integrated terminal commands like Bash",
       conversation_id: "cursor-terminal-allow",
       cwd: dir,
       task_id: "T001",
-      command: "node ./bin/helix.mjs doctor",
+      command: "node ./bin/wildarrange.mjs doctor",
     });
     assert.deepEqual(JSON.parse(safe.stdout), { permission: "allow" });
   });
@@ -157,7 +157,7 @@ test("Cursor bridge is fail-closed when the governance CLI fails or answers garb
     const missingCliBridge = path.join(dir, "missing-cli-bridge.mjs");
     await writeFile(missingCliBridge, renderCursorHookBridge({
       mode: "local",
-      localCliPath: path.join(dir, "no-such-helix.mjs"),
+      localCliPath: path.join(dir, "no-such-wildarrange.mjs"),
     }), "utf8");
     const missing = await runBridge(missingCliBridge, {
       hook_event_name: "preToolUse",
@@ -171,7 +171,7 @@ test("Cursor bridge is fail-closed when the governance CLI fails or answers garb
     assert.equal(missingOutput.permission, "deny");
     assert.match(missingOutput.user_message, /fail-closed/);
 
-    const garbageCli = path.join(dir, "fake-helix.mjs");
+    const garbageCli = path.join(dir, "fake-wildarrange.mjs");
     await writeFile(garbageCli, "console.log('not json');\n", "utf8");
     const garbageBridge = path.join(dir, "garbage-bridge.mjs");
     await writeFile(garbageBridge, renderCursorHookBridge({
@@ -187,7 +187,7 @@ test("Cursor bridge is fail-closed when the governance CLI fails or answers garb
     });
     assert.equal(JSON.parse(garbage.stdout).permission, "deny");
 
-    const undecidedCli = path.join(dir, "undecided-helix.mjs");
+    const undecidedCli = path.join(dir, "undecided-wildarrange.mjs");
     await writeFile(undecidedCli, "console.log(JSON.stringify({ decision: null, output: '' }));\n", "utf8");
     const undecidedBridge = path.join(dir, "undecided-bridge.mjs");
     await writeFile(undecidedBridge, renderCursorHookBridge({
@@ -256,7 +256,7 @@ test("Cursor stop Hook converts unfinished work into a followup_message", async 
     assert.equal(stopped.exitCode, 0);
     const output = JSON.parse(stopped.stdout);
     assert.match(output.followup_message, /requires this task to continue/);
-    assert.match(output.followup_message, /node \.\/bin\/helix\.mjs run/);
+    assert.match(output.followup_message, /node \.\/bin\/wildarrange\.mjs run/);
   });
 });
 

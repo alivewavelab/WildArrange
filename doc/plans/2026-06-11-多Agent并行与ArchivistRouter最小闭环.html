@@ -32,7 +32,7 @@ P0 已落地；实现路径在五区（<code>parallel-runtime</code> / <code>arc
   <h2>并行最小闭环</h2>
   <div class="flow">
     <div class="node"><b>输入</b><br>team task / runnable task / runner command</div>
-    <div class="node"><b>隔离</b><br><code>.helix/agent-runs/&lt;runId&gt;</code></div>
+    <div class="node"><b>隔离</b><br><code>.wildarrange/agent-runs/&lt;runId&gt;</code></div>
     <div class="node"><b>并发执行</b><br>每个子 Agent 读 task packet，写 <code>agent-result.json</code></div>
     <div class="node"><b>收集</b><br>stdout / stderr / result / exitCode 入账</div>
     <div class="node"><b>Admission</b><br>结构化 files 过 writable_paths + verifier + review 后 checkpoint</div>
@@ -52,8 +52,8 @@ P0 已落地；实现路径在五区（<code>parallel-runtime</code> / <code>arc
     <div class="card p0">
       <b>P0: 本轮实现</b>
       <ul>
-        <li><code>src/helix-parallel-agents.mjs</code>：命令型子 Agent 并发执行、结果收集、结构化成果 admission。</li>
-        <li><code>src/helix-archivist-router.mjs</code>：构建 routing packet、可选调用 LLM、hook 触发、写结构化记忆。</li>
+        <li><code>src/wildarrange-parallel-agents.mjs</code>：命令型子 Agent 并发执行、结果收集、结构化成果 admission。</li>
+        <li><code>src/wildarrange-archivist-router.mjs</code>：构建 routing packet、可选调用 LLM、hook 触发、写结构化记忆。</li>
         <li>CLI 暴露 <code>parallel run</code> 与 <code>archivist run</code>。</li>
       </ul>
     </div>

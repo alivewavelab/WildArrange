@@ -1,5 +1,5 @@
 /**
- * 汇报分级测试：reporting.verbosity 控制 helix run 结束时的门决策汇总。
+ * 汇报分级测试：reporting.verbosity 控制 wildarrange run 结束时的门决策汇总。
  * verbose（默认）= stderr 输出逐门投影；normal = 一行；quiet = 只 JSON。
  * stdout 的 JSON 契约在任何级别下都不得改变。
  */
@@ -12,9 +12,9 @@ import test from "node:test";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
 import { runCommand } from "../src/infra/command-runner.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
-import { resolveHelixPath } from "../src/infra/runtime-store.mjs";
+import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 
-const CLI_PATH = path.resolve(process.cwd(), "bin", "helix.mjs");
+const CLI_PATH = path.resolve(process.cwd(), "bin", "wildarrange.mjs");
 
 async function withTempDir(fn) {
   const baseDir = path.join(process.cwd(), ".tmp");
@@ -39,7 +39,7 @@ function passingTask(id) {
 }
 
 async function importPlanWith(dir, fileName, title, tasks) {
-  const planPath = resolveHelixPath(dir, "artifacts", fileName);
+  const planPath = resolveWildArrangePath(dir, "artifacts", fileName);
   await mkdir(path.dirname(planPath), { recursive: true });
   await writeFile(planPath, JSON.stringify({ title, tasks }, null, 2));
   await importPlan(dir, planPath);
@@ -71,14 +71,14 @@ test("quiet prints no gate summary; normal prints exactly one line", async () =>
     await runCommand("git init", dir);
     await importPlanWith(dir, "verbosity-plan.json", "Verbosity", [passingTask("T001")]);
 
-    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({ reporting: { verbosity: "quiet" } }, null, 2));
+    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({ reporting: { verbosity: "quiet" } }, null, 2));
     const quiet = runCli(dir);
     assert.equal(quiet.status, 0, quiet.stderr);
     assert.equal(JSON.parse(quiet.stdout).status, "completed");
     assert.ok(!quiet.stderr.includes("门决策汇总"), "quiet 不得输出门汇总");
 
     await importPlanWith(dir, "verbosity-plan-2.json", "Verbosity 2", [passingTask("T002")]);
-    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({ reporting: { verbosity: "normal" } }, null, 2));
+    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({ reporting: { verbosity: "normal" } }, null, 2));
     const normal = runCli(dir);
     assert.equal(normal.status, 0, normal.stderr);
     assert.match(normal.stderr, /\[run\] T002 -> completed/);
@@ -91,7 +91,7 @@ test("invalid reporting.verbosity is rejected with a clear error", async () => {
     await initRuntime(dir);
     await runCommand("git init", dir);
     await importPlanWith(dir, "verbosity-plan.json", "Verbosity", [passingTask("T001")]);
-    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({ reporting: { verbosity: "chatty" } }, null, 2));
+    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({ reporting: { verbosity: "chatty" } }, null, 2));
     const run = runCli(dir);
     assert.notEqual(run.status, 0);
     assert.match(run.stderr, /reporting\.verbosity must be verbose, normal, or quiet/);

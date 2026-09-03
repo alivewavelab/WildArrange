@@ -3,15 +3,15 @@ import path from "node:path";
 import { normalizeRelativePath } from "./path-match.mjs";
 import { appendLedger } from "./ledger.mjs";
 import {
-  ensureHelixDirs,
+  ensureWildArrangeDirs,
   nowIso,
-  resolveHelixPath,
+  resolveWildArrangePath,
   resolveTaskReportPath,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 
 export async function writeReviewReport(rootDir, planId, task, reviewResult) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const jsonPath = resolveTaskReportPath(rootDir, "reviews", planId, task.id, "json");
   const mdPath = resolveTaskReportPath(rootDir, "reviews", planId, task.id, "md");
   reviewResult.reportJsonPath = normalizeRelativePath(path.relative(rootDir, jsonPath));
@@ -122,7 +122,7 @@ ${commentFindings.length > 0 ? commentFindings.map((finding) => `- ${finding.fil
 
 export async function writeFailureReport(rootDir, planId, task) {
   if (!task.last_failure) return null;
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const jsonPath = resolveTaskReportPath(rootDir, "failures", planId, task.id, "json");
   const mdPath = resolveTaskReportPath(rootDir, "failures", planId, task.id, "md");
   task.last_failure.reportJsonPath = normalizeRelativePath(path.relative(rootDir, jsonPath));
@@ -178,5 +178,5 @@ ${failure.changeRequest ? `## ChangeRequest
 
 export async function appendWisdom(rootDir, task, verifyResult) {
   const line = `- ${nowIso()} ${task.id}: ${task.subject} verified by ${verifyResult.results.length} command(s).\n`;
-  await appendFile(resolveHelixPath(rootDir, "wisdom", "verification.md"), line, "utf8");
+  await appendFile(resolveWildArrangePath(rootDir, "wisdom", "verification.md"), line, "utf8");
 }

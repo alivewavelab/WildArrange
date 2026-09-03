@@ -27,17 +27,17 @@ export function buildErrorProtocol({ code, module, message, nextAction }) {
     code: String(code || "unknown_error"),
     module: String(module || "unknown"),
     message: String(message || ""),
-    next_action: String(nextAction || "运行 node ./bin/helix.mjs doctor；把本错误完整贴给 AI"),
+    next_action: String(nextAction || "运行 node ./bin/wildarrange.mjs doctor；把本错误完整贴给 AI"),
   };
 }
 
 export function formatErrorInline(protocol) {
-  const parts = [`[HELIX-${protocol.code}]`, `(${protocol.module})`, protocol.message];
+  const parts = [`[WILDARRANGE-${protocol.code}]`, `(${protocol.module})`, protocol.message];
   if (protocol.next_action) parts.push(`| next: ${protocol.next_action}`);
   return parts.filter(Boolean).join(" ");
 }
 
-export function helixError({ code, module, message, nextAction }) {
+export function wildarrangeError({ code, module, message, nextAction }) {
   const protocol = buildErrorProtocol({ code, module, message, nextAction });
   const error = new Error(formatErrorInline(protocol));
   error.protocol = protocol;

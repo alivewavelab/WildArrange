@@ -11,10 +11,10 @@ import {
   buildErrorProtocol,
   errorProtocolOf,
   formatErrorInline,
-  helixError,
+  wildarrangeError,
 } from "../src/infra/error-protocol.mjs";
 
-const CLI_PATH = path.join(process.cwd(), "bin", "helix.mjs");
+const CLI_PATH = path.join(process.cwd(), "bin", "wildarrange.mjs");
 
 test("error protocol renders inline with code, module and next_action", () => {
   const protocol = buildErrorProtocol({
@@ -24,14 +24,14 @@ test("error protocol renders inline with code, module and next_action", () => {
     nextAction: "查看 verify report",
   });
   const line = formatErrorInline(protocol);
-  assert.match(line, /\[HELIX-gate_failed\]/);
+  assert.match(line, /\[WILDARRANGE-gate_failed\]/);
   assert.match(line, /\(capabilities\/verify\.mjs\)/);
   assert.match(line, /验证门未通过/);
   assert.match(line, /\| next: 查看 verify report/);
 
-  const error = helixError({ code: "x", module: "m", message: "boom", nextAction: "fix" });
+  const error = wildarrangeError({ code: "x", module: "m", message: "boom", nextAction: "fix" });
   assert.deepEqual(errorProtocolOf(error), error.protocol);
-  const fallback = errorProtocolOf(new Error("plain"), { code: "cli_error", module: "bin/helix.mjs", nextAction: "doctor" });
+  const fallback = errorProtocolOf(new Error("plain"), { code: "cli_error", module: "bin/wildarrange.mjs", nextAction: "doctor" });
   assert.equal(fallback.code, "cli_error");
   assert.equal(fallback.message, "plain");
 });
@@ -42,7 +42,7 @@ test("gateway envelope error carries the protocol for unknown and throwing capab
     (error) => {
       assert.equal(error.protocol.code, "unknown_capability");
       assert.equal(error.protocol.module, "capabilities/gateway.mjs");
-      assert.match(error.message, /\[HELIX-unknown_capability\]/);
+      assert.match(error.message, /\[WILDARRANGE-unknown_capability\]/);
       return true;
     },
   );
@@ -70,7 +70,7 @@ test("delivery pipeline blocked result carries an inline error protocol pointing
     assert.equal(result.error.code, "gate_failed");
     assert.equal(result.error.module, "capabilities/verify.mjs");
     assert.match(result.error.next_action, /verify report/);
-    assert.match(formatErrorInline(result.error), /\[HELIX-gate_failed\] \(capabilities\/verify\.mjs\)/);
+    assert.match(formatErrorInline(result.error), /\[WILDARRANGE-gate_failed\] \(capabilities\/verify\.mjs\)/);
   });
 });
 
@@ -78,7 +78,7 @@ test("CLI non-zero exit renders the inline error protocol on stderr", async () =
   await withTempDir(async (dir) => {
     const result = await runCli(dir, ["nonsense-command"]);
     assert.equal(result.exitCode, 1);
-    assert.match(result.stderr, /\[HELIX-cli_error\] \(bin\/helix\.mjs\)/);
+    assert.match(result.stderr, /\[WILDARRANGE-cli_error\] \(bin\/wildarrange\.mjs\)/);
     assert.match(result.stderr, /\| next: /);
   });
 });

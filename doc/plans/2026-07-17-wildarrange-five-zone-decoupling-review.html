@@ -85,7 +85,7 @@
     <div class="grid">
       <article class="card"><h3>33 个源码模块</h3><p>核心实现约 20,249 行。当前不是“模块太少”，而是模块之间缺少稳定边界。</p></article>
       <article class="card"><h3>95 个自动测试</h3><p>在允许本地端口监听的环境中，<strong>95/95 通过</strong>。测试覆盖面广，但尚未覆盖 CLI 入口语法。</p></article>
-      <article class="card priority p0"><h3>CLI 当前不可启动</h3><p><code>bin/helix.mjs</code> 重复导入 <code>approvePlan</code> 和 <code>loadPlanApproval</code>，Node 在解析阶段直接报错。</p></article>
+      <article class="card priority p0"><h3>CLI 当前不可启动</h3><p><code>bin/wildarrange.mjs</code> 重复导入 <code>approvePlan</code> 和 <code>loadPlanApproval</code>，Node 在解析阶段直接报错。</p></article>
       <article class="card priority p0"><h3>工作区不是干净基线</h3><p>当前有 27 个已跟踪文件修改、7 个未跟踪文件。重构前必须先明确并保护这批在途成果。</p></article>
     </div>
     <div class="warning"><strong>关键判断：</strong>“测试全绿”与“产品入口可运行”目前同时为真和假——模块测试全绿，但 CLI 语法损坏。Phase 0 必须先补 CLI smoke test，否则重构中的回归无法被可靠发现。</div>
@@ -106,7 +106,7 @@
     <table>
       <thead><tr><th>区域</th><th>只负责什么</th><th>建议模块</th><th>不能做什么</th></tr></thead>
       <tbody>
-        <tr><td><strong>1. Interface</strong></td><td>把 CLI、HTTP、Codex/Cursor/Hook 宿主输入翻译为用例调用</td><td>CLI、dashboard、adapters、host-hook adapter；旧 <code>src/helix-core.mjs</code> 保留兼容出口</td><td>不决定任务状态，不直接拼交付门</td></tr>
+        <tr><td><strong>1. Interface</strong></td><td>把 CLI、HTTP、Codex/Cursor/Hook 宿主输入翻译为用例调用</td><td>CLI、dashboard、adapters、host-hook adapter；旧 <code>src/wildarrange-core.mjs</code> 保留兼容出口</td><td>不决定任务状态，不直接拼交付门</td></tr>
         <tr><td><strong>2. Orchestration</strong></td><td>用例流程和任务状态的唯一所有者</td><td>linear runtime、<strong>delivery pipeline</strong>、parallel runtime、plan service、task board、workflow、change governance、hook service、failure policy</td><td>不实现 shell、git、LLM、文件系统细节</td></tr>
         <tr><td><strong>3. AI Orchestration</strong></td><td>所有“需要语义判断或上下文组织”的能力</td><td>routing policy、plan enrichment、archivist reasoning、injection、skill matcher、context composer、rules selection、semantic review、memory digest</td><td>不写任务状态，不直接 checkpoint</td></tr>
         <tr><td><strong>4. Capabilities / Assurance</strong></td><td>可独立调用、可返回结构化证据的确定性能力</td><td>contract、registry/gateway、verifier、scope guard、review gate、code intel、command safety、acceptance proof、checkpoint、hook result gate、agent runner、doctor audit</td><td>不 import Orchestration；只接收快照并返回结果</td></tr>
@@ -180,9 +180,9 @@
   <section>
     <h2>八、实施顺序</h2>
     <div class="grid">
-      <article class="card priority p0"><span class="tag p0">P0</span><h3>Phase 0：冻结可信基线</h3><ol><li>确认并保护当前 27+7 个在途改动。</li><li>先修复 CLI 重复导入。</li><li>补 <code>node bin/helix.mjs help</code> 等 CLI smoke test。</li><li>记录公共导出、CLI 输出、<code>.helix</code> 状态格式与 95 个测试基线。</li></ol></article>
+      <article class="card priority p0"><span class="tag p0">P0</span><h3>Phase 0：冻结可信基线</h3><ol><li>确认并保护当前 27+7 个在途改动。</li><li>先修复 CLI 重复导入。</li><li>补 <code>node bin/wildarrange.mjs help</code> 等 CLI smoke test。</li><li>记录公共导出、CLI 输出、<code>.wildarrange</code> 状态格式与 95 个测试基线。</li></ol></article>
       <article class="card priority p0"><span class="tag p0">P0</span><h3>Phase 1：契约与边界守卫</h3><ol><li>新增 capability contract 与静态 registry。</li><li>先只包装 verify，验证统一结果模型。</li><li>新增 import boundary 自动测试，禁止反向依赖。</li></ol></article>
-      <article class="card priority p0"><span class="tag p0">P0</span><h3>Phase 2：拆 Assurance</h3><ol><li>从 <code>helix-gates</code> 拆 command runner、verifier、scope、checkpoint。</li><li>保留旧模块作为 re-export shim。</li><li>每拆一块跑对应测试和全量测试。</li></ol></article>
+      <article class="card priority p0"><span class="tag p0">P0</span><h3>Phase 2：拆 Assurance</h3><ol><li>从 <code>wildarrange-gates</code> 拆 command runner、verifier、scope、checkpoint。</li><li>保留旧模块作为 re-export shim。</li><li>每拆一块跑对应测试和全量测试。</li></ol></article>
       <article class="card priority p0"><span class="tag p0">P0</span><h3>Phase 3：统一交付流水线</h3><ol><li>建立 WorkerEvidence 与 delivery pipeline。</li><li>先迁线性 runtime，再迁 parallel admission。</li><li>新增线性/并行 gate parity 测试。</li></ol></article>
       <article class="card priority p1"><span class="tag p1">P1</span><h3>Phase 4：拆 Hook 与 AI</h3><ol><li>宿主协议留 Interface。</li><li>生命周期协调进 Orchestration。</li><li>上下文、路由、注入与语义判断进 AI。</li><li>清除 AI 对 task 状态的写操作。</li></ol></article>
       <article class="card priority p1"><span class="tag p1">P1</span><h3>Phase 5：逐区搬目录</h3><ol><li>一次只搬一个区域。</li><li>内部改为目标文件直接 import。</li><li>旧路径保留临时兼容 shim。</li><li>同步更新 AGENTS 与架构文档。</li></ol></article>
@@ -195,13 +195,13 @@
     <h2>九、验收标准</h2>
     <ul>
       <li>现有 95 个测试与新增 contract、boundary、CLI、linear/parallel parity 测试全部通过。</li>
-      <li><code>node --check</code> 覆盖所有 <code>src/*.mjs</code> 与 <code>bin/helix.mjs</code>；CLI help 和 sample workflow 可运行。</li>
+      <li><code>node --check</code> 覆盖所有 <code>src/*.mjs</code> 与 <code>bin/wildarrange.mjs</code>；CLI help 和 sample workflow 可运行。</li>
       <li>自动测试证明依赖矩阵无违规 import。</li>
       <li>任务状态只由 Orchestration 写入；Capability/AI 只返回结构化结果。</li>
       <li>线性执行与并行 admission 共用一套 delivery pipeline。</li>
-      <li><code>src/helix-core.mjs</code> 公共导出不丢失；现有旧模块路径在迁移期仍可 import。</li>
-      <li><code>.helix</code> 状态格式、ledger 语义、result status/task status 含义不变。</li>
-      <li><code>npm pack --dry-run --cache /private/tmp/helix-npm-cache</code> 通过，发布包不意外扩容或漏文件。</li>
+      <li><code>src/wildarrange-core.mjs</code> 公共导出不丢失；现有旧模块路径在迁移期仍可 import。</li>
+      <li><code>.wildarrange</code> 状态格式、ledger 语义、result status/task status 含义不变。</li>
+      <li><code>npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache</code> 通过，发布包不意外扩容或漏文件。</li>
     </ul>
   </section>
 
@@ -209,7 +209,7 @@
     <h2>十、明确不做</h2>
     <ul>
       <li>不借重构改变业务行为、任务状态语义或 gate 强度。</li>
-      <li>不迁移 <code>.helix</code> 数据格式。</li>
+      <li>不迁移 <code>.wildarrange</code> 数据格式。</li>
       <li>不一次性重写 <code>foundation</code>。</li>
       <li>不让动态注册、插件系统或新外部依赖扩大本轮范围。</li>
       <li>不在未确认当前工作区在途改动归属前大规模移动文件。</li>
@@ -222,8 +222,8 @@
       <ol>
         <li><strong>目标架构：</strong>采用修正版五区，并把上述依赖方向设为自动测试硬约束。</li>
         <li><strong>核心抽象：</strong>能力网关使用静态注册与统一信封；共享 delivery pipeline 优先级高于目录搬迁。</li>
-        <li><strong>迁移方式：</strong>先修可信基线，再逐模块抽取；保留 <code>helix-core</code> 和旧路径兼容 shim。</li>
-        <li><strong>兼容边界：</strong>本轮不改公共 API、CLI 语义和 <code>.helix</code> 状态格式。</li>
+        <li><strong>迁移方式：</strong>先修可信基线，再逐模块抽取；保留 <code>wildarrange-core</code> 和旧路径兼容 shim。</li>
+        <li><strong>兼容边界：</strong>本轮不改公共 API、CLI 语义和 <code>.wildarrange</code> 状态格式。</li>
       </ol>
       <p><strong>建议默认全部接受。</strong>对齐后从 Phase 0 开始，不直接进入文件搬迁。</p>
     </div>

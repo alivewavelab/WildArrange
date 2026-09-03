@@ -5,7 +5,7 @@
  * completion path has to check the checkpoint envelope status explicitly.
  *
  * Sabotage technique: occupy the exact plan checkpoint directory with a file.
- * This behaves the same on Windows and POSIX: ensureHelixDirs still succeeds,
+ * This behaves the same on Windows and POSIX: ensureWildArrangeDirs still succeeds,
  * but the final plan/task evidence path cannot be created.
  */
 import assert from "node:assert/strict";
@@ -22,7 +22,7 @@ import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { runCommand } from "../src/infra/command-runner.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { appendLedger } from "../src/infra/ledger.mjs";
-import { readJson, resolveHelixPath } from "../src/infra/runtime-store.mjs";
+import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 
 async function withTempDir(fn) {
   const baseDir = path.join(process.cwd(), ".tmp");
@@ -45,17 +45,17 @@ function nodeEval(source) {
 
 async function sabotageCheckpoints(dir) {
   const { planId } = await loadTaskState(dir);
-  await writeFile(resolveHelixPath(dir, "checkpoints", planId), "occupied by fault injection\n", "utf8");
+  await writeFile(resolveWildArrangePath(dir, "checkpoints", planId), "occupied by fault injection\n", "utf8");
 }
 
 async function repairCheckpoints(dir) {
   const { planId } = await loadTaskState(dir);
-  await rm(resolveHelixPath(dir, "checkpoints", planId), { force: true });
-  await mkdir(resolveHelixPath(dir, "checkpoints", planId), { recursive: true });
+  await rm(resolveWildArrangePath(dir, "checkpoints", planId), { force: true });
+  await mkdir(resolveWildArrangePath(dir, "checkpoints", planId), { recursive: true });
 }
 
 async function importPassingPlan(dir, planFileName = "ckpt-plan.json") {
-  const planPath = resolveHelixPath(dir, "artifacts", planFileName);
+  const planPath = resolveWildArrangePath(dir, "artifacts", planFileName);
   await writeFile(planPath, JSON.stringify({
     title: "Checkpoint integrity",
     tasks: [
@@ -108,7 +108,7 @@ test("adversarial: a throwing acceptance-proof capability blocks the pipeline an
 
     // Sabotage the acceptance report directory: writeAcceptanceProof throws,
     // the gateway converts it into a fail envelope with null evidence.
-    const acceptancePlanDir = resolveHelixPath(dir, "reports", "acceptance", plan.id);
+    const acceptancePlanDir = resolveWildArrangePath(dir, "reports", "acceptance", plan.id);
     await writeFile(acceptancePlanDir, "occupied by fault injection\n", "utf8");
     try {
       const result = await runDeliveryPipeline(dir, plan.id, task, {
@@ -141,7 +141,7 @@ test("adversarial: linear runNextTask puts the task back to pending when the che
 
     const stateAfterFailure = await loadTaskState(dir);
     assert.equal(stateAfterFailure.tasks[0].status, "pending", "task must NOT be completed without a durable checkpoint");
-    const ledger = await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8");
+    const ledger = await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8");
     assert.match(ledger, /checkpoint_write_failed/);
     assert.ok(!/"type":"task_verified"/.test(ledger), "task_verified must not be recorded when checkpoint failed");
 
@@ -150,7 +150,7 @@ test("adversarial: linear runNextTask puts the task back to pending when the che
     assert.equal(completed.status, "completed");
     const stateAfterRepair = await loadTaskState(dir);
     assert.equal(stateAfterRepair.tasks[0].status, "completed");
-    const checkpoint = await readJson(resolveHelixPath(dir, "checkpoints", stateAfterRepair.planId, "T001.json"));
+    const checkpoint = await readJson(resolveWildArrangePath(dir, "checkpoints", stateAfterRepair.planId, "T001.json"));
     assert.equal(checkpoint.taskId, "T001");
   });
 });
@@ -184,7 +184,7 @@ test("adversarial: single-step node checkpoint refuses to complete the task when
     assert.equal(completed.status, "completed");
     const stateAfterRepair = await loadTaskState(dir);
     assert.equal(stateAfterRepair.tasks[0].status, "completed");
-    const checkpoint = await readJson(resolveHelixPath(dir, "checkpoints", stateAfterRepair.planId, "T001.json"));
+    const checkpoint = await readJson(resolveWildArrangePath(dir, "checkpoints", stateAfterRepair.planId, "T001.json"));
     assert.equal(checkpoint.taskId, "T001");
   });
 });
@@ -198,16 +198,16 @@ test("adversarial: a new execute round cannot complete against the previous roun
   await withTempDir(async (dir) => {
     await initRuntime(dir);
     assert.equal((await runCommand("git init", dir)).exitCode, 0);
-    const ctrlPath = resolveHelixPath(dir, "artifacts", "ctrl.txt");
+    const ctrlPath = resolveWildArrangePath(dir, "artifacts", "ctrl.txt");
     await writeFile(ctrlPath, "ok\n");
-    const planPath = resolveHelixPath(dir, "artifacts", "stale-evidence-plan.json");
+    const planPath = resolveWildArrangePath(dir, "artifacts", "stale-evidence-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Stale gate evidence",
       tasks: [
         {
           id: "T001",
           subject: "Artifact must match ctrl content",
-          worker_command: nodeEval("const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/out.txt', fs.readFileSync('.helix/artifacts/ctrl.txt','utf8'));"),
+          worker_command: nodeEval("const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/out.txt', fs.readFileSync('.wildarrange/artifacts/ctrl.txt','utf8'));"),
           verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/out.txt','utf8').trim()!=='ok') process.exit(1);")],
           review_commands: ["node --version"],
           writable_paths: ["src/**"],
@@ -239,7 +239,7 @@ test("adversarial: a new execute round cannot complete against the previous roun
     assert.notEqual(persisted.tasks[0].status, "completed");
     assert.equal((await readFile(path.join(dir, "src", "out.txt"), "utf8")).trim(), "bad", "sanity: round 2 really produced the bad artifact");
     await assert.rejects(
-      () => readJson(resolveHelixPath(dir, "checkpoints", persisted.planId, "T001.json")),
+      () => readJson(resolveWildArrangePath(dir, "checkpoints", persisted.planId, "T001.json")),
       undefined,
       "no checkpoint may exist for a task that never passed gates in its current round",
     );
@@ -254,7 +254,7 @@ test("adversarial: persistTaskState keeps canonical tasks.json at the old state 
   await withTempDir(async (dir) => {
     await initRuntime(dir);
     await importPassingPlan(dir);
-    const tasksMdPath = resolveHelixPath(dir, "team", "tasks.md");
+    const tasksMdPath = resolveWildArrangePath(dir, "team", "tasks.md");
     await chmod(tasksMdPath, 0o444);
     try {
       const taskState = await loadTaskState(dir);
@@ -277,11 +277,11 @@ test("adversarial: persistTaskState keeps canonical tasks.json at the old state 
 });
 
 async function sabotageLedger(dir) {
-  await chmod(resolveHelixPath(dir, "ledger.jsonl"), 0o444);
+  await chmod(resolveWildArrangePath(dir, "ledger.jsonl"), 0o444);
 }
 
 async function repairLedger(dir) {
-  await chmod(resolveHelixPath(dir, "ledger.jsonl"), 0o644);
+  await chmod(resolveWildArrangePath(dir, "ledger.jsonl"), 0o644);
 }
 
 test("adversarial: node checkpoint does not persist completed when the completion ledger write fails", async () => {
@@ -314,14 +314,14 @@ test("adversarial: node checkpoint does not persist completed when the completio
     assert.equal(completed.status, "completed");
     const stateAfterRepair = await loadTaskState(dir);
     assert.equal(stateAfterRepair.tasks[0].status, "completed");
-    assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /node_checkpoint_completed/);
+    assert.match(await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8"), /node_checkpoint_completed/);
   });
 });
 
 test("adversarial: parallel admission never reaches completed/released when the ledger is unavailable", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const planPath = resolveHelixPath(dir, "artifacts", "parallel-ledger-plan.json");
+    const planPath = resolveWildArrangePath(dir, "artifacts", "parallel-ledger-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Parallel admission ledger integrity",
       tasks: [
@@ -350,13 +350,13 @@ test("adversarial: parallel admission never reaches completed/released when the 
     }
     const stateAfterOutage = await loadTaskState(dir);
     assert.notEqual(stateAfterOutage.tasks[0].status, "completed");
-    const lifecycleAfterOutage = await readJson(resolveHelixPath(dir, "agent-runs", batch.runId, "T001", "result.json"));
+    const lifecycleAfterOutage = await readJson(resolveWildArrangePath(dir, "agent-runs", batch.runId, "T001", "result.json"));
     assert.notEqual(lifecycleAfterOutage.lifecycle?.status, "released", "child result must not be released during a ledger outage");
 
     const admitted = await admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" });
     assert.equal(admitted.status, "completed");
     const stateAfterRepair = await loadTaskState(dir);
-    const ledger = await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8");
+    const ledger = await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8");
     assert.match(ledger, /"type":"parallel_agent_admission_completed"[^\n]*"status":"completed"/);
     const completionEvent = ledger
       .split(/\r?\n/)
@@ -364,7 +364,7 @@ test("adversarial: parallel admission never reaches completed/released when the 
       .map((line) => JSON.parse(line))
       .find((entry) => entry.type === "parallel_agent_admission_completed" && entry.status === "completed");
     assert.equal(completionEvent.planId, stateAfterRepair.planId);
-    const lifecycleAfterRepair = await readJson(resolveHelixPath(dir, "agent-runs", batch.runId, "T001", "result.json"));
+    const lifecycleAfterRepair = await readJson(resolveWildArrangePath(dir, "agent-runs", batch.runId, "T001", "result.json"));
     assert.equal(lifecycleAfterRepair.lifecycle.status, "released");
   });
 });
@@ -383,7 +383,7 @@ test("adversarial: linear runNextTask never yields completed during a ledger out
     }
     const stateAfterOutage = await loadTaskState(dir);
     assert.notEqual(stateAfterOutage.tasks[0].status, "completed");
-    assert.ok(!/"type":"task_verified"/.test(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8")), "no completion event may exist for the aborted run");
+    assert.ok(!/"type":"task_verified"/.test(await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8")), "no completion event may exist for the aborted run");
 
     // The outage aborted the run right after the task was claimed
     // (in_progress persisted, task_started ledger threw). The single-step
@@ -396,14 +396,14 @@ test("adversarial: linear runNextTask never yields completed during a ledger out
     assert.equal(completed.status, "completed");
     const stateAfterRepair = await loadTaskState(dir);
     assert.equal(stateAfterRepair.tasks[0].status, "completed");
-    assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /node_checkpoint_completed/);
+    assert.match(await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8"), /node_checkpoint_completed/);
   });
 });
 
 test("adversarial: parallel admission does not release the child result when the checkpoint write fails", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const planPath = resolveHelixPath(dir, "artifacts", "parallel-ckpt-plan.json");
+    const planPath = resolveWildArrangePath(dir, "artifacts", "parallel-ckpt-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Parallel admission checkpoint integrity",
       tasks: [
@@ -429,14 +429,14 @@ test("adversarial: parallel admission does not release the child result when the
     assert.equal(blocked.status, "retry");
     assert.equal(blocked.task.status, "pending");
     assert.equal(blocked.task.last_failure.reason, "checkpoint_failed");
-    const lifecycleAfterFailure = await readJson(resolveHelixPath(dir, "agent-runs", batch.runId, "T001", "result.json"));
+    const lifecycleAfterFailure = await readJson(resolveWildArrangePath(dir, "agent-runs", batch.runId, "T001", "result.json"));
     assert.equal(lifecycleAfterFailure.lifecycle.status, "awaiting_revision", "child result must not be released without a durable checkpoint");
 
     await repairCheckpoints(dir);
     const admitted = await admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" });
     assert.equal(admitted.status, "completed");
     assert.equal(await readFile(path.join(dir, "src", "parallel.txt"), "utf8"), "ok\n");
-    const lifecycleAfterRepair = await readJson(resolveHelixPath(dir, "agent-runs", batch.runId, "T001", "result.json"));
+    const lifecycleAfterRepair = await readJson(resolveWildArrangePath(dir, "agent-runs", batch.runId, "T001", "result.json"));
     assert.equal(lifecycleAfterRepair.lifecycle.status, "released");
   });
 });
@@ -462,7 +462,7 @@ test("adversarial: an interrupted completion transaction is visible to doctor an
     // tasks.json save is never reached. This is the exact divergence window
     // from the round-4 cross-review.
     const { planId } = await loadTaskState(dir);
-    const planMirrorPath = resolveHelixPath(dir, "plans", `${planId}.json`);
+    const planMirrorPath = resolveWildArrangePath(dir, "plans", `${planId}.json`);
     await chmod(planMirrorPath, 0o444);
     try {
       await assert.rejects(() => runWorkflowNode(dir, "checkpoint", { taskId: "T001" }), /EACCES|EPERM|permission denied/i);
@@ -472,8 +472,8 @@ test("adversarial: an interrupted completion transaction is visible to doctor an
 
     const interrupted = await loadTaskState(dir);
     assert.equal(interrupted.tasks[0].status, "verifying", "canonical state must stay pre-completion");
-    assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /node_checkpoint_completed/);
-    assert.match(await readFile(resolveHelixPath(dir, "team", "tasks.md"), "utf8"), /- Status: completed/, "sanity: the divergence window really exists");
+    assert.match(await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8"), /node_checkpoint_completed/);
+    assert.match(await readFile(resolveWildArrangePath(dir, "team", "tasks.md"), "utf8"), /- Status: completed/, "sanity: the divergence window really exists");
 
     // doctor must surface both reverse inconsistencies.
     const report = await runDoctor(dir);
@@ -494,7 +494,7 @@ test("adversarial: an interrupted completion transaction is visible to doctor an
     assert.equal(resumed.resumed, "verifying_task_adjudicated");
     const recovered = await loadTaskState(dir);
     assert.equal(recovered.tasks[0].status, "completed");
-    assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /run_resumed_verifying_task/);
+    assert.match(await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8"), /run_resumed_verifying_task/);
 
     const cleanReport = await runDoctor(dir);
     const remaining = cleanReport.findings.filter(
@@ -535,7 +535,7 @@ test("adversarial: parallel admission resumes idempotently after a lifecycle wri
   // missing release and must not re-apply files over the workspace.
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const planPath = resolveHelixPath(dir, "artifacts", "parallel-resume-plan.json");
+    const planPath = resolveWildArrangePath(dir, "artifacts", "parallel-resume-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Parallel admission lifecycle recovery",
       tasks: [
@@ -559,7 +559,7 @@ test("adversarial: parallel admission resumes idempotently after a lifecycle wri
     // Sabotage the per-task run directory: the admission itself completes
     // (task persisted completed) but updateAgentRunLifecycle cannot write
     // result.json — the exact interruption from the cross-review.
-    const runTaskDir = resolveHelixPath(dir, "agent-runs", batch.runId, "T001");
+    const runTaskDir = resolveWildArrangePath(dir, "agent-runs", batch.runId, "T001");
     const resultPath = path.join(runTaskDir, "result.json");
     await chmod(resultPath, 0o444);
     try {
@@ -594,7 +594,7 @@ test("adversarial: a mid-apply failure rolls the workspace back and releases the
   // apply failure rolls back the workspace and releases the claim.
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const planPath = resolveHelixPath(dir, "artifacts", "parallel-apply-fail-plan.json");
+    const planPath = resolveWildArrangePath(dir, "artifacts", "parallel-apply-fail-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Admission apply failure",
       tasks: [
@@ -634,9 +634,9 @@ test("adversarial: a mid-apply failure rolls the workspace back and releases the
     const stateAfterFailure = await loadTaskState(dir);
     assert.equal(stateAfterFailure.tasks[0].status, "pending");
     assert.equal(stateAfterFailure.tasks[0].last_failure.reason, "admission_apply_failed");
-    const ledger = await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8");
+    const ledger = await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8");
     assert.match(ledger, /parallel_agent_admission_apply_failed/);
-    const lifecycle = await readJson(resolveHelixPath(dir, "agent-runs", batch.runId, "T001", "result.json"));
+    const lifecycle = await readJson(resolveWildArrangePath(dir, "agent-runs", batch.runId, "T001", "result.json"));
     assert.equal(lifecycle.lifecycle?.status, "awaiting_revision");
 
     // After repair the SAME run can be admitted again and completes.
@@ -655,7 +655,7 @@ test("adversarial: a run whose admission failed earlier cannot fake-resume a tas
   await withTempDir(async (dir) => {
     await initRuntime(dir);
     assert.equal((await runCommand("git init", dir)).exitCode, 0);
-    const planPath = resolveHelixPath(dir, "artifacts", "fake-resume-plan.json");
+    const planPath = resolveWildArrangePath(dir, "artifacts", "fake-resume-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Fake resume",
       tasks: [
@@ -702,7 +702,7 @@ test("adversarial: a run whose admission failed earlier cannot fake-resume a tas
       /already completed/,
     );
     assert.equal((await readFile(path.join(dir, "src", "out.txt"), "utf8")).trim(), "linear", "the refusal must not touch the workspace");
-    const lifecycle = await readJson(resolveHelixPath(dir, "agent-runs", batch.runId, "T001", "result.json"));
+    const lifecycle = await readJson(resolveWildArrangePath(dir, "agent-runs", batch.runId, "T001", "result.json"));
     assert.notEqual(lifecycle.lifecycle?.status, "released", "a failed run must never be marked released");
   });
 });
@@ -723,7 +723,7 @@ test("adversarial: a wisdom write failure keeps the completion recoverable inste
     await runWorkflowNode(dir, "scope", { taskId: "T001" });
     await runWorkflowNode(dir, "review", { taskId: "T001" });
 
-    const wisdomPath = resolveHelixPath(dir, "wisdom", "verification.md");
+    const wisdomPath = resolveWildArrangePath(dir, "wisdom", "verification.md");
     await writeFile(wisdomPath, "", "utf8");
     await chmod(wisdomPath, 0o444);
     try {
@@ -761,7 +761,7 @@ test("adversarial: a post-commit snapshot failure does not un-complete the task 
       constructor(...args) { super(...(args.length > 0 ? args : [fixedIso])); }
       static now() { return new RealDate(fixedIso).getTime(); }
     };
-    const blockedSnapshotPath = resolveHelixPath(dir, "snapshots", `${fixedIso.replaceAll(":", "-")}-node_checkpoint_completed.json`);
+    const blockedSnapshotPath = resolveWildArrangePath(dir, "snapshots", `${fixedIso.replaceAll(":", "-")}-node_checkpoint_completed.json`);
     await mkdir(blockedSnapshotPath, { recursive: true });
     let completed;
     try {
@@ -773,7 +773,7 @@ test("adversarial: a post-commit snapshot failure does not un-complete the task 
     assert.equal(completed.status, "completed", "post-commit snapshot failure must not fail the completion");
     assert.equal(completed.sideEffectWarnings.length, 1);
     assert.equal((await loadTaskState(dir)).tasks[0].status, "completed");
-    const ledger = await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8");
+    const ledger = await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8");
     assert.match(ledger, /completion_side_effect_failed/, "the failed side effect must leave a ledger trace");
 
     const report = await runDoctor(dir);
@@ -790,7 +790,7 @@ test("adversarial: a run missing from index.json is rediscovered instead of stay
   // disk that `parallel status` could never see again.
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const planPath = resolveHelixPath(dir, "artifacts", "orphan-run-plan.json");
+    const planPath = resolveWildArrangePath(dir, "artifacts", "orphan-run-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Orphan run discovery",
       tasks: [
@@ -812,13 +812,13 @@ test("adversarial: a run missing from index.json is rediscovered instead of stay
     const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
 
     // Simulate the lost index (failed write / crash before write).
-    await rm(resolveHelixPath(dir, "agent-runs", "index.json"), { force: true });
+    await rm(resolveWildArrangePath(dir, "agent-runs", "index.json"), { force: true });
 
     const status = await parallelAgentStatus(dir, {});
     const rediscovered = status.runs.find((run) => run.runId === batch.runId);
     assert.ok(rediscovered, "the orphan run must be adopted back into the index");
     assert.equal(rediscovered.results.length, 1);
-    assert.match(await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8"), /parallel_run_index_reconciled/);
+    assert.match(await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8"), /parallel_run_index_reconciled/);
 
     // And the rediscovered run is still admissible.
     const admitted = await admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" });
@@ -834,7 +834,7 @@ test("adversarial: two runs admitting the same task concurrently produce exactly
   // admission_claim (runId + phase) makes the second claim attempt fail.
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const planPath = resolveHelixPath(dir, "artifacts", "double-admit-plan.json");
+    const planPath = resolveWildArrangePath(dir, "artifacts", "double-admit-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Double admission",
       tasks: [
@@ -856,7 +856,7 @@ test("adversarial: two runs admitting the same task concurrently produce exactly
     const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
     // Forge a second run with an identical result for the same task.
     const runB = `${batch.runId}-rival`;
-    await cp(resolveHelixPath(dir, "agent-runs", batch.runId), resolveHelixPath(dir, "agent-runs", runB), { recursive: true });
+    await cp(resolveWildArrangePath(dir, "agent-runs", batch.runId), resolveWildArrangePath(dir, "agent-runs", runB), { recursive: true });
 
     const outcomes = await Promise.allSettled([
       admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" }),
@@ -869,7 +869,7 @@ test("adversarial: two runs admitting the same task concurrently produce exactly
     assert.match(losers[0].reason.message, /claimed by parallel admission run|already completed/);
 
     // Exactly ONE completed admission event on the ledger for this task.
-    const ledger = await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8");
+    const ledger = await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8");
     const completedEvents = ledger
       .split(/\r?\n/)
       .filter(Boolean)
@@ -881,7 +881,7 @@ test("adversarial: two runs admitting the same task concurrently produce exactly
 
     // Only the winner's child result is released.
     const loserRunId = winnerRunId === batch.runId ? runB : batch.runId;
-    const loserLifecycle = await readJson(resolveHelixPath(dir, "agent-runs", loserRunId, "T001", "result.json"));
+    const loserLifecycle = await readJson(resolveWildArrangePath(dir, "agent-runs", loserRunId, "T001", "result.json"));
     assert.notEqual(loserLifecycle.lifecycle?.status, "released", "the losing run must not be released");
   });
 });
@@ -889,7 +889,7 @@ test("adversarial: two runs admitting the same task concurrently produce exactly
 test("adversarial: duplicate admission calls from one run cannot downgrade a released lifecycle", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const planPath = resolveHelixPath(dir, "artifacts", "same-run-double-admit.json");
+    const planPath = resolveWildArrangePath(dir, "artifacts", "same-run-double-admit.json");
     await writeFile(planPath, JSON.stringify({
       title: "Same-run duplicate admission",
       tasks: [
@@ -916,7 +916,7 @@ test("adversarial: duplicate admission calls from one run cannot downgrade a rel
       "at least one duplicate call must complete the admission",
     );
     assert.equal((await loadTaskState(dir)).tasks[0].status, "completed");
-    const result = await readJson(resolveHelixPath(dir, "agent-runs", batch.runId, "T001", "result.json"), null);
+    const result = await readJson(resolveWildArrangePath(dir, "agent-runs", batch.runId, "T001", "result.json"), null);
     assert.equal(result.lifecycle?.status, "released", "a stale duplicate must not downgrade the winner's lifecycle");
     assert.equal((await readFile(path.join(dir, "src", "same.txt"), "utf8")).trim(), "same");
   });
@@ -928,11 +928,11 @@ test("adversarial: a crash while finalizing keeps the workspace and resumes with
   // wisdom, digest, persist) left applied files + a verifying task, and the
   // "retry" then rollback-deleted the artifact. Now the claim persists at
   // phase "finalizing": re-admitting the same run skips the apply and re-runs
-  // the gates, while other actors (another run, helix run, the single-step
+  // the gates, while other actors (another run, wildarrange run, the single-step
   // checkpoint) are all refused for the duration of the claim.
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const planPath = resolveHelixPath(dir, "artifacts", "finalize-crash-plan.json");
+    const planPath = resolveWildArrangePath(dir, "artifacts", "finalize-crash-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Finalize crash resume",
       tasks: [
@@ -953,11 +953,11 @@ test("adversarial: a crash while finalizing keeps the workspace and resumes with
     ].join(" ");
     const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
     const runB = `${batch.runId}-rival`;
-    await cp(resolveHelixPath(dir, "agent-runs", batch.runId), resolveHelixPath(dir, "agent-runs", runB), { recursive: true });
+    await cp(resolveWildArrangePath(dir, "agent-runs", batch.runId), resolveWildArrangePath(dir, "agent-runs", runB), { recursive: true });
 
     // Crash inside finalize: wisdom write fails AFTER the files are applied
     // and the gates have run.
-    const wisdomPath = resolveHelixPath(dir, "wisdom", "verification.md");
+    const wisdomPath = resolveWildArrangePath(dir, "wisdom", "verification.md");
     await writeFile(wisdomPath, "", "utf8");
     await chmod(wisdomPath, 0o444);
     try {
@@ -997,9 +997,9 @@ test("adversarial: a crash while finalizing keeps the workspace and resumes with
     assert.equal(finalState.tasks[0].status, "completed");
     assert.equal(finalState.tasks[0].admission_claim, null);
     assert.match(await readFile(wisdomPath, "utf8"), /T001/, "the resumed completion must write the missed wisdom line");
-    const ledger = await readFile(resolveHelixPath(dir, "ledger.jsonl"), "utf8");
+    const ledger = await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8");
     assert.match(ledger, /parallel_agent_admission_reclaimed/);
-    const lifecycle = await readJson(resolveHelixPath(dir, "agent-runs", batch.runId, "T001", "result.json"));
+    const lifecycle = await readJson(resolveWildArrangePath(dir, "agent-runs", batch.runId, "T001", "result.json"));
     assert.equal(lifecycle.lifecycle?.status, "released");
   });
 });
@@ -1016,7 +1016,7 @@ test("adversarial: two tasks with overlapping paths admit concurrently without d
     const stableVerify = (expected) => nodeEval(
       `const fs=require('fs'); const a=fs.readFileSync('src/shared.txt','utf8'); if(a.trim()!=='${expected}') process.exit(1); setTimeout(()=>{ const b=fs.readFileSync('src/shared.txt','utf8'); process.exit(a===b?0:1); }, 400);`,
     );
-    const planPath = resolveHelixPath(dir, "artifacts", "overlap-plan.json");
+    const planPath = resolveWildArrangePath(dir, "artifacts", "overlap-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Overlapping writable paths",
       tasks: [
@@ -1053,7 +1053,7 @@ test("adversarial: a linear run and a parallel admission writing the same file d
     const stableVerify = (expected) => nodeEval(
       `const fs=require('fs'); const a=fs.readFileSync('src/shared.txt','utf8'); if(a.trim()!=='${expected}') process.exit(1); setTimeout(()=>{ const b=fs.readFileSync('src/shared.txt','utf8'); process.exit(a===b?0:1); }, 400);`,
     );
-    const planPath = resolveHelixPath(dir, "artifacts", "linear-vs-admit-plan.json");
+    const planPath = resolveWildArrangePath(dir, "artifacts", "linear-vs-admit-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Linear run vs parallel admission",
       tasks: [
@@ -1095,7 +1095,7 @@ test("adversarial: a failing admission's rollback can never clobber a successor'
   // rollback now runs inside the transaction lock, before the release.
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const planPath = resolveHelixPath(dir, "artifacts", "rollback-race-plan.json");
+    const planPath = resolveWildArrangePath(dir, "artifacts", "rollback-race-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Rollback vs successor",
       tasks: [
@@ -1117,8 +1117,8 @@ test("adversarial: a failing admission's rollback can never clobber a successor'
     const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
     // Forge a second run whose proposed content passes the gates.
     const runGood = `${batch.runId}-good`;
-    await cp(resolveHelixPath(dir, "agent-runs", batch.runId), resolveHelixPath(dir, "agent-runs", runGood), { recursive: true });
-    const goodResultPath = resolveHelixPath(dir, "agent-runs", runGood, "T001", "result.json");
+    await cp(resolveWildArrangePath(dir, "agent-runs", batch.runId), resolveWildArrangePath(dir, "agent-runs", runGood), { recursive: true });
+    const goodResultPath = resolveWildArrangePath(dir, "agent-runs", runGood, "T001", "result.json");
     const goodResult = await readJson(goodResultPath);
     goodResult.result.files = [{ path: "src/out.txt", content: "good\n" }];
     await writeFile(goodResultPath, JSON.stringify(goodResult, null, 2));
@@ -1153,7 +1153,7 @@ test("adversarial: an applying-phase crash cannot lose the original file content
     await initRuntime(dir);
     await mkdir(path.join(dir, "src"), { recursive: true });
     await writeFile(path.join(dir, "src", "data.txt"), "before\n");
-    const planPath = resolveHelixPath(dir, "artifacts", "applying-crash-plan.json");
+    const planPath = resolveWildArrangePath(dir, "artifacts", "applying-crash-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Applying crash",
       tasks: [
@@ -1192,7 +1192,7 @@ test("adversarial: an applying-phase crash cannot lose the original file content
     await persistTaskState(dir, taskState);
     await writeFile(path.join(dir, "src", "data.txt"), "after\n");
     await writeFile(
-      resolveHelixPath(dir, "agent-runs", batch.runId, "T001.rollback-plan.json"),
+      resolveWildArrangePath(dir, "agent-runs", batch.runId, "T001.rollback-plan.json"),
       JSON.stringify({
         runId: batch.runId,
         taskId: "T001",
@@ -1218,7 +1218,7 @@ test("adversarial: rollback failure keeps ownership until the same run recovers 
   await withTempDir(async (dir) => {
     await initRuntime(dir);
     await mkdir(path.join(dir, "src", "locked"), { recursive: true });
-    const planPath = resolveHelixPath(dir, "artifacts", "rollback-failure-plan.json");
+    const planPath = resolveWildArrangePath(dir, "artifacts", "rollback-failure-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Rollback failure ownership",
       tasks: [
@@ -1246,7 +1246,7 @@ test("adversarial: rollback failure keeps ownership until the same run recovers 
     const blockedState = await loadTaskState(dir);
     assert.equal(blockedState.tasks[0].status, "verifying");
     assert.equal(blockedState.tasks[0].admission_claim?.runId, batch.runId, "rollback failure must retain ownership");
-    const rollbackPlanPath = resolveHelixPath(dir, "agent-runs", batch.runId, "T001.rollback-plan.json");
+    const rollbackPlanPath = resolveWildArrangePath(dir, "agent-runs", batch.runId, "T001.rollback-plan.json");
     assert.ok(await readJson(rollbackPlanPath, null), "rollback authority must survive the failed attempt");
 
     // Repair the filesystem and make the verifier fail without sabotaging it
@@ -1271,7 +1271,7 @@ test("adversarial: missing rollback authority fails closed and cannot be hijacke
     await initRuntime(dir);
     await mkdir(path.join(dir, "src"), { recursive: true });
     await writeFile(path.join(dir, "src", "data.txt"), "before\n");
-    const planPath = resolveHelixPath(dir, "artifacts", "missing-rollback-plan.json");
+    const planPath = resolveWildArrangePath(dir, "artifacts", "missing-rollback-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Missing rollback authority",
       tasks: [
@@ -1318,10 +1318,10 @@ test("adversarial: missing rollback authority fails closed and cannot be hijacke
     // Bypass the normal spawn guard by placing a structurally valid result
     // directly on disk. Admission must still enforce ownership itself.
     const intruderRunId = "run_intruder";
-    const intruderTaskDir = resolveHelixPath(dir, "agent-runs", intruderRunId, "T001");
+    const intruderTaskDir = resolveWildArrangePath(dir, "agent-runs", intruderRunId, "T001");
     await mkdir(intruderTaskDir, { recursive: true });
     const intruderResult = await readJson(
-      resolveHelixPath(dir, "agent-runs", ownerBatch.runId, "T001", "result.json"),
+      resolveWildArrangePath(dir, "agent-runs", ownerBatch.runId, "T001", "result.json"),
       null,
     );
     intruderResult.agent = "ZhuRong";
@@ -1345,7 +1345,7 @@ test("adversarial: empty and dead-pid lock files do not deadlock the runtime", a
     await initRuntime(dir);
     assert.equal((await runCommand("git init", dir)).exitCode, 0);
     await importPassingPlan(dir);
-    const lockPath = resolveHelixPath(dir, "team", "tasks.lock");
+    const lockPath = resolveWildArrangePath(dir, "team", "tasks.lock");
 
     // 1. Empty lock file with an old mtime (owner line never written).
     await writeFile(lockPath, "");
@@ -1369,7 +1369,7 @@ test("adversarial: parallel admission refuses a task completed by other means BE
   await withTempDir(async (dir) => {
     await initRuntime(dir);
     assert.equal((await runCommand("git init", dir)).exitCode, 0);
-    const planPath = resolveHelixPath(dir, "artifacts", "parallel-precheck-plan.json");
+    const planPath = resolveWildArrangePath(dir, "artifacts", "parallel-precheck-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Parallel admission status precheck",
       tasks: [

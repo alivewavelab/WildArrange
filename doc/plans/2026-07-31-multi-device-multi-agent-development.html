@@ -194,7 +194,7 @@
       </article>
       <article class="card">
         <span class="tag info">本机 worktree</span>
-        <p><code>.helix/worktrees/&lt;planId&gt;/&lt;taskId&gt;/&lt;agent&gt;</code></p>
+        <p><code>.wildarrange/worktrees/&lt;planId&gt;/&lt;taskId&gt;/&lt;agent&gt;</code></p>
         <p>每个可写 Agent 一份隔离目录；主工作区只承担计划、审查和 admission。</p>
       </article>
       <article class="card">
@@ -233,7 +233,7 @@ WildArrange-Device: macbook
 WildArrange-Base: &lt;baseSha&gt;
 WildArrange-Verify: pass
 WildArrange-Next: review</code></pre>
-    <p>新设备通过 commit SHA 和 trailer 重建任务上下文；`.helix/` 仍是本地运行态，不直接在多台设备间互相覆盖。</p>
+    <p>新设备通过 commit SHA 和 trailer 重建任务上下文；`.wildarrange/` 仍是本地运行态，不直接在多台设备间互相覆盖。</p>
   </section>
 
   <section class="section">
@@ -313,7 +313,7 @@ WildArrange-Next: review</code></pre>
     <ul>
       <li>不在第一版引入中心服务器、数据库或常驻 Agent 集群。</li>
       <li>不自动 force push、自动解决 merge conflict 或静默接管其他设备的任务。</li>
-      <li>不把整个 `.helix/` 提交到 Git；只同步任务代码、必要产物和 checkpoint 元数据。</li>
+      <li>不把整个 `.wildarrange/` 提交到 Git；只同步任务代码、必要产物和 checkpoint 元数据。</li>
       <li>不允许 commit/push 绕过 ChangeRequest、scope、review 或 checkpoint。</li>
     </ul>
   </section>

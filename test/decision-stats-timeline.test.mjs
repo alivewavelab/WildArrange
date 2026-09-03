@@ -16,10 +16,10 @@ import { projectTimeline } from "../src/interface/timeline.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
 import { appendAnnotation } from "../src/infra/annotation-log.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
-import { resolveHelixPath } from "../src/infra/runtime-store.mjs";
+import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 
 const execFileAsync = promisify(execFile);
-const HELIX_BIN = path.resolve(import.meta.dirname, "..", "bin", "helix.mjs");
+const WILDARRANGE_BIN = path.resolve(import.meta.dirname, "..", "bin", "wildarrange.mjs");
 
 async function withTempDir(fn) {
   const baseDir = path.join(process.cwd(), ".tmp");
@@ -33,7 +33,7 @@ async function withTempDir(fn) {
 }
 
 async function importPassingPlan(dir) {
-  const planPath = resolveHelixPath(dir, "artifacts", "stats-plan.json");
+  const planPath = resolveWildArrangePath(dir, "artifacts", "stats-plan.json");
   await mkdir(path.dirname(planPath), { recursive: true });
   await writeFile(planPath, JSON.stringify({
     title: "Stats",
@@ -69,7 +69,7 @@ test("decision stats count gates, rules and never-fired gates without any LLM", 
     await denyOnce(dir, "docs/b.md");
 
     const stats = await projectDecisionStats(dir);
-    assert.equal(stats.kind, "helix_decision_stats");
+    assert.equal(stats.kind, "wildarrange_decision_stats");
     const pre = stats.gates.find((gate) => gate.gate === "pre_tool_use");
     assert.equal(pre.total, 2);
     assert.equal(pre.decisions.deny, 2);
@@ -159,15 +159,15 @@ test("decisions stats and timeline CLI both work", async () => {
     await importPassingPlan(dir);
     await denyOnce(dir, "docs/a.md");
 
-    const stats = await execFileAsync(process.execPath, [HELIX_BIN, "decisions", "stats", "--root", dir], { cwd: dir });
+    const stats = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "decisions", "stats", "--root", dir], { cwd: dir });
     const parsed = JSON.parse(stats.stdout);
-    assert.equal(parsed.kind, "helix_decision_stats");
+    assert.equal(parsed.kind, "wildarrange_decision_stats");
     assert.ok(parsed.gates.some((gate) => gate.gate === "pre_tool_use"));
 
-    const timeline = await execFileAsync(process.execPath, [HELIX_BIN, "timeline", "--root", dir, "--limit", "10"], { cwd: dir });
+    const timeline = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "timeline", "--root", dir, "--limit", "10"], { cwd: dir });
     assert.match(timeline.stdout, /时间线：共/);
 
-    const timelineJson = await execFileAsync(process.execPath, [HELIX_BIN, "timeline", "--root", dir, "--format", "json"], { cwd: dir });
-    assert.equal(JSON.parse(timelineJson.stdout).kind, "helix_timeline");
+    const timelineJson = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "timeline", "--root", dir, "--format", "json"], { cwd: dir });
+    assert.equal(JSON.parse(timelineJson.stdout).kind, "wildarrange_timeline");
   });
 });

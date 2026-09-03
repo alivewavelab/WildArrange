@@ -132,7 +132,7 @@
       <div class="card">
         <span class="tag p0">第 2 步</span>
         <h3>初始化运行时</h3>
-        <p>这会创建 <code>.helix/</code>，里面存任务、账本、报告、上下文和恢复信息。</p>
+        <p>这会创建 <code>.wildarrange/</code>，里面存任务、账本、报告、上下文和恢复信息。</p>
         <pre><code>npx @alivewavelab/wildarrange@latest init</code></pre>
       </div>
       <div class="card">
@@ -145,7 +145,7 @@
 
     <h2>二、新开 Codex 会话怎么用</h2>
     <div class="flow">
-      <div class="step"><span class="tag ok">1</span><h3>打开同一项目</h3><p>新会话必须在同一个 workspace，否则读不到 <code>.helix/</code> 状态。</p></div>
+      <div class="step"><span class="tag ok">1</span><h3>打开同一项目</h3><p>新会话必须在同一个 workspace，否则读不到 <code>.wildarrange/</code> 状态。</p></div>
       <div class="step"><span class="tag ok">2</span><h3>先让它恢复</h3><p>第一句话建议让 Codex 读取 WildArrange 状态。</p></div>
       <div class="step"><span class="tag ok">3</span><h3>先计划</h3><p>不要直接说“做完”。让它先路由、拆任务、写验收标准。</p></div>
       <div class="step"><span class="tag ok">4</span><h3>再执行</h3><p>执行时必须有 <code>writable_paths</code> 和 <code>verify_commands</code>。</p></div>
@@ -157,9 +157,9 @@
     <pre><code>请先读取本项目 WildArrange 状态，执行 resume/status，确认当前计划、下一步任务、失败项和未关闭的并行 Agent 结果。不要直接改代码。</code></pre>
 
     <h3>如果 Codex 没自动读状态</h3>
-    <pre><code>node ./bin/helix.mjs resume
-node ./bin/helix.mjs status
-node ./bin/helix.mjs continuation check</code></pre>
+    <pre><code>node ./bin/wildarrange.mjs resume
+node ./bin/wildarrange.mjs status
+node ./bin/wildarrange.mjs continuation check</code></pre>
 
     <h2>三、怎么激发不同 Agent</h2>
     <p>WildArrange 的核心不是让用户记 Agent 名字，而是让用户说清阶段和目标。路由会决定该加载哪些 Agent / Skill。你可以用下面这些说法提高命中率。</p>
@@ -214,22 +214,22 @@ node ./bin/helix.mjs continuation check</code></pre>
         <span class="tag p1">计划</span>
         <h3>先把任务变成计划</h3>
         <p>一切治理都围绕计划文件和任务状态。没有计划，后面 gate 很难判断完成。</p>
-        <pre><code>node ./bin/helix.mjs route --text "做一个网页版提醒事项 App"
-node ./bin/helix.mjs plan --from plan.json</code></pre>
+        <pre><code>node ./bin/wildarrange.mjs route --text "做一个网页版提醒事项 App"
+node ./bin/wildarrange.mjs plan --from plan.json</code></pre>
       </div>
       <div class="card">
         <span class="tag p1">执行</span>
         <h3>跑下一个任务</h3>
         <p>让 WildArrange 执行 pending 任务，自动进入 verifier/scope/review/checkpoint。</p>
-        <pre><code>node ./bin/helix.mjs run
-node ./bin/helix.mjs status</code></pre>
+        <pre><code>node ./bin/wildarrange.mjs run
+node ./bin/wildarrange.mjs status</code></pre>
       </div>
       <div class="card">
         <span class="tag p1">总结</span>
         <h3>完成后生成恢复摘要</h3>
         <p>便于新会话、误关窗口、换 Agent 后继续。</p>
-        <pre><code>node ./bin/helix.mjs summary
-node ./bin/helix.mjs resume</code></pre>
+        <pre><code>node ./bin/wildarrange.mjs summary
+node ./bin/wildarrange.mjs resume</code></pre>
       </div>
     </div>
 
@@ -239,12 +239,12 @@ node ./bin/helix.mjs resume</code></pre>
         <tr><th>检查项</th><th>命令</th><th>你要看什么</th></tr>
       </thead>
       <tbody>
-        <tr><td>当前整体状态</td><td><code>node ./bin/helix.mjs status</code></td><td>是否有 pending / failed / review_blocked；下一步是什么。</td></tr>
-        <tr><td>恢复上下文</td><td><code>node ./bin/helix.mjs resume</code></td><td>新会话要读到计划、失败、下一步、最近结论。</td></tr>
-        <tr><td>路由是否正确</td><td><code>node ./bin/helix.mjs route --text "..."</code></td><td>route、category、primaryAgent、skills 是否符合直觉。</td></tr>
-        <tr><td>Skill 是否加载对</td><td><code>node ./bin/helix.mjs skills match --text "..." --stage plan</code></td><td>matched 里的 skill 和 reasons 是否合理。</td></tr>
-        <tr><td>注入点是否正确</td><td><code>node ./bin/helix.mjs injection show --point before_review --agent BaiZe --task T001</code></td><td>tools、markdown、skills 是否加载完整。</td></tr>
-        <tr><td>任务为什么没完成</td><td><code>node ./bin/helix.mjs task get --task T001</code></td><td>last_failure、verifyResult、scopeResult、reviewResult。</td></tr>
+        <tr><td>当前整体状态</td><td><code>node ./bin/wildarrange.mjs status</code></td><td>是否有 pending / failed / review_blocked；下一步是什么。</td></tr>
+        <tr><td>恢复上下文</td><td><code>node ./bin/wildarrange.mjs resume</code></td><td>新会话要读到计划、失败、下一步、最近结论。</td></tr>
+        <tr><td>路由是否正确</td><td><code>node ./bin/wildarrange.mjs route --text "..."</code></td><td>route、category、primaryAgent、skills 是否符合直觉。</td></tr>
+        <tr><td>Skill 是否加载对</td><td><code>node ./bin/wildarrange.mjs skills match --text "..." --stage plan</code></td><td>matched 里的 skill 和 reasons 是否合理。</td></tr>
+        <tr><td>注入点是否正确</td><td><code>node ./bin/wildarrange.mjs injection show --point before_review --agent BaiZe --task T001</code></td><td>tools、markdown、skills 是否加载完整。</td></tr>
+        <tr><td>任务为什么没完成</td><td><code>node ./bin/wildarrange.mjs task get --task T001</code></td><td>last_failure、verifyResult、scopeResult、reviewResult。</td></tr>
       </tbody>
     </table>
 
@@ -253,32 +253,32 @@ node ./bin/helix.mjs resume</code></pre>
       <div class="card warn">
         <h3>路由不准</h3>
         <p>先不要改代码。让 Agent 输出 route 和 skill matcher 证据。</p>
-        <pre><code>node ./bin/helix.mjs route --text "你的需求"
-node ./bin/helix.mjs skills match --text "你的需求" --stage plan</code></pre>
+        <pre><code>node ./bin/wildarrange.mjs route --text "你的需求"
+node ./bin/wildarrange.mjs skills match --text "你的需求" --stage plan</code></pre>
         <p>如果经常不准，再让 ArchivistRouter 生成关键词建议，审核后接受。</p>
       </div>
       <div class="card warn">
         <h3>任务卡住</h3>
         <p>不要让 Agent 猜。直接看任务对象和失败报告。</p>
-        <pre><code>node ./bin/helix.mjs task get --task T001
-node ./bin/helix.mjs changes list
-node ./bin/helix.mjs status</code></pre>
+        <pre><code>node ./bin/wildarrange.mjs task get --task T001
+node ./bin/wildarrange.mjs changes list
+node ./bin/wildarrange.mjs status</code></pre>
       </div>
       <div class="card warn">
         <h3>验收不过</h3>
         <p>验收不过通常是 verifier、scope、review 或 successCriteria 缺证据。不要清空 verify_commands。</p>
-        <pre><code>node ./bin/helix.mjs node verify --task T001
-node ./bin/helix.mjs node scope --task T001
-node ./bin/helix.mjs node review --task T001</code></pre>
+        <pre><code>node ./bin/wildarrange.mjs node verify --task T001
+node ./bin/wildarrange.mjs node scope --task T001
+node ./bin/wildarrange.mjs node review --task T001</code></pre>
       </div>
     </div>
 
     <h2>七、并行 Agent 怎么试</h2>
     <p>第一版并行 Agent 适合“计划已拆好，多个 worker 可分头做”的场景。不要用它处理还没澄清的大需求。</p>
-    <pre><code>node ./bin/helix.mjs parallel run --max-agents 2 --task T001,T002 --agent ZhuRong --command "..."
-node ./bin/helix.mjs parallel status --run &lt;runId&gt;
-node ./bin/helix.mjs parallel admit --run &lt;runId&gt; --task T001
-node ./bin/helix.mjs parallel close --run &lt;runId&gt; --task T001 --reason user_accepted</code></pre>
+    <pre><code>node ./bin/wildarrange.mjs parallel run --max-agents 2 --task T001,T002 --agent ZhuRong --command "..."
+node ./bin/wildarrange.mjs parallel status --run &lt;runId&gt;
+node ./bin/wildarrange.mjs parallel admit --run &lt;runId&gt; --task T001
+node ./bin/wildarrange.mjs parallel close --run &lt;runId&gt; --task T001 --reason user_accepted</code></pre>
     <div class="note">
       <p><strong>关键原则：</strong>子 Agent 的成果只是候选成果。只有 <code>parallel admit</code> 通过 writable_paths、verifier、scope、review、acceptance proof 和 checkpoint 后，才算进入主线。</p>
     </div>
@@ -295,7 +295,7 @@ node ./bin/helix.mjs parallel close --run &lt;runId&gt; --task T001 --reason use
     </ol>
 
     <h3>给新会话的完整提示词</h3>
-    <pre><code>这是一个已安装 WildArrange 的项目。请先执行 resume/status，读取 .helix 的当前状态。
+    <pre><code>这是一个已安装 WildArrange 的项目。请先执行 resume/status，读取 .wildarrange 的当前状态。
 我要做一个网页版提醒事项 App。先不要写代码。
 请先路由需求、匹配 skill、拆 plan.json。
 每个任务必须包含 writable_paths、verify_commands、successCriteria。

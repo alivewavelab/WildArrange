@@ -1,5 +1,5 @@
 /**
- * helix timeline — 统一时间线投影。
+ * wildarrange timeline — 统一时间线投影。
  *
  * 把三个日志源合并成一条倒序时间线，回答"这个仓库最近发生了什么"：
  * - ledger（hash 链，只取通过校验的条目）：权威事件；
@@ -88,7 +88,7 @@ export async function projectTimeline(rootDir, { limit = 50, taskId, source, for
   filtered.sort((a, b) => b.ts.localeCompare(a.ts) || KNOWN_SOURCES.indexOf(a.source) - KNOWN_SOURCES.indexOf(b.source));
   const limited = Number.isInteger(limit) && limit > 0 ? filtered.slice(0, limit) : filtered;
   const projection = {
-    kind: "helix_timeline",
+    kind: "wildarrange_timeline",
     total: filtered.length,
     shown: limited.length,
     sources: {

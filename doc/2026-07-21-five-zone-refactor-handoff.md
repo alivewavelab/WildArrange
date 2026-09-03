@@ -6,26 +6,26 @@
 
 ## 一句话总结
 
-把 WildArrange 从"一层 `src/helix-*.mjs` 平铺 + 互相乱 import"的结构，重构成 **interface → orchestration → ai / capabilities → infra** 五个单向依赖区，新增了一个能力网关（`capabilities/gateway.mjs`）和一条共享交付流水线（`orchestration/delivery-pipeline.mjs`），并用自动化测试把依赖方向锁死，同时保证所有旧代码路径、CLI 命令、`.helix/` 数据格式零破坏。
+把 WildArrange 从"一层 `src/wildarrange-*.mjs` 平铺 + 互相乱 import"的结构，重构成 **interface → orchestration → ai / capabilities → infra** 五个单向依赖区，新增了一个能力网关（`capabilities/gateway.mjs`）和一条共享交付流水线（`orchestration/delivery-pipeline.mjs`），并用自动化测试把依赖方向锁死，同时保证所有旧代码路径、CLI 命令、`.wildarrange/` 数据格式零破坏。
 
 ## 为什么要做这次重构
 
 用户是不改代码的项目维护者，核心诉求是"以后改一个东西，不用来回猜它牵动了什么"。重构前的主要问题：
 
-- `src/helix-*.mjs` 30 多个文件全部平铺在 `src/` 下，靠文件名猜职责，互相 import 没有方向约束。
+- `src/wildarrange-*.mjs` 30 多个文件全部平铺在 `src/` 下，靠文件名猜职责，互相 import 没有方向约束。
 - `runNextTask`（线性主流程）和并行子 Agent 的 admission 各自手写一遍"verify → scope → review → acceptance-proof → checkpoint"的门控序列，改一次门控要改两个地方。
-- 想加一种新的检查（gate）时，不知道该往哪个文件塞，容易塞进已经很大的 `helix-gates.mjs`。
+- 想加一种新的检查（gate）时，不知道该往哪个文件塞，容易塞进已经很大的 `wildarrange-gates.mjs`。
 
 ## 六个 Phase 做了什么
 
 | Phase | 内容 | 对应 commit |
 | --- | --- | --- |
-| 0 | 基线修复：修 `bin/helix.mjs` 重复导入、加 CLI smoke test、commit 保护现场 | `5677f0c` |
+| 0 | 基线修复：修 `bin/wildarrange.mjs` 重复导入、加 CLI smoke test、commit 保护现场 | `5677f0c` |
 | 1 | 建五区目录骨架 + `test/dependency-boundary.test.mjs` 边界测试 + `capabilities/gateway.mjs`、`orchestration/delivery-pipeline.mjs` 首版 | `579dbdd` |
-| 2 | 把 `helix-gates.mjs` 物理拆成独立能力文件（verify / scope-guard / checkpoint / command-runner），接入 gateway | `55d9684` |
+| 2 | 把 `wildarrange-gates.mjs` 物理拆成独立能力文件（verify / scope-guard / checkpoint / command-runner），接入 gateway | `55d9684` |
 | 3 | 线性主流程 `runNextTask` 改成调用共享的 `delivery-pipeline`，不再手写门控序列 | `c0b089b` |
 | 4 | AI 层（hooks、routing、injection、skill-matcher）从编排状态里独立出来 | 并入 Phase 5 的搬迁提交 |
-| 5 | 把全部 30+ 个 `src/helix-*.mjs` 实体搬进五区目录，逐一修好 import，激活边界测试，旧路径转成声明式 re-export 兼容 shim | `98a2f7b` → `a3124db` → `78f480d` → `bf2578c` → `27ee1b6` |
+| 5 | 把全部 30+ 个 `src/wildarrange-*.mjs` 实体搬进五区目录，逐一修好 import，激活边界测试，旧路径转成声明式 re-export 兼容 shim | `98a2f7b` → `a3124db` → `78f480d` → `bf2578c` → `27ee1b6` |
 | 6 | 收尾：`AGENTS.md` / `CLAUDE.md` / `doc/project-architecture.md` 目录约定同步成新路径 | `27ee1b6` |
 
 ## 最终目录结构（五区，依赖只能往下走）
@@ -51,43 +51,43 @@ infra/           foundation、ledger、security、command-runner/safety、git、
    - **门控证据绑定执行轮**：每次新的 worker 运行（线性/单步 execute/并行 admission）都会清空 `last_verify_result` 等旧字段；`collectGateEvidenceFromTask()` 只认证据链上**位于最后一次 worker 记录之后**的门控证据（证据数组只追加，顺序即执行顺序）。上一轮全绿但 checkpoint 失败后，新一轮 execute 产出的工件必须重新过全部门，不能拿旧轮证据直接 checkpoint。
    - 配套的持久化保障：`persistTaskState()` 按"派生文件（tasks.md、plan 镜像）先写，权威 `tasks.json` 最后写"的顺序执行，`tasks.json` 是唯一读取源，充当提交点——派生写失败时任务状态不会半提交为 completed。
    - **完成事务顺序**（第三轮交叉走查 P0）：三条完成路径（线性 `task_verified`、单步 `node_checkpoint_completed`、并行 `parallel_agent_admission_completed`）统一为**完成 ledger 事件先写、权威 `tasks.json` 最后落盘**；并行的子 Agent `released` 生命周期更新也排在 ledger 与落盘之后。ledger 断供时任务保持可重跑状态，绝不会出现"状态已 completed / 子 Agent 已 released，但完成账目不存在"；反向的"账目多一条、状态未前进"由追加式账本天然容忍（重跑会补一条新事件）。
-   - **工作区互斥**（第七轮 P0）：整个系统只有**一把全局任务状态锁**（`.helix/team/tasks.lock`），线性 `helix run` 整轮（worker + 全部门控）持锁，并行 admission 的 claim 是一次持锁，**文件应用 + 门控 + 提交/回滚**是另一次**连续持锁**的临界区。所以两个 admission（无论同任务还是不同任务、writable_paths 是否重叠）、admission 与线性 run，都不可能把各自的文件写入插进对方的门控中间——"任务 A 的 verify 读到的是任务 B 刚写的内容"这类交错不再可能。admission 事务本体也拆到了独立模块 `orchestration/admission.mjs`（第七轮 P2，`parallel-runtime.mjs` 曾达 1144 行超出 1000 行上限）。
+   - **工作区互斥**（第七轮 P0）：整个系统只有**一把全局任务状态锁**（`.wildarrange/team/tasks.lock`），线性 `wildarrange run` 整轮（worker + 全部门控）持锁，并行 admission 的 claim 是一次持锁，**文件应用 + 门控 + 提交/回滚**是另一次**连续持锁**的临界区。所以两个 admission（无论同任务还是不同任务、writable_paths 是否重叠）、admission 与线性 run，都不可能把各自的文件写入插进对方的门控中间——"任务 A 的 verify 读到的是任务 B 刚写的内容"这类交错不再可能。admission 事务本体也拆到了独立模块 `orchestration/admission.mjs`（第七轮 P2，`parallel-runtime.mjs` 曾达 1144 行超出 1000 行上限）。
    - **恢复协议**（第四、五、六、七轮交叉走查逐步补齐；下面写清各场景的准确保障，不做笼统的"任何一步都幂等"承诺）：
-     - **卡在 `verifying`**（ledger 完成事件已写、权威 `tasks.json` 未落盘）：`helix run` 发现没有 pending 任务但有 `verifying` 任务时，不再报 `blocked`，而是自动用单步 checkpoint 节点的裁决逻辑接管——本轮门控证据全绿就幂等补完（checkpoint/账目可重写重追加），证据缺失或过期就退回 `pending` 重新跑全流程；`in_progress` 任务刻意不碰（可能正被认领执行中）。
+     - **卡在 `verifying`**（ledger 完成事件已写、权威 `tasks.json` 未落盘）：`wildarrange run` 发现没有 pending 任务但有 `verifying` 任务时，不再报 `blocked`，而是自动用单步 checkpoint 节点的裁决逻辑接管——本轮门控证据全绿就幂等补完（checkpoint/账目可重写重追加），证据缺失或过期就退回 `pending` 重新跑全流程；`in_progress` 任务刻意不碰（可能正被认领执行中）。
      - **并行 admission 是 claim 先行、且 claim 有持久化的所有权**（第五、六轮 P0）：状态裁决、writable_paths 预检、任务 claim、`parallel_agent_admission_started` 账目，全部在**同一把任务状态锁内、写任何工作区文件之前**完成。claim 本身持久化在任务上（`admission_claim = { runId, phase }`）：另一个 run 在 claim 存续期间尝试 admit 同一任务会被直接拒绝（否则两个 run 可以同时完成同一任务——同一张产权证过户给两个人），`finalizeAdmission` 提交前也会核验当前持有者就是这个 run。文件应用失败后先尝试回滚；只有回滚成功才释放 claim 并把任务退回 `pending`。
      - **回滚先行、成功后才释放**（第七轮 P0，2026-07-22 补强）：门控不通过时，工作区回滚在**释放 claim 之前、且仍在同一次持锁内**执行。原来的顺序（先把任务改回 pending、后回滚文件）留有一个窗口：后继 run 在窗口里认领并完成任务，旧 run 迟到的回滚再把已完成任务的文件覆盖回旧值——"任务 completed、文件却是旧内容"。若回滚本身失败，任务保持 `verifying`，claim 与 rollback plan 都由原 run 继续持有，返回 `recovery_required`；修复文件系统后由同一 run 续跑，后继 run 不能进入脏工作区。
      - **原始内容先持久化、再动第一笔文件**（第七轮 P0，2026-07-22 补强）：应用文件之前，先把各文件的 admission 前原文（pre-image）写到 `agent-runs/<runId>/<taskId>.rollback-plan.json`。若进程在写文件中途死掉，恢复时只认这份落盘的 pre-image，绝不拿"已被子 Agent 改过的内容"重新生成并覆盖它。该文件只在成功提交或成功回滚后清理；回滚失败时保留，作为恢复依据。
      - **锁不会永久残留**（第七轮 P1）：锁文件由死进程持有时立即视为陈旧（不再等固定 300 秒）；空/无法解析的锁（进程死在"建文件"和"写属主"两步之间）按 mtime 超过短宽限期判陈旧，不再永远阻塞。崩溃后"用同一 run 重新 admit"不会先吃一串锁超时。
      - **finalize 阶段崩溃保留现场、由同一 run 续跑**（第六轮 P0）：文件落盘后 claim 的 phase 推进为 `finalizing` 并持久化；此后任何一步（review 报告、完成账目、wisdom、digest、权威落盘）崩溃都**不回滚工作区**（工件可能是好的、完成账目可能已部分写入），任务留在 `verifying`、claim 留在 `finalizing`，这正是可续跑状态——用同一 run 重新 admit 会跳过文件应用、重跑全部门控后正常提交（账目记 `parallel_agent_admission_reclaimed`）。不会再出现"重试因 patch 已存在而失败、反向回滚误删好工件"。
-     - **`verifying` 不再混淆"执行中"与"待恢复"**（第六轮 P1）：`helix run` 的自动裁决和单步 `node checkpoint` 都会先看任务有没有 `admission_claim`——有 claim 的 verifying 任务属于进行中（或可由原 run 续跑）的并行 admission，两者都拒绝接管并给出"用同一 run 重新 admit"的提示；只有**无 claim** 的 verifying 任务才按被打断的线性完成事务裁决。
+     - **`verifying` 不再混淆"执行中"与"待恢复"**（第六轮 P1）：`wildarrange run` 的自动裁决和单步 `node checkpoint` 都会先看任务有没有 `admission_claim`——有 claim 的 verifying 任务属于进行中（或可由原 run 续跑）的并行 admission，两者都拒绝接管并给出"用同一 run 重新 admit"的提示；只有**无 claim** 的 verifying 任务才按被打断的线性完成事务裁决。
      - **并行任务已 completed、子 Agent 生命周期未 released**（释放写入失败）：重新 `parallel admit` 同一 run 会核验**链上是否存在该 run 的 completed 完成事件**——证据链上的 admission 记录不算数，因为失败后回滚的 run 也会留下同样的记录（第五轮 P1）。核验通过才只补做生命周期释放、不重新应用任何文件（返回 `resumed: true`）；任务是被别的途径完成的一律硬拒绝，且拒绝发生在碰任何文件之前。
      - **完成必备产物 vs 后置便利产物**（第五轮 P1）：wisdom 与 memory digest 写在完成事务**内部**（完成账目之后、权威落盘之前），写失败任务停在 `verifying`，恢复裁决会连它们一起重做，completed 任务不可能永久缺失它们；快照与 workflow summary 是提交后的便利产物，失败不回退完成状态，但会记 `completion_side_effect_failed` 账目并出现在返回值的 `sideEffectWarnings` 里，doctor 会晒出来。
      - **并行 run 不会失踪**（第五轮 P1）：run 在任何 Agent 启动前就预注册进 `index.json` 并写入 `running` 状态的批次 JSON；每次读 index 还会扫描 `agent-runs/` 目录，把有 result.json 却不在 index 里的孤儿 run 认领回来（记 `parallel_run_index_reconciled` 账目），落盘的结果不会对 `parallel status` 永久不可见。
 3. **依赖边界用测试锁死，不是靠文档口头约定**：`test/dependency-boundary.test.mjs` 会扫描 `src/` 下所有 `.mjs` 文件的 import 语句，按五区分类，凡是违反允许依赖表的都会让 `npm test` 直接失败。扫描器经过两轮加固（第四、五轮交叉走查 P1）：词法状态机产出**掩码视图**——注释置空、字符串/模板/正则字面量的内容替换成哨兵字节（分隔符保留、`${}` 插值仍是代码）——import 语法只在掩码视图上匹配，所以字符串里的注释标记骗不了它（假阴性），文档字符串里写的 import 语句也不会被当成真实依赖（假阳性）；specifier 文本从原始源码切出并做转义解码，`"\u002e./ai/x.mjs"` 会被识别为它真正指向的相对路径；另有一个子测试把 `src/` 内允许的 specifier 限定为相对路径、裸包名和 `node:` 内建——`file:`/`data:` URL 和绝对路径（能加载真实模块但对静态扫描不透明）一律拒绝。对抗样例都固化成了回归子测试。边界规则在复查后收紧为：
    - `ai → orchestration`（只读，hooks/context 需要读任务板和 attentionReport）和 `ai → capabilities`（仅经 gateway）是允许项；反方向永久禁止。
    - `orchestration → ai` 收紧为**逐条钉死的白名单**，目前只有一条边（`linear-runtime.mjs → ai/routing.mjs` 的 `routeRequest`，工作流 route 节点需要语义路由）；新增任何一条都得改测试里的白名单，是显式决策。确定性路由表读取（`loadRoutesConfig`/`resolveRouteDecision`）已下沉到 `infra/route-table.mjs`，`plan-state`/`task-board` 不再碰 `ai/`。
-   - 五区文件**禁止 import 任何旧 `helix-*.mjs` shim**（shim 转发到分区文件，若放行等于给了绕过分区规则的洗白通道）；shim 只服务外部旧调用方。
+   - 五区文件**禁止 import 任何旧 `wildarrange-*.mjs` shim**（shim 转发到分区文件，若放行等于给了绕过分区规则的洗白通道）；shim 只服务外部旧调用方。
    - 另有一个全图**模块级循环依赖检测**子测试，防止 `ai ↔ orchestration` 双向放行下悄悄长出真环。
 
 ## 兼容策略（这次重构承诺"零破坏"）
 
 | 不变的东西 | 怎么保证的 |
 | --- | --- |
-| 所有旧的 `import ... from "./helix-xxx.mjs"` | 每个旧路径都留了一个 `@deprecated` 的**声明式 re-export shim**（不含任何业务逻辑）。多数是一行 `export * from "./<zone>/<file>.mjs"`；个别旧模块（如 `helix-gates.mjs`、`helix-review.mjs`）的实现被拆进了多个分区文件，shim 相应是多行聚合/具名 re-export，这是允许的——约束是"只准声明式转发、不准写逻辑"，不是行数 |
-| `src/helix-core.mjs` 这个兼容总入口 | 保留在原路径，继续汇总导出所有函数供 `bin/helix.mjs` 和外部旧调用方使用（五区内部文件已全部直连分区实现，不再经它中转） |
-| CLI 命令和参数 | `bin/helix.mjs` 的子命令、参数语义完全没变 |
-| `.helix/` 下的数据格式 | JSON schema、ledger 格式、snapshot 格式零改动 |
+| 所有旧的 `import ... from "./wildarrange-xxx.mjs"` | 每个旧路径都留了一个 `@deprecated` 的**声明式 re-export shim**（不含任何业务逻辑）。多数是一行 `export * from "./<zone>/<file>.mjs"`；个别旧模块（如 `wildarrange-gates.mjs`、`wildarrange-review.mjs`）的实现被拆进了多个分区文件，shim 相应是多行聚合/具名 re-export，这是允许的——约束是"只准声明式转发、不准写逻辑"，不是行数 |
+| `src/wildarrange-core.mjs` 这个兼容总入口 | 保留在原路径，继续汇总导出所有函数供 `bin/wildarrange.mjs` 和外部旧调用方使用（五区内部文件已全部直连分区实现，不再经它中转） |
+| CLI 命令和参数 | `bin/wildarrange.mjs` 的子命令、参数语义完全没变 |
+| `.wildarrange/` 下的数据格式 | JSON schema、ledger 格式、snapshot 格式零改动 |
 | 全部既有测试 | 重构起点 109 个测试全程保持绿（七轮交叉走查修复后新增至 142）；重构过程每个 Phase 结束都跑一次 `npm test` |
 | npm 包内容 | `npm pack --dry-run` 验证过，正常打包（文件数随修复微增，以最新一次输出为准） |
 
 ## 验证结果（最终状态）
 
 - `npm test`：**全绿**（七轮交叉走查修复后 142 个测试，具体数字以 `npm test` 输出为准）。
-- `npm pack --dry-run --cache /private/tmp/helix-npm-cache`：正常出包。
+- `npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache`：正常出包。
 - 五区下每个 `.mjs` 文件单独 `import()` 都能独立加载，没有循环依赖、没有断链。
-- `test/dependency-boundary.test.mjs` 十个子测试全部通过：①五区依赖方向合法 ②`orchestration`/`ai` 只能经 `gateway.mjs` 调 `capabilities` ③`capabilities` 不依赖 `ai` ④`orchestration → ai` 限定在钉死的白名单内 ⑤动态 `import()` 的**整个参数必须是单一字符串字面量**（`import(变量)`、模板字符串、`import("…" + "")` 拼接等对静态扫描不可见的写法一律拦截）⑥specifier 只允许相对路径/裸包名/`node:` 内建（`file:`/`data:`/绝对路径拒绝）⑦掩码扫描不被字符串里的注释标记欺骗（含对抗样例回归）⑧字符串里的 import 文本不算依赖、转义 specifier 会被解码（含对抗样例回归）⑨**旧 shim 与 `helix-core.mjs` 只准声明式 re-export**——shim 文件里出现任何可执行业务逻辑都会让测试失败，堵住"legacy 文件不受分区规则约束"这个洗白通道（第六轮 P2）⑩全 `src/` 无模块级 import 环。
-- `test/checkpoint-integrity.test.mjs`：29 个故障注入用例，覆盖 checkpoint 写失败（流水线/线性/单步/并行四条路径）、验收证明能力抛异常、**跨执行轮证据复用**（旧轮门控证据不得为新轮工件作证）、**持久化提交点**（派生文件写失败时权威 `tasks.json` 不得前进）、**完成账目断供**（ledger 只读时线性/单步/并行三条路径都不得产生 completed/released，修复后可正常续跑）、**中断事务的可见与自愈**（doctor 能报出孤立完成事件与派生分叉，`run` 能自动裁决卡在 `verifying` 的任务，且证据不全时只会退回 pending 不会盖章）、**并行 admission 恢复语义**（半应用失败回滚工作区并释放 claim、同一 run 修复后可重 admit；生命周期写失败后重 admit 只补释放、不重写文件；失败过的 run 不能假冒 resume；被别的途径完成的任务在碰任何文件之前就被拒绝）、**admission 所有权**（两个 run 并发 admit 同一任务只会产生一个完成者、账本上只有一条完成事件；同一 run 重复调用以事务开始时的权威 phase 为准，过期调用不能降级已经 released 的生命周期；finalize 崩溃后现场保留、他 run/`helix run`/单步 checkpoint 都无法劫持 claim、原 run 重新 admit 跳过文件应用续跑到完成；真实回滚失败时任务与 rollback plan 保持由原 run 占有，修复后由同一 run 完成回滚再释放；rollback plan 丢失时失败关闭且上下两层均拒绝其他 run 劫持）、**完成产物分级**（wisdom 写失败任务停在 verifying 可自愈；提交后快照失败不回退完成但留下账目痕迹）、**孤儿 run 认领**（index 丢失后 `parallel status` 能重新发现并照常 admit）、**工作区互斥**（两个不同任务写重叠路径并发 admit、线性 run 与 admission 并发写同一文件，各自的 verify 用"读两次+中间停顿"检测门控中途文件被改——互斥下双双通过；失败 admission 的回滚永远不可能覆盖后继完成者的文件）、**应用期崩溃的原文保全**（claim 停在 `applying`、文件已被改、落盘的 pre-image 计划在——续跑后门控拒绝时恢复出的是 admission 前的原文，不是子 Agent 的改动）、**锁自愈**（空锁按 mtime 宽限期判陈旧、死进程锁立即判陈旧，均不再阻塞运行时）。
-- `helix doctor` 的完成审计除了"completed 但缺完成证据"，还反向检查**孤立完成事件**（任务未 completed、账本却已有完成事件——即被打断的完成事务，报 warn 并给出 `helix run` 恢复指引）、**完成后置副产物失败**（`completion_side_effect_failed` 账目逐条晒出）和 **canonical/派生分叉**（plan 镜像、`tasks.md` 的任务状态与权威 `tasks.json` 不一致时逐条报出）。
+- `test/dependency-boundary.test.mjs` 十个子测试全部通过：①五区依赖方向合法 ②`orchestration`/`ai` 只能经 `gateway.mjs` 调 `capabilities` ③`capabilities` 不依赖 `ai` ④`orchestration → ai` 限定在钉死的白名单内 ⑤动态 `import()` 的**整个参数必须是单一字符串字面量**（`import(变量)`、模板字符串、`import("…" + "")` 拼接等对静态扫描不可见的写法一律拦截）⑥specifier 只允许相对路径/裸包名/`node:` 内建（`file:`/`data:`/绝对路径拒绝）⑦掩码扫描不被字符串里的注释标记欺骗（含对抗样例回归）⑧字符串里的 import 文本不算依赖、转义 specifier 会被解码（含对抗样例回归）⑨**旧 shim 与 `wildarrange-core.mjs` 只准声明式 re-export**——shim 文件里出现任何可执行业务逻辑都会让测试失败，堵住"legacy 文件不受分区规则约束"这个洗白通道（第六轮 P2）⑩全 `src/` 无模块级 import 环。
+- `test/checkpoint-integrity.test.mjs`：29 个故障注入用例，覆盖 checkpoint 写失败（流水线/线性/单步/并行四条路径）、验收证明能力抛异常、**跨执行轮证据复用**（旧轮门控证据不得为新轮工件作证）、**持久化提交点**（派生文件写失败时权威 `tasks.json` 不得前进）、**完成账目断供**（ledger 只读时线性/单步/并行三条路径都不得产生 completed/released，修复后可正常续跑）、**中断事务的可见与自愈**（doctor 能报出孤立完成事件与派生分叉，`run` 能自动裁决卡在 `verifying` 的任务，且证据不全时只会退回 pending 不会盖章）、**并行 admission 恢复语义**（半应用失败回滚工作区并释放 claim、同一 run 修复后可重 admit；生命周期写失败后重 admit 只补释放、不重写文件；失败过的 run 不能假冒 resume；被别的途径完成的任务在碰任何文件之前就被拒绝）、**admission 所有权**（两个 run 并发 admit 同一任务只会产生一个完成者、账本上只有一条完成事件；同一 run 重复调用以事务开始时的权威 phase 为准，过期调用不能降级已经 released 的生命周期；finalize 崩溃后现场保留、他 run/`wildarrange run`/单步 checkpoint 都无法劫持 claim、原 run 重新 admit 跳过文件应用续跑到完成；真实回滚失败时任务与 rollback plan 保持由原 run 占有，修复后由同一 run 完成回滚再释放；rollback plan 丢失时失败关闭且上下两层均拒绝其他 run 劫持）、**完成产物分级**（wisdom 写失败任务停在 verifying 可自愈；提交后快照失败不回退完成但留下账目痕迹）、**孤儿 run 认领**（index 丢失后 `parallel status` 能重新发现并照常 admit）、**工作区互斥**（两个不同任务写重叠路径并发 admit、线性 run 与 admission 并发写同一文件，各自的 verify 用"读两次+中间停顿"检测门控中途文件被改——互斥下双双通过；失败 admission 的回滚永远不可能覆盖后继完成者的文件）、**应用期崩溃的原文保全**（claim 停在 `applying`、文件已被改、落盘的 pre-image 计划在——续跑后门控拒绝时恢复出的是 admission 前的原文，不是子 Agent 的改动）、**锁自愈**（空锁按 mtime 宽限期判陈旧、死进程锁立即判陈旧，均不再阻塞运行时）。
+- `wildarrange doctor` 的完成审计除了"completed 但缺完成证据"，还反向检查**孤立完成事件**（任务未 completed、账本却已有完成事件——即被打断的完成事务，报 warn 并给出 `wildarrange run` 恢复指引）、**完成后置副产物失败**（`completion_side_effect_failed` 账目逐条晒出）和 **canonical/派生分叉**（plan 镜像、`tasks.md` 的任务状态与权威 `tasks.json` 不一致时逐条报出）。
 
 ## 架构决策变更记录（对照原批准方案）
 
@@ -103,7 +103,7 @@ infra/           foundation、ledger、security、command-runner/safety、git、
 
 ## 已知遗留（下一个人接手时要知道的）
 
-1. **五区重构已在 `main`。** 不要再开「把 helix-* 搬进五区」的重复工作。
+1. **五区重构已在 `main`。** 不要再开「把 wildarrange-* 搬进五区」的重复工作。
 2. **2026-08-24 后续更新：兼容出口已删除。** 项目未形成稳定旧 API，CLI 与测试已改为直接引用五区真实 owner；`src/` 根目录由依赖门禁禁止运行时 `.mjs`。
 3. **中间有一次会话被中断**，产生了一个叫 `initial` 的过渡 commit（`bf2578c`），内容就是几个 `git mv`，命名不规范但内容没问题，如果做 `git log` 整理/squash 时可以留意。
 
@@ -123,7 +123,7 @@ infra/           foundation、ledger、security、command-runner/safety、git、
 
 ```bash
 npm test
-npm pack --dry-run --cache /private/tmp/helix-npm-cache
+npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache
 ```
 
 `npm test` 里包含 `test/dependency-boundary.test.mjs`，如果改动引入了反向依赖，这里会直接报错并列出具体是哪个文件 import 了不该 import 的东西。

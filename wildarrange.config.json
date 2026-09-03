@@ -96,7 +96,7 @@
     },
     "memory": {
       "backend": "structured-files",
-      "root": ".helix/memory",
+      "root": ".wildarrange/memory",
       "captureMode": "conclusions-only",
       "includeCodeBlocks": false,
       "maxRecentTurns": 10,
@@ -210,7 +210,7 @@
         "path": "README.md",
         "requiredPatterns": [
           "127\\.0\\.0\\.1",
-          "HELIX_DASHBOARD_TOKEN",
+          "WILDARRANGE_DASHBOARD_TOKEN",
           "governance audit"
         ]
       },
@@ -218,7 +218,7 @@
         "path": "README.en.md",
         "requiredPatterns": [
           "127\\.0\\.0\\.1",
-          "HELIX_DASHBOARD_TOKEN",
+          "WILDARRANGE_DASHBOARD_TOKEN",
           "governance audit"
         ]
       }
@@ -229,7 +229,7 @@
     ],
     "ignoredPaths": [
       ".git",
-      ".helix",
+      ".wildarrange",
       "node_modules",
       "coverage"
     ],
@@ -272,13 +272,13 @@
     "session_start": {
       "enabled": true,
       "tools": [
-        "helix_resume",
-        "helix_rules_collect",
-        "helix_context_build"
+        "wildarrange_resume",
+        "wildarrange_rules_collect",
+        "wildarrange_context_build"
       ],
       "markdown": [
-        ".helix/snapshots/context.md",
-        ".helix/rules/context.md"
+        ".wildarrange/snapshots/context.md",
+        ".wildarrange/rules/context.md"
       ],
       "skills": [
         "wildarrange-injection-runtime",
@@ -291,12 +291,12 @@
     "user_prompt_submit": {
       "enabled": true,
       "tools": [
-        "helix_route",
-        "helix_rules_collect"
+        "wildarrange_route",
+        "wildarrange_rules_collect"
       ],
       "markdown": [
-        ".helix/snapshots/context.md",
-        ".helix/rules/context.md"
+        ".wildarrange/snapshots/context.md",
+        ".wildarrange/rules/context.md"
       ],
       "skills": [
         "wildarrange-injection-runtime",
@@ -316,10 +316,10 @@
       "enabled": true,
       "tools": [
         "scope_guard",
-        "helix_rules_collect"
+        "wildarrange_rules_collect"
       ],
       "markdown": [
-        ".helix/rules/context.md"
+        ".wildarrange/rules/context.md"
       ],
       "skills": [
         "wildarrange-injection-runtime"
@@ -331,11 +331,11 @@
     "post_tool_use": {
       "enabled": true,
       "tools": [
-        "helix_rules_collect",
+        "wildarrange_rules_collect",
         "scope_guard"
       ],
       "markdown": [
-        ".helix/rules/context.md"
+        ".wildarrange/rules/context.md"
       ],
       "skills": [],
       "rules": {
@@ -345,12 +345,12 @@
     "post_compact": {
       "enabled": true,
       "tools": [
-        "helix_resume",
-        "helix_rules_collect"
+        "wildarrange_resume",
+        "wildarrange_rules_collect"
       ],
       "markdown": [
-        ".helix/snapshots/context.md",
-        ".helix/rules/context.md"
+        ".wildarrange/snapshots/context.md",
+        ".wildarrange/rules/context.md"
       ],
       "skills": [
         "wildarrange-injection-runtime"
@@ -362,13 +362,13 @@
     "before_execute": {
       "enabled": true,
       "tools": [
-        "helix_context_build",
-        "helix_node",
+        "wildarrange_context_build",
+        "wildarrange_node",
         "scope_guard"
       ],
       "markdown": [
-        ".helix/context-agents/Jiuwei-{taskId}.md",
-        ".helix/rules/context.md"
+        ".wildarrange/context-agents/Jiuwei-{taskId}.md",
+        ".wildarrange/rules/context.md"
       ],
       "skills": [
         "wildarrange-injection-runtime",
@@ -384,13 +384,13 @@
     "before_review": {
       "enabled": true,
       "tools": [
-        "helix_context_build",
-        "helix_evidence_record",
+        "wildarrange_context_build",
+        "wildarrange_evidence_record",
         "review_gate"
       ],
       "markdown": [
-        ".helix/context-agents/BaiZe-{taskId}.md",
-        ".helix/rules/context.md"
+        ".wildarrange/context-agents/BaiZe-{taskId}.md",
+        ".wildarrange/rules/context.md"
       ],
       "skills": [
         "wildarrange-injection-runtime",
@@ -407,13 +407,13 @@
       "enabled": true,
       "tools": [
         "repository_governance_audit",
-        "helix_rules_collect",
+        "wildarrange_rules_collect",
         "comment_check",
         "config_verify"
       ],
       "markdown": [
-        ".helix/reports/governance/latest.md",
-        ".helix/rules/context.md"
+        ".wildarrange/reports/governance/latest.md",
+        ".wildarrange/rules/context.md"
       ],
       "skills": [
         "wildarrange-injection-runtime",
@@ -429,13 +429,13 @@
     "before_checkpoint": {
       "enabled": true,
       "tools": [
-        "helix_evidence_record",
+        "wildarrange_evidence_record",
         "review_gate",
-        "helix_summary"
+        "wildarrange_summary"
       ],
       "markdown": [
-        ".helix/reports/reviews/{planId}/{taskId}.md",
-        ".helix/rules/context.md"
+        ".wildarrange/reports/reviews/{planId}/{taskId}.md",
+        ".wildarrange/rules/context.md"
       ],
       "skills": [
         "wildarrange-injection-runtime",
@@ -449,12 +449,12 @@
     "stop": {
       "enabled": true,
       "tools": [
-        "helix_continuation_check",
-        "helix_resume"
+        "wildarrange_continuation_check",
+        "wildarrange_resume"
       ],
       "markdown": [
-        ".helix/sessions/continuation.md",
-        ".helix/snapshots/context.md"
+        ".wildarrange/sessions/continuation.md",
+        ".wildarrange/snapshots/context.md"
       ],
       "skills": [
         "wildarrange-injection-runtime",

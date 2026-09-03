@@ -13,8 +13,8 @@
   },
   "type": "module",
   "bin": {
-    "helix": "bin/helix.mjs",
-    "wildarrange": "bin/helix.mjs"
+    "wildarrange": "bin/wildarrange.mjs",
+    "wildarrange": "bin/wildarrange.mjs"
   },
   "files": [
     "AGENTS.md",
@@ -37,7 +37,7 @@
     "docs/product/architecture-overview.html",
     "tooling/arch-module-graph/",
     "examples/",
-    "helix.config.example.json",
+    "wildarrange.config.example.json",
     "CLAUDE.md"
   ],
   "engines": {
@@ -46,6 +46,6 @@
   "scripts": {
     "check:arch": "node tooling/arch-module-graph/validate-module-file-map.mjs",
     "test": "node tooling/run-tests.mjs",
-    "helix": "node ./bin/helix.mjs"
+    "wildarrange": "node ./bin/wildarrange.mjs"
   }
 }

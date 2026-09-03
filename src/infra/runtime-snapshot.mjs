@@ -5,43 +5,43 @@ import { normalizeRelativePath } from "./path-match.mjs";
 import {
   STATE_VERSION,
   createWorkId,
-  ensureHelixDirs,
+  ensureWildArrangeDirs,
   nowIso,
   readJson,
-  resolveHelixPath,
+  resolveWildArrangePath,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 import { loadTaskState } from "./task-state-store.mjs";
 
 export async function writeSnapshot(rootDir, stage, payload = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const snapshot = {
     version: STATE_VERSION,
     id: createWorkId("snap"),
     stage,
     at: nowIso(),
-    work: await readJson(resolveHelixPath(rootDir, "work.json"), null),
-    taskState: await readJson(resolveHelixPath(rootDir, "team", "tasks.json"), null),
+    work: await readJson(resolveWildArrangePath(rootDir, "work.json"), null),
+    taskState: await readJson(resolveWildArrangePath(rootDir, "team", "tasks.json"), null),
     payload,
   };
   const fileName = `${snapshot.at.replaceAll(":", "-")}-${stage}.json`;
-  const snapshotPath = resolveHelixPath(rootDir, "snapshots", fileName);
+  const snapshotPath = resolveWildArrangePath(rootDir, "snapshots", fileName);
   await writeJsonAtomic(snapshotPath, snapshot);
-  await writeJsonAtomic(resolveHelixPath(rootDir, "snapshots", "latest.json"), snapshot);
+  await writeJsonAtomic(resolveWildArrangePath(rootDir, "snapshots", "latest.json"), snapshot);
   await writeRuntimeContextSnapshot(rootDir, { reason: `snapshot:${stage}`, latestSnapshot: snapshot });
   await appendLedger(rootDir, { type: "snapshot_written", stage, snapshotPath: normalizeRelativePath(path.relative(rootDir, snapshotPath)) });
   return snapshot;
 }
 
 export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
-  const latestSnapshot = options.latestSnapshot || await readJson(resolveHelixPath(rootDir, "snapshots", "latest.json"), null);
-  const work = await readJson(resolveHelixPath(rootDir, "work.json"), null);
+  const latestSnapshot = options.latestSnapshot || await readJson(resolveWildArrangePath(rootDir, "snapshots", "latest.json"), null);
+  const work = await readJson(resolveWildArrangePath(rootDir, "work.json"), null);
   const taskState = await loadTaskState(rootDir);
   const changes = await readChangeRequests(rootDir);
   const status = buildStatusReport(work, taskState, changes);
   const nextTask = taskState ? findRunnableTaskForContext(taskState.tasks || []) : null;
   const context = {
-    kind: "helix_context_snapshot",
+    kind: "wildarrange_context_snapshot",
     version: STATE_VERSION,
     at: nowIso(),
     reason: options.reason || "manual",
@@ -59,8 +59,8 @@ export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
     sessions: await readSessionLineage(rootDir),
     ledgerTail: await readLedgerTail(rootDir, 12),
   };
-  const jsonPath = resolveHelixPath(rootDir, "snapshots", "context.json");
-  const mdPath = resolveHelixPath(rootDir, "snapshots", "context.md");
+  const jsonPath = resolveWildArrangePath(rootDir, "snapshots", "context.json");
+  const mdPath = resolveWildArrangePath(rootDir, "snapshots", "context.md");
   context.reportJsonPath = normalizeRelativePath(path.relative(rootDir, jsonPath));
   context.reportMdPath = normalizeRelativePath(path.relative(rootDir, mdPath));
   await writeJsonAtomic(jsonPath, context);
@@ -97,7 +97,7 @@ function findRunnableTaskForContext(tasks) {
 }
 
 async function readChangeRequests(rootDir) {
-  const dirPath = resolveHelixPath(rootDir, "changes");
+  const dirPath = resolveWildArrangePath(rootDir, "changes");
   let entries;
   try {
     entries = await readdir(dirPath);
@@ -116,7 +116,7 @@ async function readChangeRequests(rootDir) {
 
 async function readLedgerTail(rootDir, limit) {
   try {
-    const content = await readFile(resolveHelixPath(rootDir, "ledger.jsonl"), "utf8");
+    const content = await readFile(resolveWildArrangePath(rootDir, "ledger.jsonl"), "utf8");
     return content
       .split(/\r?\n/)
       .filter(Boolean)
@@ -135,7 +135,7 @@ async function readLedgerTail(rootDir, limit) {
 }
 
 async function readSessionLineage(rootDir) {
-  return readJson(resolveHelixPath(rootDir, "sessions", "lineage.json"), {
+  return readJson(resolveWildArrangePath(rootDir, "sessions", "lineage.json"), {
     version: STATE_VERSION,
     currentSessionId: null,
     sessionIds: [],
@@ -233,11 +233,11 @@ function renderContextMarkdown(context) {
     }
   }
   lines.push("", "## Resume Commands", "");
-  lines.push("- Inspect: `node ./bin/helix.mjs status`");
-  lines.push("- Refresh context: `node ./bin/helix.mjs resume`");
-  lines.push("- Run next task: `node ./bin/helix.mjs run`");
-  lines.push("- Node loop: `node ./bin/helix.mjs node execute|verify|scope|review|checkpoint|retry --task <taskId>`");
-  lines.push("- Open changes: `node ./bin/helix.mjs changes list`");
+  lines.push("- Inspect: `node ./bin/wildarrange.mjs status`");
+  lines.push("- Refresh context: `node ./bin/wildarrange.mjs resume`");
+  lines.push("- Run next task: `node ./bin/wildarrange.mjs run`");
+  lines.push("- Node loop: `node ./bin/wildarrange.mjs node execute|verify|scope|review|checkpoint|retry --task <taskId>`");
+  lines.push("- Open changes: `node ./bin/wildarrange.mjs changes list`");
   lines.push("", "## Invariants", "");
   lines.push("- Worker done-claim is not completion.");
   lines.push("- Checkpoint requires verifier PASS, scope guard non-fail, and review gate PASS.");

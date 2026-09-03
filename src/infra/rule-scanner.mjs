@@ -2,14 +2,14 @@ import { existsSync } from "node:fs";
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
-  DEFAULT_HELIX_CONFIG,
-  loadHelixConfig,
+  DEFAULT_WILDARRANGE_CONFIG,
+  loadWildArrangeConfig,
 } from "./runtime-config.mjs";
 import {
   STATE_VERSION,
-  ensureHelixDirs,
+  ensureWildArrangeDirs,
   nowIso,
-  resolveHelixPath,
+  resolveWildArrangePath,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 import { appendLedger } from "./ledger.mjs";
@@ -29,9 +29,9 @@ const PROJECT_RULE_DIRS = [
 ];
 
 export async function scanProjectRules(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
-  const { config, sourcePath } = await loadHelixConfig(rootDir);
-  const ruleConfig = config.ruleInjection || DEFAULT_HELIX_CONFIG.ruleInjection;
+  await ensureWildArrangeDirs(rootDir);
+  const { config, sourcePath } = await loadWildArrangeConfig(rootDir);
+  const ruleConfig = config.ruleInjection || DEFAULT_WILDARRANGE_CONFIG.ruleInjection;
   const targetPaths = normalizeRuleTargetPaths(options.targetPaths || []);
   const allRules = [];
   for (const filePath of ruleConfig.projectSingleFiles || PROJECT_RULE_FILES) {
@@ -57,8 +57,8 @@ export async function scanProjectRules(rootDir, options = {}) {
     matched: budgetedRules.length,
     rules: budgetedRules,
   };
-  const jsonPath = resolveHelixPath(rootDir, "rules", "context.json");
-  const mdPath = resolveHelixPath(rootDir, "rules", "context.md");
+  const jsonPath = resolveWildArrangePath(rootDir, "rules", "context.json");
+  const mdPath = resolveWildArrangePath(rootDir, "rules", "context.md");
   result.reportJsonPath = path.relative(rootDir, jsonPath);
   result.reportMdPath = path.relative(rootDir, mdPath);
   await writeJsonAtomic(jsonPath, result);
@@ -99,8 +99,8 @@ async function readApplicableNestedAgents(rootDir, targetPaths, knownPaths) {
 }
 
 function applyRuleBudget(rules, ruleConfig) {
-  const maxRuleChars = Number.isInteger(ruleConfig.maxRuleChars) ? ruleConfig.maxRuleChars : DEFAULT_HELIX_CONFIG.ruleInjection.maxRuleChars;
-  const maxResultChars = Number.isInteger(ruleConfig.maxResultChars) ? ruleConfig.maxResultChars : DEFAULT_HELIX_CONFIG.ruleInjection.maxResultChars;
+  const maxRuleChars = Number.isInteger(ruleConfig.maxRuleChars) ? ruleConfig.maxRuleChars : DEFAULT_WILDARRANGE_CONFIG.ruleInjection.maxRuleChars;
+  const maxResultChars = Number.isInteger(ruleConfig.maxResultChars) ? ruleConfig.maxResultChars : DEFAULT_WILDARRANGE_CONFIG.ruleInjection.maxResultChars;
   let total = 0;
   const output = [];
   for (const rule of rules) {

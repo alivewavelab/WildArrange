@@ -3,23 +3,23 @@
   "runtime": "wildarrange-linear",
   "tools": [
     {
-      "name": "helix_init",
+      "name": "wildarrange_init",
       "layer": "runtime_state",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs init",
-      "purpose": "创建 .helix 核心运行态、prompt-pack 注册表和 ledger。",
+      "command": "node ./bin/wildarrange.mjs init",
+      "purpose": "创建 .wildarrange 核心运行态、prompt-pack 注册表和 ledger。",
       "reads": [
         "packs/wildarrange-linear/**"
       ],
       "writes": [
-        ".helix/**"
+        ".wildarrange/**"
       ]
     },
     {
-      "name": "helix_init_project_docs",
+      "name": "wildarrange_init_project_docs",
       "layer": "project_governance",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs init --project-docs [--architecture]",
+      "command": "node ./bin/wildarrange.mjs init --project-docs [--architecture]",
       "purpose": "显式、非覆盖式补建项目治理文档；人类必须处理返回的待确认项，架构模板只在边界已明确时创建。",
       "reads": [
         "packs/wildarrange-linear/project-init/**",
@@ -32,189 +32,189 @@
         "doc/testing-and-acceptance.md",
         "doc/progress.md",
         "doc/architecture.md",
-        ".helix/ledger.jsonl"
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
-      "name": "helix_config_init",
+      "name": "wildarrange_config_init",
       "layer": "runtime_state",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs config init --root",
-      "purpose": "生成根 `helix.config.json`；用于配置长期 Agent provider/model/reasoning，以及每个注入点挂载哪些 tool、markdown、skill、rules。",
+      "command": "node ./bin/wildarrange.mjs config init --root",
+      "purpose": "生成根 `wildarrange.config.json`；用于配置长期 Agent provider/model/reasoning，以及每个注入点挂载哪些 tool、markdown、skill、rules。",
       "reads": [
-        "helix.config.json",
-        ".helix/config.json"
+        "wildarrange.config.json",
+        ".wildarrange/config.json"
       ],
       "writes": [
-        "helix.config.json",
-        ".helix/config.json",
-        ".helix/ledger.jsonl"
+        "wildarrange.config.json",
+        ".wildarrange/config.json",
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
-      "name": "helix_config_show",
+      "name": "wildarrange_config_show",
       "layer": "runtime_state",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs config show",
+      "command": "node ./bin/wildarrange.mjs config show",
       "purpose": "读取当前生效配置，不修改运行态。",
       "reads": [
-        "helix.config.json",
-        ".helix/config.json"
+        "wildarrange.config.json",
+        ".wildarrange/config.json"
       ],
       "writes": []
     },
     {
-      "name": "helix_injection_show",
+      "name": "wildarrange_injection_show",
       "layer": "context_injection",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs injection show --point before_review --agent BaiZe --task T001",
+      "command": "node ./bin/wildarrange.mjs injection show --point before_review --agent BaiZe --task T001",
       "purpose": "解析某个注入点最终会挂载的 tools、markdown、skills 和 rules，用于调试 Codex/Cursor/Kimi Code adapter 与 Agent 上下文是否接近预期。",
       "reads": [
-        "helix.config.json",
-        ".helix/config.json",
-        ".helix/prompt-pack.json",
-        ".helix/**/*.md"
+        "wildarrange.config.json",
+        ".wildarrange/config.json",
+        ".wildarrange/prompt-pack.json",
+        ".wildarrange/**/*.md"
       ],
       "writes": []
     },
     {
-      "name": "helix_hook_run",
+      "name": "wildarrange_hook_run",
       "layer": "context_injection",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs hook run --from hook.json",
+      "command": "node ./bin/wildarrange.mjs hook run --from hook.json",
       "purpose": "Codex/Cursor/Kimi Code adapter 入口：读取 SessionStart/UserPromptSubmit/PreToolUse/PostToolUse/PostToolUseFailure/PostCompact/Stop hook payload，执行对应规则扫描、路由、续跑、命令安全或范围检查，并输出可直接注入模型上下文的 Markdown。",
       "reads": [
-        "helix.config.json",
-        ".helix/config.json",
-        ".helix/**",
+        "wildarrange.config.json",
+        ".wildarrange/config.json",
+        ".wildarrange/**",
         "AGENTS.md",
         "CLAUDE.md",
         ".cursor/rules/**/*.md"
       ],
       "writes": [
-        ".helix/sessions/hooks/*.json",
-        ".helix/rules/context.*",
-        ".helix/snapshots/context.*",
-        ".helix/ledger.jsonl"
+        ".wildarrange/sessions/hooks/*.json",
+        ".wildarrange/rules/context.*",
+        ".wildarrange/snapshots/context.*",
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
-      "name": "helix_adapter_install",
+      "name": "wildarrange_adapter_install",
       "layer": "host_adapter",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs adapter install --target all --mode local",
+      "command": "node ./bin/wildarrange.mjs adapter install --target all --mode local",
       "purpose": "生成 Codex hooks、Cursor `.cursor/hooks.json`（受信任工作区中 preToolUse / beforeShellExecution fail-closed 硬拦截）与 `.cursor/rules/wildarrange.mdc` 软规则层，以及 Kimi plugin；Kimi plugin 必须由用户显式安装，默认不修改用户全局配置。",
       "reads": [
         "package.json",
-        "helix.config.json",
+        "wildarrange.config.json",
         "packs/wildarrange-linear/**"
       ],
       "writes": [
-        ".helix/adapters/**",
+        ".wildarrange/adapters/**",
         ".codex/hooks.json",
         ".cursor/hooks.json",
         ".cursor/rules/wildarrange.mdc",
         ".agents/skills/**",
-        ".helix/ledger.jsonl"
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
-      "name": "helix_adapter_restore",
+      "name": "wildarrange_adapter_restore",
       "layer": "host_adapter",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs adapter restore --backup <backupId>",
-      "purpose": "从 `.helix/adapters/backups/<backupId>/` 恢复被安装或卸载流程备份的 Codex/Cursor/Kimi Code adapter 文件，形成可撤销闭环。",
+      "command": "node ./bin/wildarrange.mjs adapter restore --backup <backupId>",
+      "purpose": "从 `.wildarrange/adapters/backups/<backupId>/` 恢复被安装或卸载流程备份的 Codex/Cursor/Kimi Code adapter 文件，形成可撤销闭环。",
       "reads": [
-        ".helix/adapters/backups/**"
+        ".wildarrange/adapters/backups/**"
       ],
       "writes": [
-        ".helix/adapters/restore-report.*",
+        ".wildarrange/adapters/restore-report.*",
         ".codex/hooks.json",
         ".cursor/rules/wildarrange.mdc",
-        ".helix/adapters/codex/hooks.json",
-        ".helix/adapters/kimi/plugin/**",
+        ".wildarrange/adapters/codex/hooks.json",
+        ".wildarrange/adapters/kimi/plugin/**",
         ".agents/skills/**",
-        ".helix/ledger.jsonl"
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
       "name": "pre_tool_use_guard",
       "layer": "gate",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs hook run --from pre-tool-use.json",
+      "command": "node ./bin/wildarrange.mjs hook run --from pre-tool-use.json",
       "purpose": "按 PreToolUse deny 格式，在工具执行前检查计划范围；计划外写入返回 permissionDecision=deny，防止先落盘后补救。",
       "reads": [
-        ".helix/team/tasks.json",
-        "helix.config.json",
+        ".wildarrange/team/tasks.json",
+        "wildarrange.config.json",
         "hook payload"
       ],
       "writes": [
-        ".helix/sessions/hooks/*.json",
-        ".helix/ledger.jsonl",
-        ".helix/rules/context.*"
+        ".wildarrange/sessions/hooks/*.json",
+        ".wildarrange/ledger.jsonl",
+        ".wildarrange/rules/context.*"
       ]
     },
     {
       "name": "post_tool_use_result_gate",
       "layer": "gate",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs hook run --from post-tool-use.json",
+      "command": "node ./bin/wildarrange.mjs hook run --from post-tool-use.json",
       "purpose": "读取 PostToolUse payload，识别 MCP transport failure、非零 exit code、permission denied、command not found 和显式失败状态；阻止把坏工具输出当完成证据。",
       "reads": [
         "hook payload",
         "tool_response",
-        "helix.config.json"
+        "wildarrange.config.json"
       ],
       "writes": [
-        ".helix/sessions/hooks/*.json",
-        ".helix/ledger.jsonl"
+        ".wildarrange/sessions/hooks/*.json",
+        ".wildarrange/ledger.jsonl"
       ],
       "commercialBoundary": "WildArrange original implementation; host-specific payload shapes stay in adapter layer."
     },
     {
-      "name": "helix_resume",
+      "name": "wildarrange_resume",
       "layer": "runtime_state",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs resume [--session <id>]",
-      "purpose": "从 .helix/work.json、tasks.json、ledger.jsonl 恢复中断会话位置；记录 session 血缘，并刷新 `.helix/snapshots/context.md` 供新 Codex/Cursor 会话直接读取。",
+      "command": "node ./bin/wildarrange.mjs resume [--session <id>]",
+      "purpose": "从 .wildarrange/work.json、tasks.json、ledger.jsonl 恢复中断会话位置；记录 session 血缘，并刷新 `.wildarrange/snapshots/context.md` 供新 Codex/Cursor 会话直接读取。",
       "reads": [
-        ".helix/work.json",
-        ".helix/team/tasks.json",
-        ".helix/ledger.jsonl",
-        ".helix/snapshots/latest.json",
-        ".helix/sessions/lineage.json"
+        ".wildarrange/work.json",
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/ledger.jsonl",
+        ".wildarrange/snapshots/latest.json",
+        ".wildarrange/sessions/lineage.json"
       ],
       "writes": [
-        ".helix/ledger.jsonl",
-        ".helix/sessions/lineage.json",
-        ".helix/snapshots/context.json",
-        ".helix/snapshots/context.md"
+        ".wildarrange/ledger.jsonl",
+        ".wildarrange/sessions/lineage.json",
+        ".wildarrange/snapshots/context.json",
+        ".wildarrange/snapshots/context.md"
       ]
     },
     {
-      "name": "helix_continuation_check",
+      "name": "wildarrange_continuation_check",
       "layer": "runtime_state",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs continuation check [--session <id>]",
-      "purpose": "Codex/Cursor 会话停止前读取 .helix 状态；如果还有 runnable、active、failed、review_blocked 任务，输出下一步续跑指令，避免关闭会话丢上下文。",
+      "command": "node ./bin/wildarrange.mjs continuation check [--session <id>]",
+      "purpose": "Codex/Cursor 会话停止前读取 .wildarrange 状态；如果还有 runnable、active、failed、review_blocked 任务，输出下一步续跑指令，避免关闭会话丢上下文。",
       "reads": [
-        ".helix/work.json",
-        ".helix/team/tasks.json",
-        ".helix/ledger.jsonl",
-        ".helix/snapshots/latest.json"
+        ".wildarrange/work.json",
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/ledger.jsonl",
+        ".wildarrange/snapshots/latest.json"
       ],
       "writes": [
-        ".helix/sessions/continuation.json",
-        ".helix/sessions/continuation.md",
-        ".helix/ledger.jsonl"
+        ".wildarrange/sessions/continuation.json",
+        ".wildarrange/sessions/continuation.md",
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
-      "name": "helix_rules_collect",
+      "name": "wildarrange_rules_collect",
       "layer": "context_injection",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs rules collect [--target <path>]",
-      "purpose": "扫描 AGENTS.md、CLAUDE.md、CONTEXT.md、.claude/.cursor/.github 规则，并按 target path/globs 生成 `.helix/rules/context.md`。",
+      "command": "node ./bin/wildarrange.mjs rules collect [--target <path>]",
+      "purpose": "扫描 AGENTS.md、CLAUDE.md、CONTEXT.md、.claude/.cursor/.github 规则，并按 target path/globs 生成 `.wildarrange/rules/context.md`。",
       "reads": [
         "AGENTS.md",
         "CLAUDE.md",
@@ -224,19 +224,19 @@
         ".github/instructions/**/*.md"
       ],
       "writes": [
-        ".helix/rules/context.json",
-        ".helix/rules/context.md",
-        ".helix/ledger.jsonl"
+        ".wildarrange/rules/context.json",
+        ".wildarrange/rules/context.md",
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
       "name": "repository_governance_audit",
       "layer": "quality_gate",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs governance audit [--changed-only] [--force]",
+      "command": "node ./bin/wildarrange.mjs governance audit [--changed-only] [--force]",
       "purpose": "由 LuWu 只读检查目录级 AGENTS.md、README 中英文命令与关键安全标记、真实 CLI --help、固定五 Agent、Prompt Pack 清单、命名与真实代码注释，并写出结构化治理报告。",
       "reads": [
-        "helix.config.json",
+        "wildarrange.config.json",
         "AGENTS.md",
         "README.md",
         "README.en.md",
@@ -244,141 +244,141 @@
         "configured governed roots"
       ],
       "writes": [
-        ".helix/reports/governance/latest.json",
-        ".helix/reports/governance/latest.md",
-        ".helix/ledger.jsonl"
+        ".wildarrange/reports/governance/latest.json",
+        ".wildarrange/reports/governance/latest.md",
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
-      "name": "helix_context_build",
+      "name": "wildarrange_context_build",
       "layer": "context_injection",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs context build [--agent Jiuwei] [--task T001] [--plan <planId>] [--point before_execute]",
+      "command": "node ./bin/wildarrange.mjs context build [--agent Jiuwei] [--task T001] [--plan <planId>] [--point before_execute]",
       "purpose": "为单个简单上下文 Agent 生成任务、规则、变更路径、恢复指令和不可破坏 invariants 的输入包；后续接真实模型时作为 Agent 上下文。",
       "reads": [
-        ".helix/team/tasks.json",
-        ".helix/snapshots/context.md",
-        ".helix/rules/context.md",
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/snapshots/context.md",
+        ".wildarrange/rules/context.md",
         "git diff"
       ],
       "writes": [
-        ".helix/context-agents/*.json",
-        ".helix/context-agents/*.md",
-        ".helix/ledger.jsonl"
+        ".wildarrange/context-agents/*.json",
+        ".wildarrange/context-agents/*.md",
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
-      "name": "helix_snapshot_write",
+      "name": "wildarrange_snapshot_write",
       "layer": "runtime_state",
       "status": "implemented-in-loop",
-      "command": "node ./bin/helix.mjs run",
-      "purpose": "在关键节点写入可恢复快照，并同步刷新 `.helix/snapshots/context.md`，避免 Codex/Cursor 会话被关闭后丢上下文。",
+      "command": "node ./bin/wildarrange.mjs run",
+      "purpose": "在关键节点写入可恢复快照，并同步刷新 `.wildarrange/snapshots/context.md`，避免 Codex/Cursor 会话被关闭后丢上下文。",
       "reads": [
-        ".helix/**"
+        ".wildarrange/**"
       ],
       "writes": [
-        ".helix/snapshots/**"
+        ".wildarrange/snapshots/**"
       ]
     },
     {
-      "name": "helix_plan_import",
+      "name": "wildarrange_plan_import",
       "layer": "planning",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs plan --from <plan.json>",
-      "purpose": "把机器可读计划导入 .helix/team/tasks.json。",
+      "command": "node ./bin/wildarrange.mjs plan --from <plan.json>",
+      "purpose": "把机器可读计划导入 .wildarrange/team/tasks.json。",
       "reads": [
         "<plan.json>"
       ],
       "writes": [
-        ".helix/plans/**",
-        ".helix/team/tasks.*",
-        ".helix/work.json",
-        ".helix/ledger.jsonl"
+        ".wildarrange/plans/**",
+        ".wildarrange/team/tasks.*",
+        ".wildarrange/work.json",
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
       "name": "plan_validate",
       "layer": "planning",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs plan --from <plan.json>",
+      "command": "node ./bin/wildarrange.mjs plan --from <plan.json>",
       "purpose": "验证任务必须有 subject、verify_commands，并在导入前检查 task id 唯一、blockedBy 指向已知任务、无自依赖、无循环依赖。",
       "reads": [
         "<plan.json>"
       ],
       "writes": [
-        ".helix/ledger.jsonl"
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
-      "name": "helix_run_next",
+      "name": "wildarrange_run_next",
       "layer": "execution_loop",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs run",
+      "command": "node ./bin/wildarrange.mjs run",
       "purpose": "让下一个 pending task 走完 worker、verifier、scope_guard、checkpoint、retry 和 ledger。",
       "reads": [
-        ".helix/team/tasks.json"
+        ".wildarrange/team/tasks.json"
       ],
       "writes": [
-        ".helix/**",
+        ".wildarrange/**",
         "task.writable_paths"
       ]
     },
     {
-      "name": "helix_workflow",
+      "name": "wildarrange_workflow",
       "layer": "execution_loop",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs workflow --from <plan.json>",
+      "command": "node ./bin/wildarrange.mjs workflow --from <plan.json>",
       "purpose": "一键串起 init、plan import、run-until-idle、status、snapshot、workflow summary，用于模拟项目验收主路径。",
       "reads": [
         "<plan.json>",
         "packs/wildarrange-linear/**"
       ],
       "writes": [
-        ".helix/**",
+        ".wildarrange/**",
         "task.writable_paths",
-        ".helix/reports/workflow-summary.*"
+        ".wildarrange/reports/workflow-summary.*"
       ]
     },
     {
-      "name": "helix_node",
+      "name": "wildarrange_node",
       "layer": "execution_loop",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs node <route|execute|verify|scope|review|checkpoint|retry>",
+      "command": "node ./bin/wildarrange.mjs node <route|execute|verify|scope|review|checkpoint|retry>",
       "purpose": "把 workflow 拆成可单独测试的节点：route、execute、verify、scope、review、checkpoint、retry。每个节点独立读写状态和 ledger。",
       "reads": [
-        ".helix/team/tasks.json",
-        ".helix/prompt-pack.json",
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/prompt-pack.json",
         "packs/wildarrange-linear/routes.json"
       ],
       "writes": [
-        ".helix/**",
+        ".wildarrange/**",
         "task.writable_paths",
-        ".helix/reports/failures/**",
-        ".helix/reports/reviews/**"
+        ".wildarrange/reports/failures/**",
+        ".wildarrange/reports/reviews/**"
       ]
     },
     {
-      "name": "helix_serve",
+      "name": "wildarrange_serve",
       "layer": "runtime_state",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs serve --host 127.0.0.1 --port 8765",
+      "command": "node ./bin/wildarrange.mjs serve --host 127.0.0.1 --port 8765",
       "purpose": "启动本地网页 dashboard，展示 status、tasks、route decisions、snapshots 和 ledger；所有 POST action 必须带 token，并受 Host/Origin 防护。",
       "reads": [
-        ".helix/**"
+        ".wildarrange/**"
       ],
       "writes": [
-        ".helix/**"
+        ".wildarrange/**"
       ]
     },
     {
-      "name": "helix_status",
+      "name": "wildarrange_status",
       "layer": "runtime_state",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs status",
+      "command": "node ./bin/wildarrange.mjs status",
       "purpose": "显示当前 work 和任务计数。",
       "reads": [
-        ".helix/work.json",
-        ".helix/team/tasks.json"
+        ".wildarrange/work.json",
+        ".wildarrange/team/tasks.json"
       ],
       "writes": []
     },
@@ -386,10 +386,10 @@
       "name": "ledger_verify",
       "layer": "runtime_state",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs ledger verify",
-      "purpose": "校验 `.helix/ledger.jsonl` 的 hash 链，发现普通手工改账、断链或 prevHash 不一致。",
+      "command": "node ./bin/wildarrange.mjs ledger verify",
+      "purpose": "校验 `.wildarrange/ledger.jsonl` 的 hash 链，发现普通手工改账、断链或 prevHash 不一致。",
       "reads": [
-        ".helix/ledger.jsonl"
+        ".wildarrange/ledger.jsonl"
       ],
       "writes": []
     },
@@ -397,27 +397,27 @@
       "name": "config_baseline",
       "layer": "runtime_state",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs config baseline --reason <reason>",
-      "purpose": "把当前 `helix.config.json` 和 `.helix/config.json` 写成 hash 基线，用于后续发现 Agent 是否改弱质量门。",
+      "command": "node ./bin/wildarrange.mjs config baseline --reason <reason>",
+      "purpose": "把当前 `wildarrange.config.json` 和 `.wildarrange/config.json` 写成 hash 基线，用于后续发现 Agent 是否改弱质量门。",
       "reads": [
-        "helix.config.json",
-        ".helix/config.json"
+        "wildarrange.config.json",
+        ".wildarrange/config.json"
       ],
       "writes": [
-        ".helix/security/config-baseline.json",
-        ".helix/ledger.jsonl"
+        ".wildarrange/security/config-baseline.json",
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
       "name": "config_verify",
       "layer": "runtime_state",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs config verify",
+      "command": "node ./bin/wildarrange.mjs config verify",
       "purpose": "校验 config hash 基线；发现 config 文件新增、缺失或内容变化时返回非零状态。",
       "reads": [
-        "helix.config.json",
-        ".helix/config.json",
-        ".helix/security/config-baseline.json"
+        "wildarrange.config.json",
+        ".wildarrange/config.json",
+        ".wildarrange/security/config-baseline.json"
       ],
       "writes": []
     },
@@ -425,30 +425,30 @@
       "name": "state_backup",
       "layer": "runtime_state",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs state backup --reason <reason>",
-      "purpose": "备份 ledger、work、tasks、snapshot 和 config baseline，降低 `.helix/` 被误删后的证据链丢失风险。",
+      "command": "node ./bin/wildarrange.mjs state backup --reason <reason>",
+      "purpose": "备份 ledger、work、tasks、snapshot 和 config baseline，降低 `.wildarrange/` 被误删后的证据链丢失风险。",
       "reads": [
-        ".helix/ledger.jsonl",
-        ".helix/work.json",
-        ".helix/team/tasks.json",
-        ".helix/snapshots/**",
-        ".helix/security/config-baseline.json"
+        ".wildarrange/ledger.jsonl",
+        ".wildarrange/work.json",
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/snapshots/**",
+        ".wildarrange/security/config-baseline.json"
       ],
       "writes": [
-        ".helix/backups/**",
-        ".helix/ledger.jsonl"
+        ".wildarrange/backups/**",
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
       "name": "state_verify",
       "layer": "runtime_state",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs state verify",
-      "purpose": "检查 `.helix/ledger.jsonl`、`.helix/work.json`、`.helix/team/tasks.json` 是否仍存在，缺失时返回非零状态。",
+      "command": "node ./bin/wildarrange.mjs state verify",
+      "purpose": "检查 `.wildarrange/ledger.jsonl`、`.wildarrange/work.json`、`.wildarrange/team/tasks.json` 是否仍存在，缺失时返回非零状态。",
       "reads": [
-        ".helix/ledger.jsonl",
-        ".helix/work.json",
-        ".helix/team/tasks.json"
+        ".wildarrange/ledger.jsonl",
+        ".wildarrange/work.json",
+        ".wildarrange/team/tasks.json"
       ],
       "writes": []
     },
@@ -456,84 +456,84 @@
       "name": "state_migrate",
       "layer": "runtime_state",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs state migrate",
+      "command": "node ./bin/wildarrange.mjs state migrate",
       "purpose": "先备份，再把旧 active config 与 task ledger 迁到当前结构；删除无消费者的 agents/categories 投影；旧 completed 缺少当前 proof chain 时降为 needs_user_decision。",
       "reads": [
-        "helix.config.json",
-        ".helix/config.json",
-        ".helix/team/tasks.json",
-        ".helix/plans/**"
+        "wildarrange.config.json",
+        ".wildarrange/config.json",
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/plans/**"
       ],
       "writes": [
-        ".helix/backups/**",
-        ".helix/config.json",
-        ".helix/team/tasks.json",
-        ".helix/team/tasks.md",
-        ".helix/plans/**",
-        ".helix/ledger.jsonl"
+        ".wildarrange/backups/**",
+        ".wildarrange/config.json",
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/team/tasks.md",
+        ".wildarrange/plans/**",
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
-      "name": "helix_summary",
+      "name": "wildarrange_summary",
       "layer": "runtime_state",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs summary",
-      "purpose": "生成或刷新 `.helix/reports/workflow-summary.json|md`，汇总任务状态、checkpoint、review/failure report、ChangeRequest 和 wisdom，作为模拟项目后的验收产物。",
+      "command": "node ./bin/wildarrange.mjs summary",
+      "purpose": "生成或刷新 `.wildarrange/reports/workflow-summary.json|md`，汇总任务状态、checkpoint、review/failure report、ChangeRequest 和 wisdom，作为模拟项目后的验收产物。",
       "reads": [
-        ".helix/work.json",
-        ".helix/team/tasks.json",
-        ".helix/checkpoints/**",
-        ".helix/reports/**",
-        ".helix/changes/**",
-        ".helix/wisdom/**"
+        ".wildarrange/work.json",
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/checkpoints/**",
+        ".wildarrange/reports/**",
+        ".wildarrange/changes/**",
+        ".wildarrange/wisdom/**"
       ],
       "writes": [
-        ".helix/reports/workflow-summary.json",
-        ".helix/reports/workflow-summary.md",
-        ".helix/ledger.jsonl"
+        ".wildarrange/reports/workflow-summary.json",
+        ".wildarrange/reports/workflow-summary.md",
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
-      "name": "helix_route",
+      "name": "wildarrange_route",
       "layer": "routing",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs route --text <request>",
-      "purpose": "按 Helix intent gate + category resolver，把用户请求解析为 primaryAgent、supportAgents、category、skills 和 nextCommand。",
+      "command": "node ./bin/wildarrange.mjs route --text <request>",
+      "purpose": "按 WildArrange intent gate + category resolver，把用户请求解析为 primaryAgent、supportAgents、category、skills 和 nextCommand。",
       "reads": [
         "packs/wildarrange-linear/routes.json",
-        ".helix/work.json",
-        ".helix/team/tasks.json",
-        ".helix/snapshots/latest.json"
+        ".wildarrange/work.json",
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/snapshots/latest.json"
       ],
       "writes": [
-        ".helix/ledger.jsonl",
-        ".helix/snapshots/**"
+        ".wildarrange/ledger.jsonl",
+        ".wildarrange/snapshots/**"
       ]
     },
     {
       "name": "scope_guard",
       "layer": "gate",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs guard scope --task <taskId>",
+      "command": "node ./bin/wildarrange.mjs guard scope --task <taskId>",
       "purpose": "在 checkpoint 或 merge 前，对照 task.writable_paths 检查 changed paths；计划外改动必须退回 Jiuwei/DiJiang 审核，并生成 ChangeRequest。",
       "reads": [
-        ".helix/team/tasks.json",
+        ".wildarrange/team/tasks.json",
         "git diff",
         "git ls-files"
       ],
       "writes": [
-        ".helix/ledger.jsonl",
-        ".helix/changes/**"
+        ".wildarrange/ledger.jsonl",
+        ".wildarrange/changes/**"
       ]
     },
     {
       "name": "change_request_list",
       "layer": "change_control",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs changes list",
+      "command": "node ./bin/wildarrange.mjs changes list",
       "purpose": "列出 scope_guard 或 review blocker 生成的开放变更请求；只展示证据，不自动扩 scope。",
       "reads": [
-        ".helix/changes/**"
+        ".wildarrange/changes/**"
       ],
       "writes": []
     },
@@ -541,87 +541,87 @@
       "name": "change_request_review",
       "layer": "change_control",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs changes review --id <CR-id>",
+      "command": "node ./bin/wildarrange.mjs changes review --id <CR-id>",
       "purpose": "由 Jiuwei 对 ChangeRequest 做确定性审计：必须有 evidence/rationale，保持 autoApply=false，不允许削弱 verification/review gates。",
       "reads": [
-        ".helix/changes/<CR-id>.json"
+        ".wildarrange/changes/<CR-id>.json"
       ],
       "writes": [
-        ".helix/ledger.jsonl"
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
       "name": "change_request_resolve",
       "layer": "change_control",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs changes resolve --id <CR-id> --decision accept|reject --evidence <text> --rationale <text> [--apply-scope]",
+      "command": "node ./bin/wildarrange.mjs changes resolve --id <CR-id> --decision accept|reject --evidence <text> --rationale <text> [--apply-scope]",
       "purpose": "把负责人裁决写入 ChangeRequest。accept/reject 本身只落盘；只有显式 --apply-scope 才把被拒路径并入 task.writable_paths 并允许后续 retry。",
       "reads": [
-        ".helix/changes/<CR-id>.json",
-        ".helix/team/tasks.json"
+        ".wildarrange/changes/<CR-id>.json",
+        ".wildarrange/team/tasks.json"
       ],
       "writes": [
-        ".helix/changes/**",
-        ".helix/team/tasks.json",
-        ".helix/plans/**",
-        ".helix/ledger.jsonl",
-        ".helix/snapshots/**"
+        ".wildarrange/changes/**",
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/plans/**",
+        ".wildarrange/ledger.jsonl",
+        ".wildarrange/snapshots/**"
       ]
     },
     {
-      "name": "helix_steer",
+      "name": "wildarrange_steer",
       "layer": "change_control",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs steer --from <proposal.json>",
+      "command": "node ./bin/wildarrange.mjs steer --from <proposal.json>",
       "purpose": "治理计划变更：支持 add_task、split_task、reorder_pending、revise_acceptance、mark_blocked；必须 evidence+rationale，禁止削弱验收或伪造完成。",
       "reads": [
-        ".helix/team/tasks.json",
+        ".wildarrange/team/tasks.json",
         "<proposal.json>"
       ],
       "writes": [
-        ".helix/team/tasks.json",
-        ".helix/plans/**",
-        ".helix/ledger.jsonl",
-        ".helix/snapshots/**"
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/plans/**",
+        ".wildarrange/ledger.jsonl",
+        ".wildarrange/snapshots/**"
       ]
     },
     {
-      "name": "helix_evidence_record",
+      "name": "wildarrange_evidence_record",
       "layer": "gate",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs evidence record --task T001 --criterion C001 --status pass --evidence <text>",
+      "command": "node ./bin/wildarrange.mjs evidence record --task T001 --criterion C001 --status pass --evidence <text>",
       "purpose": "为 task.successCriteria 记录 criterion 级证据；checkpoint 不再只看命令级 verifier，还要求 successCriteria 全 PASS。",
       "reads": [
-        ".helix/team/tasks.json"
+        ".wildarrange/team/tasks.json"
       ],
       "writes": [
-        ".helix/team/tasks.json",
-        ".helix/plans/**",
-        ".helix/ledger.jsonl"
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/plans/**",
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
-      "name": "helix_review_blocker_record",
+      "name": "wildarrange_review_blocker_record",
       "layer": "change_control",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs review-blockers record --from <blocker.json>",
+      "command": "node ./bin/wildarrange.mjs review-blockers record --from <blocker.json>",
       "purpose": "把 final review blocker 记录成 review_blocked 状态，并追加独立 resolution task；原任务不被错误 checkpoint。",
       "reads": [
-        ".helix/team/tasks.json",
+        ".wildarrange/team/tasks.json",
         "<blocker.json>"
       ],
       "writes": [
-        ".helix/team/tasks.json",
-        ".helix/plans/**",
-        ".helix/ledger.jsonl",
-        ".helix/snapshots/**"
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/plans/**",
+        ".wildarrange/ledger.jsonl",
+        ".wildarrange/snapshots/**"
       ]
     },
     {
       "name": "review_gate",
       "layer": "gate",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs node review --task <taskId>",
+      "command": "node ./bin/wildarrange.mjs node review --task <taskId>",
       "purpose": "checkpoint 前运行目标符合、范围一致、证据质量、success criteria、项目规则、显式 review_commands、project standards、LSP/comment/LLM 多 lane 复核；输出结构化 findings/testingGaps/residualRisks，失败则不允许 checkpoint。",
       "reads": [
         "task.evidence",
@@ -631,14 +631,14 @@
         "task.standards_commands",
         "git diff",
         "project rules",
-        "helix.config.json"
+        "wildarrange.config.json"
       ],
       "writes": [
-        ".helix/team/tasks.json",
-        ".helix/ledger.jsonl",
-        ".helix/reports/reviews/**",
-        ".helix/reports/failures/**",
-        ".helix/rules/**"
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/ledger.jsonl",
+        ".wildarrange/reports/reviews/**",
+        ".wildarrange/reports/failures/**",
+        ".wildarrange/rules/**"
       ],
       "commercialBoundary": "WildArrange original implementation; external projects are conceptual references only."
     },
@@ -646,7 +646,7 @@
       "name": "review_finding_validator",
       "layer": "gate",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs node review --task <taskId>",
+      "command": "node ./bin/wildarrange.mjs node review --task <taskId>",
       "purpose": "把 deterministic lane、comment checker、LLM review 的问题归一成 finding schema，并为每条 finding 附独立 validator verdict，供 review blocker、dashboard 和 retry 使用。",
       "reads": [
         "reviewResult.lanes",
@@ -654,7 +654,7 @@
         "llmReviews[].findings"
       ],
       "writes": [
-        ".helix/reports/reviews/**"
+        ".wildarrange/reports/reviews/**"
       ],
       "commercialBoundary": "WildArrange original schema validator; no copied third-party prompt or schema text."
     },
@@ -662,7 +662,7 @@
       "name": "acceptance_proof",
       "layer": "gate",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs node checkpoint --task <taskId>",
+      "command": "node ./bin/wildarrange.mjs node checkpoint --task <taskId>",
       "purpose": "checkpoint 前生成验收证明链；worker、verify_commands、verifier、successCriteria、scope_guard、review_gate、review lanes 任一缺失或失败都不得 completed。",
       "reads": [
         "task.evidence",
@@ -672,9 +672,9 @@
         "task.last_review_result"
       ],
       "writes": [
-        ".helix/reports/acceptance/**",
-        ".helix/reports/failures/**",
-        ".helix/ledger.jsonl"
+        ".wildarrange/reports/acceptance/**",
+        ".wildarrange/reports/failures/**",
+        ".wildarrange/ledger.jsonl"
       ],
       "commercialBoundary": "WildArrange original acceptance proof schema."
     },
@@ -682,16 +682,16 @@
       "name": "llm_review",
       "layer": "gate",
       "status": "implemented",
-      "command": "configured by helix.config.json review.llm",
+      "command": "configured by wildarrange.config.json review.llm",
       "purpose": "通过 OpenAI-compatible HTTP provider 调用 BaiZe 独立审查角色；风险复核和怀疑式验收由其专项 Skill 提供。无 key 时默认跳过或告警；required=true 时才阻断。",
       "reads": [
-        "helix.config.json",
+        "wildarrange.config.json",
         "task.evidence",
         "task.successCriteria",
         "project rules"
       ],
       "writes": [
-        ".helix/reports/reviews/**"
+        ".wildarrange/reports/reviews/**"
       ],
       "commercialBoundary": "Provider abstraction is model-neutral and host-neutral; no dependency on private host APIs."
     },
@@ -705,24 +705,24 @@
         "task.verify_commands"
       ],
       "writes": [
-        ".helix/team/tasks.json",
-        ".helix/ledger.jsonl",
-        ".helix/reports/failures/**"
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/ledger.jsonl",
+        ".wildarrange/reports/failures/**"
       ]
     },
     {
       "name": "comment_check",
       "layer": "gate",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs node review --task <taskId>",
+      "command": "node ./bin/wildarrange.mjs node review --task <taskId>",
       "purpose": "检查变更文件中的占位注释、AI 署名、TODO/FIXME、lorem ipsum；默认 warn，可配置 blockOnFindings=true 阻断 checkpoint。",
       "reads": [
         "task.writable_paths",
         "scopeResult.changedPaths",
-        "helix.config.json"
+        "wildarrange.config.json"
       ],
       "writes": [
-        ".helix/ledger.jsonl"
+        ".wildarrange/ledger.jsonl"
       ],
       "commercialBoundary": "WildArrange original implementation."
     },
@@ -730,31 +730,31 @@
       "name": "wisdom_append",
       "layer": "memory",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs run",
-      "purpose": "每个任务后追加 verifier 事实到 `.helix/wisdom/verification.md`。结构化 learnings、decisions 和 issues 由 `.helix/memory/` digest 链路承载。",
+      "command": "node ./bin/wildarrange.mjs run",
+      "purpose": "每个任务后追加 verifier 事实到 `.wildarrange/wisdom/verification.md`。结构化 learnings、decisions 和 issues 由 `.wildarrange/memory/` digest 链路承载。",
       "reads": [
         "task.evidence"
       ],
       "writes": [
-        ".helix/wisdom/verification.md",
-        ".helix/memory/**"
+        ".wildarrange/wisdom/verification.md",
+        ".wildarrange/memory/**"
       ]
     },
     {
       "name": "parallel_run",
       "layer": "team",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs parallel run --max-agents 2 --task <taskIds> --agent <agent> [--adapter codex|cursor] [--isolation run-dir|git-worktree] --command <runner>",
+      "command": "node ./bin/wildarrange.mjs parallel run --max-agents 2 --task <taskIds> --agent <agent> [--adapter codex|cursor] [--isolation run-dir|git-worktree] --command <runner>",
       "purpose": "在隔离 run directory 或 Git worktree 中并发启动命令型子 Agent；长期身份只允许 Jiuwei/ZhuRong，DiJiang/BaiZe/LuWu 会在创建 run 前被拒绝；可通过 Codex/Cursor adapter 命令模板渲染 task packet、result、team message 和 ledger 记录；成功结果默认保留为 awaiting_user_acceptance。",
       "reads": [
-        ".helix/team/tasks.json",
-        "helix.config.json"
+        ".wildarrange/team/tasks.json",
+        "wildarrange.config.json"
       ],
       "writes": [
-        ".helix/agent-runs/**",
-        ".helix/team/inbox/**",
-        ".helix/team/outbox/**",
-        ".helix/ledger.jsonl"
+        ".wildarrange/agent-runs/**",
+        ".wildarrange/team/inbox/**",
+        ".wildarrange/team/outbox/**",
+        ".wildarrange/ledger.jsonl"
       ],
       "commercialBoundary": "Host-neutral command runner; no private Codex/Cursor API dependency."
     },
@@ -762,18 +762,18 @@
       "name": "parallel_admit",
       "layer": "gate",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs parallel admit --run <runId> --task <taskId>",
+      "command": "node ./bin/wildarrange.mjs parallel admit --run <runId> --task <taskId>",
       "purpose": "把子 Agent 的结构化 files 或 Git worktree patch 成果合入主线；先检查 writable_paths，再跑 verifier、scope、review、acceptance proof 和 checkpoint；成功后释放子 Agent lifecycle。",
       "reads": [
-        ".helix/agent-runs/**/agent-result.json",
-        ".helix/team/tasks.json"
+        ".wildarrange/agent-runs/**/agent-result.json",
+        ".wildarrange/team/tasks.json"
       ],
       "writes": [
         "task.writable_paths",
         "workspace files allowed by writable_paths",
-        ".helix/checkpoints/**",
-        ".helix/reports/**",
-        ".helix/ledger.jsonl"
+        ".wildarrange/checkpoints/**",
+        ".wildarrange/reports/**",
+        ".wildarrange/ledger.jsonl"
       ],
       "commercialBoundary": "WildArrange original admission gate."
     },
@@ -781,10 +781,10 @@
       "name": "parallel_status",
       "layer": "team",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs parallel status [--run <runId>]",
-      "purpose": "读取 `.helix/agent-runs`，汇总子 Agent 结果、adapter、isolation、lifecycle、awaiting_user_acceptance/released/closed 状态。",
+      "command": "node ./bin/wildarrange.mjs parallel status [--run <runId>]",
+      "purpose": "读取 `.wildarrange/agent-runs`，汇总子 Agent 结果、adapter、isolation、lifecycle、awaiting_user_acceptance/released/closed 状态。",
       "reads": [
-        ".helix/agent-runs/**"
+        ".wildarrange/agent-runs/**"
       ],
       "writes": []
     },
@@ -792,40 +792,40 @@
       "name": "parallel_cleanup",
       "layer": "team",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs parallel cleanup --run <runId>",
-      "purpose": "清理 Git worktree 隔离目录并记录 cleanup lifecycle；只清理 WildArrange 创建并归档在 `.helix/agent-runs` 下的运行。",
+      "command": "node ./bin/wildarrange.mjs parallel cleanup --run <runId>",
+      "purpose": "清理 Git worktree 隔离目录并记录 cleanup lifecycle；只清理 WildArrange 创建并归档在 `.wildarrange/agent-runs` 下的运行。",
       "reads": [
-        ".helix/agent-runs/**"
+        ".wildarrange/agent-runs/**"
       ],
       "writes": [
-        ".helix/agent-runs/**",
-        ".helix/ledger.jsonl"
+        ".wildarrange/agent-runs/**",
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
       "name": "parallel_close",
       "layer": "team",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs parallel close --run <runId> [--task <taskId>] --reason <reason>",
+      "command": "node ./bin/wildarrange.mjs parallel close --run <runId> [--task <taskId>] --reason <reason>",
       "purpose": "用户验收后关闭保留的子 Agent 结果，更新 lifecycle 为 closed，同时保留证据文件与 ledger。",
       "reads": [
-        ".helix/agent-runs/**"
+        ".wildarrange/agent-runs/**"
       ],
       "writes": [
-        ".helix/agent-runs/**",
-        ".helix/ledger.jsonl"
+        ".wildarrange/agent-runs/**",
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
       "name": "archivist_packet",
       "layer": "memory",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs archivist packet --text <request> --stage <stage>",
+      "command": "node ./bin/wildarrange.mjs archivist packet --text <request> --stage <stage>",
       "purpose": "构建 conclusions-only routing packet；剔除代码块、raw diff 和完整命令输出。",
       "reads": [
-        ".helix/ledger.jsonl",
-        ".helix/memory/**",
-        "helix.config.json"
+        ".wildarrange/ledger.jsonl",
+        ".wildarrange/memory/**",
+        "wildarrange.config.json"
       ],
       "writes": []
     },
@@ -833,17 +833,17 @@
       "name": "archivist_run",
       "layer": "memory",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs archivist run --text <request> --stage <stage>",
+      "command": "node ./bin/wildarrange.mjs archivist run --text <request> --stage <stage>",
       "purpose": "运行 CangJie 档案路由员；有 DeepSeek key 时调用模型，无 key 时 deterministic fallback，不阻断主线。",
       "reads": [
-        ".helix/ledger.jsonl",
-        ".helix/memory/**",
-        "helix.config.json"
+        ".wildarrange/ledger.jsonl",
+        ".wildarrange/memory/**",
+        "wildarrange.config.json"
       ],
       "writes": [
-        ".helix/memory/**",
-        ".helix/routing/suggestions/**",
-        ".helix/ledger.jsonl"
+        ".wildarrange/memory/**",
+        ".wildarrange/routing/suggestions/**",
+        ".wildarrange/ledger.jsonl"
       ],
       "commercialBoundary": "Provider abstraction is OpenAI-compatible; prompts and fallback logic are WildArrange original."
     },
@@ -851,16 +851,16 @@
       "name": "semantic_route_shadow",
       "layer": "routing",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs route --text <request>",
+      "command": "node ./bin/wildarrange.mjs route --text <request>",
       "purpose": "保留 deterministic route 证据，同时可用 CangJie 语义第二意见做 shadow review；低置信或冲突的 execute 请求降级到 plan/ask。",
       "reads": [
         "packs/wildarrange-linear/routes.json",
-        ".helix/routing/routes-overrides.json",
-        "helix.config.json"
+        ".wildarrange/routing/routes-overrides.json",
+        "wildarrange.config.json"
       ],
       "writes": [
-        ".helix/ledger.jsonl",
-        ".helix/snapshots/**"
+        ".wildarrange/ledger.jsonl",
+        ".wildarrange/snapshots/**"
       ],
       "commercialBoundary": "WildArrange original routing governance."
     },
@@ -871,16 +871,16 @@
       "command": "automatic on SessionStart/PostCompact/task_completed/parallel_admission_completed",
       "purpose": "把进展、决策、成果物、实现结论、踩坑和未决问题写入结构化 digest，降低误关会话导致的上下文丢失。",
       "reads": [
-        ".helix/ledger.jsonl",
-        ".helix/team/tasks.json",
-        ".helix/checkpoints/**",
-        ".helix/memory/last-archivist-result.json"
+        ".wildarrange/ledger.jsonl",
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/checkpoints/**",
+        ".wildarrange/memory/last-archivist-result.json"
       ],
       "writes": [
-        ".helix/memory/digests/**",
-        ".helix/memory/last-digest.json",
-        ".helix/memory/digest-index.json",
-        ".helix/ledger.jsonl"
+        ".wildarrange/memory/digests/**",
+        ".wildarrange/memory/last-digest.json",
+        ".wildarrange/memory/digest-index.json",
+        ".wildarrange/ledger.jsonl"
       ],
       "commercialBoundary": "WildArrange original structured memory digest."
     },
@@ -888,10 +888,10 @@
       "name": "archivist_suggestions_list",
       "layer": "memory",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs archivist suggestions list",
+      "command": "node ./bin/wildarrange.mjs archivist suggestions list",
       "purpose": "列出 CangJie 生成但尚未审核的路由关键词建议，供 Jiuwei 或人类审核。",
       "reads": [
-        ".helix/routing/suggestions/**"
+        ".wildarrange/routing/suggestions/**"
       ],
       "writes": []
     },
@@ -899,16 +899,16 @@
       "name": "archivist_suggestions_resolve",
       "layer": "memory",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs archivist suggestions resolve --id <id> --decision accept|reject --evidence <evidence> --rationale <rationale>",
-      "purpose": "接受或拒绝路由关键词建议；accept 时只写 `.helix/routing/routes-overrides.json` 覆盖层，不改 prompt-pack 源文件。",
+      "command": "node ./bin/wildarrange.mjs archivist suggestions resolve --id <id> --decision accept|reject --evidence <evidence> --rationale <rationale>",
+      "purpose": "接受或拒绝路由关键词建议；accept 时只写 `.wildarrange/routing/routes-overrides.json` 覆盖层，不改 prompt-pack 源文件。",
       "reads": [
-        ".helix/routing/suggestions/**",
-        "helix.config.json"
+        ".wildarrange/routing/suggestions/**",
+        "wildarrange.config.json"
       ],
       "writes": [
-        ".helix/routing/suggestions/**",
-        ".helix/routing/routes-overrides.json",
-        ".helix/ledger.jsonl"
+        ".wildarrange/routing/suggestions/**",
+        ".wildarrange/routing/routes-overrides.json",
+        ".wildarrange/ledger.jsonl"
       ],
       "commercialBoundary": "WildArrange original reviewed-routing overlay."
     },
@@ -938,28 +938,28 @@
       "name": "ast_grep_search",
       "layer": "code_intelligence",
       "status": "implemented-via-configured-command",
-      "command": "configured by helix.config.json qualityGates.astStructure.commands or task.ast_commands",
+      "command": "configured by wildarrange.config.json qualityGates.astStructure.commands or task.ast_commands",
       "purpose": "按语法结构查找代码，而不是靠字符串猜测；结果进入 review_gate 的 ast_structure lane。",
       "reads": [
         "workspace files",
-        "helix.config.json"
+        "wildarrange.config.json"
       ],
       "writes": [
-        ".helix/reports/reviews/**"
+        ".wildarrange/reports/reviews/**"
       ]
     },
     {
       "name": "lsp_diagnostics",
       "layer": "code_intelligence",
       "status": "implemented",
-      "command": "configured by helix.config.json qualityGates.lspDiagnostics.commands",
+      "command": "configured by wildarrange.config.json qualityGates.lspDiagnostics.commands",
       "purpose": "运行项目配置的 typecheck/LSP 诊断命令，作为 BaiZe 风险复核与验收的证据。",
       "reads": [
         "workspace files",
-        "helix.config.json"
+        "wildarrange.config.json"
       ],
       "writes": [
-        ".helix/reports/reviews/**"
+        ".wildarrange/reports/reviews/**"
       ],
       "commercialBoundary": "CLI command adapter; no embedded third-party LSP daemon code."
     },
@@ -972,10 +972,10 @@
       "reads": [
         "workspace files",
         "task.hashline_anchors",
-        "helix.config.json"
+        "wildarrange.config.json"
       ],
       "writes": [
-        ".helix/reports/reviews/**"
+        ".wildarrange/reports/reviews/**"
       ],
       "commercialBoundary": "Local hash verification; no upstream hashline implementation copied."
     },
@@ -995,7 +995,7 @@
       "name": "git_diff",
       "layer": "git",
       "status": "implemented-in-loop",
-      "command": "git diff -- . ':!.helix'",
+      "command": "git diff -- . ':!.wildarrange'",
       "purpose": "worker 前后采集差异，作为 done-claim 和 verifier 的输入证据。",
       "reads": [
         "git index",
@@ -1007,127 +1007,127 @@
       "name": "team_task_create",
       "layer": "team_lite",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs task create --from <task.json>",
-      "purpose": "在已有 plan 中追加任务，继承 plan.defaults，重新校验 blockedBy 依赖图并写入 .helix/team/tasks.json；适合 ChangeRequest 或设计调整后新增任务。",
+      "command": "node ./bin/wildarrange.mjs task create --from <task.json>",
+      "purpose": "在已有 plan 中追加任务，继承 plan.defaults，重新校验 blockedBy 依赖图并写入 .wildarrange/team/tasks.json；适合 ChangeRequest 或设计调整后新增任务。",
       "reads": [
-        ".helix/team/tasks.json",
-        ".helix/plans/<planId>.json",
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/plans/<planId>.json",
         "packs/wildarrange-linear/routes.json",
         "<task.json>"
       ],
       "writes": [
-        ".helix/team/tasks.json",
-        ".helix/team/tasks.md",
-        ".helix/plans/**",
-        ".helix/ledger.jsonl",
-        ".helix/snapshots/**"
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/team/tasks.md",
+        ".wildarrange/plans/**",
+        ".wildarrange/ledger.jsonl",
+        ".wildarrange/snapshots/**"
       ]
     },
     {
       "name": "team_task_update",
       "layer": "team_lite",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs task claim [--task <taskId>] [--owner <agent>]",
+      "command": "node ./bin/wildarrange.mjs task claim [--task <taskId>] [--owner <agent>]",
       "purpose": "安全认领 pending 且未被 blockedBy 阻塞的任务，状态只会进入 in_progress；completed 仍只能由 verifier/scope/review/checkpoint gate 产生。",
       "reads": [
-        ".helix/team/tasks.json"
+        ".wildarrange/team/tasks.json"
       ],
       "writes": [
-        ".helix/team/tasks.json",
-        ".helix/team/tasks.md",
-        ".helix/ledger.jsonl",
-        ".helix/snapshots/**"
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/team/tasks.md",
+        ".wildarrange/ledger.jsonl",
+        ".wildarrange/snapshots/**"
       ]
     },
     {
       "name": "team_task_archive_delete",
       "layer": "team_lite",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs task archive --task <taskId> [--plan <planId>] --delete [--reason <reason>]",
+      "command": "node ./bin/wildarrange.mjs task archive --task <taskId> [--plan <planId>] --delete [--reason <reason>]",
       "purpose": "先创建含精确 recovery package 的运行态备份，校验 canonical planId:id 身份唯一并拒绝运行中任务；显式 Plan 只精确删除目标 Task，权威总账最后提交，Plan/checkpoint/acceptance/DoneClaim/精确 artifact 可由 state restore 整套恢复；清空活动 Plan 后保持 idle，不自动激活其它 Plan。",
       "reads": [
-        ".helix/team/tasks.json",
-        ".helix/work.json",
-        ".helix/plans/**",
-        ".helix/checkpoints/**",
-        ".helix/reports/acceptance/**",
-        ".helix/artifacts/**"
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/work.json",
+        ".wildarrange/plans/**",
+        ".wildarrange/checkpoints/**",
+        ".wildarrange/reports/acceptance/**",
+        ".wildarrange/artifacts/**"
       ],
       "writes": [
-        ".helix/backups/**",
-        ".helix/team/tasks.json",
-        ".helix/team/tasks.md",
-        ".helix/work.json",
-        ".helix/plans/**",
-        ".helix/checkpoints/**",
-        ".helix/reports/acceptance/**",
-        ".helix/artifacts/**",
-        ".helix/ledger.jsonl"
+        ".wildarrange/backups/**",
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/team/tasks.md",
+        ".wildarrange/work.json",
+        ".wildarrange/plans/**",
+        ".wildarrange/checkpoints/**",
+        ".wildarrange/reports/acceptance/**",
+        ".wildarrange/artifacts/**",
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
       "name": "team_task_list",
       "layer": "team_lite",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs task list [--status <status>] [--owner <agent>]",
-      "purpose": "列出任务对象，支持按 status/owner 过滤；status 仍可用 `helix status` 查看聚合计数。",
+      "command": "node ./bin/wildarrange.mjs task list [--status <status>] [--owner <agent>]",
+      "purpose": "列出任务对象，支持按 status/owner 过滤；status 仍可用 `wildarrange status` 查看聚合计数。",
       "reads": [
-        ".helix/team/tasks.json"
+        ".wildarrange/team/tasks.json"
       ],
       "writes": [
-        ".helix/ledger.jsonl"
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
       "name": "team_task_get",
       "layer": "team_lite",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs task get --task <taskId>",
+      "command": "node ./bin/wildarrange.mjs task get --task <taskId>",
       "purpose": "读取单个任务完整对象，供 Jiuwei 在恢复、失败分析、追加任务前确认当前状态。",
       "reads": [
-        ".helix/team/tasks.json"
+        ".wildarrange/team/tasks.json"
       ],
       "writes": [
-        ".helix/ledger.jsonl"
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
       "name": "team_send_message",
       "layer": "team_lite",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs team send --to <Agent> --from <Agent> --body <text>",
-      "purpose": "写入 .helix/team/inbox/<Agent>/ 和 outbox/<Agent>/，并追加 .helix/team/messages.md，用文件消息板实现最小协同消息能力。",
+      "command": "node ./bin/wildarrange.mjs team send --to <Agent> --from <Agent> --body <text>",
+      "purpose": "写入 .wildarrange/team/inbox/<Agent>/ 和 outbox/<Agent>/，并追加 .wildarrange/team/messages.md，用文件消息板实现最小协同消息能力。",
       "reads": [
-        ".helix/team/inbox/**"
+        ".wildarrange/team/inbox/**"
       ],
       "writes": [
-        ".helix/team/inbox/**",
-        ".helix/team/outbox/**",
-        ".helix/team/messages.md",
-        ".helix/ledger.jsonl"
+        ".wildarrange/team/inbox/**",
+        ".wildarrange/team/outbox/**",
+        ".wildarrange/team/messages.md",
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
       "name": "team_read_inbox",
       "layer": "team_lite",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs team inbox [--agent <Agent>]",
+      "command": "node ./bin/wildarrange.mjs team inbox [--agent <Agent>]",
       "purpose": "读取某个 Agent 或全部 Agent 的 inbox；M1 只读不 ack，未来支持 processed/ 和 live delivery。",
       "reads": [
-        ".helix/team/inbox/**"
+        ".wildarrange/team/inbox/**"
       ],
       "writes": [
-        ".helix/ledger.jsonl"
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
       "name": "prompt_list",
       "layer": "prompt_pack",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs prompts list",
+      "command": "node ./bin/wildarrange.mjs prompts list",
       "purpose": "列出当前安装的 Agent/Skill/Tool 合同。",
       "reads": [
-        ".helix/prompt-pack.json"
+        ".wildarrange/prompt-pack.json"
       ],
       "writes": []
     },
@@ -1135,10 +1135,10 @@
       "name": "prompt_show",
       "layer": "prompt_pack",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs prompts show --agent <name>",
+      "command": "node ./bin/wildarrange.mjs prompts show --agent <name>",
       "purpose": "从已安装 prompt-pack 渲染指定 Agent 提示词，并校验 sha256 未漂移。",
       "reads": [
-        ".helix/prompt-pack.json",
+        ".wildarrange/prompt-pack.json",
         "packs/wildarrange-linear/**"
       ],
       "writes": []
@@ -1147,10 +1147,10 @@
       "name": "skill_show",
       "layer": "prompt_pack",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs prompts show --skill <name>",
+      "command": "node ./bin/wildarrange.mjs prompts show --skill <name>",
       "purpose": "从已安装 prompt-pack 渲染指定 Skill，并校验 sha256 未漂移。",
       "reads": [
-        ".helix/prompt-pack.json",
+        ".wildarrange/prompt-pack.json",
         "packs/wildarrange-linear/**"
       ],
       "writes": []
@@ -1159,12 +1159,12 @@
       "name": "skill_match",
       "layer": "prompt_pack",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs skills match --text <request> [--stage <stage>] [--agent <agent>]",
+      "command": "node ./bin/wildarrange.mjs skills match --text <request> [--stage <stage>] [--agent <agent>]",
       "purpose": "按显式 skill、阶段、路由信号、Agent 角色、类别和关键词为已安装 Skill 打分，返回可解释的按需加载建议。",
       "reads": [
-        ".helix/prompt-pack.json",
+        ".wildarrange/prompt-pack.json",
         "packs/wildarrange-linear/**",
-        "helix.config.json"
+        "wildarrange.config.json"
       ],
       "writes": []
     },
@@ -1172,19 +1172,19 @@
       "name": "codex_spawn_agent",
       "layer": "adapter",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs parallel run --task <taskId> --agent <agent> --adapter codex",
+      "command": "node ./bin/wildarrange.mjs parallel run --task <taskId> --agent <agent> --adapter codex",
       "purpose": "Codex 适配器最小实现：使用 `parallelAgents.spawnAdapters.codex.command` 命令模板拉起子 Agent，把 task packet、workDir 和 outputJson 传入；真实后台 Agent API 仍属于 adapter 深层增强。",
       "reads": [
-        "helix.config.json",
-        ".helix/prompt-pack.json",
-        ".helix/team/tasks.json",
-        ".helix/snapshots/**"
+        "wildarrange.config.json",
+        ".wildarrange/prompt-pack.json",
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/snapshots/**"
       ],
       "writes": [
-        ".helix/agent-runs/**",
-        ".helix/team/inbox/**",
-        ".helix/team/outbox/**",
-        ".helix/ledger.jsonl"
+        ".wildarrange/agent-runs/**",
+        ".wildarrange/team/inbox/**",
+        ".wildarrange/team/outbox/**",
+        ".wildarrange/ledger.jsonl"
       ],
       "commercialBoundary": "Host-neutral command-template adapter; no private Codex source or API dependency."
     },
@@ -1192,152 +1192,152 @@
       "name": "cursor_spawn_agent",
       "layer": "adapter",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs parallel run --task <taskId> --agent <agent> --adapter cursor",
+      "command": "node ./bin/wildarrange.mjs parallel run --task <taskId> --agent <agent> --adapter cursor",
       "purpose": "Cursor 适配器最小实现：使用 `parallelAgents.spawnAdapters.cursor.command` 命令模板拉起子 Agent，并复用同一套 task packet、workDir、outputJson 和 admission gate。",
       "reads": [
-        "helix.config.json",
-        ".helix/prompt-pack.json",
-        ".helix/team/tasks.json",
-        ".helix/snapshots/**"
+        "wildarrange.config.json",
+        ".wildarrange/prompt-pack.json",
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/snapshots/**"
       ],
       "writes": [
-        ".helix/agent-runs/**",
-        ".helix/team/inbox/**",
-        ".helix/team/outbox/**",
-        ".helix/ledger.jsonl"
+        ".wildarrange/agent-runs/**",
+        ".wildarrange/team/inbox/**",
+        ".wildarrange/team/outbox/**",
+        ".wildarrange/ledger.jsonl"
       ],
       "commercialBoundary": "Host-neutral command-template adapter; no private Cursor source or API dependency."
     },
     {
-      "name": "helix_plan_approve",
+      "name": "wildarrange_plan_approve",
       "layer": "planning",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs plan approve",
+      "command": "node ./bin/wildarrange.mjs plan approve",
       "purpose": "在 planApproval.required=true 时确认已导入计划，解除 awaiting_plan_approval 后才允许 run。",
       "reads": [
-        ".helix/work.json",
-        ".helix/plans/**"
+        ".wildarrange/work.json",
+        ".wildarrange/plans/**"
       ],
       "writes": [
-        ".helix/work.json",
-        ".helix/plans/**",
-        ".helix/ledger.jsonl"
+        ".wildarrange/work.json",
+        ".wildarrange/plans/**",
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
-      "name": "helix_device_register",
+      "name": "wildarrange_device_register",
       "layer": "runtime_state",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs device register --name macbook",
+      "command": "node ./bin/wildarrange.mjs device register --name macbook",
       "purpose": "登记当前设备，供 Git 多设备协调与跨设备 handoff 绑定 owner。",
       "reads": [
-        ".helix/**"
+        ".wildarrange/**"
       ],
       "writes": [
-        ".helix/coordination/**",
-        ".helix/ledger.jsonl"
+        ".wildarrange/coordination/**",
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
-      "name": "helix_coordination_status",
+      "name": "wildarrange_coordination_status",
       "layer": "runtime_state",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs coordination status",
+      "command": "node ./bin/wildarrange.mjs coordination status",
       "purpose": "只读查看 Git 协调状态和当前单写 owner。",
       "reads": [
-        ".helix/**",
+        ".wildarrange/**",
         "git remotes"
       ],
       "writes": []
     },
     {
-      "name": "helix_coordination_claim",
+      "name": "wildarrange_coordination_claim",
       "layer": "runtime_state",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs coordination claim --task T001 --owner ZhuRong",
+      "command": "node ./bin/wildarrange.mjs coordination claim --task T001 --owner ZhuRong",
       "purpose": "显式远端领取任务并维护单写 owner。",
       "reads": [
-        ".helix/**",
+        ".wildarrange/**",
         "git remotes"
       ],
       "writes": [
-        ".helix/coordination/**",
-        ".helix/team/tasks.json",
-        ".helix/ledger.jsonl"
+        ".wildarrange/coordination/**",
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
-      "name": "helix_handoff_prepare",
+      "name": "wildarrange_handoff_prepare",
       "layer": "runtime_state",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs handoff prepare --task T001 --to-device-id <uuid> --to-device-name mac-mini",
+      "command": "node ./bin/wildarrange.mjs handoff prepare --task T001 --to-device-id <uuid> --to-device-name mac-mini",
       "purpose": "准备跨设备交接并绑定目标设备 UUID。",
       "reads": [
-        ".helix/**",
+        ".wildarrange/**",
         "git remotes"
       ],
       "writes": [
-        ".helix/coordination/**",
-        ".helix/handoff/**",
-        ".helix/ledger.jsonl"
+        ".wildarrange/coordination/**",
+        ".wildarrange/handoff/**",
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
-      "name": "helix_handoff_push",
+      "name": "wildarrange_handoff_push",
       "layer": "runtime_state",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs handoff push --task T001",
+      "command": "node ./bin/wildarrange.mjs handoff push --task T001",
       "purpose": "复核 prepare 树指纹后普通 push 交接提交。",
       "reads": [
-        ".helix/handoff/**",
+        ".wildarrange/handoff/**",
         "git repository",
         "git remotes"
       ],
       "writes": [
-        ".helix/handoff/**",
-        ".helix/ledger.jsonl",
+        ".wildarrange/handoff/**",
+        ".wildarrange/ledger.jsonl",
         "git remote"
       ]
     },
     {
-      "name": "helix_handoff_accept",
+      "name": "wildarrange_handoff_accept",
       "layer": "runtime_state",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs handoff accept --plan <planId> --task T001",
+      "command": "node ./bin/wildarrange.mjs handoff accept --plan <planId> --task T001",
       "purpose": "由被绑定的目标设备接受已 push 的交接。",
       "reads": [
-        ".helix/handoff/**",
-        ".helix/coordination/**",
+        ".wildarrange/handoff/**",
+        ".wildarrange/coordination/**",
         "git remotes"
       ],
       "writes": [
-        ".helix/handoff/**",
-        ".helix/coordination/**",
-        ".helix/ledger.jsonl"
+        ".wildarrange/handoff/**",
+        ".wildarrange/coordination/**",
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
-      "name": "helix_handoff_takeover",
+      "name": "wildarrange_handoff_takeover",
       "layer": "runtime_state",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs handoff takeover --plan <planId> --task T001 --expected-device-id <uuid> --reason <text>",
+      "command": "node ./bin/wildarrange.mjs handoff takeover --plan <planId> --task T001 --expected-device-id <uuid> --reason <text>",
       "purpose": "显式记录预期旧设备和理由后接管任务；不按本机时间自动过期 owner。",
       "reads": [
-        ".helix/handoff/**",
-        ".helix/coordination/**",
+        ".wildarrange/handoff/**",
+        ".wildarrange/coordination/**",
         "git remotes"
       ],
       "writes": [
-        ".helix/handoff/**",
-        ".helix/coordination/**",
-        ".helix/ledger.jsonl"
+        ".wildarrange/handoff/**",
+        ".wildarrange/coordination/**",
+        ".wildarrange/ledger.jsonl"
       ]
     },
     {
-      "name": "helix_impact",
+      "name": "wildarrange_impact",
       "layer": "code_intelligence",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs impact <file>",
+      "command": "node ./bin/wildarrange.mjs impact <file>",
       "purpose": "按改动文件做反向依赖闭包的影响面分析。",
       "reads": [
         "src/**",
@@ -1346,24 +1346,24 @@
       "writes": []
     },
     {
-      "name": "helix_review_suspicious",
+      "name": "wildarrange_review_suspicious",
       "layer": "gate",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs review suspicious",
-      "purpose": "LLM 可疑判断异步审查：只读清洗结论包，结论只进 `.helix/reports/suspicion.*`，不进完成链。",
+      "command": "node ./bin/wildarrange.mjs review suspicious",
+      "purpose": "LLM 可疑判断异步审查：只读清洗结论包，结论只进 `.wildarrange/reports/suspicion.*`，不进完成链。",
       "reads": [
-        ".helix/decisions.jsonl",
-        "helix.config.json"
+        ".wildarrange/decisions.jsonl",
+        "wildarrange.config.json"
       ],
       "writes": [
-        ".helix/reports/suspicion.*"
+        ".wildarrange/reports/suspicion.*"
       ]
     },
     {
-      "name": "helix_test",
+      "name": "wildarrange_test",
       "layer": "quality_gate",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs test --zone infra",
+      "command": "node ./bin/wildarrange.mjs test --zone infra",
       "purpose": "按分区或影响面选择最小测试集并运行。",
       "reads": [
         "src/**",
@@ -1372,20 +1372,20 @@
       "writes": []
     },
     {
-      "name": "helix_parallel_retry",
+      "name": "wildarrange_parallel_retry",
       "layer": "team",
       "status": "implemented",
-      "command": "node ./bin/helix.mjs parallel retry --run <runId>",
+      "command": "node ./bin/wildarrange.mjs parallel retry --run <runId>",
       "purpose": "只重跑指定 run 中未通过或未完成的任务，不重跑已成功任务。",
       "reads": [
-        ".helix/agent-runs/**",
-        ".helix/team/tasks.json"
+        ".wildarrange/agent-runs/**",
+        ".wildarrange/team/tasks.json"
       ],
       "writes": [
-        ".helix/agent-runs/**",
-        ".helix/team/inbox/**",
-        ".helix/team/outbox/**",
-        ".helix/ledger.jsonl"
+        ".wildarrange/agent-runs/**",
+        ".wildarrange/team/inbox/**",
+        ".wildarrange/team/outbox/**",
+        ".wildarrange/ledger.jsonl"
       ]
     }
   ],

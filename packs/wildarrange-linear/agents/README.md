@@ -17,9 +17,9 @@
 
 | 概念 | WildArrange |
 |---|---|
-| 计划文件 | `.helix/plans/*.json` + `.helix/team/tasks.md` |
-| 工作状态 | `.helix/work.json` |
-| 经验沉淀 | `.helix/wisdom/*` |
+| 计划文件 | `.wildarrange/plans/*.json` + `.wildarrange/team/tasks.md` |
+| 工作状态 | `.wildarrange/work.json` |
+| 经验沉淀 | `.wildarrange/wisdom/*` |
 | 执行任务 | Jiuwei 派发 ZhuRong，或 Codex/Cursor adapter |
 | 外部验证 | `verify_commands` + BaiZe/review contract |
 | 完成标记 | 任务状态 `completed` + checkpoint + ledger |

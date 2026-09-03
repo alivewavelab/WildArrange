@@ -1,15 +1,15 @@
 import { appendFile, mkdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { helixError } from "./error-protocol.mjs";
+import { wildarrangeError } from "./error-protocol.mjs";
 import { withFileLock } from "./file-lock.mjs";
-import { createWorkId, hashContent, nowIso, readJson, resolveHelixPath, writeJsonAtomic } from "./runtime-store.mjs";
+import { createWorkId, hashContent, nowIso, readJson, resolveWildArrangePath, writeJsonAtomic } from "./runtime-store.mjs";
 
 const LEDGER_LOCK_RETRY_MS = 20;
 const LEDGER_LOCK_WAIT_TIMEOUT_MS = 10_000;
 const LEDGER_TAIL_CACHE_VERSION = 1;
 
 export async function appendLedger(rootDir, event) {
-  const ledgerPath = resolveHelixPath(rootDir, "ledger.jsonl");
+  const ledgerPath = resolveWildArrangePath(rootDir, "ledger.jsonl");
   await mkdir(path.dirname(ledgerPath), { recursive: true });
   return withLedgerLock(rootDir, async () => {
     const tail = await resolveTailHashForAppend(rootDir, ledgerPath);
@@ -51,7 +51,7 @@ export async function readVerifiedLedgerEntries(rootDir) {
 }
 
 async function walkLedger(rootDir) {
-  const ledgerPath = resolveHelixPath(rootDir, "ledger.jsonl");
+  const ledgerPath = resolveWildArrangePath(rootDir, "ledger.jsonl");
   let content = "";
   try {
     content = await readFile(ledgerPath, "utf8");
@@ -109,11 +109,11 @@ async function walkLedger(rootDir) {
 }
 
 export async function readLedgerTailHash(rootDir) {
-  return readLedgerLastHash(resolveHelixPath(rootDir, "ledger.jsonl"));
+  return readLedgerLastHash(resolveWildArrangePath(rootDir, "ledger.jsonl"));
 }
 
 function tailCachePath(rootDir) {
-  return resolveHelixPath(rootDir, "ledger-tail.json");
+  return resolveWildArrangePath(rootDir, "ledger-tail.json");
 }
 
 // 追加路径的尾 hash 解析：缓存命中（文件尺寸未变）时 O(1)；尺寸变大
@@ -130,11 +130,11 @@ async function resolveTailHashForAppend(rootDir, ledgerPath) {
   const cache = await readJson(tailCachePath(rootDir), null);
   if (cache && cache.version === LEDGER_TAIL_CACHE_VERSION && Number.isInteger(cache.size)) {
     if (size < cache.size) {
-      throw helixError({
+      throw wildarrangeError({
         code: "ledger_truncated",
         module: "infra/ledger.mjs",
         message: `ledger.jsonl shrank from ${cache.size} to ${size} bytes; the ledger may have been truncated or rewritten`,
-        nextAction: "运行 node ./bin/helix.mjs ledger verify 与 doctor；必要时用 state list/restore 恢复备份",
+        nextAction: "运行 node ./bin/wildarrange.mjs ledger verify 与 doctor；必要时用 state list/restore 恢复备份",
       });
     }
     if (size === cache.size) return { hash: cache.hash || null, size };
@@ -160,11 +160,11 @@ async function readLedgerLastHash(ledgerPath) {
     try {
       entry = JSON.parse(lines[index]);
     } catch {
-      throw helixError({
+      throw wildarrangeError({
         code: "ledger_tail_corrupt",
         module: "infra/ledger.mjs",
         message: `ledger.jsonl line ${index + 1} is not valid JSON; refusing to append onto a corrupted chain`,
-        nextAction: "运行 node ./bin/helix.mjs ledger verify 定位坏行；修复或用 state restore 恢复后再继续",
+        nextAction: "运行 node ./bin/wildarrange.mjs ledger verify 定位坏行；修复或用 state restore 恢复后再继续",
       });
     }
     if (entry.hash) {
@@ -173,11 +173,11 @@ async function readLedgerLastHash(ledgerPath) {
     }
   }
   if (lastHashIndex >= 0 && lastHashIndex < lines.length - 1) {
-    throw helixError({
+    throw wildarrangeError({
       code: "ledger_tail_unhashed",
       module: "infra/ledger.mjs",
       message: `ledger.jsonl has ${lines.length - 1 - lastHashIndex} unhashed line(s) after the hash chain started; refusing to append`,
-      nextAction: "运行 node ./bin/helix.mjs ledger verify 确认篡改范围；恢复备份后再继续",
+      nextAction: "运行 node ./bin/wildarrange.mjs ledger verify 确认篡改范围；恢复备份后再继续",
     });
   }
   return lastHash;
@@ -192,7 +192,7 @@ function hashLedgerEntry(entry) {
 // 不可解析按 mtime 宽限）与可诊断超时（错误带 owner/pid/存活状态）。
 // 旧的二行 `pid\nts` 锁格式不可解析，崩溃残留会在宽限期后自动回收。
 async function withLedgerLock(rootDir, fn) {
-  const lockPath = resolveHelixPath(rootDir, "ledger.lock");
+  const lockPath = resolveWildArrangePath(rootDir, "ledger.lock");
   await mkdir(path.dirname(lockPath), { recursive: true });
   return withFileLock(rootDir, lockPath, "ledger lock", "ledger-append", fn, {
     waitTimeoutMs: LEDGER_LOCK_WAIT_TIMEOUT_MS,

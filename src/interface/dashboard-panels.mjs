@@ -6,9 +6,9 @@
  * 独立成模块是为了守住 dashboard.mjs 的 1000 行拆分线。
  */
 import { stat } from "node:fs/promises";
-import { loadHelixConfig } from "../infra/runtime-config.mjs";
+import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { evaluateGateArming } from "../infra/gate-arming.mjs";
-import { readJson, resolveHelixPath } from "../infra/runtime-store.mjs";
+import { readJson, resolveWildArrangePath } from "../infra/runtime-store.mjs";
 import { inspectFileLock } from "../infra/file-lock.mjs";
 import { loadTaskState } from "../orchestration/plan-state.mjs";
 import { parallelAgentStatus } from "../orchestration/parallel-runtime.mjs";
@@ -22,7 +22,7 @@ export async function buildRouteReviewPanelViewModel(rootDir, { date = localDate
   const [{ records, skippedLines }, annotations, dailyReport] = await Promise.all([
     readDecisions(rootDir, { filter: (record) => typeof record.ts === "string" && localDate(record.ts) === date }),
     readAnnotations(rootDir),
-    readJson(resolveHelixPath(rootDir, "reports", "routing", `${date}.json`), null),
+    readJson(resolveWildArrangePath(rootDir, "reports", "routing", `${date}.json`), null),
   ]);
   const latestAnnotation = new Map();
   for (const annotation of annotations.records) latestAnnotation.set(annotation.decisionId, annotation);
@@ -67,17 +67,17 @@ export async function buildRouteReviewPanelViewModel(rootDir, { date = localDate
   const selected = routes.slice(-limit).reverse();
   const reviewed = selected.filter((route) => route.review);
   return {
-    kind: "helix_dashboard_route_review_panel",
+    kind: "wildarrange_dashboard_route_review_panel",
     date,
     total: selected.length,
     reviewed: reviewed.length,
     confirmed: reviewed.filter((route) => route.review.category === "confirmed").length,
     issues: reviewed.filter((route) => ["rule_wrong", "case_wrong"].includes(route.review.category)).length,
-    dailyReport: dailyReport?.kind === "helix_daily_routing_review" ? {
+    dailyReport: dailyReport?.kind === "wildarrange_daily_routing_review" ? {
       generatedAt: dailyReport.generatedAt,
       summary: dailyReport.summary,
       patterns: dailyReport.patterns || [],
-      path: `.helix/reports/routing/${date}.md`,
+      path: `.wildarrange/reports/routing/${date}.md`,
     } : null,
     skippedLines,
     routes: selected,
@@ -106,7 +106,7 @@ export async function buildDecisionsPanelViewModel(rootDir, { limit = 20 } = {})
     projectDecisionStats(rootDir),
   ]);
   return {
-    kind: "helix_dashboard_decisions_panel",
+    kind: "wildarrange_dashboard_decisions_panel",
     recent: recent.records,
     skippedLines: recent.skippedLines,
     gates: stats.gates,
@@ -116,21 +116,21 @@ export async function buildDecisionsPanelViewModel(rootDir, { limit = 20 } = {})
 }
 
 export async function buildOpsPanelViewModel(rootDir) {
-  const { config } = await loadHelixConfig(rootDir);
+  const { config } = await loadWildArrangeConfig(rootDir);
   const taskState = await loadTaskState(rootDir);
   const gateArming = evaluateGateArming({ config, tasks: taskState?.tasks || [] });
   const [tasksLock, ledgerLock, runs] = await Promise.all([
-    inspectFileLock(rootDir, resolveHelixPath(rootDir, "team", "tasks.lock")),
-    inspectFileLock(rootDir, resolveHelixPath(rootDir, "ledger.lock")),
+    inspectFileLock(rootDir, resolveWildArrangePath(rootDir, "team", "tasks.lock")),
+    inspectFileLock(rootDir, resolveWildArrangePath(rootDir, "ledger.lock")),
     parallelAgentStatus(rootDir).catch(() => null),
   ]);
   const files = [];
   for (const name of ["ledger.jsonl", "decisions.jsonl", "annotations.jsonl"]) {
-    const size = await stat(resolveHelixPath(rootDir, name)).then((info) => info.size).catch(() => null);
-    files.push({ path: `.helix/${name}`, sizeBytes: size });
+    const size = await stat(resolveWildArrangePath(rootDir, name)).then((info) => info.size).catch(() => null);
+    files.push({ path: `.wildarrange/${name}`, sizeBytes: size });
   }
   return {
-    kind: "helix_dashboard_ops_panel",
+    kind: "wildarrange_dashboard_ops_panel",
     gateArming,
     locks: [tasksLock, ledgerLock],
     parallelRuns: runs

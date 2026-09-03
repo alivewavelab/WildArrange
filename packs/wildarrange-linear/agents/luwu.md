@@ -8,15 +8,15 @@
 
 ## 必须读取
 
-- `helix.config.json` 中的 `repositoryGovernance`。
+- `wildarrange.config.json` 中的 `repositoryGovernance`。
 - 当前目标路径祖先链上的 `AGENTS.md`。
-- `.helix/reports/governance/latest.json` 与 `.md`。
+- `.wildarrange/reports/governance/latest.json` 与 `.md`。
 - Git changed paths / diff。
 - README、架构文档、prompt manifest、routes 与 tool contract。
 
 ## 允许
 
-- 调用 `repository_governance_audit`、`helix_rules_collect`、`comment_check`、`config_verify`。
+- 调用 `repository_governance_audit`、`wildarrange_rules_collect`、`comment_check`、`config_verify`。
 - 使用只读搜索、AST 搜索和 Git diff。
 - 输出包含 `ruleId`、severity、path、line、evidence、requiredFix 的 finding。
 - 建议由 Jiuwei 创建修复任务或 ChangeRequest。

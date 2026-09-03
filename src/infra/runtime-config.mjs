@@ -4,19 +4,19 @@ import path from "node:path";
 import { normalizeAgentKey } from "./agent-registry.mjs";
 import { appendLedger } from "./ledger.mjs";
 import {
-  ensureHelixDirs,
+  ensureWildArrangeDirs,
   readJson,
-  resolveHelixPath,
+  resolveWildArrangePath,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 
-export const HELIX_CONFIG_FILE = "helix.config.json";
+export const WILDARRANGE_CONFIG_FILE = "wildarrange.config.json";
 export const PRODUCT_NAME = "WildArrange";
 export const DEFAULT_PACKAGE_NAME = "@alivewavelab/wildarrange";
 export const DEFAULT_RUNTIME_NAME = "wildarrange-linear";
 export const DEFAULT_CLI_COMMAND = "wildarrange";
 
-export const DEFAULT_HELIX_CONFIG = {
+export const DEFAULT_WILDARRANGE_CONFIG = {
   version: 1,
   runtime: DEFAULT_RUNTIME_NAME,
   adapters: {
@@ -62,7 +62,7 @@ export const DEFAULT_HELIX_CONFIG = {
     },
     memory: {
       backend: "structured-files",
-      root: ".helix/memory",
+      root: ".wildarrange/memory",
       captureMode: "conclusions-only",
       includeCodeBlocks: false,
       maxRecentTurns: 10,
@@ -232,7 +232,7 @@ export const DEFAULT_HELIX_CONFIG = {
     documentationPairs: [],
     documentationRequirements: [],
     architectureLedgers: [],
-    ignoredPaths: [".git", ".helix", "node_modules", "coverage"],
+    ignoredPaths: [".git", ".wildarrange", "node_modules", "coverage"],
     naming: {
       directories: "kebab-case",
       sourceFiles: "kebab-case.mjs",
@@ -243,15 +243,15 @@ export const DEFAULT_HELIX_CONFIG = {
   injectionPoints: {
     session_start: {
       enabled: true,
-      tools: ["helix_resume", "helix_rules_collect", "helix_context_build"],
-      markdown: [".helix/snapshots/context.md", ".helix/rules/context.md"],
+      tools: ["wildarrange_resume", "wildarrange_rules_collect", "wildarrange_context_build"],
+      markdown: [".wildarrange/snapshots/context.md", ".wildarrange/rules/context.md"],
       skills: ["wildarrange-injection-runtime", "start-work"],
       rules: { mode: "static" },
     },
     user_prompt_submit: {
       enabled: true,
-      tools: ["helix_route", "helix_rules_collect"],
-      markdown: [".helix/snapshots/context.md", ".helix/rules/context.md"],
+      tools: ["wildarrange_route", "wildarrange_rules_collect"],
+      markdown: [".wildarrange/snapshots/context.md", ".wildarrange/rules/context.md"],
       skills: [
         "wildarrange-injection-runtime",
         "review-work",
@@ -269,66 +269,66 @@ export const DEFAULT_HELIX_CONFIG = {
     },
     pre_tool_use: {
       enabled: true,
-      tools: ["scope_guard", "helix_rules_collect"],
-      markdown: [".helix/rules/context.md"],
+      tools: ["scope_guard", "wildarrange_rules_collect"],
+      markdown: [".wildarrange/rules/context.md"],
       skills: ["wildarrange-injection-runtime"],
       rules: { mode: "dynamic_blocker" },
     },
     post_tool_use: {
       enabled: true,
-      tools: ["helix_rules_collect", "scope_guard"],
-      markdown: [".helix/rules/context.md"],
+      tools: ["wildarrange_rules_collect", "scope_guard"],
+      markdown: [".wildarrange/rules/context.md"],
       skills: [],
       rules: { mode: "dynamic" },
     },
     post_compact: {
       enabled: true,
-      tools: ["helix_resume", "helix_rules_collect"],
-      markdown: [".helix/snapshots/context.md", ".helix/rules/context.md"],
+      tools: ["wildarrange_resume", "wildarrange_rules_collect"],
+      markdown: [".wildarrange/snapshots/context.md", ".wildarrange/rules/context.md"],
       skills: ["wildarrange-injection-runtime"],
       rules: { mode: "recovery_marker" },
     },
     before_execute: {
       enabled: true,
-      tools: ["helix_context_build", "helix_node", "scope_guard"],
-      markdown: [".helix/context-agents/Jiuwei-{taskId}.md", ".helix/rules/context.md"],
+      tools: ["wildarrange_context_build", "wildarrange_node", "scope_guard"],
+      markdown: [".wildarrange/context-agents/Jiuwei-{taskId}.md", ".wildarrange/rules/context.md"],
       skills: ["wildarrange-injection-runtime", "run-linear-delivery", "programming", "debugging", "refactor"],
       rules: { mode: "dynamic" },
     },
     before_review: {
       enabled: true,
-      tools: ["helix_context_build", "helix_evidence_record", "review_gate"],
-      markdown: [".helix/context-agents/BaiZe-{taskId}.md", ".helix/rules/context.md"],
+      tools: ["wildarrange_context_build", "wildarrange_evidence_record", "review_gate"],
+      markdown: [".wildarrange/context-agents/BaiZe-{taskId}.md", ".wildarrange/rules/context.md"],
       skills: ["wildarrange-injection-runtime", "review-work", "review-plan-risk", "review-plan-readiness", "review-scope-tradeoff", "visual-qa"],
       rules: { mode: "dynamic" },
     },
     repository_governance: {
       enabled: true,
-      tools: ["repository_governance_audit", "helix_rules_collect", "comment_check", "config_verify"],
-      markdown: [".helix/reports/governance/latest.md", ".helix/rules/context.md"],
+      tools: ["repository_governance_audit", "wildarrange_rules_collect", "comment_check", "config_verify"],
+      markdown: [".wildarrange/reports/governance/latest.md", ".wildarrange/rules/context.md"],
       skills: ["wildarrange-injection-runtime", "repository-governance", "init-deep", "pre-publish-review", "remove-ai-slops"],
       rules: { mode: "dynamic" },
     },
     before_checkpoint: {
       enabled: true,
-      tools: ["helix_evidence_record", "review_gate", "helix_summary"],
-      markdown: [".helix/reports/reviews/{planId}/{taskId}.md", ".helix/rules/context.md"],
+      tools: ["wildarrange_evidence_record", "review_gate", "wildarrange_summary"],
+      markdown: [".wildarrange/reports/reviews/{planId}/{taskId}.md", ".wildarrange/rules/context.md"],
       skills: ["wildarrange-injection-runtime", "review-work", "design-acceptance"],
       rules: { mode: "dynamic" },
     },
     stop: {
       enabled: true,
-      tools: ["helix_continuation_check", "helix_resume"],
-      markdown: [".helix/sessions/continuation.md", ".helix/snapshots/context.md", ".helix/reports/routing/latest.md"],
+      tools: ["wildarrange_continuation_check", "wildarrange_resume"],
+      markdown: [".wildarrange/sessions/continuation.md", ".wildarrange/snapshots/context.md", ".wildarrange/reports/routing/latest.md"],
       skills: ["wildarrange-injection-runtime", "start-work", "review-routing-decisions"],
       rules: { mode: "static" },
     },
   },
 };
 
-export async function loadHelixConfig(rootDir) {
-  const rootConfigPath = path.join(rootDir, HELIX_CONFIG_FILE);
-  const runtimeConfigPath = resolveHelixPath(rootDir, "config.json");
+export async function loadWildArrangeConfig(rootDir) {
+  const rootConfigPath = path.join(rootDir, WILDARRANGE_CONFIG_FILE);
+  const runtimeConfigPath = resolveWildArrangePath(rootDir, "config.json");
   const rootConfig = await readJson(rootConfigPath, null);
   const runtimeConfig = await readJson(runtimeConfigPath, null);
   const sourcePath = rootConfig ? rootConfigPath : runtimeConfig ? runtimeConfigPath : null;
@@ -337,44 +337,44 @@ export async function loadHelixConfig(rootDir) {
   // reappear whenever the root stopped overriding them.
   const selectedConfig = rootConfig || runtimeConfig || {};
   return {
-    config: normalizeRuntimeConfig(deepMerge(DEFAULT_HELIX_CONFIG, selectedConfig)),
+    config: normalizeRuntimeConfig(deepMerge(DEFAULT_WILDARRANGE_CONFIG, selectedConfig)),
     sourcePath: sourcePath ? path.relative(rootDir, sourcePath) : "default",
   };
 }
 
 export async function migrateRuntimeConfigState(rootDir) {
-  await ensureHelixDirs(rootDir);
-  const rootConfigPath = path.join(rootDir, HELIX_CONFIG_FILE);
-  const runtimeConfigPath = resolveHelixPath(rootDir, "config.json");
+  await ensureWildArrangeDirs(rootDir);
+  const rootConfigPath = path.join(rootDir, WILDARRANGE_CONFIG_FILE);
+  const runtimeConfigPath = resolveWildArrangePath(rootDir, "config.json");
   const rootConfig = await readJson(rootConfigPath, null);
   const runtimeConfig = await readJson(runtimeConfigPath, null);
   const source = rootConfig || runtimeConfig || {};
-  const config = normalizeRuntimeConfig(deepMerge(DEFAULT_HELIX_CONFIG, source));
+  const config = normalizeRuntimeConfig(deepMerge(DEFAULT_WILDARRANGE_CONFIG, source));
   await writeJsonAtomic(runtimeConfigPath, config);
   const removedProjections = [];
   for (const name of ["agents.json", "categories.json"]) {
     try {
-      await unlink(resolveHelixPath(rootDir, name));
-      removedProjections.push(`.helix/${name}`);
+      await unlink(resolveWildArrangePath(rootDir, name));
+      removedProjections.push(`.wildarrange/${name}`);
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
     }
   }
   return {
     kind: "runtime_config_migration",
-    sourcePath: rootConfig ? HELIX_CONFIG_FILE : runtimeConfig ? ".helix/config.json" : "default",
+    sourcePath: rootConfig ? WILDARRANGE_CONFIG_FILE : runtimeConfig ? ".wildarrange/config.json" : "default",
     runtimeConfigPath: path.relative(rootDir, runtimeConfigPath),
     removedProjections,
   };
 }
 
-export async function writeDefaultHelixConfig(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
-  const targetPath = options.root === true ? path.join(rootDir, HELIX_CONFIG_FILE) : resolveHelixPath(rootDir, "config.json");
+export async function writeDefaultWildArrangeConfig(rootDir, options = {}) {
+  await ensureWildArrangeDirs(rootDir);
+  const targetPath = options.root === true ? path.join(rootDir, WILDARRANGE_CONFIG_FILE) : resolveWildArrangePath(rootDir, "config.json");
   if (!options.force && existsSync(targetPath)) {
     return { path: path.relative(rootDir, targetPath), created: false, config: await readJson(targetPath) };
   }
-  const config = options.armed === true ? buildArmedConfig() : DEFAULT_HELIX_CONFIG;
+  const config = options.armed === true ? buildArmedConfig() : DEFAULT_WILDARRANGE_CONFIG;
   await writeJsonAtomic(targetPath, config);
   await appendLedger(rootDir, { type: "config_written", configPath: path.relative(rootDir, targetPath), root: options.root === true, armed: options.armed === true });
   return { path: path.relative(rootDir, targetPath), created: true, config };
@@ -388,17 +388,17 @@ export async function writeDefaultHelixConfig(rootDir, options = {}) {
  */
 function buildArmedConfig() {
   return {
-    ...DEFAULT_HELIX_CONFIG,
+    ...DEFAULT_WILDARRANGE_CONFIG,
     qualityGates: {
-      ...DEFAULT_HELIX_CONFIG.qualityGates,
+      ...DEFAULT_WILDARRANGE_CONFIG.qualityGates,
       lspDiagnostics: {
-        ...DEFAULT_HELIX_CONFIG.qualityGates?.lspDiagnostics,
+        ...DEFAULT_WILDARRANGE_CONFIG.qualityGates?.lspDiagnostics,
         enabled: true,
         required: true,
         commands: ["node --test"],
       },
       commentChecker: {
-        ...DEFAULT_HELIX_CONFIG.qualityGates?.commentChecker,
+        ...DEFAULT_WILDARRANGE_CONFIG.qualityGates?.commentChecker,
         enabled: true,
         blockOnFindings: true,
       },
@@ -411,7 +411,7 @@ function normalizeRuntimeConfig(config) {
   const normalized = { ...config };
   delete normalized.dynamicAgents;
   delete normalized.promptVariants;
-  if (normalized.runtime === ["helix", "linear"].join("-")) normalized.runtime = DEFAULT_RUNTIME_NAME;
+  if (normalized.runtime === ["wildarrange", "linear"].join("-")) normalized.runtime = DEFAULT_RUNTIME_NAME;
   normalized.agents = normalizeAgentMap(normalized.agents);
   normalized.gitCoordination = normalizeGitCoordination(normalized.gitCoordination);
   if (Array.isArray(normalized.review?.llm?.agents)) {

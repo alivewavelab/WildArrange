@@ -17,13 +17,13 @@ fullstack-starter/
 │   ├── frontend.md        # 前端规范空架子（globs 命中前端路径/后缀才注入）
 │   ├── backend.md         # 后端规范空架子
 │   └── database.md        # 数据库/迁移规范空架子
-├── helix.config.json      # 一份精简、可直接跑通的配置（真正生效的文件）
+├── wildarrange.config.json      # 一份精简、可直接跑通的配置（真正生效的文件）
 └── plan.example.json      # 前后端各一个真实可跑通的最小任务
 ```
 
 ## 怎么用（把模板搬进你的项目）
 
-1. 把本目录的文件复制到你**项目根目录**（`AGENTS.md`、`.cursor/`、`helix.config.json`、`plan.example.json`）。
+1. 把本目录的文件复制到你**项目根目录**（`AGENTS.md`、`.cursor/`、`wildarrange.config.json`、`plan.example.json`）。
 2. 先在你的项目中安装 WildArrange，再按宿主安装适配器：
 
    ```bash
@@ -37,16 +37,16 @@ fullstack-starter/
    npx wildarrange init
    npx wildarrange adapter install --target cursor --mode local
    ```
-   装完在 Cursor 聊天里可直接用 `/helix-config`、`/helix-doctor`、`/helix-plan`、`/helix-run`。
+   装完在 Cursor 聊天里可直接用 `/wildarrange-config`、`/wildarrange-doctor`、`/wildarrange-plan`、`/wildarrange-run`。
 
    **Codex：**
    ```bash
    npx wildarrange init
    npx wildarrange adapter install --target codex --mode local
    ```
-   适配器会写 `.codex/hooks.json`（在 Codex 里执行 `/hooks` review 并 trust 后成为硬拦截）和 `.agents/skills/helix-*/SKILL.md`。用 `/skills` 或 `$helix-doctor` 触发。
+   适配器会写 `.codex/hooks.json`（在 Codex 里执行 `/hooks` review 并 trust 后成为硬拦截）和 `.agents/skills/wildarrange-*/SKILL.md`。用 `/skills` 或 `$wildarrange-doctor` 触发。
 
-   > 两端都要：`--target all`。只有在 WildArrange 源码仓库内开发运行时，才把 `npx wildarrange` 换成 `node ./bin/helix.mjs`。
+   > 两端都要：`--target all`。只有在 WildArrange 源码仓库内开发运行时，才把 `npx wildarrange` 换成 `node ./bin/wildarrange.mjs`。
 
 3. 先跑通一次冒烟（见下"自检清单"），确认架子是通的，再开始填规范。
 
@@ -59,7 +59,7 @@ fullstack-starter/
 - [ ] 3. 再跑一次：`npx wildarrange run`（后端任务）
 - [ ] 4. 再跑一次：`npx wildarrange run`（应返回 `status: complete`，无剩余任务）
 - [ ] 5. 确认产物：`src/frontend/hello.js` 与 `src/backend/health.js` 已生成
-- [ ] 6. 体检：`npx wildarrange doctor`（或 `/helix-doctor`），应无严重异常
+- [ ] 6. 体检：`npx wildarrange doctor`（或 `/wildarrange-doctor`），应无严重异常
 - [ ] 7. 校验配置：`npx wildarrange config verify`
 
 跑通后，删掉 `plan.example.json` 里的示例任务，换成你真实的任务即可。
@@ -69,13 +69,13 @@ fullstack-starter/
 1. **`AGENTS.md`**：先填红线和命令表（install/dev/test/lint/typecheck）。
 2. **`.cursor/rules/*.md`**：把 `globs` 改成你项目真实的前后端路径/后缀，再填每条规范。
    - 验证命中：`npx wildarrange rules collect --target src/frontend/anyfile.tsx`，看命中的规范是否符合预期（改前端只应命中前端规范）。
-3. **`helix.config.json`**：需要时再按下面的"完整配置详解"逐块开启（如接入 typecheck 门、LLM 复核）。
+3. **`wildarrange.config.json`**：需要时再按下面的"完整配置详解"逐块开启（如接入 typecheck 门、LLM 复核）。
 
 ---
 
 ## 完整配置详解（带注释的最佳示例）
 
-> `helix.config.json` 是纯 JSON，**不能写注释**。所以下面这份带注释的"完整结构"仅作讲解参考；本目录里真正生效的 `helix.config.json` 是它的一个精简、非阻断子集，保证首次就能跑通。你只需要把想开启的块，去掉注释后并入自己的 `helix.config.json` 即可（配置会与默认值深合并，只写你要改的块就行）。
+> `wildarrange.config.json` 是纯 JSON，**不能写注释**。所以下面这份带注释的"完整结构"仅作讲解参考；本目录里真正生效的 `wildarrange.config.json` 是它的一个精简、非阻断子集，保证首次就能跑通。你只需要把想开启的块，去掉注释后并入自己的 `wildarrange.config.json` 即可（配置会与默认值深合并，只写你要改的块就行）。
 
 ```jsonc
 {
@@ -101,7 +101,7 @@ fullstack-starter/
     }
   },
 
-  // 计划确认门。true 时导入的计划要开发者确认（/helix-approve 或 plan approve）后才能 run。默认 false。
+  // 计划确认门。true 时导入的计划要开发者确认（/wildarrange-approve 或 plan approve）后才能 run。默认 false。
   "planApproval": { "required": false },
 
   // 命令安全：内置高危正则不可关闭；这里只“加”项目专属危险命令拦截。

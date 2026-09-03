@@ -1,5 +1,5 @@
 import { compileCommandSafetyPatterns } from "../infra/command-safety.mjs";
-import { loadHelixConfig } from "../infra/runtime-config.mjs";
+import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { nowIso } from "../infra/runtime-store.mjs";
 import { runCommand } from "../infra/command-runner.mjs";
 
@@ -18,7 +18,7 @@ export async function runVerifier(rootDir, task) {
     };
   }
 
-  const { config } = await loadHelixConfig(rootDir);
+  const { config } = await loadWildArrangeConfig(rootDir);
   const extraPatterns = compileCommandSafetyPatterns(config);
   const results = [];
   for (const command of task.verify_commands) {

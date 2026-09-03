@@ -79,7 +79,7 @@ P0 已落地；实现路径在五区（<code>parallel-runtime</code> / <code>arc
     <section class="card">
       <span class="tag ok">保留</span>
       <h3>关键词路由仍是主干</h3>
-      <p>当前 <code>src/helix-routing.mjs</code> 已经能按 <code>routes.json</code> 做 intent/domain/complexity 路由，速度快、可解释、可测试，适合作为默认热路径。</p>
+      <p>当前 <code>src/wildarrange-routing.mjs</code> 已经能按 <code>routes.json</code> 做 intent/domain/complexity 路由，速度快、可解释、可测试，适合作为默认热路径。</p>
     </section>
     <section class="card">
       <span class="tag p0">补强</span>
@@ -212,7 +212,7 @@ P0 已落地；实现路径在五区（<code>parallel-runtime</code> / <code>arc
     <li>当前用户输入和确定性路由结果。</li>
     <li>最近 N 轮用户/助手/工具摘要：计划/脑爆/澄清默认 N=5，常规 N=10，编码/验收/review 默认 N=15，上限 N=20。</li>
     <li>采集模式为 <code>conclusions-only</code>：只保留用户意图、助手可见结论、工具结果摘要、执行证据摘要；默认剥离代码块、diff、完整命令输出和中间过程。</li>
-    <li><code>.helix/snapshots/context.json</code>、<code>.helix/ledger.jsonl</code> tail、当前 task/workflow 状态。</li>
+    <li><code>.wildarrange/snapshots/context.json</code>、<code>.wildarrange/ledger.jsonl</code> tail、当前 task/workflow 状态。</li>
     <li>当前 <code>routes.json</code>、Agent name/description、可用 skills/tools 摘要。</li>
     <li>Git HEAD、最近 commit message、改动路径摘要。</li>
     <li>已确认的用户偏好、团队规范摘要和长期结构化档案命中项。</li>
@@ -226,22 +226,22 @@ P0 已落地；实现路径在五区（<code>parallel-runtime</code> / <code>arc
     </thead>
     <tbody>
       <tr>
-        <td><code>.helix/memory/events.jsonl</code></td>
+        <td><code>.wildarrange/memory/events.jsonl</code></td>
         <td>阶段事件：prompt 摘要、路由决策、执行结果、验证结果、Git 边界。</td>
         <td>可追溯事实源。</td>
       </tr>
       <tr>
-        <td><code>.helix/memory/stage-summaries/*.json</code></td>
+        <td><code>.wildarrange/memory/stage-summaries/*.json</code></td>
         <td>进展、结论、成果物、实现方式、调研、踩坑、未决问题；不保存完整代码。</td>
         <td>跨会话恢复和上下文注入。</td>
       </tr>
       <tr>
-        <td><code>.helix/memory/index.json</code></td>
+        <td><code>.wildarrange/memory/index.json</code></td>
         <td>关键词、领域、Agent、文件路径、成果物到摘要的索引。</td>
         <td>长期记忆的关键词路由和快速召回。</td>
       </tr>
       <tr>
-        <td><code>.helix/routing/suggestions/*.json</code></td>
+        <td><code>.wildarrange/routing/suggestions/*.json</code></td>
         <td>关键词补丁、证据、风险等级、apply/reject 状态。</td>
         <td>受控迭代 <code>routes.json</code>。</td>
       </tr>
@@ -305,7 +305,7 @@ P0 已落地；实现路径在五区（<code>parallel-runtime</code> / <code>arc
     <section class="card">
       <span class="tag p0">不能自动污染</span>
       <h3>默认只写建议</h3>
-      <p>补丁写入 <code>.helix/routing/suggestions/*.json</code> 和 Markdown 摘要，不直接改 <code>packs/wildarrange-linear/routes.json</code>。</p>
+      <p>补丁写入 <code>.wildarrange/routing/suggestions/*.json</code> 和 Markdown 摘要，不直接改 <code>packs/wildarrange-linear/routes.json</code>。</p>
     </section>
     <section class="card">
       <span class="tag p1">可选自动应用</span>
@@ -327,22 +327,22 @@ P0 已落地；实现路径在五区（<code>parallel-runtime</code> / <code>arc
     <tbody>
       <tr>
         <td>P0</td>
-        <td><code>src/helix-archivist-router.mjs</code></td>
+        <td><code>src/wildarrange-archivist-router.mjs</code></td>
         <td>能构建 routing packet、判断触发点、调用 deepseek-v4-flash、写入 archive / route / contextInjection artifact；无 key 时不阻断主流程。</td>
       </tr>
       <tr>
         <td>P0</td>
-        <td><code>src/helix-routing.mjs</code></td>
+        <td><code>src/wildarrange-routing.mjs</code></td>
         <td>确定性路由结果增加 confidence、conflicts、matchedGroups，供 ArchivistRouter 判断是否介入。</td>
       </tr>
       <tr>
         <td>P0</td>
-        <td><code>src/helix-hooks.mjs</code></td>
+        <td><code>src/wildarrange-hooks.mjs</code></td>
         <td>SessionStart、UserPromptSubmit 能按规则触发 ArchivistRouter；不会每轮无脑调用 LLM。</td>
       </tr>
       <tr>
         <td>P1</td>
-        <td><code>.helix/routing/suggestions</code></td>
+        <td><code>.wildarrange/routing/suggestions</code></td>
         <td>关键词补丁有证据、有来源、有风险等级、有 apply/reject 状态。</td>
       </tr>
       <tr>

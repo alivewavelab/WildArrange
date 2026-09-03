@@ -11,9 +11,9 @@
 每次路由至少读取：
 
 - 当前用户请求。
-- `.helix/work.json`，若存在。
-- `.helix/team/tasks.json`，若存在。
-- `.helix/snapshots/latest.json`，若存在。
+- `.wildarrange/work.json`，若存在。
+- `.wildarrange/team/tasks.json`，若存在。
+- `.wildarrange/snapshots/latest.json`，若存在。
 - `packs/wildarrange-linear/routes.json`。
 - 可用 skills 与工具合同。
 
@@ -99,7 +99,7 @@
   "supportAgents": [],
   "category": "quick|deep|ultrabrain|visual-engineering|writing|git|research|null",
   "skills": [],
-  "nextCommand": "node ./bin/helix.mjs ...",
+  "nextCommand": "node ./bin/wildarrange.mjs ...",
   "needsPlan": true,
   "needsUserInput": false,
   "reason": "",

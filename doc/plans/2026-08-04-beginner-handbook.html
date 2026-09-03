@@ -229,27 +229,27 @@
 
 <!-- ========== 1 ========== -->
 <h2 id="s1">1. 部署：从空项目到可以用</h2>
-<p>下面命令默认你已经在<strong>目标业务项目</strong>根目录。把 <code>HELIX</code> 换成你机器上 WildArrange 的 CLI 路径（本仓库开发态示例）：</p>
-<div class="cmd">export HELIX="/绝对路径/工作范式/bin/helix.mjs"
-<span class="c"># npm 安装用户可把 HELIX 换成: npx wildarrange</span>
+<p>下面命令默认你已经在<strong>目标业务项目</strong>根目录。把 <code>WILDARRANGE</code> 换成你机器上 WildArrange 的 CLI 路径（本仓库开发态示例）：</p>
+<div class="cmd">export WILDARRANGE="/绝对路径/工作范式/bin/wildarrange.mjs"
+<span class="c"># npm 安装用户可把 WILDARRANGE 换成: npx wildarrange</span>
 <span class="c"># 或: npx @alivewavelab/wildarrange</span></div>
 
 <div class="step">
   <div class="step-head"><span class="num">1</span><h3>初始化运行时目录</h3></div>
-  <div class="cmd">node "$HELIX" init
+  <div class="cmd">node "$WILDARRANGE" init
 git init   <span class="c"># 建议；scope 门依赖 Git 看改动范围</span></div>
   <div class="grid2">
     <div class="slot you-slot"><h4>你插什么</h4>这步几乎不用插。只要确认你<strong>站在业务项目根</strong>，不是站在 WildArrange 框架仓库根（除非你在维护框架本身）。</div>
-    <div class="slot check-slot"><h4>怎么核对</h4>出现 <code>.helix/</code> 目录。没有报错就过。</div>
+    <div class="slot check-slot"><h4>怎么核对</h4>出现 <code>.wildarrange/</code> 目录。没有报错就过。</div>
   </div>
 </div>
 
 <div class="step">
   <div class="step-head"><span class="num">2</span><h3>生成并武装配置</h3></div>
-  <div class="cmd">node "$HELIX" config init --root --armed
-node "$HELIX" config baseline --reason "首次武装后的基线"</div>
+  <div class="cmd">node "$WILDARRANGE" config init --root --armed
+node "$WILDARRANGE" config baseline --reason "首次武装后的基线"</div>
   <div class="grid2">
-    <div class="slot you-slot"><h4>你插什么</h4>打开根目录 <code>helix.config.json</code>，按需改：
+    <div class="slot you-slot"><h4>你插什么</h4>打开根目录 <code>wildarrange.config.json</code>，按需改：
       <ul>
         <li><code>qualityGates.lspDiagnostics.commands</code> → 换成你项目真实的测试/类型检查（如 <code>npm test</code>）</li>
         <li><code>agents.*.provider</code> → 要给 BaiZe / Archivist 配外部模型时改这里</li>
@@ -257,7 +257,7 @@ node "$HELIX" config baseline --reason "首次武装后的基线"</div>
       </ul>
     </div>
     <div class="slot check-slot"><h4>怎么核对</h4>
-      <div class="cmd">node "$HELIX" doctor</div>
+      <div class="cmd">node "$WILDARRANGE" doctor</div>
       看 <code>sections.gateArming.armed</code> 应为 <span class="ok">true</span>。<br>
       若是 false，按 findings 里的 next_action 补配置，别先跑任务。
     </div>
@@ -266,8 +266,8 @@ node "$HELIX" config baseline --reason "首次武装后的基线"</div>
 
 <div class="step">
   <div class="step-head"><span class="num">3</span><h3>装宿主硬拦截（三宿主示例见下一章）</h3></div>
-  <div class="cmd">node "$HELIX" adapter install --target all --mode local
-node "$HELIX" doctor   <span class="c"># 再查 adapters 分项</span></div>
+  <div class="cmd">node "$WILDARRANGE" adapter install --target all --mode local
+node "$WILDARRANGE" doctor   <span class="c"># 再查 adapters 分项</span></div>
   <div class="grid2">
     <div class="slot you-slot"><h4>你插什么</h4>只装你实际用的宿主也可以：
       <code>--target cursor</code> / <code>codex</code> / <code>kimi</code>。<br>
@@ -286,7 +286,7 @@ node "$HELIX" doctor   <span class="c"># 再查 adapters 分项</span></div>
   <div class="step-head"><span class="num">4</span><h3>写计划并导入</h3></div>
   <div class="cmd">cp 某处/plan.example.json ./plan.json
 <span class="c"># 编辑 plan.json，把要求换成你的（见第 3 章）</span>
-node "$HELIX" plan --from ./plan.json</div>
+node "$WILDARRANGE" plan --from ./plan.json</div>
   <div class="grid2">
     <div class="slot you-slot"><h4>你插什么</h4>整份 <code>plan.json</code> 就是你的需求声明：要改哪些路径、worker 干什么、怎么验收、怎么复核。详见第 3 章模板。</div>
     <div class="slot check-slot"><h4>怎么核对</h4>输出 <code>ok: true</code> 与 taskCount。若要求计划审批，先跑 <code>approve</code> 再 <code>run</code>。</div>
@@ -295,12 +295,12 @@ node "$HELIX" plan --from ./plan.json</div>
 
 <div class="step">
   <div class="step-head"><span class="num">5</span><h3>跑第一个任务并审判门决策</h3></div>
-  <div class="cmd">node "$HELIX" run
-node "$HELIX" decisions --limit 20
-node "$HELIX" decisions --annotatable   <span class="c"># 只看该过你手的</span></div>
+  <div class="cmd">node "$WILDARRANGE" run
+node "$WILDARRANGE" decisions --limit 20
+node "$WILDARRANGE" decisions --annotatable   <span class="c"># 只看该过你手的</span></div>
   <div class="grid2">
     <div class="slot you-slot"><h4>你插什么</h4>若 AI 在本机宿主里干活，你主要插的是对话里的产品要求；命令式跑则依赖计划里的 <code>worker_command</code>。卡住时把 <code>decisions</code> 三行原文贴给 AI 说「这条判错了」。</div>
-    <div class="slot check-slot"><h4>怎么核对</h4>stderr 末尾有「门决策汇总」（verbose）。每条至少看：发生了什么 / 命中规则 / 证据路径。FAIL 的规则与证据<strong>不能为空</strong>。网页：<code>node "$HELIX" serve</code> 开 Dashboard。</div>
+    <div class="slot check-slot"><h4>怎么核对</h4>stderr 末尾有「门决策汇总」（verbose）。每条至少看：发生了什么 / 命中规则 / 证据路径。FAIL 的规则与证据<strong>不能为空</strong>。网页：<code>node "$WILDARRANGE" serve</code> 开 Dashboard。</div>
   </div>
 </div>
 
@@ -312,7 +312,7 @@ node "$HELIX" decisions --annotatable   <span class="c"># 只看该过你手的<
   <div class="host">
     <h3>Cursor</h3>
     <span class="pill fail-closed">fail-closed</span>
-    <div class="cmd">node "$HELIX" adapter install --target cursor --mode local</div>
+    <div class="cmd">node "$WILDARRANGE" adapter install --target cursor --mode local</div>
     <p><b>生成物：</b><code>.cursor/hooks.json</code>、<code>.cursor/hooks/wildarrange-hook-bridge.mjs</code>、软规则 <code>.cursor/rules/wildarrange.mdc</code>、slash 命令。</p>
     <p><b>你要做：</b>用 Cursor 以<strong>受信任工作区</strong>打开本项目。把 hooks 提交进 git（模板已例外放行 hooks；rules 默认仍本机）。</p>
     <p><b>核验：</b>在 Cursor 里故意让 AI 改 <code>writable_paths</code> 之外的文件 → 应被拒绝；或看 <code>doctor</code> adapters 显示 cursor installed。</p>
@@ -320,16 +320,16 @@ node "$HELIX" decisions --annotatable   <span class="c"># 只看该过你手的<
   <div class="host">
     <h3>Codex</h3>
     <span class="pill fail-closed">hard hooks</span>
-    <div class="cmd">node "$HELIX" adapter install --target codex --mode local</div>
-    <p><b>生成物：</b><code>.codex/hooks.json</code>（另有 <code>.helix/adapters/codex/</code> 审计副本）。</p>
+    <div class="cmd">node "$WILDARRANGE" adapter install --target codex --mode local</div>
+    <p><b>生成物：</b><code>.codex/hooks.json</code>（另有 <code>.wildarrange/adapters/codex/</code> 审计副本）。</p>
     <p><b>你要做：</b>在 Codex 会话里 <code>/hooks</code> review 并 trust 本项目 hooks。不 trust = 硬拦截不生效。</p>
     <p><b>核验：</b><code>doctor</code> 显示 codex installed；越界编辑应被 hook 拦。</p>
   </div>
   <div class="host">
     <h3>Kimi Code</h3>
     <span class="pill fail-open">hook fail-open</span>
-    <div class="cmd">node "$HELIX" adapter install --target kimi</div>
-    <p><b>生成物：</b>项目内 plugin 清单与 bridge（在 <code>.helix/adapters/kimi/</code>），按 README 手动启用用户侧 plugin。</p>
+    <div class="cmd">node "$WILDARRANGE" adapter install --target kimi</div>
+    <p><b>生成物：</b>项目内 plugin 清单与 bridge（在 <code>.wildarrange/adapters/kimi/</code>），按 README 手动启用用户侧 plugin。</p>
     <p><b>你要知道：</b>Kimi Hook 崩溃/超时默认放行，所以<strong>最终完成仍必须过 verifier 等主线门</strong>，别把 Hook 当唯一安全边界。</p>
     <p><b>核验：</b><code>doctor</code> adapters 里 kimi installed；主线用 <code>run</code> 的门决策做终审。</p>
   </div>
@@ -386,9 +386,9 @@ node "$HELIX" decisions --annotatable   <span class="c"># 只看该过你手的<
 <!-- ========== 4 ========== -->
 <h2 id="s4">4. 跑任务：每个门干什么、你插什么、怎么核对</h2>
 <p>命令：</p>
-<div class="cmd">node "$HELIX" run          <span class="c"># 跑下一个待办任务</span>
-node "$HELIX" status       <span class="c"># 看 pending / completed / gateArming</span>
-node "$HELIX" serve --host 127.0.0.1 --port 8765   <span class="c"># 网页看面板</span></div>
+<div class="cmd">node "$WILDARRANGE" run          <span class="c"># 跑下一个待办任务</span>
+node "$WILDARRANGE" status       <span class="c"># 看 pending / completed / gateArming</span>
+node "$WILDARRANGE" serve --host 127.0.0.1 --port 8765   <span class="c"># 网页看面板</span></div>
 
 <table>
   <tr>
@@ -419,13 +419,13 @@ node "$HELIX" serve --host 127.0.0.1 --port 8765   <span class="c"># 网页看�
     <td><b>review</b></td>
     <td>独立复核是否还有问题</td>
     <td><code>review_commands</code> / <code>standards_commands</code> / 质量门 /（可选）LLM review</td>
-    <td>证据路径指向 <code>.helix/reports/reviews/…md</code>。打开看各 lane。可标注（含 PASS）</td>
+    <td>证据路径指向 <code>.wildarrange/reports/reviews/…md</code>。打开看各 lane。可标注（含 PASS）</td>
   </tr>
   <tr>
     <td><b>acceptance-proof</b></td>
     <td>能不能宣称完成的硬地板</td>
     <td>确保 verify 非 trivial、review 有独立信号、successCriteria 齐</td>
-    <td>FAIL 看 <code>proof_*</code>（如 <code>proof_review_not_tautological</code>）。报告在 <code>.helix/reports/acceptance/</code></td>
+    <td>FAIL 看 <code>proof_*</code>（如 <code>proof_review_not_tautological</code>）。报告在 <code>.wildarrange/reports/acceptance/</code></td>
   </tr>
   <tr>
     <td><b>checkpoint</b></td>
@@ -438,7 +438,7 @@ node "$HELIX" serve --host 127.0.0.1 --port 8765   <span class="c"># 网页看�
 <div class="step">
   <div class="step-head"><span class="num">例</span><h3>一次「拦得对」的体验（故意无复核信号）</h3></div>
   <p>计划只有 <code>verify_commands</code>、没有 <code>review_commands</code> 且质量门也关：</p>
-  <div class="cmd">node "$HELIX" run
+  <div class="cmd">node "$WILDARRANGE" run
 <span class="c"># 预期：acceptance-proof FAIL</span>
 <span class="c"># 命中规则: proof_review_not_tautological — review 没有独立信号…</span></div>
   <p>这就是框架在保你：别对着假绿灯签字。回去给任务补 <code>review_commands</code>（或武装质量门）再跑。</p>
@@ -449,11 +449,11 @@ node "$HELIX" serve --host 127.0.0.1 --port 8765   <span class="c"># 网页看�
 
 <div class="step">
   <div class="step-head"><span class="num">A</span><h3>每条决策三行（日常主力）</h3></div>
-  <div class="cmd">node "$HELIX" decisions --limit 30
-node "$HELIX" decisions --task T001
-node "$HELIX" decisions --gate verify
-node "$HELIX" decisions --annotatable
-node "$HELIX" decisions --format json</div>
+  <div class="cmd">node "$WILDARRANGE" decisions --limit 30
+node "$WILDARRANGE" decisions --task T001
+node "$WILDARRANGE" decisions --gate verify
+node "$WILDARRANGE" decisions --annotatable
+node "$WILDARRANGE" decisions --format json</div>
   <p>三行模板：</p>
   <table>
     <tr><th>行</th><th>含义</th><th>你怎么判</th></tr>
@@ -465,10 +465,10 @@ node "$HELIX" decisions --format json</div>
 
 <div class="step">
   <div class="step-head"><span class="num">B</span><h3>标注（告诉框架「这条错了」）</h3></div>
-  <div class="cmd">node "$HELIX" annotate --decision dec_xxx --category rule_wrong --reason "这条路径本应允许"
-node "$HELIX" annotate list
-node "$HELIX" annotate stats
-node "$HELIX" decisions stats</div>
+  <div class="cmd">node "$WILDARRANGE" annotate --decision dec_xxx --category rule_wrong --reason "这条路径本应允许"
+node "$WILDARRANGE" annotate list
+node "$WILDARRANGE" annotate stats
+node "$WILDARRANGE" decisions stats</div>
   <div class="grid2">
     <div class="slot you-slot"><h4>你插什么</h4>分类必选；理由写给未来的自己和异步审查 Agent。不要在标注里改配置。</div>
     <div class="slot check-slot"><h4>怎么核对</h4><code>annotate stats</code> 会按「规则 × 标注」聚合。同条规则反复 <code>rule_wrong</code> → 你再动手改计划/配置。标注路径有硬测试保证不写门开关。</div>
@@ -477,18 +477,18 @@ node "$HELIX" decisions stats</div>
 
 <div class="step">
   <div class="step-head"><span class="num">C</span><h3>统一时间线 + 可疑审查 + 体检</h3></div>
-  <div class="cmd">node "$HELIX" timeline --limit 40
-node "$HELIX" timeline --task T001
-node "$HELIX" review suspicious      <span class="c"># 可选：有外部 LLM key 时给第二意见；无 key 也有确定性摘要</span>
-node "$HELIX" doctor
-node "$HELIX" state backup --reason "试用一周后"</div>
+  <div class="cmd">node "$WILDARRANGE" timeline --limit 40
+node "$WILDARRANGE" timeline --task T001
+node "$WILDARRANGE" review suspicious      <span class="c"># 可选：有外部 LLM key 时给第二意见；无 key 也有确定性摘要</span>
+node "$WILDARRANGE" doctor
+node "$WILDARRANGE" state backup --reason "试用一周后"</div>
 </div>
 
 <div class="step">
   <div class="step-head"><span class="num">D</span><h3>网页面板（给懒得盯终端的人）</h3></div>
-  <div class="cmd">node "$HELIX" serve --host 127.0.0.1 --port 8765
+  <div class="cmd">node "$WILDARRANGE" serve --host 127.0.0.1 --port 8765
 <span class="c"># 浏览器打开 http://127.0.0.1:8765</span>
-<span class="c"># 非本机绑定必须设 HELIX_DASHBOARD_TOKEN</span></div>
+<span class="c"># 非本机绑定必须设 WILDARRANGE_DASHBOARD_TOKEN</span></div>
   <p>面板上看：最近决策三行、门触发统计、从未触发的门、门武装状态、锁持有者、并行 run 对账。只读，不能在网页上关门。</p>
 </div>
 
@@ -499,7 +499,7 @@ node "$HELIX" state backup --reason "试用一周后"</div>
   <tr><td>全局红线（密钥、禁止 force push…）</td><td>根 <code>AGENTS.md</code> / <code>CLAUDE.md</code></td><td>会话开始、提交前注入</td></tr>
   <tr><td>前端/后端/数据库专项</td><td><code>.cursor/rules/*.md</code>（可配 globs）或宿主对应规则目录</td><td>改到匹配文件时动态注入</td></tr>
   <tr><td>单次任务边界</td><td><code>plan.json</code> 的 <code>writable_paths</code> / description / verify / review</td><td>本任务全程</td></tr>
-  <tr><td>团队命令与门面</td><td><code>helix.config.json</code> 的 qualityGates / adapters / reporting</td><td>每次 run / review</td></tr>
+  <tr><td>团队命令与门面</td><td><code>wildarrange.config.json</code> 的 qualityGates / adapters / reporting</td><td>每次 run / review</td></tr>
 </table>
 <div class="note">改规范后建议：<code>doctor</code> 一眼 + 故意越界试一次硬拦截，确认「规则活着」。</div>
 
@@ -516,12 +516,12 @@ node "$HELIX" state backup --reason "试用一周后"</div>
 </table>
 
 <div class="cmd"><span class="c"># 日常最小闭环（背这 6 条就够）</span>
-node "$HELIX" doctor
-node "$HELIX" plan --from ./plan.json
-node "$HELIX" run
-node "$HELIX" decisions --annotatable
-node "$HELIX" annotate --decision &lt;id&gt; --category case_wrong --reason "……"
-node "$HELIX" serve --host 127.0.0.1 --port 8765</div>
+node "$WILDARRANGE" doctor
+node "$WILDARRANGE" plan --from ./plan.json
+node "$WILDARRANGE" run
+node "$WILDARRANGE" decisions --annotatable
+node "$WILDARRANGE" annotate --decision &lt;id&gt; --category case_wrong --reason "……"
+node "$WILDARRANGE" serve --host 127.0.0.1 --port 8765</div>
 
 <footer>
   更细的命令全集与进阶专题见仓库根 <code>使用说明书.md</code> 与 <code>README.md</code>；架构不变量见 <code>doc/project-architecture.md</code>；低代码掌控方法论见 <code>doc/low-code-project-governance.md</code>。<br>

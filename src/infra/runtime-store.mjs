@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-export const HELIX_DIR = ".helix";
+export const WILDARRANGE_DIR = ".wildarrange";
 export const STATE_VERSION = 1;
 export const TASK_STATUSES = new Set(["draft", "pending", "in_progress", "verifying", "completed", "failed", "review_blocked", "needs_user_decision"]);
 export const TASK_WORK_TYPES = new Set(["feature", "bug", "acceptance_correction", "maintenance"]);
@@ -17,8 +17,8 @@ export function createWorkId(prefix = "work") {
   return `${prefix}_${randomUUID()}`;
 }
 
-export function resolveHelixPath(rootDir, ...segments) {
-  return path.join(rootDir, HELIX_DIR, ...segments);
+export function resolveWildArrangePath(rootDir, ...segments) {
+  return path.join(rootDir, WILDARRANGE_DIR, ...segments);
 }
 
 // Evidence identity must remain a one-to-one mapping even though both IDs may
@@ -27,27 +27,27 @@ export function resolveHelixPath(rootDir, ...segments) {
 export function resolveTaskCheckpointPath(rootDir, planId, taskId) {
   assertEvidenceSegment(planId, "planId");
   assertEvidenceSegment(taskId, "taskId");
-  return resolveHelixPath(rootDir, "checkpoints", planId, `${taskId}.json`);
+  return resolveWildArrangePath(rootDir, "checkpoints", planId, `${taskId}.json`);
 }
 
 export function resolveLegacyTaskCheckpointPath(rootDir, planId, taskId) {
   assertEvidenceSegment(planId, "planId");
   assertEvidenceSegment(taskId, "taskId");
-  return resolveHelixPath(rootDir, "checkpoints", `${planId}-${taskId}.json`);
+  return resolveWildArrangePath(rootDir, "checkpoints", `${planId}-${taskId}.json`);
 }
 
 export function resolveTaskAcceptancePath(rootDir, planId, taskId, extension = "json") {
   assertEvidenceSegment(planId, "planId");
   assertEvidenceSegment(taskId, "taskId");
   assertEvidenceExtension(extension);
-  return resolveHelixPath(rootDir, "reports", "acceptance", planId, `${taskId}.${extension}`);
+  return resolveWildArrangePath(rootDir, "reports", "acceptance", planId, `${taskId}.${extension}`);
 }
 
 export function resolveLegacyTaskAcceptancePath(rootDir, planId, taskId, extension = "json") {
   assertEvidenceSegment(planId, "planId");
   assertEvidenceSegment(taskId, "taskId");
   assertEvidenceExtension(extension);
-  return resolveHelixPath(rootDir, "reports", "acceptance", `${planId}-${taskId}.${extension}`);
+  return resolveWildArrangePath(rootDir, "reports", "acceptance", `${planId}-${taskId}.${extension}`);
 }
 
 export function resolveTaskReportPath(rootDir, reportKind, planId, taskId, extension = "json") {
@@ -57,7 +57,7 @@ export function resolveTaskReportPath(rootDir, reportKind, planId, taskId, exten
   assertEvidenceSegment(planId, "planId");
   assertEvidenceSegment(taskId, "taskId");
   assertEvidenceExtension(extension);
-  return resolveHelixPath(rootDir, "reports", reportKind, planId, `${taskId}.${extension}`);
+  return resolveWildArrangePath(rootDir, "reports", reportKind, planId, `${taskId}.${extension}`);
 }
 
 export function legacyTaskEvidenceStem(planId, taskId) {
@@ -66,7 +66,7 @@ export function legacyTaskEvidenceStem(planId, taskId) {
   return `${planId}-${taskId}`;
 }
 
-export async function ensureHelixDirs(rootDir) {
+export async function ensureWildArrangeDirs(rootDir) {
   const dirs = [
     [],
     ["plans"],
@@ -97,7 +97,7 @@ export async function ensureHelixDirs(rootDir) {
   ];
 
   for (const dir of dirs) {
-    await mkdir(resolveHelixPath(rootDir, ...dir), { recursive: true });
+    await mkdir(resolveWildArrangePath(rootDir, ...dir), { recursive: true });
   }
 }
 

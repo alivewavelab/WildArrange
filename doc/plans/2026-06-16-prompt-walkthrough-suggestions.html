@@ -37,9 +37,9 @@
   <table>
     <tr><th>范围</th><th>观察</th></tr>
     <tr><td><code>skills/wildarrange-injection-runtime.md</code></td><td>治理哲学清楚，长度约 120 行，适合作为运行时总说明；但 Codex hard-after-trust、digest/archivist 已注入、ledger verify 等新事实还没写进去。</td></tr>
-    <tr><td><code>agents/jiuwei.md</code> / <code>agents/yinglong.md</code></td><td>编排与执行角色边界明确；已将 YingLong 的 wisdom 来源改为 runtime 实际生成的 <code>.helix/wisdom/verification.md</code> 与 <code>.helix/memory/</code> digest / archivist 文件。</td></tr>
+    <tr><td><code>agents/jiuwei.md</code> / <code>agents/yinglong.md</code></td><td>编排与执行角色边界明确；已将 YingLong 的 wisdom 来源改为 runtime 实际生成的 <code>.wildarrange/wisdom/verification.md</code> 与 <code>.wildarrange/memory/</code> digest / archivist 文件。</td></tr>
     <tr><td><code>agents/baize.md</code> / <code>qiongqi.md</code> / <code>luanniao.md</code></td><td>已补齐 CLI 不可执行时的降级：BaiZe 返回 <code>INCONCLUSIVE</code>，QiongQi 返回 <code>[REJECT]</code> 并说明上下文缺失，避免 Cursor soft adapter 下假装已获得注入。</td></tr>
-    <tr><td><code>skills/wa-recall.md</code> / <code>wa-compound.md</code></td><td>已统一到 <code>.helix/memory/</code>；<code>CONCEPTS.md</code> 改为存在则读/维护，不再是硬依赖。</td></tr>
+    <tr><td><code>skills/wa-recall.md</code> / <code>wa-compound.md</code></td><td>已统一到 <code>.wildarrange/memory/</code>；<code>CONCEPTS.md</code> 改为存在则读/维护，不再是硬依赖。</td></tr>
     <tr><td><code>tools/tool-contract.json</code></td><td>已补 <code>.codex/hooks.json</code>、<code>ledger verify</code>、<code>parallel cleanup</code>、dashboard POST token，以及 wisdom 实际写入边界。</td></tr>
   </table>
 
@@ -48,7 +48,7 @@
     <section class="card">
       <span class="tag p0">P0</span>
       <h3>消除悬空 wisdom 文件</h3>
-      <p><code>yinglong.md</code> 曾要求派发前读取 <code>learnings.md</code>、<code>decisions.md</code>、<code>issues.md</code>，但 runtime 只写 <code>verification.md</code>。已改为读取 <code>verification.md</code> 和 <code>.helix/memory/</code> 的 digest / archivist 索引。</p>
+      <p><code>yinglong.md</code> 曾要求派发前读取 <code>learnings.md</code>、<code>decisions.md</code>、<code>issues.md</code>，但 runtime 只写 <code>verification.md</code>。已改为读取 <code>verification.md</code> 和 <code>.wildarrange/memory/</code> 的 digest / archivist 索引。</p>
     </section>
     <section class="card">
       <span class="tag p0">P0</span>
@@ -63,7 +63,7 @@
     <section class="card">
       <span class="tag p0">P0</span>
       <h3>修正 wa-compound 存储路径</h3>
-      <p><code>wa-compound.md</code> 已统一到 <code>.helix/memory/</code>：短期写 digest/event，长期如需人为知识库再另设 export，不让 recall 和 compound 读写两套目录。</p>
+      <p><code>wa-compound.md</code> 已统一到 <code>.wildarrange/memory/</code>：短期写 digest/event，长期如需人为知识库再另设 export，不让 recall 和 compound 读写两套目录。</p>
     </section>
     <section class="card">
       <span class="tag p0">P0</span>
@@ -78,7 +78,7 @@
     <section class="card">
       <span class="tag p1">P1</span>
       <h3>减少跨产品旧话术</h3>
-      <p><code>wa-run.md</code> 已从“Claude 可加 model / Codex 用 spawn_agent”改为 WildArrange 自己的 <code>parallel run --adapter</code>、<code>.helix/</code> 状态和 hard/soft adapter 分层语义。</p>
+      <p><code>wa-run.md</code> 已从“Claude 可加 model / Codex 用 spawn_agent”改为 WildArrange 自己的 <code>parallel run --adapter</code>、<code>.wildarrange/</code> 状态和 hard/soft adapter 分层语义。</p>
     </section>
     <section class="card">
       <span class="tag p2">P2</span>

@@ -17,7 +17,7 @@ import {
   hashContent,
   nowIso,
   readJson,
-  resolveHelixPath,
+  resolveWildArrangePath,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 
@@ -36,7 +36,7 @@ export async function installPromptPack(rootDir, packDir = DEFAULT_PROMPT_PACK_D
     installedAt: nowIso(),
     ...registryIdentity(manifest, entries, canonicalPackDir),
   };
-  await writeJsonAtomic(resolveHelixPath(rootDir, "prompt-pack.json"), registry);
+  await writeJsonAtomic(resolveWildArrangePath(rootDir, "prompt-pack.json"), registry);
   return registry;
 }
 
@@ -45,7 +45,7 @@ export async function isPromptPackCurrent(rootDir, packDir = DEFAULT_PROMPT_PACK
     const canonicalPackDir = await realpath(packDir);
     const manifest = await readJson(path.join(canonicalPackDir, "manifest.json"));
     const entries = await loadPromptPackEntries(canonicalPackDir, manifest);
-    const current = await readJson(resolveHelixPath(rootDir, "prompt-pack.json"), null);
+    const current = await readJson(resolveWildArrangePath(rootDir, "prompt-pack.json"), null);
     if (!current) return false;
     const expectedIdentity = registryIdentity(manifest, entries, canonicalPackDir);
     if (JSON.stringify(registryIdentityFromRegistry(current)) !== JSON.stringify(expectedIdentity)) return false;
@@ -68,7 +68,7 @@ function registryIdentity(manifest, entries, canonicalPackDir) {
     description: manifest.description,
     source: manifest.source,
     // Diagnostics only. Runtime readers always use the fixed materialized root
-    // under .helix and never derive a read root from registry JSON.
+    // under .wildarrange and never derive a read root from registry JSON.
     sourcePackDir: canonicalPackDir,
     agents: Object.fromEntries(entries.agents.map((entry) => [entry.name, registryEntry(entry)])),
     skills: Object.fromEntries(entries.skills.map((entry) => [entry.name, registryEntry(entry)])),
@@ -129,7 +129,7 @@ async function loadPackTextEntry(packDir, name, relativePath, kind) {
 }
 
 export async function listPromptPack(rootDir) {
-  const registry = await readJson(resolveHelixPath(rootDir, "prompt-pack.json"), null);
+  const registry = await readJson(resolveWildArrangePath(rootDir, "prompt-pack.json"), null);
   if (!registry) return null;
   return {
     name: registry.name,
@@ -142,8 +142,8 @@ export async function listPromptPack(rootDir) {
 }
 
 export async function renderPromptPackEntry(rootDir, selector) {
-  const registry = await readJson(resolveHelixPath(rootDir, "prompt-pack.json"), null);
-  if (!registry) throw new Error("prompt pack is not installed; run helix init");
+  const registry = await readJson(resolveWildArrangePath(rootDir, "prompt-pack.json"), null);
+  if (!registry) throw new Error("prompt pack is not installed; run wildarrange init");
 
   let entry;
   let label;
@@ -176,17 +176,17 @@ export async function renderPromptPackEntry(rootDir, selector) {
 }
 
 async function materializePromptPack(rootDir, entries) {
-  const runtimeRoot = resolveHelixPath(rootDir);
+  const runtimeRoot = resolveWildArrangePath(rootDir);
   const runtimeStat = await lstat(runtimeRoot).catch(() => null);
   if (!runtimeStat?.isDirectory() || runtimeStat.isSymbolicLink()) {
-    throw new Error("runtime .helix root must be a real directory before installing a prompt pack");
+    throw new Error("runtime .wildarrange root must be a real directory before installing a prompt pack");
   }
-  const packParent = resolveHelixPath(rootDir, "prompt-pack");
+  const packParent = resolveWildArrangePath(rootDir, "prompt-pack");
   await mkdir(packParent, { recursive: true });
   const realRuntimeRoot = await realpath(runtimeRoot);
   const realPackParent = await realpath(packParent);
   if (!isInsideRoot(realRuntimeRoot, realPackParent)) {
-    throw new Error("runtime prompt-pack directory escapes .helix root");
+    throw new Error("runtime prompt-pack directory escapes .wildarrange root");
   }
 
   const stagingRoot = path.join(realPackParent, `staging-${createWorkId("pack")}`);
@@ -217,14 +217,14 @@ async function materializePromptPack(rootDir, entries) {
 }
 
 async function resolveTrustedInstalledRoot(rootDir, label) {
-  const runtimeRoot = resolveHelixPath(rootDir);
-  const installedRoot = resolveHelixPath(rootDir, "prompt-pack", "installed");
+  const runtimeRoot = resolveWildArrangePath(rootDir);
+  const installedRoot = resolveWildArrangePath(rootDir, "prompt-pack", "installed");
   const [runtimeStat, installedStat] = await Promise.all([
     lstat(runtimeRoot).catch(() => null),
     lstat(installedRoot).catch(() => null),
   ]);
   if (!runtimeStat?.isDirectory() || runtimeStat.isSymbolicLink()) {
-    throw new Error(`runtime .helix root is not trusted for ${label}`);
+    throw new Error(`runtime .wildarrange root is not trusted for ${label}`);
   }
   if (!installedStat?.isDirectory() || installedStat.isSymbolicLink()) {
     throw new Error(`installed prompt-pack root is not trusted for ${label}`);
@@ -234,7 +234,7 @@ async function resolveTrustedInstalledRoot(rootDir, label) {
     realpath(installedRoot),
   ]);
   if (!isInsideRoot(realRuntimeRoot, realInstalledRoot)) {
-    throw new Error(`installed prompt-pack root escapes .helix for ${label}`);
+    throw new Error(`installed prompt-pack root escapes .wildarrange for ${label}`);
   }
   return realInstalledRoot;
 }

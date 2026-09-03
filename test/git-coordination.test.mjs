@@ -24,7 +24,7 @@ import {
 } from "../src/orchestration/remote-ownership.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { collectGitChangedPaths } from "../src/infra/git-diff.mjs";
-import { loadHelixConfig } from "../src/infra/runtime-config.mjs";
+import { loadWildArrangeConfig } from "../src/infra/runtime-config.mjs";
 import { readJson } from "../src/infra/runtime-store.mjs";
 import {
   captureIntegrationGuard,
@@ -38,7 +38,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 
-test("git changed-path probe uses argv safely and excludes .helix", async () => {
+test("git changed-path probe uses argv safely and excludes .wildarrange", async () => {
   await withTempDir(async (dir) => {
     const repo = path.join(dir, "repo with spaces");
     await mkdir(repo, { recursive: true });
@@ -48,8 +48,8 @@ test("git changed-path probe uses argv safely and excludes .helix", async () => 
     await git(repo, ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "initial"]);
     await writeFile(path.join(repo, "tracked.txt"), "changed\n", "utf8");
     await writeFile(path.join(repo, "new file.txt"), "new\n", "utf8");
-    await mkdir(path.join(repo, ".helix"), { recursive: true });
-    await writeFile(path.join(repo, ".helix", "runtime.json"), "{}\n", "utf8");
+    await mkdir(path.join(repo, ".wildarrange"), { recursive: true });
+    await writeFile(path.join(repo, ".wildarrange", "runtime.json"), "{}\n", "utf8");
 
     const changed = await collectGitChangedPaths(repo);
     assert.equal(changed.available, true);
@@ -60,17 +60,17 @@ test("git changed-path probe uses argv safely and excludes .helix", async () => 
 test("git coordination defaults to guarded and strict mode restores mandatory safety flags", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const defaults = await loadHelixConfig(dir);
+    const defaults = await loadWildArrangeConfig(dir);
     assert.equal(defaults.config.gitCoordination.mode, "guarded");
     assert.equal(defaults.config.gitCoordination.requireWorktreeForParallelWrites, true);
 
-    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
+    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
       gitCoordination: { mode: "guarded", requireTakeoverReason: false },
     }), "utf8");
-    const guarded = await loadHelixConfig(dir);
+    const guarded = await loadWildArrangeConfig(dir);
     assert.equal(guarded.config.gitCoordination.requireTakeoverReason, true);
 
-    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
+    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
       gitCoordination: {
         mode: "strict",
         requireWorktreeForParallelWrites: false,
@@ -79,7 +79,7 @@ test("git coordination defaults to guarded and strict mode restores mandatory sa
         requireTakeoverReason: false,
       },
     }), "utf8");
-    const strict = await loadHelixConfig(dir);
+    const strict = await loadWildArrangeConfig(dir);
     assert.equal(strict.config.gitCoordination.mode, "strict");
     assert.equal(strict.config.gitCoordination.requireWorktreeForParallelWrites, true);
     assert.equal(strict.config.gitCoordination.requireVerificationBeforeHandoff, true);
@@ -94,7 +94,7 @@ test("off and manual modes do not claim remotely unless manual is explicitly for
     const state = await loadTaskState(cloneA);
     const task = state.tasks[0];
 
-    await writeFile(path.join(cloneA, "helix.config.json"), JSON.stringify({
+    await writeFile(path.join(cloneA, "wildarrange.config.json"), JSON.stringify({
       gitCoordination: { mode: "off" },
     }), "utf8");
     const disabled = await coordinateTaskClaim(cloneA, {
@@ -104,7 +104,7 @@ test("off and manual modes do not claim remotely unless manual is explicitly for
     });
     assert.equal(disabled.status, "disabled");
 
-    await writeFile(path.join(cloneA, "helix.config.json"), JSON.stringify({
+    await writeFile(path.join(cloneA, "wildarrange.config.json"), JSON.stringify({
       gitCoordination: { mode: "manual" },
     }), "utf8");
     const manual = await coordinateTaskClaim(cloneA, {
@@ -151,9 +151,9 @@ test("handoff commit transfers the task and makes the previous device fail close
     const claimed = await claimTeamTask(cloneA, { taskId: "T001", owner: "ZhuRong" });
     await mkdir(path.join(cloneA, "src"), { recursive: true });
     await writeFile(path.join(cloneA, "src", "task.txt"), "handoff payload\n", "utf8");
-    await writeFile(path.join(cloneA, ".helix", "tracked-runtime.json"), "{\"local\":true}\n", "utf8");
+    await writeFile(path.join(cloneA, ".wildarrange", "tracked-runtime.json"), "{\"local\":true}\n", "utf8");
     await git(cloneA, ["add", "src/task.txt"]);
-    await git(cloneA, ["add", "-f", ".helix/tracked-runtime.json"]);
+    await git(cloneA, ["add", "-f", ".wildarrange/tracked-runtime.json"]);
     await git(cloneA, ["-c", "user.name=Device A", "-c", "user.email=a@example.invalid", "commit", "-m", "committed task payload"]);
 
     const prepared = await prepareTaskHandoff(cloneA, {
@@ -163,8 +163,8 @@ test("handoff commit transfers the task and makes the previous device fail close
     });
     assert.equal(prepared.status, "prepared");
     assert.deepEqual(prepared.changedPaths, ["src/task.txt"]);
-    assert.equal(prepared.omittedPaths.includes(".helix/tracked-runtime.json"), false);
-    assert.deepEqual(prepared.runtimePathsExcluded, [".helix/tracked-runtime.json"]);
+    assert.equal(prepared.omittedPaths.includes(".wildarrange/tracked-runtime.json"), false);
+    assert.deepEqual(prepared.runtimePathsExcluded, [".wildarrange/tracked-runtime.json"]);
     await git(cloneA, ["push", "origin", `${prepared.checkpointSha}:refs/heads/${prepared.branch}`]);
     const pushed = await pushTaskHandoff(cloneA, { taskId: "T001" });
     assert.equal(pushed.status, "pushed");
@@ -187,7 +187,7 @@ test("handoff commit transfers the task and makes the previous device fail close
     assert.equal(accepted.task.coordination.remoteHeadSha, accepted.acceptSha);
     assert.equal((await readFile(path.join(cloneB, "src", "task.txt"), "utf8")).replaceAll("\r\n", "\n"), "handoff payload\n");
     await assert.rejects(
-      readFile(path.join(cloneB, ".helix", "tracked-runtime.json"), "utf8"),
+      readFile(path.join(cloneB, ".wildarrange", "tracked-runtime.json"), "utf8"),
       /ENOENT/,
     );
 
@@ -197,7 +197,7 @@ test("handoff commit transfers the task and makes the previous device fail close
     const resumedAccept = await acceptTaskHandoff(cloneB, { planId: "P-GIT", taskId: "T001" });
     assert.equal(resumedAccept.resumed, true);
     assert.equal(resumedAccept.acceptSha, accepted.acceptSha);
-    const handoffRecord = await readJson(path.join(cloneB, ".helix", "coordination", "handoffs", "T001.json"), null);
+    const handoffRecord = await readJson(path.join(cloneB, ".wildarrange", "coordination", "handoffs", "T001.json"), null);
     assert.equal(handoffRecord.status, "accepted");
     const acceptedEvents = (await readLedger(cloneB)).filter(
       (entry) => entry.type === "task_handoff_accepted" && entry.taskId === "T001",
@@ -291,7 +291,7 @@ test("guarded mode gives writable parallel agents a worktree and one local run o
 test("adversarial round 2: integration guard rejects a stale remote main SHA", async () => {
   await withRemoteClones(async ({ cloneA, cloneB }) => {
     await initRuntime(cloneA);
-    const { config } = await loadHelixConfig(cloneA);
+    const { config } = await loadWildArrangeConfig(cloneA);
     const guard = await captureIntegrationGuard(cloneA, config.gitCoordination);
     assert.equal(guard.active, true);
 
@@ -311,7 +311,7 @@ test("adversarial round 2 integration: admission rolls back before checkpoint wh
   await withRemoteClones(async ({ cloneA, cloneB }) => {
     await initRuntime(cloneA);
     await registerCoordinationDevice(cloneA, { name: "device-a", force: true });
-    const advanceScript = path.join(cloneA, ".helix", "artifacts", "advance-remote.cjs");
+    const advanceScript = path.join(cloneA, ".wildarrange", "artifacts", "advance-remote.cjs");
     await mkdir(path.dirname(advanceScript), { recursive: true });
     await writeFile(advanceScript, [
       "const { execFileSync } = require('node:child_process');",
@@ -323,7 +323,7 @@ test("adversarial round 2 integration: admission rolls back before checkpoint wh
       "execFileSync('git', ['-C', other, '-c', 'user.name=Device B', '-c', 'user.email=b@example.invalid', 'commit', '-m', 'integration race']);",
       "execFileSync('git', ['-C', other, 'push', 'origin', 'main']);",
     ].join("\n"), "utf8");
-    const planPath = path.join(cloneA, ".helix", "artifacts", "admission-race-plan.json");
+    const planPath = path.join(cloneA, ".wildarrange", "artifacts", "admission-race-plan.json");
     await writeFile(planPath, JSON.stringify({
       id: "P-RACE",
       title: "Admission remote race",
@@ -344,7 +344,7 @@ test("adversarial round 2 integration: admission rolls back before checkpoint wh
     assert.equal(admitted.rollback.status, "rolled_back");
     await assert.rejects(readFile(path.join(cloneA, "src", "admit.txt"), "utf8"), /ENOENT/);
     await assert.rejects(
-      readFile(path.join(cloneA, ".helix", "checkpoints", "P-RACE", "T001.json"), "utf8"),
+      readFile(path.join(cloneA, ".wildarrange", "checkpoints", "P-RACE", "T001.json"), "utf8"),
       /ENOENT/,
     );
     const state = await loadTaskState(cloneA);
@@ -368,7 +368,7 @@ test("successful admission creates and non-force pushes an integration commit to
     assert.notEqual(after, before);
     assert.equal(await git(remote, ["show", `${after}:src/integrated.txt`]), "integrated\n");
     const intent = await readJson(
-      path.join(cloneA, ".helix", "agent-runs", batch.runId, "T001.integration.json"),
+      path.join(cloneA, ".wildarrange", "agent-runs", batch.runId, "T001.integration.json"),
       null,
     );
     assert.equal(intent.status, "pushed");
@@ -382,7 +382,7 @@ test("lost integration push response reconciles when remote main already advance
   await withRemoteClones(async ({ remote, cloneA, cloneB }) => {
     await initializeTaskRuntime(cloneA, "device-a");
     const claimed = await claimTeamTask(cloneA, { taskId: "T001", owner: "ZhuRong" });
-    const { config } = await loadHelixConfig(cloneA);
+    const { config } = await loadWildArrangeConfig(cloneA);
     const integrationGuard = await captureIntegrationGuard(cloneA, config.gitCoordination, { force: true });
     await mkdir(path.join(cloneA, "src"), { recursive: true });
     await writeFile(path.join(cloneA, "src", "lost-response.txt"), "integrated\n", "utf8");
@@ -428,7 +428,7 @@ test("unknown integration push outcome stays durable and forbids rollback across
   await withRemoteClones(async ({ dir, remote, cloneA }) => {
     await initializeTaskRuntime(cloneA, "device-a");
     const claimed = await claimTeamTask(cloneA, { taskId: "T001", owner: "ZhuRong" });
-    const { config } = await loadHelixConfig(cloneA);
+    const { config } = await loadWildArrangeConfig(cloneA);
     const integrationGuard = await captureIntegrationGuard(cloneA, config.gitCoordination, { force: true });
     await mkdir(path.join(cloneA, "src"), { recursive: true });
     await writeFile(path.join(cloneA, "src", "unknown-push.txt"), "keep until resolved\n", "utf8");
@@ -504,7 +504,7 @@ test("checkpoint failure after remote integration keeps ownership and resumes wi
       agent: "ZhuRong",
       command: resultCommand("src/recover.txt", "recover\n"),
     });
-    const checkpointPlanDir = path.join(cloneA, ".helix", "checkpoints", "P-GIT");
+    const checkpointPlanDir = path.join(cloneA, ".wildarrange", "checkpoints", "P-GIT");
     await replaceDirectoryWithBlockingFile(checkpointPlanDir);
     let first;
     try {
@@ -696,7 +696,7 @@ test("monolithic linear run cannot complete after another device takes ownership
     const result = await running;
     assert.equal(result.status, "revalidation_required");
     await assert.rejects(
-      readFile(path.join(cloneA, ".helix", "checkpoints", "P-LINEAR-RACE", "T001.json"), "utf8"),
+      readFile(path.join(cloneA, ".wildarrange", "checkpoints", "P-LINEAR-RACE", "T001.json"), "utf8"),
       /ENOENT/,
     );
     const stateA = await loadTaskState(cloneA);
@@ -708,10 +708,10 @@ test("monolithic linear run cannot complete after another device takes ownership
 test("strict mode rejects a missing configured integration branch", async () => {
   await withRemoteClones(async ({ cloneA }) => {
     await initRuntime(cloneA);
-    await writeFile(path.join(cloneA, "helix.config.json"), JSON.stringify({
+    await writeFile(path.join(cloneA, "wildarrange.config.json"), JSON.stringify({
       gitCoordination: { mode: "strict", integrationBranch: "does-not-exist" },
     }), "utf8");
-    const { config } = await loadHelixConfig(cloneA);
+    const { config } = await loadWildArrangeConfig(cloneA);
     await assert.rejects(
       () => captureIntegrationGuard(cloneA, config.gitCoordination),
       /strict mode.*does not exist/i,
@@ -754,10 +754,10 @@ test("multi-task partial remote claim failure remains visible and locally recove
     const taskA = stateA.tasks.find((task) => task.id === "T001");
     assert.equal(taskA.coordination.status, "claimed");
     assert.equal(taskA.parallel_run_claim, null);
-    const batchFiles = (await readdir(path.join(cloneA, ".helix", "agent-runs")))
+    const batchFiles = (await readdir(path.join(cloneA, ".wildarrange", "agent-runs")))
       .filter((name) => name.endsWith(".json") && name !== "index.json");
     const batches = await Promise.all(batchFiles.map((name) =>
-      readJson(path.join(cloneA, ".helix", "agent-runs", name), null)));
+      readJson(path.join(cloneA, ".wildarrange", "agent-runs", name), null)));
     assert.equal(batches.some((batch) => batch?.status === "claim_failed"), true);
     const recovered = await claimTeamTask(cloneA, { taskId: "T001", owner: "ZhuRong" });
     assert.equal(recovered.task.coordination.remoteHeadSha, taskA.coordination.remoteHeadSha);
@@ -775,7 +775,7 @@ test("parallel close releases a crash-orphaned claim even when the run has no re
     };
     await persistTaskState(cloneA, state);
     await writeFile(
-      path.join(cloneA, ".helix", "agent-runs", "index.json"),
+      path.join(cloneA, ".wildarrange", "agent-runs", "index.json"),
       JSON.stringify({
         runs: [{
           runId: "agent_run_crashed",
@@ -799,7 +799,7 @@ test("parallel close releases a crash-orphaned claim even when the run has no re
 test("device and coordination CLI commands expose the stable UUID and active mode", async () => {
   await withRemoteClones(async ({ cloneA }) => {
     await initRuntime(cloneA);
-    const binPath = path.resolve("bin/helix.mjs");
+    const binPath = path.resolve("bin/wildarrange.mjs");
     const registered = JSON.parse((await execFileAsync(
       process.execPath,
       [binPath, "device", "register", "--name", "cli-device", "--force"],
@@ -822,7 +822,7 @@ test("device and coordination CLI commands expose the stable UUID and active mod
 async function initializeTaskRuntime(rootDir, deviceName, taskIds = ["T001"]) {
   await initRuntime(rootDir);
   const device = await registerCoordinationDevice(rootDir, { name: deviceName, force: true });
-  const planPath = path.join(rootDir, ".helix", "artifacts", "coordination-plan.json");
+  const planPath = path.join(rootDir, ".wildarrange", "artifacts", "coordination-plan.json");
   await mkdir(path.dirname(planPath), { recursive: true });
   await writeFile(planPath, JSON.stringify({
     id: "P-GIT",
@@ -841,7 +841,7 @@ async function initializeTaskRuntime(rootDir, deviceName, taskIds = ["T001"]) {
 }
 
 async function importPlanDefinition(rootDir, plan) {
-  const planPath = path.join(rootDir, ".helix", "artifacts", `${plan.id}.json`);
+  const planPath = path.join(rootDir, ".wildarrange", "artifacts", `${plan.id}.json`);
   await writeFile(planPath, JSON.stringify(plan, null, 2), "utf8");
   await importPlan(rootDir, planPath);
 }
@@ -852,7 +852,7 @@ async function createCheckpointFailureAfterIntegration(rootDir, filePath) {
     agent: "ZhuRong",
     command: resultCommand(filePath, "recover\n"),
   });
-  const checkpointPlanDir = path.join(rootDir, ".helix", "checkpoints", "P-GIT");
+  const checkpointPlanDir = path.join(rootDir, ".wildarrange", "checkpoints", "P-GIT");
   await replaceDirectoryWithBlockingFile(checkpointPlanDir);
   let result;
   try {
@@ -862,7 +862,7 @@ async function createCheckpointFailureAfterIntegration(rootDir, filePath) {
   }
   assert.equal(result.status, "recovery_required");
   const intent = await readJson(
-    path.join(rootDir, ".helix", "agent-runs", batch.runId, "T001.integration.json"),
+    path.join(rootDir, ".wildarrange", "agent-runs", batch.runId, "T001.integration.json"),
     null,
   );
   assert.equal(intent.status, "pushed");
@@ -899,7 +899,7 @@ function resultCommand(filePath, content) {
 }
 
 async function readLedger(rootDir) {
-  const raw = await readFile(path.join(rootDir, ".helix", "ledger.jsonl"), "utf8");
+  const raw = await readFile(path.join(rootDir, ".wildarrange", "ledger.jsonl"), "utf8");
   return raw.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
 }
 

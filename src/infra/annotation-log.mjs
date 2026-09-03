@@ -1,7 +1,7 @@
 /**
  * annotations.jsonl — 决策标注回写。
  *
- * 人/审查 Agent 用 `helix annotate` 指认某条决策记录（decision id）判错了。
+ * 人/审查 Agent 用 `wildarrange annotate` 指认某条决策记录（decision id）判错了。
  * 硬约束（由 test/annotation.test.mjs 钉死）：
  *
  * - 标注只写 annotations.jsonl，绝不写 config / verify_commands / 任何门开关——
@@ -13,13 +13,13 @@
  */
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { createWorkId, nowIso, resolveHelixPath } from "./runtime-store.mjs";
+import { createWorkId, nowIso, resolveWildArrangePath } from "./runtime-store.mjs";
 import { readDecisions } from "./decision-log.mjs";
 
 export const ANNOTATION_CATEGORIES = ["confirmed", "rule_wrong", "case_wrong", "mislabeled"];
 
 export function annotationsLogPath(rootDir) {
-  return resolveHelixPath(rootDir, "annotations.jsonl");
+  return resolveWildArrangePath(rootDir, "annotations.jsonl");
 }
 
 export async function appendAnnotation(rootDir, { decisionId, category, reason, author } = {}) {
@@ -33,7 +33,7 @@ export async function appendAnnotation(rootDir, { decisionId, category, reason, 
   // decisions.jsonl 被外部清空时无法校验，放行（证据已随截断消失）。
   const { records } = await readDecisions(rootDir, {});
   if (records.length > 0 && !records.some((record) => record.id === decisionId)) {
-    throw new Error(`unknown decision id: ${decisionId}（用 helix decisions 查看可标注的决策 id）`);
+    throw new Error(`unknown decision id: ${decisionId}（用 wildarrange decisions 查看可标注的决策 id）`);
   }
   const entry = {
     ts: nowIso(),
@@ -95,7 +95,7 @@ export async function annotationStats(rootDir) {
     byRule[ruleKey][annotation.category] = (byRule[ruleKey][annotation.category] || 0) + 1;
   }
   return {
-    kind: "helix_annotation_stats",
+    kind: "wildarrange_annotation_stats",
     total: annotations.records.length,
     skippedLines: annotations.skippedLines,
     rules: Object.values(byRule).sort((a, b) => b.total - a.total),

@@ -1,17 +1,17 @@
-import { loadHelixConfig } from "../infra/runtime-config.mjs";
+import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { normalizeAgentKey } from "../infra/agent-registry.mjs";
 import { renderPromptPackEntry } from "../infra/prompt-pack.mjs";
 import {
   readJson,
-  resolveHelixPath,
+  resolveWildArrangePath,
 } from "../infra/runtime-store.mjs";
 
 const DEFAULT_LIMIT = 6;
 
 export async function matchSkills(rootDir, options = {}) {
-  const { config } = await loadHelixConfig(rootDir);
-  const registry = await readJson(resolveHelixPath(rootDir, "prompt-pack.json"), null);
-  if (!registry) throw new Error("prompt pack is not installed; run helix init");
+  const { config } = await loadWildArrangeConfig(rootDir);
+  const registry = await readJson(resolveWildArrangePath(rootDir, "prompt-pack.json"), null);
+  if (!registry) throw new Error("prompt pack is not installed; run wildarrange init");
   const routes = registry.routes
     ? JSON.parse(await renderPromptPackEntry(rootDir, { routes: true }))
     : null;

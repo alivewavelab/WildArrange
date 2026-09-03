@@ -6,10 +6,10 @@
 
 核心目标不是把治理藏进某个宿主的私有能力，而是让不同宿主按能力分层接入同一套本地协议：
 
-- Codex：adapter 写入项目 `.codex/hooks.json`，并保留 `.helix/adapters/codex/hooks.json` 审计副本；只有在可信项目里通过 `/hooks` review / trust 后，才具备 hard hook 拦截。
+- Codex：adapter 写入项目 `.codex/hooks.json`，并保留 `.wildarrange/adapters/codex/hooks.json` 审计副本；只有在可信项目里通过 `/hooks` review / trust 后，才具备 hard hook 拦截。
 - Cursor：adapter 写入 `.cursor/hooks.json`（含 hook bridge），受信任工作区中 `preToolUse`（Write/Delete/Edit/Shell）与 `beforeShellExecution` **fail-closed 硬拦截**；`.cursor/rules/wildarrange.mdc` 仍是软规则层。宿主拦截只是早期预警，最终完成仍必须过 verifier / scope / review / successCriteria / acceptance proof / checkpoint。
-- Kimi Code：adapter 生成 `.helix/adapters/kimi/plugin/`，用户显式安装后由 Hook bridge 转发宿主事件；复用 `AGENTS.md` 与 `.agents/skills/`，不改用户级配置。Kimi Hook 崩溃或超时时会 fail-open，最终完成仍以 WildArrange gate 为准。
-- 普通 CLI：手动运行 `node ./bin/helix.mjs ...`，用文件状态和 gate 命令完成治理闭环。
+- Kimi Code：adapter 生成 `.wildarrange/adapters/kimi/plugin/`，用户显式安装后由 Hook bridge 转发宿主事件；复用 `AGENTS.md` 与 `.agents/skills/`，不改用户级配置。Kimi Hook 崩溃或超时时会 fail-open，最终完成仍以 WildArrange gate 为准。
+- 普通 CLI：手动运行 `node ./bin/wildarrange.mjs ...`，用文件状态和 gate 命令完成治理闭环。
 
 无论宿主强弱，每个关键节点都应能读取：
 
@@ -41,20 +41,20 @@ Agent 看到挂载信息时必须先判断：
 
 优先级：
 
-1. `helix.config.json`
-2. `.helix/config.json`
+1. `wildarrange.config.json`
+2. `.wildarrange/config.json`
 3. runtime 默认配置
 
 查看最终配置：
 
 ```bash
-node ./bin/helix.mjs config show
+node ./bin/wildarrange.mjs config show
 ```
 
 生成可编辑根配置：
 
 ```bash
-node ./bin/helix.mjs config init --root
+node ./bin/wildarrange.mjs config init --root
 ```
 
 ## 注入点
@@ -74,13 +74,13 @@ node ./bin/helix.mjs config init --root
 查看某个注入点最终挂载：
 
 ```bash
-node ./bin/helix.mjs injection show --point before_review --agent BaiZe --task T001
+node ./bin/wildarrange.mjs injection show --point before_review --agent BaiZe --task T001
 ```
 
 adapter 应优先调用 hook 入口，让运行时自动选择注入点并输出 Markdown：
 
 ```bash
-node ./bin/helix.mjs hook run --from hook.json
+node ./bin/wildarrange.mjs hook run --from hook.json
 ```
 
 `hook.json` 最小格式：
@@ -99,8 +99,8 @@ node ./bin/helix.mjs hook run --from hook.json
 ### Jiuwei（编排）
 
 - 新会话先看 `session_start` / `stop` 注入结果。
-- 如果宿主提供 hook payload，优先执行 `node ./bin/helix.mjs hook run --from hook.json`。
-- 中途需求变化必须走 `helix steer` 或 ChangeRequest，不允许聊天里直接改计划。
+- 如果宿主提供 hook payload，优先执行 `node ./bin/wildarrange.mjs hook run --from hook.json`。
+- 中途需求变化必须走 `wildarrange steer` 或 ChangeRequest，不允许聊天里直接改计划。
 - 如果配置缺少关键模型或注入点，先报告配置缺口。
 
 ### Jiuwei（执行）

@@ -49,7 +49,7 @@ export function evaluateGateArming({ config, tasks = [] } = {}) {
     issues.push({
       code: "quality_gates_not_required",
       message: "qualityGates 没有任何一项 required（含 commentChecker.blockOnFindings），质量门全关",
-      next_action: "在 helix.config.json 中至少把一项质量门设为 required（如 lspDiagnostics 或 commentChecker.blockOnFindings）",
+      next_action: "在 wildarrange.config.json 中至少把一项质量门设为 required（如 lspDiagnostics 或 commentChecker.blockOnFindings）",
     });
   }
 

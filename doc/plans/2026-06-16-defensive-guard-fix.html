@@ -36,12 +36,12 @@
     <section class="card">
       <span class="tag p0">P0</span>
       <h3>命令安全预检</h3>
-      <p>在 shell 执行前扫描高风险命令，例如 <code>rm -rf /</code>、删除 <code>.git/.helix</code>、<code>git reset --hard</code>、<code>git clean -fd</code>、<code>sudo</code>、<code>curl | sh</code>。命中时返回 exit code 126，不进入 shell。</p>
+      <p>在 shell 执行前扫描高风险命令，例如 <code>rm -rf /</code>、删除 <code>.git/.wildarrange</code>、<code>git reset --hard</code>、<code>git clean -fd</code>、<code>sudo</code>、<code>curl | sh</code>。命中时返回 exit code 126，不进入 shell。</p>
     </section>
     <section class="card">
       <span class="tag p1">P1</span>
       <h3>Config 基线校验</h3>
-      <p>新增 <code>config baseline</code> 和 <code>config verify</code>。基线记录 <code>helix.config.json</code> / <code>.helix/config.json</code> 的 hash，后续能检测 Agent 是否改弱质量门。</p>
+      <p>新增 <code>config baseline</code> 和 <code>config verify</code>。基线记录 <code>wildarrange.config.json</code> / <code>.wildarrange/config.json</code> 的 hash，后续能检测 Agent 是否改弱质量门。</p>
     </section>
     <section class="card">
       <span class="tag p1">P1</span>
@@ -56,7 +56,7 @@
     <section class="card">
       <span class="tag p1">P1</span>
       <h3>基础模块职责收窄</h3>
-      <p>把 ledger 追加与校验从 <code>helix-foundation.mjs</code> 拆到 <code>helix-ledger.mjs</code>，保留兼容导出。下一步再单独拆 <code>helix-parallel-agents.mjs</code> 的 admission 域。</p>
+      <p>把 ledger 追加与校验从 <code>wildarrange-foundation.mjs</code> 拆到 <code>wildarrange-ledger.mjs</code>，保留兼容导出。下一步再单独拆 <code>wildarrange-parallel-agents.mjs</code> 的 admission 域。</p>
     </section>
     <section class="card">
       <span class="tag p1">P1</span>

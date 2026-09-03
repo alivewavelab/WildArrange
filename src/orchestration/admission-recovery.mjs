@@ -6,14 +6,14 @@ import { assertPathInsideRoot } from "../infra/path-match.mjs";
 import {
   nowIso,
   readJson,
-  resolveHelixPath,
+  resolveWildArrangePath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
 import { writeFailureReport } from "../infra/task-reports.mjs";
 import { persistTaskState } from "./task-board.mjs";
 
 function rollbackPlanPath(rootDir, runId, taskId) {
-  return resolveHelixPath(rootDir, "agent-runs", runId, `${taskId}.rollback-plan.json`);
+  return resolveWildArrangePath(rootDir, "agent-runs", runId, `${taskId}.rollback-plan.json`);
 }
 
 export async function persistRollbackPlan(rootDir, runId, taskId, rollbackPlan) {
@@ -35,7 +35,7 @@ export async function removePersistedRollbackPlan(rootDir, runId, taskId) {
 }
 
 export async function patchAlreadyApplied(rootDir, patch) {
-  const patchPath = path.join(rootDir, ".helix", "agent-runs", `recheck-${Date.now()}-${process.pid}.patch`);
+  const patchPath = path.join(rootDir, ".wildarrange", "agent-runs", `recheck-${Date.now()}-${process.pid}.patch`);
   await writeFile(patchPath, patch, "utf8");
   try {
     const reverseCheck = await runCommandFile("git", ["-C", rootDir, "apply", "--reverse", "--check", "--whitespace=nowarn", patchPath], rootDir, 30_000);
@@ -81,7 +81,7 @@ export async function rollbackAdmissionChanges(rootDir, rollbackPlan) {
         }
       }
     } else if (rollbackPlan.mode === "patch") {
-      const patchPath = path.join(rootDir, ".helix", "agent-runs", `rollback-${Date.now()}-${process.pid}.patch`);
+      const patchPath = path.join(rootDir, ".wildarrange", "agent-runs", `rollback-${Date.now()}-${process.pid}.patch`);
       await writeFile(patchPath, rollbackPlan.patch, "utf8");
       try {
         const reverse = await runCommandFile("git", ["-C", rootDir, "apply", "--reverse", "--whitespace=nowarn", patchPath], rootDir, 30_000);

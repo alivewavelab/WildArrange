@@ -3,14 +3,14 @@
  * - 只读清洗后的结论包（id/gate/code/reason/summary + 标注计数），
  *   绝不摄入代码块、raw diff 或完整命令输出；
  * - 无 LLM key / provider 不可用时确定性 fallback，不阻断任何主线；
- * - 结论只进 .helix/reports/suspicion.* 报告，不进完成链、不改配置、
+ * - 结论只进 .wildarrange/reports/suspicion.* 报告，不进完成链、不改配置、
  *   不动任何门开关；
  * - LLM 返回的 decisionId 必须在输入包内，否则丢弃并计数（防幻觉锚定）。
  */
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
-import { loadHelixConfig } from "../infra/runtime-config.mjs";
-import { ensureHelixDirs, nowIso, writeJsonAtomic, resolveHelixPath } from "../infra/runtime-store.mjs";
+import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
+import { ensureWildArrangeDirs, nowIso, writeJsonAtomic, resolveWildArrangePath } from "../infra/runtime-store.mjs";
 import { readDecisions } from "../infra/decision-log.mjs";
 import { annotationStats } from "../infra/annotation-log.mjs";
 import { callOpenAICompatible, resolveAgentProvider } from "../infra/llm-provider.mjs";
@@ -59,8 +59,8 @@ function parseSuspicionJson(content) {
 }
 
 export async function runSuspicionReview(rootDir, { limit = PACKET_LIMIT } = {}) {
-  await ensureHelixDirs(rootDir);
-  const { config } = await loadHelixConfig(rootDir);
+  await ensureWildArrangeDirs(rootDir);
+  const { config } = await loadWildArrangeConfig(rootDir);
   const [{ records }, annotations] = await Promise.all([
     readDecisions(rootDir, {}),
     annotationStats(rootDir),
@@ -70,7 +70,7 @@ export async function runSuspicionReview(rootDir, { limit = PACKET_LIMIT } = {})
   const baseline = buildDeterministicBaseline(records, annotations);
 
   const report = {
-    kind: "helix_suspicion_review",
+    kind: "wildarrange_suspicion_review",
     at: nowIso(),
     advisory: true,
     deterministic: baseline,
@@ -134,8 +134,8 @@ export async function runSuspicionReview(rootDir, { limit = PACKET_LIMIT } = {})
     }
   }
 
-  const jsonPath = resolveHelixPath(rootDir, "reports", "suspicion.json");
-  const mdPath = resolveHelixPath(rootDir, "reports", "suspicion.md");
+  const jsonPath = resolveWildArrangePath(rootDir, "reports", "suspicion.json");
+  const mdPath = resolveWildArrangePath(rootDir, "reports", "suspicion.md");
   report.reportJsonPath = path.relative(rootDir, jsonPath);
   report.reportMdPath = path.relative(rootDir, mdPath);
   await writeJsonAtomic(jsonPath, report);

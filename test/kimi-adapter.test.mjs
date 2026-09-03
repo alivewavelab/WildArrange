@@ -19,7 +19,7 @@ test("Kimi adapter generates a native plugin and shared project Skills", async (
       mode: "local",
     });
 
-    const pluginRoot = path.join(dir, ".helix", "adapters", "kimi", "plugin");
+    const pluginRoot = path.join(dir, ".wildarrange", "adapters", "kimi", "plugin");
     const manifestPath = path.join(pluginRoot, "kimi.plugin.json");
     const bridgePath = path.join(pluginRoot, "hooks", "wildarrange-hook-bridge.mjs");
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
@@ -30,15 +30,15 @@ test("Kimi adapter generates a native plugin and shared project Skills", async (
     assert.ok(manifest.hooks.some((hook) => hook.event === "PostToolUse" && hook.matcher === undefined));
     assert.ok(manifest.hooks.some((hook) => hook.event === "PostToolUseFailure" && hook.matcher === undefined));
     assert.ok(manifest.hooks.some((hook) => hook.event === "Stop"));
-    assert.match(await readFile(bridgePath, "utf8"), /HELIX_HOST_ADAPTER: "kimi"/);
+    assert.match(await readFile(bridgePath, "utf8"), /WILDARRANGE_HOST_ADAPTER: "kimi"/);
 
-    const doctorSkill = await readFile(path.join(dir, ".agents", "skills", "helix-doctor", "SKILL.md"), "utf8");
-    assert.match(doctorSkill, /^name: helix-doctor$/m);
+    const doctorSkill = await readFile(path.join(dir, ".agents", "skills", "wildarrange-doctor", "SKILL.md"), "utf8");
+    assert.match(doctorSkill, /^name: wildarrange-doctor$/m);
     assert.match(doctorSkill, /^description: /m);
 
     const manifestOutput = report.outputs.find((output) => output.path.endsWith("kimi.plugin.json"));
     assert.equal(manifestOutput.enforcement, "pending-user-install");
-    assert.match(manifestOutput.trustAction, /\/plugins install \.helix\/adapters\/kimi\/plugin/);
+    assert.match(manifestOutput.trustAction, /\/plugins install \.wildarrange\/adapters\/kimi\/plugin/);
     assert.doesNotMatch(manifestOutput.trustAction, /["']/);
     assert.match(manifestOutput.trustAction, /\/reload/);
   });
@@ -50,17 +50,17 @@ test("invalid adapter targets fail before creating runtime state", async () => {
       installAdapter(dir, { target: "unknown-host" }),
       /codex, cursor, or kimi/,
     );
-    assert.equal(existsSync(path.join(dir, ".helix")), false);
+    assert.equal(existsSync(path.join(dir, ".wildarrange")), false);
   });
 });
 
-test("Kimi Hook bridge ignores unrelated projects without creating .helix", async () => {
+test("Kimi Hook bridge ignores unrelated projects without creating .wildarrange", async () => {
   await withTempDir(async (wildArrangeDir) => {
     await installAdapter(wildArrangeDir, { target: "kimi", mode: "local" });
-    const bridgePath = path.join(wildArrangeDir, ".helix", "adapters", "kimi", "plugin", "hooks", "wildarrange-hook-bridge.mjs");
+    const bridgePath = path.join(wildArrangeDir, ".wildarrange", "adapters", "kimi", "plugin", "hooks", "wildarrange-hook-bridge.mjs");
 
     await withTempDir(async (unrelatedDir) => {
-      await mkdir(path.join(unrelatedDir, ".helix", "config.json"), { recursive: true });
+      await mkdir(path.join(unrelatedDir, ".wildarrange", "config.json"), { recursive: true });
       const result = await runBridge(bridgePath, {
         hook_event_name: "UserPromptSubmit",
         session_id: "kimi-unrelated",
@@ -70,7 +70,7 @@ test("Kimi Hook bridge ignores unrelated projects without creating .helix", asyn
       assert.equal(result.exitCode, 0);
       assert.equal(result.stdout, "");
       assert.equal(result.stderr, "");
-      assert.equal(existsSync(path.join(unrelatedDir, ".helix", "ledger.jsonl")), false);
+      assert.equal(existsSync(path.join(unrelatedDir, ".wildarrange", "ledger.jsonl")), false);
     });
   });
 });
@@ -78,7 +78,7 @@ test("Kimi Hook bridge ignores unrelated projects without creating .helix", asyn
 test("Kimi Hook bridge injects prompts and enforces scoped Edit calls", async () => {
   await withTempDir(async (dir) => {
     await installAdapter(dir, { target: "kimi", mode: "local" });
-    const bridgePath = path.join(dir, ".helix", "adapters", "kimi", "plugin", "hooks", "wildarrange-hook-bridge.mjs");
+    const bridgePath = path.join(dir, ".wildarrange", "adapters", "kimi", "plugin", "hooks", "wildarrange-hook-bridge.mjs");
     const planPath = path.join(dir, "plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Kimi scoped edit",
@@ -102,7 +102,7 @@ test("Kimi Hook bridge injects prompts and enforces scoped Edit calls", async ()
     });
     assert.equal(prompt.exitCode, 0);
     assert.match(prompt.stdout, /<wildarrange-injection event="UserPromptSubmit"/);
-    assert.equal(existsSync(path.join(nestedDir, ".helix")), false);
+    assert.equal(existsSync(path.join(nestedDir, ".wildarrange")), false);
 
     const allowed = await runBridge(bridgePath, {
       hook_event_name: "PreToolUse",
@@ -123,11 +123,11 @@ test("Kimi Hook bridge injects prompts and enforces scoped Edit calls", async ()
       cwd: dir,
       task_id: "T001",
       tool_name: "Bash",
-      tool_input: { command: "node ./bin/helix.mjs doctor" },
+      tool_input: { command: "node ./bin/wildarrange.mjs doctor" },
     });
     const allowedDoctorOutput = JSON.parse(allowedDoctorCommand.stdout);
     assert.equal(allowedDoctorOutput.hookSpecificOutput.permissionDecision, undefined);
-    assert.doesNotMatch(allowedDoctorOutput.hookSpecificOutput.additionalContext, /node \.\/bin\/helix\.mjs doctor/);
+    assert.doesNotMatch(allowedDoctorOutput.hookSpecificOutput.additionalContext, /node \.\/bin\/wildarrange\.mjs doctor/);
 
     const allowedPathLikeContent = await runBridge(bridgePath, {
       hook_event_name: "PreToolUse",
@@ -238,7 +238,7 @@ test("Kimi Hook bridge injects prompts and enforces scoped Edit calls", async ()
 test("Kimi Hook bridge reports malformed payloads as hook errors", async () => {
   await withTempDir(async (dir) => {
     await installAdapter(dir, { target: "kimi", mode: "local" });
-    const bridgePath = path.join(dir, ".helix", "adapters", "kimi", "plugin", "hooks", "wildarrange-hook-bridge.mjs");
+    const bridgePath = path.join(dir, ".wildarrange", "adapters", "kimi", "plugin", "hooks", "wildarrange-hook-bridge.mjs");
     const result = await runBridgeRaw(bridgePath, "{not-json");
     assert.equal(result.exitCode, 1);
     assert.match(result.stderr, /malformed hook JSON/);
@@ -248,7 +248,7 @@ test("Kimi Hook bridge reports malformed payloads as hook errors", async () => {
 test("Kimi Stop Hook converts unfinished work into a continuation block", async () => {
   await withTempDir(async (dir) => {
     await installAdapter(dir, { target: "kimi", mode: "local" });
-    const bridgePath = path.join(dir, ".helix", "adapters", "kimi", "plugin", "hooks", "wildarrange-hook-bridge.mjs");
+    const bridgePath = path.join(dir, ".wildarrange", "adapters", "kimi", "plugin", "hooks", "wildarrange-hook-bridge.mjs");
     const planPath = path.join(dir, "plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Kimi continuation",
@@ -271,7 +271,7 @@ test("Kimi Stop Hook converts unfinished work into a continuation block", async 
     const output = JSON.parse(stopped.stdout);
     assert.equal(output.hookSpecificOutput.permissionDecision, "deny");
     assert.match(output.hookSpecificOutput.permissionDecisionReason, /requires this task to continue/);
-    assert.match(output.hookSpecificOutput.permissionDecisionReason, /node \.\/bin\/helix\.mjs run/);
+    assert.match(output.hookSpecificOutput.permissionDecisionReason, /node \.\/bin\/wildarrange\.mjs run/);
   });
 });
 
@@ -279,14 +279,14 @@ test("Kimi uninstall keeps shared Skills while Codex remains and restores plugin
   await withTempDir(async (dir) => {
     await installAdapter(dir, { target: "all", mode: "local" });
     const uninstall = await uninstallAdapter(dir, { target: "kimi" });
-    const skillOutput = uninstall.outputs.find((output) => output.path === ".agents/skills/helix-doctor/SKILL.md");
+    const skillOutput = uninstall.outputs.find((output) => output.path === ".agents/skills/wildarrange-doctor/SKILL.md");
     assert.equal(skillOutput.status, "retained-shared");
-    assert.equal(existsSync(path.join(dir, ".agents", "skills", "helix-doctor", "SKILL.md")), true);
+    assert.equal(existsSync(path.join(dir, ".agents", "skills", "wildarrange-doctor", "SKILL.md")), true);
     assert.equal(existsSync(path.join(dir, ".codex", "hooks.json")), true);
-    assert.equal(existsSync(path.join(dir, ".helix", "adapters", "kimi", "plugin", "kimi.plugin.json")), false);
+    assert.equal(existsSync(path.join(dir, ".wildarrange", "adapters", "kimi", "plugin", "kimi.plugin.json")), false);
 
     await restoreAdapterBackup(dir, { backupId: uninstall.backupId });
-    assert.equal(existsSync(path.join(dir, ".helix", "adapters", "kimi", "plugin", "kimi.plugin.json")), true);
+    assert.equal(existsSync(path.join(dir, ".wildarrange", "adapters", "kimi", "plugin", "kimi.plugin.json")), true);
   });
 });
 

@@ -3,13 +3,13 @@ import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
 import {
   createWorkId,
-  ensureHelixDirs,
+  ensureWildArrangeDirs,
   nowIso,
   readJson,
-  resolveHelixPath,
+  resolveWildArrangePath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
-import { loadHelixConfig } from "../infra/runtime-config.mjs";
+import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { runCommandFile } from "../infra/command-runner.mjs";
 import { callOpenAICompatible, resolveAgentProvider } from "../infra/llm-provider.mjs";
@@ -18,8 +18,8 @@ import { routeRequest } from "./routing.mjs";
 const DEFAULT_STAGE = "default";
 
 export async function buildArchivistPacket(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
-  const { config } = await loadHelixConfig(rootDir);
+  await ensureWildArrangeDirs(rootDir);
+  const { config } = await loadWildArrangeConfig(rootDir);
   const archivistConfig = config.archivistRouter || {};
   const memoryConfig = archivistConfig.memory || {};
   const stage = normalizeStage(options.stage || DEFAULT_STAGE);
@@ -29,7 +29,7 @@ export async function buildArchivistPacket(rootDir, options = {}) {
   const text = cleanConclusionText(options.text || "");
   const ledgerTail = await readLedgerTail(rootDir, Number(options.ledgerLimit) || 30);
   const stageSummaries = await readStageSummaries(rootDir, stage, 5);
-  const memoryIndex = await readJson(resolveHelixPath(rootDir, "memory", "index.json"), { keywords: {}, artifacts: [], preferences: [] });
+  const memoryIndex = await readJson(resolveWildArrangePath(rootDir, "memory", "index.json"), { keywords: {}, artifacts: [], preferences: [] });
   const packet = {
     kind: "archivist_routing_packet",
     at: nowIso(),
@@ -54,8 +54,8 @@ export async function buildArchivistPacket(rootDir, options = {}) {
 }
 
 export async function runArchivistRouter(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
-  const { config } = await loadHelixConfig(rootDir);
+  await ensureWildArrangeDirs(rootDir);
+  const { config } = await loadWildArrangeConfig(rootDir);
   const archivistConfig = config.archivistRouter || {};
   if (archivistConfig.enabled !== true && options.force !== true) {
     const result = {
@@ -138,7 +138,7 @@ export async function runArchivistRouter(rootDir, options = {}) {
 }
 
 export async function recordArchivistEvent(rootDir, event) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const normalized = {
     id: event.id || createWorkId("mem"),
     at: event.at || nowIso(),
@@ -146,14 +146,14 @@ export async function recordArchivistEvent(rootDir, event) {
     stage: normalizeStage(event.stage || DEFAULT_STAGE),
     ...event,
   };
-  await appendFile(resolveHelixPath(rootDir, "memory", "events.jsonl"), `${JSON.stringify(normalized)}\n`, "utf8");
+  await appendFile(resolveWildArrangePath(rootDir, "memory", "events.jsonl"), `${JSON.stringify(normalized)}\n`, "utf8");
   await updateMemoryIndex(rootDir, normalized);
   return normalized;
 }
 
 export async function listArchivistRouteSuggestions(rootDir) {
-  await ensureHelixDirs(rootDir);
-  const dirPath = resolveHelixPath(rootDir, "routing", "suggestions");
+  await ensureWildArrangeDirs(rootDir);
+  const dirPath = resolveWildArrangePath(rootDir, "routing", "suggestions");
   const entries = [];
   for (const name of await readdir(dirPath).catch(() => [])) {
     if (!name.endsWith(".json")) continue;
@@ -164,12 +164,12 @@ export async function listArchivistRouteSuggestions(rootDir) {
 }
 
 export async function resolveArchivistRouteSuggestion(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   if (!options.id) throw new Error("archivist suggestion resolve requires id");
   const decision = String(options.decision || "").toLowerCase();
   if (!["accept", "reject"].includes(decision)) throw new Error("archivist suggestion decision must be accept or reject");
 
-  const suggestionPath = resolveHelixPath(rootDir, "routing", "suggestions", `${options.id}.json`);
+  const suggestionPath = resolveWildArrangePath(rootDir, "routing", "suggestions", `${options.id}.json`);
   const artifact = await readJson(suggestionPath, null);
   if (!artifact) throw new Error(`archivist route suggestion not found: ${options.id}`);
   if (artifact.status !== "pending_review") throw new Error(`archivist route suggestion ${options.id} is ${artifact.status}`);
@@ -222,7 +222,7 @@ async function persistArchivistDecision(rootDir, payload) {
     decision: normalizeDecision(payload.decision),
   };
 
-  await writeJsonAtomic(resolveHelixPath(rootDir, "memory", "stage-summaries", `${at.replace(/[:.]/g, "-")}-${stage}.json`), {
+  await writeJsonAtomic(resolveWildArrangePath(rootDir, "memory", "stage-summaries", `${at.replace(/[:.]/g, "-")}-${stage}.json`), {
     id,
     at,
     stage,
@@ -243,7 +243,7 @@ async function persistArchivistDecision(rootDir, payload) {
   }
 
   if (artifact.decision.keywordSuggestions?.length > 0) {
-    await writeJsonAtomic(resolveHelixPath(rootDir, "routing", "suggestions", `${id}.json`), {
+    await writeJsonAtomic(resolveWildArrangePath(rootDir, "routing", "suggestions", `${id}.json`), {
       id,
       at,
       status: "pending_review",
@@ -252,7 +252,7 @@ async function persistArchivistDecision(rootDir, payload) {
     });
   }
 
-  await writeJsonAtomic(resolveHelixPath(rootDir, "memory", "last-archivist-result.json"), artifact);
+  await writeJsonAtomic(resolveWildArrangePath(rootDir, "memory", "last-archivist-result.json"), artifact);
   return artifact;
 }
 
@@ -324,7 +324,7 @@ function normalizeDecision(decision) {
 
 async function evaluateArchivistTrigger(rootDir, archivistConfig, options) {
   const triggerName = options.trigger || "manual";
-  const statePath = resolveHelixPath(rootDir, "routing", "archivist-trigger-state.json");
+  const statePath = resolveWildArrangePath(rootDir, "routing", "archivist-trigger-state.json");
   const state = await readJson(statePath, {
     version: 1,
     promptCounts: {},
@@ -399,7 +399,7 @@ function promptThresholdForStage(config, stage) {
 }
 
 async function applyKeywordSuggestions(rootDir, suggestions, resolution) {
-  const { config } = await loadHelixConfig(rootDir);
+  const { config } = await loadWildArrangeConfig(rootDir);
   const protectedTargets = new Set(config.archivistRouter?.keywordEvolution?.protectedTargets || []);
   const normalized = normalizeKeywordSuggestions(suggestions);
   const accepted = [];
@@ -410,7 +410,7 @@ async function applyKeywordSuggestions(rootDir, suggestions, resolution) {
     accepted.push(suggestion);
   }
 
-  const overlayPath = resolveHelixPath(rootDir, "routing", "routes-overrides.json");
+  const overlayPath = resolveWildArrangePath(rootDir, "routing", "routes-overrides.json");
   const overlay = await readJson(overlayPath, { version: 1, patches: [] });
   const existingKeys = new Set((overlay.patches || []).map((patch) => `${patch.target}:${(patch.signals || []).join("|")}`));
   for (const suggestion of accepted) {
@@ -470,7 +470,7 @@ function parseArchivistJson(content) {
 }
 
 async function updateMemoryIndex(rootDir, event) {
-  const indexPath = resolveHelixPath(rootDir, "memory", "index.json");
+  const indexPath = resolveWildArrangePath(rootDir, "memory", "index.json");
   const index = await readJson(indexPath, { keywords: {}, artifacts: [], preferences: [] });
   for (const tag of normalizeStringList(event.tags)) {
     index.keywords[tag] = (index.keywords[tag] || 0) + 1;
@@ -487,7 +487,7 @@ async function updateMemoryIndex(rootDir, event) {
 
 async function readLedgerTail(rootDir, limit) {
   try {
-    const content = await readFile(resolveHelixPath(rootDir, "ledger.jsonl"), "utf8");
+    const content = await readFile(resolveWildArrangePath(rootDir, "ledger.jsonl"), "utf8");
     return content.trim().split(/\r?\n/).filter(Boolean).slice(-limit).map((line) => JSON.parse(line));
   } catch (error) {
     if (error?.code === "ENOENT") return [];
@@ -496,7 +496,7 @@ async function readLedgerTail(rootDir, limit) {
 }
 
 async function readStageSummaries(rootDir, stage, limit) {
-  const dirPath = resolveHelixPath(rootDir, "memory", "stage-summaries");
+  const dirPath = resolveWildArrangePath(rootDir, "memory", "stage-summaries");
   try {
     const names = (await readdir(dirPath)).filter((name) => name.endsWith(".json")).sort().reverse();
     const summaries = [];

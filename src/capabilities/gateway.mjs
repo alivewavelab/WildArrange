@@ -12,7 +12,7 @@
  * plugin loader: every capability is a real import at the top of this file.
  */
 import { runCommand } from "../infra/command-runner.mjs";
-import { buildErrorProtocol, capabilityModule, helixError } from "../infra/error-protocol.mjs";
+import { buildErrorProtocol, capabilityModule, wildarrangeError } from "../infra/error-protocol.mjs";
 import { runVerifier } from "./verify.mjs";
 import { scopeGuard } from "./scope-guard.mjs";
 import { writeCheckpoint } from "./checkpoint.mjs";
@@ -103,7 +103,7 @@ export function listRegisteredCapabilities() {
 export async function invokeCapability(name, ctx = {}) {
   const adapter = CAPABILITIES[name];
   if (!adapter) {
-    throw helixError({
+    throw wildarrangeError({
       code: "unknown_capability",
       module: "capabilities/gateway.mjs",
       message: `Unknown capability: ${name}. Registered: ${listRegisteredCapabilities().join(", ")}`,
@@ -125,7 +125,7 @@ export async function invokeCapability(name, ctx = {}) {
           code: "capability_threw",
           module: capabilityModule(name),
           message: error instanceof Error ? error.message : String(error),
-          nextAction: `运行 node ./bin/helix.mjs doctor 体检；把本错误完整贴给 AI，定位 src/${capabilityModule(name)}`,
+          nextAction: `运行 node ./bin/wildarrange.mjs doctor 体检；把本错误完整贴给 AI，定位 src/${capabilityModule(name)}`,
         }),
       },
       Date.now() - startedAt,

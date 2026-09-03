@@ -6,7 +6,7 @@ import test from "node:test";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const CLI_PATH = path.join(process.cwd(), "bin", "helix.mjs");
+const CLI_PATH = path.join(process.cwd(), "bin", "wildarrange.mjs");
 
 async function withTempProjectDir(fn) {
   const baseDir = path.join(process.cwd(), ".tmp");
@@ -35,12 +35,12 @@ async function runCli(args, cwd) {
   }
 }
 
-test("cli smoke: bin/helix.mjs loads without module resolution errors", async () => {
-  // Regression guard: bin/helix.mjs previously had duplicate named imports
+test("cli smoke: bin/wildarrange.mjs loads without module resolution errors", async () => {
+  // Regression guard: bin/wildarrange.mjs previously had duplicate named imports
   // (e.g. approvePlan, loadPlanApproval declared twice), which is an ESM
   // SyntaxError that crashes the process before any command runs. Every
   // unit tests that import zoned owners directly are blind to this because
-  // they never load bin/helix.mjs itself.
+  // they never load bin/wildarrange.mjs itself.
   const result = await runCli(["--help"], process.cwd());
   assert.equal(result.code, 0, `CLI failed to start.\nstderr: ${result.stderr}`);
   assert.match(result.stdout, /WildArrange linear runtime/);

@@ -223,7 +223,7 @@ th{background:#eef1f6;font-size:12px}
 
 <div class="phase"><div class="phase-num" style="background:var(--l4b)">0</div><div class="phase-body"><h3>基线修复</h3><p>修 CLI 重复导入 + 加 smoke test + commit 保护工作区 + 拉分支</p></div></div>
 <div class="phase"><div class="phase-num" style="background:var(--l1b)">1</div><div class="phase-body"><h3>骨架 + 边界测试</h3><p>建五区目录 + dependency-boundary.test + gateway 首版 + delivery-pipeline 首版</p></div></div>
-<div class="phase"><div class="phase-num" style="background:var(--l3bb)">2</div><div class="phase-body"><h3>拆 gates + 接入 gateway</h3><p>从 helix-gates 拆出 verify / scope / command-runner / checkpoint → 注册到 gateway → pipeline 串完整序列</p></div></div>
+<div class="phase"><div class="phase-num" style="background:var(--l3bb)">2</div><div class="phase-body"><h3>拆 gates + 接入 gateway</h3><p>从 wildarrange-gates 拆出 verify / scope / command-runner / checkpoint → 注册到 gateway → pipeline 串完整序列</p></div></div>
 <div class="phase"><div class="phase-num" style="background:var(--l2b)">3</div><div class="phase-body"><h3>编排层瘦身</h3><p>linear-runtime + parallel-runtime 改调 delivery-pipeline，消除重复编排代码</p></div></div>
 <div class="phase"><div class="phase-num" style="background:var(--l3ab)">4</div><div class="phase-body"><h3>AI 层独立</h3><p>hooks 拆出编排关注点 + plan 拆出路由 enrichment → AI 层不再碰编排状态</p></div></div>
 <div class="phase"><div class="phase-num" style="background:#607d8b">5</div><div class="phase-body"><h3>搬目录 + 激活边界测试</h3><p>move 到五区目录 + 更新兼容层 + 激活 dependency-boundary.test + npm test/pack 全绿</p></div></div>
@@ -257,13 +257,13 @@ th{background:#eef1f6;font-size:12px}
 <h2>九、兼容策略（零破坏）</h2>
 <table>
 <tr><th>不变的</th><th>保证方式</th></tr>
-<tr><td>所有 export 符号（公共 API）</td><td><code>src/helix-core.mjs</code> 保留为兼容 re-export 层</td></tr>
-<tr><td>CLI 命令和参数语义</td><td><code>bin/helix.mjs</code> 所有子命令不变</td></tr>
-<tr><td><code>.helix/</code> 数据格式</td><td>JSON schema / ledger / snapshot 零改动</td></tr>
+<tr><td>所有 export 符号（公共 API）</td><td><code>src/wildarrange-core.mjs</code> 保留为兼容 re-export 层</td></tr>
+<tr><td>CLI 命令和参数语义</td><td><code>bin/wildarrange.mjs</code> 所有子命令不变</td></tr>
+<tr><td><code>.wildarrange/</code> 数据格式</td><td>JSON schema / ledger / snapshot 零改动</td></tr>
 <tr><td>95 个现有测试</td><td>每 Phase 必须全绿</td></tr>
 <tr><td>npm pack 包内容</td><td><code>files</code> 字段覆盖新目录</td></tr>
 </table>
-<p class="small">旧 <code>src/helix-*.mjs</code> 保留为 re-export shim + <code>@deprecated</code>，一个版本周期后删。</p>
+<p class="small">旧 <code>src/wildarrange-*.mjs</code> 保留为 re-export shim + <code>@deprecated</code>，一个版本周期后删。</p>
 
 <!-- ========== 决策记录 ========== -->
 <h2>十、决策记录</h2>

@@ -1,23 +1,23 @@
 import { existsSync } from "node:fs";
 import { appendLedger } from "./ledger.mjs";
 import { DEFAULT_PROMPT_PACK_DIR, installPromptPack, isPromptPackCurrent } from "./prompt-pack.mjs";
-import { writeDefaultHelixConfig } from "./runtime-config.mjs";
+import { writeDefaultWildArrangeConfig } from "./runtime-config.mjs";
 import { writeSnapshot } from "./runtime-snapshot.mjs";
 import {
   STATE_VERSION,
   createWorkId,
-  ensureHelixDirs,
+  ensureWildArrangeDirs,
   nowIso,
   readJson,
-  resolveHelixPath,
+  resolveWildArrangePath,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 
 export async function initRuntime(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
-  const configResult = await writeDefaultHelixConfig(rootDir, { force: options.force });
+  await ensureWildArrangeDirs(rootDir);
+  const configResult = await writeDefaultWildArrangeConfig(rootDir, { force: options.force });
 
-  const workPath = resolveHelixPath(rootDir, "work.json");
+  const workPath = resolveWildArrangePath(rootDir, "work.json");
   let workCreated = false;
   if (!existsSync(workPath) || options.force) {
     await writeJsonAtomic(workPath, {

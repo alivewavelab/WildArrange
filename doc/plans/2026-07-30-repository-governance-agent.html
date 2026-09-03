@@ -381,7 +381,7 @@
         <h3>输入</h3>
         <ul>
           <li>Git changed paths 或完整目录树</li>
-          <li><code>helix.config.json</code> 中的结构政策</li>
+          <li><code>wildarrange.config.json</code> 中的结构政策</li>
           <li>根与子目录 <code>AGENTS.md</code></li>
           <li>README、架构文档、manifest、routes</li>
         </ul>
@@ -449,7 +449,7 @@
 
   <section class="section">
     <h2>政策必须声明，不能靠 Agent 猜</h2>
-    <p>建议在现有 <code>helix.config.json</code> 增加 <code>repositoryGovernance</code>，不再引入新的顶层配置文件。</p>
+    <p>建议在现有 <code>wildarrange.config.json</code> 增加 <code>repositoryGovernance</code>，不再引入新的顶层配置文件。</p>
     <pre>{
   "repositoryGovernance": {
     "enabled": true,
@@ -474,7 +474,7 @@
     "documentationPairs": [
       ["README.md", "README.en.md"]
     ],
-    "ignoredPaths": [".git", ".helix", "node_modules", "coverage"]
+    "ignoredPaths": [".git", ".wildarrange", "node_modules", "coverage"]
   }
 }</pre>
     <p class="note">配置只表达项目事实。通用底线留在扫描器，项目差异放配置；未知规则先 WARN，经过一次真实仓库校准后再升级为 FAIL。</p>
@@ -529,7 +529,7 @@
         <span class="tag p1">可调用 Tool</span>
         <ul>
           <li><code>repository_governance_audit</code>（新增，确定性只读审计）</li>
-          <li><code>helix_rules_collect</code></li>
+          <li><code>wildarrange_rules_collect</code></li>
           <li><code>comment_check</code>、<code>config_verify</code></li>
           <li>宿主提供的只读 Git diff、文本搜索、glob 与 AST 搜索（不作为 WildArrange Tool 合同伪注册）</li>
         </ul>
@@ -595,7 +595,7 @@
   "repositoryGovernance": {
     "commentRules": [
       {
-        "globs": ["src/helix-*.mjs"],
+        "globs": ["src/wildarrange-*.mjs"],
         "requiredPatterns": ["@deprecated"],
         "blockedPatterns": ["TODO", "FIXME", "HACK", "XXX"]
       }
@@ -619,9 +619,9 @@
   },
   "injectionPoints": {
     "repository_governance": {
-      "tools": ["repository_governance_audit", "helix_rules_collect"],
+      "tools": ["repository_governance_audit", "wildarrange_rules_collect"],
       "skills": ["repository-governance", "init-deep"],
-      "markdown": [".helix/reports/governance/latest.md", ".helix/rules/context.md"]
+      "markdown": [".wildarrange/reports/governance/latest.md", ".wildarrange/rules/context.md"]
     }
   }
 }</pre>
@@ -682,7 +682,7 @@
         <tr><td>Prompt pack</td><td><code>manifest.json</code>、<code>routes.json</code>、agents README、tool contract</td><td>注册、路由和同步约束。</td></tr>
         <tr><td>Infra</td><td><code>src/infra/repository-layout.mjs</code><br><code>src/infra/rule-scanner.mjs</code></td><td>目录政策解析、纯扫描、嵌套 AGENTS 发现。</td></tr>
         <tr><td>Capability</td><td><code>src/capabilities/repository-governance.mjs</code><br><code>src/capabilities/gateway.mjs</code></td><td>统一结果信封、证据和报告。</td></tr>
-        <tr><td>Interface</td><td><code>bin/helix.mjs</code><br><code>src/interface/doctor.mjs</code></td><td>audit 命令和体检摘要。</td></tr>
+        <tr><td>Interface</td><td><code>bin/wildarrange.mjs</code><br><code>src/interface/doctor.mjs</code></td><td>audit 命令和体检摘要。</td></tr>
         <tr><td>Tests / Docs</td><td><code>test/repository-governance.test.mjs</code>、README、架构文档、AGENTS</td><td>正反例、命令说明、目录台账同步。</td></tr>
       </tbody>
     </table>
@@ -707,7 +707,7 @@
       <li>注册 Router + Rogue、把 CangJie 放入正式 routes 或遗漏固定 Agent 时，治理审计必须 FAIL。</li>
       <li>CLI 源文件里放置伪命令字符串，不能让 README 中的不存在命令通过审计。</li>
       <li>模板字符串 <code>${...}</code> 表达式中的真实 TODO/FIXME 注释必须触发注释门。</li>
-      <li><code>npm test</code> 与 <code>npm pack --dry-run --cache /private/tmp/helix-npm-cache</code> 均通过。</li>
+      <li><code>npm test</code> 与 <code>npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache</code> 均通过。</li>
     </ol>
   </section>
 

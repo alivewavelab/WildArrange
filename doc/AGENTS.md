@@ -27,4 +27,4 @@
 
 - 检查 README 中英文标题、命令和关键警告保持对应。
 - 用 `rg` 核对旧命令、旧路径和旧宿主表述没有残留。
-- 包内容变化时运行 `npm pack --dry-run --cache /private/tmp/helix-npm-cache`，确认用户文档进入发布包。
+- 包内容变化时运行 `npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache`，确认用户文档进入发布包。

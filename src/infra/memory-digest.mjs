@@ -3,11 +3,11 @@ import path from "node:path";
 import { appendLedger } from "./ledger.mjs";
 import {
   createWorkId,
-  ensureHelixDirs,
+  ensureWildArrangeDirs,
   nowIso,
   readJson,
   resolveLegacyTaskCheckpointPath,
-  resolveHelixPath,
+  resolveWildArrangePath,
   resolveTaskCheckpointPath,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
@@ -15,16 +15,16 @@ import { runCommandFile } from "./command-runner.mjs";
 import { loadTaskState } from "./task-state-store.mjs";
 
 export async function writeMemoryDigest(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const digest = await buildMemoryDigest(rootDir, options);
   const fileStem = `${digest.at.replace(/[:.]/g, "-")}-${sanitizeSegment(digest.reason)}`;
-  const jsonPath = resolveHelixPath(rootDir, "memory", "digests", `${fileStem}.json`);
-  const mdPath = resolveHelixPath(rootDir, "memory", "digests", `${fileStem}.md`);
+  const jsonPath = resolveWildArrangePath(rootDir, "memory", "digests", `${fileStem}.json`);
+  const mdPath = resolveWildArrangePath(rootDir, "memory", "digests", `${fileStem}.md`);
   digest.reportJsonPath = path.relative(rootDir, jsonPath);
   digest.reportMdPath = path.relative(rootDir, mdPath);
   await writeJsonAtomic(jsonPath, digest);
   await writeFile(mdPath, renderDigestMarkdown(digest), "utf8");
-  await writeJsonAtomic(resolveHelixPath(rootDir, "memory", "last-digest.json"), digest);
+  await writeJsonAtomic(resolveWildArrangePath(rootDir, "memory", "last-digest.json"), digest);
   await updateDigestIndex(rootDir, digest);
   await appendLedger(rootDir, {
     type: "memory_digest_written",
@@ -39,8 +39,8 @@ export async function writeMemoryDigest(rootDir, options = {}) {
 export async function buildMemoryDigest(rootDir, options = {}) {
   const taskState = await loadTaskState(rootDir).catch(() => null);
   const task = options.task || (options.taskId && taskState?.tasks?.find((candidate) => candidate.id === options.taskId)) || null;
-  const work = await readJson(resolveHelixPath(rootDir, "work.json"), null);
-  const latestArchivist = await readJson(resolveHelixPath(rootDir, "memory", "last-archivist-result.json"), null);
+  const work = await readJson(resolveWildArrangePath(rootDir, "work.json"), null);
+  const latestArchivist = await readJson(resolveWildArrangePath(rootDir, "memory", "last-archivist-result.json"), null);
   const route = options.route || latestArchivist?.decision?.routeDecision || null;
   const checkpoint = taskState && task
     ? await readTaskCheckpoint(rootDir, taskState.planId, task.id)
@@ -77,7 +77,7 @@ export async function buildMemoryDigest(rootDir, options = {}) {
 }
 
 async function updateDigestIndex(rootDir, digest) {
-  const indexPath = resolveHelixPath(rootDir, "memory", "digest-index.json");
+  const indexPath = resolveWildArrangePath(rootDir, "memory", "digest-index.json");
   const index = await readJson(indexPath, { version: 1, digests: [], keywords: {} });
   index.digests.unshift({
     id: digest.id,
@@ -97,7 +97,7 @@ async function updateDigestIndex(rootDir, digest) {
 
 async function readLedgerTail(rootDir, limit) {
   try {
-    const content = await readJsonLines(resolveHelixPath(rootDir, "ledger.jsonl"));
+    const content = await readJsonLines(resolveWildArrangePath(rootDir, "ledger.jsonl"));
     return content.slice(-limit);
   } catch {
     return [];
@@ -115,7 +115,7 @@ async function readGitHead(rootDir) {
   if (current.exitCode === 0 && current.stdout.trim()) {
     return { value: current.stdout.trim(), source: "git" };
   }
-  const head = await readJson(resolveHelixPath(rootDir, "routing", "archivist-trigger-state.json"), null);
+  const head = await readJson(resolveWildArrangePath(rootDir, "routing", "archivist-trigger-state.json"), null);
   return head?.lastGitHead ? { value: head.lastGitHead, source: "archivist-trigger-state" } : null;
 }
 
@@ -150,7 +150,7 @@ function decisionsFromTask(task, checkpoint, latestArchivist) {
 function artifactRefs(planId, task, checkpoint) {
   return [
     checkpoint?.reportJsonPath || (planId && task?.id
-      ? path.join(".helix", "checkpoints", planId, `${task.id}.json`)
+      ? path.join(".wildarrange", "checkpoints", planId, `${task.id}.json`)
       : null),
     task?.last_review_result?.reportJsonPath,
     task?.last_failure?.reportJsonPath,

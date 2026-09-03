@@ -78,7 +78,7 @@
     <tr>
       <td><span class="tag p0">P0</span></td>
       <td><strong>旧 completed 会假绿。</strong> 当前 T001 是旧结构、旧 owner <code>Atlas</code>，缺 review / acceptance proof / successCriteria；但 <code>status</code> 仍报 completed，<code>summary</code> 返回 <code>ok:true</code>。</td>
-      <td class="evidence"><code>.helix/team/tasks.json</code>；<code>.helix/checkpoints/plan_2026-06-14T030111Z-T001.json</code>；<code>src/orchestration/status.mjs:26</code>。实际 Doctor 报 2 个错误：缺 acceptance proof、ledger 无可信完成事件。</td>
+      <td class="evidence"><code>.wildarrange/team/tasks.json</code>；<code>.wildarrange/checkpoints/plan_2026-06-14T030111Z-T001.json</code>；<code>src/orchestration/status.mjs:26</code>。实际 Doctor 报 2 个错误：缺 acceptance proof、ledger 无可信完成事件。</td>
       <td>增加显式 <code>state migrate</code>：迁移前备份；旧 completed 缺任一当前门证据时降级为 <code>revalidation_required</code>，绝不补造 proof。status / summary 必须验证完成链。</td>
     </tr>
     <tr>
@@ -101,14 +101,14 @@
     </tr>
     <tr>
       <td><span class="tag p1">P1</span></td>
-      <td><strong>旧 Cursor 规则仍会 alwaysApply。</strong> 安装新版只新增 <code>wildarrange.mdc</code>，旧 <code>helixflow.mdc</code> 不会被安装流程清理，新旧规则可能同时注入。</td>
-      <td class="evidence"><code>.cursor/rules/helixflow.mdc:1</code>；<code>src/infra/rule-scanner.mjs:31</code>；<code>src/interface/adapters.mjs:93,191</code>。</td>
+      <td><strong>旧 Cursor 规则仍会 alwaysApply。</strong> 安装新版只新增 <code>wildarrange.mdc</code>，旧 <code>wildarrangeflow.mdc</code> 不会被安装流程清理，新旧规则可能同时注入。</td>
+      <td class="evidence"><code>.cursor/rules/wildarrangeflow.mdc:1</code>；<code>src/infra/rule-scanner.mjs:31</code>；<code>src/interface/adapters.mjs:93,191</code>。</td>
       <td>adapter install 识别受管旧文件，先备份再迁移；Doctor 增加 legacy managed-file / duplicate rule 检查。</td>
     </tr>
     <tr>
       <td><span class="tag p1">P1</span></td>
-      <td><strong>旧 runtime config 会“复活”。</strong> <code>.helix/config.json</code> 仍含 helix-linear、Sisyphus / Atlas、omo、hf 等旧字段；根配置未覆盖的键仍会通过深合并进入有效配置。</td>
-      <td class="evidence"><code>.helix/config.json</code>；<code>src/infra/runtime-config.mjs:343</code>。<code>config show</code> 仍可见旧 provider / artistry。</td>
+      <td><strong>旧 runtime config 会“复活”。</strong> <code>.wildarrange/config.json</code> 仍含 wildarrange-linear、Sisyphus / Atlas、omo、hf 等旧字段；根配置未覆盖的键仍会通过深合并进入有效配置。</td>
+      <td class="evidence"><code>.wildarrange/config.json</code>；<code>src/infra/runtime-config.mjs:343</code>。<code>config show</code> 仍可见旧 provider / artistry。</td>
       <td>纳入同一状态迁移：按当前 schema 重建 active config；根配置存在时不继承未声明 legacy 键。历史 ledger / snapshot 不批量删除。</td>
     </tr>
   </table>
@@ -122,13 +122,13 @@
     <tr><td><span class="tag p1">P1</span></td><td><strong>Agent 工具合同有伪命令。</strong> coordination / handoff 把互斥命令用 Shell 管道串联；另列出不存在或 roadmap-only 的 lsp rename、git checkpoint、mcp register 等。</td><td>状态变更命令拆成独立 tool 条目；宿主能力标 <code>host-provided</code>；未实现能力移出发布合同。</td></tr>
     <tr><td><span class="tag p1">P1</span></td><td><strong><code>lcx-*</code> 仍可被 matcher 命中。</strong> 三个 Skill 无 routes / agent / point 正式归属，但 manifest 登记使其运行时可达。</td><td>确认 LCX 来源：若是旧产品线，删除 3 文件和 manifest 条目；能力仍需则改为 WildArrange 产品语义名并正式路由。</td></tr>
     <tr><td><span class="tag p1">P1</span></td><td><strong>发布文档断链且多套事实漂移。</strong> 包内 <code>使用说明书.md</code> 引用未发布的 <code>架构解析.md</code>；<code>CLAUDE.md</code> 至少 7 处落后于 AGENTS，却仍被发布；36 个历史/进行中方案被一起打包。</td><td>AGENTS 生成 CLAUDE 或把 CLAUDE 缩成稳定入口；<code>架构解析.md</code> 只保留稳定类比，精确事实链接唯一架构文档；发布包增加断链测试。</td></tr>
-    <tr><td><span class="tag p1">P1</span></td><td><strong>示例默认命令不可执行。</strong> 复制 starter 后却运行目标项目通常不存在的 <code>./bin/helix.mjs</code>。</td><td>默认改为安装包后用 <code>npx wildarrange</code>；本仓库开发命令单列。</td></tr>
+    <tr><td><span class="tag p1">P1</span></td><td><strong>示例默认命令不可执行。</strong> 复制 starter 后却运行目标项目通常不存在的 <code>./bin/wildarrange.mjs</code>。</td><td>默认改为安装包后用 <code>npx wildarrange</code>；本仓库开发命令单列。</td></tr>
     <tr><td><span class="tag p1">P1</span></td><td><strong>公共 npm 包没有 license / LICENSE。</strong></td><td>发布前明确许可证；若不开放复用则标 <code>UNLICENSED</code> 或调整发布策略。</td></tr>
   </table>
 
   <h2>第三批：迁移后再退役</h2>
   <ul>
-    <li><span class="tag p2">P2</span> 把普通测试里的 <code>.workflow/</code> 换成 <code>.helix/artifacts/</code>；兼容测试单独保留，不让旧词继续污染普通场景。</li>
+    <li><span class="tag p2">P2</span> 把普通测试里的 <code>.workflow/</code> 换成 <code>.wildarrange/artifacts/</code>；兼容测试单独保留，不让旧词继续污染普通场景。</li>
     <li><span class="tag p2">P2</span> 普通测试改用 Jiuwei / DiJiang / ZhuRong / BaiZe / LuWu；旧 Agent 名只留在明确命名的 migration tests。</li>
     <li><span class="tag p2">P2</span> 删除无消费者的 <code>agents.json</code> / <code>categories.json</code> 生成逻辑，或把它们升级为每次可重建、可校验的诊断投影。</li>
     <li><span class="tag p2">P2</span> 为 snapshots / hooks / outbox 增加 retention / prune；outbox 必须包含 planId 或 task ref。无运行中任务后再清 <code>.tmp</code> 和孤儿 projection。</li>
@@ -141,7 +141,7 @@
     <tr><th>对象</th><th>为什么保留</th><th>退出条件</th></tr>
     <tr><td>旧 ledger 无 hash 前缀、历史 checkpoints / snapshots / reports</td><td>这是审计证据。旧条目不可信，但不能改写成可信，也不能用删除掩盖历史。</td><td>长期只读归档；可做 retention 的仅是重复投影，不是账本。</td></tr>
     <tr><td>旧 Agent alias</td><td>当前 active config / task owner 仍有 Atlas 等真实迁移需求。</td><td>active config、task ledger、adapter 全部迁移，并经过一版 sunset 告警后再删。</td></tr>
-    <tr><td>旧 task shape reader</td><td>当前 <code>.helix/team/tasks.json</code> 仍依赖它才能读取。</td><td>幂等迁移完成；未来 schema 版本必须 fail-closed。</td></tr>
+    <tr><td>旧 task shape reader</td><td>当前 <code>.wildarrange/team/tasks.json</code> 仍依赖它才能读取。</td><td>幂等迁移完成；未来 schema 版本必须 fail-closed。</td></tr>
     <tr><td>旧 adapter uninstall 路径、旧锁恢复、旧备份兼容</td><td>这些是安全退出和事故恢复能力，不是产品旧命名污染。</td><td>确认所有受管旧文件和旧备份已退场后，单独评估。</td></tr>
   </table>
 
@@ -158,15 +158,15 @@
   <ol>
     <li><strong>批次 1 验收：</strong>两个 Plan 同名任务不串证据；旧 completed 不再假绿；未知 src 分区必失败；Doctor 对迁移后 active 状态为绿。</li>
     <li><strong>批次 2 验收：</strong>真实 tgz 不含 <code>doc/plans/**</code> 和受限材料；包内相对链接 0 断链；工具合同每条命令可独立执行或明确标为宿主能力。</li>
-    <li><strong>批次 3 验收：</strong><code>npm test</code>、<code>npm run check:arch</code>、<code>npm pack --dry-run --cache /private/tmp/helix-npm-cache</code> 全通过，Doctor / status / summary 对同一任务状态给出一致结果。</li>
+    <li><strong>批次 3 验收：</strong><code>npm test</code>、<code>npm run check:arch</code>、<code>npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache</code> 全通过，Doctor / status / summary 对同一任务状态给出一致结果。</li>
   </ol>
 
   <h2>第一批实施回执</h2>
   <ul>
     <li class="ok">旧 completed 已 fail-closed：当前 T001 从 completed 迁为 needs_user_decision；status 显示 completed=0，summary.ok=false，不再假绿。</li>
     <li class="ok">Doctor 已按 planId:taskId 审计全局任务总账；旧无 planId 事件多义时报告 ambiguous；并行 admission 新事件携带 planId。</li>
-    <li class="ok">根 helix.config.json 已成为权威源；旧 .helix/config.json、agents.json、categories.json 已按当前配置重建。迁移恢复点：backup_a2aecd44-00df-47d8-bf9c-5de499303e35。</li>
-    <li class="ok">旧 Cursor helixflow.mdc 已备份后移除，wildarrange.mdc 与 project hooks 已安装；Doctor legacyManagedRules=0。</li>
+    <li class="ok">根 wildarrange.config.json 已成为权威源；旧 .wildarrange/config.json、agents.json、categories.json 已按当前配置重建。迁移恢复点：backup_a2aecd44-00df-47d8-bf9c-5de499303e35。</li>
+    <li class="ok">旧 Cursor wildarrangeflow.mdc 已备份后移除，wildarrange.mdc 与 project hooks 已安装；Doctor legacyManagedRules=0。</li>
     <li class="ok">未知 src 一级目录现在直接触发 UNKNOWN_SOURCE_ZONE；legacy 免检已删除并有对抗测试。</li>
     <li class="ok">npm 发布改为显式白名单；受限 Prompt 不再进入 tarball。发布文件 186 → 152，解包约 2.18 MB → 1.60 MB；包内 Markdown 相对链接门通过。</li>
     <li class="ok">完整测试 287/287、架构映射 73 files / 0 unowned / 0 orphan、真实 pack 预检、git diff --check 全部通过。</li>

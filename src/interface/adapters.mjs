@@ -8,9 +8,9 @@ import {
 } from "../infra/runtime-config.mjs";
 import {
   STATE_VERSION,
-  ensureHelixDirs,
+  ensureWildArrangeDirs,
   nowIso,
-  resolveHelixPath,
+  resolveWildArrangePath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
@@ -29,7 +29,7 @@ import {
   renderCursorHookBridge,
 } from "./cursor-adapter.mjs";
 
-const SLASH_COMMAND_PREFIX = "helix";
+const SLASH_COMMAND_PREFIX = "wildarrange";
 const ADAPTER_TARGETS = new Set(["all", "codex", "cursor", "kimi"]);
 
 export async function installAdapter(rootDir, options = {}) {
@@ -60,7 +60,7 @@ export async function installAdapter(rootDir, options = {}) {
       trustAction: "在 Codex 中执行 /hooks，review 并 trust 本项目 hook。",
     });
 
-    const codexMirrorPath = resolveHelixPath(rootDir, "adapters", "codex", "hooks.json");
+    const codexMirrorPath = resolveWildArrangePath(rootDir, "adapters", "codex", "hooks.json");
     const codexMirrorBackup = await backupExistingAdapterFile(rootDir, codexMirrorPath, backupId);
     await writeJsonAtomic(codexMirrorPath, codexHooks);
     outputs.push({ target: "codex", path: reportPath(rootDir, codexMirrorPath), status: "generated", backup: codexMirrorBackup, enforcement: "audit-copy" });
@@ -87,13 +87,13 @@ export async function installAdapter(rootDir, options = {}) {
     await writeFile(cursorBridgePath, renderCursorHookBridge({
       mode,
       packageName,
-      localCliPath: path.join(PROJECT_DIR, "bin", "helix.mjs"),
+      localCliPath: path.join(PROJECT_DIR, "bin", "wildarrange.mjs"),
     }), "utf8");
     outputs.push({ target: "cursor", path: reportPath(rootDir, cursorBridgePath), status: "generated", backup: cursorBridgeBackup, enforcement: "hook-bridge" });
 
     const cursorDir = path.join(rootDir, ".cursor", "rules");
     await mkdir(cursorDir, { recursive: true });
-    const legacyCursorRulePath = path.join(cursorDir, ["helix", "flow.mdc"].join(""));
+    const legacyCursorRulePath = path.join(cursorDir, ["wildarrange", "flow.mdc"].join(""));
     if (existsSync(legacyCursorRulePath)) {
       const legacyRuleBackup = await backupExistingAdapterFile(rootDir, legacyCursorRulePath, backupId);
       await unlink(legacyCursorRulePath);
@@ -108,7 +108,7 @@ export async function installAdapter(rootDir, options = {}) {
     const cursorRulePath = path.join(cursorDir, "wildarrange.mdc");
     const cursorRuleBackup = await backupExistingAdapterFile(rootDir, cursorRulePath, backupId);
     await writeFile(cursorRulePath, renderCursorRule({ hookCommand }), "utf8");
-    const cursorReadmePath = resolveHelixPath(rootDir, "adapters", "cursor", "README.md");
+    const cursorReadmePath = resolveWildArrangePath(rootDir, "adapters", "cursor", "README.md");
     const cursorReadmeBackup = await backupExistingAdapterFile(rootDir, cursorReadmePath, backupId);
     await writeFile(cursorReadmePath, renderCursorAdapterReadme({ hookCommand }), "utf8");
     outputs.push({ target: "cursor", path: reportPath(rootDir, cursorRulePath), status: "generated", backup: cursorRuleBackup, enforcement: "soft" });
@@ -136,7 +136,7 @@ export async function installAdapter(rootDir, options = {}) {
   }
 
   if (target === "all" || target === "kimi") {
-    const kimiRoot = resolveHelixPath(rootDir, "adapters", "kimi");
+    const kimiRoot = resolveWildArrangePath(rootDir, "adapters", "kimi");
     const pluginRoot = path.join(kimiRoot, "plugin");
     const manifestPath = path.join(pluginRoot, "kimi.plugin.json");
     const bridgePath = path.join(pluginRoot, "hooks", "wildarrange-hook-bridge.mjs");
@@ -147,14 +147,14 @@ export async function installAdapter(rootDir, options = {}) {
         content: buildKimiPluginManifest(),
         json: true,
         enforcement: "pending-user-install",
-        trustAction: "从项目根启动 Kimi Code，执行 /plugins install .helix/adapters/kimi/plugin，确认后执行 /reload。",
+        trustAction: "从项目根启动 Kimi Code，执行 /plugins install .wildarrange/adapters/kimi/plugin，确认后执行 /reload。",
       },
       {
         path: bridgePath,
         content: renderKimiHookBridge({
           mode,
           packageName,
-          localCliPath: path.join(PROJECT_DIR, "bin", "helix.mjs"),
+          localCliPath: path.join(PROJECT_DIR, "bin", "wildarrange.mjs"),
         }),
         enforcement: "hook-bridge",
       },
@@ -181,7 +181,7 @@ export async function installAdapter(rootDir, options = {}) {
   }
 
   const report = {
-    kind: "helix_adapter_install",
+    kind: "wildarrange_adapter_install",
     version: STATE_VERSION,
     at: nowIso(),
     target,
@@ -191,8 +191,8 @@ export async function installAdapter(rootDir, options = {}) {
     backupId,
     outputs,
   };
-  const reportJsonPath = resolveHelixPath(rootDir, "adapters", "install-report.json");
-  const reportMdPath = resolveHelixPath(rootDir, "adapters", "install-report.md");
+  const reportJsonPath = resolveWildArrangePath(rootDir, "adapters", "install-report.json");
+  const reportMdPath = resolveWildArrangePath(rootDir, "adapters", "install-report.md");
   report.reportJsonPath = reportPath(rootDir, reportJsonPath);
   report.reportMdPath = reportPath(rootDir, reportMdPath);
   await writeJsonAtomic(reportJsonPath, report);
@@ -206,7 +206,7 @@ export async function uninstallAdapter(rootDir, options = {}) {
   if (!ADAPTER_TARGETS.has(target)) {
     throw new Error("adapter target must be all, codex, cursor, or kimi");
   }
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
 
   const backupId = createAdapterBackupId("uninstall");
   const slashCommands = buildSlashCommands("");
@@ -214,28 +214,28 @@ export async function uninstallAdapter(rootDir, options = {}) {
   const candidates = [];
   if (target === "all" || target === "codex") {
     candidates.push({ target: "codex", path: path.join(rootDir, ".codex", "hooks.json") });
-    candidates.push({ target: "codex", path: resolveHelixPath(rootDir, "adapters", "codex", "hooks.json") });
+    candidates.push({ target: "codex", path: resolveWildArrangePath(rootDir, "adapters", "codex", "hooks.json") });
   }
   if (target === "all" || target === "cursor") {
     candidates.push({ target: "cursor", path: path.join(rootDir, ".cursor", "hooks.json") });
     candidates.push({ target: "cursor", path: path.join(rootDir, CURSOR_BRIDGE_PATH) });
     candidates.push({ target: "cursor", path: path.join(rootDir, ".cursor", "rules", "wildarrange.mdc") });
-    candidates.push({ target: "cursor", path: path.join(rootDir, ".cursor", "rules", ["helix", "flow.mdc"].join("")) });
-    candidates.push({ target: "cursor", path: resolveHelixPath(rootDir, "adapters", "cursor", "README.md") });
+    candidates.push({ target: "cursor", path: path.join(rootDir, ".cursor", "rules", ["wildarrange", "flow.mdc"].join("")) });
+    candidates.push({ target: "cursor", path: resolveWildArrangePath(rootDir, "adapters", "cursor", "README.md") });
     for (const command of slashCommands) {
       candidates.push({ target: "cursor", path: path.join(rootDir, ".cursor", "commands", `${command.name}.md`) });
     }
   }
   if (target === "all" || target === "kimi") {
-    candidates.push({ target: "kimi", path: resolveHelixPath(rootDir, "adapters", "kimi", "plugin", "kimi.plugin.json") });
-    candidates.push({ target: "kimi", path: resolveHelixPath(rootDir, "adapters", "kimi", "plugin", "hooks", "wildarrange-hook-bridge.mjs") });
-    candidates.push({ target: "kimi", path: resolveHelixPath(rootDir, "adapters", "kimi", "README.md") });
+    candidates.push({ target: "kimi", path: resolveWildArrangePath(rootDir, "adapters", "kimi", "plugin", "kimi.plugin.json") });
+    candidates.push({ target: "kimi", path: resolveWildArrangePath(rootDir, "adapters", "kimi", "plugin", "hooks", "wildarrange-hook-bridge.mjs") });
+    candidates.push({ target: "kimi", path: resolveWildArrangePath(rootDir, "adapters", "kimi", "README.md") });
   }
   if (target === "all" || target === "codex" || target === "kimi") {
     const siblingStillUsesSharedSkills = target === "kimi"
       ? existsSync(path.join(rootDir, ".codex", "hooks.json"))
       : target === "codex"
-        ? existsSync(resolveHelixPath(rootDir, "adapters", "kimi", "plugin", "kimi.plugin.json"))
+        ? existsSync(resolveWildArrangePath(rootDir, "adapters", "kimi", "plugin", "kimi.plugin.json"))
         : false;
     for (const command of slashCommands) {
       const skillPath = path.join(rootDir, ".agents", "skills", command.name, "SKILL.md");
@@ -259,15 +259,15 @@ export async function uninstallAdapter(rootDir, options = {}) {
   }
 
   const report = {
-    kind: "helix_adapter_uninstall",
+    kind: "wildarrange_adapter_uninstall",
     version: STATE_VERSION,
     at: nowIso(),
     target,
     backupId,
     outputs,
   };
-  const reportJsonPath = resolveHelixPath(rootDir, "adapters", "uninstall-report.json");
-  const reportMdPath = resolveHelixPath(rootDir, "adapters", "uninstall-report.md");
+  const reportJsonPath = resolveWildArrangePath(rootDir, "adapters", "uninstall-report.json");
+  const reportMdPath = resolveWildArrangePath(rootDir, "adapters", "uninstall-report.md");
   report.reportJsonPath = reportPath(rootDir, reportJsonPath);
   report.reportMdPath = reportPath(rootDir, reportMdPath);
   await writeJsonAtomic(reportJsonPath, report);
@@ -277,7 +277,7 @@ export async function uninstallAdapter(rootDir, options = {}) {
 }
 
 export async function restoreAdapterBackup(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const backupId = options.backupId || options.backup;
   if (!backupId || typeof backupId !== "string") {
     throw new Error("adapter restore requires --backup <backupId>");
@@ -285,7 +285,7 @@ export async function restoreAdapterBackup(rootDir, options = {}) {
   if (backupId.includes("..") || path.isAbsolute(backupId)) {
     throw new Error("adapter backup id must be a local backup directory name");
   }
-  const backupRoot = resolveHelixPath(rootDir, "adapters", "backups", backupId);
+  const backupRoot = resolveWildArrangePath(rootDir, "adapters", "backups", backupId);
   if (!existsSync(backupRoot)) {
     throw new Error(`adapter backup not found: ${reportPath(rootDir, backupRoot)}`);
   }
@@ -307,14 +307,14 @@ export async function restoreAdapterBackup(rootDir, options = {}) {
   }
 
   const report = {
-    kind: "helix_adapter_restore",
+    kind: "wildarrange_adapter_restore",
     version: STATE_VERSION,
     at: nowIso(),
     backupId,
     outputs,
   };
-  const reportJsonPath = resolveHelixPath(rootDir, "adapters", "restore-report.json");
-  const reportMdPath = resolveHelixPath(rootDir, "adapters", "restore-report.md");
+  const reportJsonPath = resolveWildArrangePath(rootDir, "adapters", "restore-report.json");
+  const reportMdPath = resolveWildArrangePath(rootDir, "adapters", "restore-report.md");
   report.reportJsonPath = reportPath(rootDir, reportJsonPath);
   report.reportMdPath = reportPath(rootDir, reportMdPath);
   await writeJsonAtomic(reportJsonPath, report);
@@ -330,7 +330,7 @@ function createAdapterBackupId(prefix) {
 async function backupExistingAdapterFile(rootDir, filePath, backupId) {
   if (!existsSync(filePath)) return null;
   const relativePath = reportPath(rootDir, filePath);
-  const backupPath = resolveHelixPath(rootDir, "adapters", "backups", backupId, relativePath);
+  const backupPath = resolveWildArrangePath(rootDir, "adapters", "backups", backupId, relativePath);
   await mkdir(path.dirname(backupPath), { recursive: true });
   await copyFile(filePath, backupPath);
   return reportPath(rootDir, backupPath);
@@ -339,7 +339,7 @@ async function backupExistingAdapterFile(rootDir, filePath, backupId) {
 function adapterCliPrefix({ mode, packageName }) {
   if (mode === "npx") return `npx -y ${packageName}`;
   if (mode !== "local") throw new Error("adapter mode must be local or npx");
-  return `node "${path.join(PROJECT_DIR, "bin", "helix.mjs")}"`;
+  return `node "${path.join(PROJECT_DIR, "bin", "wildarrange.mjs")}"`;
 }
 
 function adapterHookCommand({ mode, packageName }) {
@@ -354,16 +354,16 @@ function buildSlashCommands(cliPrefix) {
     {
       name: `${SLASH_COMMAND_PREFIX}-config`,
       title: `${PRODUCT_NAME} 配置表`,
-      description: "生成并引导填写根配置文件 helix.config.json（agents / providers / injectionPoints / qualityGates 等），填完用 config verify 校验。",
+      description: "生成并引导填写根配置文件 wildarrange.config.json（agents / providers / injectionPoints / qualityGates 等），填完用 config verify 校验。",
       body: [
-        `目标：为开发者生成并逐块引导填写根配置文件 \`helix.config.json\`。`,
+        `目标：为开发者生成并逐块引导填写根配置文件 \`wildarrange.config.json\`。`,
         "",
         "步骤：",
         `1. 执行下面的命令生成/更新根配置（已存在不会被覆盖，除非加 \`--force\`）：`,
         "",
         fence([`${cliPrefix} config init --root`]),
         "",
-        "2. 打开 `helix.config.json`，按下列检查项逐块引导用户填写，每块用一句话说明作用：",
+        "2. 打开 `wildarrange.config.json`，按下列检查项逐块引导用户填写，每块用一句话说明作用：",
         "   - `agents`：各角色用哪个 provider / model / reasoning。",
         "   - `modelProviders`：`host` 交给宿主；外部模型走 OpenAI 兼容配置，`apiKeyEnv` 填环境变量名而不是密钥本身。",
         "   - `injectionPoints`：每个注入点挂哪些 `tools` / `markdown` / `skills` / `rules`。",
@@ -372,7 +372,7 @@ function buildSlashCommands(cliPrefix) {
         "   - `qualityGates`：`lspDiagnostics` / `astStructure` / `hashlineAnchors` / `commentChecker`。",
         "   - `review.llm`：是否启用 LLM 复核；`required=false` 时无 key 只告警不阻断。",
         "",
-        "3. 填写完成后执行校验，并提示可用 `/helix-doctor` 做整体体检：",
+        "3. 填写完成后执行校验，并提示可用 `/wildarrange-doctor` 做整体体检：",
         "",
         fence([`${cliPrefix} config verify`]),
         "",
@@ -430,7 +430,7 @@ function buildSlashCommands(cliPrefix) {
       title: `${PRODUCT_NAME} 导入计划`,
       description: "导入并校验一个计划文件（plan.json），报告任务数、质量门与字段完整性。",
       body: [
-        "把用户提供的计划文件路径（本命令后面的文本，例如 `/helix-plan plan.json`）导入并校验：",
+        "把用户提供的计划文件路径（本命令后面的文本，例如 `/wildarrange-plan plan.json`）导入并校验：",
         "",
         fence([`${cliPrefix} plan --from <计划文件路径>`]),
         "",
@@ -453,7 +453,7 @@ function buildSlashCommands(cliPrefix) {
         "",
         fence([`${cliPrefix} plan approve`]),
         "",
-        "4. 若开发者要修改，不要 approve；协助修订 `plan.json` 后重新 `/helix-plan` 导入。",
+        "4. 若开发者要修改，不要 approve；协助修订 `plan.json` 后重新 `/wildarrange-plan` 导入。",
       ].join("\n"),
     },
     {
@@ -517,11 +517,11 @@ This project uses ${PRODUCT_NAME} for local agent governance.
 Required behavior:
 
 - Before planning or implementing, run \`${hookCommand}\` with a \`UserPromptSubmit\` payload when available.
-- Before editing files for a ${PRODUCT_NAME} task, verify task scope with \`node ./bin/helix.mjs guard scope --task <taskId>\` or \`node ./bin/helix.mjs hook run\` using a \`PreToolUse\` payload.
+- Before editing files for a ${PRODUCT_NAME} task, verify task scope with \`node ./bin/wildarrange.mjs guard scope --task <taskId>\` or \`node ./bin/wildarrange.mjs hook run\` using a \`PreToolUse\` payload.
 - Treat worker completion as a claim only. Completion requires verifier, scope guard, review gate, success criteria evidence, and checkpoint.
 - Do not weaken \`verify_commands\`, \`review_commands\`, \`standards_commands\`, project rules, or \`successCriteria\` to manufacture PASS.
-- At the start and end of each turn, check pending human decisions (run the hook above, or \`node ./bin/helix.mjs status\`) and proactively surface them to the developer in chat with clear options — plans awaiting approval, out-of-scope ChangeRequests, failed tasks, child agents awaiting acceptance. Do not decide on the developer's behalf, and do not make the developer dig through the terminal to find them.
-- If Cursor cannot execute lifecycle hooks automatically, run \`node ./bin/helix.mjs continuation check\` before stopping a task.
+- At the start and end of each turn, check pending human decisions (run the hook above, or \`node ./bin/wildarrange.mjs status\`) and proactively surface them to the developer in chat with clear options — plans awaiting approval, out-of-scope ChangeRequests, failed tasks, child agents awaiting acceptance. Do not decide on the developer's behalf, and do not make the developer dig through the terminal to find them.
+- If Cursor cannot execute lifecycle hooks automatically, run \`node ./bin/wildarrange.mjs continuation check\` before stopping a task.
 `;
 }
 
@@ -573,7 +573,7 @@ function renderAdapterUninstallReport(report) {
     lines.push(`- ${output.target}: ${output.path} (${output.status}${output.backup ? `, backup: ${output.backup}` : ""})`);
   }
   lines.push("");
-  lines.push("Removed files were copied under `.helix/adapters/backups/` before deletion when they existed.");
+  lines.push("Removed files were copied under `.wildarrange/adapters/backups/` before deletion when they existed.");
   if (report.target === "all" || report.target === "kimi") {
     lines.push(`The Kimi-managed plugin copy is user-scoped. Run \`/plugins remove ${KIMI_ADAPTER_PLUGIN_NAME}\` in Kimi Code to remove it.`);
   }

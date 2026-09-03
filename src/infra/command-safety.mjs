@@ -11,7 +11,7 @@ const HIGH_RISK_PATTERNS = [
   },
   {
     id: "runtime_or_git_delete",
-    pattern: /\brm\s+[^;&|]*(?:-[^\s;&|]*r[^\s;&|]*f|-[^\s;&|]*f[^\s;&|]*r|--recursive)[^;&|]*(?:\.git|\.helix)(?:[\s/"']|$)/i,
+    pattern: /\brm\s+[^;&|]*(?:-[^\s;&|]*r[^\s;&|]*f|-[^\s;&|]*f[^\s;&|]*r|--recursive)[^;&|]*(?:\.git|\.wildarrange)(?:[\s/"']|$)/i,
     reason: "recursive deletion targets Git or WildArrange runtime state",
   },
   {
@@ -56,7 +56,7 @@ const HIGH_RISK_PATTERNS = [
   },
 ];
 
-// 把 helix.config.json 里 commandSafety.extraPatterns 编译成可用的正则规则。
+// 把 wildarrange.config.json 里 commandSafety.extraPatterns 编译成可用的正则规则。
 // 内置 HIGH_RISK_PATTERNS 始终作为不可削弱的底线；这里只做“加法”，让用户补充项目专属危险命令。
 export function compileCommandSafetyPatterns(config) {
   const raw = Array.isArray(config?.commandSafety?.extraPatterns) ? config.commandSafety.extraPatterns : [];
@@ -84,7 +84,7 @@ export function evaluateCommandSafety(command, options = {}) {
   if (!text) {
     return { allowed: true, level: "safe", findings: [] };
   }
-  if (options.allowUnsafe === true || process.env.HELIX_ALLOW_UNSAFE_COMMANDS === "1") {
+  if (options.allowUnsafe === true || process.env.WILDARRANGE_ALLOW_UNSAFE_COMMANDS === "1") {
     return { allowed: true, level: "override", findings: [] };
   }
 

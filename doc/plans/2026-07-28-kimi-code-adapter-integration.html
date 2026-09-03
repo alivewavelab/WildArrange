@@ -134,7 +134,7 @@ P0+P1 已落地；P2 宿主私有 spawn 仍 open；文中测试数以当前 <cod
   <div class="lead">
     <strong>结论：可以接，而且约 70% 已经天然兼容。</strong>
     Kimi Code 原生读取项目 <code>AGENTS.md</code> 和 <code>.agents/skills/</code>；
-    现有 Helix 命令技能可以直接复用。真正要新增的是 Kimi Hook 插件、Hook 桥接器，以及可选的 Kimi 子 Agent 启动模板。
+    现有 WildArrange 命令技能可以直接复用。真正要新增的是 Kimi Hook 插件、Hook 桥接器，以及可选的 Kimi 子 Agent 启动模板。
   </div>
 
   <h2>1. 生活类比</h2>
@@ -158,7 +158,7 @@ P0+P1 已落地；P2 宿主私有 spawn 仍 open；文中测试数以当前 <cod
       <tr>
         <td>项目 Skills</td>
         <td>Kimi 扫描项目 <code>.kimi-code/skills/</code> 和 <code>.agents/skills/</code>；目录型 Skill 使用 <code>SKILL.md</code>。</td>
-        <td>现有为 Codex 生成的 <code>.agents/skills/helix-*/SKILL.md</code> 可被 Kimi 直接识别。</td>
+        <td>现有为 Codex 生成的 <code>.agents/skills/wildarrange-*/SKILL.md</code> 可被 Kimi 直接识别。</td>
       </tr>
       <tr>
         <td>Hooks</td>
@@ -212,10 +212,10 @@ P0+P1 已落地；P2 宿主私有 spawn 仍 open；文中测试数以当前 <cod
       <h3>Kimi 项目 Adapter</h3>
       <ul>
         <li>CLI 增加 <code>--target kimi</code>，<code>all</code> 同时包含 Kimi。</li>
-        <li>复用共享 <code>.agents/skills/helix-*</code> 生成器，不复制第二套命令正文。</li>
-        <li>生成 <code>.helix/adapters/kimi/plugin/</code>。</li>
+        <li>复用共享 <code>.agents/skills/wildarrange-*</code> 生成器，不复制第二套命令正文。</li>
+        <li>生成 <code>.wildarrange/adapters/kimi/plugin/</code>。</li>
         <li>插件内只放 manifest 与轻量 Hook bridge。</li>
-        <li>安装报告要求从项目根执行 <code>/plugins install .helix/adapters/kimi/plugin</code> 和 <code>/reload</code>。</li>
+        <li>安装报告要求从项目根执行 <code>/plugins install .wildarrange/adapters/kimi/plugin</code> 和 <code>/reload</code>。</li>
       </ul>
     </section>
 
@@ -245,15 +245,15 @@ P0+P1 已落地；P2 宿主私有 spawn 仍 open；文中测试数以当前 <cod
   </div>
 
   <h2>5. 生成物与用户动作</h2>
-  <pre>node ./bin/helix.mjs adapter install --target kimi --mode local
+  <pre>node ./bin/wildarrange.mjs adapter install --target kimi --mode local
 
 # 从项目根启动 Kimi Code，执行（路径不要加引号）：
-/plugins install .helix/adapters/kimi/plugin
+/plugins install .wildarrange/adapters/kimi/plugin
 /reload
 
 # 验证：
-/helix-doctor
-/helix-status</pre>
+/wildarrange-doctor
+/wildarrange-status</pre>
 
   <p>
     <code>adapter install</code> 只在项目内生成文件，不自动修改
@@ -287,7 +287,7 @@ P0+P1 已落地；P2 宿主私有 spawn 仍 open；文中测试数以当前 <cod
         <td>仅声明宿主接入能力；P2 spawn 配置尚未加入。</td>
       </tr>
       <tr>
-        <td><code>bin/helix.mjs</code></td>
+        <td><code>bin/wildarrange.mjs</code></td>
         <td>帮助文案与 target/adapter 枚举增加 kimi。</td>
         <td>CLI 入口。</td>
       </tr>
@@ -342,18 +342,18 @@ P0+P1 已落地；P2 宿主私有 spawn 仍 open；文中测试数以当前 <cod
   <ol>
     <li>安装目标测试：<code>kimi</code>、<code>all</code>、非法 target、重复安装、备份、卸载和恢复。</li>
     <li>协议测试：用 Kimi 格式的 stdin JSON 覆盖 UserPromptSubmit、Edit allow、Edit deny、Bash、PostToolUse、Stop。</li>
-    <li>全局插件防串扰：非 WildArrange 项目必须立即 no-op，不得创建 <code>.helix/</code>。</li>
+    <li>全局插件防串扰：非 WildArrange 项目必须立即 no-op，不得创建 <code>.wildarrange/</code>。</li>
     <li>P0 + P1 失败对抗：非项目目录、伪造 marker、畸形 JSON、绝对路径越界、无扩展名路径越界、高危 Bash、PostToolUseFailure、Stop 续跑。</li>
     <li>P2 子 Agent 对抗（暂缓）：headless 退出 0 但无 patch、越界 patch、超时、结果文件伪造，均不得直接 completed。</li>
     <li>运行 <code>npm test</code>。</li>
-    <li>运行 <code>npm pack --dry-run --cache /private/tmp/helix-npm-cache</code>，确认插件模板与新增模块进入发布包。</li>
+    <li>运行 <code>npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache</code>，确认插件模板与新增模块进入发布包。</li>
     <li>在已登录的 Kimi Code 最新稳定版做实机冒烟：技能可见、Prompt 注入、越界 Edit 被拒、合法 Edit 放行、卸载恢复。</li>
   </ol>
 
   <h2>10. 最终建议</h2>
   <div class="decision">
     <strong>P0 + P1 已完成，P2 子 Agent spawn 保持独立后续项。</strong>
-    当前版本已能在 Kimi Code 中读取规范、使用 Helix 命令、执行生命周期 Hook 和阻断越界写入；
+    当前版本已能在 Kimi Code 中读取规范、使用 WildArrange 命令、执行生命周期 Hook 和阻断越界写入；
     同时未扩大 core、未改用户全局配置、未引入 MCP 服务器。自动测试 152/152 通过，npm 发布包预检通过。
   </div>
 

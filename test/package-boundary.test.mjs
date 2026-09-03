@@ -96,7 +96,7 @@ test("npm package excludes plans, restricted prompts, and runtime state", async 
         `published package contains restricted prompt: ${restrictedPath}`,
       );
     }
-    for (const forbiddenRoot of [".external/", ".helix/", ".tmp/"]) {
+    for (const forbiddenRoot of [".external/", ".wildarrange/", ".tmp/"]) {
       assert.equal(
         packedPaths.some((file) => file.startsWith(forbiddenRoot)),
         false,
@@ -168,7 +168,7 @@ test("packed package installs offline and public CLI completes a minimal smoke r
 
     const publicShim = path.join(installDir, "node_modules", ".bin", process.platform === "win32" ? "wildarrange.cmd" : "wildarrange");
     assert.equal(existsSync(publicShim), true, "npm install must create the public wildarrange bin shim");
-    const installedCli = path.join(installDir, "node_modules", "@alivewavelab", "wildarrange", "bin", "helix.mjs");
+    const installedCli = path.join(installDir, "node_modules", "@alivewavelab", "wildarrange", "bin", "wildarrange.mjs");
     const help = execFileSync(process.execPath, [installedCli, "--help"], { cwd: installDir, encoding: "utf8" });
     assert.match(help, /WildArrange linear runtime/);
 

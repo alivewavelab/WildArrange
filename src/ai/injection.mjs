@@ -4,11 +4,11 @@ import {
   DEFAULT_LEAD_AGENT,
   normalizeAgentKey,
 } from "../infra/agent-registry.mjs";
-import { loadHelixConfig } from "../infra/runtime-config.mjs";
+import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { renderPromptPackEntry } from "../infra/prompt-pack.mjs";
 import {
   readJson,
-  resolveHelixPath,
+  resolveWildArrangePath,
 } from "../infra/runtime-store.mjs";
 import { loadTaskState } from "../infra/task-state-store.mjs";
 import { matchSkills } from "./skill-matcher.mjs";
@@ -17,7 +17,7 @@ const DEFAULT_DYNAMIC_ALWAYS_MOUNT = ["wildarrange-injection-runtime"];
 const DEFAULT_DYNAMIC_MAX_SKILLS = 4;
 
 export async function resolveInjectionPoint(rootDir, name, variables = {}, options = {}) {
-  const { config, sourcePath } = await loadHelixConfig(rootDir);
+  const { config, sourcePath } = await loadWildArrangeConfig(rootDir);
   const point = config.injectionPoints?.[name] || { enabled: false, tools: [], markdown: [], skills: [] };
   const budgets = resolvePointBudgets(config.contextBudgets, name, point.contextBudgets);
   const markdown = [];
@@ -217,7 +217,7 @@ async function loadMarkdownAttachment(rootDir, relativePath, maxChars) {
 }
 
 async function loadSkillAttachment(rootDir, skillName, maxChars) {
-  const registry = await readJson(resolveHelixPath(rootDir, "prompt-pack.json"), null);
+  const registry = await readJson(resolveWildArrangePath(rootDir, "prompt-pack.json"), null);
   const entry = registry?.skills?.[skillName];
   const projectSkill = entry ? null : await resolveProjectSkill(rootDir, skillName);
   if (!entry && !projectSkill) return null;

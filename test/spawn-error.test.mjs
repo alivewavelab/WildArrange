@@ -11,7 +11,7 @@ import { runCommand } from "../src/infra/command-runner.mjs";
 import { runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
-import { resolveHelixPath } from "../src/infra/runtime-store.mjs";
+import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 
 async function withTempDir(fn) {
   const baseDir = path.join(process.cwd(), ".tmp");
@@ -35,7 +35,7 @@ test("runCommand resolves a 127 result when the spawn itself fails (bad cwd)", a
 test("a crashing runner fails only its own task; the rest of the batch still lands", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const planPath = resolveHelixPath(dir, "artifacts", "spawn-error-plan.json");
+    const planPath = resolveWildArrangePath(dir, "artifacts", "spawn-error-plan.json");
     await mkdir(path.dirname(planPath), { recursive: true });
     await writeFile(planPath, JSON.stringify({
       planId: "spawn-error-plan",
@@ -82,7 +82,7 @@ test("a crashing runner fails only its own task; the rest of the batch still lan
     assert.ok(crashed.results[0].error, "the underlying error message must be preserved for diagnosis");
 
     const persisted = JSON.parse(await readFile(
-      resolveHelixPath(dir, "agent-runs", crashed.runId, "T002", "result.json"),
+      resolveWildArrangePath(dir, "agent-runs", crashed.runId, "T002", "result.json"),
       "utf8",
     ));
     assert.equal(persisted.status, "fail", "the fail result must be persisted for status/adoption");

@@ -3,7 +3,7 @@
  *
  * The lexical scanner (maskSource / extractImportSpecifiers) was hardened
  * adversarially in test/dependency-boundary.test.mjs; it lives here so the
- * boundary test and `helix impact` share one implementation. The adversarial
+ * boundary test and `wildarrange impact` share one implementation. The adversarial
  * tests in that file are the non-weakenable floor for this module — if the
  * scanner changes, those tests must keep passing.
  *
@@ -317,7 +317,7 @@ export async function listRepoTests(rootDir) {
 
 /**
  * 分区测试选择：某区的应跑测试 = 引用了该区文件的测试（反向传递闭包）
- * + 命名对位测试 + 常驻的依赖边界测试。helix test --zone 用它把
+ * + 命名对位测试 + 常驻的依赖边界测试。wildarrange test --zone 用它把
  * "我只改了 infra" 映射到最小证明集，低代码维护者不必背测试矩阵。
  */
 export async function computeZoneTests(rootDir, zone) {

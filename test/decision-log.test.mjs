@@ -1,7 +1,7 @@
 /**
  * 决策记录（decisions.jsonl）测试：
  * - 四个缝（delivery-pipeline / hooks / admission / routing）都发射决策记录；
- * - 投影（helix decisions）逐条一致且能降级跳过坏行；
+ * - 投影（wildarrange decisions）逐条一致且能降级跳过坏行；
  * - 发射是 best-effort，绝不反噬主流程。
  */
 import assert from "node:assert/strict";
@@ -20,10 +20,10 @@ import { admitParallelAgentResult, runParallelAgents } from "../src/orchestratio
 import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { runCommand } from "../src/infra/command-runner.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
-import { resolveHelixPath } from "../src/infra/runtime-store.mjs";
+import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 
 const execFileAsync = promisify(execFile);
-const HELIX_BIN = path.resolve(import.meta.dirname, "..", "bin", "helix.mjs");
+const WILDARRANGE_BIN = path.resolve(import.meta.dirname, "..", "bin", "wildarrange.mjs");
 
 async function withTempDir(fn) {
   const baseDir = path.join(process.cwd(), ".tmp");
@@ -41,9 +41,9 @@ function nodeEval(source) {
 }
 
 async function importPassingPlan(dir) {
-  // 计划文件放在 .helix/artifacts 下：放在仓库根会被 scope 门当作
+  // 计划文件放在 .wildarrange/artifacts 下：放在仓库根会被 scope 门当作
   // writable_paths 之外的无归属改动而拦截。
-  const planPath = resolveHelixPath(dir, "artifacts", "decisions-plan.json");
+  const planPath = resolveWildArrangePath(dir, "artifacts", "decisions-plan.json");
   await writeFile(planPath, JSON.stringify({
     title: "Decision log",
     tasks: [
@@ -159,12 +159,12 @@ test("parallel admission emits an admission decision carrying the runId", async 
 
 test("projection renders three lines per record and degrades past corrupt lines", async () => {
   await withTempDir(async (dir) => {
-    await mkdir(resolveHelixPath(dir), { recursive: true });
+    await mkdir(resolveWildArrangePath(dir), { recursive: true });
     const good = [
-      { ts: "2026-08-04T01:00:00.000Z", gate: "pre_tool_use", decision: "deny", code: "out_of_scope", reason: "planned scope violation for task T001: docs/x.md", summary: "Edit docs/x.md -> deny", evidencePath: ".helix/sessions/hooks/s-PreToolUse.json", taskId: "T001" },
+      { ts: "2026-08-04T01:00:00.000Z", gate: "pre_tool_use", decision: "deny", code: "out_of_scope", reason: "planned scope violation for task T001: docs/x.md", summary: "Edit docs/x.md -> deny", evidencePath: ".wildarrange/sessions/hooks/s-PreToolUse.json", taskId: "T001" },
       { ts: "2026-08-04T01:01:00.000Z", gate: "verify", decision: "pass", summary: "验证门 pass", evidencePath: null, taskId: "T001" },
     ];
-    const logPath = resolveHelixPath(dir, "decisions.jsonl");
+    const logPath = resolveWildArrangePath(dir, "decisions.jsonl");
     await writeFile(logPath, good.map((entry) => JSON.stringify(entry)).join("\n") + "\n", "utf8");
     await appendFile(logPath, '{"ts":"2026-08-04T01:02:00.000Z","gate":"verify","deci', "utf8");
 
@@ -176,7 +176,7 @@ test("projection renders three lines per record and degrades past corrupt lines"
     assert.match(projection.text, /跳过 1 行/);
     assert.match(projection.text, /发生了什么: Edit docs\/x\.md -> deny/);
     assert.match(projection.text, /命中规则: out_of_scope — planned scope violation/);
-    assert.match(projection.text, /证据: \.helix\/sessions\/hooks\/s-PreToolUse\.json/);
+    assert.match(projection.text, /证据: \.wildarrange\/sessions\/hooks\/s-PreToolUse\.json/);
 
     const onlyTask = await projectDecisions(dir, { taskId: "T001", format: "json" });
     assert.equal(onlyTask.shown, 2);
@@ -188,8 +188,8 @@ test("projection renders three lines per record and degrades past corrupt lines"
 
 test("readDecisions streams from the tail and marks truncated instead of loading the whole file", async () => {
   await withTempDir(async (dir) => {
-    await mkdir(resolveHelixPath(dir), { recursive: true });
-    const logPath = resolveHelixPath(dir, "decisions.jsonl");
+    await mkdir(resolveWildArrangePath(dir), { recursive: true });
+    const logPath = resolveWildArrangePath(dir, "decisions.jsonl");
     // 2000 条记录约 300KB，远超 64KB 读块，必须触发尾部窗口。
     const lines = [];
     for (let index = 0; index < 2000; index += 1) {
@@ -215,8 +215,8 @@ test("readDecisions streams from the tail and marks truncated instead of loading
 
 test("appendDecision heals a mid-line external truncation instead of gluing onto the partial line", async () => {
   await withTempDir(async (dir) => {
-    await mkdir(resolveHelixPath(dir), { recursive: true });
-    const logPath = resolveHelixPath(dir, "decisions.jsonl");
+    await mkdir(resolveWildArrangePath(dir), { recursive: true });
+    const logPath = resolveWildArrangePath(dir, "decisions.jsonl");
     await writeFile(logPath, `${JSON.stringify({ gate: "routing", decision: "recover", summary: "complete" })}\n{"gate":"routing","deci`, "utf8");
 
     const { appendDecision } = await import("../src/infra/decision-log.mjs");
@@ -233,7 +233,7 @@ test("gate FAIL decisions carry the rule they hit (code/reason), and decision or
   await withTempDir(async (dir) => {
     await initRuntime(dir);
     assert.equal((await runCommand("git init", dir)).exitCode, 0);
-    const planPath = resolveHelixPath(dir, "artifacts", "fail-plan.json");
+    const planPath = resolveWildArrangePath(dir, "artifacts", "fail-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Failing verify",
       tasks: [
@@ -296,14 +296,14 @@ test("completed pipeline emits gate decisions in execution order ending with the
     assert.deepEqual(order, ["verify", "scope", "review", "acceptance-proof", "checkpoint", "pipeline"]);
     // review 决策必须带出约定证据路径（报告在 pipeline 返回后写入该路径）。
     const review = records.find((candidate) => candidate.gate === "review");
-    assert.match(review.evidencePath, /^\.helix\/reports\/reviews\/.+\/T001\.md$/);
+    assert.match(review.evidencePath, /^\.wildarrange\/reports\/reviews\/.+\/T001\.md$/);
   });
 });
 
 test("projection filters by annotatable and since", async () => {
   await withTempDir(async (dir) => {
-    await mkdir(resolveHelixPath(dir), { recursive: true });
-    const logPath = resolveHelixPath(dir, "decisions.jsonl");
+    await mkdir(resolveWildArrangePath(dir), { recursive: true });
+    const logPath = resolveWildArrangePath(dir, "decisions.jsonl");
     const entries = [
       { ts: "2026-08-04T01:00:00.000Z", gate: "verify", decision: "pass", summary: "old pass", annotatable: false },
       { ts: "2026-08-04T02:00:00.000Z", gate: "verify", decision: "fail", code: "verify_failed", summary: "new fail", annotatable: true },
@@ -321,21 +321,21 @@ test("projection filters by annotatable and since", async () => {
   });
 });
 
-test("helix decisions CLI prints the projection and the json format", async () => {
+test("wildarrange decisions CLI prints the projection and the json format", async () => {
   await withTempDir(async (dir) => {
-    await mkdir(resolveHelixPath(dir), { recursive: true });
+    await mkdir(resolveWildArrangePath(dir), { recursive: true });
     await writeFile(
-      resolveHelixPath(dir, "decisions.jsonl"),
+      resolveWildArrangePath(dir, "decisions.jsonl"),
       `${JSON.stringify({ ts: "2026-08-04T02:00:00.000Z", gate: "routing", decision: "recover", code: "quick", reason: "intent=resume", summary: "继续" })}\n`,
       "utf8",
     );
-    const text = await execFileAsync(process.execPath, [HELIX_BIN, "decisions"], { cwd: dir });
+    const text = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "decisions"], { cwd: dir });
     assert.match(text.stdout, /routing\s+RECOVER/);
     assert.match(text.stdout, /发生了什么: 继续/);
 
-    const json = await execFileAsync(process.execPath, [HELIX_BIN, "decisions", "--format", "json"], { cwd: dir });
+    const json = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "decisions", "--format", "json"], { cwd: dir });
     const projection = JSON.parse(json.stdout);
-    assert.equal(projection.kind, "helix_decisions_projection");
+    assert.equal(projection.kind, "wildarrange_decisions_projection");
     assert.equal(projection.records.length, 1);
   });
 });

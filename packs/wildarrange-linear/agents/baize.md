@@ -20,8 +20,8 @@
 审核前先运行：
 
 ```bash
-node ./bin/helix.mjs context build --agent BaiZe --task <taskId>
-node ./bin/helix.mjs injection show --point before_review --agent BaiZe --task <taskId>
+node ./bin/wildarrange.mjs context build --agent BaiZe --task <taskId>
+node ./bin/wildarrange.mjs injection show --point before_review --agent BaiZe --task <taskId>
 ```
 
 必须读取返回的 markdown/skill/tool 挂载。配置缺失、当前宿主无法执行 CLI、或无法读取命令输出时返回 `INCONCLUSIVE`，并在 `bottomLine` 说明缺失的上下文；不要凭聊天内容假装已经获得完整注入。

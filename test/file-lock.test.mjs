@@ -10,7 +10,7 @@ import test from "node:test";
 import { withFileLock } from "../src/infra/file-lock.mjs";
 import { appendLedger } from "../src/infra/ledger.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
-import { resolveHelixPath } from "../src/infra/runtime-store.mjs";
+import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 
 async function withTempDir(fn) {
   const baseDir = path.join(process.cwd(), ".tmp");
@@ -26,7 +26,7 @@ async function withTempDir(fn) {
 test("ledger append recovers from a dead-pid lock instead of timing out", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const lockPath = resolveHelixPath(dir, "ledger.lock");
+    const lockPath = resolveWildArrangePath(dir, "ledger.lock");
     // 三行 owner 格式，pid 999999 已死：必须立即判 stale 回收。
     await writeFile(lockPath, `crashed-writer\n999999\n${Date.now()}\n`, "utf8");
 
@@ -39,7 +39,7 @@ test("ledger append recovers from a dead-pid lock instead of timing out", async 
 test("ledger append recovers from a legacy two-line lock after the mtime grace", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const lockPath = resolveHelixPath(dir, "ledger.lock");
+    const lockPath = resolveWildArrangePath(dir, "ledger.lock");
     // 旧格式 `pid\nts` 不可解析；mtime 超过宽限期后按 stale 回收。
     await writeFile(lockPath, `12345\n${Date.now()}\n`, "utf8");
     const past = new Date(Date.now() - 60_000);
@@ -53,7 +53,7 @@ test("ledger append recovers from a legacy two-line lock after the mtime grace",
 test("lock timeout error names the owner, pid, liveness and wait budget", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const lockPath = resolveHelixPath(dir, "team", "tasks.lock");
+    const lockPath = resolveWildArrangePath(dir, "team", "tasks.lock");
     // 持锁者是当前进程（pid 存活）：不可判 stale，必须超时且报错带诊断。
     await writeFile(lockPath, `parallel-admit:T001\n${process.pid}\n${Date.now()}\n`, "utf8");
 
@@ -76,7 +76,7 @@ test("lock timeout error names the owner, pid, liveness and wait budget", async 
 test("lock timeout on an unparsable fresh lock explains the stale grace", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const lockPath = resolveHelixPath(dir, "team", "tasks.lock");
+    const lockPath = resolveWildArrangePath(dir, "team", "tasks.lock");
     await writeFile(lockPath, "", "utf8"); // 空锁、mtime 新鲜：宽限期内不可回收
 
     await assert.rejects(

@@ -22,10 +22,10 @@ import {
   appendAnnotation,
   readAnnotations,
 } from "../src/infra/annotation-log.mjs";
-import { resolveHelixPath } from "../src/infra/runtime-store.mjs";
+import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 
 const execFileAsync = promisify(execFile);
-const HELIX_BIN = path.resolve(import.meta.dirname, "..", "bin", "helix.mjs");
+const WILDARRANGE_BIN = path.resolve(import.meta.dirname, "..", "bin", "wildarrange.mjs");
 
 async function withTempDir(fn) {
   const baseDir = path.join(process.cwd(), ".tmp");
@@ -39,7 +39,7 @@ async function withTempDir(fn) {
 }
 
 async function importPassingPlan(dir) {
-  const planPath = resolveHelixPath(dir, "artifacts", "annotate-plan.json");
+  const planPath = resolveWildArrangePath(dir, "artifacts", "annotate-plan.json");
   await mkdir(path.dirname(planPath), { recursive: true });
   await writeFile(planPath, JSON.stringify({
     title: "Annotation",
@@ -81,7 +81,7 @@ test("deny decisions are annotatable with an id; deterministic pass stays out of
 
     // 纯确定性路由（显式关闭 shadow，防止本机配置了 LLM provider 时
     // shadow 真跑导致 annotatable=true）不进标注队列。
-    await writeFile(path.join(dir, "helix.config.json"), JSON.stringify({
+    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
       routeGovernance: { semanticShadow: { enabled: false } },
     }, null, 2));
     await routeRequest(dir, { text: "继续上一个任务" });
@@ -155,14 +155,14 @@ test("hard constraint: annotation paths never write config, tasks, or gate switc
     const deny = await denyDecision(dir);
 
     // 配置文件必须真实存在，"未被改动"的断言才有意义。
-    const configPath = path.join(dir, "helix.config.json");
+    const configPath = path.join(dir, "wildarrange.config.json");
     await writeFile(configPath, JSON.stringify({ review: { commands: ["node -e \"process.exit(0)\""] } }, null, 2));
-    const tasksPath = resolveHelixPath(dir, "team", "tasks.json");
+    const tasksPath = resolveWildArrangePath(dir, "team", "tasks.json");
     const before = new Map();
     for (const filePath of [configPath, tasksPath]) {
       before.set(filePath, await readFile(filePath, "utf8").catch(() => null));
     }
-    const helixDirBefore = await readdir(resolveHelixPath(dir));
+    const wildarrangeDirBefore = await readdir(resolveWildArrangePath(dir));
 
     await appendAnnotation(dir, { decisionId: deny.id, category: "mislabeled", reason: "看错了" });
     await annotationStats(dir);
@@ -175,8 +175,8 @@ test("hard constraint: annotation paths never write config, tasks, or gate switc
         `标注路径不得改动 ${path.basename(filePath)}`,
       );
     }
-    const helixDirAfter = await readdir(resolveHelixPath(dir));
-    const newFiles = helixDirAfter.filter((name) => !helixDirBefore.includes(name));
+    const wildarrangeDirAfter = await readdir(resolveWildArrangePath(dir));
+    const newFiles = wildarrangeDirAfter.filter((name) => !wildarrangeDirBefore.includes(name));
     assert.deepEqual(newFiles, ["annotations.jsonl"], "标注只允许新增 annotations.jsonl");
 
     // 静态钉死：标注模块不得 import 配置写入能力（剥离注释后检查代码本体）。
@@ -190,31 +190,31 @@ test("hard constraint: annotation paths never write config, tasks, or gate switc
   });
 });
 
-test("helix annotate CLI records, lists and aggregates annotations", async () => {
+test("wildarrange annotate CLI records, lists and aggregates annotations", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
     await importPassingPlan(dir);
     const deny = await denyDecision(dir);
 
     const annotate = await execFileAsync(process.execPath, [
-      HELIX_BIN, "annotate", "--root", dir,
+      WILDARRANGE_BIN, "annotate", "--root", dir,
       "--decision", deny.id, "--category", "rule_wrong", "--reason", "太严",
     ], { cwd: dir });
     const recorded = JSON.parse(annotate.stdout);
-    assert.equal(recorded.kind, "helix_annotation");
+    assert.equal(recorded.kind, "wildarrange_annotation");
     assert.equal(recorded.recorded.decisionId, deny.id);
 
-    const list = await execFileAsync(process.execPath, [HELIX_BIN, "annotate", "list", "--root", dir], { cwd: dir });
+    const list = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "annotate", "list", "--root", dir], { cwd: dir });
     assert.equal(JSON.parse(list.stdout).records.length, 1);
 
-    const stats = await execFileAsync(process.execPath, [HELIX_BIN, "annotate", "stats", "--root", dir], { cwd: dir });
+    const stats = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "annotate", "stats", "--root", dir], { cwd: dir });
     const parsed = JSON.parse(stats.stdout);
     assert.equal(parsed.rules[0].rule, "pre_tool_use:out_of_scope");
     assert.equal(parsed.rules[0].rule_wrong, 1);
 
     await assert.rejects(
       execFileAsync(process.execPath, [
-        HELIX_BIN, "annotate", "--root", dir, "--decision", deny.id, "--category", "whatever",
+        WILDARRANGE_BIN, "annotate", "--root", dir, "--decision", deny.id, "--category", "whatever",
       ], { cwd: dir }),
       /强制分类|rule_wrong/,
       "CLI 必须拒绝非法分类",

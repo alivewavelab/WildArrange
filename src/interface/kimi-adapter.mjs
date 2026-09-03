@@ -92,7 +92,7 @@ ${renderHookBridgeUtilities()}
 export function renderKimiAdapterReadme() {
   return `# WildArrange Kimi Code Adapter
 
-Kimi Code already reads the project \`AGENTS.md\` and generated \`.agents/skills/helix-*/SKILL.md\` files.
+Kimi Code already reads the project \`AGENTS.md\` and generated \`.agents/skills/wildarrange-*/SKILL.md\` files.
 This plugin adds lifecycle Hook forwarding without modifying the user's global \`~/.kimi-code/config.toml\`.
 
 ## Install
@@ -100,11 +100,11 @@ This plugin adds lifecycle Hook forwarding without modifying the user's global \
 Start Kimi Code from the project root, then run:
 
 \`\`\`text
-/plugins install .helix/adapters/kimi/plugin
+/plugins install .wildarrange/adapters/kimi/plugin
 /reload
 \`\`\`
 
-Then run \`/helix-doctor\` to verify the WildArrange runtime.
+Then run \`/wildarrange-doctor\` to verify the WildArrange runtime.
 Kimi Code 0.27 treats quote characters in \`/plugins install\` as literal path characters, so do not wrap the path in quotes.
 
 ## Enforcement
@@ -118,7 +118,7 @@ Kimi Code 0.27 treats quote characters in \`/plugins install\` as literal path c
 Run \`/plugins remove ${KIMI_ADAPTER_PLUGIN_NAME}\` in Kimi Code, then:
 
 \`\`\`bash
-node ./bin/helix.mjs adapter uninstall --target kimi
+node ./bin/wildarrange.mjs adapter uninstall --target kimi
 \`\`\`
 `;
 }

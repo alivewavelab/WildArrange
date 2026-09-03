@@ -113,7 +113,7 @@ export async function applyAgentPatch(rootDir, patch, options = {}) {
   if (!patch || typeof patch !== "string" || patch.trim().length === 0) {
     throw new Error("parallel admission patch is empty");
   }
-  const patchPath = path.join(rootDir, ".helix", "agent-runs", `admit-${Date.now()}-${process.pid}.patch`);
+  const patchPath = path.join(rootDir, ".wildarrange", "agent-runs", `admit-${Date.now()}-${process.pid}.patch`);
   await writeFile(patchPath, patch, "utf8");
   const check = await runCommandFile("git", ["-C", rootDir, "apply", "--check", "--whitespace=nowarn", patchPath], rootDir, options.timeoutMs);
   if (check.exitCode !== 0) {

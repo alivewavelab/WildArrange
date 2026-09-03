@@ -6,8 +6,8 @@
 
 ## 输入
 
-- `.helix/decisions.jsonl` 中 `gate=routing` 的原始请求与结构化路由结果。
-- `.helix/annotations.jsonl` 中人工确认、规则错误与个案错误标注。
+- `.wildarrange/decisions.jsonl` 中 `gate=routing` 的原始请求与结构化路由结果。
+- `.wildarrange/annotations.jsonl` 中人工确认、规则错误与个案错误标注。
 - 同一 `sessionId` 下的工具活动摘要。
 
 ## 工作方式
@@ -24,7 +24,7 @@
 - 先给“一眼结论”：判断数、正确数、问题数、待复盘数。
 - 再列已确认问题和重复误判模式。
 - 最后列每次判断的用户原文、路由结果、命中信号、人工结论和后续工具。
-- 人类可读报告：`.helix/reports/routing/latest.md`。
-- 同日归档：`.helix/reports/routing/YYYY-MM-DD.md`。
+- 人类可读报告：`.wildarrange/reports/routing/latest.md`。
+- 同日归档：`.wildarrange/reports/routing/YYYY-MM-DD.md`。
 
 只读分析，不编辑 `routes.json`、配置、质量门或任务状态。建议必须等待人工确认。

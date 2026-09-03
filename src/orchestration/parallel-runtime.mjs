@@ -8,13 +8,13 @@ import {
 import { appendLedger } from "../infra/ledger.mjs";
 import {
   createWorkId,
-  ensureHelixDirs,
+  ensureWildArrangeDirs,
   nowIso,
   readJson,
-  resolveHelixPath,
+  resolveWildArrangePath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
-import { loadHelixConfig } from "../infra/runtime-config.mjs";
+import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { resolveAgentSpawn } from "../infra/agent-spawn.mjs";
@@ -40,10 +40,10 @@ export { admitParallelAgentResult } from "./admission.mjs";
 const DEFAULT_PARALLEL_TIMEOUT_MS = 120_000;
 
 export async function runParallelAgents(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const taskState = await loadTaskState(rootDir);
-  if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
-  const { config } = await loadHelixConfig(rootDir);
+  if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
+  const { config } = await loadWildArrangeConfig(rootDir);
 
   const tasks = selectParallelTasks(taskState.tasks, options);
   if (tasks.length === 0) {
@@ -55,12 +55,12 @@ export async function runParallelAgents(rootDir, options = {}) {
   });
 
   const runId = createWorkId("agent_run");
-  const runDir = resolveHelixPath(rootDir, "agent-runs", runId);
+  const runDir = resolveWildArrangePath(rootDir, "agent-runs", runId);
   await mkdir(runDir, { recursive: true });
   const startedAt = nowIso();
   await appendLedger(rootDir, { type: "parallel_agents_started", runId, taskIds: tasks.map((task) => task.id) });
   await registerRunIndexEntry(rootDir, runId);
-  const batchPath = resolveHelixPath(rootDir, "agent-runs", `${runId}.json`);
+  const batchPath = resolveWildArrangePath(rootDir, "agent-runs", `${runId}.json`);
   // taskIds/command/agent/isolation 必须随批次持久化：中断对账与
   // `parallel retry` 依赖它们重建"这次跑了哪些任务、用什么命令"。
   const batchSeed = {
@@ -174,8 +174,8 @@ export async function runParallelAgents(rootDir, options = {}) {
 }
 
 export async function listParallelAgentRuns(rootDir) {
-  await ensureHelixDirs(rootDir);
-  const index = await readJson(resolveHelixPath(rootDir, "agent-runs", "index.json"), { runs: [] });
+  await ensureWildArrangeDirs(rootDir);
+  const index = await readJson(resolveWildArrangePath(rootDir, "agent-runs", "index.json"), { runs: [] });
   return reconcileRunIndex(rootDir, index);
 }
 
@@ -188,7 +188,7 @@ export async function listParallelAgentRuns(rootDir) {
  * index, rebuilding their entries from the result.json files.
  */
 async function reconcileRunIndex(rootDir, index) {
-  const runsDir = resolveHelixPath(rootDir, "agent-runs");
+  const runsDir = resolveWildArrangePath(rootDir, "agent-runs");
   let dirEntries = [];
   try {
     dirEntries = await readdir(runsDir, { withFileTypes: true });
@@ -225,14 +225,14 @@ async function reconcileRunIndex(rootDir, index) {
     adopted.push(entry.name);
   }
   if (adopted.length > 0) {
-    await writeJsonAtomic(resolveHelixPath(rootDir, "agent-runs", "index.json"), index);
+    await writeJsonAtomic(resolveWildArrangePath(rootDir, "agent-runs", "index.json"), index);
     await appendLedger(rootDir, { type: "parallel_run_index_reconciled", adoptedRunIds: adopted }).catch(() => {});
   }
   return index;
 }
 
 async function registerRunIndexEntry(rootDir, runId) {
-  const indexPath = resolveHelixPath(rootDir, "agent-runs", "index.json");
+  const indexPath = resolveWildArrangePath(rootDir, "agent-runs", "index.json");
   const index = await readJson(indexPath, { runs: [] });
   if (!index.runs.some((run) => run.runId === runId)) {
     index.runs.push({ runId, createdAt: nowIso(), updatedAt: nowIso(), results: [] });
@@ -241,7 +241,7 @@ async function registerRunIndexEntry(rootDir, runId) {
 }
 
 export async function parallelAgentStatus(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const index = await listParallelAgentRuns(rootDir);
   const selectedRuns = options.runId
     ? (index.runs || []).filter((run) => run.runId === options.runId)
@@ -250,7 +250,7 @@ export async function parallelAgentStatus(rootDir, options = {}) {
   for (const run of selectedRuns) {
     const results = [];
     for (const entry of run.results || []) {
-      const resultPath = resolveHelixPath(rootDir, "agent-runs", run.runId, entry.taskId, "result.json");
+      const resultPath = resolveWildArrangePath(rootDir, "agent-runs", run.runId, entry.taskId, "result.json");
       const result = await readJson(resultPath, null);
       results.push({
         taskId: entry.taskId,
@@ -267,7 +267,7 @@ export async function parallelAgentStatus(rootDir, options = {}) {
     // 中断对账：batch 文件记录了本次跑了哪些任务；与结果集对比得出
     // "有头无尾"的任务清单（进程被杀、runner 崩溃未落盘），供人和
     // `parallel retry` 直接看到缺口。
-    const batch = await readJson(resolveHelixPath(rootDir, "agent-runs", `${run.runId}.json`), null);
+    const batch = await readJson(resolveWildArrangePath(rootDir, "agent-runs", `${run.runId}.json`), null);
     const passedTaskIds = new Set((run.results || []).filter((entry) => entry.pass === true).map((entry) => entry.taskId));
     const incompleteTasks = (batch?.taskIds || []).filter((taskId) => !passedTaskIds.has(taskId));
     runs.push({
@@ -295,9 +295,9 @@ export async function parallelAgentStatus(rootDir, options = {}) {
  * （复用原批次的 command/agent/isolation），不改写原 run 的任何证据。
  */
 export async function retryParallelAgentRun(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   if (!options.runId) throw new Error("parallel retry requires --run <runId>");
-  const batch = await readJson(resolveHelixPath(rootDir, "agent-runs", `${options.runId}.json`), null);
+  const batch = await readJson(resolveWildArrangePath(rootDir, "agent-runs", `${options.runId}.json`), null);
   if (!batch) throw new Error(`parallel run not found: ${options.runId}`);
   const taskIds = Array.isArray(batch.taskIds) ? batch.taskIds : [];
   if (taskIds.length === 0) {
@@ -305,11 +305,11 @@ export async function retryParallelAgentRun(rootDir, options = {}) {
   }
 
   const taskState = await loadTaskState(rootDir);
-  if (!taskState) throw new Error("no imported plan found; run helix plan --from <file>");
+  if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
   const eligible = [];
   const skipped = [];
   for (const taskId of taskIds) {
-    const result = await readJson(resolveHelixPath(rootDir, "agent-runs", options.runId, taskId, "result.json"), null);
+    const result = await readJson(resolveWildArrangePath(rootDir, "agent-runs", options.runId, taskId, "result.json"), null);
     if (result?.pass === true) {
       skipped.push({ taskId, reason: "already passed in this run" });
       continue;
@@ -366,7 +366,7 @@ export async function retryParallelAgentRun(rootDir, options = {}) {
 }
 
 export async function closeParallelAgentRun(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   if (!options.runId) throw new Error("parallel close requires --run <runId>");
   const index = await listParallelAgentRuns(rootDir);
   const run = (index.runs || []).find((candidate) => candidate.runId === options.runId);
@@ -397,13 +397,13 @@ export async function closeParallelAgentRun(rootDir, options = {}) {
 }
 
 export async function cleanupParallelAgentRun(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   if (!options.runId) throw new Error("parallel cleanup requires --run <runId>");
   const status = await parallelAgentStatus(rootDir, { runId: options.runId });
   const cleaned = [];
   for (const run of status.runs || []) {
     for (const entry of run.results || []) {
-      const resultPath = resolveHelixPath(rootDir, "agent-runs", run.runId, entry.taskId, "result.json");
+      const resultPath = resolveWildArrangePath(rootDir, "agent-runs", run.runId, entry.taskId, "result.json");
       const result = await readJson(resultPath, null);
       if (!result || result.isolation !== "git-worktree" || result.worktreeAvailable !== true) continue;
       const worktreeDir = path.join(rootDir, result.workDir || "");
@@ -466,7 +466,7 @@ async function runOneAgent(rootDir, runDir, runId, task, options) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const agent = normalizeAgentKey(options.agent || task.owner || `Agent${options.index + 1}`) || `Agent${options.index + 1}`;
-    const config = options.config || (await loadHelixConfig(rootDir)).config;
+    const config = options.config || (await loadWildArrangeConfig(rootDir)).config;
     const result = {
       kind: "parallel_agent_result",
       runId,
@@ -502,7 +502,7 @@ async function runOneAgentInner(rootDir, runDir, runId, task, options) {
   const agent = normalizeAgentKey(options.agent || task.owner || `Agent${options.index + 1}`) || `Agent${options.index + 1}`;
   const taskRunDir = path.join(runDir, task.id);
   await mkdir(taskRunDir, { recursive: true });
-  const config = options.config || (await loadHelixConfig(rootDir)).config;
+  const config = options.config || (await loadWildArrangeConfig(rootDir)).config;
   const isolation = options.defaultIsolation || options.isolation || task.isolation || config.parallelAgents?.isolation || "run-dir";
   const worktree = await prepareAgentWorktree(rootDir, taskRunDir, {
     isolation,
@@ -686,7 +686,7 @@ function buildTaskPacket(task, context) {
 }
 
 async function appendRunIndex(rootDir, runId, results) {
-  const indexPath = resolveHelixPath(rootDir, "agent-runs", "index.json");
+  const indexPath = resolveWildArrangePath(rootDir, "agent-runs", "index.json");
   const index = await readJson(indexPath, { runs: [] });
   const existing = index.runs.find((run) => run.runId === runId);
   const entries = results.map((result) => ({

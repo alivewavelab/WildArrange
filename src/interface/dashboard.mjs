@@ -31,9 +31,9 @@ class DashboardPayloadTooLarge extends Error {}
 export function startDashboardServer(rootDir, options = {}) {
   const host = options.host || "127.0.0.1";
   const port = Number.isInteger(options.port) ? options.port : 8765;
-  const token = typeof options.token === "string" && options.token.length > 0 ? options.token : process.env.HELIX_DASHBOARD_TOKEN || "";
+  const token = typeof options.token === "string" && options.token.length > 0 ? options.token : process.env.WILDARRANGE_DASHBOARD_TOKEN || "";
   if (!isLoopbackHost(host) && token.length === 0) {
-    throw new Error("helix dashboard requires --token or HELIX_DASHBOARD_TOKEN when binding to a non-loopback host");
+    throw new Error("wildarrange dashboard requires --token or WILDARRANGE_DASHBOARD_TOKEN when binding to a non-loopback host");
   }
   const server = http.createServer(async (request, response) => {
     try {
@@ -196,7 +196,7 @@ function isAuthorized(request, token) {
   if (!token) return false;
   const auth = request.headers.authorization || "";
   if (safeTokenEquals(auth, `Bearer ${token}`)) return true;
-  return safeTokenEquals(request.headers["x-helix-token"], token);
+  return safeTokenEquals(request.headers["x-wildarrange-token"], token);
 }
 
 function safeTokenEquals(actual, expected) {
@@ -516,7 +516,7 @@ function renderDashboardHtml() {
       <main>
         <div class="view active" data-view-panel="overview">
           <section class="hero" style="padding:0;border:0;background:transparent;box-shadow:none">
-            <div><div class="eyebrow">当前运行状态 · <span id="generatedAt">—</span></div><h1 id="heroTitle">正在读取任务状态。</h1><p id="heroText">正在连接本地 Helix 运行时，请稍候。</p></div>
+            <div><div class="eyebrow">当前运行状态 · <span id="generatedAt">—</span></div><h1 id="heroTitle">正在读取任务状态。</h1><p id="heroText">正在连接本地 WildArrange 运行时，请稍候。</p></div>
             <div class="hero-stamp"><div class="eyebrow">当前计划</div><strong id="planProgress">0 / 0</strong><small id="subtitle">正在加载</small></div>
           </section>
           <div class="pipeline" id="pipeline">
@@ -540,7 +540,7 @@ function renderDashboardHtml() {
         </div>
 
         <div class="view" data-view-panel="workitems">
-          <h1 class="section-title">工单总账</h1><p class="section-intro">所有 Plan 的新功能、Bug、验收纠错和维护任务都从同一份 <code>.helix/team/tasks.json</code> 读取。</p>
+          <h1 class="section-title">工单总账</h1><p class="section-intro">所有 Plan 的新功能、Bug、验收纠错和维护任务都从同一份 <code>.wildarrange/team/tasks.json</code> 读取。</p>
           <div class="metrics" id="ledgerMetrics"></div>
           <section>
             <div class="ledger-toolbar">

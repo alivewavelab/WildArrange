@@ -11,7 +11,7 @@ import { startDashboardServer } from "../src/interface/dashboard.mjs";
 import { runInjectionHook } from "../src/ai/hooks.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
-import { readJson, resolveHelixPath } from "../src/infra/runtime-store.mjs";
+import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 
 async function withTempDir(fn) {
   const baseDir = path.join(process.cwd(), ".tmp");
@@ -39,7 +39,7 @@ async function withDashboard(dir, fn, options = {}) {
 }
 
 async function importPassingPlan(dir) {
-  const planPath = resolveHelixPath(dir, "artifacts", "panels-plan.json");
+  const planPath = resolveWildArrangePath(dir, "artifacts", "panels-plan.json");
   await mkdir(path.dirname(planPath), { recursive: true });
   await writeFile(planPath, JSON.stringify({
     title: "Panels",
@@ -72,17 +72,17 @@ test("decisions and ops panels serve read-only view models", async () => {
       const decisionsResponse = await fetch(`${base}/api/panels/decisions`, { cache: "no-store" });
       assert.equal(decisionsResponse.status, 200);
       const decisions = await decisionsResponse.json();
-      assert.equal(decisions.kind, "helix_dashboard_decisions_panel");
+      assert.equal(decisions.kind, "wildarrange_dashboard_decisions_panel");
       assert.ok(decisions.recent.some((record) => record.gate === "pre_tool_use"));
       assert.ok(decisions.neverFiredGates.includes("admission"));
 
       const opsResponse = await fetch(`${base}/api/panels/ops`, { cache: "no-store" });
       assert.equal(opsResponse.status, 200);
       const ops = await opsResponse.json();
-      assert.equal(ops.kind, "helix_dashboard_ops_panel");
+      assert.equal(ops.kind, "wildarrange_dashboard_ops_panel");
       assert.ok(ops.gateArming, "运维面板必须带门武装状态");
       assert.equal(ops.locks.length, 2, "tasks.lock 与 ledger.lock 都在巡检");
-      assert.ok(ops.files.some((file) => file.path === ".helix/decisions.jsonl"));
+      assert.ok(ops.files.some((file) => file.path === ".wildarrange/decisions.jsonl"));
 
       const html = await (await fetch(`${base}/`, { cache: "no-store" })).text();
       const inlineScripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
@@ -109,7 +109,7 @@ test("panels tolerate a corrupted decisions.jsonl without 500", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
     await importPassingPlan(dir);
-    await writeFile(resolveHelixPath(dir, "decisions.jsonl"), '{"gate":"verify"\nnot-json\n', "utf8");
+    await writeFile(resolveWildArrangePath(dir, "decisions.jsonl"), '{"gate":"verify"\nnot-json\n', "utf8");
 
     await withDashboard(dir, async (base) => {
       const response = await fetch(`${base}/api/panels/decisions`, { cache: "no-store" });
@@ -149,7 +149,7 @@ test("route review panel links full prompt, route result, tool activity, and hum
       const response = await fetch(`${base}/api/panels/routes`, { cache: "no-store" });
       assert.equal(response.status, 200);
       const payload = await response.json();
-      assert.equal(payload.kind, "helix_dashboard_route_review_panel");
+      assert.equal(payload.kind, "wildarrange_dashboard_route_review_panel");
       assert.equal(payload.total, 1);
       assert.equal(payload.routes[0].inputText, "新增一个登录页面，并检查手机端体验");
       assert.ok(payload.routes[0].result.route);
@@ -174,8 +174,8 @@ test("route review panel links full prompt, route result, tool activity, and hum
       assert.match(stop.output, /今日路由复盘/);
       assert.match(stop.output, /人类可读报告/);
 
-      const report = await readJson(resolveHelixPath(dir, "reports", "routing", "latest.json"));
-      assert.equal(report.kind, "helix_daily_routing_review");
+      const report = await readJson(resolveWildArrangePath(dir, "reports", "routing", "latest.json"));
+      assert.equal(report.kind, "wildarrange_daily_routing_review");
       assert.equal(report.summary.total, 1);
       assert.equal(report.summary.confirmed, 1);
       assert.equal(report.summary.toolCalls, 1);
@@ -183,8 +183,8 @@ test("route review panel links full prompt, route result, tool activity, and hum
       assert.equal(report.decisions[0].tools[0].toolName, "Edit");
       assert.equal(report.decisions[0].tools[0].input.apiKey, "[REDACTED]");
 
-      const readable = await readFile(resolveHelixPath(dir, "reports", "routing", "latest.md"), "utf8");
-      assert.match(readable, /^# Helix 路由每日复盘/m);
+      const readable = await readFile(resolveWildArrangePath(dir, "reports", "routing", "latest.md"), "utf8");
+      assert.match(readable, /^# WildArrange 路由每日复盘/m);
       assert.match(readable, /## 一眼结论/);
       assert.match(readable, /## 全部判断明细/);
       assert.match(readable, /新增一个登录页面，并检查手机端体验/);
@@ -193,7 +193,7 @@ test("route review panel links full prompt, route result, tool activity, and hum
 
       const withDailyReport = await (await fetch(`${base}/api/panels/routes`, { cache: "no-store" })).json();
       assert.equal(withDailyReport.dailyReport.summary.toolCalls, 1);
-      assert.match(withDailyReport.dailyReport.path, /\.helix\/reports\/routing\/\d{4}-\d{2}-\d{2}\.md/);
+      assert.match(withDailyReport.dailyReport.path, /\.wildarrange\/reports\/routing\/\d{4}-\d{2}-\d{2}\.md/);
 
       const html = await (await fetch(`${base}/`, { cache: "no-store" })).text();
       assert.match(html, /路由复盘台/);

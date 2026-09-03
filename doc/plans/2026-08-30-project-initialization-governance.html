@@ -13,7 +13,7 @@
   <h1>WildArrange 项目初始化治理融合方案</h1>
   <p>状态：待实现方案。目标是在不建立第二套任务系统的前提下，把项目专属规范、测试授权边界和任务治理入口加入 WildArrange 初始化流程。</p>
 
-  <section class="banner"><strong>关键决策</strong><p>WildArrange 的 <code>.helix/team/tasks.json</code>、Dashboard 与 ledger 已覆盖任务可视化、状态和历史。它们继续作为唯一任务真源；不接入 ClickUp，也不在 Markdown 重复维护任务表。</p></section>
+  <section class="banner"><strong>关键决策</strong><p>WildArrange 的 <code>.wildarrange/team/tasks.json</code>、Dashboard 与 ledger 已覆盖任务可视化、状态和历史。它们继续作为唯一任务真源；不接入 ClickUp，也不在 Markdown 重复维护任务表。</p></section>
 
   <h2>输入 → 处理 → 输出</h2>
   <div class="flow">
@@ -25,7 +25,7 @@
 
   <h2>命令与边界</h2>
   <div class="grid">
-    <section class="card"><span class="tag p0">显式启用</span><strong><code>helix init --project-docs</code></strong><ul><li>普通 <code>helix init</code> 保持现状。</li><li>只有显式参数才创建项目文档。</li><li><code>--architecture</code> 按需创建架构说明。</li></ul></section>
+    <section class="card"><span class="tag p0">显式启用</span><strong><code>wildarrange init --project-docs</code></strong><ul><li>普通 <code>wildarrange init</code> 保持现状。</li><li>只有显式参数才创建项目文档。</li><li><code>--architecture</code> 按需创建架构说明。</li></ul></section>
     <section class="card"><span class="tag p0">永不覆盖</span><strong>已有项目安全补建</strong><ul><li>存在的文件只报告 <code>preserved</code>。</li><li>不合并、不重写、不推断现有规则。</li><li>输出待人工补链接和确认事项。</li></ul></section>
     <section class="card"><span class="tag p1">必需文档</span><strong>最小初始化集合</strong><ul><li><code>AGENTS.md</code></li><li><code>doc/standards/code-and-interface-conventions.md</code></li><li><code>doc/testing-and-acceptance.md</code></li><li><code>doc/progress.md</code>（治理入口，不复制任务）</li></ul></section>
     <section class="card"><span class="tag ok">按需文档</span><strong><code>doc/architecture.md</code></strong><ul><li>只有系统边界已经明确时创建。</li><li>不为了凑齐文档编造架构。</li></ul></section>

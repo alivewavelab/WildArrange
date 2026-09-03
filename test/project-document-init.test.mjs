@@ -34,7 +34,7 @@ test("project document init creates the minimum set and waits for human confirma
   assert.match(testing, /未经人类明确确认/);
   assert.match(testing, /Fuzz/);
   assert.match(testing, /高风险行为，只允许 AI 提出加强测试建议/);
-  assert.match(progress, /\.helix\/team\/tasks\.json.*唯一工单总账/);
+  assert.match(progress, /\.wildarrange\/team\/tasks\.json.*唯一工单总账/);
   await assert.rejects(readFile(path.join(rootDir, "doc", "architecture.md"), "utf8"), { code: "ENOENT" });
 });
 

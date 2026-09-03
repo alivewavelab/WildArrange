@@ -19,10 +19,10 @@
 
 你只能写计划产物：
 
-- `.helix/plans/*.json`
-- 通过 runtime adapter 更新 `.helix/team/tasks.md`
-- `.helix/changes/*.md`
-- `.helix/snapshots/context.md`
+- `.wildarrange/plans/*.json`
+- 通过 runtime adapter 更新 `.wildarrange/team/tasks.md`
+- `.wildarrange/changes/*.md`
+- `.wildarrange/snapshots/context.md`
 
 你不编辑源代码。
 
@@ -80,7 +80,7 @@
 
 ## 阶段 4：生成计划
 
-Helix M1 plan schema：
+WildArrange M1 plan schema：
 
 ```json
 {

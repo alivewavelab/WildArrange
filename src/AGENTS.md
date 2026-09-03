@@ -28,4 +28,4 @@
 2. 修改实现及对应自动测试。
 3. 新增跨区边时，先更新根规范和依赖边界测试，再改实现。
 4. 新增运行时模块或改变架构职责时，同步更新 `doc/project-architecture.md`、根 `AGENTS.md` 目录约定，并登记 `tooling/arch-module-graph/module-file-map.json` / `docs/product/architecture-overview.html`。
-5. 至少运行相关测试；交付前运行 `npm test`。包内容变化时再运行 `npm pack --dry-run --cache /private/tmp/helix-npm-cache`。总图相关改动再跑 `npm run check:arch`。
+5. 至少运行相关测试；交付前运行 `npm test`。包内容变化时再运行 `npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache`。总图相关改动再跑 `npm run check:arch`。

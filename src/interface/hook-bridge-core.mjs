@@ -10,7 +10,7 @@ const child = spawn(invocation.command, [...invocation.args, "hook", "run", "--f
   cwd: projectDir,
   stdio: ["pipe", "pipe", "pipe"],
   windowsHide: true,
-  env: { ...process.env, HELIX_HOST_ADAPTER: ${JSON.stringify(hostAdapter)} },
+  env: { ...process.env, WILDARRANGE_HOST_ADAPTER: ${JSON.stringify(hostAdapter)} },
 });
 
 ${timeoutBlock}
@@ -51,8 +51,8 @@ export function renderHookBridgeUtilities() {
   }
   while (true) {
     const markers = [
-      path.join(current, ".helix", "config.json"),
-      path.join(current, "helix.config.json"),
+      path.join(current, ".wildarrange", "config.json"),
+      path.join(current, "wildarrange.config.json"),
     ];
     if (markers.some(isRegularFile)) return current;
     if (existsSync(path.join(current, ".git"))) return null;

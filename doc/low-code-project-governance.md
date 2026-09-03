@@ -297,9 +297,9 @@ doc/plans/*.html                          →  需评审的方案与流程（单
 | --- | --- |
 | 边界强制测试 | `test/dependency-boundary.test.mjs` |
 | 目录契约 | 根与各 `src/<zone>/AGENTS.md` |
-| 影响面命令 | `node ./bin/helix.mjs impact src/infra/ledger.mjs` |
-| 分区测试 | `node ./bin/helix.mjs test --zone infra` |
-| 决策投影 | ledger → `node ./bin/helix.mjs decisions --limit 20`（无 `--tail`） |
+| 影响面命令 | `node ./bin/wildarrange.mjs impact src/infra/ledger.mjs` |
+| 分区测试 | `node ./bin/wildarrange.mjs test --zone infra` |
+| 决策投影 | ledger → `node ./bin/wildarrange.mjs decisions --limit 20`（无 `--tail`） |
 | 质量门链 | `delivery-pipeline.mjs` |
 
 新团队应替换为自己的命令名与路径，保留**能力**而非复制**名称**。

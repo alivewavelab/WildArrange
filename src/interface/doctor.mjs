@@ -2,16 +2,16 @@ import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
-  DEFAULT_HELIX_CONFIG,
-  loadHelixConfig,
+  DEFAULT_WILDARRANGE_CONFIG,
+  loadWildArrangeConfig,
 } from "../infra/runtime-config.mjs";
 import {
-  ensureHelixDirs,
+  ensureWildArrangeDirs,
   nowIso,
   readJson,
   resolveLegacyTaskAcceptancePath,
   resolveLegacyTaskCheckpointPath,
-  resolveHelixPath,
+  resolveWildArrangePath,
   resolveTaskAcceptancePath,
   resolveTaskCheckpointPath,
   writeJsonAtomic,
@@ -46,7 +46,7 @@ const SECTION_CHECKS = [
 ];
 
 export async function runDoctor(rootDir) {
-  await ensureHelixDirs(rootDir);
+  await ensureWildArrangeDirs(rootDir);
   const findings = [];
   const sections = {};
 
@@ -70,8 +70,8 @@ export async function runDoctor(rootDir) {
     sections,
   };
 
-  const jsonPath = resolveHelixPath(rootDir, "reports", "doctor.json");
-  const mdPath = resolveHelixPath(rootDir, "reports", "doctor.md");
+  const jsonPath = resolveWildArrangePath(rootDir, "reports", "doctor.json");
+  const mdPath = resolveWildArrangePath(rootDir, "reports", "doctor.md");
   report.reportJsonPath = path.relative(rootDir, jsonPath);
   report.reportMdPath = path.relative(rootDir, mdPath);
   await writeJsonAtomic(jsonPath, report);
@@ -84,12 +84,12 @@ function addFinding(findings, severity, section, message, extra = {}) {
 }
 
 async function checkConfigStructure(rootDir, findings) {
-  const { config, sourcePath } = await loadHelixConfig(rootDir);
-  const knownTopLevelKeys = new Set(Object.keys(DEFAULT_HELIX_CONFIG));
-  const knownInjectionPoints = new Set(Object.keys(DEFAULT_HELIX_CONFIG.injectionPoints));
+  const { config, sourcePath } = await loadWildArrangeConfig(rootDir);
+  const knownTopLevelKeys = new Set(Object.keys(DEFAULT_WILDARRANGE_CONFIG));
+  const knownInjectionPoints = new Set(Object.keys(DEFAULT_WILDARRANGE_CONFIG.injectionPoints));
   const rawConfigs = [
-    await readJson(path.join(rootDir, "helix.config.json"), null),
-    await readJson(resolveHelixPath(rootDir, "config.json"), null),
+    await readJson(path.join(rootDir, "wildarrange.config.json"), null),
+    await readJson(resolveWildArrangePath(rootDir, "config.json"), null),
   ].filter(Boolean);
 
   const unknownTopLevelKeys = [];
@@ -109,7 +109,7 @@ async function checkConfigStructure(rootDir, findings) {
     addFinding(findings, "warn", "config", `unknown injection point "${pointName}"; it will never be mounted`, { point: pointName });
   }
 
-  const registry = await readJson(resolveHelixPath(rootDir, "prompt-pack.json"), null);
+  const registry = await readJson(resolveWildArrangePath(rootDir, "prompt-pack.json"), null);
   const registeredSkills = new Set(Object.keys(registry?.skills || {}));
   const unregisteredSkills = [];
   const missingMarkdownMounts = [];
@@ -122,8 +122,8 @@ async function checkConfigStructure(rootDir, findings) {
         }
       }
       for (const markdownPath of point?.markdown || []) {
-        // .helix/ 下的挂载是运行时生成的；带模板变量的路径也无法静态检查
-        if (markdownPath.includes("{") || markdownPath.startsWith(".helix/")) continue;
+        // .wildarrange/ 下的挂载是运行时生成的；带模板变量的路径也无法静态检查
+        if (markdownPath.includes("{") || markdownPath.startsWith(".wildarrange/")) continue;
         if (!existsSync(path.join(rootDir, markdownPath))) {
           missingMarkdownMounts.push({ point: pointName, path: markdownPath });
           addFinding(findings, "warn", "config", `injection point "${pointName}" mounts missing markdown "${markdownPath}"; it is silently skipped`, { point: pointName, path: markdownPath });
@@ -138,7 +138,7 @@ async function checkConfigStructure(rootDir, findings) {
       }
     }
   } else {
-    addFinding(findings, "warn", "config", "prompt pack registry missing; run `helix init` to install it");
+    addFinding(findings, "warn", "config", "prompt pack registry missing; run `wildarrange init` to install it");
   }
 
   return {
@@ -215,7 +215,7 @@ async function checkCompletionIntegrity(rootDir, findings) {
 
   // 反向不一致（cross-review P2, round 4, 2026-07-21）：
   // 1) 未完成任务却已有账本完成事件 → 完成事务被中断，canonical 落盘失败。
-  //    这是可恢复状态：helix run 会自动裁决卡在 verifying 的任务。
+  //    这是可恢复状态：wildarrange run 会自动裁决卡在 verifying 的任务。
   let orphanCompletionEvents = 0;
   for (const task of tasks) {
     if (task.status === "completed") continue;
@@ -223,7 +223,7 @@ async function checkCompletionIntegrity(rootDir, findings) {
     const ref = taskRef(planId, task.id);
     if (completionEvents.refs.has(ref)) {
       orphanCompletionEvents += 1;
-      addFinding(findings, "warn", "completion_audit", `task ${ref} is ${task.status} but the ledger already has a completion event; the completion transaction was interrupted before the canonical state was saved — activate plan ${planId}, then run \`helix run\` (or \`helix node checkpoint --task ${task.id}\`) to adjudicate it`, { planId, taskId: task.id, taskRef: ref, taskStatus: task.status });
+      addFinding(findings, "warn", "completion_audit", `task ${ref} is ${task.status} but the ledger already has a completion event; the completion transaction was interrupted before the canonical state was saved — activate plan ${planId}, then run \`wildarrange run\` (or \`wildarrange node checkpoint --task ${task.id}\`) to adjudicate it`, { planId, taskId: task.id, taskRef: ref, taskStatus: task.status });
     }
   }
 
@@ -242,7 +242,7 @@ async function checkCompletionIntegrity(rootDir, findings) {
   let derivedDivergences = 0;
   const planIds = [...new Set(tasks.map((task) => task.planId).filter(Boolean))];
   for (const planId of planIds) {
-    const planPath = resolveHelixPath(rootDir, "plans", `${planId}.json`);
+    const planPath = resolveWildArrangePath(rootDir, "plans", `${planId}.json`);
     if (existsSync(planPath)) {
       const plan = await readJson(planPath);
       for (const planTask of plan?.tasks || []) {
@@ -255,7 +255,7 @@ async function checkCompletionIntegrity(rootDir, findings) {
       }
     }
   }
-  const markdownPath = resolveHelixPath(rootDir, "team", "tasks.md");
+  const markdownPath = resolveWildArrangePath(rootDir, "team", "tasks.md");
   if (existsSync(markdownPath)) {
     const markdownStatus = parseTasksMarkdownStatuses(await readFile(markdownPath, "utf8"));
     for (const [taskId, mdStatus] of markdownStatus) {
@@ -368,16 +368,16 @@ async function checkLedgerIntegrity(rootDir, findings) {
 async function checkLedgerAgainstBackup(rootDir, findings) {
   const backups = await listRuntimeStateBackups(rootDir);
   if (backups.length === 0) {
-    addFinding(findings, "warn", "ledger_backup", "no runtime state backup found; run `helix state backup` so ledger rewrites can be detected");
+    addFinding(findings, "warn", "ledger_backup", "no runtime state backup found; run `wildarrange state backup` so ledger rewrites can be detected");
     return { checked: false, reason: "no_backup" };
   }
   const latest = backups[backups.length - 1];
-  const backupLedgerPath = resolveHelixPath(rootDir, "backups", latest.backupId, ".helix", "ledger.jsonl");
+  const backupLedgerPath = resolveWildArrangePath(rootDir, "backups", latest.backupId, ".wildarrange", "ledger.jsonl");
   if (!existsSync(backupLedgerPath)) {
     return { checked: false, reason: "backup_has_no_ledger", backupId: latest.backupId };
   }
   const backupLines = await readLedgerLines(backupLedgerPath);
-  const currentLines = await readLedgerLines(resolveHelixPath(rootDir, "ledger.jsonl"));
+  const currentLines = await readLedgerLines(resolveWildArrangePath(rootDir, "ledger.jsonl"));
   let prefixIntact = currentLines.length >= backupLines.length;
   let firstDivergence = null;
   if (prefixIntact) {
@@ -421,7 +421,7 @@ async function readLedgerLines(filePath) {
 async function checkConfigBaseline(rootDir, findings) {
   const result = await verifyConfigBaseline(rootDir);
   if (result.status === "missing_baseline") {
-    addFinding(findings, "warn", "config_baseline", "no config baseline; run `helix config baseline` after reviewing config so weakening edits can be detected");
+    addFinding(findings, "warn", "config_baseline", "no config baseline; run `wildarrange config baseline` after reviewing config so weakening edits can be detected");
   } else if (!result.ok) {
     for (const failure of result.failures) {
       addFinding(findings, "error", "config_baseline", `config drift detected on ${failure.path}: ${failure.reason}`, { path: failure.path, reason: failure.reason });
@@ -443,7 +443,7 @@ async function checkRuntimeState(rootDir, findings) {
 // 门武装分项：门未武装时 acceptance-proof 的 review_not_tautological 会把任务
 // 挡在 completed 之外——doctor 必须把这件事摆到台面上，而不是埋在 status JSON 里。
 async function checkGateArming(rootDir, findings) {
-  const { config } = await loadHelixConfig(rootDir);
+  const { config } = await loadWildArrangeConfig(rootDir);
   const taskState = await loadTaskState(rootDir).catch(() => null);
   const arming = evaluateGateArming({ config, tasks: taskState?.tasks || [] });
   for (const issue of arming.issues) {
@@ -455,9 +455,9 @@ async function checkGateArming(rootDir, findings) {
 // Adapter 分项：硬拦截装没装、装得对不对，必须有体检。`.cursor/` 不进 git，
 // 团队成员各自跑 adapter install，漏装的人机器上 AI 不受约束——这里兜底发现。
 async function checkAdapters(rootDir, findings) {
-  const { config, sourcePath } = await loadHelixConfig(rootDir);
+  const { config, sourcePath } = await loadWildArrangeConfig(rootDir);
   if (!sourcePath) {
-    return { status: "skipped", reason: "no helix.config.json; adapter checks only run for configured projects" };
+    return { status: "skipped", reason: "no wildarrange.config.json; adapter checks only run for configured projects" };
   }
   const targets = [];
   const cursorEnabled = config.adapters?.cursor?.enabled === true;
@@ -468,14 +468,14 @@ async function checkAdapters(rootDir, findings) {
     const hooksPath = path.join(rootDir, ".cursor", "hooks.json");
     const bridgePath = path.join(rootDir, ".cursor", "hooks", "wildarrange-hook-bridge.mjs");
     if (!existsSync(hooksPath)) {
-      addFinding(findings, "warn", "adapters", "config 启用了 Cursor adapter 但 .cursor/hooks.json 不存在，本机没有硬拦截", { target: "cursor", nextAction: "node ./bin/helix.mjs adapter install --target cursor" });
+      addFinding(findings, "warn", "adapters", "config 启用了 Cursor adapter 但 .cursor/hooks.json 不存在，本机没有硬拦截", { target: "cursor", nextAction: "node ./bin/wildarrange.mjs adapter install --target cursor" });
       targets.push({ target: "cursor", installed: false });
     } else {
       const raw = await readFile(hooksPath, "utf8").catch(() => "");
       const referencesBridge = raw.includes("wildarrange-hook-bridge");
       const bridgeExists = existsSync(bridgePath);
       if (!referencesBridge || !bridgeExists) {
-        addFinding(findings, "warn", "adapters", ".cursor/hooks.json 未引用 bridge 或 bridge 文件缺失，硬拦截不完整", { target: "cursor", nextAction: "重新运行 node ./bin/helix.mjs adapter install --target cursor" });
+        addFinding(findings, "warn", "adapters", ".cursor/hooks.json 未引用 bridge 或 bridge 文件缺失，硬拦截不完整", { target: "cursor", nextAction: "重新运行 node ./bin/wildarrange.mjs adapter install --target cursor" });
       }
       targets.push({ target: "cursor", installed: referencesBridge && bridgeExists });
     }
@@ -484,15 +484,15 @@ async function checkAdapters(rootDir, findings) {
     const codexHooks = path.join(rootDir, ".codex", "hooks.json");
     const installed = existsSync(codexHooks);
     if (!installed) {
-      addFinding(findings, "warn", "adapters", "config 启用了 Codex adapter 但 .codex/hooks.json 不存在，本机没有硬拦截", { target: "codex", nextAction: "node ./bin/helix.mjs adapter install --target codex" });
+      addFinding(findings, "warn", "adapters", "config 启用了 Codex adapter 但 .codex/hooks.json 不存在，本机没有硬拦截", { target: "codex", nextAction: "node ./bin/wildarrange.mjs adapter install --target codex" });
     }
     targets.push({ target: "codex", installed });
   }
   if (kimiEnabled) {
-    const kimiBridge = resolveHelixPath(rootDir, "adapters", "kimi", "plugin", "hooks", "wildarrange-hook-bridge.mjs");
+    const kimiBridge = resolveWildArrangePath(rootDir, "adapters", "kimi", "plugin", "hooks", "wildarrange-hook-bridge.mjs");
     const installed = existsSync(kimiBridge);
     if (!installed) {
-      addFinding(findings, "warn", "adapters", "config 启用了 Kimi adapter 但 plugin bridge 不存在", { target: "kimi", nextAction: "node ./bin/helix.mjs adapter install --target kimi" });
+      addFinding(findings, "warn", "adapters", "config 启用了 Kimi adapter 但 plugin bridge 不存在", { target: "kimi", nextAction: "node ./bin/wildarrange.mjs adapter install --target kimi" });
     }
     targets.push({ target: "kimi", installed });
   }
@@ -515,14 +515,14 @@ async function checkAdapters(rootDir, findings) {
   for (const stale of staleRules) {
     addFinding(findings, "warn", "adapters", `${stale.file} 引用了不存在的路径 ${stale.missingPath}（规则会静默失效）`, { target: "cursor", nextAction: "修正为相对路径或当前机器的有效路径" });
   }
-  const legacyCursorRule = path.join(rulesDir, ["helix", "flow.mdc"].join(""));
+  const legacyCursorRule = path.join(rulesDir, ["wildarrange", "flow.mdc"].join(""));
   if (existsSync(legacyCursorRule)) {
     const relativePath = normalizeRelativePath(path.relative(rootDir, legacyCursorRule));
     legacyManagedRules.push({ path: relativePath });
     addFinding(findings, "warn", "adapters", `legacy managed Cursor rule ${relativePath} is still active and may be injected alongside wildarrange.mdc`, {
       target: "cursor",
       path: relativePath,
-      nextAction: "node ./bin/helix.mjs adapter install --target cursor",
+      nextAction: "node ./bin/wildarrange.mjs adapter install --target cursor",
     });
   }
 
@@ -554,14 +554,14 @@ async function checkDecisionHealth(rootDir, findings) {
 }
 
 async function checkRepositoryGovernance(rootDir, findings) {
-  const reportPath = resolveHelixPath(rootDir, "reports", "governance", "latest.json");
+  const reportPath = resolveWildArrangePath(rootDir, "reports", "governance", "latest.json");
   const report = await readJson(reportPath, null);
   if (!report) {
     return { checked: false, status: "not_run", findingCount: 0 };
   }
   const findingCount = Array.isArray(report.findings) ? report.findings.length : 0;
   if (report.status === "fail") {
-    addFinding(findings, "error", "repository_governance", `latest repository governance audit failed with ${findingCount} finding(s); run \`helix governance audit\` after repairs`, { reportPath: path.relative(rootDir, reportPath) });
+    addFinding(findings, "error", "repository_governance", `latest repository governance audit failed with ${findingCount} finding(s); run \`wildarrange governance audit\` after repairs`, { reportPath: path.relative(rootDir, reportPath) });
   } else if (report.status === "warn") {
     addFinding(findings, "warn", "repository_governance", `latest repository governance audit has ${findingCount} warning finding(s)`, { reportPath: path.relative(rootDir, reportPath) });
   }

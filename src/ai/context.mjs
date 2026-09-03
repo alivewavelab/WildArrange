@@ -7,15 +7,15 @@ import {
 import {
   STATE_VERSION,
   createWorkId,
-  ensureHelixDirs,
+  ensureWildArrangeDirs,
   nowIso,
   readJson,
-  resolveHelixPath,
+  resolveWildArrangePath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
 import { normalizeRelativePath } from "../infra/path-match.mjs";
-import { loadHelixConfig } from "../infra/runtime-config.mjs";
+import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { collectGitChangedPaths } from "../infra/git-diff.mjs";
 import { renderPromptPackEntry } from "../infra/prompt-pack.mjs";
 import { writeRuntimeContextSnapshot } from "../infra/runtime-snapshot.mjs";
@@ -26,8 +26,8 @@ import { findRunnableTask, normalizeAgentName } from "../orchestration/task-boar
 import { statusReport } from "../orchestration/status.mjs";
 
 export async function buildAgentContext(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
-  const { config, sourcePath } = await loadHelixConfig(rootDir);
+  await ensureWildArrangeDirs(rootDir);
+  const { config, sourcePath } = await loadWildArrangeConfig(rootDir);
   const taskState = await loadTaskState(rootDir, { planId: options.planId });
   const task = resolveContextTask(taskState?.tasks || [], options.taskId, options.planId);
   const changed = await collectGitChangedPaths(rootDir);
@@ -60,7 +60,7 @@ export async function buildAgentContext(rootDir, options = {}) {
     agent,
   );
   const context = {
-    kind: "helix_agent_context",
+    kind: "wildarrange_agent_context",
     version: STATE_VERSION,
     at: nowIso(),
     configPath: sourcePath,
@@ -96,8 +96,8 @@ export async function buildAgentContext(rootDir, options = {}) {
     rulesContextPath: rules.reportMdPath,
   };
   const suffix = task ? `${agent}-${task.id}` : `${agent}-general`;
-  const jsonPath = resolveHelixPath(rootDir, "context-agents", `${suffix}.json`);
-  const mdPath = resolveHelixPath(rootDir, "context-agents", `${suffix}.md`);
+  const jsonPath = resolveWildArrangePath(rootDir, "context-agents", `${suffix}.json`);
+  const mdPath = resolveWildArrangePath(rootDir, "context-agents", `${suffix}.md`);
   context.reportJsonPath = normalizeRelativePath(path.relative(rootDir, jsonPath));
   context.reportMdPath = normalizeRelativePath(path.relative(rootDir, mdPath));
   await writeJsonAtomic(jsonPath, context);
@@ -121,8 +121,8 @@ export async function writeContextSnapshot(rootDir, options = {}) {
 }
 
 export async function recordRuntimeSession(rootDir, options = {}) {
-  await ensureHelixDirs(rootDir);
-  const sessionId = options.sessionId || process.env.HELIX_SESSION_ID || process.env.CODEX_SESSION_ID || process.env.CURSOR_SESSION_ID || createWorkId("session");
+  await ensureWildArrangeDirs(rootDir);
+  const sessionId = options.sessionId || process.env.WILDARRANGE_SESSION_ID || process.env.CODEX_SESSION_ID || process.env.CURSOR_SESSION_ID || createWorkId("session");
   const source = options.source || "resume";
   const now = nowIso();
   const lineage = await readSessionLineage(rootDir);
@@ -137,7 +137,7 @@ export async function recordRuntimeSession(rootDir, options = {}) {
   lineage.currentSessionId = sessionId;
   lineage.sessionIds = lineage.sessions.map((session) => session.id);
   lineage.updatedAt = now;
-  await writeJsonAtomic(resolveHelixPath(rootDir, "sessions", "lineage.json"), lineage);
+  await writeJsonAtomic(resolveWildArrangePath(rootDir, "sessions", "lineage.json"), lineage);
   await appendLedger(rootDir, { type: "session_recorded", sessionId, source });
   return lineage;
 }
@@ -147,7 +147,7 @@ export async function resumeReport(rootDir, options = {}) {
     sessionId: options.sessionId,
     source: options.source || "resume",
   });
-  const latestSnapshot = await readJson(resolveHelixPath(rootDir, "snapshots", "latest.json"), null);
+  const latestSnapshot = await readJson(resolveWildArrangePath(rootDir, "snapshots", "latest.json"), null);
   const report = await statusReport(rootDir);
   const taskState = await loadTaskState(rootDir);
   const nextTask = taskState ? findRunnableTask(taskState.tasks) : null;
@@ -181,20 +181,20 @@ export async function continuationDirective(rootDir, options = {}) {
   const failed = (taskState?.tasks || []).find((task) => task.status === "failed" || task.status === "review_blocked" || task.status === "needs_user_decision");
   const shouldContinue = Boolean(runnable || active || failed);
   const directive = {
-    kind: "helix_continuation_directive",
+    kind: "wildarrange_continuation_directive",
     version: STATE_VERSION,
     at: nowIso(),
     shouldContinue,
     reason: runnable ? "runnable_task" : active ? "active_task" : failed ? "blocked_or_failed_task" : "no_unfinished_work",
     taskId: runnable?.id || active?.id || failed?.id || null,
-    nextCommand: runnable ? "node ./bin/helix.mjs run" : active ? `node ./bin/helix.mjs node verify --task ${active.id}` : failed ? "node ./bin/helix.mjs status" : null,
+    nextCommand: runnable ? "node ./bin/wildarrange.mjs run" : active ? `node ./bin/wildarrange.mjs node verify --task ${active.id}` : failed ? "node ./bin/wildarrange.mjs status" : null,
     message: shouldContinue
       ? `WildArrange 还有未收口工作：${runnable?.id || active?.id || failed?.id}。请继续执行 ${runnable ? "run" : active ? "node loop" : "failure review"}，不要丢失上下文。`
       : "WildArrange 当前没有可续跑任务。",
     resume,
   };
-  const jsonPath = resolveHelixPath(rootDir, "sessions", "continuation.json");
-  const mdPath = resolveHelixPath(rootDir, "sessions", "continuation.md");
+  const jsonPath = resolveWildArrangePath(rootDir, "sessions", "continuation.json");
+  const mdPath = resolveWildArrangePath(rootDir, "sessions", "continuation.md");
   directive.reportJsonPath = normalizeRelativePath(path.relative(rootDir, jsonPath));
   directive.reportMdPath = normalizeRelativePath(path.relative(rootDir, mdPath));
   await writeJsonAtomic(jsonPath, directive);
@@ -373,7 +373,7 @@ function normalizePromptBudget(value) {
 }
 
 async function readSessionLineage(rootDir) {
-  return readJson(resolveHelixPath(rootDir, "sessions", "lineage.json"), {
+  return readJson(resolveWildArrangePath(rootDir, "sessions", "lineage.json"), {
     version: STATE_VERSION,
     currentSessionId: null,
     sessionIds: [],
