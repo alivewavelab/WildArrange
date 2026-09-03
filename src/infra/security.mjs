@@ -5,6 +5,12 @@ import { WILDARRANGE_CONFIG_FILE } from "./runtime-config.mjs";
 import { appendLedger } from "./ledger.mjs";
 import { normalizeRelativePath } from "./path-match.mjs";
 import {
+  assertSafeId,
+  copyEntry,
+  resolveInboundPath,
+  resolveRelativeInside,
+} from "./recovery-transaction.mjs";
+import {
   createWorkId,
   ensureWildArrangeDirs,
   hashContent,
@@ -326,59 +332,29 @@ export async function restoreRuntimeStateBackup(rootDir, options = {}) {
 }
 
 function assertSafeBackupId(value, label = "backup id") {
-  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)) {
-    throw new Error(`${label} must be a safe single-segment identifier`);
-  }
+  assertSafeId(value, label);
 }
 
 function resolveBackupSourcePath(rootDir, candidate) {
-  if (typeof candidate !== "string" || !candidate) throw new Error("archive recovery path must be a non-empty string");
-  const sourcePath = path.isAbsolute(candidate) ? path.resolve(candidate) : path.resolve(rootDir, candidate);
-  const rootPath = path.resolve(rootDir);
-  if (sourcePath !== rootPath && !sourcePath.startsWith(`${rootPath}${path.sep}`)) {
-    throw new Error(`archive recovery path escapes project root: ${candidate}`);
+  try {
+    return resolveInboundPath(rootDir, candidate, {
+      denyPrefixes: [resolveWildArrangePath(rootDir, "backups")],
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("denied")) throw new Error(`archive recovery path cannot include backups: ${candidate}`);
+    if (message.includes("escapes")) throw new Error(`archive recovery path escapes project root: ${candidate}`);
+    if (message.includes("non-empty")) throw new Error("archive recovery path must be a non-empty string");
+    throw error;
   }
-  const backupsPath = resolveWildArrangePath(rootDir, "backups");
-  if (sourcePath === backupsPath || sourcePath.startsWith(`${backupsPath}${path.sep}`)) {
-    throw new Error(`archive recovery path cannot include backups: ${candidate}`);
-  }
-  return sourcePath;
 }
 
 function resolveManifestRelativePath(parentDir, relativePath, label) {
-  if (typeof relativePath !== "string" || path.isAbsolute(relativePath)) {
-    throw new Error(`${label} must be relative`);
-  }
-  const targetPath = path.resolve(parentDir, relativePath);
-  const parentPath = path.resolve(parentDir);
-  if (targetPath !== parentPath && !targetPath.startsWith(`${parentPath}${path.sep}`)) {
-    throw new Error(`${label} escapes its root: ${relativePath}`);
-  }
-  return targetPath;
+  return resolveRelativeInside(parentDir, relativePath, label);
 }
 
 async function copyBackupEntry(sourcePath, backupDir, relativePath) {
-  let sourceStat;
-  try {
-    sourceStat = await lstat(sourcePath);
-  } catch (error) {
-    if (error?.code === "ENOENT") return { path: relativePath, status: "missing" };
-    throw error;
-  }
-  const targetPath = resolveManifestRelativePath(backupDir, relativePath, "backup target");
-  await mkdir(path.dirname(targetPath), { recursive: true });
-  if (sourceStat.isDirectory()) {
-    await rm(targetPath, { recursive: true, force: true });
-    await cp(sourcePath, targetPath, { recursive: true, force: true, verbatimSymlinks: true });
-    return { path: relativePath, status: "copied", type: "directory" };
-  }
-  if (sourceStat.isSymbolicLink()) {
-    await rm(targetPath, { recursive: true, force: true });
-    await cp(sourcePath, targetPath, { force: true, verbatimSymlinks: true });
-    return { path: relativePath, status: "copied", type: "symlink" };
-  }
-  await copyFile(sourcePath, targetPath);
-  return { path: relativePath, status: "copied", type: "file", bytes: sourceStat.size };
+  return copyEntry(sourcePath, backupDir, relativePath);
 }
 
 export async function verifyRuntimeState(rootDir) {

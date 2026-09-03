@@ -24,6 +24,12 @@ import {
   buildRouteReviewPanelViewModel,
   renderPanelsHtml,
 } from "./dashboard-panels.mjs";
+import {
+  ADOPTION_NAV_BUTTON,
+  ADOPTION_SCRIPT,
+  ADOPTION_VIEW_HTML,
+  tryHandleAdoptionApi,
+} from "./adoption-panel.mjs";
 
 class DashboardBadRequest extends Error {}
 class DashboardPayloadTooLarge extends Error {}
@@ -155,6 +161,9 @@ export function startDashboardServer(rootDir, options = {}) {
       }
       if (request.method === "GET" && url.pathname === "/api/panels/ops") {
         sendJson(response, 200, await buildOpsPanelViewModel(rootDir));
+        return;
+      }
+      if (await tryHandleAdoptionApi(request, response, url, rootDir)) {
         return;
       }
       if (url.pathname === "/" || url.pathname === "/index.html") {
@@ -503,6 +512,7 @@ function renderDashboardHtml() {
         <button data-view="operations" data-label="任务操作"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span>任务操作</span></button>
         <button data-view="review" data-label="决策复盘"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 3v18h18"/><path d="M7 16l4-5 4 3 5-7"/></svg><span>决策复盘</span></button>
         <button data-view="logs" data-label="运行与日志"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg><span>运行与日志</span></button>
+        ${ADOPTION_NAV_BUTTON}
       </nav>
       <div class="rail-foot"><i></i>本地服务正常 · 127.0.0.1</div>
     </aside>
@@ -573,6 +583,7 @@ function renderDashboardHtml() {
           <div class="grid two"><section><div class="panel-head"><h2>最新快照</h2></div><pre id="snapshot"></pre></section><section><div class="panel-head"><h2>工作流摘要</h2><button id="generateSummary">重新生成</button></div><pre id="summary"></pre></section></div>
           <section style="margin-top:22px"><div class="panel-head"><h2>可信账本</h2></div><pre id="ledger"></pre></section>
         </div>
+${ADOPTION_VIEW_HTML}
       </main>
     </div>
   </div>
@@ -580,6 +591,11 @@ function renderDashboardHtml() {
     const DASHBOARD_TOKEN_KEY = "wildarrange.dashboard.token";
     const el = (id) => document.getElementById(id);
     const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+    if (location.hash.startsWith("#adoption?")) {
+      const token = new URLSearchParams(location.hash.slice(location.hash.indexOf("?") + 1)).get("token") || "";
+      if (token) sessionStorage.setItem(DASHBOARD_TOKEN_KEY, token);
+      history.replaceState(null, "", location.pathname + location.search + "#adoption");
+    }
     function dashboardFetch(url, options = {}) {
       const headers = new Headers(options.headers || {});
       const token = sessionStorage.getItem(DASHBOARD_TOKEN_KEY) || "";
@@ -896,6 +912,7 @@ function renderDashboardHtml() {
       renderInbox(payload.result);
       return payload;
     }
+    ${ADOPTION_SCRIPT}
     ${PANELS_SCRIPT}
     loadState();
   </script>

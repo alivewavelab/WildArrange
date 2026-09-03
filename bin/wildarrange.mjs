@@ -2,7 +2,14 @@
 import path from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { startDashboardServer } from "../src/interface/dashboard.mjs";
+import {
+  recoverAdoption,
+  resumeAdoption,
+  startAdoption,
+  statusAdoption,
+} from "../src/orchestration/adoption.mjs";
 import { projectDecisions, projectDecisionStats } from "../src/interface/decisions.mjs";
 import { projectTimeline } from "../src/interface/timeline.mjs";
 import { COMMAND_REGISTRY, renderCommandsMarkdown, renderHelp } from "../src/interface/cli-help.mjs";
@@ -898,6 +905,54 @@ async function main() {
       return;
     }
     throw new Error("wildarrange changes requires list, review, or resolve");
+  }
+
+  if (command === "adoption") {
+    const subcommand = args._[1];
+    const host = args.host && args.host !== true ? args.host : "127.0.0.1";
+    const port = args.port && args.port !== true ? Number(args.port) : 8765;
+    const token = args.token && args.token !== true
+      ? args.token
+      : process.env.WILDARRANGE_DASHBOARD_TOKEN || randomBytes(24).toString("base64url");
+    const startServer = async (options) => {
+      const server = await startDashboardServer(rootDir, options);
+      const address = server.address();
+      const actualPort = typeof address === "object" && address ? address.port : options.port || 8765;
+      return { server, url: `http://${options.host || host}:${actualPort}/#adoption?token=${encodeURIComponent(options.token || token)}` };
+    };
+    if (subcommand === "start") {
+      const result = await startAdoption(rootDir, { host, port, token, startServer });
+      console.log(JSON.stringify(result, null, 2));
+      if (result.ok && result.url) await new Promise(() => {});
+      return;
+    }
+    if (subcommand === "status") {
+      console.log(JSON.stringify(await statusAdoption(rootDir, {
+        sessionId: args.session && args.session !== true ? args.session : undefined,
+      }), null, 2));
+      return;
+    }
+    if (subcommand === "resume") {
+      const result = await resumeAdoption(rootDir, {
+        sessionId: args.session && args.session !== true ? args.session : undefined,
+        host,
+        port,
+        token,
+        startServer,
+      });
+      console.log(JSON.stringify(result, null, 2));
+      if (result.ok && result.url) await new Promise(() => {});
+      return;
+    }
+    if (subcommand === "recover") {
+      const result = await recoverAdoption(rootDir, {
+        sessionId: args.session && args.session !== true ? args.session : undefined,
+      });
+      console.log(JSON.stringify(result, null, 2));
+      process.exitCode = result.ok ? 0 : 2;
+      return;
+    }
+    throw new Error("wildarrange adoption requires start, status, resume, or recover");
   }
 
   if (command === "serve") {

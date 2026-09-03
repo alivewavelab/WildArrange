@@ -21,6 +21,11 @@ import { runReviewGate } from "./review-gate.mjs";
 import { writeAcceptanceProof } from "./acceptance-proof.mjs";
 import { runRepositoryGovernanceAudit } from "./repository-governance.mjs";
 import {
+  applyVerificationCard,
+  generateVerificationArtifacts,
+  scanVerificationGovernance,
+} from "./verification-governance.mjs";
+import {
   applyContractGovernanceCard,
   generateContractGovernanceArtifacts,
   runContractGovernanceReview,
@@ -106,6 +111,21 @@ async function adaptRepositoryGovernance(ctx) {
   return { status: raw.status, evidence: raw, sideEffect: "state_written" };
 }
 
+async function adaptVerificationScan(ctx) {
+  const raw = await scanVerificationGovernance(ctx.rootDir, ctx.options || {});
+  return { status: "pass", evidence: raw, sideEffect: "none" };
+}
+
+async function adaptVerificationApplyCard(ctx) {
+  const raw = await applyVerificationCard(ctx.rootDir, ctx.options || {});
+  return { status: raw.status === "committed" ? "pass" : "fail", evidence: raw, sideEffect: "files_changed" };
+}
+
+async function adaptVerificationGenerate(ctx) {
+  const raw = await generateVerificationArtifacts(ctx.rootDir, ctx.options || {});
+  return { status: "pass", evidence: raw, sideEffect: "files_changed" };
+}
+
 const CAPABILITIES = {
   worker: adaptWorker,
   verify: adaptVerify,
@@ -116,6 +136,9 @@ const CAPABILITIES = {
   command: adaptCommand,
   "command-safety": adaptCommandSafety,
   "repository-governance": adaptRepositoryGovernance,
+  "verification-governance-scan": adaptVerificationScan,
+  "verification-governance-apply-card": adaptVerificationApplyCard,
+  "verification-governance-generate-artifacts": adaptVerificationGenerate,
   "contract-governance-scan": adaptContractScan,
   "contract-governance-apply-card": adaptContractApplyCard,
   "contract-governance-generate-artifacts": adaptContractGenerate,
@@ -140,22 +163,35 @@ export async function invokeCapability(name, ctx = {}) {
     const outcome = await adapter(ctx);
     return normalizeEnvelope(name, outcome, Date.now() - startedAt);
   } catch (error) {
-    return normalizeEnvelope(
-      name,
-      {
-        status: "fail",
-        evidence: null,
-        sideEffect: "none",
-        error: buildErrorProtocol({
-          code: "capability_threw",
-          module: capabilityModule(name),
-          message: error instanceof Error ? error.message : String(error),
-          nextAction: `运行 node ./bin/wildarrange.mjs doctor 体检；把本错误完整贴给 AI，定位 src/${capabilityModule(name)}`,
-        }),
-      },
-      Date.now() - startedAt,
-    );
+    return capabilityErrorEnvelope(name, error, Date.now() - startedAt);
   }
+}
+
+const SYSTEM_ERROR_CODE_RE = /^(ERR_[A-Z0-9_]+|E[A-Z][A-Z0-9]*)$/;
+
+export function capabilityErrorEnvelope(name, error, durationMs) {
+  const rawCode = error?.code;
+  const code = typeof rawCode === "string"
+    && /^[a-z][a-z0-9_]*$/i.test(rawCode)
+    && !SYSTEM_ERROR_CODE_RE.test(rawCode)
+    ? rawCode
+    : "capability_threw";
+  return normalizeEnvelope(
+    name,
+    {
+      status: "fail",
+      evidence: error?.evidence ?? error?.manifest ?? null,
+      sideEffect: "none",
+      error: buildErrorProtocol({
+        code,
+        module: capabilityModule(name),
+        message: error instanceof Error ? error.message : String(error),
+        nextAction: error?.nextAction || error?.next_action
+          || `运行 node ./bin/wildarrange.mjs doctor 体检；把本错误完整贴给 AI，定位 src/${capabilityModule(name)}`,
+      }),
+    },
+    durationMs,
+  );
 }
 
 function normalizeEnvelope(name, outcome, durationMs) {

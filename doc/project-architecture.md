@@ -125,9 +125,13 @@ AGENTS.md                         # product goals, global boundaries, release ga
 - `src/capabilities/worker.mjs` / `src/capabilities/review-gate.mjs`：worker 执行与 BaiZe 独立 review 通道。风险复核与怀疑式验收是 BaiZe Skill 模式，非独立长期 Agent。
 - `src/infra/command-safety.mjs`：worker、verifier、review 命令、质量 gate 与子 Agent runner 共用的高风险 shell 命令预检；阻断破坏性系统命令与对项目源/测试/文档目录的递归删除。内置模式为不可削弱底线；config 中 `commandSafety.extraPatterns` 追加项目规则（`compileCommandSafetyPatterns` 编译，调用方经 `runCommand` options 传入）。
 - `src/infra/security.mjs`：config hash 基线、config 校验、运行时状态备份、归档精确恢复包、备份列表、一键状态恢复与关键状态校验。
+- `src/interface/adoption-panel.mjs`：验证治理接管 Dashboard 卡片、批准/恢复 API 与页面片段；写操作复用 Host/Origin/token/payload 防护。`adoption start/resume` 未显式提供 token 时生成单次随机 token，并通过 URL fragment 放入当前标签页。
+- `src/orchestration/adoption.mjs`：接管会话状态机、维护互斥、逐卡事务、`adoption recover` 和两次 Git 锚定；commit A/B 核对 Git blob 与生成文件内容哈希，并对 Windows 换行规范化，不接受同名路径存在。已生效改动禁止直接取消；恢复成功或普通回滚成功后才释放维护 marker。不进入 `task.status`。
+- `src/capabilities/verification-governance.mjs`：经 gateway 暴露 scan / apply-card / generate-artifacts。archive 只允许项目可提交根（默认 `docs/verification-archive`），禁止 `.wildarrange/` / `.git` / `node_modules`。
+- `src/infra/verification-discovery.mjs` / `verification-registry.mjs` / `recovery-transaction.mjs`：只读扫描（现行 AGENTS/Skill 不得危险动作）、三文件 freshness（owner 从 Inventory HTML 内嵌的机器记录读取声明指纹）、通用恢复原语。Inventory HTML 是给人看的当前真源/历史档案/删除墓碑/暂缓清单；写入前统一检查目标名称，已有非等价文件、目录或链接时暂停且零覆盖。
 - `src/infra/contract-governance.mjs`：技术栈中立的接口/数据库契约台账、差异卡、覆盖状态和快照归档。发现器采用静态清单；首版只对照 Tauri Rust command、handler 注册与前端 invoke，Rust SQL 字符串明确降级人工申报。
 - `src/capabilities/contract-governance.mjs`：经 gateway 暴露 contract scan / apply-card / generate-artifacts，并在现有 review 内向 LuWu 提供契约治理证据；未初始化台账只告警，已接管区域的漏申报或待批准差异阻断 review。
-- `src/interface/doctor.mjs`：一致性 doctor，审计 config 结构/mounts、将全局 task ledger 中所有 Plan 的 completed 任务与 checkpoint/acceptance proof/ledger 事件按 `<planId>:<taskId>` 对账、校验 ledger hash 链、ledger 与最新备份交叉检查，并展示最新仓库治理状态。旧完成事件缺 planId 时只在 taskId 全局唯一时兼容；无法唯一归属就报告 ambiguous，不猜。专用 `gateArming` 与 `adapters` 段展示未武装 gate（黄灯不再埋在 `status` JSON 里）、已启用但未安装的 adapter hook（`.cursor/` 不随每次 clone 传播——`.gitignore` 对 `.cursor/hooks.json` 与 `.cursor/hooks/` 例外以便 hard enforcement 可提交，doctor 验证各机器实际拥有），以及引用已不存在绝对路径的规则文件（机器/用户名变更后 stale）。诊断与 gating 隔离：各项检查独立 try/catch（崩溃仅标红本段 `check_failed`，其余仍报告），doctor 从不追加 hash 链 ledger。还检查反向：orphan completion 事件（未 completed 任务已有链校验 completion ledger 事件——中断的完成事务，带 `wildarrange run` 恢复提示）、完成后副作用失败（snapshot/summary 在 commit 后写不出的 `completion_side_effect_failed` ledger 事件），以及 canonical/derived 分歧（各 Plan mirror JSON 或 active `tasks.md` 与权威 `team/tasks.json` 不一致）。
+- `src/interface/doctor.mjs`：一致性 doctor，审计 config 结构/mounts、将全局 task ledger 中所有 Plan 的 completed 任务与 checkpoint/acceptance proof/ledger 事件按 `<planId>:<taskId>` 对账、校验 ledger hash 链、ledger 与最新备份交叉检查，并展示最新仓库治理状态。`registryFreshness` 是独立容错黄灯分项。旧完成事件缺 planId 时只在 taskId 全局唯一时兼容；无法唯一归属就报告 ambiguous，不猜。专用 `gateArming` 与 `adapters` 段展示未武装 gate（黄灯不再埋在 `status` JSON 里）、已启用但未安装的 adapter hook（`.cursor/` 不随每次 clone 传播——`.gitignore` 对 `.cursor/hooks.json` 与 `.cursor/hooks/` 例外以便 hard enforcement 可提交，doctor 验证各机器实际拥有），以及引用已不存在绝对路径的规则文件（机器/用户名变更后 stale）。诊断与 gating 隔离：各项检查独立 try/catch（崩溃仅标红本段 `check_failed`，其余仍报告），doctor 从不追加 hash 链 ledger。还检查反向：orphan completion 事件（未 completed 任务已有链校验 completion ledger 事件——中断的完成事务，带 `wildarrange run` 恢复提示）、完成后副作用失败（snapshot/summary 在 commit 后写不出的 `completion_side_effect_failed` ledger 事件），以及 canonical/derived 分歧（各 Plan mirror JSON 或 active `tasks.md` 与权威 `team/tasks.json` 不一致）。
 - Cursor adapter 安装会识别受管旧规则 `.cursor/rules/wildarrangeflow.mdc`，先写入 adapter backup 再移除，并生成当前 `wildarrange.mdc`；Doctor 同时报告尚未迁移的旧规则，避免新旧 alwaysApply 双注入。
 - `src/capabilities/code-intel.mjs`：LSP/typecheck 命令、AST/结构命令、hashline anchor 与注释检查的宿主中立代码智能 gate。
 - `src/infra/repository-layout.mjs` / `src/capabilities/repository-governance.mjs`：LuWu 只读仓库审计。确定性检查覆盖目录级 `AGENTS.md`、双语 README 命令与安全标记对等、真实 CLI `--help`、固定五 Agent 白名单、prompt-pack 注册、命名、文件放置策略与实际注释 token（含 JavaScript 模板表达式）；capability 经 gateway 写 JSON/Markdown 证据。`--changed-only` 将检查范围限于变更文件及相关结构不变量；Git 变更发现不可用时才全扫描 fallback。
@@ -274,6 +278,16 @@ adapter 安装还生成一组 command，用户不必开终端做常见操作。�
 - Codex 与 Kimi：`.agents/skills/<name>/SKILL.md`（共享项目 Skill 目录，带 `name`/`description` metadata）。
 
 每个 command 是指示 agent 运行匹配 `wildarrange.mjs` CLI 子命令并报告结果的 prompt；它们是让 agent 跑 CLI 的快捷方式，不是原生按钮。
+
+### 对话生成计划与负责人
+
+`UserPromptSubmit` 先保留确定性路由证据；当路由为 `plan` 或明确 `needsPlan` 时，Hook 向当前宿主大模型发出结构化生成指令。宿主把对话理解结果写入 `.wildarrange/plan-drafts/<session>-plan.json`，顶层标记 `generated_by: "host_semantic"`。这一步使用宿主模型已有的对话上下文，不在 WildArrange 内重复调用另一套 LLM API。
+
+新增功能先进入跨轮持久化的功能设计确认门。运行时把当前会话状态写入 `.wildarrange/sessions/feature-design/`：`awaiting_feature_confirmation` 时任何“开始做、直接做、跳过计划”都不能生成计划或修改项目；开发者单独明确回复“确认”后进入 `awaiting_plan_import`，只允许写计划草稿并导入带同一 `feature_design_ref` 的完整计划。计划成功导入后仍进入下述 `awaiting_plan_approval`，批准前不得执行任务。旧活动 Plan 不能替代本次新增功能的绑定 Plan。
+
+计划导入门要求语义生成计划的每张可执行任务显式填写 `task.owner`，且只能是具备 command-worker 资格的 Jiuwei 或 ZhuRong；缺失、只读 Agent 或非法值在任何任务状态落盘前拒绝。DiJiang、BaiZe、LuWu 仍通过计划、复核、治理阶段参与，不承担 `worker_command`。语义生成计划无条件进入 `awaiting_plan_approval`，用户明确执行 `plan approve` 后才能运行。为兼容既有手工计划，未标记 `host_semantic` 的旧计划仍允许缺省 owner 回落到 Jiuwei；线性执行入口仍会拒绝只读 Agent 进入 command worker。
+
+`task.owner` 是负责人单一事实源：执行前 Agent 上下文、任务领取、Git 协调与并行运行均读取它。路由的 `primaryAgent` 只负责生成阶段的建议和审计，不会在执行阶段暗中覆盖 owner。尚无活动任务或计划仍待审批时，PreToolUse 只额外放行 `.wildarrange/plan-drafts/*.json`；任意 Shell 默认拒绝，仅精确放行 WildArrange 的初始化、计划导入/批准和少量只读命令。批准后，草稿目录恢复普通 `writable_paths` 门禁。
 
 adapter 安装与卸载始终备份被覆盖或删除的文件，含生成的 slash command。`adapter restore --backup <backupId>` 将一备份目录恢复到原项目路径。
 

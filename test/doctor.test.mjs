@@ -8,6 +8,7 @@ import { runDoctor } from "../src/interface/doctor.mjs";
 import { appendLedger } from "../src/infra/ledger.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { generateVerificationArtifacts } from "../src/capabilities/verification-governance.mjs";
 
 test("doctor keeps reporting when one check crashes on corrupted state", async () => {
   await withTempDir(async (dir) => {
@@ -26,6 +27,8 @@ test("doctor keeps reporting when one check crashes on corrupted state", async (
     assert.ok(report.sections.config.sourcePath);
     assert.notEqual(report.sections.ledger.status, "check_failed");
     assert.notEqual(report.sections.runtimeState.status, "check_failed");
+    assert.ok(report.sections.registryFreshness);
+    assert.notEqual(report.sections.registryFreshness.status, "check_failed");
 
     const markdown = await readFile(resolveWildArrangePath(dir, "reports", "doctor.md"), "utf8");
     assert.match(markdown, /CHECK FAILED/);
@@ -62,6 +65,50 @@ test("doctor surfaces unarmed gates and missing adapter hooks instead of burying
     const markdown = await readFile(resolveWildArrangePath(dir, "reports", "doctor.md"), "utf8");
     assert.match(markdown, /Gate arming: NOT ARMED/);
     assert.match(markdown, /cursor:MISSING/);
+  });
+});
+
+test("doctor yellow-lights a changed runner after adoption artifacts exist", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const locator = {
+      registryPath: "docs/verification-registry.json",
+      bootstrapPath: "docs/verification-bootstrap.json",
+      inventoryPath: "docs/verification-inventory.json",
+    };
+    await mkdir(path.join(dir, "docs"), { recursive: true });
+    await writeFile(path.join(dir, "package.json"), JSON.stringify({
+      name: "legacy",
+      scripts: { test: "node --version" },
+    }, null, 2));
+    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
+      verificationGovernance: locator,
+    }, null, 2));
+    const cards = [{
+      id: "card_001_loc",
+      action: "adopt",
+      asset: "config_locator",
+      path: "wildarrange.config.json",
+      status: "approved",
+      patch: { kind: "json_merge", path: "wildarrange.config.json", value: { verificationGovernance: locator } },
+    }];
+    await generateVerificationArtifacts(dir, { cards, locator, phase: "registry", writeLocator: true });
+    await generateVerificationArtifacts(dir, {
+      cards,
+      locator,
+      phase: "handoff",
+      baselineRef: "abc123",
+      universeFingerprint: "uni",
+    });
+    const fresh = await runDoctor(dir);
+    assert.equal(fresh.sections.registryFreshness.stale, false);
+    const pkg = JSON.parse(await readFile(path.join(dir, "package.json"), "utf8"));
+    pkg.scripts.test = "node --test";
+    await writeFile(path.join(dir, "package.json"), JSON.stringify(pkg, null, 2));
+    const drifted = await runDoctor(dir);
+    assert.equal(drifted.sections.registryFreshness.stale, true);
+    assert.equal(drifted.sections.registryFreshness.status, "declared_input_drift");
+    assert.ok(drifted.findings.some((finding) => finding.section === "registry_freshness"));
   });
 });
 

@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
+import * as gateway from "../src/capabilities/gateway.mjs";
 import { invokeCapability, listRegisteredCapabilities } from "../src/capabilities/gateway.mjs";
 import { runDeliveryPipeline } from "../src/orchestration/delivery-pipeline.mjs";
 import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
@@ -53,9 +54,34 @@ test("gateway: invokeCapability rejects unknown capability names", async () => {
   await assert.rejects(() => invokeCapability("does-not-exist", {}), /Unknown capability/);
 });
 
+test("CODE-006: gateway preserves business error.code from apply-card instead of capability_threw", async () => {
+  await withTempDir(async (dir) => {
+    const stale = await invokeCapability("verification-governance-apply-card", {
+      rootDir: dir,
+      options: {
+        sessionId: "adopt_x",
+        card: { id: "card_001_deadbeef", fingerprint: "live-fingerprint" },
+        expectedFingerprint: "not-the-live-fingerprint",
+      },
+    });
+    assert.equal(stale.status, "fail");
+    assert.equal(stale.error.code, "card_stale");
+    assert.notEqual(stale.error.code, "capability_threw");
+
+    const missing = await invokeCapability("verification-governance-apply-card", {
+      rootDir: dir,
+      options: { sessionId: "adopt_x", card: { id: "card_001_deadbeef", path: "../escape.txt", patch: { path: "../escape.txt", kind: "write_text", content: "no" } } },
+    });
+    assert.equal(missing.status, "fail");
+    assert.equal(typeof missing.error.code, "string");
+    assert.notEqual(missing.error.code, "unknown_error");
+    assert.match(missing.error.message, /escapes project root|recovery path/);
+  });
+});
+
 test("gateway: listRegisteredCapabilities exposes the static registry", () => {
   const names = listRegisteredCapabilities();
-  for (const expected of ["worker", "verify", "scope", "review", "acceptance-proof", "checkpoint", "command", "command-safety", "repository-governance"]) {
+  for (const expected of ["worker", "verify", "scope", "review", "acceptance-proof", "checkpoint", "command", "command-safety", "repository-governance", "verification-governance-scan", "verification-governance-apply-card", "verification-governance-generate-artifacts"]) {
     assert.ok(names.includes(expected), `expected ${expected} to be registered, got: ${names.join(", ")}`);
   }
 });
@@ -78,6 +104,40 @@ test("gateway: command-safety capability blocks a destructive command", async ()
   });
   assert.equal(envelope.status, "fail");
   assert.equal(envelope.evidence.allowed, false);
+});
+
+test("capabilityErrorEnvelope preserves recovery_required code and evidence", () => {
+  assert.equal(typeof gateway.capabilityErrorEnvelope, "function");
+  const error = Object.assign(new Error("adoption rollback failed"), {
+    code: "recovery_required",
+    evidence: { manifest: { status: "recovery_required" } },
+    nextAction: "resume",
+  });
+  const envelope = gateway.capabilityErrorEnvelope("verification-governance-apply-card", error, 9);
+  assert.equal(envelope.capability, "verification-governance-apply-card");
+  assert.equal(envelope.status, "fail");
+  assert.equal(envelope.error.code, "recovery_required");
+  assert.deepEqual(envelope.evidence, { manifest: { status: "recovery_required" } });
+  assert.equal(envelope.error.next_action, "resume");
+  assert.equal(envelope.duration_ms, 9);
+});
+
+test("capabilityErrorEnvelope maps system codes to capability_threw", () => {
+  const enoent = gateway.capabilityErrorEnvelope("worker", Object.assign(new Error("missing"), { code: "ENOENT" }), 1);
+  assert.equal(enoent.error.code, "capability_threw");
+  const invalid = gateway.capabilityErrorEnvelope("worker", Object.assign(new Error("bad"), { code: "ERR_INVALID" }), 1);
+  assert.equal(invalid.error.code, "capability_threw");
+});
+
+test("gateway: apply-card without card.id stays a fail envelope", async () => {
+  await withTempDir(async (dir) => {
+    const envelope = await invokeCapability("verification-governance-apply-card", {
+      rootDir: dir,
+      options: {},
+    });
+    assert.equal(envelope.status, "fail");
+    assert.equal(envelope.error.code, "capability_threw");
+  });
 });
 
 test("gateway: a throwing capability is caught and reported as a fail envelope, not an unhandled rejection", async () => {

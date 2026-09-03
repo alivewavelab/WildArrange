@@ -78,11 +78,12 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `bin/AGENTS.md`                                             | CLI 参数、路由、帮助文本和退出码的局部约束 |
 | `doc/AGENTS.md`                                             | README / 架构 / 可复用准则 / HTML 方案的文档分层 |
 | `packs/wildarrange-linear/AGENTS.md`                        | Agent、Skill、路由、工具合同与项目初始化模板的发布边界 |
-| `bin/wildarrange.mjs`                                              | CLI 入口                                        |
+| `bin/wildarrange.mjs`                                       | CLI 入口                                        |
 | `src/AGENTS.md`                                              | 五区归属判断、全区依赖不变量和统一修改顺序 |
 | **interface/**（宿主/人机交互边界，只依赖 orchestration、infra） |  |
 | `src/interface/AGENTS.md`                                    | Interface 局部职责、宿主安全边界和验收要求 |
 | `src/interface/dashboard.mjs`                                | 本地 dashboard HTTP 服务、POST token 与 Host/Origin 防护 |
+| `src/interface/adoption-panel.mjs`                           | 验证治理接管 Dashboard 卡片、批准 API 输入校验与页面片段 |
 | `src/interface/adapters.mjs`                                 | Codex / Cursor / Kimi adapter 安装、卸载、恢复、共享 Skill 命令生成 |
 | `src/interface/kimi-adapter.mjs`                             | Kimi plugin manifest、Hook bridge 与安装说明的纯渲染逻辑 |
 | `src/interface/cursor-adapter.mjs` | Cursor `.cursor/hooks.json`、项目感知 Hook bridge（事件/工具名映射与输出协议翻译）与安装说明的纯渲染逻辑；preToolUse 对 Write/Delete/Shell fail-closed |
@@ -107,6 +108,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/orchestration/task-board.mjs`                            | 全项目工单总账、draft/ready、任务 claim/证据/持久化与消息板 |
 | `src/orchestration/change-governance.mjs`                     | 任务变更治理、Review Blocker、ChangeRequest           |
 | `src/orchestration/status.mjs`                                | 状态报告、Workflow 总结、attentionReport 与 Dashboard 数据 |
+| `src/orchestration/adoption.mjs`                              | 老项目验证治理接管会话、逐卡批准、维护互斥、恢复与两次 Git 锚定 |
 | `src/orchestration/workflow.mjs`                               | Workflow 入口、样例计划生成                            |
 | **ai/**（AI 策略/prompt/技能匹配/hooks，只依赖 orchestration、capabilities、infra，且 capabilities 只能经 gateway） |  |
 | `src/ai/AGENTS.md`                                           | AI 策略、只读边、fallback 与上下文预算约束 |
@@ -120,6 +122,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | **capabilities/**（原子能力 + gateway，只依赖 infra；orchestration/ai 只能经 `gateway.mjs` 调用） |  |
 | `src/capabilities/AGENTS.md`                                 | 原子能力、网关信封和失败语义约束 |
 | `src/capabilities/gateway.mjs`                                | 能力网关：静态注册表 + 统一结果信封（capability/status/evidence/sideEffect/duration_ms/cost/error） |
+| `src/capabilities/verification-governance.mjs`                | 验证治理原子能力：scan / apply-card / generate-artifacts |
 | `src/capabilities/contract-governance.mjs`                    | 接口与数据库契约治理原子能力：scan / apply-card / generate-artifacts；首版接入 Tauri IPC 发现器 |
 | `src/capabilities/verify.mjs`                                 | verifier                                       |
 | `src/capabilities/scope-guard.mjs`                             | scope guard、realpath 范围校验                      |
@@ -147,6 +150,9 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/infra/gate-arming.mjs` | 门未武装黄灯地板：trivial/缺失 verify、同义反复 review、无 required 质量门的只读评估，status 常驻携带 |
 | `src/infra/dependency-graph.mjs` | 对抗加固的词法 import 扫描器（边界测试与 `wildarrange impact` 共用）、反向波及分析 `computeImpact`、分区测试选择 `computeZoneTests`/`listRepoTests`（供 `wildarrange test`） |
 | `src/infra/security.mjs`                                      | config hash 基线、运行态备份、归档精确恢复包、备份列表与一键恢复、关键状态完整性检查 |
+| `src/infra/recovery-transaction.mjs`                          | 通用 preimage/postimage、提交、回滚、maintenance marker 与路径/digest 原语 |
+| `src/infra/verification-discovery.mjs`                        | 验证资产只读扫描、消费者分级与可判对变更卡 |
+| `src/infra/verification-registry.mjs`                         | Registry/Bootstrap/Inventory schema、digest 与 freshness |
 | `src/infra/contract-governance.mjs`                           | 技术栈中立的契约台账、差异卡、覆盖报告、快照生命周期与静态发现器登记；首版发现 Tauri IPC，未知来源降级人工申报 |
 | `src/infra/review-findings.mjs`                                | LSP / AST / hashline / 注释检查等质量发现              |
 | `src/infra/llm-provider.mjs`                                   | OpenAI-compatible LLM provider 与可选 LLM review |
@@ -169,7 +175,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `test/dependency-boundary.test.mjs`                             | 五区依赖方向强制测试，每次 `npm test` 都会跑                |
 | `test/AGENTS.md`                                             | 单元、集成、对抗、包体测试的局部规范 |
 | `test/*.test.mjs`                                              | Node 内置测试                                     |
-| `.wildarrange/`                                                      | 运行时状态目录，可由 CLI 生成                             |
+| `.wildarrange/`                                                | 运行时状态目录，可由 CLI 生成                             |
 
 
 ## 常用命令
@@ -224,6 +230,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | 列出运行态备份        | `node ./bin/wildarrange.mjs state list`                                 |
 | 恢复运行态备份        | `node ./bin/wildarrange.mjs state restore --backup <backupId>`          |
 | 一键体检            | `node ./bin/wildarrange.mjs doctor`                                     |
+| 老项目验证治理接管    | `node ./bin/wildarrange.mjs adoption start` / `status` / `resume` |
 | 生成总结              | `node ./bin/wildarrange.mjs summary`                                   |
 | 启动本地 dashboard    | `node ./bin/wildarrange.mjs serve --host 127.0.0.1 --port 8765`        |
 | 完整测试              | `npm test`                                                       |

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Verification Governance 融合评估</title>
+  <style>
+    :root{--ink:#172033;--muted:#5e6878;--line:#d9e0e8;--bg:#f5f7fa;--card:#fff;--green:#237a4b;--amber:#9a6500;--red:#a33a3a;--blue:#2767a8}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 system-ui,"Microsoft YaHei",sans-serif}.wrap{max-width:1180px;margin:auto;padding:32px 20px 64px}h1{font-size:30px;line-height:1.25;margin:0 0 8px}h2{margin:36px 0 14px;font-size:22px}h3{margin:0 0 8px;font-size:17px}p{margin:7px 0}.lead{font-size:18px;color:#354057}.meta,.grid,.flow{display:grid;gap:12px}.meta{grid-template-columns:repeat(3,1fr);margin:20px 0}.grid{grid-template-columns:repeat(2,1fr)}.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;box-shadow:0 2px 8px #1820300a}.tag{display:inline-block;border-radius:999px;padding:2px 9px;font-size:12px;font-weight:700}.keep{background:#e5f5eb;color:var(--green)}.adapt{background:#fff1cc;color:var(--amber)}.reject{background:#fde8e8;color:var(--red)}.info{background:#e8f1fb;color:var(--blue)}.plain{color:var(--muted);border-left:3px solid #cbd5e1;padding-left:10px}.flow{grid-template-columns:1fr auto 1fr auto 1fr;align-items:stretch}.flow .card{display:flex;flex-direction:column;justify-content:center}.arrow{align-self:center;font-size:24px;color:var(--blue)}table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);font-size:14px}th,td{padding:10px;vertical-align:top;border-bottom:1px solid var(--line);text-align:left}th{background:#eef2f7}code{font-family:Consolas,monospace;font-size:.92em;background:#eef2f7;padding:1px 4px;border-radius:4px}.evidence{color:#465467;font-size:13px}.risk{border-left:4px solid var(--red)}.short{border-left:4px solid var(--green)}ul{margin:8px 0;padding-left:21px}@media(max-width:800px){.meta,.grid,.flow{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}}
+  </style>
+</head>
+<body><main class="wrap">
+  <h1>Verification Governance 是否适合融合进 WildArrange</h1>
+  <p class="lead"><strong>结论：适合“选择性吸收”，不适合整包搬入。</strong>保留仓库级资产盘点思想；把 Gamecopilot 专用配置和第二套完成门挡在产品运行链之外。</p>
+  <div class="meta">
+    <div class="card"><b>评估基线</b><br>2026-09-02 当前工作区快照（dirty WIP）</div>
+    <div class="card"><b>读取边界</b><br>ZIP 13 个条目与 WildArrange 当前实现；未执行 ZIP 脚本</div>
+    <div class="card"><b>唯一产物</b><br>本 HTML；未改 src / test / 配置 / AGENTS / README</div>
+  </div>
+
+  <h2>一眼看懂：它和 WildArrange 各做什么</h2>
+  <div class="flow">
+    <div class="card"><h3>输入</h3><p>Git Baseline / Branch / WIP、Registry、真实文件与执行入口</p><p class="plain">生活化解释：像先把仓库里的“消防设施清单”全部找出来。</p></div><div class="arrow">→</div>
+    <div class="card"><h3>处理</h3><p>检查登记、引用、Runner 可达性、重复归属、HTML 新鲜度；为结构变化生成中立 Review 包</p><p class="plain">生活化解释：核对灭火器有没有、归谁管、是否放在清单写的位置。</p></div><div class="arrow">→</div>
+    <div class="card"><h3>输出</h3><p>资产库存 HTML、机械异常、中立审查输入；不运行测试，不决定任务完成</p><p class="plain">生活化解释：它是盘点表，不是消防演习成绩，更不是开业许可证。</p></div>
+  </div>
+  <p class="evidence">ZIP 证据：README 5–11、23–30、32–42；cross-verification-governance 14–35、49–54；inventory.mjs 798–843。</p>
+
+  <h2>与现有五区和完成链的关系</h2>
+  <div class="grid">
+    <div class="card"><span class="tag keep">保留现状</span><h3>WildArrange 的交付真源</h3><p><code>delivery-pipeline.mjs</code> 已固定执行 <code>verify → scope → review → acceptance-proof → checkpoint</code>；前三门全部取证，全部通过后才写 proof 和 checkpoint。</p><p class="plain">生活化解释：这是已经在工作的“出厂质检流水线”，不能被一张库存表替换。</p><p class="evidence">仓库证据：src/orchestration/delivery-pipeline.mjs 5–13、68–75、78–149、253–280；src/capabilities/gateway.mjs 89–93。</p></div>
+    <div class="card"><span class="tag keep">保留现状</span><h3>任务与证据所有权</h3><p><code>tasks.json</code> 是任务总账真源；任务证据、状态历史、验收证明和 checkpoint 已按任务身份持久化。</p><p class="plain">生活化解释：每张工单已有自己的病历，不能再造一本彼此不同步的病历。</p><p class="evidence">仓库证据：src/orchestration/task-board.mjs 250–302、294–299、450–473；根 AGENTS“任务总账”和 checkpoint 不变量。</p></div>
+    <div class="card"><span class="tag adapt">独立工具面</span><h3>Verification Registry 的合适位置</h3><p>若未来采用，应位于 <code>tooling/verification-registry/</code>，作为仓库级只读观察工具；不新增第六区，也不经 capability gateway，不进入 runtime。</p><p class="plain">生活化解释：它应是仓库管理员的盘点夹，不是生产流水线上的新工位。</p><p class="evidence">仓库证据：根 AGENTS 五区依赖规则；package.json 37、45–49；ZIP README 41–42；合同 49–55。</p></div>
+    <div class="card"><span class="tag adapt">可选 Agent 流程</span><h3>Skill 与 Hook</h3><p>Skill 只在 Gate/Suite 结构变化时显式触发；不得自动挂进 PreToolUse/PostToolUse，也不得让 Hook 把 Inventory 绿灯解释为完成。</p><p class="plain">生活化解释：需要盘点时叫审计员来，不要让门卫每次开门都重做全仓审计。</p><p class="evidence">ZIP Skill 3、8–22、26–32、64–71；根 AGENTS 规定 Hook 不是唯一安全边界，完成仍走完整门链。</p></div>
+  </div>
+
+  <h2>机制文件：逐文件映射</h2>
+  <table><thead><tr><th>ZIP 文件</th><th>裁决</th><th>WildArrange 映射 / 改造</th><th>冲突或理由</th></tr></thead><tbody>
+    <tr><td><code>portable/tooling/inventory.mjs</code></td><td><span class="tag adapt">提炼后复用</span></td><td>候选位置 <code>tooling/verification-registry/inventory.mjs</code>；保留 Registry 校验、glob、执行入口可达性、Baseline/Branch/WIP、HTML 新鲜度与 review-pack；先拆除 Gamecopilot 路径分组与 <code>pnpm</code> 文案，改为 WildArrange 的 Node/npm 和实际目录。</td><td>脚本硬编码 <code>client/</code>、<code>packages/ui/</code> 等展示分组（99–119），输出要求运行 <code>pnpm verification:inventory</code>（816），而 WildArrange 当前脚本只用 Node/npm（package.json 45–49）。单文件约 845 行，若直接加入还需按项目 700 行拆分评估。</td></tr>
+    <tr><td><code>portable/skill/SKILL.md</code></td><td><span class="tag adapt">重写后可用</span></td><td>可映射为项目 Skill，但把合同路径从 <code>docs/design/...</code> 改为 WildArrange 已有治理文档或 Skill 自带中立合同；命令改为 npm；明确“不参与任务 completed 判定”。</td><td>当前固定引用 Gamecopilot 文档路径（12–13），且假设三条 <code>pnpm verification:*</code> 命令（34–62）。直接复制会制造失效入口。</td></tr>
+    <tr><td><code>portable/skill/references/neutral-review.md</code></td><td><span class="tag keep">可直接借鉴语义</span></td><td>保留 L1/L2/L3、重复覆盖、阻断强度和最短替代问题；把 Reviewer 结果作为结构建议，不写入 WildArrange acceptance proof/checkpoint。</td><td>它明确全程只读、不能由自动化绿色推断业务有效（17–24），与 WildArrange“证据不冒充验收”一致；但其 accept/reject 只裁决资产结构，不是任务完成。</td></tr>
+    <tr><td><code>portable/skill/agents/openai.yaml</code></td><td><span class="tag keep">可直接复用</span></td><td>仅随 Skill 安装，名称和默认 prompt 无项目耦合。</td><td>无运行时依赖；只是宿主展示元数据。</td></tr>
+    <tr><td><code>portable/integration/package-scripts.json</code></td><td><span class="tag adapt">改名后复用</span></td><td>若批准实现，再把三个脚本并入根 <code>package.json</code>，改为项目一致的 npm 调用说明；不得接到 <code>test</code>、<code>check:arch</code> 或 build。</td><td>直接复制会引入 pnpm 口径；ZIP 自身也禁止自动 build/CI wiring（manifest 17–19；README 41–42）。</td></tr>
+  </tbody></table>
+
+  <h2>模板文件：逐文件映射</h2>
+  <table><thead><tr><th>ZIP 文件</th><th>裁决</th><th>最短做法</th><th>为什么不能原样用</th></tr></thead><tbody>
+    <tr><td><code>verification-registry.template.json</code></td><td><span class="tag adapt">只取字段骨架</span></td><td>先从 WildArrange 真实 <code>npm test</code> runner、<code>check:arch</code>、delivery capability 与 Hook 入口反向盘点，再填写最小 Registry；不要逐个 <code>test/*.test.mjs</code> 登记。</td><td>模板默认 workspace packages、CI、Cargo、Python/PowerShell 测试发现面（12–29），多数不是当前 WildArrange 事实；照抄会制造虚假覆盖和过度治理。</td></tr>
+    <tr><td><code>bootstrap.template.json</code></td><td><span class="tag adapt">延后、一次性</span></td><td>只有人类批准引入 Registry 后，选一个已确认 commit 冻结“当时已存在”的资产 ID；当前 dirty WIP 不能直接当 bootstrap。</td><td>bootstrap 是历史身份锚点，不是扫描起点；当前工作区有大量未提交 WIP，错误冻结会把新增资产伪装成历史资产。ZIP Skill 17、58；neutral-review 27–30。</td></tr>
+    <tr><td><code>gamecopilot-reference/verification-registry.json</code></td><td><span class="tag reject">不融合</span></td><td>只作字段示例，不复制任何 ID、Owner、glob、blockingAt 或命令。</td><td>包含 Frontend、Overlay、Rust、Trainer、Gamecopilot Skill 等专属资产；ZIP README 19、34 明确禁止原样复制。</td></tr>
+    <tr><td><code>gamecopilot-reference/bootstrap.json</code></td><td><span class="tag reject">不融合</span></td><td>不使用其中 commit 和 24 个资产身份。</td><td>它绑定另一仓库冻结历史；移植会破坏 Git 事实性。</td></tr>
+    <tr><td><code>verification-inventory.html</code></td><td><span class="tag reject">不融合</span></td><td>未来由 WildArrange 自己的数据生成，不复制快照。</td><td>生成视图不是机器真源或通过证明（合同 8–9、31–35）。</td></tr>
+    <tr><td><code>cross-verification-governance.md</code>、<code>T-119.md</code>、<code>external-audit-task.md</code></td><td><span class="tag reject">不进入产品</span></td><td>只保留为本次评估证据；不复制为 WildArrange 长期规范、任务或验收记录。</td><td>均绑定 Gamecopilot 范围、commit、Owner、轮次和未关闭 A-002；T-119 明确仍待外部复审，不能当成通用完成证明。</td></tr>
+    <tr><td><code>README.md</code>、<code>manifest.json</code></td><td><span class="tag keep">仅保留来源记录</span></td><td>用于追溯包来源与硬边界，不并入用户 README。</td><td>它们是交接说明，不是 WildArrange 产品文档；manifest 已声明不自动删除、接 CI 或改 AGENTS。</td></tr>
+  </tbody></table>
+
+  <h2>明确不融合项</h2>
+  <div class="grid">
+    <div class="card risk"><h3>不建第二套完成状态机</h3><p>Registry 的 <code>reviewRequired</code> 不能变成 task 状态、审批队列或 checkpoint 前新门。现有 pipeline 已承担完成裁决。</p><p class="plain">生活化解释：资产台账不能变成第二位厂长。</p></div>
+    <div class="card risk"><h3>不重复登记每个测试</h3><p>WildArrange 的 <code>tooling/run-tests.mjs</code> 已逐文件执行 <code>test/*.test.mjs</code>；Registry 只按真实 Suite/Runner 归组。</p><p class="plain">生活化解释：登记“整支车队”，不要把每颗螺丝单独建档。</p></div>
+    <div class="card risk"><h3>不自动接 Hook / CI / build</h3><p>不在每次工具调用触发全仓库存，也不让 inventory 失败阻断产品运行；是否成为 CI 门需单独批准。</p><p class="plain">生活化解释：盘仓库不该让每位顾客进门都停业清点。</p></div>
+    <div class="card risk"><h3>不复制 Gamecopilot 身份</h3><p>不复制 commit、asset ID、Owner、路径、26/24/2 数量与 blockingAt。</p><p class="plain">生活化解释：不能把隔壁公司的资产编号贴到自己仓库。</p></div>
+  </div>
+
+  <h2>最短融合方案（需另行批准后才实施）</h2>
+  <div class="card short">
+    <ol>
+      <li><b>先只读建清单：</b>只识别 WildArrange 真实的两类工程入口（当前至少 <code>npm test</code>、<code>check:arch</code>）、现有 test suite runner，以及产品运行链中的 runtime protections；不写 Registry。</li>
+      <li><b>先落最小 Registry：</b>只登记“真实 Runner 的 Suite”和“确有独立故障后果的 Gate”；把 verifier/scope/review/acceptance-proof/checkpoint 视为现有交付链组件，不拆成五套新的治理审批。</li>
+      <li><b>提炼盘点器：</b>复用通用函数，去掉 Gamecopilot 分组和 pnpm 假设；只生成一个 WildArrange 自有 inventory HTML，check 模式只读。</li>
+      <li><b>最后才加可选 Skill：</b>仅结构变化时显式调用；中立 Review 输出建议，不改变 task 状态。先跑定向合同测试，再按项目要求跑 <code>npm test</code> 与 <code>npm run check:arch</code>。</li>
+    </ol>
+    <p class="plain">生活化解释：先数清家里真正有什么，再做一本薄账；不要先搬来整套仓库管理制度。</p>
+  </div>
+
+  <h2>主要风险与停止线</h2>
+  <table><thead><tr><th>风险</th><th>真实后果</th><th>停止线</th></tr></thead><tbody>
+    <tr><td>Bootstrap 污染</td><td>把当前 WIP 或后来发现的资产冒充为历史资产，绕过新增审查。</td><td>没有干净、人工确认的冻结 commit 就不创建 bootstrap。</td></tr>
+    <tr><td>重复门禁</td><td>开发者同时维护 task gate 与 Registry gate，出现两套“是否完成”的答案。</td><td>Registry 永远只描述结构；completed 只由现有 delivery pipeline 决定。</td></tr>
+    <tr><td>扫描绿灯错觉</td><td>“0 未登记”被误读成测试通过、Runtime 正确或全仓无漏门。</td><td>CLI/HTML 同屏声明配置覆盖、Runtime Gate 人工边界和未运行测试。</td></tr>
+    <tr><td>发现面膨胀</td><td>为 Cargo/CI/Python 等当前不存在的技术栈预付配置和维护成本。</td><td>发现规则只来自当前真实文件与命令，出现新技术栈后再加。</td></tr>
+    <tr><td>产品包膨胀</td><td>tooling、Skill 或生成 HTML被意外发布给终端用户。</td><td>实施时明确 package <code>files</code> 是否包含；当前 package.json 仅包含 arch tooling（37）。</td></tr>
+  </tbody></table>
+
+  <h2>最终裁决</h2>
+  <div class="card"><p><strong>推荐融合边界：</strong>吸收“验证资产结构可见性”这一能力，不吸收“另一套交付治理”。最小值得保留的是：三类资产语义、真实 Runner 对齐、Baseline/Branch/WIP 观察、HTML 新鲜度、结构变化的只读中立 Review；其余 Gamecopilot 配置、历史、任务和快照全部排除。</p><p><strong>当前不授权实现：</strong>本报告是候选方案，不代表已批准新增 tooling、Skill、Registry、package scripts、测试或 AGENTS 路由。</p><p class="plain">生活化解释：可以买“盘点方法”，不要连隔壁公司的仓库、编号和审批链一起搬来。</p></div>
+</main></body></html>

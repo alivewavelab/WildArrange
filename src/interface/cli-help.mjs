@@ -13,8 +13,8 @@ export const CORE_COMMANDS = ["init", "plan", "run", "status", "decisions", "doc
 
 export const COMMAND_REGISTRY = [
   { usage: "init [--sample] [--project-docs] [--architecture]", desc: "初始化运行时；显式补建项目治理文档，可按需包含架构模板", core: true },
-  { usage: "plan --from <plan.json>", desc: "导入计划并生成任务状态", core: true },
-  { usage: "plan approve [--plan <planId>]", desc: "确认已导入计划（开启 planApproval 时才能 run）" },
+  { usage: "plan --from <plan.json>", desc: "导入计划；宿主语义生成计划会强制等待确认", core: true },
+  { usage: "plan approve [--plan <planId>]", desc: "确认待执行计划（语义生成计划或已开启 planApproval）" },
   { usage: "run", desc: "跑下一个任务（worker→verifier→scope→review→checkpoint）", core: true },
   { usage: "status", desc: "查看状态（含门武装黄灯）", core: true },
   { usage: "decisions [--limit N] [--task T001] [--gate pre_tool_use] [--annotatable] [--format json]", desc: "查看门决策记录（每一次拦截/放行；--annotatable 只看可标注队列）", core: true },
@@ -97,6 +97,10 @@ export const COMMAND_REGISTRY = [
   { usage: "state list", desc: "列出运行态备份" },
   { usage: "state restore --backup <backupId>", desc: "恢复运行态备份" },
   { usage: "serve [--host 127.0.0.1] [--port 8765] [--token <token>]", desc: "启动本地 dashboard（默认仅 loopback）" },
+  { usage: "adoption start [--host 127.0.0.1] [--port 8765] [--token <token>]", desc: "只读扫描老项目验证资产并打开 Dashboard 逐卡批准" },
+  { usage: "adoption status [--session <sessionId>]", desc: "只读对账接管会话、待决策/过期卡和新鲜度黄灯" },
+  { usage: "adoption resume [--session <sessionId>] [--host 127.0.0.1] [--port 8765] [--token <token>]", desc: "按磁盘事实恢复接管会话；不安全时只显示 recovery_required" },
+  { usage: "adoption recover [--session <sessionId>]", desc: "重试恢复失败事务的 preimage，成功后释放维护锁" },
   { usage: "guard scope [--task T001]", desc: "校验任务范围" },
   { usage: "route --text \"request\"", desc: "请求路由" },
   { usage: "prompts list", desc: "列出提示词" },

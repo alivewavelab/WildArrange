@@ -187,6 +187,12 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
   planApproval: {
     required: false,
   },
+  verificationGovernance: {
+    registryPath: "",
+    bootstrapPath: "",
+    inventoryPath: "",
+    archiveRoot: "",
+  },
   qualityGates: {
     lspDiagnostics: {
       enabled: false,
@@ -257,13 +263,13 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
         "review-work",
         "review-product-intent",
         "clarify-feature-design",
+        "contract-governance",
         "map-user-journey",
         "design-acceptance",
         "review-ux-interaction",
         "review-scope-tradeoff",
         "research-domain-benchmark",
         "inspect-codebase",
-        "contract-governance",
         "research-external-docs"
       ],
       rules: { mode: "static" },

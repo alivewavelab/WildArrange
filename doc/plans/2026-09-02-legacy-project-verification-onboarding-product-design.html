@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>WildArrange 老项目验证资产接管 · 产品设计 v3</title>
+  <style>
+    :root{--ink:#182235;--muted:#5d6878;--line:#d9e1ea;--bg:#f5f7fa;--card:#fff;--blue:#2869a6;--green:#237a4b;--amber:#946200;--red:#a23b3b;--purple:#6650a4}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 system-ui,"Microsoft YaHei",sans-serif}.wrap{max-width:1180px;margin:auto;padding:32px 20px 70px}h1{font-size:31px;line-height:1.25;margin:0 0 7px}h2{font-size:23px;margin:38px 0 14px}h3{font-size:17px;margin:0 0 8px}p{margin:7px 0}.lead{font-size:18px;color:#364259}.notice{padding:14px 16px;border:1px solid #e6c86b;background:#fff7dc;border-radius:12px}.grid,.flow,.meta{display:grid;gap:12px}.grid{grid-template-columns:repeat(2,1fr)}.grid3,.meta{grid-template-columns:repeat(3,1fr)}.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;box-shadow:0 2px 8px #1820300a}.flow{grid-template-columns:1fr auto 1fr auto 1fr;align-items:stretch}.flow .card{display:flex;flex-direction:column;justify-content:center}.arrow{align-self:center;color:var(--blue);font-size:24px}.plain{color:var(--muted);border-left:3px solid #cbd5e1;padding-left:10px}.tag{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:700}.add{background:#e5f5eb;color:var(--green)}.change{background:#e8f1fb;color:var(--blue)}.merge{background:#eee9fb;color:var(--purple)}.archive{background:#fff1cc;color:var(--amber)}.delete{background:#fde8e8;color:var(--red)}.hold{background:#eef1f4;color:#596372}table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);font-size:14px}th,td{padding:10px;vertical-align:top;text-align:left;border-bottom:1px solid var(--line)}th{background:#edf2f7}code{font-family:Consolas,monospace;font-size:.92em;background:#edf1f5;padding:1px 4px;border-radius:4px}ul,ol{margin:8px 0;padding-left:22px}.risk{border-left:4px solid var(--red)}.safe{border-left:4px solid var(--green)}.info{border-left:4px solid var(--blue)}.small{font-size:13px;color:var(--muted)}.status{display:flex;gap:7px;flex-wrap:wrap}.state{padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:#fff}.state b{color:var(--blue)}@media(max-width:820px){.grid,.grid3,.meta,.flow{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}}
+  </style>
+</head>
+<body><main class="wrap">
+  <h1>老项目验证资产接管</h1>
+  <p class="lead">产品设计 v3 · 把旧项目的门禁和测试入口，整理成一套可看懂、可批准、可恢复的 WildArrange 管理账</p>
+  <div class="notice"><strong>状态：产品方向已确认，待最后一次只读复审，尚未授权实现。</strong>这版已按用户理想流程重写。用户只判断“这个建议对不对”；技术扫描、映射、备份、执行和恢复不再交给用户设计。</div>
+  <div class="meta grid3" style="margin-top:14px">
+    <div class="card"><b>一次初始化</b><br>扫描、解释、确认、执行、验证、建账</div>
+    <div class="card"><b>修改前必确认</b><br>扫描永远不会直接删除或合并</div>
+    <div class="card"><b>最终三份文件</b><br>Registry、Bootstrap、Inventory HTML</div>
+  </div>
+
+  <h2>1. 一句话产品定义</h2>
+  <div class="card info"><p><strong>用户运行“接管老项目”初始化后，WildArrange 全仓寻找现有门禁、测试、Runner 和 Hook，列出准备新增登记、修改接入、合并、归档或删除的每一项；把用途、理由、完成后的变化和最大风险讲清楚；用户判对后才执行，最后生成三份正式管理文件。</strong></p><p class="plain">生活化解释：像请专业团队盘点旧工厂。先把每台设备为什么留、为什么搬、搬完怎样、最坏会怎样写成清单；老板签字后才施工，最后交付资产总账。</p></div>
+
+  <h2>2. 用户真正看到的一条流程</h2>
+  <div class="flow">
+    <div class="card"><h3>输入</h3><p>运行 <code>wildarrange adoption start</code></p><p>系统只读扫描整个仓库。</p><p class="plain">先盘点，不动东西。</p></div><div class="arrow">→</div>
+    <div class="card"><h3>处理</h3><p>系统生成逐项变更卡；用户选择批准、拒绝或暂缓；系统只执行获批项并逐批验证。</p><p class="plain">先看施工单，再签字施工。</p></div><div class="arrow">→</div>
+    <div class="card"><h3>输出</h3><p>仓库整理完成，并生成 Registry、Bootstrap、Inventory HTML。</p><p class="plain">交付整理后的仓库和正式账本。</p></div>
+  </div>
+  <table style="margin-top:14px"><thead><tr><th>用户步骤</th><th>系统自动完成</th><th>用户只需要做什么</th></tr></thead><tbody>
+    <tr><td>1. 开始接管</td><td>核对 Git、当前 WIP、目录、规则、命令、测试、Hook 和 Runtime Gate 线索</td><td>无需填写 Registry</td></tr>
+    <tr><td>2. 查看扫描结果</td><td>形成“新增 / 修改 / 合并 / 归档 / 删除 / 暂缓”变更卡</td><td>阅读系统解释</td></tr>
+    <tr><td>3. 判对</td><td>检查每个决定是否具备足够证据，敏感项不允许被“一键全选”吞掉</td><td>批准、拒绝或暂缓每张卡</td></tr>
+    <tr><td>4. 执行</td><td>重新核对现场、备份、分批改动、验证、失败回滚</td><td>遇到扩大范围或未知消费者时重新确认</td></tr>
+    <tr><td>5. 建账</td><td>先生成 Registry，等待真实 Git 锚点，再生成 Bootstrap 和 Inventory</td><td>确认本次整理后的 Git commit</td></tr>
+    <tr><td>6. 完成</td><td>显示接管结果、未解决项、已执行/未执行验证和恢复入口</td><td>查看最终三份文件</td></tr>
+  </tbody></table>
+  <p><strong>产品是一条完整向导。</strong>工程实现可以分里程碑，但不能把半条工程路线包装成用户已经接管完成。</p>
+
+  <h2>3. 每张变更卡必须讲清楚什么</h2>
+  <div class="grid grid3">
+    <div class="card"><h3>这是什么</h3><p>名称、类型、精确路径、Owner、真实执行入口。</p><p class="plain">先认清是哪件东西。</p></div>
+    <div class="card"><h3>有什么作用</h3><p>它保护哪个行为；失败时阻止什么问题。</p><p class="plain">说明它为什么存在。</p></div>
+    <div class="card"><h3>谁在使用</h3><p>直接消费者、Runner、CI、Hook 或生产调用点；证据和可信度。</p><p class="plain">确认还有没有人用。</p></div>
+    <div class="card"><h3>为什么这样处理</h3><p>为什么新增登记、修改、合并、归档或删除；为什么没有更短替代。</p><p class="plain">说清施工理由。</p></div>
+    <div class="card"><h3>完成后会怎样</h3><p>保留什么、移动什么、哪个入口成为真源、用户以后从哪里管理。</p><p class="plain">预先展示施工后的样子。</p></div>
+    <div class="card risk"><h3>最大后果</h3><p>若判断错误，最严重会失去哪层保护、哪条测试不再运行、哪个副作用可能失去拦截。</p><p class="plain">先讲最坏情况，不藏风险。</p></div>
+  </div>
+  <p>卡片还必须附带：精确变更路径、候选 diff、验证命令、未验证边界、恢复方式、扫描时间、HEAD/WIP 指纹。缺少“消费者、完成后状态、最大后果”任一项时，系统不得给出删除或合并按钮。</p>
+
+  <h2>4. 六种处理动作</h2>
+  <table><thead><tr><th>动作</th><th>什么时候使用</th><th>完成后的结果</th><th>用户批准要求</th></tr></thead><tbody>
+    <tr><td><span class="tag add">新增登记</span></td><td>仓库已有有效资产，但 WildArrange 尚未管理</td><td>进入正确的 WildArrange 管理入口与 Registry</td><td>普通项可批量批准</td></tr>
+    <tr><td><span class="tag change">修改接入</span></td><td>Owner、命令、路径或阻断位置已经失效或不合理</td><td>真实入口与管理记录重新一致</td><td>展示前后 diff</td></tr>
+    <tr><td><span class="tag merge">合并</span></td><td>多个资产保护同一故障，执行和维护重复</td><td>保留一个真实 Owner/入口，消费者逐个迁移，退役项默认归档</td><td>逐项批准，不能一键全选</td></tr>
+    <tr><td><span class="tag archive">归档</span></td><td>当前无消费者，但仍值得保留历史和恢复能力</td><td>离开活跃执行面，保留墓碑和恢复材料</td><td>逐项批准</td></tr>
+    <tr><td><span class="tag delete">删除</span></td><td>确认无消费者、无独立保护价值，且归档也没有收益</td><td>从仓库移除，但本次恢复包仍可还原</td><td>精确文件单独确认；默认先推荐归档</td></tr>
+    <tr><td><span class="tag hold">暂缓</span></td><td>动态加载、外部调用或证据不足</td><td>保持原样，并进入最终 Inventory 的“待确认”区</td><td>用户确认暂缓即可，不阻塞其他正确项</td></tr>
+  </tbody></table>
+
+  <h2>5. WildArrange 怎么判断“谁在用”</h2>
+  <p>系统只采用入口级静态证据，不声称理解所有业务语义。</p>
+  <table><thead><tr><th>证据</th><th>系统做法</th><th>能否单独支持删除/合并</th></tr></thead><tbody>
+    <tr><td><code>import</code> / <code>require</code> / 已有依赖图</td><td>建立模块到资产的直接调用边</td><td>可以作为直接消费者证据</td></tr>
+    <tr><td>package scripts 调用链</td><td>解析真实 script 名和直接调用的脚本/命令</td><td>可以</td></tr>
+    <tr><td>测试 Runner 的 glob/exclude</td><td>计算 Runner 与测试文件的真实交集</td><td>可以</td></tr>
+    <tr><td>CI YAML / Hook 配置</td><td>读取登记的精确命令、事件和目标路径</td><td>可以</td></tr>
+    <tr><td>生产代码副作用前调用</td><td>记录 Runtime Gate 的触发点、权威状态和拒绝分支</td><td>可以登记；不能声称扫描穷尽</td></tr>
+    <tr><td>精确路径字符串</td><td>标记为间接消费者，再核对上下文</td><td>只支持“可能在用”，不能单独支持删除</td></tr>
+    <tr><td>文档、注释、普通关键词</td><td>只作为调查线索</td><td>不能</td></tr>
+    <tr><td>动态拼接、插件发现、外部系统</td><td>标记未知消费者并说明缺失证据</td><td>不能；动作降级为暂缓</td></tr>
+  </tbody></table>
+  <p><strong>失败规则：</strong>找不到消费者不等于没有消费者。只有发现面完整、直接消费者为零、Owner/入口事实可核对时，才允许提出归档；永久删除还必须证明归档没有收益。</p>
+
+  <h2>6. “新增登记”具体接到哪里</h2>
+  <table><thead><tr><th>发现的资产</th><th>WildArrange 建议落点</th><th>不会做什么</th></tr></thead><tbody>
+    <tr><td>行为测试 Suite</td><td>生成计划模板中的 <code>verify_commands</code> 候选；只有真实 Runner 执行到的范围才纳入</td><td>不逐条登记 test case</td></tr>
+    <tr><td>静态工程检查</td><td>优先映射到现有 <code>standards_commands</code>；现有 <code>qualityGates</code> 有精确同类字段时才建议该字段</td><td>不为了接入新增通用 Gate 类型</td></tr>
+    <tr><td>独立复核入口</td><td>映射到 <code>review_commands</code></td><td>不和 verifier 重复执行同一命令</td></tr>
+    <tr><td>Runtime Gate</td><td>保留在原生产副作用前；在 Registry 登记实现位置、触发点和拒绝行为</td><td>不搬进 <code>verify_commands</code></td></tr>
+    <tr><td>宿主 Hook</td><td>映射到对应 adapter/Hook 建议，说明 fail-open/fail-closed 和最终完成边界</td><td>不把 Hook 当任务完成证明</td></tr>
+    <tr><td>现有字段无法承接</td><td>卡片显示“需要产品扩展”，只允许暂缓</td><td>不伪造 config 字段或写空入口</td></tr>
+  </tbody></table>
+  <p>M1 扫描时就必须输出上述目标位置和候选 diff；用户批准的是一份真正可执行的接管计划，不是一句“以后再映射”。</p>
+  <p><strong>近似映射不能静默通过：</strong>如果一个旧脚本同时承担 standards 与 review，或现有字段只能覆盖它的一部分语义，卡片必须同时展示“保留了什么、丢失了什么、为什么不能精确映射”。用户只能选择拆分建议或暂缓，系统不得为了填满字段擅自归入某一类。</p>
+
+  <h2>7. 批准页面怎么用</h2>
+  <div class="grid">
+    <div class="card"><h3>默认页面</h3><ol><li>先显示“建议新增、修改、合并、归档、删除、暂缓”数量。</li><li>优先展示需要用户判断的卡片。</li><li>每张卡只有三个动作：批准、拒绝、暂缓。</li><li>展开后查看调用证据、diff、最大后果和恢复方式。</li></ol><p class="plain">用户是在判方案对不对，不是在设计算法。</p></div>
+    <div class="card risk"><h3>不能批量吞掉的内容</h3><ul><li>删除。</li><li>合并。</li><li>修改 AGENTS、CI、build、Hook 或 Runtime。</li><li>改变测试策略或阻断阶段。</li><li>执行来源不明或可能有外部副作用的验证命令。</li></ul><p class="plain">普通登记可以一批签字，拆线路必须单独确认。</p></div>
+  </div>
+  <p><strong>暂缓不会卡死接管：</strong>最终三份文件可以生成，但每个暂缓项必须带 Owner、原因、缺失证据和后续处理提示，并在 Inventory 顶部持续显示。</p>
+  <p><strong>M2 只实现一种批准交互：</strong>本地 Dashboard 是唯一可写的逐卡批准界面，复用现有 loopback/token 防护；CLI 只负责 <code>adoption start/status/resume</code> 和输出 Dashboard 地址，不再实现第二套交互式批准。Dashboard 之外的批准 API 不对外开放。</p>
+
+  <h2>8. 执行获批变更时如何保护老项目</h2>
+  <div class="flow">
+    <div class="card"><h3>执行前</h3><p>确认没有活动 task/admission → 短锁登记“接管维护中” → 使用独立 adoption lock → 复核 HEAD/WIP/消费者 → 建立通用恢复事务</p><p class="plain">先封施工现场并拍照。</p></div><div class="arrow">→</div>
+    <div class="card"><h3>执行中</h3><p>一次只处理一张卡 → 只改批准路径 → 保存 preimage/postimage → 不扩大范围</p><p class="plain">一项一项施工，不拆全屋。</p></div><div class="arrow">→</div>
+    <div class="card"><h3>执行后</h3><p>在隔离环境运行获批验证 → 通过才提交本卡 → 失败自动回滚 → 回滚失败停止并显示恢复入口</p><p class="plain">每项验收后再做下一项。</p></div>
+  </div>
+  <ul>
+    <li>不长时间持现有 15 秒全局任务锁；日常 <code>run/admission</code> 看到“接管维护中”应立即提示，而不是等待超时。</li>
+    <li><strong>M2-0 前置任务：</strong>先提炼产品中立 recovery transaction。只允许泛化接口与内部公共原语，不改变现有 task archive 的返回、状态、恢复路径和测试，也不得触碰 admission 的 owner/base/main fence、已 push 成果不得回滚、回滚失败保持 ownership 等不变量。行为等价测试通过后，M2-1 adoption Apply 才能开工。</li>
+    <li><code>command-safety</code> 只拦毁机级命令，不证明测试脚本无副作用。验证优先在隔离 worktree、禁网或受限环境运行；无法隔离时必须单独确认“运行此精确命令”。</li>
+    <li>删除默认降级为可恢复归档；用户明确选择删除后也必须保留本次恢复包。</li>
+  </ul>
+  <p><strong>本机中断恢复：</strong>finalized 前的 adoption 会话不跨设备，但必须在 <code>.wildarrange/</code> 内自包含保存 scan、卡片、逐卡批准、preimage/postimage、当前步骤和恢复事务；全部更新使用原子写。每次 <code>adoption start/status/resume</code> 先对账磁盘实际文件、恢复包和最后一条已提交卡片：一致则继续，不一致则进入 recovery_required，绝不靠内存猜进度。</p>
+
+  <h2>9. 最终生成的三个文件</h2>
+  <table><thead><tr><th>文件</th><th>它回答什么</th><th>生成时机</th></tr></thead><tbody>
+    <tr><td><code>verification-registry.json</code></td><td>现在有哪些 engineering gate、runtime gate 和 test suite；谁负责；真实入口在哪里</td><td>获批变更执行并验证完成后先生成</td></tr>
+    <tr><td><code>bootstrap.json</code></td><td>首次接管时，哪些资产已经在确定 Git commit 中真实存在</td><td>用户确认包含 Registry 的 commit 后生成</td></tr>
+    <tr><td><code>verification-inventory.html</code></td><td>给人看的总表：Baseline / Branch / WIP、变更、Owner、入口、盲区和暂缓项</td><td>Bootstrap 成立后生成，以后结构变化时刷新</td></tr>
+  </tbody></table>
+  <p>Bootstrap 和 Inventory 生成后会产生第二次待提交变更；向导明确提示用户完成第二次提交。WildArrange 不自动 commit、merge 或 push。</p>
+  <p><strong>避免两次提交的循环锚定：</strong>Bootstrap 固定锚定“包含 Registry 的 commit A”。Inventory 不要求预知第二个 commit B，而是保存 <code>baselineRef</code>、Registry digest、Bootstrap digest，以及排除 Inventory 自身后的声明输入指纹。生成 Bootstrap/Inventory 后状态为 <code>awaiting_final_commit</code>；只有当前 HEAD 已包含这两个文件，且重新计算的声明输入指纹完全一致，状态才变为 finalized。A 与 B 之间任何影响 Registry、Runner、入口或发现范围的改动都会使 Inventory 过期，必须重新生成；不影响声明输入的普通业务变更不会制造假过期。</p>
+  <p><strong>持续新鲜度：</strong><code>doctor</code> 增加只读 <code>registryFreshness</code> 分项，<code>status</code> 复用其摘要。HEAD、Registry/Bootstrap digest 或声明输入指纹漂移时常驻黄灯，提示运行显式检查；绝不把过期 Inventory 显示为绿色。</p>
+  <p><strong>路径不强加：</strong>产品内部使用逻辑角色 <code>registryPath / bootstrapPath / inventoryPath</code>。默认建议放在项目现有 tooling/docs 习惯能容纳的位置；项目没有相应目录时，扫描结果提出一个最小落点并让用户确认，不能把 Gamecopilot 的 <code>tooling/verification-*</code> 路径硬塞给所有项目。</p>
+
+  <h2>10. 三份文件能“接管”到什么程度</h2>
+  <div class="grid">
+    <div class="card safe"><h3>能够接管</h3><ul><li>Gate、Suite 和 Runner 的资产目录。</li><li>Owner、执行入口、阻断位置和变更历史身份。</li><li>测试入口是否真实覆盖登记范围。</li><li>新增、失效、重复、暂缓和报告过期。</li><li>结构变化时的中立 Review。</li></ul></div>
+    <div class="card risk"><h3>不会冒充</h3><ul><li>每个测试用例的第二套管理系统。</li><li>测试执行历史数据库。</li><li>业务、实机、制品或 Provider 验收。</li><li>对所有 Runtime Gate 的自动穷举。</li><li>现有 delivery pipeline 的替代品。</li></ul></div>
+  </div>
+  <h3 style="margin-top:16px">Registry 的真实消费者</h3>
+  <table><thead><tr><th>消费点</th><th>什么时候读取</th><th>负责什么</th></tr></thead><tbody>
+    <tr><td><code>doctor.registryFreshness</code></td><td>用户运行 doctor</td><td>核对路径、digest、输入指纹和 Inventory 新鲜度；只读黄灯</td></tr>
+    <tr><td><code>status</code></td><td>查看项目状态</td><td>显示资产数量、暂缓项和 freshness 摘要，不做全仓扫描</td></tr>
+    <tr><td>Inventory generator</td><td>用户显式生成/刷新</td><td>从 Registry 与真实入口重建人类视图</td></tr>
+    <tr><td><code>verification-governance</code> Skill</td><td>用户要求接管、盘点，或结构变更任务明确匹配时</td><td>显式调用产品检查命令并解释 diff</td></tr>
+  </tbody></table>
+  <p>不在每次 <code>run</code> 或 plan import 前做全仓扫描，也不新增默认阻断门。长期防腐依靠 doctor/status 的廉价 freshness 检查，以及 Skill 对结构变化的显式完整检查。</p>
+
+  <h2>11. 旧设计文档与任务怎么归档</h2>
+  <table><thead><tr><th>发现内容</th><th>默认建议</th><th>历史保存方式</th></tr></thead><tbody>
+    <tr><td>已被新真源替代、仍有决策价值的设计</td><td>按目标项目现有规范归档；规范要求原位标记时不移动</td><td>Git 保存全文；归档目录保留可读文件；历史索引记录替代关系</td></tr>
+    <tr><td>已经关闭的旧任务单和验收记录</td><td>退出活动入口，进入项目已有任务档案</td><td>记录任务身份、最终状态、证据、后继任务和恢复信息</td></tr>
+    <tr><td>完全重复且没有独有信息的文件</td><td>先提议归档；只有用户确认归档无收益时才提议删除</td><td>Git 与本次恢复包保留原文；历史索引保留墓碑</td></tr>
+    <tr><td>仍被引用或消费者不明的历史内容</td><td>暂缓，保持原位</td><td>Inventory 持续显示缺失证据和 Owner</td></tr>
+    <tr><td>当前有效设计和任务</td><td>保留并登记为当前真源</td><td>不移动、不复制第二份</td></tr>
+  </tbody></table>
+  <p><strong>不能按日期判断过期。</strong>系统必须找到新的当前真源、核对引用，并证明旧文件的独有信息已经迁移或明确保留，才允许提出归档。</p>
+  <p><strong>历史不重复存全文。</strong>Git 保存完整历史；归档目录保存仍值得直接阅读的文件；WildArrange 只保存结构化索引：原路径、新路径、动作、原因、后继真源、内容 hash、批准人、恢复包和时间。Archivist/Memory 只接收清洗后的结论摘要，不摄入旧文档全文、raw diff 或完整命令输出。</p>
+  <p><strong>归档路径服从目标项目。</strong>先读取项目现有规范和目录；有归档规则就沿用，要求原位标记就原位标记，没有规则才提出最小候选目录，用户批准后建立。不得给所有项目强塞统一 <code>archive/</code>。</p>
+  <p>最终 Inventory 增加四个视图：<strong>当前真源、历史档案、已删除墓碑、暂缓确认</strong>。这样 Agent 默认先看当前真源，需要追溯时再进入历史。</p>
+
+  <h2>12. 这是一项重要 Skill，但不是只有 Skill</h2>
+  <div class="grid">
+    <div class="card info"><h3><code>verification-governance</code> Skill</h3><p>负责识别触发场景、启动接管、解释变更卡、引导用户判对、调用产品命令、汇报未验证边界，并在以后 Gate/Suite 结构变化时继续维护库存。</p><p class="plain">它像项目经理：知道什么时候盘点、怎么向人说明、什么时候必须停下来确认。</p></div>
+    <div class="card safe"><h3>WildArrange 五区能力</h3><p>负责确定性扫描、消费者证据、路径与 Git 校验、锁、备份、Apply、回滚、Registry/Bootstrap/Inventory 生成。</p><p class="plain">它像施工机械和保险措施：不依赖某次对话记忆，也不会因换宿主而改变安全行为。</p></div>
+  </div>
+  <p><strong>只保留一个长期 Skill：</strong>发布真源位于 <code>packs/wildarrange-linear/skills/verification-governance.md</code>，登记进 Prompt Pack manifest/routes 并随 WildArrange 发布；宿主需要项目 Skill 形态时，由现有 adapter 受控物化到 <code>.agents/skills/verification-governance/SKILL.md</code>。其中增加“首次接管”模式，不再创建第二个含义重叠的 onboarding Skill。</p>
+  <p>Skill 不能自行改文件、绕过批准或把 Inventory 绿灯冒充业务验收，所有副作用必须调用受控产品能力。Skill 的触发识别可以由 LLM/路由建议，但<strong>全仓扫描只能由 Skill 显式调用产品命令发起</strong>；Hook 不得静默扫描，避免性能损耗和非确定性副作用。</p>
+
+  <h2>13. 单设备与多设备</h2>
+  <p>一次初始化接管必须由一台设备从扫描做到三文件生成，避免被忽略的 <code>.wildarrange/</code> 草案在设备间产生两个版本。界面必须明确显示“当前接管会话仅属于本机”。</p>
+  <p>三份正式文件完成两次 Git 提交后，才进入 WildArrange 现有 guarded 多设备协调范围。未来若要跨设备继续未完成的接管，需要单独设计可提交的 adoption plan、Owner、handoff 和 takeover；当前版本不假称已经支持。</p>
+
+  <h2>14. 状态只服务于界面恢复</h2>
+  <div class="status">
+    <span class="state"><b>scanning</b> 扫描中</span><span>→</span>
+    <span class="state"><b>reviewing</b> 等待判对</span><span>→</span>
+    <span class="state"><b>ready</b> 已形成可执行清单</span><span>→</span>
+    <span class="state"><b>applying</b> 执行获批项</span><span>→</span>
+    <span class="state"><b>awaiting_registry_commit</b> 等待 Registry 的 commit A</span><span>→</span>
+    <span class="state"><b>awaiting_final_commit</b> 等待 Bootstrap/Inventory 的 commit B</span><span>→</span>
+    <span class="state"><b>finalized</b> 三文件与声明输入一致</span>
+  </div>
+  <p>异常只用三个结果：<code>needs_review</code>（需要重新判对）、<code>recovery_required</code>（需要恢复）、<code>cancelled</code>（保持原项目）。每张卡独立记录 <code>pending / approved / rejected / deferred / stale</code>，因此“部分批准”不再伪装成一个全局 approved 状态。</p>
+  <p>这些是 adoption 自己的界面状态，不复用 task/admission 的状态字段，也不参与任务 <code>completed</code>。</p>
+
+  <h2>15. 实现归属</h2>
+  <table><thead><tr><th>职责</th><th>归属</th><th>边界</th></tr></thead><tbody>
+    <tr><td>扫描与消费者入口证据</td><td><code>capabilities</code></td><td>作为 WildArrange 产品能力随 npm 发布；复用 ZIP 算法思想，不保留第二份 tooling 扫描器</td></tr>
+    <tr><td>向导顺序、逐卡批准、执行事务</td><td><code>orchestration</code></td><td>不复制任务总账或 delivery pipeline</td></tr>
+    <tr><td>Dashboard/CLI 展示与操作</td><td><code>interface</code></td><td>Dashboard 是唯一批准写入口；CLI 仅启动、状态、恢复和输出地址；界面不实现扫描和文件事务</td></tr>
+    <tr><td>Git、依赖图、路径、锁和通用恢复</td><td><code>infra</code></td><td>直接复用 <code>dependency-graph.mjs</code> 的词法 import、<code>git-diff.mjs</code>、<code>path-match.mjs</code>、<code>runtime-store.mjs</code> 与文件锁；复用 <code>rule-scanner</code>/<code>repository-layout</code> 的结果边界，不重写其职责；M2-0 提炼通用恢复原语</td></tr>
+    <tr><td>首次接管与持续治理入口</td><td>单一 <code>verification-governance</code> Skill</td><td>只负责编排说明和调用产品命令，不直接实现副作用</td></tr>
+    <tr><td>Registry、Bootstrap、Inventory</td><td>目标项目内的可配置治理产物</td><td>路径遵循目标项目习惯；Registry 是目录真源，HTML 只是视图</td></tr>
+  </tbody></table>
+  <p>早期融合评估“不经 gateway、不进 runtime”的结论只适用于把 ZIP 当独立盘点脚本。用户现已明确要求完整接管产品，因此这是经过产品确认的范围升级；实现必须进入五区并遵守 gateway，而不是偷偷复制 ZIP 脚本。</p>
+
+  <h2>16. 工程实施顺序，不改变用户的一条流程</h2>
+  <table><thead><tr><th>里程碑</th><th>内部先完成什么</th><th>对外是否宣称完整接管</th></tr></thead><tbody>
+    <tr><td>M1</td><td>全仓只读扫描、消费者入口图、逐项变更卡、接入映射、历史归档候选和 Review 页面</td><td>否，只能内部预览</td></tr>
+    <tr><td>M2-0</td><td>提炼通用 recovery transaction；用等价测试钉死 task archive 行为和 admission 安全不变量不变</td><td>否，只是 Apply 的前置地基</td></tr>
+    <tr><td>M2-1</td><td>Dashboard 逐卡批准、现场指纹、维护互斥、自包含会话与启动对账、隔离 Apply 和验证</td><td>否，需与 M3 联调</td></tr>
+    <tr><td>M3</td><td>可配置三文件路径、Registry → commit → Bootstrap/Inventory、历史索引、单一 Skill 入口、最终结果与恢复入口</td><td>完整验收后才对外开放 <code>adoption start</code></td></tr>
+  </tbody></table>
+  <p><strong>用户不会收到半成品入口。</strong>M1/M2 是开发切片，不是让用户分别学习的三套产品。</p>
+
+  <h2>17. 产品验收</h2>
+  <div class="grid">
+    <div class="card"><h3>看得懂</h3><ul><li>每项都有“是什么、作用、为什么处理、完成后怎样、最大后果”。</li><li>用户不填写 JSON、不选择架构层、不设计映射。</li><li>默认只展示需要判断的内容，证据按需展开。</li></ul></div>
+    <div class="card"><h3>不误动</h3><ul><li>扫描阶段业务文件零修改。</li><li>消费者未知时没有删除/合并按钮。</li><li>只执行获批路径；现场变化使卡片 stale。</li><li>删除、合并和敏感治理变化必须逐项批准。</li></ul></div>
+    <div class="card"><h3>能恢复</h3><ul><li>每张执行卡都有业务文件 preimage。</li><li>失败时只回滚当前卡，不扩大影响。</li><li>回滚失败立即停止并给出恢复入口。</li><li>本机断电后可由自包含会话和磁盘对账确定性恢复。</li><li>M2-0 不改变现有 task archive/admission 行为。</li></ul></div>
+    <div class="card"><h3>真接管</h3><ul><li>有效 Suite 映射到真实 Runner/命令。</li><li>Runtime Gate 保留在副作用前。</li><li>暂缓项持续可见但不阻塞正确项。</li><li>当前真源与历史档案分开，全文不重复入库。</li><li>最终三文件与真实 commit、声明输入指纹一致。</li><li>doctor/status 能持续发现 Registry 或 Inventory 漂移。</li></ul></div>
+  </div>
+
+  <h2>18. 开工门</h2>
+  <div class="card risk"><p>本设计复审通过后，才能写实现规划。设计批准仍不自动授权：</p><ul><li>修改 AGENTS、AGENTS Schema、允许路径或校验器；</li><li>对当前 WildArrange 或任意真实老项目执行删除、合并、归档；</li><li>修改 CI、build、Hook、Runtime 或测试策略；</li><li>提交、合并或推送。</li></ul><p>真正执行老项目接管时，每张敏感变更卡仍由用户现场批准。</p></div>
+
+  <h2>证据基线</h2>
+  <p class="small">本设计以 2026-09-02 当前 WildArrange dirty 工作区、原始 Verification Governance ZIP、首次融合评估及三轮外部审核为依据。已确认：现有完成链仍为 verify → scope → review → acceptance-proof → checkpoint；<code>.wildarrange/</code> 被 Git 忽略；现有任务锁默认等待 15 秒；<code>approvePlan</code> 不含内容指纹；现有 archive recovery 仍带 task 专属语义；command-safety 只覆盖高风险命令底线。以上限制均未被本设计冒充为现成能力。</p>
+</main></body></html>

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { execFile, spawn } from "node:child_process";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
@@ -92,3 +92,65 @@ test("cli smoke: governance audit writes a deterministic report", async () => {
     assert.ok(parsed.reportJsonPath);
   });
 });
+
+test("cli smoke: adoption start auto-provisions a usable Dashboard token", async () => {
+  await withTempProjectDir(async (dir) => {
+    const init = await runCli(["init"], dir);
+    assert.equal(init.code, 0, `init failed.\nstderr: ${init.stderr}`);
+    await writeFile(path.join(dir, "package.json"), JSON.stringify({ name: "legacy", scripts: { test: "node --version" } }, null, 2));
+    await mkdir(path.join(dir, "test"), { recursive: true });
+    await writeFile(path.join(dir, "test", "smoke.test.mjs"), "export const ok = true;\n");
+
+    const child = spawn(process.execPath, [CLI_PATH, "adoption", "start", "--port", "0"], {
+      cwd: dir,
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    try {
+      const output = await waitForOutput(child, /"url":\s*"([^"]+)"/);
+      const match = output.match(/"url":\s*"([^"]+)"/);
+      const dashboardUrl = new URL(match[1]);
+      assert.equal(dashboardUrl.hash.startsWith("#adoption?token="), true);
+      const token = new URLSearchParams(dashboardUrl.hash.split("?")[1]).get("token");
+      assert.ok(token && token.length >= 24);
+      const sessionResponse = await fetch(`${dashboardUrl.origin}/api/adoption/session`);
+      const session = await sessionResponse.json();
+      const card = session.cards[0];
+      const decision = await fetch(`${dashboardUrl.origin}/api/adoption/decision`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ sessionId: session.session.sessionId, cardId: card.id, decision: "deferred", fingerprint: card.fingerprint }),
+      });
+      assert.equal(decision.status, 200);
+    } finally {
+      if (child.exitCode === null) {
+        child.kill();
+        await new Promise((resolve) => child.once("close", resolve));
+      }
+    }
+  });
+});
+
+function waitForOutput(child, pattern) {
+  return new Promise((resolve, reject) => {
+    let output = "";
+    const timer = setTimeout(() => reject(new Error(`timed out waiting for CLI output: ${output}`)), 15_000);
+    const onData = (chunk) => {
+      output += chunk.toString();
+      if (!pattern.test(output)) return;
+      clearTimeout(timer);
+      child.stdout.off("data", onData);
+      resolve(output);
+    };
+    child.stdout.on("data", onData);
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once("exit", (code) => {
+      if (pattern.test(output)) return;
+      clearTimeout(timer);
+      reject(new Error(`CLI exited before Dashboard URL was printed: ${code}; ${output}`));
+    });
+  });
+}

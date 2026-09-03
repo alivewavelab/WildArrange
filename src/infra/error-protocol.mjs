@@ -16,6 +16,9 @@ const CAPABILITY_MODULES = {
   command: "infra/command-runner.mjs",
   "command-safety": "infra/command-safety.mjs",
   "repository-governance": "capabilities/repository-governance.mjs",
+  "verification-governance-scan": "capabilities/verification-governance.mjs",
+  "verification-governance-apply-card": "capabilities/verification-governance.mjs",
+  "verification-governance-generate-artifacts": "capabilities/verification-governance.mjs",
 };
 
 export function capabilityModule(name) {

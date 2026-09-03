@@ -3,8 +3,8 @@
 | 命令 | 说明 |
 | ---- | ---- |
 | `wildarrange init [--sample] [--project-docs] [--architecture]` | 初始化运行时；显式补建项目治理文档，可按需包含架构模板 |
-| `wildarrange plan --from <plan.json>` | 导入计划并生成任务状态 |
-| `wildarrange plan approve [--plan <planId>]` | 确认已导入计划（开启 planApproval 时才能 run） |
+| `wildarrange plan --from <plan.json>` | 导入计划；宿主语义生成计划会强制等待确认 |
+| `wildarrange plan approve [--plan <planId>]` | 确认待执行计划（语义生成计划或已开启 planApproval） |
 | `wildarrange run` | 跑下一个任务（worker→verifier→scope→review→checkpoint） |
 | `wildarrange status` | 查看状态（含门武装黄灯） |
 | `wildarrange decisions [--limit N] [--task T001] [--gate pre_tool_use] [--annotatable] [--format json]` | 查看门决策记录（每一次拦截/放行；--annotatable 只看可标注队列） |
@@ -86,6 +86,10 @@
 | `wildarrange state list` | 列出运行态备份 |
 | `wildarrange state restore --backup <backupId>` | 恢复运行态备份 |
 | `wildarrange serve [--host 127.0.0.1] [--port 8765] [--token <token>]` | 启动本地 dashboard（默认仅 loopback） |
+| `wildarrange adoption start [--host 127.0.0.1] [--port 8765] [--token <token>]` | 只读扫描老项目验证资产并打开 Dashboard 逐卡批准 |
+| `wildarrange adoption status [--session <sessionId>]` | 只读对账接管会话、待决策/过期卡和新鲜度黄灯 |
+| `wildarrange adoption resume [--session <sessionId>] [--host 127.0.0.1] [--port 8765] [--token <token>]` | 按磁盘事实恢复接管会话；不安全时只显示 recovery_required |
+| `wildarrange adoption recover [--session <sessionId>]` | 重试恢复失败事务的 preimage，成功后释放维护锁 |
 | `wildarrange guard scope [--task T001]` | 校验任务范围 |
 | `wildarrange route --text "request"` | 请求路由 |
 | `wildarrange prompts list` | 列出提示词 |

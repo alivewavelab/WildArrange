@@ -227,6 +227,7 @@ node ./bin/wildarrange.mjs adapter install --target all --mode local
     {
       "id": "T001",
       "subject": "Write smoke artifact",
+      "owner": "ZhuRong",
       "writable_paths": [".wildarrange/artifacts/smoke.txt"],
       "worker_command": "node -e \"const fs=require('fs'); fs.mkdirSync('.wildarrange/artifacts',{recursive:true}); fs.writeFileSync('.wildarrange/artifacts/smoke.txt','ok\\n')\"",
       "verify_commands": ["node -e \"const fs=require('fs'); if(fs.readFileSync('.wildarrange/artifacts/smoke.txt','utf8').trim()!=='ok') process.exit(1)\""],
@@ -246,6 +247,12 @@ node ./bin/wildarrange.mjs run
 node ./bin/wildarrange.mjs status
 node ./bin/wildarrange.mjs summary
 ```
+
+在已安装 adapter 的 Codex / Cursor / Kimi Code 中，直接描述一个需要开发的需求或 Bug 即可。`UserPromptSubmit` 路由判断需要计划时，会要求当前宿主大模型根据对话语义生成 `.wildarrange/plan-drafts/<session>-plan.json`，而不是让用户手写格式。生成文件必须带 `generated_by: "host_semantic"`，并为每张可执行任务明确填写 `task.owner`；owner 只能是具备 command-worker 资格的 Jiuwei 或 ZhuRong。DiJiang、BaiZe、LuWu 分别通过计划、复核和治理阶段参与，不执行 `worker_command`。WildArrange 导入时校验 owner，且无论全局开关如何都强制等待用户 `plan approve`。执行 Hook、任务领取和并行运行随后读取同一个 `task.owner`，不会再另建一套实际负责人。
+
+计划待确认期间，用户仍可修改 `.wildarrange/plan-drafts/*.json` 并重新导入；其它文件写入和任意 Shell 默认阻断，只放行精确匹配的计划管理与只读命令。批准后，草稿目录重新受当前工单的 `writable_paths` 限制。
+
+手工编写或外部生成的 `plan.json` 仍可直接使用 `plan --from` 导入。为兼容旧计划，缺省 owner 仍回落到 Jiuwei；但新计划应始终显式填写 owner。
 
 或直接跑内置样例：
 
@@ -296,7 +303,7 @@ node ./bin/wildarrange.mjs adapter restore --backup <backupId>
 
 Codex 新会话的 `SessionStart` 会自动注入完整 Jiuwei 身份 Prompt；上下文压缩后的 `PostCompact` 会再注入一次用于恢复身份。普通 `UserPromptSubmit` 不重复注入，避免每轮对话浪费上下文。Prompt 来自已安装且经过 hash 校验的 Prompt Pack，并受 `contextBudgets.prompt.maxChars` 限制；截断会明确显示。
 
-`adapter install` 还会生成一组快捷命令，省去手动开终端敲 `node ...`。三端从同一套命令集渲染（`wildarrange-config` / `wildarrange-doctor` / `wildarrange-refresh` / `wildarrange-status` / `wildarrange-plan` / `wildarrange-approve` / `wildarrange-run`）：
+`adapter install` 还会生成一组快捷命令，省去手动开终端敲 `node ...`。其中 `/wildarrange-plan` 在未提供路径时会根据当前对话生成计划草稿，提供路径时仍导入已有文件。三端从同一套命令集渲染（`wildarrange-config` / `wildarrange-doctor` / `wildarrange-refresh` / `wildarrange-status` / `wildarrange-plan` / `wildarrange-approve` / `wildarrange-run`）：
 
 - **Cursor**：`.cursor/commands/<name>.md`（纯 Markdown 斜杠命令，聊天输入 `/wildarrange-doctor` 触发）。
 - **Codex / Kimi Code**：共享 `.agents/skills/<name>/SKILL.md` 项目 Skill；Codex 可通过 `/skills` 或 `$wildarrange-doctor` 触发，Kimi Code 按其项目 Skill 机制发现和调用。
@@ -378,7 +385,18 @@ CLI 是分层的：`--help` 默认只显示核心六命令（init / plan / run /
 
 `review suspicious` 是 LLM 可疑判断（异步审查，archivist 不变量）：只把清洗后的结论包（id/门/规则/摘要，绝无代码块、raw diff 或完整命令输出）发给配置的外部 provider，返回的可疑清单必须锚定输入包内的 decisionId（幻觉 id 直接丢弃并计数）；无 key 时确定性 fallback，不阻断任何流程。结论只写入 `.wildarrange/reports/suspicion.*`——**不进完成链、不改配置、不动门开关**。
 
-Dashboard（`serve`）包含全项目工单总账、路由复盘台、决策面板与运维面板。工单总账直接读取 `.wildarrange/team/tasks.json`，展示全部 Plan、工单类型、优先级、关联任务与状态历史。路由复盘台按日期展示用户原文、结构化路由结果、命中信号、语义第二意见及同会话后续工具摘要，并可人工标记正确/规则错/个案错；工具参数中的常见密钥字段会脱敏。IDE `Stop` Hook 会主动更新中文日报 `.wildarrange/reports/routing/latest.md`（同日归档为 `YYYY-MM-DD.md`），先给结论，再列全部判断和工具明细。复盘只写 annotation，不自动修改 `routes.json`。
+老项目验证治理接管是独立维护流程，不进入 `task.status`，也不复用 `approvePlan`：
+
+```text
+node ./bin/wildarrange.mjs adoption start
+node ./bin/wildarrange.mjs adoption status
+node ./bin/wildarrange.mjs adoption resume
+node ./bin/wildarrange.mjs adoption recover
+```
+
+`adoption start` 只读扫描测试、Gate、Runner、Hook 和历史档案，打开 Dashboard 逐卡批准；未传 `--token` 时会自动生成本次专用随机口令并注入当前标签页。只执行获批项；带验证命令、归档、合并或关键配置的卡片必须逐张批准。Registry 等待用户自行 commit A，随后生成 Bootstrap 与可直接用浏览器打开的 Inventory HTML，再等待 commit B。Inventory 同时内嵌机器可读记录，展示当前真源、历史档案、暂缓确认和本次变更；V1 不执行物理删除，因此删除墓碑只保留为未来兼容视图。三个目标名称若已被老项目文件、目录或链接占用，流程会暂停并指出冲突，绝不静默覆盖。获批 archive 默认移入项目可提交的 `docs/verification-archive/`（没有 `docs/` 时用 `verification-archive/`），不会放进 `.wildarrange/`。一旦已有卡片改变项目文件，就不能用“取消会话”冒充恢复；应完成两次 Git 锚定，或在 `recovery_required` 时运行 `adoption recover`。`doctor` / `status` 的 `registryFreshness` 过期只亮黄灯，不阻断日常 run。没有 `approve` / `apply` / `delete` CLI。
+
+Dashboard（`serve`）包含全项目工单总账、路由复盘台、决策面板、运维面板与验证接管页。工单总账直接读取 `.wildarrange/team/tasks.json`，展示全部 Plan、工单类型、优先级、关联任务与状态历史。路由复盘台按日期展示用户原文、结构化路由结果、命中信号、语义第二意见及同会话后续工具摘要，并可人工标记正确/规则错/个案错；工具参数中的常见密钥字段会脱敏。IDE `Stop` Hook 会主动更新中文日报 `.wildarrange/reports/routing/latest.md`（同日归档为 `YYYY-MM-DD.md`），先给结论，再列全部判断和工具明细。复盘只写 annotation，不自动修改 `routes.json`。
 
 `run` 结束时的门决策汇总按 `reporting.verbosity` 分级：默认 `verbose` 在 stderr 输出本次任务每个门的三行投影（框架初期让人能审判每一条门决策）；信任建立后可改为 `normal`（一行结果）或 `quiet`（只输出 JSON）。stdout 的机器可读 JSON 在任何级别下都不变。
 
@@ -387,6 +405,14 @@ Dashboard（`serve`）包含全项目工单总账、路由复盘台、决策面�
 `status` 输出顶部常驻 `gateArming` 黄灯：默认配置下质量门全关、review 门没有独立信号时会显示「门未武装」及修复指引，避免对着一条全绿但不证明任何东西的门流误判项目健康。验收证明（acceptance proof）有两条硬地板：拒绝 `verify_commands` 全是 trivial 命令（如 `true`）的任务；拒绝 review 门没有任何独立信号 lane（无 `review_commands` / `standards_commands` / `review.llm` / 已启用质量门）的任务——同义反复的复核不证明任何东西，不得进入 completed。`config init --armed` 可以直接生成一份武装了质量门（commentChecker 阻断 + lspDiagnostics 命令位）的配置。`doctor` 有独立的 `gateArming` 与 `adapters` 分项：门未武装、已启用 adapter 但本机没装 hooks、规则文件里残留指向不存在路径的命令，都会在体检报告里摆到台面上。
 
 `governance audit` 是 LuWu 的只读巡检：检查目录级 `AGENTS.md`、README 中英文命令对等、Prompt Pack 登记、命名和真实代码注释，报告写入 `.wildarrange/reports/governance/`。只看当前改动可加 `--changed-only`，它只触发变更文件及相关祖先规则/成对文档/架构台账；Git 变更不可读取时会安全回退为全量扫描。LuWu 不会自动移动、重命名或删除项目文件，运行时也会拒绝 LuWu、DiJiang、BaiZe 进入 command worker。
+
+接口与数据库契约治理首版自动对照 Tauri Rust command、handler 注册和前端 `invoke`；Rust 源码字符串中的 SQL 只标记为需要人工申报，不伪装成已扫描。扫描生成的差异必须由开发者显式批准或拒绝，LuWu 在既有 review 内检查当前任务触及的契约，不新增平行门禁：
+
+```bash
+node ./bin/wildarrange.mjs contracts scan
+node ./bin/wildarrange.mjs contracts apply-card --card <id> --decision approve --reason "baseline confirmed" --expected-fingerprint <sha256>
+node ./bin/wildarrange.mjs contracts generate
+```
 
 每次 worker 执行前，WildArrange 会在 Git 项目里自动记录一份工作区快照（`git stash create`），快照 hash 与恢复命令写入任务证据和 ledger，代码被改坏时可用 `git stash apply <hash>` 还原。
 
@@ -403,14 +429,6 @@ node ./bin/wildarrange.mjs parallel close --run <runId> --task T001 --reason use
 ```bash
 node ./bin/wildarrange.mjs parallel run --task T001 --isolation git-worktree --command "..."
 node ./bin/wildarrange.mjs parallel admit --run <runId> --task T001
-```
-
-接口与数据库契约治理首版自动对照 Tauri Rust command、handler 注册和前端 `invoke`；Rust 源码字符串中的 SQL 只标记为需要人工申报，不伪装成已扫描。扫描生成的差异必须由开发者显式批准或拒绝，LuWu 在既有 review 内检查当前任务触及的契约，不新增平行门禁：
-
-```bash
-node ./bin/wildarrange.mjs contracts scan
-node ./bin/wildarrange.mjs contracts apply-card --card <id> --decision approve --reason "baseline confirmed" --expected-fingerprint <sha256>
-node ./bin/wildarrange.mjs contracts generate
 ```
 
 ## ArchivistRouter
@@ -454,7 +472,7 @@ node ./bin/wildarrange.mjs skills match --text "做一个网页版提醒事项 A
 ### 人工决策通道与安全开关
 
 - **通用推送（不绑任何外部 IM）**：所有"待人决策"的事项——计划待确认、改动越界的 ChangeRequest、失败任务、子 Agent 待验收——由 hook 在 SessionStart / UserPromptSubmit / PostCompact / Stop 时注入宿主 AI 上下文，要求 AI 主动向开发者复述并给出选项。`attentionReport` 是这份待办的真相源，`status` / dashboard 也能拉取。
-- **计划确认门**：`planApproval.required=true` 时，`plan --from` 导入的计划进入 `awaiting_plan_approval`，`run` 拒绝执行直到开发者 `plan approve`（或对话里用 `/wildarrange-approve`）。默认关闭。
+- **计划确认门**：带 `generated_by: "host_semantic"` 的语义生成计划始终进入 `awaiting_plan_approval`；普通手工计划则在 `planApproval.required=true` 时进入。`run` 拒绝执行，直到开发者 `plan approve`（或对话里用 `/wildarrange-approve`）。
 - **命令安全外置**：内置高危命令正则是不可关闭的底线；`commandSafety.extraPatterns` 允许在其之上追加项目专属危险命令拦截（`{ id, pattern, flags, reason }`），无需改代码。
 
 ## Dashboard

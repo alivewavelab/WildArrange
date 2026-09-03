@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>老项目验证治理接管实施计划</title>
+  <style>
+    :root{--ink:#21302a;--muted:#637069;--paper:#f6f3ea;--card:#fffdf7;--line:#d8d2c3;--green:#2f6b4f;--green-bg:#e7f2ea;--amber:#9a6818;--amber-bg:#fff1cf;--red:#9b4037;--red-bg:#f9e2dc;--blue:#376983;--blue-bg:#e4f0f5}
+    *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:"Segoe UI","Microsoft YaHei",sans-serif;line-height:1.65}main{max-width:1180px;margin:auto;padding:42px 24px 72px}h1{margin:0 0 8px;font-size:38px}h2{margin:42px 0 14px;border-bottom:1px solid var(--line);padding-bottom:8px}h3{margin:0 0 8px;font-size:17px}p{margin:7px 0}.lead{font-size:18px}.small,.plain{color:var(--muted);font-size:14px}.plain:before{content:"生活化理解：";font-weight:700;color:var(--ink)}code{background:#ece8dd;border-radius:4px;padding:1px 5px;font-family:Consolas,monospace;font-size:.92em}.badge{display:inline-block;border-radius:999px;padding:5px 11px;font-size:13px;font-weight:700}.wait{background:var(--amber-bg);color:var(--amber)}.safe{border-top:5px solid var(--green)}.risk{border-top:5px solid var(--red)}.info{border-top:5px solid var(--blue)}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:14px}.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:17px;box-shadow:0 4px 14px rgba(43,52,47,.05)}.flow{display:grid;grid-template-columns:1fr auto 1.35fr auto 1fr;gap:10px;align-items:stretch}.arrow{display:flex;align-items:center;font-size:28px;color:var(--green)}table{width:100%;border-collapse:collapse;background:var(--card);font-size:14px}th,td{text-align:left;vertical-align:top;border:1px solid var(--line);padding:10px}th{background:#ece8dd}ul,ol{margin:8px 0;padding-left:22px}.phase{border-left:7px solid var(--blue)}.phase.must{border-left-color:var(--red)}.phase.done{border-left-color:var(--green)}.check{color:var(--green);font-weight:700}.stop{color:var(--red);font-weight:700}.decision{background:var(--amber-bg);border-color:#e3bd68}.mono{font-family:Consolas,monospace;white-space:pre-wrap;background:#292f2c;color:#f7f3e8;padding:14px;border-radius:9px;overflow:auto;font-size:13px}@media(max-width:760px){main{padding:26px 15px}.flow{grid-template-columns:1fr}.arrow{justify-content:center;transform:rotate(90deg)}h1{font-size:31px}table{display:block;overflow:auto}}
+  </style>
+</head>
+<body><main>
+  <span class="badge wait">待用户审核 · 未授权写实现</span>
+  <h1>老项目验证治理接管实施计划</h1>
+  <p class="lead">把已经批准的产品设计拆成 6 个可独立验收的工程批次；最后一次联调通过前，不向用户暴露半成品 <code>adoption</code> 入口。</p>
+  <p class="small">日期：2026-09-02｜设计依据：<code>2026-09-02-legacy-project-verification-onboarding-product-design.html</code>｜目标仓库：WildArrange</p>
+
+  <h2>1. 交付结果</h2>
+  <div class="flow">
+    <div class="card"><h3>输入</h3><p>一个已经存在测试、CI、Hook、旧文档和历史任务的老项目。</p><p class="plain">像接手一间住了很多年的房子。</p></div><div class="arrow">→</div>
+    <div class="card"><h3>处理</h3><p>只读扫描 → 生成证据卡 → Dashboard 逐项批准 → 可恢复地执行 → 两次 Git 锚定。</p><p class="plain">先清点、再签施工单、逐项施工验收。</p></div><div class="arrow">→</div>
+    <div class="card"><h3>输出</h3><p>整理后的仓库、Registry、Bootstrap、Inventory，以及持续新鲜度黄灯。</p><p class="plain">交付新目录、总账、交接单和过期提醒。</p></div>
+  </div>
+  <div class="grid" style="margin-top:14px">
+    <div class="card safe"><h3>核心目标</h3><p>用户能看懂并逐项决定每个验证资产的新增、修改、合并、归档、删除或暂缓；WildArrange 只执行获批项。</p><p class="plain">机器负责查证和施工，人负责签字。</p></div>
+    <div class="card risk"><h3>明确不做</h3><p>不自动删除，不自动 commit/merge/push，不执行来源不明的验证脚本，不把 Runtime Gate 穷举当作承诺，不建立第二套测试运行历史数据库。</p><p class="plain">这不是无人值守的大扫除机器人。</p></div>
+  </div>
+
+  <h2>2. 开工前的真实阻塞</h2>
+  <div class="card risk">
+    <h3>目标入口目前与大量未提交 WIP 重叠</h3>
+    <p><code>bin/wildarrange.mjs</code> 当前是未跟踪文件；<code>gateway.mjs</code>、<code>dashboard.mjs</code>、<code>dashboard-panels.mjs</code>、<code>doctor.mjs</code>、<code>status.mjs</code>、<code>security.mjs</code>、Prompt Pack manifest/routes 和多份测试均已有修改。</p>
+    <p class="plain">施工入口已经有人摆着材料，不能假装是空房直接覆盖。</p>
+    <p><span class="stop">开工条件：</span>用户或当前 WIP owner 明确确认“以当前文件内容为实现基线继续”，或者先由原 owner 收口这些改动。禁止 reset、checkout、stash、clean、批量还原或替用户提交。</p>
+  </div>
+
+  <h2>3. 最短模块方案</h2>
+  <p>新增 6 个真实 owner 文件；其余只改现有入口与文档。扫描事实放 Infra，原子动作放 Capabilities，流程状态放 Orchestration，用户操作放 Interface。</p>
+  <table>
+    <thead><tr><th>文件</th><th>技术作用</th><th>为什么不塞进现有大文件</th></tr></thead>
+    <tbody>
+      <tr><td><code>src/infra/recovery-transaction.mjs</code></td><td>通用 preimage/postimage、提交、回滚和启动对账原语。<div class="plain">统一准备施工前照片和还原工具。</div></td><td><code>security.mjs</code> 的现有 archive API 保持原样，只把可复用底层动作抽出，避免冒充已经通用。</td></tr>
+      <tr><td><code>src/infra/verification-discovery.mjs</code></td><td>确定性枚举验证资产、入口、静态消费者证据和未知项。<div class="plain">负责沿着电线找“这个开关连到哪里”。</div></td><td>不把仓库扫描混进 Dashboard 或 AI Skill；复用 dependency graph、Git diff、路径和规则扫描结果。</td></tr>
+      <tr><td><code>src/infra/verification-registry.mjs</code></td><td>三文件 schema、规范化 digest、声明输入指纹和 freshness 比对。<div class="plain">负责账本格式和“账本是不是过期”的盖章规则。</div></td><td>doctor、status、生成器需要共享同一套算法，不能各算一遍。</td></tr>
+      <tr><td><code>src/capabilities/verification-governance.mjs</code></td><td>暴露 scan、apply-card、generate-artifacts 三个可审计原子能力。<div class="plain">把盘点、单项施工、出交接单做成三台独立机器。</div></td><td>不在 capability 内决定流程推进；经 gateway 返回统一证据信封。</td></tr>
+      <tr><td><code>src/orchestration/adoption.mjs</code></td><td>接管会话、卡片批准、stale、维护互斥、恢复和两次提交状态机。<div class="plain">像现场项目经理，决定下一步能不能开工。</div></td><td>不复用 task/admission 状态名，不改 delivery pipeline 的完成语义。</td></tr>
+      <tr><td><code>src/interface/adoption-panel.mjs</code></td><td>Dashboard ViewModel、卡片 HTML/JS 和 adoption API 输入校验。<div class="plain">把施工单翻译成用户看得懂、能签字的页面。</div></td><td>避免继续膨胀接近拆分线的 <code>dashboard.mjs</code>；界面不直接碰业务文件。</td></tr>
+    </tbody>
+  </table>
+
+  <h2>4. 数据合同先钉死</h2>
+  <div class="grid">
+    <div class="card info"><h3>本机会话目录</h3><p><code>.wildarrange/adoption/&lt;sessionId&gt;/</code> 下保存 <code>session.json</code>、<code>scan.json</code>、<code>cards.json</code>、<code>approvals.json</code> 与 <code>transactions/&lt;cardId&gt;/</code>。</p><p>所有 JSON 使用原子写；transaction 目录自包含 preimage、postimage、manifest 和诊断。</p><p class="plain">即使断电，施工日志和原始材料仍在同一个工具箱里。</p></div>
+    <div class="card info"><h3>正式文件定位</h3><p>在已存在的 <code>wildarrange.config.json</code> 增加可选 <code>verificationGovernance</code> 段，只保存 <code>registryPath / bootstrapPath / inventoryPath</code>。路径由扫描建议、用户在变更卡中批准，不由 init 静默创建。</p><p class="plain">总开关箱只贴三张“账本放在哪里”的标签。</p></div>
+    <div class="card info"><h3>变更卡</h3><p>固定字段：<code>id/action/asset/path/owner/purpose/consumers/evidence/confidence/reason/afterState/maxConsequence/patch/verify/rollback/fingerprint/mappingLoss</code>。</p><p class="plain">每张施工单都写清对象、理由、后果和退路。</p></div>
+    <div class="card info"><h3>动作与批准</h3><p>卡片动作仅 <code>adopt/change/merge/archive/delete/defer</code>；决定仅 <code>approved/rejected/deferred</code>。消费者未知时，系统根本不生成 merge/delete 可批准动作。</p><p class="plain">证据不够时，不是把危险按钮变灰，而是不提供按钮。</p></div>
+  </div>
+  <h3 style="margin-top:18px">状态合同</h3>
+  <div class="mono">scanning → reviewing → ready → applying
+          → awaiting_registry_commit
+          → awaiting_final_commit
+          → finalized
+
+异常结果：needs_review | recovery_required | cancelled
+卡片状态：pending | approved | rejected | deferred | stale</div>
+  <p>这些状态只属于 adoption 会话，不进入 task.status，不产生 task completed，不借用 approvePlan。</p>
+  <p class="plain">这是独立施工进度表，不去改公司的工单结算规则。</p>
+
+  <h3 style="margin-top:18px">“adopt”写到哪里</h3>
+  <table>
+    <thead><tr><th>旧资产</th><th>获批后的精确落点</th><th>后续怎么生效</th></tr></thead>
+    <tbody>
+      <tr><td>行为测试 Suite</td><td>Registry 的 <code>planDefaults.verify_commands</code> 投影；若目标仓库已有明确的 WildArrange 计划模板，卡片另外展示该模板的精确 patch。</td><td>单一 Skill 创建/修订未来计划时，把候选复制进真实 task/plan 的 <code>verify_commands</code>；不偷偷改当前活动任务。</td></tr>
+      <tr><td>静态工程检查</td><td>Registry 的 <code>planDefaults.standards_commands</code>；只有与当前 <code>qualityGates</code> 精确同义时，另生成 <code>wildarrange.config.json</code> patch 卡。</td><td>计划命令走 standards lane；配置卡只有逐项获批后才改变现有 Gate。</td></tr>
+      <tr><td>独立复核入口</td><td>Registry 的 <code>planDefaults.review_commands</code>。</td><td>未来计划由 Skill 写入真实 <code>review_commands</code>，并拒绝与 verifier 同义反复。</td></tr>
+      <tr><td>Runtime Gate / Hook</td><td>Registry 的 <code>runtimeGates</code> / <code>hostHooks</code> 目录项；只有存在真实 adapter 配置目标时才另出 patch 卡。</td><td>保留原副作用前位置；不搬进任务命令，也不冒充完成证据。</td></tr>
+      <tr><td>现有字段无法承接</td><td>Registry 的 <code>deferred</code> 清单和 Inventory 的盲区区块。</td><td>持续可见，但不生成虚假字段、不阻塞其他正确接管项。</td></tr>
+    </tbody>
+  </table>
+  <p><code>verificationGovernance</code> 配置段只是三个正式文件的 locator，不承载验证门语义，因此不属于“伪造一个 Gate 字段”。</p>
+  <p class="plain">Registry 先保存全项目的标准工具箱；以后开新工单时，Skill 把需要的工具真实放进工单，而不是只在仓库里摆一个没人用的清单。</p>
+
+  <h2>5. M0：先固定合同和测试夹具</h2>
+  <div class="card phase must">
+    <h3>M0｜只建测试骨架，不开放命令</h3>
+    <ul>
+      <li>建立最小老项目 fixture：package scripts、直接 import、Runner glob、CI/Hook 静态入口、动态加载、重复脚本、旧文档、旧任务、符号链接逃逸。</li>
+      <li>把卡片 schema、状态迁移、三文件 schemaVersion 和错误码先写成测试断言。</li>
+      <li>固定“扫描零业务文件写入”“未知消费者不能删除/合并”“不运行发现到的命令”。</li>
+    </ul>
+    <p><strong>测试文件：</strong><code>test/verification-discovery.test.mjs</code>、<code>test/adoption-runtime.test.mjs</code> 的首批失败用例。</p>
+    <p><strong>退出条件：</strong>失败测试准确表达批准设计；没有 CLI、Dashboard 路由或发布入口。</p>
+    <p class="plain">先画验收红线，防止施工时把风险解释掉。</p>
+  </div>
+
+  <h2>6. M1：只读扫描与可判对卡片</h2>
+  <div class="card phase">
+    <h3>M1-1｜确定性发现</h3>
+    <ol>
+      <li>从 Git 跟踪文件、工作区新增文件和明确排除目录生成候选集合；排除 <code>.git/</code>、<code>.wildarrange/</code>、依赖缓存、构建产物和用户确认的 archive 根。</li>
+      <li>复用 <code>dependency-graph.mjs</code> 的词法 import；复用 <code>git-diff.mjs</code> 的 WIP 基线；用 <code>path-match.mjs</code> 做 glob/realpath 边界。</li>
+      <li>结构化解析 package JSON；对 CI YAML、shell/batch、Hook 配置只做入口级字符串和 token 证据，不宣称完整语义解析。</li>
+      <li>发现动态 import、变量拼接、eval、生成配置或未知 Runner 时标记 <code>consumerUnknown=true</code>。</li>
+    </ol>
+    <p><strong>退出条件：</strong>同一仓库重复扫描得到同序、同 ID、同 digest；扫描期间业务文件 byte-for-byte 不变。</p>
+    <p class="plain">盘点两次必须得到同一本清单，而且不能碰屋里的东西。</p>
+  </div>
+  <div class="card phase" style="margin-top:12px">
+    <h3>M1-2｜分类、映射和预览</h3>
+    <ul>
+      <li>把证据转换为六类动作建议；证据只到线索级时强制 defer。</li>
+      <li>映射到真实 <code>verify_commands</code>、<code>standards_commands</code>、现有精确 <code>qualityGates</code>、<code>review_commands</code> 或 adapter 建议。</li>
+      <li>近似映射必须填 <code>mappingLoss</code>，给出拆分或 defer；不得静默选一个相似字段。</li>
+      <li>旧文档/任务只有在存在明确后继真源且引用核验后才能建议 archive；Git 历史是全文历史库，Registry 只存结构化索引或 tombstone。</li>
+    </ul>
+    <p><strong>能力登记：</strong><code>gateway.mjs</code> 新增 <code>verification-governance-scan</code>，结果 <code>sideEffect</code> 只能是运行态报告写入，业务文件副作用为零。</p>
+    <p><strong>退出条件：</strong>每张卡完整回答“是什么、作用、谁使用、为什么处理、之后怎样、最大后果、怎么恢复”。M1 仍无公开入口。</p>
+    <p class="plain">清单不是只写“建议清理”，而是每项都能让人判对。</p>
+  </div>
+
+  <h2>7. M2-0：先提炼通用恢复原语</h2>
+  <div class="card phase must">
+    <h3>M2-0｜只泛化底层，不改变既有归档和 admission</h3>
+    <ul>
+      <li>从 <code>security.mjs</code> 抽出路径校验、preimage 复制、postimage digest、原子 manifest 更新和精确恢复的通用原语。</li>
+      <li><code>prepareArchiveRecoveryPackage</code> 与 <code>updateArchiveRecoveryPackage</code> 保持公开签名、返回结构、<code>kind: task_archive_recovery</code>、manifest 位置和状态集合不变。</li>
+      <li>不改 admission 的 owner/base/main fence，不改已 push 不得回滚，不改 <code>recovery_required</code> ownership。</li>
+      <li>adoption 使用独立 <code>kind: adoption_change_recovery</code>，不得写入 task archive 的业务字段。</li>
+    </ul>
+    <p><strong>测试：</strong>新增 <code>test/recovery-transaction.test.mjs</code>；扩充现有 task archive/state restore 测试，逐字段对比重构前后的 manifest 与返回值，并覆盖文件、目录、symlink、部分失败、重复恢复。</p>
+    <p><strong>硬退出门：</strong>现有 archive/admission 回归测试全部通过后，M2-1 才能开始。</p>
+    <p class="plain">先把通用保险箱造好，但不能顺手改变旧保险箱的钥匙。</p>
+  </div>
+
+  <h2>8. M2-1：审批、互斥、Apply 与恢复</h2>
+  <div class="grid">
+    <div class="card phase"><h3>Dashboard 唯一写入口</h3><p>新增只读 <code>GET /api/adoption/session</code> 和受保护的 <code>POST /api/adoption/decision</code>、<code>/apply</code>、<code>/reconcile</code>、<code>/cancel</code>。全部复用现有 Host、Origin、token、payload size 和 ID 校验。</p><p>删除、合并、AGENTS/CI/build/Hook/Runtime/测试策略变化只能逐卡批准；普通 adopt/change 才允许同风险批次批准。</p><p class="plain">只有一个签字台，而且拆线路必须一张一张签。</p></div>
+    <div class="card phase"><h3>现场指纹</h3><p>批准记录绑定卡片规范化 digest、目标 path preimage digest、HEAD、WIP path set 和消费者证据 digest。Apply 前任一项变化则该卡进入 stale。</p><p class="plain">施工前再看一次门牌、现场照片和签字单是否还是同一套。</p></div>
+    <div class="card phase"><h3>维护互斥</h3><p>开始 Apply 前短暂获取全局 task lock，只检查无活动 run/admission 并原子登记 maintenance marker，随后释放；实际执行持独立 adoption lock。日常 run/admission 看到 marker 后返回明确“接管维护中”，不等待 15 秒超时。</p><p class="plain">先在总前台挂“维护中”，再用施工队自己的钥匙工作。</p></div>
+    <div class="card phase"><h3>逐卡事务</h3><p>一次只执行一张 approved 卡：prepare → apply exact paths → run approved isolated verifier → write postimage → commit card；失败只回滚本卡。恢复失败立即停止并保留 marker、transaction 和恢复指令。</p><p class="plain">一间一间验收，哪间出问题只恢复哪间。</p></div>
+  </div>
+  <p><strong>测试：</strong><code>test/adoption-runtime.test.mjs</code> 覆盖并发 start、活动 task/admission、stale、越界路径、symlink、验证失败、回滚失败、断电点故障注入、resume 幂等；<code>test/adoption-dashboard.test.mjs</code> 覆盖授权、跨站请求、非法 ID、逐卡批准和页面文案。</p>
+  <p><strong>退出条件：</strong>任意注入中断后，<code>adoption status/resume</code> 能由磁盘确定唯一下一步；失败时没有越界写、没有错误清 maintenance marker。</p>
+
+  <h2>9. M3：三文件、Git 锚定与持续消费</h2>
+  <div class="card phase">
+    <h3>M3-1｜Registry → commit A → Bootstrap/Inventory → commit B</h3>
+    <ol>
+      <li>所有获批卡完成后生成 Registry 和获批的 config locator 变更，进入 <code>awaiting_registry_commit</code>。</li>
+      <li>用户自行 commit；reconcile 验证 HEAD 确实包含 Registry 与 locator，记为 <code>baselineRef=commit A</code>。</li>
+      <li>生成 Bootstrap 与 Inventory。Inventory 保存 Registry digest、Bootstrap digest、声明输入 path 清单和 <code>discoveryUniverseFingerprint</code>，排除 Inventory 自身与 archive 内容。</li>
+      <li>进入 <code>awaiting_final_commit</code>；用户自行 commit B。reconcile 验证 HEAD 包含两文件且声明输入未漂移后才 <code>finalized</code>。</li>
+    </ol>
+    <p class="plain">第一张收据证明总账已经落地，第二张收据证明交接单也正式入库。</p>
+  </div>
+  <div class="grid" style="margin-top:12px">
+    <div class="card phase"><h3>Freshness 消费点</h3><p><code>doctor</code> 新增独立容错的 <code>registryFreshness</code> 分项；<code>status</code> 读取同一 Infra 结果摘要；Inventory 生成器和 Skill 显式检查也消费 Registry。漂移只亮黄灯和给下一步，不自动扫描、不阻断日常 run。</p><p class="plain">账本过期会亮灯提醒，但不会突然锁住正常工作。</p></div>
+    <div class="card phase"><h3>单一 Skill</h3><p>新增 <code>packs/wildarrange-linear/skills/verification-governance.md</code>，同步 manifest、routes、tool-contract 与安装测试。Skill 只能显式调用产品命令；Hook 不得静默全仓扫描。</p><p class="plain">Skill 是会带路的项目经理，不是躲在门后的自动清洁工。</p></div>
+  </div>
+
+  <h2>10. CLI 与公开入口</h2>
+  <table>
+    <thead><tr><th>命令</th><th>行为</th><th>何时公开</th></tr></thead>
+    <tbody>
+      <tr><td><code>wildarrange adoption start [--host] [--port] [--token]</code></td><td>创建/拒绝重复会话、执行只读扫描并启动本地 Dashboard；只打印 URL 和 session 摘要。</td><td>M3 端到端通过后</td></tr>
+      <tr><td><code>wildarrange adoption status [--session]</code></td><td>只读磁盘对账并输出状态、待决策数、stale、恢复入口和下一步。</td><td>M3 端到端通过后</td></tr>
+      <tr><td><code>wildarrange adoption resume [--session] [--host] [--port] [--token]</code></td><td>先 reconcile；安全时继续并启动 Dashboard，不安全时只显示 recovery_required。</td><td>M3 端到端通过后</td></tr>
+    </tbody>
+  </table>
+  <p>不提供 <code>approve</code>、<code>apply</code>、<code>delete</code> CLI 子命令；不提供自动 commit/merge/push 参数。</p>
+  <p class="plain">命令行只负责开门和看进度，真正签字只在一个页面完成。</p>
+
+  <h2>11. 现有文件的精确修改清单</h2>
+  <table>
+    <thead><tr><th>批次</th><th>现有文件</th><th>最小修改</th></tr></thead>
+    <tbody>
+      <tr><td>M1</td><td><code>src/capabilities/gateway.mjs</code></td><td>静态登记 scan/apply-card/generate-artifacts；不改既有 capability 信封。</td></tr>
+      <tr><td>M2-0</td><td><code>src/infra/security.mjs</code></td><td>让现有 archive API 调用通用底层原语；公开行为与持久格式不变。</td></tr>
+      <tr><td>M2-1</td><td><code>src/interface/dashboard.mjs</code>、<code>dashboard-panels.mjs</code></td><td>挂载 adoption panel 和 API 路由；主体不承载卡片渲染实现。</td></tr>
+      <tr><td>M2-1/M3</td><td><code>bin/wildarrange.mjs</code>、<code>src/interface/cli-help.mjs</code></td><td>最后联调时一次性公开三个命令，避免半成品 help。</td></tr>
+      <tr><td>M3</td><td><code>src/interface/doctor.mjs</code>、<code>src/orchestration/status.mjs</code></td><td>接入只读 freshness 分项与摘要；单项失败不拖垮 doctor。</td></tr>
+      <tr><td>M3</td><td><code>src/infra/runtime-config.mjs</code>、配置示例</td><td>支持可选 locator；缺失时表示未接管，不自动补建。</td></tr>
+      <tr><td>M3</td><td><code>packs/wildarrange-linear/manifest.json</code>、<code>routes.json</code>、<code>tools/tool-contract.json</code></td><td>登记单一 Skill、明确触发信号和三个真实命令。</td></tr>
+      <tr><td>交付</td><td><code>README.md</code>、<code>README.en.md</code>、<code>doc/project-architecture.md</code>、<code>docs/product/architecture-overview.html</code>、生成命令文档</td><td>只在功能真实通过后同步；中英文命令一致。</td></tr>
+      <tr><td>架构门</td><td><code>tooling/arch-module-graph/module-file-map.json</code></td><td>当前按五区目录整体归属，拟新增文件已被 include 覆盖；先跑 <code>check:arch</code> 证明。只有验证器报告未归属时才提出精确修改，不做无事实变化的机械编辑。</td></tr>
+    </tbody>
+  </table>
+
+  <h2>12. AGENTS 特别批准项</h2>
+  <div class="card decision">
+    <h3>本计划本身不修改 AGENTS；实现前需要用户单独明确批准</h3>
+    <p><strong>现状：</strong>根目录约定没有 adoption、verification discovery、registry freshness 和 recovery transaction 的真实 owner；<code>src/capabilities/AGENTS.md</code> 的 gateway 注册名清单也没有新能力。</p>
+    <p><strong>为什么现有栏目无法完整容纳：</strong>它们能说明五区原则，却不能告诉维护者“接管状态归谁、三文件算法归谁、网关真实注册了什么”。实现完成后不登记会让架构文档与代码事实分叉。</p>
+    <p><strong>拟改范围：</strong>仅在根 <code>AGENTS.md</code> 目录表新增上述 6 个 owner 行；在 <code>src/capabilities/AGENTS.md</code> 更新 gateway 注册名。除非实现发现新的不可容纳约束，不改其他 AGENTS，不改 schema，不放宽依赖白名单。</p>
+    <p><strong>更短替代：</strong>把代码塞进现有 <code>security.mjs</code>、<code>dashboard.mjs</code> 或不登记 owner；前者混合事务/界面职责并逼近文件拆分线，后者违反“架构事实必须登记”，均不采用。</p>
+    <p><strong>影响：</strong>只增加职责说明和真实能力名，不削弱 verifier/scope/review/acceptance-proof/checkpoint，不改变长期 Agent 白名单。</p>
+    <p class="plain">新建六个部门工位，需要更新楼层导览，但不改公司规章和审批制度。</p>
+  </div>
+
+  <h2>13. 测试矩阵与交付证据</h2>
+  <table>
+    <thead><tr><th>风险</th><th>必须证明</th><th>主要测试</th></tr></thead>
+    <tbody>
+      <tr><td>扫描误动</td><td>扫描前后业务树内容与路径集合不变；发现命令零执行。</td><td><code>verification-discovery.test.mjs</code></td></tr>
+      <tr><td>消费者误判</td><td>direct import、script、glob、CI/Hook 分级稳定；动态加载进入 unknown。</td><td><code>verification-discovery.test.mjs</code></td></tr>
+      <tr><td>危险批准</td><td>unknown 无 merge/delete；敏感卡不能批量吞并；批准绑定内容指纹。</td><td><code>adoption-runtime.test.mjs</code>、<code>adoption-dashboard.test.mjs</code></td></tr>
+      <tr><td>路径越界</td><td>绝对路径、<code>..</code>、symlink/realpath 逃逸全部拒绝。</td><td><code>adoption-runtime.test.mjs</code></td></tr>
+      <tr><td>恢复破坏</td><td>每个写入点故障后可回滚或稳定进入 recovery_required；重复 resume 幂等。</td><td><code>recovery-transaction.test.mjs</code>、故障注入</td></tr>
+      <tr><td>旧能力回归</td><td>task archive manifest/API 不变；admission owner 与 pushed-result 不变量不变。</td><td>现有 archive/state/admission 测试 + 等价断言</td></tr>
+      <tr><td>两次提交漂移</td><td>A/B 缺失、HEAD 不含文件、声明输入变化均不能 finalized；无关业务变化不假报警。</td><td><code>verification-governance.test.mjs</code></td></tr>
+      <tr><td>Dashboard 安全</td><td>loopback/token/Host/Origin/payload 防护覆盖所有写路由。</td><td><code>adoption-dashboard.test.mjs</code></td></tr>
+      <tr><td>持续新鲜度</td><td>doctor 单项崩溃隔离；status 同源；过期只黄灯、不阻断 run。</td><td><code>doctor.test.mjs</code>、状态集成测试</td></tr>
+      <tr><td>发布真实性</td><td>CLI help、tool contract、Skill、manifest/routes、npm 包一一对应。</td><td>CLI/help/package/prompt-pack 现有测试</td></tr>
+    </tbody>
+  </table>
+  <p><strong>每个里程碑：</strong>先跑新增定向测试，再跑 <code>node ./bin/wildarrange.mjs test --zone &lt;zone&gt;</code>。最终必须运行 <code>npm test</code>、<code>npm run check:arch</code>、<code>npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache</code>。</p>
+  <p class="plain">先验收新房间，最后再做整栋楼消防验收和打包清单检查。</p>
+
+  <h2>14. 实施顺序和提交边界</h2>
+  <table>
+    <thead><tr><th>批次</th><th>完成定义</th><th>可否对外</th></tr></thead>
+    <tbody>
+      <tr><td>M0</td><td>合同与失败测试冻结</td><td>否</td></tr>
+      <tr><td>M1</td><td>静态扫描、证据分级、映射和变更卡通过</td><td>否</td></tr>
+      <tr><td>M2-0</td><td>通用恢复原语 + 旧 archive/admission 行为等价</td><td>否</td></tr>
+      <tr><td>M2-1</td><td>Dashboard 批准、互斥、逐卡事务、断电恢复通过</td><td>否</td></tr>
+      <tr><td>M3</td><td>三文件、两次锚定、freshness、Skill 联调通过</td><td>仍否</td></tr>
+      <tr><td>Release Gate</td><td>README/架构/总图/help/tool contract 同步，全测和包体通过，人工跑一次 fixture 全流程</td><td>是</td></tr>
+    </tbody>
+  </table>
+  <p>实现期间可以按批次形成小提交建议，但 WildArrange 不替用户执行 commit、merge 或 push；任何 Git 写操作仍需单独授权。</p>
+
+  <h2>15. 人工验收剧本</h2>
+  <ol>
+    <li>复制测试 fixture 到临时目录，记录初始 Git HEAD、WIP 和文件摘要。</li>
+    <li>运行 <code>adoption start</code>，确认只出现 Dashboard 和卡片，业务树未变化。</li>
+    <li>故意保留一个动态消费者未知项，确认没有删除/合并批准入口。</li>
+    <li>批准一个 adopt、一个 archive，拒绝一个 change，暂缓一个 unknown；确认 Apply 只影响获批精确路径。</li>
+    <li>在 Apply 中间注入失败，确认自动回滚；再模拟回滚失败，确认 recovery_required 和恢复入口。</li>
+    <li>完成 Apply，生成 Registry；人工 commit A 后点击重新核验，生成 Bootstrap/Inventory。</li>
+    <li>在 commit B 前修改一个 Runner 输入，确认 Inventory 过期；恢复一致后 commit B 并 finalized。</li>
+    <li>修改无关业务文件，确认不假报警；修改 Registry 或声明输入，确认 doctor/status 黄灯。</li>
+  </ol>
+  <p class="plain">完整走一遍真实接管，故意制造两次事故，再验证账本会过期提醒。</p>
+
+  <h2>16. 本次审核只需要决定三件事</h2>
+  <div class="grid">
+    <div class="card decision"><h3>决定 A｜实施方案</h3><p>是否批准“6 个新 owner + 6 个工程批次 + M3 前不开放入口”。</p><p class="plain">确认施工分工和先后顺序。</p></div>
+    <div class="card decision"><h3>决定 B｜AGENTS 修改</h3><p>是否明确批准第 12 节所列两份 AGENTS 的最小事实更新；没有批准则实现停在代码前。</p><p class="plain">确认是否可以更新楼层导览。</p></div>
+    <div class="card decision"><h3>决定 C｜WIP 基线</h3><p>是等待当前 WIP owner 收口，还是明确授权后续实现以当前未提交内容为基线逐文件协调；两种都不得清理或覆盖 WIP。</p><p class="plain">确认施工队何时、以哪一版现场开工。</p></div>
+  </div>
+
+  <h2>证据边界</h2>
+  <p class="small">本计划依据 2026-09-02 当前工作区静态读取结果、已批准产品设计、根与 doc/interface/orchestration/capabilities/infra/test/Prompt Pack 目录规范、现有 gateway、Dashboard、security archive recovery、doctor/status、Prompt Pack manifest/routes 和 module-file-map。没有执行 ZIP 内脚本或二进制，没有运行实现测试，没有修改 src/test/config/AGENTS/README，没有 commit、merge 或 push。当前代码仍未实现 adoption；本文只是待审核施工图。</p>
+</main></body></html>

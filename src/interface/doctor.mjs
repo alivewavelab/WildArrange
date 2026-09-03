@@ -21,6 +21,7 @@ import { isPossibleNoopTask, isTrivialCommand } from "../infra/task-predicates.m
 import { loadTaskLedger, loadTaskState, taskRef } from "../infra/task-state-store.mjs";
 import { listRuntimeStateBackups, verifyConfigBaseline, verifyRuntimeState } from "../infra/security.mjs";
 import { evaluateGateArming } from "../infra/gate-arming.mjs";
+import { evaluateRegistryFreshness } from "../infra/verification-registry.mjs";
 import { normalizeRelativePath } from "../infra/path-match.mjs";
 import { projectDecisionStats } from "./decisions.mjs";
 
@@ -43,6 +44,7 @@ const SECTION_CHECKS = [
   ["runtimeState", checkRuntimeState],
   ["repositoryGovernance", checkRepositoryGovernance],
   ["decisionHealth", checkDecisionHealth],
+  ["registryFreshness", checkRegistryFreshness],
 ];
 
 export async function runDoctor(rootDir) {
@@ -553,6 +555,17 @@ async function checkDecisionHealth(rootDir, findings) {
   };
 }
 
+async function checkRegistryFreshness(rootDir, findings) {
+  const result = await evaluateRegistryFreshness(rootDir);
+  if (result.stale) {
+    addFinding(findings, "warn", "registry_freshness", `${result.reason}${result.nextAction ? `；下一步：${result.nextAction}` : ""}`, {
+      status: result.status,
+      nextAction: result.nextAction,
+    });
+  }
+  return result;
+}
+
 async function checkRepositoryGovernance(rootDir, findings) {
   const reportPath = resolveWildArrangePath(rootDir, "reports", "governance", "latest.json");
   const report = await readJson(reportPath, null);
@@ -603,6 +616,7 @@ function renderDoctorMarkdown(report) {
   lines.push(`- Runtime state: ${sectionValue(report.sections.runtimeState, (s) => s.status)}`);
   lines.push(`- Repository governance: ${sectionValue(report.sections.repositoryGovernance, (s) => s.checked ? `${s.status} (${s.findingCount} findings)` : "not run")}`);
   lines.push(`- Decision health: ${sectionValue(report.sections.decisionHealth, (s) => `${s.totalDecisions} decisions, never-fired gates: ${(s.neverFiredGates || []).join(", ") || "none"}, annotations: ${s.annotations?.total ?? 0} (orphans: ${s.annotations?.unmatchedCount ?? 0})`)}`);
+  lines.push(`- Registry freshness: ${sectionValue(report.sections.registryFreshness, (s) => s.stale ? `${s.status}: ${s.reason}` : (s.status || "not_adopted"))}`);
   return `${lines.join("\n")}\n`;
 }
 

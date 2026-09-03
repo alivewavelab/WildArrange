@@ -227,6 +227,7 @@ Create `plan.json`:
     {
       "id": "T001",
       "subject": "Write smoke artifact",
+      "owner": "ZhuRong",
       "writable_paths": [".wildarrange/artifacts/smoke.txt"],
       "worker_command": "node -e \"const fs=require('fs'); fs.mkdirSync('.wildarrange/artifacts',{recursive:true}); fs.writeFileSync('.wildarrange/artifacts/smoke.txt','ok\\n')\"",
       "verify_commands": ["node -e \"const fs=require('fs'); if(fs.readFileSync('.wildarrange/artifacts/smoke.txt','utf8').trim()!=='ok') process.exit(1)\""],
@@ -246,6 +247,12 @@ node ./bin/wildarrange.mjs run
 node ./bin/wildarrange.mjs status
 node ./bin/wildarrange.mjs summary
 ```
+
+With an adapter installed in Codex, Cursor, or Kimi Code, describe the feature or bug in the host conversation. When the `UserPromptSubmit` route requires a plan, the host model is instructed to create `.wildarrange/plan-drafts/<session>-plan.json` from the conversation semantics instead of asking the user to hand-author the format. The file must include `generated_by: "host_semantic"` and an explicit `task.owner` on every executable task. That owner must be a command worker: Jiuwei or ZhuRong. DiJiang, BaiZe, and LuWu participate through planning, review, and governance stages rather than executing `worker_command`. WildArrange validates those owners and always requires `plan approve` for a host-generated plan. Execution hooks, task claims, and parallel runs then read that same `task.owner`; there is no second assignee record.
+
+While a plan awaits approval, the user can still edit `.wildarrange/plan-drafts/*.json` and re-import it. Other file writes and arbitrary Shell commands are denied; only exact plan-management and read-only WildArrange commands are allowed. After approval, the draft directory returns to ordinary task `writable_paths` enforcement.
+
+Manually authored or externally generated `plan.json` files still work with `plan --from`. Missing owners retain the Jiuwei fallback for legacy compatibility, but new plans should always declare an owner explicitly.
 
 Or run the built-in sample:
 
@@ -296,7 +303,7 @@ Install, uninstall, and restore write reports under `.wildarrange/adapters/`. Ex
 
 For Codex, `SessionStart` automatically injects the complete Jiuwei identity prompt, and `PostCompact` injects it again to restore identity after context compaction. Ordinary `UserPromptSubmit` events do not repeat the prompt. The prompt comes from the installed, hash-verified Prompt Pack, respects `contextBudgets.prompt.maxChars`, and reports truncation explicitly.
 
-`adapter install` also generates shortcuts so you don't have to open a terminal for common operations. All three surfaces render from one shared command set (`wildarrange-config` / `wildarrange-doctor` / `wildarrange-refresh` / `wildarrange-status` / `wildarrange-plan` / `wildarrange-approve` / `wildarrange-run`):
+`adapter install` also generates shortcuts so you don't have to open a terminal for common operations. `/wildarrange-plan` generates a draft from the current conversation when no path is supplied, and still imports an existing file when a path is supplied. All three surfaces render from one shared command set (`wildarrange-config` / `wildarrange-doctor` / `wildarrange-refresh` / `wildarrange-status` / `wildarrange-plan` / `wildarrange-approve` / `wildarrange-run`):
 
 - **Cursor**: `.cursor/commands/<name>.md` (plain-Markdown slash commands; type `/wildarrange-doctor` in chat).
 - **Codex / Kimi Code**: shared `.agents/skills/<name>/SKILL.md` project Skills. Codex can invoke them through `/skills` or `$wildarrange-doctor`; Kimi Code discovers and invokes them through its project Skill mechanism.
@@ -389,7 +396,18 @@ The CLI is layered: `--help` shows only the core six commands (init / plan / run
 
 `review suspicious` is the LLM suspicion pass (asynchronous audit, archivist invariants): it sends only a sanitized conclusion packet (ids/gates/rule codes/summaries — never code blocks, raw diffs, or full command output) to the configured external provider, and any returned suspicion must anchor to a decisionId present in the packet (hallucinated ids are dropped and counted). Without a key it falls back deterministically and never blocks. Conclusions land only in `.wildarrange/reports/suspicion.*` — **never in the completion chain, never in config, never on a gate switch**.
 
-The dashboard (`serve`) includes a route review console, decision panel, and ops panel. The route console groups the original request, structured route result, matched signals, semantic second opinion, and subsequent tool summaries by session and date. Reviewers can mark a route confirmed, rule-wrong, or case-wrong; common secret fields in tool inputs are redacted. The IDE `Stop` hook actively refreshes a human-readable daily report at `.wildarrange/reports/routing/latest.md` (also archived as `YYYY-MM-DD.md`), with the conclusion first and full decision/tool details below. Reviews only append annotations and never edit `routes.json` automatically.
+Legacy-project verification onboarding is a maintenance flow. It does not enter `task.status` and does not reuse `approvePlan`:
+
+```text
+node ./bin/wildarrange.mjs adoption start
+node ./bin/wildarrange.mjs adoption status
+node ./bin/wildarrange.mjs adoption resume
+node ./bin/wildarrange.mjs adoption recover
+```
+
+`adoption start` scans test, gate, runner, hook, and archive assets read-only, then opens the Dashboard for per-card approval. When `--token` is omitted, the CLI creates a random token for this Dashboard session and injects it into the current tab. Only approved cards are applied; cards containing verifier commands, archives, merges, or critical configuration changes require individual approval. Registry waits for the user's commit A; WildArrange then generates Bootstrap and a browser-readable Inventory HTML and waits for commit B. The Inventory embeds its machine-readable record and shows current sources, historical archives, deferred decisions, and the applied change log. V1 does not perform physical deletion, so deletion tombstones remain a forward-compatible empty view. If an old-project file, directory, or link already occupies any of the three target names, onboarding pauses with the conflicting path and never overwrites it silently. Approved archives move into the project-commitable `docs/verification-archive/` directory (`verification-archive/` when `docs/` is absent), never into `.wildarrange/`. Once a card has changed project files, cancelling the session cannot pretend to restore them; finish the two Git anchors, or run `adoption recover` when the session is `recovery_required`. `doctor` / `status` show `registryFreshness` as a yellow lamp only and do not block daily runs. There is no `approve` / `apply` / `delete` CLI.
+
+The dashboard (`serve`) includes a work-item ledger, route review console, decision panel, ops panel, and verification adoption view. The route console groups the original request, structured route result, matched signals, semantic second opinion, and subsequent tool summaries by session and date. Reviewers can mark a route confirmed, rule-wrong, or case-wrong; common secret fields in tool inputs are redacted. The IDE `Stop` hook actively refreshes a human-readable daily report at `.wildarrange/reports/routing/latest.md` (also archived as `YYYY-MM-DD.md`), with the conclusion first and full decision/tool details below. Reviews only append annotations and never edit `routes.json` automatically.
 
 The end-of-run gate summary is leveled by `reporting.verbosity`: the default `verbose` prints the per-gate three-line projection to stderr after each `run` (so every gate decision can be judged while the framework is new); once trust builds, set `normal` (one line) or `quiet` (JSON only). The machine-readable stdout JSON never changes across levels.
 
@@ -398,6 +416,14 @@ After an interrupted parallel run, `parallel status --run <runId>` shows `batchS
 Every `status` output carries a persistent `gateArming` yellow lamp: under default configs (all quality gates off, no independent review signal) it reports "gates not armed" with remediation guidance, so an all-green gate stream that proves nothing cannot be mistaken for a healthy project. The acceptance proof enforces two hard floors: it refuses tasks whose `verify_commands` are all trivial (e.g. `true`), and it refuses tasks whose review gate has no independent signal lane (no `review_commands` / `standards_commands` / `review.llm` / enabled quality gate) — a tautological review proves nothing and must not reach completed. `config init --armed` writes a config with armed quality gates (blocking commentChecker + an lspDiagnostics command slot). `doctor` carries dedicated `gateArming` and `adapters` sections: unarmed gates, enabled adapters whose hooks are not installed on this machine, and rule files referencing paths that no longer exist all surface in the report.
 
 `governance audit` is LuWu's read-only inspection. It checks directory-level `AGENTS.md`, Chinese/English README command parity, Prompt Pack registration, naming, and actual code comments, then writes evidence under `.wildarrange/reports/governance/`. With `--changed-only`, only changed files and the related ancestor rules, paired docs, and architecture ledgers are inspected; if Git changes cannot be read, the audit safely falls back to a full scan. LuWu never moves, renames, or deletes project files automatically, and the runtime rejects LuWu, DiJiang, or BaiZe from command workers.
+
+The first contract-governance discoverer reconciles Tauri Rust commands, handler registration, and frontend `invoke` calls. SQL embedded in Rust source is reported for manual declaration rather than claimed as scanned. Every diff card requires an explicit developer decision, while LuWu consumes the evidence inside the existing review step instead of creating a parallel gate:
+
+```bash
+node ./bin/wildarrange.mjs contracts scan
+node ./bin/wildarrange.mjs contracts apply-card --card <id> --decision approve --reason "baseline confirmed" --expected-fingerprint <sha256>
+node ./bin/wildarrange.mjs contracts generate
+```
 
 Before every worker run in a Git project, WildArrange records a workspace snapshot (`git stash create`); the snapshot hash and restore command are stored in task evidence and the ledger, so broken changes can be recovered with `git stash apply <hash>`.
 
@@ -415,14 +441,6 @@ node ./bin/wildarrange.mjs archivist run --text "build a web TODO app" --stage p
 ```
 
 When `archivistRouter.enabled` is `true`, `SessionStart`, `UserPromptSubmit`, and `PostCompact` hooks trigger ArchivistRouter automatically. Without a DeepSeek key it falls back to deterministic routing and does not block the main flow.
-
-The first contract-governance discoverer reconciles Tauri Rust commands, handler registration, and frontend `invoke` calls. SQL embedded in Rust source is reported for manual declaration rather than claimed as scanned. Every diff card requires an explicit developer decision, while LuWu consumes the evidence inside the existing review step instead of creating a parallel gate:
-
-```bash
-node ./bin/wildarrange.mjs contracts scan
-node ./bin/wildarrange.mjs contracts apply-card --card <id> --decision approve --reason "baseline confirmed" --expected-fingerprint <sha256>
-node ./bin/wildarrange.mjs contracts generate
-```
 
 Cross-session memory is written to `.wildarrange/memory/digests/`. Task completion, parallel admission completion, `SessionStart`, and `PostCompact` emit structured digests used to recover progress, decisions, artifacts, implementation notes, and pitfalls.
 
@@ -450,7 +468,7 @@ Skills persisted in `task.skills` are mounted before execution through the PreTo
 ### Human decision channel and safety switches
 
 - **Generic push (no external IM binding)**: all pending human decisions — plan awaiting approval, out-of-scope ChangeRequests, failed tasks, child agents awaiting acceptance — are injected into the host AI context by hooks (SessionStart / UserPromptSubmit / PostCompact / Stop), instructing the AI to proactively surface them to the developer with options. `attentionReport` is the source of truth; `status` / dashboard can also pull it.
-- **Plan approval gate**: when `planApproval.required=true`, an imported plan enters `awaiting_plan_approval` and `run` refuses to execute until the developer runs `plan approve` (or `/wildarrange-approve` in chat). Off by default.
+- **Plan approval gate**: a host-generated plan with `generated_by: "host_semantic"` always enters `awaiting_plan_approval`; an ordinary manual plan does so when `planApproval.required=true`. `run` refuses to execute until the developer runs `plan approve` (or `/wildarrange-approve` in chat).
 - **Externalized command safety**: built-in high-risk command patterns are a floor that cannot be disabled; `commandSafety.extraPatterns` lets you add project-specific dangerous-command blocks (`{ id, pattern, flags, reason }`) without code changes.
 
 ## Dashboard

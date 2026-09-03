@@ -17,6 +17,7 @@ import { evaluateGateArming } from "../infra/gate-arming.mjs";
 import { normalizeRelativePath } from "../infra/path-match.mjs";
 import { loadTaskLedger } from "../infra/task-state-store.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
+import { evaluateRegistryFreshness } from "../infra/verification-registry.mjs";
 import { listChangeRequests } from "./change-governance.mjs";
 import { parallelAgentStatus } from "./parallel-runtime.mjs";
 import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
@@ -81,7 +82,14 @@ export async function statusReport(rootDir) {
   // 门未武装黄灯：配置地板不满足时常驻显示，绝不因任务全绿而显示绿。
   const { config } = await loadWildArrangeConfig(rootDir);
   const gateArming = evaluateGateArming({ config, tasks: taskState?.tasks || [] });
-  if (!taskState) return { gateArming, work, planId: null, total: 0, completed: 0, invalidCompleted: 0, draft: 0, pending: 0, failed: 0, openChanges };
+  const registryFreshness = await evaluateRegistryFreshness(rootDir, { config }).catch((error) => ({
+    kind: "registry_freshness",
+    status: "check_failed",
+    stale: false,
+    reason: error instanceof Error ? error.message : String(error),
+    nextAction: "运行 wildarrange doctor 查看 registryFreshness 分项",
+  }));
+  if (!taskState) return { gateArming, registryFreshness, work, planId: null, total: 0, completed: 0, invalidCompleted: 0, draft: 0, pending: 0, failed: 0, openChanges };
   const completionIntegrity = await inspectCompletedTaskEvidence(rootDir, taskState);
   const counts = taskState.tasks.reduce((acc, task) => {
     acc[task.status] = (acc[task.status] || 0) + 1;
@@ -89,6 +97,7 @@ export async function statusReport(rootDir) {
   }, {});
   return {
     gateArming,
+    registryFreshness,
     work,
     planId: taskState.planId,
     total: taskState.tasks.length,

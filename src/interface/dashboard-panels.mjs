@@ -10,6 +10,7 @@ import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { evaluateGateArming } from "../infra/gate-arming.mjs";
 import { readJson, resolveWildArrangePath } from "../infra/runtime-store.mjs";
 import { inspectFileLock } from "../infra/file-lock.mjs";
+import { evaluateRegistryFreshness } from "../infra/verification-registry.mjs";
 import { loadTaskState } from "../orchestration/plan-state.mjs";
 import { parallelAgentStatus } from "../orchestration/parallel-runtime.mjs";
 import { projectDecisions, projectDecisionStats } from "./decisions.mjs";
@@ -119,10 +120,15 @@ export async function buildOpsPanelViewModel(rootDir) {
   const { config } = await loadWildArrangeConfig(rootDir);
   const taskState = await loadTaskState(rootDir);
   const gateArming = evaluateGateArming({ config, tasks: taskState?.tasks || [] });
-  const [tasksLock, ledgerLock, runs] = await Promise.all([
+  const [tasksLock, ledgerLock, runs, registryFreshness] = await Promise.all([
     inspectFileLock(rootDir, resolveWildArrangePath(rootDir, "team", "tasks.lock")),
     inspectFileLock(rootDir, resolveWildArrangePath(rootDir, "ledger.lock")),
     parallelAgentStatus(rootDir).catch(() => null),
+    evaluateRegistryFreshness(rootDir, { config }).catch((error) => ({
+      status: "check_failed",
+      stale: false,
+      reason: error instanceof Error ? error.message : String(error),
+    })),
   ]);
   const files = [];
   for (const name of ["ledger.jsonl", "decisions.jsonl", "annotations.jsonl"]) {
@@ -143,6 +149,7 @@ export async function buildOpsPanelViewModel(rootDir) {
         })),
       }
       : null,
+    registryFreshness,
     files,
   };
 }

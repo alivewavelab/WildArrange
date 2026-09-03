@@ -153,6 +153,12 @@
       "maxEvidenceChars": 12000
     }
   },
+  "verificationGovernance": {
+    "registryPath": "",
+    "bootstrapPath": "",
+    "inventoryPath": "",
+    "archiveRoot": ""
+  },
   "qualityGates": {
     "lspDiagnostics": {
       "enabled": false,
@@ -230,13 +236,13 @@
         "wildarrange-injection-runtime",
         "review-work",
         "review-product-intent",
+        "contract-governance",
         "map-user-journey",
         "design-acceptance",
         "review-ux-interaction",
         "review-scope-tradeoff",
         "research-domain-benchmark"
       ],
-        "contract-governance",
       "rules": { "mode": "static" }
     },
     "pre_tool_use": {

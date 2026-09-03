@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>WildArrange 验证治理接管修复任务包</title>
+  <style>
+    :root{--bg:#f4f6f8;--card:#fff;--ink:#17212b;--muted:#5f6b76;--line:#d8dee4;--red:#b42318;--amber:#a15c00;--green:#137333;--blue:#175cd3}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 system-ui,-apple-system,"Segoe UI",sans-serif}
+    main{max-width:1120px;margin:auto;padding:28px 18px 60px}h1{font-size:30px;margin:0 0 6px}h2{margin:34px 0 12px;font-size:22px}h3{margin:0 0 8px;font-size:17px}
+    p{margin:7px 0}.muted{color:var(--muted)}.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin:12px 0}.danger{border-left:6px solid var(--red)}.warn{border-left:6px solid var(--amber)}.ok{border-left:6px solid var(--green)}
+    .badge{display:inline-block;padding:3px 9px;border-radius:99px;font-weight:700;background:#e9f1ff;color:var(--blue)}.badge.red{background:#feeceb;color:var(--red)}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}.flow{display:flex;gap:9px;align-items:stretch;flex-wrap:wrap}.flow .step{flex:1;min-width:170px;background:#eef4ff;border:1px solid #cbdcff;border-radius:10px;padding:12px}.arrow{align-self:center;font-size:24px;color:var(--blue)}
+    table{width:100%;border-collapse:collapse;background:#fff}th,td{border:1px solid var(--line);padding:9px;vertical-align:top;text-align:left}th{background:#eef1f4}code,pre{font-family:Consolas,monospace}code{background:#eef1f4;padding:1px 5px;border-radius:4px}pre{white-space:pre-wrap;background:#111827;color:#e5e7eb;padding:14px;border-radius:9px;overflow:auto}ul,ol{padding-left:23px}li{margin:5px 0}.small{font-size:13px}.yes{color:var(--green);font-weight:700}.no{color:var(--red);font-weight:700}
+  </style>
+</head>
+<body><main>
+  <header>
+    <span class="badge">给 Grok 的一次性修复任务包</span>
+    <h1>WildArrange 老项目验证治理接管：审查缺陷修复</h1>
+    <p class="muted">状态：可开工。目标不是重写初版，而是让“扫描 → 用户判断 → 安全执行 → 三文件接管”真的可信。</p>
+  </header>
+
+  <section class="card danger">
+    <h2 style="margin-top:0">0. 工作区保护：违反即停止</h2>
+    <table>
+      <tr><th>Worktree</th><td><code>D:\Development\WildArrange</code></td></tr>
+      <tr><th>Branch</th><td><code>main</code></td></tr>
+      <tr><th>Baseline HEAD</th><td><code>7b970a3dae15003549c1f749d46a10acc9de9f24</code></td></tr>
+      <tr><th>外部执行器</th><td>Grok 主 Agent</td></tr>
+      <tr><th>并发上限</th><td>总计 3 路：Grok 主 Agent + 最多 2 个 subagent；平台不足则串行</td></tr>
+      <tr><th>WIP</th><td>当前大量 tracked dirty 与 untracked 文件全部视为受保护现场。初版 adoption 实现也属于当前真实基线，只允许逐文件增量修复。</td></tr>
+    </table>
+    <p><strong>开工只读核对：</strong></p>
+    <pre>Get-Location
+git branch --show-current
+git rev-parse HEAD
+git status --short</pre>
+    <ul>
+      <li>路径、分支或 HEAD 任一不符：停止写入，只报告实际现场。</li>
+      <li>Baseline 只是审计锚点，不授权 reset、checkout 或覆盖现场。</li>
+      <li>禁止 <code>switch</code>、<code>checkout</code>、<code>rebase</code>、<code>merge</code>、<code>stash</code>、<code>reset</code>、<code>clean</code>、整文件恢复、批量格式化。</li>
+      <li>禁止 commit、pull、push、删分支、删 worktree。最终只到 <code>ready for review</code>。</li>
+      <li>禁止执行原始 ZIP 中任何脚本或二进制；可静态阅读文本，不复制 Gamecopilot 专属实现。</li>
+      <li><strong>本轮禁止修改任何 AGENTS.md、AGENTS schema、允许路径清单或依赖白名单。</strong>现有规范已能容纳本次修复；如发现必须修改，停下报告。</li>
+    </ul>
+  </section>
+
+  <h2>1. 给产品经理看的修复结果</h2>
+  <div class="flow">
+    <div class="step"><strong>输入</strong><br>老项目里的测试、Gate、Runner、Hook、旧文档和旧任务</div><div class="arrow">→</div>
+    <div class="step"><strong>处理</strong><br>先找使用者和替代物，再生成可判对卡片；批准时重新核对现场</div><div class="arrow">→</div>
+    <div class="step"><strong>输出</strong><br>只执行仍然安全的批准项，失败可恢复，最终三文件与真实 Git 内容一致</div>
+  </div>
+  <div class="card ok">
+    <h3>生活化解释</h3>
+    <p>像搬家前清点仓库：不能因为箱子写着“旧资料”就扔掉；必须先确认现在没人用、有替代品、搬去哪里，并在真正动手前再看一次箱子有没有被换过。</p>
+  </div>
+
+  <h2>2. 本轮只关闭三组阻塞</h2>
+  <div class="grid">
+    <article class="card danger"><h3>阻塞 A：系统会给错危险建议</h3><p>真实扫描已经把当前生效的根与分区 <code>AGENTS.md</code>、当前 Skill 建议为 archive；merge 也没有追踪旧脚本名的消费者。</p><p><strong>完成标准：</strong>没有足够证据只能 defer，不能出现危险按钮。</p></article>
+    <article class="card danger"><h3>阻塞 B：批准、执行和恢复不是一个原子过程</h3><p>批准后真实文件变化检测不到；父目录 junction 可写出仓库；并发 start/apply/cancel、prepared 中断和 recovery_required 都可能落错状态。</p><p><strong>完成标准：</strong>一次只有一个合法状态转换，出错后只有一个确定恢复动作。</p></article>
+    <article class="card danger"><h3>阻塞 C：三文件和 Git 锚定不可信</h3><p>Bootstrap/Inventory 生成后可能立即自判漂移；Runner 变化 doctor/status 看不到；commit A/B 只看同名路径存在，不看提交内容。</p><p><strong>完成标准：</strong>生成后 fresh，改声明输入变黄，Git 中必须是同一份内容。</p></article>
+  </div>
+  <p><strong>不在本轮：</strong>跨设备 adoption、穷举动态 Runtime Gate、自动 commit/merge/push、新 Agent、新账本、新测试框架、重构其他 dirty WIP、为未来语言预建插件框架。</p>
+
+  <h2>3. 必读真源与失败证据</h2>
+  <table>
+    <tr><th>类型</th><th>路径</th><th>用途</th></tr>
+    <tr><td>产品设计</td><td><code>doc/plans/2026-09-02-legacy-project-verification-onboarding-product-design.html</code></td><td>用户流程与逐卡解释</td></tr>
+    <tr><td>实施计划</td><td><code>doc/plans/2026-09-02-legacy-project-verification-onboarding-implementation-plan.html</code></td><td>已批准边界</td></tr>
+    <tr><td>独立审查</td><td><code>.tmp/reviews/verification-governance-adoption/architecture-review/architecture-review.md</code></td><td>人类可读结论</td></tr>
+    <tr><td>结构化证据</td><td><code>.tmp/reviews/verification-governance-adoption/architecture-review/review-result.json</code></td><td>E-001～E-021、CODE-001～011</td></tr>
+    <tr><td>架构对比</td><td><code>.tmp/reviews/verification-governance-adoption/architecture-review/architecture-comparison.html</code></td><td>当前与最短目标结构</td></tr>
+    <tr><td>外部复审</td><td><code>D:\Development\gamecopilot\audit-wildarrange\2026-09-02-verification-onboarding-audit.md</code></td><td>原设计风险复核</td></tr>
+    <tr><td>规范</td><td><code>AGENTS.md</code> 与每个所有权目录最近的 <code>AGENTS.md</code></td><td>修改前完整阅读</td></tr>
+  </table>
+
+  <h2>4. 必须保留与必须移除</h2>
+  <div class="grid">
+    <section class="card ok"><h3>必须保留</h3><ul>
+      <li>扫描阶段业务文件零写入、发现命令零执行。</li>
+      <li>Dashboard 是唯一写批准入口，一次批准和 Apply 一张卡。</li>
+      <li>用户明确批准前不改目标；Git commit A/B 均由用户完成。</li>
+      <li>Registry、Bootstrap、Inventory 三文件分工。</li>
+      <li>短 task lock + maintenance marker 的产品方向。</li>
+      <li>既有 <code>verify → scope → review → acceptance-proof → checkpoint</code> 完成链。</li>
+      <li>单一 verification-governance Skill；Hook 不静默扫描。</li>
+      <li>旧 task archive API 对外字段和行为。</li>
+    </ul></section>
+    <section class="card danger"><h3>必须移除或改正</h3><ul>
+      <li>仅凭文件名或 <code>historical_archive</code> 分类生成 archive。</li>
+      <li>只因两个 script 命令相同就删除其中一个 script key。</li>
+      <li>把 archive 默认放进 <code>.wildarrange/</code>。</li>
+      <li>用卡片自身重算值冒充批准后的实时 stale 检查。</li>
+      <li>目标不存在时跳过最近存在父目录 realpath 检查。</li>
+      <li>gateway 把 <code>recovery_required</code> 改成 <code>capability_threw</code>。</li>
+      <li>只看 Git 路径存在就推进 commit A/B。</li>
+      <li>Dashboard 测试把 HTTP 500 当作可接受结果。</li>
+    </ul></section>
+  </div>
+
+  <h2>5. 精确行为合同</h2>
+  <table>
+    <tr><th>输入</th><th>必须处理</th><th>用户看到的输出 / 失败</th></tr>
+    <tr><td>当前 AGENTS、现行 Skill、当前 Runner</td><td>先证明它不是当前真源；只凭名称不得 archive</td><td>证据不足显示“暂缓，需要确认”，不显示 archive/delete</td></tr>
+    <tr><td>旧设计文档、旧任务单</td><td>同时具备：显式完成/过期事实或明确 successor；无活动消费者；项目可提交归档目录</td><td>卡片写清来源、作用、归档位置、归档后结果、最大后果和恢复方法</td></tr>
+    <tr><td>重复 package script</td><td>追踪被删除 script key 在 CI、Hook、文档和其他脚本中的消费者；不能安全迁移则 defer</td><td>卡片列出保留 key、删除 key、全部消费者和精确 patch</td></tr>
+    <tr><td>用户批准卡片</td><td>保存目标 preimage digest、依赖输入 digest、HEAD 和证据摘要</td><td>批准记录绑定当时现场</td></tr>
+    <tr><td>Apply 前</td><td>在 adoption lock 内重新读取目标、依赖输入和 HEAD；任何一项不同则 stale</td><td>不写文件，要求重新审查本卡</td></tr>
+    <tr><td>新建目标路径</td><td>逐级上溯最近存在父目录，校验 realpath 在项目根内</td><td>symlink/junction 越界明确拒绝</td></tr>
+    <tr><td>archive_move</td><td>源和目标均纳入 preimage；目标已存在则 fail closed；只允许项目可提交归档根</td><td>恢复能同时还原源和目标；历史内容可进 Git</td></tr>
+    <tr><td>Apply 中断</td><td>启动/恢复时对账 <code>prepared</code>、<code>committed</code>、<code>recovery_required</code></td><td>不重复 capture preimage，不覆盖最初原件</td></tr>
+    <tr><td>回滚失败</td><td>gateway 保留原始 <code>error.code</code>、evidence、next_action；marker 不释放</td><td>稳定显示 <code>recovery_required</code></td></tr>
+    <tr><td>并发 start/decide/apply/cancel</td><td>所有会话读写统一在 adoption lock 内重新读取最新状态；applying 期间 cancel 不得清 marker</td><td>只产生一个 session、一次 Apply 和一个合法终态</td></tr>
+    <tr><td>普通 task lock</td><td>取得 task lock 后再次检查 maintenance marker，消除 TOCTOU</td><td>接管维护期间日常 run 立即得到明确提示</td></tr>
+    <tr><td>生成三文件</td><td>先得到最终内容，再计算排除自引用字段的稳定指纹</td><td>生成完成后立即是 fresh</td></tr>
+    <tr><td>doctor/status</td><td>freshness owner 自行从 Inventory 读取 expected 指纹，不由调用方选择是否检查</td><td>改 Runner/Registry/声明入口后黄灯；改无关业务文件不报警</td></tr>
+    <tr><td>commit A/B</td><td>读取 Git tree 中的 blob 内容并核对 session digest，不接受“同名路径存在”</td><td>只有提交的正是批准生成内容才推进</td></tr>
+  </table>
+  <p class="small"><strong>生活化解释：</strong>卡片批准相当于签收照片；施工前必须确认现场还是照片里的现场。Git 锚定相当于查入库实物，不是看货架上有没有同名盒子。</p>
+
+  <h2>6. 三路文件所有权</h2>
+  <p>总控先登记 Owner。同一文件永远只有一路 Writer；需要跨路改动时交给原 Owner，不得抢写。</p>
+  <table>
+    <tr><th>路</th><th>目标</th><th>唯一生产文件所有权</th><th>测试所有权</th></tr>
+    <tr><td><strong>1：Discovery Policy Writer</strong></td><td>关闭误归档、误合并和产品中立证据缺口</td><td><code>src/infra/verification-discovery.mjs</code></td><td><code>test/verification-discovery.test.mjs</code></td></tr>
+    <tr><td><strong>2：State & Recovery Writer</strong></td><td>关闭 stale、父链接越界、prepared/recovery_required 和并发竞态</td><td><code>src/orchestration/adoption.mjs</code><br><code>src/infra/recovery-transaction.mjs</code><br><code>src/infra/task-state-lock.mjs</code><br><code>src/capabilities/gateway.mjs</code></td><td><code>test/adoption-runtime.test.mjs</code><br><code>test/recovery-transaction.test.mjs</code><br><code>test/capability-gateway.test.mjs</code></td></tr>
+    <tr><td><strong>3：Artifacts & Interface Writer</strong></td><td>关闭 archive 执行、最终指纹、doctor/status 和 Git A/B 内容锚定</td><td><code>src/capabilities/verification-governance.mjs</code><br><code>src/infra/verification-registry.mjs</code><br><code>src/interface/doctor.mjs</code><br><code>src/orchestration/status.mjs</code><br><code>src/interface/adoption-panel.mjs</code><br>确有直接需要时增量修改 <code>src/interface/dashboard.mjs</code>、<code>src/infra/runtime-config.mjs</code></td><td><code>test/verification-governance.test.mjs</code><br><code>test/doctor.test.mjs</code><br><code>test/adoption-dashboard.test.mjs</code></td></tr>
+    <tr><td><strong>最后：Grok Integration</strong></td><td>只做跨路合同对齐和一次最终验证</td><td>不抢 Writer 文件；公开文档只在行为稳定后按真实差异最小更新</td><td>完整测试、架构门、包体与人工 fixture</td></tr>
+  </table>
+  <div class="card warn">
+    <h3>接口先冻结，再并行</h3>
+    <p>路 1 输出“事实 + 证据充分度 + 推荐动作”；路 2 输出结构化状态/恢复结果；路 3 只消费这两个合同。不得复制扫描器、恢复事务或 freshness 算法。</p>
+  </div>
+
+  <h2>7. 允许保留的阻断条件</h2>
+  <table>
+    <tr><th>条件</th><th>防止事故</th><th>失败粒度</th></tr>
+    <tr><td>危险动作证据不完整 → defer</td><td>误归档/误删现行文件或断开调用</td><td>单卡</td></tr>
+    <tr><td>批准现场变化 → stale</td><td>拿旧批准施工新内容</td><td>单卡</td></tr>
+    <tr><td>路径/父 realpath 越界</td><td>写出仓库</td><td>单卡</td></tr>
+    <tr><td>活动 run/admission/adoption 互斥</td><td>两套写流程互相覆盖</td><td>会话</td></tr>
+    <tr><td>验证失败回滚；回滚失败 recovery_required</td><td>半完成现场被当作安全</td><td>单卡/会话</td></tr>
+    <tr><td>Git blob 或声明输入不一致</td><td>三文件与真实仓库脱节</td><td>会话</td></tr>
+  </table>
+  <p>除上述条件外，新增阻断点数量必须为 0。不得新增授权层、账本、哈希门、恢复门、审批状态或全仓 Hook 扫描。</p>
+
+  <h2>8. 最小测试与真实验收</h2>
+  <h3>先写能复现审查缺陷的最小测试</h3>
+  <ol>
+    <li>扫描 fixture 中生效的根/分区 AGENTS、当前 Skill：危险动作必须为零。</li>
+    <li>旧文档缺 successor 或仍有消费者：只能 defer；证据齐全才允许 archive。</li>
+    <li>重复 script key 仍被 CI/其他 script/Hook 引用：没有消费者迁移 patch 时只能 defer。</li>
+    <li>批准后修改真实目标或依赖 Runner：Apply 返回 stale 且业务树零写入。</li>
+    <li>不存在目标位于 junction/symlink 父目录：写入必须拒绝，仓库外零写入。</li>
+    <li>在 preimage、业务写、postimage、manifest 提交各断点中断：resume 保留最初 preimage 且幂等。</li>
+    <li>回滚失败：session、gateway、Dashboard/status 都是 recovery_required，marker 保留。</li>
+    <li>并发 start/apply/cancel 与普通 task lock：一个 session、一次 Apply、无提前释放。</li>
+    <li>生成 Bootstrap/Inventory 后立即 fresh；改 Runner 后 doctor/status 黄灯；无关文件变化不报警。</li>
+    <li>真实临时 Git 仓库完成 commit A/B：旧 blob、未提交工作树和同名旧文件均不能推进。</li>
+    <li>Dashboard 非法 ID/超大 body 必须是精确 4xx，不允许用 500 作为 PASS。</li>
+  </ol>
+  <h3>定向命令</h3>
+  <pre>node --test test/verification-discovery.test.mjs
+node --test test/recovery-transaction.test.mjs
+node --test test/adoption-runtime.test.mjs
+node --test test/verification-governance.test.mjs
+node --test test/adoption-dashboard.test.mjs
+node --test test/capability-gateway.test.mjs
+node --test test/doctor.test.mjs
+node --test test/cli-help.test.mjs
+node --test test/cli-smoke.test.mjs</pre>
+  <h3>候选冻结后只跑一次</h3>
+  <pre>npm.cmd test
+npm.cmd run check:arch
+npm.cmd pack --dry-run --cache C:\tmp\wildarrange-npm-cache
+git diff --check</pre>
+  <ul>
+    <li>必须定位并关闭本次复核出现的 Prompt Pack realpath/hash 失败；先判断是本任务、既有 WIP还是 Windows 权限问题，不能跳过或改宽断言。</li>
+    <li>不得新增大矩阵、快照系统、第二套 fixture 框架或纯粹为了数量的对抗测试。</li>
+    <li>Windows symlink 权限不足时可使用 junction 或明确跳过环境限制，但必须至少有一条真实父链接越界探针通过。</li>
+  </ul>
+
+  <h3>人工七步 fixture</h3>
+  <ol>
+    <li>临时 Git 老项目记录初始 HEAD、状态和文件摘要；运行 start 后业务树不变。</li>
+    <li>确认生效 AGENTS/Skill、unknown 消费者没有危险动作。</li>
+    <li>批准一张 adopt、一张证据完整 archive；拒绝一张，暂缓一张；只改获批路径。</li>
+    <li>注入 Apply 失败与回滚失败，分别看到完整恢复和 recovery_required。</li>
+    <li>生成 Registry，由测试身份手工 commit A；确认提交 blob 与 session digest 相同。</li>
+    <li>生成 Bootstrap/Inventory 后立即 fresh；commit B 前改 Runner 必须变黄，恢复后才能 commit B/finalized。</li>
+    <li>改无关业务文件不报警；改 Registry/Runner/声明入口后 doctor/status 黄灯并给出下一步。</li>
+  </ol>
+
+  <h2>9. 文档和发布边界</h2>
+  <ul>
+    <li>行为稳定前不扩写 README、Skill 或 help，不宣传“完整接管”。</li>
+    <li>若命令和用户行为未变化，不为本次修复制造文档 churn。</li>
+    <li>若 archive 默认目录、错误提示或卡片字段发生真实变化，只增量同步：<code>README.md</code>、<code>README.en.md</code>、<code>doc/project-architecture.md</code>、<code>doc/generated/commands.md</code>、配置示例和已有 Skill。</li>
+    <li>不创建第二份实现计划，不修改本任务包，不修改任何 AGENTS。</li>
+    <li>产品总图仅在模块/导出关系真实变化时更新；本轮优先在现有 owner 内修复。</li>
+  </ul>
+
+  <h2>10. 只在这些情况中断用户</h2>
+  <ul>
+    <li>worktree、branch、HEAD 不符。</li>
+    <li>必须处理所有权外 WIP、修改 AGENTS/schema/白名单，或执行不可逆操作。</li>
+    <li>发现修复必须改变“用户逐卡批准、用户自行 commit A/B、失败可恢复”的产品边界。</li>
+    <li>需要执行 ZIP 内容、真实危险验证命令或取得新外部权限。</li>
+  </ul>
+  <p>普通实现细节自行选择最短方案并记录证据，不逐项询问用户。</p>
+
+  <h2>11. 一次性交卷</h2>
+  <div class="card">
+    <ol>
+      <li>实际 worktree、branch、baseline HEAD、最终 HEAD。</li>
+      <li>确认未 commit/merge/push/stash/reset，列出全部保护的既有 WIP。</li>
+      <li>三组阻塞分别如何关闭，逐条对应 CODE-001～CODE-011。</li>
+      <li>每路 Owner、修改文件和跨路合同。</li>
+      <li>生产代码、测试、文档净增减；说明是否删掉错误捷径。</li>
+      <li>新增阻断点数量；目标为 0，非零必须说明防止的事故和用户收益。</li>
+      <li>每条定向、全量、架构、包体验证命令、退出码与真实结果。</li>
+      <li>人工七步逐项真实结果；没跑就写“未验收”，不能用自动测试替代。</li>
+      <li>给一张真实安全卡和一张被 defer 的危险卡示例，展示证据、最大后果与恢复。</li>
+      <li>只列仍会阻止再次独立 Review 的缺口。</li>
+      <li>状态只写 <code>ready for review</code>。</li>
+    </ol>
+    <p class="no">不得宣称未发生的 merge、push、真实老项目删除/合并、跨设备接管、动态 Gate 穷举或 100% 验收。</p>
+  </div>
+
+  <footer class="muted small">任务包版本：2026-09-03。它授权在冻结现场内修复上述文件，不授权扩大产品范围或修改治理规范。</footer>
+</main></body></html>

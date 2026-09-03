@@ -112,9 +112,13 @@ export async function readJson(filePath, fallback = undefined) {
 }
 
 export async function writeJsonAtomic(filePath, value) {
+  return writeTextAtomic(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+export async function writeTextAtomic(filePath, content) {
   await mkdir(path.dirname(filePath), { recursive: true });
   const tempPath = `${filePath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
-  await writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await writeFile(tempPath, String(content), "utf8");
   await rename(tempPath, filePath);
 }
 
