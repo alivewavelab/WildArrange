@@ -1,0 +1,815 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="document-status" content="current-snapshot">
+  <title>WildArrange · 模块与脚本架构图</title>
+  <!--
+  ASSUMPTIONS
+  - 这是 2026-09-01 仓库快照，不替代 docs/product/architecture-overview.html 的长期产品总图。
+  - “模块”按真实职责簇展示；抽屉列出对应物理文件，避免把 74 个运行时文件铺成不可读目录墙。
+  - 仓库没有 scripts/ 目录；可执行脚本真实位于 bin/、tooling/ 与 package.json scripts。
+  - 输入/输出契约来自当前源码与根 AGENTS.md；标注“非文件”的项是 CLI 参数、宿主 JSON 或函数返回，不能误解为磁盘制品。
+
+  STYLE_CONTRACT
+  style: Fathom
+  signature_device: 贯穿页面的依赖总线加分区色标，选中模块时同色点亮，并在唯一底部抽屉用“输入→处理→输出接线台”展示载体、内容、作用、事件矩阵和真实 owner
+  atmosphere: 坐在工程控制台前查看一张可审计的系统接线图，每条线和每个文件都有明确归属
+  radius: restrained
+  radius_max: 4px
+  radius_uses: status badge pills and the Tweaks launcher only
+  fonts: JetBrains Mono or Cascadia Mono for labels and Microsoft YaHei for Chinese body
+  palette: void #0B0F14 / surface #111821 / ink #EDF2F7 / muted #94A3B8 / interface #66A7FF / orchestration #EFB64C / ai #B38CFF / capabilities #57C785 / infra #5FD1C8
+  composition: dark information grid, five horizontal responsibility lanes, flush-left, one dependency bus, one details drawer, no five-column compression
+  allowed_effects: subtle active glow only, no gradients
+  forbidden: invented modules, decorative statistics, rounded card shells, decorative icons, emoji, large gradients, duplicate drawers
+  component_bindings:
+    h1: Microsoft YaHei 700 / responsive display token / #EDF2F7 / flush-left
+    h2: Microsoft YaHei 700 / title token / #EDF2F7 / flush-left
+    h3: Cascadia Mono 600 / body token / zone color / flush-left
+    body: Microsoft YaHei 400 / 15px token / line-height 1.7 / #94A3B8
+    list-item: no bullet / 1px separator / 12px vertical padding / active keeps zone color and 3px left bar
+    card: border-radius 4px / 1px zone-tinted border / no shadow / active-only subtle glow
+    nav-item: Cascadia Mono 600 / 11px token / active keeps zone color and dim background
+    button-primary: 4px radius / active zone fill / #0B0F14 text / 12px 16px padding
+    button-secondary: 4px radius / 1px #334155 border / #EDF2F7 text / 12px 16px padding
+    label-tag: Cascadia Mono 600 / 11px token / uppercase / letter-spacing 0.08em
+  depth_system: flat-layered / containers=border-led / pressable=color-shift / selected=zone-accent-and-subtle-glow / material-textures=no-depth
+  state_system: default=neutral border / hover=zone border and text / active=zone bar and dim fill / active+hover=keep active form
+  layout_system: web-fluid
+  layout_target: desktop
+  layout_full_bleed: dependency-bus, module-board, details-drawer
+  motion_system: web-reveal
+  motion_enter: fadeUp 400ms with maximum 180ms stagger
+  motion_transition: panel fade 250ms and drawer translate 250ms
+  motion_state: color, border-color and background 150ms ease
+  validation: style-redline-check + spec-quality-gate-check + token-qa-checklist + Edge headless screenshot + console inspection
+  reference_rules:
+    - source: user reference HTML; rule: use responsibility lanes instead of a directory tree; implementation: five zone lanes plus CLI and runtime rails; confidence: verified
+    - source: user reference HTML; rule: all module details use one bottom drawer; implementation: every module card targets #detail-drawer; confidence: verified
+    - source: WildArrange AGENTS.md; rule: dependencies only follow declared five-zone boundaries; implementation: dependency bus and boundary notes; confidence: verified
+    - source: user screenshot review; rule: zone headers cannot be sticky inside an overflow container; implementation: non-sticky left rail in each horizontal lane; confidence: verified
+    - source: user screenshot review; rule: physical paths belong in details, not summary cards; implementation: cards show file count and the drawer owns exact paths; confidence: verified
+    - source: user screenshot review; rule: architecture details must distinguish file inputs from runtime objects and explain contents and purpose; implementation: structured contract items plus host event matrix; confidence: verified
+  -->
+  <style>
+    :root {
+      color-scheme: dark;
+      --void: #0b0f14;
+      --surface: #111821;
+      --surface-2: #17212d;
+      --surface-3: #0e151d;
+      --line: #2b3949;
+      --line-soft: #202c39;
+      --ink: #edf2f7;
+      --muted: #94a3b8;
+      --faint: #64748b;
+      --interface: #66a7ff;
+      --orchestration: #efb64c;
+      --ai: #b38cff;
+      --capabilities: #57c785;
+      --infra: #5fd1c8;
+      --danger: #ef7474;
+      --accent: #66a7ff;
+      --base-fs: 15px;
+      --fs-xs: 11px;
+      --fs-sm: 13px;
+      --fs-md: var(--base-fs);
+      --fs-lg: clamp(28px, 4vw, 48px);
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-6: 24px;
+      --space-8: 32px;
+      --space-12: 48px;
+      --radius: 4px;
+      --motion-fast: 150ms ease;
+      --motion-mid: 250ms ease-out;
+      --motion-enter: 400ms ease-out;
+      --density-pad: 16px;
+      --drawer-max-height: min(84dvh, 920px);
+      --contract-process-min: 220px;
+      --contract-arrow-width: 32px;
+      --matrix-min-width: 980px;
+    }
+
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --void: #f2f5f8;
+      --surface: #ffffff;
+      --surface-2: #e9eef4;
+      --surface-3: #f8fafc;
+      --line: #bac6d3;
+      --line-soft: #d7e0e8;
+      --ink: #101820;
+      --muted: #475569;
+      --faint: #64748b;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--void);
+      color: var(--ink);
+      font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+      font-size: var(--fs-md);
+      line-height: 1.7;
+    }
+    button, input, select { font: inherit; }
+    button { min-height: 44px; }
+    a { color: inherit; }
+    code, .mono { font-family: "Cascadia Mono", "JetBrains Mono", Consolas, monospace; }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: var(--fs-lg); line-height: 1.2; text-wrap: balance; }
+    h2 { font-size: var(--fs-md); line-height: 1.35; }
+    h3 { font-size: var(--fs-md); line-height: 1.4; }
+    .wrap { width: min(1480px, calc(100% - 40px)); margin: 0 auto; }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 12;
+      border-bottom: 1px solid var(--line-soft);
+      background: color-mix(in oklch, var(--void) 94%, transparent);
+      backdrop-filter: blur(16px);
+    }
+    .topbar-inner { display: flex; justify-content: space-between; align-items: center; gap: var(--space-4); min-height: 56px; }
+    .wordmark { font: 700 var(--fs-sm)/1 "Cascadia Mono", Consolas, monospace; letter-spacing: .08em; }
+    .top-meta { display: flex; flex-wrap: wrap; gap: var(--space-2); color: var(--muted); font: 600 var(--fs-xs)/1.2 "Cascadia Mono", Consolas, monospace; }
+    .status-badge { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border: 1px solid var(--line); border-radius: 999px; }
+    .status-badge::before { content: ""; width: 6px; height: 6px; border-radius: 999px; background: var(--capabilities); }
+
+    header { padding: var(--space-12) 0 var(--space-8); border-bottom: 1px solid var(--line-soft); }
+    .eyebrow { margin-bottom: var(--space-3); color: var(--interface); font: 700 var(--fs-xs)/1.2 "Cascadia Mono", Consolas, monospace; letter-spacing: .12em; text-transform: uppercase; }
+    .lead { max-width: 980px; margin-top: var(--space-4); color: var(--muted); text-wrap: pretty; }
+    .truth-strip { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: var(--space-6); border: 1px solid var(--line); }
+    .truth { padding: var(--space-4); border-right: 1px solid var(--line); }
+    .truth:last-child { border-right: 0; }
+    .truth b { display: block; color: var(--ink); }
+    .truth span { color: var(--muted); font-size: var(--fs-sm); }
+
+    main { padding: var(--space-8) 0 120px; }
+    section { margin-top: var(--space-12); }
+    section:first-child { margin-top: 0; }
+    .section-head { display: flex; align-items: end; justify-content: space-between; gap: var(--space-6); margin-bottom: var(--space-4); }
+    .section-head p { max-width: 760px; color: var(--muted); font-size: var(--fs-sm); }
+    .section-kicker { color: var(--faint); font: 700 var(--fs-xs)/1.2 "Cascadia Mono", Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
+
+    .dependency-shell { overflow-x: auto; border: 1px solid var(--line); background: var(--surface-3); }
+    .dependency-bus { display: grid; grid-template-columns: 160px 28px 190px 28px 210px 28px 190px 28px 190px 28px 190px 28px 160px; min-width: 1450px; padding: var(--space-6); align-items: stretch; }
+    .bus-node { position: relative; min-height: 150px; padding: var(--space-4); border: 1px solid color-mix(in oklch, var(--zone) 54%, var(--line)); background: color-mix(in oklch, var(--zone) 8%, var(--surface)); }
+    .bus-node::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--zone); }
+    .bus-node .node-tag { color: var(--zone); font: 700 var(--fs-xs)/1.2 "Cascadia Mono", Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; }
+    .bus-node b { display: block; margin-top: var(--space-2); }
+    .bus-node small { display: block; margin-top: var(--space-2); color: var(--muted); font-size: var(--fs-sm); line-height: 1.5; }
+    .bus-arrow { display: grid; place-items: center; color: var(--faint); font-family: "Cascadia Mono", Consolas, monospace; }
+    .bus-arrow span { writing-mode: vertical-rl; font-size: var(--fs-xs); letter-spacing: .08em; }
+    .zone-cli { --zone: var(--ink); }
+    .zone-interface { --zone: var(--interface); }
+    .zone-orchestration { --zone: var(--orchestration); }
+    .zone-ai { --zone: var(--ai); }
+    .zone-capabilities { --zone: var(--capabilities); }
+    .zone-infra { --zone: var(--infra); }
+    .zone-runtime { --zone: var(--muted); }
+
+    .boundary-note { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); border-top: 0; }
+    .boundary-note > div { padding: var(--space-4); border-right: 1px solid var(--line); color: var(--muted); font-size: var(--fs-sm); }
+    .boundary-note > div:last-child { border-right: 0; }
+    .boundary-note b { color: var(--ink); }
+
+    .controls { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-4); }
+    .filter-btn, .search-input, .drawer-close, .tweaks-launcher, .tweaks-reset {
+      min-height: 44px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--muted);
+    }
+    .filter-btn, .drawer-close, .tweaks-launcher, .tweaks-reset { padding: var(--space-2) var(--space-4); cursor: pointer; transition: color var(--motion-fast), border-color var(--motion-fast), background var(--motion-fast); }
+    .filter-btn:hover, .filter-btn[aria-pressed="true"] { color: var(--ink); border-color: var(--accent); background: color-mix(in oklch, var(--accent) 10%, var(--surface)); }
+    .search-input { flex: 1 1 260px; padding: var(--space-2) var(--space-3); outline: none; }
+    .search-input:focus { border-color: var(--accent); }
+
+    .module-board { display: grid; grid-template-columns: 1fr; gap: var(--space-4); }
+    .zone-column { display: grid; grid-template-columns: minmax(188px, 220px) minmax(0, 1fr); min-width: 0; overflow: hidden; border: 1px solid var(--line); background: var(--surface-3); }
+    .zone-head { position: relative; display: flex; min-width: 0; padding: var(--space-6) var(--space-4); border-right: 1px solid var(--line); background: var(--surface-2); flex-direction: column; justify-content: space-between; gap: var(--space-6); }
+    .zone-head::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--zone); }
+    .zone-sequence { color: color-mix(in oklch, var(--zone) 58%, var(--faint)); font: 700 var(--fs-xs)/1.2 "Cascadia Mono", Consolas, monospace; letter-spacing: .12em; }
+    .zone-head h3 { margin-top: var(--space-2); color: var(--zone); }
+    .zone-head p { margin-top: var(--space-1); color: var(--muted); font-size: var(--fs-xs); }
+    .zone-rule { display: block; color: var(--faint); font: 600 var(--fs-xs)/1.55 "Cascadia Mono", Consolas, monospace; overflow-wrap: anywhere; }
+    .module-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); min-width: 0; gap: var(--space-3); padding: var(--density-pad); align-items: stretch; }
+    .module-card { position: relative; display: flex; width: 100%; min-width: 0; min-height: 172px; overflow: hidden; padding: var(--density-pad); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface); color: var(--ink); text-align: left; cursor: pointer; flex-direction: column; transition: transform var(--motion-fast), border-color var(--motion-fast), background var(--motion-fast); }
+    .module-card:hover { transform: translateY(-3px); border-color: var(--zone); background: color-mix(in oklch, var(--zone) 8%, var(--surface)); }
+    .module-card.active, .module-card.active:hover { border-color: var(--zone); background: color-mix(in oklch, var(--zone) 12%, var(--surface)); box-shadow: 0 0 12px color-mix(in oklch, var(--zone) 16%, transparent); }
+    .module-card.active::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--zone); }
+    .module-kind { display: block; color: var(--zone); font: 700 var(--fs-xs)/1.2 "Cascadia Mono", Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; }
+    .module-title { display: block; margin-top: var(--space-2); font-weight: 700; }
+    .module-role { display: block; margin-top: var(--space-2); color: var(--muted); font-size: var(--fs-sm); line-height: 1.6; overflow-wrap: anywhere; }
+    .module-role::before { content: "作用："; color: var(--ink); font-weight: 700; }
+    .module-plain { display: block; margin-top: var(--space-2); padding: var(--space-2); border-left: 2px solid var(--zone); background: color-mix(in oklch, var(--zone) 7%, var(--surface)); color: var(--muted); font-size: var(--fs-xs); line-height: 1.6; overflow-wrap: anywhere; }
+    .module-plain::before { content: "小白解释："; color: var(--zone); font-weight: 800; }
+    .module-files { display: block; margin-top: auto; padding-top: var(--space-3); color: var(--faint); font: 600 var(--fs-xs)/1.45 "Cascadia Mono", Consolas, monospace; letter-spacing: .04em; overflow-wrap: anywhere; }
+    .empty-state { display: none; padding: var(--space-6); border: 1px solid var(--line); color: var(--muted); text-align: center; }
+
+    .flow-tabs { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
+    .flow-panel { display: none; border: 1px solid var(--line); background: var(--surface); }
+    .flow-panel.active { display: block; animation: panelFade var(--motion-mid); }
+    .flow-intro { padding: var(--space-4); border-bottom: 1px solid var(--line); color: var(--muted); }
+    .flow-rail { display: flex; gap: var(--space-2); overflow-x: auto; padding: var(--space-4); }
+    .flow-step { flex: 1 0 190px; min-width: 190px; padding: var(--space-4); border: 1px solid var(--line-soft); background: var(--surface-3); }
+    .flow-step b { display: block; }
+    .flow-step small { display: block; margin-top: var(--space-2); color: var(--muted); font-size: var(--fs-sm); }
+    .flow-step code { display: block; margin-top: var(--space-3); color: var(--accent); font-size: var(--fs-xs); }
+    .flow-link { flex: 0 0 30px; display: grid; place-items: center; color: var(--faint); }
+
+    .script-grid { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); }
+    .script-lane { padding: var(--space-4); border-right: 1px solid var(--line); }
+    .script-lane:last-child { border-right: 0; }
+    .script-lane h3 { color: var(--accent); }
+    .script-lane > p { margin-top: var(--space-2); color: var(--muted); font-size: var(--fs-sm); }
+    .script-item { margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--line-soft); }
+    .script-item code { display: block; color: var(--ink); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+    .script-item span { display: block; margin-top: var(--space-1); color: var(--muted); font-size: var(--fs-xs); }
+    .absence-note { margin-top: var(--space-4); padding: var(--space-4); border: 1px solid color-mix(in oklch, var(--orchestration) 52%, var(--line)); background: color-mix(in oklch, var(--orchestration) 8%, var(--surface)); color: var(--muted); }
+    .absence-note b { color: var(--orchestration); }
+
+    .drawer { position: fixed; z-index: 30; left: 0; right: 0; bottom: 0; max-height: var(--drawer-max-height); overflow: hidden; border-top: 1px solid var(--active-zone, var(--interface)); background: color-mix(in oklch, var(--void) 97%, transparent); box-shadow: 0 -18px 44px rgba(0,0,0,.38); transform: translateY(110%); transition: transform var(--motion-mid); }
+    .drawer.open { transform: translateY(0); }
+    .drawer-inner { width: min(1440px, calc(100% - 40px)); max-height: var(--drawer-max-height); margin: 0 auto; padding: 0 0 max(var(--space-6), env(safe-area-inset-bottom)); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+    .drawer-head { position: sticky; top: 0; z-index: 2; display: flex; justify-content: space-between; gap: var(--space-4); align-items: start; padding: var(--space-6) 0 var(--space-3); border-bottom: 1px solid var(--line-soft); background: var(--void); box-shadow: 0 8px 18px color-mix(in oklch, var(--void) 72%, transparent); }
+    .drawer-kicker { color: var(--active-zone, var(--interface)); font: 700 var(--fs-xs)/1.2 "Cascadia Mono", Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
+    .drawer-head h2 { margin-top: var(--space-2); }
+    .drawer-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: var(--space-2); margin-top: var(--space-4); }
+    .drawer-block { padding: var(--space-4); border: 1px solid var(--line-soft); background: var(--surface); }
+    .drawer-block b { display: block; color: var(--active-zone, var(--interface)); font-size: var(--fs-sm); }
+    .drawer-block span { display: block; margin-top: var(--space-2); color: var(--muted); font-size: var(--fs-sm); }
+    .drawer-plain { display: block; margin-top: var(--space-3); padding: var(--space-3); border-left: 2px solid var(--active-zone, var(--interface)); background: color-mix(in oklch, var(--active-zone, var(--interface)) 7%, var(--surface)); color: var(--muted); font-size: var(--fs-sm); font-style: normal; line-height: 1.65; }
+    .drawer-plain::before { content: "小白解释："; color: var(--active-zone, var(--interface)); font-weight: 800; }
+    .contract-note { margin-top: var(--space-4); color: var(--muted); font-size: var(--fs-sm); }
+    .contract-note b { color: var(--ink); }
+    .contract-flow { display: grid; grid-template-columns: minmax(0, 1fr) var(--contract-arrow-width) minmax(var(--contract-process-min), .72fr) var(--contract-arrow-width) minmax(0, 1fr); gap: var(--space-2); margin-top: var(--space-3); align-items: stretch; }
+    .contract-column, .process-column { min-width: 0; border: 1px solid var(--line-soft); background: var(--surface-3); }
+    .contract-column > h3, .process-column > h3, .matrix-section > h3, .files-section > h3 { padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--line-soft); color: var(--active-zone, var(--interface)); font: 700 var(--fs-xs)/1.2 "Cascadia Mono", Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
+    .contract-list { display: grid; gap: var(--space-2); padding: var(--space-3); }
+    .contract-item { min-width: 0; padding: var(--space-3); border: 1px solid var(--line-soft); background: var(--surface); }
+    .contract-item b { display: block; color: var(--ink); font-size: var(--fs-sm); }
+    .contract-carrier { display: block; margin-top: var(--space-1); color: var(--active-zone, var(--interface)); font: 600 var(--fs-xs)/1.5 "Cascadia Mono", Consolas, monospace; overflow-wrap: anywhere; }
+    .contract-contains, .contract-purpose { display: block; margin-top: var(--space-2); color: var(--muted); font-size: var(--fs-xs); line-height: 1.65; }
+    .contract-purpose::before { content: "作用："; color: var(--ink); }
+    .contract-arrow { display: grid; place-items: center; color: var(--active-zone, var(--interface)); font: 700 var(--fs-md)/1 "Cascadia Mono", Consolas, monospace; }
+    .process-list { margin: 0; padding: var(--space-3) var(--space-3) var(--space-3) var(--space-8); color: var(--muted); font-size: var(--fs-sm); }
+    .process-list li { padding: var(--space-2) 0; border-bottom: 1px solid var(--line-soft); }
+    .process-list li:last-child { border-bottom: 0; }
+    .matrix-section, .files-section { margin-top: var(--space-3); border: 1px solid var(--line-soft); background: var(--surface-3); }
+    .matrix-scroll { overflow-x: auto; }
+    .event-table { width: 100%; min-width: var(--matrix-min-width); border-collapse: collapse; font-size: var(--fs-xs); }
+    .event-table th, .event-table td { padding: var(--space-3); border-right: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); text-align: left; vertical-align: top; }
+    .event-table th { color: var(--ink); background: var(--surface); font-family: "Cascadia Mono", Consolas, monospace; }
+    .event-table td { color: var(--muted); }
+    .event-table td:first-child { color: var(--active-zone, var(--interface)); font-family: "Cascadia Mono", Consolas, monospace; }
+    .file-role-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); padding: var(--space-3); }
+    .file-role { min-width: 0; padding: var(--space-3); border: 1px dashed var(--line); background: var(--surface); }
+    .file-role code { display: block; color: var(--ink); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+    .file-role span { display: block; margin-top: var(--space-1); color: var(--muted); font-size: var(--fs-xs); }
+
+    .tweaks-host { position: fixed; z-index: 40; right: 20px; bottom: 20px; }
+    .tweaks-launcher { border-radius: 999px; color: var(--ink); background: var(--surface-2); }
+    .tweaks-panel { display: none; width: 280px; padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: 0 14px 40px rgba(0,0,0,.3); }
+    .tweaks-panel.open { display: block; }
+    .tweaks-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4); }
+    .tweaks-head button { min-width: 44px; padding: 0; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+    .tweak-field { display: block; margin-top: var(--space-3); color: var(--muted); font-size: var(--fs-sm); }
+    .tweak-field input, .tweak-field select { width: 100%; min-height: 44px; margin-top: var(--space-1); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-3); color: var(--ink); }
+    .tweak-check { display: flex; align-items: center; gap: var(--space-2); min-height: 44px; margin-top: var(--space-2); color: var(--muted); }
+    .tweak-check input { width: 18px; height: 18px; }
+    .tweaks-reset { width: 100%; margin-top: var(--space-3); }
+
+    .reveal { opacity: 0; transform: translateY(16px); transition: opacity var(--motion-enter), transform var(--motion-enter); }
+    .reveal.visible { opacity: 1; transform: translateY(0); }
+    [hidden] { display: none !important; }
+    @keyframes panelFade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+    @media (max-width: 1120px) {
+      .zone-column { grid-template-columns: minmax(168px, 190px) minmax(0, 1fr); }
+      .module-list { grid-template-columns: repeat(auto-fit, minmax(232px, 1fr)); }
+      .script-grid { grid-template-columns: 1fr 1fr; }
+      .script-lane:nth-child(2) { border-right: 0; }
+      .script-lane:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+      .contract-flow { grid-template-columns: 1fr; }
+      .contract-arrow { min-height: 28px; transform: rotate(90deg); }
+    }
+    @media (max-width: 760px) {
+      .wrap, .drawer-inner { width: min(100% - 24px, 1480px); }
+      header { padding-top: var(--space-8); }
+      .top-meta { display: none; }
+      .truth-strip, .boundary-note, .script-grid { grid-template-columns: 1fr; }
+      .truth, .boundary-note > div, .script-lane { border-right: 0; border-bottom: 1px solid var(--line); }
+      .truth:last-child, .boundary-note > div:last-child, .script-lane:last-child { border-bottom: 0; }
+      .section-head { align-items: start; flex-direction: column; gap: var(--space-2); }
+      .zone-column { grid-template-columns: 1fr; }
+      .zone-head { min-height: 0; padding: var(--space-4); border-right: 0; border-bottom: 1px solid var(--line); gap: var(--space-3); }
+      .module-list { grid-template-columns: 1fr; padding: var(--space-4); }
+      .module-card { min-height: 0; }
+      .drawer-grid { grid-template-columns: 1fr; }
+      .file-role-list { grid-template-columns: 1fr; }
+      .tweaks-host { right: 12px; bottom: 12px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
+      .reveal { opacity: 1; transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="topbar" aria-label="文档状态">
+    <div class="wrap topbar-inner">
+      <div class="wordmark">WILDARRANGE / 项目全图</div>
+      <div class="top-meta">
+        <span class="status-badge">当前代码快照</span>
+        <span>2026-09-01</span>
+        <span>NODE ESM / 运行时不依赖外部 NPM 包</span>
+      </div>
+    </div>
+  </nav>
+
+  <header>
+    <div class="wrap">
+      <div class="eyebrow">真实模块 · 可运行脚本 · 本地状态文件</div>
+      <h1>WildArrange 模块与脚本架构图</h1>
+      <p class="lead">从用户发出指令开始，说明每一组程序接到什么、负责什么、交出什么。先看业务作用，需要核对时再展开真实文件和技术字段。</p>
+      <div class="truth-strip" aria-label="架构事实">
+        <div class="truth"><b>开发主线</b><span>初始化 → 形成计划 → 逐张工单开发 → 独立检查 → 完成记录</span></div>
+        <div class="truth"><b>五类职责</b><span>用户入口 → 任务流程 → AI 判断 / 执行质检 → 底层保障</span></div>
+        <div class="truth"><b>程序文件放哪里</b><span><code>bin/</code> 放命令入口，<code>tooling/</code> 放维护工具，快捷命令在 <code>package.json</code></span></div>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="reveal" id="dependency-overview">
+      <div class="section-head">
+        <div><div class="section-kicker">01 · 工作如何向下传递</div><h2>五层职责关系</h2></div>
+        <p>用户入口只负责接收和展示；任务流程层安排先后顺序；执行工具负责真正工作；底层保障负责文件、锁、Git 和日志。</p>
+      </div>
+      <div class="dependency-shell">
+        <div class="dependency-bus">
+          <div class="bus-node zone-cli"><span class="node-tag">命令入口</span><b>bin/wildarrange.mjs</b><small>接收终端或宿主命令，再转给真正负责的模块。</small></div>
+          <div class="bus-arrow"><span>转交</span></div>
+          <div class="bus-node zone-interface"><span class="node-tag">用户入口层</span><b>接入宿主并展示状态</b><small>连接 Codex / Cursor / Kimi，提供看板、体检和操作入口。</small></div>
+          <div class="bus-arrow"><span>发起</span></div>
+          <div class="bus-node zone-orchestration"><span class="node-tag">任务流程层</span><b>决定先做什么、失败后去哪</b><small>导入计划、选择任务、组织开发、检查、返工和成果合入。</small></div>
+          <div class="bus-arrow"><span>参考</span></div>
+          <div class="bus-node zone-ai"><span class="node-tag">AI 判断层</span><b>分类请求并准备工作材料</b><small>给请求贴标签、匹配 Skill，并为 Agent 准备当前上下文。</small></div>
+          <div class="bus-arrow"><span>调用</span></div>
+          <div class="bus-node zone-capabilities"><span class="node-tag">执行与质检工具</span><b>编码、测试、范围检查和复核</b><small>每项工具只完成一个清晰动作，并交回可核对的结果。</small></div>
+          <div class="bus-arrow"><span>使用</span></div>
+          <div class="bus-node zone-infra"><span class="node-tag">底层运行保障</span><b>文件、Git、锁、命令和日志</b><small>保证上层可以安全、可恢复地读写和执行。</small></div>
+          <div class="bus-arrow"><span>保存</span></div>
+          <div class="bus-node zone-runtime"><span class="node-tag">本地运行记录</span><b>.wildarrange/</b><small>保存计划、工单、检查结果、完成记录、日志和备份。</small></div>
+        </div>
+      </div>
+      <div class="boundary-note">
+        <div><b>工具调用：</b>任务流程层和 AI 判断层只能通过统一入口调用编码、测试和复核工具。</div>
+        <div><b>什么时候算完成：</b>Worker 说“做完了”不算完成；测试、范围、独立复核和验收证据都通过后才封口。</div>
+        <div><b>Hook 的作用：</b>Hook 只是在关键事件发生时提醒或拦截，不是一直运行的工作循环。</div>
+      </div>
+    </section>
+
+    <section class="reveal" id="module-board-section">
+      <div class="section-head">
+        <div><div class="section-kicker">02 · 谁负责什么</div><h2>五个职责区</h2></div>
+        <p>每张卡回答一个业务问题。先看卡片上的作用；点击后再看输入、处理、输出和真实文件。</p>
+      </div>
+      <div class="controls" aria-label="模块筛选">
+        <button class="filter-btn" type="button" data-filter="all" aria-pressed="true">全部</button>
+        <button class="filter-btn" type="button" data-filter="interface" aria-pressed="false">用户入口</button>
+        <button class="filter-btn" type="button" data-filter="orchestration" aria-pressed="false">任务流程</button>
+        <button class="filter-btn" type="button" data-filter="ai" aria-pressed="false">AI 判断</button>
+        <button class="filter-btn" type="button" data-filter="capabilities" aria-pressed="false">执行与质检</button>
+        <button class="filter-btn" type="button" data-filter="infra" aria-pressed="false">底层保障</button>
+        <input class="search-input" id="module-search" type="search" placeholder="搜索作用或文件，例如 Hook、工单、测试、Git" aria-label="搜索模块">
+      </div>
+      <div class="module-board" id="module-board" aria-live="polite"></div>
+      <div class="empty-state" id="empty-state">没有匹配的模块。请缩短关键词或切回“全部”。</div>
+    </section>
+
+    <section class="reveal" id="runtime-flows">
+      <div class="section-head">
+        <div><div class="section-kicker">03 · 从开始到完成</div><h2>一次工作怎样真正跑完</h2></div>
+        <p>只有具备任务状态、失败返工和结束条件的工作链才叫 Loop；分类和 Hook 只是其中的一个动作。</p>
+      </div>
+      <div class="flow-tabs" role="tablist" aria-label="运行链路">
+        <button class="filter-btn flow-tab" type="button" role="tab" data-flow="init" aria-selected="true">初始化 Loop</button>
+        <button class="filter-btn flow-tab" type="button" role="tab" data-flow="plan" aria-selected="false">整个开发计划</button>
+        <button class="filter-btn flow-tab" type="button" role="tab" data-flow="task" aria-selected="false">直接开发一个任务</button>
+        <button class="filter-btn flow-tab" type="button" role="tab" data-flow="isolated" aria-selected="false">隔离开发一个任务</button>
+        <button class="filter-btn flow-tab" type="button" role="tab" data-flow="session" aria-selected="false">新任务会话隔离（目标）</button>
+        <button class="filter-btn flow-tab" type="button" role="tab" data-flow="hook" aria-selected="false">Hook / 分类事件</button>
+      </div>
+      <div id="flow-panels"></div>
+    </section>
+
+    <section class="reveal" id="scripts-and-packaging">
+      <div class="section-head">
+        <div><div class="section-kicker">04 · 程序从哪里启动</div><h2>脚本和随产品发布的内容</h2></div>
+        <p>这一段只回答四个问题：哪个文件接收命令、哪个文件跑测试、哪个文件维护架构图，以及安装包里还带了什么。</p>
+      </div>
+      <div class="script-grid">
+        <article class="script-lane">
+          <h3>命令入口</h3>
+          <p>无论用户还是宿主大模型调用，最后都从这里进入 WildArrange。</p>
+          <div class="script-item"><code>bin/wildarrange.mjs</code><span>唯一公开命令为 <code>wildarrange</code>；负责参数解析和命令转交。</span></div>
+          <div class="script-item"><code>npm run wildarrange -- &lt;args&gt;</code><span><code>package.json</code> 对 CLI 的开发期快捷入口。</span></div>
+        </article>
+        <article class="script-lane">
+          <h3>怎样运行测试</h3>
+          <p>统一测试命令会逐个执行测试文件，避免 Windows 同时启动太多测试后互相卡住。</p>
+          <div class="script-item"><code>npm test</code><span>调用 <code>tooling/run-tests.mjs</code>，执行 29 个 <code>test/*.test.mjs</code>。</span></div>
+          <div class="script-item"><code>wildarrange test --zone &lt;zone&gt;</code><span>用依赖图选择分区或影响面测试。</span></div>
+        </article>
+        <article class="script-lane">
+          <h3>怎样维护架构图</h3>
+          <p>一个清单登记“每个文件属于哪个模块”，另一个程序检查是否有漏登记。</p>
+          <div class="script-item"><code>tooling/arch-module-graph/generate-module-graph.mjs</code><span>从映射与代码事实生成模块图数据。</span></div>
+          <div class="script-item"><code>tooling/arch-module-graph/validate-module-file-map.mjs</code><span><code>npm run check:arch</code> 的 owner，拦截无归属文件。</span></div>
+          <div class="script-item"><code>tooling/arch-module-graph/module-file-map.json</code><span>当前登记 6 个物理根：CLI + 五区，<code>unowned=[]</code>。</span></div>
+        </article>
+        <article class="script-lane">
+          <h3>安装包附带什么</h3>
+          <p>除运行程序外，还会带上 Agent 说明、Skill、任务分类规则和项目初始化模板。</p>
+          <div class="script-item"><code>packs/wildarrange-linear/manifest.json</code><span>Prompt Pack manifest；安装后按 realpath 与 hash 校验。</span></div>
+          <div class="script-item"><code>routes.json + tools/tool-contract.json</code><span>确定性路由信号与 Tool 合同。</span></div>
+          <div class="script-item"><code>agents/ + skills/ + project-init/</code><span>5 个长期 Agent 提示、29 个 Skill、项目初始化模板。</span></div>
+        </article>
+      </div>
+      <div class="absence-note"><b>文件位置说明：</b>仓库根目录没有单独的 <code>scripts/</code> 文件夹。可执行程序实际放在 <code>bin/</code> 和 <code>tooling/</code>，快捷命令登记在 <code>package.json</code>；图中按真实位置展示。</div>
+    </section>
+  </main>
+
+  <aside class="drawer" id="detail-drawer" aria-hidden="true" aria-live="polite">
+    <div class="drawer-inner">
+      <div class="drawer-head">
+        <div><div class="drawer-kicker" id="drawer-kicker">负责区域</div><h2 id="drawer-title">模块详情</h2></div>
+        <button class="drawer-close" id="drawer-close" type="button">关闭</button>
+      </div>
+      <div class="drawer-grid">
+        <div class="drawer-block"><b>它负责什么</b><span id="drawer-role"></span><em class="drawer-plain" id="drawer-plain"></em></div>
+        <div class="drawer-block"><b>它不负责什么</b><span id="drawer-forbid"></span></div>
+      </div>
+      <p class="contract-note"><b>怎么读：</b>输入和输出有时是文件，有时只是程序运行时传递的一包数据。每一项都会写明“放在哪里”和“里面有什么”。</p>
+      <div class="contract-flow">
+        <section class="contract-column"><h3>它收到什么</h3><div class="contract-list" id="drawer-inputs"></div></section>
+        <div class="contract-arrow" aria-hidden="true">→</div>
+        <section class="process-column"><h3>它按什么顺序处理</h3><ol class="process-list" id="drawer-process"></ol></section>
+        <div class="contract-arrow" aria-hidden="true">→</div>
+        <section class="contract-column"><h3>它交出什么</h3><div class="contract-list" id="drawer-outputs"></div></section>
+      </div>
+      <section class="matrix-section" id="matrix-section" hidden><h3>宿主会在什么时候叫醒 Hook</h3><div class="matrix-scroll"><table class="event-table"><thead><tr><th>宿主</th><th>宿主事件名</th><th>WildArrange 统一名称</th><th>什么时候发生 / 会带来什么</th><th>返回什么</th><th>Hook 失败时怎么办</th></tr></thead><tbody id="drawer-matrix"></tbody></table></div></section>
+      <section class="files-section"><h3>哪些真实文件负责这件事</h3><div class="file-role-list" id="drawer-files"></div></section>
+    </div>
+  </aside>
+
+  <div class="tweaks-host">
+    <button class="tweaks-launcher" id="tweaks-launcher" type="button">TWK · 调整</button>
+    <div class="tweaks-panel" id="tweaks-panel" aria-hidden="true">
+      <div class="tweaks-head"><strong>Tweaks</strong><button type="button" id="tweaks-close" aria-label="关闭调整面板">×</button></div>
+      <label class="tweak-field">主强调色<input type="color" id="tw-color" value="#66a7ff"></label>
+      <label class="tweak-field">基础字号 <span id="tw-font-value">15</span>px<input type="range" id="tw-font" min="13" max="18" value="15"></label>
+      <label class="tweak-field">信息密度<select id="tw-density"><option value="compact">紧凑</option><option value="comfortable" selected>舒适</option><option value="spacious">宽松</option></select></label>
+      <label class="tweak-check"><input type="checkbox" id="tw-light"> 亮色模式</label>
+      <button class="tweaks-reset" id="tw-reset" type="button">重置</button>
+    </div>
+  </div>
+
+  <script>
+    const zoneMeta = {
+      interface: { title: "用户入口（Interface）", subtitle: "连接宿主、展示状态、接收操作 · 11 个文件", rule: "只把请求转给任务流程或底层保障", color: "#66a7ff" },
+      orchestration: { title: "任务流程（Orchestration）", subtitle: "安排顺序、返工、恢复和成果合入 · 13 个文件", rule: "决定下一步，但不亲自编码或测试", color: "#efb64c" },
+      ai: { title: "AI 判断", subtitle: "请求分类、Skill 匹配和上下文准备 · 7 个文件", rule: "只能通过统一入口调用执行工具", color: "#b38cff" },
+      capabilities: { title: "执行与质检工具（Capabilities）", subtitle: "编码、测试、范围、复核和完成证明 · 9 个文件", rule: "只使用底层运行保障", color: "#57c785" },
+      infra: { title: "底层运行保障（Infra）", subtitle: "文件、锁、命令、Git、日志和配置 · 34 个文件", rule: "不反向调用上层业务", color: "#5fd1c8" }
+    };
+
+    const modules = [
+      { id:"host-adapters", zone:"interface", title:"连接 Codex、Cursor 与 Kimi", role:"把三种宿主接到同一个 WildArrange 项目，并把宿主事件转成 WildArrange 能理解的请求。", plain:"像给三种不同品牌的插头配转接头；上面长得不同，接进来后都走同一套 WildArrange 流程。", input:"要接入的宿主、启动方式、宿主事件", output:"宿主配置、事件转发脚本、WildArrange 返回结果", forbid:"不能让某个宿主的特殊规则污染核心流程；不能偷偷修改 Kimi 用户配置。", files:["src/interface/adapters.mjs","src/interface/kimi-adapter.mjs","src/interface/cursor-adapter.mjs","src/interface/hook-bridge-core.mjs"] },
+      { id:"human-views", zone:"interface", title:"任务看板、决策和运行状态", role:"把任务、检查结果和系统健康情况整理成人能查看和操作的界面。", plain:"像办公室白板，把谁在做什么、卡在哪里、为什么放行，翻译成人能看懂的页面。", input:"任务登记册、决策记录、人工标注和运行日志", output:"本地 Dashboard、终端查询结果和时间线", forbid:"界面操作必须调用真正的任务流程，不能绕过完成检查直接改成已完成。", files:["src/interface/dashboard.mjs","src/interface/dashboard-panels.mjs","src/interface/decisions.mjs","src/interface/timeline.mjs"] },
+      { id:"interface-governance", zone:"interface", title:"命令帮助、项目体检和初始化文档", role:"告诉用户有哪些真实命令，检查项目是否接好，并只补建缺失的治理文档。", plain:"像说明书加体检单：告诉你按钮怎么用、哪里没接好，但不会把你原来的文件改没。", input:"真实命令清单、目标项目、初始化选择", output:"命令帮助、体检结论、新建和保留的文档清单", forbid:"不能宣传不存在的命令，也不能覆盖用户已有文档。", files:["src/interface/cli-help.mjs","src/interface/doctor.mjs","src/interface/project-init.mjs"] },
+
+      { id:"mainline", zone:"orchestration", title:"生成计划并逐个推进任务", role:"宿主大模型把对话整理成计划草稿；用户批准后，WildArrange 登记任务、选择下一项，并推进到完成或等待决定。", plain:"像项目经理先把聊天整理成施工单，等你签字后，再一张一张派出去做。", input:"对话形成的计划草稿、用户批准、任务登记册、分类与 Skill 提示", output:"批准后的计划、更新后的任务状态、本次执行结果和计划摘要", forbid:"未批准的语义计划不能进入开发；一次 run 的返回也不能冒充登记册中的真实状态。", files:["src/orchestration/plan-state.mjs","src/orchestration/linear-runtime.mjs","src/orchestration/workflow.mjs"] },
+      { id:"parallel-admission", zone:"orchestration", title:"隔离开发与成果合入（子 Agent）", role:"让多个子 Agent 在各自目录或 worktree 中开发，交回候选代码；正式接纳时临时应用代码、运行同一套完成检查，再合入或撤销。", plain:"像让几支施工队各自在样板间干活；验收合格的那份才搬进正式房间。", input:"要开发的任务、如何启动子 Agent、隔离目录中的候选代码", output:"子 Agent 运行记录、待验收代码包、正式合入或恢复结果", forbid:"只在隔离开发路径使用；候选代码不能自称完成，已确认推送成功的代码不能回滚。", files:["src/orchestration/parallel-runtime.mjs","src/orchestration/admission.mjs","src/orchestration/admission-recovery.mjs","src/orchestration/integration.mjs"] },
+      { id:"delivery", zone:"orchestration", title:"任务完成检查", role:"拿到任务要求和实际代码改动后，依次组织自动测试、修改范围检查、独立复核、验收证明和完成记录。", plain:"像交房验收流程：水电、面积、监理和验收单都过了，才允许写“已交付”。", input:"任务完成要求、实际代码改动、Worker 执行回执", output:"每道检查的证据，以及完成、返工或恢复决定", forbid:"不能删除验证命令，也不能跳过测试、范围、复核、完成标准或验收证明。", files:["src/orchestration/delivery-pipeline.mjs"] },
+      { id:"coordination", zone:"orchestration", title:"跨设备任务领取与交接", role:"记录哪台设备正在负责某个任务，并让任务可以从一台设备安全交给另一台。", plain:"像一把工位钥匙：同一时间只交给一个人，换人时必须当面交接并记账。", input:"任务、设备身份、远端代码版本", output:"当前负责人、交接包和接管记录", forbid:"不能强推，不能让两台设备同时拥有同一任务，也不能靠本机时间自动抢任务。", files:["src/orchestration/remote-ownership.mjs","src/orchestration/handoff.mjs"] },
+      { id:"task-governance", zone:"orchestration", title:"工单登记、变更和待办提醒", role:"维护全项目工单登记册，记录新增需求、Bug、范围变化、阻塞原因和需要用户处理的事项。", plain:"像总工单本：新活、改需求、卡点和等你拍板的事，都必须先写在同一本账里。", input:"用户工单、越界改动、复核阻塞和运行记录", output:"可执行工单、变更决定和待用户处理清单", forbid:"不能偷偷扩大允许修改范围，也不能替用户接受需求变化。", files:["src/orchestration/task-board.mjs","src/orchestration/change-governance.mjs","src/orchestration/status.mjs"] },
+
+      { id:"routing", zone:"ai", title:"判断请求属于哪类工作", role:"先用可复现规则给请求分类，再参考历史记录提出建议；可疑判断只供人复盘。", plain:"像医院分诊台：先判断这是问诊、复查还是手术准备，再送到对应流程，不亲自治疗。", input:"用户原话、当前阶段、分类规则和历史结论", output:"工作类别、风险、建议 Agent / Skill 和可疑项", forbid:"AI 第二意见不能偷偷覆盖确定性分类；外部模型不可用时不能阻塞主流程。", files:["src/ai/routing.mjs","src/ai/archivist-router.mjs","src/ai/suspicion-review.mjs"] },
+      { id:"injection-hooks", zone:"ai", title:"给 Agent 准备当前任务材料", role:"在会话开始、用户发言或工具执行前后，装载当前任务需要的规则、Skill 和恢复信息；需要计划时还指导宿主生成待批准草稿。", plain:"像开工前把图纸、规章和上一班交接单放到工人桌上，并在危险操作前拉一下警戒线。", input:"宿主事件、当前 Agent、任务、阶段和 Skill 清单", output:"本回合工作材料、计划草稿要求，以及允许、阻止或继续的决定", forbid:"未知或完整性失败的 Skill 必须报告；Hook 只是前置提醒和拦截，不是最终完成保障。", files:["src/ai/injection.mjs","src/ai/skill-matcher.mjs","src/ai/hooks.mjs"] },
+      { id:"agent-context", zone:"ai", title:"整理 Agent 工作包并支持中断续跑", role:"把身份、任务、规则、Skill 和上次进度整理成有限大小的工作包，供宿主或子 Agent 使用。", plain:"像给接班人一张精简交接卡：谁、做什么、做到哪、下一步是什么，一眼能继续。", input:"Agent、任务、计划、当前阶段和运行快照", output:"当前工作包、恢复报告和是否继续的提示", forbid:"不能把整个仓库无限塞进上下文，也不能绕过工作手册完整性检查。", files:["src/ai/context.mjs"] },
+
+      { id:"capability-gateway", zone:"capabilities", title:"执行工具的统一调用入口", role:"根据工具名称找到真正的编码、测试或复核程序，并把不同工具的结果整理成同一种格式。", plain:"像总机：你只说要“测试”或“复核”，它负责接到正确的人，并用统一回执告诉你结果。", input:"要调用的工具名和完成这次调用所需材料", output:"通过/失败、证据、副作用、耗时和错误", forbid:"任务流程和 AI 不能绕过这个入口直接调用具体工具。", files:["src/capabilities/gateway.mjs"] },
+      { id:"execution-gates", zone:"capabilities", title:"编码、自动测试、范围检查和独立复核", role:"Worker 负责修改；测试程序重新跑测试；范围检查确认是否越界；BaiZe 从独立视角复核风险和质量。", plain:"像施工、通电测试、量边界和监理验收四个不同岗位，不能让施工员自己盖合格章。", input:"任务要求、执行命令、允许修改范围和真实代码差异", output:"施工回执、测试结果、越界结果和复核问题", forbid:"Worker 不能给自己验收；范围检查不能只比较看起来相似的路径字符串。", files:["src/capabilities/worker.mjs","src/capabilities/verify.mjs","src/capabilities/scope-guard.mjs","src/capabilities/review-gate.mjs"] },
+      { id:"proof-checkpoint", zone:"capabilities", title:"证明任务完成并封口", role:"确认每条成功判据都有真实证据，先写验收证明，再写最终完成记录。", plain:"像交付签收单：先把每一项验收凭证钉上去，齐了才盖“完成”章。", input:"任务、计划、全部测试/范围/复核证据和完成要求", output:"人和机器都能核对的验收证明与完成记录", forbid:"验收证明不通过，任务不能变成已完成。", files:["src/capabilities/acceptance-proof.mjs","src/capabilities/checkpoint.mjs"] },
+      { id:"quality-governance", zone:"capabilities", title:"代码检查与仓库体检", role:"检查类型、代码结构、定位锚点、注释和仓库布局，再把问题整理成可处理清单。", plain:"像房屋巡检：不只看能不能住，还看线路、标识和结构是否留下后患。", input:"本次改动、任务要求和项目规则", output:"问题位置、严重程度、处理建议和仓库体检报告", forbid:"测试工具不能污染生产代码；静态检查通过也不能冒充真实使用验收。", files:["src/capabilities/code-intel.mjs","src/capabilities/repository-governance.mjs"] },
+
+      { id:"runtime-state", zone:"infra", title:"保存配置、任务和运行进度", role:"统一创建状态目录，安全写入配置和任务登记册，保留恢复快照，并用锁避免同时覆盖。", plain:"像项目档案柜加值班本：所有进度放同一处，写的时候上锁，断电后还能接着来。", input:"目标项目、配置、任务登记册和当前阶段信息", output:"本地状态文件、恢复快照和安全更新后的任务", forbid:"上层不能自制另一套写文件和锁机制；迁移状态时必须留下恢复材料。", files:["src/infra/runtime-store.mjs","src/infra/runtime-config.mjs","src/infra/runtime-bootstrap.mjs","src/infra/runtime-snapshot.mjs","src/infra/task-state-store.mjs","src/infra/task-state-lock.mjs","src/infra/task-predicates.mjs"] },
+      { id:"audit-trust", zone:"infra", title:"保存可信历史、备份和完成条件", role:"记录不可静默改写的任务历史、每次判断和人工标注，备份关键状态，并统一解释失败和完成条件。", plain:"像带页码和骑缝章的账本：谁做了什么都能追溯，出问题还能按备份恢复。", input:"运行事件、判断、人工标注、关键状态和检查结果", output:"可信历史、完整性报告、备份、错误说明和完成条件状态", forbid:"损坏记录只能在读取时降级；人工标注绝不能偷偷修改配置或关闭检查。", files:["src/infra/ledger.mjs","src/infra/decision-log.mjs","src/infra/annotation-log.mjs","src/infra/security.mjs","src/infra/error-protocol.mjs","src/infra/gate-arming.mjs","src/infra/hook-result-gate.mjs","src/infra/success-criteria.mjs"] },
+      { id:"process-safety", zone:"infra", title:"安全运行命令、校验路径并管理文件锁", role:"在明确目录和超时内运行命令，提前阻止明显破坏性操作，确认文件没有越过项目边界，并处理卡死的锁。", plain:"像施工现场的断路器、围栏和门锁：危险命令先断电，越界就拦住，同一扇门不让两人抢写。", input:"命令、工作目录、目标路径和锁持有者", output:"命令结果、安全判断、路径判断和锁保护下的执行结果", forbid:"不能弱化内置危险命令检查，也不能对身份不明的路径写入或回滚。", files:["src/infra/command-runner.mjs","src/infra/command-safety.mjs","src/infra/path-match.mjs","src/infra/file-lock.mjs"] },
+      { id:"git-isolation", zone:"infra", title:"隔离代码改动并安全使用 Git", role:"读取真实 Git 改动，为子 Agent 准备独立 worktree 和 patch，并在条件允许时创建普通提交和推送。", plain:"像给每个施工队一间独立样板房；只把验收过、归属清楚的改动搬回正式房。", input:"远端代码版本、任务归属、候选改动和当前工作区", output:"真实改动清单、隔离代码包、提交与推送结果", forbid:"不能强推；候选代码夹带无归属改动时必须停止合入。", files:["src/infra/git-coordination.mjs","src/infra/git-diff.mjs","src/infra/git-worktree.mjs"] },
+      { id:"analysis-reports", zone:"infra", title:"分析改动影响、读取项目规则并生成报告", role:"判断一个改动会影响哪些文件和测试，读取适用的项目规范，再生成失败、复核和经验报告。", plain:"像改水管前先查整栋楼的管线图，再列出会受影响的房间和需要复测的地方。", input:"源码、本次改动、项目规范和检查证据", output:"受影响文件、应跑测试、适用规则和可读报告", forbid:"不能为了让测试通过而放宽五区依赖规则。", files:["src/infra/dependency-graph.mjs","src/infra/rule-scanner.mjs","src/infra/repository-layout.mjs","src/infra/review-findings.mjs","src/infra/failure-analysis.mjs","src/infra/task-reports.mjs"] },
+      { id:"ai-support", zone:"infra", title:"接入可选 LLM、工作手册包和跨会话摘要", role:"在用户配置后调用外部模型，安全安装和读取 Agent 工作手册，并把任务进展压缩成下次可恢复的摘要。", plain:"像可选的外部顾问、受控资料库和交接摘要；顾问不在线，主流程也照常工作。", input:"模型配置、工作手册清单、任务和可信历史", output:"可选复核意见、校验后的工作手册内容和恢复摘要", forbid:"没有密钥不能阻塞主流程；商业包不能带入受限第三方提示词原文。", files:["src/infra/llm-provider.mjs","src/infra/prompt-pack.mjs","src/infra/memory-digest.mjs"] },
+      { id:"agent-runtime", zone:"infra", title:"确认 Agent 身份并生成启动命令", role:"维护五个长期 Agent 的身份和可写资格，再为 Codex、Cursor 或自定义子 Agent 生成实际启动命令。", plain:"像人事名册加派工证：先确认这个人是谁、能不能动代码，再开出合法的上岗指令。", input:"Agent 名称、宿主类型、任务和工作材料", output:"统一后的身份、是否允许写代码和启动命令", forbid:"DiJiang、BaiZe、LuWu 不能作为任意可写命令 Worker。", files:["src/infra/agent-registry.mjs","src/infra/agent-spawn.mjs"] },
+      { id:"route-primitives", zone:"infra", title:"用明确规则给请求分类", role:"读取基础分类规则和人工修正规则，根据用户文本中的信号判断类别和风险，全程不调用 LLM。", plain:"像一本公开的分诊手册：看到哪些关键词走哪扇门，事后能查出当时为什么这么分。", input:"分类规则、人工修正规则和用户原话", output:"类别、风险、命中信号和可追溯依据", forbid:"规则读取失败必须明确报告，不能悄悄改成无法审计的 LLM 判断。", files:["src/infra/route-table.mjs"] }
+    ];
+
+    const moduleContracts = {
+      "host-adapters": {
+        inputs: [
+          ["受管理项目根", "rootDir 目录参数（非文件）", "就是正在接入 WildArrange 的业务项目目录；安装产物全部写在这个项目里面。", "限定安装、备份、卸载和恢复只能影响该项目。"],
+          ["Adapter 目标", "CLI 选项 --target", "all｜codex｜cursor｜kimi。all 表示一次生成三个宿主的项目接入层；不是指业务项目类型。", "决定要为哪个宿主生成配置、命令和 bridge。"],
+          ["安装模式", "CLI 选项 --mode", "local｜npx。local 直接调用当前 WildArrange 安装目录的 bin/wildarrange.mjs；npx 调用 npx -y <packageName>。默认 local。", "决定 Hook 触发时从本地包还是 npm 命令启动 WildArrange CLI。"],
+          ["宿主 Hook 事件", "stdin JSON；也可 wildarrange hook run --from <hook.json>", "常见字段：hook_event_name、cwd、session_id / conversation_id、prompt、tool_name、tool_input、command、tool_response。", "把 Codex、Cursor、Kimi 各自协议归一化后交给 ai/hooks.mjs。"],
+          ["项目发现标记", ".wildarrange/config.json 或 wildarrange.config.json", "bridge 从事件 cwd 向上查找这两个标记，并用 realpath 确认目录真实存在。", "防止用户级 Kimi plugin 在非 WildArrange 项目里产生副作用。"]
+        ],
+        process: ["先 initRuntime，并在覆盖已有适配文件前复制到 .wildarrange/adapters/backups/<backupId>/。", "按 target 渲染宿主配置、Slash Commands / Skills、bridge 与安装说明；按 mode 固化 CLI 启动方式。", "宿主事件触发时，bridge 发现项目、映射事件名和工具名，再启动 wildarrange hook run --format json。", "把统一结果翻译回宿主协议：上下文注入、allow / deny、followup_message 或静默记录。"],
+        outputs: [
+          ["Codex 项目 Hook", ".codex/hooks.json", "7 类事件定义、PreToolUse 写类 matcher、10 秒 timeout、状态提示和 hook 命令。另存审计副本到 .wildarrange/adapters/codex/hooks.json。", "项目经 /hooks review + trust 后，Codex 自动把生命周期事件交给 WildArrange。"],
+          ["Cursor 项目接入层", ".cursor/hooks.json + .cursor/hooks/wildarrange-hook-bridge.mjs", "8 类 Cursor camelCase 事件、写工具 matcher、超时、failClosed；bridge 负责协议翻译。另生成 .cursor/rules/wildarrange.mdc 与 .cursor/commands/wildarrange-*.md。", "受信任工作区打开后自动加载；写操作和终端命令可在 Hook 故障时 fail-closed。"],
+          ["Kimi Plugin", ".wildarrange/adapters/kimi/plugin/kimi.plugin.json + hooks/wildarrange-hook-bridge.mjs", "plugin 元数据、8 类 Hook、matcher、10 秒宿主超时和 bridge；另生成 .wildarrange/adapters/kimi/README.md。", "用户执行 /plugins install .wildarrange/adapters/kimi/plugin 与 /reload 后启用生命周期转发；不改 ~/.kimi-code/config.toml。"],
+          ["共享命令 Skill", ".agents/skills/wildarrange-*/SKILL.md", "由 wildarrange-config、doctor、skills、plan、approve、run、resume 等命令模板生成。Codex 与 Kimi 共用；安装全部宿主时只生成一份共享入口。", "让宿主通过项目 Skill 调用真实 WildArrange 命令，不复制另一套业务逻辑。"],
+          ["安装证据与恢复材料", ".wildarrange/adapters/*-report.json|md + backups/<backupId>/ + ledger.jsonl", "报告含 target、mode、packageName、hookCommand、每个输出路径、enforcement、trustAction、backup；卸载和恢复同样留报告。", "回答安装了什么、何时真正生效、删了什么、如何恢复。"]
+        ],
+        matrix: [
+          ["Codex", "SessionStart", "SessionStart", "会话开始；session_id、cwd", "恢复上下文、规则、Agent 上下文与待决策提醒", "Hook 命令失败由 Codex Hook 信任/执行模型处理"],
+          ["Codex", "UserPromptSubmit", "UserPromptSubmit", "每次用户发言；prompt", "路由结果、规则与待决策上下文", "同上"],
+          ["Codex", "PreToolUse", "PreToolUse", "Bash / apply_patch / write / edit / MultiEdit / create_goal 等写类工具", "permissionDecision allow 或 deny + 原因", "已信任 Hook 执行；最终安全仍由后续 Gate 封口"],
+          ["Codex", "PostToolUse", "PostToolUse", "所有工具执行后；tool_input / tool_response", "结果门、规则、scope 证据与审计记录", "best-effort 派生日志不反噬主流程"],
+          ["Codex", "PostCompact", "PostCompact", "manual 或 auto 压缩后", "恢复报告、记忆摘要和 Agent 上下文", "同上"],
+          ["Codex", "Stop / SubagentStop", "Stop", "主 Agent 或子 Agent 将结束", "continuation.required 与下一命令；提示未完成任务继续", "不能替代宿主自身 loop 限制"],
+          ["Cursor", "sessionStart", "SessionStart", "会话开始；conversation_id、workspace_roots", "additional_context", "非写事件失败退出；不伪造成功"],
+          ["Cursor", "beforeSubmitPrompt", "UserPromptSubmit", "用户发言前；prompt", "只路由和留痕；Cursor 此事件无 additional_context 通道", "保持静默"],
+          ["Cursor", "preToolUse", "PreToolUse", "Write / Delete / Edit / StrReplace / MultiEdit / Shell", "permission allow 或 deny + user_message / agent_message", "failClosed:true；bridge 超时或未知决定都阻断"],
+          ["Cursor", "beforeShellExecution", "PreToolUse", "集成终端命令；command", "permission allow 或 deny", "failClosed:true；Shell 归一化为 Bash"],
+          ["Cursor", "postToolUse / postToolUseFailure", "PostToolUse", "任意工具成功或失败后", "additional_context（若有）+ 审计", "失败事件在 core 中统一按 PostToolUse 处理"],
+          ["Cursor", "stop / subagentStop", "Stop", "Agent 将结束", "followup_message（仅 continuation.required=true）", "受 Cursor loop limit 约束"],
+          ["Kimi", "SessionStart", "SessionStart", "startup 或 resume", "stdout 注入上下文", "Hook 崩溃或宿主超时 fail-open"],
+          ["Kimi", "UserPromptSubmit", "UserPromptSubmit", "每次用户发言；prompt", "stdout 注入路由与规则上下文", "fail-open"],
+          ["Kimi", "PreToolUse", "PreToolUse", "Bash / Write / Edit", "健康 Hook 可返回 permissionDecision deny + 原因", "Hook 崩溃或超时 fail-open"],
+          ["Kimi", "PostToolUse / PostToolUseFailure", "PostToolUse", "工具成功或失败后", "stdout 上下文、结果门和审计", "fail-open"],
+          ["Kimi", "PostCompact", "PostCompact", "manual 或 auto 压缩后", "恢复上下文与记忆摘要", "fail-open"],
+          ["Kimi", "Stop / SubagentStop", "Stop", "Agent 将结束", "未完成时 permissionDecision deny，请求继续", "fail-open；最终完成仍走 verifier 等 Gate"]
+        ],
+        fileRoles: {
+          "src/interface/adapters.mjs": "安装 / 卸载 / 恢复总编排；target、mode、备份、报告、Slash Commands 与 Codex Hook owner。",
+          "src/interface/kimi-adapter.mjs": "Kimi plugin manifest、Hook bridge 和安装说明的纯渲染 owner。",
+          "src/interface/cursor-adapter.mjs": "Cursor hooks.json、事件映射、fail-closed bridge 与安装说明 owner。",
+          "src/interface/hook-bridge-core.mjs": "Cursor / Kimi 共用的项目发现、CLI 子进程调用、超时和结果解析模板。"
+        }
+      },
+      "human-views": { inputs:[["可信运行态", ".wildarrange/ledger.jsonl、decisions.jsonl、annotations.jsonl", "已校验 ledger、决策流水与人工标注。", "只使用可审计事实生成视图。"],["任务与报告", ".wildarrange/team/tasks.json、reports/、锁状态", "任务状态、路由复盘、门武装、文件大小与锁 owner。", "生成任务和运维面板。"]], process:["读取并降级处理坏行，不让单条坏数据摧毁整个视图。","构建 Dashboard ViewModel、决策三行投影、统计与统一时间线。","Dashboard 只绑定本地地址；受控标注操作单独写 annotation log。"], outputs:[["浏览器面板", "HTTP HTML / JSON（运行时返回，非持久文件）", "Dashboard、决策面板、运维面板和时间线。", "让人查看当前状态并定位下一动作。"],["终端投影", "wildarrange decisions / timeline 输出（非文件）", "人类可读三行决策、统计与倒序时间线。", "无需打开原始 JSONL 即可审计。"]] },
+      "interface-governance": { inputs:[["命令事实", "src/interface/cli-help.mjs 的 COMMAND_REGISTRY", "命令层级、参数、示例与说明。", "保证 --help 与 docs commands 同源。"],["项目根与初始化选项", "rootDir + project-docs / architecture 等选项", "目标目录、需补建文档类型、已有文件状态。", "只补缺，不覆盖用户文档。"],["运行态健康信号", ".wildarrange 配置、门、adapter、ledger、state", "每个检查项独立读取。", "单项崩溃只标红本项。"]], process:["从注册表渲染 CLI help 与命令文档。","按模板检查治理文档，只对不存在的目标使用 wx 创建。","Doctor 分项执行检查并汇总下一步。"], outputs:[["帮助与命令文档", "stdout；可选 doc/generated/commands.md", "核心六命令和完整命令清单。", "用户看到的命令与真实 CLI 一致。"],["项目治理文档", "AGENTS.md / README / doc 文件（仅缺失时）", "初始化模板内容与 created / preserved 清单。", "建立治理入口同时保留已有内容。"],["Doctor 结果", "结构化返回值与终端输出（非固定文件）", "每项 pass / warn / fail 和 next_action。", "指导修复，不替用户改状态。"]] },
+      "mainline": { inputs:[["宿主语义计划草稿", ".wildarrange/plan-drafts/*.json", "宿主大模型把对话填写成任务、依赖、owner、允许修改范围、测试命令和完成标准，并标记 generated_by=host_semantic。", "把自然语言变成可检查的施工单，但此时还不能开工。"],["用户批准", "计划审批状态（运行时状态）", "用户是否明确接受目标、范围、测试、完成标准和每张工单的 task.owner。", "审批是开发入口门；未批准计划保持草稿。"],["全项目工单登记册", ".wildarrange/team/tasks.json + .wildarrange/plans/<planId>.json", "每张工单的状态、owner、失败次数、证据和前置任务。", "从中找出现在可以开发、且负责人合法的下一张工单。"],["任务分类结果", "路由函数返回的数据（不是文件）", "任务类别、风险、建议 Skill，以及为何这样判断。", "类别和 Skill 补充工单信息；真正执行负责人只认 task.owner。"]], process:["校验语义草稿必填项和 command-worker owner；用户未批准时保持等待，不登记成可执行计划。","批准后写入工单登记册，再选出下一张可开发工单，启动完整的“开发 → 检查 → 完成或返工”任务 Loop。","本次任务结束后继续取下一张；遇到范围变化、审核阻塞或需要用户决定时暂停整个计划。"], outputs:[["批准后的计划与工单登记册", ".wildarrange/team/tasks.json + .wildarrange/plans/<planId>.json", "待开发、开发中、验收中、已完成等真实状态、owner 和证据。", "这是事实记录；终端临时返回的一句话不能替代它。"],["本次应该继续还是暂停", "函数 / CLI 返回（不是文件）", "本次处理了哪张工单，以及继续下一张、返工、阻塞或请用户决定。", "宿主大模型调用 CLI 时会看到这个结果并转述；WildArrange 不会自己弹出一条通知。"],["整个计划的进度摘要", ".wildarrange 报告与历史记录", "完成多少、哪里失败、为何暂停和下次从哪里继续。", "供恢复会话和状态面板读取；线性开发路径本身不负责 Git commit / push。"]] },
+      "delivery": { inputs:[["这张工单怎样才算完成", "task 数据（运行时对象，不是单独文件）", "允许修改的路径、必须运行的测试、复核要求和逐条完成标准。", "给所有检查划定同一把尺子。"],["Worker 刚做完的实际成果", "当前工作区改动 + Worker 执行回执", "真实代码差异、改动文件，以及命令退出码和输出摘要。", "代码差异才是被检查的交付物；Worker 的“我完成了”只是一张回执。"]], process:["自己依次发起自动测试、修改范围检查、独立复核和逐条完成标准确认。","全部通过后写验收证明和完成检查点；任何一步失败就停止，不把任务标成完成。","把通过或失败的证据写入报告、可信历史和工单登记册，告诉上层应该完成、返工还是等待处理。"], outputs:[["完成或返工决定", "函数返回（不是文件）", "已完成、返工、复核阻塞或需要恢复，并附下一步。", "开发 Loop 据此继续下一张工单，或把原工单退回处理。"],["每一道检查的证据", ".wildarrange/reports、checkpoints、ledger、任务登记册", "测试、范围、复核、完成标准、验收证明和最终状态。", "证明任务是被独立检查后完成，不是 Worker 自己宣布完成。"]] },
+      "parallel-admission": { inputs:[["要开发什么", "task 数据（来自工单登记册）", "目标、任务类型、允许修改范围、测试和完成标准。", "这部分由计划和工单组织；不是 CLI 临时猜出来的。"],["怎样启动开发者", "parallel run 的 CLI 参数", "选择哪些工单、Agent、并发数、启动命令、超时和 worktree 隔离方式。", "这些参数只决定“谁、在哪、怎么运行”，不重新定义任务目标。"],["隔离区交回的候选代码", ".wildarrange/agent-runs/<runId>/<taskId>/result.json + patch/worktree", "代码补丁或文件、改动路径、子 Agent 输出摘要和隔离目录。", "这是尚未正式接纳的代码，不算任务完成。"]], process:["为每个子 Agent 准备独立目录或 Git worktree，让它开发并交回候选代码；某个 Agent 崩溃只影响自己的工单。","接纳时先把该候选代码临时应用到共享工作区，再调用同一条“任务完成门禁链”重新检查。","检查通过后，若项目已启用远端 Git 协调，就创建普通 commit 并 push，再写完成检查点；未启用时只完成本地接纳。检查失败则撤销临时改动，撤销失败时保留恢复材料。"], outputs:[["子 Agent 运行记录", ".wildarrange/agent-runs/<runId>.json + index.json", "每张工单由谁运行、是否结束、哪些还没完成。", "支持查看状态、只重跑失败项和中断后对账。"],["待接纳的候选代码包", ".wildarrange/agent-runs/<runId>/<taskId>/result.json + patch/worktree", "候选代码、改动清单、执行摘要和隔离位置。", "它只是“交卷”，必须再经过完成门禁链。"],["撤销与恢复材料", "<taskId>.rollback-plan.json / recovery 状态", "应用候选代码前的文件快照、反向补丁和失败原因。", "检查失败时恢复共享工作区；恢复不完整就明确要求人工处理。"],["正式接纳结果", "本地任务状态；启用远端协调时另有 Git commit / 普通 push", "已接纳，或需要重新校验 / 恢复。", "只有完成门禁链通过后，候选代码才成为正式成果。"]] },
+      "coordination": { inputs:[["设备身份", "device register 参数与本机 Git 信息", "deviceId、deviceName、remote、branch。", "建立可审计设备身份。"],["任务领取", "taskId、owner、远端集成 SHA", "预期 owner 与基线。", "保证同一任务只有一个写 owner。"],["Handoff 请求", "from/to device、task、已 push commit、理由", "交接双方和不可变提交。", "跨设备转移写权限。"]], process:["登记设备并读取远端协调状态。","通过普通 claim commit 维护 owner，校验远端 SHA 与本地包含关系。","prepare → push → accept；takeover 必须显式记录旧设备和理由。"], outputs:[["Owner claim", "远端协调分支 / 状态记录", "task、owner、device、base SHA。", "其他设备据此拒绝双写。"],["Handoff packet", ".wildarrange 协调状态 + 已 push commit 引用", "交接目标、树指纹、提交与接受状态。", "让接收设备从确定基线继续。"],["协调审计", "ledger 与 CLI status", "claim / handoff / takeover 事件。", "追溯谁在什么基线上拥有任务。"]] },
+      "task-governance": { inputs:[["用户工单", "task JSON 或 CLI title 参数", "subject、workType、priority、writable_paths、依赖、成功判据。", "创建 draft，再由人补齐到 ready。"],["变更发现", "scope denied paths / ChangeRequest / Review Blocker", "越界路径、原因、建议处置。", "把执行中的范围变化显式交给人。"],["运行证据", "任务总账 + ledger + agent-runs", "状态、失败、待批准计划和待验收子 Agent。", "生成 attention report。"]], process:["维护单文件全项目工单总账和 active Plan 投影。","记录 claim、criterion evidence、消息与 blocker。","汇总需要用户决策的事项，不自动扩大范围。"], outputs:[["任务总账", ".wildarrange/team/tasks.json + .wildarrange/plans/<planId>.json", "draft / ready / status / evidence / claims。", "所有工作项的持久事实源。"],["变更治理记录", ".wildarrange ChangeRequest / review blocker 状态 + ledger", "接受、拒绝或待决策。", "范围改变必须可见可追溯。"],["状态视图", "status / attentionReport 返回值", "待批准、失败、越界、待验收事项。", "要求宿主主动向用户提问。"]] },
+      "routing": { inputs:[["用户请求", "text + stage + sessionId（非文件）", "原始请求文本、当前阶段和会话。", "确定本次请求属于什么工作类别。"],["确定性路由表", "Prompt Pack routes.json + .wildarrange/routing/routes-overrides.json", "signals、route、risk、agents、skills。", "优先产生可复现判断。"],["档案结论包", ".wildarrange/memory/index.json、events.jsonl、stage-summaries", "清洗后的进展、风险、偏好和产物引用。", "给 Archivist 第二意见，不摄入 raw diff。"],["可选 LLM 配置", "OpenAI-compatible provider config", "base URL、model、apiKeyEnv 等。", "仅用于可选建议或可疑判断。"]], process:["按静态信号匹配 route 并保存 evidence。","Archivist 只读清洗结论包，生成建议；无 key 时 deterministic fallback。","可疑判断异步复盘，不进入完成链，也不能直接覆盖路由表。"], outputs:[["Route decision", "函数返回 + decision log", "category、risk、route、evidence、agent / skill 建议。", "主线和 Hook 用它选择后续处理。"],["路由建议", ".wildarrange/routing/suggestions/<id>.json", "建议 route、证据、状态和人工 resolve 结果。", "必须人工接受后才进入 override。"],["档案索引", ".wildarrange/memory/index.json / last-archivist-result.json", "关键词、产物、偏好和最新结论。", "跨会话辅助，不替代代码事实。"],["可疑报告", ".wildarrange/reports/suspicion.json + suspicion.md", "decisionId 锚定的可疑项与 fallback 状态。", "供人审查，不阻断主线。"]] },
+      "injection-hooks": { inputs:[["Hook payload", "宿主 JSON（stdin / --from）", "event、cwd、session、prompt、tool、tool_input、tool_response。", "驱动不同生命周期处理。"],["任务与 Agent", ".wildarrange/team/tasks.json + agent name", "当前任务、task.owner、writable_paths、角色和 stage。", "决定范围门、执行身份和是否允许写入。"],["Skill 清单", "Prompt Pack manifest + .agents/skills/*/SKILL.md", "登记路径、realpath、hash、字符数、适用 stage。", "只加载可信、已登记内容。"],["注入配置", "wildarrange.config.json / .wildarrange/config.json", "injectionPoints、预算、tools、markdown、skills、rules。", "限制注入内容和长度。"]], process:["把宿主事件归一化到 6 类核心事件点；UserPromptSubmit 需要计划时，生成宿主可执行的 plan.json 填写要求。","按 stage 匹配 Skill、扫描规则并构建预算化上下文；语义计划必须写 generated_by=host_semantic、明确 task.owner 并等待用户批准。","PreToolUse 同时执行 command safety、活动计划审批和 writable_paths 范围判断；PostToolUse 执行结果门。"], outputs:[["Hook 返回", "函数 / stdout（非文件）", "context Markdown、计划草稿填写要求，或 permissionDecision allow / deny；Stop 还含 continuation。", "由 adapter 翻译回宿主协议；宿主大模型按要求写草稿，不是 WildArrange 自己调用模型。"],["计划草稿", ".wildarrange/plan-drafts/*.json", "host_semantic 来源、任务、owner、范围、测试、完成标准和待批准状态。", "先把对话固化成可审查文件；批准前 Shell 和业务写入默认拒绝。"],["Hook 证据", ".wildarrange/sessions/hooks/<session>-<event>.json", "event、pointName、taskId、targetPaths、decision、output。", "每次 Hook 的可追溯快照。"],["Decision 流水", ".wildarrange/decisions.jsonl + ledger.jsonl", "gate、decision、code、reason、evidencePath。", "供 decisions、timeline 和异步审查。"],["注入上下文", "运行时 Markdown（通常不单独持久化）", "Agent prompt、规则、Skill、待人决策与恢复信息。", "让宿主 AI 在当前回合获得治理上下文。"]] },
+      "agent-context": { inputs:[["身份与任务", "agent / task / plan 参数", "长期 Agent 身份、角色、任务与计划。", "确定谁以什么职责工作。"],["注入点", "injectionPoints config + Skill / rule 内容", "before_plan / before_execute / resume 等挂载和预算。", "只装载当前阶段需要的材料。"],["运行快照", ".wildarrange/snapshots/latest.json + sessions/lineage.json", "上次上下文、当前 session 与未完成任务。", "支持中断后恢复。"]], process:["归一化 Agent 身份并加载预算化身份 Prompt。","合并任务、规则、Skill 与注入点，截断超预算内容并记录元数据。","生成 resume report 与 continuation directive。"], outputs:[["Agent 上下文", ".wildarrange/context-agents/<suffix>.json + .md", "agent、role、task、prompt、挂载内容与字符预算。", "给宿主或 spawn 命令使用。"],["会话谱系", ".wildarrange/sessions/lineage.json", "currentSessionId、source 与历史。", "跨会话识别同一工作链。"],["续跑指令", ".wildarrange/sessions/continuation.json + .md", "shouldContinue、reason、taskId、nextCommand。", "Stop Hook 据此决定是否要求继续。"]] },
+      "capability-gateway": { inputs:[["能力名", "invokeCapability(name, ctx)（非文件）", "静态注册表允许的 capability key。", "选择真实原子能力 owner。"],["调用上下文", "ctx 对象（非文件）", "rootDir、task、config、evidence 等能力所需参数。", "把上层编排和具体实现解耦。"]], process:["在静态注册表查找能力，未知能力直接失败。","计时调用能力并捕获异常。","统一包装 evidence、sideEffect、duration_ms、cost 和 error。"], outputs:[["统一信封", "函数返回（非文件）", "capability、status、evidence、sideEffect、duration_ms、cost、error。", "Orchestration / AI 用同一种方式判断所有能力。"]] },
+      "execution-gates": { inputs:[["任务合同", "task 对象", "worker_command、verify_commands、writable_paths、review / standards 规则。", "规定执行与检查范围。"],["工作区事实", "项目文件 + Git diff / changed paths", "实际变更、realpath 和命令输出。", "Gate 不相信 Worker 自述。"]], process:["Worker 在允许目录执行命令并返回 DoneClaim。","Verifier 独立运行 verify_commands；Scope Guard 校验 diff、路径与 realpath。","BaiZe Review Gate 独立检查风险和质量，任何失败都不生成完成状态。"], outputs:[["Worker result", "Gateway evidence（非固定文件）", "exitCode、stdout/stderr 摘要、changed paths、claim。", "只是候选执行结果。"],["Gate evidence", "Gateway evidence + ledger / task evidence", "verify pass/fail、scope deniedPaths、review findings。", "Delivery Pipeline 据此决定返工或继续。"]] },
+      "proof-checkpoint": { inputs:[["任务与计划", "planId + task 对象", "successCriteria、当前状态、尝试次数。", "绑定证明所属目标。"],["全部 Gate 证据", "verify / scope / review / criteria 结果", "命令证据、范围结论、复核发现与每条判据状态。", "证明完成链没有缺环。"],["安全配置", "wildarrange config", "required quality gates 与 proof 规则。", "防止用弱配置制造 PASS。"]], process:["构造 proof，逐项确认所有必需证据齐全并通过。","先写 JSON 与人类可读 Markdown acceptance proof。","只有 proof pass 才写 checkpoint，并由主线把任务置 completed。"], outputs:[["Acceptance proof", ".wildarrange/reports/acceptance/<planId>/<taskId>.json + .md", "任务、Gate、criteria、pass 与证据引用。", "人和机器都能核对为何允许完成。"],["Checkpoint", ".wildarrange/checkpoints/<planId>/<taskId>.json", "最终 verify / scope / review 摘要和完成时间。", "任务完成的封口记录。"],["审计事件", ".wildarrange/ledger.jsonl", "proof_written / checkpoint 等 hash 链事件。", "防止静默改写历史。"]] },
+      "quality-governance": { inputs:[["变更范围", "changed paths + task", "本次修改文件和任务质量要求。", "只检查与任务相关的代码。"],["质量策略", "config / project rules", "LSP、AST、hashline、注释与仓库治理规则。", "决定运行哪些门。"]], process:["运行 LSP / typecheck、AST 结构、hashline anchor 与真实注释检查。","把发现统一成 severity / path / line / requiredAction。","LuWu 汇总仓库布局、README、Prompt 清单和命名治理。"], outputs:[["Finding bundle", "Gateway evidence / 函数返回（非固定文件）", "每项 gate 状态和结构化 findings。", "Review 与 Delivery Pipeline 使用。"],["Governance audit", "CLI JSON / 人类可读报告", "仓库级问题、证据和整改方向。", "提供治理复盘，不冒充真实运行验收。"]] },
+      "runtime-state": { inputs:[["项目根", "rootDir（非文件）", "WildArrange 运行态所属业务项目。", "所有状态统一落入该项目 .wildarrange/。"],["配置", "wildarrange.config.json 或 .wildarrange/config.json", "agents、providers、injectionPoints、qualityGates、reporting 等。", "归一化运行时行为。"],["任务总账", ".wildarrange/team/tasks.json + plans/*.json", "任务、状态、证据、active plan。", "提供可恢复任务事实源。"]], process:["创建固定 .wildarrange 目录，提供时间、ID、hash 和原子 JSON 写。","合并默认与项目配置并维护严格安全底线。","用全局 task lock 保护任务读改写，生成 deterministic snapshot。"], outputs:[["运行态目录", ".wildarrange/ 下固定子目录", "plans、team、reports、checkpoints、sessions、agent-runs、backups 等。", "所有宿主共享同一产品中立文件协议。"],["原子状态", ".wildarrange/config.json、team/tasks.json、snapshots/*.json", "归一化配置、任务 ledger 和恢复快照。", "进程崩溃时避免半写 JSON。"],["锁结果", ".wildarrange/team/tasks.lock 等锁文件 + 函数返回", "owner、pid、mtime 和临界区结果。", "防止并发状态覆盖。"]] },
+      "audit-trust": { inputs:[["运行事件", "event / decision / annotation 对象", "任务、Gate、Hook 与人类标注。", "形成可审计事实。"],["关键状态", ".wildarrange 配置、任务、ledger、proof、checkpoint", "需要 hash / 备份 / 完整性检查的文件。", "检测篡改或恢复需要。"],["Gate 结果", "verify / review / hook result / criteria", "pass、finding、requiredAction 和证据。", "统一完成判据。"]], process:["ledger 用前一条 hash 串联，每次 append 先持锁。","decision / annotation 坏行在读侧跳过；标注只影响统计，不改 gate。","备份关键状态并验证 config baseline、proof、checkpoint 和 gate arming。"], outputs:[["可信日志", ".wildarrange/ledger.jsonl + ledger-tail.json", "事件、prevHash、hash 与尾缓存。", "验证历史是否被插改。"],["决策与标注", ".wildarrange/decisions.jsonl + annotations.jsonl", "结构化 decision、code、证据路径和人工分类。", "支持规则质量复盘。"],["备份 / 完整性报告", ".wildarrange/backups/ 与 state verify 返回", "关键文件副本、hash、恢复清单和 next_action。", "风险操作前可恢复。"],["统一错误与判据", "函数返回（非文件）", "{code,module,message,next_action} 与 criteria 状态。", "CLI、Gateway、Pipeline 统一解释失败。"]] },
+      "process-safety": { inputs:[["命令", "command / file / args / cwd", "Worker、Verifier、Review 要执行的进程参数。", "在明确目录和超时内启动。"],["路径与模式", "目标路径、rootDir、glob / 精确 / 目录规则", "候选文件和允许范围。", "先归一化、realpath、再做边界判断。"],["锁请求", "lockPath、owner、timeout", "锁文件路径、持有者和等待时间。", "串行保护关键写操作。"]], process:["命令安全正则先阻断明显破坏性操作。","command-runner 捕获 spawn error、超时并截断输出。","path-match 验证根边界；file-lock 检查 pid / mtime 并恢复 stale lock。"], outputs:[["命令结果", "函数返回（非文件）", "exitCode、stdout、stderr、timedOut、spawn error。", "上层不因子进程 error 事件崩溃。"],["安全 / 路径判断", "函数返回（非文件）", "allowed、matchedPattern、reason、normalized path。", "Scope 与 Worker 决定是否执行。"],["锁内结果", "lock 文件 + 回调返回", "owner / pid 诊断和临界区结果。", "避免 ledger、tasks、admission 并发互锁。"]] },
+      "git-isolation": { inputs:[["Git 基线", "remote、branch、SHA、working tree", "远端集成分支、候选提交与当前改动。", "判断本地是否包含绑定基线。"],["任务归属", "task / run / handoff manifest", "允许变更路径和 owner。", "拒绝无归属改动。"],["Patch / worktree 请求", "diff、isolation mode、command", "子 Agent 候选变更和隔离方式。", "避免直接污染主工作区。"]], process:["读取 status / diff / changed paths，计算候选树指纹。","创建 worktree 或 patch，普通 commit / fetch / push；禁止 force。","Admission 前后重复校验 owner、base SHA 和远端历史。"], outputs:[["Diff 事实", "changed paths / manifest（函数返回）", "tracked / untracked / patch 内容与归属。", "Scope 和 Admission 使用。"],["隔离成果", "worktree 目录 + patch + result.json", "子 Agent 修改和运行证据。", "主线可验证后再合入。"],["协调 Git 结果", "commit SHA / push result / integration guard", "父 SHA、树指纹和远端状态。", "证明合入基于正确版本。"]] },
+      "analysis-reports": { inputs:[["源码与改动", "src/bin/test 文件 + changed paths", "import 语句、目录、受影响文件。", "计算依赖和测试影响面。"],["项目规范", "AGENTS.md、README、Prompt Pack 清单、config", "目录边界、命名、命令和治理规则。", "给检查器真实政策上下文。"],["Gate 证据", "verify / scope / review finding bundle", "失败命令、路径和 requiredAction。", "生成可读失败与复核报告。"]], process:["词法扫描 import 并构建 repo graph，分类五区。","从 changed paths 反向计算 impact 和应跑 tests。","扫描规则与仓库布局，归一化 findings 并渲染 failure / review / wisdom。"], outputs:[["依赖图与测试选择", "函数返回（非文件）", "edges、affected files、zone tests、repo tests。", "wildarrange impact / test 与边界门使用。"],["规则上下文", "扫描报告 / 注入 Markdown", "命中的 AGENTS 规则、路径和内容预算。", "让 Agent 在正确局部规范下工作。"],["任务报告", ".wildarrange/reports/<kind>/<planId>/<taskId>.json|md", "failure、review、wisdom 与 findings。", "跨会话理解失败和整改。"]] },
+      "ai-support": { inputs:[["Provider 配置", "wildarrange config modelProviders / apiKeyEnv", "OpenAI-compatible endpoint、model、环境变量名和开关。", "可选启用 LLM review。"],["Prompt Pack", "packs/.../manifest.json 或 .wildarrange/prompt-pack.json", "agents、skills、routes、tools 文件路径与 hash。", "安装后只读取登记且完整性通过的内容。"],["任务与历史", "task / ledger / reports / memory index", "当前进展、决策、产物、风险和开放问题。", "生成有限跨会话摘要。"]], process:["无 key 或默认关闭时返回明确 skipped / fallback，不阻断主线。","Prompt Pack 物化到固定根，再校验 install root、realpath、hash 与预算。","从结构化状态生成 digest，不复制整段原始输出。"], outputs:[["LLM review", "函数返回 / 报告（可选）", "status、findings、usage 或 fallback 原因。", "为人工复核提供第二意见。"],["校验后 Prompt entry", ".wildarrange/prompt-pack.json + 安装根文件", "可信 path、hash、内容和截断元数据。", "AI 注入层安全加载。"],["Memory digest", ".wildarrange/memory/ 下 digest / index", "进展、决策、产物、风险、开放问题。", "SessionStart / PostCompact 恢复使用。"]] },
+      "agent-runtime": { inputs:[["Agent 名称", "name / alias（非文件）", "Jiuwei、DiJiang、ZhuRong、BaiZe、LuWu 或别名。", "归一化到固定白名单。"],["Spawn 请求", "adapter、task、context、command options", "宿主类型、任务包、上下文和隔离目录。", "渲染命令型子 Agent 启动方式。"]], process:["校验是否长期 Agent、是否具备 command worker 资格。","选择 Codex / Cursor / 自定义 spawn 模板。","把上下文安全传给命令，不让只读身份进入可写 worker。"], outputs:[["身份判断", "函数返回（非文件）", "normalized name、display name、isLongLived、worker eligibility。", "所有上层共享同一身份规则。"],["Spawn command", "命令描述对象 / 字符串（非文件）", "command、args、cwd、context。", "parallel-runtime 实际启动子 Agent。"]] },
+      "route-primitives": { inputs:[["基础路由表", "Prompt Pack routes.json", "按类别登记的 signals、route、risk、agents、skills。", "确定性分类的主规则。"],["人工覆盖", ".wildarrange/routing/routes-overrides.json", "经过人工接受的附加或修正规则。", "在不改发布包的情况下校正项目路由。"],["请求文本", "text / stage（非文件）", "用户发言与当前阶段。", "与信号表做规范化匹配。"]], process:["加载并校验 routes config 与 overrides。","按信号优先级匹配并计算风险。","保留命中规则、信号和来源作为 evidence；不调用 LLM。"], outputs:[["确定性决定", "函数返回（非文件）", "route、category、risk、confidence、matchedSignals、evidence。", "ai/routing.mjs 的第一判断和审计基线。"]] }
+    };
+
+    const flowData = {
+      init: {
+        intro: "一次性目标：把项目从未接入变成可运行、可诊断、可由宿主发现的 WildArrange 环境。初始化完成后退出，不常驻。",
+        steps: [
+          ["CLI init", "解析 --sample / --project-docs / --architecture", "bin/wildarrange.mjs"],
+          ["创建运行目录", "创建 .wildarrange、安装 Agent 工作手册包、初始化状态", "infra/runtime-bootstrap.mjs"],
+          ["Project docs", "按需非覆盖式补建治理文档", "interface/project-init.mjs"],
+          ["Adapter install", "显式安装 Codex / Cursor / Kimi 项目适配", "interface/adapters.mjs"],
+          ["Doctor", "逐项确认门武装、adapter 与状态完整性", "interface/doctor.mjs"]
+        ]
+      },
+      plan: {
+        intro: "整个开发计划的物理 Loop。宿主大模型按 Hook 注入的格式要求把对话整理成 plan.json 草稿；用户批准后，WildArrange 才导入并逐张推进。",
+        steps: [
+          ["语义生成计划草稿", "宿主大模型把对话填写成 plan.json，并为每张可执行工单明确 task.owner", "ai/hooks.mjs + host model"],
+          ["用户批准计划", "检查任务、范围、测试、完成标准和 owner；没有批准不能进入开发", "orchestration/plan-state.mjs"],
+          ["登记全部工单", "写入全项目工单登记册，并保留各任务分类和 Skill", "orchestration/task-board.mjs"],
+          ["运行下一张工单", "启动一轮开发任务 Loop，得到完成、返工或待决策结果", "orchestration/linear-runtime.mjs"],
+          ["继续或暂停", "完成后取下一张；需要用户决定时停止并保留恢复位置", "orchestration/workflow.mjs"]
+        ]
+      },
+      task: {
+        intro: "直接在当前工作区开发一张 BUG、需求或维护工单。这才是单任务开发 Loop；它目前不会默认创建独立 worktree，也不会自动 commit / push。",
+        steps: [
+          ["领取工单", "读取目标、允许修改范围、测试和完成标准", "orchestration/task-board.mjs"],
+          ["Worker 开发", "在当前工作区内完成代码改动并交回执行回执", "capabilities/worker.mjs"],
+          ["完成门禁链", "依次跑测试、范围检查、独立复核和逐条完成标准", "orchestration/delivery-pipeline.mjs"],
+          ["完成或返工", "通过则写验收证明和检查点；失败则退回原工单", "capabilities/checkpoint.mjs"],
+          ["回到计划", "继续下一张工单，或暂停等待用户处理", "orchestration/workflow.mjs"]
+        ]
+      },
+      isolated: {
+        intro: "用子 Agent 隔离开发一张或多张工单。候选代码先留在独立目录，只有临时应用到共享工作区并通过同一条完成门禁链后，才正式接纳。",
+        steps: [
+          ["选择工单和 Agent", "任务决定做什么；CLI 参数决定由谁、并发多少、如何隔离", "orchestration/parallel-runtime.mjs"],
+          ["独立 worktree 开发", "每个子 Agent 在自己的代码副本中修改", "infra/git-worktree.mjs"],
+          ["交回候选代码", "收集 patch、文件、改动清单和执行摘要；此时还没完成", "orchestration/parallel-runtime.mjs"],
+          ["临时应用并检查", "把候选代码临时放入共享工作区，运行任务完成门禁链", "orchestration/admission.mjs"],
+          ["正式接纳或撤销", "通过后更新任务；启用远端协调时另做普通 commit / push，失败则恢复", "orchestration/integration.mjs"]
+        ]
+      },
+      session: {
+        intro: "目标策略，尚未实现：当前 Plan 进行中时，新的独立需求或 Bug 应进入新的宿主任务会话和独立计划草稿，不能改写当前 activePlanId。",
+        steps: [
+          ["收到新发言", "先判断是当前工单的补充，还是一件独立工作", "UserPromptSubmit"],
+          ["同一件事", "留在当前会话；范围改变时登记 ChangeRequest", "current task loop"],
+          ["另一件事", "冻结当前 Plan 上下文，为新工作建立独立草稿", "target session isolation"],
+          ["宿主能新建任务", "创建新任务会话并绑定新草稿；当前会话不变", "host thread capability"],
+          ["宿主不能自动新建", "给用户可复制的交接卡，由用户打开新会话继续", "fallback handoff"],
+          ["两条 Loop 独立", "各自维护 owner、状态、证据和结束条件", "separate plan ids"]
+        ]
+      },
+      hook: {
+        intro: "这是每次宿主事件触发的有限事件链，不是业务 Loop，也没有后台 daemon。它可以注入、路由、记录或在特定 PreToolUse 条件下阻断。",
+        steps: [
+          ["Host event", "Codex / Cursor / Kimi 发出生命周期事件", "project adapter config"],
+          ["Hook bridge", "发现项目、启动 CLI、翻译宿主协议", "interface/hook-bridge-core.mjs"],
+          ["Hook run", "统一输入进入 hooks 与 routing", "ai/hooks.mjs"],
+          ["Decision", "确定性路由、注入、allow/block/continue", "ai/routing.mjs"],
+          ["Audit", "best-effort 写 decision，不反噬主流程", "infra/decision-log.mjs"]
+        ]
+      }
+    };
+
+    const moduleBoard = document.getElementById("module-board");
+    const emptyState = document.getElementById("empty-state");
+    const searchInput = document.getElementById("module-search");
+    let activeFilter = "all";
+    let activeModuleId = null;
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[char]);
+    }
+
+    function renderModules() {
+      const query = searchInput.value.trim().toLowerCase();
+      let visibleCount = 0;
+      moduleBoard.innerHTML = Object.entries(zoneMeta).map(([zone, meta], zoneIndex) => {
+        const items = modules.filter((item) => {
+          if (item.zone !== zone) return false;
+          if (activeFilter !== "all" && item.zone !== activeFilter) return false;
+          const haystack = [item.title, item.role, item.plain, item.input, item.output, item.forbid, ...item.files, JSON.stringify(moduleContracts[item.id] || {})].join(" ").toLowerCase();
+          return !query || haystack.includes(query);
+        });
+        visibleCount += items.length;
+        if (!items.length) return "";
+        const cards = items.map((item, index) => `
+          <button class="module-card ${item.id === activeModuleId ? "active" : ""}" type="button" data-module="${item.id}" style="animation-delay:${Math.min(index,3) * 60}ms">
+            <span class="module-kind">${escapeHtml(zone)} / ${item.files.length} files</span>
+            <span class="module-title">${escapeHtml(item.title)}</span>
+            <span class="module-role">${escapeHtml(item.role)}</span>
+            <span class="module-plain">${escapeHtml(item.plain)}</span>
+            <span class="module-files">${item.files.length} 个真实文件 · 点击看详细输入输出</span>
+          </button>`).join("");
+        return `<article class="zone-column zone-${zone}">
+          <div class="zone-head"><div><span class="zone-sequence">ZONE ${String(zoneIndex + 1).padStart(2, "0")}</span><h3>${escapeHtml(meta.title)}</h3><p>${escapeHtml(meta.subtitle)}</p></div><span class="zone-rule">${escapeHtml(meta.rule)}</span></div>
+          <div class="module-list">${cards}</div>
+        </article>`;
+      }).join("");
+      emptyState.style.display = visibleCount ? "none" : "block";
+      document.querySelectorAll(".module-card").forEach((card) => card.addEventListener("click", () => openDrawer(card.dataset.module)));
+    }
+
+    const drawer = document.getElementById("detail-drawer");
+    function renderContractItems(items) {
+      return (items || []).map(([label, carrier, contains, purpose]) => `<article class="contract-item">
+        <b>${escapeHtml(label)}</b>
+        <code class="contract-carrier">${escapeHtml(carrier)}</code>
+        <span class="contract-contains">${escapeHtml(contains)}</span>
+        <span class="contract-purpose">${escapeHtml(purpose)}</span>
+      </article>`).join("");
+    }
+
+    function fallbackContract(item) {
+      return {
+        inputs: [["模块输入摘要", "运行时对象 / 状态文件", item.input, "为该职责簇提供执行条件。"]],
+        process: [item.role],
+        outputs: [["模块输出摘要", "函数返回 / .wildarrange 运行态", item.output, "交给下游模块或写入运行态。"]]
+      };
+    }
+
+    function openDrawer(id) {
+      const item = modules.find((entry) => entry.id === id);
+      if (!item) return;
+      activeModuleId = id;
+      const meta = zoneMeta[item.zone];
+      const contract = moduleContracts[item.id] || fallbackContract(item);
+      drawer.style.setProperty("--active-zone", meta.color);
+      document.getElementById("drawer-kicker").textContent = `${meta.title} / ${item.files.length} 个真实文件`;
+      document.getElementById("drawer-title").textContent = item.title;
+      document.getElementById("drawer-role").textContent = item.role;
+      document.getElementById("drawer-plain").textContent = item.plain;
+      document.getElementById("drawer-forbid").textContent = item.forbid;
+      document.getElementById("drawer-inputs").innerHTML = renderContractItems(contract.inputs);
+      document.getElementById("drawer-process").innerHTML = (contract.process || []).map((step) => `<li>${escapeHtml(step)}</li>`).join("");
+      document.getElementById("drawer-outputs").innerHTML = renderContractItems(contract.outputs);
+      const matrixSection = document.getElementById("matrix-section");
+      matrixSection.hidden = !contract.matrix?.length;
+      document.getElementById("drawer-matrix").innerHTML = (contract.matrix || []).map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("");
+      document.getElementById("drawer-files").innerHTML = item.files.map((file) => `<article class="file-role"><code>${escapeHtml(file)}</code><span>${escapeHtml(contract.fileRoles?.[file] || `负责“${item.title}”的一部分；与这张卡里的其他文件一起完成整件事。`)}</span></article>`).join("");
+      drawer.scrollTop = 0;
+      drawer.querySelector(".drawer-inner").scrollTop = 0;
+      drawer.classList.add("open");
+      drawer.setAttribute("aria-hidden", "false");
+      document.getElementById("drawer-close").focus({ preventScroll: true });
+      renderModules();
+    }
+
+    function closeDrawer() {
+      drawer.classList.remove("open");
+      drawer.setAttribute("aria-hidden", "true");
+      activeModuleId = null;
+      renderModules();
+    }
+    document.getElementById("drawer-close").addEventListener("click", closeDrawer);
+    document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeDrawer(); });
+
+    document.querySelectorAll(".filter-btn[data-filter]").forEach((button) => {
+      button.addEventListener("click", () => {
+        activeFilter = button.dataset.filter;
+        document.querySelectorAll(".filter-btn[data-filter]").forEach((item) => item.setAttribute("aria-pressed", String(item === button)));
+        renderModules();
+      });
+    });
+    searchInput.addEventListener("input", renderModules);
+
+    function renderFlows() {
+      const host = document.getElementById("flow-panels");
+      host.innerHTML = Object.entries(flowData).map(([id, flow], flowIndex) => {
+        const steps = flow.steps.map((step, index) => `${index ? '<div class="flow-link">→</div>' : ''}<div class="flow-step"><b>${escapeHtml(step[0])}</b><small>${escapeHtml(step[1])}</small><code>${escapeHtml(step[2])}</code></div>`).join("");
+        return `<article class="flow-panel ${flowIndex === 0 ? "active" : ""}" data-flow-panel="${id}"><p class="flow-intro">${escapeHtml(flow.intro)}</p><div class="flow-rail">${steps}</div></article>`;
+      }).join("");
+    }
+    renderFlows();
+    document.querySelectorAll(".flow-tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll(".flow-tab").forEach((item) => item.setAttribute("aria-selected", "false"));
+        document.querySelectorAll(".flow-panel").forEach((panel) => panel.classList.remove("active"));
+        tab.setAttribute("aria-selected", "true");
+        document.querySelector(`[data-flow-panel="${tab.dataset.flow}"]`).classList.add("active");
+      });
+    });
+
+    const tweakDefaults = { accent:"#66a7ff", font:15, density:"comfortable", light:false };
+    const tweakKey = "wildarrange-module-map-tweaks";
+    function loadTweaks() {
+      try { return { ...tweakDefaults, ...JSON.parse(localStorage.getItem(tweakKey) || "{}") }; }
+      catch { return { ...tweakDefaults }; }
+    }
+    function applyTweaks(next, persist = true) {
+      document.documentElement.style.setProperty("--accent", next.accent);
+      document.documentElement.style.setProperty("--base-fs", `${next.font}px`);
+      document.documentElement.style.setProperty("--density-pad", next.density === "compact" ? "12px" : next.density === "spacious" ? "24px" : "16px");
+      document.documentElement.setAttribute("data-theme", next.light ? "light" : "dark");
+      document.getElementById("tw-color").value = next.accent;
+      document.getElementById("tw-font").value = next.font;
+      document.getElementById("tw-font-value").textContent = next.font;
+      document.getElementById("tw-density").value = next.density;
+      document.getElementById("tw-light").checked = next.light;
+      if (persist) { try { localStorage.setItem(tweakKey, JSON.stringify(next)); } catch {} }
+    }
+    let tweaks = loadTweaks();
+    applyTweaks(tweaks, false);
+    const tweaksPanel = document.getElementById("tweaks-panel");
+    document.getElementById("tweaks-launcher").addEventListener("click", () => { tweaksPanel.classList.add("open"); tweaksPanel.setAttribute("aria-hidden", "false"); });
+    document.getElementById("tweaks-close").addEventListener("click", () => { tweaksPanel.classList.remove("open"); tweaksPanel.setAttribute("aria-hidden", "true"); });
+    document.getElementById("tw-color").addEventListener("input", (event) => { tweaks = { ...tweaks, accent:event.target.value }; applyTweaks(tweaks); });
+    document.getElementById("tw-font").addEventListener("input", (event) => { tweaks = { ...tweaks, font:Number(event.target.value) }; applyTweaks(tweaks); });
+    document.getElementById("tw-density").addEventListener("change", (event) => { tweaks = { ...tweaks, density:event.target.value }; applyTweaks(tweaks); });
+    document.getElementById("tw-light").addEventListener("change", (event) => { tweaks = { ...tweaks, light:event.target.checked }; applyTweaks(tweaks); });
+    document.getElementById("tw-reset").addEventListener("click", () => { tweaks = { ...tweakDefaults }; try { localStorage.removeItem(tweakKey); } catch {} applyTweaks(tweaks, false); });
+
+    const revealObserver = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => { if (entry.isIntersecting) { entry.target.classList.add("visible"); revealObserver.unobserve(entry.target); } });
+    }, { threshold: 0.08 });
+    document.querySelectorAll(".reveal").forEach((element) => revealObserver.observe(element));
+    renderModules();
+  </script>
+</body>
+</html>

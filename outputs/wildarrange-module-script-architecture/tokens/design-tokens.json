@@ -1,0 +1,27 @@
+{
+  "color.void": { "value": "#0b0f14", "usage_rule": "页面基底", "anti_pattern": "不用于可点击元素的 hover 区分" },
+  "color.surface": { "value": "#111821", "usage_rule": "模块与抽屉内容容器", "anti_pattern": "不叠加装饰渐变" },
+  "color.surface-2": { "value": "#17212d", "usage_rule": "Zone 标题栏与二级表面", "anti_pattern": "不替代 active zone 色" },
+  "color.line": { "value": "#2b3949", "usage_rule": "泳道、卡片、抽屉的中性边界", "anti_pattern": "选中态不使用整卡粗描边" },
+  "color.interface": { "value": "#66a7ff", "usage_rule": "Interface 区及其 active 状态", "anti_pattern": "不表示其它区或普通装饰" },
+  "color.orchestration": { "value": "#efb64c", "usage_rule": "Orchestration 区及其 active 状态", "anti_pattern": "不作为全局警告色滥用" },
+  "color.ai": { "value": "#b38cff", "usage_rule": "AI 区及其 active 状态", "anti_pattern": "不扩展为紫色渐变" },
+  "color.capabilities": { "value": "#57c785", "usage_rule": "Capabilities 区及通过状态", "anti_pattern": "不冒充真实验收结论" },
+  "color.infra": { "value": "#5fd1c8", "usage_rule": "Infra 区及其 active 状态", "anti_pattern": "不用于 AI 或 Interface" },
+  "radius.restrained": { "value": "4px", "usage_rule": "普通控件与容器最大半径", "anti_pattern": "不新增 8/10/12px 卡片壳" },
+  "size.control": { "value": "44px", "usage_rule": "按钮、筛选器与输入框的最小交互高度", "anti_pattern": "不得缩小点击区域" },
+  "size.zone-rail": { "value": "220px", "usage_rule": "桌面端 Zone 左侧语义栏上限", "anti_pattern": "移动端不得保留固定宽侧栏" },
+  "size.module-min": { "value": "260px", "usage_rule": "桌面职责卡片 auto-fit 下限", "anti_pattern": "不重新压成五个窄列" },
+  "size.drawer-max": { "value": "min(84vh, 920px)", "usage_rule": "详情抽屉最大可视高度，内部独立滚动", "anti_pattern": "不让长契约撑破视口或覆盖整页" },
+  "size.contract-process-min": { "value": "220px", "usage_rule": "桌面输入输出接线台的处理中栏下限", "anti_pattern": "移动端不得保留固定三栏" },
+  "size.contract-arrow": { "value": "32px", "usage_rule": "输入与处理、处理与输出之间的方向列", "anti_pattern": "不用于正文内容宽度" },
+  "size.event-matrix-min": { "value": "980px", "usage_rule": "宿主事件矩阵可读下限；窄屏由专用容器横向滚动", "anti_pattern": "不得使整个页面产生横向滚动" },
+  "spacing.lg": { "value": "16px", "usage_rule": "泳道间距与舒适密度", "anti_pattern": "不使用非 4px 网格值" },
+  "spacing.xl": { "value": "24px", "usage_rule": "Zone 标题桌面内边距", "anti_pattern": "移动端不强制使用" },
+  "state.module": {
+    "value": { "default": "neutral border", "hover": "zone border + translateY(-3px)", "active": "zone bar + dim fill", "active+hover": "keep active form" },
+    "usage_rule": "所有模块卡片统一四态",
+    "anti_pattern": "active+hover 不得退回普通 hover；不使用整卡 outline"
+  },
+  "motion.enter": { "value": "400ms ease-out", "usage_rule": "区块首次进入视口", "anti_pattern": "不用于点击即时反馈" }
+}

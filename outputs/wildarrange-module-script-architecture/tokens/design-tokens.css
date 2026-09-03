@@ -1,0 +1,34 @@
+:root {
+  --color-void: #0b0f14;
+  --color-surface: #111821;
+  --color-surface-2: #17212d;
+  --color-line: #2b3949;
+  --color-ink: #edf2f7;
+  --color-muted: #94a3b8;
+  --color-interface: #66a7ff;
+  --color-orchestration: #efb64c;
+  --color-ai: #b38cff;
+  --color-capabilities: #57c785;
+  --color-infra: #5fd1c8;
+  --font-label: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  --font-body: "Microsoft YaHei", "PingFang SC", sans-serif;
+  --space-unit: 4px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+  --h-control: 44px;
+  --zone-rail-width: 220px;
+  --module-min-width: 260px;
+  --module-min-height: 172px;
+  --drawer-max-height: min(84vh, 920px);
+  --contract-process-min: 220px;
+  --contract-arrow-width: 32px;
+  --matrix-min-width: 980px;
+  --density-pad: 16px;
+  --radius-restrained: 4px;
+  --radius-status-pill: 999px;
+  --position-flow: relative;
+  --tweak-storage-key: "wildarrange-module-map-tweaks";
+  --motion-fast: 150ms ease;
+  --motion-panel: 250ms ease-out;
+  --motion-enter: 400ms ease-out;
+}

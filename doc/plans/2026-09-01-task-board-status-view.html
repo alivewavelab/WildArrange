@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WildArrange 工单状态看板方案</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #687386;
+      --line: #dfe5ed;
+      --paper: #ffffff;
+      --bg: #f4f7fb;
+      --blue: #3778c2;
+      --cyan: #2998a6;
+      --amber: #d38b18;
+      --green: #3b8e5f;
+      --red: #c95050;
+      --purple: #7258b7;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      font: 15px/1.65 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+    main { max-width: 1480px; margin: 0 auto; padding: 36px 28px 64px; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin-bottom: 8px; font-size: 30px; }
+    h2 { margin-bottom: 16px; font-size: 21px; }
+    h3 { margin-bottom: 8px; font-size: 16px; }
+    code { padding: 2px 5px; border-radius: 5px; background: #eef2f7; }
+    .muted { color: var(--muted); }
+    .eyebrow { color: var(--blue); font-size: 12px; font-weight: 800; letter-spacing: .12em; }
+    .lead { max-width: 920px; color: #465269; font-size: 17px; }
+    .status {
+      display: inline-block;
+      margin: 12px 0 28px;
+      padding: 6px 10px;
+      border: 1px solid #f0ca82;
+      border-radius: 999px;
+      color: #825816;
+      background: #fff8e8;
+      font-weight: 700;
+    }
+    section {
+      margin-top: 24px;
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--paper);
+      box-shadow: 0 8px 28px rgba(34, 54, 84, .05);
+    }
+    .decision {
+      display: grid;
+      grid-template-columns: 6px 1fr;
+      gap: 18px;
+      overflow: hidden;
+    }
+    .decision::before { content: ""; background: var(--blue); border-radius: 99px; }
+    .decision strong { font-size: 18px; }
+    .flow {
+      display: grid;
+      grid-template-columns: 1fr 44px 1.3fr 44px 1fr;
+      gap: 10px;
+      align-items: stretch;
+    }
+    .flow-card { padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: #fbfcfe; }
+    .flow-card b { display: block; margin-bottom: 6px; color: var(--blue); }
+    .arrow { align-self: center; color: #8c97a9; text-align: center; font-size: 24px; }
+
+    .board-wrap { overflow-x: auto; padding-bottom: 8px; }
+    .board {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(210px, 1fr));
+      min-width: 1360px;
+      gap: 12px;
+    }
+    .column { min-height: 470px; padding: 10px; border-radius: 12px; background: #eef2f7; }
+    .column-head { display: flex; align-items: center; justify-content: space-between; padding: 5px 3px 12px; }
+    .column-head b { font-size: 15px; }
+    .count { min-width: 25px; padding: 1px 7px; border-radius: 999px; color: #536074; background: #fff; text-align: center; }
+    .stage-note { min-height: 39px; margin: -4px 3px 10px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .ticket {
+      position: relative;
+      margin-bottom: 10px;
+      padding: 13px 13px 12px 17px;
+      overflow: hidden;
+      border: 1px solid #dbe1e9;
+      border-radius: 9px;
+      background: #fff;
+      box-shadow: 0 2px 8px rgba(31, 47, 72, .06);
+    }
+    .ticket::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 5px; background: #7e8a9c; }
+    .ticket.p0::before { background: var(--red); }
+    .ticket.p1::before { background: var(--amber); }
+    .ticket.p2::before { background: var(--blue); }
+    .ticket h3 { margin: 7px 0 5px; line-height: 1.4; }
+    .ticket-meta { display: flex; flex-wrap: wrap; gap: 5px 8px; color: var(--muted); font-size: 12px; }
+    .tag { padding: 1px 6px; border-radius: 5px; color: #315d7b; background: #e9f4fa; font-weight: 700; }
+    .warning { color: #a34747; background: #fff0f0; }
+    .success { color: #2e7049; background: #eaf7ef; }
+    .progress { margin: 10px 0 6px; color: #5b6678; font-size: 12px; }
+    .progress span { color: var(--green); font-weight: 800; }
+    .ticket button {
+      width: 100%; margin-top: 11px; padding: 7px 9px;
+      border: 1px solid #cdd5df; border-radius: 7px;
+      color: #334056; background: #f8fafc; font-weight: 700;
+    }
+    .col-requirement { border-top: 4px solid var(--purple); }
+    .col-ready { border-top: 4px solid var(--blue); }
+    .col-dev { border-top: 4px solid var(--cyan); }
+    .col-verify { border-top: 4px solid var(--amber); }
+    .col-done { border-top: 4px solid var(--green); }
+    .col-alert { border-top: 4px solid var(--red); }
+
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 11px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: #566276; background: #f7f9fc; font-size: 13px; }
+    .map-user { font-weight: 800; white-space: nowrap; }
+    .plain-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .plain-card { padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: #fbfcfe; }
+    .plain-card strong { display: block; margin-bottom: 5px; color: var(--blue); }
+    .rule-list { margin: 0; padding-left: 20px; }
+    .rule-list li + li { margin-top: 8px; }
+    .priority { display: inline-flex; align-items: center; gap: 7px; margin-right: 14px; }
+    .priority i { width: 6px; height: 22px; border-radius: 99px; background: var(--amber); }
+    .priority.p0 i { background: var(--red); }
+    .priority.p2 i { background: var(--blue); }
+    .source { font-size: 13px; color: var(--muted); }
+
+    @media (max-width: 840px) {
+      main { padding: 24px 16px 48px; }
+      .flow { grid-template-columns: 1fr; }
+      .arrow { transform: rotate(90deg); }
+      .plain-grid { grid-template-columns: 1fr; }
+      section { padding: 18px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="eyebrow">ZONE 02 · 方案确认页</div>
+    <h1>工单总账改为“按进度看任务”的状态看板</h1>
+    <p class="lead">把现在从上往下翻的工单列表，改成从左到右推进的工作台。用户先看到每项工作在哪个阶段；技术状态、门禁证据和历史记录点开卡片后再看。</p>
+    <div class="status">本页只确认交互与状态映射，不实现 Dashboard</div>
+
+    <section class="decision">
+      <div>
+        <strong>核心判断：看板列只表达“任务走到哪一步”。</strong>
+        <p class="muted">“新功能 / Bug / 验收纠错 / 维护”是任务类型，显示为卡片标签；P0 / P1 / P2 是优先级，用卡片左侧色条表示。它们都不是流程阶段，不能各占一列。</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>输入 → 处理 → 输出</h2>
+      <div class="flow">
+        <div class="flow-card">
+          <b>输入：现有真实数据</b>
+          工单状态、任务类型、优先级、负责人、依赖、门禁证据、待人工处理事项
+        </div>
+        <div class="arrow">→</div>
+        <div class="flow-card">
+          <b>处理：只做展示映射</b>
+          把 8 个内部任务状态归入 6 个用户阶段；保留原始状态，不修改运行时状态机
+        </div>
+        <div class="arrow">→</div>
+        <div class="flow-card">
+          <b>输出：工单状态看板</b>
+          六列看进度；卡片看关键信息；底部抽屉看完整描述、历史、证据和下一步操作
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>建议的工单看板</h2>
+      <p class="muted">参考用户给出的状态列形式。横向滚动保留全部阶段，不把卡片压成窄条。</p>
+      <div class="board-wrap">
+        <div class="board">
+          <div class="column col-requirement">
+            <div class="column-head"><b>需求待补齐</b><span class="count">2</span></div>
+            <div class="stage-note">已经记下诉求，但执行范围或验收方式还不完整。</div>
+            <article class="ticket p1">
+              <div class="ticket-meta"><span class="tag">新功能</span><span>P1</span><span>PLAN-07</span></div>
+              <h3>支持自然语言生成任务计划</h3>
+              <div class="ticket-meta"><span>T014</span><span>负责人：待确认</span></div>
+              <button>补齐需求</button>
+            </article>
+            <article class="ticket p2">
+              <div class="ticket-meta"><span class="tag">维护</span><span>P2</span></div>
+              <h3>整理旧版命令说明</h3>
+              <div class="ticket-meta"><span>T015</span><span>缺少验证命令</span></div>
+              <button>补齐需求</button>
+            </article>
+          </div>
+
+          <div class="column col-ready">
+            <div class="column-head"><b>待开发</b><span class="count">3</span></div>
+            <div class="stage-note">信息已完整，等待认领或等待前置任务完成。</div>
+            <article class="ticket p0">
+              <div class="ticket-meta"><span class="tag">Bug</span><span>P0</span><span>PLAN-07</span></div>
+              <h3>修复任务认领后状态未刷新</h3>
+              <div class="ticket-meta"><span>T011</span><span>负责人：ZhuRong</span></div>
+              <button>开始开发</button>
+            </article>
+            <article class="ticket p1">
+              <div class="ticket-meta"><span class="tag">验收纠错</span><span>P1</span></div>
+              <h3>补充失败提示的下一步操作</h3>
+              <div class="ticket-meta"><span>T012</span><span class="tag warning">等待 T011</span></div>
+              <button>查看依赖</button>
+            </article>
+          </div>
+
+          <div class="column col-dev">
+            <div class="column-head"><b>开发中</b><span class="count">1</span></div>
+            <div class="stage-note">Worker 正在修改代码；尚未进入完成审核。</div>
+            <article class="ticket p1">
+              <div class="ticket-meta"><span class="tag">新功能</span><span>P1</span><span>PLAN-07</span></div>
+              <h3>增加计划草稿确认机制</h3>
+              <div class="ticket-meta"><span>T008</span><span>负责人：ZhuRong</span></div>
+              <div class="progress">当前动作：<span>生成计划草稿</span></div>
+              <button>查看进度</button>
+            </article>
+          </div>
+
+          <div class="column col-verify">
+            <div class="column-head"><b>验收中</b><span class="count">2</span></div>
+            <div class="stage-note">代码已交付，正在跑测试、范围检查、独立复核和验收证明。</div>
+            <article class="ticket p1">
+              <div class="ticket-meta"><span class="tag">新功能</span><span>P1</span><span>PLAN-06</span></div>
+              <h3>工单按状态分列展示</h3>
+              <div class="progress"><span>✓ 实现　✓ 测试</span>　○ 范围　○ 复核　○ 验收</div>
+              <button>查看验收</button>
+            </article>
+            <article class="ticket p2">
+              <div class="ticket-meta"><span class="tag">维护</span><span>P2</span></div>
+              <h3>更新产品架构说明</h3>
+              <div class="ticket-meta"><span class="tag warning">待人工接纳隔离成果</span></div>
+              <button>查看候选代码</button>
+            </article>
+          </div>
+
+          <div class="column col-done">
+            <div class="column-head"><b>已完成</b><span class="count">18</span></div>
+            <div class="stage-note">所有完成门均通过，完成记录已经落账。</div>
+            <article class="ticket p1">
+              <div class="ticket-meta"><span class="tag">Bug</span><span class="tag success">已完成</span></div>
+              <h3>修复 Dashboard Token 提示</h3>
+              <div class="ticket-meta"><span>T006</span><span>完成于 16:42</span></div>
+              <button>查看交付证据</button>
+            </article>
+          </div>
+
+          <div class="column col-alert">
+            <div class="column-head"><b>需要处理</b><span class="count">2</span></div>
+            <div class="stage-note">失败、复核阻断或等待人工决定；必须说明原因和下一步。</div>
+            <article class="ticket p0">
+              <div class="ticket-meta"><span class="tag">Bug</span><span class="tag warning">测试失败</span></div>
+              <h3>修复跨设备任务接管</h3>
+              <div class="ticket-meta"><span>T004</span><span>失败 2 次</span></div>
+              <button>查看原因并重试</button>
+            </article>
+            <article class="ticket p1">
+              <div class="ticket-meta"><span class="tag">新功能</span><span class="tag warning">等待决定</span></div>
+              <h3>任务需要修改范围外文件</h3>
+              <div class="ticket-meta"><span>T005</span><span>需人工批准或驳回</span></div>
+              <button>处理决定</button>
+            </article>
+          </div>
+        </div>
+      </div>
+      <p class="source">示意内容只用于确认样式，不代表当前项目已有这些工单。</p>
+    </section>
+
+    <section>
+      <h2>真实状态如何映射为用户阶段</h2>
+      <table>
+        <thead><tr><th>用户看到的列</th><th>真实任务状态</th><th>用户理解</th><th>卡片主操作</th></tr></thead>
+        <tbody>
+          <tr><td class="map-user">需求待补齐</td><td><code>draft</code></td><td>诉求已经登记，但可写范围、验证命令或成功标准还不完整。</td><td>补齐需求</td></tr>
+          <tr><td class="map-user">待开发</td><td><code>pending</code></td><td>工单可执行；若 <code>blockedBy</code> 尚未完成，仍留在本列并显示“等待依赖”。</td><td>开始开发 / 查看依赖</td></tr>
+          <tr><td class="map-user">开发中</td><td><code>in_progress</code></td><td>Worker 已开始修改代码，尚未完成实现交接。</td><td>查看进度</td></tr>
+          <tr><td class="map-user">验收中</td><td><code>verifying</code></td><td>代码已有结果，正在通过测试、范围、复核、验收证明与完成记录。</td><td>查看验收</td></tr>
+          <tr><td class="map-user">已完成</td><td><code>completed</code></td><td>所有完成门已通过，任务完成记录已持久化。</td><td>查看交付证据</td></tr>
+          <tr><td class="map-user">需要处理</td><td><code>failed</code><br><code>review_blocked</code><br><code>needs_user_decision</code></td><td>任务不能自动继续。卡片必须直接展示失败、复核阻断或待决定的具体原因。</td><td>重试 / 修正 / 人工决定</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>每张卡片先展示什么</h2>
+      <div class="plain-grid">
+        <div class="plain-card"><strong>第一眼：这是什么</strong>标题、工单编号、任务类型、所属 Plan。</div>
+        <div class="plain-card"><strong>第二眼：有多急、谁在做</strong>P0/P1/P2 色条、负责人、等待的前置任务。</div>
+        <div class="plain-card"><strong>第三眼：下一步是什么</strong>每张卡只有一个主要按钮，按钮文字随阶段变化。</div>
+      </div>
+      <p style="margin:16px 0 0">点击卡片后再从底部抽屉查看：完整需求、允许修改范围、验证命令、门禁证据、失败历史、状态变化历史。总账首页不直接铺开这些技术细节。</p>
+    </section>
+
+    <section>
+      <h2>不能混成同一维度的内容</h2>
+      <ul class="rule-list">
+        <li><strong>任务类型不是阶段：</strong><code>feature</code>、<code>bug</code>、<code>acceptance_correction</code>、<code>maintenance</code> 只做卡片标签和筛选条件。</li>
+        <li><strong>优先级不是阶段：</strong><span class="priority p0"><i></i>P0 紧急</span><span class="priority"><i></i>P1 正常</span><span class="priority p2"><i></i>P2 稍后</span>只改变排序和色条。</li>
+        <li><strong>门禁结果不是任务状态：</strong>测试、范围、复核、验收证明显示在“验收中”卡片的进度条，不再额外造五列。</li>
+        <li><strong>计划审批是 Plan 状态：</strong>显示在看板顶部的全局提示，不把全部任务复制进“等待计划批准”列。</li>
+        <li><strong>隔离成果待接纳是子 Agent 运行状态：</strong>在对应任务卡上显示“待人工接纳”徽标，仍以任务真实状态决定所在列。</li>
+        <li><strong>越界审批是待处理事项：</strong>绑定到任务卡并突出下一步，不篡改任务原始状态；无对应任务时放在看板顶部的待处理提醒。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>交互边界</h2>
+      <ul class="rule-list">
+        <li><strong>第一版不允许任意拖动卡片。</strong>状态由真实工作流推进，避免用户把未验证代码直接拖到“已完成”。</li>
+        <li><strong>筛选保留但收进一行。</strong>可按 Plan、任务类型、优先级、负责人筛选；搜索编号和标题。</li>
+        <li><strong>列内排序固定。</strong>P0 在前，其次 P1、P2；同优先级按最近更新时间倒序。等待依赖的任务不抢到可执行任务前面。</li>
+        <li><strong>“需要处理”必须可行动。</strong>不能只写“失败”；要同时给出原因、证据摘要和唯一下一步。</li>
+        <li><strong>列表不删除，只降级为备用视图。</strong>需要批量搜索、审计和导出时切换“表格视图”；默认入口是状态看板。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>本方案不改什么</h2>
+      <p>不新增任务状态，不改变任务总账文件，不改变开发与验收流程，不把看板拖拽当作状态机。实现阶段只需要在 Dashboard 读取现有工单数据后增加一层展示映射，并复用现有任务操作。</p>
+      <p class="source">当前实现依据：<code>src/infra/runtime-store.mjs</code> 的 8 个任务状态；<code>src/orchestration/plan-state.mjs</code> 的任务类型、优先级、依赖和验收字段；<code>src/interface/dashboard.mjs</code> 的工单总账、任务操作、状态标签与门禁展示；<code>src/orchestration/status.mjs</code> 的任务总账与待处理投影。</p>
+    </section>
+  </main>
+</body>
+</html>

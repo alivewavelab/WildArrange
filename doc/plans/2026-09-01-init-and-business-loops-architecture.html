@@ -1,0 +1,938 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WildArrange：真实 Loop、路由与 Hook 触发架构</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: light-dark(#f4f3ef, #171916);
+      --surface: light-dark(#fffef9, #22251f);
+      --surface-2: light-dark(#ebe9e1, #2b2f28);
+      --text: light-dark(#24261f, #f2f3ed);
+      --muted: light-dark(#65695f, #b5baae);
+      --line: light-dark(#c8cbc1, #454b41);
+      --green: light-dark(#28764e, #78d39f);
+      --green-soft: light-dark(#e1f2e7, #183b29);
+      --blue: light-dark(#275f98, #78b7ef);
+      --blue-soft: light-dark(#e4eef8, #183148);
+      --orange: light-dark(#99591c, #f0b36f);
+      --orange-soft: light-dark(#f8ead8, #48311d);
+      --red: light-dark(#9a3e3e, #ee9292);
+      --red-soft: light-dark(#f8e4e2, #462424);
+      --purple: light-dark(#6b4d94, #bda0e8);
+      --purple-soft: light-dark(#eee7f7, #332642);
+      --shadow: 0 12px 30px light-dark(rgb(43 48 38 / 8%), rgb(0 0 0 / 20%));
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+      line-height: 1.55;
+    }
+
+    main {
+      width: min(1480px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 40px 0 72px;
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin-bottom: 10px; font-size: clamp(28px, 4vw, 48px); line-height: 1.12; }
+    h2 { margin-bottom: 8px; font-size: clamp(22px, 3vw, 32px); }
+    h3 { margin-bottom: 6px; font-size: 17px; }
+    code { font-family: "Cascadia Code", Consolas, monospace; font-size: .92em; }
+
+    .eyebrow {
+      margin-bottom: 12px;
+      color: var(--green);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .lead {
+      max-width: 980px;
+      margin-bottom: 22px;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .analogy {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin: 24px 0 34px;
+    }
+
+    .analogy article,
+    .section,
+    .shared-loop,
+    .legend {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .analogy article { padding: 18px 20px; }
+    .analogy p { margin-bottom: 0; color: var(--muted); }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px 22px;
+      margin-bottom: 18px;
+      padding: 12px 16px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .legend span { display: inline-flex; align-items: center; gap: 7px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--blue); }
+    .dot.human { background: var(--orange); }
+    .dot.gate { background: var(--purple); }
+    .dot.output { background: var(--green); }
+    .dot.fail { background: var(--red); }
+
+    .section { margin-top: 20px; padding: 24px; }
+    .section-head { display: flex; justify-content: space-between; gap: 18px; align-items: start; margin-bottom: 22px; }
+    .section-head p { max-width: 760px; margin-bottom: 0; color: var(--muted); }
+    .number {
+      flex: 0 0 auto;
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      background: var(--text);
+      color: var(--bg);
+      font-weight: 800;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(150px, 1fr));
+      gap: 22px;
+      align-items: stretch;
+    }
+
+    .flow-step {
+      position: relative;
+      min-height: 176px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-top: 5px solid var(--blue);
+      border-radius: 14px;
+      background: var(--surface-2);
+    }
+
+    .flow-step::after {
+      content: "→";
+      position: absolute;
+      top: 50%;
+      right: -18px;
+      translate: 50% -50%;
+      color: var(--muted);
+      font-size: 22px;
+      font-weight: 800;
+    }
+
+    .flow-step:last-child::after { display: none; }
+    .flow-step.human { border-top-color: var(--orange); }
+    .flow-step.output { border-top-color: var(--green); }
+    .flow-step.gate { border-top-color: var(--purple); }
+    .flow-step p { margin-bottom: 10px; color: var(--muted); font-size: 13px; }
+    .flow-step small { display: block; color: var(--muted); }
+    .step-id { display: block; margin-bottom: 8px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .08em; }
+
+    .return-line {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 16px;
+      padding: 10px 14px;
+      border-radius: 12px;
+      background: var(--orange-soft);
+      color: var(--orange);
+      font-size: 13px;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .ready-bridge {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin: 22px 0;
+      color: var(--green);
+      font-weight: 800;
+    }
+
+    .ready-bridge::before,
+    .ready-bridge::after { content: ""; height: 1px; flex: 1; background: var(--green); opacity: .45; }
+
+    .router {
+      display: grid;
+      grid-template-columns: minmax(190px, .8fr) minmax(280px, 1.3fr) minmax(190px, .8fr);
+      gap: 18px;
+      align-items: center;
+      margin-bottom: 22px;
+      padding: 18px;
+      border-radius: 14px;
+      background: var(--blue-soft);
+    }
+
+    .router-node { text-align: center; }
+    .router-node strong { display: block; margin-bottom: 4px; }
+    .router-node span { color: var(--muted); font-size: 13px; }
+    .router-arrow { color: var(--blue); font-size: 22px; font-weight: 800; text-align: center; }
+
+    .business-grid { display: grid; gap: 14px; }
+
+    .business-loop {
+      --accent: var(--blue);
+      display: grid;
+      grid-template-columns: 180px minmax(0, 1fr) 210px;
+      gap: 16px;
+      align-items: stretch;
+      padding: 14px;
+      border-left: 6px solid var(--accent);
+      border-radius: 12px;
+      background: var(--surface-2);
+    }
+
+    .business-loop.debug { --accent: var(--red); }
+    .business-loop.refactor { --accent: var(--purple); }
+    .business-loop.research { --accent: var(--green); }
+    .business-loop.change { --accent: var(--orange); }
+
+    .business-title { display: flex; flex-direction: column; justify-content: center; }
+    .business-title span { color: var(--muted); font-size: 12px; }
+
+    .mini-flow {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .mini-flow b {
+      padding: 7px 9px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--surface);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .mini-flow i { color: var(--accent); font-style: normal; font-weight: 900; }
+
+    .business-exit {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding-left: 14px;
+      border-left: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .business-exit strong { color: var(--text); }
+
+    .shared-loop { margin-top: 20px; padding: 24px; }
+    .shared-loop > p { color: var(--muted); }
+
+    .state-line {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin: 18px 0;
+    }
+
+    .state {
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--blue-soft);
+      color: var(--blue);
+      font-family: "Cascadia Code", Consolas, monospace;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .state.done { background: var(--green-soft); color: var(--green); }
+    .state-arrow { color: var(--muted); }
+
+    .delivery-flow {
+      display: grid;
+      grid-template-columns: repeat(9, minmax(110px, 1fr));
+      gap: 16px;
+      align-items: stretch;
+      margin-top: 18px;
+    }
+
+    .delivery-step {
+      position: relative;
+      padding: 14px 10px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface-2);
+      text-align: center;
+      font-size: 13px;
+    }
+
+    .delivery-step::after {
+      content: "→";
+      position: absolute;
+      top: 50%;
+      right: -12px;
+      translate: 50% -50%;
+      color: var(--muted);
+      font-weight: 900;
+    }
+
+    .delivery-step:last-child::after { display: none; }
+    .delivery-step.worker { border-color: var(--blue); }
+    .delivery-step.gate { border-color: var(--purple); }
+    .delivery-step.output { border-color: var(--green); }
+    .delivery-step small { display: block; margin-top: 5px; color: var(--muted); }
+
+    .failure-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .failure-card {
+      padding: 13px 15px;
+      border-left: 4px solid var(--red);
+      border-radius: 10px;
+      background: var(--red-soft);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .failure-card.scope { border-left-color: var(--orange); background: var(--orange-soft); }
+    .failure-card.recovery { border-left-color: var(--purple); background: var(--purple-soft); }
+    .failure-card strong { display: block; margin-bottom: 4px; color: var(--text); }
+
+    .architecture-map {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .zone {
+      padding: 14px;
+      border-top: 4px solid var(--blue);
+      border-radius: 12px;
+      background: var(--surface-2);
+    }
+
+    .zone:nth-child(2) { border-top-color: var(--purple); }
+    .zone:nth-child(3) { border-top-color: var(--orange); }
+    .zone:nth-child(4) { border-top-color: var(--red); }
+    .zone:nth-child(5) { border-top-color: var(--green); }
+    .zone p { margin-bottom: 8px; color: var(--muted); font-size: 13px; }
+    .zone code { display: block; color: var(--muted); }
+
+    .roles {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .role { padding: 12px; border: 1px solid var(--line); border-radius: 10px; text-align: center; }
+    .role strong { display: block; }
+    .role span { color: var(--muted); font-size: 12px; }
+
+    .host-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin: 16px 0;
+    }
+
+    .host-stat {
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: var(--surface-2);
+      text-align: center;
+    }
+
+    .host-stat strong { display: block; font-size: 20px; }
+    .host-stat span { color: var(--muted); font-size: 12px; }
+
+    .route-overview {
+      display: grid;
+      grid-template-columns: minmax(180px, .7fr) minmax(320px, 1.6fr) minmax(220px, .9fr);
+      gap: 16px;
+      align-items: center;
+      padding: 16px;
+      border-radius: 14px;
+      background: var(--blue-soft);
+    }
+
+    .route-block { text-align: center; }
+    .route-block strong { display: block; margin-bottom: 5px; }
+    .route-block span { color: var(--muted); font-size: 13px; }
+    .route-block code { display: inline-block; margin: 3px; }
+
+    .hook-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .hook-card {
+      padding: 14px;
+      border-left: 5px solid var(--blue);
+      border-radius: 11px;
+      background: var(--surface-2);
+    }
+
+    .hook-card.guard { border-left-color: var(--red); }
+    .hook-card.memory { border-left-color: var(--purple); }
+    .hook-card.finish { border-left-color: var(--green); }
+    .hook-card p { margin-bottom: 6px; color: var(--muted); font-size: 13px; }
+    .hook-card small { color: var(--muted); }
+
+    .event-type {
+      display: inline-block;
+      margin-bottom: 8px;
+      padding: 3px 7px;
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--blue);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .05em;
+    }
+
+    .no-daemon {
+      margin-top: 14px;
+      padding: 11px 14px;
+      border: 1px dashed var(--green);
+      border-radius: 10px;
+      color: var(--green);
+      font-size: 13px;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .plan-flow {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(125px, 1fr));
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .loop-return {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .loop-return div {
+      padding: 11px 13px;
+      border-radius: 10px;
+      background: var(--orange-soft);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .loop-return strong { color: var(--orange); }
+
+    .session-policy {
+      margin-top: 18px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--blue);
+      border-radius: 12px;
+      background: linear-gradient(90deg, var(--blue-soft), var(--surface-2) 42%);
+    }
+
+    .session-policy-head { display: flex; justify-content: space-between; gap: 16px; align-items: start; }
+    .session-policy-head p { max-width: 850px; margin: 5px 0 0; color: var(--muted); font-size: 13px; }
+    .target-badge { flex: 0 0 auto; padding: 5px 9px; border: 1px solid var(--orange); border-radius: 999px; color: var(--orange); font-size: 11px; font-weight: 800; letter-spacing: .06em; }
+    .session-branches { display: grid; grid-template-columns: 1fr 46px 1fr; gap: 10px; margin-top: 14px; align-items: stretch; }
+    .session-question { display: grid; place-items: center; padding: 14px; border: 1px dashed var(--blue); border-radius: 10px; color: var(--blue); font-weight: 800; text-align: center; }
+    .session-arrow { display: grid; place-items: center; color: var(--muted); font-size: 20px; }
+    .session-choice { padding: 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+    .session-choice strong { color: var(--text); }
+    .session-choice p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+    .session-choice small { display: block; margin-top: 8px; color: var(--green); }
+    .session-choice.new { border-color: var(--orange); }
+    .session-choice.new small { color: var(--orange); }
+    .session-guard { margin-top: 10px; padding: 10px 12px; border-radius: 9px; background: var(--surface); color: var(--muted); font-size: 13px; }
+    .session-guard b { color: var(--text); }
+
+    .physical-loop {
+      --accent: var(--blue);
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-left: 6px solid var(--accent);
+      border-radius: 13px;
+      background: var(--surface-2);
+    }
+
+    .physical-loop + .physical-loop { margin-top: 12px; }
+    .physical-loop.bug { --accent: var(--red); }
+    .physical-loop.refactor { --accent: var(--purple); }
+    .physical-loop.readonly { --accent: var(--green); border-style: dashed; }
+    .physical-loop header { display: flex; justify-content: space-between; gap: 16px; align-items: start; margin-bottom: 12px; }
+    .physical-loop header p { margin-bottom: 0; color: var(--muted); font-size: 13px; }
+
+    .loop-label {
+      flex: 0 0 auto;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .cycle-path {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .cycle-path b {
+      padding: 7px 9px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--surface);
+      font-size: 13px;
+    }
+
+    .cycle-path i { color: var(--accent); font-style: normal; font-weight: 900; }
+    .cycle-back { margin-top: 10px; color: var(--accent); font-size: 13px; font-weight: 700; }
+
+    details { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 14px; }
+    summary { cursor: pointer; color: var(--muted); font-weight: 700; }
+    .evidence-list { columns: 2; margin-bottom: 0; color: var(--muted); font-size: 13px; }
+    .evidence-list li { margin-bottom: 7px; break-inside: avoid; }
+    .evidence-list a { color: var(--blue); }
+
+    footer { margin-top: 24px; color: var(--muted); font-size: 12px; text-align: center; }
+
+    @media (max-width: 1180px) {
+      .flow { grid-template-columns: repeat(3, 1fr); }
+      .flow-step::after { display: none; }
+      .delivery-flow { grid-template-columns: repeat(3, 1fr); }
+      .delivery-step::after { display: none; }
+      .architecture-map { grid-template-columns: repeat(3, 1fr); }
+      .plan-flow { grid-template-columns: repeat(4, 1fr); }
+    }
+
+    @media (max-width: 760px) {
+      main { width: min(100% - 20px, 1480px); padding-top: 24px; }
+      .analogy, .failure-grid { grid-template-columns: 1fr; }
+      .section { padding: 18px; }
+      .section-head { align-items: center; }
+      .flow { grid-template-columns: 1fr; }
+      .router { grid-template-columns: 1fr; }
+      .router-arrow { rotate: 90deg; }
+      .route-overview { grid-template-columns: 1fr; }
+      .host-strip, .hook-grid, .loop-return { grid-template-columns: 1fr; }
+      .plan-flow { grid-template-columns: 1fr; }
+      .session-policy-head { display: block; }
+      .target-badge { display: inline-block; margin-top: 10px; }
+      .session-branches { grid-template-columns: 1fr; }
+      .session-arrow { rotate: 90deg; min-height: 34px; }
+      .business-loop { grid-template-columns: 1fr; }
+      .business-exit { padding: 10px 0 0; border-left: 0; border-top: 1px solid var(--line); }
+      .delivery-flow { grid-template-columns: repeat(2, 1fr); }
+      .architecture-map, .roles { grid-template-columns: 1fr; }
+      .evidence-list { columns: 1; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="eyebrow">Current + target architecture · 2026-09-02 · local working tree</div>
+      <h1>WildArrange 的真实 Loop、路由与 Hook</h1>
+      <p class="lead">这里把三个容易混淆的东西分开：Hook 是宿主事件触发器，Router 是每次发言经过的分诊层；只有存在明确起点、终点和失败回边的完整工作生命周期，才称为 Loop。</p>
+    </header>
+
+    <section class="analogy" aria-label="生活类比">
+      <article>
+        <h3>Hook / Router = 门铃与分诊台</h3>
+        <p>每次事件到来时启动一次，判断该找谁、走哪条路，然后退出；它们不是永远在后台运转的循环。</p>
+      </article>
+      <article>
+        <h3>物理 Loop = 一张工单从开到关</h3>
+        <p>例如整个 Plan、整个 Bug 修复或整个新需求；失败会回到前一步继续，满足关闭条件才真正结束。</p>
+      </article>
+    </section>
+
+    <div class="legend" aria-label="图例">
+      <span><i class="dot"></i>系统自动</span>
+      <span><i class="dot human"></i>人类确认</span>
+      <span><i class="dot gate"></i>强制质量门</span>
+      <span><i class="dot output"></i>持久结果</span>
+      <span><i class="dot fail"></i>失败回环</span>
+    </div>
+
+    <section class="section" aria-labelledby="init-title">
+      <div class="section-head">
+        <div>
+          <h2 id="init-title">Loop A：项目初始化</h2>
+          <p>CLI 自动搭运行时，Agent/维护者补齐项目事实，人类确认门与边界，Doctor 反复检查，直到项目进入可接单的 <code>idle</code> 状态。</p>
+        </div>
+        <div class="number" aria-hidden="true">A</div>
+      </div>
+
+      <div class="flow" role="list" aria-label="初始化流程">
+        <article class="flow-step" role="listitem">
+          <span class="step-id">INPUT</span>
+          <h3>发现现状</h3>
+          <p>读取已有规则、目录、技术栈、构建与测试命令，不覆盖项目原有约定。</p>
+          <small><code>init-deep</code> / Inspect</small>
+        </article>
+        <article class="flow-step" role="listitem">
+          <span class="step-id">BOOTSTRAP</span>
+          <h3>建立运行时</h3>
+          <p>创建 <code>.wildarrange/</code>、默认配置、<code>work.json</code>，安装固定 Prompt Pack。</p>
+          <small><code>wildarrange init</code> → <code>initRuntime</code></small>
+        </article>
+        <article class="flow-step" role="listitem">
+          <span class="step-id">GOVERNANCE</span>
+          <h3>补建治理文档</h3>
+          <p>仅创建缺失文件；现有 <code>AGENTS.md</code> 与文档一律保留。</p>
+          <small><code>--project-docs [--architecture]</code></small>
+        </article>
+        <article class="flow-step human" role="listitem">
+          <span class="step-id">HUMAN GATE</span>
+          <h3>确认项目事实</h3>
+          <p>清掉所有“待确认”，确认模块边界、测试命令、生产/测试入口和质量门。</p>
+          <small>人类拥有最终放行权</small>
+        </article>
+        <article class="flow-step gate" role="listitem">
+          <span class="step-id">ARM & CONNECT</span>
+          <h3>武装并接宿主</h3>
+          <p>生成根配置并武装质量门；按需安装 Codex、Cursor、Kimi adapter。</p>
+          <small><code>config init --root --armed</code></small>
+        </article>
+        <article class="flow-step output" role="listitem">
+          <span class="step-id">OUTPUT</span>
+          <h3>体检至可接单</h3>
+          <p><code>doctor</code> 检查配置、门、adapter、ledger 和治理。通过后仍是空闲，不会擅自开工。</p>
+          <small><code>status: idle</code> · 等待 Plan</small>
+        </article>
+      </div>
+
+      <div class="return-line">Doctor 出现红灯/黄灯 → 回到“确认项目事实 / 武装并接宿主”修正 → 再次体检；初始化不是一次复制文件就结束。</div>
+    </section>
+
+    <div class="ready-bridge">初始化完成：Hook 已安装激活，项目进入可接收事件与业务请求的运行秩序</div>
+
+    <section class="section" aria-labelledby="business-title">
+      <div class="section-head">
+        <div>
+          <h2 id="business-title">触发与路由层：每次发言必经，但它不是 Loop</h2>
+          <p>宿主在生命周期事件发生时执行一次 Hook 命令；核心把不同宿主事件归一成 6 种标准事件。命令完成后退出，不存在常驻后台监听器。</p>
+        </div>
+        <div class="number" aria-hidden="true">→</div>
+      </div>
+
+      <div class="route-overview" aria-label="每次发言的路由过程">
+        <div class="route-block">
+          <strong>每次非空发言</strong>
+          <span><code>UserPromptSubmit</code></span>
+        </div>
+        <div class="router-arrow">→</div>
+        <div class="route-block">
+          <strong>Router 分诊</strong>
+          <span>11 个显式 intent + 高风险 ask；叠加 domain、complexity、risk，收敛到 verify / recover / change_request / execute / plan / explore / answer / ask。</span>
+        </div>
+      </div>
+
+      <div class="host-strip" aria-label="各宿主 Hook 注册数量">
+        <div class="host-stat"><strong>6</strong><span>核心标准事件</span></div>
+        <div class="host-stat"><strong>7</strong><span>Codex 注册项</span></div>
+        <div class="host-stat"><strong>8</strong><span>Cursor 注册项</span></div>
+        <div class="host-stat"><strong>8</strong><span>Kimi 注册项</span></div>
+      </div>
+
+      <div class="hook-grid" aria-label="标准 Hook 事件与触发动作">
+        <article class="hook-card memory">
+          <span class="event-type">SessionStart</span>
+          <h3>启动 / 恢复会话</h3>
+          <p>读取恢复状态与项目规则，构建 Jiuwei 上下文，运行 ArchivistRouter，写 memory digest，并推送待人决策。</p>
+          <small>被动事件 → 主动恢复上下文</small>
+        </article>
+        <article class="hook-card">
+          <span class="event-type">UserPromptSubmit</span>
+          <h3>每次用户发言</h3>
+          <p>运行 Router、规则扫描与 ArchivistRouter，按 stage 动态选择 Prompt / Skill，并推送 attention。</p>
+          <small>被动事件 → 主动分诊与上下文注入</small>
+        </article>
+        <article class="hook-card guard">
+          <span class="event-type">PreToolUse</span>
+          <h3>写入 / Shell 前</h3>
+          <p>提取目标路径、扫描规则、检查高风险命令和任务范围；有任务时构建 ZhuRong 执行上下文，可明确 allow / deny。</p>
+          <small>被动事件 → 主动前置拦截</small>
+        </article>
+        <article class="hook-card guard">
+          <span class="event-type">PostToolUse</span>
+          <h3>工具完成或失败后</h3>
+          <p>记录目标路径，扫描命中规则，评估结果门；带 taskId 时再次检查 scope，并写 Hook 报告与决策记录。</p>
+          <small>失败事件在 Cursor/Kimi 侧单列，核心统一归并</small>
+        </article>
+        <article class="hook-card memory">
+          <span class="event-type">PostCompact</span>
+          <h3>上下文压缩后</h3>
+          <p>重新读取恢复状态、规则和 Jiuwei 身份上下文，运行 ArchivistRouter，重写 digest 与待人决策。</p>
+          <small>Codex / Kimi 支持；Cursor 当前未注册</small>
+        </article>
+        <article class="hook-card finish">
+          <span class="event-type">Stop</span>
+          <h3>主 Agent / 子 Agent 停止时</h3>
+          <p>检查是否必须继续，生成路由日报并推送 attention；SubagentStop 在核心中归并为同一 Stop 语义。</p>
+          <small>被动事件 → 主动续跑判断</small>
+        </article>
+      </div>
+
+      <div class="no-daemon">没有主动常驻监听：Hook 由宿主事件启动一次 CLI 子进程 → 执行动作 → 写报告 / Ledger → 退出。Bridge 中的 timeout 只负责杀死挂起子进程，不是 watcher。</div>
+    </section>
+
+    <section class="section" aria-labelledby="plan-loop-title">
+      <div class="section-head">
+        <div>
+          <h2 id="plan-loop-title">物理 Loop B：整个开发计划从对话到关闭</h2>
+          <p>一份开发计划包含多张工单。用户先和宿主大模型把目标谈清楚，再形成可执行计划；WildArrange 逐张推进，全部完成或明确暂停原因后，整个计划才结束。</p>
+        </div>
+        <div class="number" aria-hidden="true">B</div>
+      </div>
+
+      <div class="plan-flow" role="list" aria-label="完整 Plan 生命周期">
+        <article class="flow-step" role="listitem">
+          <span class="step-id">用户对话</span>
+          <h3>说清要解决的问题</h3>
+          <p>用户与宿主大模型讨论新需求、Bug、重构目标和期望结果。</p>
+        </article>
+        <article class="flow-step human" role="listitem">
+          <span class="step-id">计划草稿</span>
+          <h3>整理成 plan.json</h3>
+          <p>宿主大模型根据当前对话填写任务、负责人、修改范围、测试和完成标准，写入专用草稿目录；人工也可直接提供已有文件。</p>
+        </article>
+        <article class="flow-step" role="listitem">
+          <span class="step-id">用户确认</span>
+          <h3>确认目标与边界</h3>
+          <p>WildArrange 检查字段是否齐全；需要批准时，用户确认后才允许进入开发。</p>
+        </article>
+        <article class="flow-step human" role="listitem">
+          <span class="step-id">登记工单</span>
+          <h3>写入全项目任务登记册</h3>
+          <p>每张工单保留目标、依赖、负责人、允许修改范围、测试和当前状态。</p>
+        </article>
+        <article class="flow-step gate" role="listitem">
+          <span class="step-id">分类与准备</span>
+          <h3>确认负责人并准备 Skill</h3>
+          <p>语义生成阶段把实际负责人写入每张工单的 <code>task.owner</code>；执行 Hook、任务领取和隔离运行都读取这个字段。分类只补充类别和 Skill，不建立第二套派工账。</p>
+        </article>
+        <article class="flow-step gate" role="listitem">
+          <span class="step-id">逐张开发</span>
+          <h3>运行单工单开发 Loop</h3>
+          <p>选择当前可开发工单，走直接开发或隔离开发，再进行完成检查；失败就返工。</p>
+        </article>
+        <article class="flow-step output" role="listitem">
+          <span class="step-id">计划收口</span>
+          <h3>全部完成或明确暂停</h3>
+          <p>确认所有工单、遗留事项和用户决定都已处理，输出计划总结和恢复位置。</p>
+        </article>
+      </div>
+
+      <div class="loop-return" aria-label="Plan 回环条件">
+        <div><strong>生成闭环：</strong>UserPromptSubmit 判断需要计划后，宿主大模型写入 <code>.wildarrange/plan-drafts/*.json</code>；语义生成计划必须由用户批准。</div>
+        <div><strong>派工闭环：</strong>语义计划的可执行工单必须显式填写 Jiuwei 或 ZhuRong；DiJiang、BaiZe、LuWu 通过计划、复核、治理阶段参与，不进入 command worker。</div>
+        <div><strong>看板方案：</strong>工单将按“需求待补齐、待开发、开发中、验收中、已完成、需要处理”六列展示。</div>
+      </div>
+
+      <div class="session-policy" aria-label="活动计划期间的新任务会话隔离策略">
+        <div class="session-policy-head">
+          <div>
+            <h3>活动 Plan 期间又收到一条新工作：先判断是否属于当前工单</h3>
+            <p>这是防止“正在修 A，用户顺口提到 B，系统就把 B 塞进 A 的计划”的隔离线。当前计划生成、审批和 <code>task.owner</code> 已实现；自动新建宿主会话仍是待实现产品策略。</p>
+          </div>
+          <span class="target-badge">目标策略 · 未实现</span>
+        </div>
+        <div class="session-branches">
+          <article class="session-choice">
+            <strong>属于当前工单</strong>
+            <p>例如补充要求、回答澄清、反馈验收结果，留在当前会话；如果改变范围，则登记 ChangeRequest 后继续。</p>
+            <small>小白解释：还是同一张单，就在原聊天里接着办。</small>
+          </article>
+          <div class="session-question">同一件事？<br>→ / 否</div>
+          <article class="session-choice new">
+            <strong>是另一件独立工作</strong>
+            <p>冻结当前 Plan 的状态和上下文，为新工作创建独立草稿；宿主支持时创建新任务会话，不支持时给用户一份可复制的新会话交接卡。</p>
+            <small>小白解释：新来一张单，另开一个窗口，不把桌上正在办的单据弄乱。</small>
+          </article>
+        </div>
+        <div class="session-guard"><b>必须守住：</b>新工作的草稿、owner、进度和消息不能写进当前 <code>activePlanId</code>；当前 Loop 继续停留在原工单，直到它自己完成、暂停或被用户明确替换。</div>
+      </div>
+    </section>
+
+    <section class="shared-loop" aria-labelledby="delivery-title">
+      <h2 id="delivery-title">物理 Loop C：单张工单的开发与验收循环</h2>
+      <p>每张工单先产出代码，再由独立检查确认能否完成。直接开发使用当前工作区；隔离开发先把代码留在独立 worktree，检查通过后才正式接纳。</p>
+
+      <div class="state-line" aria-label="任务持久状态变化">
+        <span class="state">待开发</span><span class="state-arrow">→</span>
+        <span class="state">开发中</span><span class="state-arrow">→</span>
+        <span class="state">验收中</span><span class="state-arrow">→</span>
+        <span class="state done">已完成</span>
+      </div>
+
+      <div class="delivery-flow" role="list" aria-label="单工单开发与验收顺序">
+        <div class="delivery-step" role="listitem"><strong>领取工单</strong><small>读取目标、范围和负责人</small></div>
+        <div class="delivery-step" role="listitem"><strong>选择开发方式</strong><small>当前工作区或独立 worktree</small></div>
+        <div class="delivery-step worker" role="listitem"><strong>Worker 开发</strong><small>产出真实代码和执行回执</small></div>
+        <div class="delivery-step worker" role="listitem"><strong>准备待验收代码</strong><small>隔离成果先临时应用；直接开发已在当前工作区</small></div>
+        <div class="delivery-step gate" role="listitem"><strong>自动测试</strong><small>重新运行任务要求的测试</small></div>
+        <div class="delivery-step gate" role="listitem"><strong>范围检查</strong><small>确认只改了允许路径</small></div>
+        <div class="delivery-step gate" role="listitem"><strong>独立复核</strong><small>风险、质量和逐条完成标准</small></div>
+        <div class="delivery-step gate" role="listitem"><strong>验收证明</strong><small>记录本轮全部通过证据</small></div>
+        <div class="delivery-step output" role="listitem"><strong>正式接纳或返工</strong><small>隔离路径此时才合入；失败则撤销并退回</small></div>
+      </div>
+
+      <div class="failure-grid" aria-label="失败与恢复回环">
+        <div class="failure-card">
+          <strong>测试、复核或完成标准失败</strong>
+          写清失败证据和下一步，工单回到待开发或需要处理；修正后重新检查，不沿用上一轮结果。
+        </div>
+        <div class="failure-card scope">
+          <strong>修改范围越界</strong>
+          要么撤销越界代码，要么由用户批准新的修改范围；批准后从头重新验收。
+        </div>
+        <div class="failure-card recovery">
+          <strong>中断或完成记录没写成功</strong>
+          工单保持“验收中”，根据最新证据恢复；最终完成记录未安全写入前，不能显示为“已完成”。
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="physical-business-title">
+      <div class="section-head">
+        <div>
+          <h2 id="physical-business-title">业务级物理 Loop：从业务问题出现到业务问题关闭</h2>
+          <p>这些是包住 Plan / Task Loop 的真实业务生命周期。它们的开始和结束标准不同，因此不能只用 intent 标签代替。</p>
+        </div>
+        <div class="number" aria-hidden="true">↻</div>
+      </div>
+
+      <article class="physical-loop">
+        <header>
+          <div><h3>整个新需求 / 新功能 Loop</h3><p>结束条件：目标用户行为与产品验收通过，而不只是代码合并。</p></div>
+          <span class="loop-label">PHYSICAL LOOP</span>
+        </header>
+        <div class="cycle-path" aria-label="完整新需求循环">
+          <b>产品目标</b><i>→</i><b>用户旅程</b><i>→</i><b>验收设计</b><i>→</i><b>Plan Loop</b><i>→</i><b>多个 Task Loop</b><i>→</i><b>真实产品验收</b><i>→</i><b>发布 / 关闭</b>
+        </div>
+        <div class="cycle-back">↩ 用户验收失败或需求变化 → ChangeRequest → 回到产品目标 / 验收设计 → 修订 Plan。</div>
+      </article>
+
+      <article class="physical-loop bug">
+        <header>
+          <div><h3>整个 Bug 修复 Loop</h3><p>结束条件：原始症状消失、根因链成立、回归用例与真实表面验证通过。</p></div>
+          <span class="loop-label">PHYSICAL LOOP</span>
+        </header>
+        <div class="cycle-path" aria-label="完整 Bug 修复循环">
+          <b>Bug 报告</b><i>→</i><b>真实复现</b><i>→</i><b>互斥假设</b><i>→</i><b>根因证据</b><i>→</i><b>失败用例</b><i>→</i><b>修复 Task Loop</b><i>→</i><b>原场景复验</b><i>→</i><b>关闭 Bug</b>
+        </div>
+        <div class="cycle-back">↩ 复验仍失败 → 回到“互斥假设”；禁止在未证明根因时继续叠补丁。</div>
+      </article>
+
+      <article class="physical-loop refactor">
+        <header>
+          <div><h3>整个重构 Loop</h3><p>结束条件：计划内重构单元全部完成，外部行为保持，前后基线证据一致。</p></div>
+          <span class="loop-label">PHYSICAL LOOP</span>
+        </header>
+        <div class="cycle-path" aria-label="完整重构循环">
+          <b>重构目标</b><i>→</i><b>影响面 / callers</b><i>→</i><b>行为基线</b><i>→</i><b>拆分重构单元</b><i>→</i><b>每单元 Task Loop</b><i>→</i><b>全量行为复验</b><i>→</i><b>关闭重构</b>
+        </div>
+        <div class="cycle-back">↩ 行为改变或范围外扩 → 回滚该单元 / ChangeRequest → 回到影响面与计划。</div>
+      </article>
+
+      <article class="physical-loop readonly">
+        <header>
+          <div><h3>答疑 / 调查 / 一次性 Review：默认不是 Loop</h3><p>它们是有界只读流程：给出证据化结论即结束；只有用户决定采取改动时才新建 Plan。</p></div>
+          <span class="loop-label">BOUNDED FLOW</span>
+        </header>
+        <div class="cycle-path" aria-label="只读流程">
+          <b>限定问题</b><i>→</i><b>读取真实来源</b><i>→</i><b>收集证据</b><i>→</i><b>结论与限制</b><i>→</i><b>结束</b>
+        </div>
+        <div class="cycle-back">若用户授权修改 → 形成新目标 → 进入 Plan Loop；不是在原 Review 中偷偷开工。</div>
+      </article>
+    </section>
+
+    <section class="section" aria-labelledby="ownership-title">
+      <div class="section-head">
+        <div>
+          <h2 id="ownership-title">Loop 下方的责任架构</h2>
+          <p>五区回答“代码归谁”，五个长期 Agent 回答“判断归谁”。Router 只分流，不成为第六个长期角色。</p>
+        </div>
+        <div class="number" aria-hidden="true">↓</div>
+      </div>
+
+      <div class="architecture-map" aria-label="五区架构">
+        <article class="zone"><h3>Interface</h3><p>CLI、Dashboard、宿主 adapter 与人机入口。</p><code>src/interface/</code></article>
+        <article class="zone"><h3>Orchestration</h3><p>计划、任务状态、顺序、重试、gate 编排与事务。</p><code>src/orchestration/</code></article>
+        <article class="zone"><h3>AI</h3><p>确定性路由上方的语义策略、上下文、Prompt 与 Skill 挂载。</p><code>src/ai/</code></article>
+        <article class="zone"><h3>Capabilities</h3><p>Worker、Verify、Scope、Review、Proof、Checkpoint 原子能力；统一经 Gateway。</p><code>src/capabilities/</code></article>
+        <article class="zone"><h3>Infra</h3><p>文件、锁、Git、配置、命令、Ledger、快照和恢复底座。</p><code>src/infra/</code></article>
+      </div>
+
+      <div class="roles" aria-label="长期 Agent 分工">
+        <div class="role"><strong>Jiuwei</strong><span>编排与线性交付</span></div>
+        <div class="role"><strong>DiJiang</strong><span>计划与边界</span></div>
+        <div class="role"><strong>ZhuRong</strong><span>实现</span></div>
+        <div class="role"><strong>BaiZe</strong><span>独立复核</span></div>
+        <div class="role"><strong>LuWu</strong><span>只读仓库治理</span></div>
+      </div>
+
+      <details>
+        <summary>展开实现证据（这张图依据哪些真实入口）</summary>
+        <ul class="evidence-list">
+          <li><a href="../../bin/wildarrange.mjs"><code>bin/wildarrange.mjs</code></a>：<code>init</code>、<code>plan</code>、<code>run</code> 的真实 CLI 路由。</li>
+          <li><a href="../../src/infra/runtime-bootstrap.mjs"><code>runtime-bootstrap.mjs</code></a>：<code>initRuntime</code> 的目录、配置、work、Prompt Pack、Ledger 与 Snapshot 顺序。</li>
+          <li><a href="../../src/interface/project-init.mjs"><code>project-init.mjs</code></a>：非覆盖式治理模板与人类待确认清单。</li>
+          <li><a href="../../src/ai/hooks.mjs"><code>ai/hooks.mjs</code></a>：6 种标准事件、每个事件的 facts、上下文注入、Hook 报告与 Ledger 写入。</li>
+          <li><a href="../../src/interface/adapters.mjs"><code>interface/adapters.mjs</code></a>：Codex 7 个 Hook 注册项与项目级 <code>.codex/hooks.json</code> 生成。</li>
+          <li><a href="../../src/interface/cursor-adapter.mjs"><code>cursor-adapter.mjs</code></a>：Cursor 8 个宿主事件及到标准事件的映射。</li>
+          <li><a href="../../src/interface/kimi-adapter.mjs"><code>kimi-adapter.mjs</code></a>：Kimi 8 个 Hook 注册项与 fail-open bridge。</li>
+          <li><a href="../../packs/wildarrange-linear/routes.json"><code>routes.json</code></a>：Debug、Plan、Investigate、Review、ChangeRequest 等确定性路由。</li>
+          <li><a href="../../src/orchestration/linear-runtime.mjs"><code>linear-runtime.mjs</code></a>：任务锁、状态推进、Worker、恢复和 retry。</li>
+          <li><a href="../../src/orchestration/delivery-pipeline.mjs"><code>delivery-pipeline.mjs</code></a>：Verify → Scope → Review → Acceptance proof → Checkpoint 的唯一顺序来源。</li>
+          <li><a href="../../src/capabilities/gateway.mjs"><code>capabilities/gateway.mjs</code></a>：所有原子能力的统一调用信封。</li>
+          <li><a href="../../src/infra/ledger.mjs"><code>infra/ledger.mjs</code></a>：append-only hash 链审计账本。</li>
+          <li><a href="../../packs/wildarrange-linear/skills/debugging.md"><code>debugging.md</code></a>：Bug 的复现、假设、根因、回归与真实表面 QA。</li>
+          <li><a href="../../packs/wildarrange-linear/skills/refactor.md"><code>refactor.md</code></a>：重构影响面、行为保持和前后验证。</li>
+        </ul>
+      </details>
+    </section>
+
+    <footer>当前实现快照，不是未来路线图。文档只解释现有主链，不替代 <code>doc/project-architecture.md</code> 的架构事实。</footer>
+  </main>
+</body>
+</html>
