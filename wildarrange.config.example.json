@@ -236,6 +236,7 @@
         "review-scope-tradeoff",
         "research-domain-benchmark"
       ],
+        "contract-governance",
       "rules": { "mode": "static" }
     },
     "pre_tool_use": {

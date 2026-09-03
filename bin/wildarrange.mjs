@@ -67,6 +67,7 @@ import { runInjectionHook } from "../src/ai/hooks.mjs";
 import { routeRequest } from "../src/ai/routing.mjs";
 import { runSuspicionReview } from "../src/ai/suspicion-review.mjs";
 import { runRepositoryGovernanceAudit } from "../src/capabilities/repository-governance.mjs";
+import { invokeCapability } from "../src/capabilities/gateway.mjs";
 import { scopeGuard } from "../src/capabilities/scope-guard.mjs";
 import {
   annotationStats,
@@ -676,6 +677,46 @@ async function main() {
       return;
     }
     throw new Error("wildarrange governance requires audit");
+  }
+
+  if (command === "contracts") {
+    const subcommand = args._[1];
+    if (subcommand === "scan") {
+      const source = args.from && args.from !== true ? await readJson(path.resolve(rootDir, args.from)) : [];
+      const declarations = Array.isArray(source) ? source : source?.items || [];
+      const result = await invokeCapability("contract-governance-scan", {
+        rootDir,
+        options: { declarations, discoverer: "tauri-ipc" },
+      });
+      console.log(JSON.stringify(result, null, 2));
+      process.exitCode = result.status === "pass" ? 0 : 2;
+      return;
+    }
+    if (subcommand === "apply-card") {
+      if (!args.card || args.card === true) throw new Error("wildarrange contracts apply-card requires --card <cardId>");
+      if (!args.decision || args.decision === true) throw new Error("wildarrange contracts apply-card requires --decision approve|reject");
+      if (!args.reason || args.reason === true) throw new Error("wildarrange contracts apply-card requires --reason <text>");
+      if (!args["expected-fingerprint"] || args["expected-fingerprint"] === true) throw new Error("wildarrange contracts apply-card requires --expected-fingerprint <sha256>");
+      const result = await invokeCapability("contract-governance-apply-card", {
+        rootDir,
+        options: {
+          cardId: args.card,
+          decision: args.decision,
+          reason: args.reason,
+          expectedFingerprint: args["expected-fingerprint"] && args["expected-fingerprint"] !== true ? args["expected-fingerprint"] : undefined,
+        },
+      });
+      console.log(JSON.stringify(result, null, 2));
+      process.exitCode = result.status === "pass" ? 0 : 2;
+      return;
+    }
+    if (subcommand === "generate") {
+      const result = await invokeCapability("contract-governance-generate-artifacts", { rootDir });
+      console.log(JSON.stringify(result, null, 2));
+      process.exitCode = result.status === "pass" ? 0 : 2;
+      return;
+    }
+    throw new Error("wildarrange contracts requires scan, apply-card, or generate");
   }
 
   if (command === "context") {

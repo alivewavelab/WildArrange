@@ -125,6 +125,8 @@ AGENTS.md                         # product goals, global boundaries, release ga
 - `src/capabilities/worker.mjs` / `src/capabilities/review-gate.mjs`：worker 执行与 BaiZe 独立 review 通道。风险复核与怀疑式验收是 BaiZe Skill 模式，非独立长期 Agent。
 - `src/infra/command-safety.mjs`：worker、verifier、review 命令、质量 gate 与子 Agent runner 共用的高风险 shell 命令预检；阻断破坏性系统命令与对项目源/测试/文档目录的递归删除。内置模式为不可削弱底线；config 中 `commandSafety.extraPatterns` 追加项目规则（`compileCommandSafetyPatterns` 编译，调用方经 `runCommand` options 传入）。
 - `src/infra/security.mjs`：config hash 基线、config 校验、运行时状态备份、归档精确恢复包、备份列表、一键状态恢复与关键状态校验。
+- `src/infra/contract-governance.mjs`：技术栈中立的接口/数据库契约台账、差异卡、覆盖状态和快照归档。发现器采用静态清单；首版只对照 Tauri Rust command、handler 注册与前端 invoke，Rust SQL 字符串明确降级人工申报。
+- `src/capabilities/contract-governance.mjs`：经 gateway 暴露 contract scan / apply-card / generate-artifacts，并在现有 review 内向 LuWu 提供契约治理证据；未初始化台账只告警，已接管区域的漏申报或待批准差异阻断 review。
 - `src/interface/doctor.mjs`：一致性 doctor，审计 config 结构/mounts、将全局 task ledger 中所有 Plan 的 completed 任务与 checkpoint/acceptance proof/ledger 事件按 `<planId>:<taskId>` 对账、校验 ledger hash 链、ledger 与最新备份交叉检查，并展示最新仓库治理状态。旧完成事件缺 planId 时只在 taskId 全局唯一时兼容；无法唯一归属就报告 ambiguous，不猜。专用 `gateArming` 与 `adapters` 段展示未武装 gate（黄灯不再埋在 `status` JSON 里）、已启用但未安装的 adapter hook（`.cursor/` 不随每次 clone 传播——`.gitignore` 对 `.cursor/hooks.json` 与 `.cursor/hooks/` 例外以便 hard enforcement 可提交，doctor 验证各机器实际拥有），以及引用已不存在绝对路径的规则文件（机器/用户名变更后 stale）。诊断与 gating 隔离：各项检查独立 try/catch（崩溃仅标红本段 `check_failed`，其余仍报告），doctor 从不追加 hash 链 ledger。还检查反向：orphan completion 事件（未 completed 任务已有链校验 completion ledger 事件——中断的完成事务，带 `wildarrange run` 恢复提示）、完成后副作用失败（snapshot/summary 在 commit 后写不出的 `completion_side_effect_failed` ledger 事件），以及 canonical/derived 分歧（各 Plan mirror JSON 或 active `tasks.md` 与权威 `team/tasks.json` 不一致）。
 - Cursor adapter 安装会识别受管旧规则 `.cursor/rules/wildarrangeflow.mdc`，先写入 adapter backup 再移除，并生成当前 `wildarrange.mdc`；Doctor 同时报告尚未迁移的旧规则，避免新旧 alwaysApply 双注入。
 - `src/capabilities/code-intel.mjs`：LSP/typecheck 命令、AST/结构命令、hashline anchor 与注释检查的宿主中立代码智能 gate。
@@ -337,7 +339,7 @@ adapter 专用行为属于 `src/interface/adapters.mjs`、`src/interface/kimi-ad
 - 源文件默认保持 1000 行以内。700+ 行时评估是否超过一个领域职责。
 - CLI、测试与运行时模块直接 import 具体分区 owner，不建立根级 barrel 或兼容 shim。
 - 任何新运行时模块必须列入本架构图与根 `AGENTS.md`；`CLAUDE.md` 只作为宿主发现入口指向根规范，不复制第二份规则。还要登记 `tooling/arch-module-graph/module-file-map.json` 并更新 `docs/product/architecture-overview.html`；运行 `npm run check:arch`。
-- 经 gateway 调用的 capability 目前含 `worker`、`verify`、`scope`、`review`、`acceptance-proof`、`checkpoint`、`command`、`command-safety`、`repository-governance`。`code-intel` 是 `review-gate.mjs` 内 import 的 review 子 capability，非 `invokeCapability` 名。
+- 经 gateway 调用的 capability 目前含 `worker`、`verify`、`scope`、`review`、`acceptance-proof`、`checkpoint`、`command`、`command-safety`、`repository-governance`、`contract-governance-scan`、`contract-governance-apply-card`、`contract-governance-generate-artifacts`。`code-intel` 是 `review-gate.mjs` 内 import 的 review 子 capability，非 `invokeCapability` 名。
 - 目录级 `AGENTS.md` 指引保持附加与局部。目录职责变化时更新最近文件；勿把完整根策略复制到每个文件夹。
 - `test/dependency-boundary.test.mjs` 每次 `npm test` 运行；边界测试失败意味着依赖图被违反，不是应放宽测试。
 - 保留 gate 不变量：verifier、scope、review 与 success criteria 对完成仍为 mandatory。

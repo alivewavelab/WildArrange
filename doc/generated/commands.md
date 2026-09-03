@@ -51,6 +51,9 @@
 | `wildarrange summary` | 生成 workflow 总结 |
 | `wildarrange rules collect [--target src/app.js]` | 收集项目规则上下文 |
 | `wildarrange governance audit [--changed-only] [--force]` | 仓库治理检查 |
+| `wildarrange contracts scan [--from <contract-changes.json>]` | 扫描 Tauri IPC 契约并生成待审核差异卡 |
+| `wildarrange contracts apply-card --card <id> --decision approve|reject --reason "..." --expected-fingerprint <sha256>` | 由开发者批准或拒绝当前契约差异卡 |
+| `wildarrange contracts generate` | 从已批准契约台账生成人类可读总图 |
 | `wildarrange context build [--agent Jiuwei] [--task T001] [--plan <planId>] [--point before_execute]` | 构建指定计划与注入点的 Agent 上下文 |
 | `wildarrange evidence record --task T001 --criterion C001 --status pass --evidence "..."` | 回填成功判据证据 |
 | `wildarrange steer --from <proposal.json>` | 任务变更治理入口 |

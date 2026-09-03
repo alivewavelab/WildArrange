@@ -28,7 +28,7 @@
 </head>
 <body>
 <main>
-  <span class="tag">修订版 V3 · 待确认 · 尚未实现</span>
+  <span class="tag">修订版 V3 · 已确认 · 已实现</span>
   <h1>接口与数据库契约台账</h1>
   <p class="lead">结论：用一份机器台账记录“系统答应外部怎样工作”，由通用核心比较新旧变化；能读懂的技术来源交给按栈发现器，读不懂的由功能设计对话人工申报。LuWu 复用现有交付链守门，不另造一套门禁。</p>
 
@@ -47,7 +47,7 @@
     <div class="arrow">↓</div>
     <section class="step"><h3>通用核心：比较与覆盖报告</h3><p>把发现结果和人工申报统一成记录，与已批准台账比较，同时列出已覆盖、未覆盖和未知区域。</p><div class="plain">不仅列变更，还把这次没有巡检到的盲区写在封面。</div></section>
     <div class="arrow">↓</div>
-    <section class="step"><h3>进入现有交付链</h3><p>执行 <code>delivery-pipeline</code> 的既有 review 步骤时，先经 capability gateway 调用 <code>repository-governance</code> 的契约检查 lane，再把结果信封交给 <code>review-gate</code>，并合入同一个 <code>reviewResult</code>。acceptance-proof 继续只检查这一份 review 证据；不增加独立 gate。</p><div class="plain">还是一个验收窗口；窗口内部先查登记手续，再做代码复核，最后只盖一个验收章。</div></section>
+    <section class="step"><h3>进入现有交付链</h3><p>执行 <code>delivery-pipeline</code> 的既有 review 步骤时，先经 capability gateway 调用 <code>contract-governance</code> 检查，再把结果信封交给 <code>review-gate</code>，并合入同一个 <code>reviewResult</code>。acceptance-proof 继续只检查这一份 review 证据；不增加独立 gate。</p><div class="plain">还是一个验收窗口；窗口内部先查登记手续，再做代码复核，最后只盖一个验收章。</div></section>
     <div class="arrow">↓</div>
     <section class="step"><h3>批准后更新</h3><p>开发者批准后更新机器台账，并重新生成覆盖报告和人类可读 HTML。</p><div class="plain">手续通过后，官方名册和展示大屏一起刷新。</div></section>
   </div>
@@ -58,7 +58,7 @@
     <tbody>
       <tr><td>已批准契约台账</td><td class="path"><code>tooling/contracts/contract-registry.json</code></td><td>长期事实源，只保存契约本体和指向其他台账的 ID。</td><td>不复制模块说明、负责人资料、测试内容或运行日志。</td></tr>
       <tr><td>通用契约核心</td><td class="path"><code>infra + capability gateway</code></td><td>定义 JSON 格式、合并发现/申报、比较差异、生成覆盖报告及退役状态。</td><td>不直接理解 Node、Rust、OpenAPI 或具体数据库。</td></tr>
-      <tr><td>按栈发现器</td><td class="path">首版一个静态登记的 Node ESM 发现器</td><td>只读取一种明确、可机读来源，返回标准记录。</td><td>不猜动态生成、源码字符串或运行时注册。</td></tr>
+      <tr><td>按栈发现器</td><td class="path">首版一个静态登记的 Tauri IPC 发现器</td><td>对照 Rust command、handler 注册与前端 invoke，返回标准记录。</td><td>不猜 SQL 字符串、动态生成或未声明的运行时结构。</td></tr>
       <tr><td>人工申报与差异卡</td><td class="path"><code>.wildarrange/contracts/</code> + Prompt Pack Skill</td><td>治理 Skill 挂在功能规划入口和任务执行前；保存扫描快照、申报及待决策差异。</td><td>未经开发者确认不得进入正式台账。</td></tr>
       <tr><td>覆盖报告与人类视图</td><td class="path"><code>docs/contracts/contract-map.html</code></td><td>由台账生成，展示契约、来源、静态调用方、覆盖范围、未知区域和待决策项。</td><td>不能手改，也不能把“未知”显示成“没有变化”。</td></tr>
     </tbody>
@@ -107,14 +107,14 @@
   <h2>08. 最短落地顺序</h2>
   <div class="grid">
     <section class="card"><h3>第一步：通用核心 + 人工申报 Skill</h3><p>实现契约 JSON、引用字段、差异卡、覆盖状态、生命周期规则和申报入口；数据库契约首版允许完全人工申报。</p><div class="plain">先建官方名册和可靠的人工登记窗口。</div></section>
-    <section class="card"><h3>第二步：一个 Node ESM 发现器</h3><p>只扫描项目内 <code>src/**/*.mjs</code> 的静态命名导出、默认导出和再导出。复用 <code>src/infra/dependency-graph.mjs</code> 的词法 import 图，只能派生“哪个模块可能使用了另一个模块”；除非以后实现导入符号关联，否则不能登记为某个具体导出契约的真实调用方。动态 import 或无法解析的关系仍标记 unknown。它只产出“模块导出契约”，不冒充 HTTP API，也不推断请求字段、数据库结构或业务含义。</p><div class="plain">线路图只能看出 A 店接了 B 店的线，看不出 A 店具体使用了 B 店哪个窗口。</div></section>
+    <section class="card"><h3>第二步：一个 Tauri IPC 发现器</h3><p>首版对照 Rust <code>#[tauri::command]</code>、<code>generate_handler!</code> 注册与前端 <code>invoke("command")</code>。它只证明命令声明、注册和静态调用是否对得上；参数业务含义、运行时动态调用和 Rust 源码字符串中的 SQL 继续标记 unknown 或人工申报。未来 Node / TypeScript ESM、OpenAPI、ts-rs、Migration 等技术栈按同一标准记录逐个增加静态发现器，不预建动态插件框架。</p><div class="plain">先安排一位专门核对 Tauri 前后端窗口的巡检员，以后遇到新楼型再增加对应巡检员。</div></section>
     <section class="card"><h3>第三步：确认基线与覆盖范围</h3><p>开发者确认稳定契约、本次任务负责人、人工申报项和未知区域，生成首版正式台账与 HTML。</p><div class="plain">批准名册时，连“哪些地方还没清点”也一起签字。</div></section>
-    <section class="card"><h3>第四步：接入现有交付链</h3><p>扩展既有 review 步骤：经 gateway 调用 <code>repository-governance</code> 的契约检查 lane，把能力信封传给 <code>review-gate</code> 并合入 <code>reviewResult</code>；失败沿用 review FAIL，acceptance-proof 沿用现有 review 证据检查。只阻断当前任务触及区域的漏登记与未获批准的破坏性变更。</p><div class="plain">监督检查成为原验收单中的一个检查项，失败仍从原窗口退回，不另建第二个大厅。</div></section>
+    <section class="card"><h3>第四步：接入现有交付链</h3><p>扩展既有 review 步骤：经 gateway 调用 <code>contract-governance</code>，把能力信封传给 <code>review-gate</code> 并合入 <code>reviewResult</code>；失败沿用 review FAIL，acceptance-proof 沿用现有 review 证据检查。只阻断当前任务触及区域的漏登记与未获批准的破坏性变更。</p><div class="plain">监督检查成为原验收单中的一个检查项，失败仍从原窗口退回，不另建第二个大厅。</div></section>
   </div>
 
   <h2>09. 本次产品决定</h2>
   <section class="card warn">
-    <p><strong>建议确认：</strong>通用核心保持技术栈中立；首版一个 Node ESM 发现器 + 一个治理 Skill/人工申报入口；契约台账只保存契约本体及外部 ID 引用；中间产物按明确生命周期处理；LuWu 复用现有 review/acceptance-proof。</p>
+    <p><strong>已确认：</strong>通用核心保持技术栈中立；首版一个 Tauri IPC 发现器 + 一个治理 Skill/人工申报入口；未来按实际技术栈逐个增加静态发现器；契约台账只保存契约本体及外部 ID 引用；中间产物按明确生命周期处理；LuWu 复用现有 review/acceptance-proof。</p>
     <p><strong>明确不做：</strong>不承诺全仓自动发现，不删除数据库契约类别，不先建动态插件框架，不复制模块/负责人/验证登记册内容，不新增平行门禁，不把 HTML 当事实源。</p>
     <div class="plain">系统必须同时告诉你“我发现了什么”“我不知道什么”“相关资料去哪里查”。</div>
   </section>

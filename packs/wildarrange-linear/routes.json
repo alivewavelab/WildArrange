@@ -259,6 +259,13 @@
       "purpose": "补齐入口、步骤、状态、失败路径和恢复路径。"
     },
     {
+      "name": "contract-governance",
+      "signals": ["接口", "API", "事件", "Tauri", "invoke", "数据库", "表", "字段", "schema", "migration", "契约"],
+      "stage": "clarify",
+      "risk": "high",
+      "purpose": "在计划生成前申报接口、事件和数据库变化，补齐兼容、迁移、回滚、验证引用与未知项。"
+    },
+    {
       "name": "design-acceptance",
       "signals": ["验收", "测试", "边界", "异常", "空状态", "失败", "回归", "证据", "criteria"],
       "stage": "ideate",

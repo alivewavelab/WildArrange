@@ -416,6 +416,14 @@ node ./bin/wildarrange.mjs archivist run --text "build a web TODO app" --stage p
 
 When `archivistRouter.enabled` is `true`, `SessionStart`, `UserPromptSubmit`, and `PostCompact` hooks trigger ArchivistRouter automatically. Without a DeepSeek key it falls back to deterministic routing and does not block the main flow.
 
+The first contract-governance discoverer reconciles Tauri Rust commands, handler registration, and frontend `invoke` calls. SQL embedded in Rust source is reported for manual declaration rather than claimed as scanned. Every diff card requires an explicit developer decision, while LuWu consumes the evidence inside the existing review step instead of creating a parallel gate:
+
+```bash
+node ./bin/wildarrange.mjs contracts scan
+node ./bin/wildarrange.mjs contracts apply-card --card <id> --decision approve --reason "baseline confirmed" --expected-fingerprint <sha256>
+node ./bin/wildarrange.mjs contracts generate
+```
+
 Cross-session memory is written to `.wildarrange/memory/digests/`. Task completion, parallel admission completion, `SessionStart`, and `PostCompact` emit structured digests used to recover progress, decisions, artifacts, implementation notes, and pitfalls.
 
 Routing suggestions remain review-only until explicitly resolved:

@@ -263,6 +263,7 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
         "review-scope-tradeoff",
         "research-domain-benchmark",
         "inspect-codebase",
+        "contract-governance",
         "research-external-docs"
       ],
       rules: { mode: "static" },

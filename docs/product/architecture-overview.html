@@ -3853,6 +3853,7 @@ const D = {
     { id: "worker", p: "src/capabilities/worker.mjs", r: "执行任务，不自证完成", io: "任务说明 → 工作完成声明" },
     { id: "verify", p: "src/capabilities/verify.mjs", r: "独立运行验证命令", io: "验证命令 → 通过或失败证据" },
     { id: "review", p: "src/capabilities/review-gate.mjs", r: "白泽独立复核门", io: "候选成果 → 复核结论" },
+    { id: "contracts", p: "src/capabilities/contract-governance.mjs", r: "契约治理原子能力", io: "扫描、人工申报与差异卡 → LuWu 复核证据" },
     { id: "proof", p: "src/capabilities/acceptance-proof.mjs", r: "写入验收证明链", io: "质量门证据 → 验收证明" },
     { id: "checkpoint", p: "src/capabilities/checkpoint.mjs", r: "最终完成状态落盘", io: "验收证明 → 完成检查点" }
   ] },
@@ -3862,6 +3863,7 @@ const D = {
     { id: "store", p: "src/infra/runtime-store.mjs", r: "路径、JSON 原子写与 hash 原语", io: "writeJsonAtomic(filePath, value) → 落盘" },
     { id: "ledger", p: "src/infra/ledger.mjs", r: "hash 链证据账本", io: "appendLedger(rootDir, event) → 账本条目" },
     { id: "gate-arming", p: "src/infra/gate-arming.mjs", r: "门未武装黄灯评估", io: "evaluateGateArming({ config, tasks }) → { armed, issues }" }
+    ,{ id: "contracts", p: "src/infra/contract-governance.mjs", r: "接口与数据库契约事实底座", io: "Tauri IPC 与人工申报 → 台账、差异和覆盖报告" }
   ], focusFiles: [
     { id: "bootstrap", p: "src/infra/runtime-bootstrap.mjs", r: "按固定顺序初始化运行时", io: "项目根目录 → 初始运行态", to: [{ t: "ledger", io: "初始化事件 → 账本" }] },
     { id: "store", p: "src/infra/runtime-store.mjs", r: "路径、原子写与 hash 原语", io: "运行时数据 → 原子文件" },

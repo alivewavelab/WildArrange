@@ -112,7 +112,6 @@ export function normalizeTask(task, index, defaults = {}, options = {}) {
   const taskWritablePaths = normalizeStringArray(task.writable_paths ?? task.writablePaths ?? [], `task ${id} writable_paths`);
   const writablePaths = uniqueStrings([...(defaults.writable_paths || []), ...taskWritablePaths]);
   const taskSkills = normalizeSkillArray(task.skills ?? [], `task ${id} skills`);
-  const skills = uniqueStrings([...(defaults.skills || []), ...taskSkills]);
   const successCriteria = normalizeSuccessCriteria(task.successCriteria ?? task.success_criteria, id, subject, verifyCommands);
   const governanceWarnings = detectTaskGovernanceWarnings({ workerCommand: task.worker_command || task.workerCommand || null, verifyCommands, writablePaths });
   const workType = normalizeWorkType(task.workType ?? task.work_type ?? inferWorkType(`${subject}\n${task.description || ""}`));
@@ -123,6 +122,12 @@ export function normalizeTask(task, index, defaults = {}, options = {}) {
   const createdAt = task.createdAt || nowIso();
   const explicitOwner = normalizeOptionalText(task.owner, `task ${id} owner`);
   const owner = normalizeTaskOwner(explicitOwner || DEFAULT_EXECUTOR_AGENT, id);
+  const contractChanges = normalizeContractChanges(task.contractChanges ?? task.contract_changes, id, owner);
+  const skills = uniqueStrings([
+    ...(defaults.skills || []),
+    ...taskSkills,
+    ...(contractChanges.declared ? ["contract-governance"] : []),
+  ]);
 
   return {
     id,
@@ -150,6 +155,7 @@ export function normalizeTask(task, index, defaults = {}, options = {}) {
     governanceWarnings,
     skills,
     route_decision: task.route_decision || null,
+    contractChanges,
     evidence: Array.isArray(task.evidence) ? task.evidence : [],
     history: Array.isArray(task.history) ? task.history : [{ at: createdAt, event: "created", status: validateStatus(requestedStatus), source }],
     createdAt,
@@ -216,6 +222,46 @@ function normalizeTaskRequest(value, subject, source) {
     source: normalizeTaskSource(value.source || source),
     evidenceRefs: normalizeStringArray(value.evidenceRefs ?? value.evidence_refs ?? [], "task request evidenceRefs"),
   };
+}
+
+export function normalizeContractChanges(value, taskId, owner) {
+  if (value === undefined || value === null) return { declared: false, items: [] };
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`task ${taskId} contractChanges must be an object`);
+  }
+  const rawItems = value.items ?? [];
+  if (!Array.isArray(rawItems)) throw new Error(`task ${taskId} contractChanges.items must be an array`);
+  const items = rawItems.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`task ${taskId} contractChanges.items[${index}] must be an object`);
+    }
+    const action = String(item.action || "").trim().toLowerCase();
+    if (!new Set(["add", "modify", "deprecate", "remove"]).has(action)) {
+      throw new Error(`task ${taskId} contractChanges.items[${index}].action is invalid`);
+    }
+    const contractId = String(item.contractId ?? item.id ?? "").trim();
+    if (!/^[A-Za-z0-9][A-Za-z0-9:._/-]{0,199}$/.test(contractId)) {
+      throw new Error(`task ${taskId} contractChanges.items[${index}].contractId is invalid`);
+    }
+    const summary = String(item.summary || "").trim();
+    if (!summary) throw new Error(`task ${taskId} contractChanges.items[${index}].summary is required`);
+    return {
+      contractId,
+      kind: String(item.kind || "manual").trim(),
+      action,
+      summary,
+      compatibility: String(item.compatibility || "").trim(),
+      migration: String(item.migration || "").trim(),
+      rollback: String(item.rollback || "").trim(),
+      approvalRef: String(item.approvalRef || "").trim(),
+      moduleRef: item.moduleRef ? String(item.moduleRef).trim() : null,
+      ownerRef: item.ownerRef ? String(item.ownerRef).trim() : owner,
+      verificationRefs: normalizeStringArray(item.verificationRefs ?? [], `task ${taskId} contractChanges.items[${index}].verificationRefs`),
+      sourcePaths: normalizeStringArray(item.sourcePaths ?? [], `task ${taskId} contractChanges.items[${index}].sourcePaths`),
+    };
+  });
+  const declared = value.declared === true || items.length > 0;
+  return { declared, items };
 }
 
 function normalizeTaskOwner(value, taskId) {

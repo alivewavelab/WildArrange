@@ -405,6 +405,14 @@ node ./bin/wildarrange.mjs parallel run --task T001 --isolation git-worktree --c
 node ./bin/wildarrange.mjs parallel admit --run <runId> --task T001
 ```
 
+接口与数据库契约治理首版自动对照 Tauri Rust command、handler 注册和前端 `invoke`；Rust 源码字符串中的 SQL 只标记为需要人工申报，不伪装成已扫描。扫描生成的差异必须由开发者显式批准或拒绝，LuWu 在既有 review 内检查当前任务触及的契约，不新增平行门禁：
+
+```bash
+node ./bin/wildarrange.mjs contracts scan
+node ./bin/wildarrange.mjs contracts apply-card --card <id> --decision approve --reason "baseline confirmed" --expected-fingerprint <sha256>
+node ./bin/wildarrange.mjs contracts generate
+```
+
 ## ArchivistRouter
 
 ArchivistRouter 是“档案员 + 任务路由”节点。它只读取清洗后的结论包，不摄入代码块、raw diff 或完整命令输出。

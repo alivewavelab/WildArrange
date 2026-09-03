@@ -250,6 +250,52 @@
       ]
     },
     {
+      "name": "contract_governance_scan",
+      "layer": "project_governance",
+      "status": "implemented",
+      "command": "node ./bin/wildarrange.mjs contracts scan [--from <contract-changes.json>]",
+      "purpose": "使用首版 Tauri IPC 发现器扫描 Rust command、handler 注册与前端 invoke，生成覆盖报告和待审核差异卡；SQL 字符串只标记人工申报。",
+      "reads": [
+        "client/src-tauri/src/**/*.rs",
+        "client/src/**/*.{ts,tsx,js,jsx}",
+        "tooling/contracts/contract-registry.json"
+      ],
+      "writes": [
+        ".wildarrange/contracts/current-scan.json",
+        ".wildarrange/contracts/cards/**",
+        ".wildarrange/contracts/archive/snapshots/**"
+      ]
+    },
+    {
+      "name": "contract_governance_apply_card",
+      "layer": "project_governance",
+      "status": "implemented",
+      "command": "node ./bin/wildarrange.mjs contracts apply-card --card <id> --decision approve|reject --reason <text> --expected-fingerprint <sha256>",
+      "purpose": "由开发者显式批准或拒绝一张契约差异卡；批准后更新正式台账，所有决定均归档。",
+      "reads": [
+        ".wildarrange/contracts/cards/**",
+        "tooling/contracts/contract-registry.json"
+      ],
+      "writes": [
+        "tooling/contracts/contract-registry.json",
+        ".wildarrange/contracts/archive/cards/**"
+      ]
+    },
+    {
+      "name": "contract_governance_generate",
+      "layer": "project_governance",
+      "status": "implemented",
+      "command": "node ./bin/wildarrange.mjs contracts generate",
+      "purpose": "从已批准机器台账生成人类可读契约总图，并展示未知区域与人工申报项。",
+      "reads": [
+        "tooling/contracts/contract-registry.json",
+        ".wildarrange/contracts/current-scan.json"
+      ],
+      "writes": [
+        "docs/contracts/contract-map.html"
+      ]
+    },
+    {
       "name": "wildarrange_context_build",
       "layer": "context_injection",
       "status": "implemented",

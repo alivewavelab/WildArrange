@@ -1,0 +1,4 @@
+interface:
+  display_name: "契约治理"
+  short_description: "在功能规划中申报接口、事件和数据库变化并检查兼容与迁移"
+  default_prompt: "使用 $contract-governance 梳理本次功能涉及的接口、事件和数据库变化。"

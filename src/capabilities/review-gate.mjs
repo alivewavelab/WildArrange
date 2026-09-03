@@ -27,6 +27,7 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
   const extraPatterns = compileCommandSafetyPatterns(config);
   const reviewCommandResults = [];
   const standardsCommandResults = [];
+  const contractGovernance = evidence.contractGovernance || { status: "warn", summary: "contract governance evidence unavailable", findings: [] };
 
   for (const command of task.review_commands || []) {
     const result = await runCommand(command, rootDir, 120_000, { extraPatterns });
@@ -75,6 +76,11 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
         ? `${criteria.passed}/${criteria.total} success criteria passed`
         : `criteria not satisfied: pass=${criteria.passed}, pending=${criteria.pending}, fail=${criteria.failed}`,
       fixBy: "补齐 criterion evidence，或修复实现后重新运行 verifier；不要删除 successCriteria。",
+    }),
+    reviewLane("contract_governance", "LuWu", contractGovernance.status === "pass", {
+      statusOverride: contractGovernance.status === "warn" ? "warn" : undefined,
+      summary: contractGovernance.summary,
+      fixBy: "运行 contracts scan，补齐 task.contractChanges，并由开发者审核差异卡后重试。",
     }),
     reviewLane("project_rules_context", "BaiZe", rulesContext.matched > 0, {
       statusOverride: rulesContext.matched > 0 ? undefined : "warn",
@@ -181,6 +187,7 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
     standardsCommandResults,
     successCriteria: criteria,
     rulesContextPath: rulesContext.reportMdPath,
+    contractGovernance,
   };
 }
 

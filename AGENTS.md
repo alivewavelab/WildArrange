@@ -120,6 +120,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | **capabilities/**（原子能力 + gateway，只依赖 infra；orchestration/ai 只能经 `gateway.mjs` 调用） |  |
 | `src/capabilities/AGENTS.md`                                 | 原子能力、网关信封和失败语义约束 |
 | `src/capabilities/gateway.mjs`                                | 能力网关：静态注册表 + 统一结果信封（capability/status/evidence/sideEffect/duration_ms/cost/error） |
+| `src/capabilities/contract-governance.mjs`                    | 接口与数据库契约治理原子能力：scan / apply-card / generate-artifacts；首版接入 Tauri IPC 发现器 |
 | `src/capabilities/verify.mjs`                                 | verifier                                       |
 | `src/capabilities/scope-guard.mjs`                             | scope guard、realpath 范围校验                      |
 | `src/capabilities/worker.mjs`                                 | Worker 执行                                      |
@@ -146,6 +147,7 @@ init -> plan -> task -> worker -> verifier -> retry/checkpoint -> ledger
 | `src/infra/gate-arming.mjs` | 门未武装黄灯地板：trivial/缺失 verify、同义反复 review、无 required 质量门的只读评估，status 常驻携带 |
 | `src/infra/dependency-graph.mjs` | 对抗加固的词法 import 扫描器（边界测试与 `wildarrange impact` 共用）、反向波及分析 `computeImpact`、分区测试选择 `computeZoneTests`/`listRepoTests`（供 `wildarrange test`） |
 | `src/infra/security.mjs`                                      | config hash 基线、运行态备份、归档精确恢复包、备份列表与一键恢复、关键状态完整性检查 |
+| `src/infra/contract-governance.mjs`                           | 技术栈中立的契约台账、差异卡、覆盖报告、快照生命周期与静态发现器登记；首版发现 Tauri IPC，未知来源降级人工申报 |
 | `src/infra/review-findings.mjs`                                | LSP / AST / hashline / 注释检查等质量发现              |
 | `src/infra/llm-provider.mjs`                                   | OpenAI-compatible LLM provider 与可选 LLM review |
 | `src/infra/agent-spawn.mjs`                                    | Codex / Cursor / 自定义命令型子 Agent spawn 模板渲染       |

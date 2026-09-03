@@ -20,6 +20,12 @@ import { runWorker } from "./worker.mjs";
 import { runReviewGate } from "./review-gate.mjs";
 import { writeAcceptanceProof } from "./acceptance-proof.mjs";
 import { runRepositoryGovernanceAudit } from "./repository-governance.mjs";
+import {
+  applyContractGovernanceCard,
+  generateContractGovernanceArtifacts,
+  runContractGovernanceReview,
+  scanContractGovernance,
+} from "./contract-governance.mjs";
 import { evaluateCommandSafety } from "../infra/command-safety.mjs";
 
 async function adaptVerify(ctx) {
@@ -37,8 +43,24 @@ async function adaptScope(ctx) {
 }
 
 async function adaptReview(ctx) {
-  const raw = await runReviewGate(ctx.rootDir, ctx.task, ctx.evidence || {});
+  const contractGovernance = await runContractGovernanceReview(ctx.rootDir, ctx.task, ctx.evidence || {});
+  const raw = await runReviewGate(ctx.rootDir, ctx.task, { ...(ctx.evidence || {}), contractGovernance });
   return { status: raw.pass ? "pass" : "fail", evidence: raw, sideEffect: "state_written" };
+}
+
+async function adaptContractScan(ctx) {
+  const raw = await scanContractGovernance(ctx.rootDir, ctx.options || {});
+  return { status: "pass", evidence: raw, sideEffect: ctx.options?.write === false ? "none" : "state_written" };
+}
+
+async function adaptContractApplyCard(ctx) {
+  const raw = await applyContractGovernanceCard(ctx.rootDir, ctx.options || {});
+  return { status: new Set(["approved", "rejected"]).has(raw.status) ? "pass" : "fail", evidence: raw, sideEffect: "files_changed" };
+}
+
+async function adaptContractGenerate(ctx) {
+  const raw = await generateContractGovernanceArtifacts(ctx.rootDir, ctx.options || {});
+  return { status: "pass", evidence: raw, sideEffect: "files_changed" };
 }
 
 async function adaptAcceptanceProof(ctx) {
@@ -94,6 +116,9 @@ const CAPABILITIES = {
   command: adaptCommand,
   "command-safety": adaptCommandSafety,
   "repository-governance": adaptRepositoryGovernance,
+  "contract-governance-scan": adaptContractScan,
+  "contract-governance-apply-card": adaptContractApplyCard,
+  "contract-governance-generate-artifacts": adaptContractGenerate,
 };
 
 export function listRegisteredCapabilities() {
