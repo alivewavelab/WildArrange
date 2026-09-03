@@ -32,6 +32,7 @@ export async function resolveInjectionPoint(rootDir, name, variables = {}, optio
     stage: typeof options.stage === "string" ? options.stage : "",
     agent: variables.agent || "",
     taskSkills,
+    routeSkills: name === "user_prompt_submit" ? normalizeStringList(options.routeSkills, []) : [],
   });
   const skills = [];
   const missingSkills = [];
@@ -89,6 +90,9 @@ async function selectPointSkills(rootDir, config, point, context) {
   const taskSkills = requestedTaskSkills.slice(0, maxSkills);
   const taskOverflow = requestedTaskSkills.slice(maxSkills)
     .map((name) => ({ name, reason: "task_binding_over_max" }));
+  const routeSkills = normalizeStringList(context.routeSkills, [])
+    .filter((skill) => pointSkills.includes(skill))
+    .slice(0, maxSkills);
   const configured = [...new Set([...pointSkills, ...agentSkills, ...taskSkills])];
   const enabled = dynamicConfig.enabled !== false && config.skillMatcher?.enabled !== false;
   const staticReport = {
@@ -120,6 +124,7 @@ async function selectPointSkills(rootDir, config, point, context) {
     ...normalizeStringList(dynamicConfig.alwaysMount, DEFAULT_DYNAMIC_ALWAYS_MOUNT),
     ...agentSkills,
     ...taskSkills,
+    ...routeSkills,
   ])];
   // 只认与请求内容相关的信号（关键词/路由/阶段/名称命中）；
   // agent 身份加分对每次请求都恒定，等于回到静态挂载，不能作为按需依据。
@@ -167,6 +172,7 @@ async function selectPointSkills(rootDir, config, point, context) {
       stage: context.stage || null,
       bound: agentSkills,
       taskBound: taskSkills,
+      routeBound: routeSkills,
       mounted: finalMounted,
       referenced,
       suggestions,

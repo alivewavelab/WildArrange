@@ -1,5 +1,9 @@
 import { writeFile } from "node:fs/promises";
-import { DEFAULT_EXECUTOR_AGENT } from "../infra/agent-registry.mjs";
+import {
+  COMMAND_WORKER_AGENTS,
+  DEFAULT_EXECUTOR_AGENT,
+  normalizeAgentKey,
+} from "../infra/agent-registry.mjs";
 import {
   STATE_VERSION,
   TASK_PRIORITIES,
@@ -21,7 +25,11 @@ import {
 import { appendLedger } from "../infra/ledger.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
-import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
+import {
+  assertFeatureDesignPlanBinding,
+  bindFeatureDesignPlan,
+  writeSnapshot,
+} from "../infra/runtime-snapshot.mjs";
 import { loadRoutesConfig, resolveRouteDecision } from "../infra/route-table.mjs";
 import { isPossibleNoopTask, isTrivialCommand } from "../infra/task-predicates.mjs";
 
@@ -41,6 +49,9 @@ export function normalizePlan(rawPlan) {
     id: rawPlan.id || createWorkId("plan"),
     title: rawPlan.title,
     objective: rawPlan.objective || rawPlan.title,
+    generated_by: normalizeOptionalText(rawPlan.generated_by ?? rawPlan.generatedBy, "plan.generated_by"),
+    feature_design_ref: normalizeOptionalText(rawPlan.feature_design_ref ?? rawPlan.featureDesignRef, "plan.feature_design_ref"),
+    request_summary: normalizeOptionalText(rawPlan.request_summary ?? rawPlan.requestSummary, "plan.request_summary"),
     defaults,
     createdAt: rawPlan.createdAt || nowIso(),
     updatedAt: nowIso(),
@@ -110,6 +121,8 @@ export function normalizeTask(task, index, defaults = {}, options = {}) {
   const parentTaskRef = normalizeOptionalText(task.parentTaskRef ?? task.parent_task_ref, `task ${id} parentTaskRef`);
   const request = normalizeTaskRequest(task.request, subject, source);
   const createdAt = task.createdAt || nowIso();
+  const explicitOwner = normalizeOptionalText(task.owner, `task ${id} owner`);
+  const owner = normalizeTaskOwner(explicitOwner || DEFAULT_EXECUTOR_AGENT, id);
 
   return {
     id,
@@ -123,7 +136,8 @@ export function normalizeTask(task, index, defaults = {}, options = {}) {
     parentTaskRef,
     request,
     status: validateStatus(requestedStatus),
-    owner: task.owner || DEFAULT_EXECUTOR_AGENT,
+    owner,
+    owner_source: explicitOwner ? "explicit" : "default",
     attempts: Number.isInteger(task.attempts) ? task.attempts : 0,
     maxAttempts: Number.isInteger(task.maxAttempts) ? task.maxAttempts : 3,
     blockedBy: normalizeStringArray(task.blockedBy ?? [], `task ${id} blockedBy`),
@@ -202,6 +216,12 @@ function normalizeTaskRequest(value, subject, source) {
     source: normalizeTaskSource(value.source || source),
     evidenceRefs: normalizeStringArray(value.evidenceRefs ?? value.evidence_refs ?? [], "task request evidenceRefs"),
   };
+}
+
+function normalizeTaskOwner(value, taskId) {
+  const normalized = normalizeAgentKey(value);
+  if (!normalized) throw new Error(`task ${taskId} owner must be a non-empty agent name`);
+  return normalized;
 }
 
 function detectTaskGovernanceWarnings({ workerCommand, verifyCommands, writablePaths }) {
@@ -366,7 +386,9 @@ async function importPlanUnlocked(rootDir, planPath) {
   const rawPlan = await readJson(planPath);
   const plan = normalizePlan(rawPlan);
   await enrichPlanWithRoutes(rootDir, plan);
+  validateSemanticGeneratedPlan(plan);
   validatePlanImportQuality(plan);
+  const featureDesignGate = await assertFeatureDesignPlanBinding(rootDir, plan);
   const existingLedger = await loadTaskLedger(rootDir);
   const taskLedger = mergePlanIntoTaskLedger(existingLedger, plan);
   const targetPath = resolveWildArrangePath(rootDir, "plans", `${plan.id}.json`);
@@ -375,7 +397,7 @@ async function importPlanUnlocked(rootDir, planPath) {
   await writeJsonAtomic(resolveWildArrangePath(rootDir, "team", "tasks.json"), taskLedger);
 
   const { config } = await loadWildArrangeConfig(rootDir);
-  const approvalRequired = config?.planApproval?.required === true;
+  const approvalRequired = plan.generated_by === "host_semantic" || config?.planApproval?.required === true;
   const work = await readJson(resolveWildArrangePath(rootDir, "work.json"), {
     version: STATE_VERSION,
     workId: createWorkId(),
@@ -394,8 +416,28 @@ async function importPlanUnlocked(rootDir, planPath) {
     },
     updatedAt: nowIso(),
   });
-  await appendLedger(rootDir, { type: "plan_imported", planId: plan.id, taskCount: plan.tasks.length, approvalRequired });
+  await appendLedger(rootDir, {
+    type: "plan_imported",
+    planId: plan.id,
+    taskCount: plan.tasks.length,
+    generatedBy: plan.generated_by,
+    approvalRequired,
+  });
+  await bindFeatureDesignPlan(rootDir, featureDesignGate, plan.id);
   await writeSnapshot(rootDir, "planned", { planId: plan.id });
+  return plan;
+}
+
+export function validateSemanticGeneratedPlan(plan) {
+  if (plan.generated_by !== "host_semantic") return plan;
+  const invalidOwners = plan.tasks
+    .filter((task) => task.owner_source !== "explicit" || !COMMAND_WORKER_AGENTS.includes(task.owner))
+    .map((task) => task.id);
+  if (invalidOwners.length > 0) {
+    throw new Error(
+      `semantic generated plan ${plan.id} requires explicit command-worker task.owner from ${COMMAND_WORKER_AGENTS.join(", ")} for: ${invalidOwners.join(", ")}`,
+    );
+  }
   return plan;
 }
 

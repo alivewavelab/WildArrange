@@ -70,4 +70,7 @@ test("renderHelp core view is a strict subset of the full view", () => {
   assert.ok(core.length < all.length);
   assert.ok(all.includes("Plan schema"));
   assert.ok(core.includes("Plan schema"), "plan schema 对新手常驻");
+  assert.match(core, /"generated_by": "host_semantic"/);
+  assert.doesNotMatch(core, /"generated_by": "host_semantic \(/);
+  assert.match(core, /"owner": "Jiuwei\|ZhuRong"/);
 });

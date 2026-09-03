@@ -1941,6 +1941,12 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "io": "path-match.mjs",
               "p": "src/infra/path-match.mjs",
               "m": "infra"
+            },
+            {
+              "t": "agent-registry.mjs",
+              "io": "agent-registry.mjs",
+              "p": "src/infra/agent-registry.mjs",
+              "m": "infra"
             }
           ]
         },
@@ -2317,6 +2323,12 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "io": "path-match.mjs",
               "p": "src/infra/path-match.mjs",
               "m": "infra"
+            },
+            {
+              "t": "agent-registry.mjs",
+              "io": "agent-registry.mjs",
+              "p": "src/infra/agent-registry.mjs",
+              "m": "infra"
             }
           ]
         },
@@ -2666,7 +2678,7 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
           "id": "src-ai-routing-mjs",
           "p": "src/ai/routing.mjs",
           "r": "routing.mjs",
-          "io": "routeRequest(rootDir, input) → 导出；writeDailyRoutingReview(rootDir, options = {) → 导出",
+          "io": "buildPlanDraftDirective(routeResult, options) → 导出；routeRequest(rootDir, input) → 导出",
           "extTo": [
             {
               "t": "agent-registry.mjs",
@@ -2825,6 +2837,12 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "orchestration"
             },
             {
+              "t": "plan-state.mjs",
+              "io": "plan-state.mjs",
+              "p": "src/orchestration/plan-state.mjs",
+              "m": "orchestration"
+            },
+            {
               "t": "hook-result-gate.mjs",
               "io": "hook-result-gate.mjs",
               "p": "src/infra/hook-result-gate.mjs",
@@ -2892,7 +2910,7 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
           "id": "src-ai-routing-mjs",
           "p": "src/ai/routing.mjs",
           "r": "routing.mjs",
-          "io": "routeRequest(rootDir, input) → 导出；writeDailyRoutingReview(rootDir, options = {) → 导出",
+          "io": "buildPlanDraftDirective(routeResult, options) → 导出；routeRequest(rootDir, input) → 导出",
           "extTo": [
             {
               "t": "agent-registry.mjs",
@@ -3180,6 +3198,12 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "t": "task-board.mjs",
               "io": "task-board.mjs",
               "p": "src/orchestration/task-board.mjs",
+              "m": "orchestration"
+            },
+            {
+              "t": "plan-state.mjs",
+              "io": "plan-state.mjs",
+              "p": "src/orchestration/plan-state.mjs",
               "m": "orchestration"
             },
             {
@@ -3785,11 +3809,11 @@ const D = {
     { id: "dir", p: "src/interface/", r: "交互区全部实现", io: "宿主请求 → 安全交互" },
     { id: "help", p: "src/interface/cli-help.mjs", r: "CLI 帮助的单一事实源", io: "renderHelp({ all }) → 帮助文本" },
     { id: "dashboard", p: "src/interface/dashboard.mjs", r: "启动本地 Dashboard", io: "startDashboardServer(rootDir, options) → 本地服务" },
-    { id: "adapters", p: "src/interface/adapters.mjs", r: "安装与恢复宿主适配器", io: "installAdapter(rootDir, options) → 安装结果" },
+    { id: "adapters", p: "src/interface/adapters.mjs", r: "安装宿主适配器与对话计划入口", io: "安装选项 → Hook、快捷命令与计划生成说明" },
     { id: "project-init", p: "src/interface/project-init.mjs", r: "非覆盖式补建项目治理文档", io: "initProjectDocuments(rootDir, options) → 创建与保留清单" }
   ], focusFiles: [
     { id: "dashboard", p: "src/interface/dashboard.mjs", r: "本地面板与安全网络边界", io: "网络请求 → 状态与操作结果", extTo: [{ t: "linear-runtime.mjs", p: "src/orchestration/linear-runtime.mjs", m: "流程编排层", io: "请求运行下一项任务" }] },
-    { id: "adapters", p: "src/interface/adapters.mjs", r: "开发宿主适配", io: "安装选项 → 项目级适配器", extTo: [{ t: "runtime-bootstrap.mjs", p: "src/infra/runtime-bootstrap.mjs", m: "可信基础设施层", io: "安装前初始化运行环境" }] },
+    { id: "adapters", p: "src/interface/adapters.mjs", r: "开发宿主适配与计划快捷入口", io: "安装选项 → 项目级适配器和对话生成计划提示", extTo: [{ t: "runtime-bootstrap.mjs", p: "src/infra/runtime-bootstrap.mjs", m: "可信基础设施层", io: "安装前初始化运行环境" }] },
     { id: "project-init", p: "src/interface/project-init.mjs", r: "项目治理文档初始化", io: "通用模板与用户选项 → 不覆盖的项目文档", extTo: [{ t: "ledger.mjs", p: "src/infra/ledger.mjs", m: "可信基础设施层", io: "记录创建与保留结果" }] },
     { id: "doctor", p: "src/interface/doctor.mjs", r: "一键体检与下一步建议", io: "项目状态 → 分项诊断", extTo: [{ t: "security.mjs", p: "src/infra/security.mjs", m: "可信基础设施层", io: "检查关键状态是否完整" }] },
     { id: "decisions", p: "src/interface/decisions.mjs", r: "只读决策投影", io: "决策日志 → 人话审查视图", extTo: [{ t: "decision-log.mjs", p: "src/infra/decision-log.mjs", m: "可信基础设施层", io: "读取可信决策记录" }] }
@@ -3800,7 +3824,7 @@ const D = {
     { id: "parallel", p: "src/orchestration/parallel-runtime.mjs", r: "命令型子 Agent 隔离运行", io: "runParallelAgents(rootDir, options) → run" },
     { id: "admission", p: "src/orchestration/admission.mjs", r: "子 Agent 成果集成事务", io: "admitParallelAgentResult(rootDir, options) → 集成结果" }
   ], focusFiles: [
-    { id: "plan", p: "src/orchestration/plan-state.mjs", r: "计划导入与任务状态", io: "计划文件 → 可运行任务" },
+    { id: "plan", p: "src/orchestration/plan-state.mjs", r: "计划导入、command-worker 负责人校验与批准状态", io: "计划草稿 → 带 Jiuwei/ZhuRong owner 的待确认或可运行任务" },
     { id: "linear", p: "src/orchestration/linear-runtime.mjs", r: "线性任务主循环", io: "任务状态 → 下一步动作", to: [{ t: "plan", io: "读取任务状态" }, { t: "delivery", io: "工作完成声明进入交付流水线" }] },
     { id: "parallel", p: "src/orchestration/parallel-runtime.mjs", r: "隔离运行命令型子智能体", io: "并行任务 → 候选成果", to: [{ t: "admission", io: "把候选结果送去合入" }] },
     { id: "admission", p: "src/orchestration/admission.mjs", r: "成果合入或安全回滚事务", io: "候选树与基线 → 集成结果", to: [{ t: "delivery", io: "候选成果 → 同一质量门" }] },
@@ -3810,13 +3834,13 @@ const D = {
   "ai": { name: "AI（策略与语境）", plain: "做路由、上下文注入、Skill 匹配和异步审查", role: "AI 决策与建议", inn: "请求与清洗上下文", out: "路由、注入或审查建议", status: "已通", files: [
     { id: "dir", p: "src/ai/", r: "AI 策略区全部实现", io: "请求与语境 → 决策建议" },
     { id: "routing", p: "src/ai/routing.mjs", r: "确定性路由与语义影子", io: "routeRequest(rootDir, input) → 路由决策" },
-    { id: "hooks", p: "src/ai/hooks.mjs", r: "宿主生命周期注入与范围守卫", io: "preToolUseGuard(rootDir, input) → 放行结果" },
+    { id: "hooks", p: "src/ai/hooks.mjs", r: "宿主计划生成注入与范围守卫", io: "用户对话或工具事件 → 计划生成指令、放行或阻断" },
     { id: "suspicion", p: "src/ai/suspicion-review.mjs", r: "对可疑决策做异步复核", io: "runSuspicionReview(rootDir, options) → 审查报告" }
   ], focusFiles: [
     { id: "routing", p: "src/ai/routing.mjs", r: "确定性路由与语义影子", io: "请求 → 可审计路由决策" },
     { id: "injection", p: "src/ai/injection.mjs", r: "按预算装载上下文", io: "阶段与规则 → 注入内容" },
     { id: "context", p: "src/ai/context.mjs", r: "构造与恢复智能体上下文", io: "任务状态 → 智能体语境", to: [{ t: "injection", io: "按阶段选择注入位置" }] },
-    { id: "hooks", p: "src/ai/hooks.mjs", r: "宿主生命周期守卫", io: "工具事件 → 放行或阻断", to: [{ t: "routing", io: "判断请求归属" }, { t: "context", io: "恢复任务语境" }, { t: "injection", io: "选择内容注入位置" }], extTo: [{ t: "gateway.mjs", p: "src/capabilities/gateway.mjs", m: "原子能力层", io: "通过网关执行受控动作" }] },
+    { id: "hooks", p: "src/ai/hooks.mjs", r: "宿主计划生成与工具范围守卫", io: "对话与工具事件 → 计划草稿指令、Shell 拒绝或范围放行", to: [{ t: "routing", io: "判断是否需要形成计划" }, { t: "context", io: "按 task.owner 恢复任务语境" }, { t: "injection", io: "选择内容注入位置" }], extTo: [{ t: "gateway.mjs", p: "src/capabilities/gateway.mjs", m: "原子能力层", io: "通过网关执行受控动作" }] },
     { id: "skill", p: "src/ai/skill-matcher.mjs", r: "能力包匹配与模型变体", io: "文本与阶段 → 能力包建议" }
   ] },
   "capabilities": { name: "Capabilities（原子能力）", plain: "把工作、验证、审查和 checkpoint 包成统一能力", role: "可独立验证的原子操作", inn: "能力名与执行上下文", out: "状态、证据、副作用与错误", status: "已通", files: [

@@ -128,7 +128,7 @@ function inferAgentSkillBoosts(agent) {
   if (agent === "Jiuwei") return ["start-work", "run-linear-delivery", "review-work"];
   if (agent === "ZhuRong") return ["programming", "debugging", "refactor"];
   if (agent === "BaiZe") return ["review-work", "review-plan-risk", "review-plan-readiness", "design-acceptance"];
-  if (agent === "DiJiang") return ["clarify-feature-design", "inspect-codebase", "research-external-docs", "review-product-intent", "design-acceptance", "review-plan-readiness"];
+  if (agent === "DiJiang") return ["inspect-codebase", "research-external-docs", "review-product-intent", "design-acceptance", "review-plan-readiness"];
   if (agent === "LuWu") return ["repository-governance", "init-deep", "pre-publish-review", "remove-ai-slops"];
   return [];
 }

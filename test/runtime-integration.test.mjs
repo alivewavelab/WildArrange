@@ -311,6 +311,7 @@ test("task-bound Skills mount through the public execution hook and budgeted loa
         id: "T001",
         subject: "Prepare a release receipt",
         description: "Use the task-bound workflow.",
+        owner: "ZhuRong",
         skills: ["publish", "missing-task-skill", "debugging", "refactor", "programming"],
         writable_paths: ["receipt.txt"],
         worker_command: nodeEval("require('fs').writeFileSync('receipt.txt', 'ok\\n')"),
@@ -361,6 +362,7 @@ test("task-bound Skills mount through the public execution hook and budgeted loa
     assert.match(hookOutput.hookSpecificOutput.additionalContext, /#### publish/);
     assert.match(hookOutput.hookSpecificOutput.additionalContext, /npm publish --dry-run/);
     assert.match(hookOutput.hookSpecificOutput.additionalContext, /missing-task-skill 未找到/);
+    assert.match(hookOutput.hookSpecificOutput.additionalContext, /Agent：ZhuRong/);
 
     const review = await buildAgentContext(dir, {
       agent: "BaiZe",
@@ -598,6 +600,9 @@ test("hook adapter emits WildArrange runtime injection for user prompt", async (
     assert.match(result.output, /类别：visual-engineering/);
     assert.match(result.output, /计划 Skill 组合/);
     assert.match(result.output, /review-ux-interaction/);
+    assert.match(result.output, /## 功能设计确认门（禁止绕过）/);
+    assert.match(result.output, /等待功能设计确认/);
+    assert.doesNotMatch(result.output, /\.wildarrange\/plan-drafts\/session-1-plan\.json/);
     assert.match(result.output, /项目规则/);
     assert.match(result.output, /Always verify behavior/);
 
@@ -838,6 +843,62 @@ test("pre-tool-use guard denies file writes when no task exists", async () => {
   });
 });
 
+test("pre-tool-use guard only allows a JSON plan draft before the first task exists", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+
+    const allowed = await preToolUseGuard(dir, {
+      hook_event_name: "PreToolUse",
+      session_id: "session-plan-draft",
+      cwd: dir,
+      tool_name: "functions.apply_patch",
+      tool_input: { file_path: ".wildarrange/plan-drafts/session-plan.json" },
+    });
+    assert.equal(allowed.decision, "allow");
+    assert.equal(allowed.code, "plan_draft_write");
+
+    const denied = await preToolUseGuard(dir, {
+      hook_event_name: "PreToolUse",
+      session_id: "session-plan-draft",
+      cwd: dir,
+      tool_name: "functions.apply_patch",
+      tool_input: { file_path: "plan.json" },
+    });
+    assert.equal(denied.decision, "deny");
+    assert.equal(denied.code, "no_active_task");
+
+    const shellDenied = await preToolUseGuard(dir, {
+      hook_event_name: "PreToolUse",
+      session_id: "session-plan-draft",
+      cwd: dir,
+      tool_name: "Bash",
+      tool_input: { command: "node -e \"require('fs').writeFileSync('src/unplanned.js','x')\"" },
+    });
+    assert.equal(shellDenied.decision, "deny");
+    assert.equal(shellDenied.code, "no_active_task_shell");
+
+    const planImportAllowed = await preToolUseGuard(dir, {
+      hook_event_name: "PreToolUse",
+      session_id: "session-plan-draft",
+      cwd: dir,
+      tool_name: "Bash",
+      tool_input: { command: "node ./bin/wildarrange.mjs plan --from .wildarrange/plan-drafts/session-plan.json" },
+    });
+    assert.equal(planImportAllowed.decision, "allow");
+    assert.equal(planImportAllowed.code, "no_file_target");
+
+    const chainedCommandDenied = await preToolUseGuard(dir, {
+      hook_event_name: "PreToolUse",
+      session_id: "session-plan-draft",
+      cwd: dir,
+      tool_name: "Bash",
+      tool_input: { command: "node ./bin/wildarrange.mjs status && node -e \"require('fs').writeFileSync('src/bypass.js','x')\"" },
+    });
+    assert.equal(chainedCommandDenied.decision, "deny");
+    assert.equal(chainedCommandDenied.code, "no_active_task_shell");
+  });
+});
+
 test("adapter install writes slash commands for cursor and codex", async () => {
   await withTempDir(async (dir) => {
     const report = await installAdapter(dir, { target: "all", mode: "npx", packageName: "wildarrange" });
@@ -861,6 +922,17 @@ test("adapter install writes slash commands for cursor and codex", async () => {
     assert.match(runCommand, /context build --point before_execute/);
     assert.ok(runCommand.indexOf("context build --point before_execute") < runCommand.indexOf("wildarrange run"));
     assert.match(runCommand, /injectionPoint\.skills/);
+
+    const planCommand = await readFile(path.join(dir, ".agents", "skills", "wildarrange-plan", "SKILL.md"), "utf8");
+    assert.match(planCommand, /\.wildarrange\/plan-drafts\/<session>-plan\.json/);
+    assert.match(planCommand, /generated_by: "host_semantic"/);
+    assert.match(planCommand, /task\.owner/);
+    assert.match(planCommand, /Jiuwei 或 ZhuRong/);
+    assert.match(planCommand, /不能成为 command worker/);
+    assert.match(planCommand, /clarify-feature-design/);
+    assert.match(planCommand, /直接在当前对话中按编号澄清/);
+    assert.match(planCommand, /不要创建 MD\/HTML 文件/);
+    assert.ok(planCommand.indexOf("明确回复“确认”") < planCommand.indexOf("生成 `.wildarrange/plan-drafts/<session>-plan.json`"));
 
     const uninstall = await uninstallAdapter(dir, { target: "all" });
     assert.ok(uninstall.outputs.some((output) => output.path === ".cursor/commands/wildarrange-run.md" && output.status === "removed"));
@@ -1433,27 +1505,6 @@ test("routeRequest maps high-risk domains to the right agents and categories", a
     assert.equal(visual.route, "execute");
     assert.ok(visual.skills.includes("frontend-ui-ux"));
 
-    const webTodo = await routeRequest(dir, "做一个网页版 TODO 工具，支持删除任务");
-    assert.equal(webTodo.domain, "visual");
-    assert.equal(webTodo.route, "plan");
-    assert.equal(webTodo.category, "visual-engineering");
-    assert.equal(webTodo.needsUserInput, false);
-    assert.equal(webTodo.routeAdjusted, true);
-    assert.match(webTodo.adjustmentReason, /require planning/);
-
-    const normalAdd = await routeRequest(dir, "新增一个网页按钮");
-    assert.equal(normalAdd.intent, "execute");
-    assert.equal(normalAdd.route, "execute");
-    assert.equal(normalAdd.category, "visual-engineering");
-
-    const plannedFeature = await routeRequest(dir, "实现计划筛选和已完成筛选");
-    assert.equal(plannedFeature.intent, "execute");
-    assert.equal(plannedFeature.route, "execute");
-
-    const scopeChange = await routeRequest(dir, "计划外新增一个支付功能");
-    assert.equal(scopeChange.intent, "change_request");
-    assert.equal(scopeChange.route, "change_request");
-
     const dangerousDelete = await routeRequest(dir, "删除数据库里的生产数据");
     assert.equal(dangerousDelete.intent, "ask");
     assert.equal(dangerousDelete.route, "ask");
@@ -1501,6 +1552,30 @@ test("routeRequest maps high-risk domains to the right agents and categories", a
     assert.equal(architecture.route, "plan");
     assert.equal(architecture.primaryAgent, "DiJiang");
     assert.equal(architecture.category, "ultrabrain");
+
+    // Feature requests start a persistent design gate, so keep them last in this
+    // multi-case routing test; later utterances in the same session must remain gated.
+    const scopeChange = await routeRequest(dir, "计划外新增一个支付功能");
+    assert.equal(scopeChange.intent, "plan");
+    assert.equal(scopeChange.route, "plan");
+
+    const webTodo = await routeRequest(dir, "做一个网页版 TODO 工具，支持删除任务");
+    assert.equal(webTodo.domain, "visual");
+    assert.equal(webTodo.route, "plan");
+    assert.equal(webTodo.category, "visual-engineering");
+    assert.equal(webTodo.needsUserInput, true);
+    assert.equal(webTodo.routeAdjusted, true);
+    assert.match(webTodo.adjustmentReason, /require planning/);
+
+    const normalAdd = await routeRequest(dir, "新增一个网页按钮");
+    assert.equal(normalAdd.intent, "plan");
+    assert.equal(normalAdd.route, "plan");
+    assert.equal(normalAdd.category, "visual-engineering");
+    assert.equal(normalAdd.needsUserInput, true);
+
+    const plannedFeature = await routeRequest(dir, "实现计划筛选和已完成筛选");
+    assert.equal(plannedFeature.intent, "plan");
+    assert.equal(plannedFeature.route, "plan");
   });
 });
 
@@ -4337,5 +4412,145 @@ test("plan approval gate blocks run until developer approves", async () => {
     const ran = await runNextTask(dir);
     assert.equal(ran.status, "completed");
     assert.equal(ran.task.id, "T001");
+  });
+});
+
+test("host semantic plans require an explicit command-worker task.owner and user approval", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = path.join(dir, "semantic-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      generated_by: "host_semantic",
+      title: "Semantic plan",
+      objective: "Deliver one user-approved change.",
+      tasks: [{
+        id: "T001",
+        subject: "Implement the requested change",
+        description: "Create the accepted artifact.",
+        owner: "ZhuRong",
+        writable_paths: ["src/result.js"],
+        worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/result.js','export const ok = true;\\n')\"",
+        verify_commands: ["node -e \"const fs=require('fs'); if(!fs.readFileSync('src/result.js','utf8').includes('ok')) process.exit(1)\""],
+        review_commands: ["node --version"],
+        successCriteria: [{
+          title: "src/result.js exists and contains ok",
+          expectedEvidence: "the verifier reads the file and finds ok",
+          verifierCommandRefs: [0],
+        }],
+      }],
+    }, null, 2));
+
+    const imported = await importPlan(dir, planPath);
+    assert.equal(imported.tasks[0].owner, "ZhuRong");
+    assert.equal(imported.tasks[0].owner_source, "explicit");
+    const approval = await loadPlanApproval(dir);
+    assert.equal(approval.required, true);
+    assert.equal(approval.status, "pending");
+    assert.equal((await runNextTask(dir)).status, "awaiting_plan_approval");
+
+    const draftEditPending = await preToolUseGuard(dir, {
+      hook_event_name: "PreToolUse",
+      session_id: "semantic-plan-edit",
+      cwd: dir,
+      tool_name: "functions.apply_patch",
+      tool_input: { file_path: ".wildarrange/plan-drafts/semantic-plan.json" },
+    });
+    assert.equal(draftEditPending.decision, "allow");
+    assert.equal(draftEditPending.code, "plan_draft_write");
+
+    const arbitraryShellPending = await preToolUseGuard(dir, {
+      hook_event_name: "PreToolUse",
+      session_id: "semantic-plan-edit",
+      cwd: dir,
+      tool_name: "Bash",
+      tool_input: { command: "node -e \"require('fs').writeFileSync('src/before-approval.js','x')\"" },
+    });
+    assert.equal(arbitraryShellPending.decision, "deny");
+    assert.equal(arbitraryShellPending.code, "awaiting_plan_approval_shell");
+
+    const approveCommandPending = await preToolUseGuard(dir, {
+      hook_event_name: "PreToolUse",
+      session_id: "semantic-plan-edit",
+      cwd: dir,
+      tool_name: "Bash",
+      tool_input: { command: "node ./bin/wildarrange.mjs plan approve" },
+    });
+    assert.equal(approveCommandPending.decision, "allow");
+
+    await approvePlan(dir);
+    const draftEditApproved = await preToolUseGuard(dir, {
+      hook_event_name: "PreToolUse",
+      session_id: "semantic-plan-edit",
+      cwd: dir,
+      taskId: "T001",
+      tool_name: "functions.apply_patch",
+      tool_input: { file_path: ".wildarrange/plan-drafts/semantic-plan.json" },
+    });
+    assert.equal(draftEditApproved.decision, "deny");
+    assert.equal(draftEditApproved.code, "out_of_scope");
+
+    const missingOwnerPath = path.join(dir, "semantic-plan-missing-owner.json");
+    await writeFile(missingOwnerPath, JSON.stringify({
+      generated_by: "host_semantic",
+      title: "Missing owner",
+      tasks: [{
+        id: "T002",
+        subject: "Must not import",
+        description: "The host omitted the actual owner.",
+        writable_paths: ["src/missing.js"],
+        worker_command: "node --version",
+        verify_commands: ["node --version"],
+        successCriteria: [{
+          title: "owner is explicit",
+          expectedEvidence: "task.owner is present in the plan",
+        }],
+      }],
+    }, null, 2));
+    await assert.rejects(
+      () => importPlan(dir, missingOwnerPath),
+      /requires explicit command-worker task\.owner.*T002/,
+    );
+
+    const readOnlyOwnerPath = path.join(dir, "semantic-plan-read-only-owner.json");
+    await writeFile(readOnlyOwnerPath, JSON.stringify({
+      generated_by: "host_semantic",
+      title: "Read-only owner",
+      tasks: [{
+        id: "T003",
+        subject: "Must not enter worker",
+        description: "BaiZe cannot own an executable command task.",
+        owner: "BaiZe",
+        writable_paths: ["src/read-only.js"],
+        worker_command: "node --version",
+        verify_commands: ["node --version"],
+      }],
+    }, null, 2));
+    await assert.rejects(
+      () => importPlan(dir, readOnlyOwnerPath),
+      /requires explicit command-worker task\.owner.*T003/,
+    );
+  });
+});
+
+test("linear command workers reject read-only long-lived task owners", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = path.join(dir, "read-only-worker-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Read-only owner must not execute",
+      tasks: [{
+        id: "T001",
+        subject: "Do not run this command",
+        owner: "BaiZe",
+        writable_paths: ["src/forbidden.js"],
+        worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/forbidden.js','x')\"",
+        verify_commands: ["node --version"],
+      }],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    await assert.rejects(() => runNextTask(dir), /agent BaiZe is read-only and cannot enter a command worker/);
+    await assert.rejects(() => runWorkflowNode(dir, "execute", { taskId: "T001" }), /agent BaiZe is read-only and cannot enter a command worker/);
+    await assert.rejects(readFile(path.join(dir, "src", "forbidden.js"), "utf8"), /ENOENT/);
   });
 });

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WildArrange 名称统一边界确认</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0d1117; --panel:#151b23; --line:#314052; --text:#edf3fa; --muted:#9db0c4; --p0:#ff6b6b; --p1:#ffca58; --ok:#53d99f; }
+    * { box-sizing:border-box; }
+    body { margin:0; font:15px/1.65 system-ui,"Microsoft YaHei",sans-serif; background:var(--bg); color:var(--text); }
+    main { width:min(1120px,calc(100% - 32px)); margin:36px auto 64px; }
+    h1 { margin:0 0 8px; font-size:32px; } h2 { margin:34px 0 14px; font-size:20px; }
+    p { color:var(--muted); } code { color:#a8d4ff; }
+    .flow,.grid { display:grid; gap:14px; } .flow { grid-template-columns:repeat(3,1fr); align-items:stretch; }
+    .grid { grid-template-columns:repeat(2,1fr); }
+    .card { position:relative; padding:18px; border:1px solid var(--line); border-radius:12px; background:var(--panel); }
+    .card::before { content:""; position:absolute; inset:0 auto 0 0; width:4px; border-radius:12px 0 0 12px; background:var(--ok); }
+    .p0::before { background:var(--p0); } .p1::before { background:var(--p1); }
+    .tag { display:inline-block; margin-bottom:8px; color:var(--p1); font-size:12px; font-weight:700; letter-spacing:.08em; }
+    ul { margin:8px 0 0; padding-left:20px; color:var(--muted); }
+    .arrow { display:grid; place-items:center; color:var(--p1); font-weight:700; }
+    .decision { border-color:#50647b; }
+    @media (max-width:760px) { .flow,.grid { grid-template-columns:1fr; } .arrow { transform:rotate(90deg); } }
+  </style>
+</head>
+<body>
+<main>
+  <div class="tag">已获用户批准 · 已完成统一</div>
+  <h1>统一为 WildArrange：改名边界</h1>
+  <p>结果：产品、命令、状态协议和内部符号已经统一为 WildArrange，不保留旧 alias、兼容读取或迁移 shim。</p>
+
+  <h2>当前状态</h2>
+  <div class="grid">
+    <section class="card p0"><strong>公开入口</strong><ul><li>npm 只暴露 <code>wildarrange</code></li><li>入口文件为 <code>bin/wildarrange.mjs</code></li><li>项目快捷 Skill 为 <code>wildarrange-*</code></li></ul></section>
+    <section class="card p1"><strong>运行态协议</strong><ul><li>状态目录 <code>.wildarrange/</code></li><li>配置 <code>wildarrange.config.json</code></li><li>环境变量 <code>WILDARRANGE_*</code></li><li>内部函数与测试同步采用 WildArrange</li></ul></section>
+  </div>
+
+  <h2>推荐边界：彻底统一用户可见名称</h2>
+  <div class="flow">
+    <section class="card p0"><strong>输入：历史双命名问题</strong><p>公开命令、运行态路径、配置、环境变量与内部符号曾使用两套产品语言。</p></section>
+    <div class="arrow">→</div>
+    <section class="card"><strong>输出：单一产品语言</strong><p><code>wildarrange</code>、<code>.wildarrange</code>、<code>wildarrange.config.json</code>、<code>WILDARRANGE_*</code>、<code>wildarrange-*</code></p></section>
+  </div>
+  <p>用户已确认没有外部项目，因此不保留旧 alias、兼容读取或迁移 shim。内部函数名与测试同步改名，避免维护者继续看到两套产品词汇。</p>
+
+  <h2>已批准并完成的 AGENTS 修改</h2>
+  <section class="card decision">
+    <ul>
+      <li><strong>现状：</strong>根、bin、src、infra、test、doc、Prompt Pack 共 7 份 AGENTS 文件已统一路径、命令和环境变量。</li>
+      <li><strong>修改理由：</strong>规范必须先登记新的唯一命名，代码才能随后执行。</li>
+      <li><strong>栏目/schema：</strong>现有“工程约束、目录约定、常用命令、验收”已经能容纳本次变化；不新增栏目、不改 schema、不放宽允许路径。</li>
+      <li><strong>影响范围：</strong>公开命令、状态目录、配置、环境变量、Adapter 生成物、README、架构文档、测试和 npm 包体。</li>
+      <li><strong>未采用的短替代：</strong>只删除 npm 旧 alias 会让运行态、配置和快捷入口继续出现两套语言，因此执行了完整统一。</li>
+    </ul>
+  </section>
+
+  <h2>批准后的执行顺序</h2>
+  <div class="flow">
+    <section class="card p0"><strong>1 · 规范</strong><p>先更新 7 份 AGENTS 中的真实路径、命令和验收词汇。</p></section>
+    <section class="card p1"><strong>2 · 实现与文档</strong><p>重命名入口、运行态协议、生成物、代码符号、README 与架构登记。</p></section>
+    <section class="card"><strong>3 · 证据</strong><p>运行全量测试、架构门、旧名残留扫描与 npm 包体预检。</p></section>
+  </div>
+</main>
+</body>
+</html>

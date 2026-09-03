@@ -70,6 +70,7 @@ export async function ensureWildArrangeDirs(rootDir) {
   const dirs = [
     [],
     ["plans"],
+    ["plan-drafts"],
     ["team"],
     ["team", "inbox"],
     ["team", "outbox"],

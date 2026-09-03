@@ -12,11 +12,35 @@ import { readAnnotations } from "../infra/annotation-log.mjs";
 import { initRuntime } from "../infra/runtime-bootstrap.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { nowIso, resolveWildArrangePath, writeJsonAtomic } from "../infra/runtime-store.mjs";
-import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
+import {
+  beginFeatureDesignGate,
+  confirmFeatureDesignGate,
+  loadActiveFeatureDesignGate,
+  writeSnapshot,
+} from "../infra/runtime-snapshot.mjs";
 import { loadRoutesConfig, resolveRouteDecision, uniqueStrings } from "../infra/route-table.mjs";
 import { callOpenAICompatible, resolveAgentProvider } from "../infra/llm-provider.mjs";
 
 export { loadRoutesConfig, resolveRouteDecision } from "../infra/route-table.mjs";
+
+export function buildPlanDraftDirective(routeResult, options = {}) {
+  if (!routeResult || (routeResult.route !== "plan" && routeResult.needsPlan !== true)) return null;
+  if (routeResult.featureDesign?.status === "awaiting_feature_confirmation") return null;
+  const sessionId = sanitizeDraftSegment(options.sessionId || "session");
+  const prompt = typeof options.prompt === "string" ? options.prompt.trim().slice(0, 4000) : "";
+  return {
+    status: "host_generation_required",
+    generatedBy: "host_semantic",
+    draftPath: `.wildarrange/plan-drafts/${sessionId}-plan.json`,
+    request: prompt,
+    approvalRequired: true,
+    ownerPolicy: "every executable task must declare task.owner as Jiuwei or ZhuRong",
+    featureDesignRef: routeResult.featureDesign?.status === "awaiting_plan_import"
+      ? routeResult.featureDesign.id
+      : null,
+    nextCommand: "node ./bin/wildarrange.mjs plan --from <draftPath>",
+  };
+}
 
 export async function routeRequest(rootDir, input) {
   await initRuntime(rootDir);
@@ -27,7 +51,20 @@ export async function routeRequest(rootDir, input) {
 
   const routes = await loadRoutesConfig(rootDir);
   const deterministic = resolveRouteDecision(routes, text);
-  const result = await applySemanticRouteGovernance(rootDir, text, deterministic, input || {});
+  let result = await applySemanticRouteGovernance(rootDir, text, deterministic, input || {});
+  const sessionId = typeof input === "object" ? input?.sessionId || input?.session_id || "session" : "session";
+  const activeFeatureGate = await loadActiveFeatureDesignGate(rootDir, sessionId);
+  if (activeFeatureGate?.status === "awaiting_feature_confirmation") {
+    const gate = isExactFeatureDesignConfirmation(text)
+      ? await confirmFeatureDesignGate(rootDir, activeFeatureGate)
+      : activeFeatureGate;
+    result = enforceFeatureDesignGate(result, gate);
+  } else if (activeFeatureGate?.status === "awaiting_plan_import") {
+    result = enforceFeatureDesignGate(result, activeFeatureGate);
+  } else if ((deterministic.skills || []).includes("clarify-feature-design")) {
+    const gate = await beginFeatureDesignGate(rootDir, sessionId, text);
+    result = enforceFeatureDesignGate(result, gate);
+  }
   await appendLedger(rootDir, {
     type: "route_decided",
     route: result.route,
@@ -74,6 +111,41 @@ export async function routeRequest(rootDir, input) {
       || (result.semanticShadow?.status !== undefined && result.semanticShadow?.status !== "skipped"),
   });
   return result;
+}
+
+function enforceFeatureDesignGate(result, gate) {
+  const skill = {
+    name: "clarify-feature-design",
+    stage: "clarify",
+    risk: "high",
+    purpose: "新增功能必须先完成对话确认，再生成并导入完整计划。",
+  };
+  return {
+    ...result,
+    intent: "plan",
+    route: "plan",
+    primaryAgent: "DiJiang",
+    supportAgents: uniqueStrings(["BaiZe", ...(result.supportAgents || [])]),
+    skills: uniqueStrings(["clarify-feature-design", ...(result.skills || [])]),
+    planSkills: [skill, ...(result.planSkills || []).filter((entry) => entry.name !== skill.name)],
+    needsPlan: false,
+    needsUserInput: gate.status === "awaiting_feature_confirmation",
+    risk: "high",
+    featureDesign: {
+      id: gate.id,
+      status: gate.status,
+      confirmedAt: gate.confirmedAt || null,
+    },
+    reason: `${result.reason || ""}; feature design gate=${gate.status}`,
+  };
+}
+
+function isExactFeatureDesignConfirmation(text) {
+  return /^(?:确认|确认以上功能设计|功能设计确认)[。.!！]?$/.test(String(text || "").trim());
+}
+
+function sanitizeDraftSegment(value) {
+  return String(value || "session").replace(/[^A-Za-z0-9_.-]+/g, "_").slice(0, 80) || "session";
 }
 
 export async function writeDailyRoutingReview(rootDir, options = {}) {

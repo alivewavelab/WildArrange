@@ -12,6 +12,7 @@ import {
   STATE_VERSION,
   createWorkId,
   nowIso,
+  readJson,
   resolveWildArrangePath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
@@ -22,15 +23,17 @@ import { pathAllowed } from "../infra/path-match.mjs";
 import { invokeCapability } from "../capabilities/gateway.mjs";
 import { resolveInjectionPoint } from "./injection.mjs";
 import { loadTaskState } from "../infra/task-state-store.mjs";
-import { routeRequest, writeDailyRoutingReview } from "./routing.mjs";
+import { buildPlanDraftDirective, routeRequest, writeDailyRoutingReview } from "./routing.mjs";
 import { scanProjectRules } from "../infra/rule-scanner.mjs";
 import { findRunnableTask } from "../orchestration/task-board.mjs";
+import { loadPlanApproval } from "../orchestration/plan-state.mjs";
 import { buildAgentContext, continuationDirective, resumeReport } from "./context.mjs";
 import { runArchivistRouter } from "./archivist-router.mjs";
 import { evaluateHookResultGate } from "../infra/hook-result-gate.mjs";
 import { compileCommandSafetyPatterns, evaluateCommandSafety } from "../infra/command-safety.mjs";
 import { writeMemoryDigest } from "../infra/memory-digest.mjs";
 import { attentionReport } from "../orchestration/status.mjs";
+import { loadActiveFeatureDesignGate } from "../infra/runtime-snapshot.mjs";
 
 export async function runInjectionHook(rootDir, input = {}) {
   const hookRootDir = input.cwd && typeof input.cwd === "string" ? input.cwd : rootDir;
@@ -63,6 +66,7 @@ export async function runInjectionHook(rootDir, input = {}) {
     }).catch((error) => ({ error: error.message }));
   } else if (event === "UserPromptSubmit") {
     facts.route = input.prompt ? await routeRequest(hookRootDir, { text: input.prompt, sessionId }) : null;
+    facts.planDraft = buildPlanDraftDirective(facts.route, { sessionId, prompt: input.prompt });
     facts.rules = await scanProjectRules(hookRootDir);
     facts.archivist = await runArchivistForHook(hookRootDir, input, {
       event,
@@ -77,7 +81,6 @@ export async function runInjectionHook(rootDir, input = {}) {
     const executionTaskId = facts.preflight?.taskId || taskId;
     if (executionTaskId) {
       facts.agentContext = await buildAgentContext(hookRootDir, {
-        agent: DEFAULT_EXECUTOR_AGENT,
         taskId: executionTaskId,
         planId: await currentPlanId(hookRootDir),
         injectionPoint: "before_execute",
@@ -125,13 +128,14 @@ export async function runInjectionHook(rootDir, input = {}) {
 
   const effectiveTaskId = taskId || facts.preflight?.taskId || "";
   const variables = {
-    agent: input.agent || defaultAgentForHookEvent(event),
+    agent: facts.agentContext?.agent || input.agent || defaultAgentForHookEvent(event),
     taskId: effectiveTaskId,
     planId: await currentPlanId(hookRootDir),
   };
   const injectionPoint = await resolveInjectionPoint(hookRootDir, pointName, variables, {
     text: injectionTextForHookEvent(event, input, facts),
     stage: injectionStageForHookEvent(event, facts),
+    routeSkills: facts.route?.skills || [],
   });
   const contextMarkdown = injectionPoint.enabled ? renderHookInjectionMarkdown({ event, pointName, sessionId, taskId: effectiveTaskId, targetPaths, facts, injectionPoint }) : "";
   const shouldRenderPreToolOutput = event === "PreToolUse"
@@ -230,11 +234,14 @@ export async function preToolUseGuard(rootDir, input = {}) {
   const toolName = String(input.tool_name || input.toolName || "");
   const targetPaths = extractHookTargetPaths(input, rootDir);
   const toolInput = input.tool_input || input.toolInput;
+  const isShellTool = /^(Bash|bash|exec_command|functions\.exec_command)$/.test(toolName);
+  const shellCommand = isShellTool && toolInput && typeof toolInput === "object"
+    ? toolInput.command || toolInput.cmd || ""
+    : "";
 
-  if (/^(Bash|bash|exec_command|functions\.exec_command)$/.test(toolName)) {
-    const command = toolInput && typeof toolInput === "object" ? toolInput.command || toolInput.cmd : "";
+  if (isShellTool) {
     const { config } = await loadWildArrangeConfig(rootDir);
-    const safety = evaluateCommandSafety(command, {
+    const safety = evaluateCommandSafety(shellCommand, {
       extraPatterns: compileCommandSafetyPatterns(config),
     });
     if (!safety.allowed) {
@@ -274,6 +281,38 @@ export async function preToolUseGuard(rootDir, input = {}) {
     };
   }
 
+  const featureDesignGate = await loadActiveFeatureDesignGate(rootDir, featureGateSessionId(input));
+  if (featureDesignGate?.status === "awaiting_feature_confirmation") {
+    const blocked = (isShellTool && !isReadOnlyWildArrangeShellCommand(shellCommand)) || targetPaths.length > 0;
+    if (blocked) {
+      return denyFeatureDesignToolUse(rootDir, {
+        code: "feature_design_confirmation_required",
+        reason: "feature design is awaiting explicit confirmation; implementation, plan files, and plan commands remain blocked",
+        gate: featureDesignGate,
+        toolName,
+        targetPaths,
+        shellCommand,
+      });
+    }
+  }
+  if (featureDesignGate?.status === "awaiting_plan_import") {
+    const validPlanImport = isShellTool
+      ? await isMatchingFeaturePlanImport(rootDir, shellCommand, featureDesignGate.id)
+      : false;
+    const blockedShell = isShellTool && !isReadOnlyWildArrangeShellCommand(shellCommand) && !validPlanImport;
+    const blockedWrite = targetPaths.length > 0 && !isPlanDraftWrite(targetPaths);
+    if (blockedShell || blockedWrite) {
+      return denyFeatureDesignToolUse(rootDir, {
+        code: "feature_plan_required",
+        reason: `feature design ${featureDesignGate.id} is confirmed but no matching complete plan has been imported`,
+        gate: featureDesignGate,
+        toolName,
+        targetPaths,
+        shellCommand,
+      });
+    }
+  }
+
   const taskState = await loadTaskState(rootDir);
   const taskId = normalizeHookTaskId(input);
   const task = taskState
@@ -281,6 +320,37 @@ export async function preToolUseGuard(rootDir, input = {}) {
       ? taskState.tasks.find((candidate) => candidate.id === taskId)
       : taskState.tasks.find((candidate) => ["in_progress", "verifying"].includes(candidate.status)) || findRunnableTask(taskState.tasks)
     : null;
+  const planApproval = taskState
+    ? await loadPlanApproval(rootDir).catch(() => ({ required: false, status: "approved", planId: taskState.planId }))
+    : { required: false, status: "approved", planId: null };
+  const awaitingPlanApproval = planApproval.required === true
+    && planApproval.status !== "approved"
+    && planApproval.planId === taskState?.planId;
+
+  if (isShellTool && (!task || awaitingPlanApproval) && !isAllowedPrePlanShellCommand(shellCommand)) {
+    const code = awaitingPlanApproval ? "awaiting_plan_approval_shell" : "no_active_task_shell";
+    const reason = awaitingPlanApproval
+      ? "plan is awaiting user approval; only exact WildArrange plan-management and read-only commands are allowed"
+      : "no active task exists; arbitrary shell commands are denied until a plan task is available";
+    await appendLedger(rootDir, {
+      type: "pre_tool_use_denied",
+      reason: code,
+      toolName,
+      command: shellCommand,
+      targetPaths,
+    });
+    return {
+      kind: "pre_tool_use_guard",
+      at: nowIso(),
+      decision: "deny",
+      code,
+      reason,
+      toolName,
+      taskId: task?.id || taskId || null,
+      targetPaths,
+      deniedPaths: targetPaths,
+    };
+  }
 
   if (targetPaths.length === 0) {
     return {
@@ -291,6 +361,27 @@ export async function preToolUseGuard(rootDir, input = {}) {
       reason: "no project file target detected",
       toolName,
       taskId: task?.id || taskId || null,
+      targetPaths,
+      deniedPaths: [],
+    };
+  }
+  if (isPlanDraftWrite(targetPaths) && (!task || awaitingPlanApproval)) {
+    await appendLedger(rootDir, {
+      type: "pre_tool_use_allowed",
+      reason: "plan_draft_write",
+      toolName,
+      targetPaths,
+    });
+    return {
+      kind: "pre_tool_use_guard",
+      at: nowIso(),
+      decision: "allow",
+      code: "plan_draft_write",
+      reason: awaitingPlanApproval
+        ? "plan is awaiting user approval; edits remain limited to a JSON plan draft under .wildarrange/plan-drafts/"
+        : "no active task yet; write is limited to a JSON plan draft under .wildarrange/plan-drafts/",
+      toolName,
+      taskId: null,
       targetPaths,
       deniedPaths: [],
     };
@@ -509,6 +600,73 @@ function isCandidateFilePath(value) {
   return !/^(https?:|data:|mailto:)/i.test(value);
 }
 
+function isPlanDraftWrite(targetPaths) {
+  return targetPaths.length > 0
+    && targetPaths.every((targetPath) => /^\.wildarrange\/plan-drafts\/[A-Za-z0-9_.-]+\.json$/.test(targetPath));
+}
+
+function isAllowedPrePlanShellCommand(command) {
+  const args = parseWildArrangeShellArgs(command);
+  if (!args) return false;
+  if (/^(?:status|doctor|summary|timeline|decisions|help(?:\s+--all)?|--help(?:\s+--all)?)$/i.test(args)) return true;
+  if (/^init(?:\s+--sample)?$/i.test(args)) return true;
+  if (/^plan\s+approve(?:\s+--plan\s+[A-Za-z0-9_.-]+)?$/i.test(args)) return true;
+  return /^plan\s+--from\s+(?:"[A-Za-z0-9_./\\: -]+\.json"|'[A-Za-z0-9_./\\: -]+\.json'|[A-Za-z0-9_./\\:-]+\.json)$/i.test(args);
+}
+
+function parseWildArrangeShellArgs(command) {
+  if (typeof command !== "string") return null;
+  const trimmed = command.trim();
+  if (!trimmed || /[\r\n;&|><`$%!^]/.test(trimmed)) return null;
+  const invocation = trimmed.match(
+    /^(?:node(?:\.exe)?\s+(?:"[^"\r\n]*[\\/]wildarrange\.mjs"|'[^'\r\n]*[\\/]wildarrange\.mjs'|[^\s"']*wildarrange\.mjs)|npx(?:\.cmd)?\s+(?:-y\s+)?(?:@alivewavelab\/wildarrange(?:@[A-Za-z0-9._-]+)?|wildarrange(?:@[A-Za-z0-9._-]+)?))\s+(.+)$/i,
+  );
+  return invocation ? invocation[1].trim() : null;
+}
+
+function isReadOnlyWildArrangeShellCommand(command) {
+  const args = parseWildArrangeShellArgs(command);
+  return Boolean(args && /^(?:status|doctor|summary|timeline|decisions|help(?:\s+--all)?|--help(?:\s+--all)?)$/i.test(args));
+}
+
+async function isMatchingFeaturePlanImport(rootDir, command, gateId) {
+  const args = parseWildArrangeShellArgs(command);
+  const match = args?.match(/^plan\s+--from\s+(?:"([^"]+\.json)"|'([^']+\.json)'|([^\s]+\.json))$/i);
+  const rawPath = match?.[1] || match?.[2] || match?.[3];
+  if (!rawPath) return false;
+  const planPath = path.isAbsolute(rawPath) ? rawPath : path.resolve(rootDir, rawPath);
+  const plan = await readJson(planPath, null).catch(() => null);
+  return plan?.feature_design_ref === gateId || plan?.featureDesignRef === gateId;
+}
+
+function featureGateSessionId(input) {
+  return String(input.session_id || input.sessionId || process.env.WILDARRANGE_SESSION_ID || process.env.CODEX_SESSION_ID || process.env.CURSOR_SESSION_ID || "session");
+}
+
+async function denyFeatureDesignToolUse(rootDir, options) {
+  await appendLedger(rootDir, {
+    type: "pre_tool_use_denied",
+    reason: options.code,
+    featureDesignId: options.gate.id,
+    featureDesignStatus: options.gate.status,
+    toolName: options.toolName,
+    command: options.shellCommand || null,
+    targetPaths: options.targetPaths,
+  });
+  return {
+    kind: "pre_tool_use_guard",
+    at: nowIso(),
+    decision: "deny",
+    code: options.code,
+    reason: options.reason,
+    toolName: options.toolName,
+    taskId: null,
+    targetPaths: options.targetPaths,
+    deniedPaths: options.targetPaths,
+    featureDesignId: options.gate.id,
+  };
+}
+
 function normalizeHookTargetPath(value, rootDir) {
   const absoluteTarget = path.isAbsolute(value) ? value : path.resolve(rootDir, value);
   const relative = path.relative(
@@ -586,6 +744,30 @@ function appendHookFacts(lines, facts) {
       }
     }
     lines.push("");
+  }
+  if (facts.route?.featureDesign?.status === "awaiting_feature_confirmation") {
+    lines.push("## 功能设计确认门（禁止绕过）", "");
+    lines.push(`- 状态：等待功能设计确认（${facts.route.featureDesign.id}）`);
+    lines.push("- 本轮只能继续澄清或展示完整确认稿；“开始做”“直接做”“跳过计划”等表达均不放行。");
+    lines.push("- 只有开发者单独明确回复“确认”后，才进入完整 Plan 生成阶段。", "");
+  }
+  if (facts.route?.featureDesign?.status === "awaiting_plan_import") {
+    lines.push("## 完整 Plan 门（禁止绕过）", "");
+    lines.push(`- 已确认功能设计：${facts.route.featureDesign.id}`);
+    lines.push("- 现在只能生成并导入绑定该功能设计的完整 Plan；Plan 导入并由开发者批准前不得开发。", "");
+  }
+  if (facts.planDraft) {
+    lines.push("## 生成计划草稿（必须执行）", "");
+    lines.push("- 使用当前宿主大模型理解本轮对话，不要只做关键词拼接。");
+    lines.push(`- 把计划 JSON 写入：${facts.planDraft.draftPath}`);
+    lines.push('- 顶层必须包含：`generated_by: "host_semantic"`、`title`、`objective`、`tasks`。');
+    if (facts.planDraft.featureDesignRef) {
+      lines.push(`- 本计划必须绑定已确认功能设计：\`feature_design_ref: "${facts.planDraft.featureDesignRef}"\`；缺失或不匹配时禁止导入和开发。`);
+    }
+    lines.push("- 每张任务必须包含：`id`、`subject`、`description`、`owner`、`writable_paths`、`verify_commands`、`successCriteria`；每条 successCriteria 是带 `title`、`expectedEvidence`、`verifierCommandRefs` 的对象。");
+    lines.push(`- owner 规则：${facts.planDraft.ownerPolicy}。可执行工单通常交给 ZhuRong，必要时由 Jiuwei；DiJiang、BaiZe、LuWu 通过计划、复核、治理阶段参与，不得作为 command worker。`);
+    lines.push(`- 写完草稿后执行：${facts.planDraft.nextCommand.replace("<draftPath>", facts.planDraft.draftPath)}`);
+    lines.push("- 导入后先向用户展示计划摘要并等待明确确认；未执行 plan approve 前不得 run。", "");
   }
   if (facts.resume) {
     lines.push("## 恢复上下文", "");

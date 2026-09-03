@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WildArrange：语义生成计划与真实负责人闭环</title>
+  <style>
+    :root { color-scheme: light; --ink:#172033; --muted:#667085; --line:#d9e1ea; --bg:#f5f7fa; --paper:#fff; --blue:#2f6fb3; --green:#2f855a; --amber:#b7791f; --red:#b54747; }
+    * { box-sizing:border-box; }
+    body { margin:0; color:var(--ink); background:var(--bg); font:15px/1.65 system-ui,"Microsoft YaHei",sans-serif; }
+    main { width:min(1280px,calc(100% - 32px)); margin:0 auto; padding:36px 0 64px; }
+    h1,h2,h3,p { margin-top:0; } h1 { margin-bottom:8px; } h2 { margin-bottom:14px; font-size:21px; }
+    .lead { max-width:900px; color:var(--muted); font-size:17px; }
+    .status { display:inline-block; margin:10px 0 24px; padding:6px 10px; border:1px solid #a8d5bc; border-radius:999px; color:#236443; background:#edf9f2; font-weight:700; }
+    section { margin-top:20px; padding:22px; border:1px solid var(--line); border-radius:12px; background:var(--paper); }
+    .flow { display:grid; grid-template-columns:repeat(7,minmax(145px,1fr)); gap:9px; overflow-x:auto; }
+    .step { position:relative; min-height:150px; padding:15px; border-top:4px solid var(--blue); background:#f8fafc; }
+    .step:not(:last-child)::after { content:"→"; position:absolute; right:-9px; top:56px; z-index:2; color:#98a2b3; font-size:20px; }
+    .step b { display:block; margin-bottom:7px; } .step small { color:var(--muted); }
+    .step.human { border-color:var(--amber); } .step.done { border-color:var(--green); }
+    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+    .card { padding:16px; border:1px solid var(--line); border-left:5px solid var(--blue); border-radius:9px; background:#fbfcfe; }
+    .card.warn { border-left-color:var(--amber); } .card.stop { border-left-color:var(--red); }
+    .card strong { display:block; margin-bottom:6px; }
+    table { width:100%; border-collapse:collapse; } th,td { padding:11px 12px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; } th { background:#f7f9fc; }
+    code { padding:2px 5px; border-radius:5px; background:#eef2f6; }
+    ul { margin-bottom:0; padding-left:20px; }
+    @media(max-width:850px){ .grid{grid-template-columns:1fr}.flow{grid-template-columns:1fr}.step:not(:last-child)::after{display:none} }
+  </style>
+</head>
+<body>
+<main>
+  <div>2026-09-01 · 开工方案</div>
+  <h1>语义识别生成计划，并让 task.owner 成为真实负责人</h1>
+  <p class="lead">这不是新增一套计划系统，而是把已经存在的“路由、计划导入、用户批准、Agent 上下文”接成一条完整链。宿主大模型负责理解对话，WildArrange 负责限定格式、校验、批准和执行归属。</p>
+  <div class="status">方向已由用户确认：进入实现</div>
+
+  <section>
+    <h2>真实主流程</h2>
+    <div class="flow">
+      <div class="step"><b>1. 用户对话</b><small>用户描述需求、Bug 或其它开发目标。</small></div>
+      <div class="step"><b>2. 语义路由</b><small>Hook 判断是否需要形成开发计划，并保留分类证据。</small></div>
+      <div class="step"><b>3. 宿主生成草稿</b><small>宿主大模型按固定 schema 写入 <code>.wildarrange/plan-drafts/</code>。</small></div>
+      <div class="step"><b>4. WildArrange 校验</b><small>检查任务、范围、测试、完成标准和每项 <code>owner</code>。</small></div>
+      <div class="step human"><b>5. 用户确认</b><small>语义生成计划一律等待用户批准，未批准不得 run。</small></div>
+      <div class="step"><b>6. 按 owner 执行</b><small>Hook、Agent 上下文、任务领取和并行启动都读取同一个 <code>task.owner</code>。</small></div>
+      <div class="step done"><b>7. 检查后完成</b><small>测试、范围、独立复核和验收证明通过后才关闭工单。</small></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>保护机制</h2>
+    <div class="grid">
+      <div class="card"><strong>草稿只能写在专用目录</strong>尚无任务或计划待审批时，只放行 <code>.wildarrange/plan-drafts/*.json</code>；任意 Shell 默认拒绝，仅允许精确匹配的计划管理与只读命令。</div>
+      <div class="card"><strong>生成计划必须标记来源</strong>宿主写入 <code>generated_by: "host_semantic"</code>，WildArrange 据此启用更严格校验。</div>
+      <div class="card warn"><strong>每张可执行工单必须明确 owner</strong>语义生成任务的负责人只能是 command worker：<code>Jiuwei</code> 或 <code>ZhuRong</code>。只读 Agent 不得进入 worker。</div>
+      <div class="card warn"><strong>强制人工批准</strong>即使项目全局关闭普通计划审批，语义生成的计划仍必须执行 <code>wildarrange plan approve</code>。</div>
+      <div class="card"><strong>显式负责人优先</strong>计划里写明的 <code>task.owner</code> 不会被路由建议覆盖；路由决定只作为审计信息保存。</div>
+      <div class="card stop"><strong>禁止身份漂移</strong>执行前 Hook 不再默认注入 Jiuwei；必须加载当前工单的真实 owner 和角色。</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>负责人从哪里来</h2>
+    <table>
+      <thead><tr><th>场景</th><th>真实负责人</th><th>规则</th></tr></thead>
+      <tbody>
+        <tr><td>宿主语义生成计划</td><td><code>task.owner</code></td><td>宿主按任务性质填写 Jiuwei 或 ZhuRong；缺失、只读 Agent 或未知值均拒绝导入。</td></tr>
+        <tr><td>人工编写计划</td><td><code>task.owner</code></td><td>显式值优先；保留旧计划默认值只为兼容现有手工计划。</td></tr>
+        <tr><td>任务领取与 Git 协调</td><td><code>task.owner</code></td><td>领取时可以显式变更，变更必须写入任务历史。</td></tr>
+        <tr><td>隔离子 Agent</td><td><code>--agent</code> 或 <code>task.owner</code></td><td>显式 CLI 覆盖用于一次隔离运行；否则读取工单负责人。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>本轮最小改动</h2>
+    <ul>
+      <li><code>src/ai/routing.mjs</code>：把“需要计划”的路由结果变成宿主可执行的计划生成指令。</li>
+      <li><code>src/ai/hooks.mjs</code>：在用户发言时注入生成指令；只放行计划草稿目录；执行前从 <code>task.owner</code> 构建 Agent 上下文。</li>
+      <li><code>src/orchestration/plan-state.mjs</code>：保留生成来源，校验语义计划 owner，并强制用户批准。</li>
+      <li><code>src/interface/adapters.mjs</code> 与 <code>cli-help.mjs</code>：让宿主命令和计划 schema 明确包含自动生成与 owner。</li>
+      <li>对应 Hook、计划导入、审批和 owner 注入自动测试；最后运行完整 <code>npm test</code>。</li>
+    </ul>
+  </section>
+</main>
+</body>
+</html>

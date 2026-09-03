@@ -26,6 +26,7 @@ import { writeWorkflowSummary } from "./status.mjs";
 import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
 import { findRunnableTask, persistTaskState, writeOutbox } from "./task-board.mjs";
 import { assertCurrentTaskOwnership, coordinateTaskClaim } from "./remote-ownership.mjs";
+import { assertCommandWorkerAgent } from "../infra/agent-registry.mjs";
 
 export async function runNextTask(rootDir, options = {}) {
   return withTaskStateLock(rootDir, "run-next-task", () => runNextTaskUnlocked(rootDir, options));
@@ -89,7 +90,7 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
     return { status, task: null };
   }
 
-  task.owner = task.owner || "Jiuwei";
+  task.owner = assertCommandWorkerAgent(task.owner || "Jiuwei");
   task.coordination = await coordinateTaskClaim(rootDir, {
     planId: taskState.planId,
     task,
@@ -332,8 +333,8 @@ async function executeTaskNodeUnlocked(rootDir, options = {}) {
   if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
 
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["pending", "in_progress"]);
+  task.owner = assertCommandWorkerAgent(task.owner || "Jiuwei");
   if (task.status === "pending") {
-    task.owner = task.owner || "Jiuwei";
     task.coordination = await coordinateTaskClaim(rootDir, {
       planId: taskState.planId,
       task,

@@ -13,7 +13,6 @@
   },
   "type": "module",
   "bin": {
-    "wildarrange": "bin/wildarrange.mjs",
     "wildarrange": "bin/wildarrange.mjs"
   },
   "files": [

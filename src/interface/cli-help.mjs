@@ -107,6 +107,7 @@ export const COMMAND_REGISTRY = [
 const PLAN_SCHEMA = `
 Plan schema:
   {
+    "generated_by": "host_semantic",
     "title": "Feature name",
     "objective": "What must be true",
     "defaults": {
@@ -118,11 +119,22 @@ Plan schema:
     "tasks": [{
       "id": "T001",
       "subject": "Implement one thing",
+      "description": "What this task delivers",
+      "owner": "Jiuwei|ZhuRong",
       "category": "quick|deep|ultrabrain|visual-engineering",
+      "writable_paths": ["src/**"],
       "worker_command": "command that changes files",
-      "verify_commands": ["command that must pass"]
+      "verify_commands": ["command that must pass"],
+      "successCriteria": [{
+        "title": "observable acceptance condition",
+        "expectedEvidence": "what proves it",
+        "verifierCommandRefs": [0]
+      }]
     }]
   }
+
+generated_by=host_semantic means the host conversation generated this plan.
+Such plans must declare a command-worker task.owner (Jiuwei or ZhuRong) on every task and always wait for plan approve.
 `;
 
 export function renderHelp({ all = false } = {}) {
