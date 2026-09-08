@@ -57,7 +57,7 @@ export async function createFileRollbackPlan(rootDir, files) {
         content: await readFile(absolutePath, "utf8"),
       });
     } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
+      if (error?.code !== "ENOENT" && error?.code !== "ENOTDIR") throw error;
       entries.push({ path: file.path, existed: false, content: "" });
     }
   }
