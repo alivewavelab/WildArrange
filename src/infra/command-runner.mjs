@@ -49,6 +49,7 @@ function runProcess(file, args, command, cwd, timeoutMs, options) {
         shell: options.shell,
         stdio: ["ignore", "pipe", "pipe"],
         env: { ...process.env, WILDARRANGE_RUNTIME: "1", ...(options.env || {}) },
+        detached: process.platform !== "win32",
       });
     } catch (error) {
       resolve({
@@ -86,9 +87,9 @@ function runProcess(file, args, command, cwd, timeoutMs, options) {
         // verifier) on Windows. taskkill /T closes the complete process tree.
         terminationPromise = killWindowsProcessTree(child);
       } else {
-        child.kill("SIGTERM");
+        killPosixProcessGroup(child, "SIGTERM");
         killTimer = setTimeout(() => {
-          if (!settled) child.kill("SIGKILL");
+          if (!settled) killPosixProcessGroup(child, "SIGKILL");
         }, COMMAND_SIGKILL_GRACE_MS);
       }
     }, timeoutMs);
@@ -128,6 +129,15 @@ function runProcess(file, args, command, cwd, timeoutMs, options) {
       });
     });
   });
+}
+
+function killPosixProcessGroup(child, signal) {
+  if (!child.pid) return;
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    child.kill(signal);
+  }
 }
 
 function killWindowsProcessTree(child) {

@@ -38,6 +38,14 @@ async function withTempDir(fn) {
   }
 }
 
+async function blockFileWrite(filePath) {
+  const blockedPath = process.platform === "win32" ? filePath : path.dirname(filePath);
+  await chmod(blockedPath, process.platform === "win32" ? 0o444 : 0o555);
+  return async () => {
+    await chmod(blockedPath, process.platform === "win32" ? 0o644 : 0o755);
+  };
+}
+
 function nodeEval(source) {
   const encoded = Buffer.from(source.replace(/\s*\n\s*/g, " ").trim(), "utf8").toString("base64");
   return `node -e "eval(Buffer.from('${encoded}','base64').toString())"`;
@@ -463,11 +471,11 @@ test("adversarial: an interrupted completion transaction is visible to doctor an
     // from the round-4 cross-review.
     const { planId } = await loadTaskState(dir);
     const planMirrorPath = resolveWildArrangePath(dir, "plans", `${planId}.json`);
-    await chmod(planMirrorPath, 0o444);
+    const restorePlanMirror = await blockFileWrite(planMirrorPath);
     try {
       await assert.rejects(() => runWorkflowNode(dir, "checkpoint", { taskId: "T001" }), /EACCES|EPERM|permission denied/i);
     } finally {
-      await chmod(planMirrorPath, 0o644);
+      await restorePlanMirror();
     }
 
     const interrupted = await loadTaskState(dir);
@@ -561,11 +569,11 @@ test("adversarial: parallel admission resumes idempotently after a lifecycle wri
     // result.json — the exact interruption from the cross-review.
     const runTaskDir = resolveWildArrangePath(dir, "agent-runs", batch.runId, "T001");
     const resultPath = path.join(runTaskDir, "result.json");
-    await chmod(resultPath, 0o444);
+    const restoreResult = await blockFileWrite(resultPath);
     try {
       await assert.rejects(() => admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" }), /EACCES|EPERM|permission denied/i);
     } finally {
-      await chmod(resultPath, 0o644);
+      await restoreResult();
     }
     const stateAfterCrash = await loadTaskState(dir);
     assert.equal(stateAfterCrash.tasks[0].status, "completed", "sanity: the interruption happened after the completed persist");
