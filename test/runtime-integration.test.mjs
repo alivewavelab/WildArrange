@@ -1339,7 +1339,7 @@ test("parallel agents can isolate edits in git worktrees and admit patches", asy
     assert.equal(dashboard.activeWorkspaces.length, 1);
     assert.equal(dashboard.activeWorkspaces[0].taskId, "T001");
     assert.equal(dashboard.activeWorkspaces[0].workDir, batch.results[0].workDir);
-    assert.equal(dashboard.activeWorkspaces[0].branch, null);
+    assert.match(dashboard.activeWorkspaces[0].branch, /^wildarrange\/task\/.+\/T001$/);
 
     const admitted = await admitParallelAgentResult(dir, {
       runId: batch.runId,
