@@ -12,7 +12,7 @@ import { criteriaStatus } from "../infra/success-criteria.mjs";
 import { hasRealReviewLane } from "../infra/gate-arming.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 
-export async function writeAcceptanceProof(rootDir, planId, task, evidence = {}) {
+export async function writeAcceptanceProof(rootDir, planId, task, evidence = {}, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const { config } = await loadWildArrangeConfig(rootDir);
   const proof = buildAcceptanceProof(planId, task, evidence, config);
@@ -22,13 +22,15 @@ export async function writeAcceptanceProof(rootDir, planId, task, evidence = {})
   proof.reportMdPath = path.relative(rootDir, mdPath);
   await writeJsonAtomic(jsonPath, proof);
   await writeFile(mdPath, renderAcceptanceProofMarkdown(proof), "utf8");
-  await appendLedger(rootDir, {
-    type: proof.pass ? "acceptance_proof_passed" : "acceptance_proof_failed",
-    planId,
-    taskId: task.id,
-    reportPath: proof.reportMdPath,
-    failedCount: proof.checks.filter((check) => check.status === "fail").length,
-  });
+  if (options.recordLedger !== false) {
+    await appendLedger(rootDir, {
+      type: proof.pass ? "acceptance_proof_passed" : "acceptance_proof_failed",
+      planId,
+      taskId: task.id,
+      reportPath: proof.reportMdPath,
+      failedCount: proof.checks.filter((check) => check.status === "fail").length,
+    });
+  }
   return proof;
 }
 
@@ -110,7 +112,21 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
       scope: scopeResult ? { status: scopeResult.status, deniedPaths: scopeResult.deniedPaths || [] } : null,
       review: reviewResult ? { pass: reviewResult.pass, failedLanes: reviewLanes.filter((lane) => lane.status === "fail").map((lane) => lane.name) } : null,
       successCriteria: criteria,
+      deliveryBaseline: summarizeDeliveryBaseline(evidence.deliveryBaseline || evidence.integrationCommit),
     },
+  };
+}
+
+function summarizeDeliveryBaseline(delivery) {
+  if (!delivery) return null;
+  return {
+    status: delivery.status || null,
+    commitSha: delivery.commitSha || delivery.integrationSha || delivery.actualSha || null,
+    baseSha: delivery.baseSha || delivery.expectedSha || null,
+    branch: delivery.branch || null,
+    remote: delivery.remote || null,
+    pushed: delivery.pushed === true,
+    noChange: delivery.status === "no_change",
   };
 }
 

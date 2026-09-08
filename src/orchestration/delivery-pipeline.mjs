@@ -258,9 +258,9 @@ function pipelineOutcomeReason(status, results, criteria) {
  * throws into fail envelopes; we check the envelope status here).
  */
 export async function runCompletionSegment(rootDir, planId, task, evidence, options = {}) {
-  const proofEnvelope = await invokeCapability("acceptance-proof", { rootDir, planId, task, evidence });
-  await emitGateDecision(rootDir, planId, task, proofEnvelope, options.runId);
+  let proofEnvelope = await invokeCapability("acceptance-proof", { rootDir, planId, task, evidence });
   if (proofEnvelope.status !== "pass") {
+    await emitGateDecision(rootDir, planId, task, proofEnvelope, options.runId);
     return { status: "proof_failed", proofEnvelope, checkpointEnvelope: null };
   }
   evidence.acceptanceProof = proofEnvelope.evidence;
@@ -268,10 +268,30 @@ export async function runCompletionSegment(rootDir, planId, task, evidence, opti
   if (typeof options.beforeCheckpointGate === "function") {
     integrationGate = await options.beforeCheckpointGate();
     evidence.integrationCommit = integrationGate;
+    evidence.deliveryBaseline = integrationGate;
     if (integrationGate?.pass !== true) {
+      await emitGateDecision(rootDir, planId, task, proofEnvelope, options.runId);
       return { status: "revalidation_required", proofEnvelope, integrationGate, checkpointEnvelope: null };
     }
+    // The first proof pass authorizes creation of the delivery commit. Rewrite
+    // the same proof after the commit/push so its durable evidence references
+    // the exact SHA that checkpoint will bind. This is not a second approval
+    // event, only completion of the first proof's evidence record.
+    const boundProof = await invokeCapability("acceptance-proof", {
+      rootDir,
+      planId,
+      task,
+      evidence,
+      options: { recordLedger: false },
+    });
+    if (boundProof.status !== "pass") {
+      await emitGateDecision(rootDir, planId, task, boundProof, options.runId);
+      return { status: "checkpoint_failed", proofEnvelope: boundProof, integrationGate, checkpointEnvelope: boundProof };
+    }
+    proofEnvelope = boundProof;
+    evidence.acceptanceProof = proofEnvelope.evidence;
   }
+  await emitGateDecision(rootDir, planId, task, proofEnvelope, options.runId);
   const checkpointEnvelope = await invokeCapability("checkpoint", { rootDir, planId, task, evidence });
   await emitGateDecision(rootDir, planId, task, checkpointEnvelope, options.runId);
   if (checkpointEnvelope.status !== "pass") {

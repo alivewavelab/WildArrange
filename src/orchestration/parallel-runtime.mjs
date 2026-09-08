@@ -506,6 +506,8 @@ async function runOneAgentInner(rootDir, runDir, runId, task, options) {
   const isolation = options.defaultIsolation || options.isolation || task.isolation || config.parallelAgents?.isolation || "run-dir";
   const worktree = await prepareAgentWorktree(rootDir, taskRunDir, {
     isolation,
+    branchName: task.coordination?.branch || null,
+    startPoint: task.coordination?.remoteHeadSha || "HEAD",
     timeoutMs: normalizeTimeout(options.timeoutMs || config.parallelAgents?.timeoutMs),
   });
   const taskPacketPath = path.join(taskRunDir, "task.json");

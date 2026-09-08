@@ -4,7 +4,7 @@ import {
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
 
-export async function writeCheckpoint(rootDir, planId, task, verifyResult, scopeResult = null, reviewResult = null) {
+export async function writeCheckpoint(rootDir, planId, task, verifyResult, scopeResult = null, reviewResult = null, deliveryBaseline = null) {
   const checkpointPath = resolveTaskCheckpointPath(rootDir, planId, task.id);
   await writeJsonAtomic(checkpointPath, {
     planId,
@@ -14,5 +14,6 @@ export async function writeCheckpoint(rootDir, planId, task, verifyResult, scope
     verifyResult,
     scopeResult,
     reviewResult,
+    deliveryBaseline,
   });
 }

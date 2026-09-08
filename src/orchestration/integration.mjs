@@ -8,13 +8,16 @@ import {
 } from "../infra/runtime-store.mjs";
 import {
   commitIsAncestor,
+  createTaskDeliveryCommit,
   createTaskCheckpointCommit,
   ensureDeviceIdentity,
   fetchRemoteBranch,
   listTreeChanges,
   listWorkingTreeChanges,
   pushCommit,
+  pushTaskDeliveryCommit,
   remoteBranchHead,
+  synchronizeTaskWorktreeToDelivery,
   verifyIntegrationGuard,
 } from "../infra/git-coordination.mjs";
 import { readVerifiedLedgerEntries } from "../infra/ledger.mjs";
@@ -43,6 +46,43 @@ export async function collectIntegrationCandidatePaths(rootDir, baseSha) {
 export async function verifyAdmissionFences(rootDir, taskId, integrationGuard, recoveryIntent = null) {
   const state = await loadTaskState(rootDir);
   const task = state?.tasks.find((candidate) => candidate.id === taskId);
+  if (recoveryIntent?.integrationSha
+    && recoveryIntent?.remote
+    && recoveryIntent?.branch
+    && ["pushed", "push_outcome_unknown"].includes(recoveryIntent.status)) {
+    const device = await ensureDeviceIdentity(rootDir);
+    const coordination = task?.coordination;
+    const delivery = await inspectRemoteCommitContainment(
+      rootDir,
+      recoveryIntent.remote,
+      recoveryIntent.branch,
+      recoveryIntent.integrationSha,
+    );
+    const ownership = {
+      pass: Boolean(coordination
+        && ["claimed", "accepted"].includes(coordination.status)
+        && coordination.deviceId === device.deviceId
+        && delivery.actualSha === recoveryIntent.integrationSha),
+      active: true,
+      deviceId: device.deviceId,
+      remoteHeadSha: delivery.actualSha,
+    };
+    return {
+      pass: ownership.pass === true && delivery.contains === true,
+      reason: delivery.contains !== true
+        ? "delivered_commit_not_on_remote_task_branch"
+        : ownership.pass === true
+          ? null
+          : "task_ownership_changed",
+      ownership,
+      integration: null,
+      delivery,
+      remoteContainsPriorIntegration: delivery.contains === true,
+      workspaceContainsExpected: true,
+      expectedSha: recoveryIntent.integrationSha,
+      actualSha: delivery.actualSha,
+    };
+  }
   let ownership;
   try {
     ownership = await assertCurrentTaskOwnership(rootDir, task);
@@ -86,8 +126,35 @@ export async function verifyAdmissionFences(rootDir, taskId, integrationGuard, r
 }
 
 export async function integrateAdmissionCommit(rootDir, options) {
-  if (!options.integrationGuard?.active) {
-    return { pass: true, active: false, pushed: false, reason: options.integrationGuard?.reason || null };
+  const coordination = options.task?.coordination;
+  const deliveryTarget = coordination && ["claimed", "accepted"].includes(coordination.status)
+    ? {
+        active: true,
+        remote: coordination.remote,
+        branch: coordination.branch,
+        expectedSha: coordination.remoteHeadSha,
+      }
+    : null;
+  if (!deliveryTarget?.remote || !deliveryTarget?.branch || !deliveryTarget?.expectedSha) {
+    if (options.integrationGuard?.active !== true
+      && ["disabled", "manual", "degraded"].includes(coordination?.status)) {
+      return {
+        pass: true,
+        active: false,
+        pushed: false,
+        status: "local_degraded",
+        reason: coordination.reason || "remote task-branch delivery is unavailable",
+        commitSha: null,
+        integrationSha: null,
+      };
+    }
+    return {
+      pass: false,
+      active: false,
+      pushed: false,
+      reason: "task_branch_delivery_unavailable",
+      error: "a claimed remote task branch is required before admission can complete",
+    };
   }
   const intentPath = integrationIntentPath(rootDir, options.runId, options.taskId);
   let intent = await readJson(intentPath, null);
@@ -98,8 +165,8 @@ export async function integrateAdmissionCommit(rootDir, options) {
       active: true,
       pushed: false,
       reason: "integration_intent_mismatch",
-      expectedSha: options.integrationGuard.expectedSha,
-      actualSha: await remoteBranchHead(rootDir, options.integrationGuard.remote, options.integrationGuard.branch),
+      expectedSha: deliveryTarget.expectedSha,
+      actualSha: await remoteBranchHead(rootDir, deliveryTarget.remote, deliveryTarget.branch),
     };
   }
   const fences = await verifyAdmissionFences(rootDir, options.taskId, options.integrationGuard, intent);
@@ -118,32 +185,53 @@ export async function integrateAdmissionCommit(rootDir, options) {
   }
   if (!intent) {
     const device = await ensureDeviceIdentity(rootDir);
-    const packet = buildCoordinationPacket("task_integration", {
+    const packet = buildCoordinationPacket("task_delivery", {
       planId: options.planId,
       task: taskContract(options.task),
       runId: options.runId,
       device,
       taskBranch: options.task.coordination?.branch || null,
       taskRemoteHeadSha: options.task.coordination?.remoteHeadSha || null,
-      integrationBranch: options.integrationGuard.branch,
+      deliveryBranch: deliveryTarget.branch,
       expectedMainSha: options.integrationGuard.expectedSha,
       changedPaths: options.changedPaths || [],
     });
-    const integrationSha = await createTaskCheckpointCommit(rootDir, {
-      parentSha: options.integrationGuard.expectedSha,
-      changedPaths: options.changedPaths || [],
-      message: renderCoordinationCommitMessage(`integrate ${options.planId}/${options.taskId}`, packet),
-    });
+    const message = renderCoordinationCommitMessage(`deliver ${options.planId}/${options.taskId}`, packet);
+    let integrationSha;
+    if (options.deliveryWorktreeDir && options.deliveryFromWorktree) {
+      const deliveryCommit = await createTaskDeliveryCommit(options.deliveryWorktreeDir, {
+        expectedHead: deliveryTarget.expectedSha,
+        expectedBranch: deliveryTarget.branch,
+        changedPaths: options.changedPaths || [],
+        message,
+      });
+      if (deliveryCommit.pass !== true) {
+        return {
+          ...deliveryCommit,
+          active: true,
+          pushed: false,
+          remote: deliveryTarget.remote,
+        };
+      }
+      integrationSha = deliveryCommit.commitSha;
+    } else {
+      integrationSha = await createTaskCheckpointCommit(rootDir, {
+        parentSha: deliveryTarget.expectedSha,
+        changedPaths: options.changedPaths || [],
+        message,
+      });
+    }
     intent = {
-      kind: "task_integration_intent",
+      kind: "task_delivery_intent",
       version: 1,
       status: "prepared",
       planId: options.planId,
       taskId: options.taskId,
       runId: options.runId,
-      remote: options.integrationGuard.remote,
-      branch: options.integrationGuard.branch,
-      expectedSha: options.integrationGuard.expectedSha,
+      remote: deliveryTarget.remote,
+      branch: deliveryTarget.branch,
+      expectedSha: deliveryTarget.expectedSha,
+      expectedMainSha: options.integrationGuard.expectedSha,
       integrationSha,
       changedPaths: options.changedPaths || [],
       preparedAt: nowIso(),
@@ -184,7 +272,17 @@ export async function integrateAdmissionCommit(rootDir, options) {
   const reconciled = remoteContainsIntegration;
   let pushReconciled = reconciled;
   if (!reconciled) {
-    const pushCommitFn = options.pushCommitFn || pushCommit;
+    const pushCommitFn = options.pushCommitFn || (options.deliveryWorktreeDir
+      ? async (_rootDir, pushOptions) => {
+          const pushed = await pushTaskDeliveryCommit(options.deliveryWorktreeDir, pushOptions);
+          return {
+            ok: pushed.pass,
+            exitCode: pushed.pass ? 0 : 1,
+            stdout: "",
+            stderr: pushed.error || "",
+          };
+        }
+      : pushCommit);
     const pushed = await pushCommitFn(rootDir, {
       remote: intent.remote,
       branch: intent.branch,
@@ -272,12 +370,37 @@ export async function integrateAdmissionCommit(rootDir, options) {
   );
   actualSha = finalRemote.actualSha;
   const finalRemoteContainsIntegration = finalRemote.contains;
+  let worktreeSync = null;
+  if (finalRemoteContainsIntegration && options.deliveryWorktreeDir) {
+    worktreeSync = await synchronizeTaskWorktreeToDelivery(options.deliveryWorktreeDir, {
+      expectedHead: intent.expectedSha,
+      expectedBranch: intent.branch,
+      commitSha: intent.integrationSha,
+    });
+    if (worktreeSync.pass !== true) {
+      return {
+        pass: false,
+        active: true,
+        pushed: true,
+        reconciled: pushReconciled,
+        reason: worktreeSync.reason,
+        remote: intent.remote,
+        branch: intent.branch,
+        expectedSha: intent.expectedSha,
+        actualSha,
+        integrationSha: intent.integrationSha,
+        worktreeSync,
+        intentPath: path.relative(rootDir, intentPath),
+      };
+    }
+  }
   const completed = {
     ...intent,
     status: "pushed",
     pushed: true,
     reconciled: pushReconciled,
     actualSha,
+    worktreeSync,
     pushedAt: intent.pushedAt || nowIso(),
   };
   await writeJsonAtomic(intentPath, completed);
@@ -322,6 +445,7 @@ export async function integrateAdmissionCommit(rootDir, options) {
     expectedSha: intent.expectedSha,
     actualSha,
     integrationSha: intent.integrationSha,
+    worktreeSync,
     intentPath: path.relative(rootDir, intentPath),
   };
 }

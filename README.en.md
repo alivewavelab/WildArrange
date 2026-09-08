@@ -168,7 +168,7 @@ npx wildarrange handoff takeover --plan <planId> --task T001 \
   --expected-device-id <old-device-uuid> --reason "source device is offline and writes were manually stopped"
 ```
 
-WildArrange never expires ownership from a local clock and never force-pushes. Any device may run admission, but it fetches and binds the remote integration-branch SHA before gates start. The current workspace must contain that base and may not carry dirty paths other than the current run result and explicitly attributed handoff paths. Only after all gates and the acceptance proof pass does it create a commit parented by that SHA and push it normally to the remote integration branch. A changed remote head, stale local base, or unattributed workspace change returns `revalidation_required`, safely rolls back this run's files, and writes no checkpoint. Once a remote push is known to have succeeded, later checkpoint/audit failure, main advancement, ownership change, or abnormal remote history can never trigger rollback; the same run must reconcile or remain `recovery_required`.
+WildArrange never expires ownership from a local clock and never force-pushes. One writable task maps to one owner, one isolated worktree, and one task branch. Execution starts from a clean commit baseline and may not carry dirty paths other than the current task result and explicitly attributed handoff paths. Only after all gates and the acceptance proof pass does WildArrange create a delivery commit containing this task's paths and push it normally to that task's remote branch; checkpoint and acceptance proof bind the same commit SHA. A task-branch push never moves `main`. One task normally keeps updating one Draft PR, and shared main changes only after a human approves and merges it on the hosting platform. Once a task-branch push is known to have succeeded, later checkpoint or audit failure cannot trigger rollback; the same run must reconcile or remain `recovery_required`.
 
 If a process was forcibly terminated and `parallel status` shows an empty run while a task is still claimed, confirm that the process is gone and run:
 
@@ -204,7 +204,7 @@ Configure the built-in behavior in `wildarrange.config.json`:
 | `guarded` (default) | Automatically claim and use worktrees when a Git remote exists; otherwise continue locally and return a degradation reason. |
 | `strict` | Refuse execution unless the Git repository, remote, worktree, and pre-handoff verification are available. |
 
-You may tune automatic activation, local fallback, and pre-handoff verification. In every mode except `off`, these floors cannot be disabled: one writer per task, no force push, pushed-commit handoff, revalidation after remote-main movement, and explicit evidence-bearing takeover.
+You may tune automatic activation, local fallback, and pre-handoff verification. In every mode except `off`, these floors cannot be disabled: one writer per task, no force push, pushed-commit handoff, revalidation after task-branch movement, explicit evidence-bearing takeover, and no automatic merge or business-code push to `main`.
 
 ### Developing This Repository
 

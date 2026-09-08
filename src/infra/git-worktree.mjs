@@ -24,7 +24,12 @@ export async function prepareAgentWorktree(rootDir, taskRunDir, options = {}) {
 
   const worktreeDir = path.join(taskRunDir, "worktree");
   await mkdir(taskRunDir, { recursive: true });
-  const add = await runCommandFile("git", ["-C", rootDir, "worktree", "add", "--detach", worktreeDir, "HEAD"], rootDir, options.timeoutMs);
+  const branchName = String(options.branchName || "").trim();
+  const startPoint = String(options.startPoint || "HEAD").trim();
+  const addArgs = branchName
+    ? ["-C", rootDir, "worktree", "add", "-b", branchName, worktreeDir, startPoint]
+    : ["-C", rootDir, "worktree", "add", "--detach", worktreeDir, startPoint];
+  const add = await runCommandFile("git", addArgs, rootDir, options.timeoutMs);
   if (add.exitCode !== 0) {
     return {
       isolation: "git-worktree",
@@ -37,6 +42,8 @@ export async function prepareAgentWorktree(rootDir, taskRunDir, options = {}) {
     isolation: "git-worktree",
     workDir: worktreeDir,
     available: true,
+    branch: branchName || null,
+    startPoint,
     reason: null,
   };
 }

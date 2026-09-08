@@ -168,7 +168,7 @@ npx wildarrange handoff takeover --plan <planId> --task T001 \
   --expected-device-id <old-device-uuid> --reason "原设备离线，已人工确认停止写入"
 ```
 
-不会使用本机时间自动判定 owner 过期，也不会 force push。任意设备都能执行 admission，但开始时会获取并绑定远端集成分支 SHA；当前工作目录必须包含该基线，且除本 run 结果与已确认 handoff 路径外不能夹带其他脏改动。全部质量门与 acceptance proof 通过后，WildArrange 才生成以该 SHA 为父提交的集成 commit，并普通 push 到远端主分支；主分支变化、本地基线落后或存在无归属改动时返回 `revalidation_required`，安全回滚本 run 文件且不写 checkpoint。若远端 push 已成功、仅本地 checkpoint/审计写入失败，则保留同一 run 的所有权和集成意图；即使随后 main 前进、任务 owner 变化或远端历史异常，也绝不回滚已知 push，只允许同 run 对账恢复或进入 `recovery_required`。
+不会使用本机时间自动判定 owner 过期，也不会 force push。一个可写任务对应一个 owner、一个隔离 worktree 和一个 task branch；开始执行前必须绑定干净 commit 基线，除本任务结果与已确认 handoff 路径外不能夹带其他脏改动。全部质量门与 acceptance proof 通过后，WildArrange 才生成只含本任务路径的 delivery commit，并普通 push 到该任务独占的远端 task branch；checkpoint 与 acceptance proof 绑定同一 commit SHA。task branch push 不会移动 `main`，一个任务通常持续更新一个 Draft PR，只有人类在托管平台批准并执行 merge 后才进入共享主线。若 task branch push 已成功、仅本地 checkpoint/审计写入失败，则保留同一 run 的所有权和交付意图，禁止回滚已知 push，只允许同 run 对账恢复或进入 `recovery_required`。
 
 进程被强制终止后，若 `parallel status` 显示 run 没有结果但任务仍被占用，可在人工确认进程已经结束后执行：
 
@@ -204,7 +204,7 @@ npx wildarrange parallel close --run <runId> --reason "confirmed process termina
 | `guarded`（默认） | 有 Git remote 时自动 claim，并让可写并行 Agent 使用 worktree；无 remote 时降级为本地模式并返回原因。 |
 | `strict` | Git 仓库、remote、worktree、交接前验证缺一即拒绝。 |
 
-可调的是自动启用程度、无 remote 时能否降级、交接前是否强制验证。只要不是 `off`，单任务单写者、禁止 force push、跨设备 handoff 绑定已 push commit、远端 main 变化后重验、接管必须显式留证这些底线不可关闭。
+可调的是自动启用程度、无 remote 时能否降级、交接前是否强制验证。只要不是 `off`，单任务单写者、禁止 force push、跨设备 handoff 绑定已 push commit、task branch 变化后重验、接管必须显式留证、不得自动 merge/push 业务代码到 `main` 这些底线不可关闭。
 
 ### 本仓库开发
 

@@ -449,12 +449,18 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
   // stays on disk), which is exactly the resumable state — re-admitting the
   // same run skips the apply and re-runs the gates.
   try {
+    const deliveryWorktreeDir = result.isolation === "git-worktree" && result.worktreeAvailable === true && result.workDir
+      ? path.resolve(rootDir, result.workDir)
+      : null;
+    if (deliveryWorktreeDir) assertPathInsideRoot(rootDir, deliveryWorktreeDir, result.workDir);
     const finalized = await finalizeAdmissionWithinLock(rootDir, options.taskId, {
       workerResult: claim.workerResult,
       changedPaths: appliedPaths,
       runId: options.runId,
       rollbackPlan,
       integrationGuard,
+      deliveryWorktreeDir,
+      deliveryFromWorktree: deliveryWorktreeDir && files.length === 0 && typeof result.result?.patch === "string",
     });
     return { ...finalized, appliedPaths };
   } catch (error) {
@@ -478,7 +484,7 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
  * then be clobbered by the old rollback (cross-review P0, round 7,
  * 2026-07-21).
  */
-async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, changedPaths, runId, rollbackPlan, integrationGuard }) {
+async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, changedPaths, runId, rollbackPlan, integrationGuard, deliveryWorktreeDir, deliveryFromWorktree }) {
   const taskState = await loadTaskState(rootDir);
   if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
   const task = taskState.tasks.find((candidate) => candidate.id === taskId);
@@ -615,6 +621,8 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
       runId,
       changedPaths: deliveryChangedPaths,
       integrationGuard,
+      deliveryWorktreeDir,
+      deliveryFromWorktree,
     }),
   });
   const verifyResult = pipelineResult.evidence.verifyResult;
@@ -632,6 +640,45 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
   await writeReviewReport(rootDir, taskState.planId, task, reviewResult);
 
   if (pipelineResult.status === "completed") {
+    // The admitted files were evaluated in the protected shared checkout only
+    // long enough to build and verify the task-branch delivery commit. Once
+    // that commit is durable on the remote task branch, restore the shared
+    // checkout before releasing ownership. The task branch/worktree remains
+    // the delivery artifact; main must not retain an uncommitted copy.
+    const remoteDeliveryCompleted = pipelineResult.evidence.integrationCommit?.active === true
+      && pipelineResult.evidence.integrationCommit?.pushed === true;
+    const deliveryRollback = remoteDeliveryCompleted
+      ? await rollbackAdmissionChanges(rootDir, rollbackPlan)
+      : { status: "not_attempted", reason: "local_degraded_delivery_retained" };
+    if (remoteDeliveryCompleted && deliveryRollback.status !== "rolled_back") {
+      task.status = "verifying";
+      task.last_failure = buildFailureSummary(task, {
+        workerResult,
+        verifyResult,
+        scopeResult,
+        reviewResult,
+        criteriaResult: criteria,
+        nextStatus: task.status,
+      });
+      task.last_failure.reason = "delivery_cleanup_failed";
+      task.last_failure.summary = `task branch delivery succeeded but shared checkout cleanup failed: ${deliveryRollback.error || deliveryRollback.reason || "unknown error"}`;
+      task.last_failure.retryHint = `delivery commit 已在任务分支；保留 owner 与 rollback plan，修复工作区后用同一 run 恢复。涉及路径：${(deliveryRollback.paths || []).join(", ") || "unknown"}`;
+      task.updatedAt = nowIso();
+      await writeFailureReport(rootDir, taskState.planId, task);
+      await persistTaskState(rootDir, taskState);
+      return {
+        status: "recovery_required",
+        planId: taskState.planId,
+        task,
+        acceptanceProof,
+        verifyResult,
+        scopeResult,
+        reviewResult,
+        integrationCommit: pipelineResult.evidence.integrationCommit || null,
+        rollback: deliveryRollback,
+      };
+    }
+    task.delivery = pipelineResult.evidence.integrationCommit || null;
     task.admission_claim = null;
     // Ledger first, canonical tasks.json last (commit point): a ledger
     // outage must never leave a completed/released admission without its
@@ -651,7 +698,7 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
         taskId,
         status: "completed",
         appliedPaths: deliveryChangedPaths || [],
-        rollback: null,
+        rollback: deliveryRollback,
       },
       digestReason: "parallel_admission_completed",
     });
@@ -665,7 +712,7 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
       scopeResult,
       reviewResult,
       integrationCommit: pipelineResult.evidence.integrationCommit || null,
-      rollback: null,
+      rollback: deliveryRollback,
     };
   }
 

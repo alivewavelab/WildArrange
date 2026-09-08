@@ -29,7 +29,9 @@
 - 长期 Agent 固定白名单是机器约束；Prompt manifest、根配置和确定性路由不能仅靠相互引用形成自洽的第六角色。
 - README 命令事实从真实 CLI `--help` 读取，不能扫描源码字符串代替；JavaScript 注释词法检查必须进入模板表达式并跳过字符串/正则正文。
 - Provider 缺失或网络失败不能越权改变确定性质量门结果。
-- Git 协调命令必须使用参数数组调用 Git，不拼接用户输入到 shell；所有远端写入只允许普通 push，禁止提供 force push 原语。
+- Git 协调命令必须使用参数数组调用 Git，不拼接用户输入到 shell；所有远端写入只允许普通 push，禁止提供 force push 原语。自动 push 只允许写入任务独占的 task branch 或 ownership/handoff 协调引用；不得提供自动合入共享 `main` 的原语。
+- 本地 delivery commit 必须使用隔离 index 或等价机制，只收集当前任务已验证且属于 `writable_paths` 的文件，不得污染开发者已有 staging area。更新任务分支前必须以预期 HEAD 做乐观锁复核，提交后证明 task worktree 无残留改动。
+- Worktree 是临时施工目录，不是长期证据。只有确认目标主线包含 delivery commit、worktree 干净且任务不处于等待验收/返工/恢复状态时才可清理；删除 worktree、本地 branch、远端 branch 是三个独立步骤。
 - Git 路径比较必须处理 macOS `/var` 与 `/private/var` 等 realpath 别名；`.wildarrange/` 永远不进入 handoff 工作树变更清单。
 - Infra 可以返回事实和证据，不能把“完成任务”作为自己的业务结论。
 - 项目没有 `foundation.mjs` 兼容 shim；五区实现必须直接 import `runtime-store.mjs`、`runtime-config.mjs`、`task-state-lock.mjs`、`runtime-snapshot.mjs`、`prompt-pack.mjs`、`runtime-bootstrap.mjs`、`agent-registry.mjs` 或 `ledger.mjs` 的真实 owner。

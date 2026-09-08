@@ -69,7 +69,7 @@ async function adaptContractGenerate(ctx) {
 }
 
 async function adaptAcceptanceProof(ctx) {
-  const raw = await writeAcceptanceProof(ctx.rootDir, ctx.planId, ctx.task, ctx.evidence || {});
+  const raw = await writeAcceptanceProof(ctx.rootDir, ctx.planId, ctx.task, ctx.evidence || {}, ctx.options || {});
   return { status: raw.pass ? "pass" : "fail", evidence: raw, sideEffect: "state_written" };
 }
 
@@ -81,6 +81,7 @@ async function adaptCheckpoint(ctx) {
     ctx.evidence?.verifyResult,
     ctx.evidence?.scopeResult,
     ctx.evidence?.reviewResult,
+    ctx.evidence?.deliveryBaseline || ctx.evidence?.integrationCommit || null,
   );
   return { status: "pass", evidence: null, sideEffect: "state_written" };
 }

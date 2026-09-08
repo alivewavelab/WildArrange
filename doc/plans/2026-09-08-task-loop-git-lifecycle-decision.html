@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WildArrange Task Loop Git 生命周期决策记录</title>
+  <style>
+    body { max-width: 980px; margin: 40px auto; padding: 0 24px; color: #1f2937; font: 16px/1.65 system-ui, sans-serif; }
+    h1, h2 { color: #111827; }
+    code, pre { background: #f3f4f6; border-radius: 6px; }
+    code { padding: 2px 5px; }
+    pre { padding: 16px; overflow: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #d1d5db; padding: 8px 10px; text-align: left; vertical-align: top; }
+    .fixed { border-left: 4px solid #059669; padding-left: 14px; }
+    .open { border-left: 4px solid #d97706; padding-left: 14px; }
+  </style>
+</head>
+<body>
+  <h1>Task Loop Git 生命周期决策记录</h1>
+  <p><strong>状态：</strong>已定稿；task worktree / delivery commit / task-branch push / SHA 绑定与主线不移动已实现并由自动测试证明。Draft PR 创建与主线合并后的安全清理仍属于后续独立实现。</p>
+
+  <h2 class="fixed">已定规则</h2>
+  <ol>
+    <li>一个可写任务对应一个 owner、一个独立 worktree 和一个独立 task branch；两个可写 worktree 不得共享同一分支。</li>
+    <li>开发与 BUG 修复默认从干净 commit 基线创建隔离 worktree。发现无归属改动时优先自动隔离；无法隔离、同文件冲突或所有权不明时才询问开发者。</li>
+    <li>禁止自动 stash、reset、clean、覆盖、提交或删除其他任务的改动。</li>
+    <li>任务分支允许多个中间 WIP commit；只有 verifier、scope、review 与 acceptance proof 全部通过的最终版本才能标记为 delivery commit。</li>
+    <li>AI 或人类对任务代码做出的后续修复都必须形成新 commit，不用长期 dirty 工作区保存成果。</li>
+    <li>Loop 自动创建本地 commit，并可自动 push 到该任务独占的远端 task branch；这不等于获准进入共享主线。</li>
+    <li>无实际文件变化时记录 <code>no_change</code>，不制造空 commit。</li>
+    <li>强耦合改动若不能独立验收，应放入同一任务联合交付；若可拆分，则使用两个任务、两个 worktree、两个 branch，再由独立 integration task 绑定双方 commit SHA 做联合验收。</li>
+    <li>实现任务不能自证完成。Verifier 与 Integrator 读取明确的 commit SHA，生成 acceptance proof 与 checkpoint。</li>
+    <li>任务处于等待验收、返工或 <code>recovery_required</code> 时保留 branch/worktree。确认目标主线包含任务 commit 后，先验证 worktree 干净并删除 worktree，再删除本地 branch；远端 branch 删除需人类确认。</li>
+  </ol>
+
+  <h2>已定流水线</h2>
+  <pre>clean base
+  -&gt; task branch + isolated worktree
+  -&gt; worker
+  -&gt; verifier
+  -&gt; scope
+  -&gt; independent review
+  -&gt; acceptance proof
+  -&gt; local commit
+  -&gt; push own remote task branch
+  -&gt; checkpoint bound to commit SHA
+  -&gt; await integration / rework</pre>
+
+  <h2 class="fixed">共享主线与 PR 定稿</h2>
+  <ul>
+    <li>默认只有一个共享长期主分支 <code>main</code>；不默认创建 <code>develop</code> 或 <code>production</code> 分支。</li>
+    <li>一个 task branch 通常对应一个持续更新的 PR；一个 PR 可以包含多个中间 commit。</li>
+    <li>系统可以自动创建或更新 Draft PR；人类批准点是把通过检查的 PR merge 到 <code>main</code>。</li>
+    <li>Approve 与 Merge 是不同动作；进入 <code>main</code> 和部署到 production 也是两次独立授权。</li>
+    <li>development、staging、production 是部署环境；同一已验证 commit/tag 应按授权逐级部署。</li>
+  </ul>
+
+  <h2>术语</h2>
+  <table>
+    <tr><th>术语</th><th>含义</th></tr>
+    <tr><td>commit</td><td>保存在本地 Git 数据库中的代码快照。</td></tr>
+    <tr><td>push</td><td>把本地 commit 同步到远端分支。</td></tr>
+    <tr><td>task branch</td><td>只承载一个任务开发历史的短期分支。</td></tr>
+    <tr><td>worktree</td><td>与任务分支绑定的临时施工目录，不作为长期档案。</td></tr>
+    <tr><td>merge</td><td>把已验收任务的历史纳入共享目标分支。</td></tr>
+  </table>
+</body>
+</html>
