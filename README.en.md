@@ -168,7 +168,7 @@ npx wildarrange handoff takeover --plan <planId> --task T001 \
   --expected-device-id <old-device-uuid> --reason "source device is offline and writes were manually stopped"
 ```
 
-WildArrange never expires ownership from a local clock and never force-pushes. One writable task maps to one owner, one isolated worktree, and one task branch. Execution starts from a clean commit baseline and may not carry dirty paths other than the current task result and explicitly attributed handoff paths. Only after all gates and the acceptance proof pass does WildArrange create a delivery commit containing this task's paths and push it normally to that task's remote branch; checkpoint and acceptance proof bind the same commit SHA. A task-branch push never moves `main`. One task normally keeps updating one Draft PR, and shared main changes only after a human approves and merges it on the hosting platform. Once a task-branch push is known to have succeeded, later checkpoint or audit failure cannot trigger rollback; the same run must reconcile or remain `recovery_required`.
+WildArrange never expires ownership from a local clock and never force-pushes. One writable task maps to one owner, one isolated worktree, and one task branch. Execution starts from a clean commit baseline and may not carry dirty paths other than the current task result and explicitly attributed handoff paths. Only after all gates and the acceptance proof pass does WildArrange create a delivery commit containing this task's paths: with a remote it pushes normally to the task's remote branch; in a Git repository without a remote it retains the commit on the local task branch/worktree. Both paths bind checkpoint and acceptance proof to the same commit SHA and restore the shared checkout to a clean state. A task-branch push never moves `main`. One task normally keeps updating one Draft PR, and shared main changes only after a human approves and merges it on the hosting platform. Once a task-branch push is known to have succeeded, later checkpoint or audit failure cannot trigger rollback; the same run must reconcile or remain `recovery_required`.
 
 If a process was forcibly terminated and `parallel status` shows an empty run while a task is still claimed, confirm that the process is gone and run:
 
@@ -201,7 +201,7 @@ Configure the built-in behavior in `wildarrange.config.json`:
 |---|---|
 | `off` | Disable Git coordination and keep the original single-device flow. |
 | `manual` | Only explicit `coordination` / `handoff` commands use the remote; `parallel run --coordinate` enables it for one run. |
-| `guarded` (default) | Automatically claim and use worktrees when a Git remote exists; otherwise continue locally and return a degradation reason. |
+| `guarded` (default) | Claim remotely when a remote exists; without one, use a local task branch. Both Git paths isolate writable agents in worktrees and create delivery commits. |
 | `strict` | Refuse execution unless the Git repository, remote, worktree, and pre-handoff verification are available. |
 
 You may tune automatic activation, local fallback, and pre-handoff verification. In every mode except `off`, these floors cannot be disabled: one writer per task, no force push, pushed-commit handoff, revalidation after task-branch movement, explicit evidence-bearing takeover, and no automatic merge or business-code push to `main`.
@@ -314,7 +314,7 @@ A healthy Kimi Hook can deny out-of-scope Write/Edit calls and clearly destructi
 
 ## Minimal Multi-Agent Loop
 
-Command-based child agents can run concurrently. In default `guarded` mode with a configured remote, writable agents automatically receive independent Git worktrees. Without a remote, or in `manual/off`, `parallelAgents.isolation` remains in control:
+Command-based child agents can run concurrently. In default `guarded` mode, writable agents automatically receive independent Git worktrees whenever the project is a Git repository with a baseline commit; the remote only determines whether the delivery commit is pushed automatically. In `manual/off`, `parallelAgents.isolation` remains in control:
 
 ```bash
 node ./bin/wildarrange.mjs parallel run --max-agents 2 --task T001,T002 --agent ZhuRong --command "..."

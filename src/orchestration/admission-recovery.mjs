@@ -147,6 +147,8 @@ export async function persistAdmissionRevalidation(rootDir, taskState, task, opt
 }
 
 export async function persistPostIntegrationRecovery(rootDir, taskState, task, options) {
+  const localDelivery = options.integrationCommit?.local === true
+    || options.integrationCommit?.status === "committed_local";
   task.status = "verifying";
   task.last_failure = {
     at: nowIso(),
@@ -154,7 +156,9 @@ export async function persistPostIntegrationRecovery(rootDir, taskState, task, o
       ? "checkpoint_failed_after_integration"
       : "post_integration_recovery_required",
     summary: options.summary,
-    retryHint: `远端代码已经集成或曾经集成；禁止回滚、释放或换 run。确认远端历史后，用同一 run ${options.runId} 恢复`,
+    retryHint: localDelivery
+      ? `本地任务分支已经生成 delivery commit；禁止释放或换 run。确认本地任务 worktree 后，用同一 run ${options.runId} 恢复`
+      : `远端代码已经集成或曾经集成；禁止回滚、释放或换 run。确认远端历史后，用同一 run ${options.runId} 恢复`,
   };
   task.updatedAt = nowIso();
   await writeFailureReport(rootDir, taskState.planId, task);
@@ -177,6 +181,9 @@ export async function persistPostIntegrationRecovery(rootDir, taskState, task, o
     verifyResult: options.verifyResult,
     scopeResult: options.scopeResult,
     reviewResult: options.reviewResult,
-    rollback: { status: "not_attempted", reason: "remote_integration_already_pushed" },
+    rollback: {
+      status: "not_attempted",
+      reason: localDelivery ? "local_delivery_already_committed" : "remote_integration_already_pushed",
+    },
   };
 }

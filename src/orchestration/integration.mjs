@@ -127,6 +127,18 @@ export async function verifyAdmissionFences(rootDir, taskId, integrationGuard, r
 
 export async function integrateAdmissionCommit(rootDir, options) {
   const coordination = options.task?.coordination;
+  const localDeliveryTarget = coordination?.status === "degraded"
+    && coordination.localGit === true
+    && coordination.branch
+    && coordination.remoteHeadSha
+    ? {
+        branch: coordination.branch,
+        expectedSha: coordination.remoteHeadSha,
+      }
+    : null;
+  if (localDeliveryTarget) {
+    return integrateLocalAdmissionCommit(rootDir, options, localDeliveryTarget);
+  }
   const deliveryTarget = coordination && ["claimed", "accepted"].includes(coordination.status)
     ? {
         active: true,
@@ -137,13 +149,13 @@ export async function integrateAdmissionCommit(rootDir, options) {
     : null;
   if (!deliveryTarget?.remote || !deliveryTarget?.branch || !deliveryTarget?.expectedSha) {
     if (options.integrationGuard?.active !== true
-      && ["disabled", "manual", "degraded"].includes(coordination?.status)) {
+      && (!coordination || ["disabled", "manual", "degraded"].includes(coordination.status))) {
       return {
         pass: true,
         active: false,
         pushed: false,
         status: "local_degraded",
-        reason: coordination.reason || "remote task-branch delivery is unavailable",
+        reason: coordination?.reason || "task coordination metadata is unavailable",
         commitSha: null,
         integrationSha: null,
       };
@@ -444,6 +456,163 @@ export async function integrateAdmissionCommit(rootDir, options) {
     branch: intent.branch,
     expectedSha: intent.expectedSha,
     actualSha,
+    integrationSha: intent.integrationSha,
+    worktreeSync,
+    intentPath: path.relative(rootDir, intentPath),
+  };
+}
+
+async function integrateLocalAdmissionCommit(rootDir, options, deliveryTarget) {
+  if (options.integrationGuard?.active === true) {
+    return {
+      pass: false,
+      active: true,
+      local: true,
+      pushed: false,
+      reason: "local_delivery_conflicts_with_remote_guard",
+    };
+  }
+  if (!options.deliveryWorktreeDir) {
+    return {
+      pass: false,
+      active: true,
+      local: true,
+      pushed: false,
+      reason: "local_task_worktree_unavailable",
+      error: "a branch-bound task worktree is required for local Git delivery",
+    };
+  }
+
+  const intentPath = integrationIntentPath(rootDir, options.runId, options.taskId);
+  let intent = await readJson(intentPath, null);
+  if (intent && (intent.runId !== options.runId
+    || intent.taskId !== options.taskId
+    || intent.branch !== deliveryTarget.branch
+    || intent.expectedSha !== deliveryTarget.expectedSha)) {
+    return {
+      pass: false,
+      active: true,
+      local: true,
+      pushed: false,
+      reason: "integration_intent_mismatch",
+      expectedSha: deliveryTarget.expectedSha,
+      actualSha: intent.integrationSha || null,
+    };
+  }
+
+  if (!intent) {
+    const device = await ensureDeviceIdentity(rootDir);
+    const packet = buildCoordinationPacket("task_delivery", {
+      planId: options.planId,
+      task: taskContract(options.task),
+      runId: options.runId,
+      device,
+      taskBranch: deliveryTarget.branch,
+      taskRemoteHeadSha: null,
+      deliveryBranch: deliveryTarget.branch,
+      expectedMainSha: deliveryTarget.expectedSha,
+      changedPaths: options.changedPaths || [],
+      deliveryMode: "local_git",
+    });
+    const message = renderCoordinationCommitMessage(`deliver ${options.planId}/${options.taskId}`, packet);
+    let integrationSha;
+    if (options.deliveryFromWorktree) {
+      const deliveryCommit = await createTaskDeliveryCommit(options.deliveryWorktreeDir, {
+        expectedHead: deliveryTarget.expectedSha,
+        expectedBranch: deliveryTarget.branch,
+        changedPaths: options.changedPaths || [],
+        message,
+      });
+      if (deliveryCommit.pass !== true) {
+        return {
+          ...deliveryCommit,
+          active: true,
+          local: true,
+          pushed: false,
+        };
+      }
+      integrationSha = deliveryCommit.commitSha;
+    } else {
+      integrationSha = await createTaskCheckpointCommit(rootDir, {
+        parentSha: deliveryTarget.expectedSha,
+        changedPaths: options.changedPaths || [],
+        message,
+      });
+    }
+    intent = {
+      kind: "task_delivery_intent",
+      version: 1,
+      status: "prepared_local",
+      planId: options.planId,
+      taskId: options.taskId,
+      runId: options.runId,
+      remote: null,
+      branch: deliveryTarget.branch,
+      expectedSha: deliveryTarget.expectedSha,
+      expectedMainSha: deliveryTarget.expectedSha,
+      integrationSha,
+      changedPaths: options.changedPaths || [],
+      preparedAt: nowIso(),
+    };
+    await writeJsonAtomic(intentPath, intent);
+  }
+
+  const worktreeSync = await synchronizeTaskWorktreeToDelivery(options.deliveryWorktreeDir, {
+    expectedHead: intent.expectedSha,
+    expectedBranch: intent.branch,
+    commitSha: intent.integrationSha,
+  });
+  if (worktreeSync.pass !== true) {
+    return {
+      pass: false,
+      active: true,
+      local: true,
+      pushed: false,
+      status: "recovery_required",
+      reason: worktreeSync.reason,
+      branch: intent.branch,
+      expectedSha: intent.expectedSha,
+      actualSha: worktreeSync.commitSha || null,
+      integrationSha: intent.integrationSha,
+      worktreeSync,
+      intentPath: path.relative(rootDir, intentPath),
+    };
+  }
+
+  const completed = {
+    ...intent,
+    status: "committed_local",
+    local: true,
+    pushed: false,
+    actualSha: intent.integrationSha,
+    worktreeSync,
+    committedAt: intent.committedAt || nowIso(),
+  };
+  await writeJsonAtomic(intentPath, completed);
+  const ledgerEntries = await readVerifiedLedgerEntries(rootDir);
+  if (!ledgerEntries.some((entry) => entry.type === "task_delivery_committed_local"
+    && entry.runId === options.runId
+    && entry.taskId === options.taskId
+    && entry.integrationSha === intent.integrationSha)) {
+    await appendLedger(rootDir, {
+      type: "task_delivery_committed_local",
+      planId: options.planId,
+      taskId: options.taskId,
+      runId: options.runId,
+      expectedSha: intent.expectedSha,
+      integrationSha: intent.integrationSha,
+      branch: intent.branch,
+    });
+  }
+  return {
+    pass: true,
+    active: true,
+    local: true,
+    pushed: false,
+    status: "committed_local",
+    branch: intent.branch,
+    expectedSha: intent.expectedSha,
+    actualSha: intent.integrationSha,
     integrationSha: intent.integrationSha,
     worktreeSync,
     intentPath: path.relative(rootDir, intentPath),

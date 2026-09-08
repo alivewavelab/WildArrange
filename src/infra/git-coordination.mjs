@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, realpath, rm } from "node:fs/promises";
+import { realpath, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { runCommandFile } from "./command-runner.mjs";
@@ -41,13 +41,23 @@ export async function inspectGitCoordination(rootDir, config = {}) {
   if (topLevel !== await canonicalPath(rootDir)) {
     return unavailable(mode, "project root is not the Git toplevel");
   }
+  const headResult = await runGit(rootDir, ["rev-parse", "HEAD"]);
+  if (!headResult.ok) {
+    return unavailable(mode, "Git repository has no baseline commit", { topLevel });
+  }
+  const head = headResult.stdout.trim();
   const remote = config.remote || "origin";
   const remoteResult = await runGit(rootDir, ["remote", "get-url", remote]);
   if (!remoteResult.ok) {
-    return unavailable(mode, `Git remote ${remote} is not configured`, { topLevel, remote });
+    return unavailable(mode, `Git remote ${remote} is not configured`, {
+      topLevel,
+      remote,
+      remoteConfigured: false,
+      localGitAvailable: true,
+      headSha: head,
+    });
   }
   const integrationBranch = await resolveIntegrationBranch(rootDir, remote, config.integrationBranch || "auto");
-  const head = await gitHead(rootDir);
   return {
     enabled: true,
     active: true,
@@ -55,6 +65,7 @@ export async function inspectGitCoordination(rootDir, config = {}) {
     topLevel,
     remote,
     remoteConfigured: true,
+    localGitAvailable: true,
     integrationBranch,
     headSha: head,
     reason: null,
@@ -155,8 +166,7 @@ export async function createTaskDeliveryCommit(rootDir, options = {}) {
     };
   }
 
-  const indexPath = resolveWildArrangePath(rootDir, "coordination", "tmp", `delivery-index-${process.pid}-${randomUUID()}`);
-  await mkdir(path.dirname(indexPath), { recursive: true });
+  const indexPath = path.join(os.tmpdir(), `wildarrange-delivery-index-${process.pid}-${randomUUID()}`);
   const env = { GIT_INDEX_FILE: indexPath };
   try {
     const readTree = await runGit(rootDir, ["read-tree", expectedHead], { env });
@@ -314,8 +324,7 @@ export async function createMetadataCommit(rootDir, options) {
 }
 
 export async function createTaskCheckpointCommit(rootDir, options) {
-  const indexPath = resolveWildArrangePath(rootDir, "coordination", "tmp", `index-${process.pid}-${randomUUID()}`);
-  await mkdir(path.dirname(indexPath), { recursive: true });
+  const indexPath = path.join(os.tmpdir(), `wildarrange-checkpoint-index-${process.pid}-${randomUUID()}`);
   const env = { GIT_INDEX_FILE: indexPath };
   try {
     const readTree = await runGit(rootDir, ["read-tree", options.parentSha], { env });

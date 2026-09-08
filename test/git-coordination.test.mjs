@@ -378,6 +378,107 @@ test("guarded mode gives writable parallel agents a worktree and one local run o
   });
 });
 
+test("guarded mode without a remote still delivers to a clean local task branch worktree", async () => {
+  await withTempDir(async (repo) => {
+    await git(repo, ["init", "--initial-branch=main"]);
+    await writeFile(path.join(repo, ".gitignore"), ".wildarrange/\n", "utf8");
+    await writeFile(path.join(repo, "README.md"), "local seed\n", "utf8");
+    await git(repo, ["add", ".gitignore", "README.md"]);
+    await git(repo, ["-c", "user.name=Seed", "-c", "user.email=seed@example.invalid", "commit", "-m", "initial"]);
+    const mainBefore = (await git(repo, ["rev-parse", "main"])).trim();
+    await initializeTaskRuntime(repo, "local-device");
+
+    const batch = await runParallelAgents(repo, {
+      taskIds: ["T001"],
+      agent: "ZhuRong",
+      command: resultCommand("src/local-only.txt", "local delivery\n"),
+    });
+    assert.equal(batch.results[0].isolation, "git-worktree");
+    assert.equal(batch.results[0].worktreeAvailable, true);
+
+    const admitted = await admitParallelAgentResult(repo, { runId: batch.runId, taskId: "T001" });
+    assert.equal(admitted.status, "completed", JSON.stringify(admitted, null, 2));
+    assert.equal(admitted.integrationCommit.local, true);
+    assert.equal(admitted.integrationCommit.pushed, false);
+    assert.equal(admitted.integrationCommit.status, "committed_local");
+    assert.equal(admitted.rollback.status, "rolled_back");
+    assert.equal((await git(repo, ["rev-parse", "main"])).trim(), mainBefore);
+    assert.equal((await git(repo, ["status", "--short"])).trim(), "");
+    await assert.rejects(readFile(path.join(repo, "src", "local-only.txt"), "utf8"), /ENOENT/);
+
+    const state = await loadTaskState(repo);
+    const task = state.tasks[0];
+    assert.equal(task.coordination.status, "degraded");
+    assert.equal(task.coordination.localGit, true);
+    assert.equal(task.coordination.branch, "wildarrange/task/P-GIT/T001");
+    const localTaskHead = (await git(repo, ["rev-parse", task.coordination.branch])).trim();
+    assert.equal(localTaskHead, admitted.integrationCommit.integrationSha);
+    assert.equal(await git(repo, ["show", `${localTaskHead}:src/local-only.txt`]), "local delivery\n");
+    const taskWorktree = await inspectTaskWorktreeBaseline(path.resolve(repo, batch.results[0].workDir));
+    assert.equal(taskWorktree.clean, true);
+    assert.equal(taskWorktree.branch, task.coordination.branch);
+    assert.equal(taskWorktree.headSha, localTaskHead);
+    const proof = await readJson(path.join(repo, ".wildarrange", "reports", "acceptance", "P-GIT", "T001.json"));
+    const checkpoint = await readJson(path.join(repo, ".wildarrange", "checkpoints", "P-GIT", "T001.json"));
+    assert.equal(proof.evidenceRefs.deliveryBaseline.commitSha, localTaskHead);
+    assert.equal(proof.evidenceRefs.deliveryBaseline.pushed, false);
+    assert.equal(checkpoint.deliveryBaseline.integrationSha, localTaskHead);
+  });
+});
+
+test("local task delivery resumes the same commit after checkpoint failure", async () => {
+  await withTempDir(async (repo) => {
+    await git(repo, ["init", "--initial-branch=main"]);
+    await writeFile(path.join(repo, ".gitignore"), ".wildarrange/\n", "utf8");
+    await writeFile(path.join(repo, "README.md"), "local seed\n", "utf8");
+    await git(repo, ["add", ".gitignore", "README.md"]);
+    await git(repo, ["-c", "user.name=Seed", "-c", "user.email=seed@example.invalid", "commit", "-m", "initial"]);
+    const mainBefore = (await git(repo, ["rev-parse", "main"])).trim();
+    await initializeTaskRuntime(repo, "local-device");
+    const batch = await runParallelAgents(repo, {
+      taskIds: ["T001"],
+      agent: "ZhuRong",
+      command: resultCommand("src/local-recovery.txt", "recover locally\n"),
+    });
+    const checkpointPlanDir = path.join(repo, ".wildarrange", "checkpoints", "P-GIT");
+    await replaceDirectoryWithBlockingFile(checkpointPlanDir);
+    let first;
+    try {
+      first = await admitParallelAgentResult(repo, { runId: batch.runId, taskId: "T001" });
+    } finally {
+      await restoreBlockedDirectory(checkpointPlanDir);
+    }
+    assert.equal(first.status, "recovery_required");
+    assert.equal(first.rollback.reason, "local_delivery_already_committed");
+    const firstIntent = await readIntegrationIntent(repo, batch.runId, "T001");
+    assert.equal(firstIntent.status, "committed_local");
+
+    const resumed = await admitParallelAgentResult(repo, { runId: batch.runId, taskId: "T001" });
+    assert.equal(resumed.status, "completed");
+    assert.equal(resumed.integrationCommit.integrationSha, firstIntent.integrationSha);
+    assert.equal((await git(repo, ["rev-parse", "main"])).trim(), mainBefore);
+    await assert.rejects(readFile(path.join(repo, "src", "local-recovery.txt"), "utf8"), /ENOENT/);
+    assert.equal((await git(repo, ["rev-list", "--count", "wildarrange/task/P-GIT/T001"])).trim(), "2");
+  });
+});
+
+test("missing task coordination degrades explicitly when no integration guard is active", async () => {
+  await withTempDir(async (rootDir) => {
+    await initRuntime(rootDir);
+    const result = await integrateAdmissionCommit(rootDir, {
+      planId: "P-LOCAL",
+      taskId: "T001",
+      task: { id: "T001" },
+      runId: "agent_run_missing_coordination",
+      changedPaths: [],
+      integrationGuard: { active: false, reason: "project is not a Git repository" },
+    });
+    assert.equal(result.pass, true);
+    assert.equal(result.status, "local_degraded");
+    assert.equal(result.reason, "task coordination metadata is unavailable");
+  });
+});
+
 test("adversarial round 2: integration guard rejects a stale remote main SHA", async () => {
   await withRemoteClones(async ({ cloneA, cloneB }) => {
     await initRuntime(cloneA);

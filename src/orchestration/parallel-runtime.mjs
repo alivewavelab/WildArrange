@@ -587,7 +587,7 @@ function resolveParallelIsolation(config, gitCoordination, options) {
   const coordination = config.gitCoordination || {};
   const enforceWorktree = ["guarded", "strict"].includes(coordination.mode)
     && coordination.requireWorktreeForParallelWrites !== false
-    && gitCoordination.active;
+    && (gitCoordination.active || gitCoordination.localGitAvailable === true);
   if (enforceWorktree && options.isolation && options.isolation !== "git-worktree") {
     throw new Error("parallel writable agents require git-worktree isolation; weaken gitCoordination.requireWorktreeForParallelWrites in config to opt out");
   }

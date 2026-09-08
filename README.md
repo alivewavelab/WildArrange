@@ -168,7 +168,7 @@ npx wildarrange handoff takeover --plan <planId> --task T001 \
   --expected-device-id <old-device-uuid> --reason "原设备离线，已人工确认停止写入"
 ```
 
-不会使用本机时间自动判定 owner 过期，也不会 force push。一个可写任务对应一个 owner、一个隔离 worktree 和一个 task branch；开始执行前必须绑定干净 commit 基线，除本任务结果与已确认 handoff 路径外不能夹带其他脏改动。全部质量门与 acceptance proof 通过后，WildArrange 才生成只含本任务路径的 delivery commit，并普通 push 到该任务独占的远端 task branch；checkpoint 与 acceptance proof 绑定同一 commit SHA。task branch push 不会移动 `main`，一个任务通常持续更新一个 Draft PR，只有人类在托管平台批准并执行 merge 后才进入共享主线。若 task branch push 已成功、仅本地 checkpoint/审计写入失败，则保留同一 run 的所有权和交付意图，禁止回滚已知 push，只允许同 run 对账恢复或进入 `recovery_required`。
+不会使用本机时间自动判定 owner 过期，也不会 force push。一个可写任务对应一个 owner、一个隔离 worktree 和一个 task branch；开始执行前必须绑定干净 commit 基线，除本任务结果与已确认 handoff 路径外不能夹带其他脏改动。全部质量门与 acceptance proof 通过后，WildArrange 才生成只含本任务路径的 delivery commit：有 remote 时普通 push 到该任务独占的远端 task branch；无 remote 但仍是 Git 仓库时，commit 保留在本地 task branch/worktree。两种路径都会让 checkpoint 与 acceptance proof 绑定同一 commit SHA，并把共享 checkout 恢复干净。task branch push 不会移动 `main`，一个任务通常持续更新一个 Draft PR，只有人类在托管平台批准并执行 merge 后才进入共享主线。若 task branch push 已成功、仅本地 checkpoint/审计写入失败，则保留同一 run 的所有权和交付意图，禁止回滚已知 push，只允许同 run 对账恢复或进入 `recovery_required`。
 
 进程被强制终止后，若 `parallel status` 显示 run 没有结果但任务仍被占用，可在人工确认进程已经结束后执行：
 
@@ -201,7 +201,7 @@ npx wildarrange parallel close --run <runId> --reason "confirmed process termina
 |---|---|
 | `off` | 关闭 Git 协调，保留原本的单机流程。 |
 | `manual` | 只有显式 `coordination` / `handoff` 命令使用远端协调；`parallel run --coordinate` 可单次启用。 |
-| `guarded`（默认） | 有 Git remote 时自动 claim，并让可写并行 Agent 使用 worktree；无 remote 时降级为本地模式并返回原因。 |
+| `guarded`（默认） | 有 remote 时自动远端 claim；无 remote 的 Git 仓库使用本地 task branch。两者都让可写并行 Agent 使用独立 worktree 并生成 delivery commit。 |
 | `strict` | Git 仓库、remote、worktree、交接前验证缺一即拒绝。 |
 
 可调的是自动启用程度、无 remote 时能否降级、交接前是否强制验证。只要不是 `off`，单任务单写者、禁止 force push、跨设备 handoff 绑定已 push commit、task branch 变化后重验、接管必须显式留证、不得自动 merge/push 业务代码到 `main` 这些底线不可关闭。
@@ -314,7 +314,7 @@ Kimi Hook 在正常运行时可拦截越界 Write/Edit 和明显高危 Bash，�
 
 ## 多 Agent 最小闭环
 
-命令型子 Agent 可以并发运行；默认 `guarded` 且仓库存在 remote 时，可写 Agent 自动使用独立 Git worktree。无 remote 或配置为 `manual/off` 时沿用配置中的 `parallelAgents.isolation`：
+命令型子 Agent 可以并发运行；默认 `guarded` 下，只要项目是具有基线 commit 的 Git 仓库，可写 Agent 就自动使用独立 Git worktree；remote 只决定 delivery commit 是否自动 push。配置为 `manual/off` 时沿用 `parallelAgents.isolation`：
 
 ```bash
 node ./bin/wildarrange.mjs parallel run --max-agents 2 --task T001,T002 --agent ZhuRong --command "..."

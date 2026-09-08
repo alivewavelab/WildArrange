@@ -496,12 +496,12 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
   }
   const integrationIntent = await readIntegrationIntent(rootDir, runId, taskId);
   const initialFence = await verifyAdmissionFences(rootDir, taskId, integrationGuard, integrationIntent);
-  const integrationWasPushed = ["pushed", "push_outcome_unknown"].includes(integrationIntent?.status)
+  const durableDeliveryExists = ["pushed", "push_outcome_unknown", "committed_local"].includes(integrationIntent?.status)
     || Boolean(integrationIntent?.integrationSha
       && integrationGuard?.expectedSha
       && await commitIsAncestor(rootDir, integrationIntent.integrationSha, integrationGuard.expectedSha));
   if (!initialFence.pass) {
-    if (integrationWasPushed) {
+    if (durableDeliveryExists) {
       return persistPostIntegrationRecovery(rootDir, taskState, task, {
         runId,
         integrationCommit: {
@@ -553,16 +553,20 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
       removeRollbackPlan: () => removePersistedRollbackPlan(rootDir, runId, taskId),
     });
   }
+  const localGitDelivery = task.coordination?.localGit === true;
   const deliveryChangedPaths = integrationIntent && initialFence.remoteContainsPriorIntegration
     ? integrationIntent.changedPaths || changedPaths
-    : integrationGuard?.active
-      ? await collectIntegrationCandidatePaths(rootDir, integrationGuard.expectedSha)
+    : integrationGuard?.active || localGitDelivery
+      ? await collectIntegrationCandidatePaths(
+          rootDir,
+          integrationGuard?.expectedSha || task.coordination?.remoteHeadSha,
+        )
     : changedPaths;
   const authoritativePaths = new Set([
     ...(changedPaths || []),
     ...(task.coordination?.handoffChangedPaths || []),
   ]);
-  const unattributedPaths = integrationGuard?.active
+  const unattributedPaths = integrationGuard?.active || localGitDelivery
     ? deliveryChangedPaths.filter((filePath) => !authoritativePaths.has(filePath))
     : [];
   if (unattributedPaths.length > 0) {
@@ -642,15 +646,16 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
   if (pipelineResult.status === "completed") {
     // The admitted files were evaluated in the protected shared checkout only
     // long enough to build and verify the task-branch delivery commit. Once
-    // that commit is durable on the remote task branch, restore the shared
-    // checkout before releasing ownership. The task branch/worktree remains
-    // the delivery artifact; main must not retain an uncommitted copy.
-    const remoteDeliveryCompleted = pipelineResult.evidence.integrationCommit?.active === true
-      && pipelineResult.evidence.integrationCommit?.pushed === true;
-    const deliveryRollback = remoteDeliveryCompleted
+    // that commit is durable locally (and pushed when a remote exists), restore
+    // the shared checkout before releasing ownership. The task branch/worktree
+    // remains the delivery artifact; main must not retain an uncommitted copy.
+    const delivery = pipelineResult.evidence.integrationCommit;
+    const durableDeliveryCompleted = delivery?.active === true
+      && (delivery.pushed === true || (delivery.local === true && delivery.status === "committed_local"));
+    const deliveryRollback = durableDeliveryCompleted
       ? await rollbackAdmissionChanges(rootDir, rollbackPlan)
       : { status: "not_attempted", reason: "local_degraded_delivery_retained" };
-    if (remoteDeliveryCompleted && deliveryRollback.status !== "rolled_back") {
+    if (durableDeliveryCompleted && deliveryRollback.status !== "rolled_back") {
       task.status = "verifying";
       task.last_failure = buildFailureSummary(task, {
         workerResult,
@@ -716,12 +721,14 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
     };
   }
 
-  if (pipelineResult.status !== "completed" && pipelineResult.evidence.integrationCommit?.pushed === true) {
+  if (pipelineResult.status !== "completed"
+    && (pipelineResult.evidence.integrationCommit?.pushed === true
+      || pipelineResult.evidence.integrationCommit?.status === "committed_local")) {
     return persistPostIntegrationRecovery(rootDir, taskState, task, {
       runId,
       integrationCommit: pipelineResult.evidence.integrationCommit,
       summary: pipelineResult.status === "checkpoint_failed"
-        ? `remote integration ${pipelineResult.evidence.integrationCommit.integrationSha} succeeded, but checkpoint failed: ${pipelineResult.evidence.checkpointError?.message || "unknown error"}`
+        ? `delivery commit ${pipelineResult.evidence.integrationCommit.integrationSha} succeeded, but checkpoint failed: ${pipelineResult.evidence.checkpointError?.message || "unknown error"}`
         : `integration ${pipelineResult.evidence.integrationCommit.integrationSha} was already pushed, but remote recovery validation failed: ${pipelineResult.evidence.integrationCommit.reason || pipelineResult.status}`,
       error: pipelineResult.evidence.checkpointError?.message
         || pipelineResult.evidence.integrationCommit.reason
