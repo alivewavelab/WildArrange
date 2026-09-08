@@ -1,4 +1,5 @@
 import http from "node:http";
+import { readFile } from "node:fs/promises";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import {
   DEFAULT_EXECUTOR_AGENT,
@@ -63,6 +64,12 @@ export function startDashboardServer(rootDir, options = {}) {
       if (url.pathname === "/api/state") {
         const data = await dashboardData(rootDir);
         sendJson(response, 200, data);
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/dashboard-assets/wordmark.png") {
+        const asset = await readFile(new URL("../../docs/product/assets/wildarrange-wordmark-dark-v1.png", import.meta.url));
+        response.writeHead(200, { "content-type": "image/png", "cache-control": "public, max-age=3600" });
+        response.end(asset);
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/run-next") {
@@ -368,7 +375,8 @@ function renderDashboardHtml() {
     .app { display: grid; grid-template-columns: 242px minmax(0,1fr); min-height: 100vh; }
     .rail { position: sticky; top: 0; height: 100vh; padding: 28px 22px; color: #eef7f0; background: linear-gradient(rgba(255,255,255,.026) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.026) 1px,transparent 1px),var(--forest); background-size: 22px 22px; overflow: hidden; }
     .rail::after { content: ""; position: absolute; width: 190px; height: 190px; right: -92px; bottom: 82px; border: 1px solid rgba(191,230,207,.2); border-radius: 50%; box-shadow: 0 0 0 24px rgba(191,230,207,.025),0 0 0 48px rgba(191,230,207,.025); }
-    .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 42px; }
+    .brand { display: flex; align-items: center; gap: 12px; height:52px; margin-bottom: 34px; overflow:hidden; }
+    .brand-wordmark { display:block; width:172px; height:52px; object-fit:cover; object-position:center; }
     .mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 13px; color: var(--forest); background: var(--mint); font: 800 20px/1 "Iowan Old Style",Georgia,serif; transform: rotate(-5deg); }
     .brand strong { display: block; font: 700 17px/1.1 "Iowan Old Style",Georgia,serif; }
     .brand small { display: block; margin-top: 4px; color: #a9c6b7; font-size: 10px; letter-spacing: .14em; }
@@ -424,6 +432,12 @@ function renderDashboardHtml() {
     .pill,.status-badge { display:inline-flex; align-items:center; padding:4px 8px; border-radius:99px; color:var(--forest-2); background:#e5f3e9; font-size:10px; font-weight:700; }
     .task-detail { grid-column:2/-1; display:none; padding:12px 0 2px; }
     .task-card.expanded .task-detail { display:block; }
+    .workspace-list { display:grid; border-top:1px solid var(--line); }
+    .workspace-row { display:grid; grid-template-columns:minmax(130px,.8fr) minmax(180px,1.2fr) minmax(180px,1fr) auto; gap:14px; align-items:center; padding:13px 0; border-bottom:1px solid var(--line); }
+    .workspace-row:last-child { border-bottom:0; }
+    .workspace-row code { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .workspace-empty { padding:18px 0 4px; color:var(--muted); }
+    .workspace-chip { color:var(--signal); font-size:10px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
     .attention-panel { color:#fff; background:var(--signal); border:0; }
     .attention-panel h2 { margin:8px 0 7px; font-size:21px; }
     .attention-panel .muted { color:rgba(255,255,255,.78); }
@@ -464,10 +478,10 @@ function renderDashboardHtml() {
     .decision-filters { display:flex; gap:8px; flex-wrap:wrap; margin:0 0 14px; }
     .decision-filters button { border-radius:999px; background:var(--surface-soft); }
     .decision-filters button.active { color:white; background:var(--ink); border-color:var(--ink); }
-    .governance-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; align-items:start; }
-    .governance-grid > section { min-height:190px; display:flex; flex-direction:column; }
+    .governance-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; align-items:stretch; }
+    .governance-grid > section { height:480px; min-height:480px; display:flex; flex-direction:column; overflow:hidden; }
     .governance-grid > section > button { margin-top:8px; }
-    .governance-file-list { display:grid; gap:6px; max-height:330px; margin-top:12px; padding-right:4px; overflow:auto; }
+    .governance-file-list { display:grid; flex:1; min-height:0; gap:6px; margin-top:12px; padding-right:4px; overflow:auto; align-content:start; }
     .governance-file { width:100%; display:flex; justify-content:space-between; gap:12px; text-align:left; background:#f8f5ed; }
     .section-kicker { margin:22px 0 10px; color:var(--muted); font-size:12px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; }
     .governance-ledger-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }
@@ -552,13 +566,48 @@ function renderDashboardHtml() {
     @keyframes rise { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
     @media (max-width: 980px) { .app{grid-template-columns:76px minmax(0,1fr)} .rail{padding-inline:17px}.brand-text,.nav span,.nav-label,.rail-foot{display:none}.nav button{justify-content:center;padding:12px 0}.hero,.dashboard-grid{grid-template-columns:1fr}.hero-stamp{justify-self:stretch;width:100%}.ops,.two,.log-grid{grid-template-columns:1fr}.governance-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.governance-ledger-grid{grid-template-columns:1fr}.ledger-toolbar{grid-template-columns:1fr 1fr} }
     @media (max-width: 640px) { .governance-grid{grid-template-columns:1fr}.activity-row{grid-template-columns:1fr;gap:4px} }
-    @media (max-width: 640px) { .app{display:block}.rail{position:static;width:100%;height:auto;padding:14px 18px}.rail::after{display:none}.brand{margin:0}.nav,.nav-label,.rail-foot{display:none}.topbar{padding:18px 16px 0}.status-pill,.top-actions .notice{display:none}main{padding:24px 16px 44px}h1{font-size:39px}.pipeline{grid-template-columns:repeat(2,minmax(0,1fr));overflow:hidden}.step:nth-child(2)::after{display:none}.step small{display:block;overflow:hidden;text-overflow:ellipsis}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.task-card{grid-template-columns:44px minmax(0,1fr)}.task-card>.status-badge{display:none}.panel-head{align-items:flex-start}.panel-head .primary{padding-inline:9px;font-size:12px}.route-review-head,.route-review-actions{align-items:flex-start;flex-direction:column} }
+    /* Grid workbench theme: information hierarchy comes from rules and spacing. */
+    :root { --ink:#141412; --muted:#6d6b64; --paper:#f2efe8; --panel:#f8f5ee; --forest:#171715; --forest-2:#262622; --mint:#d3482f; --signal:#d3482f; --gold:#d3482f; --line:#cbc6ba; --good:#24704d; --bad:#bd3528; --warn:#a56519; --shadow:none; --radius:0; }
+    body { background:var(--paper); font-family:Arial,"PingFang SC","Microsoft YaHei",sans-serif; }
+    .app { grid-template-columns:204px minmax(0,1fr); }
+    .rail { padding:22px 18px; background:#171715; border-right:1px solid #353531; }
+    .rail::after { display:none; }
+    .nav button { border-radius:0; border-left:2px solid transparent; }
+    .nav button:hover { transform:none; background:#22221f; }
+    .nav button.active { color:#fff; background:#242421; border-left-color:var(--signal); box-shadow:none; }
+    .topbar { min-height:64px; padding:0 clamp(24px,3vw,48px); border-bottom:1px solid var(--line); }
+    main { padding:38px clamp(24px,3vw,48px) 64px; }
+    .hero { grid-template-columns:minmax(0,1fr) 240px; align-items:stretch; gap:0; margin-bottom:0; border-top:1px solid var(--ink)!important; border-bottom:1px solid var(--ink)!important; }
+    .hero>div:first-child { padding:28px 26px 30px 0; }
+    h1 { font-family:Arial,"PingFang SC",sans-serif; font-weight:900; font-size:clamp(40px,5vw,72px); letter-spacing:-.06em; }
+    h2,.section-title { font-family:Arial,"PingFang SC",sans-serif; font-weight:800; }
+    .hero-stamp { width:auto; padding:25px 22px; border:0; border-left:1px solid var(--ink); background:transparent; box-shadow:none; }
+    .hero-stamp strong { font-family:Arial,sans-serif; font-size:38px; }
+    .pipeline { gap:0; margin:0 0 22px; padding:0; border-radius:0; color:var(--ink); background:transparent; border-bottom:1px solid var(--ink); box-shadow:none; }
+    .step { padding:16px 14px; opacity:.58; border-right:1px solid var(--line); }
+    .step:first-child { border-left:1px solid var(--ink); }
+    .step:last-child { border-right:1px solid var(--ink); }
+    .step:not(:last-child)::after { display:none; }
+    .step small { color:var(--muted); }
+    .step.done,.step.active { background:#ebe6dc; }
+    section,.metric,.op-block { border-radius:0; background:var(--panel); box-shadow:none; }
+    .attention-panel { background:var(--signal); }
+    .task-id { border-radius:0; color:var(--ink); background:transparent; }
+    .pill,.status-badge,.attention-chip { border-radius:0; }
+    button,input,textarea,select,pre,.governance-file { border-radius:0; box-shadow:none; }
+    button:hover { transform:none; border-color:var(--ink); }
+    .ledger-column,.ledger-card { border-radius:0; box-shadow:none; }
+    .ledger-board { gap:1px; background:var(--line); }
+    .ledger-column { border:0; background:var(--panel); }
+    .workspace-row code { font-size:11px; }
+    @media (max-width: 900px) { .workspace-row{grid-template-columns:minmax(100px,.7fr) minmax(150px,1.3fr)}.workspace-row code{grid-column:span 1}.dashboard-grid{grid-template-columns:1fr} }
+    @media (max-width: 640px) { .app{display:block}.rail{position:static;width:100%;height:auto;padding:10px 16px}.brand{margin:0}.brand-wordmark{width:150px}.nav,.nav-label,.rail-foot{display:none}.topbar{padding:14px 16px}.status-pill,.top-actions .notice{display:none}main{padding:24px 16px 44px}h1{font-size:39px}.hero{grid-template-columns:1fr}.hero-stamp{border-left:0;border-top:1px solid var(--ink)}.pipeline{grid-template-columns:repeat(2,minmax(0,1fr));overflow:hidden}.step small{display:block;overflow:hidden;text-overflow:ellipsis}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.task-card{grid-template-columns:44px minmax(0,1fr)}.task-card>.status-badge{display:none}.panel-head{align-items:flex-start}.panel-head .primary{padding-inline:9px;font-size:12px}.route-review-head,.route-review-actions{align-items:flex-start;flex-direction:column}.workspace-row{grid-template-columns:1fr}.workspace-row code{grid-column:auto} }
   </style>
 </head>
 <body>
   <div class="app">
     <aside class="rail">
-      <div class="brand"><div class="mark">W</div><div class="brand-text"><strong>WildArrange</strong><small>本地智能驾驭系统</small></div></div>
+      <div class="brand"><img class="brand-wordmark" src="/dashboard-assets/wordmark.png" alt="WildArrange"></div>
       <div class="nav-label">驾驶舱</div>
       <nav class="nav" aria-label="主导航">
         <button class="active" data-view="overview" data-label="总览"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg><span>总览</span></button>
@@ -591,6 +640,7 @@ function renderDashboardHtml() {
           <div class="dashboard-grid">
             <div class="stack">
               <section><div class="panel-head"><h2>当前任务</h2><button id="runNext" class="primary">继续推进</button></div><div class="task-list" id="tasks"></div></section>
+              <section><div class="panel-head"><div><h2>活动工作区</h2><div class="muted">每项工作显示自己的分支与目录，不用一个分支代表整个项目。</div></div></div><div id="activeWorkspaces"></div></section>
               <div class="metrics" id="metrics"></div>
             </div>
             <div class="stack">
@@ -659,6 +709,7 @@ ${ADOPTION_VIEW_HTML}
       { id:"passed", label:"已通过", statuses:["completed"] },
     ];
     let latestTaskLedger = { tasks: [], plans: [], counts: {}, typeCounts: {} };
+    let activeWorkspacesByTask = new Map();
     let latestRunData = null;
     let runCategory = "all";
     function switchView(name) {
@@ -686,6 +737,7 @@ ${ADOPTION_VIEW_HTML}
       const status = data.status || {};
       const work = status.work || {};
       const tasks = data.tasks || [];
+      activeWorkspacesByTask = new Map((data.activeWorkspaces || []).map((workspace) => [workspace.taskId, workspace]));
       const focusTask = tasks.find((task) => task.status !== "completed") || tasks[tasks.length - 1] || null;
       const failed = (status.failed || 0) + (status.review_blocked || 0);
       const waiting = (status.pending || 0) + (status.in_progress || 0) + (status.verifying || 0);
@@ -713,14 +765,22 @@ ${ADOPTION_VIEW_HTML}
       el("metrics").innerHTML = metrics.map(([label, value, cls]) => '<div class="metric"><div class="label">' + label + '</div><div class="value ' + cls + '">' + value + '</div></div>').join("");
       el("tasks").innerHTML = tasks.length === 0 ? '<div class="muted" style="padding:18px 22px;border-top:1px solid var(--line)">还没有任务</div>' : tasks.map((task) => {
         const route = task.route_decision ? task.route_decision.route + " → " + task.route_decision.primaryAgent : "尚未路由";
-        return '<article class="task-card"><div class="task-id">' + esc(task.id) + '</div><div><div class="task-title">' + esc(task.subject) + '</div><div class="task-meta">' + esc(workTypeLabel(task.workType)) + ' · ' + esc(task.priority || "P1") + ' · ' + esc(route) + ' · ' + (task.verify_commands || []).length + ' 条验证命令 · 已尝试 ' + esc(task.attempts || 0) + ' 次</div></div><span class="status-badge ' + esc(task.status) + '">' + esc(statusLabel(task.status)) + '</span><div class="task-detail"><div class="grid two"><div><div class="label">验证与复核</div>' + reviewBox(task) + '</div><div><div class="label">失败与操作</div>' + failureBox(task) + actionButtons(task) + '</div></div></div></article>';
+        const workspace = activeWorkspacesByTask.get(task.id);
+        const workspaceMeta = workspace ? ' · ' + esc(workspace.branch || "独立工作区（detached）") + ' · ' + esc(workspace.workDir || "") : task.coordination?.branch ? ' · ' + esc(task.coordination.branch) : '';
+        return '<article class="task-card"><div class="task-id">' + esc(task.id) + '</div><div><div class="task-title">' + esc(task.subject) + '</div><div class="task-meta">' + esc(workTypeLabel(task.workType)) + ' · ' + esc(task.priority || "P1") + ' · ' + esc(route) + workspaceMeta + ' · ' + (task.verify_commands || []).length + ' 条验证命令 · 已尝试 ' + esc(task.attempts || 0) + ' 次</div></div><span class="status-badge ' + esc(task.status) + '">' + esc(statusLabel(task.status)) + '</span><div class="task-detail"><div class="grid two"><div><div class="label">验证与复核</div>' + reviewBox(task) + '</div><div><div class="label">失败与操作</div>' + failureBox(task) + actionButtons(task) + '</div></div></div></article>';
       }).join("");
+      renderActiveWorkspaces(data.activeWorkspaces || []);
       renderTaskLedger(data.taskLedger || null);
       renderAttention(data.attention || null);
       renderChanges(data.changes || []);
       el("healthSummary").innerHTML = '<div class="health-row"><span>配置基线</span><b>' + (status.gateArming?.armed ? "正常" : "需检查") + '</b></div><div class="health-row"><span>可信账本</span><b>已连接</b></div><div class="health-row"><span>IDE 适配器</span><b>查看体检</b></div>';
       renderRunHistory(data);
       loadPanels();
+    }
+    function renderActiveWorkspaces(workspaces) {
+      el("activeWorkspaces").innerHTML = workspaces.length === 0
+        ? '<div class="workspace-empty">当前没有独立工作区。任务进入并行执行后，会在这里显示各自的目录与分支。</div>'
+        : '<div class="workspace-list">' + workspaces.map((workspace) => '<div class="workspace-row"><div><span class="workspace-chip">' + esc(workspace.agent || "Agent") + '</span><strong style="display:block">' + esc(workspace.taskId) + '</strong></div><div><strong>' + esc(workspace.subject) + '</strong></div><code title="' + esc(workspace.branch || "") + '">' + esc(workspace.branch || "独立工作区（detached）") + '</code><code title="' + esc(workspace.workDir || "") + '">' + esc(workspace.workDir || "—") + '</code></div>').join("") + '</div>';
     }
     function renderRunHistory(data) {
       latestRunData = data;
@@ -796,7 +856,9 @@ ${ADOPTION_VIEW_HTML}
       const historyHtml = history.length === 0 ? '<div class="muted">尚无历史</div>' : '<div class="history">' + history.map((item) => '<div class="history-row"><span>' + esc(item.at ? new Date(item.at).toLocaleString("zh-CN", { hour12:false }) : "—") + '</span><strong>' + esc(item.event || "event") + '</strong><span>' + esc(historySummary(item)) + '</span></div>').join("") + '</div>';
       const parent = task.parentTaskRef ? '<div><span class="label">关联原任务</span><br><code>' + esc(task.parentTaskRef) + '</code></div>' : '';
       const needsAttention = ["failed", "review_blocked", "needs_user_decision"].includes(task.status);
-      return '<article class="ledger-card"><div class="ledger-card-head"><div><div class="ticket-meta"><span class="ticket-type">' + esc(workTypeLabel(routeWorkType(task))) + '</span><span>' + esc(task.priority || "P1") + '</span><span>' + esc(plans.get(task.planId) || task.planId) + '</span><code>' + esc(task.ref || task.id) + '</code></div><h3>' + esc(task.subject) + '</h3><div class="muted">' + esc(task.request?.summary || task.description || "") + '</div></div><div>' + (needsAttention ? '<span class="attention-chip">需处理</span>' : '') + '<span class="status-badge ' + esc(task.status) + '">' + esc(statusLabel(task.status)) + '</span></div></div><div class="task-detail"><div class="grid two"><div><div class="label">工单信息</div><p>' + esc(task.description || task.subject) + '</p><div class="ticket-meta"><span>来源：' + esc(task.source || "imported") + '</span><span>负责人：' + esc(task.owner || "—") + '</span><span>尝试：' + esc(task.attempts || 0) + '</span></div>' + parent + '</div><div><div class="label">最近历史</div>' + historyHtml + '</div></div></div></article>';
+      const workspace = activeWorkspacesByTask.get(task.id);
+      const workspaceHtml = workspace || task.coordination?.branch ? '<div class="ticket-meta"><span>分支：' + esc(workspace?.branch || task.coordination?.branch || "独立工作区（detached）") + '</span>' + (workspace?.workDir ? '<code>' + esc(workspace.workDir) + '</code>' : '') + '</div>' : '';
+      return '<article class="ledger-card"><div class="ledger-card-head"><div><div class="ticket-meta"><span class="ticket-type">' + esc(workTypeLabel(routeWorkType(task))) + '</span><span>' + esc(task.priority || "P1") + '</span><span>' + esc(plans.get(task.planId) || task.planId) + '</span><code>' + esc(task.ref || task.id) + '</code></div><h3>' + esc(task.subject) + '</h3><div class="muted">' + esc(task.request?.summary || task.description || "") + '</div>' + workspaceHtml + '</div><div>' + (needsAttention ? '<span class="attention-chip">需处理</span>' : '') + '<span class="status-badge ' + esc(task.status) + '">' + esc(statusLabel(task.status)) + '</span></div></div><div class="task-detail"><div class="grid two"><div><div class="label">工单信息</div><p>' + esc(task.description || task.subject) + '</p><div class="ticket-meta"><span>来源：' + esc(task.source || "imported") + '</span><span>负责人：' + esc(task.owner || "—") + '</span><span>尝试：' + esc(task.attempts || 0) + '</span></div>' + parent + '</div><div><div class="label">最近历史</div>' + historyHtml + '</div></div></div></article>';
     }
     function historySummary(item) {
       if (item.event === "status_changed") return String(item.from || "") + " → " + String(item.to || "");

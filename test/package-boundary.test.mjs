@@ -81,6 +81,7 @@ function collectRelativeLinks(markdown) {
 test("npm package excludes plans, restricted prompts, and runtime state", async () => {
   await withPackedPackage(async ({ manifest }) => {
     const packedPaths = manifest.files.map((file) => file.path);
+    assert.ok(packedPaths.includes("docs/product/assets/wildarrange-wordmark-dark-v1.png"));
 
     assert.ok(packedPaths.length > 0, "npm pack returned an empty file list");
     const publishedPlanFiles = packedPaths.filter((file) => file.startsWith("doc/plans/"));

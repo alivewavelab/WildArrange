@@ -260,6 +260,8 @@ export async function parallelAgentStatus(rootDir, options = {}) {
         lifecycle: result?.lifecycle || entry.lifecycle || null,
         adapter: result?.adapter || null,
         isolation: result?.isolation || null,
+        workDir: result?.workDir || null,
+        worktreeAvailable: result?.worktreeAvailable === true,
         command: result?.command || null,
         resultPath: path.relative(rootDir, resultPath),
       });

@@ -163,11 +163,14 @@ export async function dashboardData(rootDir) {
   const changes = await listChangeRequests(rootDir);
   const attention = await attentionReport(rootDir, { taskState, changes });
   const taskLedger = await taskLedgerReport(rootDir);
+  const parallel = await parallelAgentStatus(rootDir).catch(() => null);
+  const activeWorkspaces = buildActiveWorkspaces(taskState?.tasks || [], parallel?.runs || []);
   return {
     generatedAt: nowIso(),
     status,
     tasks: taskState?.tasks || [],
     taskLedger,
+    activeWorkspaces,
     changes,
     attention,
     summary,
@@ -179,6 +182,25 @@ export async function dashboardData(rootDir) {
     } : null,
     ledger,
   };
+}
+
+function buildActiveWorkspaces(tasks, runs) {
+  const tasksById = new Map(tasks.map((task) => [task.id, task]));
+  return runs.flatMap((run) => (run.results || [])
+    .filter((result) => result.worktreeAvailable === true && !["released", "closed", "cleaned"].includes(result.lifecycle?.status))
+    .map((result) => {
+      const task = tasksById.get(result.taskId);
+      return {
+        taskId: result.taskId,
+        subject: task?.subject || result.taskId,
+        runId: run.runId,
+        agent: result.agent || null,
+        branch: task?.coordination?.branch || null,
+        workDir: result.workDir || null,
+        isolation: result.isolation || null,
+        status: result.lifecycle?.status || result.status || "unknown",
+      };
+    }));
 }
 
 export async function taskLedgerReport(rootDir) {
