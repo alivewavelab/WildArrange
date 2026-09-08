@@ -84,7 +84,7 @@ test("wildarrange test CLI runs the impact-selected subset and passes through th
   );
   assert.match(stderr, /应跑 \d+ 个测试/);
   assert.match(stderr, /test\/cli-help\.test\.mjs/);
-  assert.match(stdout, /ℹ pass [1-9]/, "child test run must actually execute tests");
+  assert.match(stdout, /(?:ℹ|#)\s+pass [1-9]/, "child test run must actually execute tests");
 });
 
 test("wildarrange test CLI rejects an unknown zone with a non-zero exit code", async () => {

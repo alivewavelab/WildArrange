@@ -77,7 +77,9 @@ export async function rollbackAdmissionChanges(rootDir, rollbackPlan) {
           await mkdir(path.dirname(absolutePath), { recursive: true });
           await writeFile(absolutePath, entry.content, "utf8");
         } else {
-          await rm(absolutePath, { force: true });
+          await rm(absolutePath, { force: true }).catch((error) => {
+            if (error?.code !== "ENOENT" && error?.code !== "ENOTDIR") throw error;
+          });
         }
       }
     } else if (rollbackPlan.mode === "patch") {
