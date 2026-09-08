@@ -24,10 +24,14 @@ import {
 } from "../src/orchestration/remote-ownership.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { collectGitChangedPaths } from "../src/infra/git-diff.mjs";
+import { prepareAgentWorktree } from "../src/infra/git-worktree.mjs";
 import { loadWildArrangeConfig } from "../src/infra/runtime-config.mjs";
 import { readJson } from "../src/infra/runtime-store.mjs";
 import {
   captureIntegrationGuard,
+  createTaskDeliveryCommit,
+  inspectTaskWorktreeBaseline,
+  pushTaskDeliveryCommit,
   pushCommit,
   verifyIntegrationGuard,
 } from "../src/infra/git-coordination.mjs";
@@ -37,6 +41,92 @@ import {
 } from "../src/orchestration/integration.mjs";
 
 const execFileAsync = promisify(execFile);
+
+test("task delivery uses one branch-bound worktree, commits atomically, and pushes without moving main", async () => {
+  await withRemoteClones(async ({ dir, remote, cloneA }) => {
+    const mainBefore = (await git(cloneA, ["rev-parse", "origin/main"])).trim();
+    const taskRunDir = path.join(dir, "task-run");
+    const branch = "wildarrange/task/P-GIT/T001";
+    const worktree = await prepareAgentWorktree(cloneA, taskRunDir, {
+      isolation: "git-worktree",
+      branchName: branch,
+      startPoint: mainBefore,
+    });
+    assert.equal(worktree.available, true);
+    assert.equal(worktree.branch, branch);
+
+    const baseline = await inspectTaskWorktreeBaseline(worktree.workDir);
+    assert.equal(baseline.clean, true);
+    assert.equal(baseline.headSha, mainBefore);
+    assert.equal(baseline.branch, branch);
+
+    await mkdir(path.join(worktree.workDir, "src"), { recursive: true });
+    await writeFile(path.join(worktree.workDir, "src", "feature.mjs"), "export const ready = true;\n", "utf8");
+    const delivery = await createTaskDeliveryCommit(worktree.workDir, {
+      expectedHead: mainBefore,
+      expectedBranch: branch,
+      changedPaths: ["src/feature.mjs"],
+      message: "feat(T001): deliver feature",
+    });
+    assert.equal(delivery.pass, true);
+    assert.equal(delivery.status, "committed");
+    assert.equal(delivery.worktreeClean, true);
+    assert.notEqual(delivery.commitSha, mainBefore);
+
+    const pushed = await pushTaskDeliveryCommit(worktree.workDir, {
+      remote,
+      branch,
+      commitSha: delivery.commitSha,
+    });
+    assert.equal(pushed.pass, true);
+    assert.equal((await git(cloneA, ["ls-remote", "--heads", remote, "refs/heads/main"])).trim().split(/\s+/)[0], mainBefore);
+    assert.equal((await git(cloneA, ["ls-remote", "--heads", remote, `refs/heads/${branch}`])).trim().split(/\s+/)[0], delivery.commitSha);
+  });
+});
+
+test("task delivery refuses unattributed dirty files and does not create a commit", async () => {
+  await withRemoteClones(async ({ dir, cloneA }) => {
+    const head = (await git(cloneA, ["rev-parse", "HEAD"])).trim();
+    const worktree = await prepareAgentWorktree(cloneA, path.join(dir, "dirty-task"), {
+      isolation: "git-worktree",
+      branchName: "wildarrange/task/P-GIT/T-DIRTY",
+      startPoint: head,
+    });
+    await writeFile(path.join(worktree.workDir, "unexpected.txt"), "other owner\n", "utf8");
+    const baseline = await inspectTaskWorktreeBaseline(worktree.workDir);
+    assert.equal(baseline.clean, false);
+    assert.deepEqual(baseline.changedPaths, ["unexpected.txt"]);
+    const result = await createTaskDeliveryCommit(worktree.workDir, {
+      expectedHead: head,
+      expectedBranch: "wildarrange/task/P-GIT/T-DIRTY",
+      changedPaths: [],
+    });
+    assert.equal(result.pass, false);
+    assert.equal(result.reason, "unattributed_worktree_changes");
+    assert.equal((await git(worktree.workDir, ["rev-parse", "HEAD"])).trim(), head);
+  });
+});
+
+test("task delivery records no_change without manufacturing an empty commit", async () => {
+  await withRemoteClones(async ({ dir, cloneA }) => {
+    const head = (await git(cloneA, ["rev-parse", "HEAD"])).trim();
+    const branch = "wildarrange/task/P-GIT/T-NOCHANGE";
+    const worktree = await prepareAgentWorktree(cloneA, path.join(dir, "no-change-task"), {
+      isolation: "git-worktree",
+      branchName: branch,
+      startPoint: head,
+    });
+    const result = await createTaskDeliveryCommit(worktree.workDir, {
+      expectedHead: head,
+      expectedBranch: branch,
+      changedPaths: [],
+    });
+    assert.equal(result.pass, true);
+    assert.equal(result.status, "no_change");
+    assert.equal(result.commitSha, head);
+    assert.equal((await git(worktree.workDir, ["rev-list", "--count", "HEAD"])).trim(), "1");
+  });
+});
 
 test("git changed-path probe uses argv safely and excludes .wildarrange", async () => {
   await withTempDir(async (dir) => {
@@ -288,6 +378,107 @@ test("guarded mode gives writable parallel agents a worktree and one local run o
   });
 });
 
+test("guarded mode without a remote still delivers to a clean local task branch worktree", async () => {
+  await withTempDir(async (repo) => {
+    await git(repo, ["init", "--initial-branch=main"]);
+    await writeFile(path.join(repo, ".gitignore"), ".wildarrange/\n", "utf8");
+    await writeFile(path.join(repo, "README.md"), "local seed\n", "utf8");
+    await git(repo, ["add", ".gitignore", "README.md"]);
+    await git(repo, ["-c", "user.name=Seed", "-c", "user.email=seed@example.invalid", "commit", "-m", "initial"]);
+    const mainBefore = (await git(repo, ["rev-parse", "main"])).trim();
+    await initializeTaskRuntime(repo, "local-device");
+
+    const batch = await runParallelAgents(repo, {
+      taskIds: ["T001"],
+      agent: "ZhuRong",
+      command: resultCommand("src/local-only.txt", "local delivery\n"),
+    });
+    assert.equal(batch.results[0].isolation, "git-worktree");
+    assert.equal(batch.results[0].worktreeAvailable, true);
+
+    const admitted = await admitParallelAgentResult(repo, { runId: batch.runId, taskId: "T001" });
+    assert.equal(admitted.status, "completed", JSON.stringify(admitted, null, 2));
+    assert.equal(admitted.integrationCommit.local, true);
+    assert.equal(admitted.integrationCommit.pushed, false);
+    assert.equal(admitted.integrationCommit.status, "committed_local");
+    assert.equal(admitted.rollback.status, "rolled_back");
+    assert.equal((await git(repo, ["rev-parse", "main"])).trim(), mainBefore);
+    assert.equal((await git(repo, ["status", "--short"])).trim(), "");
+    await assert.rejects(readFile(path.join(repo, "src", "local-only.txt"), "utf8"), /ENOENT/);
+
+    const state = await loadTaskState(repo);
+    const task = state.tasks[0];
+    assert.equal(task.coordination.status, "degraded");
+    assert.equal(task.coordination.localGit, true);
+    assert.equal(task.coordination.branch, "wildarrange/task/P-GIT/T001");
+    const localTaskHead = (await git(repo, ["rev-parse", task.coordination.branch])).trim();
+    assert.equal(localTaskHead, admitted.integrationCommit.integrationSha);
+    assert.equal(await git(repo, ["show", `${localTaskHead}:src/local-only.txt`]), "local delivery\n");
+    const taskWorktree = await inspectTaskWorktreeBaseline(path.resolve(repo, batch.results[0].workDir));
+    assert.equal(taskWorktree.clean, true);
+    assert.equal(taskWorktree.branch, task.coordination.branch);
+    assert.equal(taskWorktree.headSha, localTaskHead);
+    const proof = await readJson(path.join(repo, ".wildarrange", "reports", "acceptance", "P-GIT", "T001.json"));
+    const checkpoint = await readJson(path.join(repo, ".wildarrange", "checkpoints", "P-GIT", "T001.json"));
+    assert.equal(proof.evidenceRefs.deliveryBaseline.commitSha, localTaskHead);
+    assert.equal(proof.evidenceRefs.deliveryBaseline.pushed, false);
+    assert.equal(checkpoint.deliveryBaseline.integrationSha, localTaskHead);
+  });
+});
+
+test("local task delivery resumes the same commit after checkpoint failure", async () => {
+  await withTempDir(async (repo) => {
+    await git(repo, ["init", "--initial-branch=main"]);
+    await writeFile(path.join(repo, ".gitignore"), ".wildarrange/\n", "utf8");
+    await writeFile(path.join(repo, "README.md"), "local seed\n", "utf8");
+    await git(repo, ["add", ".gitignore", "README.md"]);
+    await git(repo, ["-c", "user.name=Seed", "-c", "user.email=seed@example.invalid", "commit", "-m", "initial"]);
+    const mainBefore = (await git(repo, ["rev-parse", "main"])).trim();
+    await initializeTaskRuntime(repo, "local-device");
+    const batch = await runParallelAgents(repo, {
+      taskIds: ["T001"],
+      agent: "ZhuRong",
+      command: resultCommand("src/local-recovery.txt", "recover locally\n"),
+    });
+    const checkpointPlanDir = path.join(repo, ".wildarrange", "checkpoints", "P-GIT");
+    await replaceDirectoryWithBlockingFile(checkpointPlanDir);
+    let first;
+    try {
+      first = await admitParallelAgentResult(repo, { runId: batch.runId, taskId: "T001" });
+    } finally {
+      await restoreBlockedDirectory(checkpointPlanDir);
+    }
+    assert.equal(first.status, "recovery_required");
+    assert.equal(first.rollback.reason, "local_delivery_already_committed");
+    const firstIntent = await readIntegrationIntent(repo, batch.runId, "T001");
+    assert.equal(firstIntent.status, "committed_local");
+
+    const resumed = await admitParallelAgentResult(repo, { runId: batch.runId, taskId: "T001" });
+    assert.equal(resumed.status, "completed");
+    assert.equal(resumed.integrationCommit.integrationSha, firstIntent.integrationSha);
+    assert.equal((await git(repo, ["rev-parse", "main"])).trim(), mainBefore);
+    await assert.rejects(readFile(path.join(repo, "src", "local-recovery.txt"), "utf8"), /ENOENT/);
+    assert.equal((await git(repo, ["rev-list", "--count", "wildarrange/task/P-GIT/T001"])).trim(), "2");
+  });
+});
+
+test("missing task coordination degrades explicitly when no integration guard is active", async () => {
+  await withTempDir(async (rootDir) => {
+    await initRuntime(rootDir);
+    const result = await integrateAdmissionCommit(rootDir, {
+      planId: "P-LOCAL",
+      taskId: "T001",
+      task: { id: "T001" },
+      runId: "agent_run_missing_coordination",
+      changedPaths: [],
+      integrationGuard: { active: false, reason: "project is not a Git repository" },
+    });
+    assert.equal(result.pass, true);
+    assert.equal(result.status, "local_degraded");
+    assert.equal(result.reason, "task coordination metadata is unavailable");
+  });
+});
+
 test("adversarial round 2: integration guard rejects a stale remote main SHA", async () => {
   await withRemoteClones(async ({ cloneA, cloneB }) => {
     await initRuntime(cloneA);
@@ -353,32 +544,42 @@ test("adversarial round 2 integration: admission rolls back before checkpoint wh
   });
 });
 
-test("successful admission creates and non-force pushes an integration commit to remote main", async () => {
+test("successful admission pushes a delivery commit to the task branch and leaves main unchanged", async () => {
   await withRemoteClones(async ({ remote, cloneA }) => {
     await initializeTaskRuntime(cloneA, "device-a");
     const before = (await git(remote, ["rev-parse", "main"])).trim();
     const batch = await runParallelAgents(cloneA, {
       taskIds: ["T001"],
       agent: "ZhuRong",
-      command: resultCommand("src/integrated.txt", "integrated\n"),
+      command: worktreeEditCommand("src/integrated.txt", "integrated\n"),
     });
     const admitted = await admitParallelAgentResult(cloneA, { runId: batch.runId, taskId: "T001" });
     assert.equal(admitted.status, "completed");
     const after = (await git(remote, ["rev-parse", "main"])).trim();
-    assert.notEqual(after, before);
-    assert.equal(await git(remote, ["show", `${after}:src/integrated.txt`]), "integrated\n");
+    assert.equal(after, before);
+    await assert.rejects(readFile(path.join(cloneA, "src", "integrated.txt"), "utf8"), /ENOENT/);
     const intent = await readJson(
       path.join(cloneA, ".wildarrange", "agent-runs", batch.runId, "T001.integration.json"),
       null,
     );
     assert.equal(intent.status, "pushed");
-    assert.equal(intent.integrationSha, after);
-    assert.equal(intent.actualSha, after);
-    assert.equal(admitted.integrationCommit.actualSha, after);
+    const taskBranchHead = (await git(remote, ["rev-parse", intent.branch])).trim();
+    assert.equal(await git(remote, ["show", `${taskBranchHead}:src/integrated.txt`]), "integrated\n");
+    const taskWorktree = await inspectTaskWorktreeBaseline(path.join(cloneA, batch.results[0].workDir));
+    assert.equal(taskWorktree.clean, true);
+    assert.equal(taskWorktree.branch, intent.branch);
+    assert.equal(taskWorktree.headSha, taskBranchHead);
+    assert.equal(intent.integrationSha, taskBranchHead);
+    assert.equal(intent.actualSha, taskBranchHead);
+    assert.equal(admitted.integrationCommit.actualSha, taskBranchHead);
+    const proof = await readJson(path.join(cloneA, ".wildarrange", "reports", "acceptance", "P-GIT", "T001.json"));
+    const checkpoint = await readJson(path.join(cloneA, ".wildarrange", "checkpoints", "P-GIT", "T001.json"));
+    assert.equal(proof.evidenceRefs.deliveryBaseline.commitSha, taskBranchHead);
+    assert.equal(checkpoint.deliveryBaseline.integrationSha, taskBranchHead);
   });
 });
 
-test("lost integration push response reconciles when remote main already advanced to a descendant", async () => {
+test("lost task-branch push response reconciles when the remote task branch advanced to a descendant", async () => {
   await withRemoteClones(async ({ remote, cloneA, cloneB }) => {
     await initializeTaskRuntime(cloneA, "device-a");
     const claimed = await claimTeamTask(cloneA, { taskId: "T001", owner: "ZhuRong" });
@@ -400,12 +601,13 @@ test("lost integration push response reconciles when remote main already advance
         const pushed = await pushCommit(rootDir, pushOptions);
         assert.equal(pushed.ok, true);
         integrationSha = pushOptions.commitSha;
-        await git(cloneB, ["pull", "--ff-only", "origin", "main"]);
+        await git(cloneB, ["fetch", "origin", `refs/heads/${pushOptions.branch}`]);
+        await git(cloneB, ["switch", "-C", "delivery-descendant", "FETCH_HEAD"]);
         await writeFile(path.join(cloneB, "after-lost-response.txt"), "descendant\n", "utf8");
         await git(cloneB, ["add", "after-lost-response.txt"]);
         await git(cloneB, ["-c", "user.name=Device B", "-c", "user.email=b@example.invalid", "commit", "-m", "advance after accepted push"]);
-        await git(cloneB, ["push", "origin", "main"]);
-        descendantSha = (await git(remote, ["rev-parse", "main"])).trim();
+        await git(cloneB, ["push", "origin", `HEAD:refs/heads/${pushOptions.branch}`]);
+        descendantSha = (await git(remote, ["rev-parse", pushOptions.branch])).trim();
         return {
           ok: false,
           exitCode: 1,
@@ -496,7 +698,7 @@ test("admission rejects unrelated dirty files even when they are inside writable
   });
 });
 
-test("checkpoint failure after remote integration keeps ownership and resumes without a second push", async () => {
+test("checkpoint failure after task-branch delivery keeps ownership and resumes without a second push", async () => {
   await withRemoteClones(async ({ remote, cloneA, cloneB }) => {
     await initializeTaskRuntime(cloneA, "device-a");
     const batch = await runParallelAgents(cloneA, {
@@ -514,7 +716,9 @@ test("checkpoint failure after remote integration keeps ownership and resumes wi
     }
     assert.equal(first.status, "recovery_required");
     assert.equal(first.rollback.reason, "remote_integration_already_pushed");
-    const integratedSha = (await git(remote, ["rev-parse", "main"])).trim();
+    const intent = await readIntegrationIntent(cloneA, batch.runId, "T001");
+    const integratedSha = (await git(remote, ["rev-parse", intent.branch])).trim();
+    assert.equal(integratedSha, intent.integrationSha);
     assert.equal(await git(remote, ["show", `${integratedSha}:src/recover.txt`]), "recover\n");
     await git(cloneB, ["pull", "--ff-only", "origin", "main"]);
     await writeFile(path.join(cloneB, "after-integration.txt"), "later\n", "utf8");
@@ -551,18 +755,21 @@ test("pushed integration is never rolled back when task ownership changes before
   });
 });
 
-test("pushed integration is never silently re-pushed or rolled back after remote history rewrite", async () => {
+test("pushed task delivery is never silently re-pushed or rolled back after task-branch history rewrite", async () => {
   await withRemoteClones(async ({ remote, cloneA, cloneB }) => {
     await initializeTaskRuntime(cloneA, "device-a");
     const before = (await git(remote, ["rev-parse", "main"])).trim();
     const { batch, integratedSha } = await createCheckpointFailureAfterIntegration(cloneA, "src/rewrite-recovery.txt");
-    assert.notEqual(integratedSha, before);
-    await git(cloneB, ["push", "--force", "origin", `${before}:refs/heads/main`]);
+    const intent = await readIntegrationIntent(cloneA, batch.runId, "T001");
+    assert.notEqual(integratedSha, intent.expectedSha);
+    await git(cloneB, ["fetch", "origin", `refs/heads/${intent.branch}`]);
+    await git(cloneB, ["push", "--force", "origin", `${intent.expectedSha}:refs/heads/${intent.branch}`]);
 
     const retried = await admitParallelAgentResult(cloneA, { runId: batch.runId, taskId: "T001" });
     assert.equal(retried.status, "recovery_required");
     assert.equal(retried.rollback.status, "not_attempted");
     assert.equal((await git(remote, ["rev-parse", "main"])).trim(), before);
+    assert.equal((await git(remote, ["rev-parse", intent.branch])).trim(), intent.expectedSha);
     assert.equal(await readFile(path.join(cloneA, "src", "rewrite-recovery.txt"), "utf8"), "recover\n");
   });
 });
@@ -588,10 +795,11 @@ test("admission refuses a stale local base even when remote main was stable duri
   });
 });
 
-test("two devices integrating different tasks race safely: one completes and one revalidates", async () => {
-  await withRemoteClones(async ({ cloneA, cloneB }) => {
+test("two devices deliver different task branches concurrently without moving main", async () => {
+  await withRemoteClones(async ({ remote, cloneA, cloneB }) => {
     await initializeTaskRuntime(cloneA, "device-a", ["T001", "T002"]);
     await initializeTaskRuntime(cloneB, "device-b", ["T001", "T002"]);
+    const mainBefore = (await git(remote, ["rev-parse", "main"])).trim();
     const [batchA, batchB] = await Promise.all([
       runParallelAgents(cloneA, {
         taskIds: ["T001"],
@@ -608,8 +816,13 @@ test("two devices integrating different tasks race safely: one completes and one
       admitParallelAgentResult(cloneA, { runId: batchA.runId, taskId: "T001" }),
       admitParallelAgentResult(cloneB, { runId: batchB.runId, taskId: "T002" }),
     ]);
-    assert.equal(outcomes.filter((result) => result.status === "completed").length, 1);
-    assert.equal(outcomes.filter((result) => result.status === "revalidation_required").length, 1);
+    assert.equal(outcomes.filter((result) => result.status === "completed").length, 2);
+    assert.equal(outcomes.filter((result) => result.status === "revalidation_required").length, 0);
+    assert.equal((await git(remote, ["rev-parse", "main"])).trim(), mainBefore);
+    const intentA = await readIntegrationIntent(cloneA, batchA.runId, "T001");
+    const intentB = await readIntegrationIntent(cloneB, batchB.runId, "T002");
+    assert.equal(await git(remote, ["show", `${intentA.branch}:src/from-a.txt`]), "a\n");
+    assert.equal(await git(remote, ["show", `${intentB.branch}:src/from-b.txt`]), "b\n");
   });
 });
 
@@ -894,6 +1107,16 @@ function resultCommand(filePath, content) {
   return [
     "node -e",
     JSON.stringify(`const fs=require('fs');const decode=(value)=>Buffer.from(value,'base64').toString('utf8');fs.writeFileSync(process.argv[1],JSON.stringify({summary:'ready',files:[{path:decode('${encodedPath}'),content:decode('${encodedContent}')}] }));`),
+    "{outputJson}",
+  ].join(" ");
+}
+
+function worktreeEditCommand(filePath, content) {
+  const encodedPath = Buffer.from(filePath, "utf8").toString("base64");
+  const encodedContent = Buffer.from(content, "utf8").toString("base64");
+  return [
+    "node -e",
+    JSON.stringify(`const fs=require('fs');const path=require('path');const decode=(value)=>Buffer.from(value,'base64').toString('utf8');const target=decode('${encodedPath}');fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,decode('${encodedContent}'));fs.writeFileSync(process.argv[1],JSON.stringify({summary:'worktree delivery ready'}));`),
     "{outputJson}",
   ].join(" ");
 }

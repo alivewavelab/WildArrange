@@ -65,12 +65,19 @@ export async function coordinateTaskClaim(rootDir, options) {
   const context = await inspectGitCoordination(rootDir, coordination);
   if (!context.active) {
     if (forced) throw new Error(`cannot claim remote task ownership: ${context.reason}`);
+    const localTaskBranch = context.localGitAvailable === true
+      ? taskBranchName(coordination, options.planId, options.task.id)
+      : null;
     return {
       status: "degraded",
       mode: coordination.mode,
       deviceId: device.deviceId,
       deviceName: device.name,
       reason: context.reason,
+      localGit: context.localGitAvailable === true,
+      branch: localTaskBranch,
+      baseSha: context.headSha || null,
+      remoteHeadSha: context.headSha || null,
     };
   }
   const branch = taskBranchName(coordination, options.planId, options.task.id);

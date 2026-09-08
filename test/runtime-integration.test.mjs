@@ -1304,9 +1304,10 @@ test("parallel agents can isolate edits in git worktrees and admit patches", asy
     await writeFile(path.join(dir, "README.md"), "root\n");
     await runCommand("git add README.md", dir);
     await runCommand("git commit -m initial", dir);
+    const mainBefore = (await runCommand("git rev-parse HEAD", dir)).stdout.trim();
 
     await initRuntime(dir);
-    const planPath = path.join(dir, "worktree-plan.json");
+    const planPath = resolveWildArrangePath(dir, "artifacts", "worktree-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Worktree admission",
       tasks: [{
@@ -1342,7 +1343,11 @@ test("parallel agents can isolate edits in git worktrees and admit patches", asy
 
     assert.equal(admitted.status, "completed");
     assert.deepEqual(admitted.appliedPaths, ["src/worktree.txt"]);
-    assert.equal((await readFile(path.join(dir, "src", "worktree.txt"), "utf8")).replaceAll("\r\n", "\n"), "ok\n");
+    await assert.rejects(readFile(path.join(dir, "src", "worktree.txt"), "utf8"), /ENOENT/);
+    assert.equal((await runCommand("git rev-parse HEAD", dir)).stdout.trim(), mainBefore);
+    const taskWorktree = path.resolve(dir, batch.results[0].workDir);
+    assert.equal((await readFile(path.join(taskWorktree, "src", "worktree.txt"), "utf8")).replaceAll("\r\n", "\n"), "ok\n");
+    assert.equal((await runCommand("git status --short", taskWorktree)).stdout.trim(), "");
   });
 });
 

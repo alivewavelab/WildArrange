@@ -506,6 +506,8 @@ async function runOneAgentInner(rootDir, runDir, runId, task, options) {
   const isolation = options.defaultIsolation || options.isolation || task.isolation || config.parallelAgents?.isolation || "run-dir";
   const worktree = await prepareAgentWorktree(rootDir, taskRunDir, {
     isolation,
+    branchName: task.coordination?.branch || null,
+    startPoint: task.coordination?.remoteHeadSha || "HEAD",
     timeoutMs: normalizeTimeout(options.timeoutMs || config.parallelAgents?.timeoutMs),
   });
   const taskPacketPath = path.join(taskRunDir, "task.json");
@@ -585,7 +587,7 @@ function resolveParallelIsolation(config, gitCoordination, options) {
   const coordination = config.gitCoordination || {};
   const enforceWorktree = ["guarded", "strict"].includes(coordination.mode)
     && coordination.requireWorktreeForParallelWrites !== false
-    && gitCoordination.active;
+    && (gitCoordination.active || gitCoordination.localGitAvailable === true);
   if (enforceWorktree && options.isolation && options.isolation !== "git-worktree") {
     throw new Error("parallel writable agents require git-worktree isolation; weaken gitCoordination.requireWorktreeForParallelWrites in config to opt out");
   }

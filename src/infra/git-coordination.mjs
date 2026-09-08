@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, realpath, rm } from "node:fs/promises";
+import { realpath, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { runCommandFile } from "./command-runner.mjs";
@@ -41,13 +41,23 @@ export async function inspectGitCoordination(rootDir, config = {}) {
   if (topLevel !== await canonicalPath(rootDir)) {
     return unavailable(mode, "project root is not the Git toplevel");
   }
+  const headResult = await runGit(rootDir, ["rev-parse", "HEAD"]);
+  if (!headResult.ok) {
+    return unavailable(mode, "Git repository has no baseline commit", { topLevel });
+  }
+  const head = headResult.stdout.trim();
   const remote = config.remote || "origin";
   const remoteResult = await runGit(rootDir, ["remote", "get-url", remote]);
   if (!remoteResult.ok) {
-    return unavailable(mode, `Git remote ${remote} is not configured`, { topLevel, remote });
+    return unavailable(mode, `Git remote ${remote} is not configured`, {
+      topLevel,
+      remote,
+      remoteConfigured: false,
+      localGitAvailable: true,
+      headSha: head,
+    });
   }
   const integrationBranch = await resolveIntegrationBranch(rootDir, remote, config.integrationBranch || "auto");
-  const head = await gitHead(rootDir);
   return {
     enabled: true,
     active: true,
@@ -55,6 +65,7 @@ export async function inspectGitCoordination(rootDir, config = {}) {
     topLevel,
     remote,
     remoteConfigured: true,
+    localGitAvailable: true,
     integrationBranch,
     headSha: head,
     reason: null,
@@ -71,6 +82,211 @@ export async function gitTree(rootDir, ref = "HEAD") {
   const result = await runGit(rootDir, ["rev-parse", `${ref}^{tree}`]);
   if (!result.ok) throw new Error(`cannot resolve Git tree for ${ref}: ${result.stderr || result.stdout}`);
   return result.stdout.trim();
+}
+
+export async function inspectTaskWorktreeBaseline(rootDir) {
+  const topLevel = await runGit(rootDir, ["rev-parse", "--show-toplevel"]);
+  if (!topLevel.ok) {
+    return { available: false, clean: false, reason: "project is not a Git repository", changedPaths: [] };
+  }
+  const canonicalRoot = await canonicalPath(rootDir);
+  const canonicalTopLevel = await canonicalPath(topLevel.stdout.trim());
+  if (canonicalRoot !== canonicalTopLevel) {
+    return { available: false, clean: false, reason: "project root is not the Git toplevel", changedPaths: [] };
+  }
+  const head = await runGit(rootDir, ["rev-parse", "HEAD"]);
+  if (!head.ok) {
+    return { available: false, clean: false, reason: "Git repository has no baseline commit", changedPaths: [] };
+  }
+  const branch = await runGit(rootDir, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
+  const changedPaths = await listWorkingTreeChanges(rootDir);
+  return {
+    available: true,
+    clean: changedPaths.length === 0,
+    headSha: head.stdout.trim(),
+    branch: branch.ok ? branch.stdout.trim() : null,
+    detached: !branch.ok,
+    changedPaths,
+    reason: changedPaths.length === 0 ? null : "working tree contains changes outside a completed task delivery",
+  };
+}
+
+export async function createTaskDeliveryCommit(rootDir, options = {}) {
+  const baseline = await inspectTaskWorktreeBaseline(rootDir);
+  if (!baseline.available) {
+    return { pass: false, status: "unavailable", reason: baseline.reason, changedPaths: [] };
+  }
+  const expectedHead = String(options.expectedHead || "").trim();
+  if (!expectedHead || baseline.headSha !== expectedHead) {
+    return {
+      pass: false,
+      status: "revalidation_required",
+      reason: "task_branch_head_changed",
+      expectedHead: expectedHead || null,
+      actualHead: baseline.headSha,
+      changedPaths: baseline.changedPaths,
+    };
+  }
+  if (options.expectedBranch && baseline.branch !== options.expectedBranch) {
+    return {
+      pass: false,
+      status: "revalidation_required",
+      reason: "task_branch_changed",
+      expectedBranch: options.expectedBranch,
+      actualBranch: baseline.branch,
+      changedPaths: baseline.changedPaths,
+    };
+  }
+
+  const requestedPaths = uniqueGitPaths(options.changedPaths || []);
+  const actualPaths = uniqueGitPaths(baseline.changedPaths);
+  const requested = new Set(requestedPaths);
+  const unownedPaths = actualPaths.filter((filePath) => !requested.has(filePath));
+  if (unownedPaths.length > 0) {
+    return {
+      pass: false,
+      status: "revalidation_required",
+      reason: "unattributed_worktree_changes",
+      expectedHead,
+      actualHead: baseline.headSha,
+      changedPaths: actualPaths,
+      unownedPaths,
+    };
+  }
+  if (actualPaths.length === 0) {
+    return {
+      pass: true,
+      status: "no_change",
+      baseSha: expectedHead,
+      commitSha: expectedHead,
+      branch: baseline.branch,
+      changedPaths: [],
+      worktreeClean: true,
+      pushed: false,
+    };
+  }
+
+  const indexPath = path.join(os.tmpdir(), `wildarrange-delivery-index-${process.pid}-${randomUUID()}`);
+  const env = { GIT_INDEX_FILE: indexPath };
+  try {
+    const readTree = await runGit(rootDir, ["read-tree", expectedHead], { env });
+    if (!readTree.ok) throw new Error(`cannot prepare delivery index: ${readTree.stderr || readTree.stdout}`);
+    const add = await runGit(rootDir, ["add", "-A", "--", ...actualPaths], { env });
+    if (!add.ok) throw new Error(`cannot stage delivery paths: ${add.stderr || add.stdout}`);
+    const tree = await runGit(rootDir, ["write-tree"], { env });
+    if (!tree.ok) throw new Error(`cannot write delivery tree: ${tree.stderr || tree.stdout}`);
+    const commitSha = await commitTree(
+      rootDir,
+      tree.stdout.trim(),
+      expectedHead,
+      options.message || "wildarrange: task delivery",
+    );
+    const update = await runGit(rootDir, ["update-ref", "HEAD", commitSha, expectedHead]);
+    if (!update.ok) {
+      return {
+        pass: false,
+        status: "revalidation_required",
+        reason: "task_branch_head_changed",
+        expectedHead,
+        actualHead: await gitHead(rootDir).catch(() => null),
+        preparedCommitSha: commitSha,
+        changedPaths: actualPaths,
+      };
+    }
+    // The commit was built with an isolated index so the task worktree's
+    // staging area was never used. Once HEAD moves, refresh that worktree's
+    // real index to the committed tree; otherwise Git would report the old
+    // index as staged deletions even though the files on disk are correct.
+    const refreshIndex = await runGit(rootDir, ["read-tree", commitSha]);
+    if (!refreshIndex.ok) {
+      return {
+        pass: false,
+        status: "recovery_required",
+        reason: "delivery_index_refresh_failed",
+        baseSha: expectedHead,
+        commitSha,
+        branch: baseline.branch,
+        changedPaths: actualPaths,
+        worktreeClean: false,
+        error: refreshIndex.stderr || refreshIndex.stdout,
+      };
+    }
+    const after = await inspectTaskWorktreeBaseline(rootDir);
+    return {
+      pass: after.available && after.clean && after.headSha === commitSha,
+      status: after.available && after.clean && after.headSha === commitSha ? "committed" : "recovery_required",
+      reason: after.available && after.clean && after.headSha === commitSha ? null : "delivery_commit_left_dirty_worktree",
+      baseSha: expectedHead,
+      commitSha,
+      branch: after.branch,
+      changedPaths: actualPaths,
+      worktreeClean: after.clean === true,
+      pushed: false,
+    };
+  } finally {
+    await rm(indexPath, { force: true }).catch(() => undefined);
+  }
+}
+
+export async function pushTaskDeliveryCommit(rootDir, options = {}) {
+  const branch = String(options.branch || "").trim();
+  const commitSha = String(options.commitSha || "").trim();
+  const prefix = String(options.taskBranchPrefix || "wildarrange/task").replace(/^\/+|\/+$/g, "");
+  if (!branch || !branch.startsWith(`${prefix}/`)) {
+    throw new Error(`refusing automatic push outside task branch prefix ${prefix}/: ${branch || "missing"}`);
+  }
+  if (!/^[0-9a-f]{40,64}$/i.test(commitSha)) throw new Error("valid delivery commit SHA is required");
+  const pushed = await pushCommit(rootDir, { remote: options.remote || "origin", branch, commitSha });
+  return {
+    pass: pushed.ok,
+    status: pushed.ok ? "pushed" : "push_failed",
+    remote: options.remote || "origin",
+    branch,
+    commitSha,
+    pushed: pushed.ok,
+    error: pushed.ok ? null : pushed.stderr || pushed.stdout,
+  };
+}
+
+export async function synchronizeTaskWorktreeToDelivery(rootDir, options = {}) {
+  const baseline = await inspectTaskWorktreeBaseline(rootDir);
+  const expectedHead = String(options.expectedHead || "").trim();
+  const commitSha = String(options.commitSha || "").trim();
+  if (!baseline.available || !baseline.clean) {
+    return {
+      pass: false,
+      status: "recovery_required",
+      reason: baseline.available ? "task_worktree_changed_after_delivery" : baseline.reason,
+      changedPaths: baseline.changedPaths || [],
+    };
+  }
+  if (options.expectedBranch && baseline.branch !== options.expectedBranch) {
+    return { pass: false, status: "recovery_required", reason: "task_branch_changed", expectedBranch: options.expectedBranch, actualBranch: baseline.branch };
+  }
+  if (baseline.headSha === commitSha) {
+    return { pass: true, status: "clean", branch: baseline.branch, commitSha, worktreeClean: true };
+  }
+  if (!expectedHead || baseline.headSha !== expectedHead) {
+    return { pass: false, status: "recovery_required", reason: "task_branch_head_changed", expectedHead, actualHead: baseline.headSha };
+  }
+  const update = await runGit(rootDir, ["update-ref", "HEAD", commitSha, expectedHead]);
+  if (!update.ok) {
+    return { pass: false, status: "recovery_required", reason: "task_branch_head_changed", expectedHead, actualHead: await gitHead(rootDir).catch(() => null) };
+  }
+  const checkout = await runGit(rootDir, ["read-tree", "--reset", "-u", commitSha]);
+  if (!checkout.ok) {
+    return { pass: false, status: "recovery_required", reason: "task_worktree_sync_failed", commitSha, error: checkout.stderr || checkout.stdout };
+  }
+  const after = await inspectTaskWorktreeBaseline(rootDir);
+  return {
+    pass: after.available && after.clean && after.headSha === commitSha,
+    status: after.available && after.clean && after.headSha === commitSha ? "clean" : "recovery_required",
+    reason: after.available && after.clean && after.headSha === commitSha ? null : "task_worktree_sync_incomplete",
+    branch: after.branch,
+    commitSha,
+    worktreeClean: after.clean === true,
+    changedPaths: after.changedPaths,
+  };
 }
 
 export async function remoteBranchHead(rootDir, remote, branch) {
@@ -108,8 +324,7 @@ export async function createMetadataCommit(rootDir, options) {
 }
 
 export async function createTaskCheckpointCommit(rootDir, options) {
-  const indexPath = resolveWildArrangePath(rootDir, "coordination", "tmp", `index-${process.pid}-${randomUUID()}`);
-  await mkdir(path.dirname(indexPath), { recursive: true });
+  const indexPath = path.join(os.tmpdir(), `wildarrange-checkpoint-index-${process.pid}-${randomUUID()}`);
   const env = { GIT_INDEX_FILE: indexPath };
   try {
     const readTree = await runGit(rootDir, ["read-tree", options.parentSha], { env });
@@ -287,6 +502,13 @@ function safeRefSegment(value) {
   const normalized = String(value || "").trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
   if (!normalized || normalized === "." || normalized === "..") throw new Error(`invalid Git task branch segment: ${value}`);
   return normalized;
+}
+
+function uniqueGitPaths(values) {
+  return [...new Set(values
+    .map((value) => String(value || "").replaceAll("\\", "/").replace(/^\.\//, ""))
+    .filter((value) => value && value !== ".wildarrange" && !value.startsWith(".wildarrange/")))]
+    .sort();
 }
 
 function normalizeDeviceName(value) {
