@@ -483,7 +483,7 @@ node ./bin/wildarrange.mjs skills match --text "做一个网页版提醒事项 A
 node ./bin/wildarrange.mjs serve --host 127.0.0.1 --port 8765
 ```
 
-路由复盘数据可直接查看；如需在页面点击“正确/规则错/个案错”写入标注，请用 `--token` 启动，因为所有 Dashboard POST 写操作都要求 token。
+本机打开后可直接查看和操作，无需填写登录信息。服务会为当前进程创建一次性 HttpOnly 会话 cookie；Dashboard 写操作仍在后台经过 token、Host 与 Origin 校验。
 
 绑定非 loopback 地址时必须带 token：
 
@@ -491,7 +491,7 @@ node ./bin/wildarrange.mjs serve --host 127.0.0.1 --port 8765
 node ./bin/wildarrange.mjs serve --host 0.0.0.0 --port 8765 --token "$WILDARRANGE_DASHBOARD_TOKEN"
 ```
 
-API 请求需携带以下之一：
+非本机 API 请求需携带以下之一：
 
 ```text
 Authorization: Bearer <token>

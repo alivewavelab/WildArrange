@@ -479,15 +479,17 @@ Local dashboard:
 node ./bin/wildarrange.mjs serve --host 127.0.0.1 --port 8765
 ```
 
+The loopback dashboard opens directly without a login form. The server creates a one-process HttpOnly session cookie, while Dashboard write actions still pass token, Host, and Origin checks behind the scenes.
+
 Binding to a non-loopback host requires a token:
 
 ```bash
 node ./bin/wildarrange.mjs serve --host 0.0.0.0 --port 8765 --token "$WILDARRANGE_DASHBOARD_TOKEN"
 ```
 
-`GET /api/state` remains readable on loopback without a token. Every `POST` write operation requires a token even on `127.0.0.1`, and the server validates Host / Origin headers to prevent browser-triggered local command execution.
+`GET /api/state` remains readable on loopback without a token. Browser writes use the automatic session cookie; non-browser clients still authenticate explicitly. The server validates Host / Origin headers to prevent browser-triggered local command execution.
 
-API write requests need either:
+Non-loopback API requests need either:
 
 ```text
 Authorization: Bearer <token>

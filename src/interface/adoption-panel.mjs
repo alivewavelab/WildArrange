@@ -2,6 +2,8 @@
  * Adoption Dashboard panel: ViewModel, HTML/JS and write-API input checks.
  * Interface does not import capabilities or apply patches itself.
  */
+import { readdir, readFile, realpath, stat } from "node:fs/promises";
+import path from "node:path";
 import {
   applyApprovedCards,
   cancelAdoption,
@@ -11,21 +13,43 @@ import {
   recoverAdoption,
   reconcileAdoption,
 } from "../orchestration/adoption.mjs";
+import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
+import { evaluateRegistryFreshness, readLocator, readVerificationInventory } from "../infra/verification-registry.mjs";
+import { readJson } from "../infra/runtime-store.mjs";
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const GOVERNANCE_EXCLUDES = new Set([".git", ".wildarrange", "node_modules", ".tmp", "dist", "build", "coverage"]);
+const GOVERNANCE_GROUPS = [
+  { id: "gates", label: "质量门", title: "交付检查链", description: "测试、改动范围、独立复核、验收证明和完成入账。" },
+  { id: "tests", label: "自动测试", title: "行为与边界测试", description: "项目测试、静态检查及其真实执行入口。" },
+  { id: "product", label: "产品文档", title: "目标与使用说明", description: "产品概念、开发计划和使用说明。" },
+  { id: "architecture", label: "架构", title: "模块与依赖地图", description: "模块职责、依赖关系和产品总图。" },
+  { id: "rules", label: "项目规范", title: "Agent 行动边界", description: "根规范和各目录就近生效的维护约定。" },
+  { id: "automation", label: "自动化入口", title: "宿主、CI 与 Hook", description: "宿主适配器、持续集成和自动拦截入口。" },
+];
+const GOVERNANCE_LEDGERS = [
+  { id: "registry", label: "门单", title: "检查规则", description: "交付前必须经过哪些测试、复核和质量门。", locatorKey: "registryPath" },
+  { id: "bootstrap", label: "测试单", title: "执行基线", description: "这些检查以哪个版本、哪套配置为准。", locatorKey: "bootstrapPath" },
+  { id: "inventory", label: "资产单", title: "治理资产", description: "项目当前使用、归档、删除或暂缓的治理内容。", locatorKey: "inventoryPath" },
+];
 
-export const ADOPTION_NAV_BUTTON = `<button data-view="adoption" data-label="验证接管"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M4 12h10M4 17h7"/><path d="M16 14l3 3 5-6"/></svg><span>验证接管</span></button>`;
+export const ADOPTION_NAV_BUTTON = `<button data-view="adoption" data-label="项目治理"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M4 12h10M4 17h7"/><path d="M16 14l3 3 5-6"/></svg><span>项目治理</span></button>`;
 
 export const ADOPTION_VIEW_HTML = `
         <div class="view" data-view-panel="adoption">
-          <h1 class="section-title">验证治理接管</h1>
-          <p class="section-intro">每张卡说明资产是什么、谁在用、为什么处理、完成后怎样、最大后果和恢复方法。签字只在本页进行。</p>
-          <section>
+          <h1 class="section-title">项目治理</h1>
+          <p class="section-intro">集中查看这个项目靠哪些规则、文档和自动检查保持可维护。这里只展示状态，不代替 GitHub 的最终权限操作。</p>
+          <div class="section-kicker">治理总账</div>
+          <div class="governance-ledger-grid" id="governanceLedgers"><span class="muted">正在读取治理总账</span></div>
+          <div class="section-kicker">项目文件</div>
+          <div class="governance-grid" id="governanceGrid" style="margin-bottom:18px"><span class="muted">正在读取治理文件</span></div>
+          <section id="governancePreview" hidden><div class="panel-head"><div><div class="eyebrow" id="previewGroup">文件预览</div><h2 id="previewPath"></h2></div><button id="copyGovernancePath">复制路径</button></div><pre id="previewContent"></pre></section>
+          <section id="governanceCleanup" hidden>
             <div class="panel-head">
               <div>
-                <div class="eyebrow">会话</div>
-                <h2 id="adoptionSessionTitle">没有进行中的接管</h2>
-                <p id="adoptionNext" class="muted">需要时运行 <code>wildarrange adoption start</code>。</p>
+                <div class="eyebrow">治理问题整理</div>
+                <h2 id="adoptionSessionTitle">治理问题待处理</h2>
+                <p id="adoptionNext" class="muted">这里仅在发现重复、过期或冲突的治理资产时出现。</p>
               </div>
               <div class="form-row">
                 <button id="adoptionApply">执行已批准项</button>
@@ -41,6 +65,7 @@ export const ADOPTION_VIEW_HTML = `
 
 export const ADOPTION_SCRIPT = `
     const ADOPTION_SENSITIVE = new Set(["merge", "delete", "archive"]);
+    let governancePreviewPath = "";
     async function getJson(url) {
       const response = await dashboardFetch(url, { cache: "no-store" });
       const payload = await response.json();
@@ -52,13 +77,59 @@ export const ADOPTION_SCRIPT = `
       renderAdoption(payload);
       return payload;
     }
+    async function loadGovernanceFiles() {
+      const payload = await getJson("/api/adoption/governance");
+      el("governanceLedgers").innerHTML = payload.ledgers.map(function (ledger) {
+        const stateClass = ledger.exists ? (ledger.stale ? "warn" : "ok") : "muted";
+        const stateText = ledger.exists ? (ledger.stale ? "需要更新" : "已建立") : "尚未建立";
+        const action = ledger.path ? '<button data-governance-file="' + esc(ledger.path) + '">查看内容</button>' : '<span class="muted">接管后自动生成</span>';
+        return '<section><div class="ledger-card-head"><div><div class="eyebrow">' + esc(ledger.label) + '</div><h2>' + esc(ledger.title) + '</h2></div><span class="badge ' + stateClass + '">' + stateText + '</span></div><p class="muted">' + esc(ledger.description) + '</p><strong class="ledger-count">' + esc(ledger.summary) + '</strong><div class="ledger-card-foot">' + action + '</div></section>';
+      }).join("");
+      el("governanceGrid").innerHTML = payload.groups.map(function (group) {
+        const files = group.files.map(function (file) {
+          return '<button class="governance-file" data-governance-file="' + esc(file.path) + '"><code>' + esc(file.path) + '</code><span>' + Math.max(1, Math.round(file.sizeBytes / 1024)) + ' KB</span></button>';
+        }).join("");
+        return '<section><div class="eyebrow">' + esc(group.label) + '</div><h2>' + esc(group.title) + '</h2><p class="muted">' + esc(group.description) + '</p><button data-governance-group="' + esc(group.id) + '">' + group.files.length + ' 个文件</button><div class="governance-file-list" data-governance-list="' + esc(group.id) + '" hidden>' + (files || '<span class="muted">暂无文件</span>') + '</div></section>';
+      }).join("");
+    }
+    async function openGovernanceFile(filePath) {
+      const payload = await getJson("/api/adoption/file?path=" + encodeURIComponent(filePath));
+      governancePreviewPath = payload.file.path;
+      el("previewPath").textContent = payload.file.path;
+      el("previewGroup").textContent = "只读文件预览";
+      el("previewContent").textContent = payload.file.content;
+      el("governancePreview").hidden = false;
+      el("governancePreview").scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    el("governanceLedgers").addEventListener("click", async function (event) {
+      const fileButton = event.target.closest("button[data-governance-file]");
+      if (fileButton) await openGovernanceFile(fileButton.dataset.governanceFile);
+    });
+    el("governanceGrid").addEventListener("click", async function (event) {
+      const groupButton = event.target.closest("button[data-governance-group]");
+      if (groupButton) {
+        const list = el("governanceGrid").querySelector('[data-governance-list="' + groupButton.dataset.governanceGroup + '"]');
+        if (list) list.hidden = !list.hidden;
+        return;
+      }
+      const fileButton = event.target.closest("button[data-governance-file]");
+      if (!fileButton) return;
+      await openGovernanceFile(fileButton.dataset.governanceFile);
+    });
+    el("copyGovernancePath").addEventListener("click", async function () {
+      if (!governancePreviewPath) return;
+      await navigator.clipboard.writeText(governancePreviewPath);
+      el("copyGovernancePath").textContent = "已复制";
+    });
     function renderAdoption(payload) {
       const session = payload.session;
-      el("adoptionSessionTitle").textContent = session ? (session.sessionId + " · " + session.status) : "没有进行中的接管";
-      el("adoptionNext").textContent = payload.nextAction || session?.nextAction || "需要时运行 wildarrange adoption start";
+      const cleanup = el("governanceCleanup");
+      if (cleanup) cleanup.hidden = !session;
+      el("adoptionSessionTitle").textContent = session ? ("治理整理 · " + session.status) : "治理问题待处理";
+      el("adoptionNext").textContent = session?.nextAction || "这里仅在发现治理问题时出现";
       el("adoptionSummary").textContent = session
         ? "待决策 " + (payload.pending || 0) + " · 已批准 " + (payload.approved || 0) + " · 过期 " + (payload.stale || 0)
-        : "当前没有 adoption 会话";
+        : "当前没有需要整理的治理问题";
       if (session) {
         el("adoptionSummary").textContent += " | scanned " + (session.scannedAt || "unknown")
           + " | HEAD " + (session.scanHeadSha || "non-git")
@@ -166,15 +237,114 @@ export const ADOPTION_SCRIPT = `
       document.querySelectorAll("[data-view-panel]").forEach((panel) => panel.classList.toggle("active", panel.dataset.viewPanel === "adoption"));
       document.querySelectorAll(".nav [data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === "adoption"));
     }
+    loadGovernanceFiles().catch((error) => {
+      el("governanceGrid").textContent = error instanceof Error ? error.message : String(error);
+    });
     loadAdoption().catch((error) => {
       const next = document.getElementById("adoptionNext");
       if (next) next.textContent = error instanceof Error ? error.message : String(error);
     });
 `;
 
+export async function buildGovernanceFileIndex(rootDir) {
+  const files = await listProjectFiles(rootDir);
+  const configResult = await loadWildArrangeConfig(rootDir).catch(() => ({ config: {} }));
+  const locator = readLocator(configResult.config);
+  const freshness = await evaluateRegistryFreshness(rootDir, { config: configResult.config });
+  const registry = locator.registryPath ? await readJson(path.join(rootDir, locator.registryPath), null) : null;
+  const bootstrap = locator.bootstrapPath ? await readJson(path.join(rootDir, locator.bootstrapPath), null) : null;
+  const inventory = locator.inventoryPath ? await readVerificationInventory(path.join(rootDir, locator.inventoryPath), null) : null;
+  const values = { registry, bootstrap, inventory };
+  const ledgers = GOVERNANCE_LEDGERS.map((ledger) => {
+    const value = values[ledger.id];
+    return {
+      id: ledger.id,
+      label: ledger.label,
+      title: ledger.title,
+      description: ledger.description,
+      path: locator[ledger.locatorKey] || null,
+      exists: Boolean(value),
+      stale: Boolean(value) && freshness.stale === true,
+      summary: governanceLedgerSummary(ledger.id, value),
+    };
+  });
+  const groups = GOVERNANCE_GROUPS.map((group) => ({
+    ...group,
+    files: files.filter((file) => governanceGroupFor(file.path) === group.id),
+  }));
+  return { kind: "wildarrange_governance_files", freshness, ledgers, groups };
+}
+
+function governanceLedgerSummary(id, value) {
+  if (!value) return "0 项";
+  if (id === "registry") {
+    const commands = Object.values(value.planDefaults || {}).flat().length;
+    return `${commands + (value.runtimeGates || []).length + (value.hostHooks || []).length} 条规则`;
+  }
+  if (id === "bootstrap") return value.baselineRef ? "1 个执行基线" : "基线待确认";
+  const views = value.views || {};
+  const count = Object.values(views).reduce((total, items) => total + (Array.isArray(items) ? items.length : 0), 0);
+  return `${count} 项资产`;
+}
+
+async function listProjectFiles(rootDir) {
+  const result = [];
+  async function visit(directory) {
+    for (const entry of await readdir(directory, { withFileTypes: true }).catch(() => [])) {
+      if (GOVERNANCE_EXCLUDES.has(entry.name)) continue;
+      const absolute = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        await visit(absolute);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const relative = path.relative(rootDir, absolute).replaceAll("\\", "/");
+      if (!governanceGroupFor(relative)) continue;
+      const info = await stat(absolute);
+      result.push({ path: relative, sizeBytes: info.size, updatedAt: info.mtime.toISOString() });
+    }
+  }
+  await visit(rootDir);
+  return result.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function governanceGroupFor(relativePath) {
+  const value = String(relativePath || "").replaceAll("\\", "/");
+  if (/verification-(registry|bootstrap)\.json$|verification-inventory\.(json|html)$/i.test(value)) return "gates";
+  if (/(^|\/)AGENTS\.md$/i.test(value)) return "rules";
+  if (/^(doc\/project-architecture\.md|docs\/product\/architecture-overview\.html|tooling\/arch-module-graph\/)/i.test(value)) return "architecture";
+  if (/^(test\/|tests\/|package\.json$)|\.(test|spec)\.[cm]?[jt]s$/i.test(value)) return "tests";
+  if (/^(wildarrange\.config\.json|src\/capabilities\/(verify|scope-guard|review-gate|acceptance-proof|checkpoint)\.mjs)$/i.test(value)) return "gates";
+  if (/^(README(?:\.en)?\.md|doc\/.*\.(md|html))$/i.test(value)) return "product";
+  if (/^(\.github\/workflows\/|\.cursor\/|\.codex\/|\.kimi-code\/|src\/interface\/.*(?:adapter|hook).*\.mjs$)/i.test(value)) return "automation";
+  return null;
+}
+
+async function readGovernancePreview(rootDir, requestedPath) {
+  const relative = String(requestedPath || "").replaceAll("\\", "/");
+  if (!governanceGroupFor(relative)) throw Object.assign(new Error("该文件不属于项目治理范围"), { code: "invalid_path" });
+  const root = path.resolve(rootDir);
+  const absolute = path.resolve(root, relative);
+  if (absolute !== root && !absolute.startsWith(`${root}${path.sep}`)) throw Object.assign(new Error("文件路径超出项目范围"), { code: "invalid_path" });
+  const actual = await realpath(absolute);
+  if (actual !== root && !actual.startsWith(`${root}${path.sep}`)) throw Object.assign(new Error("文件真实路径超出项目范围"), { code: "invalid_path" });
+  const info = await stat(actual);
+  if (!info.isFile()) throw Object.assign(new Error("目标不是文件"), { code: "invalid_path" });
+  if (info.size > 512_000) throw Object.assign(new Error("文件过大，请复制路径后使用编辑器打开"), { code: "file_too_large" });
+  return { path: relative, content: await readFile(actual, "utf8"), sizeBytes: info.size, updatedAt: info.mtime.toISOString() };
+}
+
 export async function tryHandleAdoptionApi(request, response, url, rootDir) {
   if (!url.pathname.startsWith("/api/adoption/")) return false;
   try {
+    if (request.method === "GET" && url.pathname === "/api/adoption/governance") {
+      sendJson(response, 200, { ok: true, ...(await buildGovernanceFileIndex(rootDir)) });
+      return true;
+    }
+    if (request.method === "GET" && url.pathname === "/api/adoption/file") {
+      sendJson(response, 200, { ok: true, file: await readGovernancePreview(rootDir, url.searchParams.get("path")) });
+      return true;
+    }
     if (request.method === "GET" && url.pathname === "/api/adoption/session") {
       sendJson(response, 200, await loadAdoptionViewModel(rootDir, {
         sessionId: validOptionalId(url.searchParams.get("session"), "sessionId"),
@@ -247,7 +417,9 @@ export async function tryHandleAdoptionApi(request, response, url, rootDir) {
   } catch (error) {
     const status = error?.code === "payload_too_large"
       ? 413
-      : ["card_stale", "sensitive_card", "invalid_decision", "invalid_id", "invalid_json"].includes(error?.code)
+      : error?.code === "file_too_large"
+        ? 413
+        : ["card_stale", "sensitive_card", "invalid_decision", "invalid_id", "invalid_json", "invalid_path"].includes(error?.code)
         ? 400
         : ["session_not_reviewable", "session_not_applicable", "session_applying", "applied_changes_exist", "recovery_required", "recovery_not_required"].includes(error?.code)
           ? 409

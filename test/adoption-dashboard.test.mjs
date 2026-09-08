@@ -55,16 +55,30 @@ function request(base, pathname, { method = "GET", token, headers = {}, body } =
 test("dashboard adoption GET is available and HTML contains the panel", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
+    await writeFile(path.join(dir, "README.md"), "# Demo\n", "utf8");
     const { server, base } = await listen(dir);
     try {
       const page = await request(base, "/");
       assert.equal(page.status, 200);
       assert.match(page.text, /location\.hash\.startsWith\("#adoption\?"\)/);
       assert.match(page.text, /sessionStorage\.setItem\(DASHBOARD_TOKEN_KEY, token\)/);
-      assert.match(page.text, /验证治理接管/);
+      assert.match(page.text, /项目治理/);
+      assert.match(page.text, /治理问题整理/);
+      assert.match(page.text, /id="governanceCleanup" hidden/);
+      assert.match(page.text, /id="governanceLedgers"/);
       const api = await request(base, "/api/adoption/session");
       assert.equal(api.status, 200);
       assert.equal(api.json.ok, true);
+      const governance = await request(base, "/api/adoption/governance");
+      assert.equal(governance.status, 200);
+      assert.deepEqual(governance.json.ledgers.map((ledger) => ledger.title), ["检查规则", "执行基线", "治理资产"]);
+      assert.ok(governance.json.ledgers.every((ledger) => ledger.exists === false));
+      assert.ok(governance.json.groups.find((group) => group.id === "product").files.some((file) => file.path === "README.md"));
+      const preview = await request(base, "/api/adoption/file?path=README.md");
+      assert.equal(preview.status, 200);
+      assert.equal(preview.json.file.content, "# Demo\n");
+      const traversal = await request(base, "/api/adoption/file?path=../AGENTS.md");
+      assert.equal(traversal.status, 400);
     } finally {
       server.close();
     }

@@ -3707,7 +3707,10 @@ test("dashboard requires a token for non-loopback hosts and enforces API auth", 
       const pageHtml = await page.text();
       assert.equal(page.status, 200);
       assert.doesNotMatch(pageHtml, /secret-token/);
+      assert.doesNotMatch(pageHtml, /API Token/);
       assert.match(pageHtml, /sessionStorage\.getItem/);
+      const dashboardCookie = page.headers.get("set-cookie");
+      assert.match(dashboardCookie, /^wildarrange_dashboard=secret-token; HttpOnly; SameSite=Strict; Path=\/$/);
 
       const readable = await fetchJson(`${baseUrl}/api/state`);
       assert.equal(readable.response.status, 200);
@@ -3724,6 +3727,11 @@ test("dashboard requires a token for non-loopback hosts and enforces API auth", 
         headers: { authorization: "Bearer secret-token" },
       });
       assert.equal(writeAllowed.response.status, 200);
+
+      const browserWriteAllowed = await postJson(`${baseUrl}/api/summary`, {}, {
+        headers: { cookie: dashboardCookie },
+      });
+      assert.equal(browserWriteAllowed.response.status, 200);
 
       const oversized = await postJson(`${baseUrl}/api/team/send`, {
         from: "Jiuwei",

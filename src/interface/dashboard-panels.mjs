@@ -160,29 +160,32 @@ export async function buildOpsPanelViewModel(rootDir) {
  */
 export function renderPanelsHtml() {
   return `
-    <section class="route-review-shell">
-      <div class="route-review-head">
-        <div><div class="eyebrow">ROUTER FLIGHT RECORDER</div><h2>路由复盘台</h2><div class="muted">逐条审查原始请求、路由判断和后续工具活动</div></div>
-        <div class="toolbar"><input id="routeReviewDate" type="date"><button id="routeReviewRefresh">查看当天</button></div>
+    <section>
+      <div class="panel-head"><div><h2>决策列表</h2><div class="muted">每条记录说明发生了什么、为什么这样判断。</div></div></div>
+      <div class="decision-filters" id="decisionFilters">
+        <button class="active" data-decision-category="all">全部</button>
+        <button data-decision-category="routing">路由</button>
+        <button data-decision-category="hook">Hook</button>
+        <button data-decision-category="quality">质量门</button>
+        <button data-decision-category="admission">成果合入</button>
       </div>
-      <div id="routeReviewDaily" class="route-daily-summary"></div>
-      <div id="routeReviewStats" class="route-review-stats"></div>
-      <div id="routeReviews" class="route-review-list"><span class="muted">loading</span></div>
-    </section>
-    <div class="grid two">
-      <section>
-        <h2>Decision Panel / 决策面板</h2>
-        <div id="decisionStats" class="muted">loading</div>
-        <div id="decisions"></div>
-      </section>
-      <section>
-        <h2>Ops Panel / 运维面板</h2>
-        <div id="ops"></div>
-      </section>
-    </div>`;
+      <div id="decisionStats" class="muted">正在读取</div>
+      <div id="decisions"></div>
+    </section>`;
 }
 
 export const PANELS_SCRIPT = `
+    let decisionPayload = { recent: [], gates: [], neverFiredGates: [] };
+    let decisionCategory = "all";
+    function decisionCategoryOf(gate) {
+      if (gate === "routing") return "routing";
+      if (gate === "pre_tool_use" || gate === "post_tool_use") return "hook";
+      if (gate === "admission") return "admission";
+      return "quality";
+    }
+    function decisionCategoryLabel(gate) {
+      return ({ routing:"路由", hook:"Hook", quality:"质量门", admission:"成果合入" })[decisionCategoryOf(gate)] || "质量门";
+    }
     function routeReviewLabel(category) {
       return ({ confirmed: "已确认正确", rule_wrong: "规则错误", case_wrong: "个案错误", mislabeled: "标注有误" })[category] || "未复盘";
     }
@@ -224,26 +227,22 @@ export const PANELS_SCRIPT = `
       renderRouteReviews(await response.json());
     }
     function renderDecisionRecord(record) {
-      const head = "[" + esc(record.ts || "?") + "] " + esc(record.gate || "?") + " " + esc(String(record.decision || "?").toUpperCase());
+      const head = decisionCategoryLabel(record.gate) + " · " + esc(String(record.decision || "?").toUpperCase());
       const rule = record.code ? esc(record.code) + (record.reason ? " — " + esc(record.reason) : "") : esc(record.reason || "(未记录)");
       const marker = record.annotatable === true ? ' <span class="pill">可标注 ' + esc(record.id || "") + "</span>" : "";
-      return '<div class="op-block" style="margin-bottom:8px;"><div><strong>' + head + "</strong>" + marker + "</div>"
+      return '<div class="op-block" style="margin-bottom:8px;"><div><strong>' + head + "</strong>" + marker + '<span class="muted" style="float:right">' + esc(record.ts ? new Date(record.ts).toLocaleString("zh-CN", { hour12:false }) : "?") + "</span></div>"
         + '<div class="muted">' + esc(record.summary || "(无摘要)") + "</div>"
         + '<div class="muted">规则: ' + rule + "</div>"
         + (record.evidencePath ? '<div class="muted">证据: <code>' + esc(record.evidencePath) + "</code></div>" : "")
         + "</div>";
     }
     function renderDecisionsPanel(payload) {
-      const stats = payload.gates.map(function (gate) {
-        return esc(gate.gate) + ": " + gate.total + " 次";
-      }).join(" · ");
-      const never = payload.neverFiredGates.length > 0
-        ? '<div style="color:var(--warn);margin:6px 0;">从未触发的门: ' + esc(payload.neverFiredGates.join(", ")) + "</div>"
-        : "";
-      el("decisionStats").innerHTML = stats + never;
-      el("decisions").innerHTML = payload.recent.length === 0
+      decisionPayload = payload;
+      const records = payload.recent.filter(function (record) { return decisionCategory === "all" || decisionCategoryOf(record.gate) === decisionCategory; });
+      el("decisionStats").textContent = "显示 " + records.length + " 条 · 共读取 " + payload.recent.length + " 条";
+      el("decisions").innerHTML = records.length === 0
         ? '<span class="muted">(无决策记录)</span>'
-        : payload.recent.map(renderDecisionRecord).join("");
+        : records.map(renderDecisionRecord).join("");
     }
     function renderOpsPanel(payload) {
       const blocks = [];
@@ -273,28 +272,17 @@ export const PANELS_SCRIPT = `
     }
     async function loadPanels() {
       try {
-        await loadRouteReviews();
         const decisionsResponse = await dashboardFetch("/api/panels/decisions", { cache: "no-store" });
         if (decisionsResponse.ok) renderDecisionsPanel(await decisionsResponse.json());
-        const opsResponse = await dashboardFetch("/api/panels/ops", { cache: "no-store" });
-        if (opsResponse.ok) renderOpsPanel(await opsResponse.json());
       } catch (error) {
         el("decisionStats").textContent = error instanceof Error ? error.message : String(error);
       }
     }
-    el("routeReviewDate").value = new Date().toLocaleDateString("en-CA");
-    el("routeReviewRefresh").addEventListener("click", loadRouteReviews);
-    el("routeReviews").addEventListener("click", async function (event) {
-      const button = event.target.closest("button[data-route-category]");
+    el("decisionFilters").addEventListener("click", function (event) {
+      const button = event.target.closest("button[data-decision-category]");
       if (!button) return;
-      const card = button.closest("[data-decision]");
-      const category = button.dataset.routeCategory;
-      const reason = category === "confirmed" ? "" : (prompt("请简短说明问题，方便后续改规则") || "");
-      try {
-        await postJson("/api/panels/routes/annotate", { decisionId: card.dataset.decision, category: category, reason: reason });
-        await loadRouteReviews();
-      } catch (error) {
-        el("notice").textContent = error instanceof Error ? error.message : String(error);
-      }
+      decisionCategory = button.dataset.decisionCategory;
+      el("decisionFilters").querySelectorAll("button").forEach(function (item) { item.classList.toggle("active", item === button); });
+      renderDecisionsPanel(decisionPayload);
     });
 `;
