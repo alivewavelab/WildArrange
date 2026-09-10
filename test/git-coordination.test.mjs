@@ -734,6 +734,58 @@ test("checkpoint failure after task-branch delivery keeps ownership and resumes 
   });
 });
 
+test("linear remote delivery resumes the pushed commit after checkpoint failure without rerunning worker", async () => {
+  await withRemoteClones(async ({ remote, cloneA }) => {
+    await initRuntime(cloneA);
+    await registerCoordinationDevice(cloneA, { name: "device-a", force: true });
+    const planId = "P-LINEAR-REMOTE";
+    await importPlanDefinition(cloneA, {
+      id: planId,
+      title: "Linear remote delivery recovery",
+      objective: "One pushed delivery commit is bound to proof and checkpoint.",
+      tasks: [{
+        id: "T001",
+        subject: "Push and recover one linear delivery",
+        worker_command: "node -e \"const fs=require('node:fs');fs.mkdirSync('src',{recursive:true});const p='src/linear-remote.txt';const n=fs.existsSync(p)?Number(fs.readFileSync(p,'utf8'))+1:1;fs.writeFileSync(p,String(n))\"",
+        verify_commands: ["node -e \"require('node:assert/strict').equal(require('node:fs').readFileSync('src/linear-remote.txt','utf8'),'1')\""],
+        review_commands: ["node -e \"const fs=require('node:fs');const assert=require('node:assert/strict');assert.equal(fs.statSync('src/linear-remote.txt').size,1);assert.deepEqual(fs.readdirSync('src'),['linear-remote.txt'])\""],
+        writable_paths: ["src/**"],
+      }],
+    });
+    const mainBefore = (await git(remote, ["rev-parse", "main"])).trim();
+    const checkpointPlanDir = path.join(cloneA, ".wildarrange", "checkpoints", planId);
+    await replaceDirectoryWithBlockingFile(checkpointPlanDir);
+    let first;
+    try {
+      first = await runNextTask(cloneA);
+    } finally {
+      await restoreBlockedDirectory(checkpointPlanDir);
+    }
+    assert.equal(first.status, "recovery_required");
+    assert.equal(first.task.status, "verifying");
+    const deliverySha = first.task.delivery.integrationSha;
+    const taskBranch = first.task.coordination.branch;
+    assert.equal((await git(remote, ["rev-parse", taskBranch])).trim(), deliverySha);
+    assert.equal((await git(remote, ["rev-parse", "main"])).trim(), mainBefore);
+    assert.equal(await git(remote, ["show", `${deliverySha}:src/linear-remote.txt`]), "1");
+
+    const intent = await readIntegrationIntent(cloneA, first.task.delivery_workspace.runId, "T001");
+    assert.equal(intent.status, "pushed");
+    assert.equal(intent.integrationSha, deliverySha);
+    const resumed = await runNextTask(cloneA);
+    assert.equal(resumed.status, "completed");
+    assert.equal(resumed.task.delivery.integrationSha, deliverySha);
+    assert.equal((await git(remote, ["rev-parse", taskBranch])).trim(), deliverySha, "recovery must not push another commit");
+    assert.equal((await git(remote, ["rev-parse", "main"])).trim(), mainBefore);
+    assert.equal(await readFile(path.join(resumed.task.delivery_workspace.workDir, "src", "linear-remote.txt"), "utf8"), "1", "worker must not rerun");
+
+    const proof = await readJson(path.join(cloneA, ".wildarrange", "reports", "acceptance", planId, "T001.json"));
+    const checkpoint = await readJson(path.join(cloneA, ".wildarrange", "checkpoints", planId, "T001.json"));
+    assert.equal(proof.evidenceRefs.deliveryBaseline.commitSha, deliverySha);
+    assert.equal(checkpoint.deliveryBaseline.integrationSha || checkpoint.deliveryBaseline.commitSha, deliverySha);
+  });
+});
+
 test("pushed integration is never rolled back when task ownership changes before recovery", async () => {
   await withRemoteClones(async ({ cloneA, cloneB }) => {
     const deviceA = await initializeTaskRuntime(cloneA, "device-a");

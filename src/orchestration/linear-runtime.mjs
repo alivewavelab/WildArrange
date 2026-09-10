@@ -30,7 +30,7 @@ import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
 import { findRunnableTask, persistTaskState, writeOutbox } from "./task-board.mjs";
 import { assertCurrentTaskOwnership, coordinateTaskClaim } from "./remote-ownership.mjs";
 import { assertCommandWorkerAgent } from "../infra/agent-registry.mjs";
-import { integrateAdmissionCommit, readIntegrationIntent } from "./integration.mjs";
+import { assertTaskOrDeliveredOwnership, integrateAdmissionCommit, readIntegrationIntent } from "./integration.mjs";
 import { commitIsAncestor, inspectTaskWorktreeBaseline, taskBranchName } from "../infra/git-coordination.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 
@@ -557,7 +557,7 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
   const taskState = await loadTaskState(rootDir);
   if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["verifying", "in_progress"]);
-  await assertCurrentTaskOwnership(rootDir, task);
+  await assertTaskOrDeliveredOwnership(rootDir, taskState.planId, task);
   if (task.last_failure?.reason === "command_termination_failed" && options.force !== true) {
     return { status: "recovery_required", task, commandEvidence: task.last_failure.commandEvidence || null };
   }
@@ -988,7 +988,7 @@ async function taskOwnershipGate(rootDir, taskId) {
   const state = await loadTaskState(rootDir);
   const task = state?.tasks.find((candidate) => candidate.id === taskId);
   try {
-    const ownership = await assertCurrentTaskOwnership(rootDir, task);
+    const ownership = await assertTaskOrDeliveredOwnership(rootDir, state?.planId, task);
     return { pass: true, ownership };
   } catch (error) {
     return {

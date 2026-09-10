@@ -33,6 +33,23 @@ export async function readIntegrationIntent(rootDir, runId, taskId) {
   return readJson(integrationIntentPath(rootDir, runId, taskId), null);
 }
 
+export async function assertTaskOrDeliveredOwnership(rootDir, planId, task) {
+  try {
+    return await assertCurrentTaskOwnership(rootDir, task);
+  } catch (originalError) {
+    const workspace = task?.delivery_workspace;
+    const intent = workspace?.runId ? await readIntegrationIntent(rootDir, workspace.runId, task.id) : null;
+    const coordination = task?.coordination;
+    if (!intent || intent.planId !== planId || intent.taskId !== task.id || intent.runId !== workspace.runId
+      || intent.expectedSha !== workspace.baseSha || intent.remote !== coordination?.remote
+      || intent.branch !== workspace.branch || intent.branch !== coordination?.branch
+      || !["pushed", "push_outcome_unknown"].includes(intent.status)) throw originalError;
+    const fences = await verifyAdmissionFences(rootDir, task.id, null, intent);
+    if (fences.pass !== true) throw originalError;
+    return { ...fences.ownership, recoveredFromDeliveryIntent: true };
+  }
+}
+
 export async function collectIntegrationCandidatePaths(rootDir, baseSha) {
   const [workingPaths, committedPaths] = await Promise.all([
     listWorkingTreeChanges(rootDir),
