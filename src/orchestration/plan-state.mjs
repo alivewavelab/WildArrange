@@ -480,9 +480,10 @@ function assertPlanImportDoesNotReplaceActiveWork(existingLedger, plan) {
     const replacedByImport = task.planId === plan.id;
     const switchesAwayFromActivePlan = existingLedger?.activePlanId === task.planId && plan.id !== task.planId;
     if (!replacedByImport && !switchesAwayFromActivePlan) return false;
+    if (replacedByImport && task.status === "completed") return true;
     return ["in_progress", "verifying", "recovery_required"].includes(task.status)
       || Boolean(task.parallel_run_claim)
-      || ["claimed", "accepted"].includes(task.coordination?.status);
+      || (task.status !== "completed" && ["claimed", "accepted"].includes(task.coordination?.status));
   });
   if (protectedTasks.length === 0) return;
   const details = protectedTasks.map((task) => `${task.id}:${task.status}`).join(", ");

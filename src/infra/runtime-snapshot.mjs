@@ -1,6 +1,6 @@
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { appendLedger } from "./ledger.mjs";
+import { appendLedger, readVerifiedLedgerEntries, verifyLedger } from "./ledger.mjs";
 import { normalizeRelativePath } from "./path-match.mjs";
 import {
   STATE_VERSION,
@@ -11,7 +11,7 @@ import {
   resolveWildArrangePath,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
-import { loadTaskState } from "./task-state-store.mjs";
+import { inspectCompletedTaskEvidence, loadTaskState } from "./task-state-store.mjs";
 
 export async function writeSnapshot(rootDir, stage, payload = {}) {
   await ensureWildArrangeDirs(rootDir);
@@ -117,7 +117,10 @@ export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
   const work = await readJson(resolveWildArrangePath(rootDir, "work.json"), null);
   const taskState = await loadTaskState(rootDir);
   const changes = await readChangeRequests(rootDir);
-  const status = buildStatusReport(work, taskState, changes);
+  const verifiedLedgerEntries = await readVerifiedLedgerEntries(rootDir);
+  const completionIntegrity = await inspectCompletedTaskEvidence(rootDir, taskState, { ledgerEntries: verifiedLedgerEntries });
+  const status = buildStatusReport(work, taskState, changes, completionIntegrity);
+  const ledgerIntegrity = await verifyLedger(rootDir);
   const nextTask = taskState ? findRunnableTaskForContext(taskState.tasks || []) : null;
   const context = {
     kind: "wildarrange_context_snapshot",
@@ -136,7 +139,8 @@ export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
       .map(summarizeTaskForContext),
     openChanges: changes.filter((change) => change.status === "open").map(summarizeChangeForContext),
     sessions: await readSessionLineage(rootDir),
-    ledgerTail: await readLedgerTail(rootDir, 12),
+    ledgerIntegrity,
+    ledgerTail: verifiedLedgerEntries.slice(-12),
   };
   const jsonPath = resolveWildArrangePath(rootDir, "snapshots", "context.json");
   const mdPath = resolveWildArrangePath(rootDir, "snapshots", "context.md");
@@ -147,9 +151,9 @@ export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
   return context;
 }
 
-function buildStatusReport(work, taskState, changes) {
+function buildStatusReport(work, taskState, changes, completionIntegrity) {
   const openChanges = changes.filter((change) => change.status === "open").length;
-  if (!taskState) return { work, planId: null, total: 0, completed: 0, draft: 0, pending: 0, failed: 0, openChanges };
+  if (!taskState) return { work, planId: null, total: 0, completed: 0, invalidCompleted: 0, completionIntegrity, draft: 0, pending: 0, failed: 0, openChanges };
   const counts = (taskState.tasks || []).reduce((acc, task) => {
     acc[task.status] = (acc[task.status] || 0) + 1;
     return acc;
@@ -160,6 +164,8 @@ function buildStatusReport(work, taskState, changes) {
     total: taskState.tasks.length,
     draft: counts.draft || 0,
     completed: counts.completed || 0,
+    invalidCompleted: completionIntegrity.invalid.length,
+    completionIntegrity,
     pending: counts.pending || 0,
     in_progress: counts.in_progress || 0,
     verifying: counts.verifying || 0,
@@ -191,26 +197,6 @@ async function readChangeRequests(rootDir) {
     if (change) changes.push(change);
   }
   return changes.sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
-}
-
-async function readLedgerTail(rootDir, limit) {
-  try {
-    const content = await readFile(resolveWildArrangePath(rootDir, "ledger.jsonl"), "utf8");
-    return content
-      .split(/\r?\n/)
-      .filter(Boolean)
-      .slice(-limit)
-      .map((line) => {
-        try {
-          return JSON.parse(line);
-        } catch {
-          return { raw: line };
-        }
-      });
-  } catch (error) {
-    if (error?.code === "ENOENT") return [];
-    throw error;
-  }
 }
 
 async function readSessionLineage(rootDir) {
@@ -279,7 +265,8 @@ function renderContextMarkdown(context) {
     "",
     `- Work: ${status.work?.workId || "(none)"}`,
     `- Plan: ${status.planId || "(none)"}`,
-    `- Counts: total=${status.total || 0}, completed=${status.completed || 0}, pending=${status.pending || 0}, verifying=${status.verifying || 0}, failed=${status.failed || 0}, openChanges=${status.openChanges || 0}`,
+    `- Counts: total=${status.total || 0}, completed=${status.completed || 0}, invalidCompleted=${status.invalidCompleted || 0}, pending=${status.pending || 0}, verifying=${status.verifying || 0}, failed=${status.failed || 0}, openChanges=${status.openChanges || 0}`,
+    `- Ledger integrity: ${context.ledgerIntegrity?.ok === true ? "verified" : `failed (${context.ledgerIntegrity?.failures?.length || 0} finding(s))`}`,
     `- Next action: ${context.nextAction}`,
     "",
     "## Session Lineage",

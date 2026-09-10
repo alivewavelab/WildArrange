@@ -14,7 +14,7 @@ import {
   scanContractGovernanceUniverse,
 } from "../src/infra/contract-governance.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
-import { cleanupParallelAgentRun, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
+import { admitParallelAgentResult, cleanupParallelAgentRun, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
 import { claimTeamTask, getTeamTask } from "../src/orchestration/task-board.mjs";
 
@@ -67,6 +67,75 @@ test("parallel cleanup retains an awaiting-acceptance dirty worktree", async () 
     assert.equal(await readFile(notePath, "utf8"), "keep me");
     assert.equal(cleanup.cleaned[0].status, "retained");
     assert.equal(cleanup.cleaned[0].reason, "lifecycle_requires_retention");
+  });
+});
+
+test("parallel cleanup waits for main containment and rejects an unmerged worktree HEAD", async () => {
+  await withTempDir(async (rootDir) => {
+    await writeFile(path.join(rootDir, ".gitignore"), ".wildarrange/\n", "utf8");
+    await writeFile(path.join(rootDir, "verify.cjs"), "require('node:assert/strict').equal(require('node:fs').readFileSync('result.txt','utf8'),'done')\n", "utf8");
+    await writeFile(path.join(rootDir, "review.cjs"), "const fs=require('node:fs');require('node:assert/strict').equal(fs.statSync('result.txt').size,4)\n", "utf8");
+    const planPath = path.join(rootDir, "cleanup-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      id: "cleanup-plan",
+      title: "Cleanup after main containment",
+      tasks: [{
+        id: "T001",
+        subject: "Deliver a checked result",
+        owner: "ZhuRong",
+        verify_commands: ["node verify.cjs"],
+        review_commands: ["node review.cjs"],
+        writable_paths: ["result.txt"],
+      }],
+    }, null, 2), "utf8");
+    await git(rootDir, "init", "-b", "main");
+    await git(rootDir, "config", "user.name", "State Safety Test");
+    await git(rootDir, "config", "user.email", "state-safety@example.invalid");
+    await git(rootDir, "add", ".");
+    await git(rootDir, "commit", "-m", "fixture baseline");
+    await initRuntime(rootDir);
+    await importPlan(rootDir, planPath);
+    const run = await runParallelAgents(rootDir, {
+      taskIds: ["T001"],
+      isolation: "git-worktree",
+      maxAgents: 1,
+      command: "node -e \"const fs=require('node:fs');fs.writeFileSync('result.txt','done');fs.writeFileSync(process.argv[1],JSON.stringify({summary:'done'}))\" {outputJson}",
+    });
+    const admitted = await admitParallelAgentResult(rootDir, { runId: run.runId, taskId: "T001" });
+    assert.equal(admitted.status, "completed");
+    const deliverySha = admitted.task.delivery.integrationSha;
+    const worktreeDir = path.resolve(rootDir, run.results[0].workDir);
+
+    const nextPlanPath = path.join(rootDir, ".wildarrange", "artifacts", "next-plan.json");
+    await writeFile(nextPlanPath, JSON.stringify({
+      id: "next-plan",
+      title: "Next plan after completed delivery",
+      tasks: [{
+        id: "T001",
+        subject: "Same task id in a later plan",
+        owner: "ZhuRong",
+        verify_commands: ["node verify.cjs"],
+        review_commands: ["node review.cjs"],
+        writable_paths: ["next.txt"],
+      }],
+    }), "utf8");
+    await importPlan(rootDir, nextPlanPath);
+
+    const beforeMerge = await cleanupParallelAgentRun(rootDir, { runId: run.runId });
+    assert.equal(beforeMerge.cleaned[0].reason, "worktree_head_not_in_main");
+
+    await git(rootDir, "merge", "--ff-only", deliverySha);
+    await writeFile(path.join(worktreeDir, "post-delivery.txt"), "later\n", "utf8");
+    await git(worktreeDir, "add", "post-delivery.txt");
+    await git(worktreeDir, "commit", "-m", "post delivery note");
+    const ahead = await cleanupParallelAgentRun(rootDir, { runId: run.runId });
+    assert.equal(ahead.cleaned[0].reason, "worktree_head_not_in_main");
+
+    const worktreeHead = (await git(worktreeDir, "rev-parse", "HEAD")).stdout.trim();
+    await git(rootDir, "merge", "--ff-only", worktreeHead);
+    const cleaned = await cleanupParallelAgentRun(rootDir, { runId: run.runId });
+    assert.equal(cleaned.cleaned[0].status, "cleaned");
+    await assert.rejects(readFile(path.join(worktreeDir, "post-delivery.txt"), "utf8"), /ENOENT/);
   });
 });
 

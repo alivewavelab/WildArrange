@@ -9,16 +9,12 @@ import {
   ensureWildArrangeDirs,
   nowIso,
   readJson,
-  resolveLegacyTaskAcceptancePath,
-  resolveLegacyTaskCheckpointPath,
   resolveWildArrangePath,
-  resolveTaskAcceptancePath,
-  resolveTaskCheckpointPath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
 import { readVerifiedLedgerEntries, verifyLedger } from "../infra/ledger.mjs";
 import { isPossibleNoopTask, isTrivialCommand } from "../infra/task-predicates.mjs";
-import { loadTaskLedger, loadTaskState, taskRef } from "../infra/task-state-store.mjs";
+import { inspectCompletedTaskEvidence, loadTaskLedger, loadTaskState, taskRef } from "../infra/task-state-store.mjs";
 import { listRuntimeStateBackups, verifyConfigBaseline, verifyRuntimeState } from "../infra/security.mjs";
 import { evaluateGateArming } from "../infra/gate-arming.mjs";
 import { evaluateRegistryFreshness } from "../infra/verification-registry.mjs";
@@ -174,6 +170,27 @@ async function checkCompletionIntegrity(rootDir, findings) {
     );
   }
   const completedTasks = tasks.filter((task) => task.status === "completed");
+  const evidenceIntegrity = await inspectCompletedTaskEvidence(rootDir, taskLedger);
+  for (const invalid of evidenceIntegrity.invalid) {
+    const evidenceMessages = [];
+    if (invalid.failures.includes("checkpoint_identity")) {
+      evidenceMessages.push(invalid.checkpointPresent ? "has an invalid checkpoint identity" : "is completed but has no checkpoint file");
+    }
+    if (invalid.failures.includes("acceptance_proof")) {
+      evidenceMessages.push(invalid.proofPresent ? "has an invalid acceptance proof" : "is completed but has no acceptance proof report");
+    }
+    if (invalid.failures.includes("ledger_event")) evidenceMessages.push("is completed but the ledger has no completion event");
+    if (invalid.failures.includes("delivery_commit_missing")) evidenceMessages.push("has no delivery commit bound across proof and checkpoint");
+    if (invalid.failures.includes("delivery_commit_mismatch")) evidenceMessages.push("has different delivery commits in proof and checkpoint");
+    addFinding(findings, "error", "completion_audit", `task ${invalid.taskRef} ${evidenceMessages.join("; ") || `has invalid completion evidence (${invalid.failures.join(", ")})`}`, {
+      planId: invalid.planId,
+      taskId: invalid.taskId,
+      taskRef: invalid.taskRef,
+      failures: invalid.failures,
+      proofSha: invalid.proofSha,
+      checkpointSha: invalid.checkpointSha,
+    });
+  }
   let audited = 0;
   let revalidationRequired = 0;
   for (const task of tasks) {
@@ -192,19 +209,6 @@ async function checkCompletionIntegrity(rootDir, findings) {
     audited += 1;
     const planId = task.planId || taskLedger.activePlanId;
     const ref = taskRef(planId, task.id);
-    const checkpointPath = resolveTaskCheckpointPath(rootDir, planId, task.id);
-    const checkpoint = await readTaskEvidenceJson(rootDir, "checkpoint", planId, task.id);
-    if (!checkpoint) {
-      addFinding(findings, "error", "completion_audit", `task ${ref} is completed but has no checkpoint file; task state may have been edited by hand`, { planId, taskId: task.id, taskRef: ref, expectedPath: path.relative(rootDir, checkpointPath) });
-    }
-    const acceptancePath = resolveTaskAcceptancePath(rootDir, planId, task.id, "json");
-    const acceptance = await readTaskEvidenceJson(rootDir, "acceptance", planId, task.id);
-    if (!acceptance) {
-      addFinding(findings, "error", "completion_audit", `task ${ref} is completed but has no acceptance proof report`, { planId, taskId: task.id, taskRef: ref, expectedPath: path.relative(rootDir, acceptancePath) });
-    }
-    if (!completionEvents.refs.has(ref)) {
-      addFinding(findings, "error", "completion_audit", `task ${ref} is completed but the ledger has no completion event for it`, { planId, taskId: task.id, taskRef: ref });
-    }
     if (!Array.isArray(task.verify_commands) || task.verify_commands.length === 0) {
       addFinding(findings, "error", "completion_audit", `task ${ref} is completed with empty verify_commands`, { planId, taskId: task.id, taskRef: ref });
     } else if (task.verify_commands.every(isTrivialCommand)) {
@@ -280,20 +284,8 @@ async function checkCompletionIntegrity(rootDir, findings) {
     orphanCompletionEvents,
     sideEffectFailures,
     derivedDivergences,
+    invalidCompleted: evidenceIntegrity.invalid.length,
   };
-}
-
-async function readTaskEvidenceJson(rootDir, kind, planId, taskId) {
-  const canonicalPath = kind === "checkpoint"
-    ? resolveTaskCheckpointPath(rootDir, planId, taskId)
-    : resolveTaskAcceptancePath(rootDir, planId, taskId, "json");
-  const canonical = await readJson(canonicalPath, null);
-  if (canonical?.planId === planId && canonical?.taskId === taskId) return canonical;
-  const legacyPath = kind === "checkpoint"
-    ? resolveLegacyTaskCheckpointPath(rootDir, planId, taskId)
-    : resolveLegacyTaskAcceptancePath(rootDir, planId, taskId, "json");
-  const legacy = await readJson(legacyPath, null);
-  return legacy?.planId === planId && legacy?.taskId === taskId ? legacy : null;
 }
 
 function parseTasksMarkdownStatuses(markdown) {

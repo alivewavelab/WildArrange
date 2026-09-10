@@ -16,6 +16,7 @@ import {
 } from "../infra/runtime-store.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
+import { loadTaskLedger } from "../infra/task-state-store.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { resolveAgentSpawn } from "../infra/agent-spawn.mjs";
 import { collectAgentWorktreePatch, prepareAgentWorktree } from "../infra/git-worktree.mjs";
@@ -403,7 +404,7 @@ export async function cleanupParallelAgentRun(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   if (!options.runId) throw new Error("parallel cleanup requires --run <runId>");
   const status = await parallelAgentStatus(rootDir, { runId: options.runId });
-  const taskState = await loadTaskState(rootDir);
+  const taskLedger = await loadTaskLedger(rootDir);
   const { config } = await loadWildArrangeConfig(rootDir);
   const gitContext = await inspectGitCoordination(rootDir, config.gitCoordination || {}).catch(() => null);
   const cleaned = [];
@@ -416,7 +417,7 @@ export async function cleanupParallelAgentRun(rootDir, options = {}) {
       if (!result || result.isolation !== "git-worktree" || result.worktreeAvailable !== true) continue;
       const worktreeDir = path.resolve(rootDir, result.workDir || "");
       assertPathInsideRoot(rootDir, worktreeDir, result.workDir, "parallel worktree");
-      const task = (taskState?.tasks || []).find((candidate) => candidate.planId === runPlanId && candidate.id === entry.taskId) || null;
+      const task = (taskLedger?.tasks || []).find((candidate) => candidate.planId === runPlanId && candidate.id === entry.taskId) || null;
       const cleanupFence = await inspectParallelCleanupFence(worktreeDir, entry, task, gitContext, runPlanId);
       if (!cleanupFence.pass) {
         cleaned.push({ taskId: entry.taskId, status: "retained", path: result.workDir, reason: cleanupFence.reason, details: cleanupFence.details || null });
@@ -454,7 +455,7 @@ async function inspectParallelCleanupFence(worktreeDir, entry, task, gitContext,
   }
   if (["in_progress", "verifying", "recovery_required"].includes(task.status)
     || task.parallel_run_claim
-    || ["claimed", "accepted"].includes(task.coordination?.status)) {
+    || (task.status !== "completed" && ["claimed", "accepted"].includes(task.coordination?.status))) {
     return {
       pass: false,
       reason: "task_ownership_requires_retention",

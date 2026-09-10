@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { access, chmod, lstat, mkdtemp, mkdir, readFile, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { access, appendFile, chmod, lstat, mkdtemp, mkdir, readFile, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -13,6 +13,8 @@ import {
 } from "../src/infra/security.mjs";
 import { loadTaskLedger } from "../src/infra/task-state-store.mjs";
 import { appendLedger } from "../src/infra/ledger.mjs";
+import { writeRuntimeContextSnapshot } from "../src/infra/runtime-snapshot.mjs";
+import { runDoctor } from "../src/interface/doctor.mjs";
 import { archiveAndDeleteTeamTask, migrateTaskLedgerState } from "../src/orchestration/task-board.mjs";
 import { statusReport, writeWorkflowSummary } from "../src/orchestration/status.mjs";
 
@@ -174,6 +176,105 @@ test("status and summary reject completed state without the current proof chain"
     ]);
     const summary = await writeWorkflowSummary(dir, { reason: "test" });
     assert.equal(summary.ok, false);
+    await appendFile(path.join(dir, ".wildarrange", "ledger.jsonl"), `${JSON.stringify({ type: "forged_completion" })}\n`, "utf8");
+    const context = await writeRuntimeContextSnapshot(dir);
+    assert.equal(context.status.invalidCompleted, 1);
+    assert.equal(context.ledgerIntegrity.ok, false);
+    assert.ok(!context.ledgerTail.some((entry) => entry.type === "forged_completion"));
+    const doctor = await runDoctor(dir);
+    assert.ok(doctor.findings.some((finding) => finding.section === "completion_audit" && finding.taskId === "T001"));
+  });
+});
+
+test("status doctor and context agree when proof and checkpoint delivery SHAs diverge", async () => {
+  await withTempDir(async (dir) => {
+    const planId = "P-SHA";
+    const task = {
+      ...legacyTask("completed"),
+      planId,
+      ref: `${planId}:T001`,
+      history: [{ at: "2026-09-10T00:00:00.000Z", event: "completed", status: "completed" }],
+      delivery: { active: true, status: "committed_local", integrationSha: "a".repeat(40) },
+    };
+    await writeJson(path.join(dir, ".wildarrange", "team", "tasks.json"), {
+      version: 1,
+      kind: "task_ledger",
+      planId,
+      activePlanId: planId,
+      plans: [{ id: planId, taskIds: ["T001"] }],
+      tasks: [task],
+    });
+    await writeJson(path.join(dir, ".wildarrange", "work.json"), { activePlanId: planId, status: "ready" });
+    await writeJson(path.join(dir, ".wildarrange", "reports", "acceptance", planId, "T001.json"), {
+      kind: "acceptance_proof",
+      planId,
+      taskId: "T001",
+      pass: true,
+      evidenceRefs: { deliveryBaseline: { status: "committed_local", commitSha: "b".repeat(40) } },
+    });
+    await writeJson(path.join(dir, ".wildarrange", "checkpoints", planId, "T001.json"), {
+      planId,
+      taskId: "T001",
+      verifyResult: { pass: true },
+      scopeResult: { status: "pass" },
+      reviewResult: { pass: true },
+      deliveryBaseline: { active: true, status: "committed_local", integrationSha: "a".repeat(40) },
+    });
+    await appendLedger(dir, { type: "node_checkpoint_completed", planId, taskId: "T001" });
+
+    const status = await statusReport(dir);
+    const context = await writeRuntimeContextSnapshot(dir);
+    const doctor = await runDoctor(dir);
+    assert.deepEqual(status.completionIntegrity.invalid[0].failures, ["delivery_commit_mismatch"]);
+    assert.deepEqual(context.status.completionIntegrity.invalid[0].failures, ["delivery_commit_mismatch"]);
+    assert.ok(doctor.findings.some((finding) => finding.taskId === "T001" && finding.failures?.includes("delivery_commit_mismatch")));
+  });
+});
+
+test("Git completed evidence requires matching 40-character commit SHAs", async () => {
+  await withTempDir(async (dir) => {
+    const planId = "P-GIT-SHA";
+    await mkdir(path.join(dir, ".git"), { recursive: true });
+    await writeJson(path.join(dir, ".wildarrange", "team", "tasks.json"), {
+      version: 1,
+      kind: "task_ledger",
+      planId,
+      activePlanId: planId,
+      plans: [{ id: planId, taskIds: ["T001"] }],
+      tasks: [{
+        ...legacyTask("completed"),
+        planId,
+        ref: `${planId}:T001`,
+        history: [{ at: "2026-09-10T00:00:00.000Z", event: "completed", status: "completed" }],
+      }],
+    });
+    await writeJson(path.join(dir, ".wildarrange", "work.json"), { activePlanId: planId, status: "ready" });
+    const proofPath = path.join(dir, ".wildarrange", "reports", "acceptance", planId, "T001.json");
+    const checkpointPath = path.join(dir, ".wildarrange", "checkpoints", planId, "T001.json");
+    const proof = { kind: "acceptance_proof", planId, taskId: "T001", pass: true, evidenceRefs: {} };
+    const checkpoint = {
+      planId,
+      taskId: "T001",
+      verifyResult: { pass: true },
+      scopeResult: { status: "pass" },
+      reviewResult: { pass: true },
+    };
+    await writeJson(proofPath, proof);
+    await writeJson(checkpointPath, checkpoint);
+    await appendLedger(dir, { type: "node_checkpoint_completed", planId, taskId: "T001" });
+
+    const missing = await statusReport(dir);
+    assert.deepEqual(missing.completionIntegrity.invalid[0].failures, ["delivery_commit_missing"]);
+
+    proof.evidenceRefs.deliveryBaseline = { status: "committed_local", commitSha: "not-a-git-sha" };
+    checkpoint.deliveryBaseline = { status: "committed_local", commitSha: "not-a-git-sha" };
+    await writeJson(proofPath, proof);
+    await writeJson(checkpointPath, checkpoint);
+    const malformed = await statusReport(dir);
+    assert.deepEqual(malformed.completionIntegrity.invalid[0].failures, [
+      "delivery_commit_invalid",
+      "delivery_commit_missing",
+    ]);
   });
 });
 

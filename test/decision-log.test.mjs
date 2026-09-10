@@ -41,6 +41,8 @@ function nodeEval(source) {
 }
 
 async function importPassingPlan(dir) {
+  await mkdir(path.join(dir, "src"), { recursive: true });
+  await writeFile(path.join(dir, "src", "decision-fixture.txt"), "checked\n", "utf8");
   // 计划文件放在 .wildarrange/artifacts 下：放在仓库根会被 scope 门当作
   // writable_paths 之外的无归属改动而拦截。
   const planPath = resolveWildArrangePath(dir, "artifacts", "decisions-plan.json");
@@ -51,8 +53,8 @@ async function importPassingPlan(dir) {
         id: "T001",
         subject: "Task whose gates all pass",
         worker_command: nodeEval("process.exit(0)"),
-        verify_commands: [nodeEval("if(!process.version)process.exit(1)")],
-        review_commands: ["node --version"],
+        verify_commands: [nodeEval("const fs=require('fs');const assert=require('assert/strict');assert.equal(fs.readFileSync('src/decision-fixture.txt','utf8').trim(),'checked');if(fs.existsSync('src/parallel.txt'))assert.equal(fs.readFileSync('src/parallel.txt','utf8').trim(),'ok')")],
+        review_commands: [nodeEval("const fs=require('fs');const assert=require('assert/strict');assert.equal(fs.statSync('src/decision-fixture.txt').size,8);assert(!fs.existsSync('src/unexpected.txt'))")],
         writable_paths: ["src/**"],
       },
     ],
@@ -63,17 +65,16 @@ async function importPassingPlan(dir) {
 test("delivery pipeline emits one decision record per gate plus a pipeline outcome", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    assert.equal((await runCommand("git init", dir)).exitCode, 0);
     const plan = await importPassingPlan(dir);
     const taskState = await loadTaskState(dir);
     const task = taskState.tasks.find((candidate) => candidate.id === "T001");
 
     const result = await runDeliveryPipeline(dir, plan.id, task, {
       initialEvidence: {
-        workerResult: { kind: "worker", command: null, exitCode: 0, stdout: "", stderr: "" },
+        workerResult: { kind: "worker", command: task.worker_command, exitCode: 0, stdout: "fixture prepared", stderr: "" },
       },
     });
-    assert.equal(result.status, "completed");
+    assert.equal(result.status, "completed", JSON.stringify(result, null, 2));
 
     const { records, skippedLines } = await readDecisions(dir);
     assert.equal(skippedLines, 0);
@@ -138,12 +139,12 @@ test("parallel admission emits an admission decision carrying the runId", async 
 
     const command = [
       "node -e",
-      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
+      JSON.stringify("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok'}]}));"),
       "{outputJson}",
     ].join(" ");
     const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
     const admitted = await admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" });
-    assert.equal(admitted.status, "completed");
+    assert.equal(admitted.status, "completed", JSON.stringify(admitted, null, 2));
 
     const { records } = await readDecisions(dir);
     const record = records.find((candidate) => candidate.gate === "admission");
@@ -210,6 +211,33 @@ test("readDecisions streams from the tail and marks truncated instead of loading
 
     const zero = await readDecisions(dir, { limit: 0 });
     assert.equal(zero.records.length, 0);
+  });
+});
+
+test("readDecisions preserves UTF-8 characters split across a read chunk", async () => {
+  await withTempDir(async (dir) => {
+    await mkdir(resolveWildArrangePath(dir), { recursive: true });
+    const summary = "中".repeat(23_000);
+    await writeFile(resolveWildArrangePath(dir, "decisions.jsonl"), `${JSON.stringify({ gate: "routing", decision: "recover", summary })}\n`, "utf8");
+
+    const result = await readDecisions(dir);
+    assert.equal(result.skippedLines, 0);
+    assert.equal(result.records.length, 1);
+    assert.equal(result.records[0].summary, summary);
+    assert.doesNotMatch(result.records[0].summary, /\uFFFD/);
+  });
+});
+
+test("readDecisions marks truncated when limit stops inside the current read chunk", async () => {
+  await withTempDir(async (dir) => {
+    await mkdir(resolveWildArrangePath(dir), { recursive: true });
+    const lines = Array.from({ length: 10 }, (_, index) => JSON.stringify({ gate: "routing", decision: "recover", summary: `record ${index}` }));
+    await writeFile(resolveWildArrangePath(dir, "decisions.jsonl"), `${lines.join("\n")}\n`, "utf8");
+
+    const result = await readDecisions(dir, { limit: 2 });
+    assert.equal(result.records.length, 2);
+    assert.equal(result.truncated, true);
+    assert.deepEqual(result.records.map((record) => record.summary), ["record 8", "record 9"]);
   });
 });
 
@@ -281,16 +309,15 @@ test("gate FAIL decisions carry the rule they hit (code/reason), and decision or
 test("completed pipeline emits gate decisions in execution order ending with the pipeline outcome", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    assert.equal((await runCommand("git init", dir)).exitCode, 0);
     const plan = await importPassingPlan(dir);
     const taskState = await loadTaskState(dir);
     const task = taskState.tasks.find((candidate) => candidate.id === "T001");
     const result = await runDeliveryPipeline(dir, plan.id, task, {
       initialEvidence: {
-        workerResult: { kind: "worker", command: null, exitCode: 0, stdout: "", stderr: "" },
+        workerResult: { kind: "worker", command: task.worker_command, exitCode: 0, stdout: "fixture prepared", stderr: "" },
       },
     });
-    assert.equal(result.status, "completed");
+    assert.equal(result.status, "completed", JSON.stringify(result, null, 2));
     const { records } = await readDecisions(dir);
     const order = records.map((record) => record.gate);
     assert.deepEqual(order, ["verify", "scope", "review", "acceptance-proof", "checkpoint", "pipeline"]);

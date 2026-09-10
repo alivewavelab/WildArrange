@@ -29,7 +29,7 @@
 - 模型差异由长期 Agent 的 provider/model/reasoning 与宿主 adapter 承担；独立 `promptVariants` 因未进入真实上下文已退役。`RETIRED: 2026-08-25`
 - 加入 `pre-publish-review`、`publish`、`get-unpublished-changes` skill。`DONE: packs/wildarrange-linear/skills/`
 - 加入 skill matcher 与优先级加载。`DONE: stage/route/agent/keyword matcher with explainable scores`
-- 路由写入的 `task.skills` 进入执行/复核/checkpoint 的统一预算化加载器。`DONE: 2026-08-25`
+- 路由写入的 `task.skills` 进入执行前预算化加载器。`PARTIAL: before_execute 已接通；review/checkpoint 尚未接通`
 - 若 uninstall 备份不足，加入 adapter 备份恢复命令。`DONE`
 - 加入 LuWu 仓库治理能力及 `governance audit`。`DONE`
 - 加入 Kimi Code adapter P0/P1（plugin + fail-open Hook bridge）。`DONE`；宿主私有 spawn 仍为 P2

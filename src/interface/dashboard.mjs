@@ -773,7 +773,9 @@ ${ADOPTION_VIEW_HTML}
       renderTaskLedger(data.taskLedger || null);
       renderAttention(data.attention || null);
       renderChanges(data.changes || []);
-      el("healthSummary").innerHTML = '<div class="health-row"><span>配置基线</span><b>' + (status.gateArming?.armed ? "正常" : "需检查") + '</b></div><div class="health-row"><span>可信账本</span><b>已连接</b></div><div class="health-row"><span>IDE 适配器</span><b>查看体检</b></div>';
+      const health = data.health || {};
+      const healthLabel = (check) => check?.status === "pass" ? "正常" : check?.status === "fail" ? "需处理 · 查看体检" : check?.status === "unchecked" ? "未检查 · 查看体检" : "未知 · 查看体检";
+      el("healthSummary").innerHTML = '<div class="health-row"><span>配置基线</span><b>' + healthLabel(health.configBaseline) + '</b></div><div class="health-row"><span>可信账本</span><b>' + healthLabel(health.ledger) + '</b></div><div class="health-row"><span>IDE 适配器</span><b>查看体检</b></div>';
       renderRunHistory(data);
       loadPanels();
     }

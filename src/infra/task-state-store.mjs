@@ -6,12 +6,20 @@
  * Legacy files used `{ planId, tasks }`. They are normalized in memory and are
  * migrated the next time orchestration persists/imports a plan.
  */
+import { stat } from "node:fs/promises";
+import path from "node:path";
+
 import {
   STATE_VERSION,
   readJson,
+  resolveLegacyTaskAcceptancePath,
+  resolveLegacyTaskCheckpointPath,
+  resolveTaskAcceptancePath,
+  resolveTaskCheckpointPath,
   resolveWildArrangePath,
 } from "./runtime-store.mjs";
 import { normalizeAgentKey } from "./agent-registry.mjs";
+import { readVerifiedLedgerEntries } from "./ledger.mjs";
 
 export async function loadTaskLedger(rootDir) {
   const raw = await readJson(resolveWildArrangePath(rootDir, "team", "tasks.json"), null);
@@ -30,6 +38,112 @@ export async function loadTaskState(rootDir, options = {}) {
     tasks: ledger.tasks.filter((task) => task.planId === planId),
     updatedAt: ledger.updatedAt,
   };
+}
+
+/**
+ * Read-only technical integrity check for tasks already marked completed.
+ * It reports evidence facts; callers decide how those facts affect workflow or UI.
+ */
+export async function inspectCompletedTaskEvidence(rootDir, taskState, options = {}) {
+  if (!taskState) return { checked: 0, invalid: [] };
+  const gitProject = options.gitProject ?? await pathExists(path.join(rootDir, ".git"));
+  const ledgerEntries = options.ledgerEntries || await readVerifiedLedgerEntries(rootDir);
+  const completionEvents = new Set(ledgerEntries
+    .filter((entry) => ["task_verified", "node_checkpoint_completed", "parallel_agent_admission_completed"].includes(entry.type))
+    .filter((entry) => entry.planId && entry.taskId)
+    .map((entry) => `${entry.planId}:${entry.taskId}`));
+  const completedTasks = (taskState.tasks || []).filter((task) => task.status === "completed");
+  const invalid = [];
+  for (const task of completedTasks) {
+    const planId = task.planId || taskState.planId || taskState.activePlanId;
+    const ref = `${planId}:${task.id}`;
+    const proof = await readTaskEvidenceJson(rootDir, "acceptance", planId, task.id);
+    const checkpoint = await readTaskEvidenceJson(rootDir, "checkpoint", planId, task.id);
+    const failures = [];
+    if (proof?.kind !== "acceptance_proof" || proof.pass !== true || proof.planId !== planId || proof.taskId !== task.id) failures.push("acceptance_proof");
+    if (checkpoint?.planId !== planId || checkpoint?.taskId !== task.id) failures.push("checkpoint_identity");
+    if (checkpoint?.verifyResult?.pass !== true) failures.push("verifier");
+    if (checkpoint?.scopeResult?.status !== "pass") failures.push("scope");
+    if (checkpoint?.reviewResult?.pass !== true) failures.push("review");
+    if (!completionEvents.has(ref)) failures.push("ledger_event");
+    const proofDelivery = proof?.evidenceRefs?.deliveryBaseline || null;
+    const checkpointDelivery = checkpoint?.deliveryBaseline || null;
+    const deliveryCandidates = [
+      rawDeliveryCommitSha(proofDelivery),
+      rawDeliveryCommitSha(checkpointDelivery),
+      rawDeliveryCommitSha(task.delivery),
+      rawDeliveryCommitSha(task.delivery_workspace),
+    ].filter(Boolean);
+    if (deliveryCandidates.some((sha) => !isGitCommitSha(sha))) failures.push("delivery_commit_invalid");
+    const proofSha = deliveryCommitSha(proofDelivery);
+    const checkpointSha = deliveryCommitSha(checkpointDelivery);
+    const taskDeliverySha = deliveryCommitSha(task.delivery) || deliveryCommitSha(task.delivery_workspace);
+    const requiresDeliverySha = gitProject
+      || hasGitDeliveryEvidence(task.delivery)
+      || hasGitDeliveryEvidence(task.delivery_workspace)
+      || hasGitDeliveryEvidence(proofDelivery)
+      || hasGitDeliveryEvidence(checkpointDelivery);
+    if (requiresDeliverySha && (!proofSha || !checkpointSha)) failures.push("delivery_commit_missing");
+    const deliveryMismatch = (proofSha && checkpointSha && proofSha !== checkpointSha)
+      || (taskDeliverySha && (proofSha !== taskDeliverySha || checkpointSha !== taskDeliverySha));
+    if (deliveryMismatch) failures.push("delivery_commit_mismatch");
+    if (failures.length > 0) invalid.push({
+      taskId: task.id,
+      taskRef: ref,
+      planId,
+      failures,
+      proofPresent: Boolean(proof),
+      checkpointPresent: Boolean(checkpoint),
+      proofSha,
+      checkpointSha,
+      taskDeliverySha,
+    });
+  }
+  return { checked: completedTasks.length, invalid };
+}
+
+async function pathExists(filePath) {
+  try {
+    await stat(filePath);
+    return true;
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+async function readTaskEvidenceJson(rootDir, kind, planId, taskId) {
+  const canonicalPath = kind === "checkpoint"
+    ? resolveTaskCheckpointPath(rootDir, planId, taskId)
+    : resolveTaskAcceptancePath(rootDir, planId, taskId, "json");
+  const canonical = await readJson(canonicalPath, null);
+  if (canonical) return canonical;
+  const legacyPath = kind === "checkpoint"
+    ? resolveLegacyTaskCheckpointPath(rootDir, planId, taskId)
+    : resolveLegacyTaskAcceptancePath(rootDir, planId, taskId, "json");
+  const legacy = await readJson(legacyPath, null);
+  return legacy?.planId === planId && legacy?.taskId === taskId ? legacy : null;
+}
+
+function deliveryCommitSha(delivery) {
+  const sha = rawDeliveryCommitSha(delivery);
+  return isGitCommitSha(sha) ? sha.toLowerCase() : null;
+}
+
+function rawDeliveryCommitSha(delivery) {
+  return delivery?.commitSha || delivery?.integrationSha || delivery?.actualSha || null;
+}
+
+function isGitCommitSha(value) {
+  return typeof value === "string" && /^[0-9a-f]{40}$/i.test(value);
+}
+
+function hasGitDeliveryEvidence(delivery) {
+  if (!delivery) return false;
+  return Boolean(deliveryCommitSha(delivery))
+    || delivery.active === true
+    || delivery.noChange === true
+    || ["no_change", "committed_local", "pushed"].includes(delivery.status);
 }
 
 export function normalizeTaskLedger(raw) {
