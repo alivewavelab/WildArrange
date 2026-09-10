@@ -131,7 +131,7 @@ function deliveryCommitSha(delivery) {
 }
 
 function rawDeliveryCommitSha(delivery) {
-  return delivery?.commitSha || delivery?.integrationSha || delivery?.actualSha || null;
+  return delivery?.commitSha || delivery?.deliverySha || delivery?.integrationSha || delivery?.actualSha || null;
 }
 
 function isGitCommitSha(value) {

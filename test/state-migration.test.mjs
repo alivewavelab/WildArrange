@@ -275,6 +275,17 @@ test("Git completed evidence requires matching 40-character commit SHAs", async 
       "delivery_commit_invalid",
       "delivery_commit_missing",
     ]);
+
+    const deliverySha = "c".repeat(40);
+    const taskLedger = JSON.parse(await readFile(path.join(dir, ".wildarrange", "team", "tasks.json"), "utf8"));
+    taskLedger.tasks[0].delivery_workspace = { deliverySha };
+    proof.evidenceRefs.deliveryBaseline = { status: "committed_local", commitSha: deliverySha };
+    checkpoint.deliveryBaseline = { status: "committed_local", commitSha: deliverySha };
+    await writeJson(path.join(dir, ".wildarrange", "team", "tasks.json"), taskLedger);
+    await writeJson(proofPath, proof);
+    await writeJson(checkpointPath, checkpoint);
+    const validWorkspaceShape = await statusReport(dir);
+    assert.equal(validWorkspaceShape.invalidCompleted, 0);
   });
 });
 
