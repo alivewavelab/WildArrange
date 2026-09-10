@@ -34,7 +34,7 @@ import {
 import { evaluateCommandSafety } from "../infra/command-safety.mjs";
 
 async function adaptVerify(ctx) {
-  const raw = await runVerifier(ctx.rootDir, ctx.task);
+  const raw = await runVerifier(ctx.rootDir, ctx.task, ctx.options || {});
   return { status: raw.pass ? "pass" : "fail", evidence: raw, sideEffect: "none" };
 }
 
@@ -43,13 +43,15 @@ async function adaptScope(ctx) {
     taskId: ctx.task.id,
     changedPaths: ctx.options?.changedPaths,
     unavailableReason: ctx.options?.unavailableReason,
+    executionRoot: ctx.options?.executionRoot,
   });
   return { status: raw.status, evidence: raw, sideEffect: "state_written" };
 }
 
 async function adaptReview(ctx) {
-  const contractGovernance = await runContractGovernanceReview(ctx.rootDir, ctx.task, ctx.evidence || {});
-  const raw = await runReviewGate(ctx.rootDir, ctx.task, { ...(ctx.evidence || {}), contractGovernance });
+  const executionRoot = ctx.options?.executionRoot || ctx.rootDir;
+  const contractGovernance = await runContractGovernanceReview(executionRoot, ctx.task, ctx.evidence || {}, { controlRoot: ctx.rootDir });
+  const raw = await runReviewGate(ctx.rootDir, ctx.task, { ...(ctx.evidence || {}), contractGovernance }, ctx.options || {});
   return { status: raw.pass ? "pass" : "fail", evidence: raw, sideEffect: "state_written" };
 }
 

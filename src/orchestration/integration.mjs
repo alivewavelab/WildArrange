@@ -127,8 +127,7 @@ export async function verifyAdmissionFences(rootDir, taskId, integrationGuard, r
 
 export async function integrateAdmissionCommit(rootDir, options) {
   const coordination = options.task?.coordination;
-  const localDeliveryTarget = coordination?.status === "degraded"
-    && coordination.localGit === true
+  const localDeliveryTarget = coordination?.localGit === true
     && coordination.branch
     && coordination.remoteHeadSha
     ? {
@@ -587,6 +586,7 @@ async function integrateLocalAdmissionCommit(rootDir, options, deliveryTarget) {
     actualSha: intent.integrationSha,
     worktreeSync,
     committedAt: intent.committedAt || nowIso(),
+    noChange: (intent.changedPaths || []).length === 0,
   };
   await writeJsonAtomic(intentPath, completed);
   const ledgerEntries = await readVerifiedLedgerEntries(rootDir);
@@ -609,11 +609,12 @@ async function integrateLocalAdmissionCommit(rootDir, options, deliveryTarget) {
     active: true,
     local: true,
     pushed: false,
-    status: "committed_local",
+    status: completed.noChange ? "no_change" : "committed_local",
     branch: intent.branch,
     expectedSha: intent.expectedSha,
     actualSha: intent.integrationSha,
     integrationSha: intent.integrationSha,
+    noChange: completed.noChange,
     worktreeSync,
     intentPath: path.relative(rootDir, intentPath),
   };

@@ -57,8 +57,8 @@ export function evaluateGateArming({ config, tasks = [] } = {}) {
 }
 
 export function hasRealReviewLane(task, config) {
-  if ((task?.review_commands || []).length > 0) return true;
-  if ((task?.standards_commands || []).length > 0) return true;
+  if ((task?.review_commands || []).some((command) => !isTrivialCommand(command))) return true;
+  if ((task?.standards_commands || []).some((command) => !isTrivialCommand(command))) return true;
   if (config?.review?.llm?.enabled === true) return true;
   return hasEnabledQualityGate(config);
 }

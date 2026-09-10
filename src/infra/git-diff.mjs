@@ -5,7 +5,8 @@
  * context/resume reporting) alike, so this stays infra-level.
  */
 import { existsSync } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { lstat, readFile, readlink, readdir, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { runCommandFile } from "./command-runner.mjs";
 import { normalizeRelativePath } from "./path-match.mjs";
@@ -28,8 +29,12 @@ export async function collectGitChangedPaths(rootDir) {
     }
   }
 
-  const diff = await runCommandFile("git", ["-C", rootDir, "diff", "--name-only", "--", ".", ":!.wildarrange"], rootDir, 30_000);
-  const untracked = await runCommandFile("git", ["-C", rootDir, "ls-files", "--others", "--exclude-standard", "--", ".", ":!.wildarrange"], rootDir, 30_000);
+  const head = await runCommandFile("git", ["-C", rootDir, "rev-parse", "--verify", "HEAD"], rootDir, 30_000);
+  const diffArgs = head.exitCode === 0
+    ? ["-C", rootDir, "diff", "--name-only", "-z", "HEAD", "--", ".", ":!.wildarrange"]
+    : ["-C", rootDir, "diff", "--name-only", "-z", "--cached", "--", ".", ":!.wildarrange"];
+  const diff = await runCommandFile("git", diffArgs, rootDir, 30_000);
+  const untracked = await runCommandFile("git", ["-C", rootDir, "ls-files", "--others", "--exclude-standard", "-z", "--", ".", ":!.wildarrange"], rootDir, 30_000);
   if (diff.exitCode !== 0 || untracked.exitCode !== 0) {
     return {
       available: false,
@@ -38,11 +43,33 @@ export async function collectGitChangedPaths(rootDir) {
     };
   }
 
+  const paths = [...new Set([...splitPathLines(diff.stdout), ...splitPathLines(untracked.stdout)])].sort();
+  const fingerprints = {};
+  for (const filePath of paths) {
+    fingerprints[normalizeRelativePath(filePath)] = await fingerprintWorkspacePath(rootDir, filePath);
+  }
   return {
     available: true,
     source: "git",
-    paths: [...new Set([...splitPathLines(diff.stdout), ...splitPathLines(untracked.stdout)])].sort(),
+    paths,
+    fingerprints,
   };
+}
+
+async function fingerprintWorkspacePath(rootDir, filePath) {
+  try {
+    const absolutePath = path.join(rootDir, filePath);
+    const entry = await lstat(absolutePath);
+    if (entry.isSymbolicLink()) {
+      return `symlink:${createHash("sha256").update(await readlink(absolutePath)).digest("hex")}`;
+    }
+    if (!entry.isFile()) return `special:${entry.mode}:${entry.size}`;
+    const content = await readFile(absolutePath);
+    return `file:${createHash("sha256").update(content).digest("hex")}`;
+  } catch (error) {
+    if (error?.code === "ENOENT") return "deleted";
+    throw error;
+  }
 }
 
 export function changedPathsIntroducedByTask(beforeChanged, afterChanged) {
@@ -96,5 +123,5 @@ async function collectFileManifest(rootDir, relativeDir = "") {
 }
 
 function splitPathLines(value) {
-  return value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return value.split(/\0|\r?\n/).map((line) => line.trim()).filter(Boolean);
 }

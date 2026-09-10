@@ -617,6 +617,7 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
     initialEvidence: { workerResult },
     changedPaths: deliveryChangedPaths,
     runId,
+    deliveryRequired: integrationGuard?.active === true || localGitDelivery,
     preCompletionGate: () => verifyAdmissionFences(rootDir, taskId, integrationGuard, integrationIntent),
     beforeCheckpointGate: () => integrateAdmissionCommit(rootDir, {
       planId: taskState.planId,
@@ -642,6 +643,26 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
   task.evidence.push(reviewResult);
   task.last_review_result = reviewResult;
   await writeReviewReport(rootDir, taskState.planId, task, reviewResult);
+
+  if (pipelineResult.status === "recovery_required") {
+    task.status = "verifying";
+    task.last_failure = buildFailureSummary(task, {
+      workerResult,
+      verifyResult,
+      scopeResult,
+      reviewResult,
+      criteriaResult: criteria,
+      nextStatus: task.status,
+    });
+    task.last_failure.reason = "command_termination_failed";
+    task.last_failure.summary = `a gate command timed out and process termination could not be confirmed${pipelineResult.evidence.commandRecovery?.pid ? ` (pid ${pipelineResult.evidence.commandRecovery.pid})` : ""}`;
+    task.last_failure.retryHint = "确认残留进程已经终止后，用同一 run 重新 admit；保留 owner、worktree 与 rollback plan。";
+    task.last_failure.commandEvidence = pipelineResult.evidence.commandRecovery;
+    task.updatedAt = nowIso();
+    await writeFailureReport(rootDir, taskState.planId, task);
+    await persistTaskState(rootDir, taskState);
+    return { status: "recovery_required", planId: taskState.planId, task, acceptanceProof, verifyResult, scopeResult, reviewResult, rollback: { status: "not_attempted", reason: "command_process_state_unknown" } };
+  }
 
   if (pipelineResult.status === "completed") {
     // The admitted files were evaluated in the protected shared checkout only

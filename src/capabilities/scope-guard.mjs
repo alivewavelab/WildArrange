@@ -17,7 +17,7 @@ export async function scopeGuard(rootDir, options = {}) {
   const task = resolveGuardTask(taskState.tasks, options.taskId);
   const collected = Array.isArray(options.changedPaths)
     ? { available: true, paths: options.changedPaths }
-    : await collectGitChangedPaths(rootDir);
+    : await collectGitChangedPaths(options.executionRoot || rootDir);
 
   if (!collected.available) {
     const guarded = (task.writable_paths || []).length > 0;
@@ -35,7 +35,7 @@ export async function scopeGuard(rootDir, options = {}) {
 
   const changedPaths = collected.paths.map(normalizeRelativePath);
   const writablePaths = task.writable_paths.map(normalizeRelativePath);
-  const realpathFindings = await resolveChangedPathRealpaths(rootDir, changedPaths);
+  const realpathFindings = await resolveChangedPathRealpaths(options.executionRoot || rootDir, changedPaths);
   const deniedPaths = [
     ...changedPaths.filter((filePath) => !pathAllowed(filePath, writablePaths)),
     ...realpathFindings
@@ -95,4 +95,3 @@ function resolveGuardTask(tasks, taskId) {
   }
   return task;
 }
-

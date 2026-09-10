@@ -19,7 +19,8 @@ export function isTrivialCommand(command) {
 
 function trivialCommand(command) {
   const normalized = String(command || "").replace(/\s+/g, " ").trim();
-  if (normalized === "" || /^true$/.test(normalized)) return true;
+  if (normalized === "" || /^(?:true|echo(?:\s+.*)?)$/i.test(normalized)) return true;
+  if (/^(?:node|node\.exe)(?:\s+--(?:version|help)|\s+-v)$/i.test(normalized)) return true;
   // 整条命令只是空转退出才算 trivial；夹带任何真实逻辑（哪怕以
   // process.exit(0) 收尾）都是有效验证，不误伤。
   return /^node -e ["']process\.exit\(0\);?["']$/.test(normalized);

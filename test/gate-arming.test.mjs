@@ -78,10 +78,17 @@ test("acceptance proof fails when every verify command is trivial", async () => 
   assert.equal(realProof.checks.find((check) => check.name === "review_not_tautological").status, "fail");
   assert.equal(realProof.pass, false);
 
-  const reviewedTask = { ...realTask, review_commands: ["node --version"] };
+  const reviewCommand = "node -e \"require('node:assert/strict').ok(require('node:fs').existsSync('src/app.js'))\"";
+  const reviewedTask = { ...realTask, review_commands: [reviewCommand] };
   const reviewedProof = buildAcceptanceProof("plan-1", reviewedTask, {
     ...passingEvidence,
     verifyResult: { kind: "verifier", pass: true, results: [{ command: "node --test", exitCode: 0 }] },
+    reviewResult: {
+      kind: "review_gate",
+      pass: true,
+      lanes: [{ name: "explicit_review_commands", status: "pass" }],
+      reviewCommandResults: [{ command: reviewCommand, exitCode: 0 }],
+    },
   });
   assert.equal(reviewedProof.checks.find((check) => check.name === "review_not_tautological").status, "pass");
   assert.equal(reviewedProof.pass, true);

@@ -26,8 +26,8 @@ export async function generateContractGovernanceArtifacts(rootDir) {
   return generateContractArtifacts(rootDir);
 }
 
-export async function runContractGovernanceReview(rootDir, task, evidence = {}) {
-  const result = await inspectContractTask(rootDir, task, evidence);
+export async function runContractGovernanceReview(rootDir, task, evidence = {}, options = {}) {
+  const result = await inspectContractTask(rootDir, task, evidence, options);
   return {
     kind: "contract_governance_review",
     at: nowIso(),

@@ -11,8 +11,10 @@ import { buildReviewFindingBundle } from "../infra/review-findings.mjs";
 import { scanProjectRules } from "../infra/rule-scanner.mjs";
 import { criteriaStatus } from "../infra/success-criteria.mjs";
 import { runQualityGates } from "./code-intel.mjs";
+import { isTrivialCommand } from "../infra/task-predicates.mjs";
 
-export async function runReviewGate(rootDir, task, evidence = {}) {
+export async function runReviewGate(rootDir, task, evidence = {}, options = {}) {
+  const executionRoot = options.executionRoot || rootDir;
   const { config } = await loadWildArrangeConfig(rootDir);
   const workerResult = evidence.workerResult || [...task.evidence].reverse().find((entry) => entry.kind === "worker");
   const verifyResult = evidence.verifyResult || task.last_verify_result || [...task.evidence].reverse().find((entry) => entry.kind === "verifier");
@@ -21,7 +23,7 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
   const verifierEvidenceOk = verifierEvidenceComplete(task, verifyResult);
   const evidenceIntegrity = reviewEvidenceIntegrity(task, { workerResult, verifyResult });
   const criteria = criteriaStatus(task);
-  const rulesContext = await scanProjectRules(rootDir, {
+  const rulesContext = await scanProjectRules(executionRoot, {
     targetPaths: uniqueStrings([...(task.writable_paths || []), ...((scopeResult?.changedPaths) || [])]),
   });
   const extraPatterns = compileCommandSafetyPatterns(config);
@@ -30,18 +32,32 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
   const contractGovernance = evidence.contractGovernance || { status: "warn", summary: "contract governance evidence unavailable", findings: [] };
 
   for (const command of task.review_commands || []) {
-    const result = await runCommand(command, rootDir, 120_000, { extraPatterns });
+    if (isTrivialCommand(command)) {
+      reviewCommandResults.push({ command, exitCode: null, skipped: true, reason: "trivial_review_command" });
+      continue;
+    }
+    const result = await runCommand(command, executionRoot, 120_000, { extraPatterns });
     reviewCommandResults.push({ command, ...result });
     if (result.exitCode !== 0) break;
   }
 
+  const commandRecovery = reviewCommandResults.find(requiresCommandRecovery);
+  if (commandRecovery) return recoveryRequiredReview(commandRecovery, reviewCommandResults, standardsCommandResults, criteria);
+
   for (const command of task.standards_commands || []) {
-    const result = await runCommand(command, rootDir, 120_000, { extraPatterns });
+    if (isTrivialCommand(command)) {
+      standardsCommandResults.push({ command, exitCode: null, skipped: true, reason: "trivial_standards_command" });
+      continue;
+    }
+    const result = await runCommand(command, executionRoot, 120_000, { extraPatterns });
     standardsCommandResults.push({ command, ...result });
     if (result.exitCode !== 0) break;
   }
 
-  const qualityResults = await runQualityGates(rootDir, task, scopeResult, config);
+  const standardsRecovery = standardsCommandResults.find(requiresCommandRecovery);
+  if (standardsRecovery) return recoveryRequiredReview(standardsRecovery, reviewCommandResults, standardsCommandResults, criteria);
+
+  const qualityResults = await runQualityGates(executionRoot, task, scopeResult, config);
 
   const lanes = [
     reviewLane("evidence_integrity", "BaiZe", evidenceIntegrity.pass, {
@@ -89,20 +105,20 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
         : "no project rules matched; review relies on prompt pack and commands",
       fixBy: "补充 CLAUDE.md/AGENTS.md/.cursor/rules/.github/instructions，或确认本任务无需项目规则。",
     }),
-    reviewLane("explicit_review_commands", "BaiZe", reviewCommandResults.every((result) => result.exitCode === 0), {
+    reviewLane("explicit_review_commands", "BaiZe", reviewCommandResults.length > 0 && reviewCommandResults.every((result) => result.exitCode === 0 && result.skipped !== true), {
       statusOverride: reviewCommandResults.length === 0 ? "warn" : undefined,
       summary: reviewCommandResults.length === 0
         ? "no review_commands configured; deterministic review lanes only"
-        : reviewCommandResults.every((result) => result.exitCode === 0)
+        : reviewCommandResults.every((result) => result.exitCode === 0 && result.skipped !== true)
           ? `${reviewCommandResults.length} review command(s) passed`
           : commandObservation(reviewCommandResults.find((result) => result.exitCode !== 0) || { exitCode: 1 }),
       fixBy: "按 review_commands 的失败输出修复，不要删除 review_commands 绕过复核。",
     }),
-    reviewLane("project_standards", "BaiZe", standardsCommandResults.every((result) => result.exitCode === 0), {
+    reviewLane("project_standards", "BaiZe", standardsCommandResults.length > 0 && standardsCommandResults.every((result) => result.exitCode === 0 && result.skipped !== true), {
       statusOverride: standardsCommandResults.length === 0 ? "warn" : undefined,
       summary: standardsCommandResults.length === 0
         ? "no standards_commands configured; relying on project instructions and explicit review lanes"
-        : standardsCommandResults.every((result) => result.exitCode === 0)
+        : standardsCommandResults.every((result) => result.exitCode === 0 && result.skipped !== true)
           ? `${standardsCommandResults.length} standards command(s) passed`
           : commandObservation(standardsCommandResults.find((result) => result.exitCode !== 0) || { exitCode: 1 }),
       fixBy: "按 standards_commands 的失败输出修复项目规范问题，不要删除规范门来制造 PASS。",
@@ -155,7 +171,7 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
     for (const rawAgentName of llmAgents) {
       const agentName = normalizeAgentKey(rawAgentName);
       if (!agentName) continue;
-      const llmReview = await runLlmReview(rootDir, agentName, task, {
+      const llmReview = await runLlmReview(executionRoot, agentName, task, {
         workerResult,
         verifyResult,
         scopeResult,
@@ -188,6 +204,32 @@ export async function runReviewGate(rootDir, task, evidence = {}) {
     successCriteria: criteria,
     rulesContextPath: rulesContext.reportMdPath,
     contractGovernance,
+  };
+}
+
+function requiresCommandRecovery(result) {
+  return result?.recoveryRequired === true || result?.terminationFailed === true;
+}
+
+function recoveryRequiredReview(commandEvidence, reviewCommandResults, standardsCommandResults, criteria) {
+  return {
+    kind: "review_gate",
+    at: nowIso(),
+    pass: false,
+    reviewerAgents: DEFAULT_REVIEW_AGENTS,
+    lanes: [reviewLane("command_termination", "BaiZe", false, {
+      summary: `command process could not be confirmed stopped${commandEvidence.pid ? ` (pid ${commandEvidence.pid})` : ""}`,
+      fixBy: "确认残留进程终止后，用同一 run 恢复复核。",
+    })],
+    qualityResults: null,
+    llmReviews: [],
+    findings: [],
+    testingGaps: [],
+    residualRisks: [],
+    reviewCommandResults,
+    standardsCommandResults,
+    successCriteria: criteria,
+    commandRecovery: commandEvidence,
   };
 }
 

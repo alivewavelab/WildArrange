@@ -17,6 +17,6 @@ export async function runWorker(rootDir, task, options = {}) {
   }
   const { config } = await loadWildArrangeConfig(rootDir);
   const extraPatterns = compileCommandSafetyPatterns(config);
-  const result = await runCommand(command, rootDir, options.timeoutMs, { extraPatterns });
+  const result = await runCommand(command, options.executionRoot || rootDir, options.timeoutMs, { extraPatterns });
   return { kind: "worker", at: nowIso(), command, ...result };
 }

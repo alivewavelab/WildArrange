@@ -80,6 +80,22 @@ export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
   const results = [];
   let criterionEvidenceRecorded = [];
 
+  const finish = async (status, extra = {}) => {
+    const currentCriteria = extra.criteria || criteriaStatus(task);
+    await emitDecision(rootDir, {
+      gate: "pipeline",
+      decision: status,
+      code: status === "completed" ? null : status,
+      reason: pipelineOutcomeReason(status, results, currentCriteria),
+      summary: `task ${task.id} delivery pipeline -> ${status}`,
+      taskId: task.id,
+      planId,
+      runId: options.runId || null,
+      annotatable: status !== "completed",
+    });
+    return finalizePipelineResult(status, results, evidence, { criteria: currentCriteria, criterionEvidenceRecorded, ...extra });
+  };
+
   for (const stepName of GATE_STEPS) {
     const envelope = await invokeCapability(stepName, buildStepContext(stepName, { rootDir, planId, task, evidence, options }));
     results.push(envelope);
@@ -91,6 +107,11 @@ export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
     // 每门跑完立即发射决策记录，保证 decisions 的时间序与门的真实执行序一致
     // （acceptance-proof/checkpoint 由 runCompletionSegment 发射）。
     await emitGateDecision(rootDir, planId, task, envelope, options.runId);
+    const recoveryEvidence = findCommandRecoveryEvidence(evidence);
+    if (recoveryEvidence) {
+      evidence.commandRecovery = recoveryEvidence;
+      return finish("recovery_required");
+    }
   }
 
   const criteria = criteriaStatus(task);
@@ -98,21 +119,6 @@ export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
   const gatesAllPass = workerExitOk && criteria.pass && results.every((result) => result.status === "pass");
 
   // pipeline 总账。emitDecision 是 best-effort，绝不反噬门控。
-  const finish = async (status, extra = {}) => {
-      await emitDecision(rootDir, {
-        gate: "pipeline",
-        decision: status,
-        code: status === "completed" ? null : status,
-        reason: pipelineOutcomeReason(status, results, extra.criteria || criteria),
-        summary: `task ${task.id} delivery pipeline -> ${status}`,
-        taskId: task.id,
-        planId,
-        runId: options.runId || null,
-        annotatable: status !== "completed",
-      });
-    return finalizePipelineResult(status, results, evidence, { criteria, criterionEvidenceRecorded, ...extra });
-  };
-
   if (!gatesAllPass) {
     return finish("blocked");
   }
@@ -127,6 +133,7 @@ export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
 
   const completion = await runCompletionSegment(rootDir, planId, task, evidence, {
     beforeCheckpointGate: options.beforeCheckpointGate,
+    deliveryRequired: options.deliveryRequired === true,
     runId: options.runId,
   });
   results.push(completion.proofEnvelope);
@@ -150,6 +157,16 @@ export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
   }
 
   return finish("completed");
+}
+
+function findCommandRecoveryEvidence(evidence) {
+  const candidates = [
+    evidence.workerResult,
+    ...(evidence.verifyResult?.results || []),
+    ...(evidence.reviewResult?.reviewCommandResults || []),
+    ...(evidence.reviewResult?.standardsCommandResults || []),
+  ];
+  return candidates.find((result) => result?.recoveryRequired === true || result?.terminationFailed === true) || null;
 }
 
 function envelopeEvidencePath(envelope, planId, task) {
@@ -258,6 +275,10 @@ function pipelineOutcomeReason(status, results, criteria) {
  * throws into fail envelopes; we check the envelope status here).
  */
 export async function runCompletionSegment(rootDir, planId, task, evidence, options = {}) {
+  if (options.deliveryRequired === true) {
+    evidence.deliveryRequired = true;
+    evidence.deliveryPending = true;
+  }
   let proofEnvelope = await invokeCapability("acceptance-proof", { rootDir, planId, task, evidence });
   if (proofEnvelope.status !== "pass") {
     await emitGateDecision(rootDir, planId, task, proofEnvelope, options.runId);
@@ -269,6 +290,7 @@ export async function runCompletionSegment(rootDir, planId, task, evidence, opti
     integrationGate = await options.beforeCheckpointGate();
     evidence.integrationCommit = integrationGate;
     evidence.deliveryBaseline = integrationGate;
+    evidence.deliveryPending = false;
     if (integrationGate?.pass !== true) {
       await emitGateDecision(rootDir, planId, task, proofEnvelope, options.runId);
       return { status: "revalidation_required", proofEnvelope, integrationGate, checkpointEnvelope: null };
@@ -348,12 +370,12 @@ export function collectGateEvidenceFromTask(task) {
 function buildStepContext(stepName, { rootDir, planId, task, evidence, options }) {
   switch (stepName) {
     case "verify":
-      return { rootDir, task };
+      return { rootDir, task, options: { executionRoot: options.executionRoot } };
     case "scope":
       return {
         rootDir,
         task,
-        options: { changedPaths: options.changedPaths, unavailableReason: options.unavailableReason },
+        options: { changedPaths: options.changedPaths, unavailableReason: options.unavailableReason, executionRoot: options.executionRoot },
       };
     case "review":
       return {
@@ -364,6 +386,7 @@ function buildStepContext(stepName, { rootDir, planId, task, evidence, options }
           verifyResult: evidence.verifyResult,
           scopeResult: evidence.scopeResult,
         },
+        options: { executionRoot: options.executionRoot },
       };
     case "acceptance-proof":
     case "checkpoint":

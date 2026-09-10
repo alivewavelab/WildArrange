@@ -1,7 +1,10 @@
+import { lstat } from "node:fs/promises";
+import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
 import {
   ensureWildArrangeDirs,
   nowIso,
+  resolveWildArrangePath,
 } from "../infra/runtime-store.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
@@ -9,7 +12,7 @@ import { readChangeRequest, writeChangeRequest } from "./change-governance.mjs";
 import { buildFailureSummary } from "../infra/failure-analysis.mjs";
 import { writeFailureReport, writeReviewReport } from "../infra/task-reports.mjs";
 import { routeRequest } from "../ai/routing.mjs";
-import { captureWorkspaceSnapshot } from "../infra/git-worktree.mjs";
+import { captureWorkspaceSnapshot, prepareAgentWorktree } from "../infra/git-worktree.mjs";
 import { changedPathsIntroducedByTask, collectGitChangedPaths, collectGitDiff } from "../infra/git-diff.mjs";
 import { applyVerifierEvidenceToCriteria, criteriaStatus } from "../infra/success-criteria.mjs";
 import { invokeCapability } from "../capabilities/gateway.mjs";
@@ -27,6 +30,9 @@ import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
 import { findRunnableTask, persistTaskState, writeOutbox } from "./task-board.mjs";
 import { assertCurrentTaskOwnership, coordinateTaskClaim } from "./remote-ownership.mjs";
 import { assertCommandWorkerAgent } from "../infra/agent-registry.mjs";
+import { integrateAdmissionCommit } from "./integration.mjs";
+import { commitIsAncestor, inspectTaskWorktreeBaseline, taskBranchName } from "../infra/git-coordination.mjs";
+import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 
 export async function runNextTask(rootDir, options = {}) {
   return withTaskStateLock(rootDir, "run-next-task", () => runNextTaskUnlocked(rootDir, options));
@@ -96,6 +102,7 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
     task,
     owner: task.owner,
   });
+  const deliveryWorkspace = await ensureLinearDeliveryWorkspace(rootDir, taskState.planId, task, taskState.tasks);
   task.status = "in_progress";
   task.attempts += 1;
   task.updatedAt = nowIso();
@@ -103,13 +110,14 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   await appendLedger(rootDir, { type: "task_started", planId: taskState.planId, taskId: task.id, attempt: task.attempts });
   await writeSnapshot(rootDir, "task_started", { planId: taskState.planId, taskId: task.id, attempt: task.attempts });
 
-  const workspaceSnapshot = await recordPreExecuteSnapshot(rootDir, taskState.planId, task);
-  const beforeDiff = await collectGitDiff(rootDir);
-  const beforeChanged = await collectGitChangedPaths(rootDir);
-  const workerEnvelope = await invokeCapability("worker", { rootDir, task, options });
+  const executionRoot = deliveryWorkspace?.workDir || rootDir;
+  const workspaceSnapshot = await recordPreExecuteSnapshot(rootDir, taskState.planId, task, executionRoot);
+  const beforeDiff = await collectGitDiff(executionRoot);
+  const beforeChanged = await collectGitChangedPaths(executionRoot);
+  const workerEnvelope = await invokeCapability("worker", { rootDir, task, options: { ...options, executionRoot } });
   const workerResult = workerEnvelope.evidence;
-  const afterDiff = await collectGitDiff(rootDir);
-  const afterChanged = await collectGitChangedPaths(rootDir);
+  const afterDiff = await collectGitDiff(executionRoot);
+  const afterChanged = await collectGitChangedPaths(executionRoot);
 
   task.status = "verifying";
   // New worker round: stale gate results from previous rounds must not
@@ -134,6 +142,10 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   await appendLedger(rootDir, { type: "worker_done_claim", planId: taskState.planId, taskId: task.id, exitCode: workerResult.exitCode });
   await writeSnapshot(rootDir, "worker_done", { planId: taskState.planId, taskId: task.id, exitCode: workerResult.exitCode });
 
+  if (workerResult?.recoveryRequired === true || workerResult?.terminationFailed === true) {
+    return persistCommandRecoveryRequired(rootDir, taskState, task, workerResult);
+  }
+
   // Shared delivery pipeline owns gate order (verify -> scope -> review ->
   // acceptance-proof -> checkpoint); see src/orchestration/delivery-pipeline.mjs.
   // This function still owns every reporting/ledger side effect itself so
@@ -141,15 +153,22 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   // stays identical to before the pipeline existed.
   const pipelineResult = await runDeliveryPipeline(rootDir, taskState.planId, task, {
     initialEvidence: { workerResult },
-    changedPaths: changedPathsIntroducedByTask(beforeChanged, afterChanged),
+    changedPaths: deliveryWorkspace ? afterChanged.paths : changedPathsIntroducedByTask(beforeChanged, afterChanged),
     unavailableReason: beforeChanged.available ? afterChanged.reason : beforeChanged.reason,
+    executionRoot,
+    deliveryRequired: Boolean(deliveryWorkspace),
+    runId: deliveryWorkspace?.runId,
     preCompletionGate: () => taskOwnershipGate(rootDir, task.id),
+    beforeCheckpointGate: deliveryWorkspace
+      ? () => commitLinearDelivery(rootDir, taskState.planId, task, deliveryWorkspace, afterChanged.paths || [])
+      : undefined,
   });
   const verifyResult = pipelineResult.evidence.verifyResult;
   const scopeResult = pipelineResult.evidence.scopeResult;
   const reviewResult = pipelineResult.evidence.reviewResult;
   const acceptanceProof = pipelineResult.evidence.acceptanceProof || null;
   const criteria = pipelineResult.criteria;
+  if (pipelineResult.evidence.integrationCommit) task.delivery = pipelineResult.evidence.integrationCommit;
 
   task.evidence.push(verifyResult);
   task.last_verify_result = verifyResult;
@@ -169,6 +188,12 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   await writeReviewReport(rootDir, taskState.planId, task, reviewResult);
   await appendLedger(rootDir, { type: "review_gate_completed", planId: taskState.planId, taskId: task.id, pass: reviewResult.pass, failedLaneCount: reviewResult.lanes.filter((lane) => lane.status === "fail").length });
   await writeSnapshot(rootDir, "reviewed", { planId: taskState.planId, taskId: task.id, pass: reviewResult.pass });
+
+  if (pipelineResult.status === "recovery_required") {
+    return persistCommandRecoveryRequired(rootDir, taskState, task, pipelineResult.evidence.commandRecovery, {
+      workerResult, verifyResult, scopeResult, reviewResult,
+    });
+  }
 
   if (pipelineResult.status === "revalidation_required") {
     task.status = "pending";
@@ -231,7 +256,7 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
     // itself failed (e.g. checkpoints dir unwritable). Completion requires a
     // durable checkpoint, so the task goes back to pending for retry instead
     // of being silently marked completed.
-    task.status = "pending";
+    task.status = task.delivery?.integrationSha || task.delivery?.commitSha ? "verifying" : "pending";
     task.last_failure = buildFailureSummary(task, {
       workerResult,
       verifyResult,
@@ -248,7 +273,7 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
     await persistTaskState(rootDir, taskState);
     await appendLedger(rootDir, { type: "checkpoint_write_failed", planId: taskState.planId, taskId: task.id, error: pipelineResult.evidence.checkpointError?.message || null });
     await writeSnapshot(rootDir, "checkpoint_write_failed", { planId: taskState.planId, taskId: task.id });
-    return { status: "retry", task, workerResult, verifyResult, scopeResult, reviewResult, acceptanceProof };
+    return { status: task.status === "verifying" ? "recovery_required" : "retry", task, workerResult, verifyResult, scopeResult, reviewResult, acceptanceProof };
   }
 
   if (acceptanceProof) {
@@ -350,13 +375,16 @@ async function executeTaskNodeUnlocked(rootDir, options = {}) {
     await assertCurrentTaskOwnership(rootDir, task);
   }
 
-  const workspaceSnapshot = await recordPreExecuteSnapshot(rootDir, taskState.planId, task);
-  const beforeDiff = await collectGitDiff(rootDir);
-  const beforeChanged = await collectGitChangedPaths(rootDir);
-  const workerEnvelope = await invokeCapability("worker", { rootDir, task, options });
+  const deliveryWorkspace = await ensureLinearDeliveryWorkspace(rootDir, taskState.planId, task, taskState.tasks);
+  await persistTaskState(rootDir, taskState);
+  const executionRoot = deliveryWorkspace?.workDir || rootDir;
+  const workspaceSnapshot = await recordPreExecuteSnapshot(rootDir, taskState.planId, task, executionRoot);
+  const beforeDiff = await collectGitDiff(executionRoot);
+  const beforeChanged = await collectGitChangedPaths(executionRoot);
+  const workerEnvelope = await invokeCapability("worker", { rootDir, task, options: { ...options, executionRoot } });
   const workerResult = workerEnvelope.evidence;
-  const afterDiff = await collectGitDiff(rootDir);
-  const afterChanged = await collectGitChangedPaths(rootDir);
+  const afterDiff = await collectGitDiff(executionRoot);
+  const afterChanged = await collectGitChangedPaths(executionRoot);
 
   task.status = "verifying";
   // A new worker round invalidates every gate result from previous rounds:
@@ -382,7 +410,7 @@ async function executeTaskNodeUnlocked(rootDir, options = {}) {
     afterAvailable: afterChanged.available,
     beforePaths: beforeChanged.paths || [],
     afterPaths: afterChanged.paths || [],
-    introducedPaths: changedPathsIntroducedByTask(beforeChanged, afterChanged) || [],
+    introducedPaths: deliveryWorkspace ? afterChanged.paths || [] : changedPathsIntroducedByTask(beforeChanged, afterChanged) || [],
     unavailableReason: beforeChanged.available ? afterChanged.reason : beforeChanged.reason,
   });
   task.updatedAt = nowIso();
@@ -390,6 +418,9 @@ async function executeTaskNodeUnlocked(rootDir, options = {}) {
   await writeOutbox(rootDir, task, workerResult);
   await appendLedger(rootDir, { type: "node_execute_completed", planId: taskState.planId, taskId: task.id, exitCode: workerResult.exitCode });
   await writeSnapshot(rootDir, "node_execute_completed", { planId: taskState.planId, taskId: task.id, exitCode: workerResult.exitCode });
+  if (workerResult?.recoveryRequired === true || workerResult?.terminationFailed === true) {
+    return persistCommandRecoveryRequired(rootDir, taskState, task, workerResult);
+  }
   return { status: "executed", task, workerResult };
 }
 
@@ -403,9 +434,10 @@ async function verifyTaskNodeUnlocked(rootDir, options = {}) {
   if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["verifying", "in_progress"]);
   await assertCurrentTaskOwnership(rootDir, task);
+  const deliveryWorkspace = await ensureLinearDeliveryWorkspace(rootDir, taskState.planId, task, taskState.tasks);
 
   task.status = "verifying";
-  const verifyEnvelope = await invokeCapability("verify", { rootDir, task });
+  const verifyEnvelope = await invokeCapability("verify", { rootDir, task, options: { executionRoot: deliveryWorkspace?.workDir || rootDir } });
   const verifyResult = verifyEnvelope.evidence;
   task.evidence.push(verifyResult);
   task.last_verify_result = verifyResult;
@@ -442,6 +474,7 @@ async function scopeTaskNodeUnlocked(rootDir, options = {}) {
   if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["verifying", "in_progress", "pending"]);
   await assertCurrentTaskOwnership(rootDir, task);
+  const deliveryWorkspace = await ensureLinearDeliveryWorkspace(rootDir, taskState.planId, task, taskState.tasks);
   const executionPaths = [...task.evidence].reverse().find((entry) => entry.kind === "execution_paths");
   const scopeEnvelope = await invokeCapability("scope", {
     rootDir,
@@ -449,6 +482,7 @@ async function scopeTaskNodeUnlocked(rootDir, options = {}) {
     options: {
       changedPaths: executionPaths?.afterAvailable === true ? executionPaths.introducedPaths : undefined,
       unavailableReason: executionPaths?.unavailableReason,
+      executionRoot: deliveryWorkspace?.workDir || rootDir,
     },
   });
   const scopeResult = scopeEnvelope.evidence;
@@ -473,10 +507,16 @@ async function reviewTaskNodeUnlocked(rootDir, options = {}) {
   if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["verifying", "in_progress"]);
   await assertCurrentTaskOwnership(rootDir, task);
+  const deliveryWorkspace = await ensureLinearDeliveryWorkspace(rootDir, taskState.planId, task, taskState.tasks);
   const workerResult = [...task.evidence].reverse().find((entry) => entry.kind === "worker");
   const verifyResult = task.last_verify_result || [...task.evidence].reverse().find((entry) => entry.kind === "verifier");
   const scopeResult = task.last_scope_result || [...task.evidence].reverse().find((entry) => entry.kind === "scope_guard");
-  const reviewEnvelope = await invokeCapability("review", { rootDir, task, evidence: { workerResult, verifyResult, scopeResult } });
+  const reviewEnvelope = await invokeCapability("review", {
+    rootDir,
+    task,
+    evidence: { workerResult, verifyResult, scopeResult },
+    options: { executionRoot: deliveryWorkspace?.workDir || rootDir },
+  });
   const reviewResult = reviewEnvelope.evidence;
 
   task.status = "verifying";
@@ -518,6 +558,10 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
   if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["verifying", "in_progress"]);
   await assertCurrentTaskOwnership(rootDir, task);
+  if (task.last_failure?.reason === "command_termination_failed" && options.force !== true) {
+    return { status: "recovery_required", task, commandEvidence: task.last_failure.commandEvidence || null };
+  }
+  const deliveryWorkspace = await ensureLinearDeliveryWorkspace(rootDir, taskState.planId, task, taskState.tasks);
   // A verifying task holding an admission_claim belongs to an in-flight (or
   // crash-resumable) parallel admission; the single-step checkpoint must not
   // complete it on that run's behalf (cross-review P1, round 6, 2026-07-21).
@@ -529,16 +573,51 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
   // single-step workflow cannot complete a task while skipping a gate that
   // the shared delivery pipeline would have run.
   const { evidence: gateEvidence, failedSteps } = collectGateEvidenceFromTask(task);
-  const { verifyResult, scopeResult, reviewResult } = gateEvidence;
-  const criteria = criteriaStatus(task);
+  let { verifyResult, scopeResult, reviewResult } = gateEvidence;
+  let criteria = criteriaStatus(task);
 
   if (workerResult?.exitCode === 0 && criteria.pass && failedSteps.length === 0) {
-    const completion = await runCompletionSegment(rootDir, taskState.planId, task, {
-      workerResult,
-      ...gateEvidence,
-    }, {
-      beforeCheckpointGate: () => taskOwnershipGate(rootDir, task.id),
-    });
+    let completion;
+    if (deliveryWorkspace) {
+      const current = await collectGitChangedPaths(deliveryWorkspace.workDir);
+      const pipeline = await runDeliveryPipeline(rootDir, taskState.planId, task, {
+        initialEvidence: { workerResult },
+        changedPaths: current.available ? current.paths : undefined,
+        unavailableReason: current.reason,
+        executionRoot: deliveryWorkspace.workDir,
+        deliveryRequired: true,
+        runId: deliveryWorkspace.runId,
+        preCompletionGate: () => taskOwnershipGate(rootDir, task.id),
+        beforeCheckpointGate: () => commitLinearDelivery(rootDir, taskState.planId, task, deliveryWorkspace, current.paths || []),
+      });
+      verifyResult = pipeline.evidence.verifyResult;
+      scopeResult = pipeline.evidence.scopeResult;
+      reviewResult = pipeline.evidence.reviewResult;
+      criteria = pipeline.criteria;
+      if (pipeline.evidence.integrationCommit) task.delivery = pipeline.evidence.integrationCommit;
+      task.evidence.push(verifyResult, { kind: "scope_guard", at: nowIso(), ...scopeResult }, reviewResult);
+      task.last_verify_result = verifyResult;
+      task.last_scope_result = scopeResult;
+      task.last_review_result = reviewResult;
+      completion = {
+        status: pipeline.status,
+        proofEnvelope: { evidence: pipeline.evidence.acceptanceProof },
+        checkpointEnvelope: pipeline.checkpointEnvelope,
+        integrationGate: pipeline.evidence.integrationCommit,
+      };
+      if (pipeline.status === "recovery_required") {
+        return persistCommandRecoveryRequired(rootDir, taskState, task, pipeline.evidence.commandRecovery, {
+          workerResult, verifyResult, scopeResult, reviewResult,
+        });
+      }
+    } else {
+      completion = await runCompletionSegment(rootDir, taskState.planId, task, {
+        workerResult,
+        ...gateEvidence,
+      }, {
+        beforeCheckpointGate: () => taskOwnershipGate(rootDir, task.id),
+      });
+    }
     const acceptanceProof = completion.proofEnvelope.evidence;
     if (completion.status === "proof_failed") {
       task.status = shouldFailDeliveryAttempt(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
@@ -561,7 +640,7 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
       return { status: task.status === "failed" ? "failed" : "retry", task, verifyResult, scopeResult, reviewResult, acceptanceProof };
     }
     if (completion.status === "checkpoint_failed") {
-      task.status = "pending";
+      task.status = task.delivery?.integrationSha || task.delivery?.commitSha ? "verifying" : "pending";
       task.last_failure = buildFailureSummary(task, {
         workerResult,
         verifyResult,
@@ -578,7 +657,7 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
       await persistTaskState(rootDir, taskState);
       await appendLedger(rootDir, { type: "checkpoint_write_failed", planId: taskState.planId, taskId: task.id, error: completion.checkpointEnvelope.error?.message || null });
       await writeSnapshot(rootDir, "checkpoint_write_failed", { planId: taskState.planId, taskId: task.id });
-      return { status: "retry", task, verifyResult, scopeResult, reviewResult, acceptanceProof };
+      return { status: task.status === "verifying" ? "recovery_required" : "retry", task, verifyResult, scopeResult, reviewResult, acceptanceProof };
     }
     if (completion.status === "revalidation_required") {
       task.status = "pending";
@@ -602,6 +681,18 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
         taskId: task.id,
       });
       return { status: "revalidation_required", task, verifyResult, scopeResult, reviewResult, acceptanceProof };
+    }
+    if (completion.status !== "completed") {
+      task.status = task.delivery?.integrationSha || task.delivery?.commitSha ? "verifying" : (shouldFailDeliveryAttempt(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending");
+      task.last_failure = buildFailureSummary(task, { workerResult, verifyResult, scopeResult, reviewResult, criteriaResult: criteria, nextStatus: task.status });
+      if (task.status === "verifying") {
+        task.last_failure.reason = "delivery_revalidation_failed";
+        task.last_failure.retryHint = "保留同一 delivery commit 与 owner；修复 gate 后显式重跑 checkpoint，不重新执行 worker。";
+      }
+      task.updatedAt = nowIso();
+      await writeFailureReport(rootDir, taskState.planId, task);
+      await persistTaskState(rootDir, taskState);
+      return { status: task.status === "verifying" ? "recovery_required" : task.status === "failed" ? "failed" : "retry", task, verifyResult, scopeResult, reviewResult, acceptanceProof };
     }
     // Checkpoint durably written — only now may the task become completed.
     // Ledger event first, then wisdom/digest (inside the transaction: a
@@ -720,9 +811,9 @@ async function retryTaskNodeUnlocked(rootDir, options = {}) {
   return { status: "pending", task, failure };
 }
 
-async function recordPreExecuteSnapshot(rootDir, planId, task) {
+async function recordPreExecuteSnapshot(rootDir, planId, task, executionRoot = rootDir) {
   try {
-    const snapshot = await captureWorkspaceSnapshot(rootDir, { label: `pre-execute ${task.id} attempt ${task.attempts}` });
+    const snapshot = await captureWorkspaceSnapshot(executionRoot, { label: `pre-execute ${task.id} attempt ${task.attempts}` });
     const entry = { ...snapshot, at: nowIso(), taskId: task.id };
     await appendLedger(rootDir, {
       type: snapshot.available ? "pre_execute_snapshot" : "pre_execute_snapshot_unavailable",
@@ -763,6 +854,119 @@ function resolveRetryTask(tasks, taskId) {
     throw new Error(`task ${task.id} status ${task.status} cannot run retry`);
   }
   return task;
+}
+
+async function ensureLinearDeliveryWorkspace(rootDir, planId, task, tasks = []) {
+  if (task.delivery_workspace?.workDir && task.delivery_workspace?.branch && task.delivery_workspace?.baseSha) {
+    const existing = await inspectTaskWorktreeBaseline(task.delivery_workspace.workDir);
+    const expectedHead = task.delivery_workspace.deliverySha || task.delivery_workspace.baseSha;
+    if (!existing.available || existing.branch !== task.delivery_workspace.branch || existing.headSha !== expectedHead) {
+      throw new Error(`persisted linear task worktree changed: expected ${task.delivery_workspace.branch}@${expectedHead}, got ${existing.branch || "unknown"}@${existing.headSha || "unknown"}`);
+    }
+    return task.delivery_workspace;
+  }
+
+  const baseline = await captureWorkspaceSnapshot(rootDir, { label: `linear-delivery-${planId}-${task.id}` });
+  if (baseline.available !== true) {
+    const hasGitMarker = await lstat(path.join(rootDir, ".git")).then(() => true).catch((error) => {
+      if (error?.code === "ENOENT") return false;
+      throw error;
+    });
+    if (!hasGitMarker && baseline.reason === "project is not a Git repository") return null;
+    throw new Error(`cannot establish linear Git delivery baseline: ${baseline.reason || "unknown Git error"}`);
+  }
+  if (!baseline.headCommit) throw new Error("cannot establish linear Git delivery baseline: Git repository has no initial commit");
+
+  const dependencySha = await resolveDependencyDeliverySha(rootDir, task, tasks);
+  const remoteHeadSha = task.coordination?.remoteHeadSha || null;
+  if (task.coordination?.localGit !== true && remoteHeadSha && dependencySha
+    && !(await commitIsAncestor(rootDir, dependencySha, remoteHeadSha))) {
+    throw new Error(`task ${task.id} task branch does not contain dependency delivery ${dependencySha}; create an integration task first`);
+  }
+  const startPoint = task.coordination?.localGit === true && dependencySha
+    ? dependencySha
+    : remoteHeadSha || dependencySha || baseline.headCommit;
+  if (dependencySha && task.coordination?.localGit === true) {
+    task.coordination = { ...task.coordination, baseSha: dependencySha, remoteHeadSha: dependencySha };
+  }
+  const { config } = await loadWildArrangeConfig(rootDir);
+  const branch = task.coordination?.branch || taskBranchName(config.gitCoordination, planId, task.id);
+  if (["disabled", "manual"].includes(task.coordination?.status)) {
+    task.coordination = {
+      ...task.coordination,
+      localGit: true,
+      branch,
+      baseSha: startPoint,
+      remoteHeadSha: startPoint,
+    };
+  }
+  const safePlan = String(planId).replace(/[^A-Za-z0-9._-]/g, "_");
+  const safeTask = String(task.id).replace(/[^A-Za-z0-9._-]/g, "_");
+  const runId = `linear-${safePlan}-${safeTask}`;
+  const runDir = resolveWildArrangePath(rootDir, "linear-runs", safePlan, safeTask);
+  const prepared = await prepareAgentWorktree(rootDir, runDir, {
+    isolation: "git-worktree",
+    branchName: branch,
+    startPoint,
+  });
+  if (prepared.available !== true) throw new Error(`linear task worktree is required for Git delivery: ${prepared.reason}`);
+  task.delivery_workspace = {
+    kind: "linear_task_worktree",
+    runId,
+    workDir: path.resolve(prepared.workDir),
+    branch,
+    baseSha: startPoint,
+  };
+  return task.delivery_workspace;
+}
+
+async function resolveDependencyDeliverySha(rootDir, task, tasks) {
+  const dependencyShas = [];
+  for (const taskId of task.blockedBy || []) {
+    const dependency = tasks.find((candidate) => candidate.id === taskId);
+    const deliverySha = dependency?.delivery?.integrationSha || dependency?.delivery?.commitSha || dependency?.delivery?.actualSha || dependency?.delivery_workspace?.deliverySha;
+    if (!deliverySha) throw new Error(`task ${task.id} dependency ${taskId} has no bound delivery commit`);
+    if (!dependencyShas.includes(deliverySha)) dependencyShas.push(deliverySha);
+  }
+  if (dependencyShas.length < 2) return dependencyShas[0] || null;
+  for (const candidate of [...dependencyShas].reverse()) {
+    const containsAll = await Promise.all(dependencyShas.map((sha) => commitIsAncestor(rootDir, sha, candidate)));
+    if (containsAll.every(Boolean)) return candidate;
+  }
+  throw new Error(`task ${task.id} dependencies are on unrelated delivery branches; create an integration task first`);
+}
+
+async function commitLinearDelivery(rootDir, planId, task, workspace, changedPaths) {
+  const ownership = await taskOwnershipGate(rootDir, task.id);
+  if (ownership.pass !== true) return ownership;
+  const delivery = await integrateAdmissionCommit(rootDir, {
+    planId,
+    task,
+    taskId: task.id,
+    runId: workspace.runId,
+    changedPaths,
+    integrationGuard: { active: false, expectedSha: workspace.baseSha },
+    deliveryWorktreeDir: workspace.workDir,
+    deliveryFromWorktree: true,
+  });
+  if (delivery.pass === true) workspace.deliverySha = delivery.integrationSha || delivery.commitSha || delivery.actualSha;
+  return delivery;
+}
+
+async function persistCommandRecoveryRequired(rootDir, taskState, task, commandEvidence, result = {}) {
+  task.status = "verifying";
+  task.last_failure = {
+    at: nowIso(),
+    reason: "command_termination_failed",
+    summary: `command timed out and its process could not be confirmed stopped${commandEvidence?.pid ? ` (pid ${commandEvidence.pid})` : ""}`,
+    retryHint: "确认残留进程已经终止后，再从同一 task worktree 和 delivery intent 恢复；不要重新执行 worker。",
+    commandEvidence,
+  };
+  task.updatedAt = nowIso();
+  await writeFailureReport(rootDir, taskState.planId, task);
+  await persistTaskState(rootDir, taskState);
+  await appendLedger(rootDir, { type: "command_recovery_required", planId: taskState.planId, taskId: task.id, pid: commandEvidence?.pid || null });
+  return { status: "recovery_required", task, ...result };
 }
 
 async function taskOwnershipGate(rootDir, taskId) {
