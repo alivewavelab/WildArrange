@@ -436,6 +436,7 @@ async function importPlanUnlocked(rootDir, planPath) {
   validatePlanImportQuality(plan);
   const featureDesignGate = await assertFeatureDesignPlanBinding(rootDir, plan);
   const existingLedger = await loadTaskLedger(rootDir);
+  assertPlanImportDoesNotReplaceActiveWork(existingLedger, plan);
   const taskLedger = mergePlanIntoTaskLedger(existingLedger, plan);
   const targetPath = resolveWildArrangePath(rootDir, "plans", `${plan.id}.json`);
   await writeJsonAtomic(targetPath, plan);
@@ -472,6 +473,20 @@ async function importPlanUnlocked(rootDir, planPath) {
   await bindFeatureDesignPlan(rootDir, featureDesignGate, plan.id);
   await writeSnapshot(rootDir, "planned", { planId: plan.id });
   return plan;
+}
+
+function assertPlanImportDoesNotReplaceActiveWork(existingLedger, plan) {
+  const protectedTasks = (existingLedger?.tasks || []).filter((task) => {
+    const replacedByImport = task.planId === plan.id;
+    const switchesAwayFromActivePlan = existingLedger?.activePlanId === task.planId && plan.id !== task.planId;
+    if (!replacedByImport && !switchesAwayFromActivePlan) return false;
+    return ["in_progress", "verifying", "recovery_required"].includes(task.status)
+      || Boolean(task.parallel_run_claim)
+      || ["claimed", "accepted"].includes(task.coordination?.status);
+  });
+  if (protectedTasks.length === 0) return;
+  const details = protectedTasks.map((task) => `${task.id}:${task.status}`).join(", ");
+  throw new Error(`cannot import plan ${plan.id} while active task ownership must be preserved: ${details}`);
 }
 
 export function validateSemanticGeneratedPlan(plan) {

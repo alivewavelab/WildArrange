@@ -3,6 +3,7 @@ import path from "node:path";
 import { hashContent, nowIso, readJson, writeJsonAtomic } from "./runtime-store.mjs";
 import { loadWildArrangeConfig } from "./runtime-config.mjs";
 import { extractImportSpecifiers, maskSource } from "./dependency-graph.mjs";
+import { withFileLock } from "./file-lock.mjs";
 
 export const CONTRACT_SCHEMA_VERSION = 1;
 export const CONTRACT_DISCOVERERS = Object.freeze(["tauri-ipc"]);
@@ -79,6 +80,10 @@ export async function scanContractGovernanceUniverse(rootDir, options = {}) {
 }
 
 export async function persistContractScan(rootDir, scan) {
+  return withContractGovernanceLock(rootDir, "persist-scan", () => persistContractScanUnlocked(rootDir, scan));
+}
+
+async function persistContractScanUnlocked(rootDir, scan) {
   const paths = contractGovernancePaths(rootDir);
   await mkdir(paths.cards, { recursive: true });
   await archiveCurrentSnapshot(paths, scan.at);
@@ -101,6 +106,11 @@ export async function persistContractScan(rootDir, scan) {
 }
 
 export async function applyContractCardDecision(rootDir, options = {}) {
+  return withContractGovernanceLock(rootDir, `apply-card:${options.cardId || "unknown"}`, () =>
+    applyContractCardDecisionUnlocked(rootDir, options));
+}
+
+async function applyContractCardDecisionUnlocked(rootDir, options = {}) {
   const cardId = requireSafeId(options.cardId, "cardId");
   const decision = String(options.decision || "").trim();
   if (!new Set(["approve", "reject"]).has(decision)) {
@@ -184,6 +194,18 @@ export async function applyContractCardDecision(rootDir, options = {}) {
   };
 }
 
+async function withContractGovernanceLock(rootDir, ownerTag, fn) {
+  const paths = contractGovernancePaths(rootDir);
+  await mkdir(paths.runtimeRoot, { recursive: true });
+  return withFileLock(
+    rootDir,
+    path.join(paths.runtimeRoot, "governance.lock"),
+    "contract governance lock",
+    `contract-governance:${ownerTag}`,
+    fn,
+  );
+}
+
 export async function generateContractArtifacts(rootDir) {
   const paths = contractGovernancePaths(rootDir);
   const registry = await readContractRegistry(rootDir);
@@ -199,7 +221,8 @@ export async function generateContractArtifacts(rootDir) {
   };
 }
 
-export async function inspectContractTask(rootDir, task, evidence = {}) {
+export async function inspectContractTask(rootDir, task, evidence = {}, options = {}) {
+  const controlRoot = options.controlRoot || rootDir;
   const declarations = Array.isArray(task?.contractChanges?.items) ? task.contractChanges.items : [];
   const scan = await scanContractGovernanceUniverse(rootDir, { declarations });
   const changedPaths = new Set((evidence.scopeResult?.changedPaths || []).map(normalizeSlash));
@@ -217,10 +240,10 @@ export async function inspectContractTask(rootDir, task, evidence = {}) {
       findings.push({ code: "contract_compatibility_missing", contractId: item.contractId || null });
     }
     if (action === "remove") {
-      const approval = await inspectApprovalRef(rootDir, item);
+      const approval = await inspectApprovalRef(controlRoot, item);
       if (!approval.pass) findings.push({ code: "contract_destructive_approval_missing", contractId: item.contractId || null, reason: approval.reason });
     }
-    const referenceFindings = await inspectContractReferences(rootDir, item);
+    const referenceFindings = await inspectContractReferences(controlRoot, item);
     findings.push(...referenceFindings.map((finding) => ({ ...finding, contractId: item.contractId || null })));
   }
   const touchedManualRequired = scan.coverage.manualRequired.filter((item) => changedPaths.has(normalizeSlash(item.sourcePath)) && !declarationCoversSource(declarations, item.sourcePath));
