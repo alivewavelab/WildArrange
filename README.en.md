@@ -237,7 +237,9 @@ Create `plan.json`:
 }
 ```
 
-> `review_commands` is required in practice: the acceptance proof refuses to complete a task whose review gate has no independent signal lane (a tautological review proves nothing). An independent signal is any of `review_commands` / `standards_commands` / `review.llm` / an enabled quality gate.
+> The acceptance proof requires an independent review result from this execution: a successful substantive `review_commands` / `standards_commands` command, a quality gate with actual inspection targets, or a successful LLM review. Configuration alone, skipped execution, missing-key fallback, `echo`, and `node --version` cannot authorize completion.
+
+Plan import protects existing work: reimport cannot overwrite tasks in the same Plan that are executing, verifying, recovering, holding a task claim, or already completed. After the old Plan completes, a new Plan can be imported while retaining the previous tasks and delivery records.
 
 Run it:
 
@@ -323,6 +325,8 @@ node ./bin/wildarrange.mjs parallel list
 node ./bin/wildarrange.mjs parallel status --run <runId>
 node ./bin/wildarrange.mjs parallel cleanup --run <runId>
 ```
+
+`parallel cleanup` retains worktrees awaiting acceptance, rework, recovery, or containing uncommitted changes. Cleanup requires a verifiable task identity and lifecycle, a clean worktree, and its current HEAD to be contained in `main`; it never force-deletes files added after acceptance.
 
 To propose mainline artifacts, a child agent writes structured files to `agent-result.json`:
 

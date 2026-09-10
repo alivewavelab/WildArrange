@@ -237,7 +237,9 @@ node ./bin/wildarrange.mjs adapter install --target all --mode local
 }
 ```
 
-> `review_commands` 不能省：验收证明会拒绝「没有任何独立复核信号」的任务进入 completed（同义反复的复核不证明任何东西）。独立信号可以是 `review_commands` / `standards_commands` / `review.llm` / 已启用的质量门之一。
+> 验收证明要求本轮实际取得独立复核结果：成功执行的非空转 `review_commands` / `standards_commands`、有检查对象的质量门，或成功的 LLM review。只配置通道、跳过执行、无 key fallback、`echo` 或 `node --version` 都不能作为完成依据。
+
+计划导入会保护已有成果：同一 Plan 中仍在执行、验证、恢复、持有任务 claim 或已经完成的任务不能被重新导入覆盖。已完成旧 Plan 后可以导入新的 Plan，旧任务及其交付记录继续保留。
 
 运行：
 
@@ -323,6 +325,8 @@ node ./bin/wildarrange.mjs parallel list
 node ./bin/wildarrange.mjs parallel status --run <runId>
 node ./bin/wildarrange.mjs parallel cleanup --run <runId>
 ```
+
+`parallel cleanup` 会保留等待验收、返工、恢复中或仍有未提交改动的 worktree。只有任务身份与生命周期可核实、worktree 干净且当前 HEAD 已进入 `main` 时才允许清理；不会强制删除验收后的新增文件。
 
 子 Agent 若要提交主线成果，需要在 `agent-result.json` 写入结构化文件：
 

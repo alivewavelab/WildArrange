@@ -53,6 +53,10 @@ device identity
 
 并行 admission 在应用子 Agent 结果前绑定主线与任务分支基线。在 gate 之前及完成之前，它会再次检查 task ownership、当前工作区祖先和变更归属，并拒绝未归因于子 Agent 结果或已接受 handoff 的候选路径。gate 与 acceptance proof 全部通过后，使用临时 index 创建只含本任务路径、以任务分支 HEAD 为父的 delivery commit；有 remote 时普通 push 到该 task branch（非 force），无 remote 时更新本地 task branch/worktree。acceptance proof 随后补齐该 SHA，checkpoint 绑定相同 SHA。两种交付都会把共享 checkout 按 pre-image 回滚到干净状态，`main` 不移动。远端任务分支移动、本地基线过期或无归属脏路径时，仅回滚本 run 的文件并返回 `revalidation_required`。一旦已知 task-branch push 成功，之后任何本地失败或 ownership/任务分支历史异常都会使 claim 与 intent 处于 `recovery_required`；禁止回滚已推送成果或释放 ownership。进入 `main` 另走持续更新的 PR、自动检查、独立验收和人类 merge 批准；development、staging、production 是部署环境，不默认映射为长期分支。
 
+线性 `run` 与单步 `node execute/checkpoint` 在 Git 项目中也使用独立任务 worktree，位置与 branch/base/delivery SHA 保存在任务的 `delivery_workspace`。执行与 gate 读取任务 worktree 中的项目文件；任务台账、配置、契约批准记录及验收证据仍使用原项目的 `.wildarrange/`。依赖任务从上游交付 SHA 开始；多个互不包含的上游分支需要显式 integration task。无文件变化记录 `no_change` 并绑定现有 SHA，不创建空 commit。非 Git 项目保留本地文件协议，不自动初始化 Git。
+
+命令超时只有确认进程终止后才可进入普通失败重试；Windows 进程树终止失败返回 `terminationFailed` / `recoveryRequired` 和 PID。编排保留 `verifying` 与所有权，停止后续 gate，要求确认残留进程已停止后恢复，不能把超时当作已安全回滚。
+
 ## 五区分层
 
 | 区 | 目录 | 职责 | 允许依赖 |
@@ -114,7 +118,7 @@ AGENTS.md                         # product goals, global boundaries, release ga
 - `src/interface/hook-bridge-core.mjs`：两类 Hook bridge 共享的项目发现、CLI 子进程启动、stdout/stderr 收集与 JSON 解析模板。Cursor 显式传入 25 秒第二保险并由本地 `failHook` 实施 fail-closed；Kimi 显式不配置自毁定时器，保持宿主 timeout 后 fail-open 的合同，二者输出协议仍由各 adapter 自己翻译。
 - `src/orchestration/change-governance.mjs`：转向提案、review blocker、ChangeRequest 复核与显式 accept/reject 决议。
 - `src/infra/failure-analysis.mjs`：失败原因分类、重试提示与可行动失败摘要。
-- `src/capabilities/acceptance-proof.mjs`：checkpoint 证明链，在完成前校验 worker、verifier、success criteria、scope、review 与 review 通道；还拒绝 worker 与 verify 命令全为 trivial 且无 writable_paths 的 no-op 任务，并失败于 `verify_commands` 全 trivial 的任务（`verify_not_trivial`——trivial 验证证明不了任何事）。第二硬底线是 `review_not_tautological`：review gate 无独立信号通道（无 `review_commands` / `standards_commands` / `review.llm` / 启用的质量 gate——与 `infra/gate-arming.mjs` 的 `hasRealReviewLane` 同谓词）的任务不能到 `completed`，因为同义反复的 review 证明不了任何事。`config init --armed` 写入 armed 质量 gate 的 config（blocking commentChecker + lspDiagnostics 命令槽），为底线提供命令级入门。
+- `src/capabilities/acceptance-proof.mjs`：checkpoint 证明链，在完成前校验 worker、verifier、success criteria、scope、review 与 review 通道；还拒绝 worker 与 verify 命令全为 trivial 且无 writable_paths 的 no-op 任务，并失败于 `verify_commands` 全 trivial 的任务（`verify_not_trivial`——trivial 验证证明不了任何事）。第二硬底线是 `review_not_tautological`：review gate 没有本轮实际成功执行的独立信号时，任务不能到 `completed`；`infra/gate-arming.mjs` 的 `hasRealReviewLane` 只用于配置预检，最终 proof 还检查执行结果，因为同义反复的 review 证明不了任何事。`config init --armed` 写入 armed 质量 gate 的 config（blocking commentChecker + lspDiagnostics 命令槽），为底线提供命令级入门。
 - `src/ai/routing.mjs`：完整 `routeRequest` 流（路由请求持久化、语义 shadow 治理、可选 LLM 第二意见）。
 - `src/infra/route-table.mjs`：确定性路由表加载（routes.json + 已审核 overrides）与信号匹配（`loadRoutesConfig` / `resolveRouteDecision`），无 LLM——orchestration 可用而不触 ai 区。
 - `src/ai/archivist-router.mjs`：基于 DeepSeek flash 的档案员/路由运行时、routing packet 构建、确定性 fallback、hook 触发的档案更新、上下文注入包与关键词建议产物。
@@ -260,7 +264,9 @@ AGENTS.md                         # product goals, global boundaries, release ga
 5. `review_gate` 返回 `pass`。
 6. `acceptance_proof` 返回 `pass` 并写入 `.wildarrange/reports/acceptance/<planId>/<taskId>.json`；checkpoint 同样写入 `.wildarrange/checkpoints/<planId>/<taskId>.json`。Plan/Task 分目录使两个允许连字符的 ID 仍保持一一对应；旧扁平路径只在 JSON 身份匹配或不存在碰撞时兼容读取/清理。
 
-`inconclusive` 不是完成证据。
+`inconclusive` 不是完成证据。独立复核必须在本轮产生真实成功结果：非空转 review/standards 命令、有检查对象的质量门或成功 LLM review；配置存在、零执行、skipped、无 key fallback、`echo` / `node --version` 不计入。单步 checkpoint 会重新验证当前文件，不能拿修改前的 gate 结果完成任务。
+
+完成证据的读侧校验由 `infra/task-state-store.mjs` 统一提供；status、doctor 与恢复上下文共用 proof/checkpoint 身份、gate 结果、可信完成事件和交付 SHA 的技术校验，不各自定义另一套完成判断。它只报告无效证据，不改写任务状态。上下文账本尾部仅来自通过 hash 链校验的条目；Dashboard 的账本与配置基线状态分别读取真实校验结果，不从门武装状态推断。
 
 review gate 是宿主中立的。从 CLI 运行，可含确定性通道、配置的 `review_commands`、配置的 `standards_commands`、可选 LSP/typecheck 命令、AST/结构命令、hashline anchor 检查、注释检查与可选 OpenAI 兼容 LLM review。BaiZe 是唯一独立 review Agent；目标/证据、bug/风险与怀疑式验收视角作为 review Skill 或模式选择。
 
