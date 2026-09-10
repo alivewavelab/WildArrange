@@ -144,18 +144,20 @@ test("linear no-change delivery binds the dependency SHA without creating an emp
 
 test("Git change collection detects staged and same-path content changes", async () => {
   await withGitFixture(async (root) => {
-    await writeFile(path.join(root, "index-only.txt"), "base");
-    assert.equal((await runCommand("git add index-only.txt", root)).exitCode, 0);
+    const indexOnlyPath = "index[1].txt";
+    await writeFile(path.join(root, indexOnlyPath), "base");
+    assert.equal((await runCommandFile("git", ["--literal-pathspecs", "add", indexOnlyPath], root)).exitCode, 0);
     assert.equal((await runCommand("git commit -m index-baseline", root)).exitCode, 0);
     const clean = await collectGitChangedPaths(root);
-    await writeFile(path.join(root, "index-only.txt"), "staged");
-    assert.equal((await runCommand("git add index-only.txt", root)).exitCode, 0);
-    await writeFile(path.join(root, "index-only.txt"), "base");
+    await writeFile(path.join(root, indexOnlyPath), "staged");
+    assert.equal((await runCommandFile("git", ["--literal-pathspecs", "add", indexOnlyPath], root)).exitCode, 0);
+    await writeFile(path.join(root, indexOnlyPath), "base");
     const indexOnly = await collectGitChangedPaths(root);
-    assert.deepEqual(indexOnly.paths, ["index-only.txt"]);
-    assert.deepEqual(changedPathsIntroducedByTask(clean, indexOnly), ["index-only.txt"], "index blob changes remain visible when worktree bytes equal HEAD");
+    assert.deepEqual(indexOnly.paths, [indexOnlyPath]);
+    assert.doesNotMatch(indexOnly.fingerprints[indexOnlyPath], /^index:absent\|/, "index pathspec metacharacters must remain literal");
+    assert.deepEqual(changedPathsIntroducedByTask(clean, indexOnly), [indexOnlyPath], "index blob changes remain visible when worktree bytes equal HEAD");
 
-    assert.equal((await runCommandFile("git", ["restore", "--staged", "index-only.txt"], root)).exitCode, 0);
+    assert.equal((await runCommandFile("git", ["--literal-pathspecs", "restore", "--staged", indexOnlyPath], root)).exitCode, 0);
     await writeFile(path.join(root, "outside.txt"), "first");
     const before = await collectGitChangedPaths(root);
     await writeFile(path.join(root, "outside.txt"), "second");
@@ -167,6 +169,24 @@ test("Git change collection detects staged and same-path content changes", async
     const quotedPath = " 中文 spaced name.txt";
     await writeFile(path.join(root, quotedPath), "path evidence");
     assert.ok((await collectGitChangedPaths(root)).paths.includes(quotedPath), "NUL-delimited Git output preserves Unicode and leading spaces in paths");
+
+    assert.equal((await runCommandFile("git", ["restore", "--staged", "outside.txt"], root)).exitCode, 0);
+    await rm(path.join(root, "outside.txt"), { force: true });
+    await rm(path.join(root, quotedPath), { force: true });
+    await writeFile(path.join(root, "conflict.txt"), "base\n");
+    assert.equal((await runCommandFile("git", ["add", "conflict.txt"], root)).exitCode, 0);
+    assert.equal((await runCommandFile("git", ["commit", "-m", "conflict baseline"], root)).exitCode, 0);
+    assert.equal((await runCommandFile("git", ["checkout", "-b", "conflict-side"], root)).exitCode, 0);
+    await writeFile(path.join(root, "conflict.txt"), "side\n");
+    assert.equal((await runCommandFile("git", ["commit", "-am", "side change"], root)).exitCode, 0);
+    assert.equal((await runCommandFile("git", ["checkout", "main"], root)).exitCode, 0);
+    await writeFile(path.join(root, "conflict.txt"), "main\n");
+    assert.equal((await runCommandFile("git", ["commit", "-am", "main change"], root)).exitCode, 0);
+    assert.notEqual((await runCommandFile("git", ["merge", "conflict-side"], root)).exitCode, 0);
+    const conflicted = await collectGitChangedPaths(root);
+    assert.equal(conflicted.available, true);
+    assert.deepEqual(conflicted.paths, ["conflict.txt"]);
+    assert.match(conflicted.fingerprints["conflict.txt"], /^index:[^;]+;[^;]+;[^|]+\|worktree:/, "all conflict stages contribute to the index fingerprint");
   });
 });
 
