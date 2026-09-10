@@ -30,7 +30,7 @@ import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
 import { findRunnableTask, persistTaskState, writeOutbox } from "./task-board.mjs";
 import { assertCurrentTaskOwnership, coordinateTaskClaim } from "./remote-ownership.mjs";
 import { assertCommandWorkerAgent } from "../infra/agent-registry.mjs";
-import { integrateAdmissionCommit } from "./integration.mjs";
+import { integrateAdmissionCommit, readIntegrationIntent } from "./integration.mjs";
 import { commitIsAncestor, inspectTaskWorktreeBaseline, taskBranchName } from "../infra/git-coordination.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 
@@ -602,7 +602,7 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
       completion = {
         status: pipeline.status,
         proofEnvelope: { evidence: pipeline.evidence.acceptanceProof },
-        checkpointEnvelope: pipeline.checkpointEnvelope,
+        checkpointEnvelope: pipeline.steps.find((step) => step.capability === "checkpoint") || null,
         integrationGate: pipeline.evidence.integrationCommit,
       };
       if (pipeline.status === "recovery_required") {
@@ -650,12 +650,12 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
         nextStatus: task.status,
       });
       task.last_failure.reason = "checkpoint_failed";
-      task.last_failure.summary = `checkpoint write failed: ${completion.checkpointEnvelope.error?.message || "unknown error"}`;
+      task.last_failure.summary = `checkpoint write failed: ${completion.checkpointEnvelope?.error?.message || "unknown error"}`;
       task.last_failure.retryHint = "checkpoint 写入失败（检查 .wildarrange/checkpoints 目录是否可写），修复后重跑即可，所有质量门已通过";
       task.updatedAt = nowIso();
       await writeFailureReport(rootDir, taskState.planId, task);
       await persistTaskState(rootDir, taskState);
-      await appendLedger(rootDir, { type: "checkpoint_write_failed", planId: taskState.planId, taskId: task.id, error: completion.checkpointEnvelope.error?.message || null });
+      await appendLedger(rootDir, { type: "checkpoint_write_failed", planId: taskState.planId, taskId: task.id, error: completion.checkpointEnvelope?.error?.message || null });
       await writeSnapshot(rootDir, "checkpoint_write_failed", { planId: taskState.planId, taskId: task.id });
       return { status: task.status === "verifying" ? "recovery_required" : "retry", task, verifyResult, scopeResult, reviewResult, acceptanceProof };
     }
@@ -861,7 +861,22 @@ async function ensureLinearDeliveryWorkspace(rootDir, planId, task, tasks = []) 
     const existing = await inspectTaskWorktreeBaseline(task.delivery_workspace.workDir);
     const expectedHead = task.delivery_workspace.deliverySha || task.delivery_workspace.baseSha;
     if (!existing.available || existing.branch !== task.delivery_workspace.branch || existing.headSha !== expectedHead) {
-      throw new Error(`persisted linear task worktree changed: expected ${task.delivery_workspace.branch}@${expectedHead}, got ${existing.branch || "unknown"}@${existing.headSha || "unknown"}`);
+      const intent = await readIntegrationIntent(rootDir, task.delivery_workspace.runId, task.id);
+      const persistedDeliverySha = task.delivery?.integrationSha || task.delivery?.commitSha || task.delivery?.actualSha || null;
+      const intentOwnsCurrentHead = intent
+        && intent.planId === planId
+        && intent.taskId === task.id
+        && intent.runId === task.delivery_workspace.runId
+        && intent.branch === task.delivery_workspace.branch
+        && intent.expectedSha === task.delivery_workspace.baseSha
+        && intent.integrationSha === existing.headSha
+        && (!persistedDeliverySha || persistedDeliverySha === intent.integrationSha)
+        && ["prepared", "prepared_local", "committed_local", "pushed", "push_outcome_unknown"].includes(intent.status);
+      if (!existing.available || existing.branch !== task.delivery_workspace.branch || !intentOwnsCurrentHead) {
+        throw new Error(`persisted linear task worktree changed: expected ${task.delivery_workspace.branch}@${expectedHead}, got ${existing.branch || "unknown"}@${existing.headSha || "unknown"}`);
+      }
+      // Only the pre-checkpoint durable intent can reconcile a stale task-state SHA.
+      task.delivery_workspace.deliverySha = intent.integrationSha;
     }
     return task.delivery_workspace;
   }
@@ -872,7 +887,7 @@ async function ensureLinearDeliveryWorkspace(rootDir, planId, task, tasks = []) 
       if (error?.code === "ENOENT") return false;
       throw error;
     });
-    if (!hasGitMarker && baseline.reason === "project is not a Git repository") return null;
+    if (!hasGitMarker && ["project is not a Git repository", "project root is not the git toplevel"].includes(baseline.reason)) return null;
     throw new Error(`cannot establish linear Git delivery baseline: ${baseline.reason || "unknown Git error"}`);
   }
   if (!baseline.headCommit) throw new Error("cannot establish linear Git delivery baseline: Git repository has no initial commit");

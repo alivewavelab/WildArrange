@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
@@ -17,7 +18,7 @@ import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 const CLI_PATH = path.resolve(process.cwd(), "bin", "wildarrange.mjs");
 
 async function withTempDir(fn) {
-  const baseDir = path.join(process.cwd(), ".tmp");
+  const baseDir = path.join(os.tmpdir(), "wildarrange-tests");
   await mkdir(baseDir, { recursive: true });
   const dir = await mkdtemp(path.join(baseDir, "wildarrange-verbosity-"));
   try {
@@ -31,9 +32,9 @@ function passingTask(id) {
   return {
     id,
     subject: `task ${id}`,
-    worker_command: "node -e \"process.exit(0)\"",
-    verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
-    review_commands: ["node --version"],
+    worker_command: "node -e \"require('node:fs').mkdirSync('src',{recursive:true});require('node:fs').writeFileSync('src/result.txt','ok')\"",
+    verify_commands: ["node -e \"require('node:assert/strict').equal(require('node:fs').readFileSync('src/result.txt','utf8'),'ok')\""],
+    review_commands: ["node -e \"const fs=require('node:fs');require('node:assert/strict').equal(fs.statSync('src/result.txt').size,2);if(fs.existsSync('unexpected.txt'))process.exit(1)\""],
     writable_paths: ["src/**"],
   };
 }
@@ -45,6 +46,14 @@ async function importPlanWith(dir, fileName, title, tasks) {
   await importPlan(dir, planPath);
 }
 
+async function commitInitialGitBaseline(dir) {
+  await writeFile(path.join(dir, ".gitignore"), ".wildarrange/\n");
+  for (const command of ["git config user.email test@example.com", "git config user.name WildArrange-Test", "git add .gitignore", "git commit -m initial"]) {
+    const result = await runCommand(command, dir);
+    assert.equal(result.exitCode, 0, result.stderr);
+  }
+}
+
 function runCli(dir) {
   return spawnSync(process.execPath, [CLI_PATH, "run", "--root", dir], { cwd: dir, encoding: "utf8" });
 }
@@ -53,6 +62,7 @@ test("default verbose prints the per-gate decision summary on stderr, JSON on st
   await withTempDir(async (dir) => {
     await initRuntime(dir);
     await runCommand("git init", dir);
+    await commitInitialGitBaseline(dir);
     await importPlanWith(dir, "verbosity-plan.json", "Verbosity", [passingTask("T001")]);
 
     const run = runCli(dir);
@@ -69,6 +79,7 @@ test("quiet prints no gate summary; normal prints exactly one line", async () =>
   await withTempDir(async (dir) => {
     await initRuntime(dir);
     await runCommand("git init", dir);
+    await commitInitialGitBaseline(dir);
     await importPlanWith(dir, "verbosity-plan.json", "Verbosity", [passingTask("T001")]);
 
     await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({ reporting: { verbosity: "quiet" } }, null, 2));

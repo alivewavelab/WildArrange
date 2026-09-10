@@ -29,24 +29,29 @@ export async function collectGitChangedPaths(rootDir) {
     }
   }
 
-  const head = await runCommandFile("git", ["-C", rootDir, "rev-parse", "--verify", "HEAD"], rootDir, 30_000);
-  const diffArgs = head.exitCode === 0
-    ? ["-C", rootDir, "diff", "--name-only", "-z", "HEAD", "--", ".", ":!.wildarrange"]
-    : ["-C", rootDir, "diff", "--name-only", "-z", "--cached", "--", ".", ":!.wildarrange"];
-  const diff = await runCommandFile("git", diffArgs, rootDir, 30_000);
+  const unstaged = await runCommandFile("git", ["-C", rootDir, "diff", "--name-only", "-z", "--", ".", ":!.wildarrange"], rootDir, 30_000);
+  const staged = await runCommandFile("git", ["-C", rootDir, "diff", "--name-only", "-z", "--cached", "--", ".", ":!.wildarrange"], rootDir, 30_000);
   const untracked = await runCommandFile("git", ["-C", rootDir, "ls-files", "--others", "--exclude-standard", "-z", "--", ".", ":!.wildarrange"], rootDir, 30_000);
-  if (diff.exitCode !== 0 || untracked.exitCode !== 0) {
+  if (staged.exitCode !== 0 || unstaged.exitCode !== 0 || untracked.exitCode !== 0) {
     return {
       available: false,
-      reason: [diff.stderr, untracked.stderr].filter(Boolean).join("\n") || "git changed path collection failed",
+      reason: [staged.stderr, unstaged.stderr, untracked.stderr].filter(Boolean).join("\n") || "git changed path collection failed",
       paths: [],
     };
   }
 
-  const paths = [...new Set([...splitPathLines(diff.stdout), ...splitPathLines(untracked.stdout)])].sort();
+  const paths = [...new Set([
+    ...splitNullPaths(staged.stdout),
+    ...splitNullPaths(unstaged.stdout),
+    ...splitNullPaths(untracked.stdout),
+  ])].sort();
   const fingerprints = {};
   for (const filePath of paths) {
-    fingerprints[normalizeRelativePath(filePath)] = await fingerprintWorkspacePath(rootDir, filePath);
+    const [workspace, index] = await Promise.all([
+      fingerprintWorkspacePath(rootDir, filePath),
+      fingerprintIndexPath(rootDir, filePath),
+    ]);
+    fingerprints[normalizeRelativePath(filePath)] = `index:${index}|worktree:${workspace}`;
   }
   return {
     available: true,
@@ -54,6 +59,15 @@ export async function collectGitChangedPaths(rootDir) {
     paths,
     fingerprints,
   };
+}
+
+async function fingerprintIndexPath(rootDir, filePath) {
+  const result = await runCommandFile("git", ["-C", rootDir, "ls-files", "-s", "-z", "--", filePath], rootDir, 30_000);
+  if (result.exitCode !== 0) throw new Error(result.stderr || `cannot fingerprint index path ${filePath}`);
+  const record = String(result.stdout || "").split("\0").find(Boolean);
+  if (!record) return "absent";
+  const metadata = record.slice(0, record.indexOf("\t"));
+  return metadata || "absent";
 }
 
 async function fingerprintWorkspacePath(rootDir, filePath) {
@@ -122,6 +136,6 @@ async function collectFileManifest(rootDir, relativeDir = "") {
   return manifest;
 }
 
-function splitPathLines(value) {
-  return value.split(/\0|\r?\n/).map((line) => line.trim()).filter(Boolean);
+function splitNullPaths(value) {
+  return String(value || "").split("\0").filter((entry) => entry.length > 0);
 }

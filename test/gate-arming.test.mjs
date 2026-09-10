@@ -92,6 +92,31 @@ test("acceptance proof fails when every verify command is trivial", async () => 
   });
   assert.equal(reviewedProof.checks.find((check) => check.name === "review_not_tautological").status, "pass");
   assert.equal(reviewedProof.pass, true);
+
+  const commentReviewedProof = buildAcceptanceProof("plan-1", realTask, {
+    ...passingEvidence,
+    verifyResult: { kind: "verifier", pass: true, results: [{ command: "node --test", exitCode: 0 }] },
+    reviewResult: {
+      kind: "review_gate",
+      pass: true,
+      lanes: [{ name: "comment_checker", status: "pass" }],
+      qualityResults: { commentResult: { status: "pass", pass: true, checkedPaths: ["src/app.js"], findings: [] } },
+    },
+  }, { qualityGates: { commentChecker: { enabled: true, blockOnFindings: true } } });
+  assert.equal(commentReviewedProof.checks.find((check) => check.name === "review_not_tautological").status, "pass");
+
+  const warningOnlyCommentProof = buildAcceptanceProof("plan-1", realTask, {
+    ...passingEvidence,
+    verifyResult: { kind: "verifier", pass: true, results: [{ command: "node --test", exitCode: 0 }] },
+    reviewResult: {
+      kind: "review_gate",
+      pass: true,
+      lanes: [{ name: "comment_checker", status: "pass" }],
+      qualityResults: { commentResult: { status: "pass", pass: true, checkedPaths: ["src/app.js"], findings: [] } },
+      llmReviews: [{ status: "skipped", pass: true, reason: "provider unavailable" }],
+    },
+  }, { review: { llm: { enabled: true } }, qualityGates: { commentChecker: { enabled: true, blockOnFindings: false } } });
+  assert.equal(warningOnlyCommentProof.checks.find((check) => check.name === "review_not_tautological").status, "fail");
 });
 
 test("status report carries the persistent unarmed-gates yellow lamp", async () => {

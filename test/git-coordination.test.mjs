@@ -524,7 +524,7 @@ test("adversarial round 2 integration: admission rolls back before checkpoint wh
         subject: "Race remote main",
         writable_paths: ["src/**"],
         verify_commands: [`node ${JSON.stringify(advanceScript)}`],
-        review_commands: ["node -e \"const out=require('node:child_process').execFileSync('git',['diff','--name-only'],{encoding:'utf8'});if(!out.split(/\\r?\\n/).some(p=>p.startsWith('src/')))process.exit(1)\""],
+        review_commands: ["node -e \"require('node:assert/strict').equal(require('node:fs').readFileSync('src/admit.txt','utf8'),'ok\\n')\""],
       }],
     }, null, 2), "utf8");
     await importPlan(cloneA, planPath);

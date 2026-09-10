@@ -43,7 +43,7 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
   const verifyCommands = Array.isArray(task.verify_commands) ? task.verify_commands : [];
   const reviewLanes = Array.isArray(reviewResult?.lanes) ? reviewResult.lanes : [];
   const deliveryBaseline = summarizeDeliveryBaseline(evidence.deliveryBaseline || evidence.integrationCommit);
-  const executedReview = hasExecutedIndependentReview(reviewResult);
+  const executedReview = hasExecutedIndependentReview(reviewResult, config);
 
   const checks = [
     proofCheck("worker_result", workerResult?.kind === "worker" && workerResult.exitCode === 0, {
@@ -125,7 +125,7 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
   };
 }
 
-function hasExecutedIndependentReview(reviewResult) {
+function hasExecutedIndependentReview(reviewResult, config = null) {
   if (!reviewResult || reviewResult.kind !== "review_gate") return { pass: false, sources: [], reasons: ["missing review result"] };
   const sources = [];
   const reasons = [];
@@ -142,6 +142,9 @@ function hasExecutedIndependentReview(reviewResult) {
   }
   if (quality.hashlineResult?.status === "pass" && quality.hashlineResult?.pass === true
     && (quality.hashlineResult.anchors || []).length > 0) sources.push("quality:hashlineResult");
+  if (config?.qualityGates?.commentChecker?.blockOnFindings === true
+    && quality.commentResult?.status === "pass" && quality.commentResult?.pass === true
+    && (quality.commentResult.checkedPaths || []).length > 0) sources.push("quality:commentResult");
   if ((reviewResult.llmReviews || []).some((result) => result?.status === "pass" && result?.pass === true)) sources.push("llm_review");
   if (sources.length === 0 && reasons.length === 0) reasons.push("all independent lanes were skipped or unavailable");
   return { pass: sources.length > 0, sources, reasons };

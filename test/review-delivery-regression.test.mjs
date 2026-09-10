@@ -144,6 +144,18 @@ test("linear no-change delivery binds the dependency SHA without creating an emp
 
 test("Git change collection detects staged and same-path content changes", async () => {
   await withGitFixture(async (root) => {
+    await writeFile(path.join(root, "index-only.txt"), "base");
+    assert.equal((await runCommand("git add index-only.txt", root)).exitCode, 0);
+    assert.equal((await runCommand("git commit -m index-baseline", root)).exitCode, 0);
+    const clean = await collectGitChangedPaths(root);
+    await writeFile(path.join(root, "index-only.txt"), "staged");
+    assert.equal((await runCommand("git add index-only.txt", root)).exitCode, 0);
+    await writeFile(path.join(root, "index-only.txt"), "base");
+    const indexOnly = await collectGitChangedPaths(root);
+    assert.deepEqual(indexOnly.paths, ["index-only.txt"]);
+    assert.deepEqual(changedPathsIntroducedByTask(clean, indexOnly), ["index-only.txt"], "index blob changes remain visible when worktree bytes equal HEAD");
+
+    assert.equal((await runCommandFile("git", ["restore", "--staged", "index-only.txt"], root)).exitCode, 0);
     await writeFile(path.join(root, "outside.txt"), "first");
     const before = await collectGitChangedPaths(root);
     await writeFile(path.join(root, "outside.txt"), "second");
@@ -151,6 +163,10 @@ test("Git change collection detects staged and same-path content changes", async
     assert.deepEqual(changedPathsIntroducedByTask(before, after), ["outside.txt"]);
     await runCommand("git add outside.txt", root);
     assert.deepEqual((await collectGitChangedPaths(root)).paths, ["outside.txt"]);
+
+    const quotedPath = " 中文 spaced name.txt";
+    await writeFile(path.join(root, quotedPath), "path evidence");
+    assert.ok((await collectGitChangedPaths(root)).paths.includes(quotedPath), "NUL-delimited Git output preserves Unicode and leading spaces in paths");
   });
 });
 

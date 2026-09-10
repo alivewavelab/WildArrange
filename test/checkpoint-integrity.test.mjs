@@ -10,6 +10,7 @@
  */
 import assert from "node:assert/strict";
 import { chmod, cp, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
@@ -25,7 +26,7 @@ import { appendLedger } from "../src/infra/ledger.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 
 async function withTempDir(fn) {
-  const baseDir = path.join(process.cwd(), ".tmp");
+  const baseDir = path.join(os.tmpdir(), "wildarrange-tests");
   await mkdir(baseDir, { recursive: true });
   const dir = await mkdtemp(path.join(baseDir, "wildarrange-ckpt-"));
   try {
@@ -35,6 +36,15 @@ async function withTempDir(fn) {
     // so cleanup can delete the tree even when an assertion failed mid-test.
     await runCommand(`chmod -R u+w ${JSON.stringify(dir)}`, dir, 30_000).catch(() => {});
     await rm(dir, { recursive: true, force: true });
+  }
+}
+
+async function initGitBaseline(dir) {
+  assert.equal((await runCommand("git init", dir)).exitCode, 0);
+  await writeFile(path.join(dir, ".gitignore"), ".wildarrange/\n", "utf8");
+  for (const command of ["git config user.email test@example.com", "git config user.name WildArrange-Test", "git add .gitignore", "git commit -m initial"]) {
+    const result = await runCommand(command, dir);
+    assert.equal(result.exitCode, 0, result.stderr);
   }
 }
 
@@ -49,6 +59,10 @@ async function blockFileWrite(filePath) {
 function nodeEval(source) {
   const encoded = Buffer.from(source.replace(/\s*\n\s*/g, " ").trim(), "utf8").toString("base64");
   return `node -e "eval(Buffer.from('${encoded}','base64').toString())"`;
+}
+
+function realReviewCommand() {
+  return nodeEval("const fs=require('fs');if(!fs.existsSync('src')||fs.readdirSync('src').length===0)process.exit(1)");
 }
 
 async function sabotageCheckpoints(dir) {
@@ -70,9 +84,9 @@ async function importPassingPlan(dir, planFileName = "ckpt-plan.json") {
       {
         id: "T001",
         subject: "Task whose gates all pass",
-        worker_command: nodeEval("process.exit(0)"),
-        verify_commands: [nodeEval("if(!process.version)process.exit(1)")],
-        review_commands: ["node --version"],
+        worker_command: nodeEval("const fs=require('fs');fs.mkdirSync('src',{recursive:true});fs.writeFileSync('src/result.txt','ok')"),
+        verify_commands: [nodeEval("require('node:assert/strict').equal(require('node:fs').readFileSync('src/result.txt','utf8'),'ok')")],
+        review_commands: [realReviewCommand()],
         writable_paths: ["src/**"],
       },
     ],
@@ -83,10 +97,12 @@ async function importPassingPlan(dir, planFileName = "ckpt-plan.json") {
 test("adversarial: delivery pipeline reports checkpoint_failed instead of completed when the checkpoint write fails", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    await initGitBaseline(dir);
     const plan = await importPassingPlan(dir);
     const taskState = await loadTaskState(dir);
     const task = taskState.tasks.find((candidate) => candidate.id === "T001");
+    await mkdir(path.join(dir, "src"), { recursive: true });
+    await writeFile(path.join(dir, "src", "result.txt"), "ok", "utf8");
 
     await sabotageCheckpoints(dir);
     const result = await runDeliveryPipeline(dir, plan.id, task, {
@@ -109,10 +125,12 @@ test("adversarial: delivery pipeline reports checkpoint_failed instead of comple
 test("adversarial: a throwing acceptance-proof capability blocks the pipeline and checkpoint is never attempted", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    await initGitBaseline(dir);
     const plan = await importPassingPlan(dir);
     const taskState = await loadTaskState(dir);
     const task = taskState.tasks.find((candidate) => candidate.id === "T001");
+    await mkdir(path.join(dir, "src"), { recursive: true });
+    await writeFile(path.join(dir, "src", "result.txt"), "ok", "utf8");
 
     // Sabotage the acceptance report directory: writeAcceptanceProof throws,
     // the gateway converts it into a fail envelope with null evidence.
@@ -135,20 +153,21 @@ test("adversarial: a throwing acceptance-proof capability blocks the pipeline an
   });
 });
 
-test("adversarial: linear runNextTask puts the task back to pending when the checkpoint write fails, and completes after repair", async () => {
+test("adversarial: linear runNextTask preserves the committed delivery when checkpoint write fails, and completes after repair", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    await initGitBaseline(dir);
     await importPassingPlan(dir);
 
     await sabotageCheckpoints(dir);
     const blocked = await runNextTask(dir);
-    assert.equal(blocked.status, "retry");
-    assert.equal(blocked.task.status, "pending");
+    assert.equal(blocked.status, "recovery_required");
+    assert.equal(blocked.task.status, "verifying");
     assert.equal(blocked.task.last_failure.reason, "checkpoint_failed");
 
     const stateAfterFailure = await loadTaskState(dir);
-    assert.equal(stateAfterFailure.tasks[0].status, "pending", "task must NOT be completed without a durable checkpoint");
+    assert.equal(stateAfterFailure.tasks[0].status, "verifying", "committed delivery must stay owned until checkpoint recovery");
+    const deliverySha = stateAfterFailure.tasks[0].delivery.commitSha || stateAfterFailure.tasks[0].delivery.integrationSha;
     const ledger = await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8");
     assert.match(ledger, /checkpoint_write_failed/);
     assert.ok(!/"type":"task_verified"/.test(ledger), "task_verified must not be recorded when checkpoint failed");
@@ -158,6 +177,7 @@ test("adversarial: linear runNextTask puts the task back to pending when the che
     assert.equal(completed.status, "completed");
     const stateAfterRepair = await loadTaskState(dir);
     assert.equal(stateAfterRepair.tasks[0].status, "completed");
+    assert.equal(stateAfterRepair.tasks[0].delivery.commitSha || stateAfterRepair.tasks[0].delivery.integrationSha, deliverySha);
     const checkpoint = await readJson(resolveWildArrangePath(dir, "checkpoints", stateAfterRepair.planId, "T001.json"));
     assert.equal(checkpoint.taskId, "T001");
   });
@@ -166,7 +186,7 @@ test("adversarial: linear runNextTask puts the task back to pending when the che
 test("adversarial: single-step node checkpoint refuses to complete the task when the checkpoint write fails", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    await initGitBaseline(dir);
     await importPassingPlan(dir);
 
     await runWorkflowNode(dir, "execute", { taskId: "T001" });
@@ -176,18 +196,15 @@ test("adversarial: single-step node checkpoint refuses to complete the task when
 
     await sabotageCheckpoints(dir);
     const blocked = await runWorkflowNode(dir, "checkpoint", { taskId: "T001" });
-    assert.equal(blocked.status, "retry");
-    assert.equal(blocked.task.status, "pending");
+    assert.equal(blocked.status, "recovery_required");
+    assert.equal(blocked.task.status, "verifying");
     assert.equal(blocked.task.last_failure.reason, "checkpoint_failed");
     const stateAfterFailure = await loadTaskState(dir);
-    assert.equal(stateAfterFailure.tasks[0].status, "pending", "node checkpoint must NOT persist completed without a durable checkpoint");
+    assert.equal(stateAfterFailure.tasks[0].status, "verifying", "node checkpoint must retain committed delivery ownership without a durable checkpoint");
 
-    // After repair the task re-runs its gates and can then complete normally.
+    // After repair checkpoint revalidates the same committed delivery without
+    // executing the worker again.
     await repairCheckpoints(dir);
-    await runWorkflowNode(dir, "execute", { taskId: "T001" });
-    await runWorkflowNode(dir, "verify", { taskId: "T001" });
-    await runWorkflowNode(dir, "scope", { taskId: "T001" });
-    await runWorkflowNode(dir, "review", { taskId: "T001" });
     const completed = await runWorkflowNode(dir, "checkpoint", { taskId: "T001" });
     assert.equal(completed.status, "completed");
     const stateAfterRepair = await loadTaskState(dir);
@@ -205,7 +222,7 @@ test("adversarial: a new execute round cannot complete against the previous roun
   // must not certify round 2's artifact.
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    await initGitBaseline(dir);
     const ctrlPath = resolveWildArrangePath(dir, "artifacts", "ctrl.txt");
     await writeFile(ctrlPath, "ok\n");
     const planPath = resolveWildArrangePath(dir, "artifacts", "stale-evidence-plan.json");
@@ -215,9 +232,9 @@ test("adversarial: a new execute round cannot complete against the previous roun
         {
           id: "T001",
           subject: "Artifact must match ctrl content",
-          worker_command: nodeEval("const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/out.txt', fs.readFileSync('.wildarrange/artifacts/ctrl.txt','utf8'));"),
+          worker_command: nodeEval(`const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/out.txt', fs.readFileSync(${JSON.stringify(ctrlPath)},'utf8'));`),
           verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/out.txt','utf8').trim()!=='ok') process.exit(1);")],
-          review_commands: ["node --version"],
+          review_commands: [realReviewCommand()],
           writable_paths: ["src/**"],
         },
       ],
@@ -231,21 +248,19 @@ test("adversarial: a new execute round cannot complete against the previous roun
     await runWorkflowNode(dir, "review", { taskId: "T001" });
     await sabotageCheckpoints(dir);
     const firstCheckpoint = await runWorkflowNode(dir, "checkpoint", { taskId: "T001" });
-    assert.equal(firstCheckpoint.status, "retry");
+    assert.equal(firstCheckpoint.status, "recovery_required");
     // Repair the directory so a completion attempt would now succeed on disk:
     // any block from here on comes from evidence freshness, not the sabotage.
     await repairCheckpoints(dir);
 
-    // Round 2: worker produces a bad artifact, then checkpoint is called
-    // directly without re-running verify/scope/review.
+    // A committed delivery awaiting checkpoint recovery cannot start another
+    // worker round. This prevents stale evidence from certifying new bytes.
     await writeFile(ctrlPath, "bad\n");
-    await runWorkflowNode(dir, "execute", { taskId: "T001" });
-    const secondCheckpoint = await runWorkflowNode(dir, "checkpoint", { taskId: "T001" });
-    assert.notEqual(secondCheckpoint.status, "completed", "round 2 must not complete on round 1's gate evidence");
+    await assert.rejects(() => runWorkflowNode(dir, "execute", { taskId: "T001" }), /status verifying cannot run this node/);
 
     const persisted = await loadTaskState(dir);
     assert.notEqual(persisted.tasks[0].status, "completed");
-    assert.equal((await readFile(path.join(dir, "src", "out.txt"), "utf8")).trim(), "bad", "sanity: round 2 really produced the bad artifact");
+    assert.equal((await readFile(path.join(persisted.tasks[0].delivery_workspace.workDir, "src", "out.txt"), "utf8")).trim(), "ok");
     await assert.rejects(
       () => readJson(resolveWildArrangePath(dir, "checkpoints", persisted.planId, "T001.json")),
       undefined,
@@ -299,7 +314,7 @@ test("adversarial: node checkpoint does not persist completed when the completio
   // written first; canonical tasks.json stays the commit point.
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    await initGitBaseline(dir);
     await importPassingPlan(dir);
 
     await runWorkflowNode(dir, "execute", { taskId: "T001" });
@@ -337,7 +352,7 @@ test("adversarial: parallel admission never reaches completed/released when the 
           id: "T001",
           subject: "Admit child artifact",
           verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/parallel.txt','utf8').trim()!=='ok') process.exit(1);")],
-          review_commands: ["node --version"],
+          review_commands: [realReviewCommand()],
           writable_paths: ["src/**"],
         },
       ],
@@ -380,7 +395,7 @@ test("adversarial: parallel admission never reaches completed/released when the 
 test("adversarial: linear runNextTask never yields completed during a ledger outage", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    await initGitBaseline(dir);
     await importPassingPlan(dir);
 
     await sabotageLedger(dir);
@@ -419,7 +434,7 @@ test("adversarial: parallel admission does not release the child result when the
           id: "T001",
           subject: "Admit child artifact",
           verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/parallel.txt','utf8').trim()!=='ok') process.exit(1);")],
-          review_commands: ["node --version"],
+          review_commands: [realReviewCommand()],
           writable_paths: ["src/**"],
         },
       ],
@@ -456,7 +471,7 @@ test("adversarial: an interrupted completion transaction is visible to doctor an
   // report "blocked" forever and doctor was blind to the divergence.
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    await initGitBaseline(dir);
     await importPassingPlan(dir);
 
     await runWorkflowNode(dir, "execute", { taskId: "T001" });
@@ -518,7 +533,7 @@ test("adversarial: an interrupted verifying task with a bad artifact is sent bac
   // to go back to pending (rejected), never straight to completed.
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    await initGitBaseline(dir);
     await importPassingPlan(dir);
 
     // Only execute ran; verify/scope/review never happened this round.
@@ -551,7 +566,7 @@ test("adversarial: parallel admission resumes idempotently after a lifecycle wri
           id: "T001",
           subject: "Admit child artifact",
           verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/parallel.txt','utf8').trim()!=='ok') process.exit(1);")],
-          review_commands: ["node --version"],
+          review_commands: [realReviewCommand()],
           writable_paths: ["src/**"],
         },
       ],
@@ -610,7 +625,7 @@ test("adversarial: a mid-apply failure rolls the workspace back and releases the
           id: "T001",
           subject: "Two files, second one fails to write",
           verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/a.txt','utf8').trim()!=='A'||fs.readFileSync('src/sub/b.txt','utf8').trim()!=='B') process.exit(1);")],
-          review_commands: ["node --version"],
+          review_commands: [realReviewCommand()],
           writable_paths: ["src/**"],
         },
       ],
@@ -662,7 +677,6 @@ test("adversarial: a run whose admission failed earlier cannot fake-resume a tas
   // completed ledger event for that exact run.
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    assert.equal((await runCommand("git init", dir)).exitCode, 0);
     const planPath = resolveWildArrangePath(dir, "artifacts", "fake-resume-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Fake resume",
@@ -672,7 +686,7 @@ test("adversarial: a run whose admission failed earlier cannot fake-resume a tas
           subject: "Content must be linear",
           worker_command: nodeEval("const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/out.txt','linear\\n');"),
           verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/out.txt','utf8').trim()!=='linear') process.exit(1);")],
-          review_commands: ["node --version"],
+          review_commands: [realReviewCommand()],
           writable_paths: ["src/**"],
         },
       ],
@@ -690,9 +704,12 @@ test("adversarial: a run whose admission failed earlier cannot fake-resume a tas
     assert.notEqual(failed.status, "completed", "sanity: run R's admission must fail its gates");
 
     // The task is then completed through the linear flow, NOT by run R.
+    await initGitBaseline(dir);
     const completed = await runNextTask(dir);
     assert.equal(completed.status, "completed");
-    assert.equal((await readFile(path.join(dir, "src", "out.txt"), "utf8")).trim(), "linear");
+    const deliveredPath = path.join(completed.task.delivery_workspace.workDir, "src", "out.txt");
+    assert.equal((await readFile(deliveredPath, "utf8")).trim(), "linear");
+    await assert.rejects(() => readFile(path.join(dir, "src", "out.txt"), "utf8"), /ENOENT/);
 
     // A historical completion event without planId must not be transferred
     // to today's Plan, even when runId/taskId happen to match.
@@ -709,7 +726,8 @@ test("adversarial: a run whose admission failed earlier cannot fake-resume a tas
       () => admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" }),
       /already completed/,
     );
-    assert.equal((await readFile(path.join(dir, "src", "out.txt"), "utf8")).trim(), "linear", "the refusal must not touch the workspace");
+    assert.equal((await readFile(deliveredPath, "utf8")).trim(), "linear", "the refusal must not touch the delivery worktree");
+    await assert.rejects(() => readFile(path.join(dir, "src", "out.txt"), "utf8"), /ENOENT/);
     const lifecycle = await readJson(resolveWildArrangePath(dir, "agent-runs", batch.runId, "T001", "result.json"));
     assert.notEqual(lifecycle.lifecycle?.status, "released", "a failed run must never be marked released");
   });
@@ -723,7 +741,7 @@ test("adversarial: a wisdom write failure keeps the completion recoverable inste
   // auto-recovery re-runs the whole completion including the missed writes.
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    await initGitBaseline(dir);
     await importPassingPlan(dir);
 
     await runWorkflowNode(dir, "execute", { taskId: "T001" });
@@ -752,7 +770,7 @@ test("adversarial: a wisdom write failure keeps the completion recoverable inste
 test("adversarial: a post-commit snapshot failure does not un-complete the task but stays visible", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    await initGitBaseline(dir);
     await importPassingPlan(dir);
 
     await runWorkflowNode(dir, "execute", { taskId: "T001" });
@@ -806,7 +824,7 @@ test("adversarial: a run missing from index.json is rediscovered instead of stay
           id: "T001",
           subject: "Admit child artifact",
           verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/parallel.txt','utf8').trim()!=='ok') process.exit(1);")],
-          review_commands: ["node --version"],
+          review_commands: [realReviewCommand()],
           writable_paths: ["src/**"],
         },
       ],
@@ -850,7 +868,7 @@ test("adversarial: two runs admitting the same task concurrently produce exactly
           id: "T001",
           subject: "One task, two claimants",
           verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/one.txt','utf8').trim()!=='one') process.exit(1);")],
-          review_commands: ["node --version"],
+          review_commands: [realReviewCommand()],
           writable_paths: ["src/**"],
         },
       ],
@@ -905,7 +923,7 @@ test("adversarial: duplicate admission calls from one run cannot downgrade a rel
           id: "T001",
           subject: "Duplicate clicks remain idempotent",
           verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/same.txt','utf8').trim()!=='same') process.exit(1);")],
-          review_commands: ["node --version"],
+          review_commands: [realReviewCommand()],
           writable_paths: ["src/**"],
         },
       ],
@@ -948,7 +966,7 @@ test("adversarial: a crash while finalizing keeps the workspace and resumes with
           id: "T001",
           subject: "Artifact must survive a finalize crash",
           verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/artifact.txt','utf8').trim()!=='good') process.exit(1);")],
-          review_commands: ["node --version"],
+          review_commands: [realReviewCommand()],
           writable_paths: ["src/**"],
         },
       ],
@@ -1028,8 +1046,8 @@ test("adversarial: two tasks with overlapping paths admit concurrently without d
     await writeFile(planPath, JSON.stringify({
       title: "Overlapping writable paths",
       tasks: [
-        { id: "T001", subject: "writes alpha", verify_commands: [stableVerify("alpha")], review_commands: ["node --version"], writable_paths: ["src/**"] },
-        { id: "T002", subject: "writes beta", verify_commands: [stableVerify("beta")], review_commands: ["node --version"], writable_paths: ["src/**"] },
+        { id: "T001", subject: "writes alpha", verify_commands: [stableVerify("alpha")], review_commands: [realReviewCommand()], writable_paths: ["src/**"] },
+        { id: "T002", subject: "writes beta", verify_commands: [stableVerify("beta")], review_commands: [realReviewCommand()], writable_paths: ["src/**"] },
       ],
     }, null, 2));
     await importPlan(dir, planPath);
@@ -1057,7 +1075,7 @@ test("adversarial: two tasks with overlapping paths admit concurrently without d
 test("adversarial: a linear run and a parallel admission writing the same file do not interleave", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    await initGitBaseline(dir);
     const stableVerify = (expected) => nodeEval(
       `const fs=require('fs'); const a=fs.readFileSync('src/shared.txt','utf8'); if(a.trim()!=='${expected}') process.exit(1); setTimeout(()=>{ const b=fs.readFileSync('src/shared.txt','utf8'); process.exit(a===b?0:1); }, 400);`,
     );
@@ -1070,10 +1088,10 @@ test("adversarial: a linear run and a parallel admission writing the same file d
           subject: "linear task writes linear",
           worker_command: nodeEval("const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/shared.txt','linear\\n');"),
           verify_commands: [stableVerify("linear")],
-          review_commands: ["node --version"],
+          review_commands: [realReviewCommand()],
           writable_paths: ["src/**"],
         },
-        { id: "T002", subject: "parallel task writes parallel", verify_commands: [stableVerify("parallel")], review_commands: ["node --version"], writable_paths: ["src/**"] },
+        { id: "T002", subject: "parallel task writes parallel", verify_commands: [stableVerify("parallel")], review_commands: [realReviewCommand()], writable_paths: ["src/**"] },
       ],
     }, null, 2));
     await importPlan(dir, planPath);
@@ -1111,7 +1129,7 @@ test("adversarial: a failing admission's rollback can never clobber a successor'
           id: "T001",
           subject: "Content must be good",
           verify_commands: [nodeEval("const fs=require('fs'); const c=fs.readFileSync('src/out.txt','utf8'); if(c.trim()!=='good') process.exit(1); setTimeout(()=>process.exit(0),300);")],
-          review_commands: ["node --version"],
+          review_commands: [realReviewCommand()],
           writable_paths: ["src/**"],
         },
       ],
@@ -1169,7 +1187,7 @@ test("adversarial: an applying-phase crash cannot lose the original file content
           id: "T001",
           subject: "Gates will reject the child content",
           verify_commands: [nodeEval("process.exit(1)")],
-          review_commands: ["node --version"],
+          review_commands: [realReviewCommand()],
           writable_paths: ["src/**"],
         },
       ],
@@ -1234,7 +1252,7 @@ test("adversarial: rollback failure keeps ownership until the same run recovers 
           id: "T001",
           subject: "Reject a new file after replacing it with a non-empty directory",
           verify_commands: [nodeEval("const fs=require('fs'); fs.unlinkSync('src/locked/leak.txt'); fs.mkdirSync('src/locked/leak.txt'); fs.writeFileSync('src/locked/leak.txt/blocker.txt','occupied'); process.exit(1)")],
-          review_commands: ["node --version"],
+          review_commands: [realReviewCommand()],
           writable_paths: ["src/**"],
         },
       ],
@@ -1287,7 +1305,7 @@ test("adversarial: missing rollback authority fails closed and cannot be hijacke
           id: "T001",
           subject: "Never release an unrecoverable workspace",
           verify_commands: [nodeEval("process.exit(1)")],
-          review_commands: ["node --version"],
+          review_commands: [realReviewCommand()],
           writable_paths: ["src/**"],
         },
       ],
@@ -1351,7 +1369,7 @@ test("adversarial: empty and dead-pid lock files do not deadlock the runtime", a
   // locks immediately.
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    await initGitBaseline(dir);
     await importPassingPlan(dir);
     const lockPath = resolveWildArrangePath(dir, "team", "tasks.lock");
 
@@ -1376,7 +1394,6 @@ test("adversarial: parallel admission refuses a task completed by other means BE
   // afterwards, so a doomed admission could still clobber the workspace.
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    assert.equal((await runCommand("git init", dir)).exitCode, 0);
     const planPath = resolveWildArrangePath(dir, "artifacts", "parallel-precheck-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Parallel admission status precheck",
@@ -1386,7 +1403,7 @@ test("adversarial: parallel admission refuses a task completed by other means BE
           subject: "Task completed through the linear flow",
           worker_command: nodeEval("const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/parallel.txt','linear\\n');"),
           verify_commands: [nodeEval("if(!process.version)process.exit(1)")],
-          review_commands: ["node --version"],
+          review_commands: [realReviewCommand()],
           writable_paths: ["src/**"],
         },
       ],
@@ -1400,9 +1417,12 @@ test("adversarial: parallel admission refuses a task completed by other means BE
     const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
 
     // Complete the task through the linear flow, NOT through this admission.
+    await initGitBaseline(dir);
     const completed = await runNextTask(dir);
     assert.equal(completed.status, "completed");
-    assert.equal(await readFile(path.join(dir, "src", "parallel.txt"), "utf8"), "linear\n");
+    const deliveredPath = path.join(completed.task.delivery_workspace.workDir, "src", "parallel.txt");
+    assert.equal(await readFile(deliveredPath, "utf8"), "linear\n");
+    await assert.rejects(() => readFile(path.join(dir, "src", "parallel.txt"), "utf8"), /ENOENT/);
 
     await assert.rejects(
       () => admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" }),
@@ -1410,7 +1430,7 @@ test("adversarial: parallel admission refuses a task completed by other means BE
       "an unrelated completed task must be refused, not resumed",
     );
     assert.equal(
-      await readFile(path.join(dir, "src", "parallel.txt"), "utf8"),
+      await readFile(deliveredPath, "utf8"),
       "linear\n",
       "the refusal must happen before any child file touches the workspace",
     );

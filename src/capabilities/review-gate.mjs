@@ -58,6 +58,9 @@ export async function runReviewGate(rootDir, task, evidence = {}, options = {}) 
   if (standardsRecovery) return recoveryRequiredReview(standardsRecovery, reviewCommandResults, standardsCommandResults, criteria);
 
   const qualityResults = await runQualityGates(executionRoot, task, scopeResult, config);
+  if (qualityResults.commandRecovery) {
+    return recoveryRequiredReview(qualityResults.commandRecovery, reviewCommandResults, standardsCommandResults, criteria, qualityResults);
+  }
 
   const lanes = [
     reviewLane("evidence_integrity", "BaiZe", evidenceIntegrity.pass, {
@@ -211,7 +214,7 @@ function requiresCommandRecovery(result) {
   return result?.recoveryRequired === true || result?.terminationFailed === true;
 }
 
-function recoveryRequiredReview(commandEvidence, reviewCommandResults, standardsCommandResults, criteria) {
+function recoveryRequiredReview(commandEvidence, reviewCommandResults, standardsCommandResults, criteria, qualityResults = null) {
   return {
     kind: "review_gate",
     at: nowIso(),
@@ -221,7 +224,7 @@ function recoveryRequiredReview(commandEvidence, reviewCommandResults, standards
       summary: `command process could not be confirmed stopped${commandEvidence.pid ? ` (pid ${commandEvidence.pid})` : ""}`,
       fixBy: "确认残留进程终止后，用同一 run 恢复复核。",
     })],
-    qualityResults: null,
+    qualityResults,
     llmReviews: [],
     findings: [],
     testingGaps: [],
