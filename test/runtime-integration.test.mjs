@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
@@ -85,13 +86,34 @@ import {
 } from "../src/infra/security.mjs";
 
 async function withTempDir(fn) {
-  const baseDir = path.join(process.cwd(), ".tmp");
+  const baseDir = path.join(os.tmpdir(), "wildarrange-tests");
   await mkdir(baseDir, { recursive: true });
   const dir = await mkdtemp(path.join(baseDir, "wildarrange-linear-"));
   try {
     await fn(dir);
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+}
+
+async function initializeGitFixture(rootDir) {
+  const gitignorePath = path.join(rootDir, ".gitignore");
+  const gitignore = await readFile(gitignorePath, "utf8").catch((error) => {
+    if (error?.code === "ENOENT") return "";
+    throw error;
+  });
+  if (!gitignore.split(/\r?\n/).includes(".wildarrange/")) {
+    await writeFile(gitignorePath, `${gitignore}${gitignore && !gitignore.endsWith("\n") ? "\n" : ""}.wildarrange/\n`, "utf8");
+  }
+  for (const command of [
+    "git init",
+    "git config user.email wildarrange@test.local",
+    "git config user.name wildarrange-test",
+    "git add -A",
+    "git commit --allow-empty -m fixture-baseline --no-gpg-sign",
+  ]) {
+    const result = await runCommand(command, rootDir);
+    assert.equal(result.exitCode, 0, `${command}: ${result.stderr}`);
   }
 }
 
@@ -1221,7 +1243,7 @@ test("parallel admission applies child artifacts only after gates pass", async (
           id: "T001",
           subject: "Admit child artifact",
           verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/parallel.txt','utf8').trim()!=='ok') process.exit(1);")],
-          review_commands: ["node --version"],
+          review_commands: [nodeEval("const fs=require('fs');const value=fs.readFileSync('src/parallel.txt','utf8');if(value.split(/\\r?\\n/).filter(Boolean).length!==1||value.trim()!=='ok')process.exit(1)")],
           writable_paths: ["src/**"],
         },
       ],
@@ -1242,7 +1264,7 @@ test("parallel admission applies child artifacts only after gates pass", async (
       taskId: "T001",
     });
 
-    assert.equal(admitted.status, "completed");
+    assert.equal(admitted.status, "completed", JSON.stringify(admitted, null, 2));
     assert.equal(admitted.acceptanceProof.pass, true);
     assert.deepEqual(admitted.appliedPaths, ["src/parallel.txt"]);
     assert.equal(await readFile(path.join(dir, "src", "parallel.txt"), "utf8"), "ok\n");
@@ -1314,7 +1336,7 @@ test("parallel agents can isolate edits in git worktrees and admit patches", asy
         id: "T001",
         subject: "Admit worktree patch",
         verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/worktree.txt','utf8').trim()!=='ok') process.exit(1);")],
-        review_commands: ["node --version"],
+        review_commands: [nodeEval("const fs=require('fs');const value=fs.readFileSync('src/worktree.txt','utf8');if(value.includes('\\0')||value.trim()!=='ok')process.exit(1)")],
         writable_paths: ["src/**"],
       }],
     }, null, 2));
@@ -1346,7 +1368,7 @@ test("parallel agents can isolate edits in git worktrees and admit patches", asy
       taskId: "T001",
     });
 
-    assert.equal(admitted.status, "completed");
+    assert.equal(admitted.status, "completed", JSON.stringify(admitted, null, 2));
     assert.deepEqual(admitted.appliedPaths, ["src/worktree.txt"]);
     await assert.rejects(readFile(path.join(dir, "src", "worktree.txt"), "utf8"), /ENOENT/);
     assert.equal((await runCommand("git rev-parse HEAD", dir)).stdout.trim(), mainBefore);
@@ -1874,9 +1896,9 @@ test("success criteria evidence is recorded and required by checkpoint", async (
         id: "T001",
         subject: "Require manual criteria",
         writable_paths: ["src/**"],
-        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
-        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
-        review_commands: ["node --version"],
+        worker_command: nodeEval("const fs=require('fs');fs.mkdirSync('src',{recursive:true});fs.writeFileSync('src/manual-criteria.txt','manual proof captured\\n')"),
+        verify_commands: [nodeEval("const fs=require('fs');if(fs.readFileSync('src/manual-criteria.txt','utf8').trim()!=='manual proof captured')process.exit(1)")],
+        review_commands: [nodeEval("const fs=require('fs');const lines=fs.readFileSync('src/manual-criteria.txt','utf8').trim().split(/\\r?\\n/);if(lines.length!==1||!lines[0].startsWith('manual proof'))process.exit(1)")],
         successCriteria: [
           { id: "C001", title: "Manual criterion", status: "pending", expectedEvidence: "manual proof" },
         ],
@@ -1893,7 +1915,7 @@ test("success criteria evidence is recorded and required by checkpoint", async (
     assert.equal(recorded.criterion.status, "pass");
 
     const result = await runNextTask(dir);
-    assert.equal(result.status, "completed");
+    assert.equal(result.status, "completed", JSON.stringify(result, null, 2));
     assert.equal(result.task.successCriteria[0].status, "pass");
   });
 });
@@ -1927,7 +1949,7 @@ test("unbound success criteria are not auto-passed by verifier", async () => {
 test("success criteria can be auto-passed only with explicit verifier command refs", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const verifyCommand = "node -e \"if(!process.version)process.exit(1)\"";
+    const verifyCommand = nodeEval("const fs=require('fs');if(fs.readFileSync('src/bound-criteria.txt','utf8')!=='bound criterion')process.exit(1)");
     const planPath = path.join(dir, "criteria-bound-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Bound criteria evidence",
@@ -1935,9 +1957,9 @@ test("success criteria can be auto-passed only with explicit verifier command re
         id: "T001",
         subject: "Auto-pass bound criterion",
         writable_paths: ["src/**"],
-        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+        worker_command: nodeEval("const fs=require('fs');fs.mkdirSync('src',{recursive:true});fs.writeFileSync('src/bound-criteria.txt','bound criterion')"),
         verify_commands: [verifyCommand],
-        review_commands: ["node --version"],
+        review_commands: [nodeEval("const fs=require('fs');const stat=fs.statSync('src/bound-criteria.txt');if(!stat.isFile()||stat.size!==15)process.exit(1)")],
         successCriteria: [
           { id: "C001", title: "Bound criterion", status: "pending", verifierCommandRefs: [0] },
         ],
@@ -2326,7 +2348,7 @@ test("LLM review gate uses OpenAI-compatible provider when configured", async ()
           writable_paths: [".wildarrange/artifacts/llm.txt"],
           worker_command: "node -e \"const fs=require('fs'); fs.writeFileSync('.wildarrange/artifacts/llm.txt','ok')\"",
           verify_commands: ["node -e \"const fs=require('fs'); if(fs.readFileSync('.wildarrange/artifacts/llm.txt','utf8')!=='ok') process.exit(1)\""],
-          review_commands: ["node --version"],
+          review_commands: [nodeEval("const fs=require('fs');const stat=fs.statSync('.wildarrange/artifacts/llm.txt');if(!stat.isFile()||stat.size!==2)process.exit(1)")],
         }],
       }));
       const plan = await importPlan(dir, planPath);
@@ -2518,7 +2540,7 @@ test("simulation greenfield project runs from product planning to completed web 
               if (!design.includes("empty state") || !design.includes("error feedback")) process.exit(1);
             `),
           ],
-          review_commands: ["node --version"],
+          review_commands: [nodeEval("const fs=require('fs');const brief=fs.readFileSync('doc/product/reminders/brief.md','utf8');const tasks=fs.readFileSync('doc/plans/reminders/tasks.md','utf8');if(!brief.includes('MUST show an empty state')||!tasks.includes('T002 implements'))process.exit(1)")],
         },
         {
           id: "T002",
@@ -2552,7 +2574,7 @@ test("simulation greenfield project runs from product planning to completed web 
             ].join("\\n"));
           `),
           verify_commands: ["npm test"],
-          review_commands: ["node --version"],
+          review_commands: [nodeEval("const fs=require('fs');const html=fs.readFileSync('index.html','utf8');const app=fs.readFileSync('src/app.js','utf8');if(!html.includes('id=\\\"empty\\\"')||!app.includes('module.exports = { addReminder }'))process.exit(1)")],
         },
         {
           id: "T003",
@@ -2581,7 +2603,7 @@ test("simulation greenfield project runs from product planning to completed web 
               if (report.includes("FAIL") || !report.includes("PASS empty state")) process.exit(1);
             `),
           ],
-          review_commands: ["node --version"],
+          review_commands: [nodeEval("const fs=require('fs');const lines=fs.readFileSync('.wildarrange/artifacts/reminders-qa.md','utf8').split(/\\r?\\n/);if(lines.filter((line)=>line.startsWith('PASS ')).length!==3||lines.some((line)=>line.startsWith('FAIL ')))process.exit(1)")],
         },
         {
           id: "T004",
@@ -2605,7 +2627,7 @@ test("simulation greenfield project runs from product planning to completed web 
               if (!summary.includes("Brief") || !summary.includes("QA report")) process.exit(1);
             `),
           ],
-          review_commands: ["node --version"],
+          review_commands: [nodeEval("const fs=require('fs');const summary=fs.readFileSync('doc/reports/reminders-summary.md','utf8');if(!summary.includes('No direct coding')||!fs.existsSync('.wildarrange/artifacts/reminders-qa.md'))process.exit(1)")],
         },
       ],
     }, null, 2));
@@ -2635,8 +2657,7 @@ test("simulation existing project handles large feature addition through plannin
     await writeFile(path.join(dir, "AGENTS.md"), "# Existing Project Rules\n\nLarge features require scope and regression evidence.\n");
     await writeFile(path.join(dir, "src", "app.cjs"), "function listItems(items) { return items; }\nmodule.exports = { listItems };\n");
     await writeFile(path.join(dir, "test", "app.test.cjs"), "const { listItems } = require('../src/app.cjs');\nif (listItems([1]).length !== 1) process.exit(1);\n");
-    assert.equal((await runCommand("git init", dir)).exitCode, 0);
-    assert.equal((await runCommand("git add AGENTS.md src/app.cjs test/app.test.cjs", dir)).exitCode, 0);
+    await initializeGitFixture(dir);
     await initRuntime(dir);
 
     const route = await routeRequest(dir, {
@@ -2674,7 +2695,7 @@ test("simulation existing project handles large feature addition through plannin
               if (!plan.includes("OUT: sharing permissions") || !plan.includes("regression test")) process.exit(1);
             `),
           ],
-          review_commands: ["node --version"],
+          review_commands: [nodeEval("const fs=require('fs');const plan=fs.readFileSync('doc/plans/reminder-groups/tasks.md','utf8');if(!plan.includes('IN: create group')||!plan.includes('OUT: sharing permissions'))process.exit(1)")],
         },
         {
           id: "T002",
@@ -2705,7 +2726,7 @@ test("simulation existing project handles large feature addition through plannin
             ].join("\\n"));
           `),
           verify_commands: ["node test/app.test.cjs"],
-          review_commands: ["node --version"],
+          review_commands: [nodeEval("const fs=require('fs');const source=fs.readFileSync('src/app.cjs','utf8');const tests=fs.readFileSync('test/app.test.cjs','utf8');if(!source.includes('function groupReminder')||!tests.includes('listItems'))process.exit(1)")],
         },
         {
           id: "T003",
@@ -2732,7 +2753,7 @@ test("simulation existing project handles large feature addition through plannin
               if (report.includes("FAIL") || !report.includes("PASS existing behavior")) process.exit(1);
             `),
           ],
-          review_commands: ["node --version"],
+          review_commands: [nodeEval("const fs=require('fs');const report=fs.readFileSync('.wildarrange/artifacts/reminder-groups-qa.md','utf8');if((report.match(/PASS /g)||[]).length!==3||report.includes('FAIL '))process.exit(1)")],
         },
         {
           id: "T004",
@@ -2757,7 +2778,7 @@ test("simulation existing project handles large feature addition through plannin
               if (!summary.includes("regression evidence") || !summary.includes("OUT scope")) process.exit(1);
             `),
           ],
-          review_commands: ["node --version"],
+          review_commands: [nodeEval("const fs=require('fs');const summary=fs.readFileSync('doc/reports/reminder-groups-summary.md','utf8');if(!summary.includes('IN scope')||!summary.includes('OUT scope'))process.exit(1)")],
         },
       ],
     }, null, 2));
@@ -2774,7 +2795,7 @@ test("simulation existing project handles large feature addition through plannin
     await writeWorkflowSummary(dir, { reason: "existing_feature_simulation" });
     const status = await statusReport(dir);
     assert.equal(status.completed, 4);
-    assert.match(await readFile(path.join(dir, "src", "app.cjs"), "utf8"), /groupReminder/);
+    assert.match(await readFile(path.join(implemented.task.delivery_workspace.workDir, "src", "app.cjs"), "utf8"), /groupReminder/);
     assert.match(await readFile(resolveWildArrangePath(dir, "reports", "workflow-summary.md"), "utf8"), /Status: PASS/);
   });
 });
@@ -2791,7 +2812,7 @@ test("linear loop honors blockedBy dependencies in order", async () => {
           subject: "Write first artifact",
           worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('.wildarrange/artifacts',{recursive:true}); fs.writeFileSync('.wildarrange/artifacts/first.txt','first')\"",
           verify_commands: ["node -e \"const fs=require('fs'); if(fs.readFileSync('.wildarrange/artifacts/first.txt','utf8')!=='first') process.exit(1)\""],
-          review_commands: ["node --version"],
+          review_commands: [nodeEval("const fs=require('fs');const stat=fs.statSync('.wildarrange/artifacts/first.txt');if(!stat.isFile()||stat.size!==5)process.exit(1)")],
         },
         {
           id: "T002",
@@ -2799,7 +2820,7 @@ test("linear loop honors blockedBy dependencies in order", async () => {
           blockedBy: ["T001"],
           worker_command: "node -e \"const fs=require('fs'); fs.writeFileSync('.wildarrange/artifacts/second.txt',fs.readFileSync('.wildarrange/artifacts/first.txt','utf8')+'+second')\"",
           verify_commands: ["node -e \"const fs=require('fs'); if(fs.readFileSync('.wildarrange/artifacts/second.txt','utf8')!=='first+second') process.exit(1)\""],
-          review_commands: ["node --version"],
+          review_commands: [nodeEval("const fs=require('fs');const value=fs.readFileSync('.wildarrange/artifacts/second.txt','utf8');if(!value.startsWith('first+')||value.split('+').length!==2)process.exit(1)")],
         },
       ],
     }));
@@ -2827,15 +2848,15 @@ test("team task create appends a routed task and preserves dependency gates", as
     await writeFile(planPath, JSON.stringify({
       title: "Append task",
       defaults: {
-        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
-        review_commands: ["node --version"],
+        verify_commands: [nodeEval("const fs=require('fs');if(!fs.readFileSync('src/task-output.txt','utf8').includes('task'))process.exit(1)")],
+        review_commands: [nodeEval("const fs=require('fs');const value=fs.readFileSync('src/task-output.txt','utf8');if(value.trim().split(/\\s+/).length!==2)process.exit(1)")],
         standards_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         writable_paths: ["src/**"],
       },
       tasks: [{
         id: "T001",
         subject: "First task",
-        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+        worker_command: nodeEval("const fs=require('fs');fs.mkdirSync('src',{recursive:true});fs.writeFileSync('src/task-output.txt','first task')"),
       }],
     }));
     await importPlan(dir, planPath);
@@ -2845,11 +2866,11 @@ test("team task create appends a routed task and preserves dependency gates", as
       subject: "实现追加任务按钮",
       description: "新增一个 UI 按钮任务",
       blockedBy: ["T001"],
-      worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+      worker_command: nodeEval("const fs=require('fs');fs.writeFileSync('src/task-output.txt','second task')"),
     });
     assert.equal(created.task.id, "T002");
     assert.equal(created.task.category, "visual-engineering");
-    assert.deepEqual(created.task.verify_commands, ["node -e \"if(!process.version)process.exit(1)\""]);
+    assert.deepEqual(created.task.verify_commands, [nodeEval("const fs=require('fs');if(!fs.readFileSync('src/task-output.txt','utf8').includes('task'))process.exit(1)")]);
     assert.deepEqual(created.task.standards_commands, ["node -e \"if(!process.version)process.exit(1)\""]);
 
     const listed = await listTeamTasks(dir, { status: "pending" });
@@ -2977,9 +2998,9 @@ test("team task claim respects blockers and does not bypass execution gates", as
         {
           id: "T001",
           subject: "Claimable task",
-          worker_command: "node -e \"if(!process.version)process.exit(1)\"",
-          verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
-          review_commands: ["node --version"],
+          worker_command: nodeEval("const fs=require('fs');fs.mkdirSync('src',{recursive:true});fs.writeFileSync('src/claimed.txt','claimed by owner')"),
+          verify_commands: [nodeEval("const fs=require('fs');if(fs.readFileSync('src/claimed.txt','utf8')!=='claimed by owner')process.exit(1)")],
+          review_commands: [nodeEval("const fs=require('fs');const stat=fs.statSync('src/claimed.txt');if(!stat.isFile()||stat.size!==16)process.exit(1)")],
         },
         {
           id: "T002",
@@ -3064,8 +3085,7 @@ test("verifier failure returns task to pending until max attempts", async () => 
 test("runNextTask fails when automatic scope guard finds out-of-scope worker changes", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const gitInit = await runCommand("git init", dir);
-    assert.equal(gitInit.exitCode, 0);
+    await initializeGitFixture(dir);
 
     const planPath = resolveWildArrangePath(dir, "artifacts", "out-of-scope-plan.json");
     await writeFile(planPath, JSON.stringify({
@@ -3140,8 +3160,7 @@ test("non-git projects use file manifest scope fallback before checkpoint", asyn
 test("accepted change request can explicitly apply scope and reopen retry", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const gitInit = await runCommand("git init", dir);
-    assert.equal(gitInit.exitCode, 0);
+    await initializeGitFixture(dir);
 
     const planPath = resolveWildArrangePath(dir, "artifacts", "accepted-change-plan.json");
     await writeFile(planPath, JSON.stringify({
@@ -3152,7 +3171,7 @@ test("accepted change request can explicitly apply scope and reopen retry", asyn
         writable_paths: ["src/**"],
         worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('docs',{recursive:true}); fs.writeFileSync('docs/leak.md','accepted')\"",
         verify_commands: ["node -e \"const fs=require('fs'); if(fs.readFileSync('docs/leak.md','utf8')!=='accepted') process.exit(1)\""],
-        review_commands: ["node --version"],
+        review_commands: [nodeEval("const fs=require('fs');const stat=fs.statSync('docs/leak.md');if(!stat.isFile()||stat.size!==8)process.exit(1)")],
       }],
     }));
     await importPlan(dir, planPath);
@@ -3327,8 +3346,7 @@ test("scope guard checks git changed paths against task writable paths", async (
     }));
     await importPlan(dir, planPath);
 
-    const gitInit = await runCommand("git init", dir);
-    assert.equal(gitInit.exitCode, 0);
+    await initializeGitFixture(dir);
 
     await mkdir(path.join(dir, "src"), { recursive: true });
     await writeFile(path.join(dir, "src", "ok.js"), "export const ok = true;\n");
@@ -3495,8 +3513,7 @@ test("resume writes durable context snapshot and session lineage", async () => {
 test("workflow nodes execute, verify, scope, review, and checkpoint independently", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const gitInit = await runCommand("git init", dir);
-    assert.equal(gitInit.exitCode, 0);
+    await initializeGitFixture(dir);
     const planPath = path.join(dir, "node-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Node workflow",
@@ -3507,7 +3524,7 @@ test("workflow nodes execute, verify, scope, review, and checkpoint independentl
         writable_paths: ["src/**"],
         worker_command: nodeEval("const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/app.js','console.log(\\\"hello\\\")\\n')"),
         verify_commands: [nodeEval("const fs=require('fs'); if(!fs.readFileSync('src/app.js','utf8').includes('hello')) process.exit(1)")],
-        review_commands: ["node --version"],
+        review_commands: [nodeEval("const fs=require('fs');const source=fs.readFileSync('src/app.js','utf8').trim();if(source!=='console.log(\\\"hello\\\")')process.exit(1)")],
       }],
     }));
     await importPlan(dir, planPath);
@@ -3761,8 +3778,7 @@ test("dashboard requires a token for non-loopback hosts and enforces API auth", 
 test("workflow node state updates are serialized under the task lock", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const gitInit = await runCommand("git init", dir);
-    assert.equal(gitInit.exitCode, 0);
+    await initializeGitFixture(dir);
     const planPath = path.join(dir, "locked-node-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Locked node workflow",
@@ -3772,7 +3788,7 @@ test("workflow node state updates are serialized under the task lock", async () 
         writable_paths: ["src/**"],
         worker_command: nodeEval("const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/app.js','console.log(\\\"locked\\\")\\n')"),
         verify_commands: [nodeEval("const fs=require('fs'); if(!fs.readFileSync('src/app.js','utf8').includes('locked')) process.exit(1)")],
-        review_commands: ["node --version"],
+        review_commands: [nodeEval("const fs=require('fs');const source=fs.readFileSync('src/app.js','utf8');if(!source.startsWith('console.log')||!source.includes('locked'))process.exit(1)")],
       }],
     }));
     await importPlan(dir, planPath);
@@ -3844,7 +3860,7 @@ test("acceptance proof rejects no-op tasks with trivial worker and verifier", as
         subject: "看似完成实则什么都没做",
         worker_command: "node -e \"process.exit(0)\"",
         verify_commands: ["node -e \"process.exit(0)\""],
-        review_commands: ["node --version"],
+        review_commands: [nodeEval("const fs=require('fs');const state=JSON.parse(fs.readFileSync('.wildarrange/team/tasks.json','utf8'));const task=state.tasks.find((entry)=>entry.id==='T001');if(fs.existsSync('src')||!task||!task.worker_command.includes('process.exit(0)'))process.exit(1)")],
       }],
     }, null, 2));
     await importPlan(dir, planPath);
@@ -3879,7 +3895,7 @@ test("worker execution records a pre-execute workspace snapshot in a git repo", 
         writable_paths: [".wildarrange/artifacts/**", "src/**"],
         worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/out.txt','snapshot')\"",
         verify_commands: ["node -e \"const fs=require('fs'); process.exit(fs.readFileSync('src/out.txt','utf8')==='snapshot'?0:1)\""],
-        review_commands: ["node --version"],
+        review_commands: [nodeEval("const fs=require('fs');const stat=fs.statSync('src/out.txt');if(!stat.isFile()||stat.size!==8)process.exit(1)")],
       }],
     }, null, 2));
     await importPlan(dir, planPath);
@@ -4309,8 +4325,8 @@ test("adversarial round 2: completion forgery attempts are caught by gates and d
     const report = await runDoctor(dir);
     assert.equal(report.ok, false);
     const messages = report.findings.map((finding) => finding.message).join("\n");
-    assert.match(messages, /T002 is completed but has no acceptance proof report/);
-    assert.match(messages, /T002 is completed but the ledger has no completion event/);
+    assert.match(messages, /T002 .*no acceptance proof report/);
+    assert.match(messages, /T002 .*ledger has no completion event/);
   });
 });
 
@@ -4400,7 +4416,7 @@ test("plan approval gate blocks run until developer approves", async () => {
         writable_paths: ["src/**"],
         worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/a.js','X\\n')\"",
         verify_commands: ["node -e \"const fs=require('fs'); if(!fs.readFileSync('src/a.js','utf8').includes('X')) process.exit(1)\""],
-        review_commands: ["node --version"],
+        review_commands: [nodeEval("const fs=require('fs');const lines=fs.readFileSync('src/a.js','utf8').trim().split(/\\r?\\n/);if(lines.length!==1||lines[0]!=='X')process.exit(1)")],
       }],
     }, null, 2));
     await importPlan(dir, planPath);
