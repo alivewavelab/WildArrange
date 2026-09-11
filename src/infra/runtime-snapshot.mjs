@@ -43,6 +43,7 @@ export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
   const status = buildStatusReport(work, taskState, changes, completionIntegrity);
   const ledgerIntegrity = await verifyLedger(rootDir);
   const nextTask = taskState ? findRunnableTaskForContext(taskState.tasks || []) : null;
+  const pendingDecision = (taskState?.tasks || []).find((task) => task.pendingContractChange);
   const context = {
     kind: "wildarrange_context_snapshot",
     version: STATE_VERSION,
@@ -50,7 +51,7 @@ export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
     reason: options.reason || "manual",
     latestSnapshot: latestSnapshot ? { id: latestSnapshot.id, stage: latestSnapshot.stage, at: latestSnapshot.at } : null,
     status,
-    nextAction: nextTask ? `run task ${nextTask.id}: ${nextTask.subject}` : status.failed > 0 ? "inspect failed task" : "no runnable task",
+    nextAction: nextTask ? `run task ${nextTask.id}: ${nextTask.subject}` : pendingDecision ? `await user direction for contract change ${pendingDecision.pendingContractChange}` : status.failed > 0 ? "inspect failed task" : "no runnable task",
     nextTask: nextTask ? summarizeTaskForContext(nextTask) : null,
     activeTasks: (taskState?.tasks || [])
       .filter((task) => task.status === "verifying" || task.status === "in_progress")

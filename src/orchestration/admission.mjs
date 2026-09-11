@@ -421,7 +421,7 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
         rollbackPlan = { mode: "patch", patch: result.result.patch, paths: proposedPaths };
         await persistRollbackPlan(rootDir, options.runId, options.taskId, rollbackPlan);
         await advanceClaimPhaseWithinLock(rootDir, options.taskId, options.runId, "applying", proposedPaths);
-        const alreadyApplied = claim.kind === "reclaimed" && (await patchAlreadyApplied(rootDir, result.result.patch));
+        const alreadyApplied = resumeApplying && (await patchAlreadyApplied(rootDir, result.result.patch));
         if (!alreadyApplied) await applyAgentPatch(rootDir, result.result.patch);
         const actualPaths = await collectActualAdmissionPaths(rootDir, proposedPaths);
         const actualDenied = actualPaths.filter((filePath) => !pathAllowed(filePath, claim.writablePaths));
@@ -433,7 +433,9 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
       }
     } catch (error) {
       const applyError = error instanceof Error ? error : new Error(String(error));
-      const rollback = await rollbackAdmissionChanges(rootDir, rollbackPlan);
+      const rollback = applyError.code === "patch_precheck_failed" && !resumeApplying
+        ? { status: "rolled_back", reason: "patch_not_applied", paths: [] }
+        : await rollbackAdmissionChanges(rootDir, rollbackPlan);
       await recordApplyFailureWithinLock(rootDir, options.taskId, {
         runId: options.runId,
         error: applyError,

@@ -15,6 +15,7 @@ import { runParallelAgents, admitParallelAgentResult } from "../src/orchestratio
 import { runCommandFile } from "../src/infra/command-runner.mjs";
 import { scanContractGovernanceUniverse, persistContractScan } from "../src/infra/contract-governance.mjs";
 import { applyContractCardDecision } from "../src/capabilities/contract-governance.mjs";
+import { continuationDirective } from "../src/ai/context.mjs";
 
 const sourcePath = "src-tauri/src/lib.rs";
 const rust = '#[tauri::command]\nfn greet(name: String) -> String { name }\nfn main(){ tauri::generate_handler![greet]; }\n';
@@ -60,6 +61,10 @@ test("unplanned interface waits across sessions, approval resumes gates, changed
   const hook = await runHostHook(root, { event: "SessionStart", sessionId: "new-session" }, runInjectionHook);
   assert.match(hook.output, new RegExp(request.id));
   assert.match(hook.output, /计划外接口\/数据库变更/);
+  const stop = await continuationDirective(root, { sessionId: "new-session" });
+  assert.equal(stop.shouldContinue, false);
+  assert.equal(stop.reason, "awaiting_user_decision");
+  assert.match(stop.resume.nextAction, new RegExp(request.id));
   await assert.rejects(resolveChangeRequest(root, { id: request.id, decision: "accept", evidence: "reviewed", rationale: "confirmed" }), /contracts resolve/);
   const options = { id: request.id, decision: "accept", expectedFingerprint: request.fingerprint, reason: "用户确认新增问候接口" };
   await assert.rejects(resolveContractChange(root, { ...options, expectedFingerprint: "old" }), /changed/);
@@ -174,3 +179,32 @@ test("an approved remove declaration cannot hide an interface that still exists"
   assert.ok(review.changeRequest);
   assert.equal(await readJson(resolveTaskCheckpointPath(root, state.planId, "T1"), null), null);
 });
+
+for (const scenario of ["same_result", "conflict", "unchanged"]) {
+  test(`patch admission after contract wait preserves independent changes: ${scenario}`, async (t) => {
+    const root = await fixture(t);
+    await writeFile(path.join(root, sourcePath), "// original\n");
+    const patch = `diff --git a/${sourcePath} b/${sourcePath}\n--- a/${sourcePath}\n+++ b/${sourcePath}\n@@ -1 +1,3 @@\n-// original\n${rust.trimEnd().split("\n").map((line) => `+${line}`).join("\n")}\n`;
+    await writeFile(path.join(root, "parallel.cjs"), `require('fs').writeFileSync(process.argv[2], JSON.stringify(${JSON.stringify({ summary: "IPC patch", patch, patchPaths: [sourcePath] })}));`);
+    const batch = await runParallelAgents(root, { taskIds: ["T1"], agent: "ZhuRong", command: `node "${path.join(root, "parallel.cjs")}" {outputJson}` });
+    const options = { runId: batch.runId, taskId: "T1" };
+    const waiting = await admitParallelAgentResult(root, options);
+    assert.equal(waiting.status, "awaiting_user_decision", JSON.stringify(waiting));
+    // Git's Windows autocrlf may normalize a reverse-applied text patch.
+    assert.equal((await readFile(path.join(root, sourcePath), "utf8")).replaceAll("\r\n", "\n"), "// original\n");
+    const independent = scenario === "same_result" ? rust : "// independent\n";
+    if (scenario !== "unchanged") await writeFile(path.join(root, sourcePath), independent);
+    await resolveContractChange(root, { id: waiting.changeRequest.id, decision: "accept", expectedFingerprint: waiting.changeRequest.fingerprint, reason: "用户批准具体接口" });
+    if (scenario === "unchanged") {
+      assert.equal((await admitParallelAgentResult(root, options)).status, "completed");
+      assert.equal((await loadTaskState(root)).tasks[0].status, "completed");
+    } else {
+      await assert.rejects(admitParallelAgentResult(root, options), /patch check failed/);
+      assert.equal(await readFile(path.join(root, sourcePath), "utf8"), independent);
+      const task = (await loadTaskState(root)).tasks[0];
+      assert.equal(task.admission_claim, null);
+      assert.equal(task.last_failure.reason, "admission_apply_failed");
+      assert.equal(await readJson(resolveTaskCheckpointPath(root, "contract-flow", "T1"), null), null);
+    }
+  });
+}

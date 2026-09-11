@@ -149,8 +149,6 @@ export async function resumeReport(rootDir, options = {}) {
   });
   const latestSnapshot = await readJson(resolveWildArrangePath(rootDir, "snapshots", "latest.json"), null);
   const report = await statusReport(rootDir);
-  const taskState = await loadTaskState(rootDir);
-  const nextTask = taskState ? findRunnableTask(taskState.tasks) : null;
   const context = await writeContextSnapshot(rootDir, { reason: "resume", latestSnapshot });
   const resume = {
     latestSnapshot: latestSnapshot ? {
@@ -164,7 +162,7 @@ export async function resumeReport(rootDir, options = {}) {
       sessionIds: lineage.sessionIds,
     },
     contextPath: context.reportMdPath,
-    nextAction: nextTask ? `run task ${nextTask.id}: ${nextTask.subject}` : report.failed > 0 ? "inspect failed task" : "no runnable task",
+    nextAction: context.nextAction,
   };
   await appendLedger(rootDir, { type: "resume_reported", nextAction: resume.nextAction, sessionId: lineage.currentSessionId, contextPath: resume.contextPath });
   return resume;
@@ -177,20 +175,21 @@ export async function continuationDirective(rootDir, options = {}) {
   });
   const taskState = await loadTaskState(rootDir);
   const runnable = taskState ? findRunnableTask(taskState.tasks) : null;
-  const active = (taskState?.tasks || []).find((task) => task.status === "in_progress" || task.status === "verifying");
-  const failed = (taskState?.tasks || []).find((task) => task.status === "failed" || task.status === "review_blocked" || task.status === "needs_user_decision");
+  const active = (taskState?.tasks || []).find((task) => !task.pendingContractChange && (task.status === "in_progress" || task.status === "verifying"));
+  const failed = (taskState?.tasks || []).find((task) => !task.pendingContractChange && (task.status === "failed" || task.status === "review_blocked" || task.status === "needs_user_decision"));
+  const waiting = (taskState?.tasks || []).find((task) => task.pendingContractChange);
   const shouldContinue = Boolean(runnable || active || failed);
   const directive = {
     kind: "wildarrange_continuation_directive",
     version: STATE_VERSION,
     at: nowIso(),
     shouldContinue,
-    reason: runnable ? "runnable_task" : active ? "active_task" : failed ? "blocked_or_failed_task" : "no_unfinished_work",
-    taskId: runnable?.id || active?.id || failed?.id || null,
+    reason: runnable ? "runnable_task" : active ? "active_task" : failed ? "blocked_or_failed_task" : waiting ? "awaiting_user_decision" : "no_unfinished_work",
+    taskId: runnable?.id || active?.id || failed?.id || waiting?.id || null,
     nextCommand: runnable ? "node ./bin/wildarrange.mjs run" : active ? `node ./bin/wildarrange.mjs node verify --task ${active.id}` : failed ? "node ./bin/wildarrange.mjs status" : null,
     message: shouldContinue
       ? `WildArrange 还有未收口工作：${runnable?.id || active?.id || failed?.id}。请继续执行 ${runnable ? "run" : active ? "node loop" : "failure review"}，不要丢失上下文。`
-      : "WildArrange 当前没有可续跑任务。",
+      : waiting ? `等待开发者对 ${waiting.pendingContractChange} 给出方向；不要自动续跑或重复催问。` : "WildArrange 当前没有可续跑任务。",
     resume,
   };
   const jsonPath = resolveWildArrangePath(rootDir, "sessions", "continuation.json");

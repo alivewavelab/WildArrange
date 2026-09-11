@@ -3809,7 +3809,7 @@ const D = {
     { id: "dir", p: "src/interface/", r: "交互区全部实现", io: "宿主请求 → 安全交互" },
     { id: "help", p: "src/interface/cli-help.mjs", r: "CLI 帮助的单一事实源", io: "renderHelp({ all }) → 帮助文本" },
     { id: "dashboard", p: "src/interface/dashboard.mjs", r: "启动本地 Dashboard", io: "startDashboardServer(rootDir, options) → 本地服务" },
-    { id: "dashboard-view", p: "src/interface/dashboard-view.mjs", r: "整页 HTML、CSS 与浏览器逻辑", io: "renderDashboardHtml(rootDir, options) → HTML" },
+    { id: "dashboard-view", p: "src/interface/dashboard-view.mjs", r: "整页 HTML、CSS 与浏览器逻辑", io: "renderDashboardHtml() → HTML" },
     { id: "contract-view", p: "src/interface/contract-view.mjs", r: "契约台账只读总图", io: "generateContractArtifacts(rootDir) → 产物路径" },
     { id: "adapters", p: "src/interface/adapters.mjs", r: "安装宿主适配器与对话计划入口", io: "安装选项 → Hook、快捷命令与计划生成说明" },
     { id: "project-init", p: "src/interface/project-init.mjs", r: "非覆盖式补建项目治理文档", io: "initProjectDocuments(rootDir, options) → 创建与保留清单" }
