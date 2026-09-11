@@ -54,6 +54,7 @@ test("unplanned interface waits across sessions, approval resumes gates, changed
   const result = await runNextTask(root);
   assert.equal(result.status, "awaiting_user_decision", JSON.stringify(result));
   const request = result.changeRequest;
+  assert.equal(request.content.beforeImplementation, false);
   assert.equal((await loadTaskState(root)).tasks[0].status, "needs_user_decision");
   assert.equal(await readJson(resolveTaskCheckpointPath(root, "contract-flow", "T1"), null), null);
   const again = await runNextTask(root);
@@ -105,6 +106,43 @@ test("worker proposes before implementation without a nested task lock", async (
   assert.equal(result.status, "awaiting_user_decision");
   assert.equal(result.changeRequest.content.beforeImplementation, true);
   assert.equal(await readJson(resolveTaskCheckpointPath(root, "contract-flow", "T1"), null), null);
+});
+
+test("a replacement proposal preserves the pre-implementation phase and approval reruns the worker", async (t) => {
+  const root = await fixture(t);
+  const proposal = { reason: "需要问候接口", impact: "新增一个 IPC，无数据库迁移", alternatives: "前端本地生成", recommendation: "批准 IPC", items: [declaration] };
+  await writeFile(path.join(root, "worker.cjs"), `const fs=require('fs'); const count=fs.existsSync('.wildarrange/worker-count')?fs.readFileSync('.wildarrange/worker-count','utf8').length:0; fs.appendFileSync('.wildarrange/worker-count','1'); if(count===0) console.log('WILDARRANGE_CONTRACT_CHANGE='+JSON.stringify(${JSON.stringify(proposal)})); else fs.writeFileSync('${sourcePath}',${JSON.stringify(rust)});`);
+
+  const waiting = await runNextTask(root);
+  assert.equal(waiting.changeRequest.content.beforeImplementation, true);
+  await resolveContractChange(root, { id: waiting.changeRequest.id, decision: "reject", expectedFingerprint: waiting.changeRequest.fingerprint, reason: "请先补充影响说明" });
+
+  await writeFile(path.join(root, "proposal.json"), JSON.stringify({ ...proposal, impact: "已补充：只新增 greet IPC，不改变现有调用" }));
+  const replacement = await proposeContractChange(root, { taskId: "T1", from: "proposal.json" });
+  assert.equal(replacement.request.content.beforeImplementation, true);
+  await resolveContractChange(root, { id: replacement.request.id, decision: "accept", expectedFingerprint: replacement.request.fingerprint, reason: "批准补充后的接口方案" });
+  assert.equal((await loadTaskState(root)).tasks[0].status, "pending");
+
+  const completed = await runNextTask(root);
+  assert.equal(completed.status, "completed", JSON.stringify(completed));
+  assert.equal(await readFile(path.join(root, ".wildarrange/worker-count"), "utf8"), "11");
+  assert.match(await readFile(path.join(root, sourcePath), "utf8"), /fn greet/);
+});
+
+test("changing an after-implementation replacement proposal requires another worker round", async (t) => {
+  const root = await fixture(t);
+  const waiting = await runNextTask(root);
+  assert.equal(waiting.changeRequest.content.beforeImplementation, false);
+  await resolveContractChange(root, { id: waiting.changeRequest.id, decision: "reject", expectedFingerprint: waiting.changeRequest.fingerprint, reason: "请调整接口签名" });
+
+  const changed = { ...declaration, expected: { signatures: ["greet(value: String) -> String"] } };
+  await writeFile(path.join(root, "proposal.json"), JSON.stringify({ reason: "调整接口参数", impact: "调用方改用 value 参数", alternatives: "保留 name 参数", recommendation: "调整签名", items: [changed] }));
+  const replacement = await proposeContractChange(root, { taskId: "T1", from: "proposal.json" });
+  assert.equal(replacement.request.content.beforeImplementation, true);
+  await resolveContractChange(root, { id: replacement.request.id, decision: "accept", expectedFingerprint: replacement.request.fingerprint, reason: "批准调整后的签名" });
+
+  await runNextTask(root);
+  assert.equal(await readFile(path.join(root, ".wildarrange/worker-count"), "utf8"), "11");
 });
 
 test("admission restores shared files while waiting and replays against a fresh preimage after approval", async (t) => {

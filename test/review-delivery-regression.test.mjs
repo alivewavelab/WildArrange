@@ -160,6 +160,34 @@ test("linear no-change delivery binds the dependency SHA without creating an emp
   });
 });
 
+test("local dependent task retry keeps its existing delivery workspace base", async () => {
+  await withGitFixture(async (root) => {
+    const retryWorker = "node -e \"const fs=require('fs');fs.mkdirSync('.wildarrange',{recursive:true});const marker='.wildarrange/retry-worker';fs.writeFileSync('result.txt',fs.existsSync(marker)?'2':'bad');fs.writeFileSync(marker,'1')\"";
+    await writePlan(root, [
+      realTask(),
+      realTask({
+        id: "T002",
+        subject: "retry on dependency delivery",
+        blockedBy: ["T001"],
+        worker_command: retryWorker,
+        verify_commands: ["node -e \"if(require('fs').readFileSync('result.txt','utf8')!=='2')process.exit(1)\""],
+      }),
+    ]);
+
+    const first = await runNextTask(root);
+    assert.equal(first.status, "completed");
+    const dependencySha = first.task.delivery.integrationSha;
+    const failed = await runNextTask(root);
+    assert.equal(failed.status, "retry");
+    assert.equal(failed.task.delivery_workspace.baseSha, dependencySha);
+
+    const completed = await runNextTask(root);
+    assert.equal(completed.status, "completed", JSON.stringify(completed));
+    assert.equal(completed.task.coordination.baseSha, dependencySha);
+    assert.equal(completed.task.coordination.remoteHeadSha, dependencySha);
+  });
+});
+
 test("Git change collection detects staged and same-path content changes", async () => {
   await withGitFixture(async (root) => {
     const indexOnlyPath = "index[1].txt";
