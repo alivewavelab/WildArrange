@@ -731,8 +731,10 @@ async function main() {
       return;
     }
     if (subcommand === "generate") {
+      const startedAt = Date.now();
       const evidence = await generateContractArtifacts(rootDir);
-      const result = { capability: "contract-governance-generate-artifacts", status: "pass", evidence };
+      const result = { capability: "contract-governance-generate-artifacts", status: "pass", evidence,
+        sideEffect: "files_changed", duration_ms: Date.now() - startedAt, cost: null, error: null };
       console.log(JSON.stringify(result, null, 2));
       process.exitCode = result.status === "pass" ? 0 : 2;
       return;

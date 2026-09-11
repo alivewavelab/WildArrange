@@ -43,7 +43,7 @@ export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
   const status = buildStatusReport(work, taskState, changes, completionIntegrity);
   const ledgerIntegrity = await verifyLedger(rootDir);
   const nextTask = taskState ? findRunnableTaskForContext(taskState.tasks || []) : null;
-  const pendingDecision = (taskState?.tasks || []).find((task) => task.pendingContractChange);
+  const nextAction = describeNextAction(taskState?.tasks || [], nextTask);
   const context = {
     kind: "wildarrange_context_snapshot",
     version: STATE_VERSION,
@@ -51,7 +51,8 @@ export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
     reason: options.reason || "manual",
     latestSnapshot: latestSnapshot ? { id: latestSnapshot.id, stage: latestSnapshot.stage, at: latestSnapshot.at } : null,
     status,
-    nextAction: nextTask ? `run task ${nextTask.id}: ${nextTask.subject}` : pendingDecision ? `await user direction for contract change ${pendingDecision.pendingContractChange}` : status.failed > 0 ? "inspect failed task" : "no runnable task",
+    nextAction: nextAction.text,
+    nextActionDetails: nextAction,
     nextTask: nextTask ? summarizeTaskForContext(nextTask) : null,
     activeTasks: (taskState?.tasks || [])
       .filter((task) => task.status === "verifying" || task.status === "in_progress")
@@ -101,6 +102,24 @@ function buildStatusReport(work, taskState, changes, completionIntegrity) {
 function findRunnableTaskForContext(tasks) {
   const completed = new Set(tasks.filter((task) => task.status === "completed").map((task) => task.id));
   return tasks.find((task) => task.status === "pending" && (task.blockedBy || []).every((id) => completed.has(id))) || null;
+}
+
+// A read-only description of current state, shared by resume and Stop output.
+// Executing any suggested command still goes through the runtime's own gates.
+function describeNextAction(tasks, runnable) {
+  const recovery = tasks.find((task) => task.pendingContractChange && task.admission_claim
+    && task.admission_claim.workspaceRestored !== true);
+  const active = tasks.find((task) => !task.pendingContractChange && ["in_progress", "verifying"].includes(task.status));
+  const failed = tasks.find((task) => !task.pendingContractChange && ["failed", "review_blocked", "needs_user_decision"].includes(task.status));
+  const waiting = tasks.find((task) => task.pendingContractChange);
+  const task = recovery || runnable || active || failed || waiting;
+  const reason = recovery ? "admission_recovery" : runnable ? "runnable_task" : active ? "active_task" : failed ? "blocked_or_failed_task" : waiting ? "awaiting_user_decision" : "no_unfinished_work";
+  const command = recovery || (task === active && active?.admission_claim)
+    ? `node ./bin/wildarrange.mjs parallel admit --run ${task.admission_claim.runId} --task ${task.id}`
+    : runnable ? "node ./bin/wildarrange.mjs run" : active ? `node ./bin/wildarrange.mjs node verify --task ${task.id}` : failed ? "node ./bin/wildarrange.mjs status" : null;
+  const text = recovery ? `recover shared workspace: ${command}` : runnable ? `run task ${task.id}: ${task.subject}` : active ? `resume task ${task.id}: ${command}`
+    : failed ? "inspect failed task" : waiting ? `await user direction for contract change ${task.pendingContractChange}` : "no runnable task";
+  return { reason, taskId: task?.id || null, command, text };
 }
 
 async function readChangeRequests(rootDir) {

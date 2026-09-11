@@ -16,6 +16,7 @@ import { runCommandFile } from "../src/infra/command-runner.mjs";
 import { scanContractGovernanceUniverse, persistContractScan } from "../src/infra/contract-governance.mjs";
 import { applyContractCardDecision } from "../src/capabilities/contract-governance.mjs";
 import { continuationDirective } from "../src/ai/context.mjs";
+import { persistTaskState } from "../src/orchestration/task-board.mjs";
 
 const sourcePath = "src-tauri/src/lib.rs";
 const rust = '#[tauri::command]\nfn greet(name: String) -> String { name }\nfn main(){ tauri::generate_handler![greet]; }\n';
@@ -208,3 +209,30 @@ for (const scenario of ["same_result", "conflict", "unchanged"]) {
     }
   });
 }
+
+test("resume and Stop prioritize unfinished rollback over human approval and other runnable work", async (t) => {
+  const root = await fixture(t);
+  const waiting = await runNextTask(root);
+  const state = await loadTaskState(root);
+  const task = state.tasks[0];
+  task.status = "verifying";
+  task.admission_claim = { runId: "original-run", phase: "finalizing", workspaceRestored: false };
+  task.last_failure = { reason: "admission_rollback_failed", summary: "rollback could not restore shared files", retryHint: "resume original run" };
+  state.tasks.push({ ...task, id: "T2", subject: "Independent task", status: "pending", admission_claim: null, pendingContractChange: null });
+  await persistTaskState(root, state);
+  const recovery = await continuationDirective(root);
+  assert.equal(recovery.shouldContinue, true);
+  assert.equal(recovery.reason, "admission_recovery");
+  assert.match(recovery.nextCommand, /parallel admit --run original-run --task T1$/);
+  assert.match(recovery.resume.nextAction, /original-run/);
+  await assert.rejects(runNextTask(root), /recovery_required/);
+  await assert.rejects(resolveContractChange(root, { id: waiting.changeRequest.id, decision: "accept", expectedFingerprint: waiting.changeRequest.fingerprint, reason: "用户批准" }), /recovery required/);
+  task.status = "needs_user_decision";
+  task.admission_claim.workspaceRestored = true;
+  state.tasks[1].status = "failed";
+  await persistTaskState(root, state);
+  const failure = await continuationDirective(root);
+  assert.equal(failure.taskId, "T2");
+  assert.equal(failure.reason, "blocked_or_failed_task");
+  assert.equal(failure.resume.nextAction, "inspect failed task");
+});
