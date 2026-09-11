@@ -418,6 +418,15 @@ node ./bin/wildarrange.mjs contracts apply-card --card <id> --decision approve -
 node ./bin/wildarrange.mjs contracts generate
 ```
 
+计划里已明确批准的契约内容不重复询问；临时新增接口/数据库字段会暂停任务，由主 Agent 解释必要性、影响、替代方案和建议，等待你的明确决定。批准绑定具体内容，改动内容后旧批准失效。
+
+```bash
+node ./bin/wildarrange.mjs contracts propose --task T001 --from proposal.json
+node ./bin/wildarrange.mjs contracts resolve --id <id> --decision accept --expected-fingerprint <sha256> --reason "同意报告中的具体变更"
+```
+
+`proposal.json` 包含 `reason`、`impact`、`alternatives`、`recommendation` 和 `items`（与任务 `contractChanges.items` 相同结构；Tauri 接口需 `expected.signatures`）。Loop 内的命令 worker 输出 `WILDARRANGE_CONTRACT_CHANGE=<proposal JSON>` 单行并退出，由主 Agent 接办，不在 worker 子进程内再次调用 `propose`。拒绝使用 `--decision reject`，任务保持等待，不自动重试；新会话继续提示同一请求。完整声明与职责见 [运行时架构](doc/project-architecture.md)。正式台账仍由显式 `scan/apply-card` 更新并版本化，任务批准不会偷偷改写台账。
+
 每次 worker 执行前，WildArrange 会在 Git 项目里自动记录一份工作区快照（`git stash create`），快照 hash 与恢复命令写入任务证据和 ledger，代码被改坏时可用 `git stash apply <hash>` 还原。
 
 WildArrange 会在 shell 执行前阻断明显破坏性命令，例如删除 `.git/.wildarrange`、递归删除 `src/test/doc` 等项目核心目录、`git reset --hard`、`git clean -fd`、`sudo` 或 `curl | sh`。正常项目命令、verifier、review command 和子 Agent runner 不受影响。

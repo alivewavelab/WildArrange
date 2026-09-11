@@ -9,6 +9,7 @@ import { runCommand } from "../src/infra/command-runner.mjs";
 import { runCommandFile } from "../src/infra/command-runner.mjs";
 import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { runNextTask } from "../src/orchestration/linear-runtime.mjs";
+import { runDeliveryPipeline } from "../src/orchestration/delivery-pipeline.mjs";
 import { persistTaskState } from "../src/orchestration/task-board.mjs";
 import { collectGitChangedPaths, changedPathsIntroducedByTask } from "../src/infra/git-diff.mjs";
 import { readJson, resolveTaskAcceptancePath, resolveTaskCheckpointPath, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
@@ -53,6 +54,23 @@ function realTask(overrides = {}) {
     ...overrides,
   };
 }
+
+test("shared completion derives mandatory Git delivery when an entry omits or disables its flags", async () => {
+  await withGitFixture(async (root) => {
+    const plan = await writePlan(root, [realTask()]);
+    const state = await loadTaskState(root);
+    const task = state.tasks[0];
+    const workerResult = { kind: "worker", ...await runCommand("node worker.cjs", root) };
+    assert.equal(workerResult.exitCode, 0);
+    for (const options of [{}, { deliveryRequired: false, beforeCheckpointGate: async () => ({ pass: true }) }]) {
+      const result = await runDeliveryPipeline(root, plan.id, task, {
+        ...options, initialEvidence: { workerResult }, changedPaths: ["result.txt"],
+      });
+      assert.notEqual(result.status, "completed", "a Git task without its isolated delivery target cannot complete");
+      assert.equal(await readJson(resolveTaskCheckpointPath(root, plan.id, task.id), null), null);
+    }
+  });
+});
 
 test("linear checkpoint failure resumes the same delivery commit without rerunning worker", async () => {
   await withGitFixture(async (root) => {

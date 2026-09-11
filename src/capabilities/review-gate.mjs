@@ -1,3 +1,4 @@
+import { runContractGovernanceReview } from "./contract-governance.mjs";
 import {
   DEFAULT_REVIEW_AGENTS,
   normalizeAgentKey,
@@ -29,7 +30,7 @@ export async function runReviewGate(rootDir, task, evidence = {}, options = {}) 
   const extraPatterns = compileCommandSafetyPatterns(config);
   const reviewCommandResults = [];
   const standardsCommandResults = [];
-  const contractGovernance = evidence.contractGovernance || { status: "warn", summary: "contract governance evidence unavailable", findings: [] };
+  const contractGovernance = evidence.contractGovernance || await runContractGovernanceReview(options.executionRoot || rootDir, task, evidence, { controlRoot: rootDir });
 
   for (const command of task.review_commands || []) {
     if (isTrivialCommand(command)) {

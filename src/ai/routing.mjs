@@ -12,12 +12,8 @@ import { readAnnotations } from "../infra/annotation-log.mjs";
 import { initRuntime } from "../infra/runtime-bootstrap.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { nowIso, resolveWildArrangePath, writeJsonAtomic } from "../infra/runtime-store.mjs";
-import {
-  beginFeatureDesignGate,
-  confirmFeatureDesignGate,
-  loadActiveFeatureDesignGate,
-  writeSnapshot,
-} from "../infra/runtime-snapshot.mjs";
+import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
+import { loadActiveFeatureDesignGate } from "../orchestration/feature-design.mjs";
 import { loadRoutesConfig, resolveRouteDecision, uniqueStrings } from "../infra/route-table.mjs";
 import { callOpenAICompatible, resolveAgentProvider } from "../infra/llm-provider.mjs";
 
@@ -54,16 +50,8 @@ export async function routeRequest(rootDir, input) {
   let result = await applySemanticRouteGovernance(rootDir, text, deterministic, input || {});
   const sessionId = typeof input === "object" ? input?.sessionId || input?.session_id || "session" : "session";
   const activeFeatureGate = await loadActiveFeatureDesignGate(rootDir, sessionId);
-  if (activeFeatureGate?.status === "awaiting_feature_confirmation") {
-    const gate = isExactFeatureDesignConfirmation(text)
-      ? await confirmFeatureDesignGate(rootDir, activeFeatureGate)
-      : activeFeatureGate;
-    result = enforceFeatureDesignGate(result, gate);
-  } else if (activeFeatureGate?.status === "awaiting_plan_import") {
+  if (["awaiting_feature_confirmation", "awaiting_plan_import"].includes(activeFeatureGate?.status)) {
     result = enforceFeatureDesignGate(result, activeFeatureGate);
-  } else if ((deterministic.skills || []).includes("clarify-feature-design")) {
-    const gate = await beginFeatureDesignGate(rootDir, sessionId, text);
-    result = enforceFeatureDesignGate(result, gate);
   }
   await appendLedger(rootDir, {
     type: "route_decided",
@@ -138,10 +126,6 @@ function enforceFeatureDesignGate(result, gate) {
     },
     reason: `${result.reason || ""}; feature design gate=${gate.status}`,
   };
-}
-
-function isExactFeatureDesignConfirmation(text) {
-  return /^(?:确认|确认以上功能设计|功能设计确认)[。.!！]?$/.test(String(text || "").trim());
 }
 
 function sanitizeDraftSegment(value) {

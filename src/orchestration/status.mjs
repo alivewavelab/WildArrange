@@ -220,7 +220,16 @@ export async function attentionReport(rootDir, options = {}) {
       subject: change.subject,
       deniedPaths: change.deniedPaths || [],
       reportMdPath: change.reportMdPath || null,
-      resolveHint: `node ./bin/wildarrange.mjs changes resolve --id ${change.id} --decision accept|reject --evidence "..." --rationale "..."`,
+      source: change.source,
+      rationale: change.rationale,
+      impact: change.evidence,
+      alternatives: change.alternatives,
+      recommendation: change.recommendation,
+      fingerprint: change.fingerprint,
+      proposedDeclarations: change.content?.proposedDeclarations,
+      resolveHint: change.source === "contract_change"
+        ? `node ./bin/wildarrange.mjs contracts resolve --id ${change.id} --decision accept|reject --expected-fingerprint ${change.fingerprint} --reason "..."`
+        : `node ./bin/wildarrange.mjs changes resolve --id ${change.id} --decision accept|reject --evidence "..." --rationale "..."`,
     }));
 
   const failedTasks = tasks
@@ -235,7 +244,8 @@ export async function attentionReport(rootDir, options = {}) {
 
   const needsUserDecision = tasks
     .filter((task) => task.status === "needs_user_decision" || task.status === "review_blocked")
-    .map((task) => ({ id: task.id, subject: task.subject, status: task.status }));
+    .filter((task) => !openChanges.some((change) => change.id === task.pendingContractChange))
+    .map((task) => ({ id: task.id, subject: task.subject, status: task.status, pendingContractChange: task.pendingContractChange || null }));
 
   const draftTasks = tasks
     .filter((task) => task.status === "draft")

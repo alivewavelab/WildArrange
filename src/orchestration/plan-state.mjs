@@ -11,6 +11,7 @@ import {
   TASK_STATUSES,
   TASK_WORK_TYPES,
   createWorkId,
+  hashContent,
   ensureWildArrangeDirs,
   nowIso,
   readJson,
@@ -25,11 +26,8 @@ import {
 import { appendLedger } from "../infra/ledger.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
-import {
-  assertFeatureDesignPlanBinding,
-  bindFeatureDesignPlan,
-  writeSnapshot,
-} from "../infra/runtime-snapshot.mjs";
+import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
+import { assertFeatureDesignPlanBinding, bindFeatureDesignPlan } from "./feature-design.mjs";
 import { loadRoutesConfig, resolveRouteDecision } from "../infra/route-table.mjs";
 import { isPossibleNoopTask, isTrivialCommand } from "../infra/task-predicates.mjs";
 
@@ -250,6 +248,7 @@ export function normalizeContractChanges(value, taskId, owner) {
       kind: String(item.kind || "manual").trim(),
       action,
       summary,
+      expected: item.expected && typeof item.expected === "object" && !Array.isArray(item.expected) ? JSON.parse(JSON.stringify(item.expected)) : null,
       compatibility: String(item.compatibility || "").trim(),
       migration: String(item.migration || "").trim(),
       rollback: String(item.rollback || "").trim(),
@@ -583,7 +582,9 @@ export async function approvePlan(rootDir, options = {}) {
       planApproval: nextApproval,
       updatedAt: nowIso(),
     });
-    await appendLedger(rootDir, { type: "plan_approved", planId: work.activePlanId, approver: nextApproval.approvedBy });
+    const state = await loadTaskState(rootDir);
+    await appendLedger(rootDir, { type: "plan_approved", planId: work.activePlanId, approver: nextApproval.approvedBy,
+      contractScopes: Object.fromEntries((state?.tasks || []).map((task) => [task.id, hashContent(JSON.stringify(task.contractChanges?.items || []))])) });
     return { planId: work.activePlanId, status: "approved", approval: nextApproval };
   });
 }

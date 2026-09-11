@@ -12,16 +12,20 @@
  * checkpoint only run if every prior gate (worker, verify, criteria, scope,
  * review) already passed.
  */
-import { invokeCapability } from "../capabilities/gateway.mjs";
+import { invokeCapability, capabilityModule } from "../capabilities/gateway.mjs";
+import { lstat } from "node:fs/promises";
+import path from "node:path";
+import { assertTaskOrDeliveredOwnership, integrateAdmissionCommit } from "./integration.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
 import { emitDecision } from "../infra/decision-log.mjs";
-import { buildErrorProtocol, capabilityModule } from "../infra/error-protocol.mjs";
+import { buildErrorProtocol } from "../infra/error-protocol.mjs";
 import { writeMemoryDigest } from "../infra/memory-digest.mjs";
 import { normalizeRelativePath } from "../infra/path-match.mjs";
 import { nowIso, resolveTaskReportPath } from "../infra/runtime-store.mjs";
 import { applyVerifierEvidenceToCriteria, criteriaStatus } from "../infra/success-criteria.mjs";
 import { appendWisdom } from "../infra/task-reports.mjs";
 import { persistTaskState } from "./task-board.mjs";
+import { prepareContractReview } from "./contract-governance.mjs";
 
 export function shouldFailDeliveryAttempt(task, verifyResult, scopeResult, reviewResult) {
   if (scopeResult?.status === "fail") return true;
@@ -97,6 +101,9 @@ export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
   };
 
   for (const stepName of GATE_STEPS) {
+    if (stepName === "review") {
+      evidence.contractGovernance = await prepareContractReview(rootDir, planId, task, options.executionRoot || rootDir, evidence);
+    }
     const envelope = await invokeCapability(stepName, buildStepContext(stepName, { rootDir, planId, task, evidence, options }));
     results.push(envelope);
     if (stepName === "verify") {
@@ -115,6 +122,9 @@ export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
   }
 
   const criteria = criteriaStatus(task);
+  if (evidence.contractGovernance?.changeRequest) {
+    return finish("awaiting_user_decision", { changeRequest: evidence.contractGovernance.changeRequest });
+  }
   const workerExitOk = evidence.workerResult ? evidence.workerResult.exitCode === 0 : true;
   const gatesAllPass = workerExitOk && criteria.pass && results.every((result) => result.status === "pass");
 
@@ -132,8 +142,8 @@ export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
   }
 
   const completion = await runCompletionSegment(rootDir, planId, task, evidence, {
-    beforeCheckpointGate: options.beforeCheckpointGate,
-    deliveryRequired: options.deliveryRequired === true,
+    delivery: options.delivery,
+    executionRoot: options.executionRoot,
     runId: options.runId,
   });
   results.push(completion.proofEnvelope);
@@ -275,10 +285,13 @@ function pipelineOutcomeReason(status, results, criteria) {
  * throws into fail envelopes; we check the envelope status here).
  */
 export async function runCompletionSegment(rootDir, planId, task, evidence, options = {}) {
-  if (options.deliveryRequired === true) {
-    evidence.deliveryRequired = true;
-    evidence.deliveryPending = true;
-  }
+  const delivery = await resolveDeliveryFacts(rootDir, task, options);
+  evidence.deliveryRequired = delivery.required;
+  evidence.deliveryPending = delivery.required && Boolean(delivery.target);
+  // Entry flags cannot waive Git delivery. Missing targets fail the proof,
+  // rather than making an unversioned task look like a non-Git task.
+  evidence.deliveryBaseline = null;
+  evidence.integrationCommit = null;
   let proofEnvelope = await invokeCapability("acceptance-proof", { rootDir, planId, task, evidence });
   if (proofEnvelope.status !== "pass") {
     await emitGateDecision(rootDir, planId, task, proofEnvelope, options.runId);
@@ -286,8 +299,13 @@ export async function runCompletionSegment(rootDir, planId, task, evidence, opti
   }
   evidence.acceptanceProof = proofEnvelope.evidence;
   let integrationGate = null;
-  if (typeof options.beforeCheckpointGate === "function") {
-    integrationGate = await options.beforeCheckpointGate();
+  if (delivery.required) {
+    // integration owns the owner/base/remote-intent fences for both paths.
+    // A second linear-only assertion would reject a recovered admission push.
+    integrationGate = await integrateAdmissionCommit(rootDir, {
+      ...delivery.target, planId, task, taskId: task.id,
+      changedPaths: evidence.scopeResult?.changedPaths || [],
+    });
     evidence.integrationCommit = integrationGate;
     evidence.deliveryBaseline = integrationGate;
     evidence.deliveryPending = false;
@@ -312,6 +330,11 @@ export async function runCompletionSegment(rootDir, planId, task, evidence, opti
     }
     proofEnvelope = boundProof;
     evidence.acceptanceProof = proofEnvelope.evidence;
+    if (task.delivery_workspace?.runId === delivery.target.runId && integrationGate.pass === true) {
+      task.delivery_workspace.deliverySha = integrationGate.integrationSha || integrationGate.commitSha || integrationGate.actualSha;
+    }
+  } else {
+    await assertTaskOrDeliveredOwnership(rootDir, planId, task);
   }
   await emitGateDecision(rootDir, planId, task, proofEnvelope, options.runId);
   const checkpointEnvelope = await invokeCapability("checkpoint", { rootDir, planId, task, evidence });
@@ -320,6 +343,24 @@ export async function runCompletionSegment(rootDir, planId, task, evidence, opti
     return { status: "checkpoint_failed", proofEnvelope, integrationGate, checkpointEnvelope };
   }
   return { status: "completed", proofEnvelope, integrationGate, checkpointEnvelope };
+}
+
+async function resolveDeliveryFacts(rootDir, task, options) {
+  const workspace = task.delivery_workspace;
+  const target = options.delivery || (workspace?.workDir && workspace?.runId && workspace?.baseSha
+    ? { runId: workspace.runId, integrationGuard: { active: false, expectedSha: workspace.baseSha },
+        deliveryWorktreeDir: workspace.workDir, deliveryFromWorktree: true }
+    : null);
+  if (options.delivery && task.admission_claim?.runId !== options.delivery.runId) {
+    throw new Error("delivery target does not match the current admission claim");
+  }
+  const roots = new Set([rootDir, options.executionRoot, workspace?.workDir, target?.deliveryWorktreeDir].filter(Boolean));
+  let required = Boolean(workspace || task.coordination?.localGit || task.coordination?.remote || target?.integrationGuard?.active);
+  for (const root of roots) {
+    try { await lstat(path.join(root, ".git")); required = true; }
+    catch (error) { if (error.code !== "ENOENT") throw error; }
+  }
+  return { required, target: target?.runId ? target : null };
 }
 
 /**
@@ -385,6 +426,7 @@ function buildStepContext(stepName, { rootDir, planId, task, evidence, options }
           workerResult: evidence.workerResult,
           verifyResult: evidence.verifyResult,
           scopeResult: evidence.scopeResult,
+          contractGovernance: evidence.contractGovernance,
         },
         options: { executionRoot: options.executionRoot },
       };
@@ -471,6 +513,7 @@ function finalizePipelineResult(status, results, evidence, extra = {}) {
     error: status === "completed" ? null : pipelineErrorProtocol(status, results, extra),
     steps: results,
     evidence,
+    changeRequest: extra.changeRequest || null,
     criteria: extra.criteria || null,
     criterionEvidenceRecorded: extra.criterionEvidenceRecorded || [],
     totalDurationMs,
@@ -480,6 +523,8 @@ function finalizePipelineResult(status, results, evidence, extra = {}) {
 }
 
 function pipelineErrorProtocol(status, results, extra) {
+  if (status === "awaiting_user_decision") return buildErrorProtocol({ code: status, module: "orchestration/contract-governance.mjs",
+    message: "计划外契约变更等待人类决定", nextAction: `主 Agent 阅读 ${extra.changeRequest?.reportMdPath || "变更报告"}，解释必要性、影响和替代方案；得到明确决定后运行 contracts resolve。` });
   if (status === "revalidation_required") {
     return buildErrorProtocol({
       code: "revalidation_required",

@@ -1,14 +1,27 @@
+import { runHostHook, runHostRoute } from "../src/orchestration/host-runtime.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { buildPlanDraftDirective, routeRequest } from "../src/ai/routing.mjs";
-import { preToolUseGuard, runInjectionHook } from "../src/ai/hooks.mjs";
+import { buildPlanDraftDirective, routeRequest as classifyRoute } from "../src/ai/routing.mjs";
+import { preToolUseGuard, runInjectionHook as renderHook } from "../src/ai/hooks.mjs";
 import { importPlan, loadPlanApproval } from "../src/orchestration/plan-state.mjs";
-import { loadActiveFeatureDesignGate } from "../src/infra/runtime-snapshot.mjs";
+import { loadActiveFeatureDesignGate } from "../src/orchestration/feature-design.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
+
+test("AI routing does not own feature confirmation while the public host entry does", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "wa-feature-owner-"));
+  try {
+    await initRuntime(root);
+    const input = { text: "新增一个从游戏详情页启动游戏的功能", sessionId: "owner-test" };
+    await classifyRoute(root, input);
+    assert.equal(await loadActiveFeatureDesignGate(root, input.sessionId), null);
+    await runHostRoute(root, input, classifyRoute);
+    assert.equal((await loadActiveFeatureDesignGate(root, input.sessionId)).status, "awaiting_feature_confirmation");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 test("feature design confirmation and complete plan cannot be bypassed across turns", async () => {
   const rootDir = await mkdtemp(path.join(os.tmpdir(), "wildarrange-feature-gate-"));
@@ -170,3 +183,6 @@ test("ordinary architecture planning does not mount the feature clarification sk
     await rm(rootDir, { recursive: true, force: true });
   }
 });
+
+function routeRequest(root, input) { return runHostRoute(root, input, classifyRoute); }
+function runInjectionHook(root, input) { return runHostHook(root, input, renderHook); }

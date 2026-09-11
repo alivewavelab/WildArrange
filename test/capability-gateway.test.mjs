@@ -158,7 +158,6 @@ test("gateway: a throwing capability is caught and reported as a fail envelope, 
 test("delivery pipeline: runs verify -> scope -> review -> acceptance-proof -> checkpoint and completes", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    assert.equal((await runCommand("git init", dir)).exitCode, 0);
     await mkdir(path.join(dir, "src"), { recursive: true });
     await writeFile(path.join(dir, "src", "review-marker.txt"), "reviewed\n");
     const plan = await importSingleTaskPlan(dir, { verifyCommand: nodeEval("if(!process.version)process.exit(1)") });
@@ -166,6 +165,7 @@ test("delivery pipeline: runs verify -> scope -> review -> acceptance-proof -> c
     const task = taskState.tasks.find((candidate) => candidate.id === "T001");
 
     const result = await runDeliveryPipeline(dir, plan.id, task, {
+      changedPaths: ["src/review-marker.txt"],
       initialEvidence: {
         workerResult: { kind: "worker", command: null, exitCode: 0, stdout: "", stderr: "" },
       },

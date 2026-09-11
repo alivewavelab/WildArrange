@@ -4,7 +4,7 @@ import {
   DEFAULT_LEAD_AGENT,
   normalizeAgentKey,
 } from "../infra/agent-registry.mjs";
-import { appendLedger } from "../infra/ledger.mjs";
+import { appendLedger, readVerifiedLedgerEntries } from "../infra/ledger.mjs";
 import {
   ensureWildArrangeDirs,
   hashContent,
@@ -150,6 +150,7 @@ async function resolveChangeRequestUnlocked(rootDir, options = {}) {
   }
 
   const changeRequest = await readChangeRequest(rootDir, id);
+  if (changeRequest.source === "contract_change") throw new Error("use contracts resolve for a content-bound human contract decision");
   if (changeRequest.status !== "open") throw new Error(`change request ${id} is already ${changeRequest.status}`);
   const taskState = await loadTaskState(rootDir);
   const task = taskState?.planId === changeRequest.planId
@@ -523,6 +524,69 @@ export async function writeOpenChangesIndex(rootDir) {
     }
   }
   await writeFile(resolveWildArrangePath(rootDir, "changes", "open.md"), `${lines.join("\n")}\n`, "utf8");
+}
+
+// Called under the task-state lock by the contract workflow. Changes keep one
+// authoritative JSON record; task state contains only a reference to it.
+export async function writeContractChangeRequest(rootDir, planId, task, proposal) {
+  const fingerprint = contractRequestFingerprint(proposal);
+  const id = `CR-${hashContent(`${planId}/${task.id}/${fingerprint}`).slice(0, 24)}`;
+  const file = resolveWildArrangePath(rootDir, "changes", `${id}.json`);
+  const existing = await readJson(file, null);
+  if (existing) return existing;
+  const record = {
+    id, kind: "change_request", source: "contract_change", status: "open",
+    planId, taskId: task.id, subject: task.subject, fingerprint,
+    createdAt: nowIso(), updatedAt: nowIso(),
+    evidence: proposal.evidence, rationale: proposal.rationale,
+    content: proposal.content, alternatives: proposal.alternatives,
+    recommendation: proposal.recommendation,
+    deniedPaths: [], changedPaths: proposal.changedPaths || [], writablePaths: task.writable_paths || [],
+    proposedActions: ["human_accept_exact_contract_change", "human_reject_and_use_alternative"],
+    invariants: { autoApply: false, requiresLeadReview: true, mustNotWeakenVerification: true },
+    reportJsonPath: path.relative(rootDir, file),
+    reportMdPath: path.relative(rootDir, resolveWildArrangePath(rootDir, "changes", `${id}.md`)),
+  };
+  await persistContractRequest(rootDir, record);
+  await appendLedger(rootDir, { type: "contract_change_requested", planId, taskId: task.id, changeRequestId: id, fingerprint });
+  return record;
+}
+
+export async function recordContractChangeDecision(rootDir, options) {
+  const request = await readChangeRequest(rootDir, options.id);
+  if (request.source !== "contract_change" || request.fingerprint !== options.expectedFingerprint
+    || request.fingerprint !== contractRequestFingerprint(request)) throw new Error("contract request changed; review the current content before deciding");
+  if (!["accept", "reject"].includes(options.decision) || !String(options.reason || "").trim()) throw new Error("explicit accept/reject and reason are required");
+  const status = options.decision === "accept" ? "accepted" : "rejected";
+  if (request.status !== "open") {
+    if (request.status !== status) throw new Error("contract request already has a different decision");
+  } else {
+    request.status = status;
+    request.decision = options.decision;
+    request.decisionReason = String(options.reason).trim();
+    request.decidedAt = nowIso();
+    request.updatedAt = request.decidedAt;
+    await persistContractRequest(rootDir, request);
+  }
+  const events = await readVerifiedLedgerEntries(rootDir);
+  if (!events.some((event) => event.type === "contract_change_decided" && event.changeRequestId === request.id
+    && event.fingerprint === request.fingerprint && event.decision === request.decision)) {
+    await appendLedger(rootDir, { type: "contract_change_decided", planId: request.planId, taskId: request.taskId,
+      changeRequestId: request.id, fingerprint: request.fingerprint, decision: request.decision });
+  }
+  return request;
+}
+
+async function persistContractRequest(rootDir, record) {
+  await writeJsonAtomic(resolveWildArrangePath(rootDir, "changes", `${record.id}.json`), record);
+  await writeFile(resolveWildArrangePath(rootDir, "changes", `${record.id}.md`),
+    `${renderChangeRequestMarkdown(record)}\n## Contract decision\n\n${record.decisionReason || "等待人类决定"}\n\n${JSON.stringify(record.content, null, 2)}\n\n替代方案：${record.alternatives}\n建议：${record.recommendation}\n`, "utf8");
+  await writeOpenChangesIndex(rootDir);
+}
+
+export function contractRequestFingerprint(request) {
+  return hashContent(JSON.stringify({ content: request.content, evidence: request.evidence,
+    rationale: request.rationale, alternatives: request.alternatives, recommendation: request.recommendation }));
 }
 
 export async function listChangeRequests(rootDir) {

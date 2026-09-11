@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, realpath, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { hashContent, nowIso, readJson, writeJsonAtomic } from "./runtime-store.mjs";
 import { loadWildArrangeConfig } from "./runtime-config.mjs";
@@ -48,7 +48,7 @@ export async function scanContractGovernanceUniverse(rootDir, options = {}) {
   if (!CONTRACT_DISCOVERERS.includes(discoverer)) {
     throw contractError("contract_discoverer_unknown", `unknown contract discoverer: ${discoverer}`);
   }
-  const registry = await readContractRegistry(rootDir);
+  const registry = await readContractRegistry(options.controlRoot || rootDir);
   const discovered = await discoverTauriIpcContracts(rootDir);
   const declared = normalizeManualDeclarations(options.declarations || []);
   const declaredIds = new Set(declared.map((item) => item.id));
@@ -66,6 +66,7 @@ export async function scanContractGovernanceUniverse(rootDir, options = {}) {
     discoverer,
     registryPresent: registry.updatedAt !== null || registry.contracts.length > 0,
     contracts,
+    observedContracts: discovered.contracts,
     cards,
     coverage: {
       discoverer,
@@ -105,96 +106,7 @@ async function persistContractScanUnlocked(rootDir, scan) {
   };
 }
 
-export async function applyContractCardDecision(rootDir, options = {}) {
-  return withContractGovernanceLock(rootDir, `apply-card:${options.cardId || "unknown"}`, () =>
-    applyContractCardDecisionUnlocked(rootDir, options));
-}
-
-async function applyContractCardDecisionUnlocked(rootDir, options = {}) {
-  const cardId = requireSafeId(options.cardId, "cardId");
-  const decision = String(options.decision || "").trim();
-  if (!new Set(["approve", "reject"]).has(decision)) {
-    throw contractError("contract_decision_invalid", "decision must be approve or reject");
-  }
-  if (!String(options.reason || "").trim()) {
-    throw contractError("contract_decision_reason_required", "contract decision requires --reason");
-  }
-  const paths = contractGovernancePaths(rootDir);
-  const cardPath = path.join(paths.cards, `${safeCardName(cardId)}.json`);
-  const card = await readJson(cardPath, null);
-  if (!card) throw contractError("contract_card_missing", `contract card not found: ${cardId}`);
-  if (!options.expectedFingerprint) throw contractError("contract_card_fingerprint_required", "contract decision requires expectedFingerprint");
-  if (options.expectedFingerprint !== card.fingerprint) {
-    throw contractError("contract_card_stale", "contract card fingerprint no longer matches");
-  }
-  const currentScan = await readJson(paths.currentScan, null);
-  const currentCard = currentScan?.cards?.find((item) => item.id === card.id);
-  if (!currentCard || currentCard.fingerprint !== card.fingerprint) {
-    throw contractError("contract_card_superseded", "contract card is not part of the current scan");
-  }
-  let registry = await readContractRegistry(rootDir);
-  if (decision === "approve") {
-    if (card.candidate) await assertContractReferences(rootDir, card.candidate);
-    registry = applyApprovedCard(registry, card);
-  }
-  const finalStatus = decision === "approve" ? "approved" : "rejected";
-  const decided = {
-    ...card,
-    status: finalStatus,
-    committed: true,
-    decisionReason: String(options.reason).trim(),
-    decidedAt: nowIso(),
-  };
-  await mkdir(paths.archiveCards, { recursive: true });
-  const archivePath = path.join(paths.archiveCards, `${safeCardName(card.id)}.${Date.now()}.json`);
-  await writeJsonAtomic(archivePath, { ...decided, status: "prepared", committed: false, intendedStatus: finalStatus });
-  const retiredPath = `${cardPath}.${process.pid}.retired`;
-  const renameFile = options.operations?.rename || rename;
-  const removeFile = options.operations?.rm || rm;
-  try {
-    await renameFile(cardPath, retiredPath);
-  } catch (error) {
-    try {
-      await removeFile(archivePath, { force: true });
-    } catch {
-      throw contractError("recovery_required", "contract card retirement failed and its prepared decision record could not be cleaned up");
-    }
-    throw contractError("contract_card_retire_failed", `contract card could not be retired: ${error?.message || error}`);
-  }
-  try {
-    if (decision === "approve") await writeJsonAtomic(paths.registry, registry);
-  } catch (error) {
-    let restored = false;
-    try {
-      await renameFile(retiredPath, cardPath);
-      await removeFile(archivePath, { force: true });
-      restored = true;
-    } catch {}
-    if (!restored) throw contractError("recovery_required", "contract decision failed and the pending card could not be restored");
-    throw error;
-  }
-  try {
-    await writeJsonAtomic(archivePath, decided);
-  } catch {
-    throw contractError("recovery_required", "contract registry changed but the decision record could not be committed");
-  }
-  let cleanupWarning = null;
-  try {
-    await removeFile(retiredPath, { force: true });
-  } catch (error) {
-    cleanupWarning = `decision committed; retired card cleanup is pending: ${error?.message || error}`;
-  }
-  return {
-    kind: "contract_governance_decision",
-    status: decided.status,
-    cardId: card.id,
-    registryPath: decision === "approve" ? relative(rootDir, paths.registry) : null,
-    archivePath: relative(rootDir, archivePath),
-    cleanupWarning,
-  };
-}
-
-async function withContractGovernanceLock(rootDir, ownerTag, fn) {
+export async function withContractGovernanceLock(rootDir, ownerTag, fn) {
   const paths = contractGovernancePaths(rootDir);
   await mkdir(paths.runtimeRoot, { recursive: true });
   return withFileLock(
@@ -204,62 +116,6 @@ async function withContractGovernanceLock(rootDir, ownerTag, fn) {
     `contract-governance:${ownerTag}`,
     fn,
   );
-}
-
-export async function generateContractArtifacts(rootDir) {
-  const paths = contractGovernancePaths(rootDir);
-  const registry = await readContractRegistry(rootDir);
-  const scan = await readJson(paths.currentScan, null);
-  await mkdir(path.dirname(paths.html), { recursive: true });
-  await writeFile(paths.html, renderContractMapHtml(registry, scan), "utf8");
-  return {
-    kind: "contract_governance_artifacts",
-    registryPath: relative(rootDir, paths.registry),
-    htmlPath: relative(rootDir, paths.html),
-    contracts: registry.contracts.length,
-    unknown: scan?.coverage?.unknown?.length || 0,
-  };
-}
-
-export async function inspectContractTask(rootDir, task, evidence = {}, options = {}) {
-  const controlRoot = options.controlRoot || rootDir;
-  const declarations = Array.isArray(task?.contractChanges?.items) ? task.contractChanges.items : [];
-  const scan = await scanContractGovernanceUniverse(rootDir, { declarations });
-  const changedPaths = new Set((evidence.scopeResult?.changedPaths || []).map(normalizeSlash));
-  const touchedCards = scan.cards.filter((card) => cardTouchesPaths(card, changedPaths));
-  const findings = [];
-  if (touchedCards.length > 0 && declarations.length === 0) {
-    findings.push({ code: "contract_declaration_missing", cards: touchedCards.map((card) => card.id) });
-  }
-  for (const item of declarations) {
-    const action = String(item.action || "").toLowerCase();
-    if (!item.kind || !action || !String(item.summary || "").trim()) {
-      findings.push({ code: "contract_declaration_incomplete", contractId: item.contractId || null });
-    }
-    if (new Set(["modify", "remove"]).has(action) && !String(item.compatibility || "").trim()) {
-      findings.push({ code: "contract_compatibility_missing", contractId: item.contractId || null });
-    }
-    if (action === "remove") {
-      const approval = await inspectApprovalRef(controlRoot, item);
-      if (!approval.pass) findings.push({ code: "contract_destructive_approval_missing", contractId: item.contractId || null, reason: approval.reason });
-    }
-    const referenceFindings = await inspectContractReferences(controlRoot, item);
-    findings.push(...referenceFindings.map((finding) => ({ ...finding, contractId: item.contractId || null })));
-  }
-  const touchedManualRequired = scan.coverage.manualRequired.filter((item) => changedPaths.has(normalizeSlash(item.sourcePath)) && !declarationCoversSource(declarations, item.sourcePath));
-  for (const item of touchedManualRequired) findings.push({ code: "contract_manual_declaration_required", sourcePath: item.sourcePath, reason: item.reason });
-  const touchesScanRoot = [...changedPaths].some(isContractScanPath);
-  if (!scan.registryPresent && touchesScanRoot) findings.push({ code: "contract_baseline_required", changedPaths: [...changedPaths].filter(isContractScanPath) });
-  if (!scan.registryPresent && findings.length === 0) return { status: "warn", summary: "contract registry is not initialized", scan, findings };
-  if (touchedCards.length > 0) {
-    findings.push({ code: "contract_cards_pending", cards: touchedCards.map((card) => card.id) });
-  }
-  return {
-    status: findings.length === 0 ? "pass" : "fail",
-    summary: findings.length === 0 ? "contract declarations and approved registry are aligned" : `${findings.length} contract governance finding(s)`,
-    findings,
-    scan,
-  };
 }
 
 export async function inspectContractReferences(rootDir, contract) {
@@ -286,7 +142,7 @@ export async function inspectContractReferences(rootDir, contract) {
   return findings;
 }
 
-async function inspectApprovalRef(rootDir, item) {
+export async function inspectApprovalRef(rootDir, item) {
   const approvalRef = String(item.approvalRef || "").trim();
   if (!approvalRef) return { pass: false, reason: "approvalRef is missing" };
   const paths = contractGovernancePaths(rootDir);
@@ -301,7 +157,7 @@ async function inspectApprovalRef(rootDir, item) {
   return { pass: false, reason: "approvalRef does not identify an approved remove decision for this contract" };
 }
 
-async function assertContractReferences(rootDir, contract) {
+export async function assertContractReferences(rootDir, contract) {
   const findings = await inspectContractReferences(rootDir, contract);
   if (findings.length > 0) {
     throw contractError("contract_reference_invalid", `contract references are invalid: ${findings.map((item) => item.code).join(", ")}`);
@@ -435,6 +291,7 @@ function normalizeManualDeclarations(items) {
     source: { discoverer: "manual", declarations: uniqueStrings(item.sourcePaths || []).map((sourcePath) => ({ path: normalizeSlash(sourcePath) })) },
     lifecycle: "active",
     status: "declared",
+    expected: item.expected || null,
     unknown: [],
   }), declarationAction: String(item.action || "add").toLowerCase() }));
 }
@@ -447,6 +304,7 @@ function withoutDeclarationAction(item) {
 function approvedOverlay(item) {
   return {
     id: item.id,
+    expected: item.expected ?? null,
     kind: item.kind,
     name: item.name,
     summary: item.summary || "",
@@ -472,6 +330,7 @@ function mergeContracts(discovered, manual) {
       ...item,
       source: { ...existing.source, manualApproved: true, manualDeclarations: item.source.declarations || [] },
       callers: existing.callers || [],
+      unknown: existing.unknown || [],
     } : item);
   }
   return [...merged.values()].sort((a, b) => a.id.localeCompare(b.id));
@@ -490,7 +349,7 @@ function normalizeContract(value) {
   };
 }
 
-function applyApprovedCard(registry, card) {
+export function applyApprovedCard(registry, card) {
   const contracts = new Map(registry.contracts.map((item) => [item.id, item]));
   if (card.action === "remove") {
     const existing = contracts.get(card.contractId);
@@ -534,23 +393,23 @@ function expirePendingCard(card, at) {
   return Number.isFinite(age) && age >= 30 * 24 * 60 * 60 * 1000 ? { ...card, status: "expired" } : card;
 }
 
-function cardTouchesPaths(card, changedPaths) {
+export function cardTouchesPaths(card, changedPaths) {
   if (changedPaths.size === 0) return false;
   const paths = [card.baseline, card.candidate].flatMap(contractSourcePaths);
   return paths.some((item) => changedPaths.has(normalizeSlash(item)));
 }
 
-function declarationCoversSource(declarations, sourcePath) {
+export function declarationCoversSource(declarations, sourcePath) {
   const normalized = normalizeSlash(sourcePath);
   return declarations.some((item) => item.kind === "database" && (item.sourcePaths || []).map(normalizeSlash).includes(normalized));
 }
 
-function isContractScanPath(value) {
+export function isContractScanPath(value) {
   const normalized = normalizeSlash(value);
   return /(^|\/)src-tauri\/src\/.*\.rs$/.test(normalized) || /(^|\/)client\/src\/.*\.(?:[cm]?[jt]sx?)$/.test(normalized);
 }
 
-function contractSourcePaths(contract) {
+export function contractSourcePaths(contract) {
   if (!contract?.source) return [];
   return [...(contract.source.declarations || []), ...(contract.source.registrations || []), ...(contract.source.manualDeclarations || []), ...(contract.callers || [])].map((item) => item.path).filter(Boolean);
 }
@@ -574,13 +433,6 @@ async function walk(directory, output) {
     if (entry.isDirectory()) await walk(absolute, output);
     else if (/\.(?:rs|[cm]?[jt]sx?)$/.test(entry.name)) output.push(absolute);
   }
-}
-
-function renderContractMapHtml(registry, scan) {
-  const cards = registry.contracts.map((item) => `<section><h2>${escapeHtml(item.name)}</h2><p><code>${escapeHtml(item.id)}</code> · ${escapeHtml(item.kind)} · ${escapeHtml(item.lifecycle)}</p><p>来源：${escapeHtml(contractSourcePaths(item).join(", ") || "人工登记")}</p><p>验证引用：${escapeHtml((item.verificationRefs || []).join(", ") || "未登记")}</p></section>`).join("\n");
-  const unknown = (scan?.coverage?.unknown || []).map((item) => `<li>${escapeHtml(item.contractId)}：${escapeHtml((item.fields || []).join(", "))}</li>`).join("");
-  const manual = (scan?.coverage?.manualRequired || []).map((item) => `<li>${escapeHtml(item.sourcePath)}：${escapeHtml(item.reason)}</li>`).join("");
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>项目契约总图</title><style>body{max-width:980px;margin:32px auto;padding:0 16px;background:#091019;color:#e7eef7;font:15px/1.6 system-ui}section{border:1px solid #294057;background:#111c29;padding:16px;margin:12px 0;border-radius:8px}code{color:#ffd978}.warn{border-left:4px solid #f6c85f}</style></head><body><h1>接口与数据库契约总图</h1><p>正式契约 ${registry.contracts.length} 项；本页由机器台账生成，不可手改。</p>${cards || "<section><p>尚无已批准契约。</p></section>"}<section class="warn"><h2>未知区域</h2><ul>${unknown || "<li>无</li>"}</ul><h2>需要人工申报</h2><ul>${manual || "<li>无</li>"}</ul></section></body></html>\n`;
 }
 
 function contractFingerprint(value) {
@@ -625,11 +477,11 @@ function tauriInvokeBindings(source) {
   return uniqueStrings(bindings);
 }
 
-function safeCardName(value) {
+export function safeCardName(value) {
   return requireSafeId(value, "card id").replace(/[^A-Za-z0-9._-]/g, "_");
 }
 
-function requireSafeId(value, label) {
+export function requireSafeId(value, label) {
   const normalized = String(value || "").trim();
   if (!CONTRACT_ID_RE.test(normalized)) throw contractError("contract_id_invalid", `${label} is invalid`);
   return normalized;
@@ -639,11 +491,11 @@ function uniqueStrings(values) {
   return [...new Set((Array.isArray(values) ? values : []).filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim()))];
 }
 
-function normalizeSlash(value) {
+export function normalizeSlash(value) {
   return String(value || "").replaceAll("\\", "/").replace(/^\.\//, "");
 }
 
-function relative(rootDir, value) {
+export function relative(rootDir, value) {
   return normalizeSlash(path.relative(rootDir, value));
 }
 
@@ -661,14 +513,10 @@ async function realpathInside(rootDir, absolutePath) {
   }
 }
 
-function escapeHtml(value) {
-  return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
-}
-
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function contractError(code, message) {
+export function contractError(code, message) {
   return Object.assign(new Error(message), { code });
 }

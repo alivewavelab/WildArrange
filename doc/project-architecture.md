@@ -136,7 +136,27 @@ AGENTS.md                         # product goals, global boundaries, release ga
 - `src/capabilities/verification-governance.mjs`：经 gateway 暴露 scan / apply-card / generate-artifacts。archive 只允许项目可提交根（默认 `docs/verification-archive`），禁止 `.wildarrange/` / `.git` / `node_modules`。
 - `src/infra/verification-discovery.mjs` / `verification-registry.mjs` / `recovery-transaction.mjs`：只读扫描（现行 AGENTS/Skill 不得危险动作）、三文件 freshness（owner 从 Inventory HTML 内嵌的机器记录读取声明指纹）、通用恢复原语。Inventory HTML 是给人看的当前真源/历史档案/删除墓碑/暂缓清单；写入前统一检查目标名称，已有非等价文件、目录或链接时暂停且零覆盖。
 - `src/infra/contract-governance.mjs`：技术栈中立的接口/数据库契约台账、差异卡、覆盖状态和快照归档。发现器采用静态清单；首版只对照 Tauri Rust command、handler 注册与前端 invoke，Rust SQL 字符串明确降级人工申报。
-- `src/capabilities/contract-governance.mjs`：经 gateway 暴露 contract scan / apply-card / generate-artifacts，并在现有 review 内向 LuWu 提供契约治理证据；未初始化台账只告警，已接管区域的漏申报或待批准差异阻断 review。
+- `src/capabilities/contract-governance.mjs`：经 gateway 执行扫描、差异卡存储事务与复核，提供只读总图数据；不渲染 HTML、不决定任务状态。
+- `src/orchestration/contract-governance.mjs`：任务契约变更的批准范围、提案、暂停与继续 owner；复用 `change-governance.mjs` 的 ChangeRequest，不建立第二套批准库。
+- `src/interface/contract-view.mjs`：`generateContractArtifacts(rootDir)` 读取正式台账与当前扫描，生成 HTML；页面不是批准记录。
+
+### 交付、交接与契约变更的唯一职责
+
+`delivery-pipeline.mjs` 根据项目 `.git`、task worktree、已有交付和远端协调事实判定是否必须生成 delivery commit；入口遗漏参数或传 `deliveryRequired: false` 不会解除要求。真实非 Git 项目继续使用文件协议。线性与 admission 的 commit 操作在同一完成段执行；admission 的当前 run 优先于旧线性 worktree，并须匹配持久 claim。PR 合入 `main` 与生产部署仍分别需要人类授权。
+
+`feature-design.mjs` 唯一推进需求确认与计划绑定；`host-runtime.mjs` 在公开 CLI Hook/route 入口先推进业务状态，再调用只读 AI 渲染器。`runtime-snapshot.mjs` 只读取事实并写交接摘要/历史快照。新会话 Hook 注入当前摘要路径、下一步及待决策说明；历史快照用来追溯，不会覆盖当前任务台账。直接调用 AI 路由不再隐式确认需求。
+
+`dashboard.mjs` 负责 HTTP/API、安全校验；`dashboard-view.mjs` 负责整页 HTML/CSS/浏览器逻辑。已有 panel 保持原职责，页面布局不变。
+
+契约有三个不同对象：源码扫描是“现在看到什么”；task 的批准范围是“允许本任务改什么”；`tooling/contracts/contract-registry.json` 是版本化正式登记。前两者不会偷偷改写第三者。正式登记仍由 `contracts scan/apply-card` 显式更新，并纳入对应任务的允许路径和 delivery commit；review 返回 `pendingRegistryUpdates` 供维护者办理登记，不宣称已自动同步台账。
+
+计划批准 ledger 绑定每个任务规范化 `contractChanges.items` 的内容指纹。Tauri 变更需声明 ID、动作、来源路径与 `expected.signatures`（Rust 函数签名）；实现与批准内容一致时不再次询问。签名、路径或声明被改动会生成新 ChangeRequest；remove 声明不能掩盖仍存在的源码接口。
+
+临时变更走同一条链：worker 提案/扫描发现 → ChangeRequest → `needs_user_decision` → 主 Agent 解释必要性、影响、替代与建议 → 人类明确 accept/reject → 按指纹绑定批准 → 重跑验收。审批记录只在 `.wildarrange/changes/CR-*.json`；Markdown、Hook、Dashboard 是投影，任务只保存请求引用。拒绝与等待不会自动重跑 worker。并行 admission 保留原 claim、worktree 和 rollback plan，只能由同一 run 续办。
+
+命令 worker 在持锁的 Loop 内不能再调用加锁的 `contracts propose`。应向 stdout 输出一行 `WILDARRANGE_CONTRACT_CHANGE=<proposal JSON>` 并退出，编排层接收后暂停；主 Agent 在 Loop 外可用 `contracts propose --task <id> --from <proposal.json>`。JSON 必含 `reason`、`impact`、`alternatives`、`recommendation`、非空 `items`。`contracts resolve` 必须给当前请求指纹和人类决定理由，不得以普通 `changes resolve` 绕过契约批准。
+
+SQL/数据库字段首版仍需人工声明精确结构及验证引用，Tauri 发现器不会证明 SQL 迁移正确；`coverage.manualRequired` / `unknown` 持续公开未知项，人工元数据不能抹掉静态扫描未证明的字段。Hook 是向宿主提供说明的增强入口，并非不可绕过的人类身份认证服务；最终推进由持久任务状态和质量门约束。
 - `src/interface/doctor.mjs`：一致性 doctor，审计 config 结构/mounts、将全局 task ledger 中所有 Plan 的 completed 任务与 checkpoint/acceptance proof/ledger 事件按 `<planId>:<taskId>` 对账、校验 ledger hash 链、ledger 与最新备份交叉检查，并展示最新仓库治理状态。`registryFreshness` 是独立容错黄灯分项。旧完成事件缺 planId 时只在 taskId 全局唯一时兼容；无法唯一归属就报告 ambiguous，不猜。专用 `gateArming` 与 `adapters` 段展示未武装 gate（黄灯不再埋在 `status` JSON 里）、已启用但未安装的 adapter hook（`.cursor/` 不随每次 clone 传播——`.gitignore` 对 `.cursor/hooks.json` 与 `.cursor/hooks/` 例外以便 hard enforcement 可提交，doctor 验证各机器实际拥有），以及引用已不存在绝对路径的规则文件（机器/用户名变更后 stale）。诊断与 gating 隔离：各项检查独立 try/catch（崩溃仅标红本段 `check_failed`，其余仍报告），doctor 从不追加 hash 链 ledger。还检查反向：orphan completion 事件（未 completed 任务已有链校验 completion ledger 事件——中断的完成事务，带 `wildarrange run` 恢复提示）、完成后副作用失败（snapshot/summary 在 commit 后写不出的 `completion_side_effect_failed` ledger 事件），以及 canonical/derived 分歧（各 Plan mirror JSON 或 active `tasks.md` 与权威 `team/tasks.json` 不一致）。
 - Cursor adapter 安装会识别受管旧规则 `.cursor/rules/wildarrangeflow.mdc`，先写入 adapter backup 再移除，并生成当前 `wildarrange.mdc`；Doctor 同时报告尚未迁移的旧规则，避免新旧 alwaysApply 双注入。
 - `src/capabilities/code-intel.mjs`：LSP/typecheck 命令、AST/结构命令、hashline anchor 与注释检查的宿主中立代码智能 gate。

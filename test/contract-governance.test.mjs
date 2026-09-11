@@ -1,3 +1,4 @@
+import { applyContractCardDecision, inspectContractTask } from "../src/capabilities/contract-governance.mjs";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
@@ -7,13 +8,11 @@ import test from "node:test";
 import { promisify } from "node:util";
 
 import {
-  applyContractCardDecision,
   contractGovernancePaths,
   discoverTauriIpcContracts,
   findFrontendInvokes,
   findRegisteredCommands,
   findTauriCommands,
-  inspectContractTask,
   persistContractScan,
   readContractRegistry,
   scanContractGovernanceUniverse,

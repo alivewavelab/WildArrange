@@ -12,7 +12,7 @@
  * plugin loader: every capability is a real import at the top of this file.
  */
 import { runCommand } from "../infra/command-runner.mjs";
-import { buildErrorProtocol, capabilityModule, wildarrangeError } from "../infra/error-protocol.mjs";
+import { buildErrorProtocol, wildarrangeError } from "../infra/error-protocol.mjs";
 import { runVerifier } from "./verify.mjs";
 import { scopeGuard } from "./scope-guard.mjs";
 import { writeCheckpoint } from "./checkpoint.mjs";
@@ -28,7 +28,6 @@ import {
 import {
   applyContractGovernanceCard,
   generateContractGovernanceArtifacts,
-  runContractGovernanceReview,
   scanContractGovernance,
 } from "./contract-governance.mjs";
 import { evaluateCommandSafety } from "../infra/command-safety.mjs";
@@ -49,9 +48,7 @@ async function adaptScope(ctx) {
 }
 
 async function adaptReview(ctx) {
-  const executionRoot = ctx.options?.executionRoot || ctx.rootDir;
-  const contractGovernance = await runContractGovernanceReview(executionRoot, ctx.task, ctx.evidence || {}, { controlRoot: ctx.rootDir });
-  const raw = await runReviewGate(ctx.rootDir, ctx.task, { ...(ctx.evidence || {}), contractGovernance }, ctx.options || {});
+  const raw = await runReviewGate(ctx.rootDir, ctx.task, ctx.evidence || {}, ctx.options || {});
   return { status: raw.pass ? "pass" : "fail", evidence: raw, sideEffect: "state_written" };
 }
 
@@ -67,7 +64,7 @@ async function adaptContractApplyCard(ctx) {
 
 async function adaptContractGenerate(ctx) {
   const raw = await generateContractGovernanceArtifacts(ctx.rootDir, ctx.options || {});
-  return { status: "pass", evidence: raw, sideEffect: "files_changed" };
+  return { status: "pass", evidence: raw, sideEffect: "none" };
 }
 
 async function adaptAcceptanceProof(ctx) {
@@ -130,21 +127,21 @@ async function adaptVerificationGenerate(ctx) {
 }
 
 const CAPABILITIES = {
-  worker: adaptWorker,
-  verify: adaptVerify,
-  scope: adaptScope,
-  review: adaptReview,
-  "acceptance-proof": adaptAcceptanceProof,
-  checkpoint: adaptCheckpoint,
-  command: adaptCommand,
-  "command-safety": adaptCommandSafety,
-  "repository-governance": adaptRepositoryGovernance,
-  "verification-governance-scan": adaptVerificationScan,
-  "verification-governance-apply-card": adaptVerificationApplyCard,
-  "verification-governance-generate-artifacts": adaptVerificationGenerate,
-  "contract-governance-scan": adaptContractScan,
-  "contract-governance-apply-card": adaptContractApplyCard,
-  "contract-governance-generate-artifacts": adaptContractGenerate,
+  worker: { handler: adaptWorker, owner: "capabilities/worker.mjs" },
+  verify: { handler: adaptVerify, owner: "capabilities/verify.mjs" },
+  scope: { handler: adaptScope, owner: "capabilities/scope-guard.mjs" },
+  review: { handler: adaptReview, owner: "capabilities/review-gate.mjs" },
+  "acceptance-proof": { handler: adaptAcceptanceProof, owner: "capabilities/acceptance-proof.mjs" },
+  checkpoint: { handler: adaptCheckpoint, owner: "capabilities/checkpoint.mjs" },
+  command: { handler: adaptCommand, owner: "infra/command-runner.mjs" },
+  "command-safety": { handler: adaptCommandSafety, owner: "infra/command-safety.mjs" },
+  "repository-governance": { handler: adaptRepositoryGovernance, owner: "capabilities/repository-governance.mjs" },
+  "verification-governance-scan": { handler: adaptVerificationScan, owner: "capabilities/verification-governance.mjs" },
+  "verification-governance-apply-card": { handler: adaptVerificationApplyCard, owner: "capabilities/verification-governance.mjs" },
+  "verification-governance-generate-artifacts": { handler: adaptVerificationGenerate, owner: "capabilities/verification-governance.mjs" },
+  "contract-governance-scan": { handler: adaptContractScan, owner: "capabilities/contract-governance.mjs" },
+  "contract-governance-apply-card": { handler: adaptContractApplyCard, owner: "capabilities/contract-governance.mjs" },
+  "contract-governance-generate-artifacts": { handler: adaptContractGenerate, owner: "capabilities/contract-governance.mjs" },
 };
 
 export function listRegisteredCapabilities() {
@@ -152,7 +149,7 @@ export function listRegisteredCapabilities() {
 }
 
 export async function invokeCapability(name, ctx = {}) {
-  const adapter = CAPABILITIES[name];
+  const adapter = CAPABILITIES[name]?.handler;
   if (!adapter) {
     throw wildarrangeError({
       code: "unknown_capability",
@@ -208,3 +205,5 @@ function normalizeEnvelope(name, outcome, durationMs) {
     error: outcome.error ?? null,
   };
 }
+
+export function capabilityModule(name) { return CAPABILITIES[name]?.owner || "capabilities/gateway.mjs"; }

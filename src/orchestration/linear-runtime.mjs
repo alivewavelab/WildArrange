@@ -1,3 +1,4 @@
+import { runHostRoute } from "./host-runtime.mjs";
 import { lstat } from "node:fs/promises";
 import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
@@ -9,6 +10,7 @@ import {
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { readChangeRequest, writeChangeRequest } from "./change-governance.mjs";
+import { prepareContractReview } from "./contract-governance.mjs";
 import { buildFailureSummary } from "../infra/failure-analysis.mjs";
 import { writeFailureReport, writeReviewReport } from "../infra/task-reports.mjs";
 import { routeRequest } from "../ai/routing.mjs";
@@ -20,7 +22,6 @@ import { normalizeRelativePath } from "../infra/path-match.mjs";
 import {
   collectGateEvidenceFromTask,
   commitTaskCompletionState,
-  runCompletionSegment,
   runDeliveryPipeline,
   runPostCompletionSideEffects,
   shouldFailDeliveryAttempt,
@@ -30,7 +31,7 @@ import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
 import { findRunnableTask, persistTaskState, writeOutbox } from "./task-board.mjs";
 import { assertCurrentTaskOwnership, coordinateTaskClaim } from "./remote-ownership.mjs";
 import { assertCommandWorkerAgent } from "../infra/agent-registry.mjs";
-import { assertTaskOrDeliveredOwnership, integrateAdmissionCommit, readIntegrationIntent } from "./integration.mjs";
+import { assertTaskOrDeliveredOwnership, readIntegrationIntent, assertContractWorkspaceAvailable } from "./integration.mjs";
 import { commitIsAncestor, inspectTaskWorktreeBaseline, taskBranchName } from "../infra/git-coordination.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 
@@ -54,8 +55,11 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
     };
   }
 
+  assertContractWorkspaceAvailable(taskState.tasks);
   const task = findRunnableTask(taskState.tasks);
   if (!task) {
+    const waiting = taskState.tasks.find((candidate) => candidate.pendingContractChange);
+    if (waiting) return { status: "awaiting_user_decision", task: waiting, changeRequest: await readChangeRequest(rootDir, waiting.pendingContractChange) };
     // Recoverable-transaction protocol (cross-review P1, round 4,
     // 2026-07-21): a task stuck in "verifying" means a completion was
     // interrupted mid-transaction (e.g. the completion ledger event exists
@@ -156,12 +160,8 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
     changedPaths: deliveryWorkspace ? afterChanged.paths : changedPathsIntroducedByTask(beforeChanged, afterChanged),
     unavailableReason: beforeChanged.available ? afterChanged.reason : beforeChanged.reason,
     executionRoot,
-    deliveryRequired: Boolean(deliveryWorkspace),
     runId: deliveryWorkspace?.runId,
     preCompletionGate: () => taskOwnershipGate(rootDir, task.id),
-    beforeCheckpointGate: deliveryWorkspace
-      ? () => commitLinearDelivery(rootDir, taskState.planId, task, deliveryWorkspace, afterChanged.paths || [])
-      : undefined,
   });
   const verifyResult = pipelineResult.evidence.verifyResult;
   const scopeResult = pipelineResult.evidence.scopeResult;
@@ -189,6 +189,10 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   await appendLedger(rootDir, { type: "review_gate_completed", planId: taskState.planId, taskId: task.id, pass: reviewResult.pass, failedLaneCount: reviewResult.lanes.filter((lane) => lane.status === "fail").length });
   await writeSnapshot(rootDir, "reviewed", { planId: taskState.planId, taskId: task.id, pass: reviewResult.pass });
 
+  if (pipelineResult.status === "awaiting_user_decision") {
+    await persistTaskState(rootDir, taskState);
+    return { status: "awaiting_user_decision", task, changeRequest: pipelineResult.changeRequest, verifyResult, scopeResult, reviewResult };
+  }
   if (pipelineResult.status === "recovery_required") {
     return persistCommandRecoveryRequired(rootDir, taskState, task, pipelineResult.evidence.commandRecovery, {
       workerResult, verifyResult, scopeResult, reviewResult,
@@ -325,7 +329,7 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
 
 export async function runWorkflowNode(rootDir, nodeName, options = {}) {
   if (nodeName === "route") {
-    return routeRequest(rootDir, { text: options.text });
+    return runHostRoute(rootDir, { text: options.text }, routeRequest);
   }
   if (nodeName === "execute") {
     return executeTaskNode(rootDir, options);
@@ -511,10 +515,11 @@ async function reviewTaskNodeUnlocked(rootDir, options = {}) {
   const workerResult = [...task.evidence].reverse().find((entry) => entry.kind === "worker");
   const verifyResult = task.last_verify_result || [...task.evidence].reverse().find((entry) => entry.kind === "verifier");
   const scopeResult = task.last_scope_result || [...task.evidence].reverse().find((entry) => entry.kind === "scope_guard");
+  const contractGovernance = await prepareContractReview(rootDir, taskState.planId, task, deliveryWorkspace?.workDir || rootDir, { workerResult, verifyResult, scopeResult });
   const reviewEnvelope = await invokeCapability("review", {
     rootDir,
     task,
-    evidence: { workerResult, verifyResult, scopeResult },
+    evidence: { workerResult, verifyResult, scopeResult, contractGovernance },
     options: { executionRoot: deliveryWorkspace?.workDir || rootDir },
   });
   const reviewResult = reviewEnvelope.evidence;
@@ -525,6 +530,11 @@ async function reviewTaskNodeUnlocked(rootDir, options = {}) {
   task.updatedAt = nowIso();
   await writeReviewReport(rootDir, taskState.planId, task, reviewResult);
 
+  if (contractGovernance.changeRequest) {
+    task.status = "needs_user_decision";
+    await persistTaskState(rootDir, taskState);
+    return { status: "awaiting_user_decision", task, changeRequest: contractGovernance.changeRequest, reviewResult };
+  }
   if (!reviewResult.pass) {
     task.status = "failed";
     task.last_failure = buildFailureSummary(task, {
@@ -576,19 +586,17 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
   let { verifyResult, scopeResult, reviewResult } = gateEvidence;
   let criteria = criteriaStatus(task);
 
-  if (workerResult?.exitCode === 0 && criteria.pass && failedSteps.length === 0) {
+  if (workerResult?.exitCode === 0 && ((criteria.pass && failedSteps.length === 0) || task.contractDecisionRef)) {
     let completion;
-    if (deliveryWorkspace) {
-      const current = await collectGitChangedPaths(deliveryWorkspace.workDir);
+    {
+      const current = deliveryWorkspace ? await collectGitChangedPaths(deliveryWorkspace.workDir) : { available: false, reason: "not_git" };
       const pipeline = await runDeliveryPipeline(rootDir, taskState.planId, task, {
         initialEvidence: { workerResult },
-        changedPaths: current.available ? current.paths : undefined,
+        changedPaths: current.available ? current.paths : task.last_scope_result?.changedPaths,
         unavailableReason: current.reason,
-        executionRoot: deliveryWorkspace.workDir,
-        deliveryRequired: true,
-        runId: deliveryWorkspace.runId,
+        executionRoot: deliveryWorkspace?.workDir || rootDir,
+        runId: deliveryWorkspace?.runId,
         preCompletionGate: () => taskOwnershipGate(rootDir, task.id),
-        beforeCheckpointGate: () => commitLinearDelivery(rootDir, taskState.planId, task, deliveryWorkspace, current.paths || []),
       });
       verifyResult = pipeline.evidence.verifyResult;
       scopeResult = pipeline.evidence.scopeResult;
@@ -605,18 +613,15 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
         checkpointEnvelope: pipeline.steps.find((step) => step.capability === "checkpoint") || null,
         integrationGate: pipeline.evidence.integrationCommit,
       };
+      if (pipeline.status === "awaiting_user_decision") {
+        await persistTaskState(rootDir, taskState);
+        return { status: "awaiting_user_decision", task, changeRequest: pipeline.changeRequest, verifyResult, scopeResult, reviewResult };
+      }
       if (pipeline.status === "recovery_required") {
         return persistCommandRecoveryRequired(rootDir, taskState, task, pipeline.evidence.commandRecovery, {
           workerResult, verifyResult, scopeResult, reviewResult,
         });
       }
-    } else {
-      completion = await runCompletionSegment(rootDir, taskState.planId, task, {
-        workerResult,
-        ...gateEvidence,
-      }, {
-        beforeCheckpointGate: () => taskOwnershipGate(rootDir, task.id),
-      });
     }
     const acceptanceProof = completion.proofEnvelope.evidence;
     if (completion.status === "proof_failed") {
@@ -837,6 +842,7 @@ async function recordPreExecuteSnapshot(rootDir, planId, task, executionRoot = r
 }
 
 function resolveNodeTask(tasks, taskId, allowedStatuses) {
+  assertContractWorkspaceAvailable(tasks);
   const task = taskId ? tasks.find((candidate) => candidate.id === taskId) : findRunnableTask(tasks) || tasks.find((candidate) => allowedStatuses.includes(candidate.status));
   if (!task) throw new Error(taskId ? `unknown task: ${taskId}` : "no task available for node");
   if (!allowedStatuses.includes(task.status)) {
@@ -949,23 +955,6 @@ async function resolveDependencyDeliverySha(rootDir, task, tasks) {
     if (containsAll.every(Boolean)) return candidate;
   }
   throw new Error(`task ${task.id} dependencies are on unrelated delivery branches; create an integration task first`);
-}
-
-async function commitLinearDelivery(rootDir, planId, task, workspace, changedPaths) {
-  const ownership = await taskOwnershipGate(rootDir, task.id);
-  if (ownership.pass !== true) return ownership;
-  const delivery = await integrateAdmissionCommit(rootDir, {
-    planId,
-    task,
-    taskId: task.id,
-    runId: workspace.runId,
-    changedPaths,
-    integrationGuard: { active: false, expectedSha: workspace.baseSha },
-    deliveryWorktreeDir: workspace.workDir,
-    deliveryFromWorktree: true,
-  });
-  if (delivery.pass === true) workspace.deliverySha = delivery.integrationSha || delivery.commitSha || delivery.actualSha;
-  return delivery;
 }
 
 async function persistCommandRecoveryRequired(rootDir, taskState, task, commandEvidence, result = {}) {

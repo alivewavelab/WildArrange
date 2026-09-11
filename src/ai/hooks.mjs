@@ -33,7 +33,7 @@ import { evaluateHookResultGate } from "../infra/hook-result-gate.mjs";
 import { compileCommandSafetyPatterns, evaluateCommandSafety } from "../infra/command-safety.mjs";
 import { writeMemoryDigest } from "../infra/memory-digest.mjs";
 import { attentionReport } from "../orchestration/status.mjs";
-import { loadActiveFeatureDesignGate } from "../infra/runtime-snapshot.mjs";
+import { loadActiveFeatureDesignGate } from "../orchestration/feature-design.mjs";
 
 export async function runInjectionHook(rootDir, input = {}) {
   const hookRootDir = input.cwd && typeof input.cwd === "string" ? input.cwd : rootDir;
@@ -906,6 +906,11 @@ function appendAttentionReport(lines, attention) {
     lines.push(`- [计划待确认] 计划 ${item.planId} 需开发者确认后才能执行。请复述计划要点并询问“确认 / 需要修改”；确认后执行：\`${item.approveHint}\`。`);
   }
   for (const change of attention.openChanges || []) {
+    if (change.source === "contract_change") {
+      lines.push(`- [计划外接口/数据库变更] ${change.id} / 任务 ${change.taskId} 已暂停。主 Agent 先读报告 \`${change.reportMdPath}\`，向开发者说明：为什么需要（${change.rationale}）；影响（${change.impact}）；替代方案（${change.alternatives}）；建议（${change.recommendation}）。`);
+      lines.push(`  - 报告中的内容指纹：${change.fingerprint}。只在开发者明确决定后执行 \`${change.resolveHint}\`。不得自动批准、重复催问或继续该任务；新会话继续引用同一请求。`);
+      continue;
+    }
     lines.push(`- [越界变更待审] 任务 ${change.taskId} 改动越界：${(change.deniedPaths || []).join(", ") || "(见报告)"}。请询问开发者“接受并纳入范围 / 拒绝返工”；处理：\`${change.resolveHint}\`。`);
   }
   for (const task of attention.needsUserDecision || []) {

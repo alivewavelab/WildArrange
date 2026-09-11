@@ -59,10 +59,13 @@ import {
   resolveArchivistRouteSuggestion,
   runArchivistRouter,
 } from "../src/ai/archivist-router.mjs";
-import { preToolUseGuard, runInjectionHook } from "../src/ai/hooks.mjs";
+import { preToolUseGuard, runInjectionHook as renderHook } from "../src/ai/hooks.mjs";
+import { runHostHook, runHostRoute } from "../src/orchestration/host-runtime.mjs";
 import { matchSkills } from "../src/ai/skill-matcher.mjs";
 import { resolveInjectionPoint } from "../src/ai/injection.mjs";
-import { routeRequest } from "../src/ai/routing.mjs";
+import { routeRequest as classifyRoute } from "../src/ai/routing.mjs";
+const routeRequest = (root, input) => runHostRoute(root, input, classifyRoute);
+const runInjectionHook = (root, input) => runHostHook(root, input, renderHook);
 import { hashLine } from "../src/capabilities/code-intel.mjs";
 import { scopeGuard } from "../src/capabilities/scope-guard.mjs";
 import { compileCommandSafetyPatterns, evaluateCommandSafety } from "../src/infra/command-safety.mjs";

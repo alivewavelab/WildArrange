@@ -29,6 +29,13 @@ import {
   taskContract,
 } from "./remote-ownership.mjs";
 
+export function assertContractWorkspaceAvailable(tasks, resume = {}) {
+  const held = tasks.find((task) => task.pendingContractChange && task.admission_claim
+    && task.admission_claim.workspaceRestored !== true
+    && !(task.id === resume.taskId && task.admission_claim.runId === resume.runId));
+  if (held) throw new Error(`recovery_required: task ${held.id} has unrestored contract changes; resume admission run ${held.admission_claim.runId} before other workspace writes`);
+}
+
 export async function readIntegrationIntent(rootDir, runId, taskId) {
   return readJson(integrationIntentPath(rootDir, runId, taskId), null);
 }

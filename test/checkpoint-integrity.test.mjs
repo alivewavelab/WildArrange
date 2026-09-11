@@ -97,7 +97,6 @@ async function importPassingPlan(dir, planFileName = "ckpt-plan.json") {
 test("adversarial: delivery pipeline reports checkpoint_failed instead of completed when the checkpoint write fails", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    await initGitBaseline(dir);
     const plan = await importPassingPlan(dir);
     const taskState = await loadTaskState(dir);
     const task = taskState.tasks.find((candidate) => candidate.id === "T001");
@@ -106,6 +105,7 @@ test("adversarial: delivery pipeline reports checkpoint_failed instead of comple
 
     await sabotageCheckpoints(dir);
     const result = await runDeliveryPipeline(dir, plan.id, task, {
+      changedPaths: ["src/result.txt"],
       initialEvidence: {
         workerResult: { kind: "worker", command: null, exitCode: 0, stdout: "", stderr: "" },
       },
