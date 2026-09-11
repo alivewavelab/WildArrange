@@ -11,6 +11,23 @@ import { readChangeRequest, writeContractChangeRequest, recordContractChangeDeci
 const digest = (value) => hashContent(JSON.stringify(value));
 const itemsOf = (task) => task.contractChanges?.items || [];
 
+function requestBeforeImplementation(task, request) {
+  if (typeof request?.content?.beforeImplementation === "boolean") return request.content.beforeImplementation;
+  // Preserve the old resume behavior only for already-persisted requests that
+  // predate the explicit phase field. New requests never use this fallback.
+  return !task.admission_claim && !task.last_verify_result;
+}
+
+function proposalBeforeImplementation(task, priorRequest, proposedDeclarations) {
+  if (!priorRequest) return true;
+  const priorPhase = requestBeforeImplementation(task, priorRequest);
+  if (priorPhase) return true;
+  // Rewording an after-implementation request can keep the implemented work
+  // and rerun gates. Changing its normalized contract scope requires another
+  // worker round so approval cannot silently bless unimplemented content.
+  return digest(priorRequest.content.proposedDeclarations) !== digest(proposedDeclarations);
+}
+
 // Approval is bound to the exact normalized declarations, not an editable
 // worker-supplied boolean. Existing plan approval events are the authority.
 async function approvedScope(rootDir, planId, task) {
@@ -98,7 +115,7 @@ export async function prepareContractReview(rootDir, planId, task, executionRoot
     const proposedDeclarations = normalizeTask({ ...task, contractChanges: { items: [...proposed.values()] } }).contractChanges.items;
     const request = await writeContractChangeRequest(rootDir, planId, task, {
       content: { proposedDeclarations, cards: cards.map(({ contractId, action, fingerprint, baseline, candidate }) => ({ contractId, action, fingerprint, baseline, candidate })),
-        priorScopeFingerprint: digest(declared), manualRequired: review.scan.coverage.manualRequired },
+        priorScopeFingerprint: digest(declared), manualRequired: review.scan.coverage.manualRequired, beforeImplementation: false },
       evidence: `检测到未被当前任务批准内容覆盖的契约变化：${unexpected.map((card) => card.contractId).join(", ") || "声明或数据库手工核查"}`,
       rationale: "主 Agent 必须说明新增接口/字段的必要性、兼容及迁移影响，并取得明确人类决定。扫描结果不是批准。",
       alternatives: "维持原批准范围；移除计划外变化；或拆成另一个任务。",
@@ -134,10 +151,12 @@ export async function proposeContractChange(rootDir, options) {
     const state = await loadTaskState(rootDir);
     const task = state?.tasks.find((entry) => entry.id === options.taskId);
     if (!task || task.status === "completed") throw new Error("an unfinished current task is required");
+    const priorRequest = task.pendingContractChange ? await readChangeRequest(rootDir, task.pendingContractChange) : null;
     const proposal = JSON.parse(await readFile(path.resolve(rootDir, options.from), "utf8"));
     const proposedDeclarations = normalizeProposal(task, proposal);
     const request = await writeContractChangeRequest(rootDir, state.planId, task, {
-      content: { proposedDeclarations, priorScopeFingerprint: digest(itemsOf(task)), cards: [] },
+      content: { proposedDeclarations, priorScopeFingerprint: digest(itemsOf(task)), cards: [],
+        beforeImplementation: proposalBeforeImplementation(task, priorRequest, proposedDeclarations) },
       evidence: proposal.impact, rationale: proposal.reason, alternatives: proposal.alternatives, recommendation: proposal.recommendation,
     });
     task.pendingContractChange = request.id;
@@ -165,8 +184,10 @@ export async function resolveContractChange(rootDir, options) {
       task.contractDecisionRef = request.id;
       task.pendingContractChange = null;
       // A retained admission must resume its own transaction; a linear task
-      // with a successful worker rechecks gates instead of rerunning it.
-      task.status = task.admission_claim || (task.last_verify_result && !request.content.beforeImplementation) ? "verifying" : "pending";
+      // whose approved request followed implementation rechecks gates instead
+      // of rerunning the worker. The request phase is authoritative for new
+      // requests; the helper only infers old requests that predate the field.
+      task.status = task.admission_claim || !requestBeforeImplementation(task, request) ? "verifying" : "pending";
     } else {
       task.status = "needs_user_decision";
       // The admission owner proved rollback before offering the decision.
