@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
@@ -11,7 +12,7 @@ import { runNextTask } from "../src/orchestration/linear-runtime.mjs";
 import { runWorkflow } from "../src/orchestration/workflow.mjs";
 
 async function withTempDir(fn) {
-  const baseDir = path.join(process.cwd(), ".tmp");
+  const baseDir = path.join(os.tmpdir(), "wildarrange-tests");
   await mkdir(baseDir, { recursive: true });
   const dir = await mkdtemp(path.join(baseDir, "wildarrange-p2-"));
   try {

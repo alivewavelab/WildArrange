@@ -87,7 +87,9 @@ init -> plan -> task-worktree -> worker -> verifier -> delivery-commit -> task-b
 | `src/AGENTS.md`                                              | 五区归属判断、全区依赖不变量和统一修改顺序 |
 | **interface/**（宿主/人机交互边界，只依赖 orchestration、infra） |  |
 | `src/interface/AGENTS.md`                                    | Interface 局部职责、宿主安全边界和验收要求 |
-| `src/interface/dashboard.mjs`                                | 本地 dashboard HTTP 服务、POST token 与 Host/Origin 防护 |
+| `src/interface/dashboard.mjs`                                | Dashboard HTTP/API 路由、token、Host/Origin 与请求安全边界 |
+| `src/interface/dashboard-view.mjs`                           | Dashboard 整页 HTML/CSS 与浏览器交互渲染，组合现有 panel 片段 |
+| `src/interface/contract-view.mjs`                            | 契约登记与扫描差异的只读 HTML 呈现，不批准或改写正式登记 |
 | `src/interface/adoption-panel.mjs`                           | 验证治理接管 Dashboard 卡片、批准 API 输入校验与页面片段 |
 | `src/interface/adapters.mjs`                                 | Codex / Cursor / Kimi adapter 安装、卸载、恢复、共享 Skill 命令生成 |
 | `src/interface/kimi-adapter.mjs`                             | Kimi plugin manifest、Hook bridge 与安装说明的纯渲染逻辑 |
@@ -101,17 +103,20 @@ init -> plan -> task-worktree -> worker -> verifier -> delivery-commit -> task-b
 | `src/interface/project-init.mjs` | 显式、非覆盖式补建项目治理文档，并返回需要人类确认的清单 |
 | **orchestration/**（工作流顺序、重试、gate 编排，只依赖 ai、capabilities、infra） |  |
 | `src/orchestration/AGENTS.md`                                | 编排、事务、恢复与完成状态不变量 |
-| `src/orchestration/plan-state.mjs`                            | 计划导入、校验、路由 enrichment、任务状态加载                 |
+| `src/orchestration/plan-state.mjs`                            | 计划导入、批准、校验与任务状态加载；feature design 状态委托唯一 owner |
+| `src/orchestration/feature-design.mjs`                        | 需求确认、计划绑定与 feature design 状态迁移的唯一业务 owner |
+| `src/orchestration/host-runtime.mjs`                          | 宿主事件的业务前置编排；CLI 显式组合 AI 渲染入口，不添加反向 import |
+| `src/orchestration/contract-governance.mjs`                    | 批准契约范围、计划外变更申请/决定/等待与登记更新编排，复用现有 ChangeRequest |
 | `src/orchestration/linear-runtime.mjs`                        | 线性任务节点运行时、重试 / checkpoint，经 gateway 调用能力       |
 | `src/orchestration/parallel-runtime.mjs`                      | 命令型子 Agent 并行运行、隔离结果、skipped/cleanup 生命周期状态、runner 崩溃逐任务容错、中断对账（incompleteTasks）与 `parallel retry` partial 重试 |
 | `src/orchestration/remote-ownership.mjs`                      | 设备登记、远端任务 claim、单写 owner 校验与协调状态 |
 | `src/orchestration/handoff.mjs`                               | 跨设备 prepare/push/accept 与显式 takeover |
 | `src/orchestration/admission.mjs`                             | 并行 admission 事务：claim → apply → gates → commit/rollback；回滚失败保持 ownership，全程持全局任务锁 |
 | `src/orchestration/admission-recovery.mjs`                    | admission 回滚计划、补丁恢复、revalidation / 已集成恢复状态落盘，禁止已 push 成果回滚 |
-| `src/orchestration/delivery-pipeline.mjs`                     | 共享交付流水线与完成提交顺序：verify → scope → review → acceptance-proof → checkpoint；ledger → wisdom → digest → tasks.json |
+| `src/orchestration/delivery-pipeline.mjs`                     | 按任务/工作区事实确定交付要求及强制完成终点，复用 integration Git 事务；统一 gate 与完成提交顺序 |
 | `src/orchestration/integration.mjs`                           | admission 交付事务：owner/base/task-branch 三重 fence、delivery commit、task branch 普通 push 与故障对账；不得自动合入 `main` |
 | `src/orchestration/task-board.mjs`                            | 全项目工单总账、draft/ready、任务 claim/证据/持久化与消息板 |
-| `src/orchestration/change-governance.mjs`                     | 任务变更治理、Review Blocker、ChangeRequest           |
+| `src/orchestration/change-governance.mjs`                     | 任务变更治理、Review Blocker、ChangeRequest 单一记录与决定持久化；契约请求复用记录 |
 | `src/orchestration/status.mjs`                                | 状态报告、Workflow 总结、attentionReport 与 Dashboard 数据 |
 | `src/orchestration/adoption.mjs`                              | 老项目验证治理接管会话、逐卡批准、维护互斥、恢复与两次 Git 锚定 |
 | `src/orchestration/workflow.mjs`                               | Workflow 入口、样例计划生成                            |
@@ -128,7 +133,7 @@ init -> plan -> task-worktree -> worker -> verifier -> delivery-commit -> task-b
 | `src/capabilities/AGENTS.md`                                 | 原子能力、网关信封和失败语义约束 |
 | `src/capabilities/gateway.mjs`                                | 能力网关：静态注册表 + 统一结果信封（capability/status/evidence/sideEffect/duration_ms/cost/error） |
 | `src/capabilities/verification-governance.mjs`                | 验证治理原子能力：scan / apply-card / generate-artifacts |
-| `src/capabilities/contract-governance.mjs`                    | 接口与数据库契约治理原子能力：scan / apply-card / generate-artifacts；首版接入 Tauri IPC 发现器 |
+| `src/capabilities/contract-governance.mjs`                    | 契约扫描、检查与受控原子操作；跨步骤审批和任务推进由 orchestration 负责 |
 | `src/capabilities/verify.mjs`                                 | verifier                                       |
 | `src/capabilities/scope-guard.mjs`                             | scope guard、realpath 范围校验                      |
 | `src/capabilities/worker.mjs`                                 | Worker 执行                                      |
@@ -158,7 +163,7 @@ init -> plan -> task-worktree -> worker -> verifier -> delivery-commit -> task-b
 | `src/infra/recovery-transaction.mjs`                          | 通用 preimage/postimage、提交、回滚、maintenance marker 与路径/digest 原语 |
 | `src/infra/verification-discovery.mjs`                        | 验证资产只读扫描、消费者分级与可判对变更卡 |
 | `src/infra/verification-registry.mjs`                         | Registry/Bootstrap/Inventory schema、digest 与 freshness |
-| `src/infra/contract-governance.mjs`                           | 技术栈中立的契约台账、差异卡、覆盖报告、快照生命周期与静态发现器登记；首版发现 Tauri IPC，未知来源降级人工申报 |
+| `src/infra/contract-governance.mjs`                           | 契约 schema、发现、差异与锁/存储原语；批准流程及页面归上层，未知来源显式降级申报 |
 | `src/infra/review-findings.mjs`                                | LSP / AST / hashline / 注释检查等质量发现              |
 | `src/infra/llm-provider.mjs`                                   | OpenAI-compatible LLM provider 与可选 LLM review |
 | `src/infra/agent-spawn.mjs`                                    | Codex / Cursor / 自定义命令型子 Agent spawn 模板渲染       |

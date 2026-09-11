@@ -1,6 +1,6 @@
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { appendLedger } from "./ledger.mjs";
+import { appendLedger, readVerifiedLedgerEntries, verifyLedger } from "./ledger.mjs";
 import { normalizeRelativePath } from "./path-match.mjs";
 import {
   STATE_VERSION,
@@ -11,7 +11,7 @@ import {
   resolveWildArrangePath,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
-import { loadTaskState } from "./task-state-store.mjs";
+import { inspectCompletedTaskEvidence, loadTaskState } from "./task-state-store.mjs";
 
 export async function writeSnapshot(rootDir, stage, payload = {}) {
   await ensureWildArrangeDirs(rootDir);
@@ -33,92 +33,17 @@ export async function writeSnapshot(rootDir, stage, payload = {}) {
   return snapshot;
 }
 
-export async function beginFeatureDesignGate(rootDir, sessionId, request) {
-  await ensureWildArrangeDirs(rootDir);
-  const at = nowIso();
-  const gate = {
-    version: STATE_VERSION,
-    kind: "feature_design_gate",
-    id: createWorkId("feature_design"),
-    sessionId: String(sessionId || "session"),
-    status: "awaiting_feature_confirmation",
-    request: String(request || "").trim().slice(0, 4000),
-    createdAt: at,
-    updatedAt: at,
-  };
-  await writeJsonAtomic(featureDesignGatePath(rootDir, gate.id), gate);
-  await writeJsonAtomic(featureDesignSessionPath(rootDir, gate.sessionId), {
-    version: STATE_VERSION,
-    gateId: gate.id,
-    updatedAt: at,
-  });
-  return gate;
-}
-
-export async function loadActiveFeatureDesignGate(rootDir, sessionId) {
-  const pointer = await readJson(featureDesignSessionPath(rootDir, sessionId), null);
-  if (!pointer?.gateId) return null;
-  return readJson(featureDesignGatePath(rootDir, pointer.gateId), null);
-}
-
-export async function confirmFeatureDesignGate(rootDir, gate) {
-  if (!gate || gate.status !== "awaiting_feature_confirmation") {
-    throw new Error("feature design gate is not awaiting confirmation");
-  }
-  const at = nowIso();
-  const confirmed = {
-    ...gate,
-    status: "awaiting_plan_import",
-    confirmedAt: at,
-    updatedAt: at,
-  };
-  await writeJsonAtomic(featureDesignGatePath(rootDir, gate.id), confirmed);
-  return confirmed;
-}
-
-export async function assertFeatureDesignPlanBinding(rootDir, plan) {
-  if (!plan?.feature_design_ref) return null;
-  const gate = await readJson(featureDesignGatePath(rootDir, plan.feature_design_ref), null);
-  if (!gate) throw new Error(`unknown feature_design_ref: ${plan.feature_design_ref}`);
-  if (gate.status !== "awaiting_plan_import" && !(gate.status === "plan_imported" && gate.planId === plan.id)) {
-    throw new Error(`feature design ${gate.id} is not confirmed for plan import`);
-  }
-  return gate;
-}
-
-export async function bindFeatureDesignPlan(rootDir, gate, planId) {
-  if (!gate) return null;
-  const at = nowIso();
-  const bound = {
-    ...gate,
-    status: "plan_imported",
-    planId,
-    planImportedAt: at,
-    updatedAt: at,
-  };
-  await writeJsonAtomic(featureDesignGatePath(rootDir, gate.id), bound);
-  return bound;
-}
-
-function featureDesignGatePath(rootDir, gateId) {
-  return resolveWildArrangePath(rootDir, "sessions", "feature-design", `${safeStateSegment(gateId)}.json`);
-}
-
-function featureDesignSessionPath(rootDir, sessionId) {
-  return resolveWildArrangePath(rootDir, "sessions", "feature-design", "by-session", `${safeStateSegment(sessionId)}.json`);
-}
-
-function safeStateSegment(value) {
-  return String(value || "session").replace(/[^A-Za-z0-9_.-]+/g, "_").slice(0, 120) || "session";
-}
-
 export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
   const latestSnapshot = options.latestSnapshot || await readJson(resolveWildArrangePath(rootDir, "snapshots", "latest.json"), null);
   const work = await readJson(resolveWildArrangePath(rootDir, "work.json"), null);
   const taskState = await loadTaskState(rootDir);
   const changes = await readChangeRequests(rootDir);
-  const status = buildStatusReport(work, taskState, changes);
+  const verifiedLedgerEntries = await readVerifiedLedgerEntries(rootDir);
+  const completionIntegrity = await inspectCompletedTaskEvidence(rootDir, taskState, { ledgerEntries: verifiedLedgerEntries });
+  const status = buildStatusReport(work, taskState, changes, completionIntegrity);
+  const ledgerIntegrity = await verifyLedger(rootDir);
   const nextTask = taskState ? findRunnableTaskForContext(taskState.tasks || []) : null;
+  const nextAction = describeNextAction(taskState?.tasks || [], nextTask);
   const context = {
     kind: "wildarrange_context_snapshot",
     version: STATE_VERSION,
@@ -126,7 +51,8 @@ export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
     reason: options.reason || "manual",
     latestSnapshot: latestSnapshot ? { id: latestSnapshot.id, stage: latestSnapshot.stage, at: latestSnapshot.at } : null,
     status,
-    nextAction: nextTask ? `run task ${nextTask.id}: ${nextTask.subject}` : status.failed > 0 ? "inspect failed task" : "no runnable task",
+    nextAction: nextAction.text,
+    nextActionDetails: nextAction,
     nextTask: nextTask ? summarizeTaskForContext(nextTask) : null,
     activeTasks: (taskState?.tasks || [])
       .filter((task) => task.status === "verifying" || task.status === "in_progress")
@@ -136,7 +62,8 @@ export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
       .map(summarizeTaskForContext),
     openChanges: changes.filter((change) => change.status === "open").map(summarizeChangeForContext),
     sessions: await readSessionLineage(rootDir),
-    ledgerTail: await readLedgerTail(rootDir, 12),
+    ledgerIntegrity,
+    ledgerTail: verifiedLedgerEntries.slice(-12),
   };
   const jsonPath = resolveWildArrangePath(rootDir, "snapshots", "context.json");
   const mdPath = resolveWildArrangePath(rootDir, "snapshots", "context.md");
@@ -147,9 +74,9 @@ export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
   return context;
 }
 
-function buildStatusReport(work, taskState, changes) {
+function buildStatusReport(work, taskState, changes, completionIntegrity) {
   const openChanges = changes.filter((change) => change.status === "open").length;
-  if (!taskState) return { work, planId: null, total: 0, completed: 0, draft: 0, pending: 0, failed: 0, openChanges };
+  if (!taskState) return { work, planId: null, total: 0, completed: 0, invalidCompleted: 0, completionIntegrity, draft: 0, pending: 0, failed: 0, openChanges };
   const counts = (taskState.tasks || []).reduce((acc, task) => {
     acc[task.status] = (acc[task.status] || 0) + 1;
     return acc;
@@ -160,6 +87,8 @@ function buildStatusReport(work, taskState, changes) {
     total: taskState.tasks.length,
     draft: counts.draft || 0,
     completed: counts.completed || 0,
+    invalidCompleted: completionIntegrity.invalid.length,
+    completionIntegrity,
     pending: counts.pending || 0,
     in_progress: counts.in_progress || 0,
     verifying: counts.verifying || 0,
@@ -173,6 +102,24 @@ function buildStatusReport(work, taskState, changes) {
 function findRunnableTaskForContext(tasks) {
   const completed = new Set(tasks.filter((task) => task.status === "completed").map((task) => task.id));
   return tasks.find((task) => task.status === "pending" && (task.blockedBy || []).every((id) => completed.has(id))) || null;
+}
+
+// A read-only description of current state, shared by resume and Stop output.
+// Executing any suggested command still goes through the runtime's own gates.
+function describeNextAction(tasks, runnable) {
+  const recovery = tasks.find((task) => task.pendingContractChange && task.admission_claim
+    && task.admission_claim.workspaceRestored !== true);
+  const active = tasks.find((task) => !task.pendingContractChange && ["in_progress", "verifying"].includes(task.status));
+  const failed = tasks.find((task) => !task.pendingContractChange && ["failed", "review_blocked", "needs_user_decision"].includes(task.status));
+  const waiting = tasks.find((task) => task.pendingContractChange);
+  const task = recovery || runnable || active || failed || waiting;
+  const reason = recovery ? "admission_recovery" : runnable ? "runnable_task" : active ? "active_task" : failed ? "blocked_or_failed_task" : waiting ? "awaiting_user_decision" : "no_unfinished_work";
+  const command = recovery || (task === active && active?.admission_claim)
+    ? `node ./bin/wildarrange.mjs parallel admit --run ${task.admission_claim.runId} --task ${task.id}`
+    : runnable ? "node ./bin/wildarrange.mjs run" : active ? `node ./bin/wildarrange.mjs node verify --task ${task.id}` : failed ? "node ./bin/wildarrange.mjs status" : null;
+  const text = recovery ? `recover shared workspace: ${command}` : runnable ? `run task ${task.id}: ${task.subject}` : active ? `resume task ${task.id}: ${command}`
+    : failed ? "inspect failed task" : waiting ? `await user direction for contract change ${task.pendingContractChange}` : "no runnable task";
+  return { reason, taskId: task?.id || null, command, text };
 }
 
 async function readChangeRequests(rootDir) {
@@ -191,26 +138,6 @@ async function readChangeRequests(rootDir) {
     if (change) changes.push(change);
   }
   return changes.sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
-}
-
-async function readLedgerTail(rootDir, limit) {
-  try {
-    const content = await readFile(resolveWildArrangePath(rootDir, "ledger.jsonl"), "utf8");
-    return content
-      .split(/\r?\n/)
-      .filter(Boolean)
-      .slice(-limit)
-      .map((line) => {
-        try {
-          return JSON.parse(line);
-        } catch {
-          return { raw: line };
-        }
-      });
-  } catch (error) {
-    if (error?.code === "ENOENT") return [];
-    throw error;
-  }
 }
 
 async function readSessionLineage(rootDir) {
@@ -279,7 +206,8 @@ function renderContextMarkdown(context) {
     "",
     `- Work: ${status.work?.workId || "(none)"}`,
     `- Plan: ${status.planId || "(none)"}`,
-    `- Counts: total=${status.total || 0}, completed=${status.completed || 0}, pending=${status.pending || 0}, verifying=${status.verifying || 0}, failed=${status.failed || 0}, openChanges=${status.openChanges || 0}`,
+    `- Counts: total=${status.total || 0}, completed=${status.completed || 0}, invalidCompleted=${status.invalidCompleted || 0}, pending=${status.pending || 0}, verifying=${status.verifying || 0}, failed=${status.failed || 0}, openChanges=${status.openChanges || 0}`,
+    `- Ledger integrity: ${context.ledgerIntegrity?.ok === true ? "verified" : `failed (${context.ledgerIntegrity?.failures?.length || 0} finding(s))`}`,
     `- Next action: ${context.nextAction}`,
     "",
     "## Session Lineage",

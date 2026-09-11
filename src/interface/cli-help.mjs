@@ -65,6 +65,8 @@ export const COMMAND_REGISTRY = [
   { usage: "contracts scan [--from <contract-changes.json>]", desc: "扫描 Tauri IPC 契约并生成待审核差异卡" },
   { usage: "contracts apply-card --card <id> --decision approve|reject --reason \"...\" --expected-fingerprint <sha256>", desc: "由开发者批准或拒绝当前契约差异卡" },
   { usage: "contracts generate", desc: "从已批准契约台账生成人类可读总图" },
+  { usage: "contracts propose --task <id> --from <proposal.json>", desc: "提出计划外接口或数据库变更，暂停任务等待人类决定" },
+  { usage: "contracts resolve --id <id> --decision accept|reject --expected-fingerprint <sha256> --reason \"...\"", desc: "按当前变更内容记录人类决定，批准后重新验收" },
   { usage: `context build [--agent ${DEFAULT_EXECUTOR_AGENT}] [--task T001] [--plan <planId>] [--point before_execute]`, desc: "构建指定计划与注入点的 Agent 上下文" },
   { usage: "evidence record --task T001 --criterion C001 --status pass --evidence \"...\"", desc: "回填成功判据证据" },
   { usage: "steer --from <proposal.json>", desc: "任务变更治理入口" },

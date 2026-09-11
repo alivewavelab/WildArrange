@@ -237,7 +237,9 @@ Create `plan.json`:
 }
 ```
 
-> `review_commands` is required in practice: the acceptance proof refuses to complete a task whose review gate has no independent signal lane (a tautological review proves nothing). An independent signal is any of `review_commands` / `standards_commands` / `review.llm` / an enabled quality gate.
+> The acceptance proof requires an independent review result from this execution: a successful substantive `review_commands` / `standards_commands` command, a quality gate with actual inspection targets, or a successful LLM review. Configuration alone, skipped execution, missing-key fallback, `echo`, and `node --version` cannot authorize completion.
+
+Plan import protects existing work: reimport cannot overwrite tasks in the same Plan that are executing, verifying, recovering, holding a task claim, or already completed. After the old Plan completes, a new Plan can be imported while retaining the previous tasks and delivery records.
 
 Run it:
 
@@ -323,6 +325,8 @@ node ./bin/wildarrange.mjs parallel list
 node ./bin/wildarrange.mjs parallel status --run <runId>
 node ./bin/wildarrange.mjs parallel cleanup --run <runId>
 ```
+
+`parallel cleanup` retains worktrees awaiting acceptance, rework, recovery, or containing uncommitted changes. Cleanup requires a verifiable task identity and lifecycle, a clean worktree, and its current HEAD to be contained in `main`; it never force-deletes files added after acceptance.
 
 To propose mainline artifacts, a child agent writes structured files to `agent-result.json`:
 
@@ -425,6 +429,15 @@ node ./bin/wildarrange.mjs contracts apply-card --card <id> --decision approve -
 node ./bin/wildarrange.mjs contracts generate
 ```
 
+Exact contract definitions approved in the plan need no second decision. Unplanned interfaces or database fields pause the task while the lead explains necessity, impact, alternatives, and a recommendation. Approval binds the specific content; subsequent changes invalidate it.
+
+```bash
+node ./bin/wildarrange.mjs contracts propose --task T001 --from proposal.json
+node ./bin/wildarrange.mjs contracts resolve --id <id> --decision accept --expected-fingerprint <sha256> --reason "Approve the specific changes in the report"
+```
+
+`proposal.json` requires `reason`, `impact`, `alternatives`, `recommendation`, and `items` (the task's `contractChanges.items` format; Tauri definitions require `expected.signatures`). Inside a running Loop, command workers emit one stdout line `WILDARRANGE_CONTRACT_CHANGE=<proposal JSON>` and exit for lead review; they must not call the locking `propose` command from that child process. Use `--decision reject` to keep the task paused without automatic retries. A new session surfaces the same request. See [runtime architecture](doc/project-architecture.md) for the full contract. Formal registration remains an explicit, versioned `scan/apply-card` operation; task approval does not silently modify the registry.
+
 Before every worker run in a Git project, WildArrange records a workspace snapshot (`git stash create`); the snapshot hash and restore command are stored in task evidence and the ledger, so broken changes can be recovered with `git stash apply <hash>`.
 
 WildArrange preflights shell commands and blocks clearly destructive commands such as deleting `.git/.wildarrange`, recursively deleting project source/test/doc directories, `git reset --hard`, `git clean -fd`, `sudo`, or `curl | sh`. Normal project commands, verifiers, review commands, and child-agent runners continue to run.
@@ -479,15 +492,17 @@ Local dashboard:
 node ./bin/wildarrange.mjs serve --host 127.0.0.1 --port 8765
 ```
 
+The loopback dashboard opens directly without a login form. The server creates a one-process HttpOnly session cookie, while Dashboard write actions still pass token, Host, and Origin checks behind the scenes.
+
 Binding to a non-loopback host requires a token:
 
 ```bash
 node ./bin/wildarrange.mjs serve --host 0.0.0.0 --port 8765 --token "$WILDARRANGE_DASHBOARD_TOKEN"
 ```
 
-`GET /api/state` remains readable on loopback without a token. Every `POST` write operation requires a token even on `127.0.0.1`, and the server validates Host / Origin headers to prevent browser-triggered local command execution.
+`GET /api/state` remains readable on loopback without a token. Browser writes use the automatic session cookie; non-browser clients still authenticate explicitly. The server validates Host / Origin headers to prevent browser-triggered local command execution.
 
-API write requests need either:
+Non-loopback API requests need either:
 
 ```text
 Authorization: Bearer <token>

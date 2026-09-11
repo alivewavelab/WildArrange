@@ -3809,6 +3809,8 @@ const D = {
     { id: "dir", p: "src/interface/", r: "交互区全部实现", io: "宿主请求 → 安全交互" },
     { id: "help", p: "src/interface/cli-help.mjs", r: "CLI 帮助的单一事实源", io: "renderHelp({ all }) → 帮助文本" },
     { id: "dashboard", p: "src/interface/dashboard.mjs", r: "启动本地 Dashboard", io: "startDashboardServer(rootDir, options) → 本地服务" },
+    { id: "dashboard-view", p: "src/interface/dashboard-view.mjs", r: "整页 HTML、CSS 与浏览器逻辑", io: "renderDashboardHtml() → HTML" },
+    { id: "contract-view", p: "src/interface/contract-view.mjs", r: "契约台账只读总图", io: "generateContractArtifacts(rootDir) → 产物路径" },
     { id: "adapters", p: "src/interface/adapters.mjs", r: "安装宿主适配器与对话计划入口", io: "安装选项 → Hook、快捷命令与计划生成说明" },
     { id: "project-init", p: "src/interface/project-init.mjs", r: "非覆盖式补建项目治理文档", io: "initProjectDocuments(rootDir, options) → 创建与保留清单" }
   ], focusFiles: [
@@ -3820,6 +3822,9 @@ const D = {
   ] },
   "orchestration": { name: "Orchestration（流程编排）", plain: "把计划按顺序推进，失败返工，通过后才提交", role: "顺序、重试、事务与门编排", inn: "计划与任务状态", out: "下一步动作或集成结果", status: "已通", files: [
     { id: "dir", p: "src/orchestration/", r: "编排区全部实现", io: "任务状态 → 流程推进" },
+    { id: "feature-design", p: "src/orchestration/feature-design.mjs", r: "需求确认与计划绑定唯一 owner", io: "advanceFeatureDesign(rootDir, input) → 当前设计门状态" },
+    { id: "host-runtime", p: "src/orchestration/host-runtime.mjs", r: "宿主入口先推进业务再渲染", io: "runHostHook(rootDir, input, renderHook) → Hook 结果" },
+    { id: "contract-workflow", p: "src/orchestration/contract-governance.mjs", r: "计划外契约变更暂停与人类决定", io: "prepareContractReview(rootDir, planId, task, executionRoot, evidence) → 复核或 ChangeRequest" },
     { id: "linear", p: "src/orchestration/linear-runtime.mjs", r: "M1 线性任务循环", io: "runNextTask(rootDir, options) → 下一步" },
     { id: "parallel", p: "src/orchestration/parallel-runtime.mjs", r: "命令型子 Agent 隔离运行", io: "runParallelAgents(rootDir, options) → run" },
     { id: "admission", p: "src/orchestration/admission.mjs", r: "子 Agent 成果集成事务", io: "admitParallelAgentResult(rootDir, options) → 集成结果" }

@@ -6,11 +6,13 @@
     },
     "interface": {
       "designId": null,
-      "include": ["src/interface/"]
+      "include": ["src/interface/"],
+      "description": "HTTP 安全边界与页面渲染分别持有职责；契约总图为只读投影。目录规则自动登记本区新脚本。"
     },
     "orchestration": {
       "designId": null,
-      "include": ["src/orchestration/"]
+      "include": ["src/orchestration/"],
+      "description": "交付、需求确认、宿主业务顺序与契约变更决定各有独立 owner。目录规则自动登记本区新脚本。"
     },
     "ai": {
       "designId": null,

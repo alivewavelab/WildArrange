@@ -55,14 +55,16 @@ import {
   persistPostIntegrationRecovery,
   removePersistedRollbackPlan,
   rollbackAdmissionChanges,
+  recordApplyFailureWithinLock,
 } from "./admission-recovery.mjs";
 import {
   collectIntegrationCandidatePaths,
-  integrateAdmissionCommit,
+  assertContractWorkspaceAvailable,
   readIntegrationIntent,
   verifyAdmissionFences,
 } from "./integration.mjs";
 import { loadTaskState } from "./plan-state.mjs";
+import { readChangeRequest } from "./change-governance.mjs";
 import { persistTaskState } from "./task-board.mjs";
 import { assertCurrentTaskOwnership } from "./remote-ownership.mjs";
 
@@ -94,6 +96,8 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
   // an established transaction (started ledger + claimed task) behind it.
   const claim = await withTaskStateLock(rootDir, `parallel-admit:${options.taskId}`, () =>
     claimAdmission(rootDir, options, { result, files, proposedPaths }));
+
+  if (claim.kind === "awaiting_user_decision") return { status: claim.kind, task: claim.task, changeRequest: claim.changeRequest };
 
   if (claim.kind === "resume") {
     await updateAgentRunLifecycle(rootDir, options.runId, options.taskId, "released", {
@@ -184,6 +188,7 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
     taskId: options.taskId,
     planId: finalized.planId || finalized.task?.planId || null,
     status: finalized.status,
+    changeRequest: finalized.changeRequest || null,
     appliedPaths: finalized.appliedPaths,
     verifyResult: finalized.verifyResult,
     scopeResult: finalized.scopeResult,
@@ -220,6 +225,8 @@ async function claimAdmission(rootDir, options, { result, files, proposedPaths }
   const task = taskState.tasks.find((candidate) => candidate.id === options.taskId);
   if (!task) throw new Error(`unknown task: ${options.taskId}`);
 
+  assertContractWorkspaceAvailable(taskState.tasks, options);
+
   if (task.status === "completed") {
     // A completed task is either an idempotent resume (THIS run completed
     // it through the gates, only the lifecycle release was interrupted) or
@@ -243,6 +250,10 @@ async function claimAdmission(rootDir, options, { result, files, proposedPaths }
   // review P0, round 6, 2026-07-21) from "MY admission crashed mid-flight"
   // (reclaim and continue from the recorded phase, without re-running the
   // parts that already happened).
+  if (task.pendingContractChange && task.last_failure?.reason !== "admission_rollback_failed") {
+    if (task.admission_claim?.runId && task.admission_claim.runId !== options.runId) throw new Error("another admission owns this waiting task");
+    return { kind: "awaiting_user_decision", task, changeRequest: await readChangeRequest(rootDir, task.pendingContractChange) };
+  }
   if (task.admission_claim?.runId && task.status === "verifying") {
     if (task.admission_claim.runId !== options.runId) {
       throw new Error(`task ${options.taskId} is currently claimed by parallel admission run ${task.admission_claim.runId} (phase: ${task.admission_claim.phase}); refusing run ${options.runId}. 若那次 admission 已崩溃，用原 run 重新 admit 即可续跑`);
@@ -360,7 +371,7 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
     throw new Error(`task ${options.taskId} has unsupported admission phase ${livePhase || "missing"}; claim kept for manual recovery`);
   }
   const resumeFinalizing = livePhase === "finalizing";
-  const resumeApplying = claim.kind === "reclaimed" && livePhase === "applying";
+  const resumeApplying = claim.kind === "reclaimed" && livePhase === "applying" && liveTask.admission_claim.workspaceRestored !== true;
   let rollbackPlan = { mode: "none", paths: [] };
   let appliedPaths = resumeFinalizing ? liveTask.admission_claim.appliedPaths : proposedPaths;
 
@@ -400,6 +411,7 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
         if (!resumeApplying) {
           await persistRollbackPlan(rootDir, options.runId, options.taskId, rollbackPlan);
         }
+        await advanceClaimPhaseWithinLock(rootDir, options.taskId, options.runId, "applying", proposedPaths);
         for (const file of files) {
           const absolutePath = path.join(rootDir, file.path);
           assertPathInsideRoot(rootDir, absolutePath, file.path);
@@ -409,7 +421,8 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
       } else {
         rollbackPlan = { mode: "patch", patch: result.result.patch, paths: proposedPaths };
         await persistRollbackPlan(rootDir, options.runId, options.taskId, rollbackPlan);
-        const alreadyApplied = claim.kind === "reclaimed" && (await patchAlreadyApplied(rootDir, result.result.patch));
+        await advanceClaimPhaseWithinLock(rootDir, options.taskId, options.runId, "applying", proposedPaths);
+        const alreadyApplied = resumeApplying && (await patchAlreadyApplied(rootDir, result.result.patch));
         if (!alreadyApplied) await applyAgentPatch(rootDir, result.result.patch);
         const actualPaths = await collectActualAdmissionPaths(rootDir, proposedPaths);
         const actualDenied = actualPaths.filter((filePath) => !pathAllowed(filePath, claim.writablePaths));
@@ -421,7 +434,9 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
       }
     } catch (error) {
       const applyError = error instanceof Error ? error : new Error(String(error));
-      const rollback = await rollbackAdmissionChanges(rootDir, rollbackPlan);
+      const rollback = applyError.code === "patch_precheck_failed" && !resumeApplying
+        ? { status: "rolled_back", reason: "patch_not_applied", paths: [] }
+        : await rollbackAdmissionChanges(rootDir, rollbackPlan);
       await recordApplyFailureWithinLock(rootDir, options.taskId, {
         runId: options.runId,
         error: applyError,
@@ -618,16 +633,12 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
     changedPaths: deliveryChangedPaths,
     runId,
     preCompletionGate: () => verifyAdmissionFences(rootDir, taskId, integrationGuard, integrationIntent),
-    beforeCheckpointGate: () => integrateAdmissionCommit(rootDir, {
-      planId: taskState.planId,
-      task,
-      taskId,
+    delivery: {
       runId,
-      changedPaths: deliveryChangedPaths,
       integrationGuard,
       deliveryWorktreeDir,
       deliveryFromWorktree,
-    }),
+    },
   });
   const verifyResult = pipelineResult.evidence.verifyResult;
   const scopeResult = pipelineResult.evidence.scopeResult;
@@ -642,6 +653,26 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
   task.evidence.push(reviewResult);
   task.last_review_result = reviewResult;
   await writeReviewReport(rootDir, taskState.planId, task, reviewResult);
+
+  if (pipelineResult.status === "recovery_required") {
+    task.status = "verifying";
+    task.last_failure = buildFailureSummary(task, {
+      workerResult,
+      verifyResult,
+      scopeResult,
+      reviewResult,
+      criteriaResult: criteria,
+      nextStatus: task.status,
+    });
+    task.last_failure.reason = "command_termination_failed";
+    task.last_failure.summary = `a gate command timed out and process termination could not be confirmed${pipelineResult.evidence.commandRecovery?.pid ? ` (pid ${pipelineResult.evidence.commandRecovery.pid})` : ""}`;
+    task.last_failure.retryHint = "确认残留进程已经终止后，用同一 run 重新 admit；保留 owner、worktree 与 rollback plan。";
+    task.last_failure.commandEvidence = pipelineResult.evidence.commandRecovery;
+    task.updatedAt = nowIso();
+    await writeFailureReport(rootDir, taskState.planId, task);
+    await persistTaskState(rootDir, taskState);
+    return { status: "recovery_required", planId: taskState.planId, task, acceptanceProof, verifyResult, scopeResult, reviewResult, rollback: { status: "not_attempted", reason: "command_process_state_unknown" } };
+  }
 
   if (pipelineResult.status === "completed") {
     // The admitted files were evaluated in the protected shared checkout only
@@ -763,6 +794,18 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
     return { status: "recovery_required", planId: taskState.planId, task, acceptanceProof, verifyResult, scopeResult, reviewResult, rollback };
   }
 
+  if (pipelineResult.status === "awaiting_user_decision") {
+    // A human wait must never retain temporary files in the shared checkout.
+    // Keep the task/run owner, but replay the child result against a NEW
+    // preimage after approval; the old preimage cannot erase another task.
+    task.status = "needs_user_decision";
+    task.admission_claim = { ...task.admission_claim, phase: "applying", appliedPaths: [], workspaceRestored: true };
+    task.last_failure = null;
+    await persistTaskState(rootDir, taskState);
+    await removePersistedRollbackPlan(rootDir, runId, taskId);
+    return { status: "awaiting_user_decision", planId: taskState.planId, task, changeRequest: pipelineResult.changeRequest,
+      verifyResult, scopeResult, reviewResult, rollback };
+  }
   if (pipelineResult.status === "checkpoint_failed") {
     task.status = "pending";
     task.admission_claim = null;
@@ -823,42 +866,6 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
 }
 
 /**
- * Records a failed file application. A successful rollback releases the
- * claim; a failed rollback keeps ownership and the task in verifying so a
- * successor cannot enter a dirty workspace. Runs inside the caller's lock
- * hold; MUST NOT acquire the task-state lock.
- */
-async function recordApplyFailureWithinLock(rootDir, taskId, { runId, error, rollback }) {
-  const taskState = await loadTaskState(rootDir);
-  if (!taskState) return;
-  const task = taskState.tasks.find((candidate) => candidate.id === taskId);
-  if (!task || task.status !== "verifying") return;
-  const rolledBack = rollback?.status === "rolled_back";
-  task.status = rolledBack ? "pending" : "verifying";
-  if (rolledBack) task.admission_claim = null;
-  task.last_failure = {
-    at: nowIso(),
-    reason: rolledBack ? "admission_apply_failed" : "admission_rollback_failed",
-    summary: rolledBack
-      ? `parallel admission failed while applying files: ${error.message}`
-      : `parallel admission apply failed and workspace rollback did not complete: ${rollback?.error || error.message}`,
-    retryHint: rolledBack
-      ? "工作区已回滚到 admission 前的内容，修复失败原因后重新 admit 即可"
-      : `工作区回滚失败；任务所有权和 rollback plan 已保留。修复文件系统问题后，用同一 run 重新 admit。涉及路径：${(rollback?.paths || []).join(", ") || "unknown"}`,
-  };
-  task.updatedAt = nowIso();
-  await appendLedger(rootDir, {
-    type: "parallel_agent_admission_apply_failed",
-    runId: runId || null,
-    taskId,
-    error: error.message,
-    rollback: rollback?.status || null,
-    rollbackPaths: rollback?.paths || [],
-  });
-  await persistTaskState(rootDir, taskState);
-}
-
-/**
  * Advances the persisted claim phase (applying -> finalizing) once the
  * child's files are on disk. Runs inside the caller's lock hold; MUST NOT
  * acquire the task-state lock.
@@ -868,6 +875,7 @@ async function advanceClaimPhaseWithinLock(rootDir, taskId, runId, phase, applie
   const task = taskState?.tasks.find((candidate) => candidate.id === taskId);
   if (!task || task.admission_claim?.runId !== runId) return;
   task.admission_claim.phase = phase;
+  task.admission_claim.workspaceRestored = false;
   task.admission_claim.appliedPaths = appliedPaths;
   task.updatedAt = nowIso();
   await persistTaskState(rootDir, taskState);

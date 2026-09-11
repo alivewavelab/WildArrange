@@ -234,6 +234,51 @@ test("doctor never assigns an archived Plan's unscoped completion event to a new
   });
 });
 
+test("doctor rejects a completed task whose acceptance proof says false", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const task = {
+      id: "T001",
+      planId: "proof-plan",
+      ref: "proof-plan:T001",
+      subject: "False proof must stay visible",
+      status: "completed",
+      verify_commands: ["node verify.cjs"],
+      review_commands: ["node review.cjs"],
+      writable_paths: ["result.txt"],
+      evidence: [],
+      history: [],
+    };
+    await writeFile(resolveWildArrangePath(dir, "team", "tasks.json"), JSON.stringify({
+      version: 1,
+      kind: "task_ledger",
+      activePlanId: "proof-plan",
+      plans: [{ id: "proof-plan", taskIds: ["T001"] }],
+      tasks: [task],
+    }, null, 2), "utf8");
+    await mkdir(resolveWildArrangePath(dir, "checkpoints", "proof-plan"), { recursive: true });
+    await mkdir(resolveWildArrangePath(dir, "reports", "acceptance", "proof-plan"), { recursive: true });
+    await writeFile(resolveWildArrangePath(dir, "checkpoints", "proof-plan", "T001.json"), JSON.stringify({
+      planId: "proof-plan",
+      taskId: "T001",
+      verifyResult: { pass: true },
+      scopeResult: { status: "pass" },
+      reviewResult: { pass: true },
+    }), "utf8");
+    await writeFile(resolveWildArrangePath(dir, "reports", "acceptance", "proof-plan", "T001.json"), JSON.stringify({
+      kind: "acceptance_proof",
+      planId: "proof-plan",
+      taskId: "T001",
+      pass: false,
+    }), "utf8");
+    await appendLedger(dir, { type: "node_checkpoint_completed", planId: "proof-plan", taskId: "T001" });
+
+    const report = await runDoctor(dir);
+    const finding = report.findings.find((item) => item.section === "completion_audit" && item.taskId === "T001");
+    assert.ok(finding?.failures.includes("acceptance_proof"));
+  });
+});
+
 async function writeTwoPlanSameTaskLedger(dir) {
   const task = (planId) => ({
     id: "T001",

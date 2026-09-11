@@ -42,6 +42,8 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
   const criteria = criteriaStatus(task);
   const verifyCommands = Array.isArray(task.verify_commands) ? task.verify_commands : [];
   const reviewLanes = Array.isArray(reviewResult?.lanes) ? reviewResult.lanes : [];
+  const deliveryBaseline = summarizeDeliveryBaseline(evidence.deliveryBaseline || evidence.integrationCommit);
+  const executedReview = hasExecutedIndependentReview(reviewResult, config);
 
   const checks = [
     proofCheck("worker_result", workerResult?.kind === "worker" && workerResult.exitCode === 0, {
@@ -90,11 +92,17 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
     }),
     // 与 verify_not_trivial 同类：同义反复的复核是「门在撒谎」——没有任何
     // 独立信号 lane 时 review PASS 不证明任何东西，不得进入 completed。
-    proofCheck("review_not_tautological", hasRealReviewLane(task, config), {
-      evidence: hasRealReviewLane(task, config)
-        ? "review gate has at least one independent signal lane"
-        : "no review_commands / standards_commands / LLM review / enabled quality gate: the review adds no independent signal beyond verify itself",
-      requiredFix: "为任务配置 review_commands 或 standards_commands，或启用 review.llm / 质量门（qualityGates.*.enabled）；同义反复的复核不能作为完成证据。",
+    proofCheck("review_not_tautological", hasRealReviewLane(task, config) && executedReview.pass, {
+      evidence: executedReview.pass
+        ? `independent review executed: ${executedReview.sources.join(", ")}`
+        : `configured review did not produce a substantive passing result: ${executedReview.reasons.join("; ") || "no executed lane"}`,
+      requiredFix: "本轮至少实际执行一条非空转 review/standards 命令、启用并运行质量门，或取得成功 LLM review；仅有配置、skipped/fallback 或 echo/node --version 不能完成任务。",
+    }),
+    proofCheck("delivery_commit_bound", evidence.deliveryRequired !== true || evidence.deliveryPending === true || Boolean(deliveryBaseline?.commitSha), {
+      evidence: evidence.deliveryPending === true
+        ? "delivery commit will be created before the final proof is persisted"
+        : deliveryBaseline?.commitSha ? `delivery commit ${deliveryBaseline.commitSha}` : "missing delivery commit SHA",
+      requiredFix: "在独立 task worktree/branch 形成 delivery commit，并让 acceptance proof 与 checkpoint 绑定同一 SHA。",
     }),
   ];
 
@@ -112,9 +120,34 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
       scope: scopeResult ? { status: scopeResult.status, deniedPaths: scopeResult.deniedPaths || [] } : null,
       review: reviewResult ? { pass: reviewResult.pass, failedLanes: reviewLanes.filter((lane) => lane.status === "fail").map((lane) => lane.name) } : null,
       successCriteria: criteria,
-      deliveryBaseline: summarizeDeliveryBaseline(evidence.deliveryBaseline || evidence.integrationCommit),
+      deliveryBaseline,
     },
   };
+}
+
+function hasExecutedIndependentReview(reviewResult, config = null) {
+  if (!reviewResult || reviewResult.kind !== "review_gate") return { pass: false, sources: [], reasons: ["missing review result"] };
+  const sources = [];
+  const reasons = [];
+  for (const [name, results] of [["review_commands", reviewResult.reviewCommandResults], ["standards_commands", reviewResult.standardsCommandResults]]) {
+    const substantive = (results || []).filter((result) => result.skipped !== true && !isTrivialCommand(result.command));
+    if (substantive.some((result) => result.exitCode === 0)) sources.push(name);
+    else if ((results || []).length > 0) reasons.push(`${name} were skipped, trivial, or failed`);
+  }
+  const quality = reviewResult.qualityResults || {};
+  for (const name of ["lspResult", "astResult"]) {
+    const result = quality[name];
+    if (result?.status === "pass" && result?.pass === true
+      && (result.results || []).some((entry) => entry.exitCode === 0 && !isTrivialCommand(entry.command))) sources.push(`quality:${name}`);
+  }
+  if (quality.hashlineResult?.status === "pass" && quality.hashlineResult?.pass === true
+    && (quality.hashlineResult.anchors || []).length > 0) sources.push("quality:hashlineResult");
+  if (config?.qualityGates?.commentChecker?.blockOnFindings === true
+    && quality.commentResult?.status === "pass" && quality.commentResult?.pass === true
+    && (quality.commentResult.checkedPaths || []).length > 0) sources.push("quality:commentResult");
+  if ((reviewResult.llmReviews || []).some((result) => result?.status === "pass" && result?.pass === true)) sources.push("llm_review");
+  if (sources.length === 0 && reasons.length === 0) reasons.push("all independent lanes were skipped or unavailable");
+  return { pass: sources.length > 0, sources, reasons };
 }
 
 function summarizeDeliveryBaseline(delivery) {

@@ -11,6 +11,7 @@ import {
   TASK_STATUSES,
   TASK_WORK_TYPES,
   createWorkId,
+  hashContent,
   ensureWildArrangeDirs,
   nowIso,
   readJson,
@@ -25,11 +26,8 @@ import {
 import { appendLedger } from "../infra/ledger.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
-import {
-  assertFeatureDesignPlanBinding,
-  bindFeatureDesignPlan,
-  writeSnapshot,
-} from "../infra/runtime-snapshot.mjs";
+import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
+import { assertFeatureDesignPlanBinding, bindFeatureDesignPlan } from "./feature-design.mjs";
 import { loadRoutesConfig, resolveRouteDecision } from "../infra/route-table.mjs";
 import { isPossibleNoopTask, isTrivialCommand } from "../infra/task-predicates.mjs";
 
@@ -250,6 +248,7 @@ export function normalizeContractChanges(value, taskId, owner) {
       kind: String(item.kind || "manual").trim(),
       action,
       summary,
+      expected: item.expected && typeof item.expected === "object" && !Array.isArray(item.expected) ? JSON.parse(JSON.stringify(item.expected)) : null,
       compatibility: String(item.compatibility || "").trim(),
       migration: String(item.migration || "").trim(),
       rollback: String(item.rollback || "").trim(),
@@ -436,6 +435,7 @@ async function importPlanUnlocked(rootDir, planPath) {
   validatePlanImportQuality(plan);
   const featureDesignGate = await assertFeatureDesignPlanBinding(rootDir, plan);
   const existingLedger = await loadTaskLedger(rootDir);
+  assertPlanImportDoesNotReplaceActiveWork(existingLedger, plan);
   const taskLedger = mergePlanIntoTaskLedger(existingLedger, plan);
   const targetPath = resolveWildArrangePath(rootDir, "plans", `${plan.id}.json`);
   await writeJsonAtomic(targetPath, plan);
@@ -472,6 +472,21 @@ async function importPlanUnlocked(rootDir, planPath) {
   await bindFeatureDesignPlan(rootDir, featureDesignGate, plan.id);
   await writeSnapshot(rootDir, "planned", { planId: plan.id });
   return plan;
+}
+
+function assertPlanImportDoesNotReplaceActiveWork(existingLedger, plan) {
+  const protectedTasks = (existingLedger?.tasks || []).filter((task) => {
+    const replacedByImport = task.planId === plan.id;
+    const switchesAwayFromActivePlan = existingLedger?.activePlanId === task.planId && plan.id !== task.planId;
+    if (!replacedByImport && !switchesAwayFromActivePlan) return false;
+    if (replacedByImport && task.status === "completed") return true;
+    return ["in_progress", "verifying", "recovery_required"].includes(task.status)
+      || Boolean(task.parallel_run_claim)
+      || (task.status !== "completed" && ["claimed", "accepted"].includes(task.coordination?.status));
+  });
+  if (protectedTasks.length === 0) return;
+  const details = protectedTasks.map((task) => `${task.id}:${task.status}`).join(", ");
+  throw new Error(`cannot import plan ${plan.id} while active task ownership must be preserved: ${details}`);
 }
 
 export function validateSemanticGeneratedPlan(plan) {
@@ -567,7 +582,9 @@ export async function approvePlan(rootDir, options = {}) {
       planApproval: nextApproval,
       updatedAt: nowIso(),
     });
-    await appendLedger(rootDir, { type: "plan_approved", planId: work.activePlanId, approver: nextApproval.approvedBy });
+    const state = await loadTaskState(rootDir);
+    await appendLedger(rootDir, { type: "plan_approved", planId: work.activePlanId, approver: nextApproval.approvedBy,
+      contractScopes: Object.fromEntries((state?.tasks || []).map((task) => [task.id, hashContent(JSON.stringify(task.contractChanges?.items || []))])) });
     return { planId: work.activePlanId, status: "approved", approval: nextApproval };
   });
 }

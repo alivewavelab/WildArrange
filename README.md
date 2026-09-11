@@ -237,7 +237,9 @@ node ./bin/wildarrange.mjs adapter install --target all --mode local
 }
 ```
 
-> `review_commands` 不能省：验收证明会拒绝「没有任何独立复核信号」的任务进入 completed（同义反复的复核不证明任何东西）。独立信号可以是 `review_commands` / `standards_commands` / `review.llm` / 已启用的质量门之一。
+> 验收证明要求本轮实际取得独立复核结果：成功执行的非空转 `review_commands` / `standards_commands`、有检查对象的质量门，或成功的 LLM review。只配置通道、跳过执行、无 key fallback、`echo` 或 `node --version` 都不能作为完成依据。
+
+计划导入会保护已有成果：同一 Plan 中仍在执行、验证、恢复、持有任务 claim 或已经完成的任务不能被重新导入覆盖。已完成旧 Plan 后可以导入新的 Plan，旧任务及其交付记录继续保留。
 
 运行：
 
@@ -323,6 +325,8 @@ node ./bin/wildarrange.mjs parallel list
 node ./bin/wildarrange.mjs parallel status --run <runId>
 node ./bin/wildarrange.mjs parallel cleanup --run <runId>
 ```
+
+`parallel cleanup` 会保留等待验收、返工、恢复中或仍有未提交改动的 worktree。只有任务身份与生命周期可核实、worktree 干净且当前 HEAD 已进入 `main` 时才允许清理；不会强制删除验收后的新增文件。
 
 子 Agent 若要提交主线成果，需要在 `agent-result.json` 写入结构化文件：
 
@@ -414,6 +418,15 @@ node ./bin/wildarrange.mjs contracts apply-card --card <id> --decision approve -
 node ./bin/wildarrange.mjs contracts generate
 ```
 
+计划里已明确批准的契约内容不重复询问；临时新增接口/数据库字段会暂停任务，由主 Agent 解释必要性、影响、替代方案和建议，等待你的明确决定。批准绑定具体内容，改动内容后旧批准失效。
+
+```bash
+node ./bin/wildarrange.mjs contracts propose --task T001 --from proposal.json
+node ./bin/wildarrange.mjs contracts resolve --id <id> --decision accept --expected-fingerprint <sha256> --reason "同意报告中的具体变更"
+```
+
+`proposal.json` 包含 `reason`、`impact`、`alternatives`、`recommendation` 和 `items`（与任务 `contractChanges.items` 相同结构；Tauri 接口需 `expected.signatures`）。Loop 内的命令 worker 输出 `WILDARRANGE_CONTRACT_CHANGE=<proposal JSON>` 单行并退出，由主 Agent 接办，不在 worker 子进程内再次调用 `propose`。拒绝使用 `--decision reject`，任务保持等待，不自动重试；新会话继续提示同一请求。完整声明与职责见 [运行时架构](doc/project-architecture.md)。正式台账仍由显式 `scan/apply-card` 更新并版本化，任务批准不会偷偷改写台账。
+
 每次 worker 执行前，WildArrange 会在 Git 项目里自动记录一份工作区快照（`git stash create`），快照 hash 与恢复命令写入任务证据和 ledger，代码被改坏时可用 `git stash apply <hash>` 还原。
 
 WildArrange 会在 shell 执行前阻断明显破坏性命令，例如删除 `.git/.wildarrange`、递归删除 `src/test/doc` 等项目核心目录、`git reset --hard`、`git clean -fd`、`sudo` 或 `curl | sh`。正常项目命令、verifier、review command 和子 Agent runner 不受影响。
@@ -483,7 +496,7 @@ node ./bin/wildarrange.mjs skills match --text "做一个网页版提醒事项 A
 node ./bin/wildarrange.mjs serve --host 127.0.0.1 --port 8765
 ```
 
-路由复盘数据可直接查看；如需在页面点击“正确/规则错/个案错”写入标注，请用 `--token` 启动，因为所有 Dashboard POST 写操作都要求 token。
+本机打开后可直接查看和操作，无需填写登录信息。服务会为当前进程创建一次性 HttpOnly 会话 cookie；Dashboard 写操作仍在后台经过 token、Host 与 Origin 校验。
 
 绑定非 loopback 地址时必须带 token：
 
@@ -491,7 +504,7 @@ node ./bin/wildarrange.mjs serve --host 127.0.0.1 --port 8765
 node ./bin/wildarrange.mjs serve --host 0.0.0.0 --port 8765 --token "$WILDARRANGE_DASHBOARD_TOKEN"
 ```
 
-API 请求需携带以下之一：
+非本机 API 请求需携带以下之一：
 
 ```text
 Authorization: Bearer <token>

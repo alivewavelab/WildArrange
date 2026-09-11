@@ -129,8 +129,9 @@ export async function readDecisions(rootDir, { limit, filter } = {}) {
     let skippedLines = 0;
     let scanned = 0;
     let position = size;
-    let carry = "";
+    let carry = Buffer.alloc(0);
     let done = false;
+    let stoppedInsideChunk = false;
 
     const consume = (line) => {
       const parsed = parseDecisionLine(line);
@@ -151,16 +152,30 @@ export async function readDecisions(rootDir, { limit, filter } = {}) {
       position -= chunkSize;
       const buffer = Buffer.alloc(chunkSize);
       await handle.read(buffer, 0, chunkSize, position);
-      const text = buffer.toString("utf8") + carry;
-      const lines = text.split("\n");
-      // 未到文件起点时，首行可能被块边界截断，留给下一轮拼上 carry。
-      carry = position > 0 ? lines.shift() : "";
-      for (let index = lines.length - 1; index >= 0 && !done; index -= 1) {
-        consume(lines[index]);
+      const joined = carry.length > 0 ? Buffer.concat([buffer, carry]) : buffer;
+      const lines = [];
+      let lineEnd = joined.length;
+      for (let index = joined.length - 1; index >= 0; index -= 1) {
+        if (joined[index] === 0x0a) {
+          lines.push(joined.subarray(index + 1, lineEnd));
+          lineEnd = index;
+        }
+      }
+      // Keep bytes intact until a complete line is assembled. Decoding each
+      // chunk independently corrupts a multi-byte UTF-8 character at a chunk boundary.
+      if (position > 0) {
+        carry = joined.subarray(0, lineEnd);
+      } else {
+        lines.push(joined.subarray(0, lineEnd));
+        carry = Buffer.alloc(0);
+      }
+      for (let index = 0; index < lines.length && !done; index += 1) {
+        consume(lines[index].toString("utf8"));
+        if (done && index < lines.length - 1) stoppedInsideChunk = true;
       }
     }
     collected.reverse();
-    return { records: collected, skippedLines, total: scanned, truncated: position > 0 };
+    return { records: collected, skippedLines, total: scanned, truncated: position > 0 || stoppedInsideChunk };
   } finally {
     await handle.close();
   }

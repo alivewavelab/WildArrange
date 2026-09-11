@@ -29,8 +29,32 @@ import {
   taskContract,
 } from "./remote-ownership.mjs";
 
+export function assertContractWorkspaceAvailable(tasks, resume = {}) {
+  const held = tasks.find((task) => task.pendingContractChange && task.admission_claim
+    && task.admission_claim.workspaceRestored !== true
+    && !(task.id === resume.taskId && task.admission_claim.runId === resume.runId));
+  if (held) throw new Error(`recovery_required: task ${held.id} has unrestored contract changes; resume admission run ${held.admission_claim.runId} before other workspace writes`);
+}
+
 export async function readIntegrationIntent(rootDir, runId, taskId) {
   return readJson(integrationIntentPath(rootDir, runId, taskId), null);
+}
+
+export async function assertTaskOrDeliveredOwnership(rootDir, planId, task) {
+  try {
+    return await assertCurrentTaskOwnership(rootDir, task);
+  } catch (originalError) {
+    const workspace = task?.delivery_workspace;
+    const intent = workspace?.runId ? await readIntegrationIntent(rootDir, workspace.runId, task.id) : null;
+    const coordination = task?.coordination;
+    if (!intent || intent.planId !== planId || intent.taskId !== task.id || intent.runId !== workspace.runId
+      || intent.expectedSha !== workspace.baseSha || intent.remote !== coordination?.remote
+      || intent.branch !== workspace.branch || intent.branch !== coordination?.branch
+      || !["pushed", "push_outcome_unknown"].includes(intent.status)) throw originalError;
+    const fences = await verifyAdmissionFences(rootDir, task.id, null, intent);
+    if (fences.pass !== true) throw originalError;
+    return { ...fences.ownership, recoveredFromDeliveryIntent: true };
+  }
 }
 
 export async function collectIntegrationCandidatePaths(rootDir, baseSha) {
@@ -127,8 +151,7 @@ export async function verifyAdmissionFences(rootDir, taskId, integrationGuard, r
 
 export async function integrateAdmissionCommit(rootDir, options) {
   const coordination = options.task?.coordination;
-  const localDeliveryTarget = coordination?.status === "degraded"
-    && coordination.localGit === true
+  const localDeliveryTarget = coordination?.localGit === true
     && coordination.branch
     && coordination.remoteHeadSha
     ? {
@@ -587,6 +610,7 @@ async function integrateLocalAdmissionCommit(rootDir, options, deliveryTarget) {
     actualSha: intent.integrationSha,
     worktreeSync,
     committedAt: intent.committedAt || nowIso(),
+    noChange: (intent.changedPaths || []).length === 0,
   };
   await writeJsonAtomic(intentPath, completed);
   const ledgerEntries = await readVerifiedLedgerEntries(rootDir);
@@ -609,11 +633,12 @@ async function integrateLocalAdmissionCommit(rootDir, options, deliveryTarget) {
     active: true,
     local: true,
     pushed: false,
-    status: "committed_local",
+    status: completed.noChange ? "no_change" : "committed_local",
     branch: intent.branch,
     expectedSha: intent.expectedSha,
     actualSha: intent.integrationSha,
     integrationSha: intent.integrationSha,
+    noChange: completed.noChange,
     worktreeSync,
     intentPath: path.relative(rootDir, intentPath),
   };

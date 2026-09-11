@@ -1,19 +1,18 @@
+import { applyContractCardDecision, inspectContractTask } from "../src/capabilities/contract-governance.mjs";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 
 import {
-  applyContractCardDecision,
   contractGovernancePaths,
   discoverTauriIpcContracts,
   findFrontendInvokes,
   findRegisteredCommands,
   findTauriCommands,
-  inspectContractTask,
   persistContractScan,
   readContractRegistry,
   scanContractGovernanceUniverse,
@@ -25,6 +24,12 @@ import { matchSkills } from "../src/ai/skill-matcher.mjs";
 
 const execFileAsync = promisify(execFile);
 const cliPath = path.resolve("bin/wildarrange.mjs");
+const fixtureRoots = new Set();
+
+test.after(async () => {
+  await Promise.all([...fixtureRoots].map((rootDir) =>
+    rm(rootDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })));
+});
 
 test("Tauri IPC parser finds declarations, handler registrations and frontend invokes", () => {
   assert.deepEqual(findTauriCommands("#[tauri::command]\npub async fn launch_game(id: String) -> Result<(), String> { Ok(()) }"), [{
@@ -288,6 +293,7 @@ test("contracts CLI scans and generates the human-readable map", async () => {
 
 async function fixtureProject() {
   const rootDir = await mkdtemp(path.join(os.tmpdir(), "wildarrange-contract-"));
+  fixtureRoots.add(rootDir);
   const rustDir = path.join(rootDir, "client", "src-tauri", "src");
   const frontendDir = path.join(rootDir, "client", "src");
   await mkdir(rustDir, { recursive: true });

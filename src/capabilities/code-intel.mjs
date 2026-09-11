@@ -11,7 +11,9 @@ import { extractComments } from "../infra/repository-layout.mjs";
 
 export async function runQualityGates(rootDir, task, scopeResult = null, config = {}) {
   const lspResult = await runLspDiagnosticsGate(rootDir, task, config);
+  if (commandGateNeedsRecovery(lspResult)) return interruptedQualityGates(lspResult, "lspResult");
   const astResult = await runAstStructureGate(rootDir, task, config);
+  if (commandGateNeedsRecovery(astResult)) return interruptedQualityGates(astResult, "astResult", { lspResult });
   const hashlineResult = await runHashlineAnchorsGate(rootDir, task, config);
   const commentResult = await runCommentCheckerGate(rootDir, task, scopeResult, config);
   return {
@@ -136,6 +138,7 @@ export async function runCommentCheckerGate(rootDir, task, scopeResult = null, c
       at: nowIso(),
       status: "skipped",
       pass: true,
+      checkedPaths: [],
       findings: [],
       reason: "qualityGates.commentChecker.enabled is false",
     };
@@ -143,6 +146,7 @@ export async function runCommentCheckerGate(rootDir, task, scopeResult = null, c
 
   const candidatePaths = commentCandidatePaths(task, scopeResult);
   const findings = [];
+  const checkedPaths = [];
   for (const filePath of candidatePaths) {
     const absolutePath = path.join(rootDir, filePath);
     if (!pathInsideRoot(rootDir, absolutePath) || !isLikelyTextPath(filePath) || !existsSync(absolutePath)) continue;
@@ -154,6 +158,7 @@ export async function runCommentCheckerGate(rootDir, task, scopeResult = null, c
     } catch {
       continue;
     }
+    checkedPaths.push(normalizeRelativePath(filePath));
     const policyRules = (config.repositoryGovernance?.commentRules || [])
       .filter((rule) => (rule.globs || []).some((glob) => pathMatchesPattern(filePath, glob)));
     const configuredPatterns = Array.isArray(gateConfig.patterns) && gateConfig.patterns.length > 0
@@ -200,7 +205,34 @@ export async function runCommentCheckerGate(rootDir, task, scopeResult = null, c
     at: nowIso(),
     status,
     pass: status !== "fail",
+    checkedPaths,
     findings,
+  };
+}
+
+function commandGateNeedsRecovery(result) {
+  return (result?.results || []).some((entry) => entry?.recoveryRequired === true || entry?.terminationFailed === true);
+}
+
+function interruptedQualityGates(commandResult, resultName, completed = {}) {
+  const interrupted = {
+    kind: "quality_gate_not_run",
+    at: nowIso(),
+    status: "skipped",
+    pass: false,
+    results: [],
+    reason: "an earlier quality command requires process recovery",
+  };
+  return {
+    kind: "quality_gates",
+    at: nowIso(),
+    pass: false,
+    ...completed,
+    lspResult: resultName === "lspResult" ? commandResult : completed.lspResult,
+    astResult: resultName === "astResult" ? commandResult : interrupted,
+    hashlineResult: interrupted,
+    commentResult: { ...interrupted, checkedPaths: [], findings: [] },
+    commandRecovery: (commandResult.results || []).find((entry) => entry?.recoveryRequired === true || entry?.terminationFailed === true),
   };
 }
 

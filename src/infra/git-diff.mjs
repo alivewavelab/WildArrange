@@ -5,7 +5,8 @@
  * context/resume reporting) alike, so this stays infra-level.
  */
 import { existsSync } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { lstat, readFile, readlink, readdir, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { runCommandFile } from "./command-runner.mjs";
 import { normalizeRelativePath } from "./path-match.mjs";
@@ -28,21 +29,106 @@ export async function collectGitChangedPaths(rootDir) {
     }
   }
 
-  const diff = await runCommandFile("git", ["-C", rootDir, "diff", "--name-only", "--", ".", ":!.wildarrange"], rootDir, 30_000);
-  const untracked = await runCommandFile("git", ["-C", rootDir, "ls-files", "--others", "--exclude-standard", "--", ".", ":!.wildarrange"], rootDir, 30_000);
-  if (diff.exitCode !== 0 || untracked.exitCode !== 0) {
+  const [unstaged, staged, untracked] = await Promise.all([
+    runCommandFile("git", ["-C", rootDir, "diff", "--name-only", "-z", "--", ".", ":!.wildarrange"], rootDir, 30_000),
+    runCommandFile("git", ["-C", rootDir, "diff", "--name-only", "-z", "--cached", "--", ".", ":!.wildarrange"], rootDir, 30_000),
+    runCommandFile("git", ["-C", rootDir, "ls-files", "--others", "--exclude-standard", "-z", "--", ".", ":!.wildarrange"], rootDir, 30_000),
+  ]);
+  if ([staged, unstaged, untracked].some(gitProbeFailed)) {
     return {
       available: false,
-      reason: [diff.stderr, untracked.stderr].filter(Boolean).join("\n") || "git changed path collection failed",
+      reason: [staged, unstaged, untracked].map(gitProbeFailureReason).filter(Boolean).join("\n") || "git changed path collection failed",
       paths: [],
     };
   }
 
+  const paths = [...new Set([
+    ...splitNullPaths(staged.stdout),
+    ...splitNullPaths(unstaged.stdout),
+    ...splitNullPaths(untracked.stdout),
+  ])].sort();
+  let indexFingerprints;
+  try {
+    indexFingerprints = await collectIndexFingerprints(rootDir, paths);
+  } catch (error) {
+    return { available: false, reason: error instanceof Error ? error.message : String(error), paths: [] };
+  }
+  const fingerprints = {};
+  for (const filePath of paths) {
+    const workspace = await fingerprintWorkspacePath(rootDir, filePath);
+    const index = indexFingerprints.get(normalizeRelativePath(filePath)) || "absent";
+    fingerprints[normalizeRelativePath(filePath)] = `index:${index}|worktree:${workspace}`;
+  }
   return {
     available: true,
     source: "git",
-    paths: [...new Set([...splitPathLines(diff.stdout), ...splitPathLines(untracked.stdout)])].sort(),
+    paths,
+    fingerprints,
   };
+}
+
+async function collectIndexFingerprints(rootDir, paths) {
+  const metadataByPath = new Map();
+  for (const batch of batchIndexPaths(paths)) {
+    const result = await runCommandFile("git", ["--literal-pathspecs", "-C", rootDir, "ls-files", "-s", "-z", "--", ...batch], rootDir, 30_000, { maxOutputChars: 200_000 });
+    if (gitProbeFailed(result)) throw new Error(gitProbeFailureReason(result) || "git index fingerprint collection failed");
+    for (const record of splitNullPaths(result.stdout)) {
+      const separator = record.indexOf("\t");
+      if (separator < 0) throw new Error("git index fingerprint record is malformed");
+      const filePath = normalizeRelativePath(record.slice(separator + 1));
+      const metadata = record.slice(0, separator);
+      const entries = metadataByPath.get(filePath) || [];
+      entries.push(metadata);
+      metadataByPath.set(filePath, entries);
+    }
+  }
+  return new Map([...metadataByPath].map(([filePath, entries]) => [filePath, entries.sort().join(";")]));
+}
+
+function batchIndexPaths(paths) {
+  const batches = [];
+  let batch = [];
+  let argvChars = 0;
+  let expectedOutputChars = 0;
+  for (const filePath of paths) {
+    const pathChars = String(filePath).length;
+    if (batch.length > 0 && (argvChars + pathChars + 3 > 20_000 || expectedOutputChars + pathChars + 64 > 150_000)) {
+      batches.push(batch);
+      batch = [];
+      argvChars = 0;
+      expectedOutputChars = 0;
+    }
+    batch.push(filePath);
+    argvChars += pathChars + 3;
+    expectedOutputChars += pathChars + 64;
+  }
+  if (batch.length > 0) batches.push(batch);
+  return batches;
+}
+
+function gitProbeFailed(result) {
+  return result.exitCode !== 0 || result.outputTruncated?.stdout === true;
+}
+
+function gitProbeFailureReason(result) {
+  if (result.outputTruncated?.stdout === true) return "git changed path output was truncated";
+  return result.stderr || (result.exitCode !== 0 ? `git probe failed with exit ${result.exitCode}` : "");
+}
+
+async function fingerprintWorkspacePath(rootDir, filePath) {
+  try {
+    const absolutePath = path.join(rootDir, filePath);
+    const entry = await lstat(absolutePath);
+    if (entry.isSymbolicLink()) {
+      return `symlink:${createHash("sha256").update(await readlink(absolutePath)).digest("hex")}`;
+    }
+    if (!entry.isFile()) return `special:${entry.mode}:${entry.size}`;
+    const content = await readFile(absolutePath);
+    return `file:${createHash("sha256").update(content).digest("hex")}`;
+  } catch (error) {
+    if (error?.code === "ENOENT") return "deleted";
+    throw error;
+  }
 }
 
 export function changedPathsIntroducedByTask(beforeChanged, afterChanged) {
@@ -95,6 +181,6 @@ async function collectFileManifest(rootDir, relativeDir = "") {
   return manifest;
 }
 
-function splitPathLines(value) {
-  return value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+function splitNullPaths(value) {
+  return String(value || "").split("\0").filter((entry) => entry.length > 0);
 }

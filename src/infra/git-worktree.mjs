@@ -124,7 +124,7 @@ export async function applyAgentPatch(rootDir, patch, options = {}) {
   await writeFile(patchPath, patch, "utf8");
   const check = await runCommandFile("git", ["-C", rootDir, "apply", "--check", "--whitespace=nowarn", patchPath], rootDir, options.timeoutMs);
   if (check.exitCode !== 0) {
-    throw new Error(`parallel admission patch check failed: ${check.stderr || check.stdout}`);
+    throw Object.assign(new Error(`parallel admission patch check failed: ${check.stderr || check.stdout}`), { code: "patch_precheck_failed" });
   }
   const apply = await runCommandFile("git", ["-C", rootDir, "apply", "--whitespace=nowarn", patchPath], rootDir, options.timeoutMs);
   if (apply.exitCode !== 0) {

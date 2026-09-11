@@ -296,6 +296,24 @@
       ]
     },
     {
+      "name": "contract_change_propose",
+      "layer": "project_governance",
+      "status": "implemented",
+      "command": "node ./bin/wildarrange.mjs contracts propose --task <id> --from <proposal.json>",
+      "purpose": "Loop 外提出计划外契约变化，含必要性、影响、替代及建议；暂停任务等待人类决定。Loop 内 worker 用 stdout 的 WILDARRANGE_CONTRACT_CHANGE=JSON 回执，不能嵌套获取任务锁。",
+      "reads": [".wildarrange/team/tasks.json", "<proposal.json>"],
+      "writes": [".wildarrange/changes/**", ".wildarrange/team/tasks.json", ".wildarrange/plans/**", ".wildarrange/ledger.jsonl"]
+    },
+    {
+      "name": "contract_change_resolve",
+      "layer": "project_governance",
+      "status": "implemented",
+      "command": "node ./bin/wildarrange.mjs contracts resolve --id <id> --decision accept|reject --expected-fingerprint <sha256> --reason <text>",
+      "purpose": "仅在人类明确决定后，按报告内容指纹记录批准或拒绝；不得由 worker 自批。",
+      "reads": [".wildarrange/changes/**", ".wildarrange/team/tasks.json", ".wildarrange/ledger.jsonl"],
+      "writes": [".wildarrange/changes/**", ".wildarrange/team/tasks.json", ".wildarrange/plans/**", ".wildarrange/ledger.jsonl"]
+    },
+    {
       "name": "wildarrange_context_build",
       "layer": "context_injection",
       "status": "implemented",

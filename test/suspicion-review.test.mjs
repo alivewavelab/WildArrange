@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
@@ -20,7 +21,7 @@ import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 
 async function withTempDir(fn) {
-  const baseDir = path.join(process.cwd(), ".tmp");
+  const baseDir = path.join(os.tmpdir(), "wildarrange-tests");
   await mkdir(baseDir, { recursive: true });
   const dir = await mkdtemp(path.join(baseDir, "wildarrange-suspicion-"));
   try {

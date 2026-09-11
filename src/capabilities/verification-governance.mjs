@@ -8,7 +8,7 @@ import path from "node:path";
 import { runCommand } from "../infra/command-runner.mjs";
 import { evaluateCommandSafety } from "../infra/command-safety.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
-import { hashContent, nowIso, readJson, writeJsonAtomic, writeTextAtomic } from "../infra/runtime-store.mjs";
+import { nowIso, readJson, writeJsonAtomic, writeTextAtomic } from "../infra/runtime-store.mjs";
 import {
   adoptionTransactionDir,
   assertRealpathInsideRoot,
@@ -408,8 +408,4 @@ function deepMerge(base, overlay) {
 
 function redactSecrets(text) {
   return String(text).replace(/(token|secret|api[_-]?key|password)\s*[:=]\s*\S+/gi, "$1=[redacted]");
-}
-
-export function contentFingerprint(value) {
-  return hashContent(typeof value === "string" ? value : JSON.stringify(value));
 }

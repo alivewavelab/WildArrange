@@ -16,11 +16,13 @@ import {
 } from "../infra/runtime-store.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
+import { loadTaskLedger } from "../infra/task-state-store.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { resolveAgentSpawn } from "../infra/agent-spawn.mjs";
 import { collectAgentWorktreePatch, prepareAgentWorktree } from "../infra/git-worktree.mjs";
-import { inspectGitCoordination } from "../infra/git-coordination.mjs";
+import { commitIsAncestor, inspectGitCoordination } from "../infra/git-coordination.mjs";
 import { runCommand, runCommandFile } from "../infra/command-runner.mjs";
+import { assertPathInsideRoot } from "../infra/path-match.mjs";
 import { normalizeProposedFilesOrEmpty, updateAgentRunLifecycle } from "./admission.mjs";
 import { loadTaskState } from "./plan-state.mjs";
 import {
@@ -260,6 +262,8 @@ export async function parallelAgentStatus(rootDir, options = {}) {
         lifecycle: result?.lifecycle || entry.lifecycle || null,
         adapter: result?.adapter || null,
         isolation: result?.isolation || null,
+        workDir: result?.workDir || null,
+        worktreeAvailable: result?.worktreeAvailable === true,
         command: result?.command || null,
         resultPath: path.relative(rootDir, resultPath),
       });
@@ -400,14 +404,26 @@ export async function cleanupParallelAgentRun(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   if (!options.runId) throw new Error("parallel cleanup requires --run <runId>");
   const status = await parallelAgentStatus(rootDir, { runId: options.runId });
+  const taskLedger = await loadTaskLedger(rootDir);
+  const { config } = await loadWildArrangeConfig(rootDir);
+  const gitContext = await inspectGitCoordination(rootDir, config.gitCoordination || {}).catch(() => null);
   const cleaned = [];
   for (const run of status.runs || []) {
+    const batch = await readJson(resolveWildArrangePath(rootDir, "agent-runs", `${run.runId}.json`), null);
+    const runPlanId = batch?.planId || null;
     for (const entry of run.results || []) {
       const resultPath = resolveWildArrangePath(rootDir, "agent-runs", run.runId, entry.taskId, "result.json");
       const result = await readJson(resultPath, null);
       if (!result || result.isolation !== "git-worktree" || result.worktreeAvailable !== true) continue;
-      const worktreeDir = path.join(rootDir, result.workDir || "");
-      const remove = await runCommandFile("git", ["-C", rootDir, "worktree", "remove", "--force", worktreeDir], rootDir, 30_000);
+      const worktreeDir = path.resolve(rootDir, result.workDir || "");
+      assertPathInsideRoot(rootDir, worktreeDir, result.workDir, "parallel worktree");
+      const task = (taskLedger?.tasks || []).find((candidate) => candidate.planId === runPlanId && candidate.id === entry.taskId) || null;
+      const cleanupFence = await inspectParallelCleanupFence(worktreeDir, entry, task, gitContext, runPlanId);
+      if (!cleanupFence.pass) {
+        cleaned.push({ taskId: entry.taskId, status: "retained", path: result.workDir, reason: cleanupFence.reason, details: cleanupFence.details || null });
+        continue;
+      }
+      const remove = await runCommandFile("git", ["-C", rootDir, "worktree", "remove", worktreeDir], rootDir, 30_000);
       if (remove.exitCode !== 0 && !/is not a working tree|No such file/i.test(remove.stderr || remove.stdout || "")) {
         cleaned.push({ taskId: entry.taskId, status: "failed", path: result.workDir, error: remove.stderr || remove.stdout });
         continue;
@@ -426,6 +442,55 @@ export async function cleanupParallelAgentRun(rootDir, options = {}) {
     runId: options.runId,
     cleaned,
   };
+}
+
+async function inspectParallelCleanupFence(worktreeDir, entry, task, gitContext, runPlanId) {
+  const lifecycle = entry.lifecycle?.status || null;
+  const cleanableLifecycle = new Set(["closed", "failed", "skipped", "released"]);
+  if (!cleanableLifecycle.has(lifecycle)) {
+    return { pass: false, reason: "lifecycle_requires_retention", details: { lifecycle } };
+  }
+  if (!runPlanId || !task) {
+    return { pass: false, reason: "task_identity_unavailable", details: { planId: runPlanId, taskId: entry.taskId } };
+  }
+  if (["in_progress", "verifying", "recovery_required"].includes(task.status)
+    || task.parallel_run_claim
+    || (task.status !== "completed" && ["claimed", "accepted"].includes(task.coordination?.status))) {
+    return {
+      pass: false,
+      reason: "task_ownership_requires_retention",
+      details: { taskStatus: task.status, parallelRunClaim: task.parallel_run_claim || null, coordination: task.coordination || null },
+    };
+  }
+  const worktreeStatus = await runCommandFile("git", ["-C", worktreeDir, "status", "--porcelain"], worktreeDir, 30_000);
+  if (worktreeStatus.exitCode !== 0) {
+    return { pass: false, reason: "worktree_cleanliness_unknown", details: { error: worktreeStatus.stderr || worktreeStatus.stdout } };
+  }
+  if (worktreeStatus.stdout.trim()) {
+    return { pass: false, reason: "worktree_dirty", details: { changes: worktreeStatus.stdout.trim().split(/\r?\n/) } };
+  }
+  const mainRef = gitContext?.integrationBranch || "main";
+  const worktreeHead = await runCommandFile("git", ["-C", worktreeDir, "rev-parse", "HEAD"], worktreeDir, 30_000);
+  if (worktreeHead.exitCode !== 0) {
+    return { pass: false, reason: "worktree_head_unknown", details: { error: worktreeHead.stderr || worktreeHead.stdout } };
+  }
+  if (!await commitIsAncestor(worktreeDir, worktreeHead.stdout.trim(), mainRef).catch(() => false)) {
+    return { pass: false, reason: "worktree_head_not_in_main", details: { worktreeHead: worktreeHead.stdout.trim(), mainRef } };
+  }
+  if (lifecycle !== "released") return { pass: true };
+  if (task.status !== "completed") {
+    return { pass: false, reason: "released_task_not_completed", details: { taskStatus: task.status } };
+  }
+  const delivery = task?.delivery;
+  if (delivery?.status === "no_change") return { pass: true };
+  if (!delivery?.integrationSha) {
+    return { pass: false, reason: "delivery_commit_not_recorded", details: { lifecycle, taskStatus: task?.status || null } };
+  }
+  const contained = await commitIsAncestor(worktreeDir, delivery.integrationSha, mainRef).catch(() => false);
+  if (!contained) {
+    return { pass: false, reason: "delivery_not_in_main", details: { deliveryCommit: delivery.integrationSha, mainRef } };
+  }
+  return { pass: true };
 }
 
 function selectParallelTasks(tasks, options) {

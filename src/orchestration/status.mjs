@@ -5,17 +5,15 @@ import {
   ensureWildArrangeDirs,
   nowIso,
   readJson,
-  resolveLegacyTaskAcceptancePath,
-  resolveLegacyTaskCheckpointPath,
   resolveWildArrangePath,
-  resolveTaskAcceptancePath,
   resolveTaskCheckpointPath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
-import { appendLedger, readVerifiedLedgerEntries } from "../infra/ledger.mjs";
+import { appendLedger, verifyLedger } from "../infra/ledger.mjs";
+import { verifyConfigBaseline } from "../infra/security.mjs";
 import { evaluateGateArming } from "../infra/gate-arming.mjs";
 import { normalizeRelativePath } from "../infra/path-match.mjs";
-import { loadTaskLedger } from "../infra/task-state-store.mjs";
+import { inspectCompletedTaskEvidence, loadTaskLedger } from "../infra/task-state-store.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { evaluateRegistryFreshness } from "../infra/verification-registry.mjs";
 import { listChangeRequests } from "./change-governance.mjs";
@@ -115,45 +113,6 @@ export async function statusReport(rootDir) {
   };
 }
 
-async function inspectCompletedTaskEvidence(rootDir, taskState) {
-  const entries = await readVerifiedLedgerEntries(rootDir);
-  const completionEvents = new Set(entries
-    .filter((entry) => ["task_verified", "node_checkpoint_completed", "parallel_agent_admission_completed"].includes(entry.type))
-    .filter((entry) => entry.planId && entry.taskId)
-    .map((entry) => `${entry.planId}:${entry.taskId}`));
-  const invalid = [];
-  for (const task of taskState.tasks.filter((candidate) => candidate.status === "completed")) {
-    const ref = `${taskState.planId}:${task.id}`;
-    const proof = await readTaskEvidenceJson(rootDir, "acceptance", taskState.planId, task.id);
-    const checkpoint = await readTaskEvidenceJson(rootDir, "checkpoint", taskState.planId, task.id);
-    const failures = [];
-    if (proof?.kind !== "acceptance_proof" || proof.pass !== true || proof.planId !== taskState.planId || proof.taskId !== task.id) failures.push("acceptance_proof");
-    if (checkpoint?.planId !== taskState.planId || checkpoint?.taskId !== task.id) failures.push("checkpoint_identity");
-    if (checkpoint?.verifyResult?.pass !== true) failures.push("verifier");
-    if (checkpoint?.scopeResult?.status !== "pass") failures.push("scope");
-    if (checkpoint?.reviewResult?.pass !== true) failures.push("review");
-    if (!completionEvents.has(ref)) failures.push("ledger_event");
-    if (failures.length > 0) invalid.push({ taskId: task.id, taskRef: ref, failures });
-  }
-  return {
-    checked: taskState.tasks.filter((task) => task.status === "completed").length,
-    invalid,
-  };
-}
-
-async function readTaskEvidenceJson(rootDir, kind, planId, taskId) {
-  const canonicalPath = kind === "checkpoint"
-    ? resolveTaskCheckpointPath(rootDir, planId, taskId)
-    : resolveTaskAcceptancePath(rootDir, planId, taskId, "json");
-  const canonical = await readJson(canonicalPath, null);
-  if (canonical) return canonical;
-  const legacyPath = kind === "checkpoint"
-    ? resolveLegacyTaskCheckpointPath(rootDir, planId, taskId)
-    : resolveLegacyTaskAcceptancePath(rootDir, planId, taskId, "json");
-  const legacy = await readJson(legacyPath, null);
-  return legacy?.planId === planId && legacy?.taskId === taskId ? legacy : null;
-}
-
 export async function dashboardData(rootDir) {
   const status = await statusReport(rootDir);
   const taskState = await loadTaskState(rootDir);
@@ -163,11 +122,27 @@ export async function dashboardData(rootDir) {
   const changes = await listChangeRequests(rootDir);
   const attention = await attentionReport(rootDir, { taskState, changes });
   const taskLedger = await taskLedgerReport(rootDir);
+  const parallel = await parallelAgentStatus(rootDir).catch(() => null);
+  const activeWorkspaces = buildActiveWorkspaces(taskState?.tasks || [], parallel?.runs || []);
+  const health = {
+    configBaseline: await dashboardHealthCheck(
+      () => verifyConfigBaseline(rootDir),
+      (result) => result?.status === "missing_baseline" ? "unchecked" : result?.ok === true ? "pass" : "fail",
+      (result) => result?.message || "run `node ./bin/wildarrange.mjs config verify`, then review and baseline the configuration",
+    ),
+    ledger: await dashboardHealthCheck(
+      () => verifyLedger(rootDir),
+      (result) => result?.checked === 0 ? "unchecked" : result?.ok === true ? "pass" : "fail",
+      () => "run `node ./bin/wildarrange.mjs ledger verify` and repair the reported chain failure before trusting history",
+    ),
+  };
   return {
     generatedAt: nowIso(),
     status,
     tasks: taskState?.tasks || [],
     taskLedger,
+    activeWorkspaces,
+    health,
     changes,
     attention,
     summary,
@@ -179,6 +154,35 @@ export async function dashboardData(rootDir) {
     } : null,
     ledger,
   };
+}
+
+async function dashboardHealthCheck(check, classify, nextAction) {
+  try {
+    const result = await check();
+    const status = classify(result);
+    return { status, result, nextAction: status === "pass" ? null : nextAction(result, status) };
+  } catch (error) {
+    return { status: "unknown", error: error instanceof Error ? error.message : String(error), nextAction: nextAction(null, "unknown") };
+  }
+}
+
+function buildActiveWorkspaces(tasks, runs) {
+  const tasksById = new Map(tasks.map((task) => [task.id, task]));
+  return runs.flatMap((run) => (run.results || [])
+    .filter((result) => result.worktreeAvailable === true && !["released", "closed", "cleaned"].includes(result.lifecycle?.status))
+    .map((result) => {
+      const task = tasksById.get(result.taskId);
+      return {
+        taskId: result.taskId,
+        subject: task?.subject || result.taskId,
+        runId: run.runId,
+        agent: result.agent || null,
+        branch: task?.coordination?.branch || null,
+        workDir: result.workDir || null,
+        isolation: result.isolation || null,
+        status: result.lifecycle?.status || result.status || "unknown",
+      };
+    }));
 }
 
 export async function taskLedgerReport(rootDir) {
@@ -216,7 +220,16 @@ export async function attentionReport(rootDir, options = {}) {
       subject: change.subject,
       deniedPaths: change.deniedPaths || [],
       reportMdPath: change.reportMdPath || null,
-      resolveHint: `node ./bin/wildarrange.mjs changes resolve --id ${change.id} --decision accept|reject --evidence "..." --rationale "..."`,
+      source: change.source,
+      rationale: change.rationale,
+      impact: change.evidence,
+      alternatives: change.alternatives,
+      recommendation: change.recommendation,
+      fingerprint: change.fingerprint,
+      proposedDeclarations: change.content?.proposedDeclarations,
+      resolveHint: change.source === "contract_change"
+        ? `node ./bin/wildarrange.mjs contracts resolve --id ${change.id} --decision accept|reject --expected-fingerprint ${change.fingerprint} --reason "..."`
+        : `node ./bin/wildarrange.mjs changes resolve --id ${change.id} --decision accept|reject --evidence "..." --rationale "..."`,
     }));
 
   const failedTasks = tasks
@@ -231,7 +244,8 @@ export async function attentionReport(rootDir, options = {}) {
 
   const needsUserDecision = tasks
     .filter((task) => task.status === "needs_user_decision" || task.status === "review_blocked")
-    .map((task) => ({ id: task.id, subject: task.subject, status: task.status }));
+    .filter((task) => !openChanges.some((change) => change.id === task.pendingContractChange))
+    .map((task) => ({ id: task.id, subject: task.subject, status: task.status, pendingContractChange: task.pendingContractChange || null }));
 
   const draftTasks = tasks
     .filter((task) => task.status === "draft")

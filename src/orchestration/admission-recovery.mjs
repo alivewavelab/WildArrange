@@ -11,6 +11,39 @@ import {
 } from "../infra/runtime-store.mjs";
 import { writeFailureReport } from "../infra/task-reports.mjs";
 import { persistTaskState } from "./task-board.mjs";
+import { loadTaskState } from "./plan-state.mjs";
+
+// Runs under admission's task lock. Recovery persistence owns whether the
+// restored workspace permits releasing the claim; never acquire a second lock.
+export async function recordApplyFailureWithinLock(rootDir, taskId, { runId, error, rollback }) {
+  const taskState = await loadTaskState(rootDir);
+  if (!taskState) return;
+  const task = taskState.tasks.find((candidate) => candidate.id === taskId);
+  if (!task || task.status !== "verifying") return;
+  const rolledBack = rollback?.status === "rolled_back";
+  task.status = rolledBack ? "pending" : "verifying";
+  if (rolledBack) task.admission_claim = null;
+  task.last_failure = {
+    at: nowIso(),
+    reason: rolledBack ? "admission_apply_failed" : "admission_rollback_failed",
+    summary: rolledBack
+      ? `parallel admission failed while applying files: ${error.message}`
+      : `parallel admission apply failed and workspace rollback did not complete: ${rollback?.error || error.message}`,
+    retryHint: rolledBack
+      ? "工作区已回滚到 admission 前的内容，修复失败原因后重新 admit 即可"
+      : `工作区回滚失败；任务所有权和 rollback plan 已保留。修复文件系统问题后，用同一 run 重新 admit。涉及路径：${(rollback?.paths || []).join(", ") || "unknown"}`,
+  };
+  task.updatedAt = nowIso();
+  await appendLedger(rootDir, {
+    type: "parallel_agent_admission_apply_failed",
+    runId: runId || null,
+    taskId,
+    error: error.message,
+    rollback: rollback?.status || null,
+    rollbackPaths: rollback?.paths || [],
+  });
+  await persistTaskState(rootDir, taskState);
+}
 
 function rollbackPlanPath(rootDir, runId, taskId) {
   return resolveWildArrangePath(rootDir, "agent-runs", runId, `${taskId}.rollback-plan.json`);

@@ -6,25 +6,6 @@
  * right zone/file without reading unrelated modules.
  */
 
-const CAPABILITY_MODULES = {
-  worker: "capabilities/worker.mjs",
-  verify: "capabilities/verify.mjs",
-  scope: "capabilities/scope-guard.mjs",
-  review: "capabilities/review-gate.mjs",
-  "acceptance-proof": "capabilities/acceptance-proof.mjs",
-  checkpoint: "capabilities/checkpoint.mjs",
-  command: "infra/command-runner.mjs",
-  "command-safety": "infra/command-safety.mjs",
-  "repository-governance": "capabilities/repository-governance.mjs",
-  "verification-governance-scan": "capabilities/verification-governance.mjs",
-  "verification-governance-apply-card": "capabilities/verification-governance.mjs",
-  "verification-governance-generate-artifacts": "capabilities/verification-governance.mjs",
-};
-
-export function capabilityModule(name) {
-  return CAPABILITY_MODULES[name] || `capabilities/gateway.mjs`;
-}
-
 export function buildErrorProtocol({ code, module, message, nextAction }) {
   return {
     code: String(code || "unknown_error"),

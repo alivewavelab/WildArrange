@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
@@ -26,12 +26,11 @@ function nodeEval(source) {
   return `node -e ${JSON.stringify(source.replace(/\s*\n\s*/g, " ").trim())}`;
 }
 
-async function importSingleTaskPlan(dir, { verifyCommand, writablePaths = ["src/**"] }) {
+async function importSingleTaskPlan(dir, { verifyCommand, writablePaths = ["src/**"], reviewCommand = nodeEval("require('node:assert/strict').ok(require('node:fs').existsSync('src/review-marker.txt'))") }) {
   // Written under .wildarrange/artifacts/ (not the project root) so it is excluded
   // from the scope guard's git diff pathspec (`git diff -- . ':!.wildarrange'`);
   // otherwise the plan file itself would show up as an "out of scope" change.
   const planPath = resolveWildArrangePath(dir, "artifacts", "pipeline-plan.json");
-  const { writeFile } = await import("node:fs/promises");
   await writeFile(
     planPath,
     JSON.stringify({
@@ -41,7 +40,7 @@ async function importSingleTaskPlan(dir, { verifyCommand, writablePaths = ["src/
           id: "T001",
           subject: "Exercise the shared delivery pipeline",
           verify_commands: [verifyCommand],
-          review_commands: ["node --version"],
+          review_commands: [reviewCommand],
           writable_paths: writablePaths,
         },
       ],
@@ -159,12 +158,14 @@ test("gateway: a throwing capability is caught and reported as a fail envelope, 
 test("delivery pipeline: runs verify -> scope -> review -> acceptance-proof -> checkpoint and completes", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+    await mkdir(path.join(dir, "src"), { recursive: true });
+    await writeFile(path.join(dir, "src", "review-marker.txt"), "reviewed\n");
     const plan = await importSingleTaskPlan(dir, { verifyCommand: nodeEval("if(!process.version)process.exit(1)") });
     const taskState = await loadTaskState(dir);
     const task = taskState.tasks.find((candidate) => candidate.id === "T001");
 
     const result = await runDeliveryPipeline(dir, plan.id, task, {
+      changedPaths: ["src/review-marker.txt"],
       initialEvidence: {
         workerResult: { kind: "worker", command: null, exitCode: 0, stdout: "", stderr: "" },
       },

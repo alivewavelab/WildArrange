@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { generateContractArtifacts } from "../src/interface/contract-view.mjs";
+import { applyContractDecision, proposeContractChange, resolveContractChange } from "../src/orchestration/contract-governance.mjs";
+import { runHostRoute, runHostHook } from "../src/orchestration/host-runtime.mjs";
 import path from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
@@ -329,7 +332,7 @@ async function main() {
       const payload = args.from && args.from !== true
         ? await readJson(path.resolve(rootDir, args.from))
         : JSON.parse(await readAllStdin());
-      const result = await runInjectionHook(rootDir, payload);
+      const result = await runHostHook(rootDir, payload, runInjectionHook);
       if (args.format === "json") {
         console.log(JSON.stringify(result, null, 2));
       } else {
@@ -688,6 +691,19 @@ async function main() {
 
   if (command === "contracts") {
     const subcommand = args._[1];
+    if (subcommand === "propose") {
+      if (!args.task || args.task === true || !args.from || args.from === true) throw new Error("contracts propose requires --task <id> --from <proposal.json>");
+      console.log(JSON.stringify(await proposeContractChange(rootDir, { taskId: args.task, from: args.from }), null, 2));
+      return;
+    }
+    if (subcommand === "resolve") {
+      for (const key of ["id", "decision", "expected-fingerprint", "reason"]) {
+        if (!args[key] || args[key] === true) throw new Error(`contracts resolve requires --${key}`);
+      }
+      console.log(JSON.stringify(await resolveContractChange(rootDir, { id: args.id, decision: args.decision,
+        expectedFingerprint: args["expected-fingerprint"], reason: args.reason }), null, 2));
+      return;
+    }
     if (subcommand === "scan") {
       const source = args.from && args.from !== true ? await readJson(path.resolve(rootDir, args.from)) : [];
       const declarations = Array.isArray(source) ? source : source?.items || [];
@@ -704,26 +720,26 @@ async function main() {
       if (!args.decision || args.decision === true) throw new Error("wildarrange contracts apply-card requires --decision approve|reject");
       if (!args.reason || args.reason === true) throw new Error("wildarrange contracts apply-card requires --reason <text>");
       if (!args["expected-fingerprint"] || args["expected-fingerprint"] === true) throw new Error("wildarrange contracts apply-card requires --expected-fingerprint <sha256>");
-      const result = await invokeCapability("contract-governance-apply-card", {
-        rootDir,
-        options: {
+      const result = await applyContractDecision(rootDir, {
           cardId: args.card,
           decision: args.decision,
           reason: args.reason,
           expectedFingerprint: args["expected-fingerprint"] && args["expected-fingerprint"] !== true ? args["expected-fingerprint"] : undefined,
-        },
       });
       console.log(JSON.stringify(result, null, 2));
       process.exitCode = result.status === "pass" ? 0 : 2;
       return;
     }
     if (subcommand === "generate") {
-      const result = await invokeCapability("contract-governance-generate-artifacts", { rootDir });
+      const startedAt = Date.now();
+      const evidence = await generateContractArtifacts(rootDir);
+      const result = { capability: "contract-governance-generate-artifacts", status: "pass", evidence,
+        sideEffect: "files_changed", duration_ms: Date.now() - startedAt, cost: null, error: null };
       console.log(JSON.stringify(result, null, 2));
       process.exitCode = result.status === "pass" ? 0 : 2;
       return;
     }
-    throw new Error("wildarrange contracts requires scan, apply-card, or generate");
+    throw new Error("wildarrange contracts requires scan, apply-card, generate, propose, or resolve");
   }
 
   if (command === "context") {
@@ -1032,7 +1048,7 @@ async function main() {
 
   if (command === "route") {
     if (!args.text || args.text === true) throw new Error("wildarrange route requires --text <request>");
-    console.log(JSON.stringify(await routeRequest(rootDir, { text: args.text }), null, 2));
+    console.log(JSON.stringify(await runHostRoute(rootDir, { text: args.text }, routeRequest), null, 2));
     return;
   }
 
