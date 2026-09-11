@@ -4,7 +4,6 @@ export const DEFAULT_REVIEW_AGENTS = ["BaiZe"];
 export const LONG_LIVED_AGENTS = Object.freeze(["Jiuwei", "DiJiang", "ZhuRong", "BaiZe", "LuWu"]);
 export const COMMAND_WORKER_AGENTS = Object.freeze(["Jiuwei", "ZhuRong"]);
 export const READ_ONLY_LONG_LIVED_AGENTS = Object.freeze(["DiJiang", "BaiZe", "LuWu"]);
-const LONG_LIVED_AGENT_SET = new Set(LONG_LIVED_AGENTS);
 const READ_ONLY_LONG_LIVED_AGENT_SET = new Set(READ_ONLY_LONG_LIVED_AGENTS);
 const legacyAgentName = (...parts) => parts.join("");
 export const AGENT_ALIASES = {
@@ -25,25 +24,12 @@ export const AGENT_ALIASES = {
   Kui: "BaiZe",
   Taotie: "BaiZe",
 };
-export const AGENT_DISPLAY_NAMES = {
-  Jiuwei: "九尾狐 / Nine-Tailed Fox",
-  ZhuRong: "祝融 / Zhu Rong",
-  DiJiang: "帝江 / Di Jiang",
-  BaiZe: "白泽 / Bai Ze",
-  LuWu: "陆吾 / Lu Wu",
-};
-
 export function normalizeAgentKey(value) {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (!trimmed) return null;
   const sanitized = trimmed.replace(/[^\w.-]/g, "_");
   return AGENT_ALIASES[sanitized] || AGENT_ALIASES[trimmed] || sanitized;
-}
-
-export function isLongLivedAgent(value) {
-  const normalized = normalizeAgentKey(value);
-  return normalized ? LONG_LIVED_AGENT_SET.has(normalized) : false;
 }
 
 export function assertCommandWorkerAgent(value) {
@@ -53,10 +39,4 @@ export function assertCommandWorkerAgent(value) {
     throw new Error(`agent ${normalized} is read-only and cannot enter a command worker`);
   }
   return normalized;
-}
-
-export function displayAgentName(value) {
-  const key = normalizeAgentKey(value);
-  if (!key) return "";
-  return AGENT_DISPLAY_NAMES[key] || key;
 }

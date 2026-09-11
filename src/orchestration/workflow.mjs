@@ -1,4 +1,3 @@
-import { copyFile } from "node:fs/promises";
 import path from "node:path";
 import {
   ensureWildArrangeDirs,
@@ -80,10 +79,4 @@ export async function createSamplePlan(rootDir, targetPath = resolveWildArrangeP
 function nodeEvalCommand(source) {
   const encoded = Buffer.from(source, "utf8").toString("base64");
   return `node -e "eval(Buffer.from('${encoded}','base64').toString())"`;
-}
-
-export async function copyPlanTemplate(rootDir, destinationPath) {
-  const samplePath = await createSamplePlan(rootDir);
-  await copyFile(samplePath, destinationPath);
-  return destinationPath;
 }

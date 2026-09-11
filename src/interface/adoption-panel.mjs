@@ -8,7 +8,6 @@ import {
   applyApprovedCards,
   cancelAdoption,
   decideAdoptionCard,
-  isSensitiveAdoptionCard,
   loadAdoptionViewModel,
   recoverAdoption,
   reconcileAdoption,
@@ -427,14 +426,6 @@ export async function tryHandleAdoptionApi(request, response, url, rootDir) {
     sendJson(response, status, { ok: false, error: error instanceof Error ? error.message : String(error), code: error?.code || null });
     return true;
   }
-}
-
-export function describeAdoptionCard(card) {
-  return {
-    id: card.id,
-    sensitive: isSensitiveAdoptionCard(card),
-    allowsDangerous: !((card.consumers || []).some((item) => item.grade === "unknown") || card.confidence === "unknown"),
-  };
 }
 
 function validateId(value, label) {
