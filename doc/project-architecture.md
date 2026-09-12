@@ -81,10 +81,13 @@ device identity
 
 ## 渐进式治理加载
 
-项目规则使用嵌套 `AGENTS.md`，Agent 先收到全局不变量，进入相关目录时才收到局部工作规则。
+根 `AGENTS.md` 先给出场景与必读入口；Agent 在执行对应动作前读取 `doc/development-workflow.md`、`doc/code-maintenance.md` 或下方「目录约定」中的适用正文，再读取目标路径沿途的嵌套 `AGENTS.md`。这些正文承接原根规则，不是可忽略的参考资料。
 
 ```text
-AGENTS.md                         # product goals, global boundaries, release gates
+AGENTS.md                         # mandatory reading routes
+  doc/development-workflow.md      # product goals, global boundaries, release gates
+  doc/code-maintenance.md          # engineering and dependency rules
+  doc/development-commands.md      # command reference
   bin/AGENTS.md                   # CLI-only rules
   doc/AGENTS.md                   # documentation hierarchy and parity
   packs/wildarrange-linear/AGENTS.md
@@ -97,7 +100,7 @@ AGENTS.md                         # product goals, global boundaries, release ga
   test/AGENTS.md                  # test evidence and anti-weakening rules
 ```
 
-嵌套文件是附加性的。它们可收窄目录职责并规定局部证据，但不得放松根级的依赖、gate、安全、测试或商业发布约束。这使根宪法稳定，同时将实现相关指引放在其治理的代码旁。
+嵌套文件是附加性的。它们可收窄目录职责并规定局部证据，但不得放松根入口所引用的依赖、gate、安全、测试或商业发布约束。当前规则扫描器读取入口与匹配的嵌套 AGENTS，不会自动展开 Markdown 链接；命中场景后必须由 Agent 继续读取正文，不能把收到入口当作已经读取全部规则。
 
 ## 主要文件
 
@@ -385,3 +388,124 @@ adapter 专用行为属于 `src/interface/adapters.mjs`、`src/interface/kimi-ad
 - 目录级 `AGENTS.md` 指引保持附加与局部。目录职责变化时更新最近文件；勿把完整根策略复制到每个文件夹。
 - `test/dependency-boundary.test.mjs` 每次 `npm test` 运行；边界测试失败意味着依赖图被违反，不是应放宽测试。
 - 保留 gate 不变量：verifier、scope、review 与 success criteria 对完成仍为 mandatory。
+
+## 目录约定
+
+按依赖方向从上到下列出五区（`interface → orchestration → ai/capabilities → infra`）；CLI 与测试直接 import 下表中的真实 owner。
+
+| 路径                                                           | 职责                                            |
+| ------------------------------------------------------------ | --------------------------------------------- |
+| [README.md](../README.md) / [README.en.md](../README.en.md)    | 用户安装、初始化、最小工作流、dashboard 安全说明                 |
+| [CLAUDE.md](../CLAUDE.md)                                    | Claude 宿主发现入口；只指向根 AGENTS.md，不复制第二份规范                |
+| [doc/concept.md](../doc/concept.md)                           | 产品概念与外部参考边界                                   |
+| [doc/project-architecture.md](../doc/project-architecture.md) | 运行时架构、状态文件和 gate 模型                           |
+| [doc/five-zone-decoupling-guidelines.md](../doc/five-zone-decoupling-guidelines.md) | 可复制到其他项目的五区受控解耦准则、实施顺序与 Review 清单 |
+| [doc/low-code-project-governance.md](../doc/low-code-project-governance.md) | 低代码开发者 + AI 维护的通用掌控手册、测试纪律与 L0–L3 成熟度 |
+| [doc/development-plan.md](../doc/development-plan.md)         | P0 / P1 / P2 路线                               |
+| [doc/2026-07-21-five-zone-refactor-handoff.md](../doc/2026-07-21-five-zone-refactor-handoff.md) | 五区解耦重构总结与交接（六个 Phase、关键决策、已知遗留、改 X 去哪改速查） |
+| `bin/AGENTS.md`                                             | CLI 参数、路由、帮助文本和退出码的局部约束 |
+| `doc/AGENTS.md`                                             | README / 架构 / 可复用准则 / HTML 方案的文档分层 |
+| `packs/wildarrange-linear/AGENTS.md`                        | Agent、Skill、路由、工具合同与项目初始化模板的发布边界 |
+| `bin/wildarrange.mjs`                                       | CLI 入口                                        |
+| `src/AGENTS.md`                                              | 五区归属判断、全区依赖不变量和统一修改顺序 |
+| **interface/**（宿主/人机交互边界，只依赖 orchestration、infra） |  |
+| `src/interface/AGENTS.md`                                    | Interface 局部职责、宿主安全边界和验收要求 |
+| `src/interface/dashboard.mjs`                                | Dashboard HTTP/API 路由、token、Host/Origin 与请求安全边界 |
+| `src/interface/dashboard-view.mjs`                           | Dashboard 整页 HTML/CSS 与浏览器交互渲染，组合现有 panel 片段 |
+| `src/interface/contract-view.mjs`                            | 契约登记与扫描差异的只读 HTML 呈现，不批准或改写正式登记 |
+| `src/interface/adoption-panel.mjs`                           | 验证治理接管 Dashboard 卡片、批准 API 输入校验与页面片段 |
+| `src/interface/adapters.mjs`                                 | Codex / Cursor / Kimi adapter 安装、卸载、恢复、共享 Skill 命令生成 |
+| `src/interface/kimi-adapter.mjs`                             | Kimi plugin manifest、Hook bridge 与安装说明的纯渲染逻辑 |
+| `src/interface/cursor-adapter.mjs` | Cursor `.cursor/hooks.json`、项目感知 Hook bridge（事件/工具名映射与输出协议翻译）与安装说明的纯渲染逻辑；preToolUse 对 Write/Delete/Shell fail-closed |
+| `src/interface/hook-bridge-core.mjs` | Kimi/Cursor bridge 共享的项目发现、CLI 子进程与输出解析渲染；宿主超时和失败策略由调用方显式传入 |
+| `src/interface/doctor.mjs`                                   | 一键体检：各项检查各自独立 try/catch（单项崩只标红本分项），含 gateArming 门武装、adapters 硬拦截安装/陈旧规则、decisionHealth 周期健康摘要；诊断不再写 ledger |
+| `src/interface/decisions.mjs` | `wildarrange decisions` 只读投影：每条决策三行（发生了什么/命中规则/证据），坏行降级；`decisions stats` 确定性统计审查（计数/从未触发的门/标注关联，无 LLM） |
+| `src/interface/timeline.mjs` | `wildarrange timeline`：ledger（仅校验通过条目）+ decisions + annotations 统一倒序时间线投影，只读 |
+| `src/interface/dashboard-panels.mjs` | Dashboard 决策面板 + 运维面板：只读 ViewModel 与渲染片段（防 dashboard.mjs 超拆分线） |
+| `src/interface/cli-help.mjs` | CLI 命令注册表单一事实源：core 六命令分层 help、`docs commands` Markdown 物化 |
+| `src/interface/project-init.mjs` | 显式、非覆盖式补建项目治理文档，并返回需要人类确认的清单 |
+| **orchestration/**（工作流顺序、重试、gate 编排，只依赖 ai、capabilities、infra） |  |
+| `src/orchestration/AGENTS.md`                                | 编排、事务、恢复与完成状态不变量 |
+| `src/orchestration/plan-state.mjs`                            | 计划导入、批准、校验与任务状态加载；feature design 状态委托唯一 owner |
+| `src/orchestration/feature-design.mjs`                        | 需求确认、计划绑定与 feature design 状态迁移的唯一业务 owner |
+| `src/orchestration/host-runtime.mjs`                          | 宿主事件的业务前置编排；CLI 显式组合 AI 渲染入口，不添加反向 import |
+| `src/orchestration/contract-governance.mjs`                    | 批准契约范围、计划外变更申请/决定/等待与登记更新编排，复用现有 ChangeRequest |
+| `src/orchestration/linear-runtime.mjs`                        | 线性任务节点运行时、重试 / checkpoint，经 gateway 调用能力       |
+| `src/orchestration/parallel-runtime.mjs`                      | 命令型子 Agent 并行运行、隔离结果、skipped/cleanup 生命周期状态、runner 崩溃逐任务容错、中断对账（incompleteTasks）与 `parallel retry` partial 重试 |
+| `src/orchestration/remote-ownership.mjs`                      | 设备登记、远端任务 claim、单写 owner 校验与协调状态 |
+| `src/orchestration/handoff.mjs`                               | 跨设备 prepare/push/accept 与显式 takeover |
+| `src/orchestration/admission.mjs`                             | 并行 admission 事务：claim → apply → gates → commit/rollback；回滚失败保持 ownership，全程持全局任务锁 |
+| `src/orchestration/admission-recovery.mjs`                    | admission 回滚计划、补丁恢复、revalidation / 已集成恢复状态落盘，禁止已 push 成果回滚 |
+| `src/orchestration/delivery-pipeline.mjs`                     | 按任务/工作区事实确定交付要求及强制完成终点，复用 integration Git 事务；统一 gate 与完成提交顺序 |
+| `src/orchestration/integration.mjs`                           | admission 交付事务：owner/base/task-branch 三重 fence、delivery commit、task branch 普通 push 与故障对账；不得自动合入 `main` |
+| `src/orchestration/task-board.mjs`                            | 全项目工单总账、draft/ready、任务 claim/证据/持久化与消息板 |
+| `src/orchestration/change-governance.mjs`                     | 任务变更治理、Review Blocker、ChangeRequest 单一记录与决定持久化；契约请求复用记录 |
+| `src/orchestration/status.mjs`                                | 状态报告、Workflow 总结、attentionReport 与 Dashboard 数据 |
+| `src/orchestration/adoption.mjs`                              | 老项目验证治理接管会话、逐卡批准、维护互斥、恢复与两次 Git 锚定 |
+| `src/orchestration/workflow.mjs`                               | Workflow 入口、样例计划生成                            |
+| **ai/**（AI 策略/prompt/技能匹配/hooks，只依赖 orchestration、capabilities、infra，且 capabilities 只能经 gateway） |  |
+| `src/ai/AGENTS.md`                                           | AI 策略、只读边、fallback 与上下文预算约束 |
+| `src/ai/routing.mjs`                                          | 请求路由、类别决策与 Stop Hook 每日可读复盘报告                 |
+| `src/ai/archivist-router.mjs`                                 | 档案路由员：routing packet、结构化记忆、路由建议              |
+| `src/ai/injection.mjs`                                        | 注入点解析、Agent 固定 Skill 绑定、项目 Skill 安全加载、Markdown / Skill 分级预算与按需（动态匹配）挂载 |
+| `src/ai/skill-matcher.mjs`                                    | Skill 匹配、优先级打分与可解释路由提示                       |
+| `src/ai/context.mjs`                                          | Agent 上下文、身份 Prompt 预算化、恢复快照、会话延续           |
+| `src/ai/hooks.mjs`                                            | 宿主生命周期 Hook、Jiuwei 会话身份注入、PreToolUse 范围拦截    |
+| `src/ai/suspicion-review.mjs` | LLM 可疑判断异步审查：只读清洗结论包、无 key 确定性 fallback、decisionId 防幻觉锚定；结论只进 `.wildarrange/reports/suspicion.*`，不进完成链 |
+| **capabilities/**（原子能力 + gateway，只依赖 infra；orchestration/ai 只能经 `gateway.mjs` 调用） |  |
+| `src/capabilities/AGENTS.md`                                 | 原子能力、网关信封和失败语义约束 |
+| `src/capabilities/gateway.mjs`                                | 能力网关：静态注册表 + 统一结果信封（capability/status/evidence/sideEffect/duration_ms/cost/error） |
+| `src/capabilities/verification-governance.mjs`                | 验证治理原子能力：scan / apply-card / generate-artifacts |
+| `src/capabilities/contract-governance.mjs`                    | 契约扫描、检查与受控原子操作；跨步骤审批和任务推进由 orchestration 负责 |
+| `src/capabilities/verify.mjs`                                 | verifier                                       |
+| `src/capabilities/scope-guard.mjs`                             | scope guard、realpath 范围校验                      |
+| `src/capabilities/worker.mjs`                                 | Worker 执行                                      |
+| `src/capabilities/review-gate.mjs`                             | BaiZe 独立复核门（风险/怀疑模式由 Skill 挂载）              |
+| `src/capabilities/code-intel.mjs`                              | LSP/typecheck、AST 结构命令、hashline anchor、注释检查门 |
+| `src/capabilities/repository-governance.mjs`                  | LuWu 仓库治理报告能力，经 gateway 调用 |
+| `src/capabilities/acceptance-proof.mjs`                        | checkpoint 前验收证明链                                 |
+| `src/capabilities/checkpoint.mjs`                              | checkpoint 落盘                                  |
+| **infra/**（基础设施，不依赖任何上层区） |  |
+| `src/infra/AGENTS.md`                                        | 最低层依赖、确定性、文件/锁/命令安全约束 |
+| `src/infra/runtime-store.mjs`                                 | 路径、时间/ID、目录、JSON 原子写与 hash 原语 |
+| `src/infra/file-lock.mjs`                                     | 统一文件锁原语：stale 恢复（死 pid 立即、不可解析按 mtime 宽限）与可诊断超时（错误带 owner/pid/存活状态） |
+| `src/infra/task-state-lock.mjs`                               | 全局任务状态锁（file-lock 原语的路径与默认参数封装） |
+| `src/infra/agent-registry.mjs`                                | 固定 Agent 白名单、别名、显示名与 command-worker 资格 |
+| `src/infra/runtime-config.mjs`                                | 默认配置、配置合并/归一化（含 reporting.verbosity 汇报分级）与 strict 安全底线 |
+| `src/infra/runtime-snapshot.mjs`                              | 运行态 snapshot 与恢复上下文的确定性文件读取/渲染 owner |
+| `src/infra/prompt-pack.mjs`                                   | Prompt Pack 安装后物化到固定运行时根，统一校验路径/realpath/hash 后读取 |
+| `src/infra/runtime-bootstrap.mjs`                             | `initRuntime` 一次性运行时初始化顺序 |
+| `src/infra/ledger.mjs`                                        | hash 链 ledger 追加、校验与可信条目读取（链启动后无 hash 行视为篡改；锁经 file-lock 具备 stale 恢复） |
+| `src/infra/command-runner.mjs`                                 | 子进程命令执行、输出截断、超时与 spawn 级失败兜底（error 事件转 127 结果） |
+| `src/infra/annotation-log.mjs`                                 | 决策标注回写：强制分类（confirmed/rule_wrong/case_wrong/mislabeled）、规则×标注统计；硬约束——绝不写 config/verify_commands/门开关 |
+| `src/infra/command-safety.mjs`                                 | shell 命令高风险预检，阻断明显破坏性 worker/verifier/review 命令；内置正则为不可削弱底线，`commandSafety.extraPatterns` 可外置追加项目规则 |
+| `src/infra/error-protocol.mjs` | 统一错误协议 `{code, module, message, next_action}` 与内联单行渲染；覆盖 gateway 信封、delivery-pipeline 返回、CLI 非零退出三处 |
+| `src/infra/gate-arming.mjs` | 门未武装黄灯地板：trivial/缺失 verify、同义反复 review、无 required 质量门的只读评估，status 常驻携带 |
+| `src/infra/dependency-graph.mjs` | 对抗加固的词法 import 扫描器（边界测试与 `wildarrange impact` 共用）、反向波及分析 `computeImpact`、分区测试选择 `computeZoneTests`/`listRepoTests`（供 `wildarrange test`） |
+| `src/infra/security.mjs`                                      | config hash 基线、运行态备份、归档精确恢复包、备份列表与一键恢复、关键状态完整性检查 |
+| `src/infra/recovery-transaction.mjs`                          | 通用 preimage/postimage、提交、回滚、maintenance marker 与路径/digest 原语 |
+| `src/infra/verification-discovery.mjs`                        | 验证资产只读扫描、消费者分级与可判对变更卡 |
+| `src/infra/verification-registry.mjs`                         | Registry/Bootstrap/Inventory schema、digest 与 freshness |
+| `src/infra/contract-governance.mjs`                           | 契约 schema、发现、差异与锁/存储原语；批准流程及页面归上层，未知来源显式降级申报 |
+| `src/infra/review-findings.mjs`                                | LSP / AST / hashline / 注释检查等质量发现              |
+| `src/infra/llm-provider.mjs`                                   | OpenAI-compatible LLM provider 与可选 LLM review |
+| `src/infra/agent-spawn.mjs`                                    | Codex / Cursor / 自定义命令型子 Agent spawn 模板渲染       |
+| `src/infra/git-worktree.mjs`                                   | Git worktree 隔离、patch 提取与 patch admission        |
+| `src/infra/git-coordination.mjs`                               | 设备安全的 Git remote/commit/push/fetch 与集成 SHA 乐观锁原语 |
+| `src/infra/git-diff.mjs`                                       | git diff / changed-paths 收集与 manifest 变更分类     |
+| `src/infra/path-match.mjs`                                     | 路径归一化、项目根边界断言与 glob/精确/目录匹配（`pathAllowed`）           |
+| `src/infra/route-table.mjs`                                    | 确定性路由表加载（含 overrides）与信号匹配（`loadRoutesConfig`/`resolveRouteDecision`），无 LLM |
+| `src/infra/failure-analysis.mjs`                                | 失败原因分类、返工提示与失败摘要                              |
+| `src/infra/task-reports.mjs`                                    | wisdom / failure report / review report 落盘      |
+| `src/infra/task-state-store.mjs`                                | 单文件全项目 Task ledger 读取、旧格式兼容与 active Plan 投影 |
+| `src/infra/task-predicates.mjs`                                 | no-op / trivial command 等纯任务形状判断              |
+| `src/infra/success-criteria.mjs`                                | 成功判据状态机与 verifier 证据回填                        |
+| `src/infra/rule-scanner.mjs`                                    | 项目规范扫描与规则上下文注入                                |
+| `src/infra/repository-layout.mjs`                                | 目录边界、README 对等、Prompt 清单、命名与真实注释的只读检查 |
+| `src/infra/memory-digest.mjs`                                   | 跨会话 digest、任务完成 digest 与恢复索引                   |
+| `src/infra/decision-log.mjs` | `.wildarrange/decisions.jsonl` 统一决策记录：只在 pipeline/hooks/admission/routing 四缝发射，best-effort 不反噬主流程，坏行读侧跳过 |
+| `src/infra/hook-result-gate.mjs`                                | PostToolUse 结果门校验                              |
+| `test/dependency-boundary.test.mjs`                             | 五区依赖方向强制测试，每次 `npm test` 都会跑                |
+| `test/AGENTS.md`                                             | 单元、集成、对抗、包体测试的局部规范 |
+| `test/*.test.mjs`                                              | Node 内置测试                                     |
+| `.wildarrange/`                                                | 运行时状态目录，可由 CLI 生成                             |

@@ -4,6 +4,8 @@
 
 ## 信息分层
 
+- `development-workflow.md`、`code-maintenance.md`：由根 AGENTS 按场景引入的规范正文；`development-commands.md`：迁出的常用命令；`project-architecture.md` 的「目录约定」承接原根职责表。修改这些规则正文沿用根入口的批准要求。
+
 - `README.md` / `README.en.md`：面向用户，保留安装、升级、最小工作流和常见操作。
 - `project-architecture.md`：面向维护者，记录当前真实架构和运行时不变量。
 - `five-zone-decoupling-guidelines.md`：面向复用，记录不依赖 WildArrange 业务名的通用准则。
