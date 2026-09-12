@@ -383,7 +383,7 @@ adapter 专用行为属于 `src/interface/adapters.mjs`、`src/interface/kimi-ad
 - 尊重上文「五区分层」的单向依赖图。`orchestration/` 与 `ai/` 到达 `capabilities/` 只能经 `capabilities/gateway.mjs` 的 `invokeCapability(name, ctx)`；永不直接 import capability 实现文件。
 - 源文件默认保持 1000 行以内。700+ 行时评估是否超过一个领域职责。
 - CLI、测试与运行时模块直接 import 具体分区 owner，不建立根级 barrel 或兼容 shim。
-- 任何新运行时模块必须列入本架构图与根 `AGENTS.md`；`CLAUDE.md` 只作为宿主发现入口指向根规范，不复制第二份规则。还要登记 `tooling/arch-module-graph/module-file-map.json` 并更新 `docs/product/architecture-overview.html`；运行 `npm run check:arch`。
+- 任何新运行时模块必须列入本架构文档（含「目录约定」）；`CLAUDE.md` 只作为宿主发现入口指向根规范，不复制第二份规则。还要登记 `tooling/arch-module-graph/module-file-map.json` 并更新 `docs/product/architecture-overview.html`；运行 `npm run check:arch`。
 - 经 gateway 调用的 capability 目前含 `worker`、`verify`、`scope`、`review`、`acceptance-proof`、`checkpoint`、`command`、`command-safety`、`repository-governance`、`contract-governance-scan`、`contract-governance-apply-card`、`contract-governance-generate-artifacts`。`code-intel` 是 `review-gate.mjs` 内 import 的 review 子 capability，非 `invokeCapability` 名。
 - 目录级 `AGENTS.md` 指引保持附加与局部。目录职责变化时更新最近文件；勿把完整根策略复制到每个文件夹。
 - `test/dependency-boundary.test.mjs` 每次 `npm test` 运行；边界测试失败意味着依赖图被违反，不是应放宽测试。
