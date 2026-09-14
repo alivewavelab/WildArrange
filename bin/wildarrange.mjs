@@ -3,7 +3,7 @@ import { generateContractArtifacts } from "../src/interface/contract-view.mjs";
 import { applyContractDecision, proposeContractChange, resolveContractChange } from "../src/orchestration/contract-governance.mjs";
 import { runHostRoute, runHostHook } from "../src/orchestration/host-runtime.mjs";
 import path from "node:path";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { startDashboardServer } from "../src/interface/dashboard.mjs";
@@ -86,6 +86,7 @@ import {
 } from "../src/infra/annotation-log.mjs";
 import { computeImpact, computeZoneTests, listRepoTests } from "../src/infra/dependency-graph.mjs";
 import { errorProtocolOf, formatErrorInline } from "../src/infra/error-protocol.mjs";
+import { hashContent } from "../src/infra/runtime-store.mjs";
 import { verifyLedger } from "../src/infra/ledger.mjs";
 import { listPromptPack, renderPromptPackEntry } from "../src/infra/prompt-pack.mjs";
 import { scanProjectRules } from "../src/infra/rule-scanner.mjs";
@@ -332,6 +333,12 @@ async function main() {
       const payload = args.from && args.from !== true
         ? await readJson(path.resolve(rootDir, args.from))
         : JSON.parse(await readAllStdin());
+      const hostAdapter = args.host && args.host !== true ? String(args.host) : String(process.env.WILDARRANGE_HOST_ADAPTER || "");
+      if (hostAdapter) payload.host_adapter = hostAdapter;
+      if (hostAdapter === "codex") {
+        const hookConfig = await readFile(path.join(rootDir, ".codex", "hooks.json"), "utf8");
+        payload.hook_config_digest = hashContent(hookConfig);
+      }
       const result = await runHostHook(rootDir, payload, runInjectionHook);
       if (args.format === "json") {
         console.log(JSON.stringify(result, null, 2));

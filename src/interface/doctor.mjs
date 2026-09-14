@@ -11,6 +11,7 @@ import {
   readJson,
   resolveWildArrangePath,
   writeJsonAtomic,
+  hashContent,
 } from "../infra/runtime-store.mjs";
 import { readVerifiedLedgerEntries, verifyLedger } from "../infra/ledger.mjs";
 import { isPossibleNoopTask, isTrivialCommand } from "../infra/task-predicates.mjs";
@@ -463,7 +464,7 @@ async function checkAdapters(rootDir, findings) {
     const bridgePath = path.join(rootDir, ".cursor", "hooks", "wildarrange-hook-bridge.mjs");
     if (!existsSync(hooksPath)) {
       addFinding(findings, "warn", "adapters", "config 启用了 Cursor adapter 但 .cursor/hooks.json 不存在，本机没有硬拦截", { target: "cursor", nextAction: "node ./bin/wildarrange.mjs adapter install --target cursor" });
-      targets.push({ target: "cursor", installed: false });
+      targets.push({ target: "cursor", configured: false });
     } else {
       const raw = await readFile(hooksPath, "utf8").catch(() => "");
       const referencesBridge = raw.includes("wildarrange-hook-bridge");
@@ -471,24 +472,34 @@ async function checkAdapters(rootDir, findings) {
       if (!referencesBridge || !bridgeExists) {
         addFinding(findings, "warn", "adapters", ".cursor/hooks.json 未引用 bridge 或 bridge 文件缺失，硬拦截不完整", { target: "cursor", nextAction: "重新运行 node ./bin/wildarrange.mjs adapter install --target cursor" });
       }
-      targets.push({ target: "cursor", installed: referencesBridge && bridgeExists });
+      targets.push({ target: "cursor", configured: referencesBridge && bridgeExists });
     }
   }
   if (codexEnabled) {
     const codexHooks = path.join(rootDir, ".codex", "hooks.json");
-    const installed = existsSync(codexHooks);
-    if (!installed) {
-      addFinding(findings, "warn", "adapters", "config 启用了 Codex adapter 但 .codex/hooks.json 不存在，本机没有硬拦截", { target: "codex", nextAction: "node ./bin/wildarrange.mjs adapter install --target codex" });
+    const configured = existsSync(codexHooks);
+    if (!configured) {
+      addFinding(findings, "error", "adapters", "config 启用了 Codex adapter 但 .codex/hooks.json 不存在，Codex 治理未配置", { target: "codex", code: "codex_hook_not_configured", nextAction: "node ./bin/wildarrange.mjs adapter install --target codex" });
+      targets.push({ target: "codex", configured: false, activation: "not_configured" });
+    } else {
+      const activation = await inspectCodexHookExecution(rootDir, codexHooks);
+      if (activation.status !== "execution_observed") {
+        addFinding(findings, "error", "adapters", "Codex Hook 文件已生成，但没有当前 Hook 配置被宿主实际执行的回执；不能认定治理已生效", {
+          target: "codex",
+          code: "codex_hook_activation_unverified",
+          nextAction: "在 Codex 中执行 /hooks，review 并 trust 本项目 Hook；然后新开或继续一个任务，再运行 wildarrange doctor",
+        });
+      }
+      targets.push({ target: "codex", configured: true, activation: activation.status, lastObservedAt: activation.lastObservedAt, lastEvent: activation.lastEvent, sessionId: activation.sessionId });
     }
-    targets.push({ target: "codex", installed });
   }
   if (kimiEnabled) {
     const kimiBridge = resolveWildArrangePath(rootDir, "adapters", "kimi", "plugin", "hooks", "wildarrange-hook-bridge.mjs");
-    const installed = existsSync(kimiBridge);
-    if (!installed) {
+    const configured = existsSync(kimiBridge);
+    if (!configured) {
       addFinding(findings, "warn", "adapters", "config 启用了 Kimi adapter 但 plugin bridge 不存在", { target: "kimi", nextAction: "node ./bin/wildarrange.mjs adapter install --target kimi" });
     }
-    targets.push({ target: "kimi", installed });
+    targets.push({ target: "kimi", configured });
   }
 
   // 陈旧规则检测：规则文件里指向不存在绝对路径的命令（如换机/换用户名后的
@@ -520,12 +531,30 @@ async function checkAdapters(rootDir, findings) {
     });
   }
 
-  const uninstalled = targets.filter((target) => !target.installed).length;
+  const unconfigured = targets.filter((target) => !target.configured).length;
+  const activationUnverified = targets.filter((target) => target.target === "codex" && target.activation !== "execution_observed").length;
   return {
-    status: uninstalled > 0 || staleRules.length > 0 || legacyManagedRules.length > 0 ? "warn" : "ok",
+    status: activationUnverified > 0 ? "error" : (unconfigured > 0 || staleRules.length > 0 || legacyManagedRules.length > 0 ? "warn" : "ok"),
     targets,
     staleRules,
     legacyManagedRules,
+  };
+}
+
+async function inspectCodexHookExecution(rootDir, hooksPath) {
+  const currentDigest = hashContent(await readFile(hooksPath, "utf8"));
+  const entries = await readVerifiedLedgerEntries(rootDir);
+  const latest = entries
+    .filter((entry) => entry.type === "hook_injection_run"
+      && entry.hostAdapter === "codex"
+      && entry.hookConfigDigest === currentDigest)
+    .at(-1);
+  if (!latest) return { status: "unverified", lastObservedAt: null, lastEvent: null, sessionId: null };
+  return {
+    status: "execution_observed",
+    lastObservedAt: latest.at,
+    lastEvent: latest.event || null,
+    sessionId: latest.sessionId || null,
   };
 }
 
@@ -600,7 +629,7 @@ function renderDoctorMarkdown(report) {
   lines.push("", "## Sections", "");
   lines.push(`- Config source: ${sectionValue(report.sections.config, (s) => s.sourcePath)}`);
   lines.push(`- Gate arming: ${sectionValue(report.sections.gateArming, (s) => s.armed ? "armed" : `NOT ARMED (${s.issueCount} issue(s))`)}`);
-  lines.push(`- Adapters: ${sectionValue(report.sections.adapters, (s) => s.status === "skipped" ? `skipped (${s.reason})` : `${(s.targets || []).map((target) => `${target.target}:${target.installed ? "installed" : "MISSING"}`).join(", ") || "none enabled"}${(s.staleRules || []).length ? `, stale rules: ${s.staleRules.length}` : ""}`)}`);
+  lines.push(`- Adapters: ${sectionValue(report.sections.adapters, (s) => s.status === "skipped" ? `skipped (${s.reason})` : `${(s.targets || []).map(renderAdapterTarget).join(", ") || "none enabled"}${(s.staleRules || []).length ? `, stale rules: ${s.staleRules.length}` : ""}`)}`);
   lines.push(`- Completed tasks audited: ${sectionValue(report.sections.completionAudit, (s) => s.checkedCompleted)}`);
   lines.push(`- Ledger entries checked: ${sectionValue(report.sections.ledger, (s) => `${s.checked} (legacy: ${s.legacy})`)}`);
   lines.push(`- Ledger vs backup: ${sectionValue(report.sections.ledgerBackupCrossCheck, (s) => s.checked ? `${s.backupId}: ${s.prefixIntact ? "history intact" : "HISTORY DIVERGED"}` : `not checked (${s.reason})`)}`);
@@ -610,6 +639,12 @@ function renderDoctorMarkdown(report) {
   lines.push(`- Decision health: ${sectionValue(report.sections.decisionHealth, (s) => `${s.totalDecisions} decisions, never-fired gates: ${(s.neverFiredGates || []).join(", ") || "none"}, annotations: ${s.annotations?.total ?? 0} (orphans: ${s.annotations?.unmatchedCount ?? 0})`)}`);
   lines.push(`- Registry freshness: ${sectionValue(report.sections.registryFreshness, (s) => s.stale ? `${s.status}: ${s.reason}` : (s.status || "not_adopted"))}`);
   return `${lines.join("\n")}\n`;
+}
+
+function renderAdapterTarget(target) {
+  if (!target.configured) return `${target.target}:NOT CONFIGURED`;
+  if (target.target === "codex") return `${target.target}:configured/${target.activation === "execution_observed" ? "execution observed" : "ACTIVATION UNVERIFIED"}`;
+  return `${target.target}:configured`;
 }
 
 function sectionValue(section, render) {

@@ -276,8 +276,8 @@ node "$WILDARRANGE" doctor   <span class="c"># 再查 adapters 分项</span></di
       Kimi：按安装说明启用用户侧 plugin（CLI 不会静默改你的全局配置）。
     </div>
     <div class="slot check-slot"><h4>怎么核对</h4>
-      <code>doctor</code> → <code>sections.adapters.targets</code> 里你要用的宿主显示 <span class="ok">installed: true</span>。<br>
-      仍是 MISSING → 重新 install；规则文件若告警「不存在路径」，把绝对路径改成相对路径。
+      <code>doctor</code> → Codex 应显示 <span class="ok">configured / execution_observed</span>；这表示文件已生成，且当前 Hook 配置至少真实运行过一次。<br>
+      <code>NOT CONFIGURED</code> → 重新 install；<code>ACTIVATION UNVERIFIED</code> → 在 Codex 用 <code>/hooks</code> trust，继续或新开一次任务后再运行 doctor。规则文件若告警「不存在路径」，把绝对路径改成相对路径。
     </div>
   </div>
 </div>

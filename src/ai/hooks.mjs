@@ -41,6 +41,8 @@ export async function runInjectionHook(rootDir, input = {}) {
   const event = normalizeHookEvent(input.hook_event_name || input.event || input.name);
   const pointName = injectionPointForHookEvent(event);
   const sessionId = normalizeHookSessionId(input);
+  const hostAdapter = String(input.host_adapter || process.env.WILDARRANGE_HOST_ADAPTER || "").trim().toLowerCase();
+  const hookConfigDigest = String(input.hook_config_digest || "").trim().toLowerCase();
   const taskId = normalizeHookTaskId(input);
   const targetPaths = event === "PostToolUse" || event === "PreToolUse" ? extractHookTargetPaths(input, hookRootDir) : [];
   const facts = {};
@@ -150,6 +152,8 @@ export async function runInjectionHook(rootDir, input = {}) {
     event,
     pointName,
     sessionId,
+    hostAdapter: hostAdapter || null,
+    hookConfigDigest: hookConfigDigest || null,
     taskId: effectiveTaskId || null,
     targetPaths,
     enabled: injectionPoint.enabled,
@@ -171,6 +175,8 @@ export async function runInjectionHook(rootDir, input = {}) {
     event,
     pointName,
     sessionId,
+    hostAdapter: hostAdapter || null,
+    hookConfigDigest: hookConfigDigest || null,
     taskId: effectiveTaskId || null,
     decision: result.decision,
     outputChars: output.length,

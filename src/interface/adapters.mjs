@@ -47,7 +47,7 @@ export async function installAdapter(rootDir, options = {}) {
   const backupId = createAdapterBackupId("install");
 
   if (target === "all" || target === "codex") {
-    const codexHooks = buildCodexHooksConfig(hookCommand);
+    const codexHooks = buildCodexHooksConfig(`${hookCommand} --host codex`);
     const codexRuntimePath = path.join(rootDir, ".codex", "hooks.json");
     const codexRuntimeBackup = await backupExistingAdapterFile(rootDir, codexRuntimePath, backupId);
     await writeJsonAtomic(codexRuntimePath, codexHooks);
@@ -189,6 +189,8 @@ export async function installAdapter(rootDir, options = {}) {
     packageName,
     hookCommand,
     backupId,
+    result: "files_generated",
+    activationVerified: false,
     outputs,
   };
   const reportJsonPath = resolveWildArrangePath(rootDir, "adapters", "install-report.json");
@@ -197,7 +199,9 @@ export async function installAdapter(rootDir, options = {}) {
   report.reportMdPath = reportPath(rootDir, reportMdPath);
   await writeJsonAtomic(reportJsonPath, report);
   await writeFile(reportMdPath, renderAdapterInstallReport(report), "utf8");
-  await appendLedger(rootDir, { type: "adapter_installed", target, mode, packageName, outputCount: outputs.length });
+  // This command can only materialize project files. Host trust and lifecycle
+  // execution happen later inside Codex/Cursor/Kimi and need separate evidence.
+  await appendLedger(rootDir, { type: "adapter_files_generated", target, mode, packageName, outputCount: outputs.length });
   return report;
 }
 
@@ -542,6 +546,7 @@ function renderAdapterInstallReport(report) {
     `Target: ${report.target}`,
     `Mode: ${report.mode}`,
     `Package: ${report.packageName}`,
+    `Result: ${report.result} (host activation not yet verified)`,
     "",
     "## Hook Command",
     "",

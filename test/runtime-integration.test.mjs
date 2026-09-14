@@ -973,6 +973,8 @@ test("adapter install writes codex hooks and cursor rules", async () => {
     await writeFile(legacyCursorRule, "legacy alwaysApply rule\n", "utf8");
     const report = await installAdapter(dir, { target: "all", mode: "npx", packageName: "wildarrange" });
     assert.equal(report.mode, "npx");
+    assert.equal(report.result, "files_generated");
+    assert.equal(report.activationVerified, false);
     assert.ok(report.outputs.some((output) => output.path === ".codex/hooks.json" && output.enforcement === "hard-after-trust"));
     assert.ok(report.outputs.some((output) => output.path === ".wildarrange/adapters/codex/hooks.json"));
     assert.ok(report.outputs.some((output) => output.path === ".cursor/rules/wildarrange.mdc"));
@@ -988,7 +990,10 @@ test("adapter install writes codex hooks and cursor rules", async () => {
     assert.match(codexHooks.hooks.PreToolUse[0].matcher, /apply_patch/);
     assert.match(codexHooks.hooks.PreToolUse[0].matcher, /functions\\\.apply_patch/);
     assert.match(codexHooks.hooks.SessionStart[0].hooks[0].command, /npx -y wildarrange hook run/);
-    assert.match(await readFile(resolveWildArrangePath(dir, "adapters", "install-report.md"), "utf8"), /hard-after-trust/);
+    assert.match(codexHooks.hooks.SessionStart[0].hooks[0].command, /--host codex$/);
+    assert.match(await readFile(resolveWildArrangePath(dir, "adapters", "install-report.md"), "utf8"), /host activation not yet verified/);
+    assert.match(await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8"), /adapter_files_generated/);
+    assert.doesNotMatch(await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8"), /adapter_installed/);
 
     const cursorRule = await readFile(path.join(dir, ".cursor", "rules", "wildarrange.mdc"), "utf8");
     assert.match(cursorRule, /alwaysApply: true/);
@@ -3963,6 +3968,15 @@ test("doctor passes on a healthy runtime and flags hand-edited completion", asyn
     await initRuntime(dir);
     const workflow = await runWorkflow(dir, { sample: true });
     assert.equal(workflow.ok, true);
+    await installAdapter(dir, { target: "codex", mode: "local" });
+    await runInjectionHook(dir, {
+      hook_event_name: "UserPromptSubmit",
+      session_id: "doctor-healthy-session",
+      cwd: dir,
+      prompt: "检查当前健康状态",
+      host_adapter: "codex",
+      hook_config_digest: hashContent(await readFile(path.join(dir, ".codex", "hooks.json"), "utf8")),
+    });
     await writeRuntimeStateBackup(dir, { reason: "doctor-baseline" });
 
     const healthy = await runDoctor(dir);
