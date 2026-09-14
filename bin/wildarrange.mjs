@@ -73,7 +73,7 @@ import {
 } from "../src/ai/context.mjs";
 import { matchSkills } from "../src/ai/skill-matcher.mjs";
 import { resolveInjectionPoint } from "../src/ai/injection.mjs";
-import { runInjectionHook } from "../src/ai/hooks.mjs";
+import { runInjectionHook, TRUSTED_CLI_COMMAND_PREFIX } from "../src/ai/hooks.mjs";
 import { routeRequest } from "../src/ai/routing.mjs";
 import { runSuspicionReview } from "../src/ai/suspicion-review.mjs";
 import { runRepositoryGovernanceAudit } from "../src/capabilities/repository-governance.mjs";
@@ -91,6 +91,7 @@ import { verifyLedger } from "../src/infra/ledger.mjs";
 import { listPromptPack, renderPromptPackEntry } from "../src/infra/prompt-pack.mjs";
 import { scanProjectRules } from "../src/infra/rule-scanner.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
+import { resolveRuntimeCliCommandPrefix } from "../src/infra/runtime-snapshot.mjs";
 import {
   DEFAULT_PACKAGE_NAME,
   loadWildArrangeConfig,
@@ -335,17 +336,23 @@ async function main() {
         : JSON.parse(await readAllStdin());
       const hostAdapter = args.host && args.host !== true ? String(args.host) : String(process.env.WILDARRANGE_HOST_ADAPTER || "");
       if (hostAdapter) payload.host_adapter = hostAdapter;
-      const adapterMode = args["adapter-mode"] && args["adapter-mode"] !== true ? String(args["adapter-mode"]) : "local";
+      const hasAdapterMode = args["adapter-mode"] && args["adapter-mode"] !== true;
+      const adapterMode = hasAdapterMode ? String(args["adapter-mode"]) : "local";
       const adapterPackage = args["adapter-package"] && args["adapter-package"] !== true
         ? String(args["adapter-package"])
         : DEFAULT_PACKAGE_NAME;
       // The hook payload originates in the host and is untrusted. Always derive
       // the command prefix from this running CLI and its generated adapter flags.
-      payload.cli_command_prefix = adapterCliPrefix({
-        mode: adapterMode,
-        packageName: adapterPackage,
-        localCliPath: path.resolve(process.argv[1]),
-      });
+      const cliCommandPrefix = hasAdapterMode
+        ? adapterCliPrefix({
+          mode: adapterMode,
+          packageName: adapterPackage,
+          localCliPath: path.resolve(process.argv[1]),
+        })
+        : await resolveRuntimeCliCommandPrefix(rootDir, { fallbackCliPath: path.resolve(process.argv[1]) });
+      if (!cliCommandPrefix) throw new Error("WildArrange CLI command prefix is unavailable; reinstall the adapter");
+      payload.cli_command_prefix = cliCommandPrefix;
+      payload[TRUSTED_CLI_COMMAND_PREFIX] = cliCommandPrefix;
       if (hostAdapter === "codex") {
         const hookConfig = await readFile(path.join(rootDir, ".codex", "hooks.json"), "utf8");
         payload.hook_config_digest = hashContent(hookConfig);

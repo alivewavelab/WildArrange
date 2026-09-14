@@ -73,8 +73,11 @@ export function detectToolResultFindings(response, options = {}) {
     });
   }
 
-  const explicitFailureText = /(?:^|\r?\n)\s*(?:(?:output|stderr|message):\s*)?(?:error|failed|failure|exception)(?::|\b)/i.test(flat)
-    || /\b(?:permission denied|command not found|no such file or directory)\b/i.test(flat);
+  const explicitFailureText = /(?:^|\r?\n)\s*(?:(?:output|stderr|message):\s*)?(?:error|failed|failure|exception)(?::|\s|$)/i.test(flat)
+    || /(?:^|\r?\n)\s*(?:(?:output|stderr|message):\s*)?(?:permission denied|command not found|no such file or directory)(?::|\s|$)/i.test(flat)
+    || /\b(?:could not|cannot|can't|unable to)\s+apply patch\b/i.test(flat)
+    || /\bapply_patch verification failed\b/i.test(flat)
+    || /\bfailed to (?:apply|find|open|write|update|delete)\b/i.test(flat);
   const structuredSuccess = exitCode === 0
     || booleanValue(response, ["ok", "success", "passed"]) === true;
   const strictApplyPatchSuccess = /^\s*(?:Done!|Success\.\s+(?:Updated|Added|Deleted|Applied)(?: the following files)?:?(?:\r?\n[ADM]\s+[^\r\n]+)*)\s*$/i.test(flat);
@@ -88,7 +91,7 @@ export function detectToolResultFindings(response, options = {}) {
     // source containing words such as "error" or "process.exit". Structured
     // failure fields above remain authoritative; textual scanning must not turn
     // a confirmed patch success into a false shell_failure warning.
-    if (successfulApplyPatch && pattern.name === "shell_failure") continue;
+    if (successfulApplyPatch) continue;
     const match = flat.match(pattern.regex);
     if (!match) continue;
     findings.push({
@@ -122,7 +125,10 @@ function flattenToolResponse(value) {
 
 function firstNumericValue(value, keys) {
   const found = findFirstValue(value, keys);
-  return Number.isInteger(found) ? found : Number.isInteger(Number(found)) ? Number(found) : null;
+  if (typeof found === "number") return Number.isInteger(found) ? found : null;
+  if (typeof found !== "string" || found.trim() === "" || !/^-?\d+$/.test(found.trim())) return null;
+  const parsed = Number(found.trim());
+  return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
 function firstStringValue(value, keys) {

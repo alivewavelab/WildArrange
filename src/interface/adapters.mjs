@@ -10,7 +10,6 @@ import {
   STATE_VERSION,
   ensureWildArrangeDirs,
   nowIso,
-  readJson,
   resolveWildArrangePath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
@@ -318,13 +317,9 @@ export async function restoreAdapterBackup(rootDir, options = {}) {
     });
   }
 
-  const restoredInstallReport = await readJson(resolveWildArrangePath(rootDir, "adapters", "install-report.json"), null);
-  const restoredCliPrefix = typeof restoredInstallReport?.cliPrefix === "string"
-    ? restoredInstallReport.cliPrefix
-    : undefined;
   await writeRuntimeContextSnapshot(rootDir, {
     reason: "adapter_restore",
-    cliCommandPrefix: restoredCliPrefix,
+    preferAdapterArtifacts: true,
   });
 
   const report = {

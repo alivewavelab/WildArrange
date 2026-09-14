@@ -59,7 +59,7 @@ import {
   resolveArchivistRouteSuggestion,
   runArchivistRouter,
 } from "../src/ai/archivist-router.mjs";
-import { preToolUseGuard, runInjectionHook as renderHook } from "../src/ai/hooks.mjs";
+import { TRUSTED_CLI_COMMAND_PREFIX, preToolUseGuard, runInjectionHook as renderHook } from "../src/ai/hooks.mjs";
 import { runHostHook, runHostRoute } from "../src/orchestration/host-runtime.mjs";
 import { matchSkills } from "../src/ai/skill-matcher.mjs";
 import { resolveInjectionPoint } from "../src/ai/injection.mjs";
@@ -379,7 +379,7 @@ test("task-bound Skills mount through the public execution hook and budgeted loa
       session_id: "task-skill-delivery",
       cwd: dir,
       tool_name: "apply_patch",
-      tool_input: { file_path: "receipt.txt" },
+      tool_input: { command: "*** Begin Patch\n*** Add File: receipt.txt\n+ready\n*** End Patch" },
     });
     const hookOutput = JSON.parse(hook.output);
     assert.equal(hook.taskId, "T001", "public hook should resolve the runnable task without a private function call");
@@ -664,6 +664,7 @@ test("hook rendering rewrites canonical plan, resume, and prompt commands to the
       cwd: dir,
       prompt: "修复 broken login bug",
       cli_command_prefix: "npx -y wildarrange",
+      [TRUSTED_CLI_COMMAND_PREFIX]: "npx -y wildarrange",
     });
 
     assert.match(result.output, /npx -y wildarrange plan --from \.wildarrange\/plan-drafts\/adapter-prefix-plan\.json/);
@@ -822,6 +823,25 @@ test("successful apply_patch output is not misclassified by source text that men
     assert.equal(strictHostSuccess.decision, "pass");
     assert.doesNotMatch(strictHostSuccess.output, /shell_failure/);
 
+    for (const toolResponse of [
+      { exit_code: 0, output: "Success. Updated the following files:\nA src/timeout-helper.js\nA src/permission denied-handler.js" },
+      { exit_code: "0", output: "Success. Updated the following files:\nA src/timeout-helper.js" },
+      "Success. Updated the following files:\nA src/no such file or directory-helper.js",
+    ]) {
+      const noisySuccess = await renderHook(dir, {
+        hook_event_name: "PostToolUse",
+        session_id: "session-noisy-patch-success",
+        cwd: dir,
+        tool_name: "functions.apply_patch",
+        tool_input: { command: "*** Begin Patch\n*** Add File: src/timeout-helper.js\n*** End Patch" },
+        tool_response: toolResponse,
+      });
+      assert.equal(noisySuccess.decision, "pass");
+      assert.equal(noisySuccess.output.includes("mcp_transport_failure"), false);
+      assert.equal(noisySuccess.output.includes("permission_denied"), false);
+      assert.equal(noisySuccess.output.includes("command_not_found"), false);
+    }
+
     const failed = await renderHook(dir, {
       hook_event_name: "PostToolUse",
       session_id: "session-failed-patch",
@@ -833,9 +853,26 @@ test("successful apply_patch output is not misclassified by source text that men
     assert.equal(failed.decision, "block");
     assert.match(failed.output, /nonzero_exit_code/);
 
+    const numericStringFailure = await renderHook(dir, {
+      hook_event_name: "PostToolUse",
+      session_id: "session-numeric-string-failure",
+      cwd: dir,
+      tool_name: "functions.apply_patch",
+      tool_input: { command: "*** Begin Patch\n*** Add File: src/error-handler.js\n*** End Patch" },
+      tool_response: { exitCode: "7", output: "" },
+    });
+    assert.equal(numericStringFailure.decision, "block");
+    assert.match(numericStringFailure.output, /nonzero_exit_code/);
+
     for (const toolResponse of [
       "Done!\nError: Failed to apply patch",
       { exit_code: 0, output: "Error: Failed to apply patch" },
+      "apply_patch verification failed: Failed to find expected lines in src/app.js",
+      "Could not apply patch: error opening file src/app.js",
+      { exit_code: 0, output: "Could not apply patch: error opening file src/app.js" },
+      { exit_code: null, output: "Failed to apply patch" },
+      { exitCode: " ", output: "Failed to apply patch" },
+      { code: false, output: "Failed to apply patch" },
     ]) {
       const conflicting = await renderHook(dir, {
         hook_event_name: "PostToolUse",
@@ -901,7 +938,7 @@ test("pre-tool-use guard denies out-of-scope file writes before they land", asyn
       cwd: dir,
       taskId: "T001",
       tool_name: "apply_patch",
-      tool_input: { file_path: "src/other.js" },
+      tool_input: { command: "*** Begin Patch\n*** Add File: src/other.js\n+export const other = true;\n*** End Patch" },
     });
 
     assert.equal(guard.decision, "deny");
@@ -935,7 +972,7 @@ test("pre-tool-use guard denies out-of-scope file writes before they land", asyn
       cwd: dir,
       taskId: "T001",
       tool_name: "apply_patch",
-      tool_input: { file_path: "src/other.js" },
+      tool_input: { command: "*** Begin Patch\n*** Add File: src/other.js\n+export const other = true;\n*** End Patch" },
     });
     const output = JSON.parse(hook.output);
     assert.equal(output.hookSpecificOutput.hookEventName, "PreToolUse");
@@ -953,7 +990,7 @@ test("pre-tool-use guard denies out-of-scope file writes before they land", asyn
       cwd: dir,
       taskId: "T001",
       tool_name: "apply_patch",
-      tool_input: { file_path: "src/other.js" },
+      tool_input: { command: "*** Begin Patch\n*** Add File: src/other.js\n+export const other = true;\n*** End Patch" },
     });
     const disabledOutput = JSON.parse(disabledInjectionHook.output);
     assert.equal(disabledInjectionHook.enabled, false);
@@ -972,7 +1009,7 @@ test("pre-tool-use guard denies file writes when no task exists", async () => {
       session_id: "session-no-task",
       cwd: dir,
       tool_name: "functions.apply_patch",
-      tool_input: { file_path: "index.html" },
+      tool_input: { command: "*** Begin Patch\n*** Add File: index.html\n+<main></main>\n*** End Patch" },
     });
     const output = JSON.parse(hook.output);
     assert.equal(hook.decision, "deny");
@@ -986,15 +1023,19 @@ test("pre-tool-use guard only allows a JSON plan draft before the first task exi
   await withTempDir(async (dir) => {
     await initRuntime(dir);
 
-    const allowed = await preToolUseGuard(dir, {
+    const decoyOnly = await preToolUseGuard(dir, {
       hook_event_name: "PreToolUse",
       session_id: "session-plan-draft",
       cwd: dir,
       tool_name: "functions.apply_patch",
-      tool_input: { file_path: ".wildarrange/plan-drafts/session-plan.json" },
+      tool_input: {
+        file_path: ".wildarrange/plan-drafts/session-plan.json",
+        command: "*** Begin Patch\n*** End Patch",
+      },
     });
-    assert.equal(allowed.decision, "allow");
-    assert.equal(allowed.code, "plan_draft_write");
+    assert.equal(decoyOnly.decision, "deny");
+    assert.equal(decoyOnly.code, "unresolved_apply_patch_targets");
+    assert.deepEqual(decoyOnly.targetPaths, []);
 
     const realisticPlanPatch = await preToolUseGuard(dir, {
       hook_event_name: "PreToolUse",
@@ -1057,7 +1098,7 @@ test("pre-tool-use guard only allows a JSON plan draft before the first task exi
       session_id: "session-plan-draft",
       cwd: dir,
       tool_name: "functions.apply_patch",
-      tool_input: { file_path: "plan.json" },
+      tool_input: { command: "*** Begin Patch\n*** Add File: plan.json\n+{}\n*** End Patch" },
     });
     assert.equal(denied.decision, "deny");
     assert.equal(denied.code, "no_active_task");
@@ -1120,6 +1161,17 @@ test("pre-tool-use guard only allows a JSON plan draft before the first task exi
     });
     assert.equal(chainedPromptCommand.decision, "deny");
     assert.equal(chainedPromptCommand.code, "no_active_task_shell");
+
+    const untrustedPrefixDenied = await preToolUseGuard(dir, {
+      hook_event_name: "PreToolUse",
+      session_id: "session-plan-draft",
+      cwd: dir,
+      tool_name: "Bash",
+      cli_command_prefix: "node attacker.js",
+      tool_input: { command: "node attacker.js status" },
+    });
+    assert.equal(untrustedPrefixDenied.decision, "deny");
+    assert.equal(untrustedPrefixDenied.code, "no_active_task_shell");
   });
 });
 
@@ -1263,6 +1315,129 @@ test("adapter reinstall backup restores hooks, install facts, and runtime comman
     assert.equal(restoredContext.cliCommandPrefix, oldInstall.cliPrefix);
     assert.match(await readFile(resolveWildArrangePath(dir, "snapshots", "context.md"), "utf8"), /adapter_restore/);
     assert.ok((await readFile(resolveWildArrangePath(dir, "snapshots", "context.md"), "utf8")).includes(`${oldInstall.cliPrefix} resume`));
+  });
+});
+
+test("legacy and uninstall backups recover CLI context from restored hook facts", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const legacyHookPath = resolveWildArrangePath(dir, "adapters", "backups", "legacy-hook", ".codex", "hooks.json");
+    await mkdir(path.dirname(legacyHookPath), { recursive: true });
+    await writeFile(legacyHookPath, JSON.stringify({
+      hooks: {
+        SessionStart: [{ hooks: [{ command: "node \"C:\\npm-cache\\_npx\\abc\\node_modules\\@alivewavelab\\wildarrange\\bin\\wildarrange.mjs\" hook run" }] }],
+      },
+    }, null, 2));
+    await restoreAdapterBackup(dir, { backupId: "legacy-hook" });
+    let context = await readJson(resolveWildArrangePath(dir, "snapshots", "context.json"));
+    assert.equal(context.cliCommandPrefix, "npx -y @alivewavelab/wildarrange");
+    let contextMd = await readFile(resolveWildArrangePath(dir, "snapshots", "context.md"), "utf8");
+    assert.match(contextMd, /npx -y @alivewavelab\/wildarrange resume/);
+    assert.doesNotMatch(contextMd, /node \.\/bin\/wildarrange\.mjs/);
+
+    const installed = await installAdapter(dir, { target: "codex", mode: "npx", packageName: "@example/wildarrange-fork" });
+    const uninstalled = await uninstallAdapter(dir, { target: "codex" });
+    await rm(resolveWildArrangePath(dir, "adapters", "install-report.json"), { force: true });
+    await rm(resolveWildArrangePath(dir, "adapters", "install-report.md"), { force: true });
+    await restoreAdapterBackup(dir, { backupId: uninstalled.backupId });
+    context = await readJson(resolveWildArrangePath(dir, "snapshots", "context.json"));
+    assert.equal(context.cliCommandPrefix, installed.cliPrefix);
+    contextMd = await readFile(resolveWildArrangePath(dir, "snapshots", "context.md"), "utf8");
+    assert.ok(contextMd.includes(`${installed.cliPrefix} resume`));
+    assert.doesNotMatch(contextMd, /node \.\/bin\/wildarrange\.mjs/);
+  });
+});
+
+test("legacy npx cache hooks preserve custom scoped and unscoped package identity", async () => {
+  for (const fixture of [
+    {
+      packageName: "@example/wildarrange-fork",
+      cliPath: "C:\\npm-cache\\_npx\\scoped\\node_modules\\@example\\wildarrange-fork\\bin\\wildarrange.mjs",
+    },
+    {
+      packageName: "wildarrange-fork",
+      cliPath: "C:\\npm-cache\\_npx\\unscoped\\node_modules\\wildarrange-fork\\bin\\wildarrange.mjs",
+    },
+  ]) {
+    await withTempDir(async (dir) => {
+      await initRuntime(dir);
+      const hookPath = resolveWildArrangePath(dir, "adapters", "backups", "legacy-custom-npx", ".codex", "hooks.json");
+      await mkdir(path.dirname(hookPath), { recursive: true });
+      await writeFile(hookPath, JSON.stringify({
+        hooks: {
+          SessionStart: [{ hooks: [{ command: `node "${fixture.cliPath}" hook run` }] }],
+        },
+      }, null, 2));
+
+      await restoreAdapterBackup(dir, { backupId: "legacy-custom-npx" });
+      const context = await readJson(resolveWildArrangePath(dir, "snapshots", "context.json"));
+      assert.equal(context.cliCommandPrefix, `npx -y ${fixture.packageName}`);
+      const contextMd = await readFile(resolveWildArrangePath(dir, "snapshots", "context.md"), "utf8");
+      assert.ok(contextMd.includes(`npx -y ${fixture.packageName} resume`));
+      assert.doesNotMatch(contextMd, /@alivewavelab\/wildarrange/);
+    });
+  }
+});
+
+test("unrecognized legacy npx cache hook does not guess a package identity", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const hookPath = resolveWildArrangePath(dir, "adapters", "backups", "legacy-unknown-npx", ".codex", "hooks.json");
+    await mkdir(path.dirname(hookPath), { recursive: true });
+    await writeFile(hookPath, JSON.stringify({
+      hooks: {
+        SessionStart: [{ hooks: [{ command: "node \"C:\\npm-cache\\_npx\\unknown\\wildarrange.mjs\" hook run" }] }],
+      },
+    }, null, 2));
+
+    await restoreAdapterBackup(dir, { backupId: "legacy-unknown-npx" });
+    const context = await readJson(resolveWildArrangePath(dir, "snapshots", "context.json"));
+    assert.equal(context.cliCommandPrefix, null);
+    assert.equal(context.nextActionDetails.command, null);
+    const contextMd = await readFile(resolveWildArrangePath(dir, "snapshots", "context.md"), "utf8");
+    assert.match(contextMd, /Unavailable: reinstall the WildArrange adapter/);
+    assert.doesNotMatch(contextMd, /@alivewavelab\/wildarrange|node \.\/bin\/wildarrange\.mjs/);
+  });
+});
+
+test("restore without an executable CLI fact leaves context commands unavailable", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const legacyRulePath = resolveWildArrangePath(dir, "adapters", "backups", "legacy-rule-only", ".cursor", "rules", "wildarrange.mdc");
+    await mkdir(path.dirname(legacyRulePath), { recursive: true });
+    await writeFile(legacyRulePath, "legacy rule\n");
+    await restoreAdapterBackup(dir, { backupId: "legacy-rule-only" });
+    const context = await readJson(resolveWildArrangePath(dir, "snapshots", "context.json"));
+    assert.equal(context.cliCommandPrefix, null);
+    assert.equal(context.nextActionDetails.command, null);
+    const contextMd = await readFile(resolveWildArrangePath(dir, "snapshots", "context.md"), "utf8");
+    assert.match(contextMd, /Unavailable: reinstall the WildArrange adapter/);
+    assert.doesNotMatch(contextMd, /node \.\/bin\/wildarrange\.mjs/);
+  });
+});
+
+test("legacy bridge-only backup restores its generated npx CLI fact", async () => {
+  await withTempDir(async (dir) => {
+    const installed = await installAdapter(dir, {
+      target: "cursor",
+      mode: "npx",
+      packageName: "@example/wildarrange-fork",
+    });
+    const liveBridgePath = path.join(dir, ".cursor", "hooks", "wildarrange-hook-bridge.mjs");
+    const bridgeSource = await readFile(liveBridgePath, "utf8");
+    const backupBridgePath = resolveWildArrangePath(dir, "adapters", "backups", "legacy-bridge-only", ".cursor", "hooks", "wildarrange-hook-bridge.mjs");
+    await mkdir(path.dirname(backupBridgePath), { recursive: true });
+    await writeFile(backupBridgePath, bridgeSource);
+    await rm(liveBridgePath, { force: true });
+    await rm(resolveWildArrangePath(dir, "adapters", "install-report.json"), { force: true });
+    await rm(resolveWildArrangePath(dir, "adapters", "install-report.md"), { force: true });
+
+    await restoreAdapterBackup(dir, { backupId: "legacy-bridge-only" });
+    const context = await readJson(resolveWildArrangePath(dir, "snapshots", "context.json"));
+    assert.equal(context.cliCommandPrefix, installed.cliPrefix);
+    const contextMd = await readFile(resolveWildArrangePath(dir, "snapshots", "context.md"), "utf8");
+    assert.ok(contextMd.includes(`${installed.cliPrefix} resume`));
+    assert.doesNotMatch(contextMd, /node \.\/bin\/wildarrange\.mjs/);
   });
 });
 
@@ -2373,12 +2548,13 @@ test("review blockers create a resolution task without completing the blocked ta
 test("continuation directive reports runnable work across sessions", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
+    const adapter = await installAdapter(dir, { target: "codex", mode: "npx", packageName: "wildarrange" });
     const samplePath = await createSamplePlan(dir);
     await importPlan(dir, samplePath);
     const directive = await continuationDirective(dir, { sessionId: "codex-a", source: "test" });
     assert.equal(directive.shouldContinue, true);
     assert.equal(directive.reason, "runnable_task");
-    assert.equal(directive.nextCommand, "node ./bin/wildarrange.mjs run");
+    assert.equal(directive.nextCommand, `${adapter.cliPrefix} run`);
     assert.match(await readFile(resolveWildArrangePath(dir, "sessions", "continuation.md"), "utf8"), /Should continue: yes/);
   });
 });
@@ -4748,7 +4924,7 @@ test("host semantic plans require an explicit command-worker task.owner and user
       session_id: "semantic-plan-edit",
       cwd: dir,
       tool_name: "functions.apply_patch",
-      tool_input: { file_path: ".wildarrange/plan-drafts/semantic-plan.json" },
+      tool_input: { command: "*** Begin Patch\n*** Update File: .wildarrange/plan-drafts/semantic-plan.json\n@@\n {}\n*** End Patch" },
     });
     assert.equal(draftEditPending.decision, "allow");
     assert.equal(draftEditPending.code, "plan_draft_write");
@@ -4779,7 +4955,7 @@ test("host semantic plans require an explicit command-worker task.owner and user
       cwd: dir,
       taskId: "T001",
       tool_name: "functions.apply_patch",
-      tool_input: { file_path: ".wildarrange/plan-drafts/semantic-plan.json" },
+      tool_input: { command: "*** Begin Patch\n*** Update File: .wildarrange/plan-drafts/semantic-plan.json\n@@\n {}\n*** End Patch" },
     });
     assert.equal(draftEditApproved.decision, "deny");
     assert.equal(draftEditApproved.code, "out_of_scope");

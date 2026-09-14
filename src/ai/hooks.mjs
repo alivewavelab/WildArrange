@@ -35,6 +35,8 @@ import { writeMemoryDigest } from "../infra/memory-digest.mjs";
 import { attentionReport } from "../orchestration/status.mjs";
 import { loadActiveFeatureDesignGate } from "../orchestration/feature-design.mjs";
 
+export const TRUSTED_CLI_COMMAND_PREFIX = Symbol("wildarrange.trustedCliCommandPrefix");
+
 export async function runInjectionHook(rootDir, input = {}) {
   const hookRootDir = input.cwd && typeof input.cwd === "string" ? input.cwd : rootDir;
   await initRuntime(hookRootDir);
@@ -43,9 +45,11 @@ export async function runInjectionHook(rootDir, input = {}) {
   const sessionId = normalizeHookSessionId(input);
   const hostAdapter = String(input.host_adapter || process.env.WILDARRANGE_HOST_ADAPTER || "").trim().toLowerCase();
   const hookConfigDigest = String(input.hook_config_digest || "").trim().toLowerCase();
-  const cliCommandPrefix = normalizeHookCliCommandPrefix(input.cli_command_prefix);
+  const cliCommandPrefix = normalizeHookCliCommandPrefix(input[TRUSTED_CLI_COMMAND_PREFIX]);
   const taskId = normalizeHookTaskId(input);
-  const targetPaths = event === "PostToolUse" || event === "PreToolUse" ? extractHookTargetPaths(input, hookRootDir) : [];
+  const targetPaths = event === "PreToolUse"
+    ? extractPreToolTargetPaths(input, hookRootDir)
+    : event === "PostToolUse" ? extractHookTargetPaths(input, hookRootDir) : [];
   const facts = {};
 
   if (event === "SessionStart") {
@@ -240,14 +244,14 @@ export async function preToolUseGuard(rootDir, input = {}) {
   const event = normalizeHookEvent(input.hook_event_name || input.event || input.name);
   if (event !== "PreToolUse") throw new Error("preToolUseGuard requires PreToolUse input");
   const toolName = String(input.tool_name || input.toolName || "");
-  const targetPaths = extractHookTargetPaths(input, rootDir);
+  const targetPaths = extractPreToolTargetPaths(input, rootDir);
   const toolInput = input.tool_input || input.toolInput;
   const isApplyPatchTool = /^(?:functions\.)?apply_patch$/i.test(toolName);
   const isShellTool = /^(Bash|bash|exec_command|functions\.exec_command)$/.test(toolName);
   const shellCommand = isShellTool && toolInput && typeof toolInput === "object"
     ? toolInput.command || toolInput.cmd || ""
     : "";
-  const cliCommandPrefix = normalizeHookCliCommandPrefix(input.cli_command_prefix);
+  const cliCommandPrefix = normalizeHookCliCommandPrefix(input[TRUSTED_CLI_COMMAND_PREFIX]);
 
   if (isShellTool) {
     const { config } = await loadWildArrangeConfig(rootDir);
@@ -605,6 +609,14 @@ function extractHookTargetPaths(input, rootDir) {
   collectApplyPatchTargetPaths(input, values);
   collectPathLikeValues(input.tool_response || input.toolResponse, values);
   collectPathLikeValues(input.paths || input.targetPaths, values, true);
+  return uniqueStrings(values.map((value) => normalizeHookTargetPath(value, rootDir)).filter(Boolean));
+}
+
+function extractPreToolTargetPaths(input, rootDir) {
+  const toolName = String(input.tool_name || input.toolName || "");
+  if (!/^(?:functions\.)?apply_patch$/i.test(toolName)) return extractHookTargetPaths(input, rootDir);
+  const values = [];
+  collectApplyPatchTargetPaths(input, values);
   return uniqueStrings(values.map((value) => normalizeHookTargetPath(value, rootDir)).filter(Boolean));
 }
 

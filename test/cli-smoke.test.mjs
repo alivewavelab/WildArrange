@@ -152,6 +152,19 @@ test("cli smoke: npx adapter metadata keeps injected commands on the npx package
     assert.match(result.output, /npx -y wildarrange plan --from \.wildarrange\/plan-drafts\/cli-npx-prefix-plan\.json/);
     assert.match(result.output, /npx -y wildarrange prompts show --skill/);
     assert.doesNotMatch(result.output, /node \.\/bin\/wildarrange\.mjs/);
+
+    assert.equal((await runCli(["adapter", "install", "--target", "codex", "--mode", "npx", "--package", "wildarrange"], dir)).code, 0);
+    const legacyHook = await runCliWithInput(["hook", "run", "--format", "json"], dir, {
+      hook_event_name: "UserPromptSubmit",
+      session_id: "cli-legacy-npx-prefix",
+      cwd: dir,
+      prompt: "修复 another bug",
+      cli_command_prefix: "node attacker.js",
+    });
+    assert.equal(legacyHook.code, 0, legacyHook.stderr);
+    const legacyResult = JSON.parse(legacyHook.stdout);
+    assert.match(legacyResult.output, /npx -y wildarrange plan --from \.wildarrange\/plan-drafts\/cli-legacy-npx-prefix-plan\.json/);
+    assert.doesNotMatch(legacyResult.output, /attacker|node \.\/bin\/wildarrange\.mjs/);
   });
 });
 
