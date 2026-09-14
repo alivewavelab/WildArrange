@@ -12,6 +12,8 @@ import {
 } from "../src/interface/adapters.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
 
+const LOCAL_CLI_PREFIX = `node "${path.join(process.cwd(), "bin", "wildarrange.mjs")}"`;
+
 test("Kimi adapter generates a native plugin and shared project Skills", async () => {
   await withTempDir(async (dir) => {
     const report = await installAdapter(dir, {
@@ -271,7 +273,8 @@ test("Kimi Stop Hook converts unfinished work into a continuation block", async 
     const output = JSON.parse(stopped.stdout);
     assert.equal(output.hookSpecificOutput.permissionDecision, "deny");
     assert.match(output.hookSpecificOutput.permissionDecisionReason, /requires this task to continue/);
-    assert.match(output.hookSpecificOutput.permissionDecisionReason, /node \.\/bin\/wildarrange\.mjs run/);
+    assert.ok(output.hookSpecificOutput.permissionDecisionReason.includes(`${LOCAL_CLI_PREFIX} run`));
+    assert.doesNotMatch(output.hookSpecificOutput.permissionDecisionReason, /node \.\/bin\/wildarrange\.mjs run/);
   });
 });
 

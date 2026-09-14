@@ -637,6 +637,43 @@ test("hook adapter emits WildArrange runtime injection for user prompt", async (
   });
 });
 
+test("hook rendering rewrites canonical plan, resume, and prompt commands to the adapter CLI prefix", async () => {
+  await withTempDir(async (dir) => {
+    const skillDir = path.join(dir, ".agents", "skills", "command-probe");
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(path.join(skillDir, "SKILL.md"), [
+      "# Command probe",
+      "",
+      "Run `node ./bin/wildarrange.mjs plan --from draft.json`.",
+      "Run `node ./bin/wildarrange.mjs resume`.",
+      "Run `node ./bin/wildarrange.mjs prompts show --skill command-probe`.",
+      "",
+    ].join("\n"));
+    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
+      routeGovernance: { semanticShadow: { enabled: false } },
+      skillMatcher: { dynamicInjection: { enabled: false } },
+      injectionPoints: {
+        user_prompt_submit: { enabled: true, tools: [], markdown: [], skills: ["command-probe"], rules: {} },
+      },
+    }, null, 2));
+    await initRuntime(dir);
+
+    const result = await renderHook(dir, {
+      hook_event_name: "UserPromptSubmit",
+      session_id: "adapter-prefix",
+      cwd: dir,
+      prompt: "修复 broken login bug",
+      cli_command_prefix: "npx -y wildarrange",
+    });
+
+    assert.match(result.output, /npx -y wildarrange plan --from \.wildarrange\/plan-drafts\/adapter-prefix-plan\.json/);
+    assert.match(result.output, /npx -y wildarrange resume/);
+    assert.match(result.output, /npx -y wildarrange prompts show --skill command-probe/);
+    assert.doesNotMatch(result.output, /node \.\/bin\/wildarrange\.mjs/);
+    assert.match(result.output, /`verify_commands` 必须是非空的命令字符串数组/);
+  });
+});
+
 test("Codex session hooks inject and rehydrate the full Jiuwei prompt without repeating it per user prompt", async () => {
   await withTempDir(async (dir) => {
     await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
@@ -759,6 +796,61 @@ test("hook adapter injects dynamic rules after tool use target paths", async () 
   });
 });
 
+test("successful apply_patch output is not misclassified by source text that mentions errors", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const result = await renderHook(dir, {
+      hook_event_name: "PostToolUse",
+      session_id: "session-successful-patch",
+      cwd: dir,
+      tool_name: "functions.apply_patch",
+      tool_input: { command: "*** Begin Patch\n*** Add File: src/error-handler.js\n*** End Patch" },
+      tool_response: { exit_code: 0, output: "Success. Updated the following files:\nA src/error-handler.js" },
+    });
+    assert.equal(result.decision, "pass");
+    assert.match(result.output, /决策：pass/);
+    assert.doesNotMatch(result.output, /shell_failure/);
+
+    const strictHostSuccess = await renderHook(dir, {
+      hook_event_name: "PostToolUse",
+      session_id: "session-strict-patch-success",
+      cwd: dir,
+      tool_name: "functions.apply_patch",
+      tool_input: { command: "*** Begin Patch\n*** Add File: src/error-handler.js\n*** End Patch" },
+      tool_response: "Success. Updated the following files:\nA src/error-handler.js",
+    });
+    assert.equal(strictHostSuccess.decision, "pass");
+    assert.doesNotMatch(strictHostSuccess.output, /shell_failure/);
+
+    const failed = await renderHook(dir, {
+      hook_event_name: "PostToolUse",
+      session_id: "session-failed-patch",
+      cwd: dir,
+      tool_name: "functions.apply_patch",
+      tool_input: { command: "*** Begin Patch\n*** Add File: src/error-handler.js\n*** End Patch" },
+      tool_response: { exit_code: 1, output: "Failed to apply patch" },
+    });
+    assert.equal(failed.decision, "block");
+    assert.match(failed.output, /nonzero_exit_code/);
+
+    for (const toolResponse of [
+      "Done!\nError: Failed to apply patch",
+      { exit_code: 0, output: "Error: Failed to apply patch" },
+    ]) {
+      const conflicting = await renderHook(dir, {
+        hook_event_name: "PostToolUse",
+        session_id: "session-conflicting-patch-result",
+        cwd: dir,
+        tool_name: "functions.apply_patch",
+        tool_input: { command: "*** Begin Patch\n*** Add File: src/app.js\n*** End Patch" },
+        tool_response: toolResponse,
+      });
+      assert.equal(conflicting.decision, "block");
+      assert.match(conflicting.output, /shell_failure/);
+    }
+  });
+});
+
 test("post-tool-use result gate blocks failed tool evidence", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
@@ -814,6 +906,28 @@ test("pre-tool-use guard denies out-of-scope file writes before they land", asyn
 
     assert.equal(guard.decision, "deny");
     assert.deepEqual(guard.deniedPaths, ["src/other.js"]);
+
+    const mixedPatch = await preToolUseGuard(dir, {
+      hook_event_name: "PreToolUse",
+      session_id: "session-scope",
+      cwd: dir,
+      taskId: "T001",
+      tool_name: "functions.apply_patch",
+      tool_input: {
+        command: [
+          "*** Begin Patch",
+          "*** Update File: src/app.js",
+          "@@",
+          "+export const ok = true;",
+          "*** Add File: src/other.js",
+          "+export const bypass = true;",
+          "*** End Patch",
+        ].join("\n"),
+      },
+    });
+    assert.equal(mixedPatch.decision, "deny");
+    assert.deepEqual(mixedPatch.targetPaths, ["src/app.js", "src/other.js"]);
+    assert.deepEqual(mixedPatch.deniedPaths, ["src/other.js"]);
 
     const hook = await runInjectionHook(dir, {
       hook_event_name: "PreToolUse",
@@ -882,6 +996,62 @@ test("pre-tool-use guard only allows a JSON plan draft before the first task exi
     assert.equal(allowed.decision, "allow");
     assert.equal(allowed.code, "plan_draft_write");
 
+    const realisticPlanPatch = await preToolUseGuard(dir, {
+      hook_event_name: "PreToolUse",
+      session_id: "session-plan-draft",
+      cwd: dir,
+      tool_name: "functions.apply_patch",
+      tool_input: { command: "*** Begin Patch\n*** Add File: .wildarrange/plan-drafts/real-plan.json\n+{}\n*** End Patch" },
+    });
+    assert.equal(realisticPlanPatch.decision, "allow");
+    assert.equal(realisticPlanPatch.code, "plan_draft_write");
+    assert.deepEqual(realisticPlanPatch.targetPaths, [".wildarrange/plan-drafts/real-plan.json"]);
+
+    const nativePatchWithUnifiedLookingContent = await preToolUseGuard(dir, {
+      hook_event_name: "PreToolUse",
+      session_id: "session-plan-draft",
+      cwd: dir,
+      tool_name: "functions.apply_patch",
+      tool_input: {
+        command: "*** Begin Patch\n*** Add File: .wildarrange/plan-drafts/content-plan.json\n+{}\n+++ wa-hook-probe.txt\n*** End Patch",
+      },
+    });
+    assert.equal(nativePatchWithUnifiedLookingContent.decision, "allow");
+    assert.deepEqual(nativePatchWithUnifiedLookingContent.targetPaths, [".wildarrange/plan-drafts/content-plan.json"]);
+
+    const unifiedPlanPatch = await preToolUseGuard(dir, {
+      hook_event_name: "PreToolUse",
+      session_id: "session-plan-draft",
+      cwd: dir,
+      tool_name: "functions.apply_patch",
+      tool_input: {
+        diff: "--- /dev/null\n+++ b/.wildarrange/plan-drafts/unified-plan.json\n@@ -0,0 +1 @@\n+{}",
+      },
+    });
+    assert.equal(unifiedPlanPatch.decision, "allow");
+    assert.deepEqual(unifiedPlanPatch.targetPaths, [".wildarrange/plan-drafts/unified-plan.json"]);
+
+    const realisticBypassPatch = await preToolUseGuard(dir, {
+      hook_event_name: "PreToolUse",
+      session_id: "session-plan-draft",
+      cwd: dir,
+      tool_name: "functions.apply_patch",
+      tool_input: { command: "*** Begin Patch\n*** Add File: wa-hook-probe.txt\n+WA_BYPASS_TEST\n*** End Patch" },
+    });
+    assert.equal(realisticBypassPatch.decision, "deny");
+    assert.equal(realisticBypassPatch.code, "no_active_task");
+    assert.deepEqual(realisticBypassPatch.deniedPaths, ["wa-hook-probe.txt"]);
+
+    const unparseablePatch = await preToolUseGuard(dir, {
+      hook_event_name: "PreToolUse",
+      session_id: "session-plan-draft",
+      cwd: dir,
+      tool_name: "apply_patch",
+      tool_input: { command: "*** Begin Patch\n*** End Patch" },
+    });
+    assert.equal(unparseablePatch.decision, "deny");
+    assert.equal(unparseablePatch.code, "unresolved_apply_patch_targets");
+
     const denied = await preToolUseGuard(dir, {
       hook_event_name: "PreToolUse",
       session_id: "session-plan-draft",
@@ -921,6 +1091,35 @@ test("pre-tool-use guard only allows a JSON plan draft before the first task exi
     });
     assert.equal(chainedCommandDenied.decision, "deny");
     assert.equal(chainedCommandDenied.code, "no_active_task_shell");
+
+    for (const command of [
+      "node ./bin/wildarrange.mjs resume",
+      "node ./bin/wildarrange.mjs resume --session recovery-1",
+      "node ./bin/wildarrange.mjs continuation check",
+      "node ./bin/wildarrange.mjs changes list",
+      "node ./bin/wildarrange.mjs config show",
+      "node ./bin/wildarrange.mjs prompts show --skill debugging",
+    ]) {
+      const controlCommand = await preToolUseGuard(dir, {
+        hook_event_name: "PreToolUse",
+        session_id: "session-plan-draft",
+        cwd: dir,
+        tool_name: "Bash",
+        tool_input: { command },
+      });
+      assert.equal(controlCommand.decision, "allow", command);
+      assert.equal(controlCommand.code, "no_file_target", command);
+    }
+
+    const chainedPromptCommand = await preToolUseGuard(dir, {
+      hook_event_name: "PreToolUse",
+      session_id: "session-plan-draft",
+      cwd: dir,
+      tool_name: "Bash",
+      tool_input: { command: "node ./bin/wildarrange.mjs prompts show --skill debugging && node -e \"process.exit(1)\"" },
+    });
+    assert.equal(chainedPromptCommand.decision, "deny");
+    assert.equal(chainedPromptCommand.code, "no_active_task_shell");
   });
 });
 
@@ -954,6 +1153,8 @@ test("adapter install writes slash commands for cursor and codex", async () => {
     assert.match(planCommand, /task\.owner/);
     assert.match(planCommand, /Jiuwei 或 ZhuRong/);
     assert.match(planCommand, /不能成为 command worker/);
+    assert.match(planCommand, /`verify_commands` 必须是非空的命令字符串数组/);
+    assert.match(planCommand, /从 0 开始的命令索引数组/);
     assert.match(planCommand, /clarify-feature-design/);
     assert.match(planCommand, /直接在当前对话中按编号澄清/);
     assert.match(planCommand, /不要创建 MD\/HTML 文件/);
@@ -990,7 +1191,12 @@ test("adapter install writes codex hooks and cursor rules", async () => {
     assert.match(codexHooks.hooks.PreToolUse[0].matcher, /apply_patch/);
     assert.match(codexHooks.hooks.PreToolUse[0].matcher, /functions\\\.apply_patch/);
     assert.match(codexHooks.hooks.SessionStart[0].hooks[0].command, /npx -y wildarrange hook run/);
+    assert.match(codexHooks.hooks.SessionStart[0].hooks[0].command, /--adapter-mode npx/);
+    assert.match(codexHooks.hooks.SessionStart[0].hooks[0].command, /--adapter-package "wildarrange"/);
     assert.match(codexHooks.hooks.SessionStart[0].hooks[0].command, /--host codex$/);
+    const cursorBridge = await readFile(path.join(dir, ".cursor", "hooks", "wildarrange-hook-bridge.mjs"), "utf8");
+    assert.match(cursorBridge, /"--adapter-mode", cliSpec\.kind/);
+    assert.match(cursorBridge, /"--adapter-package", cliSpec\.packageName/);
     assert.match(await readFile(resolveWildArrangePath(dir, "adapters", "install-report.md"), "utf8"), /host activation not yet verified/);
     assert.match(await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8"), /adapter_files_generated/);
     assert.doesNotMatch(await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8"), /adapter_installed/);
@@ -1019,6 +1225,44 @@ test("adapter install writes codex hooks and cursor rules", async () => {
     assert.ok(restored.outputs.some((output) => output.path === ".cursor/rules/wildarrange.mdc" && output.status === "restored"));
     assert.match(await readFile(cursorRulePath, "utf8"), /WildArrange Governance Runtime/);
     assert.match(await readFile(resolveWildArrangePath(dir, "adapters", "restore-report.md"), "utf8"), /Adapter Restore Report/);
+  });
+});
+
+test("adapter reinstall backup restores hooks, install facts, and runtime command context together", async () => {
+  await withTempDir(async (dir) => {
+    const oldInstall = await installAdapter(dir, { target: "codex", mode: "local" });
+    const oldHooksText = await readFile(path.join(dir, ".codex", "hooks.json"), "utf8");
+    const oldHooks = JSON.parse(oldHooksText);
+    assert.ok(oldHooks.hooks.SessionStart[0].hooks[0].command.includes(`${oldInstall.cliPrefix} hook run`));
+
+    const newInstall = await installAdapter(dir, {
+      target: "codex",
+      mode: "npx",
+      packageName: "@example/wildarrange-fork",
+    });
+    assert.ok(newInstall.previousInstallReportBackup);
+    assert.ok(newInstall.previousInstallReportMdBackup);
+    assert.equal(newInstall.outputs.some((output) => output.path === ".wildarrange/adapters/install-report.json"), false);
+    assert.equal(newInstall.outputs.some((output) => output.path === ".wildarrange/adapters/install-report.md"), false);
+    const backedInstall = await readJson(path.join(dir, newInstall.previousInstallReportBackup));
+    assert.equal(backedInstall.cliPrefix, oldInstall.cliPrefix);
+    assert.equal((await readJson(resolveWildArrangePath(dir, "snapshots", "context.json"))).cliCommandPrefix, newInstall.cliPrefix);
+
+    const restored = await restoreAdapterBackup(dir, { backupId: newInstall.backupId });
+    assert.ok(restored.outputs.some((output) => output.path === ".wildarrange/adapters/install-report.json"));
+    assert.equal(await readFile(path.join(dir, ".codex", "hooks.json"), "utf8"), oldHooksText);
+    const restoredInstall = await readJson(resolveWildArrangePath(dir, "adapters", "install-report.json"));
+    assert.equal(restoredInstall.mode, "local");
+    assert.equal(restoredInstall.cliPrefix, oldInstall.cliPrefix);
+    const restoredInstallMd = await readFile(resolveWildArrangePath(dir, "adapters", "install-report.md"), "utf8");
+    assert.match(restoredInstallMd, /^Mode: local$/m);
+    assert.match(restoredInstallMd, /^Package: @alivewavelab\/wildarrange$/m);
+    assert.ok(restoredInstallMd.includes(`CLI prefix: ${oldInstall.cliPrefix}`));
+    assert.doesNotMatch(restoredInstallMd, /@example\/wildarrange-fork/);
+    const restoredContext = await readJson(resolveWildArrangePath(dir, "snapshots", "context.json"));
+    assert.equal(restoredContext.cliCommandPrefix, oldInstall.cliPrefix);
+    assert.match(await readFile(resolveWildArrangePath(dir, "snapshots", "context.md"), "utf8"), /adapter_restore/);
+    assert.ok((await readFile(resolveWildArrangePath(dir, "snapshots", "context.md"), "utf8")).includes(`${oldInstall.cliPrefix} resume`));
   });
 });
 

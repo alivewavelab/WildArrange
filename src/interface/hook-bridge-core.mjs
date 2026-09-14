@@ -6,7 +6,12 @@ export function renderHookBridgeExecution({ hostAdapter, timeoutMs = null }) {
 }, ${timeoutMs});`
     : "const childTimer = null;";
   return `const invocation = resolveCliInvocation(cliSpec);
-const child = spawn(invocation.command, [...invocation.args, "hook", "run", "--format", "json"], {
+const child = spawn(invocation.command, [
+  ...invocation.args,
+  "hook", "run", "--format", "json",
+  "--adapter-mode", cliSpec.kind,
+  "--adapter-package", cliSpec.packageName,
+], {
   cwd: projectDir,
   stdio: ["pipe", "pipe", "pipe"],
   windowsHide: true,

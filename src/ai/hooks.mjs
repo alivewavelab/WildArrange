@@ -43,12 +43,13 @@ export async function runInjectionHook(rootDir, input = {}) {
   const sessionId = normalizeHookSessionId(input);
   const hostAdapter = String(input.host_adapter || process.env.WILDARRANGE_HOST_ADAPTER || "").trim().toLowerCase();
   const hookConfigDigest = String(input.hook_config_digest || "").trim().toLowerCase();
+  const cliCommandPrefix = normalizeHookCliCommandPrefix(input.cli_command_prefix);
   const taskId = normalizeHookTaskId(input);
   const targetPaths = event === "PostToolUse" || event === "PreToolUse" ? extractHookTargetPaths(input, hookRootDir) : [];
   const facts = {};
 
   if (event === "SessionStart") {
-    facts.resume = await resumeReport(hookRootDir, { sessionId, source: "hook:session_start" });
+    facts.resume = await resumeReport(hookRootDir, { sessionId, source: "hook:session_start", cliCommandPrefix });
     facts.rules = await scanProjectRules(hookRootDir);
     facts.agentContext = await buildAgentContext(hookRootDir, {
       agent: DEFAULT_LEAD_AGENT,
@@ -98,7 +99,7 @@ export async function runInjectionHook(rootDir, input = {}) {
         .catch((error) => ({ status: "inconclusive", reason: error.message }));
     }
   } else if (event === "PostCompact") {
-    facts.resume = await resumeReport(hookRootDir, { sessionId, source: "hook:post_compact" });
+    facts.resume = await resumeReport(hookRootDir, { sessionId, source: "hook:post_compact", cliCommandPrefix });
     facts.rules = await scanProjectRules(hookRootDir);
     facts.agentContext = await buildAgentContext(hookRootDir, {
       agent: DEFAULT_LEAD_AGENT,
@@ -116,7 +117,7 @@ export async function runInjectionHook(rootDir, input = {}) {
       stage: "resume",
     }).catch((error) => ({ error: error.message }));
   } else if (event === "Stop") {
-    facts.continuation = await continuationDirective(hookRootDir, { sessionId, source: "hook:stop" });
+    facts.continuation = await continuationDirective(hookRootDir, { sessionId, source: "hook:stop", cliCommandPrefix });
     facts.routingReview = await writeDailyRoutingReview(hookRootDir, {
       trigger: "hook:stop",
       sessionId,
@@ -139,7 +140,8 @@ export async function runInjectionHook(rootDir, input = {}) {
     stage: injectionStageForHookEvent(event, facts),
     routeSkills: facts.route?.skills || [],
   });
-  const contextMarkdown = injectionPoint.enabled ? renderHookInjectionMarkdown({ event, pointName, sessionId, taskId: effectiveTaskId, targetPaths, facts, injectionPoint }) : "";
+  const renderedContext = injectionPoint.enabled ? renderHookInjectionMarkdown({ event, pointName, sessionId, taskId: effectiveTaskId, targetPaths, facts, injectionPoint }) : "";
+  const contextMarkdown = rewriteCanonicalCliCommands(renderedContext, cliCommandPrefix);
   const shouldRenderPreToolOutput = event === "PreToolUse"
     && (injectionPoint.enabled || facts.preflight?.decision === "deny");
   const output = shouldRenderPreToolOutput
@@ -161,7 +163,7 @@ export async function runInjectionHook(rootDir, input = {}) {
     continuation: facts.continuation ? {
       required: facts.continuation.shouldContinue === true,
       reason: facts.continuation.reason || "",
-      nextCommand: facts.continuation.nextCommand || null,
+      nextCommand: rewriteCanonicalCliCommands(facts.continuation.nextCommand || null, cliCommandPrefix),
     } : null,
     output,
   };
@@ -240,10 +242,12 @@ export async function preToolUseGuard(rootDir, input = {}) {
   const toolName = String(input.tool_name || input.toolName || "");
   const targetPaths = extractHookTargetPaths(input, rootDir);
   const toolInput = input.tool_input || input.toolInput;
+  const isApplyPatchTool = /^(?:functions\.)?apply_patch$/i.test(toolName);
   const isShellTool = /^(Bash|bash|exec_command|functions\.exec_command)$/.test(toolName);
   const shellCommand = isShellTool && toolInput && typeof toolInput === "object"
     ? toolInput.command || toolInput.cmd || ""
     : "";
+  const cliCommandPrefix = normalizeHookCliCommandPrefix(input.cli_command_prefix);
 
   if (isShellTool) {
     const { config } = await loadWildArrangeConfig(rootDir);
@@ -287,9 +291,30 @@ export async function preToolUseGuard(rootDir, input = {}) {
     };
   }
 
+  if (isApplyPatchTool && targetPaths.length === 0) {
+    const reason = "apply_patch target paths could not be parsed; refusing a file mutation whose planned scope cannot be verified";
+    await appendLedger(rootDir, {
+      type: "pre_tool_use_denied",
+      reason: "unresolved_apply_patch_targets",
+      toolName,
+      targetPaths,
+    });
+    return {
+      kind: "pre_tool_use_guard",
+      at: nowIso(),
+      decision: "deny",
+      code: "unresolved_apply_patch_targets",
+      reason,
+      toolName,
+      taskId: normalizeHookTaskId(input) || null,
+      targetPaths,
+      deniedPaths: [],
+    };
+  }
+
   const featureDesignGate = await loadActiveFeatureDesignGate(rootDir, featureGateSessionId(input));
   if (featureDesignGate?.status === "awaiting_feature_confirmation") {
-    const blocked = (isShellTool && !isReadOnlyWildArrangeShellCommand(shellCommand)) || targetPaths.length > 0;
+    const blocked = (isShellTool && !isReadOnlyWildArrangeShellCommand(shellCommand, cliCommandPrefix)) || targetPaths.length > 0;
     if (blocked) {
       return denyFeatureDesignToolUse(rootDir, {
         code: "feature_design_confirmation_required",
@@ -303,9 +328,9 @@ export async function preToolUseGuard(rootDir, input = {}) {
   }
   if (featureDesignGate?.status === "awaiting_plan_import") {
     const validPlanImport = isShellTool
-      ? await isMatchingFeaturePlanImport(rootDir, shellCommand, featureDesignGate.id)
+      ? await isMatchingFeaturePlanImport(rootDir, shellCommand, featureDesignGate.id, cliCommandPrefix)
       : false;
-    const blockedShell = isShellTool && !isReadOnlyWildArrangeShellCommand(shellCommand) && !validPlanImport;
+    const blockedShell = isShellTool && !isReadOnlyWildArrangeShellCommand(shellCommand, cliCommandPrefix) && !validPlanImport;
     const blockedWrite = targetPaths.length > 0 && !isPlanDraftWrite(targetPaths);
     if (blockedShell || blockedWrite) {
       return denyFeatureDesignToolUse(rootDir, {
@@ -333,7 +358,7 @@ export async function preToolUseGuard(rootDir, input = {}) {
     && planApproval.status !== "approved"
     && planApproval.planId === taskState?.planId;
 
-  if (isShellTool && (!task || awaitingPlanApproval) && !isAllowedPrePlanShellCommand(shellCommand)) {
+  if (isShellTool && (!task || awaitingPlanApproval) && !isAllowedPrePlanShellCommand(shellCommand, cliCommandPrefix)) {
     const code = awaitingPlanApproval ? "awaiting_plan_approval_shell" : "no_active_task_shell";
     const reason = awaitingPlanApproval
       ? "plan is awaiting user approval; only exact WildArrange plan-management and read-only commands are allowed"
@@ -577,9 +602,53 @@ async function currentPlanId(rootDir) {
 function extractHookTargetPaths(input, rootDir) {
   const values = [];
   collectPathLikeValues(input.tool_input || input.toolInput, values);
+  collectApplyPatchTargetPaths(input, values);
   collectPathLikeValues(input.tool_response || input.toolResponse, values);
   collectPathLikeValues(input.paths || input.targetPaths, values, true);
   return uniqueStrings(values.map((value) => normalizeHookTargetPath(value, rootDir)).filter(Boolean));
+}
+
+function collectApplyPatchTargetPaths(input, output) {
+  const toolName = String(input.tool_name || input.toolName || "");
+  if (!/^(?:functions\.)?apply_patch$/i.test(toolName)) return;
+  const toolInput = input.tool_input || input.toolInput;
+  const patchTexts = typeof toolInput === "string"
+    ? [toolInput]
+    : toolInput && typeof toolInput === "object"
+      ? [toolInput.patch, toolInput.command, toolInput.diff].filter((value) => typeof value === "string")
+      : [];
+  for (const patchText of patchTexts) {
+    const lines = patchText.split(/\r?\n/);
+    const nativeApplyPatch = lines.some((line) => /^\*\*\* (?:Begin Patch|(?:Add|Update|Delete) File:|Move to:)/.test(line));
+    for (const line of lines) {
+      const applyPatchHeader = line.match(/^\*\*\* (?:Add|Update|Delete) File:\s*(.+?)\s*$/)
+        || line.match(/^\*\*\* Move to:\s*(.+?)\s*$/);
+      if (applyPatchHeader) {
+        output.push(cleanPatchHeaderPath(applyPatchHeader[1]));
+        continue;
+      }
+      if (nativeApplyPatch) continue;
+      const gitHeader = line.match(/^diff --git a\/(.+?) b\/(.+)$/);
+      if (gitHeader) {
+        output.push(cleanPatchHeaderPath(gitHeader[1]));
+        output.push(cleanPatchHeaderPath(gitHeader[2]));
+        continue;
+      }
+      const unifiedHeader = line.match(/^(?:---|\+\+\+)\s+(.+)$/);
+      if (unifiedHeader) {
+        const candidate = cleanPatchHeaderPath(unifiedHeader[1].split("\t", 1)[0]);
+        if (candidate !== "/dev/null") output.push(candidate.replace(/^[ab]\//, ""));
+      }
+    }
+  }
+}
+
+function cleanPatchHeaderPath(value) {
+  const trimmed = String(value || "").trim();
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
 }
 
 function collectPathLikeValues(value, output, explicitPath = false) {
@@ -611,32 +680,40 @@ function isPlanDraftWrite(targetPaths) {
     && targetPaths.every((targetPath) => /^\.wildarrange\/plan-drafts\/[A-Za-z0-9_.-]+\.json$/.test(targetPath));
 }
 
-function isAllowedPrePlanShellCommand(command) {
-  const args = parseWildArrangeShellArgs(command);
+function isAllowedPrePlanShellCommand(command, cliCommandPrefix = "") {
+  const args = parseWildArrangeShellArgs(command, cliCommandPrefix);
   if (!args) return false;
   if (/^(?:status|doctor|summary|timeline|decisions|help(?:\s+--all)?|--help(?:\s+--all)?)$/i.test(args)) return true;
+  if (/^(?:config\s+show|changes\s+list)$/i.test(args)) return true;
+  if (/^prompts\s+show\s+--skill\s+[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/i.test(args)) return true;
+  if (/^resume(?:\s+--session\s+[A-Za-z0-9_.-]+)?$/i.test(args)) return true;
+  if (/^continuation\s+check(?:\s+--session\s+[A-Za-z0-9_.-]+)?$/i.test(args)) return true;
   if (/^init(?:\s+--sample)?$/i.test(args)) return true;
   if (/^plan\s+approve(?:\s+--plan\s+[A-Za-z0-9_.-]+)?$/i.test(args)) return true;
   return /^plan\s+--from\s+(?:"[A-Za-z0-9_./\\: -]+\.json"|'[A-Za-z0-9_./\\: -]+\.json'|[A-Za-z0-9_./\\:-]+\.json)$/i.test(args);
 }
 
-function parseWildArrangeShellArgs(command) {
+function parseWildArrangeShellArgs(command, cliCommandPrefix = "") {
   if (typeof command !== "string") return null;
   const trimmed = command.trim();
   if (!trimmed || /[\r\n;&|><`$%!^]/.test(trimmed)) return null;
+  const trustedPrefix = normalizeHookCliCommandPrefix(cliCommandPrefix);
+  if (trustedPrefix && trimmed.startsWith(`${trustedPrefix} `)) {
+    return trimmed.slice(trustedPrefix.length + 1).trim() || null;
+  }
   const invocation = trimmed.match(
     /^(?:node(?:\.exe)?\s+(?:"[^"\r\n]*[\\/]wildarrange\.mjs"|'[^'\r\n]*[\\/]wildarrange\.mjs'|[^\s"']*wildarrange\.mjs)|npx(?:\.cmd)?\s+(?:-y\s+)?(?:@alivewavelab\/wildarrange(?:@[A-Za-z0-9._-]+)?|wildarrange(?:@[A-Za-z0-9._-]+)?))\s+(.+)$/i,
   );
   return invocation ? invocation[1].trim() : null;
 }
 
-function isReadOnlyWildArrangeShellCommand(command) {
-  const args = parseWildArrangeShellArgs(command);
-  return Boolean(args && /^(?:status|doctor|summary|timeline|decisions|help(?:\s+--all)?|--help(?:\s+--all)?)$/i.test(args));
+function isReadOnlyWildArrangeShellCommand(command, cliCommandPrefix = "") {
+  const args = parseWildArrangeShellArgs(command, cliCommandPrefix);
+  return Boolean(args && /^(?:status|doctor|summary|timeline|decisions|config\s+show|changes\s+list|prompts\s+show\s+--skill\s+[A-Za-z0-9][A-Za-z0-9._-]{0,99}|resume(?:\s+--session\s+[A-Za-z0-9_.-]+)?|continuation\s+check(?:\s+--session\s+[A-Za-z0-9_.-]+)?|help(?:\s+--all)?|--help(?:\s+--all)?)$/i.test(args));
 }
 
-async function isMatchingFeaturePlanImport(rootDir, command, gateId) {
-  const args = parseWildArrangeShellArgs(command);
+async function isMatchingFeaturePlanImport(rootDir, command, gateId, cliCommandPrefix = "") {
+  const args = parseWildArrangeShellArgs(command, cliCommandPrefix);
   const match = args?.match(/^plan\s+--from\s+(?:"([^"]+\.json)"|'([^']+\.json)'|([^\s]+\.json))$/i);
   const rawPath = match?.[1] || match?.[2] || match?.[3];
   if (!rawPath) return false;
@@ -770,7 +847,7 @@ function appendHookFacts(lines, facts) {
     if (facts.planDraft.featureDesignRef) {
       lines.push(`- 本计划必须绑定已确认功能设计：\`feature_design_ref: "${facts.planDraft.featureDesignRef}"\`；缺失或不匹配时禁止导入和开发。`);
     }
-    lines.push("- 每张任务必须包含：`id`、`subject`、`description`、`owner`、`writable_paths`、`verify_commands`、`successCriteria`；每条 successCriteria 是带 `title`、`expectedEvidence`、`verifierCommandRefs` 的对象。");
+    lines.push("- 每张任务必须包含：`id`、`subject`、`description`、`owner`、`writable_paths`、`verify_commands`、`successCriteria`。`verify_commands` 必须是非空的命令字符串数组，不能写成对象数组。每条 successCriteria 是带 `title`、`expectedEvidence`、`verifierCommandRefs` 的对象；`verifierCommandRefs` 填从 0 开始的命令索引数组，或与 `verify_commands` 完全一致的命令字符串数组。");
     lines.push(`- owner 规则：${facts.planDraft.ownerPolicy}。可执行工单通常交给 ZhuRong，必要时由 Jiuwei；DiJiang、BaiZe、LuWu 通过计划、复核、治理阶段参与，不得作为 command worker。`);
     lines.push(`- 写完草稿后执行：${facts.planDraft.nextCommand.replace("<draftPath>", facts.planDraft.draftPath)}`);
     lines.push("- 导入后先向用户展示计划摘要并等待明确确认；未执行 plan approve 前不得 run。", "");
@@ -1003,6 +1080,18 @@ function isPlainObject(value) {
 
 function uniqueStrings(values) {
   return [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))];
+}
+
+function normalizeHookCliCommandPrefix(value) {
+  if (typeof value !== "string") return "";
+  const prefix = value.trim();
+  if (!prefix || prefix.length > 2_000 || /[\r\n\0]/.test(prefix)) return "";
+  return prefix;
+}
+
+function rewriteCanonicalCliCommands(value, cliCommandPrefix) {
+  if (typeof value !== "string" || !cliCommandPrefix) return value;
+  return value.replaceAll("node ./bin/wildarrange.mjs", cliCommandPrefix);
 }
 
 function normalizeRelativePath(filePath) {

@@ -69,7 +69,7 @@ npx wildarrange doctor
 
 把 `package.json` 和 `package-lock.json` 提交到项目仓库。这样团队成员与 CI 使用 `npm ci` 时会安装同一版本，不会因 `latest` 更新而悄悄改变行为。
 
-`adapter install` 是项目级接入文件生成：它会根据当前设备和当前项目生成 Codex、Cursor、Kimi Code 的接入文件，但这一步本身不证明宿主已经加载。`.wildarrange/`、`.cursor/` 等本地运行产物通常不进入 Git，因此每台设备都应重新执行一次，而不是复制另一台设备的生成结果。Codex 还必须通过 `/hooks` 信任当前 Hook，并至少产生一次生命周期 Hook 回执；随后 `doctor` 应显示 `codex:configured/execution observed`。显示 `ACTIVATION UNVERIFIED` 时不得把治理说成已生效。
+`adapter install` 是项目级接入文件生成：它会根据当前设备和当前项目生成 Codex、Cursor、Kimi Code 的接入文件，但这一步本身不证明宿主已经加载。`.wildarrange/`、`.cursor/` 等本地运行产物通常不进入 Git，因此每台设备都应重新执行一次，而不是复制另一台设备的生成结果。Codex 桌面版还必须在设置 > Hooks 中审查、信任并启用当前 Hook；Codex CLI 使用 `/hooks`。至少产生一次生命周期 Hook 回执后，`doctor` 应显示 `codex:configured/execution observed`。显示 `ACTIVATION UNVERIFIED` 时不得把治理说成已生效。
 
 ### 初始化项目治理文档（可选）
 
@@ -299,7 +299,7 @@ node ./bin/wildarrange.mjs adapter restore --backup <backupId>
 
 安装、卸载、恢复都会在 `.wildarrange/adapters/` 写入报告；覆盖或删除前会备份已有 adapter 文件。`restore` 用于把 `.wildarrange/adapters/backups/<backupId>/` 里的文件恢复回原位置。
 
-- **Codex**：生命周期 hook 写入 `.codex/hooks.json`，并在 `.wildarrange/adapters/codex/hooks.json` 保留审计副本。Codex 需要在可信项目中通过 `/hooks` review / trust 后才会执行这些 hard hook。
+- **Codex**：生命周期 hook 写入 `.codex/hooks.json`，并在 `.wildarrange/adapters/codex/hooks.json` 保留审计副本。Codex 桌面版需在设置 > Hooks 中审查、信任并启用；Codex CLI 使用 `/hooks`。完成后才会执行这些 hard hook。
 - **Cursor**：项目级 hooks 写入 `.cursor/hooks.json`（含 `.cursor/hooks/wildarrange-hook-bridge.mjs` 桥接脚本），在受信任工作区中自动加载，`preToolUse`（Write/Delete/Edit/Shell）与 `beforeShellExecution`（集成终端命令）可硬拦截且 fail-closed；`.cursor/rules/wildarrange.mdc` 保留为软规则层。`.gitignore` 模板对 `.cursor/hooks.json` 与 `.cursor/hooks/` 留了例外，硬拦截配置可以随仓库提交共享给团队；每台机器是否真装了 hooks 由 `doctor` 的 `adapters` 分项检查。
 - **Kimi Code**：生成项目专属 plugin 到 `.wildarrange/adapters/kimi/plugin/`，复用项目根 `AGENTS.md` 和 `.agents/skills/`。WildArrange 不会静默改写用户级 `~/.kimi-code/config.toml`；从项目根启动 Kimi Code，显式执行 `/plugins install .wildarrange/adapters/kimi/plugin`，再执行 `/reload`。不要给路径加引号，Kimi Code 0.27 会把引号当成路径字符。plugin 是用户级安装，但 bridge 会在非 WildArrange 项目中静默退出。
 
@@ -615,7 +615,7 @@ npm test
 npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache
 ```
 
-当前状态：线性治理闭环已实现并通过测试；checkpoint 前会生成验收证明链，显式 `successCriteria` 只有绑定具体 verifier 命令或人工证据后才会通过。Codex adapter 已能写入项目 `.codex/hooks.json`，通过 `/hooks` trust 后具备 hard hook 拦截；Cursor adapter 已能写入项目 `.cursor/hooks.json`，受信任工作区中 `preToolUse` 与 `beforeShellExecution` 硬拦截且 fail-closed。跨会话 digest 与 ArchivistRouter 会进入 hook 注入块；ledger 具备 hash 链校验；多 Agent 已具备命令型并行、Codex/Cursor 命令模板 spawn、结构化文件 admission、Git worktree patch admission、验收前保留与 admission 后释放。
+当前状态：线性治理闭环已实现并通过测试；checkpoint 前会生成验收证明链，显式 `successCriteria` 只有绑定具体 verifier 命令或人工证据后才会通过。Codex adapter 已能写入项目 `.codex/hooks.json`，桌面版在设置 > Hooks 中审查、信任并启用后具备 hard hook 拦截，Codex CLI 则使用 `/hooks`；Cursor adapter 已能写入项目 `.cursor/hooks.json`，受信任工作区中 `preToolUse` 与 `beforeShellExecution` 硬拦截且 fail-closed。跨会话 digest 与 ArchivistRouter 会进入 hook 注入块；ledger 具备 hash 链校验；多 Agent 已具备命令型并行、Codex/Cursor 命令模板 spawn、结构化文件 admission、Git worktree patch admission、验收前保留与 admission 后释放。
 
 ## 更多文档
 

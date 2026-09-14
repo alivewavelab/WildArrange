@@ -16,7 +16,7 @@ import {
 import { projectDecisions, projectDecisionStats } from "../src/interface/decisions.mjs";
 import { projectTimeline } from "../src/interface/timeline.mjs";
 import { COMMAND_REGISTRY, renderCommandsMarkdown, renderHelp } from "../src/interface/cli-help.mjs";
-import { installAdapter, restoreAdapterBackup, uninstallAdapter } from "../src/interface/adapters.mjs";
+import { adapterCliPrefix, installAdapter, restoreAdapterBackup, uninstallAdapter } from "../src/interface/adapters.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
 import {
   acceptTaskHandoff,
@@ -335,6 +335,17 @@ async function main() {
         : JSON.parse(await readAllStdin());
       const hostAdapter = args.host && args.host !== true ? String(args.host) : String(process.env.WILDARRANGE_HOST_ADAPTER || "");
       if (hostAdapter) payload.host_adapter = hostAdapter;
+      const adapterMode = args["adapter-mode"] && args["adapter-mode"] !== true ? String(args["adapter-mode"]) : "local";
+      const adapterPackage = args["adapter-package"] && args["adapter-package"] !== true
+        ? String(args["adapter-package"])
+        : DEFAULT_PACKAGE_NAME;
+      // The hook payload originates in the host and is untrusted. Always derive
+      // the command prefix from this running CLI and its generated adapter flags.
+      payload.cli_command_prefix = adapterCliPrefix({
+        mode: adapterMode,
+        packageName: adapterPackage,
+        localCliPath: path.resolve(process.argv[1]),
+      });
       if (hostAdapter === "codex") {
         const hookConfig = await readFile(path.join(rootDir, ".codex", "hooks.json"), "utf8");
         payload.hook_config_digest = hashContent(hookConfig);

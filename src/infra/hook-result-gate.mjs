@@ -17,7 +17,7 @@ export async function evaluateHookResultGate(rootDir, input = {}) {
     ?? input.error
     ?? input.response
     ?? null;
-  const findings = detectToolResultFindings(response);
+  const findings = detectToolResultFindings(response, { toolName });
   const decision = findings.some((finding) => finding.severity === "block")
     ? "block"
     : findings.length > 0
@@ -41,7 +41,7 @@ export async function evaluateHookResultGate(rootDir, input = {}) {
   return result;
 }
 
-export function detectToolResultFindings(response) {
+export function detectToolResultFindings(response, options = {}) {
   const findings = [];
   const flat = flattenToolResponse(response);
   const exitCode = firstNumericValue(response, ["exitCode", "exit_code", "code", "statusCode", "status_code"]);
@@ -73,7 +73,22 @@ export function detectToolResultFindings(response) {
     });
   }
 
+  const explicitFailureText = /(?:^|\r?\n)\s*(?:(?:output|stderr|message):\s*)?(?:error|failed|failure|exception)(?::|\b)/i.test(flat)
+    || /\b(?:permission denied|command not found|no such file or directory)\b/i.test(flat);
+  const structuredSuccess = exitCode === 0
+    || booleanValue(response, ["ok", "success", "passed"]) === true;
+  const strictApplyPatchSuccess = /^\s*(?:Done!|Success\.\s+(?:Updated|Added|Deleted|Applied)(?: the following files)?:?(?:\r?\n[ADM]\s+[^\r\n]+)*)\s*$/i.test(flat);
+  const successfulApplyPatch = /^(?:functions\.)?apply_patch$/i.test(String(options.toolName || ""))
+    && !findings.some((finding) => finding.severity === "block")
+    && !explicitFailureText
+    && (structuredSuccess || strictApplyPatchSuccess);
+
   for (const pattern of HARD_FAILURE_PATTERNS) {
+    // Successful apply_patch output can legitimately echo paths or changed
+    // source containing words such as "error" or "process.exit". Structured
+    // failure fields above remain authoritative; textual scanning must not turn
+    // a confirmed patch success into a false shell_failure warning.
+    if (successfulApplyPatch && pattern.name === "shell_failure") continue;
     const match = flat.match(pattern.regex);
     if (!match) continue;
     findings.push({

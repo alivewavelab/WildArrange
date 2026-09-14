@@ -43,12 +43,14 @@ export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
   const status = buildStatusReport(work, taskState, changes, completionIntegrity);
   const ledgerIntegrity = await verifyLedger(rootDir);
   const nextTask = taskState ? findRunnableTaskForContext(taskState.tasks || []) : null;
-  const nextAction = describeNextAction(taskState?.tasks || [], nextTask);
+  const cliCommandPrefix = options.cliCommandPrefix || await readInstalledCliCommandPrefix(rootDir);
+  const nextAction = describeNextAction(taskState?.tasks || [], nextTask, cliCommandPrefix);
   const context = {
     kind: "wildarrange_context_snapshot",
     version: STATE_VERSION,
     at: nowIso(),
     reason: options.reason || "manual",
+    cliCommandPrefix,
     latestSnapshot: latestSnapshot ? { id: latestSnapshot.id, stage: latestSnapshot.stage, at: latestSnapshot.at } : null,
     status,
     nextAction: nextAction.text,
@@ -106,7 +108,7 @@ function findRunnableTaskForContext(tasks) {
 
 // A read-only description of current state, shared by resume and Stop output.
 // Executing any suggested command still goes through the runtime's own gates.
-function describeNextAction(tasks, runnable) {
+function describeNextAction(tasks, runnable, cliCommandPrefix) {
   const recovery = tasks.find((task) => task.pendingContractChange && task.admission_claim
     && task.admission_claim.workspaceRestored !== true);
   const active = tasks.find((task) => !task.pendingContractChange && ["in_progress", "verifying"].includes(task.status));
@@ -115,11 +117,22 @@ function describeNextAction(tasks, runnable) {
   const task = recovery || runnable || active || failed || waiting;
   const reason = recovery ? "admission_recovery" : runnable ? "runnable_task" : active ? "active_task" : failed ? "blocked_or_failed_task" : waiting ? "awaiting_user_decision" : "no_unfinished_work";
   const command = recovery || (task === active && active?.admission_claim)
-    ? `node ./bin/wildarrange.mjs parallel admit --run ${task.admission_claim.runId} --task ${task.id}`
-    : runnable ? "node ./bin/wildarrange.mjs run" : active ? `node ./bin/wildarrange.mjs node verify --task ${task.id}` : failed ? "node ./bin/wildarrange.mjs status" : null;
+    ? renderCliCommand(cliCommandPrefix, `parallel admit --run ${task.admission_claim.runId} --task ${task.id}`)
+    : runnable ? renderCliCommand(cliCommandPrefix, "run") : active ? renderCliCommand(cliCommandPrefix, `node verify --task ${task.id}`) : failed ? renderCliCommand(cliCommandPrefix, "status") : null;
   const text = recovery ? `recover shared workspace: ${command}` : runnable ? `run task ${task.id}: ${task.subject}` : active ? `resume task ${task.id}: ${command}`
     : failed ? "inspect failed task" : waiting ? `await user direction for contract change ${task.pendingContractChange}` : "no runnable task";
   return { reason, taskId: task?.id || null, command, text };
+}
+
+async function readInstalledCliCommandPrefix(rootDir) {
+  const report = await readJson(resolveWildArrangePath(rootDir, "adapters", "install-report.json"), null);
+  const prefix = typeof report?.cliPrefix === "string" ? report.cliPrefix.trim() : "";
+  if (prefix && prefix.length <= 2_000 && !/[\r\n\0]/.test(prefix)) return prefix;
+  return "node ./bin/wildarrange.mjs";
+}
+
+function renderCliCommand(cliCommandPrefix, args) {
+  return `${cliCommandPrefix} ${args}`;
 }
 
 async function readChangeRequests(rootDir) {
@@ -209,6 +222,7 @@ function renderContextMarkdown(context) {
     `- Counts: total=${status.total || 0}, completed=${status.completed || 0}, invalidCompleted=${status.invalidCompleted || 0}, pending=${status.pending || 0}, verifying=${status.verifying || 0}, failed=${status.failed || 0}, openChanges=${status.openChanges || 0}`,
     `- Ledger integrity: ${context.ledgerIntegrity?.ok === true ? "verified" : `failed (${context.ledgerIntegrity?.failures?.length || 0} finding(s))`}`,
     `- Next action: ${context.nextAction}`,
+    ...(context.nextActionDetails?.command ? [`- Next command: \`${context.nextActionDetails.command}\``] : []),
     "",
     "## Session Lineage",
     "",
@@ -240,11 +254,11 @@ function renderContextMarkdown(context) {
     }
   }
   lines.push("", "## Resume Commands", "");
-  lines.push("- Inspect: `node ./bin/wildarrange.mjs status`");
-  lines.push("- Refresh context: `node ./bin/wildarrange.mjs resume`");
-  lines.push("- Run next task: `node ./bin/wildarrange.mjs run`");
-  lines.push("- Node loop: `node ./bin/wildarrange.mjs node execute|verify|scope|review|checkpoint|retry --task <taskId>`");
-  lines.push("- Open changes: `node ./bin/wildarrange.mjs changes list`");
+  lines.push(`- Inspect: \`${renderCliCommand(context.cliCommandPrefix, "status")}\``);
+  lines.push(`- Refresh context: \`${renderCliCommand(context.cliCommandPrefix, "resume")}\``);
+  lines.push(`- Run next task: \`${renderCliCommand(context.cliCommandPrefix, "run")}\``);
+  lines.push(`- Node loop: \`${renderCliCommand(context.cliCommandPrefix, "node execute|verify|scope|review|checkpoint|retry --task <taskId>")}\``);
+  lines.push(`- Open changes: \`${renderCliCommand(context.cliCommandPrefix, "changes list")}\``);
   lines.push("", "## Invariants", "");
   lines.push("- Worker done-claim is not completion.");
   lines.push("- Checkpoint requires verifier PASS, scope guard non-fail, and review gate PASS.");

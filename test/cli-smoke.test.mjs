@@ -106,18 +106,24 @@ test("cli smoke: Codex hook execution binds host and current config digest befor
     assert.equal((await runCli(["init"], dir)).code, 0);
     assert.equal((await runCli(["adapter", "install", "--target", "codex", "--mode", "local"], dir)).code, 0);
     const hooks = JSON.parse(await readFile(path.join(dir, ".codex", "hooks.json"), "utf8"));
+    assert.ok(hooks.hooks.UserPromptSubmit[0].hooks[0].command.includes(`node "${CLI_PATH}" hook run`));
+    assert.match(hooks.hooks.UserPromptSubmit[0].hooks[0].command, /--adapter-mode local/);
     assert.match(hooks.hooks.UserPromptSubmit[0].hooks[0].command, /--host codex$/);
 
     const hook = await runCliWithInput(["hook", "run", "--host", "codex", "--format", "json"], dir, {
       hook_event_name: "UserPromptSubmit",
       session_id: "cli-codex-host-proof",
       cwd: dir,
-      prompt: "验证 Codex 宿主回执",
+      prompt: "修复 broken login bug",
+      cli_command_prefix: "untrusted-prefix",
     });
     assert.equal(hook.code, 0, hook.stderr);
     const hookResult = JSON.parse(hook.stdout);
     assert.equal(hookResult.hostAdapter, "codex");
     assert.match(hookResult.hookConfigDigest, /^[a-f0-9]{64}$/);
+    assert.ok(hookResult.output.includes(`node "${CLI_PATH}" plan --from .wildarrange/plan-drafts/cli-codex-host-proof-plan.json`));
+    assert.ok(hookResult.output.includes(`node "${CLI_PATH}" prompts show --skill`));
+    assert.doesNotMatch(hookResult.output, /node \.\/bin\/wildarrange\.mjs|untrusted-prefix/);
 
     const doctor = await runCli(["doctor"], dir);
     assert.equal(doctor.code, 0, doctor.stderr);
@@ -125,6 +131,136 @@ test("cli smoke: Codex hook execution binds host and current config digest befor
     const codex = report.sections.adapters.targets.find((target) => target.target === "codex");
     assert.equal(codex.activation, "execution_observed");
     assert.equal(codex.sessionId, "cli-codex-host-proof");
+  });
+});
+
+test("cli smoke: npx adapter metadata keeps injected commands on the npx package prefix", async () => {
+  await withTempProjectDir(async (dir) => {
+    assert.equal((await runCli(["init"], dir)).code, 0);
+    const hook = await runCliWithInput([
+      "hook", "run", "--format", "json",
+      "--adapter-mode", "npx",
+      "--adapter-package", "wildarrange",
+    ], dir, {
+      hook_event_name: "UserPromptSubmit",
+      session_id: "cli-npx-prefix",
+      cwd: dir,
+      prompt: "修复 broken login bug",
+    });
+    assert.equal(hook.code, 0, hook.stderr);
+    const result = JSON.parse(hook.stdout);
+    assert.match(result.output, /npx -y wildarrange plan --from \.wildarrange\/plan-drafts\/cli-npx-prefix-plan\.json/);
+    assert.match(result.output, /npx -y wildarrange prompts show --skill/);
+    assert.doesNotMatch(result.output, /node \.\/bin\/wildarrange\.mjs/);
+  });
+});
+
+test("cli smoke: custom npx adapter metadata authorizes its exact read-only command", async () => {
+  await withTempProjectDir(async (dir) => {
+    const packageName = "@example/wildarrange-fork";
+    const installed = await runCli(["adapter", "install", "--target", "codex", "--mode", "npx", "--package", packageName], dir);
+    assert.equal(installed.code, 0, installed.stderr);
+    const hooks = JSON.parse(await readFile(path.join(dir, ".codex", "hooks.json"), "utf8"));
+    assert.match(hooks.hooks.PreToolUse[0].hooks[0].command, /npx -y @example\/wildarrange-fork hook run/);
+    const hook = await runCliWithInput([
+      "hook", "run", "--format", "json",
+      "--adapter-mode", "npx",
+      "--adapter-package", packageName,
+    ], dir, {
+      hook_event_name: "PreToolUse",
+      session_id: "cli-custom-npx-pretool",
+      cwd: dir,
+      tool_name: "Bash",
+      tool_input: { command: `npx -y ${packageName} status` },
+      cli_command_prefix: "npx -y attacker-package",
+    });
+    assert.equal(hook.code, 0, hook.stderr);
+    const result = JSON.parse(hook.stdout);
+    assert.equal(result.decision, "allow");
+    assert.equal(JSON.parse(result.output).hookSpecificOutput.hookEventName, "PreToolUse");
+  });
+});
+
+test("cli smoke: adapter install rejects unsafe package metadata in every mode before generating files", async () => {
+  await withTempProjectDir(async (dir) => {
+    for (const [mode, packageName] of [
+      ["npx", "safe-package;node-payload"],
+      ["local", "safe-package$(node-payload)"],
+      ["local", "safe-package`node-payload`"],
+    ]) {
+      const result = await runCli([
+        "adapter", "install", "--target", "codex", "--mode", mode,
+        "--package", packageName,
+      ], dir);
+      assert.equal(result.code, 1, `${mode}: ${packageName}`);
+      assert.match(result.stderr, /plain npm package name/);
+    }
+    await assert.rejects(readFile(path.join(dir, ".codex", "hooks.json"), "utf8"), /ENOENT/);
+    await assert.rejects(readFile(path.join(dir, ".wildarrange", "work.json"), "utf8"), /ENOENT/);
+    await assert.rejects(readFile(path.join(dir, ".wildarrange", "adapters", "install-report.json"), "utf8"), /ENOENT/);
+  });
+});
+
+test("cli smoke: a local target without bin imports a string-array verifier plan through the injected absolute prefix", async () => {
+  await withTempProjectDir(async (dir) => {
+    assert.equal((await runCli(["init"], dir)).code, 0);
+    assert.equal((await runCli(["adapter", "install", "--target", "codex", "--mode", "local"], dir)).code, 0);
+    await assert.rejects(readFile(path.join(dir, "bin", "wildarrange.mjs"), "utf8"), /ENOENT/);
+
+    const hook = await runCliWithInput(["hook", "run", "--format", "json"], dir, {
+      hook_event_name: "UserPromptSubmit",
+      session_id: "cli-local-import",
+      cwd: dir,
+      prompt: "修复 broken login bug",
+    });
+    assert.equal(hook.code, 0, hook.stderr);
+    const absolutePlanCommand = `node "${CLI_PATH}" plan --from .wildarrange/plan-drafts/cli-local-import-plan.json`;
+    assert.ok(JSON.parse(hook.stdout).output.includes(absolutePlanCommand));
+
+    const draftPath = path.join(dir, ".wildarrange", "plan-drafts", "cli-local-import-plan.json");
+    await mkdir(path.dirname(draftPath), { recursive: true });
+    await writeFile(draftPath, JSON.stringify({
+      generated_by: "host_semantic",
+      title: "Absolute adapter import",
+      objective: "Import a valid plan without a target-local CLI file.",
+      tasks: [{
+        id: "T001",
+        subject: "Write receipt",
+        description: "Create a small receipt through the governed task.",
+        owner: "ZhuRong",
+        writable_paths: ["receipt.txt"],
+        worker_command: "node -e \"require('fs').writeFileSync('receipt.txt','ok')\"",
+        verify_commands: ["node -e \"if(require('fs').readFileSync('receipt.txt','utf8')!=='ok')process.exit(1)\""],
+        successCriteria: [{
+          title: "receipt contains ok",
+          expectedEvidence: "the verifier reads exactly ok",
+          verifierCommandRefs: [0],
+        }],
+      }],
+    }, null, 2));
+
+    const imported = await runCli(["plan", "--from", ".wildarrange/plan-drafts/cli-local-import-plan.json"], dir);
+    assert.equal(imported.code, 0, imported.stderr);
+    const result = JSON.parse(imported.stdout);
+    assert.equal(result.ok, true);
+    assert.equal(result.approvalStatus, "pending");
+    const taskLedger = JSON.parse(await readFile(path.join(dir, ".wildarrange", "team", "tasks.json"), "utf8"));
+    const task = taskLedger.tasks.find((candidate) => candidate.id === "T001");
+    assert.equal(task.owner, "ZhuRong");
+    assert.deepEqual(task.verify_commands, ["node -e \"if(require('fs').readFileSync('receipt.txt','utf8')!=='ok')process.exit(1)\""]);
+
+    const installReport = JSON.parse(await readFile(path.join(dir, ".wildarrange", "adapters", "install-report.json"), "utf8"));
+    const absolutePrefix = `node "${CLI_PATH}"`;
+    assert.equal(installReport.cliPrefix, absolutePrefix);
+    const resumed = await runCli(["resume"], dir);
+    assert.equal(resumed.code, 0, resumed.stderr);
+    const resume = JSON.parse(resumed.stdout);
+    assert.equal(resume.nextActionDetails.command, `${absolutePrefix} run`);
+    const contextJson = JSON.parse(await readFile(path.join(dir, ".wildarrange", "snapshots", "context.json"), "utf8"));
+    assert.equal(contextJson.nextActionDetails.command, `${absolutePrefix} run`);
+    const contextMd = await readFile(path.join(dir, ".wildarrange", "snapshots", "context.md"), "utf8");
+    assert.ok(contextMd.includes(`${absolutePrefix} resume`));
+    assert.doesNotMatch(contextMd, /node \.\/bin\/wildarrange\.mjs/);
   });
 });
 
