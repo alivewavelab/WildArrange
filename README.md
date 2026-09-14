@@ -69,7 +69,7 @@ npx wildarrange doctor
 
 把 `package.json` 和 `package-lock.json` 提交到项目仓库。这样团队成员与 CI 使用 `npm ci` 时会安装同一版本，不会因 `latest` 更新而悄悄改变行为。
 
-`adapter install` 是项目级安装：它会根据当前设备和当前项目生成 Codex、Cursor、Kimi Code 的接入文件。`.wildarrange/`、`.cursor/` 等本地运行产物通常不进入 Git，因此每台设备都应重新执行一次，而不是复制另一台设备的生成结果。
+`adapter install` 是项目级接入文件生成：它会根据当前设备和当前项目生成 Codex、Cursor、Kimi Code 的接入文件，但这一步本身不证明宿主已经加载。`.wildarrange/`、`.cursor/` 等本地运行产物通常不进入 Git，因此每台设备都应重新执行一次，而不是复制另一台设备的生成结果。Codex 还必须通过 `/hooks` 信任当前 Hook，并至少产生一次生命周期 Hook 回执；随后 `doctor` 应显示 `codex:configured/execution observed`。显示 `ACTIVATION UNVERIFIED` 时不得把治理说成已生效。
 
 ### 初始化项目治理文档（可选）
 
@@ -406,7 +406,7 @@ Dashboard（`serve`）包含全项目工单总账、路由复盘台、决策面�
 
 并行运行中断后，`parallel status --run <runId>` 会显示 `batchStatus` 与 `incompleteTasks`（有头无尾的任务）；`parallel retry --run <runId>` 只重跑未通过的任务（复用原命令，可用 `--command` 覆盖），已通过/已完成/被其他 run 持有的任务跳过并说明，重试是新的 run，不改写原 run 证据。
 
-`status` 输出顶部常驻 `gateArming` 黄灯：默认配置下质量门全关、review 门没有独立信号时会显示「门未武装」及修复指引，避免对着一条全绿但不证明任何东西的门流误判项目健康。验收证明（acceptance proof）有两条硬地板：拒绝 `verify_commands` 全是 trivial 命令（如 `true`）的任务；拒绝 review 门没有任何独立信号 lane（无 `review_commands` / `standards_commands` / `review.llm` / 已启用质量门）的任务——同义反复的复核不证明任何东西，不得进入 completed。`config init --armed` 可以直接生成一份武装了质量门（commentChecker 阻断 + lspDiagnostics 命令位）的配置。`doctor` 有独立的 `gateArming` 与 `adapters` 分项：门未武装、已启用 adapter 但本机没装 hooks、规则文件里残留指向不存在路径的命令，都会在体检报告里摆到台面上。
+`status` 输出顶部常驻 `gateArming` 黄灯：默认配置下质量门全关、review 门没有独立信号时会显示「门未武装」及修复指引，避免对着一条全绿但不证明任何东西的门流误判项目健康。验收证明（acceptance proof）有两条硬地板：拒绝 `verify_commands` 全是 trivial 命令（如 `true`）的任务；拒绝 review 门没有任何独立信号 lane（无 `review_commands` / `standards_commands` / `review.llm` / 已启用质量门）的任务——同义反复的复核不证明任何东西，不得进入 completed。`config init --armed` 可以直接生成一份武装了质量门（commentChecker 阻断 + lspDiagnostics 命令位）的配置。`doctor` 有独立的 `gateArming` 与 `adapters` 分项：门未武装、已启用 adapter 但本机没生成 hooks、Codex Hook 已生成却没有当前配置的真实执行回执、规则文件里残留指向不存在路径的命令，都会在体检报告里摆到台面上。Adapter 使用 `configured` 表示文件已生成；只有 Codex 显示 `execution_observed` 才表示当前 Hook 配置至少真实运行过一次。
 
 `governance audit` 是 LuWu 的只读巡检：检查目录级 `AGENTS.md`、README 中英文命令对等、Prompt Pack 登记、命名和真实代码注释，报告写入 `.wildarrange/reports/governance/`。只看当前改动可加 `--changed-only`，它只触发变更文件及相关祖先规则/成对文档/架构台账；Git 变更不可读取时会安全回退为全量扫描。LuWu 不会自动移动、重命名或删除项目文件，运行时也会拒绝 LuWu、DiJiang、BaiZe 进入 command worker。
 

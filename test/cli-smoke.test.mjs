@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
@@ -33,6 +33,26 @@ async function runCli(args, cwd) {
       stderr: error.stderr ?? String(error),
     };
   }
+}
+
+async function runCliWithInput(args, cwd, input) {
+  const child = spawn(process.execPath, [CLI_PATH, ...args], {
+    cwd,
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  child.stdin.end(JSON.stringify(input));
+  const code = await new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", resolve);
+  });
+  return { code, stdout, stderr };
 }
 
 test("cli smoke: bin/wildarrange.mjs loads without module resolution errors", async () => {
@@ -68,15 +88,43 @@ test("cli smoke: status runs against an initialized project", async () => {
   });
 });
 
-test("cli smoke: doctor runs against an initialized project", async () => {
+test("cli smoke: doctor rejects an initialized project whose Codex Hook is not configured", async () => {
   await withTempProjectDir(async (dir) => {
     const init = await runCli(["init"], dir);
     assert.equal(init.code, 0, `init failed.\nstderr: ${init.stderr}`);
 
     const result = await runCli(["doctor"], dir);
-    assert.equal(result.code, 0, `doctor failed.\nstderr: ${result.stderr}`);
+    assert.equal(result.code, 2, `doctor should fail until Codex Hook activation is evidenced.\nstderr: ${result.stderr}`);
     const parsed = JSON.parse(result.stdout);
     assert.ok(parsed.reportJsonPath);
+    assert.ok(parsed.findings.some((finding) => finding.code === "codex_hook_not_configured"));
+  });
+});
+
+test("cli smoke: Codex hook execution binds host and current config digest before doctor passes it", async () => {
+  await withTempProjectDir(async (dir) => {
+    assert.equal((await runCli(["init"], dir)).code, 0);
+    assert.equal((await runCli(["adapter", "install", "--target", "codex", "--mode", "local"], dir)).code, 0);
+    const hooks = JSON.parse(await readFile(path.join(dir, ".codex", "hooks.json"), "utf8"));
+    assert.match(hooks.hooks.UserPromptSubmit[0].hooks[0].command, /--host codex$/);
+
+    const hook = await runCliWithInput(["hook", "run", "--host", "codex", "--format", "json"], dir, {
+      hook_event_name: "UserPromptSubmit",
+      session_id: "cli-codex-host-proof",
+      cwd: dir,
+      prompt: "验证 Codex 宿主回执",
+    });
+    assert.equal(hook.code, 0, hook.stderr);
+    const hookResult = JSON.parse(hook.stdout);
+    assert.equal(hookResult.hostAdapter, "codex");
+    assert.match(hookResult.hookConfigDigest, /^[a-f0-9]{64}$/);
+
+    const doctor = await runCli(["doctor"], dir);
+    assert.equal(doctor.code, 0, doctor.stderr);
+    const report = JSON.parse(doctor.stdout);
+    const codex = report.sections.adapters.targets.find((target) => target.target === "codex");
+    assert.equal(codex.activation, "execution_observed");
+    assert.equal(codex.sessionId, "cli-codex-host-proof");
   });
 });
 
