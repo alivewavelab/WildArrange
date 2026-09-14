@@ -824,7 +824,7 @@ test("successful apply_patch output is not misclassified by source text that men
     assert.doesNotMatch(strictHostSuccess.output, /shell_failure/);
 
     for (const toolResponse of [
-      { exit_code: 0, output: "Success. Updated the following files:\nA src/timeout-helper.js\nA src/permission denied-handler.js" },
+      { exit_code: 0, output: "Success. Updated the following files:\nA src/timeout-helper.js\nA src/permission-denied-handler.js" },
       { exit_code: "0", output: "Success. Updated the following files:\nA src/timeout-helper.js" },
       "Success. Updated the following files:\nA src/no such file or directory-helper.js",
     ]) {
@@ -840,6 +840,25 @@ test("successful apply_patch output is not misclassified by source text that men
       assert.equal(noisySuccess.output.includes("mcp_transport_failure"), false);
       assert.equal(noisySuccess.output.includes("permission_denied"), false);
       assert.equal(noisySuccess.output.includes("command_not_found"), false);
+    }
+
+    for (const [toolResponse, expectedFinding] of [
+      [{ exit_code: 0, stderr: "EPERM: operation not permitted, open 'src/app.js'" }, "permission_denied"],
+      [{ ok: true, stderr: "EACCES: permission denied, open 'src/app.js'" }, "permission_denied"],
+      [{ exit_code: 0, stderr: "MCP transport error: socket closed" }, "mcp_transport_failure"],
+      [{ exit_code: 0, output: "apply_patch: permission denied" }, "permission_denied"],
+      [{ exit_code: 0, output: "Could not apply patch" }, "shell_failure"],
+    ]) {
+      const structuredFailure = await renderHook(dir, {
+        hook_event_name: "PostToolUse",
+        session_id: "session-structured-patch-failure",
+        cwd: dir,
+        tool_name: "functions.apply_patch",
+        tool_input: { command: "*** Begin Patch\n*** Add File: src/app.js\n*** End Patch" },
+        tool_response: toolResponse,
+      });
+      assert.equal(structuredFailure.decision, "block");
+      assert.match(structuredFailure.output, new RegExp(expectedFinding));
     }
 
     const failed = await renderHook(dir, {

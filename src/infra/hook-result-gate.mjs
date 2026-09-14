@@ -5,7 +5,7 @@ const HARD_FAILURE_PATTERNS = [
   { name: "mcp_transport_failure", regex: /\b(mcp|transport|socket|econnreset|econnrefused|timed out|timeout)\b/i },
   { name: "permission_denied", regex: /\b(permission denied|eperm|eacces|operation not permitted)\b/i },
   { name: "command_not_found", regex: /\b(command not found|not recognized as an internal|enoent|no such file or directory)\b/i },
-  { name: "shell_failure", regex: /\b(exit code|exited with code|process\.exit|failed|error|exception)\b/i },
+  { name: "shell_failure", regex: /\b(exit code|exited with code|process\.exit|failed|error|exception|could not apply patch|cannot apply patch|unable to apply patch)\b/i },
 ];
 
 export async function evaluateHookResultGate(rootDir, input = {}) {
@@ -73,8 +73,11 @@ export function detectToolResultFindings(response, options = {}) {
     });
   }
 
+  const structuredStderr = collectNamedTextValues(response, "stderr").join("\n");
+  const structuredStderrFailure = /\b(?:mcp|transport|socket|econnreset|econnrefused|timed out|timeout|permission denied|eperm|eacces|operation not permitted)\b/i.test(structuredStderr);
   const explicitFailureText = /(?:^|\r?\n)\s*(?:(?:output|stderr|message):\s*)?(?:error|failed|failure|exception)(?::|\s|$)/i.test(flat)
     || /(?:^|\r?\n)\s*(?:(?:output|stderr|message):\s*)?(?:permission denied|command not found|no such file or directory)(?::|\s|$)/i.test(flat)
+    || /\bapply_patch\s*:\s*(?:permission denied|eperm|eacces|operation not permitted)\b/i.test(flat)
     || /\b(?:could not|cannot|can't|unable to)\s+apply patch\b/i.test(flat)
     || /\bapply_patch verification failed\b/i.test(flat)
     || /\bfailed to (?:apply|find|open|write|update|delete)\b/i.test(flat);
@@ -84,6 +87,7 @@ export function detectToolResultFindings(response, options = {}) {
   const successfulApplyPatch = /^(?:functions\.)?apply_patch$/i.test(String(options.toolName || ""))
     && !findings.some((finding) => finding.severity === "block")
     && !explicitFailureText
+    && !structuredStderrFailure
     && (structuredSuccess || strictApplyPatchSuccess);
 
   for (const pattern of HARD_FAILURE_PATTERNS) {
@@ -96,7 +100,9 @@ export function detectToolResultFindings(response, options = {}) {
     if (!match) continue;
     findings.push({
       name: pattern.name,
-      severity: pattern.name === "shell_failure" && !flat.match(/\b(stderr|error|failed|exception)\b/i) ? "warn" : "block",
+      severity: pattern.name === "shell_failure"
+        && !explicitFailureText
+        && !flat.match(/\b(stderr|error|failed|exception)\b/i) ? "warn" : "block",
       evidence: truncate(match.input || flat, 280),
       requiredAction: "核对工具输出，修复失败根因；如果只是误报，需要记录人工解释。",
     });
@@ -139,6 +145,15 @@ function firstStringValue(value, keys) {
 function booleanValue(value, keys) {
   const found = findFirstValue(value, keys);
   return typeof found === "boolean" ? found : null;
+}
+
+function collectNamedTextValues(value, keyName, output = []) {
+  if (!value || typeof value !== "object") return output;
+  for (const [key, nested] of Object.entries(value)) {
+    if (key === keyName && typeof nested === "string") output.push(nested);
+    else if (nested && typeof nested === "object") collectNamedTextValues(nested, keyName, output);
+  }
+  return output;
 }
 
 function findFirstValue(value, keys) {

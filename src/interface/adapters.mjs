@@ -317,10 +317,7 @@ export async function restoreAdapterBackup(rootDir, options = {}) {
     });
   }
 
-  await writeRuntimeContextSnapshot(rootDir, {
-    reason: "adapter_restore",
-    preferAdapterArtifacts: true,
-  });
+  await writeRuntimeContextSnapshot(rootDir, { reason: "adapter_restore" });
 
   const report = {
     kind: "wildarrange_adapter_restore",

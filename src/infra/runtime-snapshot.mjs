@@ -46,7 +46,6 @@ export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
   const nextTask = taskState ? findRunnableTaskForContext(taskState.tasks || []) : null;
   const cliCommandPrefix = await resolveRuntimeCliCommandPrefix(rootDir, {
     preferredPrefix: options.cliCommandPrefix,
-    preferAdapterArtifacts: options.preferAdapterArtifacts === true,
     fallbackCliPath: options.fallbackCliPath,
   });
   const nextAction = describeNextAction(taskState?.tasks || [], nextTask, cliCommandPrefix);
@@ -133,15 +132,11 @@ function describeNextAction(tasks, runnable, cliCommandPrefix) {
 export async function resolveRuntimeCliCommandPrefix(rootDir, options = {}) {
   const preferred = normalizeRuntimeCliCommandPrefix(rootDir, options.preferredPrefix);
   if (preferred) return preferred;
-  if (options.preferAdapterArtifacts) {
-    const artifactPrefix = await readInstalledHookCliCommandPrefix(rootDir);
-    if (artifactPrefix) return artifactPrefix;
-  }
+  const artifactPrefix = await readInstalledHookCliCommandPrefix(rootDir);
+  if (artifactPrefix) return artifactPrefix;
   const report = await readJson(resolveWildArrangePath(rootDir, "adapters", "install-report.json"), null);
   const reportPrefix = normalizeRuntimeCliCommandPrefix(rootDir, report?.cliPrefix);
   if (reportPrefix) return reportPrefix;
-  const artifactPrefix = await readInstalledHookCliCommandPrefix(rootDir);
-  if (artifactPrefix) return artifactPrefix;
   if (options.fallbackCliPath) {
     const fallbackPrefix = normalizeRuntimeCliCommandPrefix(rootDir, `node "${path.resolve(options.fallbackCliPath)}"`);
     if (fallbackPrefix) return fallbackPrefix;

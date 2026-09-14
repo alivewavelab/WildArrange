@@ -194,6 +194,49 @@ test("cli smoke: custom npx adapter metadata authorizes its exact read-only comm
   });
 });
 
+test("cli smoke: restored live adapter remains the CLI fact across resume and hook execution", async () => {
+  await withTempProjectDir(async (dir) => {
+    const packageA = "@example/wildarrange-a";
+    const packageB = "@example/wildarrange-b";
+    assert.equal((await runCli(["init"], dir)).code, 0);
+    const installA = await runCli(["adapter", "install", "--target", "codex", "--mode", "npx", "--package", packageA], dir);
+    assert.equal(installA.code, 0, installA.stderr);
+    const prefixA = JSON.parse(installA.stdout).cliPrefix;
+    const uninstallA = await runCli(["adapter", "uninstall", "--target", "codex"], dir);
+    assert.equal(uninstallA.code, 0, uninstallA.stderr);
+    const backupId = JSON.parse(uninstallA.stdout).backupId;
+    const installB = await runCli(["adapter", "install", "--target", "codex", "--mode", "npx", "--package", packageB], dir);
+    assert.equal(installB.code, 0, installB.stderr);
+    const prefixB = JSON.parse(installB.stdout).cliPrefix;
+
+    const restored = await runCli(["adapter", "restore", "--backup", backupId], dir);
+    assert.equal(restored.code, 0, restored.stderr);
+    const staleReport = JSON.parse(await readFile(path.join(dir, ".wildarrange", "adapters", "install-report.json"), "utf8"));
+    assert.equal(staleReport.cliPrefix, prefixB, "the lifecycle intentionally leaves B metadata behind");
+    let context = JSON.parse(await readFile(path.join(dir, ".wildarrange", "snapshots", "context.json"), "utf8"));
+    assert.equal(context.cliCommandPrefix, prefixA);
+
+    const resumed = await runCli(["resume"], dir);
+    assert.equal(resumed.code, 0, resumed.stderr);
+    context = JSON.parse(await readFile(path.join(dir, ".wildarrange", "snapshots", "context.json"), "utf8"));
+    assert.equal(context.cliCommandPrefix, prefixA);
+    const hooks = JSON.parse(await readFile(path.join(dir, ".codex", "hooks.json"), "utf8"));
+    assert.match(hooks.hooks.UserPromptSubmit[0].hooks[0].command, new RegExp(packageA.replace("/", "\\/")));
+    assert.doesNotMatch(hooks.hooks.UserPromptSubmit[0].hooks[0].command, new RegExp(packageB.replace("/", "\\/")));
+
+    const hook = await runCliWithInput(["hook", "run", "--format", "json"], dir, {
+      hook_event_name: "UserPromptSubmit",
+      session_id: "cli-restored-adapter-prefix",
+      cwd: dir,
+      prompt: "修复 broken login bug",
+    });
+    assert.equal(hook.code, 0, hook.stderr);
+    const hookResult = JSON.parse(hook.stdout);
+    assert.ok(hookResult.output.includes(`${prefixA} plan --from`));
+    assert.doesNotMatch(hookResult.output, new RegExp(packageB.replace("/", "\\/")));
+  });
+});
+
 test("cli smoke: adapter install rejects unsafe package metadata in every mode before generating files", async () => {
   await withTempProjectDir(async (dir) => {
     for (const [mode, packageName] of [
