@@ -144,6 +144,7 @@ Plan schema:
 
 generated_by=host_semantic means the host conversation generated this plan.
 Such plans must declare a command-worker task.owner (Jiuwei or ZhuRong) on every task and always wait for plan approve.
+Each host semantic task must also use a real, non-trivial worker_command that changes writable_paths inside its isolated task worktree; version checks and process.exit(0) are placeholders, not implementation.
 `;
 
 export function renderHelp({ all = false } = {}) {

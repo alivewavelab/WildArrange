@@ -43,12 +43,16 @@ export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
   const completionIntegrity = await inspectCompletedTaskEvidence(rootDir, taskState, { ledgerEntries: verifiedLedgerEntries });
   const status = buildStatusReport(work, taskState, changes, completionIntegrity);
   const ledgerIntegrity = await verifyLedger(rootDir);
-  const nextTask = taskState ? findRunnableTaskForContext(taskState.tasks || []) : null;
+  const awaitingPlanApproval = isCurrentPlanAwaitingApproval(work, taskState);
+  const nextTask = taskState && !awaitingPlanApproval ? findRunnableTaskForContext(taskState.tasks || []) : null;
   const cliCommandPrefix = await resolveRuntimeCliCommandPrefix(rootDir, {
     preferredPrefix: options.cliCommandPrefix,
     fallbackCliPath: options.fallbackCliPath,
   });
-  const nextAction = describeNextAction(taskState?.tasks || [], nextTask, cliCommandPrefix);
+  const nextAction = describeNextAction(taskState?.tasks || [], nextTask, cliCommandPrefix, {
+    awaitingPlanApproval,
+    planId: work?.activePlanId || taskState?.planId || null,
+  });
   const context = {
     kind: "wildarrange_context_snapshot",
     version: STATE_VERSION,
@@ -110,23 +114,36 @@ function findRunnableTaskForContext(tasks) {
   return tasks.find((task) => task.status === "pending" && (task.blockedBy || []).every((id) => completed.has(id))) || null;
 }
 
+function isCurrentPlanAwaitingApproval(work, taskState) {
+  const activePlanId = work?.activePlanId || null;
+  const taskPlanId = taskState?.planId || taskState?.activePlanId || null;
+  const approval = work?.planApproval;
+  return Boolean(activePlanId)
+    && (!taskPlanId || taskPlanId === activePlanId)
+    && approval?.required === true
+    && approval.status !== "approved"
+    && (!approval.planId || approval.planId === activePlanId);
+}
+
 // A read-only description of current state, shared by resume and Stop output.
 // Executing any suggested command still goes through the runtime's own gates.
-function describeNextAction(tasks, runnable, cliCommandPrefix) {
+function describeNextAction(tasks, runnable, cliCommandPrefix, options = {}) {
   const recovery = tasks.find((task) => task.pendingContractChange && task.admission_claim
     && task.admission_claim.workspaceRestored !== true);
   const active = tasks.find((task) => !task.pendingContractChange && ["in_progress", "verifying"].includes(task.status));
   const failed = tasks.find((task) => !task.pendingContractChange && ["failed", "review_blocked", "needs_user_decision"].includes(task.status));
   const waiting = tasks.find((task) => task.pendingContractChange);
-  const task = recovery || runnable || active || failed || waiting;
-  const reason = recovery ? "admission_recovery" : runnable ? "runnable_task" : active ? "active_task" : failed ? "blocked_or_failed_task" : waiting ? "awaiting_user_decision" : "no_unfinished_work";
+  const awaitingPlanApproval = options.awaitingPlanApproval === true && !recovery;
+  const task = recovery || (awaitingPlanApproval ? null : runnable || active || failed || waiting);
+  const reason = recovery ? "admission_recovery" : awaitingPlanApproval ? "awaiting_plan_approval" : runnable ? "runnable_task" : active ? "active_task" : failed ? "blocked_or_failed_task" : waiting ? "awaiting_user_decision" : "no_unfinished_work";
   const command = recovery || (task === active && active?.admission_claim)
     ? renderCliCommand(cliCommandPrefix, `parallel admit --run ${task.admission_claim.runId} --task ${task.id}`)
     : runnable ? renderCliCommand(cliCommandPrefix, "run") : active ? renderCliCommand(cliCommandPrefix, `node verify --task ${task.id}`) : failed ? renderCliCommand(cliCommandPrefix, "status") : null;
   const text = recovery ? command ? `recover shared workspace: ${command}` : "reinstall the adapter before shared-workspace recovery"
+    : awaitingPlanApproval ? `await user approval for plan ${options.planId}`
     : runnable ? `run task ${task.id}: ${task.subject}` : active ? command ? `resume task ${task.id}: ${command}` : `reinstall the adapter before resuming task ${task.id}`
     : failed ? "inspect failed task" : waiting ? `await user direction for contract change ${task.pendingContractChange}` : "no runnable task";
-  return { reason, taskId: task?.id || null, command, text };
+  return { reason, taskId: task?.id || null, planId: awaitingPlanApproval ? options.planId : null, command, text };
 }
 
 export async function resolveRuntimeCliCommandPrefix(rootDir, options = {}) {
@@ -340,8 +357,12 @@ function renderContextMarkdown(context) {
   if (context.cliCommandPrefix) {
     lines.push(`- Inspect: \`${renderCliCommand(context.cliCommandPrefix, "status")}\``);
     lines.push(`- Refresh context: \`${renderCliCommand(context.cliCommandPrefix, "resume")}\``);
-    lines.push(`- Run next task: \`${renderCliCommand(context.cliCommandPrefix, "run")}\``);
-    lines.push(`- Node loop: \`${renderCliCommand(context.cliCommandPrefix, "node execute|verify|scope|review|checkpoint|retry --task <taskId>")}\``);
+    if (context.nextActionDetails.reason === "awaiting_plan_approval") {
+      lines.push(`- Approve after user confirmation: \`${renderCliCommand(context.cliCommandPrefix, `plan approve --plan ${context.nextActionDetails.planId}`)}\``);
+    } else {
+      lines.push(`- Run next task: \`${renderCliCommand(context.cliCommandPrefix, "run")}\``);
+      lines.push(`- Node loop: \`${renderCliCommand(context.cliCommandPrefix, "node execute|verify|scope|review|checkpoint|retry --task <taskId>")}\``);
+    }
     lines.push(`- Open changes: \`${renderCliCommand(context.cliCommandPrefix, "changes list")}\``);
   } else {
     lines.push("- Unavailable: reinstall the WildArrange adapter to record an executable CLI command.");

@@ -430,8 +430,8 @@ async function importPlanUnlocked(rootDir, planPath) {
   await ensureWildArrangeDirs(rootDir);
   const rawPlan = await readJson(planPath);
   const plan = normalizePlan(rawPlan);
-  await enrichPlanWithRoutes(rootDir, plan);
   validateSemanticGeneratedPlan(plan);
+  await enrichPlanWithRoutes(rootDir, plan);
   validatePlanImportQuality(plan);
   const featureDesignGate = await assertFeatureDesignPlanBinding(rootDir, plan);
   const existingLedger = await loadTaskLedger(rootDir);
@@ -497,6 +497,14 @@ export function validateSemanticGeneratedPlan(plan) {
   if (invalidOwners.length > 0) {
     throw new Error(
       `semantic generated plan ${plan.id} requires explicit command-worker task.owner from ${COMMAND_WORKER_AGENTS.join(", ")} for: ${invalidOwners.join(", ")}`,
+    );
+  }
+  const invalidWorkerCommands = plan.tasks
+    .filter((task) => typeof task.worker_command !== "string" || isTrivialCommand(task.worker_command))
+    .map((task) => task.id);
+  if (invalidWorkerCommands.length > 0) {
+    throw new Error(
+      `semantic generated plan ${plan.id} requires a non-empty, non-trivial worker_command that implements writable_paths for: ${invalidWorkerCommands.join(", ")}; replace placeholders such as node --version or process.exit(0) with the real implementation command, or import an unmarked manual plan after external work is complete`,
     );
   }
   return plan;

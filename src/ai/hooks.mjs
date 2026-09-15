@@ -859,9 +859,13 @@ function appendHookFacts(lines, facts) {
     if (facts.planDraft.featureDesignRef) {
       lines.push(`- 本计划必须绑定已确认功能设计：\`feature_design_ref: "${facts.planDraft.featureDesignRef}"\`；缺失或不匹配时禁止导入和开发。`);
     }
-    lines.push("- 每张任务必须包含：`id`、`subject`、`description`、`owner`、`writable_paths`、`verify_commands`、`successCriteria`。`verify_commands` 必须是非空的命令字符串数组，不能写成对象数组。每条 successCriteria 是带 `title`、`expectedEvidence`、`verifierCommandRefs` 的对象；`verifierCommandRefs` 填从 0 开始的命令索引数组，或与 `verify_commands` 完全一致的命令字符串数组。");
+    lines.push("- 每张任务必须包含：`id`、`subject`、`description`、`owner`、`writable_paths`、`worker_command`、`verify_commands`、`successCriteria`。`worker_command` 必须是宿主可执行的真实实现命令，并在 WildArrange 准备的隔离任务 worktree 中产生 `writable_paths` 内的改动；不得使用 `node --version`、`process.exit(0)`、`true` 等占位命令。`verify_commands` 必须是非空的命令字符串数组，不能写成对象数组。每条 successCriteria 是带 `title`、`expectedEvidence`、`verifierCommandRefs` 的对象；`verifierCommandRefs` 填从 0 开始的命令索引数组，或与 `verify_commands` 完全一致的命令字符串数组。");
     lines.push(`- owner 规则：${facts.planDraft.ownerPolicy}。可执行工单通常交给 ZhuRong，必要时由 Jiuwei；DiJiang、BaiZe、LuWu 通过计划、复核、治理阶段参与，不得作为 command worker。`);
-    lines.push(`- 写完草稿后执行：${facts.planDraft.nextCommand.replace("<draftPath>", facts.planDraft.draftPath)}`);
+    if (facts.planDraft.nextCommand) {
+      lines.push(`- 写完草稿后执行：${facts.planDraft.nextCommand.replace("<draftPath>", facts.planDraft.draftPath)}`);
+    } else {
+      lines.push("- 用户明确只要草稿：写完即停止，不要执行 `plan --from`，不要登记正式计划或进入审批状态。");
+    }
     lines.push("- 导入后先向用户展示计划摘要并等待明确确认；未执行 plan approve 前不得 run。", "");
   }
   if (facts.resume) {
