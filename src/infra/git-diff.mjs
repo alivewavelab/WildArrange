@@ -80,7 +80,7 @@ export function buildChangedPathDiffEvidence(beforeChanged, afterChanged, option
       at: options.at,
       status: "unknown",
       changed: null,
-      changes: [],
+      changedPaths: null,
       beforePathCount: Array.isArray(beforeChanged?.paths) ? beforeChanged.paths.length : null,
       afterPathCount: Array.isArray(afterChanged?.paths) ? afterChanged.paths.length : null,
       unavailableReason: beforeChanged?.available === false
@@ -90,15 +90,20 @@ export function buildChangedPathDiffEvidence(beforeChanged, afterChanged, option
           : "changed-path fingerprints are unavailable",
     };
   }
-  const changes = classifyManifestPathChanges(beforeFingerprints, afterFingerprints);
+  const changedPaths = [...new Set([
+    ...Object.keys(beforeFingerprints),
+    ...Object.keys(afterFingerprints),
+  ])]
+    .filter((filePath) => beforeFingerprints[filePath] !== afterFingerprints[filePath])
+    .sort();
   return {
     kind: "diff",
     at: options.at,
     status: "known",
     source: afterChanged.source || beforeChanged.source || null,
-    changed: changes.length > 0,
-    changeCount: changes.length,
-    changes,
+    changed: changedPaths.length > 0,
+    changeCount: changedPaths.length,
+    changedPaths,
     beforePathCount: Object.keys(beforeFingerprints).length,
     afterPathCount: Object.keys(afterFingerprints).length,
     unavailableReason: null,

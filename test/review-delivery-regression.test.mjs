@@ -87,7 +87,7 @@ test("linear delivery persists runtime facts only in control root and doctor det
     const diffEvidence = [...completed.task.evidence].reverse().find((entry) => entry.kind === "diff");
     assert.equal(diffEvidence.status, "known");
     assert.equal(diffEvidence.changed, true);
-    assert.deepEqual(diffEvidence.changes, [{ path: "result.txt", status: "added" }]);
+    assert.deepEqual(diffEvidence.changedPaths, ["result.txt"]);
 
     await mkdir(path.join(workDir, ".wildarrange", "rules"), { recursive: true });
     await writeFile(path.join(workDir, ".wildarrange", "rules", "context.json"), "{}\n");
@@ -112,7 +112,7 @@ test("single-node execute records the same fingerprint-based diff evidence", asy
     const diffEvidence = [...executed.task.evidence].reverse().find((entry) => entry.kind === "diff");
     assert.equal(diffEvidence.status, "known");
     assert.equal(diffEvidence.changed, true);
-    assert.deepEqual(diffEvidence.changes, [{ path: "result.txt", status: "added" }]);
+    assert.deepEqual(diffEvidence.changedPaths, ["result.txt"]);
   });
 });
 
@@ -221,7 +221,7 @@ test("Git change collection detects staged and same-path content changes", async
     const stagedSummary = buildChangedPathDiffEvidence(clean, indexOnly);
     assert.equal(stagedSummary.status, "known");
     assert.equal(stagedSummary.changed, true);
-    assert.deepEqual(stagedSummary.changes, [{ path: indexOnlyPath, status: "added" }]);
+    assert.deepEqual(stagedSummary.changedPaths, [indexOnlyPath]);
 
     assert.equal((await runCommandFile("git", ["--literal-pathspecs", "restore", "--staged", indexOnlyPath], root)).exitCode, 0);
     await writeFile(path.join(root, "outside.txt"), "first");
@@ -263,8 +263,36 @@ test("diff evidence stays unknown when changed-path fingerprint collection fails
   );
   assert.equal(summary.status, "unknown");
   assert.equal(summary.changed, null);
-  assert.deepEqual(summary.changes, []);
+  assert.equal(summary.changedPaths, null);
   assert.equal(summary.unavailableReason, "before probe failed");
+});
+
+test("diff evidence reports changed paths without guessing dirty-state change types", async () => {
+  await withGitFixture(async (root) => {
+    const trackedPath = "tracked.txt";
+    await writeFile(path.join(root, trackedPath), "base\n");
+    assert.equal((await runCommandFile("git", ["add", trackedPath], root)).exitCode, 0);
+    assert.equal((await runCommandFile("git", ["commit", "-m", "tracked baseline"], root)).exitCode, 0);
+    const clean = await collectGitChangedPaths(root);
+
+    await writeFile(path.join(root, trackedPath), "modified\n");
+    const modified = await collectGitChangedPaths(root);
+    const modification = buildChangedPathDiffEvidence(clean, modified);
+    assert.equal(modification.changed, true);
+    assert.deepEqual(modification.changedPaths, [trackedPath]);
+
+    assert.equal((await runCommandFile("git", ["restore", "--", trackedPath], root)).exitCode, 0);
+    const restored = await collectGitChangedPaths(root);
+    const restoration = buildChangedPathDiffEvidence(modified, restored);
+    assert.equal(restoration.changed, true);
+    assert.deepEqual(restoration.changedPaths, [trackedPath]);
+
+    await rm(path.join(root, trackedPath));
+    const deleted = await collectGitChangedPaths(root);
+    const deletion = buildChangedPathDiffEvidence(restored, deleted);
+    assert.equal(deletion.changed, true);
+    assert.deepEqual(deletion.changedPaths, [trackedPath]);
+  });
 });
 
 test("trivial review command cannot create proof or checkpoint", async () => {
