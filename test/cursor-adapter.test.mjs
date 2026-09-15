@@ -13,6 +13,7 @@ import { renderCursorHookBridge } from "../src/interface/cursor-adapter.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
 
 const BRIDGE_RELATIVE_PATH = path.join(".cursor", "hooks", "wildarrange-hook-bridge.mjs");
+const LOCAL_CLI_PREFIX = `node "${path.join(process.cwd(), "bin", "wildarrange.mjs")}"`;
 
 test("Cursor adapter generates project hooks.json with fail-closed preToolUse", async () => {
   await withTempDir(async (dir) => {
@@ -256,7 +257,8 @@ test("Cursor stop Hook converts unfinished work into a followup_message", async 
     assert.equal(stopped.exitCode, 0);
     const output = JSON.parse(stopped.stdout);
     assert.match(output.followup_message, /requires this task to continue/);
-    assert.match(output.followup_message, /node \.\/bin\/wildarrange\.mjs run/);
+    assert.ok(output.followup_message.includes(`${LOCAL_CLI_PREFIX} run`));
+    assert.doesNotMatch(output.followup_message, /node \.\/bin\/wildarrange\.mjs run/);
   });
 });
 

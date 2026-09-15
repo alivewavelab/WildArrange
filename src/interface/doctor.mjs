@@ -487,7 +487,7 @@ async function checkAdapters(rootDir, findings) {
         addFinding(findings, "error", "adapters", "Codex Hook 文件已生成，但没有当前 Hook 配置被宿主实际执行的回执；不能认定治理已生效", {
           target: "codex",
           code: "codex_hook_activation_unverified",
-          nextAction: "在 Codex 中执行 /hooks，review 并 trust 本项目 Hook；然后新开或继续一个任务，再运行 wildarrange doctor",
+          nextAction: "Codex 桌面版请打开设置 > Hooks，审查、信任并启用本项目 Hook；Codex CLI 请执行 /hooks。然后新开或继续一个任务，再运行 wildarrange doctor",
         });
       }
       targets.push({ target: "codex", configured: true, activation: activation.status, lastObservedAt: activation.lastObservedAt, lastEvent: activation.lastEvent, sessionId: activation.sessionId });

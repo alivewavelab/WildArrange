@@ -149,7 +149,11 @@ export async function resumeReport(rootDir, options = {}) {
   });
   const latestSnapshot = await readJson(resolveWildArrangePath(rootDir, "snapshots", "latest.json"), null);
   const report = await statusReport(rootDir);
-  const context = await writeContextSnapshot(rootDir, { reason: "resume", latestSnapshot });
+  const context = await writeContextSnapshot(rootDir, {
+    reason: "resume",
+    latestSnapshot,
+    cliCommandPrefix: options.cliCommandPrefix,
+  });
   const resume = {
     latestSnapshot: latestSnapshot ? {
       id: latestSnapshot.id,
@@ -173,6 +177,7 @@ export async function continuationDirective(rootDir, options = {}) {
   const resume = await resumeReport(rootDir, {
     sessionId: options.sessionId,
     source: options.source || "continuation",
+    cliCommandPrefix: options.cliCommandPrefix,
   });
   const action = resume.nextActionDetails;
   const shouldContinue = !["awaiting_user_decision", "no_unfinished_work"].includes(action.reason);

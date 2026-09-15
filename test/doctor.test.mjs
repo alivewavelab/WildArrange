@@ -141,7 +141,10 @@ test("doctor adapter check passes once hooks are installed and flags stale rule 
     assert.equal(codex.configured, true);
     assert.equal(codex.activation, "unverified");
     assert.equal(report.ok, false);
-    assert.ok(report.findings.some((finding) => finding.code === "codex_hook_activation_unverified"));
+    const activationFinding = report.findings.find((finding) => finding.code === "codex_hook_activation_unverified");
+    assert.ok(activationFinding);
+    assert.match(activationFinding.nextAction, /设置 > Hooks/);
+    assert.match(activationFinding.nextAction, /Codex CLI 请执行 \/hooks/);
     assert.equal(report.sections.adapters.staleRules.length, 1);
     assert.deepEqual(report.sections.adapters.legacyManagedRules, [{ path: ".cursor/rules/wildarrangeflow.mdc" }]);
     assert.ok(report.findings.some((finding) => finding.message.includes("/Users/ghost/nonexistent")));
