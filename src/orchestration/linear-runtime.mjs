@@ -884,6 +884,14 @@ async function ensureLinearDeliveryWorkspace(rootDir, planId, task, tasks = []) 
       // Only the pre-checkpoint durable intent can reconcile a stale task-state SHA.
       task.delivery_workspace.deliverySha = intent.integrationSha;
     }
+    if (task.coordination?.localGit === true) {
+      task.coordination = {
+        ...task.coordination,
+        branch: task.delivery_workspace.branch,
+        baseSha: task.delivery_workspace.baseSha,
+        remoteHeadSha: task.delivery_workspace.baseSha,
+      };
+    }
     return task.delivery_workspace;
   }
 
