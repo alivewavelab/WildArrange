@@ -75,7 +75,12 @@ export async function runInjectionHook(rootDir, input = {}) {
     }).catch((error) => ({ error: error.message }));
   } else if (event === "UserPromptSubmit") {
     facts.route = input.prompt ? await routeRequest(controlRoot, { text: input.prompt, sessionId }) : null;
-    facts.planDraft = buildPlanDraftDirective(facts.route, { sessionId, prompt: input.prompt });
+    facts.planDraft = buildPlanDraftDirective(facts.route, {
+      sessionId,
+      prompt: input.prompt,
+      controlRoot,
+      executionRoot,
+    });
     facts.rules = await scanProjectRules(executionRoot, { controlRoot });
     facts.archivist = await runArchivistForHook(controlRoot, input, {
       event,
@@ -697,7 +702,7 @@ function isPlanDraftWrite(targetPaths) {
 }
 
 function isAllowedPrePlanShellCommand(command, cliCommandPrefix = "") {
-  const args = parseWildArrangeShellArgs(command, cliCommandPrefix);
+  const args = stripControlRootOption(parseWildArrangeShellArgs(command, cliCommandPrefix));
   if (!args) return false;
   if (/^(?:status|doctor|summary|timeline|decisions|help(?:\s+--all)?|--help(?:\s+--all)?)$/i.test(args)) return true;
   if (/^(?:config\s+show|changes\s+list)$/i.test(args)) return true;
@@ -706,7 +711,7 @@ function isAllowedPrePlanShellCommand(command, cliCommandPrefix = "") {
   if (/^continuation\s+check(?:\s+--session\s+[A-Za-z0-9_.-]+)?$/i.test(args)) return true;
   if (/^init(?:\s+--sample)?$/i.test(args)) return true;
   if (/^plan\s+approve(?:\s+--plan\s+[A-Za-z0-9_.-]+)?$/i.test(args)) return true;
-  return /^plan\s+--from\s+(?:"[A-Za-z0-9_./\\: -]+\.json"|'[A-Za-z0-9_./\\: -]+\.json'|[A-Za-z0-9_./\\:-]+\.json)$/i.test(args);
+  return /^plan\s+--from\s+(?:"[A-Za-z0-9_./\\:~ -]+\.json"|'[A-Za-z0-9_./\\:~ -]+\.json'|[A-Za-z0-9_./\\:~ -]+\.json)$/i.test(args);
 }
 
 function parseWildArrangeShellArgs(command, cliCommandPrefix = "") {
@@ -724,18 +729,23 @@ function parseWildArrangeShellArgs(command, cliCommandPrefix = "") {
 }
 
 function isReadOnlyWildArrangeShellCommand(command, cliCommandPrefix = "") {
-  const args = parseWildArrangeShellArgs(command, cliCommandPrefix);
+  const args = stripControlRootOption(parseWildArrangeShellArgs(command, cliCommandPrefix));
   return Boolean(args && /^(?:status|doctor|summary|timeline|decisions|config\s+show|changes\s+list|prompts\s+show\s+--skill\s+[A-Za-z0-9][A-Za-z0-9._-]{0,99}|resume(?:\s+--session\s+[A-Za-z0-9_.-]+)?|continuation\s+check(?:\s+--session\s+[A-Za-z0-9_.-]+)?|help(?:\s+--all)?|--help(?:\s+--all)?)$/i.test(args));
 }
 
 async function isMatchingFeaturePlanImport(rootDir, command, gateId, cliCommandPrefix = "") {
-  const args = parseWildArrangeShellArgs(command, cliCommandPrefix);
+  const args = stripControlRootOption(parseWildArrangeShellArgs(command, cliCommandPrefix));
   const match = args?.match(/^plan\s+--from\s+(?:"([^"]+\.json)"|'([^']+\.json)'|([^\s]+\.json))$/i);
   const rawPath = match?.[1] || match?.[2] || match?.[3];
   if (!rawPath) return false;
   const planPath = path.isAbsolute(rawPath) ? rawPath : path.resolve(rootDir, rawPath);
   const plan = await readJson(planPath, null).catch(() => null);
   return plan?.feature_design_ref === gateId || plan?.featureDesignRef === gateId;
+}
+
+function stripControlRootOption(args) {
+  if (typeof args !== "string") return args;
+  return args.replace(/\s+--control-root\s+(?:"[^"]*"|'[^']*'|[^\s]+)/gi, "").replace(/\s+/g, " ").trim();
 }
 
 function featureGateSessionId(input) {

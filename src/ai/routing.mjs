@@ -6,6 +6,7 @@
  */
 import { DEFAULT_LEAD_AGENT } from "../infra/agent-registry.mjs";
 import { writeFile } from "node:fs/promises";
+import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
 import { emitDecision, readDecisions } from "../infra/decision-log.mjs";
 import { readAnnotations } from "../infra/annotation-log.mjs";
@@ -25,10 +26,16 @@ export function buildPlanDraftDirective(routeResult, options = {}) {
   const sessionId = sanitizeDraftSegment(options.sessionId || "session");
   const prompt = typeof options.prompt === "string" ? options.prompt.trim().slice(0, 4000) : "";
   const draftOnly = isDraftOnlyPlanRequest(prompt);
+  const controlRoot = typeof options.controlRoot === "string" ? path.resolve(options.controlRoot) : null;
+  const executionRoot = typeof options.executionRoot === "string" ? path.resolve(options.executionRoot) : controlRoot;
+  const crossRoot = Boolean(controlRoot && executionRoot && controlRoot !== executionRoot);
+  const draftPath = crossRoot
+    ? path.join(controlRoot, ".wildarrange", "plan-drafts", `${sessionId}-plan.json`)
+    : `.wildarrange/plan-drafts/${sessionId}-plan.json`;
   return {
     status: "host_generation_required",
     generatedBy: "host_semantic",
-    draftPath: `.wildarrange/plan-drafts/${sessionId}-plan.json`,
+    draftPath,
     request: prompt,
     approvalRequired: true,
     draftOnly,
@@ -36,7 +43,9 @@ export function buildPlanDraftDirective(routeResult, options = {}) {
     featureDesignRef: routeResult.featureDesign?.status === "awaiting_plan_import"
       ? routeResult.featureDesign.id
       : null,
-    nextCommand: draftOnly ? null : "node ./bin/wildarrange.mjs plan --from <draftPath>",
+    nextCommand: draftOnly ? null : crossRoot
+      ? `node ./bin/wildarrange.mjs plan --from "${draftPath}" --control-root "${controlRoot}"`
+      : "node ./bin/wildarrange.mjs plan --from <draftPath>",
   };
 }
 
