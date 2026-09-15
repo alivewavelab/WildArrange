@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -64,6 +64,38 @@ test("Cursor Hook bridge ignores unrelated projects without creating .wildarrang
       assert.equal(result.stdout, "");
       assert.equal(existsSync(path.join(unrelatedDir, ".wildarrange")), false);
     });
+  });
+});
+
+test("Cursor Hook bridge keeps task-worktree sessions on the installed control root", async () => {
+  await withTempDir(async (controlRoot) => {
+    await installAdapter(controlRoot, { target: "cursor", mode: "local" });
+    await writeTestPlan(controlRoot);
+    const bridgePath = path.join(controlRoot, BRIDGE_RELATIVE_PATH);
+    const executionRoot = path.join(controlRoot, "task-worktree");
+    await mkdir(path.join(executionRoot, "src"), { recursive: true });
+    await writeFile(path.join(executionRoot, "wildarrange.config.json"), "{}\n");
+    await writeFile(path.join(executionRoot, "AGENTS.md"), "# Task Worktree\n\nCURSOR_WORKTREE_RULE_PROBE\n");
+
+    const started = await runBridge(bridgePath, {
+      hook_event_name: "sessionStart",
+      conversation_id: "cursor-task-worktree",
+      cwd: executionRoot,
+    });
+    assert.equal(started.exitCode, 0, started.stderr);
+    assert.match(JSON.parse(started.stdout).additional_context, /CURSOR_WORKTREE_RULE_PROBE/);
+
+    const allowed = await runBridge(bridgePath, {
+      hook_event_name: "preToolUse",
+      conversation_id: "cursor-task-worktree",
+      cwd: executionRoot,
+      task_id: "T001",
+      tool_name: "Write",
+      tool_input: { path: "src/app.js" },
+    });
+    assert.deepEqual(JSON.parse(allowed.stdout), { permission: "allow" });
+    assert.equal(existsSync(path.join(executionRoot, ".wildarrange")), false);
+    assert.equal(existsSync(path.join(controlRoot, ".wildarrange", "sessions", "hooks", "cursor-task-worktree-PreToolUse.json")), true);
   });
 });
 
@@ -159,6 +191,7 @@ test("Cursor bridge is fail-closed when the governance CLI fails or answers garb
     await writeFile(missingCliBridge, renderCursorHookBridge({
       mode: "local",
       localCliPath: path.join(dir, "no-such-wildarrange.mjs"),
+      controlRoot: dir,
     }), "utf8");
     const missing = await runBridge(missingCliBridge, {
       hook_event_name: "preToolUse",
@@ -178,6 +211,7 @@ test("Cursor bridge is fail-closed when the governance CLI fails or answers garb
     await writeFile(garbageBridge, renderCursorHookBridge({
       mode: "local",
       localCliPath: garbageCli,
+      controlRoot: dir,
     }), "utf8");
     const garbage = await runBridge(garbageBridge, {
       hook_event_name: "preToolUse",
@@ -194,6 +228,7 @@ test("Cursor bridge is fail-closed when the governance CLI fails or answers garb
     await writeFile(undecidedBridge, renderCursorHookBridge({
       mode: "local",
       localCliPath: undecidedCli,
+      controlRoot: dir,
     }), "utf8");
     const undecided = await runBridge(undecidedBridge, {
       hook_event_name: "preToolUse",

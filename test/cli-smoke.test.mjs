@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
@@ -108,6 +109,7 @@ test("cli smoke: Codex hook execution binds host and current config digest befor
     const hooks = JSON.parse(await readFile(path.join(dir, ".codex", "hooks.json"), "utf8"));
     assert.ok(hooks.hooks.UserPromptSubmit[0].hooks[0].command.includes(`node "${CLI_PATH}" hook run`));
     assert.match(hooks.hooks.UserPromptSubmit[0].hooks[0].command, /--adapter-mode local/);
+    assert.ok(hooks.hooks.UserPromptSubmit[0].hooks[0].command.includes(`--control-root "${dir}"`));
     assert.match(hooks.hooks.UserPromptSubmit[0].hooks[0].command, /--host codex$/);
 
     const hook = await runCliWithInput(["hook", "run", "--host", "codex", "--format", "json"], dir, {
@@ -131,6 +133,31 @@ test("cli smoke: Codex hook execution binds host and current config digest befor
     const codex = report.sections.adapters.targets.find((target) => target.target === "codex");
     assert.equal(codex.activation, "execution_observed");
     assert.equal(codex.sessionId, "cli-codex-host-proof");
+  });
+});
+
+test("cli smoke: Codex hook uses its installed control root from a task worktree", async () => {
+  await withTempProjectDir(async (controlRoot) => {
+    assert.equal((await runCli(["init"], controlRoot)).code, 0);
+    assert.equal((await runCli(["adapter", "install", "--target", "codex", "--mode", "local"], controlRoot)).code, 0);
+    const executionRoot = path.join(controlRoot, "task-worktree");
+    await mkdir(executionRoot, { recursive: true });
+    await writeFile(path.join(executionRoot, "wildarrange.config.json"), "{}\n");
+    await writeFile(path.join(executionRoot, "AGENTS.md"), "# Task Worktree\n\nCODEX_WORKTREE_RULE_PROBE\n");
+
+    const hook = await runCliWithInput([
+      "hook", "run", "--host", "codex", "--format", "json", "--control-root", controlRoot,
+    ], executionRoot, {
+      hook_event_name: "SessionStart",
+      session_id: "cli-codex-task-worktree",
+      cwd: executionRoot,
+    });
+
+    assert.equal(hook.code, 0, hook.stderr);
+    const result = JSON.parse(hook.stdout);
+    assert.match(result.output, /CODEX_WORKTREE_RULE_PROBE/);
+    assert.equal(existsSync(path.join(executionRoot, ".wildarrange")), false);
+    assert.equal(existsSync(path.join(controlRoot, ".wildarrange", "sessions", "hooks", "cli-codex-task-worktree-SessionStart.json")), true);
   });
 });
 

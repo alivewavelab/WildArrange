@@ -26,16 +26,17 @@ import { findRunnableTask, normalizeAgentName } from "../orchestration/task-boar
 import { statusReport } from "../orchestration/status.mjs";
 
 export async function buildAgentContext(rootDir, options = {}) {
+  const executionRoot = options.executionRoot || rootDir;
   await ensureWildArrangeDirs(rootDir);
   const { config, sourcePath } = await loadWildArrangeConfig(rootDir);
   const taskState = await loadTaskState(rootDir, { planId: options.planId });
   const task = resolveContextTask(taskState?.tasks || [], options.taskId, options.planId);
-  const changed = await collectGitChangedPaths(rootDir);
+  const changed = await collectGitChangedPaths(executionRoot);
   const targetPaths = uniqueStrings([
     ...(task?.writable_paths || []),
     ...(changed.available ? changed.paths : []),
   ].map(normalizeRelativePath));
-  const rules = await scanProjectRules(rootDir, { targetPaths });
+  const rules = await scanProjectRules(executionRoot, { controlRoot: rootDir, targetPaths });
   const agent = normalizeAgentName(options.agent || task?.owner || DEFAULT_EXECUTOR_AGENT) || DEFAULT_EXECUTOR_AGENT;
   const resumeContext = await writeContextSnapshot(rootDir, { reason: `agent-context:${agent}` });
   const role = options.role || roleForAgent(agent);

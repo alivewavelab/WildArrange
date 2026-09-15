@@ -38,8 +38,9 @@ import { loadActiveFeatureDesignGate } from "../orchestration/feature-design.mjs
 export const TRUSTED_CLI_COMMAND_PREFIX = Symbol("wildarrange.trustedCliCommandPrefix");
 
 export async function runInjectionHook(rootDir, input = {}) {
-  const hookRootDir = input.cwd && typeof input.cwd === "string" ? input.cwd : rootDir;
-  await initRuntime(hookRootDir);
+  const controlRoot = rootDir;
+  const executionRoot = input.cwd && typeof input.cwd === "string" ? input.cwd : controlRoot;
+  await initRuntime(controlRoot);
   const event = normalizeHookEvent(input.hook_event_name || input.event || input.name);
   const pointName = injectionPointForHookEvent(event);
   const sessionId = normalizeHookSessionId(input);
@@ -48,34 +49,35 @@ export async function runInjectionHook(rootDir, input = {}) {
   const cliCommandPrefix = normalizeHookCliCommandPrefix(input[TRUSTED_CLI_COMMAND_PREFIX]);
   const taskId = normalizeHookTaskId(input);
   const targetPaths = event === "PreToolUse"
-    ? extractPreToolTargetPaths(input, hookRootDir)
-    : event === "PostToolUse" ? extractHookTargetPaths(input, hookRootDir) : [];
+    ? extractPreToolTargetPaths(input, executionRoot)
+    : event === "PostToolUse" ? extractHookTargetPaths(input, executionRoot) : [];
   const facts = {};
 
   if (event === "SessionStart") {
-    facts.resume = await resumeReport(hookRootDir, { sessionId, source: "hook:session_start", cliCommandPrefix });
-    facts.rules = await scanProjectRules(hookRootDir);
-    facts.agentContext = await buildAgentContext(hookRootDir, {
+    facts.resume = await resumeReport(controlRoot, { sessionId, source: "hook:session_start", cliCommandPrefix });
+    facts.rules = await scanProjectRules(executionRoot, { controlRoot });
+    facts.agentContext = await buildAgentContext(controlRoot, {
+      executionRoot,
       agent: DEFAULT_LEAD_AGENT,
       taskId,
       injectionPoint: pointName,
     }).catch((error) => ({ error: error.message }));
-    facts.archivist = await runArchivistForHook(hookRootDir, input, {
+    facts.archivist = await runArchivistForHook(controlRoot, input, {
       event,
       stage: "resume",
       trigger: "sessionStart",
       text: facts.resume?.nextAction || "",
     });
-    facts.digest = await writeMemoryDigest(hookRootDir, {
+    facts.digest = await writeMemoryDigest(controlRoot, {
       reason: "session_start",
       stage: "resume",
       route: facts.route,
     }).catch((error) => ({ error: error.message }));
   } else if (event === "UserPromptSubmit") {
-    facts.route = input.prompt ? await routeRequest(hookRootDir, { text: input.prompt, sessionId }) : null;
+    facts.route = input.prompt ? await routeRequest(controlRoot, { text: input.prompt, sessionId }) : null;
     facts.planDraft = buildPlanDraftDirective(facts.route, { sessionId, prompt: input.prompt });
-    facts.rules = await scanProjectRules(hookRootDir);
-    facts.archivist = await runArchivistForHook(hookRootDir, input, {
+    facts.rules = await scanProjectRules(executionRoot, { controlRoot });
+    facts.archivist = await runArchivistForHook(controlRoot, input, {
       event,
       stage: stageForRoute(facts.route),
       trigger: "userPromptSubmit",
@@ -83,46 +85,48 @@ export async function runInjectionHook(rootDir, input = {}) {
     });
   } else if (event === "PreToolUse") {
     facts.targetPaths = targetPaths;
-    facts.rules = await scanProjectRules(hookRootDir, { targetPaths });
-    facts.preflight = await preToolUseGuard(hookRootDir, input);
+    facts.rules = await scanProjectRules(executionRoot, { controlRoot, targetPaths });
+    facts.preflight = await preToolUseGuard(controlRoot, input, { executionRoot });
     const executionTaskId = facts.preflight?.taskId || taskId;
     if (executionTaskId) {
-      facts.agentContext = await buildAgentContext(hookRootDir, {
+      facts.agentContext = await buildAgentContext(controlRoot, {
+        executionRoot,
         taskId: executionTaskId,
-        planId: await currentPlanId(hookRootDir),
+        planId: await currentPlanId(controlRoot),
         injectionPoint: "before_execute",
       }).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
     }
   } else if (event === "PostToolUse") {
     facts.targetPaths = targetPaths;
-    facts.rules = await scanProjectRules(hookRootDir, { targetPaths });
-    facts.resultGate = await evaluateHookResultGate(hookRootDir, input);
+    facts.rules = await scanProjectRules(executionRoot, { controlRoot, targetPaths });
+    facts.resultGate = await evaluateHookResultGate(controlRoot, input);
     if (taskId) {
-      facts.scope = await invokeCapability("scope", { rootDir: hookRootDir, task: { id: taskId } })
+      facts.scope = await invokeCapability("scope", { rootDir: controlRoot, task: { id: taskId } })
         .then((envelope) => envelope.evidence)
         .catch((error) => ({ status: "inconclusive", reason: error.message }));
     }
   } else if (event === "PostCompact") {
-    facts.resume = await resumeReport(hookRootDir, { sessionId, source: "hook:post_compact", cliCommandPrefix });
-    facts.rules = await scanProjectRules(hookRootDir);
-    facts.agentContext = await buildAgentContext(hookRootDir, {
+    facts.resume = await resumeReport(controlRoot, { sessionId, source: "hook:post_compact", cliCommandPrefix });
+    facts.rules = await scanProjectRules(executionRoot, { controlRoot });
+    facts.agentContext = await buildAgentContext(controlRoot, {
+      executionRoot,
       agent: DEFAULT_LEAD_AGENT,
       taskId,
       injectionPoint: pointName,
     }).catch((error) => ({ error: error.message }));
-    facts.archivist = await runArchivistForHook(hookRootDir, input, {
+    facts.archivist = await runArchivistForHook(controlRoot, input, {
       event,
       stage: "resume",
       trigger: "postCompact",
       text: facts.resume?.nextAction || "",
     });
-    facts.digest = await writeMemoryDigest(hookRootDir, {
+    facts.digest = await writeMemoryDigest(controlRoot, {
       reason: "post_compact",
       stage: "resume",
     }).catch((error) => ({ error: error.message }));
   } else if (event === "Stop") {
-    facts.continuation = await continuationDirective(hookRootDir, { sessionId, source: "hook:stop", cliCommandPrefix });
-    facts.routingReview = await writeDailyRoutingReview(hookRootDir, {
+    facts.continuation = await continuationDirective(controlRoot, { sessionId, source: "hook:stop", cliCommandPrefix });
+    facts.routingReview = await writeDailyRoutingReview(controlRoot, {
       trigger: "hook:stop",
       sessionId,
     }).catch((error) => ({ status: "warn", reason: error instanceof Error ? error.message : String(error) }));
@@ -130,16 +134,16 @@ export async function runInjectionHook(rootDir, input = {}) {
 
   // 通用推送：在有"对话面"的事件里，把待人决策的事项主动注入，指示宿主 AI 直接问开发者。
   if (["SessionStart", "UserPromptSubmit", "PostCompact", "Stop"].includes(event)) {
-    facts.attention = await attentionReport(hookRootDir).catch(() => null);
+    facts.attention = await attentionReport(controlRoot).catch(() => null);
   }
 
   const effectiveTaskId = taskId || facts.preflight?.taskId || "";
   const variables = {
     agent: facts.agentContext?.agent || input.agent || defaultAgentForHookEvent(event),
     taskId: effectiveTaskId,
-    planId: await currentPlanId(hookRootDir),
+    planId: await currentPlanId(controlRoot),
   };
-  const injectionPoint = await resolveInjectionPoint(hookRootDir, pointName, variables, {
+  const injectionPoint = await resolveInjectionPoint(controlRoot, pointName, variables, {
     text: injectionTextForHookEvent(event, input, facts),
     stage: injectionStageForHookEvent(event, facts),
     routeSkills: facts.route?.skills || [],
@@ -173,10 +177,10 @@ export async function runInjectionHook(rootDir, input = {}) {
   };
   const safeSessionId = sanitizeFileSegment(sessionId || "session");
   const safeEvent = sanitizeFileSegment(event);
-  const outputPath = resolveWildArrangePath(hookRootDir, "sessions", "hooks", `${safeSessionId}-${safeEvent}.json`);
-  result.reportJsonPath = path.relative(hookRootDir, outputPath);
+  const outputPath = resolveWildArrangePath(controlRoot, "sessions", "hooks", `${safeSessionId}-${safeEvent}.json`);
+  result.reportJsonPath = path.relative(controlRoot, outputPath);
   await writeJsonAtomic(outputPath, result);
-  await appendLedger(hookRootDir, {
+  await appendLedger(controlRoot, {
     type: "hook_injection_run",
     event,
     pointName,
@@ -191,7 +195,7 @@ export async function runInjectionHook(rootDir, input = {}) {
   // 异步审查 Agent 复盘。best-effort，不反噬 hook 主流程。
   if (result.decision) {
     try {
-      await emitDecision(hookRootDir, {
+      await emitDecision(controlRoot, {
         gate: pointName,
         decision: result.decision,
         code: hookDecisionCode(facts.preflight, facts.resultGate),
@@ -240,11 +244,11 @@ function hookDecisionCode(preflight, resultGate) {
   return null;
 }
 
-export async function preToolUseGuard(rootDir, input = {}) {
+export async function preToolUseGuard(rootDir, input = {}, options = {}) {
   const event = normalizeHookEvent(input.hook_event_name || input.event || input.name);
   if (event !== "PreToolUse") throw new Error("preToolUseGuard requires PreToolUse input");
   const toolName = String(input.tool_name || input.toolName || "");
-  const targetPaths = extractPreToolTargetPaths(input, rootDir);
+  const targetPaths = extractPreToolTargetPaths(input, options.executionRoot || rootDir);
   const toolInput = input.tool_input || input.toolInput;
   const isApplyPatchTool = /^(?:functions\.)?apply_patch$/i.test(toolName);
   const isShellTool = /^(Bash|bash|exec_command|functions\.exec_command)$/.test(toolName);

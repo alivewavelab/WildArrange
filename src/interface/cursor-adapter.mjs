@@ -38,7 +38,7 @@ export function buildCursorHooksConfig({ bridgeCommand }) {
   };
 }
 
-export function renderCursorHookBridge({ mode, packageName, localCliPath }) {
+export function renderCursorHookBridge({ mode, packageName, localCliPath, controlRoot }) {
   const cliSpec = mode === "npx"
     ? { kind: "npx", packageName }
     : { kind: "local", cliPath: path.resolve(localCliPath), packageName };
@@ -81,7 +81,7 @@ const normalizedPayload = {
 };
 
 // 宿主 timeout 之外的第二道保险：子进程挂死时按 fail-closed 收口。
-${renderHookBridgeExecution({ hostAdapter: "cursor", timeoutMs: 25_000 })}
+${renderHookBridgeExecution({ hostAdapter: "cursor", controlRoot, timeoutMs: 25_000 })}
 
 if (event === "PreToolUse") {
   if (result.decision === "allow") {
