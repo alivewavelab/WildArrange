@@ -73,4 +73,5 @@ test("renderHelp core view is a strict subset of the full view", () => {
   assert.match(core, /"generated_by": "host_semantic"/);
   assert.doesNotMatch(core, /"generated_by": "host_semantic \(/);
   assert.match(core, /"owner": "Jiuwei\|ZhuRong"/);
+  assert.match(core, /"worker_command": "command that changes files"/);
 });

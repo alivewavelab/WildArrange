@@ -23,6 +23,48 @@ test("AI routing does not own feature confirmation while the public host entry d
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("an explicit draft-only request writes a draft without forcing formal import", async () => {
+  const directive = buildPlanDraftDirective({ route: "plan", needsPlan: true }, {
+    sessionId: "draft-only",
+    prompt: "只生成计划草稿，不要导入正式计划",
+  });
+  assert.equal(directive.draftOnly, true);
+  assert.equal(directive.nextCommand, null);
+
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), "wildarrange-draft-only-"));
+  try {
+    const hook = await runInjectionHook(rootDir, {
+      hook_event_name: "UserPromptSubmit",
+      session_id: "draft-only",
+      cwd: rootDir,
+      prompt: "只生成修复登录 bug 的计划草稿，不要导入正式计划",
+    });
+    assert.match(hook.output, /用户明确只要草稿：写完即停止/);
+    assert.doesNotMatch(hook.output, /写完草稿后执行：/);
+  } finally {
+    await rm(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("dependency import constraints do not suppress formal plan import", () => {
+  for (const prompt of [
+    "不要导入第三方库，创建并导入计划",
+    "不要 import lodash，创建并导入计划",
+    "不要导入计划表，创建并导入计划",
+    "暂时不登记计划外的任务，创建并导入计划",
+    "Do not import lodash; create and import the plan.",
+    "Do not import planning tools; create and import the plan.",
+    "don't import planned modules; create and import the plan.",
+  ]) {
+    const directive = buildPlanDraftDirective({ route: "plan", needsPlan: true }, {
+      sessionId: "dependency-import",
+      prompt,
+    });
+    assert.equal(directive.draftOnly, false, prompt);
+    assert.match(directive.nextCommand, /plan --from/);
+  }
+});
+
 test("feature design confirmation and complete plan cannot be bypassed across turns", async () => {
   const rootDir = await mkdtemp(path.join(os.tmpdir(), "wildarrange-feature-gate-"));
   const sessionId = "feature-gate-session";
@@ -94,7 +136,7 @@ test("feature design confirmation and complete plan cannot be bypassed across tu
         description: "Add the confirmed launch interaction and state update.",
         owner: "ZhuRong",
         writable_paths: ["src/feature.js"],
-        worker_command: "node --version",
+        worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/feature.js','export const launch = true;\\n')\"",
         verify_commands: ["node --version"],
         review_commands: ["node --version"],
         successCriteria: [{

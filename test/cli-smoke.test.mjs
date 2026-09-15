@@ -310,7 +310,13 @@ test("cli smoke: a local target without bin imports a string-array verifier plan
     assert.equal(installReport.cliPrefix, absolutePrefix);
     const resumed = await runCli(["resume"], dir);
     assert.equal(resumed.code, 0, resumed.stderr);
-    const resume = JSON.parse(resumed.stdout);
+    let resume = JSON.parse(resumed.stdout);
+    assert.equal(resume.nextActionDetails.reason, "awaiting_plan_approval");
+    assert.equal(resume.nextActionDetails.command, null);
+    assert.equal((await runCli(["plan", "approve"], dir)).code, 0);
+    const approvedResume = await runCli(["resume"], dir);
+    assert.equal(approvedResume.code, 0, approvedResume.stderr);
+    resume = JSON.parse(approvedResume.stdout);
     assert.equal(resume.nextActionDetails.command, `${absolutePrefix} run`);
     const contextJson = JSON.parse(await readFile(path.join(dir, ".wildarrange", "snapshots", "context.json"), "utf8"));
     assert.equal(contextJson.nextActionDetails.command, `${absolutePrefix} run`);

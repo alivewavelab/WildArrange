@@ -250,7 +250,7 @@ node ./bin/wildarrange.mjs status
 node ./bin/wildarrange.mjs summary
 ```
 
-在已安装 adapter 的 Codex / Cursor / Kimi Code 中，直接描述一个需要开发的需求或 Bug 即可。`UserPromptSubmit` 路由判断需要计划时，会要求当前宿主大模型根据对话语义生成 `.wildarrange/plan-drafts/<session>-plan.json`，而不是让用户手写格式。生成文件必须带 `generated_by: "host_semantic"`，并为每张可执行任务明确填写 `task.owner`；owner 只能是具备 command-worker 资格的 Jiuwei 或 ZhuRong。DiJiang、BaiZe、LuWu 分别通过计划、复核和治理阶段参与，不执行 `worker_command`。WildArrange 导入时校验 owner，且无论全局开关如何都强制等待用户 `plan approve`。执行 Hook、任务领取和并行运行随后读取同一个 `task.owner`，不会再另建一套实际负责人。
+在已安装 adapter 的 Codex / Cursor / Kimi Code 中，直接描述一个需要开发的需求或 Bug 即可。`UserPromptSubmit` 路由判断需要计划时，会要求当前宿主大模型根据对话语义生成 `.wildarrange/plan-drafts/<session>-plan.json`，而不是让用户手写格式。生成文件必须带 `generated_by: "host_semantic"`，并为每张可执行任务明确填写 `task.owner`；owner 只能是具备 command-worker 资格的 Jiuwei 或 ZhuRong。每张任务还必须提供真实、非空转的 `worker_command`，由 WildArrange 在隔离任务 worktree 中执行并产出 `writable_paths` 内的改动；`node --version`、`process.exit(0)` 等占位命令不能导入。DiJiang、BaiZe、LuWu 分别通过计划、复核和治理阶段参与，不执行 `worker_command`。WildArrange 导入时校验 owner 与 Worker 合同，且无论全局开关如何都强制等待用户 `plan approve`。执行 Hook、任务领取和并行运行随后读取同一个 `task.owner`，不会再另建一套实际负责人。
 
 计划待确认期间，用户仍可修改 `.wildarrange/plan-drafts/*.json` 并重新导入；其它文件写入和任意 Shell 默认阻断，只放行精确匹配的计划管理与只读命令。批准后，草稿目录重新受当前工单的 `writable_paths` 限制。
 
