@@ -23,6 +23,7 @@ import {
   registerCoordinationDevice,
 } from "../src/orchestration/remote-ownership.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
+import { runDoctor } from "../src/interface/doctor.mjs";
 import { collectGitChangedPaths } from "../src/infra/git-diff.mjs";
 import { prepareAgentWorktree } from "../src/infra/git-worktree.mjs";
 import { loadWildArrangeConfig } from "../src/infra/runtime-config.mjs";
@@ -446,11 +447,23 @@ test("guarded mode without a remote still delivers to a clean local task branch 
     assert.equal(taskWorktree.clean, true);
     assert.equal(taskWorktree.branch, task.coordination.branch);
     assert.equal(taskWorktree.headSha, localTaskHead);
+    assert.equal(task.delivery_workspace.kind, "parallel_task_worktree");
+    assert.equal(task.delivery_workspace.runId, batch.runId);
+    assert.equal(task.delivery_workspace.workDir, path.resolve(repo, batch.results[0].workDir));
+    assert.equal(task.delivery_workspace.branch, task.coordination.branch);
+    assert.equal(task.delivery_workspace.baseSha, mainBefore);
+    assert.equal(task.delivery_workspace.deliverySha, localTaskHead);
     const proof = await readJson(path.join(repo, ".wildarrange", "reports", "acceptance", "P-GIT", "T001.json"));
     const checkpoint = await readJson(path.join(repo, ".wildarrange", "checkpoints", "P-GIT", "T001.json"));
     assert.equal(proof.evidenceRefs.deliveryBaseline.commitSha, localTaskHead);
     assert.equal(proof.evidenceRefs.deliveryBaseline.pushed, false);
     assert.equal(checkpoint.deliveryBaseline.integrationSha, localTaskHead);
+
+    await writeFile(path.join(task.delivery_workspace.workDir, "README.md"), "drift after admission\n");
+    const doctor = await runDoctor(repo);
+    const finding = doctor.findings.find((entry) => entry.code === "delivery_worktree_state_drift" && entry.taskId === "T001");
+    assert.ok(finding, JSON.stringify(doctor.findings, null, 2));
+    assert.deepEqual(finding.changedPaths, ["README.md"]);
   });
 });
 
