@@ -40,7 +40,7 @@ export async function installAdapter(rootDir, options = {}) {
   }
   const mode = options.mode || "local";
   const packageName = options.packageName || options.package || DEFAULT_PACKAGE_NAME;
-  const hookCommand = adapterHookCommand({ mode, packageName });
+  const hookCommand = adapterHookCommand({ mode, packageName, controlRoot: rootDir });
   const cliPrefix = adapterCliPrefix({ mode, packageName });
   await initRuntime(rootDir);
   const slashCommands = buildSlashCommands(cliPrefix);
@@ -93,6 +93,7 @@ export async function installAdapter(rootDir, options = {}) {
       mode,
       packageName,
       localCliPath: path.join(PROJECT_DIR, "bin", "wildarrange.mjs"),
+      controlRoot: rootDir,
     }), "utf8");
     outputs.push({ target: "cursor", path: reportPath(rootDir, cursorBridgePath), status: "generated", backup: cursorBridgeBackup, enforcement: "hook-bridge" });
 
@@ -160,6 +161,7 @@ export async function installAdapter(rootDir, options = {}) {
           mode,
           packageName,
           localCliPath: path.join(PROJECT_DIR, "bin", "wildarrange.mjs"),
+          controlRoot: rootDir,
         }),
         enforcement: "hook-bridge",
       },
@@ -358,8 +360,8 @@ export function adapterCliPrefix({ mode = "local", packageName = DEFAULT_PACKAGE
   return `node "${path.resolve(localCliPath || path.join(PROJECT_DIR, "bin", "wildarrange.mjs"))}"`;
 }
 
-function adapterHookCommand({ mode, packageName }) {
-  return `${adapterCliPrefix({ mode, packageName })} hook run --adapter-mode ${mode} --adapter-package ${JSON.stringify(packageName)}`;
+function adapterHookCommand({ mode, packageName, controlRoot }) {
+  return `${adapterCliPrefix({ mode, packageName })} hook run --adapter-mode ${mode} --adapter-package ${JSON.stringify(packageName)} --control-root "${path.resolve(controlRoot)}"`;
 }
 
 // 统一的 slash 命令集：Cursor 渲染成 .cursor/commands/<name>.md，

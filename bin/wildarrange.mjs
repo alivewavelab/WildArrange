@@ -331,6 +331,9 @@ async function main() {
   if (command === "hook") {
     const subcommand = args._[1];
     if (subcommand === "run") {
+      const controlRoot = args["control-root"] && args["control-root"] !== true
+        ? path.resolve(String(args["control-root"]))
+        : rootDir;
       const payload = args.from && args.from !== true
         ? await readJson(path.resolve(rootDir, args.from))
         : JSON.parse(await readAllStdin());
@@ -349,15 +352,15 @@ async function main() {
           packageName: adapterPackage,
           localCliPath: path.resolve(process.argv[1]),
         })
-        : await resolveRuntimeCliCommandPrefix(rootDir, { fallbackCliPath: path.resolve(process.argv[1]) });
+        : await resolveRuntimeCliCommandPrefix(controlRoot, { fallbackCliPath: path.resolve(process.argv[1]) });
       if (!cliCommandPrefix) throw new Error("WildArrange CLI command prefix is unavailable; reinstall the adapter");
       payload.cli_command_prefix = cliCommandPrefix;
       payload[TRUSTED_CLI_COMMAND_PREFIX] = cliCommandPrefix;
       if (hostAdapter === "codex") {
-        const hookConfig = await readFile(path.join(rootDir, ".codex", "hooks.json"), "utf8");
+        const hookConfig = await readFile(path.join(controlRoot, ".codex", "hooks.json"), "utf8");
         payload.hook_config_digest = hashContent(hookConfig);
       }
-      const result = await runHostHook(rootDir, payload, runInjectionHook);
+      const result = await runHostHook(controlRoot, payload, runInjectionHook);
       if (args.format === "json") {
         console.log(JSON.stringify(result, null, 2));
       } else {

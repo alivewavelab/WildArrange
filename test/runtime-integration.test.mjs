@@ -637,6 +637,46 @@ test("hook adapter emits WildArrange runtime injection for user prompt", async (
   });
 });
 
+test("hook sessions in task worktrees keep governance facts in the control root", async () => {
+  await withTempDir(async (controlRoot) => {
+    const executionRoot = path.join(controlRoot, "task-worktree");
+    await mkdir(executionRoot, { recursive: true });
+    await writeFile(path.join(executionRoot, "AGENTS.md"), "# Task Worktree Rules\n\nWORKTREE_RULE_PROBE\n");
+    await initRuntime(controlRoot);
+    const samplePath = await createSamplePlan(controlRoot);
+    await importPlan(controlRoot, samplePath);
+    await approvePlan(controlRoot);
+
+    const session = await runInjectionHook(controlRoot, {
+      hook_event_name: "SessionStart",
+      session_id: "task-worktree-session",
+      cwd: executionRoot,
+    });
+
+    assert.match(session.output, /WORKTREE_RULE_PROBE/);
+    assert.equal(
+      (await readJson(resolveWildArrangePath(controlRoot, "sessions", "hooks", "task-worktree-session-SessionStart.json"))).event,
+      "SessionStart",
+    );
+    await assert.rejects(() => stat(path.join(executionRoot, ".wildarrange")), { code: "ENOENT" });
+
+    const preTool = await runInjectionHook(controlRoot, {
+      hook_event_name: "PreToolUse",
+      session_id: "task-worktree-session",
+      cwd: executionRoot,
+      task_id: "T001",
+      tool_name: "functions.apply_patch",
+      tool_input: {
+        command: "*** Begin Patch\n*** Add File: .wildarrange/artifacts/linear-smoke.txt\n+ok\n*** End Patch",
+      },
+    });
+
+    assert.equal(preTool.decision, "allow");
+    assert.deepEqual(preTool.targetPaths, [".wildarrange/artifacts/linear-smoke.txt"]);
+    await assert.rejects(() => stat(path.join(executionRoot, ".wildarrange")), { code: "ENOENT" });
+  });
+});
+
 test("hook rendering rewrites canonical plan, resume, and prompt commands to the adapter CLI prefix", async () => {
   await withTempDir(async (dir) => {
     const skillDir = path.join(dir, ".agents", "skills", "command-probe");
