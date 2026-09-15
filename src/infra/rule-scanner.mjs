@@ -29,8 +29,9 @@ const PROJECT_RULE_DIRS = [
 ];
 
 export async function scanProjectRules(rootDir, options = {}) {
-  await ensureWildArrangeDirs(rootDir);
-  const { config, sourcePath } = await loadWildArrangeConfig(rootDir);
+  const controlRoot = options.controlRoot || rootDir;
+  await ensureWildArrangeDirs(controlRoot);
+  const { config, sourcePath } = await loadWildArrangeConfig(controlRoot);
   const ruleConfig = config.ruleInjection || DEFAULT_WILDARRANGE_CONFIG.ruleInjection;
   const targetPaths = normalizeRuleTargetPaths(options.targetPaths || []);
   const allRules = [];
@@ -57,13 +58,13 @@ export async function scanProjectRules(rootDir, options = {}) {
     matched: budgetedRules.length,
     rules: budgetedRules,
   };
-  const jsonPath = resolveWildArrangePath(rootDir, "rules", "context.json");
-  const mdPath = resolveWildArrangePath(rootDir, "rules", "context.md");
-  result.reportJsonPath = path.relative(rootDir, jsonPath);
-  result.reportMdPath = path.relative(rootDir, mdPath);
+  const jsonPath = resolveWildArrangePath(controlRoot, "rules", "context.json");
+  const mdPath = resolveWildArrangePath(controlRoot, "rules", "context.md");
+  result.reportJsonPath = path.relative(controlRoot, jsonPath);
+  result.reportMdPath = path.relative(controlRoot, mdPath);
   await writeJsonAtomic(jsonPath, result);
   await writeFile(mdPath, renderRulesMarkdown(result), "utf8");
-  await appendLedger(rootDir, { type: "project_rules_scanned", total: result.total, matched: result.matched, targetPathCount: targetPaths.length });
+  await appendLedger(controlRoot, { type: "project_rules_scanned", total: result.total, matched: result.matched, targetPathCount: targetPaths.length });
   return result;
 }
 

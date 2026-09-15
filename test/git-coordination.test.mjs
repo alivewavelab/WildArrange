@@ -33,6 +33,7 @@ import {
   inspectTaskWorktreeBaseline,
   pushTaskDeliveryCommit,
   pushCommit,
+  synchronizeTaskWorktreeToDelivery,
   verifyIntegrationGuard,
 } from "../src/infra/git-coordination.mjs";
 import {
@@ -104,6 +105,33 @@ test("task delivery refuses unattributed dirty files and does not create a commi
     assert.equal(result.pass, false);
     assert.equal(result.reason, "unattributed_worktree_changes");
     assert.equal((await git(worktree.workDir, ["rev-parse", "HEAD"])).trim(), head);
+  });
+});
+
+test("task worktree cleanliness includes untracked WildArrange runtime files", async () => {
+  await withRemoteClones(async ({ dir, cloneA }) => {
+    const head = (await git(cloneA, ["rev-parse", "HEAD"])).trim();
+    const branch = "wildarrange/task/P-GIT/T-RUNTIME-DIRTY";
+    const worktree = await prepareAgentWorktree(cloneA, path.join(dir, "runtime-dirty-task"), {
+      isolation: "git-worktree",
+      branchName: branch,
+      startPoint: head,
+    });
+    await mkdir(path.join(worktree.workDir, ".wildarrange", "rules"), { recursive: true });
+    await writeFile(path.join(worktree.workDir, ".wildarrange", "rules", "context.json"), "{}\n", "utf8");
+
+    const baseline = await inspectTaskWorktreeBaseline(worktree.workDir);
+    assert.equal(baseline.clean, false);
+    assert.deepEqual(baseline.changedPaths, [".wildarrange/rules/context.json"]);
+    const sync = await synchronizeTaskWorktreeToDelivery(worktree.workDir, {
+      expectedHead: head,
+      expectedBranch: branch,
+      commitSha: head,
+    });
+    assert.equal(sync.pass, false);
+    assert.equal(sync.status, "recovery_required");
+    assert.equal(sync.reason, "task_worktree_changed_after_delivery");
+    assert.deepEqual(sync.changedPaths, [".wildarrange/rules/context.json"]);
   });
 });
 

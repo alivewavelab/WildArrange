@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -8,20 +8,21 @@ import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { runCommand } from "../src/infra/command-runner.mjs";
 import { runCommandFile } from "../src/infra/command-runner.mjs";
 import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
-import { runNextTask } from "../src/orchestration/linear-runtime.mjs";
+import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtime.mjs";
 import { runDeliveryPipeline } from "../src/orchestration/delivery-pipeline.mjs";
 import { persistTaskState } from "../src/orchestration/task-board.mjs";
-import { collectGitChangedPaths, changedPathsIntroducedByTask } from "../src/infra/git-diff.mjs";
+import { buildChangedPathDiffEvidence, collectGitChangedPaths, changedPathsIntroducedByTask } from "../src/infra/git-diff.mjs";
 import { readJson, resolveTaskAcceptancePath, resolveTaskCheckpointPath, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { runDoctor } from "../src/interface/doctor.mjs";
 
-async function withGitFixture(fn) {
+async function withGitFixture(fn, options = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "wa-delivery-regression-"));
   try {
     for (const args of [["init", "-b", "main"], ["config", "user.name", "Delivery Test"], ["config", "user.email", "delivery@example.invalid"]]) {
       const result = await runCommandFile("git", args, root);
       assert.equal(result.exitCode, 0, result.stderr);
     }
-    await writeFile(path.join(root, ".gitignore"), ".wildarrange/\n");
+    if (options.ignoreRuntime !== false) await writeFile(path.join(root, ".gitignore"), ".wildarrange/\n");
     await writeFile(path.join(root, "worker.cjs"), "const fs=require('fs');const p='result.txt';const n=fs.existsSync(p)?Number(fs.readFileSync(p,'utf8'))+1:1;fs.writeFileSync(p,String(n));");
     await writeFile(path.join(root, "check.cjs"), "require('node:assert/strict').equal(require('node:fs').readFileSync('result.txt','utf8'),'1');");
     await writeFile(path.join(root, "review.cjs"), "const fs=require('node:fs');const assert=require('node:assert/strict');assert.equal(fs.statSync('result.txt').size,1);assert(!fs.existsSync('unexpected.txt'));\n");
@@ -69,6 +70,49 @@ test("shared completion derives mandatory Git delivery when an entry omits or di
       assert.notEqual(result.status, "completed", "a Git task without its isolated delivery target cannot complete");
       assert.equal(await readJson(resolveTaskCheckpointPath(root, plan.id, task.id), null), null);
     }
+  });
+});
+
+test("linear delivery persists runtime facts only in control root and doctor detects later worktree drift", async () => {
+  await withGitFixture(async (root) => {
+    await writePlan(root, [realTask()]);
+    const completed = await runNextTask(root);
+    assert.equal(completed.status, "completed", JSON.stringify(completed, null, 2));
+    assert.equal(completed.task.delivery.worktreeSync.worktreeClean, true);
+    const workDir = completed.task.delivery_workspace.workDir;
+    const cleanStatus = await runCommandFile("git", ["status", "--short"], workDir);
+    assert.equal(cleanStatus.exitCode, 0, cleanStatus.stderr);
+    assert.equal(cleanStatus.stdout, "");
+    await assert.rejects(stat(path.join(workDir, ".wildarrange")), /ENOENT/);
+    const diffEvidence = [...completed.task.evidence].reverse().find((entry) => entry.kind === "diff");
+    assert.equal(diffEvidence.status, "known");
+    assert.equal(diffEvidence.changed, true);
+    assert.deepEqual(diffEvidence.changes, [{ path: "result.txt", status: "added" }]);
+
+    await mkdir(path.join(workDir, ".wildarrange", "rules"), { recursive: true });
+    await writeFile(path.join(workDir, ".wildarrange", "rules", "context.json"), "{}\n");
+    const drifted = await runDoctor(root);
+    const drift = drifted.findings.find((finding) => finding.code === "delivery_worktree_state_drift");
+    assert.ok(drift, JSON.stringify(drifted.findings, null, 2));
+    assert.deepEqual(drift.changedPaths, [".wildarrange/rules/context.json"]);
+
+    await rm(path.join(workDir, ".wildarrange"), { recursive: true, force: true });
+    const removed = await runCommandFile("git", ["worktree", "remove", workDir], root);
+    assert.equal(removed.exitCode, 0, removed.stderr);
+    const afterCleanup = await runDoctor(root);
+    assert.equal(afterCleanup.findings.some((finding) => finding.code === "delivery_worktree_state_drift"), false);
+  }, { ignoreRuntime: false });
+});
+
+test("single-node execute records the same fingerprint-based diff evidence", async () => {
+  await withGitFixture(async (root) => {
+    await writePlan(root, [realTask()]);
+    const executed = await runWorkflowNode(root, "execute", { taskId: "T001" });
+    assert.equal(executed.status, "executed");
+    const diffEvidence = [...executed.task.evidence].reverse().find((entry) => entry.kind === "diff");
+    assert.equal(diffEvidence.status, "known");
+    assert.equal(diffEvidence.changed, true);
+    assert.deepEqual(diffEvidence.changes, [{ path: "result.txt", status: "added" }]);
   });
 });
 
@@ -174,6 +218,10 @@ test("Git change collection detects staged and same-path content changes", async
     assert.deepEqual(indexOnly.paths, [indexOnlyPath]);
     assert.doesNotMatch(indexOnly.fingerprints[indexOnlyPath], /^index:absent\|/, "index pathspec metacharacters must remain literal");
     assert.deepEqual(changedPathsIntroducedByTask(clean, indexOnly), [indexOnlyPath], "index blob changes remain visible when worktree bytes equal HEAD");
+    const stagedSummary = buildChangedPathDiffEvidence(clean, indexOnly);
+    assert.equal(stagedSummary.status, "known");
+    assert.equal(stagedSummary.changed, true);
+    assert.deepEqual(stagedSummary.changes, [{ path: indexOnlyPath, status: "added" }]);
 
     assert.equal((await runCommandFile("git", ["--literal-pathspecs", "restore", "--staged", indexOnlyPath], root)).exitCode, 0);
     await writeFile(path.join(root, "outside.txt"), "first");
@@ -206,6 +254,17 @@ test("Git change collection detects staged and same-path content changes", async
     assert.deepEqual(conflicted.paths, ["conflict.txt"]);
     assert.match(conflicted.fingerprints["conflict.txt"], /^index:[^;]+;[^;]+;[^|]+\|worktree:/, "all conflict stages contribute to the index fingerprint");
   });
+});
+
+test("diff evidence stays unknown when changed-path fingerprint collection fails", () => {
+  const summary = buildChangedPathDiffEvidence(
+    { available: false, reason: "before probe failed", paths: [] },
+    { available: true, source: "git", paths: ["new.txt"], fingerprints: { "new.txt": "fingerprint" } },
+  );
+  assert.equal(summary.status, "unknown");
+  assert.equal(summary.changed, null);
+  assert.deepEqual(summary.changes, []);
+  assert.equal(summary.unavailableReason, "before probe failed");
 });
 
 test("trivial review command cannot create proof or checkpoint", async () => {
