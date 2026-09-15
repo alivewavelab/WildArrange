@@ -20,6 +20,7 @@ import { listRuntimeStateBackups, verifyConfigBaseline, verifyRuntimeState } fro
 import { evaluateGateArming } from "../infra/gate-arming.mjs";
 import { evaluateRegistryFreshness } from "../infra/verification-registry.mjs";
 import { normalizeRelativePath } from "../infra/path-match.mjs";
+import { inspectTaskWorktreeBaseline } from "../infra/git-coordination.mjs";
 import { projectDecisionStats } from "./decisions.mjs";
 
 const COMPLETION_LEDGER_EVENT_TYPES = new Set([
@@ -220,6 +221,52 @@ async function checkCompletionIntegrity(rootDir, findings) {
     }
   }
 
+  let deliveryWorktreesChecked = 0;
+  let deliveryWorktreeDrifts = 0;
+  const projectRoot = path.resolve(rootDir);
+  for (const task of completedTasks) {
+    const workDir = task.delivery_workspace?.workDir;
+    if (!workDir) continue;
+    const absoluteWorkDir = path.resolve(rootDir, workDir);
+    if (!existsSync(absoluteWorkDir)) continue;
+    deliveryWorktreesChecked += 1;
+    const planId = task.planId || taskLedger.activePlanId;
+    const ref = taskRef(planId, task.id);
+    const relativeWorkDir = path.relative(projectRoot, absoluteWorkDir);
+    const outsideProject = relativeWorkDir.startsWith("..") || path.isAbsolute(relativeWorkDir);
+    let actual;
+    try {
+      actual = outsideProject
+        ? { available: false, clean: false, reason: "delivery worktree path is outside the project", changedPaths: [] }
+        : await inspectTaskWorktreeBaseline(absoluteWorkDir);
+    } catch (error) {
+      actual = { available: false, clean: false, reason: error instanceof Error ? error.message : String(error), changedPaths: [] };
+    }
+    const expectedHead = task.delivery?.integrationSha
+      || task.delivery?.commitSha
+      || task.delivery?.actualSha
+      || task.delivery_workspace?.deliverySha
+      || null;
+    const expectedBranch = task.delivery_workspace?.branch || task.delivery?.branch || null;
+    const headMatches = !expectedHead || actual.headSha === expectedHead;
+    const branchMatches = !expectedBranch || actual.branch === expectedBranch;
+    if (actual.available === true && actual.clean === true && headMatches && branchMatches) continue;
+    deliveryWorktreeDrifts += 1;
+    addFinding(findings, "error", "completion_audit", `task ${ref} completed delivery worktree no longer matches its recorded clean state`, {
+      code: "delivery_worktree_state_drift",
+      planId,
+      taskId: task.id,
+      taskRef: ref,
+      workDir: normalizeRelativePath(relativeWorkDir),
+      expectedHead,
+      actualHead: actual.headSha || null,
+      expectedBranch,
+      actualBranch: actual.branch || null,
+      changedPaths: actual.changedPaths || [],
+      reason: actual.reason || (!headMatches ? "delivery worktree HEAD changed" : "delivery worktree branch changed"),
+    });
+  }
+
   // 反向不一致（cross-review P2, round 4, 2026-07-21）：
   // 1) 未完成任务却已有账本完成事件 → 完成事务被中断，canonical 落盘失败。
   //    这是可恢复状态：wildarrange run 会自动裁决卡在 verifying 的任务。
@@ -286,6 +333,8 @@ async function checkCompletionIntegrity(rootDir, findings) {
     sideEffectFailures,
     derivedDivergences,
     invalidCompleted: evidenceIntegrity.invalid.length,
+    deliveryWorktreesChecked,
+    deliveryWorktreeDrifts,
   };
 }
 

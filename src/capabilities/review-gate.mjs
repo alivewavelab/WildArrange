@@ -26,6 +26,7 @@ export async function runReviewGate(rootDir, task, evidence = {}, options = {}) 
   const criteria = criteriaStatus(task);
   const rulesContext = await scanProjectRules(executionRoot, {
     targetPaths: uniqueStrings([...(task.writable_paths || []), ...((scopeResult?.changedPaths) || [])]),
+    controlRoot: rootDir,
   });
   const extraPatterns = compileCommandSafetyPatterns(config);
   const reviewCommandResults = [];

@@ -67,6 +67,49 @@ export async function collectGitChangedPaths(rootDir) {
   };
 }
 
+export function buildChangedPathDiffEvidence(beforeChanged, afterChanged, options = {}) {
+  const beforeFingerprints = beforeChanged?.fingerprints;
+  const afterFingerprints = afterChanged?.fingerprints;
+  const available = beforeChanged?.available === true
+    && afterChanged?.available === true
+    && beforeFingerprints && typeof beforeFingerprints === "object"
+    && afterFingerprints && typeof afterFingerprints === "object";
+  if (!available) {
+    return {
+      kind: "diff",
+      at: options.at,
+      status: "unknown",
+      changed: null,
+      changedPaths: null,
+      beforePathCount: Array.isArray(beforeChanged?.paths) ? beforeChanged.paths.length : null,
+      afterPathCount: Array.isArray(afterChanged?.paths) ? afterChanged.paths.length : null,
+      unavailableReason: beforeChanged?.available === false
+        ? beforeChanged.reason || "before changed-path collection failed"
+        : afterChanged?.available === false
+          ? afterChanged.reason || "after changed-path collection failed"
+          : "changed-path fingerprints are unavailable",
+    };
+  }
+  const changedPaths = [...new Set([
+    ...Object.keys(beforeFingerprints),
+    ...Object.keys(afterFingerprints),
+  ])]
+    .filter((filePath) => beforeFingerprints[filePath] !== afterFingerprints[filePath])
+    .sort();
+  return {
+    kind: "diff",
+    at: options.at,
+    status: "known",
+    source: afterChanged.source || beforeChanged.source || null,
+    changed: changedPaths.length > 0,
+    changeCount: changedPaths.length,
+    changedPaths,
+    beforePathCount: Object.keys(beforeFingerprints).length,
+    afterPathCount: Object.keys(afterFingerprints).length,
+    unavailableReason: null,
+  };
+}
+
 async function collectIndexFingerprints(rootDir, paths) {
   const metadataByPath = new Map();
   for (const batch of batchIndexPaths(paths)) {

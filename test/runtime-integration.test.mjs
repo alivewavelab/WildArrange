@@ -1,6 +1,6 @@
 /** End-to-end integration coverage across the five runtime zones. */
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -2333,6 +2333,27 @@ test("project rules and agent context collect matching local governance", async 
     assert.equal(context.task.id, "T001");
     assert.equal(context.projectRules.matched, 3);
     assert.match(await readFile(resolveWildArrangePath(dir, "context-agents", "BaiZe-T001.md"), "utf8"), /WildArrange Agent Context/);
+  });
+});
+
+test("project rules read a task worktree but persist runtime facts to the control root", async () => {
+  await withTempDir(async (dir) => {
+    const controlRoot = path.join(dir, "control");
+    const executionRoot = path.join(dir, "task-worktree");
+    await mkdir(controlRoot, { recursive: true });
+    await mkdir(path.join(executionRoot, "src"), { recursive: true });
+    await writeFile(path.join(executionRoot, "AGENTS.md"), "# Task worktree rules\n\nRun the real verifier.\n");
+    await initRuntime(controlRoot);
+
+    const rules = await scanProjectRules(executionRoot, {
+      controlRoot,
+      targetPaths: ["src/app.js"],
+    });
+    assert.equal(rules.matched, 1);
+    assert.equal(rules.rules[0].path, "AGENTS.md");
+    assert.match(await readFile(resolveWildArrangePath(controlRoot, "rules", "context.md"), "utf8"), /Run the real verifier/);
+    assert.match(await readFile(resolveWildArrangePath(controlRoot, "ledger.jsonl"), "utf8"), /project_rules_scanned/);
+    await assert.rejects(stat(path.join(executionRoot, ".wildarrange")), /ENOENT/);
   });
 });
 
