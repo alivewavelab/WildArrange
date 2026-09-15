@@ -70,7 +70,9 @@ test("feature design confirmation and complete plan cannot be bypassed across tu
       hook_event_name: "PreToolUse",
       session_id: sessionId,
       tool_name: "functions.apply_patch",
-      tool_input: { file_path: ".wildarrange/plan-drafts/feature-gate-plan.json" },
+      tool_input: {
+        command: "*** Begin Patch\n*** Add File: .wildarrange/plan-drafts/feature-gate-plan.json\n+{}\n*** End Patch",
+      },
     });
     assert.equal(blockedDraft.decision, "deny");
     assert.equal(blockedDraft.code, "feature_design_confirmation_required");

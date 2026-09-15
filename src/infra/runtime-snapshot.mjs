@@ -1,4 +1,5 @@
-import { readdir, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendLedger, readVerifiedLedgerEntries, verifyLedger } from "./ledger.mjs";
 import { normalizeRelativePath } from "./path-match.mjs";
@@ -43,12 +44,17 @@ export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
   const status = buildStatusReport(work, taskState, changes, completionIntegrity);
   const ledgerIntegrity = await verifyLedger(rootDir);
   const nextTask = taskState ? findRunnableTaskForContext(taskState.tasks || []) : null;
-  const nextAction = describeNextAction(taskState?.tasks || [], nextTask);
+  const cliCommandPrefix = await resolveRuntimeCliCommandPrefix(rootDir, {
+    preferredPrefix: options.cliCommandPrefix,
+    fallbackCliPath: options.fallbackCliPath,
+  });
+  const nextAction = describeNextAction(taskState?.tasks || [], nextTask, cliCommandPrefix);
   const context = {
     kind: "wildarrange_context_snapshot",
     version: STATE_VERSION,
     at: nowIso(),
     reason: options.reason || "manual",
+    cliCommandPrefix,
     latestSnapshot: latestSnapshot ? { id: latestSnapshot.id, stage: latestSnapshot.stage, at: latestSnapshot.at } : null,
     status,
     nextAction: nextAction.text,
@@ -106,7 +112,7 @@ function findRunnableTaskForContext(tasks) {
 
 // A read-only description of current state, shared by resume and Stop output.
 // Executing any suggested command still goes through the runtime's own gates.
-function describeNextAction(tasks, runnable) {
+function describeNextAction(tasks, runnable, cliCommandPrefix) {
   const recovery = tasks.find((task) => task.pendingContractChange && task.admission_claim
     && task.admission_claim.workspaceRestored !== true);
   const active = tasks.find((task) => !task.pendingContractChange && ["in_progress", "verifying"].includes(task.status));
@@ -115,11 +121,101 @@ function describeNextAction(tasks, runnable) {
   const task = recovery || runnable || active || failed || waiting;
   const reason = recovery ? "admission_recovery" : runnable ? "runnable_task" : active ? "active_task" : failed ? "blocked_or_failed_task" : waiting ? "awaiting_user_decision" : "no_unfinished_work";
   const command = recovery || (task === active && active?.admission_claim)
-    ? `node ./bin/wildarrange.mjs parallel admit --run ${task.admission_claim.runId} --task ${task.id}`
-    : runnable ? "node ./bin/wildarrange.mjs run" : active ? `node ./bin/wildarrange.mjs node verify --task ${task.id}` : failed ? "node ./bin/wildarrange.mjs status" : null;
-  const text = recovery ? `recover shared workspace: ${command}` : runnable ? `run task ${task.id}: ${task.subject}` : active ? `resume task ${task.id}: ${command}`
+    ? renderCliCommand(cliCommandPrefix, `parallel admit --run ${task.admission_claim.runId} --task ${task.id}`)
+    : runnable ? renderCliCommand(cliCommandPrefix, "run") : active ? renderCliCommand(cliCommandPrefix, `node verify --task ${task.id}`) : failed ? renderCliCommand(cliCommandPrefix, "status") : null;
+  const text = recovery ? command ? `recover shared workspace: ${command}` : "reinstall the adapter before shared-workspace recovery"
+    : runnable ? `run task ${task.id}: ${task.subject}` : active ? command ? `resume task ${task.id}: ${command}` : `reinstall the adapter before resuming task ${task.id}`
     : failed ? "inspect failed task" : waiting ? `await user direction for contract change ${task.pendingContractChange}` : "no runnable task";
   return { reason, taskId: task?.id || null, command, text };
+}
+
+export async function resolveRuntimeCliCommandPrefix(rootDir, options = {}) {
+  const preferred = normalizeRuntimeCliCommandPrefix(rootDir, options.preferredPrefix);
+  if (preferred) return preferred;
+  const artifactPrefix = await readInstalledHookCliCommandPrefix(rootDir);
+  if (artifactPrefix) return artifactPrefix;
+  const report = await readJson(resolveWildArrangePath(rootDir, "adapters", "install-report.json"), null);
+  const reportPrefix = normalizeRuntimeCliCommandPrefix(rootDir, report?.cliPrefix);
+  if (reportPrefix) return reportPrefix;
+  if (options.fallbackCliPath) {
+    const fallbackPrefix = normalizeRuntimeCliCommandPrefix(rootDir, `node "${path.resolve(options.fallbackCliPath)}"`);
+    if (fallbackPrefix) return fallbackPrefix;
+  }
+  return existsSync(path.join(rootDir, "bin", "wildarrange.mjs")) ? "node ./bin/wildarrange.mjs" : null;
+}
+
+async function readInstalledHookCliCommandPrefix(rootDir) {
+  for (const hookPath of [
+    path.join(rootDir, ".codex", "hooks.json"),
+    resolveWildArrangePath(rootDir, "adapters", "codex", "hooks.json"),
+  ]) {
+    const hooks = await readJson(hookPath, null);
+    for (const command of collectHookCommands(hooks)) {
+      const marker = command.indexOf(" hook run");
+      if (marker < 0) continue;
+      const prefix = normalizeRuntimeCliCommandPrefix(rootDir, command.slice(0, marker));
+      if (prefix) return prefix;
+    }
+  }
+  for (const bridgePath of [
+    path.join(rootDir, ".cursor", "hooks", "wildarrange-hook-bridge.mjs"),
+    resolveWildArrangePath(rootDir, "adapters", "kimi", "plugin", "hooks", "wildarrange-hook-bridge.mjs"),
+  ]) {
+    const source = await readFile(bridgePath, "utf8").catch(() => "");
+    const cliSpecJson = source.match(/^const cliSpec = (\{[^\r\n]+\});$/m)?.[1];
+    if (!cliSpecJson) continue;
+    try {
+      const cliSpec = JSON.parse(cliSpecJson);
+      const candidate = cliSpec.kind === "npx"
+        ? `npx -y ${cliSpec.packageName}`
+        : cliSpec.kind === "local" ? `node "${cliSpec.cliPath}"` : "";
+      const prefix = normalizeRuntimeCliCommandPrefix(rootDir, candidate);
+      if (prefix) return prefix;
+    } catch {
+      // A malformed restored bridge is not an executable CLI fact.
+    }
+  }
+  return null;
+}
+
+function collectHookCommands(value, output = []) {
+  if (Array.isArray(value)) {
+    for (const item of value) collectHookCommands(item, output);
+  } else if (value && typeof value === "object") {
+    for (const [key, nested] of Object.entries(value)) {
+      if (key === "command" && typeof nested === "string") output.push(nested);
+      else collectHookCommands(nested, output);
+    }
+  }
+  return output;
+}
+
+function normalizeRuntimeCliCommandPrefix(rootDir, value) {
+  if (typeof value !== "string") return null;
+  const prefix = value.trim();
+  if (!prefix || prefix.length > 2_000 || /[\r\n\0]/.test(prefix)) return null;
+  const npx = prefix.match(/^npx(?:\.cmd)?\s+(?:-y\s+)?((?:@[A-Za-z0-9][A-Za-z0-9._-]*\/)?[A-Za-z0-9][A-Za-z0-9._-]*)$/i);
+  if (npx) return `npx -y ${npx[1]}`;
+  const node = prefix.match(/^node(?:\.exe)?\s+(?:"([^"\r\n]+[\\/]wildarrange\.mjs)"|'([^'\r\n]+[\\/]wildarrange\.mjs)'|(\S+[\\/]wildarrange\.mjs))$/i);
+  const cliPath = node?.[1] || node?.[2] || node?.[3];
+  if (!cliPath) return null;
+  if (/[\\/]_npx[\\/]/i.test(cliPath)) {
+    const packageName = extractNpxPackageNameFromCliPath(cliPath);
+    return packageName ? `npx -y ${packageName}` : null;
+  }
+  const absoluteCliPath = path.isAbsolute(cliPath) ? path.resolve(cliPath) : path.resolve(rootDir, cliPath);
+  if (!existsSync(absoluteCliPath)) return null;
+  if (!path.isAbsolute(cliPath)) return "node ./bin/wildarrange.mjs";
+  return `node "${absoluteCliPath}"`;
+}
+
+function extractNpxPackageNameFromCliPath(cliPath) {
+  const normalized = cliPath.replaceAll("\\", "/");
+  return normalized.match(/\/node_modules\/((?:@[A-Za-z0-9][A-Za-z0-9._-]*\/)?[A-Za-z0-9][A-Za-z0-9._-]*)\/bin\/wildarrange\.mjs$/i)?.[1] || null;
+}
+
+function renderCliCommand(cliCommandPrefix, args) {
+  return cliCommandPrefix ? `${cliCommandPrefix} ${args}` : null;
 }
 
 async function readChangeRequests(rootDir) {
@@ -209,6 +305,7 @@ function renderContextMarkdown(context) {
     `- Counts: total=${status.total || 0}, completed=${status.completed || 0}, invalidCompleted=${status.invalidCompleted || 0}, pending=${status.pending || 0}, verifying=${status.verifying || 0}, failed=${status.failed || 0}, openChanges=${status.openChanges || 0}`,
     `- Ledger integrity: ${context.ledgerIntegrity?.ok === true ? "verified" : `failed (${context.ledgerIntegrity?.failures?.length || 0} finding(s))`}`,
     `- Next action: ${context.nextAction}`,
+    ...(context.nextActionDetails?.command ? [`- Next command: \`${context.nextActionDetails.command}\``] : []),
     "",
     "## Session Lineage",
     "",
@@ -240,11 +337,15 @@ function renderContextMarkdown(context) {
     }
   }
   lines.push("", "## Resume Commands", "");
-  lines.push("- Inspect: `node ./bin/wildarrange.mjs status`");
-  lines.push("- Refresh context: `node ./bin/wildarrange.mjs resume`");
-  lines.push("- Run next task: `node ./bin/wildarrange.mjs run`");
-  lines.push("- Node loop: `node ./bin/wildarrange.mjs node execute|verify|scope|review|checkpoint|retry --task <taskId>`");
-  lines.push("- Open changes: `node ./bin/wildarrange.mjs changes list`");
+  if (context.cliCommandPrefix) {
+    lines.push(`- Inspect: \`${renderCliCommand(context.cliCommandPrefix, "status")}\``);
+    lines.push(`- Refresh context: \`${renderCliCommand(context.cliCommandPrefix, "resume")}\``);
+    lines.push(`- Run next task: \`${renderCliCommand(context.cliCommandPrefix, "run")}\``);
+    lines.push(`- Node loop: \`${renderCliCommand(context.cliCommandPrefix, "node execute|verify|scope|review|checkpoint|retry --task <taskId>")}\``);
+    lines.push(`- Open changes: \`${renderCliCommand(context.cliCommandPrefix, "changes list")}\``);
+  } else {
+    lines.push("- Unavailable: reinstall the WildArrange adapter to record an executable CLI command.");
+  }
   lines.push("", "## Invariants", "");
   lines.push("- Worker done-claim is not completion.");
   lines.push("- Checkpoint requires verifier PASS, scope guard non-fail, and review gate PASS.");

@@ -15,6 +15,7 @@ import {
 } from "../infra/runtime-store.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
 import { initRuntime } from "../infra/runtime-bootstrap.mjs";
+import { writeRuntimeContextSnapshot } from "../infra/runtime-snapshot.mjs";
 import { assertPathInsideRoot, normalizeRelativePath } from "../infra/path-match.mjs";
 import {
   KIMI_ADAPTER_PLUGIN_NAME,
@@ -37,14 +38,18 @@ export async function installAdapter(rootDir, options = {}) {
   if (!ADAPTER_TARGETS.has(target)) {
     throw new Error("adapter target must be all, codex, cursor, or kimi");
   }
-  await initRuntime(rootDir);
   const mode = options.mode || "local";
   const packageName = options.packageName || options.package || DEFAULT_PACKAGE_NAME;
   const hookCommand = adapterHookCommand({ mode, packageName });
   const cliPrefix = adapterCliPrefix({ mode, packageName });
+  await initRuntime(rootDir);
   const slashCommands = buildSlashCommands(cliPrefix);
   const outputs = [];
   const backupId = createAdapterBackupId("install");
+  const reportJsonPath = resolveWildArrangePath(rootDir, "adapters", "install-report.json");
+  const reportMdPath = resolveWildArrangePath(rootDir, "adapters", "install-report.md");
+  const previousInstallReportBackup = await backupExistingAdapterFile(rootDir, reportJsonPath, backupId);
+  const previousInstallReportMdBackup = await backupExistingAdapterFile(rootDir, reportMdPath, backupId);
 
   if (target === "all" || target === "codex") {
     const codexHooks = buildCodexHooksConfig(`${hookCommand} --host codex`);
@@ -57,7 +62,7 @@ export async function installAdapter(rootDir, options = {}) {
       status: "generated",
       backup: codexRuntimeBackup,
       enforcement: "hard-after-trust",
-      trustAction: "在 Codex 中执行 /hooks，review 并 trust 本项目 hook。",
+      trustAction: "Codex 桌面版：打开设置 > Hooks，审查、信任并启用本项目 Hook；Codex CLI：执行 /hooks。",
     });
 
     const codexMirrorPath = resolveWildArrangePath(rootDir, "adapters", "codex", "hooks.json");
@@ -107,7 +112,7 @@ export async function installAdapter(rootDir, options = {}) {
     }
     const cursorRulePath = path.join(cursorDir, "wildarrange.mdc");
     const cursorRuleBackup = await backupExistingAdapterFile(rootDir, cursorRulePath, backupId);
-    await writeFile(cursorRulePath, renderCursorRule({ hookCommand }), "utf8");
+    await writeFile(cursorRulePath, renderCursorRule({ hookCommand, cliPrefix }), "utf8");
     const cursorReadmePath = resolveWildArrangePath(rootDir, "adapters", "cursor", "README.md");
     const cursorReadmeBackup = await backupExistingAdapterFile(rootDir, cursorReadmePath, backupId);
     await writeFile(cursorReadmePath, renderCursorAdapterReadme({ hookCommand }), "utf8");
@@ -187,18 +192,20 @@ export async function installAdapter(rootDir, options = {}) {
     target,
     mode,
     packageName,
+    cliPrefix,
     hookCommand,
     backupId,
+    previousInstallReportBackup,
+    previousInstallReportMdBackup,
     result: "files_generated",
     activationVerified: false,
     outputs,
   };
-  const reportJsonPath = resolveWildArrangePath(rootDir, "adapters", "install-report.json");
-  const reportMdPath = resolveWildArrangePath(rootDir, "adapters", "install-report.md");
   report.reportJsonPath = reportPath(rootDir, reportJsonPath);
   report.reportMdPath = reportPath(rootDir, reportMdPath);
   await writeJsonAtomic(reportJsonPath, report);
   await writeFile(reportMdPath, renderAdapterInstallReport(report), "utf8");
+  await writeRuntimeContextSnapshot(rootDir, { reason: "adapter_install", cliCommandPrefix: cliPrefix });
   // This command can only materialize project files. Host trust and lifecycle
   // execution happen later inside Codex/Cursor/Kimi and need separate evidence.
   await appendLedger(rootDir, { type: "adapter_files_generated", target, mode, packageName, outputCount: outputs.length });
@@ -310,6 +317,8 @@ export async function restoreAdapterBackup(rootDir, options = {}) {
     });
   }
 
+  await writeRuntimeContextSnapshot(rootDir, { reason: "adapter_restore" });
+
   const report = {
     kind: "wildarrange_adapter_restore",
     version: STATE_VERSION,
@@ -340,14 +349,17 @@ async function backupExistingAdapterFile(rootDir, filePath, backupId) {
   return reportPath(rootDir, backupPath);
 }
 
-function adapterCliPrefix({ mode, packageName }) {
+export function adapterCliPrefix({ mode = "local", packageName = DEFAULT_PACKAGE_NAME, localCliPath } = {}) {
+  if (!/^(?:@[A-Za-z0-9][A-Za-z0-9._-]*\/)?[A-Za-z0-9][A-Za-z0-9._-]*$/.test(packageName)) {
+    throw new Error("adapter package must be a plain npm package name or @scope/name");
+  }
   if (mode === "npx") return `npx -y ${packageName}`;
   if (mode !== "local") throw new Error("adapter mode must be local or npx");
-  return `node "${path.join(PROJECT_DIR, "bin", "wildarrange.mjs")}"`;
+  return `node "${path.resolve(localCliPath || path.join(PROJECT_DIR, "bin", "wildarrange.mjs"))}"`;
 }
 
 function adapterHookCommand({ mode, packageName }) {
-  return `${adapterCliPrefix({ mode, packageName })} hook run`;
+  return `${adapterCliPrefix({ mode, packageName })} hook run --adapter-mode ${mode} --adapter-package ${JSON.stringify(packageName)}`;
 }
 
 // 统一的 slash 命令集：Cursor 渲染成 .cursor/commands/<name>.md，
@@ -440,7 +452,7 @@ function buildSlashCommands(cliPrefix) {
         "",
         "如果用户没有给出路径，不要再向用户索要 plan.json。若请求包含新增功能或新的用户可见行为，先执行 `clarify-feature-design`：直接在当前对话中按编号澄清并展示功能设计确认稿；不要创建 MD/HTML 文件，也不要在开发者明确回复“确认”前生成 plan draft。确认后，再理解当前对话中的目标、约束与质量要求，生成 `.wildarrange/plan-drafts/<session>-plan.json`。",
         "",
-        "生成的 JSON 顶层必须写 `generated_by: \"host_semantic\"`、`title`、`objective`、`tasks`；如果路由返回 `featureDesign.id`，还必须原样写入 `feature_design_ref`，否则功能计划不能导入。每张任务必须写 `id`、`subject`、`description`、`owner`、`writable_paths`、`verify_commands`、`successCriteria`。每条 successCriteria 是对象，至少写 `title` 与 `expectedEvidence`，能由某条验证命令证明时再写 `verifierCommandRefs`。",
+        "生成的 JSON 顶层必须写 `generated_by: \"host_semantic\"`、`title`、`objective`、`tasks`；如果路由返回 `featureDesign.id`，还必须原样写入 `feature_design_ref`，否则功能计划不能导入。每张任务必须写 `id`、`subject`、`description`、`owner`、`writable_paths`、`verify_commands`、`successCriteria`。`verify_commands` 必须是非空的命令字符串数组，不能写成对象数组。每条 successCriteria 是对象，至少写 `title` 与 `expectedEvidence`；能由验证命令证明时，`verifierCommandRefs` 填从 0 开始的命令索引数组，或填与 `verify_commands` 中完全一致的命令字符串数组。",
         "可执行工单的 `owner` 必须是 Jiuwei 或 ZhuRong：实现任务通常交给 ZhuRong，必要的流程执行交给 Jiuwei。DiJiang、BaiZe、LuWu 是只读长期 Agent，分别通过计划、独立复核和仓库治理阶段参与，不能成为 command worker。不要留空，也不要用执行阶段的默认值代替。",
         "",
         "写入草稿后执行导入命令。语义生成的计划会自动进入待确认状态，即使全局 `planApproval.required` 没有打开也不能直接 run：",
@@ -519,7 +531,7 @@ function buildCodexHooksConfig(command) {
   };
 }
 
-function renderCursorRule({ hookCommand }) {
+function renderCursorRule({ hookCommand, cliPrefix }) {
   return `---
 alwaysApply: true
 ---
@@ -530,11 +542,11 @@ This project uses ${PRODUCT_NAME} for local agent governance.
 Required behavior:
 
 - Before planning or implementing, run \`${hookCommand}\` with a \`UserPromptSubmit\` payload when available.
-- Before editing files for a ${PRODUCT_NAME} task, verify task scope with \`node ./bin/wildarrange.mjs guard scope --task <taskId>\` or \`node ./bin/wildarrange.mjs hook run\` using a \`PreToolUse\` payload.
+- Before editing files for a ${PRODUCT_NAME} task, verify task scope with \`${cliPrefix} guard scope --task <taskId>\` or \`${cliPrefix} hook run\` using a \`PreToolUse\` payload.
 - Treat worker completion as a claim only. Completion requires verifier, scope guard, review gate, success criteria evidence, and checkpoint.
 - Do not weaken \`verify_commands\`, \`review_commands\`, \`standards_commands\`, project rules, or \`successCriteria\` to manufacture PASS.
-- At the start and end of each turn, check pending human decisions (run the hook above, or \`node ./bin/wildarrange.mjs status\`) and proactively surface them to the developer in chat with clear options — plans awaiting approval, out-of-scope ChangeRequests, failed tasks, child agents awaiting acceptance. Do not decide on the developer's behalf, and do not make the developer dig through the terminal to find them.
-- If Cursor cannot execute lifecycle hooks automatically, run \`node ./bin/wildarrange.mjs continuation check\` before stopping a task.
+- At the start and end of each turn, check pending human decisions (run the hook above, or \`${cliPrefix} status\`) and proactively surface them to the developer in chat with clear options — plans awaiting approval, out-of-scope ChangeRequests, failed tasks, child agents awaiting acceptance. Do not decide on the developer's behalf, and do not make the developer dig through the terminal to find them.
+- If Cursor cannot execute lifecycle hooks automatically, run \`${cliPrefix} continuation check\` before stopping a task.
 `;
 }
 
@@ -546,6 +558,7 @@ function renderAdapterInstallReport(report) {
     `Target: ${report.target}`,
     `Mode: ${report.mode}`,
     `Package: ${report.packageName}`,
+    `CLI prefix: ${report.cliPrefix}`,
     `Result: ${report.result} (host activation not yet verified)`,
     "",
     "## Hook Command",
@@ -564,7 +577,7 @@ function renderAdapterInstallReport(report) {
   lines.push("");
   lines.push("## Install Model");
   lines.push("");
-  lines.push("- Codex project hooks are hard enforcement only after Codex trusts the project `.codex/` layer and the hook definition via `/hooks`.");
+  lines.push("- Codex project hooks are hard enforcement only after trust and enablement. In Codex Desktop, review and enable the project Hook under Settings > Hooks; in Codex CLI, use `/hooks`.");
   lines.push("- Cursor project hooks (`.cursor/hooks.json`) are hard enforcement once the project is opened as a trusted workspace; `preToolUse` on Write/Delete/Shell is fail-closed. The `.cursor/rules/wildarrange.mdc` layer remains soft guidance.");
   lines.push("- Kimi Code reads the shared `.agents/skills/` directly. Its generated plugin becomes active only after `/plugins install <path>` and `/reload`; Kimi Hooks are fail-open on hook crashes/timeouts.");
   lines.push(`- Recommended user entry: \`npx ${DEFAULT_PACKAGE_NAME}@latest init\` or \`npx ${DEFAULT_PACKAGE_NAME}@latest adapter install\`.`);

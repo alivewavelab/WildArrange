@@ -69,7 +69,7 @@ npx wildarrange doctor
 
 Commit `package.json` and `package-lock.json`. Teammates and CI can then use `npm ci` to install the same version instead of silently following a newer `latest`.
 
-`adapter install` generates project-scoped integration files for Codex, Cursor, and Kimi Code; generation alone does not prove that the host loaded them. Local runtime outputs such as `.wildarrange/` and `.cursor/` are normally excluded from Git, so regenerate them on each device instead of copying generated files from another machine. Codex must also trust the current definition through `/hooks` and produce at least one lifecycle-hook receipt. After that, `doctor` should show `codex:configured/execution observed`; `ACTIVATION UNVERIFIED` must not be reported as active governance.
+`adapter install` generates project-scoped integration files for Codex, Cursor, and Kimi Code; generation alone does not prove that the host loaded them. Local runtime outputs such as `.wildarrange/` and `.cursor/` are normally excluded from Git, so regenerate them on each device instead of copying generated files from another machine. In Codex Desktop, review, trust, and enable the current project Hook under Settings > Hooks; in Codex CLI, use `/hooks`. Produce at least one lifecycle-hook receipt. After that, `doctor` should show `codex:configured/execution observed`; `ACTIVATION UNVERIFIED` must not be reported as active governance.
 
 ### Initialize Project Governance Documents (Optional)
 
@@ -299,7 +299,7 @@ node ./bin/wildarrange.mjs adapter restore --backup <backupId>
 
 Install, uninstall, and restore write reports under `.wildarrange/adapters/`. Existing adapter files are backed up before overwrite or removal. `restore` copies files from `.wildarrange/adapters/backups/<backupId>/` back to their original paths.
 
-- **Codex**: lifecycle hooks are written to `.codex/hooks.json`, with an audit copy at `.wildarrange/adapters/codex/hooks.json`. Codex runs these hard hooks only after the trusted project layer and the hook definition are reviewed/trusted through `/hooks`.
+- **Codex**: lifecycle hooks are written to `.codex/hooks.json`, with an audit copy at `.wildarrange/adapters/codex/hooks.json`. In Codex Desktop, review, trust, and enable the project Hook under Settings > Hooks; in Codex CLI, use `/hooks`. Codex runs these hard hooks only after that step.
 - **Cursor**: project hooks at `.cursor/hooks.json` (with the `.cursor/hooks/wildarrange-hook-bridge.mjs` bridge) load automatically in a trusted workspace; `preToolUse` (Write/Delete/Edit/Shell) and `beforeShellExecution` (integrated terminal commands) can hard-deny and are fail-closed. `.cursor/rules/wildarrange.mdc` remains as the soft rule layer.
 - **Kimi Code**: a project-specific plugin is generated under `.wildarrange/adapters/kimi/plugin/`, while project instructions and Skills reuse `AGENTS.md` and `.agents/skills/`. WildArrange never silently edits the user-level `~/.kimi-code/config.toml`; start Kimi Code from the project root, run `/plugins install .wildarrange/adapters/kimi/plugin`, then run `/reload`. Do not quote the path because Kimi Code 0.27 treats quote characters as part of the path. Although plugin installation is user-scoped, its bridge exits silently outside WildArrange projects.
 
@@ -611,7 +611,7 @@ npm test
 npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache
 ```
 
-Current status: the linear governance loop is implemented and tested; checkpoint writes an acceptance-proof chain first. Optional LLM review, configurable LSP/typecheck diagnostics, AST/structure commands, hashline anchors, and comment checking are available through the CLI review gate. Codex hooks become hard after `/hooks` trust; Cursor `preToolUse` / `beforeShellExecution` are fail-closed in trusted workspaces. Multi-agent support includes command-based parallel runs, Codex/Cursor command-template spawn, structured artifact admission, Git worktree patch admission, and retain-until-acceptance. Host-private background process management remains adapter work.
+Current status: the linear governance loop is implemented and tested; checkpoint writes an acceptance-proof chain first. Optional LLM review, configurable LSP/typecheck diagnostics, AST/structure commands, hashline anchors, and comment checking are available through the CLI review gate. Codex Desktop hooks become hard after they are reviewed, trusted, and enabled under Settings > Hooks; Codex CLI uses `/hooks`. Cursor `preToolUse` / `beforeShellExecution` are fail-closed in trusted workspaces. Multi-agent support includes command-based parallel runs, Codex/Cursor command-template spawn, structured artifact admission, Git worktree patch admission, and retain-until-acceptance. Host-private background process management remains adapter work.
 
 ## More Docs
 

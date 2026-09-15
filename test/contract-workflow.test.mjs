@@ -17,6 +17,7 @@ import { scanContractGovernanceUniverse, persistContractScan } from "../src/infr
 import { applyContractCardDecision } from "../src/capabilities/contract-governance.mjs";
 import { continuationDirective } from "../src/ai/context.mjs";
 import { persistTaskState } from "../src/orchestration/task-board.mjs";
+import { installAdapter } from "../src/interface/adapters.mjs";
 
 const sourcePath = "src-tauri/src/lib.rs";
 const rust = '#[tauri::command]\nfn greet(name: String) -> String { name }\nfn main(){ tauri::generate_handler![greet]; }\n';
@@ -212,6 +213,7 @@ for (const scenario of ["same_result", "conflict", "unchanged"]) {
 
 test("resume and Stop prioritize unfinished rollback over human approval and other runnable work", async (t) => {
   const root = await fixture(t);
+  await installAdapter(root, { target: "codex", mode: "local" });
   const waiting = await runNextTask(root);
   const state = await loadTaskState(root);
   const task = state.tasks[0];

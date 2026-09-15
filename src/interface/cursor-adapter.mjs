@@ -41,7 +41,7 @@ export function buildCursorHooksConfig({ bridgeCommand }) {
 export function renderCursorHookBridge({ mode, packageName, localCliPath }) {
   const cliSpec = mode === "npx"
     ? { kind: "npx", packageName }
-    : { kind: "local", cliPath: path.resolve(localCliPath) };
+    : { kind: "local", cliPath: path.resolve(localCliPath), packageName };
   return `#!/usr/bin/env node
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
