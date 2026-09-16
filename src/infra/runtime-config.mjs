@@ -143,7 +143,7 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
       plan: ["init-deep", "review-plan-risk", "review-plan-readiness", "review-scope-tradeoff", "design-acceptance"],
       design: ["frontend-ui-ux", "review-ux-interaction", "visual-qa"],
       execute: ["programming", "debugging", "refactor", "run-linear-delivery"],
-      verify: ["review-work", "design-acceptance", "visual-qa"],
+      verify: ["review-work", "design-acceptance", "visual-qa", "configure-project-review", "project-onboarding"],
       review: ["review-work", "review-plan-risk", "review-plan-readiness", "remove-ai-slops"],
       deploy: ["publish", "pre-publish-review"],
       recall: ["get-unpublished-changes"],
@@ -166,7 +166,9 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
       stop: { markdownMaxChars: 12_000, skillMaxChars: 24_000 },
     },
   },
+  executionReadiness: { workerProbe: null, researchProbe: null, researchSkills: [], timeoutMs: 30000 },
   review: {
+    steps: [],
     responsibility: { command: null, timeoutMs: 120000, maxEvidenceChars: 500000 },
     llm: {
       enabled: false,
@@ -417,6 +419,14 @@ function buildArmedConfig() {
 function normalizeRuntimeConfig(config) {
   if (!isPlainObject(config)) return config;
   const normalized = { ...config };
+  const readiness = normalized.executionReadiness;
+  if (!isPlainObject(readiness)) throw new Error("executionReadiness must be an object");
+  for (const key of ["workerProbe", "researchProbe"]) {
+    if (readiness[key] != null && (typeof readiness[key] !== "string" || !readiness[key].trim())) throw new Error("executionReadiness." + key + " must be a nonempty command or null");
+  }
+  if (!Array.isArray(readiness.researchSkills) || readiness.researchSkills.some(name => typeof name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(name))) throw new Error("executionReadiness.researchSkills must contain Skill names");
+  if (!Number.isInteger(readiness.timeoutMs) || readiness.timeoutMs < 1 || readiness.timeoutMs > 300000) throw new Error("executionReadiness.timeoutMs must be between 1 and 300000");
+  if (!isPlainObject(normalized.review) || !Array.isArray(normalized.review.steps)) throw new Error("review.steps must be an array");
   delete normalized.dynamicAgents;
   delete normalized.promptVariants;
   if (normalized.runtime === ["wildarrange", "linear"].join("-")) normalized.runtime = DEFAULT_RUNTIME_NAME;
@@ -517,4 +527,19 @@ function deepMerge(base, override) {
 
 function isPlainObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export async function updateProjectGovernanceConfig(rootDir, patch, options = {}) {
+  if (!patch || typeof patch !== "object" || Array.isArray(patch) || Object.keys(patch).some(key => !["review", "executionReadiness"].includes(key))) throw new Error("setup may only change review and executionReadiness");
+  if (patch.review !== undefined && !isPlainObject(patch.review)) throw new Error("review must be an object");
+  if (patch.executionReadiness !== undefined && !isPlainObject(patch.executionReadiness)) throw new Error("executionReadiness must be an object");
+  if (patch.review && Object.keys(patch.review).some(key => !["steps", "responsibility"].includes(key))) throw new Error("setup review only accepts steps and responsibility");
+  if (patch.executionReadiness && Object.keys(patch.executionReadiness).some(key => !["workerProbe", "researchProbe", "researchSkills", "timeoutMs"].includes(key))) throw new Error("unknown executionReadiness field");
+  const current = await loadWildArrangeConfig(rootDir);
+  const config = normalizeRuntimeConfig(deepMerge(current.config, patch));
+  if (options.apply === true) {
+    await writeJsonAtomic(path.join(rootDir, WILDARRANGE_CONFIG_FILE), config);
+    await appendLedger(rootDir, { type: "project_governance_configured", configPath: WILDARRANGE_CONFIG_FILE });
+  }
+  return { config, applied: options.apply === true, configPath: WILDARRANGE_CONFIG_FILE };
 }

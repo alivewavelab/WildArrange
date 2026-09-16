@@ -1,3 +1,4 @@
+import { invokeCapability } from "../capabilities/gateway.mjs";
 import { mkdir, readdir } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -60,6 +61,26 @@ export async function runParallelAgents(rootDir, options = {}) {
     assertCommandWorkerAgent(options.agent || task.owner || `Agent${index + 1}`);
   });
 
+  const executionContexts = {};
+  for (const [index, task] of tasks.entries()) {
+    const agent = options.agent || task.owner || `Agent${index + 1}`;
+    // Resolve the same adapter as execution; preview paths are never executed.
+    const previewDir = resolveWildArrangePath(rootDir, "agent-runs", "readiness", task.id);
+    const spawn = resolveAgentSpawn(rootDir, config, task, {
+      rootDir, runDir: previewDir, workDir: previewDir, task, agent,
+      taskPacketPath: path.join(previewDir, "task.json"), resultPath: path.join(previewDir, "agent-result.json"),
+    }, options);
+    const envelope = await invokeCapability("execution-readiness", { rootDir, task: { ...task, owner: agent }, options: { workerCommand: spawn.command || "" } });
+    if (envelope.status !== "pass") {
+      if (envelope.evidence?.commandRecovery) {
+        task.status = "needs_user_decision";
+        task.last_readiness_result = envelope.evidence;
+        await persistTaskState(rootDir, taskState);
+      }
+      return { status: envelope.evidence?.commandRecovery ? "recovery_required" : "readiness_blocked", runId: null, tasks: [], readiness: envelope.evidence, error: envelope.error };
+    }
+    executionContexts[task.id] = envelope.evidence?.contextPath;
+  }
   const runId = createWorkId("agent_run");
   const runDir = resolveWildArrangePath(rootDir, "agent-runs", runId);
   await mkdir(runDir, { recursive: true });
@@ -133,6 +154,7 @@ export async function runParallelAgents(rootDir, options = {}) {
       ...options,
       config,
       defaultIsolation,
+      executionContextPath: executionContexts[task.id],
       index,
     })));
     await releaseFailedParallelRunClaims(rootDir, runId, results);
@@ -598,7 +620,7 @@ async function runOneAgentInner(rootDir, runDir, runId, task, options) {
   const commandResult = worktree.isolation === "git-worktree" && worktree.available !== true
     ? { exitCode: 1, stdout: "", stderr: worktree.reason || "git-worktree isolation unavailable" }
     : command
-      ? await runCommand(command, worktree.workDir, normalizeTimeout(options.timeoutMs || config.parallelAgents?.timeoutMs))
+      ? await runCommand(command, worktree.workDir, normalizeTimeout(options.timeoutMs || config.parallelAgents?.timeoutMs), { env: options.executionContextPath ? { WILDARRANGE_EXECUTION_CONTEXT: options.executionContextPath } : {} })
       : { exitCode: 78, stdout: "", stderr: "no runner command configured; task packet prepared only" };
   const structuredResult = await readJson(resultPath, null) || {};
   const patchResult = await collectAgentWorktreePatch(rootDir, worktree, {

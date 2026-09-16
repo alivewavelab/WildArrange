@@ -1,3 +1,4 @@
+import { hasAcceptedProjectReview, prepareProjectReview } from "./project-review.mjs";
 import { hasAcceptedResponsibilityAudit } from "../infra/responsibility-contract.mjs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -16,7 +17,14 @@ import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 export async function writeAcceptanceProof(rootDir, planId, task, evidence = {}, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const { config } = await loadWildArrangeConfig(rootDir);
-  const proof = buildAcceptanceProof(planId, task, evidence, config);
+  let projectReviewContextValid = false;
+  try {
+    const scope = evidence.scopeResult || task.last_scope_result || latestEvidence(task, "scope_check");
+    const review = evidence.reviewResult || task.last_review_result || latestEvidence(task, "review_gate");
+    const current = await prepareProjectReview(rootDir, task, config, scope?.changedPaths || []);
+    projectReviewContextValid = !current.steps.length || (current.pass && current.contextDigest === review?.projectReview?.contextDigest);
+  } catch { /* Missing or changed review inputs cannot reuse an old pass. */ }
+  const proof = buildAcceptanceProof(planId, task, { ...evidence, projectReviewContextValid }, config);
   const jsonPath = resolveTaskAcceptancePath(rootDir, planId, task.id, "json");
   const mdPath = resolveTaskAcceptancePath(rootDir, planId, task.id, "md");
   proof.reportJsonPath = path.relative(rootDir, jsonPath);
@@ -47,6 +55,10 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
   const executedReview = hasExecutedIndependentReview(reviewResult, config, task);
 
   const checks = [
+    proofCheck("project_review_bound", evidence.projectReviewContextValid !== false && hasAcceptedProjectReview(config || {}, task, scopeResult, reviewResult?.projectReview), {
+      evidence: reviewResult?.projectReview ? `policy=${reviewResult.projectReview.policyDigest}` : "no applicable project review receipt",
+      requiredFix: "重新执行当前项目必需审查清单，不得使用旧配置的通过结果。",
+    }),
     ...(task.responsibilityChanges ? [proofCheck("responsibility_audit_bound", hasAcceptedResponsibilityAudit(task, reviewResult?.responsibilityAudit), {
       evidence: reviewResult?.responsibilityAudit ? `decision=${reviewResult.responsibilityAudit.decision}; declaration=${reviewResult.responsibilityAudit.responsibilityDigest}; source=${reviewResult.responsibilityAudit.sourceDigest}` : "missing responsibility audit receipt",
       requiredFix: "重新执行独立职责审计；旧 Review PASS 或旧职责声明的审计不能作为完成证据。",

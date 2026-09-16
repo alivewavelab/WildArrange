@@ -25,7 +25,7 @@ export async function runWorkflow(rootDir, options = {}) {
   for (let step = 0; step < maxSteps; step += 1) {
     const result = await runNextTask(rootDir);
     results.push(result);
-    if (["complete", "blocked", "failed", "awaiting_plan_approval", "revalidation_required"].includes(result.status)) break;
+    if (["complete", "blocked", "failed", "awaiting_plan_approval", "revalidation_required", "readiness_blocked", "recovery_required"].includes(result.status)) break;
   }
 
   const report = await statusReport(rootDir);

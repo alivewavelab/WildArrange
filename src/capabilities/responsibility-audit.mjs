@@ -1,11 +1,9 @@
-import path from "node:path";
+import { loadSkillAttachment } from "../infra/context-attachments.mjs";
+import { executeReviewPacket } from "./project-review.mjs";
 import { RESPONSIBILITY_RULES, RESPONSIBILITY_REVIEW_INSTRUCTIONS, responsibilityDigest, normalizeResponsibilityChanges } from "../infra/responsibility-contract.mjs";
 import { collectResponsibilityEvidence } from "../infra/responsibility-evidence.mjs";
 import { readVerifiedLedgerEntries } from "../infra/ledger.mjs";
-import { runCommand } from "../infra/command-runner.mjs";
-import { compileCommandSafetyPatterns } from "../infra/command-safety.mjs";
-import { runResponsibilityLlmReview } from "../infra/llm-provider.mjs";
-import { nowIso, readJson, resolveWildArrangePath, resolveTaskReportPath, writeJsonAtomic } from "../infra/runtime-store.mjs";
+import { nowIso, readJson, resolveWildArrangePath, resolveTaskReportPath } from "../infra/runtime-store.mjs";
 
 export async function runResponsibilityAudit(controlRoot, task, scopeResult, config, executionRoot = controlRoot) {
   const base = { kind: "responsibility_audit", at: nowIso(), reviewer: "BaiZe" };
@@ -29,24 +27,18 @@ export async function runResponsibilityAudit(controlRoot, task, scopeResult, con
     const settings = config.review?.responsibility || {};
     const budget = Number.isInteger(settings.maxEvidenceChars) && settings.maxEvidenceChars > 0 ? settings.maxEvidenceChars : 500000;
     const source = await collectResponsibilityEvidence(executionRoot, changes, scopeResult.changedPaths, budget);
+    const reviewSkill = await loadSkillAttachment(controlRoot, "review-work", budget);
+    if (!reviewSkill || reviewSkill.truncated) return blocked("Required review-work Skill is missing or truncated");
     const packet = {
+      requiredSkills: [reviewSkill],
       taskId: task.id, planId: task.planId, responsibilityChanges: changes, rules: RESPONSIBILITY_RULES, source,
       instruction: RESPONSIBILITY_REVIEW_INSTRUCTIONS,
     };
+    if (JSON.stringify(packet).length > budget) return blocked("Responsibility review packet exceeds evidence budget");
     const packetPath = resolveTaskReportPath(controlRoot, "reviews", task.planId, task.id, "json") + ".responsibility-input.json";
-    await writeJsonAtomic(packetPath, packet);
-    let content;
-    if (typeof settings.command === "string" && settings.command.trim()) {
-      const result = await runCommand(settings.command, executionRoot, settings.timeoutMs || 120000, {
-        extraPatterns: compileCommandSafetyPatterns(config),
-        env: { WILDARRANGE_REVIEW_PACKET: path.resolve(packetPath) },
-      });
-      if (result.terminationFailed || result.recoveryRequired) return { ...blocked("Reviewer termination requires recovery"), commandRecovery: result };
-      if (result.exitCode !== 0 || result.outputTruncated?.stdout) return blocked("Independent reviewer failed or output was truncated");
-      content = result.stdout;
-    } else {
-      content = await runResponsibilityLlmReview(config, packet, settings);
-    }
+    const response = await executeReviewPacket(executionRoot, packetPath, packet, config, settings);
+    if (response.commandRecovery) return { ...blocked("Reviewer termination requires recovery"), commandRecovery: response.commandRecovery };
+    const content = response.content;
     const after = await collectResponsibilityEvidence(executionRoot, changes, scopeResult.changedPaths, budget);
     if (after.digest !== source.digest) return blocked("Source changed during independent audit; rerun verification and review");
     const result = validateResponsibilityVerdict(JSON.parse(content), source);

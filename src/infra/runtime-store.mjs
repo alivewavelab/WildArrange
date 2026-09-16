@@ -51,7 +51,7 @@ export function resolveLegacyTaskAcceptancePath(rootDir, planId, taskId, extensi
 }
 
 export function resolveTaskReportPath(rootDir, reportKind, planId, taskId, extension = "json") {
-  if (!new Set(["reviews", "failures"]).has(reportKind)) {
+  if (!new Set(["reviews", "failures", "readiness"]).has(reportKind)) {
     throw new Error(`unsupported task report kind: ${reportKind}`);
   }
   assertEvidenceSegment(planId, "planId");

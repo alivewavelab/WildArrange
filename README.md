@@ -660,3 +660,15 @@ Worker 之后的既有 Review 增加独立职责审计：R1 符合批准方案�
 职责变化通过现有 `steer` 的 `revise_acceptance` 提交 `responsibilityChanges`；原任务保持 pending，计划重新等待人工批准。批准指纹进入现有 ledger，不增加第二个事实台账。旧持久任务没有声明时显示 NOT_AUDITED 警告，不能说已通过新审计；旧底层程序化导入 API 保留兼容模式，集成方应传 `{ requireResponsibility: true }`。公开 CLI 没有关闭此校验的开关。
 
 新增任务或将草稿转为可执行任务时，只要职责声明发生变化，就重新等待人工批准；整链运行、分步执行、并行启动都不得抢跑。内置 `workflow --sample` 仅为固定运行时产物的诊断演示，保留 NOT_AUDITED 标记，不构成职责审计通过证明。
+
+## 项目接管与项目审查
+
+安装 adapter 后，使用 /wildarrange-setup 配置必需的 Worker、Reviewer、调研能力和项目规范；使用 /wildarrange-onboard 盘点旧计划、事实维护者、测试与夹具，并通过正式计划迁移。Skill 正文也可用 prompts show --skill configure-project-review 或 project-onboarding 读取。目标项目使用已安装的 wildarrange 命令或 adapter 给出的绝对路径，不需要拥有工具源码。
+
+配置保存在 wildarrange.config.json 的 review.steps 与 executionReadiness；任务业务字段仍只描述本次工作。每个 Review 步骤声明 id、title、appliesTo、requirement、required、documents、skills 和可选 command，按数组顺序运行。必需步骤不通过就驳回，记录规则、文件行号、原文和整改要求；建议步骤只告警。原有 R1–R5 审计不能被项目步骤替代。
+
+先将配置补丁保存到 .wildarrange/plan-drafts/review-setup.json，执行 wildarrange review configure --from .wildarrange/plan-drafts/review-setup.json 预览，用户确认后再加 --apply。用 review checklist --task T001 查看清单，已批准后用 readiness --task T001 检查开工依赖。配置依赖缺失可先保存，但业务 Worker 不会启动，不消耗重试次数。
+
+Worker 读取 WILDARRANGE_EXECUTION_CONTEXT 的完整任务 Skill；探测器读取 WILDARRANGE_READINESS_PACKET，Reviewer 读取 WILDARRANGE_REVIEW_PACKET。探测返回 ready、原 challenge、loadedSkills；Reviewer 按包内协议返回带 inputDigest 的 PASS/RETURN/INCONCLUSIVE 与准确源码证据。请连接真实服务，固定回显不是独立审核。握手通过不等于功能交付。
+
+旧项目扫描用 adoption inventory，登记继续使用 adoption 的逐卡批准流程。Registry.fixtures 只保存夹具位置与消费者；旧计划来源保存在 task.request.evidenceRefs，事实读写仍属于唯一 owner。登记完成与实际迁移完成分别报告，历史“已完成”必须重新验证才成为当前完成。存量无职责声明且无项目步骤的兼容任务返回 legacy_not_checked，不能宣传为通过新开工检查。

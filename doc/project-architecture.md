@@ -397,3 +397,11 @@ adapter 专用行为属于 `src/interface/adapters.mjs`、`src/interface/kimi-ad
 完整字段与执行器协议见 README 的“职责与事实审计”。旧底层程序化导入的兼容边界不构成新的审计通过证据。
 
 职责声明变化的重新批准由 task-board.persistTaskState 统一触发，覆盖新增任务、草稿补全和 steer；先关闭批准门再写任务，防止更新中断后带着旧批准执行。线性、分步和并行入口共同读取 plan-state 的批准状态。
+
+## 项目审查与开工依赖
+
+infra/context-attachments.mjs 是完整 Markdown/Skill 安全读取的唯一 owner，AI 注入与能力层复用它。capabilities/project-review.mjs 持有项目审查清单选择、输入包与证据校验，并提供配置预览/应用；capabilities/execution-readiness.mjs 持有开工依赖检查与执行服务握手。线性和并行编排只经 gateway 调用，不新增反向依赖。
+
+review.steps 是项目附加审查的唯一配置；任务字段不复制审查要求。审查输入绑定策略、文档/Skill 与源码摘要，运行后复查内容未变。必需项目审查与原有职责审计共同进入 Review 与 acceptance proof；探测不能生成完成证明。报告只保存证据，不成为第二套业务事实维护者。
+
+configure-project-review 和 project-onboarding 是按需加载的流程 Skill；setup/onboard adapter 入口先读取其正文。接管沿用 tasks.request.evidenceRefs 与 Verification Registry，fixtures 目录项保存来源和消费者，不保存夹具业务值。扫描、登记、迁移和当前验收不能互相替代。

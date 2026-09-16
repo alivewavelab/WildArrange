@@ -1,14 +1,36 @@
 {
   "version": 1,
   "source": {
-    "routingMechanism": [
-      "deterministic intent gate",
-      "category and Skill delegation",
-      "optional semantic shadow"
-    ],
+    "routingMechanism": ["deterministic intent gate", "category and Skill delegation", "optional semantic shadow"],
     "adaptation": "Codex/Cursor/Kimi Code 线性 runtime 使用确定性 intent/domain/category 路由；Agent 固定为五个长期岗位，窄职责按需挂载为 Skill。"
   },
   "intents": [
+    {
+      "name": "configure_project_review",
+      "signals": ["配置项目审查", "接入审查规范", "配置执行能力", "configure project review"],
+      "route": "verify",
+      "primaryAgent": "LuWu",
+      "supportAgents": ["Jiuwei"],
+      "category": null,
+      "skills": ["configure-project-review"],
+      "nextCommand": "node ./bin/wildarrange.mjs config show",
+      "needsPlan": false,
+      "lockPrimaryAgent": true,
+      "risk": "medium"
+    },
+    {
+      "name": "project_onboarding",
+      "signals": ["初始化治理", "旧项目整体接管", "归拢旧计划", "project onboarding"],
+      "route": "verify",
+      "primaryAgent": "LuWu",
+      "supportAgents": ["Jiuwei"],
+      "category": null,
+      "skills": ["project-onboarding"],
+      "nextCommand": "node ./bin/wildarrange.mjs adoption inventory",
+      "needsPlan": false,
+      "lockPrimaryAgent": true,
+      "risk": "medium"
+    },
     {
       "name": "routing_review",
       "signals": ["路由复盘", "路由调试", "路由误判", "误判分析", "route review", "routing review"],

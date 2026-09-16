@@ -1,3 +1,4 @@
+import { runProjectReview } from "./project-review.mjs";
 import { runResponsibilityAudit } from "./responsibility-audit.mjs";
 import { runContractGovernanceReview } from "./contract-governance.mjs";
 import {
@@ -67,7 +68,15 @@ export async function runReviewGate(rootDir, task, evidence = {}, options = {}) 
 
   const responsibilityAudit = await runResponsibilityAudit(rootDir, task, scopeResult, config, executionRoot);
   if (responsibilityAudit.commandRecovery) return recoveryRequiredReview(responsibilityAudit.commandRecovery, reviewCommandResults, standardsCommandResults, criteria, qualityResults);
+  const projectReview = await runProjectReview(rootDir, task, scopeResult, config, executionRoot);
+  if (projectReview.commandRecovery) return recoveryRequiredReview(projectReview.commandRecovery, reviewCommandResults, standardsCommandResults, criteria, qualityResults);
   const lanes = [
+    ...(projectReview.error ? [reviewLane("project_review", "BaiZe", false, { summary: projectReview.error, fixBy: "修复项目审查配置、依据或执行器后重跑。" })] : []),
+    ...projectReview.steps.map(step => reviewLane(`project_review_${step.id}`, "BaiZe", step.decision === "PASS", {
+      statusOverride: !step.required && step.decision !== "PASS" ? "warn" : undefined,
+      summary: step.summary + (step.findings.length ? "\n" + step.findings.map(f => `${f.file}:${f.line} ${f.reason}; evidence=${f.text}; fix=${f.requiredFix}`).join("\n") : ""),
+      fixBy: "按照本项项目规范和证据整改，不得删除必需审查项。",
+    })),
     reviewLane("responsibility_audit", "BaiZe", responsibilityAudit.pass, {
       statusOverride: responsibilityAudit.legacy ? "warn" : undefined,
       summary: responsibilityAudit.summary,
@@ -218,6 +227,7 @@ export async function runReviewGate(rootDir, task, evidence = {}, options = {}) 
     rulesContextPath: rulesContext.reportMdPath,
     contractGovernance,
     responsibilityAudit,
+    projectReview,
   };
 }
 

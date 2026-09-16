@@ -46,7 +46,9 @@
     "run-linear-delivery": "skills/run-linear-delivery.md",
     "design-acceptance": "skills/design-acceptance.md",
     "ultraresearch": "skills/ultraresearch.md",
-    "visual-qa": "skills/visual-qa.md"
+    "visual-qa": "skills/visual-qa.md",
+    "configure-project-review": "skills/configure-project-review/SKILL.md",
+    "project-onboarding": "skills/project-onboarding/SKILL.md"
   },
   "tools": "tools/tool-contract.json",
   "routes": "routes.json"

@@ -5160,8 +5160,8 @@ test("host semantic plans require an explicit command-worker task.owner and user
     );
 
     const reviewRunner = resolveWildArrangePath(dir, "independent-review-fixture.cjs");
-    await writeFile(reviewRunner, `const fs=require('node:fs');const packet=JSON.parse(fs.readFileSync(process.env.WILDARRANGE_REVIEW_PACKET,'utf8'));if(!packet.source.files.some(f=>f.path==='src/result.js' && f.content.includes('export const ok = true')))throw Error('missing reviewed implementation');console.log(JSON.stringify({decision:'PASS',checks:Object.keys(packet.rules).map(rule=>({rule,decision:'PASS',reason:'Single fixture artifact, no facts or independent responsibilities added'})),findings:[]}));`);
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({ review: { responsibility: { command: `node "${reviewRunner}"` } } }));
+    await writeFile(reviewRunner, `const fs=require('node:fs');const packet=JSON.parse(fs.readFileSync(process.env.WILDARRANGE_READINESS_PACKET||process.env.WILDARRANGE_REVIEW_PACKET,'utf8'));if(packet.kind==='execution_readiness_probe'){console.log(JSON.stringify({ready:true,challenge:packet.challenge,loadedSkills:packet.requiredSkills.map(s=>s.name)}));process.exit(0)}if(!packet.source.files.some(f=>f.path==='src/result.js' && f.content.includes('export const ok = true')))throw Error('missing reviewed implementation');console.log(JSON.stringify({decision:'PASS',checks:Object.keys(packet.rules).map(rule=>({rule,decision:'PASS',reason:'Single fixture artifact, no facts or independent responsibilities added'})),findings:[]}));`);
+    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({ executionReadiness: { workerProbe: `node "${reviewRunner}"` }, review: { responsibility: { command: `node "${reviewRunner}"` } } }));
     const completed = await runNextTask(dir);
     assert.equal(completed.status, "completed");
     assert.match(await readFile(path.join(dir, "src", "result.js"), "utf8"), /export const ok = true/);

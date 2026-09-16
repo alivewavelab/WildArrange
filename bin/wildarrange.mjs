@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { configureProjectReview, prepareProjectReview } from "../src/capabilities/project-review.mjs";
 import { generateContractArtifacts } from "../src/interface/contract-view.mjs";
 import { applyContractDecision, proposeContractChange, resolveContractChange } from "../src/orchestration/contract-governance.mjs";
 import { runHostRoute, runHostHook } from "../src/orchestration/host-runtime.mjs";
@@ -606,6 +607,30 @@ async function main() {
     return;
   }
 
+  if (command === "review" && args._[1] === "configure") {
+    if (!args.from || args.from === true) throw new Error("review configure requires --from <setup.json>");
+    console.log(JSON.stringify(await configureProjectReview(rootDir, args.from, { apply: args.apply === true }), null, 2));
+    return;
+  }
+  if ((command === "review" && args._[1] === "checklist") || command === "readiness") {
+    if (!args.task || args.task === true) throw new Error("this command requires --task <taskId>");
+    const { task } = await getTeamTask(rootDir, args.task);
+    if (command === "readiness") {
+      const approval = await loadPlanApproval(rootDir);
+      if (approval.required && approval.status !== "approved") { console.log(JSON.stringify({ status: "awaiting_plan_approval" })); return; }
+      const result = await invokeCapability("execution-readiness", { rootDir, task });
+      console.log(JSON.stringify(result, null, 2));
+      if (result.status !== "pass") process.exitCode = 1;
+    } else {
+      const { config } = await loadWildArrangeConfig(rootDir);
+      console.log(JSON.stringify(await prepareProjectReview(rootDir, task, config), null, 2));
+    }
+    return;
+  }
+  if (command === "adoption" && args._[1] === "inventory") {
+    console.log(JSON.stringify(await invokeCapability("verification-governance-scan", { rootDir }), null, 2));
+    return;
+  }
   if (command === "review" && args._[1] === "suspicious") {
     const report = await runSuspicionReview(rootDir, {
       limit: Number.isInteger(Number(args.limit)) && args.limit !== true ? Number(args.limit) : undefined,

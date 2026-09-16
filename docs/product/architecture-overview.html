@@ -1062,6 +1062,12 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
           "io": "待读代码填写",
           "extTo": [
             {
+              "t": "project-review.mjs",
+              "io": "project-review.mjs",
+              "p": "src/capabilities/project-review.mjs",
+              "m": "capabilities"
+            },
+            {
               "t": "contract-view.mjs",
               "io": "contract-view.mjs",
               "p": "src/interface/contract-view.mjs",
@@ -1315,6 +1321,12 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
           "r": "wildarrange.mjs",
           "io": "待读代码填写",
           "extTo": [
+            {
+              "t": "project-review.mjs",
+              "io": "project-review.mjs",
+              "p": "src/capabilities/project-review.mjs",
+              "m": "capabilities"
+            },
             {
               "t": "contract-view.mjs",
               "io": "contract-view.mjs",
@@ -2252,6 +2264,12 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
           ],
           "extTo": [
             {
+              "t": "gateway.mjs",
+              "io": "gateway.mjs",
+              "p": "src/capabilities/gateway.mjs",
+              "m": "capabilities"
+            },
+            {
               "t": "agent-registry.mjs",
               "io": "agent-registry.mjs",
               "p": "src/infra/agent-registry.mjs",
@@ -2690,6 +2708,12 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
             }
           ],
           "extTo": [
+            {
+              "t": "gateway.mjs",
+              "io": "gateway.mjs",
+              "p": "src/capabilities/gateway.mjs",
+              "m": "capabilities"
+            },
             {
               "t": "agent-registry.mjs",
               "io": "agent-registry.mjs",
@@ -3363,6 +3387,12 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
           ],
           "extTo": [
             {
+              "t": "context-attachments.mjs",
+              "io": "context-attachments.mjs",
+              "p": "src/infra/context-attachments.mjs",
+              "m": "infra"
+            },
+            {
               "t": "agent-registry.mjs",
               "io": "agent-registry.mjs",
               "p": "src/infra/agent-registry.mjs",
@@ -3372,12 +3402,6 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "t": "runtime-config.mjs",
               "io": "runtime-config.mjs",
               "p": "src/infra/runtime-config.mjs",
-              "m": "infra"
-            },
-            {
-              "t": "prompt-pack.mjs",
-              "io": "prompt-pack.mjs",
-              "p": "src/infra/prompt-pack.mjs",
               "m": "infra"
             },
             {
@@ -3662,6 +3686,11 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
           "io": "listRegisteredCapabilities() → 导出；invokeCapability(name, ctx = {}) → 导出",
           "to": [
             {
+              "t": "src-capabilities-execution-readiness-mjs",
+              "io": "execution-readiness.mjs",
+              "p": "src/capabilities/execution-readiness.mjs"
+            },
+            {
               "t": "src-capabilities-verify-mjs",
               "io": "verify.mjs",
               "p": "src/capabilities/verify.mjs"
@@ -3734,6 +3763,11 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
           "r": "gateway.mjs",
           "io": "listRegisteredCapabilities() → 导出；invokeCapability(name, ctx = {}) → 导出",
           "to": [
+            {
+              "t": "src-capabilities-execution-readiness-mjs",
+              "io": "execution-readiness.mjs",
+              "p": "src/capabilities/execution-readiness.mjs"
+            },
             {
               "t": "src-capabilities-verify-mjs",
               "io": "verify.mjs",
@@ -3872,6 +3906,11 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
           "io": "runReviewGate(rootDir, task, evide) → 导出",
           "to": [
             {
+              "t": "src-capabilities-project-review-mjs",
+              "io": "project-review.mjs",
+              "p": "src/capabilities/project-review.mjs"
+            },
+            {
               "t": "rc-capabilities-responsibility-audit-mjs",
               "io": "responsibility-audit.mjs",
               "p": "src/capabilities/responsibility-audit.mjs"
@@ -3975,6 +4014,13 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
           "p": "src/capabilities/acceptance-proof.mjs",
           "r": "acceptance-proof.mjs",
           "io": "writeAcceptanceProof(rootDir, planId, tas) → 导出；buildAcceptanceProof(planId, task, eviden) → 导出",
+          "to": [
+            {
+              "t": "src-capabilities-project-review-mjs",
+              "io": "project-review.mjs",
+              "p": "src/capabilities/project-review.mjs"
+            }
+          ],
           "extTo": [
             {
               "t": "responsibility-contract.mjs",

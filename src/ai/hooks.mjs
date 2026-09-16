@@ -700,7 +700,8 @@ function isAllowedPrePlanShellCommand(command, cliCommandPrefix = "") {
   const args = parseWildArrangeShellArgs(command, cliCommandPrefix);
   if (!args) return false;
   if (/^(?:status|doctor|summary|timeline|decisions|help(?:\s+--all)?|--help(?:\s+--all)?)$/i.test(args)) return true;
-  if (/^(?:config\s+show|changes\s+list)$/i.test(args)) return true;
+  if (/^(?:config\s+show|changes\s+list|adoption\s+inventory|review\s+checklist\s+--task\s+[A-Za-z0-9_.-]+)$/i.test(args)) return true;
+  if (/^review\s+configure\s+--from\s+\.wildarrange[\\/]plan-drafts[\\/][A-Za-z0-9_.-]+\.json(?:\s+--apply)?$/i.test(args)) return true;
   if (/^prompts\s+show\s+--skill\s+[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/i.test(args)) return true;
   if (/^resume(?:\s+--session\s+[A-Za-z0-9_.-]+)?$/i.test(args)) return true;
   if (/^continuation\s+check(?:\s+--session\s+[A-Za-z0-9_.-]+)?$/i.test(args)) return true;
@@ -725,7 +726,7 @@ function parseWildArrangeShellArgs(command, cliCommandPrefix = "") {
 
 function isReadOnlyWildArrangeShellCommand(command, cliCommandPrefix = "") {
   const args = parseWildArrangeShellArgs(command, cliCommandPrefix);
-  return Boolean(args && /^(?:status|doctor|summary|timeline|decisions|config\s+show|changes\s+list|prompts\s+show\s+--skill\s+[A-Za-z0-9][A-Za-z0-9._-]{0,99}|resume(?:\s+--session\s+[A-Za-z0-9_.-]+)?|continuation\s+check(?:\s+--session\s+[A-Za-z0-9_.-]+)?|help(?:\s+--all)?|--help(?:\s+--all)?)$/i.test(args));
+  return Boolean(args && /^(?:status|doctor|summary|timeline|decisions|config\s+show|changes\s+list|adoption\s+inventory|review\s+checklist\s+--task\s+[A-Za-z0-9_.-]+|review\s+configure\s+--from\s+\.wildarrange[\\/]plan-drafts[\\/][A-Za-z0-9_.-]+\.json|prompts\s+show\s+--skill\s+[A-Za-z0-9][A-Za-z0-9._-]{0,99}|resume(?:\s+--session\s+[A-Za-z0-9_.-]+)?|continuation\s+check(?:\s+--session\s+[A-Za-z0-9_.-]+)?|help(?:\s+--all)?|--help(?:\s+--all)?)$/i.test(args));
 }
 
 async function isMatchingFeaturePlanImport(rootDir, command, gateId, cliCommandPrefix = "") {
