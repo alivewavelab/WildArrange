@@ -423,7 +423,7 @@ ${ADOPTION_VIEW_HTML}
         const route = task.route_decision ? task.route_decision.route + " → " + task.route_decision.primaryAgent : "尚未路由";
         const workspace = activeWorkspacesByTask.get(task.id);
         const workspaceMeta = workspace ? ' · ' + esc(workspace.branch || "独立工作区（detached）") + ' · ' + esc(workspace.workDir || "") : task.coordination?.branch ? ' · ' + esc(task.coordination.branch) : '';
-        return '<article class="task-card"><div class="task-id">' + esc(task.id) + '</div><div><div class="task-title">' + esc(task.subject) + '</div><div class="task-meta">' + esc(workTypeLabel(task.workType)) + ' · ' + esc(task.priority || "P1") + ' · ' + esc(route) + workspaceMeta + ' · ' + (task.verify_commands || []).length + ' 条验证命令 · 已尝试 ' + esc(task.attempts || 0) + ' 次</div></div><span class="status-badge ' + esc(task.status) + '">' + esc(statusLabel(task.status)) + '</span><div class="task-detail"><div class="grid two"><div><div class="label">验证与复核</div>' + reviewBox(task) + '</div><div><div class="label">失败与操作</div>' + failureBox(task) + actionButtons(task) + '</div></div></div></article>';
+        return '<article class="task-card"><div class="task-id">' + esc(task.id) + '</div><div><div class="task-title">' + esc(task.subject) + '</div><div class="task-meta">' + esc(workTypeLabel(task.workType)) + ' · ' + esc(task.priority || "P1") + ' · ' + esc(route) + workspaceMeta + ' · ' + (task.verify_commands || []).length + ' 条验证命令 · 已尝试 ' + esc(task.attempts || 0) + ' 次</div></div><span class="status-badge ' + esc(task.status) + '">' + esc(statusLabel(task.status)) + '</span><div class="task-detail"><div class="grid two"><div><div class="label">验证与复核</div>' + responsibilityBox(task) + reviewBox(task) + '</div><div><div class="label">失败与操作</div>' + failureBox(task) + actionButtons(task) + '</div></div></div></article>';
       }).join("");
       renderActiveWorkspaces(data.activeWorkspaces || []);
       renderTaskLedger(data.taskLedger || null);
@@ -434,6 +434,11 @@ ${ADOPTION_VIEW_HTML}
       el("healthSummary").innerHTML = '<div class="health-row"><span>配置基线</span><b>' + healthLabel(health.configBaseline) + '</b></div><div class="health-row"><span>可信账本</span><b>' + healthLabel(health.ledger) + '</b></div><div class="health-row"><span>IDE 适配器</span><b>查看体检</b></div>';
       renderRunHistory(data);
       loadPanels();
+    }
+    function responsibilityBox(task) {
+      const changes = task.responsibilityChanges || [];
+      if (!changes.length) return '<div class="muted">旧任务未声明职责与事实变化</div>';
+      return '<details><summary>职责与事实变更</summary>' + changes.map((change) => '<p><strong>' + esc(change.script) + '</strong><br>新增：' + esc(change.additions) + '<br>职责：' + esc(change.responsibilityBefore) + ' → ' + esc(change.responsibilityAfter) + '<br>事实：' + (change.facts || []).map((fact) => esc(fact.name) + '：' + esc(fact.ownerBefore || '无') + ' → ' + esc(fact.ownerAfter || '无') + '；' + esc(fact.access)).join('<br>') + '</p>').join('') + '</details>';
     }
     function renderActiveWorkspaces(workspaces) {
       el("activeWorkspaces").innerHTML = workspaces.length === 0

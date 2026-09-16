@@ -144,6 +144,7 @@
     }
   },
   "review": {
+    "responsibility": { "command": null, "timeoutMs": 120000, "maxEvidenceChars": 500000 },
     "llm": {
       "enabled": false,
       "required": false,

@@ -385,3 +385,13 @@ adapter 专用行为属于 `src/interface/adapters.mjs`、`src/interface/kimi-ad
 - 目录级 `AGENTS.md` 指引保持附加与局部。目录职责变化时更新最近文件；勿把完整根策略复制到每个文件夹。
 - `test/dependency-boundary.test.mjs` 每次 `npm test` 运行；边界测试失败意味着依赖图被违反，不是应放宽测试。
 - 保留 gate 不变量：verifier、scope、review 与 success criteria 对完成仍为 mandatory。
+
+## 职责与事实审计的目录归属
+
+- `src/infra/responsibility-contract.mjs`：任务职责声明的字段校验、R1–R5 常量、批准摘要指纹与中文摘要；不读取任务状态、不作交付决定。
+- `src/infra/responsibility-evidence.mjs`：只读采集目标与事实 owner 完整文件、项目源码、Git diff 及输入指纹；校验路径与预算，不写业务事实。
+- `src/capabilities/responsibility-audit.mjs`：Review 内部独立审计能力；核对既有批准 ledger、调用独立审查执行器、校验五条规则和源码证据，返回 PASS/RETURN；不推进任务状态。
+- `src/capabilities/review-gate.mjs` 统一消费该内部能力，继续由 delivery-pipeline 决定阻断、返工和 checkpoint；没有新并行流水线。
+- `plan-state.mjs` 持久化 task.responsibilityChanges，批准事件保存 responsibilityScopes；change-governance 的 revise_acceptance 修改声明后重新进入人工批准门。task-reports 保存审计结果，runtime-snapshot 保留声明，Dashboard 只读展示。
+
+完整字段与执行器协议见 README 的“职责与事实审计”。旧底层程序化导入的兼容边界不构成新的审计通过证据。

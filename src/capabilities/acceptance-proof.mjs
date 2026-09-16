@@ -1,3 +1,4 @@
+import { hasAcceptedResponsibilityAudit } from "../infra/responsibility-contract.mjs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
@@ -43,9 +44,13 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
   const verifyCommands = Array.isArray(task.verify_commands) ? task.verify_commands : [];
   const reviewLanes = Array.isArray(reviewResult?.lanes) ? reviewResult.lanes : [];
   const deliveryBaseline = summarizeDeliveryBaseline(evidence.deliveryBaseline || evidence.integrationCommit);
-  const executedReview = hasExecutedIndependentReview(reviewResult, config);
+  const executedReview = hasExecutedIndependentReview(reviewResult, config, task);
 
   const checks = [
+    ...(task.responsibilityChanges ? [proofCheck("responsibility_audit_bound", hasAcceptedResponsibilityAudit(task, reviewResult?.responsibilityAudit), {
+      evidence: reviewResult?.responsibilityAudit ? `decision=${reviewResult.responsibilityAudit.decision}; declaration=${reviewResult.responsibilityAudit.responsibilityDigest}; source=${reviewResult.responsibilityAudit.sourceDigest}` : "missing responsibility audit receipt",
+      requiredFix: "重新执行独立职责审计；旧 Review PASS 或旧职责声明的审计不能作为完成证据。",
+    })] : []),
     proofCheck("worker_result", workerResult?.kind === "worker" && workerResult.exitCode === 0, {
       evidence: workerResult ? `exitCode=${workerResult.exitCode}` : "missing worker result",
       requiredFix: "重新运行 execute/worker，确保 worker evidence 写入任务。",
@@ -115,6 +120,7 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
     pass: checks.every((check) => check.status === "pass"),
     checks,
     evidenceRefs: {
+      responsibilityAudit: reviewResult?.responsibilityAudit ? { decision: reviewResult.responsibilityAudit.decision, responsibilityDigest: reviewResult.responsibilityAudit.responsibilityDigest, sourceDigest: reviewResult.responsibilityAudit.sourceDigest } : null,
       worker: summarizeCommand(workerResult),
       verifier: verifyResult ? { pass: verifyResult.pass, resultCount: verifyResult.results?.length || 0 } : null,
       scope: scopeResult ? { status: scopeResult.status, deniedPaths: scopeResult.deniedPaths || [] } : null,
@@ -125,9 +131,10 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
   };
 }
 
-function hasExecutedIndependentReview(reviewResult, config = null) {
+function hasExecutedIndependentReview(reviewResult, config = null, task = {}) {
   if (!reviewResult || reviewResult.kind !== "review_gate") return { pass: false, sources: [], reasons: ["missing review result"] };
   const sources = [];
+  if (task.responsibilityChanges && hasAcceptedResponsibilityAudit(task, reviewResult.responsibilityAudit)) sources.push("responsibility_audit");
   const reasons = [];
   for (const [name, results] of [["review_commands", reviewResult.reviewCommandResults], ["standards_commands", reviewResult.standardsCommandResults]]) {
     const substantive = (results || []).filter((result) => result.skipped !== true && !isTrivialCommand(result.command));

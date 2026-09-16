@@ -1,3 +1,4 @@
+import { runResponsibilityAudit } from "./responsibility-audit.mjs";
 import { runContractGovernanceReview } from "./contract-governance.mjs";
 import {
   DEFAULT_REVIEW_AGENTS,
@@ -64,7 +65,14 @@ export async function runReviewGate(rootDir, task, evidence = {}, options = {}) 
     return recoveryRequiredReview(qualityResults.commandRecovery, reviewCommandResults, standardsCommandResults, criteria, qualityResults);
   }
 
+  const responsibilityAudit = await runResponsibilityAudit(rootDir, task, scopeResult, config, executionRoot);
+  if (responsibilityAudit.commandRecovery) return recoveryRequiredReview(responsibilityAudit.commandRecovery, reviewCommandResults, standardsCommandResults, criteria, qualityResults);
   const lanes = [
+    reviewLane("responsibility_audit", "BaiZe", responsibilityAudit.pass, {
+      statusOverride: responsibilityAudit.legacy ? "warn" : undefined,
+      summary: responsibilityAudit.summary,
+      fixBy: "按 R1-R5、代码位置和证据整改后重新审计；职责方案改变须先确认。缺少审计执行器时配置独立审查者。",
+    }),
     reviewLane("evidence_integrity", "BaiZe", evidenceIntegrity.pass, {
       summary: evidenceIntegrity.pass
         ? "worker and verifier evidence objects are present and internally complete"
@@ -209,6 +217,7 @@ export async function runReviewGate(rootDir, task, evidence = {}, options = {}) 
     successCriteria: criteria,
     rulesContextPath: rulesContext.reportMdPath,
     contractGovernance,
+    responsibilityAudit,
   };
 }
 

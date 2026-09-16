@@ -384,12 +384,13 @@ async function main() {
     }
     if (!args.from) throw new Error("wildarrange plan requires --from <plan.json>（或 wildarrange plan approve 确认已导入计划）");
     await initRuntime(rootDir);
-    const plan = await importPlan(rootDir, path.resolve(rootDir, args.from));
+    const plan = await importPlan(rootDir, path.resolve(rootDir, args.from), { requireResponsibility: true });
     const approval = await loadPlanApproval(rootDir);
     console.log(JSON.stringify({
       ok: true,
       planId: plan.id,
       taskCount: plan.tasks.length,
+      responsibilityChanges: plan.tasks.map((task) => ({ taskId: task.id, changes: task.responsibilityChanges })),
       approvalRequired: approval.required,
       approvalStatus: approval.status,
       nextStep: approval.required && approval.status !== "approved"

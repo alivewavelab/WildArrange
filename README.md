@@ -627,3 +627,34 @@ npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache
 | [doc/project-architecture.md](./doc/project-architecture.md) | 运行时架构与 gate 模型 |
 | [doc/five-zone-decoupling-guidelines.md](./doc/five-zone-decoupling-guidelines.md) | 可复用的五区受控解耦与目录级 AGENTS.md 准则 |
 | [doc/development-plan.md](./doc/development-plan.md) | P0 / P1 / P2 路线 |
+
+## 职责与事实审计
+
+公开 `plan --from` / `workflow --from` 导入的每张任务增加 `responsibilityChanges`。由计划 Agent 填写，人工确认；不是让用户编写技术设计。每项包含 `script`（精确目标脚本）、`additions`、`responsibilityBefore`、`responsibilityAfter`、`facts`。每项事实包含 `name`、`ownerBefore`、`ownerAfter`、`access`；无事实填空数组，新增/删除事实的不存在一侧填 `null`。任务摘要和 Dashboard 展示这些内容，恢复快照保留同一任务字段。
+
+```json
+{
+  "responsibilityChanges": [{
+    "script": "src/config-router.mjs",
+    "additions": "按游戏版本选择配置",
+    "responsibilityBefore": "按游戏选择配置",
+    "responsibilityAfter": "按游戏和版本选择配置，仍只负责路由",
+    "facts": [{
+      "name": "gameId 与 buildId 的对应关系",
+      "ownerBefore": "src/game-records.mjs",
+      "ownerAfter": "src/game-records.mjs",
+      "access": "通过 game-records.readGame() 查询，不新增存储"
+    }]
+  }]
+}
+```
+
+Worker 之后的既有 Review 增加独立职责审计：R1 符合批准方案；R2 无独立职责混杂；R3 无重复维护事实；R4 不绕过统一读写入口；R5 无重复业务实现。审查完整目标脚本、事实负责脚本、项目源码和 Git 差异。文件长度本身不是退回理由。审查者逐条返回 PASS/RETURN；RETURN 必须带规则编号、文件行号、源码原文、原因和整改建议，运行时检查证据位置与原文匹配。模型判断仍需人类裁决争议，不能把机械证据检查宣传为语义正确性证明。
+
+配置独立审查执行器有两种方式：
+- `review.responsibility.command`：只读宿主审查命令；从环境变量 `WILDARRANGE_REVIEW_PACKET` 指向的 JSON 读取任务与源码，stdout 仅返回审计 JSON。必须配置真正独立的审查者，不可复用 worker 自证或输出固定 PASS。
+- 未配置上述命令时，使用启用的 `review.llm` 和 BaiZe OpenAI-compatible provider。不会自动安装 CLI、申请 API key 或更改用户级配置。
+
+审查协议：`{ "decision": "PASS|RETURN", "checks": [{ "rule": "R1", "decision": "PASS|RETURN", "reason": "..." }], "findings": [{ "rule": "R3", "file": "src/example.mjs", "line": 12, "evidence": "该行源码原文", "reason": "...", "requiredFix": "..." }] }`。checks 必须恰好覆盖 R1–R5；每条 RETURN 有对应 finding。缺少执行器、证据超预算、响应格式错误、审查期间代码变化都不能通过 Review。`review.responsibility.maxEvidenceChars` 默认 500000；超限明确阻止审计，不截断后放行。
+
+职责变化通过现有 `steer` 的 `revise_acceptance` 提交 `responsibilityChanges`；原任务保持 pending，计划重新等待人工批准。批准指纹进入现有 ledger，不增加第二个事实台账。旧持久任务没有声明时显示 NOT_AUDITED 警告，不能说已通过新审计；旧底层程序化导入 API 保留兼容模式，集成方应传 `{ requireResponsibility: true }`。公开 CLI 没有关闭此校验的开关。

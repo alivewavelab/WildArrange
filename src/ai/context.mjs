@@ -1,3 +1,4 @@
+import { renderResponsibilityChanges } from "../infra/responsibility-contract.mjs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -296,6 +297,7 @@ function summarizeTaskForContext(task) {
     attempts: task.attempts,
     maxAttempts: task.maxAttempts,
     writable_paths: task.writable_paths || [],
+    responsibilityChanges: task.responsibilityChanges || null,
     verify_commands: task.verify_commands || [],
     review_commands: task.review_commands || [],
     standards_commands: task.standards_commands || [],
@@ -321,6 +323,7 @@ function summarizeTaskForContext(task) {
 function appendTaskContext(lines, task) {
   lines.push(`- ${task.id}: ${task.subject}`);
   lines.push(`  - Status: ${task.status}; category=${task.category || "unresolved"}; attempts=${task.attempts}/${task.maxAttempts}`);
+  lines.push(...renderResponsibilityChanges(task.responsibilityChanges));
   lines.push(`  - Writable: ${task.writable_paths.join(", ") || "(none)"}`);
   lines.push(`  - Verify: ${task.verify_commands.join(" && ") || "(none)"}`);
   if (task.review_commands.length > 0) lines.push(`  - Review: ${task.review_commands.join(" && ")}`);

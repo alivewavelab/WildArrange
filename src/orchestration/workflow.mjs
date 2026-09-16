@@ -14,7 +14,7 @@ export async function runWorkflow(rootDir, options = {}) {
   await initRuntime(rootDir);
   let plan = null;
   if (options.planPath) {
-    plan = await importPlan(rootDir, path.resolve(rootDir, options.planPath));
+    plan = await importPlan(rootDir, path.resolve(rootDir, options.planPath), { requireResponsibility: true });
   } else if (options.sample) {
     const samplePath = await createSamplePlan(rootDir);
     plan = await importPlan(rootDir, samplePath);

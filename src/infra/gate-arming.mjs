@@ -57,6 +57,7 @@ export function evaluateGateArming({ config, tasks = [] } = {}) {
 }
 
 export function hasRealReviewLane(task, config) {
+  if (task?.responsibilityChanges && typeof config?.review?.responsibility?.command === "string" && !isTrivialCommand(config.review.responsibility.command)) return true;
   if ((task?.review_commands || []).some((command) => !isTrivialCommand(command))) return true;
   if ((task?.standards_commands || []).some((command) => !isTrivialCommand(command))) return true;
   if (config?.review?.llm?.enabled === true) return true;

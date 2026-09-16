@@ -1,3 +1,4 @@
+import { normalizeResponsibilityChanges, responsibilityDigest, renderResponsibilityChanges } from "../infra/responsibility-contract.mjs";
 import { writeFile } from "node:fs/promises";
 import {
   COMMAND_WORKER_AGENTS,
@@ -154,6 +155,7 @@ export function normalizeTask(task, index, defaults = {}, options = {}) {
     skills,
     route_decision: task.route_decision || null,
     contractChanges,
+    responsibilityChanges: normalizeResponsibilityChanges(task.responsibilityChanges, writablePaths),
     evidence: Array.isArray(task.evidence) ? task.evidence : [],
     history: Array.isArray(task.history) ? task.history : [{ at: createdAt, event: "created", status: validateStatus(requestedStatus), source }],
     createdAt,
@@ -422,15 +424,20 @@ export function validatePlanGraph(plan) {
   return plan;
 }
 
-export async function importPlan(rootDir, planPath) {
-  return withTaskStateLock(rootDir, "import-plan", () => importPlanUnlocked(rootDir, planPath));
+export async function importPlan(rootDir, planPath, options = {}) {
+  return withTaskStateLock(rootDir, "import-plan", () => importPlanUnlocked(rootDir, planPath, options));
 }
 
-async function importPlanUnlocked(rootDir, planPath) {
+async function importPlanUnlocked(rootDir, planPath, options) {
   await ensureWildArrangeDirs(rootDir);
   const rawPlan = await readJson(planPath);
   const plan = normalizePlan(rawPlan);
   validateSemanticGeneratedPlan(plan);
+  if (options.requireResponsibility === true || plan.generated_by === "host_semantic") {
+    for (const task of plan.tasks) {
+      if (!task.responsibilityChanges) throw new Error(`task ${task.id} requires responsibilityChanges before plan approval`);
+    }
+  }
   await enrichPlanWithRoutes(rootDir, plan);
   validatePlanImportQuality(plan);
   const featureDesignGate = await assertFeatureDesignPlanBinding(rootDir, plan);
@@ -443,7 +450,7 @@ async function importPlanUnlocked(rootDir, planPath) {
   await writeJsonAtomic(resolveWildArrangePath(rootDir, "team", "tasks.json"), taskLedger);
 
   const { config } = await loadWildArrangeConfig(rootDir);
-  const approvalRequired = plan.generated_by === "host_semantic" || config?.planApproval?.required === true;
+  const approvalRequired = plan.generated_by === "host_semantic" || plan.tasks.some((task) => task.responsibilityChanges) || config?.planApproval?.required === true;
   const work = await readJson(resolveWildArrangePath(rootDir, "work.json"), {
     version: STATE_VERSION,
     workId: createWorkId(),
@@ -463,6 +470,7 @@ async function importPlanUnlocked(rootDir, planPath) {
     updatedAt: nowIso(),
   });
   await appendLedger(rootDir, {
+    responsibilityAuditRequired: plan.generated_by === "host_semantic" || plan.tasks.some((task) => task.responsibilityChanges),
     type: "plan_imported",
     planId: plan.id,
     taskCount: plan.tasks.length,
@@ -592,6 +600,7 @@ export async function approvePlan(rootDir, options = {}) {
     });
     const state = await loadTaskState(rootDir);
     await appendLedger(rootDir, { type: "plan_approved", planId: work.activePlanId, approver: nextApproval.approvedBy,
+      responsibilityScopes: Object.fromEntries((state?.tasks || []).map((task) => [task.id, responsibilityDigest(task.responsibilityChanges)])),
       contractScopes: Object.fromEntries((state?.tasks || []).map((task) => [task.id, hashContent(JSON.stringify(task.contractChanges?.items || []))])) });
     return { planId: work.activePlanId, status: "approved", approval: nextApproval };
   });
@@ -673,6 +682,7 @@ export async function writeTasksMarkdown(rootDir, plan) {
     if (task.route_decision) {
       lines.push(`  - Route: ${task.route_decision.route} -> ${task.route_decision.primaryAgent}`);
     }
+    lines.push(...renderResponsibilityChanges(task.responsibilityChanges));
     lines.push(`  - Verify: ${task.verify_commands.join(" && ")}`);
     if ((task.review_commands || []).length > 0) {
       lines.push(`  - Review: ${task.review_commands.join(" && ")}`);

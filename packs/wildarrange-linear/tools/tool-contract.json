@@ -349,7 +349,7 @@
       "layer": "planning",
       "status": "implemented",
       "command": "node ./bin/wildarrange.mjs plan --from <plan.json>",
-      "purpose": "把机器可读计划导入 .wildarrange/team/tasks.json。",
+      "purpose": "把含 responsibilityChanges 的机器可读计划导入 .wildarrange/team/tasks.json；展示目标脚本、新增内容、职责前后变化和事实读写归属，等待人工批准。",
       "reads": [
         "<plan.json>"
       ],

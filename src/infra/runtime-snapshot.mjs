@@ -271,6 +271,7 @@ function summarizeTaskForContext(task) {
     attempts: task.attempts,
     maxAttempts: task.maxAttempts,
     writable_paths: task.writable_paths || [],
+    responsibilityChanges: task.responsibilityChanges || null,
     verify_commands: task.verify_commands || [],
     review_commands: task.review_commands || [],
     standards_commands: task.standards_commands || [],

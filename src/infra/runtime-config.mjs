@@ -167,6 +167,7 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
     },
   },
   review: {
+    responsibility: { command: null, timeoutMs: 120000, maxEvidenceChars: 500000 },
     llm: {
       enabled: false,
       required: false,

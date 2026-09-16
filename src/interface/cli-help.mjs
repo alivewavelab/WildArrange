@@ -13,7 +13,7 @@ export const CORE_COMMANDS = ["init", "plan", "run", "status", "decisions", "doc
 
 export const COMMAND_REGISTRY = [
   { usage: "init [--sample] [--project-docs] [--architecture]", desc: "初始化运行时；显式补建项目治理文档，可按需包含架构模板", core: true },
-  { usage: "plan --from <plan.json>", desc: "导入计划；宿主语义生成计划会强制等待确认", core: true },
+  { usage: "plan --from <plan.json>", desc: "导入含 responsibilityChanges 的计划；等待人工确认职责与事实归属", core: true },
   { usage: "plan approve [--plan <planId>]", desc: "确认待执行计划（语义生成计划或已开启 planApproval）" },
   { usage: "run", desc: "跑下一个任务（worker→verifier→scope→review→checkpoint）", core: true },
   { usage: "status", desc: "查看状态（含门武装黄灯）", core: true },

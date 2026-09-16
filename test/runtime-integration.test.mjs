@@ -3974,7 +3974,9 @@ test("workflow summary records failed runs with failure evidence", async () => {
       }],
     }));
 
-    const result = await runWorkflow(dir, { planPath });
+    // Preserve the legacy-plan failure-summary regression; public imports now require responsibility approval.
+    await importPlan(dir, planPath);
+    const result = await runWorkflow(dir);
     assert.equal(result.ok, false);
     assert.equal(result.summaryPath, ".wildarrange/reports/workflow-summary.md");
 
@@ -4985,6 +4987,7 @@ test("runtime snapshot follows execution semantics for legacy approval records",
         description: "Create the requested result file.",
         owner: "ZhuRong",
         writable_paths: ["src/result.js"],
+        responsibilityChanges: [{ script: "src/result.js", additions: "Create accepted artifact", responsibilityBefore: "Absent", responsibilityAfter: "Own accepted artifact", facts: [] }],
         worker_command: "node -e \"const fs=require('fs');fs.mkdirSync('src',{recursive:true});fs.writeFileSync('src/result.js','ok')\"",
         verify_commands: ["node -e \"if(!require('fs').existsSync('src/result.js'))process.exit(1)\""],
       }],
@@ -5028,6 +5031,7 @@ test("host semantic plans require an explicit command-worker task.owner and user
         description: "Create the accepted artifact.",
         owner: "ZhuRong",
         writable_paths: ["src/result.js"],
+        responsibilityChanges: [{ script: "src/result.js", additions: "Create accepted artifact", responsibilityBefore: "Absent", responsibilityAfter: "Own accepted artifact", facts: [] }],
         worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/result.js','export const ok = true;\\n')\"",
         verify_commands: ["node -e \"const fs=require('fs'); if(!fs.readFileSync('src/result.js','utf8').includes('ok')) process.exit(1)\""],
         review_commands: ["node -e \"const fs=require('fs'); if(!fs.readFileSync('src/result.js','utf8').includes('export const ok = true')) process.exit(1)\""],
@@ -5121,6 +5125,7 @@ test("host semantic plans require an explicit command-worker task.owner and user
         subject: "Must not import",
         description: "The host omitted the actual owner.",
         writable_paths: ["src/missing.js"],
+        responsibilityChanges: [{ script: "src/missing.js", additions: "Create accepted artifact", responsibilityBefore: "Absent", responsibilityAfter: "Own accepted artifact", facts: [] }],
         worker_command: "node --version",
         verify_commands: ["node --version"],
         successCriteria: [{
@@ -5144,6 +5149,7 @@ test("host semantic plans require an explicit command-worker task.owner and user
         description: "BaiZe cannot own an executable command task.",
         owner: "BaiZe",
         writable_paths: ["src/read-only.js"],
+        responsibilityChanges: [{ script: "src/read-only.js", additions: "Create accepted artifact", responsibilityBefore: "Absent", responsibilityAfter: "Own accepted artifact", facts: [] }],
         worker_command: "node --version",
         verify_commands: ["node --version"],
       }],
@@ -5153,6 +5159,9 @@ test("host semantic plans require an explicit command-worker task.owner and user
       /requires explicit command-worker task\.owner.*T003/,
     );
 
+    const reviewRunner = resolveWildArrangePath(dir, "independent-review-fixture.cjs");
+    await writeFile(reviewRunner, `const fs=require('node:fs');const packet=JSON.parse(fs.readFileSync(process.env.WILDARRANGE_REVIEW_PACKET,'utf8'));if(!packet.source.files.some(f=>f.path==='src/result.js' && f.content.includes('export const ok = true')))throw Error('missing reviewed implementation');console.log(JSON.stringify({decision:'PASS',checks:Object.keys(packet.rules).map(rule=>({rule,decision:'PASS',reason:'Single fixture artifact, no facts or independent responsibilities added'})),findings:[]}));`);
+    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({ review: { responsibility: { command: `node "${reviewRunner}"` } } }));
     const completed = await runNextTask(dir);
     assert.equal(completed.status, "completed");
     assert.match(await readFile(path.join(dir, "src", "result.js"), "utf8"), /export const ok = true/);
@@ -5179,6 +5188,7 @@ test("host semantic plans reject missing or trivial workers before formal state 
         description: "Create the requested source file.",
         owner: "ZhuRong",
         writable_paths: ["src/result.js"],
+        responsibilityChanges: [{ script: "src/result.js", additions: "Create accepted artifact", responsibilityBefore: "Absent", responsibilityAfter: "Own accepted artifact", facts: [] }],
         verify_commands: ["node -e \"if(!require('fs').existsSync('src/result.js')) process.exit(1)\""],
         successCriteria: [{ title: "result exists", expectedEvidence: "verifier finds src/result.js", verifierCommandRefs: [0] }],
       };

@@ -3,7 +3,7 @@
 | 命令 | 说明 |
 | ---- | ---- |
 | `wildarrange init [--sample] [--project-docs] [--architecture]` | 初始化运行时；显式补建项目治理文档，可按需包含架构模板 |
-| `wildarrange plan --from <plan.json>` | 导入计划；宿主语义生成计划会强制等待确认 |
+| `wildarrange plan --from <plan.json>` | 导入含 responsibilityChanges 的计划；等待人工确认职责与事实归属 |
 | `wildarrange plan approve [--plan <planId>]` | 确认待执行计划（语义生成计划或已开启 planApproval） |
 | `wildarrange run` | 跑下一个任务（worker→verifier→scope→review→checkpoint） |
 | `wildarrange status` | 查看状态（含门武装黄灯） |
