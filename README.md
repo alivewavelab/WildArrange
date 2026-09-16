@@ -658,3 +658,5 @@ Worker 之后的既有 Review 增加独立职责审计：R1 符合批准方案�
 审查协议：`{ "decision": "PASS|RETURN", "checks": [{ "rule": "R1", "decision": "PASS|RETURN", "reason": "..." }], "findings": [{ "rule": "R3", "file": "src/example.mjs", "line": 12, "evidence": "该行源码原文", "reason": "...", "requiredFix": "..." }] }`。checks 必须恰好覆盖 R1–R5；每条 RETURN 有对应 finding。缺少执行器、证据超预算、响应格式错误、审查期间代码变化都不能通过 Review。`review.responsibility.maxEvidenceChars` 默认 500000；超限明确阻止审计，不截断后放行。
 
 职责变化通过现有 `steer` 的 `revise_acceptance` 提交 `responsibilityChanges`；原任务保持 pending，计划重新等待人工批准。批准指纹进入现有 ledger，不增加第二个事实台账。旧持久任务没有声明时显示 NOT_AUDITED 警告，不能说已通过新审计；旧底层程序化导入 API 保留兼容模式，集成方应传 `{ requireResponsibility: true }`。公开 CLI 没有关闭此校验的开关。
+
+新增任务或将草稿转为可执行任务时，只要职责声明发生变化，就重新等待人工批准；整链运行、分步执行、并行启动都不得抢跑。内置 `workflow --sample` 仅为固定运行时产物的诊断演示，保留 NOT_AUDITED 标记，不构成职责审计通过证明。

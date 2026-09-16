@@ -24,7 +24,7 @@ import { commitIsAncestor, inspectGitCoordination } from "../infra/git-coordinat
 import { runCommand, runCommandFile } from "../infra/command-runner.mjs";
 import { assertPathInsideRoot } from "../infra/path-match.mjs";
 import { normalizeProposedFilesOrEmpty, updateAgentRunLifecycle } from "./admission.mjs";
-import { loadTaskState } from "./plan-state.mjs";
+import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
 import {
   findRunnableTask,
   isTaskRunnable,
@@ -45,6 +45,10 @@ export async function runParallelAgents(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const taskState = await loadTaskState(rootDir);
   if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
+  const approval = await loadPlanApproval(rootDir);
+  if (approval.required && approval.status !== "approved" && approval.planId === taskState.planId) {
+    return { status: "awaiting_plan_approval", runId: null, tasks: [], planId: taskState.planId };
+  }
   const { config } = await loadWildArrangeConfig(rootDir);
 
   const tasks = selectParallelTasks(taskState.tasks, options);

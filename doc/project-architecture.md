@@ -395,3 +395,5 @@ adapter 专用行为属于 `src/interface/adapters.mjs`、`src/interface/kimi-ad
 - `plan-state.mjs` 持久化 task.responsibilityChanges，批准事件保存 responsibilityScopes；change-governance 的 revise_acceptance 修改声明后重新进入人工批准门。task-reports 保存审计结果，runtime-snapshot 保留声明，Dashboard 只读展示。
 
 完整字段与执行器协议见 README 的“职责与事实审计”。旧底层程序化导入的兼容边界不构成新的审计通过证据。
+
+职责声明变化的重新批准由 task-board.persistTaskState 统一触发，覆盖新增任务、草稿补全和 steer；先关闭批准门再写任务，防止更新中断后带着旧批准执行。线性、分步和并行入口共同读取 plan-state 的批准状态。

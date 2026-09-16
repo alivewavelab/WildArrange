@@ -39,11 +39,6 @@ export async function steerWorkflow(rootDir, proposal = {}) {
     const result = applySteeringProposal(taskState, proposal);
     validatePlanGraph({ tasks: taskState.tasks });
     validateTaskAcceptanceInvariants(taskState.tasks);
-    if (proposal.kind === "revise_acceptance" && proposal.responsibilityChanges !== undefined) {
-      const workPath = resolveWildArrangePath(rootDir, "work.json");
-      const work = await readJson(workPath);
-      await writeJsonAtomic(workPath, { ...work, status: "awaiting_plan_approval", planApproval: { ...work.planApproval, required: true, status: "pending", planId: taskState.planId } });
-    }
     await persistTaskState(rootDir, taskState);
     audit.before = summarizeSteeringState(before);
     audit.after = summarizeSteeringState(taskState);

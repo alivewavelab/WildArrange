@@ -207,3 +207,29 @@ test("review process recovery evidence stops delivery before checkpoint", async 
   assert.equal(result.steps.some(step => step.capability === "checkpoint"), false);
   await assert.rejects(readFile(resolveTaskAcceptancePath(root, task.planId, task.id)), /ENOENT/);
 });
+
+import { createTeamTask, readyTeamTask } from "../src/orchestration/task-board.mjs";
+import { runNextTask, executeTaskNode } from "../src/orchestration/linear-runtime.mjs";
+import { runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
+
+test("new task responsibility declarations reopen approval before any worker starts", async (t) => {
+  const { root } = await fixture(t);
+  await createTeamTask(root, { id: "T002", subject: "New scoped work", writable_paths: ["router.mjs"], verify_commands: ["node validate.mjs"], worker_command: "node implement.mjs", responsibilityChanges: changes() });
+  assert.equal((await loadPlanApproval(root)).status, "pending");
+  assert.equal((await runNextTask(root)).status, "awaiting_plan_approval");
+  assert.equal((await executeTaskNode(root, { taskId: "T002" })).status, "awaiting_plan_approval");
+  const parallel = await runParallelAgents(root, { taskId: "T002" });
+  assert.equal(parallel.status, "awaiting_plan_approval");
+  assert.equal(parallel.runId, null);
+  assert.equal((await loadTaskState(root)).tasks.every(task => task.attempts === 0), true);
+  await approvePlan(root);
+  const task = (await loadTaskState(root)).tasks.find(task => task.id === "T002");
+  assert.equal((await runResponsibilityAudit(root, task, { status: "pass", changedPaths: ["router.mjs"] }, await reviewer(root, verdict()))).pass, true);
+});
+
+test("readying a draft with responsibilities reopens approval", async (t) => {
+  const { root } = await fixture(t);
+  await createTeamTask(root, { id: "T002", subject: "Draft" });
+  await readyTeamTask(root, { taskId: "T002", patch: { writable_paths: ["router.mjs"], verify_commands: ["node validate.mjs"], responsibilityChanges: changes() } });
+  assert.equal((await runNextTask(root)).status, "awaiting_plan_approval");
+});

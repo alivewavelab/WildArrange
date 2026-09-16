@@ -353,6 +353,11 @@ async function executeTaskNodeUnlocked(rootDir, options = {}) {
   const taskState = await loadTaskState(rootDir);
   if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
 
+  const approval = await loadPlanApproval(rootDir);
+  if (approval.required && approval.status !== "approved" && approval.planId === taskState.planId) {
+    return { status: "awaiting_plan_approval", task: null, planId: taskState.planId };
+  }
+
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["pending", "in_progress"]);
   task.owner = assertCommandWorkerAgent(task.owner || "Jiuwei");
   if (task.status === "pending") {

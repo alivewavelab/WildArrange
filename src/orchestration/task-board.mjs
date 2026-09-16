@@ -1,3 +1,4 @@
+import { responsibilityDigest } from "../infra/responsibility-contract.mjs";
 import { appendFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
@@ -255,6 +256,19 @@ export async function persistTaskState(rootDir, taskState) {
   const previousTasks = new Map((ledger?.tasks || [])
     .filter((task) => task.planId === taskState.planId)
     .map((task) => [task.id, task]));
+  const responsibilityChanged = taskState.tasks.some((task) => {
+    const previous = previousTasks.get(task.id);
+    return Boolean(task.responsibilityChanges || previous?.responsibilityChanges)
+      && responsibilityDigest(task.responsibilityChanges) !== responsibilityDigest(previous?.responsibilityChanges);
+  });
+  if (responsibilityChanged) {
+    const workPath = resolveWildArrangePath(rootDir, "work.json");
+    const work = await readJson(workPath, null);
+    if (work?.activePlanId === taskState.planId) {
+      await writeJsonAtomic(workPath, { ...work, status: "awaiting_plan_approval",
+        planApproval: { ...work.planApproval, required: true, status: "pending", planId: taskState.planId } });
+    }
+  }
   for (const task of taskState.tasks) {
     const persisted = appendTaskHistory(
       withTaskIdentity(task, taskState.planId),
