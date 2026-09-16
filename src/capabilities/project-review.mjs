@@ -20,6 +20,14 @@ const strings = (value, label) => {
   return [...new Set(value.map(item => item.trim()))];
 };
 
+const DOCUMENT_TRUTH_ID = "document-current-truth";
+const isLongTermDocument = name => {
+  if (typeof name !== "string" || name.startsWith(".wildarrange/")) return false;
+  if (/(^|\/)(?:verification-archive|node_modules|vendor|plans|reports|research|evidence)\//i.test(name)) return false;
+  return /^[^/]+\.mdx?$/i.test(name)
+    || /^(?:doc|docs)\/.+\.(?:md|mdx|html)$/i.test(name);
+};
+
 export function selectProjectReviewSteps(config, task, changedPaths = []) {
   const raw = config.review?.steps ?? [];
   if (!Array.isArray(raw)) throw new Error("review.steps must be an array");
@@ -45,7 +53,15 @@ export function selectProjectReviewSteps(config, task, changedPaths = []) {
   });
   const declared = (task.responsibilityChanges || []).map(item => item.script);
   const targets = [...new Set([...(declared.length ? declared : task.writable_paths || []), ...changedPaths])];
-  return steps.filter(step => targets.some(target => /[*?]/.test(target) || pathAllowed(target, step.appliesTo)));
+  const selected = steps.filter(step => targets.some(target => /[*?]/.test(target) || pathAllowed(target, step.appliesTo)));
+  const documents = targets.filter(target => !/[*?]/.test(target) && isLongTermDocument(target));
+  if (documents.length) {
+    if (ids.has(DOCUMENT_TRUTH_ID)) throw new Error(`${DOCUMENT_TRUTH_ID} is a built-in review step and cannot be overridden`);
+    selected.push({ id: DOCUMENT_TRUTH_ID, title: "Long-term document truth", appliesTo: documents,
+      requirement: "D1: Long-term documentation describes current effective behavior, structure, use and limitations; task timeline, attempts, raw logs, research chronology and unlanded proposals belong in task evidence. D2: Maintain a current fact in one authoritative source and link to it elsewhere; verified translations and generated views are allowed. D3: Mark historical designs as historical. Cite each changed long-term document. Return only source-backed violations with exact line and required fix. Dates, versions and genuine migration instructions alone are not violations.",
+      required: true, documents: [], skills: ["review-work"], command: null });
+  }
+  return selected;
 }
 
 export async function prepareProjectReview(rootDir, task, config, changedPaths = []) {
@@ -108,6 +124,16 @@ export function validateProjectReviewVerdict(value, packet) {
     if (!finding.reason?.trim() || !finding.requiredFix?.trim()) throw new Error("finding requires reason and requiredFix");
   }
   if (value.decision === "PASS" && (!value.evidence.length || value.findings.length)) throw new Error("PASS requires evidence and no findings");
+  if (packet.step.id === DOCUMENT_TRUTH_ID) {
+    const changedDocs = packet.source.changedPaths.filter(isLongTermDocument)
+      .filter(name => packet.source.files.some(file => file.path === name && typeof file.content === "string"));
+    if (value.decision === "PASS" && changedDocs.some(name => !value.evidence.some(citation => citation.file === name))) {
+      throw new Error("document review PASS must cite every changed long-term document");
+    }
+    if (value.decision === "RETURN" && value.findings.some(finding => !isLongTermDocument(finding.file))) {
+      throw new Error("document review RETURN must cite a long-term document");
+    }
+  }
   if (value.decision === "RETURN" && !value.findings.length) throw new Error("RETURN requires a source-backed finding");
   return value;
 }

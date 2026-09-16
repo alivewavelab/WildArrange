@@ -18,7 +18,7 @@ import {
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { loadTaskLedger } from "../infra/task-state-store.mjs";
-import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
+import { ensureTaskPacket, writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { resolveAgentSpawn } from "../infra/agent-spawn.mjs";
 import { collectAgentWorktreePatch, prepareAgentWorktree } from "../infra/git-worktree.mjs";
 import { commitIsAncestor, inspectGitCoordination } from "../infra/git-coordination.mjs";
@@ -149,6 +149,7 @@ export async function runParallelAgents(rootDir, options = {}) {
       results: [],
     });
     await writeSnapshot(rootDir, "parallel_agents_started", { runId, taskIds: tasks.map((task) => task.id) });
+    for (const task of tasks) await ensureTaskPacket(rootDir, taskState.planId, task);
 
     const results = await Promise.all(tasks.map((task, index) => runOneAgent(rootDir, runDir, runId, task, {
       ...options,

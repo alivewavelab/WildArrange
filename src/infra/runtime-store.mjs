@@ -24,6 +24,13 @@ export function resolveWildArrangePath(rootDir, ...segments) {
 // Evidence identity must remain a one-to-one mapping even though both IDs may
 // contain "-". New files therefore use plan/task directory segments; the
 // legacy flat helpers exist only for guarded compatibility reads and cleanup.
+export function resolveTaskPacketPath(rootDir, planId, taskId, name = "") {
+  assertEvidenceSegment(planId, "planId");
+  assertEvidenceSegment(taskId, "taskId");
+  if (name && !new Set(["baseline.json", "README.md", "research.md"]).has(name)) throw new Error(`unsupported task packet file: ${name}`);
+  return resolveWildArrangePath(rootDir, "task-packets", planId, taskId, ...(name ? [name] : []));
+}
+
 export function resolveTaskCheckpointPath(rootDir, planId, taskId) {
   assertEvidenceSegment(planId, "planId");
   assertEvidenceSegment(taskId, "taskId");

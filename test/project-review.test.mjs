@@ -199,3 +199,65 @@ test("a linear worker command cannot stand in for a missing parallel adapter", a
   assert.equal(run.runId, null);
   assert.match(run.readiness.issues.join(";"), /real worker_command/);
 });
+
+test("approved task creates one historical packet and keeps it unchanged across retries", async t => {
+  const { root, task } = await fixture(t);
+  const { ensureTaskPacket } = await import("../src/infra/runtime-snapshot.mjs");
+  const { resolveTaskPacketPath } = await import("../src/infra/runtime-store.mjs");
+  const packet = await ensureTaskPacket(root, task.planId, task);
+  const baseline = await readFile(packet.baselinePath, "utf8");
+  assert.match(baseline, /task_start_baseline/);
+  assert.equal(JSON.parse(baseline).task.subject, "Implement value");
+  assert.match(await readFile(packet.indexPath, "utf8"), /reports\/acceptance/);
+  assert.match(await readFile(packet.researchPath, "utf8"), /not a claim that research has been completed/);
+  task.subject = "Changed after first attempt";
+  await ensureTaskPacket(root, task.planId, task);
+  assert.equal(await readFile(packet.baselinePath, "utf8"), baseline);
+  assert.throws(() => resolveTaskPacketPath(root, "../escape", task.id), /safe evidence/);
+  assert.throws(() => resolveTaskPacketPath(root, task.planId, task.id, "other.md"), /unsupported/);
+});
+
+test("document review returns line-backed finding and blocks checkpoint", async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "wa-doc-truth-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await initRuntime(root);
+  await writeFile(path.join(root, "README.md"), "Old instructions");
+  const adapter = path.join(root, ".wildarrange/doc-review.cjs");
+  await writeFile(adapter, `const fs=require('fs');
+const p=JSON.parse(fs.readFileSync(process.env.WILDARRANGE_READINESS_PACKET||process.env.WILDARRANGE_REVIEW_PACKET,'utf8'));
+if(p.kind==='execution_readiness_probe') console.log(JSON.stringify({ready:true,challenge:p.challenge,loadedSkills:p.requiredSkills.map(s=>s.name)}));
+else if(p.kind==='project_review_step') {
+  const doc=p.source.files.find(f=>f.path==='README.md');const citation={file:'README.md',line:1,text:doc.content.split('\\n')[0]};
+  console.log(JSON.stringify({stepId:p.step.id,inputDigest:p.inputDigest,decision:'RETURN',summary:'D1: process log in long-term documentation',evidence:[citation],findings:[{...citation,reason:'D1: task progress belongs in task evidence',requiredFix:'Move progress to the task packet and keep only current usage in README'}]}));
+} else console.log(JSON.stringify({decision:'PASS',checks:Object.keys(p.rules).map(rule=>({rule,decision:'PASS',reason:'Checked README source'})),findings:[]}));`);
+  const command = `node "${adapter}"`;
+  await writeFile(path.join(root, "wildarrange.config.json"), JSON.stringify({ executionReadiness:{workerProbe:command}, review:{responsibility:{command}} }));
+  const plan = { title:"Document task", tasks:[{id:"T001",subject:"Update documentation",owner:"ZhuRong",writable_paths:["README.md"],
+    worker_command:"node -e \"require('fs').writeFileSync('README.md','Attempt 1: updated docs.')\"",
+    verify_commands:["node -e \"if(require('fs').readFileSync('README.md','utf8')!=='Attempt 1: updated docs.')process.exit(1)\""],
+    responsibilityChanges:[{script:"README.md",additions:"Current usage",responsibilityBefore:"Current usage",responsibilityAfter:"Current usage",facts:[]}] }] };
+  const planFile = path.join(root, ".wildarrange/plan.json");
+  await writeFile(planFile, JSON.stringify(plan));
+  await importPlan(root, planFile, { requireResponsibility:true });
+  const { resolveTaskPacketPath } = await import("../src/infra/runtime-store.mjs");
+  const initial = (await loadTaskState(root)).tasks[0];
+  await assert.rejects(() => readFile(resolveTaskPacketPath(root, initial.planId, initial.id, "baseline.json")), /ENOENT/);
+  await approvePlan(root);
+  const result = await runNextTask(root);
+  assert.equal(result.reviewResult.projectReview.pass, false, JSON.stringify(result.reviewResult.projectReview));
+  assert.equal(result.reviewResult.projectReview.steps.find(step=>step.id==='document-current-truth')?.decision, "RETURN");
+  assert.match(result.reviewResult.projectReview.steps.find(step=>step.id==='document-current-truth').findings[0].requiredFix, /task packet/);
+  assert.notEqual((await loadTaskState(root)).tasks[0].status, "completed");
+  await assert.rejects(() => readFile(resolveTaskAcceptancePath(root, initial.planId, initial.id)), /ENOENT/);
+  assert.equal(JSON.parse(await readFile(resolveTaskPacketPath(root, initial.planId, initial.id, "baseline.json"))).task.subject, "Update documentation");
+});
+
+test("task packet refuses a symlinked control directory without writing outside root", async t => {
+  const { root, task } = await fixture(t);
+  const outside = await mkdtemp(path.join(os.tmpdir(), "wa-packet-outside-"));
+  t.after(() => rm(outside, { recursive: true, force: true }));
+  await symlink(outside, path.join(root, ".wildarrange", "task-packets"), "junction");
+  const { ensureTaskPacket } = await import("../src/infra/runtime-snapshot.mjs");
+  await assert.rejects(() => ensureTaskPacket(root, task.planId, task), /symlink/);
+  assert.deepEqual(await import("node:fs/promises").then(fs => fs.readdir(outside)), []);
+});

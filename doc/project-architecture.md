@@ -108,6 +108,7 @@ AGENTS.md                         # product goals, global boundaries, release ga
 - `src/infra/agent-registry.mjs`：固定长期 Agent 白名单、读写角色集、旧别名、显示名、归一化与 command-worker 资格。
 - `src/infra/runtime-config.mjs`：默认配置、分层根/运行时 config 加载、归一化、深合并与不可削弱的 strict Git 协调标志。
 - `src/infra/runtime-snapshot.mjs`：运行时 snapshot 持久化与 resume-context JSON/Markdown 渲染的唯一确定性 owner。`src/ai/context.mjs::writeContextSnapshot` 是其薄 public 包装，非第二套实现。
+- `src/infra/runtime-snapshot.mjs::ensureTaskPacket`：已获准任务首次开工的历史基线与证据路径索引 owner。`runtime-store.mjs::resolveTaskPacketPath` 校验 `<planId>/<taskId>`；`.wildarrange/task-packets/` 不是当前任务状态或新批准记录，Worker 不能因其存在获得额外写权限。
 - `src/infra/prompt-pack.mjs`：prompt-pack 注册安装、固定运行时副本物化、条目加载、内容 hash、列表与校验渲染。外部/custom pack 先校验 source realpath，再复制到 `.wildarrange/prompt-pack/installed`；运行时 Agent、Skill、routes、tool 与 matcher 全部只从这个固定根读取，不信任 registry 中可修改的根路径字段。
 - `src/infra/runtime-bootstrap.mjs`：跨 config、work、prompt pack、ledger 与 snapshot 的一次性 `initRuntime` 顺序。长期 Agent 配置只保留在权威 config，不再生成无消费者的 `agents.json` / `categories.json` 投影。
 - `src/interface/project-init.mjs`：只在显式 `init --project-docs` 时从发布包模板补建缺失治理文档，使用独占创建保证已有文件不被合并或覆盖，架构模板还需显式 `--architecture`。
@@ -400,7 +401,7 @@ adapter 专用行为属于 `src/interface/adapters.mjs`、`src/interface/kimi-ad
 
 ## 项目审查与开工依赖
 
-infra/context-attachments.mjs 是完整 Markdown/Skill 安全读取的唯一 owner，AI 注入与能力层复用它。capabilities/project-review.mjs 持有项目审查清单选择、输入包与证据校验，并提供配置预览/应用；capabilities/execution-readiness.mjs 持有开工依赖检查与执行服务握手。线性和并行编排只经 gateway 调用，不新增反向依赖。
+infra/context-attachments.mjs 是完整 Markdown/Skill 安全读取的唯一 owner，AI 注入与能力层复用它。capabilities/project-review.mjs 持有项目审查清单选择、输入包与证据校验，并提供配置预览/应用；其中内置的长期文档当前事实审计只在相关文档路径命中时启用，逐份引用源码、失败则沿现有 Review gate 阻止 checkpoint。capabilities/execution-readiness.mjs 持有开工依赖检查与执行服务握手，并将证据夹路径及文档边界放入 Worker 上下文。线性和并行编排只经 gateway 调用，不新增反向依赖。
 
 review.steps 是项目附加审查的唯一配置；任务字段不复制审查要求。审查输入绑定策略、文档/Skill 与源码摘要，运行后复查内容未变。必需项目审查与原有职责审计共同进入 Review 与 acceptance proof；探测不能生成完成证明。报告只保存证据，不成为第二套业务事实维护者。
 

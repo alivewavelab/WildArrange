@@ -99,6 +99,20 @@ async function withTempDir(fn) {
   }
 }
 
+async function installDocumentReviewerFixture(rootDir) {
+  const adapter = path.join(rootDir, ".wildarrange", "document-reviewer.cjs");
+  await mkdir(path.dirname(adapter), { recursive: true });
+  await writeFile(adapter, `const fs=require('node:fs');
+const p=JSON.parse(fs.readFileSync(process.env.WILDARRANGE_READINESS_PACKET||process.env.WILDARRANGE_REVIEW_PACKET,'utf8'));
+if(p.kind==='execution_readiness_probe') console.log(JSON.stringify({ready:true,challenge:p.challenge,loadedSkills:p.requiredSkills.map(s=>s.name)}));
+else if(p.kind==='project_review_step') {
+  const evidence=p.step.appliesTo.map(name=>p.source.files.find(file=>file.path===name)).filter(file=>file&&typeof file.content==='string').map(file=>({file:file.path,line:1,text:file.content.split('\\n')[0]}));
+  console.log(JSON.stringify({stepId:p.step.id,inputDigest:p.inputDigest,decision:'PASS',summary:'Fixture reviewed current document content',evidence,findings:[]}));
+} else console.log(JSON.stringify({decision:'PASS',checks:Object.keys(p.rules).map(rule=>({rule,decision:'PASS',reason:'Fixture inspected source'})),findings:[]}));`);
+  const command = `node "${adapter}"`;
+  await writeFile(path.join(rootDir, "wildarrange.config.json"), JSON.stringify({ executionReadiness: { workerProbe: command }, review: { responsibility: { command } } }));
+}
+
 async function initializeGitFixture(rootDir) {
   const gitignorePath = path.join(rootDir, ".gitignore");
   const gitignore = await readFile(gitignorePath, "utf8").catch((error) => {
@@ -3002,6 +3016,7 @@ test("simulation greenfield project runs from product planning to completed web 
   await withTempDir(async (dir) => {
     await writeFile(path.join(dir, "AGENTS.md"), "# Project Rules\n\nUser-visible web work needs verifier evidence.\n");
     await initRuntime(dir);
+    await installDocumentReviewerFixture(dir);
 
     const route = await routeRequest(dir, {
       text: "从零做一个网页版提醒事项 App，一期 MVP 要有清单流程、空状态、验收标准和失败恢复。",
@@ -3169,6 +3184,7 @@ test("simulation existing project handles large feature addition through plannin
     await writeFile(path.join(dir, "AGENTS.md"), "# Existing Project Rules\n\nLarge features require scope and regression evidence.\n");
     await writeFile(path.join(dir, "src", "app.cjs"), "function listItems(items) { return items; }\nmodule.exports = { listItems };\n");
     await writeFile(path.join(dir, "test", "app.test.cjs"), "const { listItems } = require('../src/app.cjs');\nif (listItems([1]).length !== 1) process.exit(1);\n");
+    await installDocumentReviewerFixture(dir);
     await initializeGitFixture(dir);
     await initRuntime(dir);
 
@@ -3671,6 +3687,7 @@ test("non-git projects use file manifest scope fallback before checkpoint", asyn
 
 test("accepted change request can explicitly apply scope and reopen retry", async () => {
   await withTempDir(async (dir) => {
+    await installDocumentReviewerFixture(dir);
     await initRuntime(dir);
     await initializeGitFixture(dir);
 

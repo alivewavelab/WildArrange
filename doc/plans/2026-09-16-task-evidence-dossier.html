@@ -1,0 +1,31 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>历史方案：任务证据夹与文档事实审计</title>
+<style>body{font:16px/1.6 system-ui;max-width:900px;margin:3rem auto;padding:0 1rem;color:#17252b}table{border-collapse:collapse;width:100%}td,th{border:1px solid #bbc;padding:.6rem;vertical-align:top}pre{background:#eef;padding:1rem}</style>
+<h1>历史方案：任务证据夹与文档事实审计</h1><p>2026-09-16。已实施；现行行为以代码、README 和项目架构文档为准。</p>
+<h2>目标与权威记录</h2><p>获准任务在 Worker 启动前生成证据夹。当前任务状态仍只由 .wildarrange/team/tasks.json 持有；证据夹只保留开工时的历史切片及已有报告链接，不回写当前事实。</p>
+<pre>计划批准 → 开工能力检查 → 建立任务证据夹 → Worker → Verify → Scope → Review（长期文档事实审计） → Acceptance proof → Checkpoint</pre>
+<h2>节点输入输出</h2><table><tr><th>节点</th><th>输入</th><th>输出与失败</th></tr>
+<tr><td>建档</td><td>获批 Plan/Task、任务投影、批准记录</td><td>.wildarrange/task-packets/&lt;planId&gt;/&lt;taskId&gt;/ 下的 baseline.json、README.md、research.md。重试不覆盖原始基线；失败不启动 Worker。</td></tr>
+<tr><td>Worker 简报</td><td>任务范围、Skill、证据夹路径</td><td>提示长期文档只写当前有效事实；研究和过程证据放到任务资料，且不扩大 writable_paths。</td></tr>
+<tr><td>审计</td><td>实际改动的长期 Markdown/HTML 文档全文（排除任务历史目录）</td><td>独立 Reviewer 返回 PASS/RETURN/INCONCLUSIVE。RETURN 提供文件、行号、原文、原因和整改；未 PASS 禁止 checkpoint。</td></tr>
+<tr><td>导航</td><td>Plan/Task ID</td><td>链接现有 readiness、review、failure、acceptance、checkpoint 报告；没有文件即没有该证据。</td></tr></table>
+<h2>准则与边界</h2><p>D1：长期文档只写当前功能、结构、用法和限制；任务时间线、尝试、日志及未落地想法放在任务证据。D2：同一当前事实只在权威来源维护；已验证同步的翻译或生成视图可保留。D3：历史设计明确标为历史。日期、版本号或真实迁移说明不自动构成违规。</p>
+<p>不新增任务状态表、批准入口、Hook 放行路径或 Worker 可写范围。旧任务不补造基线。验收覆盖生成、重试、待批准、开工失败、文档 RETURN 阻断和非文档任务不增加审查。</p>
+<h2>事实归属</h2><table><tr><th>对象</th><th>唯一维护者</th><th>证据夹如何使用</th></tr>
+<tr><td>当前任务状态、Owner、可写范围</td><td>.wildarrange/team/tasks.json</td><td>baseline.json 只冻结第一次开工时的投影，不能用它回答“现在是什么状态”。</td></tr>
+<tr><td>批准与范围变化</td><td>现有 Plan/ChangeRequest 批准记录及 ledger</td><td>baseline.json 只标记当时批准投影，不生成新审批。</td></tr>
+<tr><td>门禁判定</td><td>现有 readiness/review/acceptance/checkpoint 报告</td><td>README.md 指向路径，文件不存在即证据未产生；不复制 PASS/FAIL。</td></tr>
+<tr><td>调研与项目现行事实</td><td>任务批准的产物路径及项目权威文档</td><td>research.md 列出启动时来源；后续研究先落入批准路径，再由 Review 证据引用。</td></tr></table>
+<h2>执行与恢复协议</h2><ol>
+<li>导入计划、完成人工批准；无批准的 run 直接返回，不建资料夹、不启动 Worker。</li>
+<li>开工检查确认 Worker/Reviewer/Skill 可用。失败保留 readiness 报告，不消耗任务 attempt。</li>
+<li>线性与并行运行各自在 Worker 启动前调用同一个建档函数。它按 Plan ID / Task ID 校验路径，拒绝符号链接，并以原子写入创建 baseline。README 和 research 索引也只在缺失时创建。</li>
+<li>同任务重试检查已存在 baseline 的身份，不刷新首次时点。开工建档写失败时 fail closed；并行模式进入原有 claim 恢复链。</li>
+<li>Worker 只修改原任务允许路径。Scope 用真实 changedPaths 定位长期文档；Review 输入是改后全文与实际差异，结构化响应须绑定输入摘要且引用逐行原文。</li>
+<li>有 RETURN 或 INCONCLUSIVE 则 Review 失败、Acceptance proof 与 Checkpoint 不成立。整改后重跑同一任务审查；若需扩大已批准范围，走现有 ChangeRequest/计划修订。</li></ol>
+<h2>审查的边界</h2><p>默认检查项目根 Markdown，以及 doc/docs 下承载现行规范、架构和产品说明的 Markdown/HTML。任务历史目录（plans、reports、research、evidence、verification-archive）、运行态 .wildarrange、依赖目录不当作现行说明书。项目仍可通过现有 review.steps 加挂模块规则，内置 D1–D3 规则不能用同名配置覆盖。证据须覆盖每份实际改动的长期文档；无独立 Reviewer、缺 Skill、源文件中途变化或回复无法逐行验证均为 INCONCLUSIVE，不放行。</p>
+<h2>验收场景</h2><table><tr><th>场景</th><th>预期</th></tr>
+<tr><td>已批准、能力齐备</td><td>生成三个文件；Worker 上下文含目录绝对路径与文档边界。</td></tr>
+<tr><td>重试与历史</td><td>baseline 字节不变；新的当前状态只看任务总账。</td></tr>
+<tr><td>长期文档混入尝试日志</td><td>独立 Reviewer 按 D1 给出文件行号和整改；没有 checkpoint。</td></tr>
+<tr><td>真正的现行说明与验证同步的翻译</td><td>可按逐文档证据 PASS，继续原有交付链。</td></tr>
+<tr><td>资料夹路径遭符号链接替换</td><td>拒绝建档，控制根外零写入。</td></tr></table></html>

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
-import { hashContent, nowIso, resolveTaskReportPath, writeJsonAtomic } from "../infra/runtime-store.mjs";
+import { hashContent, nowIso, resolveTaskPacketPath, resolveTaskReportPath, writeJsonAtomic } from "../infra/runtime-store.mjs";
 import { loadSkillAttachment } from "../infra/context-attachments.mjs";
 import { isTrivialCommand } from "../infra/task-predicates.mjs";
 import { runCommand } from "../infra/command-runner.mjs";
@@ -41,7 +41,9 @@ export async function checkExecutionReadiness(rootDir, task, options = {}) {
   const researchNames = names.filter(name => name.startsWith("research-") || (settings.researchSkills || []).includes(name));
   if (researchNames.length && !settings.researchProbe?.trim()) result.issues.push("executionReadiness.researchProbe is required for this task's research Skills");
   const contextPath = resolveTaskReportPath(rootDir, "readiness", task.planId, task.id, "json") + ".context.json";
-  const context = { kind: "worker_execution_context", task, skills: result.skills, reviewRequirements: review || null };
+  const context = { kind: "worker_execution_context", task, skills: result.skills, reviewRequirements: review || null,
+    taskPacketPath: resolveTaskPacketPath(rootDir, task.planId, task.id),
+    documentGuidance: "Long-term project documentation states current behavior, architecture and limitations. Keep attempt logs, command output, research chronology and unlanded proposals in task evidence or an approved research artifact. Do not duplicate a current business fact in multiple documents. The task packet is navigation and historical evidence, not an extra writable path or live task ledger." };
   if (JSON.stringify(context).length > budget) result.issues.push("required execution context exceeds budget");
   if (!result.issues.length) {
     await writeJsonAtomic(contextPath, context);

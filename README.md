@@ -674,3 +674,9 @@ Worker 读取 WILDARRANGE_EXECUTION_CONTEXT 的完整任务 Skill；探测器读
 旧项目扫描用 adoption inventory，登记继续使用 adoption 的逐卡批准流程。Registry.fixtures 只保存夹具位置与消费者；旧计划来源保存在 task.request.evidenceRefs，事实读写仍属于唯一 owner。登记完成与实际迁移完成分别报告，历史“已完成”必须重新验证才成为当前完成。存量无职责声明且无项目步骤的兼容任务返回 legacy_not_checked，不能宣传为通过新开工检查。
 
 架构设计环节：初始化项目文档后会返回下一步 Skill 提示；也可主动运行 `/wildarrange-architecture`，或说“审查旧架构图”。已有设计按职责、依赖、事实归属、流程、必要复杂度五项审查，无设计则按需求提出最小方案。通过后仍须人工确认具体版本，沿用一个权威文档。此环节由宿主执行 Skill，不会自动弹窗、修改旧设计或建立图与代码一致性门禁。
+
+### 任务证据夹与长期文档审计
+
+获准任务通过开工检查后、Worker 启动前，会自动建立 `.wildarrange/task-packets/<planId>/<taskId>/`：`baseline.json` 冻结首次开工时的任务范围与批准投影，`README.md` 指向现有 readiness、review、failure、acceptance、checkpoint 报告，`research.md` 索引任务启动时已声明的来源。重试不会覆盖首次基线；列出的报告只有实际生成后才是证据。当前任务状态始终以 `.wildarrange/team/tasks.json` 为准。研究成果仍须写入任务批准的 `writable_paths` 并在验收证据中引用；证据夹不扩大 Worker 权限。
+
+Worker 上下文会提示文档边界。若实际改动项目根 Markdown，或 `doc/`、`docs/` 下的长期 Markdown/HTML 文档（不含 `plans/`、`reports/` 等任务历史目录），独立 Reviewer 额外执行当前事实审计：长期文档保留当前有效的功能、结构、用法与限制；任务时间线、原始日志和未落地方案归任务证据；同一当前事实只由权威来源维护，已验证同步的翻译可保留；旧方案明确标为历史。Reviewer 必须逐份引用改动文档的源码行；违规时给出行号、原因和整改，未通过不能 checkpoint。

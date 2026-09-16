@@ -8,7 +8,7 @@ import {
   resolveWildArrangePath,
 } from "../infra/runtime-store.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
-import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
+import { ensureTaskPacket, writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { readChangeRequest, writeChangeRequest } from "./change-governance.mjs";
 import { prepareContractReview } from "./contract-governance.mjs";
 import { buildFailureSummary } from "../infra/failure-analysis.mjs";
@@ -110,6 +110,7 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
     }
     return { status: readiness?.commandRecovery ? "recovery_required" : "readiness_blocked", task, readiness, error: readinessEnvelope.error };
   }
+  await ensureTaskPacket(rootDir, taskState.planId, task);
   options = { ...options, executionContextPath: readiness?.contextPath };
   task.owner = assertCommandWorkerAgent(task.owner || "Jiuwei");
   task.coordination = await coordinateTaskClaim(rootDir, {
@@ -380,6 +381,7 @@ async function executeTaskNodeUnlocked(rootDir, options = {}) {
     }
     return { status: readiness?.commandRecovery ? "recovery_required" : "readiness_blocked", task, readiness, error: readinessEnvelope.error };
   }
+  await ensureTaskPacket(rootDir, taskState.planId, task);
   options = { ...options, executionContextPath: readiness?.contextPath };
   task.owner = assertCommandWorkerAgent(task.owner || "Jiuwei");
   if (task.status === "pending") {
