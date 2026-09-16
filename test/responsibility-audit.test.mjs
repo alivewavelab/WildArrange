@@ -190,3 +190,20 @@ test("independent responsibility PASS is sufficient as the substantive review la
   const proof = JSON.parse(await readFile(resolveTaskAcceptancePath(root, task.planId, "T001"), "utf8"));
   assert.equal(proof.pass, true);
 });
+
+
+test("review process recovery evidence stops delivery before checkpoint", async (t) => {
+  const { root, task } = await fixture(t);
+  task.verify_commands = ['node -e "if(!process.version)process.exit(1)"'];
+  const recovery = { exitCode: 1, terminationFailed: true, recoveryRequired: true, pid: 12345 };
+  const result = await runDeliveryPipeline(root, task.planId, task, {
+    initialEvidence: {
+      workerResult: { kind: "worker", exitCode: 0 },
+      reviewResult: { kind: "review_gate", pass: false, commandRecovery: recovery },
+    },
+  });
+  assert.equal(result.status, "recovery_required");
+  assert.deepEqual(result.evidence.commandRecovery, recovery);
+  assert.equal(result.steps.some(step => step.capability === "checkpoint"), false);
+  await assert.rejects(readFile(resolveTaskAcceptancePath(root, task.planId, task.id)), /ENOENT/);
+});
