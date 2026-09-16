@@ -672,3 +672,5 @@ Worker 之后的既有 Review 增加独立职责审计：R1 符合批准方案�
 Worker 读取 WILDARRANGE_EXECUTION_CONTEXT 的完整任务 Skill；探测器读取 WILDARRANGE_READINESS_PACKET，Reviewer 读取 WILDARRANGE_REVIEW_PACKET。探测返回 ready、原 challenge、loadedSkills；Reviewer 按包内协议返回带 inputDigest 的 PASS/RETURN/INCONCLUSIVE 与准确源码证据。请连接真实服务，固定回显不是独立审核。握手通过不等于功能交付。
 
 旧项目扫描用 adoption inventory，登记继续使用 adoption 的逐卡批准流程。Registry.fixtures 只保存夹具位置与消费者；旧计划来源保存在 task.request.evidenceRefs，事实读写仍属于唯一 owner。登记完成与实际迁移完成分别报告，历史“已完成”必须重新验证才成为当前完成。存量无职责声明且无项目步骤的兼容任务返回 legacy_not_checked，不能宣传为通过新开工检查。
+
+架构设计环节：初始化项目文档后会返回下一步 Skill 提示；也可主动运行 `/wildarrange-architecture`，或说“审查旧架构图”。已有设计按职责、依赖、事实归属、流程、必要复杂度五项审查，无设计则按需求提出最小方案。通过后仍须人工确认具体版本，沿用一个权威文档。此环节由宿主执行 Skill，不会自动弹窗、修改旧设计或建立图与代码一致性门禁。

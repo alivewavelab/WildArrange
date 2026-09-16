@@ -20,7 +20,7 @@
       "layer": "project_governance",
       "status": "implemented",
       "command": "node ./bin/wildarrange.mjs init --project-docs [--architecture]",
-      "purpose": "显式、非覆盖式补建项目治理文档；人类必须处理返回的待确认项，架构模板只在边界已明确时创建。",
+      "purpose": "显式、非覆盖式补建项目治理文档；返回设计审查 Skill 的下一步提示，架构模板不代表审查通过或人工批准。",
       "reads": [
         "packs/wildarrange-linear/project-init/**",
         "AGENTS.md",

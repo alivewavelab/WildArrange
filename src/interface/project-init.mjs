@@ -43,7 +43,15 @@ export async function initProjectDocuments(rootDir, options = {}) {
     created,
     preserved,
     architectureIncluded: options.architecture === true,
+    architectureDesign: {
+      status: "review_required",
+      scope: "design_only",
+      skill: "review-architecture-design",
+      nextCommand: "prompts show --skill review-architecture-design",
+      templateIsApproval: false,
+    },
     awaitingHumanConfirmation: [
+      "读取 review-architecture-design：已有设计先审查，无设计先提案；具体版本经人工确认后才作为权威设计",
       "替换或删除全部 [待确认] 占位项",
       "确认测试策略、标准命令与必要门禁",
       "确认生产入口、测试入口和生产产物隔离方式",

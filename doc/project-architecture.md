@@ -405,3 +405,7 @@ infra/context-attachments.mjs 是完整 Markdown/Skill 安全读取的唯一 own
 review.steps 是项目附加审查的唯一配置；任务字段不复制审查要求。审查输入绑定策略、文档/Skill 与源码摘要，运行后复查内容未变。必需项目审查与原有职责审计共同进入 Review 与 acceptance proof；探测不能生成完成证明。报告只保存证据，不成为第二套业务事实维护者。
 
 configure-project-review 和 project-onboarding 是按需加载的流程 Skill；setup/onboard adapter 入口先读取其正文。接管沿用 tasks.request.evidenceRefs 与 Verification Registry，fixtures 目录项保存来源和消费者，不保存夹具业务值。扫描、登记、迁移和当前验收不能互相替代。
+
+### 设计层架构接入
+
+review-architecture-design 是设计审查流程的唯一规则来源；project-init 返回加载提示，project-onboarding 先进入该环节，adapter 提供 architecture 入口。它审查设计并要求人工确认同一权威文档，不读取源码反推设计、不新增 runtime 架构准入状态、不将模板或 Review PASS 视为人类批准。

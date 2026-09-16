@@ -370,7 +370,8 @@ function buildSlashCommands(cliPrefix) {
   const fence = (lines) => ["```bash", ...lines, "```"].join("\n");
   return [
     ...[{ suffix: "setup", skill: "configure-project-review", title: "项目审查与执行配置" },
-      { suffix: "onboard", skill: "project-onboarding", title: "旧项目治理接管" }].map(entry => ({
+      { suffix: "onboard", skill: "project-onboarding", title: "旧项目治理接管" },
+      { suffix: "architecture", skill: "review-architecture-design", title: "架构设计审查与确认" }].map(entry => ({
       name: SLASH_COMMAND_PREFIX + "-" + entry.suffix, title: entry.title, description: entry.title,
       body: "先运行 " + cliPrefix + " prompts show --skill " + entry.skill + " 读取完整 Skill，再遵循其预览、批准和验收步骤。不能只凭名称执行，不能假定项目拥有工具源码。",
     })),

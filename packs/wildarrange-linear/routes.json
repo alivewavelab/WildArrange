@@ -6,6 +6,19 @@
   },
   "intents": [
     {
+      "name": "architecture_design_review",
+      "signals": ["审查架构设计", "审查旧架构图", "架构设计审查", "建立权威架构", "默认架构", "默认架构方案", "architecture design review"],
+      "route": "verify",
+      "primaryAgent": "BaiZe",
+      "supportAgents": ["DiJiang"],
+      "category": null,
+      "skills": ["review-architecture-design"],
+      "nextCommand": "node ./bin/wildarrange.mjs prompts show --skill review-architecture-design",
+      "needsPlan": false,
+      "lockPrimaryAgent": true,
+      "risk": "low"
+    },
+    {
       "name": "configure_project_review",
       "signals": ["配置项目审查", "接入审查规范", "配置执行能力", "configure project review"],
       "route": "verify",

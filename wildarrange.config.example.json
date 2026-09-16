@@ -181,7 +181,7 @@
       "plan": ["init-deep", "review-plan-risk", "review-plan-readiness", "review-scope-tradeoff", "design-acceptance"],
       "design": ["frontend-ui-ux", "review-ux-interaction", "visual-qa"],
       "execute": ["programming", "debugging", "refactor", "run-linear-delivery"],
-      "verify": ["review-work", "design-acceptance", "visual-qa", "configure-project-review", "project-onboarding"],
+      "verify": ["review-work", "design-acceptance", "visual-qa", "configure-project-review", "project-onboarding", "review-architecture-design"],
       "review": ["review-work", "review-plan-risk", "review-plan-readiness", "remove-ai-slops"],
       "deploy": ["publish", "pre-publish-review"],
       "recall": ["get-unpublished-changes"]

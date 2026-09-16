@@ -6,7 +6,7 @@
 | `wildarrange review checklist --task <taskId>` | 解析本任务项目审查清单和必需依据，不启动执行器 |
 | `wildarrange readiness --task <taskId>` | 检查已批准任务必需的执行器、Skill、规范与握手，不启动业务 Worker |
 | `wildarrange adoption inventory` | 只读扫描旧仓库文件与验证资产，供接管 Skill 建立来源映射 |
-| `wildarrange init [--sample] [--project-docs] [--architecture]` | 初始化运行时；显式补建项目治理文档，可按需包含架构模板 |
+| `wildarrange init [--sample] [--project-docs] [--architecture]` | 初始化运行时；显式补建项目文档并提示设计审查 Skill，可选未批准架构模板 |
 | `wildarrange plan --from <plan.json>` | 导入含 responsibilityChanges 的计划；等待人工确认职责与事实归属 |
 | `wildarrange plan approve [--plan <planId>]` | 确认待执行计划（语义生成计划或已开启 planApproval） |
 | `wildarrange run` | 跑下一个任务（worker→verifier→scope→review→checkpoint） |
