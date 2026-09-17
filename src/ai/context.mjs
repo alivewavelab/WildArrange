@@ -1,3 +1,4 @@
+import { renderResponsibilityChanges } from "../infra/responsibility-contract.mjs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -26,16 +27,17 @@ import { findRunnableTask, normalizeAgentName } from "../orchestration/task-boar
 import { statusReport } from "../orchestration/status.mjs";
 
 export async function buildAgentContext(rootDir, options = {}) {
+  const executionRoot = options.executionRoot || rootDir;
   await ensureWildArrangeDirs(rootDir);
   const { config, sourcePath } = await loadWildArrangeConfig(rootDir);
   const taskState = await loadTaskState(rootDir, { planId: options.planId });
   const task = resolveContextTask(taskState?.tasks || [], options.taskId, options.planId);
-  const changed = await collectGitChangedPaths(rootDir);
+  const changed = await collectGitChangedPaths(executionRoot);
   const targetPaths = uniqueStrings([
     ...(task?.writable_paths || []),
     ...(changed.available ? changed.paths : []),
   ].map(normalizeRelativePath));
-  const rules = await scanProjectRules(rootDir, { targetPaths });
+  const rules = await scanProjectRules(executionRoot, { controlRoot: rootDir, targetPaths });
   const agent = normalizeAgentName(options.agent || task?.owner || DEFAULT_EXECUTOR_AGENT) || DEFAULT_EXECUTOR_AGENT;
   const resumeContext = await writeContextSnapshot(rootDir, { reason: `agent-context:${agent}` });
   const role = options.role || roleForAgent(agent);
@@ -180,7 +182,7 @@ export async function continuationDirective(rootDir, options = {}) {
     cliCommandPrefix: options.cliCommandPrefix,
   });
   const action = resume.nextActionDetails;
-  const shouldContinue = !["awaiting_user_decision", "no_unfinished_work"].includes(action.reason);
+  const shouldContinue = !["awaiting_plan_approval", "awaiting_user_decision", "no_unfinished_work"].includes(action.reason);
   const directive = {
     kind: "wildarrange_continuation_directive",
     version: STATE_VERSION,
@@ -191,7 +193,7 @@ export async function continuationDirective(rootDir, options = {}) {
     nextCommand: action.command,
     message: shouldContinue
       ? `WildArrange 还有未收口工作：${action.taskId}。下一步：${action.command}，不要丢失上下文。`
-      : action.reason === "awaiting_user_decision" ? `${action.text}；不要自动续跑或重复催问。` : "WildArrange 当前没有可续跑任务。",
+      : ["awaiting_plan_approval", "awaiting_user_decision"].includes(action.reason) ? `${action.text}；不要自动续跑或重复催问。` : "WildArrange 当前没有可续跑任务。",
     resume,
   };
   const jsonPath = resolveWildArrangePath(rootDir, "sessions", "continuation.json");
@@ -295,6 +297,7 @@ function summarizeTaskForContext(task) {
     attempts: task.attempts,
     maxAttempts: task.maxAttempts,
     writable_paths: task.writable_paths || [],
+    responsibilityChanges: task.responsibilityChanges || null,
     verify_commands: task.verify_commands || [],
     review_commands: task.review_commands || [],
     standards_commands: task.standards_commands || [],
@@ -320,6 +323,7 @@ function summarizeTaskForContext(task) {
 function appendTaskContext(lines, task) {
   lines.push(`- ${task.id}: ${task.subject}`);
   lines.push(`  - Status: ${task.status}; category=${task.category || "unresolved"}; attempts=${task.attempts}/${task.maxAttempts}`);
+  lines.push(...renderResponsibilityChanges(task.responsibilityChanges));
   lines.push(`  - Writable: ${task.writable_paths.join(", ") || "(none)"}`);
   lines.push(`  - Verify: ${task.verify_commands.join(" && ") || "(none)"}`);
   if (task.review_commands.length > 0) lines.push(`  - Review: ${task.review_commands.join(" && ")}`);

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
@@ -108,6 +109,7 @@ test("cli smoke: Codex hook execution binds host and current config digest befor
     const hooks = JSON.parse(await readFile(path.join(dir, ".codex", "hooks.json"), "utf8"));
     assert.ok(hooks.hooks.UserPromptSubmit[0].hooks[0].command.includes(`node "${CLI_PATH}" hook run`));
     assert.match(hooks.hooks.UserPromptSubmit[0].hooks[0].command, /--adapter-mode local/);
+    assert.ok(hooks.hooks.UserPromptSubmit[0].hooks[0].command.includes(`--control-root "${dir}"`));
     assert.match(hooks.hooks.UserPromptSubmit[0].hooks[0].command, /--host codex$/);
 
     const hook = await runCliWithInput(["hook", "run", "--host", "codex", "--format", "json"], dir, {
@@ -131,6 +133,31 @@ test("cli smoke: Codex hook execution binds host and current config digest befor
     const codex = report.sections.adapters.targets.find((target) => target.target === "codex");
     assert.equal(codex.activation, "execution_observed");
     assert.equal(codex.sessionId, "cli-codex-host-proof");
+  });
+});
+
+test("cli smoke: Codex hook uses its installed control root from a task worktree", async () => {
+  await withTempProjectDir(async (controlRoot) => {
+    assert.equal((await runCli(["init"], controlRoot)).code, 0);
+    assert.equal((await runCli(["adapter", "install", "--target", "codex", "--mode", "local"], controlRoot)).code, 0);
+    const executionRoot = path.join(controlRoot, "task-worktree");
+    await mkdir(executionRoot, { recursive: true });
+    await writeFile(path.join(executionRoot, "wildarrange.config.json"), "{}\n");
+    await writeFile(path.join(executionRoot, "AGENTS.md"), "# Task Worktree\n\nCODEX_WORKTREE_RULE_PROBE\n");
+
+    const hook = await runCliWithInput([
+      "hook", "run", "--host", "codex", "--format", "json", "--control-root", controlRoot,
+    ], executionRoot, {
+      hook_event_name: "SessionStart",
+      session_id: "cli-codex-task-worktree",
+      cwd: executionRoot,
+    });
+
+    assert.equal(hook.code, 0, hook.stderr);
+    const result = JSON.parse(hook.stdout);
+    assert.match(result.output, /CODEX_WORKTREE_RULE_PROBE/);
+    assert.equal(existsSync(path.join(executionRoot, ".wildarrange")), false);
+    assert.equal(existsSync(path.join(controlRoot, ".wildarrange", "sessions", "hooks", "cli-codex-task-worktree-SessionStart.json")), true);
   });
 });
 
@@ -285,6 +312,7 @@ test("cli smoke: a local target without bin imports a string-array verifier plan
         description: "Create a small receipt through the governed task.",
         owner: "ZhuRong",
         writable_paths: ["receipt.txt"],
+        responsibilityChanges: [{ script: "receipt.txt", additions: "Create accepted artifact", responsibilityBefore: "Absent", responsibilityAfter: "Own the accepted artifact", facts: [] }],
         worker_command: "node -e \"require('fs').writeFileSync('receipt.txt','ok')\"",
         verify_commands: ["node -e \"if(require('fs').readFileSync('receipt.txt','utf8')!=='ok')process.exit(1)\""],
         successCriteria: [{
@@ -310,7 +338,13 @@ test("cli smoke: a local target without bin imports a string-array verifier plan
     assert.equal(installReport.cliPrefix, absolutePrefix);
     const resumed = await runCli(["resume"], dir);
     assert.equal(resumed.code, 0, resumed.stderr);
-    const resume = JSON.parse(resumed.stdout);
+    let resume = JSON.parse(resumed.stdout);
+    assert.equal(resume.nextActionDetails.reason, "awaiting_plan_approval");
+    assert.equal(resume.nextActionDetails.command, null);
+    assert.equal((await runCli(["plan", "approve"], dir)).code, 0);
+    const approvedResume = await runCli(["resume"], dir);
+    assert.equal(approvedResume.code, 0, approvedResume.stderr);
+    resume = JSON.parse(approvedResume.stdout);
     assert.equal(resume.nextActionDetails.command, `${absolutePrefix} run`);
     const contextJson = JSON.parse(await readFile(path.join(dir, ".wildarrange", "snapshots", "context.json"), "utf8"));
     assert.equal(contextJson.nextActionDetails.command, `${absolutePrefix} run`);

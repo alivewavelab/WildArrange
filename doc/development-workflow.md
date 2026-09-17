@@ -36,7 +36,7 @@ init -> plan -> task-worktree -> worker -> verifier -> delivery-commit -> task-b
 - task 处于等待验收、返工或 `recovery_required` 时保留 branch/worktree。确认 `main` 已包含 delivery commit 后，先证明 worktree 干净并删除 worktree，再删除本地 branch；删除远端 branch 属于远端变更，必须由人类确认。Worktree 不是长期档案。
 - ArchivistRouter 只读取清洗后的结论包，不摄入代码块、raw diff 或完整命令输出；无 LLM key 时必须 fallback，不阻断主线或 hook。
 - 路由必须保留 deterministic 证据；semantic shadow 只能作为第二意见和低置信门控，不得无审计地覆盖路由表。
-- 路由写入任务的 `task.skills` 必须由执行前公开宿主入口真实挂载；M1 不得宣称尚未接通的复核/checkpoint 自动挂载。只允许加载 Prompt Pack manifest 或项目 Skill 根内的已登记文件，并校验安装根、realpath 与 hash，继续受数量和字符预算约束。未知或完整性失败的 Skill 必须显式报告，不能静默加载。
+- 路由写入任务的 `task.skills` 必须由执行前公开宿主入口真实挂载；项目级 Review 必需 Skill 在审查前经同一安全加载器完整读取，缺失或截断不得放行；未接通的 checkpoint 自动挂载仍不得宣称可用。只允许加载 Prompt Pack manifest 或项目 Skill 根内的已登记文件，并校验安装根、realpath 与 hash，继续受数量和字符预算约束。未知或完整性失败的 Skill 必须显式报告，不能静默加载。
 - 商业发布包不得包含受限第三方源码、prompt 原文或近似改写文本；外部项目只能作为概念参考和对照证据。
 
 ## 工程约束

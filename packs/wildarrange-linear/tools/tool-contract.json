@@ -20,7 +20,7 @@
       "layer": "project_governance",
       "status": "implemented",
       "command": "node ./bin/wildarrange.mjs init --project-docs [--architecture]",
-      "purpose": "显式、非覆盖式补建项目治理文档；人类必须处理返回的待确认项，架构模板只在边界已明确时创建。",
+      "purpose": "显式、非覆盖式补建项目治理文档；返回设计审查 Skill 的下一步提示，架构模板不代表审查通过或人工批准。",
       "reads": [
         "packs/wildarrange-linear/project-init/**",
         "AGENTS.md",
@@ -301,8 +301,16 @@
       "status": "implemented",
       "command": "node ./bin/wildarrange.mjs contracts propose --task <id> --from <proposal.json>",
       "purpose": "Loop 外提出计划外契约变化，含必要性、影响、替代及建议；暂停任务等待人类决定。Loop 内 worker 用 stdout 的 WILDARRANGE_CONTRACT_CHANGE=JSON 回执，不能嵌套获取任务锁。",
-      "reads": [".wildarrange/team/tasks.json", "<proposal.json>"],
-      "writes": [".wildarrange/changes/**", ".wildarrange/team/tasks.json", ".wildarrange/plans/**", ".wildarrange/ledger.jsonl"]
+      "reads": [
+        ".wildarrange/team/tasks.json",
+        "<proposal.json>"
+      ],
+      "writes": [
+        ".wildarrange/changes/**",
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/plans/**",
+        ".wildarrange/ledger.jsonl"
+      ]
     },
     {
       "name": "contract_change_resolve",
@@ -310,8 +318,17 @@
       "status": "implemented",
       "command": "node ./bin/wildarrange.mjs contracts resolve --id <id> --decision accept|reject --expected-fingerprint <sha256> --reason <text>",
       "purpose": "仅在人类明确决定后，按报告内容指纹记录批准或拒绝；不得由 worker 自批。",
-      "reads": [".wildarrange/changes/**", ".wildarrange/team/tasks.json", ".wildarrange/ledger.jsonl"],
-      "writes": [".wildarrange/changes/**", ".wildarrange/team/tasks.json", ".wildarrange/plans/**", ".wildarrange/ledger.jsonl"]
+      "reads": [
+        ".wildarrange/changes/**",
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/ledger.jsonl"
+      ],
+      "writes": [
+        ".wildarrange/changes/**",
+        ".wildarrange/team/tasks.json",
+        ".wildarrange/plans/**",
+        ".wildarrange/ledger.jsonl"
+      ]
     },
     {
       "name": "wildarrange_context_build",
@@ -349,7 +366,7 @@
       "layer": "planning",
       "status": "implemented",
       "command": "node ./bin/wildarrange.mjs plan --from <plan.json>",
-      "purpose": "把机器可读计划导入 .wildarrange/team/tasks.json。",
+      "purpose": "把含 responsibilityChanges 的机器可读计划导入 .wildarrange/team/tasks.json；展示目标脚本、新增内容、职责前后变化和事实读写归属，等待人工批准。",
       "reads": [
         "<plan.json>"
       ],
@@ -1506,6 +1523,67 @@
         ".wildarrange/team/outbox/**",
         ".wildarrange/ledger.jsonl"
       ]
+    },
+    {
+      "name": "wildarrange_review_configure",
+      "layer": "project_governance",
+      "status": "implemented",
+      "command": "node ./bin/wildarrange.mjs review configure --from .wildarrange/plan-drafts/setup.json [--apply]",
+      "purpose": "预览项目 Review 清单及能力配置；显式 apply 只修改治理配置，不启动 Worker。",
+      "reads": [
+        "wildarrange.config.json",
+        ".wildarrange/**",
+        "packs/wildarrange-linear/**",
+        ".agents/skills/**"
+      ],
+      "writes": [
+        "wildarrange.config.json",
+        ".wildarrange/ledger.jsonl"
+      ]
+    },
+    {
+      "name": "wildarrange_review_checklist",
+      "layer": "project_governance",
+      "status": "implemented",
+      "command": "node ./bin/wildarrange.mjs review checklist --task <taskId>",
+      "purpose": "显示本任务匹配的项目规范与必需 Skill、缺失项，不运行探测。",
+      "reads": [
+        "wildarrange.config.json",
+        ".wildarrange/**",
+        "packs/wildarrange-linear/**",
+        ".agents/skills/**"
+      ],
+      "writes": []
+    },
+    {
+      "name": "wildarrange_readiness",
+      "layer": "project_governance",
+      "status": "implemented",
+      "command": "node ./bin/wildarrange.mjs readiness --task <taskId>",
+      "purpose": "已批准任务开工前，检查真实执行能力握手、完整 Skill 与审查依赖。",
+      "reads": [
+        "wildarrange.config.json",
+        ".wildarrange/**",
+        "packs/wildarrange-linear/**",
+        ".agents/skills/**"
+      ],
+      "writes": [
+        ".wildarrange/reports/readiness/**"
+      ]
+    },
+    {
+      "name": "wildarrange_adoption_inventory",
+      "layer": "project_governance",
+      "status": "implemented",
+      "command": "node ./bin/wildarrange.mjs adoption inventory",
+      "purpose": "只读扫描验证资产与夹具，返回归拢卡片；不代表迁移或验收完成。",
+      "reads": [
+        "wildarrange.config.json",
+        ".wildarrange/**",
+        "packs/wildarrange-linear/**",
+        ".agents/skills/**"
+      ],
+      "writes": []
     }
   ],
   "adapterNotes": {

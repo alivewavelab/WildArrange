@@ -27,6 +27,8 @@ export async function writeReviewReport(rootDir, planId, task, reviewResult) {
     testingGaps: reviewResult.testingGaps || [],
     residualRisks: reviewResult.residualRisks || [],
     qualityResults: reviewResult.qualityResults || null,
+    responsibilityAudit: reviewResult.responsibilityAudit || null,
+    projectReview: reviewResult.projectReview || null,
     llmReviews: reviewResult.llmReviews || [],
     reviewCommandResults: reviewResult.reviewCommandResults,
     standardsCommandResults: reviewResult.standardsCommandResults || [],

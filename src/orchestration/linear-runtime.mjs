@@ -8,14 +8,14 @@ import {
   resolveWildArrangePath,
 } from "../infra/runtime-store.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
-import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
+import { ensureTaskPacket, writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { readChangeRequest, writeChangeRequest } from "./change-governance.mjs";
 import { prepareContractReview } from "./contract-governance.mjs";
 import { buildFailureSummary } from "../infra/failure-analysis.mjs";
 import { writeFailureReport, writeReviewReport } from "../infra/task-reports.mjs";
 import { routeRequest } from "../ai/routing.mjs";
 import { captureWorkspaceSnapshot, prepareAgentWorktree } from "../infra/git-worktree.mjs";
-import { changedPathsIntroducedByTask, collectGitChangedPaths, collectGitDiff } from "../infra/git-diff.mjs";
+import { buildChangedPathDiffEvidence, changedPathsIntroducedByTask, collectGitChangedPaths } from "../infra/git-diff.mjs";
 import { applyVerifierEvidenceToCriteria, criteriaStatus } from "../infra/success-criteria.mjs";
 import { invokeCapability } from "../capabilities/gateway.mjs";
 import { normalizeRelativePath } from "../infra/path-match.mjs";
@@ -100,6 +100,18 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
     return { status, task: null };
   }
 
+  const readinessEnvelope = await invokeCapability("execution-readiness", { rootDir, task, options });
+  const readiness = readinessEnvelope.evidence;
+  if (readinessEnvelope.status !== "pass") {
+    if (readiness?.commandRecovery) {
+      task.status = "needs_user_decision";
+      task.last_readiness_result = readiness;
+      await persistTaskState(rootDir, taskState);
+    }
+    return { status: readiness?.commandRecovery ? "recovery_required" : "readiness_blocked", task, readiness, error: readinessEnvelope.error };
+  }
+  await ensureTaskPacket(rootDir, taskState.planId, task);
+  options = { ...options, executionContextPath: readiness?.contextPath };
   task.owner = assertCommandWorkerAgent(task.owner || "Jiuwei");
   task.coordination = await coordinateTaskClaim(rootDir, {
     planId: taskState.planId,
@@ -116,11 +128,9 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
 
   const executionRoot = deliveryWorkspace?.workDir || rootDir;
   const workspaceSnapshot = await recordPreExecuteSnapshot(rootDir, taskState.planId, task, executionRoot);
-  const beforeDiff = await collectGitDiff(executionRoot);
   const beforeChanged = await collectGitChangedPaths(executionRoot);
   const workerEnvelope = await invokeCapability("worker", { rootDir, task, options: { ...options, executionRoot } });
   const workerResult = workerEnvelope.evidence;
-  const afterDiff = await collectGitDiff(executionRoot);
   const afterChanged = await collectGitChangedPaths(executionRoot);
 
   task.status = "verifying";
@@ -133,13 +143,7 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   task.last_review_result = null;
   if (workspaceSnapshot) task.evidence.push(workspaceSnapshot);
   task.evidence.push(workerResult);
-  task.evidence.push({
-    kind: "diff",
-    at: nowIso(),
-    beforeBytes: beforeDiff.length,
-    afterBytes: afterDiff.length,
-    changed: beforeDiff !== afterDiff,
-  });
+  task.evidence.push(buildChangedPathDiffEvidence(beforeChanged, afterChanged, { at: nowIso() }));
   task.updatedAt = nowIso();
   await persistTaskState(rootDir, taskState);
   await writeOutbox(rootDir, task, workerResult);
@@ -361,7 +365,24 @@ async function executeTaskNodeUnlocked(rootDir, options = {}) {
   const taskState = await loadTaskState(rootDir);
   if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
 
+  const approval = await loadPlanApproval(rootDir);
+  if (approval.required && approval.status !== "approved" && approval.planId === taskState.planId) {
+    return { status: "awaiting_plan_approval", task: null, planId: taskState.planId };
+  }
+
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["pending", "in_progress"]);
+  const readinessEnvelope = await invokeCapability("execution-readiness", { rootDir, task, options });
+  const readiness = readinessEnvelope.evidence;
+  if (readinessEnvelope.status !== "pass") {
+    if (readiness?.commandRecovery) {
+      task.status = "needs_user_decision";
+      task.last_readiness_result = readiness;
+      await persistTaskState(rootDir, taskState);
+    }
+    return { status: readiness?.commandRecovery ? "recovery_required" : "readiness_blocked", task, readiness, error: readinessEnvelope.error };
+  }
+  await ensureTaskPacket(rootDir, taskState.planId, task);
+  options = { ...options, executionContextPath: readiness?.contextPath };
   task.owner = assertCommandWorkerAgent(task.owner || "Jiuwei");
   if (task.status === "pending") {
     task.coordination = await coordinateTaskClaim(rootDir, {
@@ -383,11 +404,9 @@ async function executeTaskNodeUnlocked(rootDir, options = {}) {
   await persistTaskState(rootDir, taskState);
   const executionRoot = deliveryWorkspace?.workDir || rootDir;
   const workspaceSnapshot = await recordPreExecuteSnapshot(rootDir, taskState.planId, task, executionRoot);
-  const beforeDiff = await collectGitDiff(executionRoot);
   const beforeChanged = await collectGitChangedPaths(executionRoot);
   const workerEnvelope = await invokeCapability("worker", { rootDir, task, options: { ...options, executionRoot } });
   const workerResult = workerEnvelope.evidence;
-  const afterDiff = await collectGitDiff(executionRoot);
   const afterChanged = await collectGitChangedPaths(executionRoot);
 
   task.status = "verifying";
@@ -400,13 +419,7 @@ async function executeTaskNodeUnlocked(rootDir, options = {}) {
   task.last_review_result = null;
   if (workspaceSnapshot) task.evidence.push(workspaceSnapshot);
   task.evidence.push(workerResult);
-  task.evidence.push({
-    kind: "diff",
-    at: nowIso(),
-    beforeBytes: beforeDiff.length,
-    afterBytes: afterDiff.length,
-    changed: beforeDiff !== afterDiff,
-  });
+  task.evidence.push(buildChangedPathDiffEvidence(beforeChanged, afterChanged, { at: nowIso() }));
   task.evidence.push({
     kind: "execution_paths",
     at: nowIso(),

@@ -1,6 +1,6 @@
 /** End-to-end integration coverage across the five runtime zones. */
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -97,6 +97,20 @@ async function withTempDir(fn) {
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+async function installDocumentReviewerFixture(rootDir) {
+  const adapter = path.join(rootDir, ".wildarrange", "document-reviewer.cjs");
+  await mkdir(path.dirname(adapter), { recursive: true });
+  await writeFile(adapter, `const fs=require('node:fs');
+const p=JSON.parse(fs.readFileSync(process.env.WILDARRANGE_READINESS_PACKET||process.env.WILDARRANGE_REVIEW_PACKET,'utf8'));
+if(p.kind==='execution_readiness_probe') console.log(JSON.stringify({ready:true,challenge:p.challenge,loadedSkills:p.requiredSkills.map(s=>s.name)}));
+else if(p.kind==='project_review_step') {
+  const evidence=p.step.appliesTo.map(name=>p.source.files.find(file=>file.path===name)).filter(file=>file&&typeof file.content==='string').map(file=>({file:file.path,line:1,text:file.content.split('\\n')[0]}));
+  console.log(JSON.stringify({stepId:p.step.id,inputDigest:p.inputDigest,decision:'PASS',summary:'Fixture reviewed current document content',evidence,findings:[]}));
+} else console.log(JSON.stringify({decision:'PASS',checks:Object.keys(p.rules).map(rule=>({rule,decision:'PASS',reason:'Fixture inspected source'})),findings:[]}));`);
+  const command = `node "${adapter}"`;
+  await writeFile(path.join(rootDir, "wildarrange.config.json"), JSON.stringify({ executionReadiness: { workerProbe: command }, review: { responsibility: { command } } }));
 }
 
 async function initializeGitFixture(rootDir) {
@@ -634,6 +648,46 @@ test("hook adapter emits WildArrange runtime injection for user prompt", async (
     const hookRecord = await readJson(resolveWildArrangePath(dir, "sessions", "hooks", "session-1-UserPromptSubmit.json"));
     assert.equal(hookRecord.event, "UserPromptSubmit");
     assert.ok(hookRecord.output.length > 0);
+  });
+});
+
+test("hook sessions in task worktrees keep governance facts in the control root", async () => {
+  await withTempDir(async (controlRoot) => {
+    const executionRoot = path.join(controlRoot, "task-worktree");
+    await mkdir(executionRoot, { recursive: true });
+    await writeFile(path.join(executionRoot, "AGENTS.md"), "# Task Worktree Rules\n\nWORKTREE_RULE_PROBE\n");
+    await initRuntime(controlRoot);
+    const samplePath = await createSamplePlan(controlRoot);
+    await importPlan(controlRoot, samplePath);
+    await approvePlan(controlRoot);
+
+    const session = await runInjectionHook(controlRoot, {
+      hook_event_name: "SessionStart",
+      session_id: "task-worktree-session",
+      cwd: executionRoot,
+    });
+
+    assert.match(session.output, /WORKTREE_RULE_PROBE/);
+    assert.equal(
+      (await readJson(resolveWildArrangePath(controlRoot, "sessions", "hooks", "task-worktree-session-SessionStart.json"))).event,
+      "SessionStart",
+    );
+    await assert.rejects(() => stat(path.join(executionRoot, ".wildarrange")), { code: "ENOENT" });
+
+    const preTool = await runInjectionHook(controlRoot, {
+      hook_event_name: "PreToolUse",
+      session_id: "task-worktree-session",
+      cwd: executionRoot,
+      task_id: "T001",
+      tool_name: "functions.apply_patch",
+      tool_input: {
+        command: "*** Begin Patch\n*** Add File: .wildarrange/artifacts/linear-smoke.txt\n+ok\n*** End Patch",
+      },
+    });
+
+    assert.equal(preTool.decision, "allow");
+    assert.deepEqual(preTool.targetPaths, [".wildarrange/artifacts/linear-smoke.txt"]);
+    await assert.rejects(() => stat(path.join(executionRoot, ".wildarrange")), { code: "ENOENT" });
   });
 });
 
@@ -1222,6 +1276,10 @@ test("adapter install writes slash commands for cursor and codex", async () => {
     assert.match(planCommand, /\.wildarrange\/plan-drafts\/<session>-plan\.json/);
     assert.match(planCommand, /generated_by: "host_semantic"/);
     assert.match(planCommand, /task\.owner/);
+    assert.match(planCommand, /`worker_command`/);
+    assert.match(planCommand, /隔离任务 worktree/);
+    assert.match(planCommand, /node --version.*process\.exit\(0\).*占位/);
+    assert.match(planCommand, /只要求生成草稿.*不得执行下面的导入命令/);
     assert.match(planCommand, /Jiuwei 或 ZhuRong/);
     assert.match(planCommand, /不能成为 command worker/);
     assert.match(planCommand, /`verify_commands` 必须是非空的命令字符串数组/);
@@ -2332,6 +2390,27 @@ test("project rules and agent context collect matching local governance", async 
   });
 });
 
+test("project rules read a task worktree but persist runtime facts to the control root", async () => {
+  await withTempDir(async (dir) => {
+    const controlRoot = path.join(dir, "control");
+    const executionRoot = path.join(dir, "task-worktree");
+    await mkdir(controlRoot, { recursive: true });
+    await mkdir(path.join(executionRoot, "src"), { recursive: true });
+    await writeFile(path.join(executionRoot, "AGENTS.md"), "# Task worktree rules\n\nRun the real verifier.\n");
+    await initRuntime(controlRoot);
+
+    const rules = await scanProjectRules(executionRoot, {
+      controlRoot,
+      targetPaths: ["src/app.js"],
+    });
+    assert.equal(rules.matched, 1);
+    assert.equal(rules.rules[0].path, "AGENTS.md");
+    assert.match(await readFile(resolveWildArrangePath(controlRoot, "rules", "context.md"), "utf8"), /Run the real verifier/);
+    assert.match(await readFile(resolveWildArrangePath(controlRoot, "ledger.jsonl"), "utf8"), /project_rules_scanned/);
+    await assert.rejects(stat(path.join(executionRoot, ".wildarrange")), /ENOENT/);
+  });
+});
+
 test("success criteria evidence is recorded and required by checkpoint", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
@@ -2937,6 +3016,7 @@ test("simulation greenfield project runs from product planning to completed web 
   await withTempDir(async (dir) => {
     await writeFile(path.join(dir, "AGENTS.md"), "# Project Rules\n\nUser-visible web work needs verifier evidence.\n");
     await initRuntime(dir);
+    await installDocumentReviewerFixture(dir);
 
     const route = await routeRequest(dir, {
       text: "从零做一个网页版提醒事项 App，一期 MVP 要有清单流程、空状态、验收标准和失败恢复。",
@@ -3104,6 +3184,7 @@ test("simulation existing project handles large feature addition through plannin
     await writeFile(path.join(dir, "AGENTS.md"), "# Existing Project Rules\n\nLarge features require scope and regression evidence.\n");
     await writeFile(path.join(dir, "src", "app.cjs"), "function listItems(items) { return items; }\nmodule.exports = { listItems };\n");
     await writeFile(path.join(dir, "test", "app.test.cjs"), "const { listItems } = require('../src/app.cjs');\nif (listItems([1]).length !== 1) process.exit(1);\n");
+    await installDocumentReviewerFixture(dir);
     await initializeGitFixture(dir);
     await initRuntime(dir);
 
@@ -3606,6 +3687,7 @@ test("non-git projects use file manifest scope fallback before checkpoint", asyn
 
 test("accepted change request can explicitly apply scope and reopen retry", async () => {
   await withTempDir(async (dir) => {
+    await installDocumentReviewerFixture(dir);
     await initRuntime(dir);
     await initializeGitFixture(dir);
 
@@ -3909,7 +3991,9 @@ test("workflow summary records failed runs with failure evidence", async () => {
       }],
     }));
 
-    const result = await runWorkflow(dir, { planPath });
+    // Preserve the legacy-plan failure-summary regression; public imports now require responsibility approval.
+    await importPlan(dir, planPath);
+    const result = await runWorkflow(dir);
     assert.equal(result.ok, false);
     assert.equal(result.summaryPath, ".wildarrange/reports/workflow-summary.md");
 
@@ -4905,9 +4989,54 @@ test("plan approval gate blocks run until developer approves", async () => {
   });
 });
 
+test("runtime snapshot follows execution semantics for legacy approval records", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    await installAdapter(dir, { target: "codex", mode: "local" });
+    const planPath = path.join(dir, "legacy-approval-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      id: "legacy-approval-plan",
+      generated_by: "host_semantic",
+      title: "Legacy approval compatibility",
+      tasks: [{
+        id: "T001",
+        subject: "Create a result",
+        description: "Create the requested result file.",
+        owner: "ZhuRong",
+        writable_paths: ["src/result.js"],
+        responsibilityChanges: [{ script: "src/result.js", additions: "Create accepted artifact", responsibilityBefore: "Absent", responsibilityAfter: "Own accepted artifact", facts: [] }],
+        worker_command: "node -e \"const fs=require('fs');fs.mkdirSync('src',{recursive:true});fs.writeFileSync('src/result.js','ok')\"",
+        verify_commands: ["node -e \"if(!require('fs').existsSync('src/result.js'))process.exit(1)\""],
+      }],
+    }, null, 2));
+    await importPlan(dir, planPath);
+
+    const workPath = resolveWildArrangePath(dir, "work.json");
+    const legacyWork = await readJson(workPath);
+    delete legacyWork.planApproval.planId;
+    await writeFile(workPath, JSON.stringify(legacyWork, null, 2));
+    legacyWork.status = "ready";
+    await writeFile(workPath, JSON.stringify(legacyWork, null, 2));
+    const currentLegacy = await resumeReport(dir, { sessionId: "legacy-current-approval" });
+    assert.equal(currentLegacy.nextActionDetails.reason, "awaiting_plan_approval");
+    assert.equal(currentLegacy.nextActionDetails.command, null);
+    assert.match(currentLegacy.nextAction, /await user approval/);
+    const blockedRun = await runNextTask(dir);
+    assert.equal(blockedRun.status, "awaiting_plan_approval");
+    assert.equal(blockedRun.task, null);
+
+    legacyWork.planApproval.planId = "older-plan";
+    await writeFile(workPath, JSON.stringify(legacyWork, null, 2));
+    const staleLegacy = await resumeReport(dir, { sessionId: "legacy-other-plan-approval" });
+    assert.equal(staleLegacy.nextActionDetails.reason, "runnable_task");
+    assert.match(staleLegacy.nextActionDetails.command, /\brun$/);
+  });
+});
+
 test("host semantic plans require an explicit command-worker task.owner and user approval", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
+    await installAdapter(dir, { target: "codex", mode: "local" });
     const planPath = path.join(dir, "semantic-plan.json");
     await writeFile(planPath, JSON.stringify({
       generated_by: "host_semantic",
@@ -4919,9 +5048,10 @@ test("host semantic plans require an explicit command-worker task.owner and user
         description: "Create the accepted artifact.",
         owner: "ZhuRong",
         writable_paths: ["src/result.js"],
+        responsibilityChanges: [{ script: "src/result.js", additions: "Create accepted artifact", responsibilityBefore: "Absent", responsibilityAfter: "Own accepted artifact", facts: [] }],
         worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/result.js','export const ok = true;\\n')\"",
         verify_commands: ["node -e \"const fs=require('fs'); if(!fs.readFileSync('src/result.js','utf8').includes('ok')) process.exit(1)\""],
-        review_commands: ["node --version"],
+        review_commands: ["node -e \"const fs=require('fs'); if(!fs.readFileSync('src/result.js','utf8').includes('export const ok = true')) process.exit(1)\""],
         successCriteria: [{
           title: "src/result.js exists and contains ok",
           expectedEvidence: "the verifier reads the file and finds ok",
@@ -4937,6 +5067,24 @@ test("host semantic plans require an explicit command-worker task.owner and user
     assert.equal(approval.required, true);
     assert.equal(approval.status, "pending");
     assert.equal((await runNextTask(dir)).status, "awaiting_plan_approval");
+
+    const pendingResume = await resumeReport(dir, { sessionId: "semantic-pending-resume" });
+    assert.equal(pendingResume.nextActionDetails.reason, "awaiting_plan_approval");
+    assert.equal(pendingResume.nextActionDetails.planId, imported.id);
+    assert.equal(pendingResume.nextActionDetails.command, null);
+    const pendingContext = await readJson(resolveWildArrangePath(dir, "snapshots", "context.json"));
+    assert.equal(pendingContext.nextTask, null);
+    const pendingContextMarkdown = await readFile(resolveWildArrangePath(dir, "snapshots", "context.md"), "utf8");
+    assert.match(pendingContextMarkdown, /Approve after user confirmation/);
+    assert.doesNotMatch(pendingContextMarkdown, /Run next task:.*\brun\b/);
+    const pendingStop = await runInjectionHook(dir, {
+      hook_event_name: "Stop",
+      session_id: "semantic-pending-stop",
+      cwd: dir,
+    });
+    assert.equal(pendingStop.continuation.required, false);
+    assert.equal(pendingStop.continuation.reason, "awaiting_plan_approval");
+    assert.equal(pendingStop.continuation.nextCommand, null);
 
     const draftEditPending = await preToolUseGuard(dir, {
       hook_event_name: "PreToolUse",
@@ -4968,6 +5116,12 @@ test("host semantic plans require an explicit command-worker task.owner and user
     assert.equal(approveCommandPending.decision, "allow");
 
     await approvePlan(dir);
+    const approvedResume = await resumeReport(dir, { sessionId: "semantic-approved-resume" });
+    assert.equal(approvedResume.nextActionDetails.reason, "runnable_task");
+    assert.match(approvedResume.nextActionDetails.command, /\brun$/);
+    const approvedContinuation = await continuationDirective(dir, { sessionId: "semantic-approved-stop" });
+    assert.equal(approvedContinuation.shouldContinue, true);
+    assert.match(approvedContinuation.nextCommand, /\brun$/);
     const draftEditApproved = await preToolUseGuard(dir, {
       hook_event_name: "PreToolUse",
       session_id: "semantic-plan-edit",
@@ -4988,6 +5142,7 @@ test("host semantic plans require an explicit command-worker task.owner and user
         subject: "Must not import",
         description: "The host omitted the actual owner.",
         writable_paths: ["src/missing.js"],
+        responsibilityChanges: [{ script: "src/missing.js", additions: "Create accepted artifact", responsibilityBefore: "Absent", responsibilityAfter: "Own accepted artifact", facts: [] }],
         worker_command: "node --version",
         verify_commands: ["node --version"],
         successCriteria: [{
@@ -5011,6 +5166,7 @@ test("host semantic plans require an explicit command-worker task.owner and user
         description: "BaiZe cannot own an executable command task.",
         owner: "BaiZe",
         writable_paths: ["src/read-only.js"],
+        responsibilityChanges: [{ script: "src/read-only.js", additions: "Create accepted artifact", responsibilityBefore: "Absent", responsibilityAfter: "Own accepted artifact", facts: [] }],
         worker_command: "node --version",
         verify_commands: ["node --version"],
       }],
@@ -5019,6 +5175,65 @@ test("host semantic plans require an explicit command-worker task.owner and user
       () => importPlan(dir, readOnlyOwnerPath),
       /requires explicit command-worker task\.owner.*T003/,
     );
+
+    const reviewRunner = resolveWildArrangePath(dir, "independent-review-fixture.cjs");
+    await writeFile(reviewRunner, `const fs=require('node:fs');const packet=JSON.parse(fs.readFileSync(process.env.WILDARRANGE_READINESS_PACKET||process.env.WILDARRANGE_REVIEW_PACKET,'utf8'));if(packet.kind==='execution_readiness_probe'){console.log(JSON.stringify({ready:true,challenge:packet.challenge,loadedSkills:packet.requiredSkills.map(s=>s.name)}));process.exit(0)}if(!packet.source.files.some(f=>f.path==='src/result.js' && f.content.includes('export const ok = true')))throw Error('missing reviewed implementation');console.log(JSON.stringify({decision:'PASS',checks:Object.keys(packet.rules).map(rule=>({rule,decision:'PASS',reason:'Single fixture artifact, no facts or independent responsibilities added'})),findings:[]}));`);
+    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({ executionReadiness: { workerProbe: `node "${reviewRunner}"` }, review: { responsibility: { command: `node "${reviewRunner}"` } } }));
+    const completed = await runNextTask(dir);
+    assert.equal(completed.status, "completed");
+    assert.match(await readFile(path.join(dir, "src", "result.js"), "utf8"), /export const ok = true/);
+  });
+});
+
+test("host semantic plans reject missing or trivial workers before formal state writes", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const statePaths = [
+      resolveWildArrangePath(dir, "work.json"),
+      resolveWildArrangePath(dir, "team", "tasks.json"),
+      resolveWildArrangePath(dir, "ledger.jsonl"),
+    ];
+    const readState = () => Promise.all(statePaths.map((statePath) => readFile(statePath, "utf8").catch((error) => error?.code === "ENOENT" ? null : Promise.reject(error))));
+    const baseline = await readState();
+
+    for (const [index, workerCommand] of [undefined, "   ", "node --version", "node -e \"process.exit(0)\""] .entries()) {
+      const planId = `semantic-invalid-worker-${index}`;
+      const planPath = path.join(dir, `${planId}.json`);
+      const task = {
+        id: "T001",
+        subject: "Must use a real implementation worker",
+        description: "Create the requested source file.",
+        owner: "ZhuRong",
+        writable_paths: ["src/result.js"],
+        responsibilityChanges: [{ script: "src/result.js", additions: "Create accepted artifact", responsibilityBefore: "Absent", responsibilityAfter: "Own accepted artifact", facts: [] }],
+        verify_commands: ["node -e \"if(!require('fs').existsSync('src/result.js')) process.exit(1)\""],
+        successCriteria: [{ title: "result exists", expectedEvidence: "verifier finds src/result.js", verifierCommandRefs: [0] }],
+      };
+      if (workerCommand !== undefined) task.worker_command = workerCommand;
+      await writeFile(planPath, JSON.stringify({
+        id: planId,
+        generated_by: "host_semantic",
+        title: "Invalid semantic worker",
+        tasks: [task],
+      }, null, 2));
+      await assert.rejects(() => importPlan(dir, planPath), /requires a non-empty, non-trivial worker_command.*T001.*real implementation command/);
+      assert.deepEqual(await readState(), baseline, `invalid worker ${JSON.stringify(workerCommand)} must not mutate formal state`);
+      await assert.rejects(readFile(resolveWildArrangePath(dir, "plans", `${planId}.json`), "utf8"), /ENOENT/);
+    }
+
+    const manualPath = path.join(dir, "manual-external-plan.json");
+    await writeFile(manualPath, JSON.stringify({
+      id: "manual-external-plan",
+      title: "Legacy manual external work",
+      tasks: [{
+        id: "T001",
+        subject: "Verify work completed outside the automatic host plan",
+        writable_paths: ["src/result.js"],
+        verify_commands: ["node -e \"if(!require('fs').existsSync('src/result.js')) process.exit(1)\""],
+      }],
+    }, null, 2));
+    const manual = await importPlan(dir, manualPath);
+    assert.equal(manual.tasks[0].worker_command, null);
   });
 });
 

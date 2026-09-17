@@ -413,6 +413,14 @@ function cardForAsset(asset, ctx = {}) {
       mappingLoss: existingCommands.verify.includes(command) ? "与 verify 同义，Skill 必须拒绝写进完成链" : null,
     });
   }
+  if (asset.kind === "test_fixture") {
+    return makeCard({ action: "adopt", asset: asset.kind, path: asset.path,
+      owner: "fixtures", purpose: asset.purpose, consumers, evidence: asset.evidence, confidence,
+      reason: "登记夹具原位置和消费者，不复制数据，也不把数据文件当测试执行",
+      afterState: "Registry.fixtures 引用原夹具", maxConsequence: "仅登记引用，不证明测试已通过",
+      patch: { kind: "registry_catalog", field: "fixtures", sourcePath: asset.path },
+      verify: [], rollback: "移除本目录项，原夹具不变", mappingLoss: consumers.length ? null : "消费者尚未查明，迁移任务需补证据" });
+  }
   if (asset.kind === "runtime_gate" || asset.kind === "host_hook") {
     return makeCard({
       action: "adopt",
@@ -492,6 +500,7 @@ function classifyFileKind(relativePath, packageFacts, config, headText = "") {
   if (relativePath === "wildarrange.config.json" || relativePath === ".wildarrange/config.json") return "runtime_gate";
   if (CI_GLOBS.some((pattern) => pathMatchesPattern(relativePath, pattern))) return "runtime_gate";
   if (HOOK_GLOBS.some((pattern) => pathMatchesPattern(relativePath, pattern))) return "host_hook";
+  if (/(^|\/)(__fixtures__|fixtures)(\/|$)/i.test(relativePath)) return "test_fixture";
   if (TEST_FILE_GLOBS.some((pattern) => pathMatchesPattern(relativePath, pattern))) return "behavior_suite";
   if (/(^|\/)(AGENTS|TESTING|ACCEPTANCE|VERIFICATION)[^/]*\.(md|html)$/i.test(relativePath)) return "historical_archive";
   if (/(^|\/)(legacy|archive|history)\/.*\.(md|json|txt)$/i.test(relativePath)) return "historical_archive";
@@ -508,6 +517,7 @@ function classifyFileKind(relativePath, packageFacts, config, headText = "") {
 }
 
 function purposeForKind(kind, filePath, packageFacts) {
+  if (kind === "test_fixture") return `测试夹具：${filePath}`;
   if (kind === "behavior_suite") return `行为测试或 verify 入口：${filePath}`;
   if (kind === "static_check") return `静态检查入口：${filePath}`;
   if (kind === "independent_review") return `独立复核入口：${filePath}`;

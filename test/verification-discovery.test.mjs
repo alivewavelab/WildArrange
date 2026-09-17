@@ -285,3 +285,22 @@ test("discovery: live snapshot digests package, CI, hook and referenced test byt
     assert.notEqual(afterUnknownCi.dependencyDigests[".github/workflows/ci.yml"], beforeUnknownCi.dependencyDigests[".github/workflows/ci.yml"]);
   });
 });
+
+test("fixtures are adopted as references rather than executable tests or copied data", async () => {
+  const { buildRegistryFromCards } = await import("../src/infra/verification-registry.mjs");
+  await withTempDir(async dir => {
+    await writeFixture(dir);
+    await mkdir(path.join(dir, "test/fixtures"), { recursive: true });
+    await writeFile(path.join(dir, "test/fixtures/game.json"), '{"gameId":"original"}');
+    const scan = await scanVerificationUniverse(dir);
+    const card = scan.cards.find(c => c.path === "test/fixtures/game.json");
+    assert.equal(card.asset, "test_fixture");
+    assert.equal(card.patch.kind, "registry_catalog");
+    assert.deepEqual(card.verify, []);
+    const registry = buildRegistryFromCards([{ ...card, status: "approved" }]);
+    assert.deepEqual(registry.planDefaults.verify_commands, []);
+    assert.equal(registry.fixtures[0].path, "test/fixtures/game.json");
+    assert.equal(JSON.stringify(registry).includes('"gameId"'), false);
+    assert.equal(await readFile(path.join(dir, card.path), "utf8"), '{"gameId":"original"}');
+  });
+});

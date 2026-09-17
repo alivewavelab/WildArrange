@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendLedger, readVerifiedLedgerEntries, verifyLedger } from "./ledger.mjs";
 import { normalizeRelativePath } from "./path-match.mjs";
@@ -10,7 +10,9 @@ import {
   nowIso,
   readJson,
   resolveWildArrangePath,
+  resolveTaskPacketPath,
   writeJsonAtomic,
+  writeTextAtomic,
 } from "./runtime-store.mjs";
 import { inspectCompletedTaskEvidence, loadTaskState } from "./task-state-store.mjs";
 
@@ -34,6 +36,65 @@ export async function writeSnapshot(rootDir, stage, payload = {}) {
   return snapshot;
 }
 
+// A frozen start-of-work projection and navigation only. tasks.json remains the live task authority.
+export async function ensureTaskPacket(rootDir, planId, task) {
+  const dir = resolveTaskPacketPath(rootDir, planId, task.id);
+  const components = [resolveWildArrangePath(rootDir), resolveWildArrangePath(rootDir, "task-packets"),
+    resolveWildArrangePath(rootDir, "task-packets", planId), dir];
+  for (const component of components) await assertPacketComponentNotSymlink(component);
+  await mkdir(dir, { recursive: true });
+  for (const component of components) await assertPacketComponentNotSymlink(component);
+  const baselinePath = resolveTaskPacketPath(rootDir, planId, task.id, "baseline.json");
+  for (const name of ["baseline.json", "README.md", "research.md"]) {
+    await assertPacketComponentNotSymlink(resolveTaskPacketPath(rootDir, planId, task.id, name));
+  }
+  const existing = await readJson(baselinePath, null);
+  if (existing && (existing.planId !== planId || existing.taskId !== task.id || existing.kind !== "task_start_baseline")) {
+    throw new Error("task packet baseline identity mismatch");
+  }
+  if (!existing) {
+    const work = await readJson(resolveWildArrangePath(rootDir, "work.json"), null);
+    await writeJsonAtomic(baselinePath, {
+      kind: "task_start_baseline", planId, taskId: task.id, at: nowIso(),
+      note: "Historical start snapshot only; live task state is team/tasks.json.",
+      task: Object.fromEntries(["subject", "owner", "category", "writable_paths", "success_criteria", "verify_commands", "responsibilityChanges", "contractChanges", "request"]
+        .filter(key => task[key] !== undefined).map(key => [key, task[key]])),
+      approval: work?.activePlanId === planId ? work.planApproval || null : null,
+    });
+  }
+  const indexPath = resolveTaskPacketPath(rootDir, planId, task.id, "README.md");
+  const researchPath = resolveTaskPacketPath(rootDir, planId, task.id, "research.md");
+  const index = `# Task evidence packet ${planId}/${task.id}\n\n` +
+    `This folder is historical evidence and navigation. Current task state: ../../../team/tasks.json.\n\n` +
+    `- Start baseline: ./baseline.json (frozen at first start)\n` +
+    `- Research index: ./research.md (initial links only; research artifacts require an approved writable path)\n` +
+    `- Readiness: ../../../reports/readiness/${planId}/${task.id}.json\n` +
+    `- Review: ../../../reports/reviews/${planId}/${task.id}.json\n` +
+    `- Failure: ../../../reports/failures/${planId}/${task.id}.json\n` +
+    `- Acceptance: ../../../reports/acceptance/${planId}/${task.id}.json\n` +
+    `- Checkpoint: ../../../checkpoints/${planId}/${task.id}.json\n\n` +
+    `A listed future report is not evidence until its file exists. Do not copy its current status here.\n`;
+  const sourceRefs = task.request?.evidenceRefs || [];
+  const researchIndex = `# Research index ${planId}/${task.id}\n\n` +
+    `This is a frozen input index, not a claim that research has been completed. New research artifacts require a task-approved writable path and must be cited in task/review evidence.\n\n` +
+    `## Source references at start\n\n` +
+    (sourceRefs.length ? sourceRefs.map(ref => `- ${JSON.stringify(ref)}`).join("\n") : "- None declared.") + "\n";
+  for (const [file, content] of [[indexPath, index], [researchPath, researchIndex]]) {
+    const exists = await readFile(file, "utf8").then(() => true, error => {
+      if (error?.code === "ENOENT") return false;
+      throw error;
+    });
+    if (!exists) await writeTextAtomic(file, content);
+  }
+  return { directory: dir, baselinePath, indexPath, researchPath };
+}
+
+async function assertPacketComponentNotSymlink(file) {
+  try {
+    if ((await lstat(file)).isSymbolicLink()) throw new Error(`task packet path is a symlink: ${file}`);
+  } catch (error) { if (error?.code !== "ENOENT") throw error; }
+}
+
 export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
   const latestSnapshot = options.latestSnapshot || await readJson(resolveWildArrangePath(rootDir, "snapshots", "latest.json"), null);
   const work = await readJson(resolveWildArrangePath(rootDir, "work.json"), null);
@@ -43,12 +104,16 @@ export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
   const completionIntegrity = await inspectCompletedTaskEvidence(rootDir, taskState, { ledgerEntries: verifiedLedgerEntries });
   const status = buildStatusReport(work, taskState, changes, completionIntegrity);
   const ledgerIntegrity = await verifyLedger(rootDir);
-  const nextTask = taskState ? findRunnableTaskForContext(taskState.tasks || []) : null;
+  const awaitingPlanApproval = isCurrentPlanAwaitingApproval(work, taskState);
+  const nextTask = taskState && !awaitingPlanApproval ? findRunnableTaskForContext(taskState.tasks || []) : null;
   const cliCommandPrefix = await resolveRuntimeCliCommandPrefix(rootDir, {
     preferredPrefix: options.cliCommandPrefix,
     fallbackCliPath: options.fallbackCliPath,
   });
-  const nextAction = describeNextAction(taskState?.tasks || [], nextTask, cliCommandPrefix);
+  const nextAction = describeNextAction(taskState?.tasks || [], nextTask, cliCommandPrefix, {
+    awaitingPlanApproval,
+    planId: work?.activePlanId || taskState?.planId || null,
+  });
   const context = {
     kind: "wildarrange_context_snapshot",
     version: STATE_VERSION,
@@ -110,23 +175,36 @@ function findRunnableTaskForContext(tasks) {
   return tasks.find((task) => task.status === "pending" && (task.blockedBy || []).every((id) => completed.has(id))) || null;
 }
 
+function isCurrentPlanAwaitingApproval(work, taskState) {
+  const activePlanId = work?.activePlanId || null;
+  const taskPlanId = taskState?.planId || taskState?.activePlanId || null;
+  const approval = work?.planApproval;
+  return Boolean(activePlanId)
+    && (!taskPlanId || taskPlanId === activePlanId)
+    && approval?.required === true
+    && approval.status !== "approved"
+    && (!approval.planId || approval.planId === activePlanId);
+}
+
 // A read-only description of current state, shared by resume and Stop output.
 // Executing any suggested command still goes through the runtime's own gates.
-function describeNextAction(tasks, runnable, cliCommandPrefix) {
+function describeNextAction(tasks, runnable, cliCommandPrefix, options = {}) {
   const recovery = tasks.find((task) => task.pendingContractChange && task.admission_claim
     && task.admission_claim.workspaceRestored !== true);
   const active = tasks.find((task) => !task.pendingContractChange && ["in_progress", "verifying"].includes(task.status));
   const failed = tasks.find((task) => !task.pendingContractChange && ["failed", "review_blocked", "needs_user_decision"].includes(task.status));
   const waiting = tasks.find((task) => task.pendingContractChange);
-  const task = recovery || runnable || active || failed || waiting;
-  const reason = recovery ? "admission_recovery" : runnable ? "runnable_task" : active ? "active_task" : failed ? "blocked_or_failed_task" : waiting ? "awaiting_user_decision" : "no_unfinished_work";
+  const awaitingPlanApproval = options.awaitingPlanApproval === true && !recovery;
+  const task = recovery || (awaitingPlanApproval ? null : runnable || active || failed || waiting);
+  const reason = recovery ? "admission_recovery" : awaitingPlanApproval ? "awaiting_plan_approval" : runnable ? "runnable_task" : active ? "active_task" : failed ? "blocked_or_failed_task" : waiting ? "awaiting_user_decision" : "no_unfinished_work";
   const command = recovery || (task === active && active?.admission_claim)
     ? renderCliCommand(cliCommandPrefix, `parallel admit --run ${task.admission_claim.runId} --task ${task.id}`)
     : runnable ? renderCliCommand(cliCommandPrefix, "run") : active ? renderCliCommand(cliCommandPrefix, `node verify --task ${task.id}`) : failed ? renderCliCommand(cliCommandPrefix, "status") : null;
   const text = recovery ? command ? `recover shared workspace: ${command}` : "reinstall the adapter before shared-workspace recovery"
+    : awaitingPlanApproval ? `await user approval for plan ${options.planId}`
     : runnable ? `run task ${task.id}: ${task.subject}` : active ? command ? `resume task ${task.id}: ${command}` : `reinstall the adapter before resuming task ${task.id}`
     : failed ? "inspect failed task" : waiting ? `await user direction for contract change ${task.pendingContractChange}` : "no runnable task";
-  return { reason, taskId: task?.id || null, command, text };
+  return { reason, taskId: task?.id || null, planId: awaitingPlanApproval ? options.planId : null, command, text };
 }
 
 export async function resolveRuntimeCliCommandPrefix(rootDir, options = {}) {
@@ -254,6 +332,7 @@ function summarizeTaskForContext(task) {
     attempts: task.attempts,
     maxAttempts: task.maxAttempts,
     writable_paths: task.writable_paths || [],
+    responsibilityChanges: task.responsibilityChanges || null,
     verify_commands: task.verify_commands || [],
     review_commands: task.review_commands || [],
     standards_commands: task.standards_commands || [],
@@ -340,8 +419,12 @@ function renderContextMarkdown(context) {
   if (context.cliCommandPrefix) {
     lines.push(`- Inspect: \`${renderCliCommand(context.cliCommandPrefix, "status")}\``);
     lines.push(`- Refresh context: \`${renderCliCommand(context.cliCommandPrefix, "resume")}\``);
-    lines.push(`- Run next task: \`${renderCliCommand(context.cliCommandPrefix, "run")}\``);
-    lines.push(`- Node loop: \`${renderCliCommand(context.cliCommandPrefix, "node execute|verify|scope|review|checkpoint|retry --task <taskId>")}\``);
+    if (context.nextActionDetails.reason === "awaiting_plan_approval") {
+      lines.push(`- Approve after user confirmation: \`${renderCliCommand(context.cliCommandPrefix, `plan approve --plan ${context.nextActionDetails.planId}`)}\``);
+    } else {
+      lines.push(`- Run next task: \`${renderCliCommand(context.cliCommandPrefix, "run")}\``);
+      lines.push(`- Node loop: \`${renderCliCommand(context.cliCommandPrefix, "node execute|verify|scope|review|checkpoint|retry --task <taskId>")}\``);
+    }
     lines.push(`- Open changes: \`${renderCliCommand(context.cliCommandPrefix, "changes list")}\``);
   } else {
     lines.push("- Unavailable: reinstall the WildArrange adapter to record an executable CLI command.");

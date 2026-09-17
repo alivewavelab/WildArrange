@@ -36,7 +36,7 @@ export function buildKimiPluginManifest() {
   };
 }
 
-export function renderKimiHookBridge({ mode, packageName, localCliPath }) {
+export function renderKimiHookBridge({ mode, packageName, localCliPath, controlRoot }) {
   const cliSpec = mode === "npx"
     ? { kind: "npx", packageName }
     : { kind: "local", cliPath: path.resolve(localCliPath), packageName };
@@ -62,7 +62,7 @@ if (!projectDir) process.exit(0);
 const normalizedPayload = { ...payload, cwd: projectDir };
 
 // Kimi 宿主合同是 fail-open：这里不增加自毁定时器；宿主 timeout 后放行。
-${renderHookBridgeExecution({ hostAdapter: "kimi", timeoutMs: null })}
+${renderHookBridgeExecution({ hostAdapter: "kimi", controlRoot, timeoutMs: null })}
 
 if (payload.hook_event_name === "Stop" && result.continuation?.required === true) {
   const reason = [

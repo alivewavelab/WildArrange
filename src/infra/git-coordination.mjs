@@ -99,7 +99,7 @@ export async function inspectTaskWorktreeBaseline(rootDir) {
     return { available: false, clean: false, reason: "Git repository has no baseline commit", changedPaths: [] };
   }
   const branch = await runGit(rootDir, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
-  const changedPaths = await listWorkingTreeChanges(rootDir);
+  const changedPaths = await listWorkingTreeChanges(rootDir, { includeRuntimePaths: true });
   return {
     available: true,
     clean: changedPaths.length === 0,
@@ -373,7 +373,7 @@ export async function readCommitMessage(rootDir, commitSha) {
   return result.stdout;
 }
 
-export async function listWorkingTreeChanges(rootDir) {
+export async function listWorkingTreeChanges(rootDir, options = {}) {
   const groups = await Promise.all([
     runGit(rootDir, ["diff", "--name-only", "-z", "--"]),
     runGit(rootDir, ["diff", "--cached", "--name-only", "-z", "--"]),
@@ -382,9 +382,10 @@ export async function listWorkingTreeChanges(rootDir) {
   for (const result of groups) {
     if (!result.ok) throw new Error(`cannot inspect Git working tree: ${result.stderr || result.stdout}`);
   }
-  return [...new Set(groups.flatMap((result) => result.stdout.split("\0").filter(Boolean)))]
-    .filter((filePath) => filePath !== ".wildarrange" && !filePath.startsWith(".wildarrange/"))
-    .sort();
+  const paths = [...new Set(groups.flatMap((result) => result.stdout.split("\0").filter(Boolean)))].sort();
+  return options.includeRuntimePaths === true
+    ? paths
+    : paths.filter((filePath) => filePath !== ".wildarrange" && !filePath.startsWith(".wildarrange/"));
 }
 
 export async function listTreeChanges(rootDir, fromSha, toRef = "HEAD") {

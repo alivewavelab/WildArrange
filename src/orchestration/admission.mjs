@@ -715,6 +715,16 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
       };
     }
     task.delivery = pipelineResult.evidence.integrationCommit || null;
+    if (deliveryWorktreeDir) {
+      task.delivery_workspace = {
+        kind: "parallel_task_worktree",
+        runId,
+        workDir: deliveryWorktreeDir,
+        branch: task.delivery?.branch || task.delivery?.worktreeSync?.branch || task.coordination?.branch || null,
+        baseSha: task.delivery?.expectedSha || integrationGuard?.expectedSha || null,
+        deliverySha: task.delivery?.integrationSha || task.delivery?.commitSha || task.delivery?.actualSha || null,
+      };
+    }
     task.admission_claim = null;
     // Ledger first, canonical tasks.json last (commit point): a ledger
     // outage must never leave a completed/released admission without its

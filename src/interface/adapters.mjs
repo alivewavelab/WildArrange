@@ -40,7 +40,7 @@ export async function installAdapter(rootDir, options = {}) {
   }
   const mode = options.mode || "local";
   const packageName = options.packageName || options.package || DEFAULT_PACKAGE_NAME;
-  const hookCommand = adapterHookCommand({ mode, packageName });
+  const hookCommand = adapterHookCommand({ mode, packageName, controlRoot: rootDir });
   const cliPrefix = adapterCliPrefix({ mode, packageName });
   await initRuntime(rootDir);
   const slashCommands = buildSlashCommands(cliPrefix);
@@ -93,6 +93,7 @@ export async function installAdapter(rootDir, options = {}) {
       mode,
       packageName,
       localCliPath: path.join(PROJECT_DIR, "bin", "wildarrange.mjs"),
+      controlRoot: rootDir,
     }), "utf8");
     outputs.push({ target: "cursor", path: reportPath(rootDir, cursorBridgePath), status: "generated", backup: cursorBridgeBackup, enforcement: "hook-bridge" });
 
@@ -160,6 +161,7 @@ export async function installAdapter(rootDir, options = {}) {
           mode,
           packageName,
           localCliPath: path.join(PROJECT_DIR, "bin", "wildarrange.mjs"),
+          controlRoot: rootDir,
         }),
         enforcement: "hook-bridge",
       },
@@ -358,8 +360,8 @@ export function adapterCliPrefix({ mode = "local", packageName = DEFAULT_PACKAGE
   return `node "${path.resolve(localCliPath || path.join(PROJECT_DIR, "bin", "wildarrange.mjs"))}"`;
 }
 
-function adapterHookCommand({ mode, packageName }) {
-  return `${adapterCliPrefix({ mode, packageName })} hook run --adapter-mode ${mode} --adapter-package ${JSON.stringify(packageName)}`;
+function adapterHookCommand({ mode, packageName, controlRoot }) {
+  return `${adapterCliPrefix({ mode, packageName })} hook run --adapter-mode ${mode} --adapter-package ${JSON.stringify(packageName)} --control-root "${path.resolve(controlRoot)}"`;
 }
 
 // 统一的 slash 命令集：Cursor 渲染成 .cursor/commands/<name>.md，
@@ -367,6 +369,12 @@ function adapterHookCommand({ mode, packageName }) {
 function buildSlashCommands(cliPrefix) {
   const fence = (lines) => ["```bash", ...lines, "```"].join("\n");
   return [
+    ...[{ suffix: "setup", skill: "configure-project-review", title: "项目审查与执行配置" },
+      { suffix: "onboard", skill: "project-onboarding", title: "旧项目治理接管" },
+      { suffix: "architecture", skill: "review-architecture-design", title: "架构设计审查与确认" }].map(entry => ({
+      name: SLASH_COMMAND_PREFIX + "-" + entry.suffix, title: entry.title, description: entry.title,
+      body: "先运行 " + cliPrefix + " prompts show --skill " + entry.skill + " 读取完整 Skill，再遵循其预览、批准和验收步骤。不能只凭名称执行，不能假定项目拥有工具源码。",
+    })),
     {
       name: `${SLASH_COMMAND_PREFIX}-config`,
       title: `${PRODUCT_NAME} 配置表`,
@@ -452,10 +460,11 @@ function buildSlashCommands(cliPrefix) {
         "",
         "如果用户没有给出路径，不要再向用户索要 plan.json。若请求包含新增功能或新的用户可见行为，先执行 `clarify-feature-design`：直接在当前对话中按编号澄清并展示功能设计确认稿；不要创建 MD/HTML 文件，也不要在开发者明确回复“确认”前生成 plan draft。确认后，再理解当前对话中的目标、约束与质量要求，生成 `.wildarrange/plan-drafts/<session>-plan.json`。",
         "",
-        "生成的 JSON 顶层必须写 `generated_by: \"host_semantic\"`、`title`、`objective`、`tasks`；如果路由返回 `featureDesign.id`，还必须原样写入 `feature_design_ref`，否则功能计划不能导入。每张任务必须写 `id`、`subject`、`description`、`owner`、`writable_paths`、`verify_commands`、`successCriteria`。`verify_commands` 必须是非空的命令字符串数组，不能写成对象数组。每条 successCriteria 是对象，至少写 `title` 与 `expectedEvidence`；能由验证命令证明时，`verifierCommandRefs` 填从 0 开始的命令索引数组，或填与 `verify_commands` 中完全一致的命令字符串数组。",
+        "每张任务还必须包含 responsibilityChanges 数组，每项写 script（精确目标脚本）、additions（新增内容）、responsibilityBefore、responsibilityAfter、facts 数组。每项事实写 name、ownerBefore、ownerAfter、access（统一读写入口）；无事实填 facts: []，新事实 ownerBefore 为 null。计划摘要用中文展示职责变化与事实归属，等待用户确认。交付 Review 必须独立审计 R1-R5：符合已批职责、无职责混杂、无重复事实、无绕过入口、无重复实现；缺少执行器或有效证据不得称通过。",
+        "生成的 JSON 顶层必须写 `generated_by: \"host_semantic\"`、`title`、`objective`、`tasks`；如果路由返回 `featureDesign.id`，还必须原样写入 `feature_design_ref`，否则功能计划不能导入。每张任务必须写 `id`、`subject`、`description`、`owner`、`writable_paths`、`worker_command`、`verify_commands`、`successCriteria`。`worker_command` 必须是宿主可执行的真实实现命令，并在 WildArrange 准备的隔离任务 worktree 中产生 `writable_paths` 内的改动；不能用 `node --version`、`process.exit(0)`、`true` 等占位。`verify_commands` 必须是非空的命令字符串数组，不能写成对象数组。每条 successCriteria 是对象，至少写 `title` 与 `expectedEvidence`；能由验证命令证明时，`verifierCommandRefs` 填从 0 开始的命令索引数组，或填与 `verify_commands` 中完全一致的命令字符串数组。",
         "可执行工单的 `owner` 必须是 Jiuwei 或 ZhuRong：实现任务通常交给 ZhuRong，必要的流程执行交给 Jiuwei。DiJiang、BaiZe、LuWu 是只读长期 Agent，分别通过计划、独立复核和仓库治理阶段参与，不能成为 command worker。不要留空，也不要用执行阶段的默认值代替。",
         "",
-        "写入草稿后执行导入命令。语义生成的计划会自动进入待确认状态，即使全局 `planApproval.required` 没有打开也不能直接 run：",
+        "写入草稿后执行导入命令。若用户明确只要求生成草稿或明确说不要导入，写完即停止，不得执行下面的导入命令。正式导入的语义生成计划会自动进入待确认状态，即使全局 `planApproval.required` 没有打开也不能直接 run：",
         "",
         fence([`${cliPrefix} plan --from .wildarrange/plan-drafts/<session>-plan.json`]),
         "",

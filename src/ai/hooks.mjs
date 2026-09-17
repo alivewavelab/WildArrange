@@ -38,8 +38,9 @@ import { loadActiveFeatureDesignGate } from "../orchestration/feature-design.mjs
 export const TRUSTED_CLI_COMMAND_PREFIX = Symbol("wildarrange.trustedCliCommandPrefix");
 
 export async function runInjectionHook(rootDir, input = {}) {
-  const hookRootDir = input.cwd && typeof input.cwd === "string" ? input.cwd : rootDir;
-  await initRuntime(hookRootDir);
+  const controlRoot = rootDir;
+  const executionRoot = input.cwd && typeof input.cwd === "string" ? input.cwd : controlRoot;
+  await initRuntime(controlRoot);
   const event = normalizeHookEvent(input.hook_event_name || input.event || input.name);
   const pointName = injectionPointForHookEvent(event);
   const sessionId = normalizeHookSessionId(input);
@@ -48,34 +49,40 @@ export async function runInjectionHook(rootDir, input = {}) {
   const cliCommandPrefix = normalizeHookCliCommandPrefix(input[TRUSTED_CLI_COMMAND_PREFIX]);
   const taskId = normalizeHookTaskId(input);
   const targetPaths = event === "PreToolUse"
-    ? extractPreToolTargetPaths(input, hookRootDir)
-    : event === "PostToolUse" ? extractHookTargetPaths(input, hookRootDir) : [];
+    ? extractPreToolTargetPaths(input, executionRoot)
+    : event === "PostToolUse" ? extractHookTargetPaths(input, executionRoot) : [];
   const facts = {};
 
   if (event === "SessionStart") {
-    facts.resume = await resumeReport(hookRootDir, { sessionId, source: "hook:session_start", cliCommandPrefix });
-    facts.rules = await scanProjectRules(hookRootDir);
-    facts.agentContext = await buildAgentContext(hookRootDir, {
+    facts.resume = await resumeReport(controlRoot, { sessionId, source: "hook:session_start", cliCommandPrefix });
+    facts.rules = await scanProjectRules(executionRoot, { controlRoot });
+    facts.agentContext = await buildAgentContext(controlRoot, {
+      executionRoot,
       agent: DEFAULT_LEAD_AGENT,
       taskId,
       injectionPoint: pointName,
     }).catch((error) => ({ error: error.message }));
-    facts.archivist = await runArchivistForHook(hookRootDir, input, {
+    facts.archivist = await runArchivistForHook(controlRoot, input, {
       event,
       stage: "resume",
       trigger: "sessionStart",
       text: facts.resume?.nextAction || "",
     });
-    facts.digest = await writeMemoryDigest(hookRootDir, {
+    facts.digest = await writeMemoryDigest(controlRoot, {
       reason: "session_start",
       stage: "resume",
       route: facts.route,
     }).catch((error) => ({ error: error.message }));
   } else if (event === "UserPromptSubmit") {
-    facts.route = input.prompt ? await routeRequest(hookRootDir, { text: input.prompt, sessionId }) : null;
-    facts.planDraft = buildPlanDraftDirective(facts.route, { sessionId, prompt: input.prompt });
-    facts.rules = await scanProjectRules(hookRootDir);
-    facts.archivist = await runArchivistForHook(hookRootDir, input, {
+    facts.route = input.prompt ? await routeRequest(controlRoot, { text: input.prompt, sessionId }) : null;
+    facts.planDraft = buildPlanDraftDirective(facts.route, {
+      sessionId,
+      prompt: input.prompt,
+      controlRoot,
+      executionRoot,
+    });
+    facts.rules = await scanProjectRules(executionRoot, { controlRoot });
+    facts.archivist = await runArchivistForHook(controlRoot, input, {
       event,
       stage: stageForRoute(facts.route),
       trigger: "userPromptSubmit",
@@ -83,46 +90,48 @@ export async function runInjectionHook(rootDir, input = {}) {
     });
   } else if (event === "PreToolUse") {
     facts.targetPaths = targetPaths;
-    facts.rules = await scanProjectRules(hookRootDir, { targetPaths });
-    facts.preflight = await preToolUseGuard(hookRootDir, input);
+    facts.rules = await scanProjectRules(executionRoot, { controlRoot, targetPaths });
+    facts.preflight = await preToolUseGuard(controlRoot, input, { executionRoot });
     const executionTaskId = facts.preflight?.taskId || taskId;
     if (executionTaskId) {
-      facts.agentContext = await buildAgentContext(hookRootDir, {
+      facts.agentContext = await buildAgentContext(controlRoot, {
+        executionRoot,
         taskId: executionTaskId,
-        planId: await currentPlanId(hookRootDir),
+        planId: await currentPlanId(controlRoot),
         injectionPoint: "before_execute",
       }).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
     }
   } else if (event === "PostToolUse") {
     facts.targetPaths = targetPaths;
-    facts.rules = await scanProjectRules(hookRootDir, { targetPaths });
-    facts.resultGate = await evaluateHookResultGate(hookRootDir, input);
+    facts.rules = await scanProjectRules(executionRoot, { controlRoot, targetPaths });
+    facts.resultGate = await evaluateHookResultGate(controlRoot, input);
     if (taskId) {
-      facts.scope = await invokeCapability("scope", { rootDir: hookRootDir, task: { id: taskId } })
+      facts.scope = await invokeCapability("scope", { rootDir: controlRoot, task: { id: taskId } })
         .then((envelope) => envelope.evidence)
         .catch((error) => ({ status: "inconclusive", reason: error.message }));
     }
   } else if (event === "PostCompact") {
-    facts.resume = await resumeReport(hookRootDir, { sessionId, source: "hook:post_compact", cliCommandPrefix });
-    facts.rules = await scanProjectRules(hookRootDir);
-    facts.agentContext = await buildAgentContext(hookRootDir, {
+    facts.resume = await resumeReport(controlRoot, { sessionId, source: "hook:post_compact", cliCommandPrefix });
+    facts.rules = await scanProjectRules(executionRoot, { controlRoot });
+    facts.agentContext = await buildAgentContext(controlRoot, {
+      executionRoot,
       agent: DEFAULT_LEAD_AGENT,
       taskId,
       injectionPoint: pointName,
     }).catch((error) => ({ error: error.message }));
-    facts.archivist = await runArchivistForHook(hookRootDir, input, {
+    facts.archivist = await runArchivistForHook(controlRoot, input, {
       event,
       stage: "resume",
       trigger: "postCompact",
       text: facts.resume?.nextAction || "",
     });
-    facts.digest = await writeMemoryDigest(hookRootDir, {
+    facts.digest = await writeMemoryDigest(controlRoot, {
       reason: "post_compact",
       stage: "resume",
     }).catch((error) => ({ error: error.message }));
   } else if (event === "Stop") {
-    facts.continuation = await continuationDirective(hookRootDir, { sessionId, source: "hook:stop", cliCommandPrefix });
-    facts.routingReview = await writeDailyRoutingReview(hookRootDir, {
+    facts.continuation = await continuationDirective(controlRoot, { sessionId, source: "hook:stop", cliCommandPrefix });
+    facts.routingReview = await writeDailyRoutingReview(controlRoot, {
       trigger: "hook:stop",
       sessionId,
     }).catch((error) => ({ status: "warn", reason: error instanceof Error ? error.message : String(error) }));
@@ -130,16 +139,16 @@ export async function runInjectionHook(rootDir, input = {}) {
 
   // 通用推送：在有"对话面"的事件里，把待人决策的事项主动注入，指示宿主 AI 直接问开发者。
   if (["SessionStart", "UserPromptSubmit", "PostCompact", "Stop"].includes(event)) {
-    facts.attention = await attentionReport(hookRootDir).catch(() => null);
+    facts.attention = await attentionReport(controlRoot).catch(() => null);
   }
 
   const effectiveTaskId = taskId || facts.preflight?.taskId || "";
   const variables = {
     agent: facts.agentContext?.agent || input.agent || defaultAgentForHookEvent(event),
     taskId: effectiveTaskId,
-    planId: await currentPlanId(hookRootDir),
+    planId: await currentPlanId(controlRoot),
   };
-  const injectionPoint = await resolveInjectionPoint(hookRootDir, pointName, variables, {
+  const injectionPoint = await resolveInjectionPoint(controlRoot, pointName, variables, {
     text: injectionTextForHookEvent(event, input, facts),
     stage: injectionStageForHookEvent(event, facts),
     routeSkills: facts.route?.skills || [],
@@ -173,10 +182,10 @@ export async function runInjectionHook(rootDir, input = {}) {
   };
   const safeSessionId = sanitizeFileSegment(sessionId || "session");
   const safeEvent = sanitizeFileSegment(event);
-  const outputPath = resolveWildArrangePath(hookRootDir, "sessions", "hooks", `${safeSessionId}-${safeEvent}.json`);
-  result.reportJsonPath = path.relative(hookRootDir, outputPath);
+  const outputPath = resolveWildArrangePath(controlRoot, "sessions", "hooks", `${safeSessionId}-${safeEvent}.json`);
+  result.reportJsonPath = path.relative(controlRoot, outputPath);
   await writeJsonAtomic(outputPath, result);
-  await appendLedger(hookRootDir, {
+  await appendLedger(controlRoot, {
     type: "hook_injection_run",
     event,
     pointName,
@@ -191,7 +200,7 @@ export async function runInjectionHook(rootDir, input = {}) {
   // 异步审查 Agent 复盘。best-effort，不反噬 hook 主流程。
   if (result.decision) {
     try {
-      await emitDecision(hookRootDir, {
+      await emitDecision(controlRoot, {
         gate: pointName,
         decision: result.decision,
         code: hookDecisionCode(facts.preflight, facts.resultGate),
@@ -240,11 +249,11 @@ function hookDecisionCode(preflight, resultGate) {
   return null;
 }
 
-export async function preToolUseGuard(rootDir, input = {}) {
+export async function preToolUseGuard(rootDir, input = {}, options = {}) {
   const event = normalizeHookEvent(input.hook_event_name || input.event || input.name);
   if (event !== "PreToolUse") throw new Error("preToolUseGuard requires PreToolUse input");
   const toolName = String(input.tool_name || input.toolName || "");
-  const targetPaths = extractPreToolTargetPaths(input, rootDir);
+  const targetPaths = extractPreToolTargetPaths(input, options.executionRoot || rootDir);
   const toolInput = input.tool_input || input.toolInput;
   const isApplyPatchTool = /^(?:functions\.)?apply_patch$/i.test(toolName);
   const isShellTool = /^(Bash|bash|exec_command|functions\.exec_command)$/.test(toolName);
@@ -318,7 +327,7 @@ export async function preToolUseGuard(rootDir, input = {}) {
 
   const featureDesignGate = await loadActiveFeatureDesignGate(rootDir, featureGateSessionId(input));
   if (featureDesignGate?.status === "awaiting_feature_confirmation") {
-    const blocked = (isShellTool && !isReadOnlyWildArrangeShellCommand(shellCommand, cliCommandPrefix)) || targetPaths.length > 0;
+    const blocked = (isShellTool && !isReadOnlyWildArrangeShellCommand(shellCommand, cliCommandPrefix, rootDir)) || targetPaths.length > 0;
     if (blocked) {
       return denyFeatureDesignToolUse(rootDir, {
         code: "feature_design_confirmation_required",
@@ -334,7 +343,7 @@ export async function preToolUseGuard(rootDir, input = {}) {
     const validPlanImport = isShellTool
       ? await isMatchingFeaturePlanImport(rootDir, shellCommand, featureDesignGate.id, cliCommandPrefix)
       : false;
-    const blockedShell = isShellTool && !isReadOnlyWildArrangeShellCommand(shellCommand, cliCommandPrefix) && !validPlanImport;
+    const blockedShell = isShellTool && !isReadOnlyWildArrangeShellCommand(shellCommand, cliCommandPrefix, rootDir) && !validPlanImport;
     const blockedWrite = targetPaths.length > 0 && !isPlanDraftWrite(targetPaths);
     if (blockedShell || blockedWrite) {
       return denyFeatureDesignToolUse(rootDir, {
@@ -362,7 +371,7 @@ export async function preToolUseGuard(rootDir, input = {}) {
     && planApproval.status !== "approved"
     && planApproval.planId === taskState?.planId;
 
-  if (isShellTool && (!task || awaitingPlanApproval) && !isAllowedPrePlanShellCommand(shellCommand, cliCommandPrefix)) {
+  if (isShellTool && (!task || awaitingPlanApproval) && !isAllowedPrePlanShellCommand(shellCommand, cliCommandPrefix, rootDir)) {
     const code = awaitingPlanApproval ? "awaiting_plan_approval_shell" : "no_active_task_shell";
     const reason = awaitingPlanApproval
       ? "plan is awaiting user approval; only exact WildArrange plan-management and read-only commands are allowed"
@@ -692,17 +701,18 @@ function isPlanDraftWrite(targetPaths) {
     && targetPaths.every((targetPath) => /^\.wildarrange\/plan-drafts\/[A-Za-z0-9_.-]+\.json$/.test(targetPath));
 }
 
-function isAllowedPrePlanShellCommand(command, cliCommandPrefix = "") {
-  const args = parseWildArrangeShellArgs(command, cliCommandPrefix);
+function isAllowedPrePlanShellCommand(command, cliCommandPrefix = "", controlRoot = "") {
+  const args = stripVerifiedControlRootOption(parseWildArrangeShellArgs(command, cliCommandPrefix), controlRoot);
   if (!args) return false;
   if (/^(?:status|doctor|summary|timeline|decisions|help(?:\s+--all)?|--help(?:\s+--all)?)$/i.test(args)) return true;
-  if (/^(?:config\s+show|changes\s+list)$/i.test(args)) return true;
+  if (/^(?:config\s+show|changes\s+list|adoption\s+inventory|review\s+checklist\s+--task\s+[A-Za-z0-9_.-]+)$/i.test(args)) return true;
+  if (/^review\s+configure\s+--from\s+\.wildarrange[\\/]plan-drafts[\\/][A-Za-z0-9_.-]+\.json(?:\s+--apply)?$/i.test(args)) return true;
   if (/^prompts\s+show\s+--skill\s+[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/i.test(args)) return true;
   if (/^resume(?:\s+--session\s+[A-Za-z0-9_.-]+)?$/i.test(args)) return true;
   if (/^continuation\s+check(?:\s+--session\s+[A-Za-z0-9_.-]+)?$/i.test(args)) return true;
   if (/^init(?:\s+--sample)?$/i.test(args)) return true;
   if (/^plan\s+approve(?:\s+--plan\s+[A-Za-z0-9_.-]+)?$/i.test(args)) return true;
-  return /^plan\s+--from\s+(?:"[A-Za-z0-9_./\\: -]+\.json"|'[A-Za-z0-9_./\\: -]+\.json'|[A-Za-z0-9_./\\:-]+\.json)$/i.test(args);
+  return /^plan\s+--from\s+(?:"[A-Za-z0-9_./\\:~ -]+\.json"|'[A-Za-z0-9_./\\:~ -]+\.json'|[A-Za-z0-9_./\\:~ -]+\.json)$/i.test(args);
 }
 
 function parseWildArrangeShellArgs(command, cliCommandPrefix = "") {
@@ -719,19 +729,37 @@ function parseWildArrangeShellArgs(command, cliCommandPrefix = "") {
   return invocation ? invocation[1].trim() : null;
 }
 
-function isReadOnlyWildArrangeShellCommand(command, cliCommandPrefix = "") {
-  const args = parseWildArrangeShellArgs(command, cliCommandPrefix);
-  return Boolean(args && /^(?:status|doctor|summary|timeline|decisions|config\s+show|changes\s+list|prompts\s+show\s+--skill\s+[A-Za-z0-9][A-Za-z0-9._-]{0,99}|resume(?:\s+--session\s+[A-Za-z0-9_.-]+)?|continuation\s+check(?:\s+--session\s+[A-Za-z0-9_.-]+)?|help(?:\s+--all)?|--help(?:\s+--all)?)$/i.test(args));
+function isReadOnlyWildArrangeShellCommand(command, cliCommandPrefix = "", controlRoot = "") {
+  const args = stripVerifiedControlRootOption(parseWildArrangeShellArgs(command, cliCommandPrefix), controlRoot);
+  return Boolean(args && /^(?:status|doctor|summary|timeline|decisions|config\s+show|changes\s+list|adoption\s+inventory|review\s+checklist\s+--task\s+[A-Za-z0-9_.-]+|review\s+configure\s+--from\s+\.wildarrange[\\/]plan-drafts[\\/][A-Za-z0-9_.-]+\.json|prompts\s+show\s+--skill\s+[A-Za-z0-9][A-Za-z0-9._-]{0,99}|resume(?:\s+--session\s+[A-Za-z0-9_.-]+)?|continuation\s+check(?:\s+--session\s+[A-Za-z0-9_.-]+)?|help(?:\s+--all)?|--help(?:\s+--all)?)$/i.test(args));
 }
 
 async function isMatchingFeaturePlanImport(rootDir, command, gateId, cliCommandPrefix = "") {
-  const args = parseWildArrangeShellArgs(command, cliCommandPrefix);
+  const args = stripVerifiedControlRootOption(parseWildArrangeShellArgs(command, cliCommandPrefix), rootDir);
   const match = args?.match(/^plan\s+--from\s+(?:"([^"]+\.json)"|'([^']+\.json)'|([^\s]+\.json))$/i);
   const rawPath = match?.[1] || match?.[2] || match?.[3];
   if (!rawPath) return false;
   const planPath = path.isAbsolute(rawPath) ? rawPath : path.resolve(rootDir, rawPath);
   const plan = await readJson(planPath, null).catch(() => null);
   return plan?.feature_design_ref === gateId || plan?.featureDesignRef === gateId;
+}
+
+function stripVerifiedControlRootOption(args, controlRoot) {
+  if (typeof args !== "string") return args;
+  const pattern = /\s+--control-root\s+(?:"([^"]*)"|'([^']*)'|([^\s]+))/gi;
+  const matches = [...args.matchAll(pattern)];
+  if (matches.length === 0) return args;
+  const expected = normalizeControlRootPath(controlRoot);
+  for (const match of matches) {
+    const value = match[1] ?? match[2] ?? match[3] ?? "";
+    if (!expected || normalizeControlRootPath(value) !== expected) return null;
+  }
+  return args.replace(pattern, "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeControlRootPath(value) {
+  const normalized = path.resolve(String(value)).replace(/\\/g, "/").replace(/\/+$/, "");
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
 function featureGateSessionId(input) {
@@ -859,9 +887,14 @@ function appendHookFacts(lines, facts) {
     if (facts.planDraft.featureDesignRef) {
       lines.push(`- 本计划必须绑定已确认功能设计：\`feature_design_ref: "${facts.planDraft.featureDesignRef}"\`；缺失或不匹配时禁止导入和开发。`);
     }
-    lines.push("- 每张任务必须包含：`id`、`subject`、`description`、`owner`、`writable_paths`、`verify_commands`、`successCriteria`。`verify_commands` 必须是非空的命令字符串数组，不能写成对象数组。每条 successCriteria 是带 `title`、`expectedEvidence`、`verifierCommandRefs` 的对象；`verifierCommandRefs` 填从 0 开始的命令索引数组，或与 `verify_commands` 完全一致的命令字符串数组。");
+    lines.push("- 每张任务必须包含：`id`、`subject`、`description`、`owner`、`writable_paths`、`worker_command`、`verify_commands`、`successCriteria`。`worker_command` 必须是宿主可执行的真实实现命令，并在 WildArrange 准备的隔离任务 worktree 中产生 `writable_paths` 内的改动；不得使用 `node --version`、`process.exit(0)`、`true` 等占位命令。`verify_commands` 必须是非空的命令字符串数组，不能写成对象数组。每条 successCriteria 是带 `title`、`expectedEvidence`、`verifierCommandRefs` 的对象；`verifierCommandRefs` 填从 0 开始的命令索引数组，或与 `verify_commands` 完全一致的命令字符串数组。");
+    lines.push("- 每张任务还必须包含 responsibilityChanges 数组，每项写 script（精确目标脚本）、additions（新增内容）、responsibilityBefore、responsibilityAfter、facts 数组。每项事实写 name、ownerBefore、ownerAfter、access（统一读写入口）；无事实填 facts: []，新事实 ownerBefore 为 null。计划摘要用中文展示职责变化与事实归属，等待用户确认。交付 Review 必须独立审计 R1-R5：符合已批职责、无职责混杂、无重复事实、无绕过入口、无重复实现；缺少执行器或有效证据不得称通过。");
     lines.push(`- owner 规则：${facts.planDraft.ownerPolicy}。可执行工单通常交给 ZhuRong，必要时由 Jiuwei；DiJiang、BaiZe、LuWu 通过计划、复核、治理阶段参与，不得作为 command worker。`);
-    lines.push(`- 写完草稿后执行：${facts.planDraft.nextCommand.replace("<draftPath>", facts.planDraft.draftPath)}`);
+    if (facts.planDraft.nextCommand) {
+      lines.push(`- 写完草稿后执行：${facts.planDraft.nextCommand.replace("<draftPath>", facts.planDraft.draftPath)}`);
+    } else {
+      lines.push("- 用户明确只要草稿：写完即停止，不要执行 `plan --from`，不要登记正式计划或进入审批状态。");
+    }
     lines.push("- 导入后先向用户展示计划摘要并等待明确确认；未执行 plan approve 前不得 run。", "");
   }
   if (facts.resume) {

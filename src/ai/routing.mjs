@@ -6,6 +6,7 @@
  */
 import { DEFAULT_LEAD_AGENT } from "../infra/agent-registry.mjs";
 import { writeFile } from "node:fs/promises";
+import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
 import { emitDecision, readDecisions } from "../infra/decision-log.mjs";
 import { readAnnotations } from "../infra/annotation-log.mjs";
@@ -24,18 +25,32 @@ export function buildPlanDraftDirective(routeResult, options = {}) {
   if (routeResult.featureDesign?.status === "awaiting_feature_confirmation") return null;
   const sessionId = sanitizeDraftSegment(options.sessionId || "session");
   const prompt = typeof options.prompt === "string" ? options.prompt.trim().slice(0, 4000) : "";
+  const draftOnly = isDraftOnlyPlanRequest(prompt);
+  const controlRoot = typeof options.controlRoot === "string" ? path.resolve(options.controlRoot) : null;
+  const executionRoot = typeof options.executionRoot === "string" ? path.resolve(options.executionRoot) : controlRoot;
+  const crossRoot = Boolean(controlRoot && executionRoot && controlRoot !== executionRoot);
+  const draftPath = crossRoot
+    ? path.join(controlRoot, ".wildarrange", "plan-drafts", `${sessionId}-plan.json`)
+    : `.wildarrange/plan-drafts/${sessionId}-plan.json`;
   return {
     status: "host_generation_required",
     generatedBy: "host_semantic",
-    draftPath: `.wildarrange/plan-drafts/${sessionId}-plan.json`,
+    draftPath,
     request: prompt,
     approvalRequired: true,
+    draftOnly,
     ownerPolicy: "every executable task must declare task.owner as Jiuwei or ZhuRong",
     featureDesignRef: routeResult.featureDesign?.status === "awaiting_plan_import"
       ? routeResult.featureDesign.id
       : null,
-    nextCommand: "node ./bin/wildarrange.mjs plan --from <draftPath>",
+    nextCommand: draftOnly ? null : crossRoot
+      ? `node ./bin/wildarrange.mjs plan --from "${draftPath}" --control-root "${controlRoot}"`
+      : "node ./bin/wildarrange.mjs plan --from <draftPath>",
   };
+}
+
+function isDraftOnlyPlanRequest(prompt) {
+  return /(?:只|仅)(?:生成|创建|写|要).{0,12}(?:计划)?草稿(?=$|[\s，。！？；、,:：.!?;])|(?:先|暂时)?不(?:要|用|必)?(?:导入|登记)(?:(?:这|该|这个|本)?(?:份)?(?:正式)?(?:计划|草稿)(?=$|[\s，。！？；、,:：.!?;])|(?=\s*(?:$|[，。！？；,;])))|不要执行\s*plan\s+--from\b|\bdraft[ -]?only\b|\b(?:do not|don't) import(?:(?:\s+(?:the|this))?\s+(?:plan|draft)\b|(?=\s*(?:$|[,.!?;])))|\b(?:do not|don't) run\s+(?:the\s+)?plan\s+--from\b/i.test(prompt);
 }
 
 export async function routeRequest(rootDir, input) {

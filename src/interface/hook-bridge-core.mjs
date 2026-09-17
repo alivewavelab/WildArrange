@@ -1,4 +1,6 @@
-export function renderHookBridgeExecution({ hostAdapter, timeoutMs = null }) {
+import path from "node:path";
+
+export function renderHookBridgeExecution({ hostAdapter, controlRoot, timeoutMs = null }) {
   const timeoutBlock = Number.isInteger(timeoutMs) && timeoutMs > 0
     ? `const childTimer = setTimeout(() => {
   child.kill("SIGKILL");
@@ -11,6 +13,7 @@ const child = spawn(invocation.command, [
   "hook", "run", "--format", "json",
   "--adapter-mode", cliSpec.kind,
   "--adapter-package", cliSpec.packageName,
+  "--control-root", ${JSON.stringify(path.resolve(controlRoot))},
 ], {
   cwd: projectDir,
   stdio: ["pipe", "pipe", "pipe"],
