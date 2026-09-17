@@ -53,6 +53,7 @@ export function buildRegistryFromCards(cards, options = {}) {
   };
   const runtimeGates = [];
   const hostHooks = [];
+  const fixtures = [];
   for (const card of adopted) {
     if (card.patch?.kind === "registry_plan_default" && planDefaults[card.patch.field]) {
       if (!planDefaults[card.patch.field].includes(card.patch.command)) {
@@ -61,6 +62,9 @@ export function buildRegistryFromCards(cards, options = {}) {
     }
     if (card.patch?.kind === "registry_catalog" && card.patch.field === "runtimeGates") {
       runtimeGates.push({ path: card.patch.sourcePath, purpose: card.purpose });
+    }
+    if (card.patch?.kind === "registry_catalog" && card.patch.field === "fixtures") {
+      fixtures.push({ path: card.patch.sourcePath, purpose: card.purpose, consumers: card.consumers || [] });
     }
     if (card.patch?.kind === "registry_catalog" && card.patch.field === "hostHooks") {
       hostHooks.push({ path: card.patch.sourcePath, purpose: card.purpose });
@@ -74,6 +78,7 @@ export function buildRegistryFromCards(cards, options = {}) {
     planDefaults,
     runtimeGates,
     hostHooks,
+    fixtures,
     deferred: deferred.map((card) => ({
       id: card.id,
       path: card.path,

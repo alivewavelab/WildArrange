@@ -25,7 +25,10 @@ test("project document init creates the minimum set and waits for human confirma
   ]);
   assert.deepEqual(result.preserved, []);
   assert.equal(result.architectureIncluded, false);
-  assert.equal(result.awaitingHumanConfirmation.length, 4);
+  assert.equal(result.architectureDesign.status, "review_required");
+  assert.equal(result.architectureDesign.scope, "design_only");
+  assert.equal(result.architectureDesign.templateIsApproval, false);
+  assert.ok(result.awaitingHumanConfirmation.some(item => item.includes("review-architecture-design")));
 
   const agents = await readFile(path.join(rootDir, "AGENTS.md"), "utf8");
   const testing = await readFile(path.join(rootDir, "doc", "testing-and-acceptance.md"), "utf8");
@@ -62,5 +65,39 @@ test("architecture template is created only when explicitly requested", async (t
 
   assert.equal(result.architectureIncluded, true);
   assert.ok(result.created.includes("doc/architecture.md"));
-  assert.match(await readFile(path.join(rootDir, "doc", "architecture.md"), "utf8"), /本文件按需创建/);
+  assert.match(await readFile(path.join(rootDir, "doc", "architecture.md"), "utf8"), /待设计审查与人工确认/);
+});
+
+test("existing architecture is preserved and still routed to design review", async t => {
+  const rootDir = await withProject(t);
+  await initProjectDocuments(rootDir, { architecture: true });
+  const file = path.join(rootDir, "doc/architecture.md");
+  const old = "# Existing design\nCatalog owns game identity.\n";
+  await writeFile(file, old);
+  const result = await initProjectDocuments(rootDir, { architecture: true });
+  assert.ok(result.preserved.includes("doc/architecture.md"));
+  assert.equal(await readFile(file, "utf8"), old);
+  assert.equal(result.architectureDesign.status, "review_required");
+  assert.equal(result.architectureDesign.templateIsApproval, false);
+});
+
+test("architecture design review is loadable through initialization, routing and installed Skill", async t => {
+  const rootDir = await withProject(t);
+  const { renderPromptPackEntry } = await import("../src/infra/prompt-pack.mjs");
+  const { loadRoutesConfig, resolveRouteDecision } = await import("../src/infra/route-table.mjs");
+  const { installAdapter } = await import("../src/interface/adapters.mjs");
+  const result = await initProjectDocuments(rootDir);
+  const body = await renderPromptPackEntry(rootDir, { skill: result.architectureDesign.skill });
+  assert.match(body, /name: review-architecture-design/);
+  const routes = await loadRoutesConfig(rootDir);
+  for (const prompt of ["审查旧架构图", "默认架构方案", "architecture design review"]) {
+    const route = resolveRouteDecision(routes, prompt);
+    assert.ok(route.skills.includes("review-architecture-design"), JSON.stringify(route));
+    assert.equal(route.needsPlan, false);
+    assert.equal(route.primaryAgent, "BaiZe");
+  }
+  await installAdapter(rootDir, "codex");
+  const entry = await readFile(path.join(rootDir, ".agents/skills/wildarrange-architecture/SKILL.md"), "utf8");
+  assert.match(entry, /prompts show --skill review-architecture-design/);
+  await assert.rejects(readFile(path.join(rootDir, "doc/architecture.md")), { code: "ENOENT" });
 });

@@ -57,3 +57,7 @@ Jiuwei 必须处理完整的 worker -> verifier -> checkpoint/retry。不要绕�
 - 需要 Jiuwei/user 决策。
 
 不要因为一个 worker 返回 DoneClaim 就停止。
+
+## 任务证据与文档边界
+
+获准任务通过开工检查后、Worker 启动前，由运行时建立 `.wildarrange/task-packets/<planId>/<taskId>/`。先读其中的 `baseline.json`（第一次开工的历史切片）和 `README.md`（现有门禁报告路径），不要将它们当作当前任务状态；当前状态只读 `.wildarrange/team/tasks.json`。`research.md` 是调研索引模板，实际研究资料需落在任务批准的可写路径并被验收证据引用。长期项目文档只维护当前有效事实，过程记录留在任务证据。

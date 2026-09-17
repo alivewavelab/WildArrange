@@ -172,6 +172,7 @@ export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
 function findCommandRecoveryEvidence(evidence) {
   const candidates = [
     evidence.workerResult,
+    evidence.reviewResult?.commandRecovery,
     ...(evidence.verifyResult?.results || []),
     ...(evidence.reviewResult?.reviewCommandResults || []),
     ...(evidence.reviewResult?.standardsCommandResults || []),

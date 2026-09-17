@@ -136,6 +136,7 @@ test("feature design confirmation and complete plan cannot be bypassed across tu
         description: "Add the confirmed launch interaction and state update.",
         owner: "ZhuRong",
         writable_paths: ["src/feature.js"],
+        responsibilityChanges: [{ script: "src/feature.js", additions: "Create accepted artifact", responsibilityBefore: "Absent", responsibilityAfter: "Own the accepted artifact", facts: [] }],
         worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/feature.js','export const launch = true;\\n')\"",
         verify_commands: ["node --version"],
         review_commands: ["node --version"],

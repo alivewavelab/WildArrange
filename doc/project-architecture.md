@@ -108,6 +108,7 @@ AGENTS.md                         # product goals, global boundaries, release ga
 - `src/infra/agent-registry.mjs`：固定长期 Agent 白名单、读写角色集、旧别名、显示名、归一化与 command-worker 资格。
 - `src/infra/runtime-config.mjs`：默认配置、分层根/运行时 config 加载、归一化、深合并与不可削弱的 strict Git 协调标志。
 - `src/infra/runtime-snapshot.mjs`：运行时 snapshot 持久化与 resume-context JSON/Markdown 渲染的唯一确定性 owner。`src/ai/context.mjs::writeContextSnapshot` 是其薄 public 包装，非第二套实现。
+- `src/infra/runtime-snapshot.mjs::ensureTaskPacket`：已获准任务首次开工的历史基线与证据路径索引 owner。`runtime-store.mjs::resolveTaskPacketPath` 校验 `<planId>/<taskId>`；`.wildarrange/task-packets/` 不是当前任务状态或新批准记录，Worker 不能因其存在获得额外写权限。
 - `src/infra/prompt-pack.mjs`：prompt-pack 注册安装、固定运行时副本物化、条目加载、内容 hash、列表与校验渲染。外部/custom pack 先校验 source realpath，再复制到 `.wildarrange/prompt-pack/installed`；运行时 Agent、Skill、routes、tool 与 matcher 全部只从这个固定根读取，不信任 registry 中可修改的根路径字段。
 - `src/infra/runtime-bootstrap.mjs`：跨 config、work、prompt pack、ledger 与 snapshot 的一次性 `initRuntime` 顺序。长期 Agent 配置只保留在权威 config，不再生成无消费者的 `agents.json` / `categories.json` 投影。
 - `src/interface/project-init.mjs`：只在显式 `init --project-docs` 时从发布包模板补建缺失治理文档，使用独占创建保证已有文件不被合并或覆盖，架构模板还需显式 `--architecture`。
@@ -385,3 +386,27 @@ adapter 专用行为属于 `src/interface/adapters.mjs`、`src/interface/kimi-ad
 - 目录级 `AGENTS.md` 指引保持附加与局部。目录职责变化时更新最近文件；勿把完整根策略复制到每个文件夹。
 - `test/dependency-boundary.test.mjs` 每次 `npm test` 运行；边界测试失败意味着依赖图被违反，不是应放宽测试。
 - 保留 gate 不变量：verifier、scope、review 与 success criteria 对完成仍为 mandatory。
+
+## 职责与事实审计的目录归属
+
+- `src/infra/responsibility-contract.mjs`：任务职责声明的字段校验、R1–R5 常量、批准摘要指纹与中文摘要；不读取任务状态、不作交付决定。
+- `src/infra/responsibility-evidence.mjs`：只读采集目标与事实 owner 完整文件、项目源码、Git diff 及输入指纹；校验路径与预算，不写业务事实。
+- `src/capabilities/responsibility-audit.mjs`：Review 内部独立审计能力；核对既有批准 ledger、调用独立审查执行器、校验五条规则和源码证据，返回 PASS/RETURN；不推进任务状态。
+- `src/capabilities/review-gate.mjs` 统一消费该内部能力，继续由 delivery-pipeline 决定阻断、返工和 checkpoint；没有新并行流水线。
+- `plan-state.mjs` 持久化 task.responsibilityChanges，批准事件保存 responsibilityScopes；change-governance 的 revise_acceptance 修改声明后重新进入人工批准门。task-reports 保存审计结果，runtime-snapshot 保留声明，Dashboard 只读展示。
+
+完整字段与执行器协议见 README 的“职责与事实审计”。旧底层程序化导入的兼容边界不构成新的审计通过证据。
+
+职责声明变化的重新批准由 task-board.persistTaskState 统一触发，覆盖新增任务、草稿补全和 steer；先关闭批准门再写任务，防止更新中断后带着旧批准执行。线性、分步和并行入口共同读取 plan-state 的批准状态。
+
+## 项目审查与开工依赖
+
+infra/context-attachments.mjs 是完整 Markdown/Skill 安全读取的唯一 owner，AI 注入与能力层复用它。capabilities/project-review.mjs 持有项目审查清单选择、输入包与证据校验，并提供配置预览/应用；其中内置的长期文档当前事实审计只在相关文档路径命中时启用，逐份引用源码、失败则沿现有 Review gate 阻止 checkpoint。capabilities/execution-readiness.mjs 持有开工依赖检查与执行服务握手，并将证据夹路径及文档边界放入 Worker 上下文。线性和并行编排只经 gateway 调用，不新增反向依赖。
+
+review.steps 是项目附加审查的唯一配置；任务字段不复制审查要求。审查输入绑定策略、文档/Skill 与源码摘要，运行后复查内容未变。必需项目审查与原有职责审计共同进入 Review 与 acceptance proof；探测不能生成完成证明。报告只保存证据，不成为第二套业务事实维护者。
+
+configure-project-review 和 project-onboarding 是按需加载的流程 Skill；setup/onboard adapter 入口先读取其正文。接管沿用 tasks.request.evidenceRefs 与 Verification Registry，fixtures 目录项保存来源和消费者，不保存夹具业务值。扫描、登记、迁移和当前验收不能互相替代。
+
+### 设计层架构接入
+
+review-architecture-design 是设计审查流程的唯一规则来源；project-init 返回加载提示，project-onboarding 先进入该环节，adapter 提供 architecture 入口。它审查设计并要求人工确认同一权威文档，不读取源码反推设计、不新增 runtime 架构准入状态、不将模板或 Review PASS 视为人类批准。

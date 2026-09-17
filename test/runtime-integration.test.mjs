@@ -99,6 +99,20 @@ async function withTempDir(fn) {
   }
 }
 
+async function installDocumentReviewerFixture(rootDir) {
+  const adapter = path.join(rootDir, ".wildarrange", "document-reviewer.cjs");
+  await mkdir(path.dirname(adapter), { recursive: true });
+  await writeFile(adapter, `const fs=require('node:fs');
+const p=JSON.parse(fs.readFileSync(process.env.WILDARRANGE_READINESS_PACKET||process.env.WILDARRANGE_REVIEW_PACKET,'utf8'));
+if(p.kind==='execution_readiness_probe') console.log(JSON.stringify({ready:true,challenge:p.challenge,loadedSkills:p.requiredSkills.map(s=>s.name)}));
+else if(p.kind==='project_review_step') {
+  const evidence=p.step.appliesTo.map(name=>p.source.files.find(file=>file.path===name)).filter(file=>file&&typeof file.content==='string').map(file=>({file:file.path,line:1,text:file.content.split('\\n')[0]}));
+  console.log(JSON.stringify({stepId:p.step.id,inputDigest:p.inputDigest,decision:'PASS',summary:'Fixture reviewed current document content',evidence,findings:[]}));
+} else console.log(JSON.stringify({decision:'PASS',checks:Object.keys(p.rules).map(rule=>({rule,decision:'PASS',reason:'Fixture inspected source'})),findings:[]}));`);
+  const command = `node "${adapter}"`;
+  await writeFile(path.join(rootDir, "wildarrange.config.json"), JSON.stringify({ executionReadiness: { workerProbe: command }, review: { responsibility: { command } } }));
+}
+
 async function initializeGitFixture(rootDir) {
   const gitignorePath = path.join(rootDir, ".gitignore");
   const gitignore = await readFile(gitignorePath, "utf8").catch((error) => {
@@ -3002,6 +3016,7 @@ test("simulation greenfield project runs from product planning to completed web 
   await withTempDir(async (dir) => {
     await writeFile(path.join(dir, "AGENTS.md"), "# Project Rules\n\nUser-visible web work needs verifier evidence.\n");
     await initRuntime(dir);
+    await installDocumentReviewerFixture(dir);
 
     const route = await routeRequest(dir, {
       text: "从零做一个网页版提醒事项 App，一期 MVP 要有清单流程、空状态、验收标准和失败恢复。",
@@ -3169,6 +3184,7 @@ test("simulation existing project handles large feature addition through plannin
     await writeFile(path.join(dir, "AGENTS.md"), "# Existing Project Rules\n\nLarge features require scope and regression evidence.\n");
     await writeFile(path.join(dir, "src", "app.cjs"), "function listItems(items) { return items; }\nmodule.exports = { listItems };\n");
     await writeFile(path.join(dir, "test", "app.test.cjs"), "const { listItems } = require('../src/app.cjs');\nif (listItems([1]).length !== 1) process.exit(1);\n");
+    await installDocumentReviewerFixture(dir);
     await initializeGitFixture(dir);
     await initRuntime(dir);
 
@@ -3671,6 +3687,7 @@ test("non-git projects use file manifest scope fallback before checkpoint", asyn
 
 test("accepted change request can explicitly apply scope and reopen retry", async () => {
   await withTempDir(async (dir) => {
+    await installDocumentReviewerFixture(dir);
     await initRuntime(dir);
     await initializeGitFixture(dir);
 
@@ -3974,7 +3991,9 @@ test("workflow summary records failed runs with failure evidence", async () => {
       }],
     }));
 
-    const result = await runWorkflow(dir, { planPath });
+    // Preserve the legacy-plan failure-summary regression; public imports now require responsibility approval.
+    await importPlan(dir, planPath);
+    const result = await runWorkflow(dir);
     assert.equal(result.ok, false);
     assert.equal(result.summaryPath, ".wildarrange/reports/workflow-summary.md");
 
@@ -4985,6 +5004,7 @@ test("runtime snapshot follows execution semantics for legacy approval records",
         description: "Create the requested result file.",
         owner: "ZhuRong",
         writable_paths: ["src/result.js"],
+        responsibilityChanges: [{ script: "src/result.js", additions: "Create accepted artifact", responsibilityBefore: "Absent", responsibilityAfter: "Own accepted artifact", facts: [] }],
         worker_command: "node -e \"const fs=require('fs');fs.mkdirSync('src',{recursive:true});fs.writeFileSync('src/result.js','ok')\"",
         verify_commands: ["node -e \"if(!require('fs').existsSync('src/result.js'))process.exit(1)\""],
       }],
@@ -5028,6 +5048,7 @@ test("host semantic plans require an explicit command-worker task.owner and user
         description: "Create the accepted artifact.",
         owner: "ZhuRong",
         writable_paths: ["src/result.js"],
+        responsibilityChanges: [{ script: "src/result.js", additions: "Create accepted artifact", responsibilityBefore: "Absent", responsibilityAfter: "Own accepted artifact", facts: [] }],
         worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/result.js','export const ok = true;\\n')\"",
         verify_commands: ["node -e \"const fs=require('fs'); if(!fs.readFileSync('src/result.js','utf8').includes('ok')) process.exit(1)\""],
         review_commands: ["node -e \"const fs=require('fs'); if(!fs.readFileSync('src/result.js','utf8').includes('export const ok = true')) process.exit(1)\""],
@@ -5121,6 +5142,7 @@ test("host semantic plans require an explicit command-worker task.owner and user
         subject: "Must not import",
         description: "The host omitted the actual owner.",
         writable_paths: ["src/missing.js"],
+        responsibilityChanges: [{ script: "src/missing.js", additions: "Create accepted artifact", responsibilityBefore: "Absent", responsibilityAfter: "Own accepted artifact", facts: [] }],
         worker_command: "node --version",
         verify_commands: ["node --version"],
         successCriteria: [{
@@ -5144,6 +5166,7 @@ test("host semantic plans require an explicit command-worker task.owner and user
         description: "BaiZe cannot own an executable command task.",
         owner: "BaiZe",
         writable_paths: ["src/read-only.js"],
+        responsibilityChanges: [{ script: "src/read-only.js", additions: "Create accepted artifact", responsibilityBefore: "Absent", responsibilityAfter: "Own accepted artifact", facts: [] }],
         worker_command: "node --version",
         verify_commands: ["node --version"],
       }],
@@ -5153,6 +5176,9 @@ test("host semantic plans require an explicit command-worker task.owner and user
       /requires explicit command-worker task\.owner.*T003/,
     );
 
+    const reviewRunner = resolveWildArrangePath(dir, "independent-review-fixture.cjs");
+    await writeFile(reviewRunner, `const fs=require('node:fs');const packet=JSON.parse(fs.readFileSync(process.env.WILDARRANGE_READINESS_PACKET||process.env.WILDARRANGE_REVIEW_PACKET,'utf8'));if(packet.kind==='execution_readiness_probe'){console.log(JSON.stringify({ready:true,challenge:packet.challenge,loadedSkills:packet.requiredSkills.map(s=>s.name)}));process.exit(0)}if(!packet.source.files.some(f=>f.path==='src/result.js' && f.content.includes('export const ok = true')))throw Error('missing reviewed implementation');console.log(JSON.stringify({decision:'PASS',checks:Object.keys(packet.rules).map(rule=>({rule,decision:'PASS',reason:'Single fixture artifact, no facts or independent responsibilities added'})),findings:[]}));`);
+    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({ executionReadiness: { workerProbe: `node "${reviewRunner}"` }, review: { responsibility: { command: `node "${reviewRunner}"` } } }));
     const completed = await runNextTask(dir);
     assert.equal(completed.status, "completed");
     assert.match(await readFile(path.join(dir, "src", "result.js"), "utf8"), /export const ok = true/);
@@ -5179,6 +5205,7 @@ test("host semantic plans reject missing or trivial workers before formal state 
         description: "Create the requested source file.",
         owner: "ZhuRong",
         writable_paths: ["src/result.js"],
+        responsibilityChanges: [{ script: "src/result.js", additions: "Create accepted artifact", responsibilityBefore: "Absent", responsibilityAfter: "Own accepted artifact", facts: [] }],
         verify_commands: ["node -e \"if(!require('fs').existsSync('src/result.js')) process.exit(1)\""],
         successCriteria: [{ title: "result exists", expectedEvidence: "verifier finds src/result.js", verifierCommandRefs: [0] }],
       };

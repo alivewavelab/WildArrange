@@ -705,7 +705,8 @@ function isAllowedPrePlanShellCommand(command, cliCommandPrefix = "", controlRoo
   const args = stripVerifiedControlRootOption(parseWildArrangeShellArgs(command, cliCommandPrefix), controlRoot);
   if (!args) return false;
   if (/^(?:status|doctor|summary|timeline|decisions|help(?:\s+--all)?|--help(?:\s+--all)?)$/i.test(args)) return true;
-  if (/^(?:config\s+show|changes\s+list)$/i.test(args)) return true;
+  if (/^(?:config\s+show|changes\s+list|adoption\s+inventory|review\s+checklist\s+--task\s+[A-Za-z0-9_.-]+)$/i.test(args)) return true;
+  if (/^review\s+configure\s+--from\s+\.wildarrange[\\/]plan-drafts[\\/][A-Za-z0-9_.-]+\.json(?:\s+--apply)?$/i.test(args)) return true;
   if (/^prompts\s+show\s+--skill\s+[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/i.test(args)) return true;
   if (/^resume(?:\s+--session\s+[A-Za-z0-9_.-]+)?$/i.test(args)) return true;
   if (/^continuation\s+check(?:\s+--session\s+[A-Za-z0-9_.-]+)?$/i.test(args)) return true;
@@ -730,7 +731,7 @@ function parseWildArrangeShellArgs(command, cliCommandPrefix = "") {
 
 function isReadOnlyWildArrangeShellCommand(command, cliCommandPrefix = "", controlRoot = "") {
   const args = stripVerifiedControlRootOption(parseWildArrangeShellArgs(command, cliCommandPrefix), controlRoot);
-  return Boolean(args && /^(?:status|doctor|summary|timeline|decisions|config\s+show|changes\s+list|prompts\s+show\s+--skill\s+[A-Za-z0-9][A-Za-z0-9._-]{0,99}|resume(?:\s+--session\s+[A-Za-z0-9_.-]+)?|continuation\s+check(?:\s+--session\s+[A-Za-z0-9_.-]+)?|help(?:\s+--all)?|--help(?:\s+--all)?)$/i.test(args));
+  return Boolean(args && /^(?:status|doctor|summary|timeline|decisions|config\s+show|changes\s+list|adoption\s+inventory|review\s+checklist\s+--task\s+[A-Za-z0-9_.-]+|review\s+configure\s+--from\s+\.wildarrange[\\/]plan-drafts[\\/][A-Za-z0-9_.-]+\.json|prompts\s+show\s+--skill\s+[A-Za-z0-9][A-Za-z0-9._-]{0,99}|resume(?:\s+--session\s+[A-Za-z0-9_.-]+)?|continuation\s+check(?:\s+--session\s+[A-Za-z0-9_.-]+)?|help(?:\s+--all)?|--help(?:\s+--all)?)$/i.test(args));
 }
 
 async function isMatchingFeaturePlanImport(rootDir, command, gateId, cliCommandPrefix = "") {
@@ -887,6 +888,7 @@ function appendHookFacts(lines, facts) {
       lines.push(`- 本计划必须绑定已确认功能设计：\`feature_design_ref: "${facts.planDraft.featureDesignRef}"\`；缺失或不匹配时禁止导入和开发。`);
     }
     lines.push("- 每张任务必须包含：`id`、`subject`、`description`、`owner`、`writable_paths`、`worker_command`、`verify_commands`、`successCriteria`。`worker_command` 必须是宿主可执行的真实实现命令，并在 WildArrange 准备的隔离任务 worktree 中产生 `writable_paths` 内的改动；不得使用 `node --version`、`process.exit(0)`、`true` 等占位命令。`verify_commands` 必须是非空的命令字符串数组，不能写成对象数组。每条 successCriteria 是带 `title`、`expectedEvidence`、`verifierCommandRefs` 的对象；`verifierCommandRefs` 填从 0 开始的命令索引数组，或与 `verify_commands` 完全一致的命令字符串数组。");
+    lines.push("- 每张任务还必须包含 responsibilityChanges 数组，每项写 script（精确目标脚本）、additions（新增内容）、responsibilityBefore、responsibilityAfter、facts 数组。每项事实写 name、ownerBefore、ownerAfter、access（统一读写入口）；无事实填 facts: []，新事实 ownerBefore 为 null。计划摘要用中文展示职责变化与事实归属，等待用户确认。交付 Review 必须独立审计 R1-R5：符合已批职责、无职责混杂、无重复事实、无绕过入口、无重复实现；缺少执行器或有效证据不得称通过。");
     lines.push(`- owner 规则：${facts.planDraft.ownerPolicy}。可执行工单通常交给 ZhuRong，必要时由 Jiuwei；DiJiang、BaiZe、LuWu 通过计划、复核、治理阶段参与，不得作为 command worker。`);
     if (facts.planDraft.nextCommand) {
       lines.push(`- 写完草稿后执行：${facts.planDraft.nextCommand.replace("<draftPath>", facts.planDraft.draftPath)}`);
