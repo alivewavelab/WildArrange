@@ -75,7 +75,12 @@ export async function runInjectionHook(rootDir, input = {}) {
     }).catch((error) => ({ error: error.message }));
   } else if (event === "UserPromptSubmit") {
     facts.route = input.prompt ? await routeRequest(controlRoot, { text: input.prompt, sessionId }) : null;
-    facts.planDraft = buildPlanDraftDirective(facts.route, { sessionId, prompt: input.prompt });
+    facts.planDraft = buildPlanDraftDirective(facts.route, {
+      sessionId,
+      prompt: input.prompt,
+      controlRoot,
+      executionRoot,
+    });
     facts.rules = await scanProjectRules(executionRoot, { controlRoot });
     facts.archivist = await runArchivistForHook(controlRoot, input, {
       event,
@@ -322,7 +327,7 @@ export async function preToolUseGuard(rootDir, input = {}, options = {}) {
 
   const featureDesignGate = await loadActiveFeatureDesignGate(rootDir, featureGateSessionId(input));
   if (featureDesignGate?.status === "awaiting_feature_confirmation") {
-    const blocked = (isShellTool && !isReadOnlyWildArrangeShellCommand(shellCommand, cliCommandPrefix)) || targetPaths.length > 0;
+    const blocked = (isShellTool && !isReadOnlyWildArrangeShellCommand(shellCommand, cliCommandPrefix, rootDir)) || targetPaths.length > 0;
     if (blocked) {
       return denyFeatureDesignToolUse(rootDir, {
         code: "feature_design_confirmation_required",
@@ -338,7 +343,7 @@ export async function preToolUseGuard(rootDir, input = {}, options = {}) {
     const validPlanImport = isShellTool
       ? await isMatchingFeaturePlanImport(rootDir, shellCommand, featureDesignGate.id, cliCommandPrefix)
       : false;
-    const blockedShell = isShellTool && !isReadOnlyWildArrangeShellCommand(shellCommand, cliCommandPrefix) && !validPlanImport;
+    const blockedShell = isShellTool && !isReadOnlyWildArrangeShellCommand(shellCommand, cliCommandPrefix, rootDir) && !validPlanImport;
     const blockedWrite = targetPaths.length > 0 && !isPlanDraftWrite(targetPaths);
     if (blockedShell || blockedWrite) {
       return denyFeatureDesignToolUse(rootDir, {
@@ -366,7 +371,7 @@ export async function preToolUseGuard(rootDir, input = {}, options = {}) {
     && planApproval.status !== "approved"
     && planApproval.planId === taskState?.planId;
 
-  if (isShellTool && (!task || awaitingPlanApproval) && !isAllowedPrePlanShellCommand(shellCommand, cliCommandPrefix)) {
+  if (isShellTool && (!task || awaitingPlanApproval) && !isAllowedPrePlanShellCommand(shellCommand, cliCommandPrefix, rootDir)) {
     const code = awaitingPlanApproval ? "awaiting_plan_approval_shell" : "no_active_task_shell";
     const reason = awaitingPlanApproval
       ? "plan is awaiting user approval; only exact WildArrange plan-management and read-only commands are allowed"
@@ -696,8 +701,8 @@ function isPlanDraftWrite(targetPaths) {
     && targetPaths.every((targetPath) => /^\.wildarrange\/plan-drafts\/[A-Za-z0-9_.-]+\.json$/.test(targetPath));
 }
 
-function isAllowedPrePlanShellCommand(command, cliCommandPrefix = "") {
-  const args = parseWildArrangeShellArgs(command, cliCommandPrefix);
+function isAllowedPrePlanShellCommand(command, cliCommandPrefix = "", controlRoot = "") {
+  const args = stripVerifiedControlRootOption(parseWildArrangeShellArgs(command, cliCommandPrefix), controlRoot);
   if (!args) return false;
   if (/^(?:status|doctor|summary|timeline|decisions|help(?:\s+--all)?|--help(?:\s+--all)?)$/i.test(args)) return true;
   if (/^(?:config\s+show|changes\s+list|adoption\s+inventory|review\s+checklist\s+--task\s+[A-Za-z0-9_.-]+)$/i.test(args)) return true;
@@ -707,7 +712,7 @@ function isAllowedPrePlanShellCommand(command, cliCommandPrefix = "") {
   if (/^continuation\s+check(?:\s+--session\s+[A-Za-z0-9_.-]+)?$/i.test(args)) return true;
   if (/^init(?:\s+--sample)?$/i.test(args)) return true;
   if (/^plan\s+approve(?:\s+--plan\s+[A-Za-z0-9_.-]+)?$/i.test(args)) return true;
-  return /^plan\s+--from\s+(?:"[A-Za-z0-9_./\\: -]+\.json"|'[A-Za-z0-9_./\\: -]+\.json'|[A-Za-z0-9_./\\:-]+\.json)$/i.test(args);
+  return /^plan\s+--from\s+(?:"[A-Za-z0-9_./\\:~ -]+\.json"|'[A-Za-z0-9_./\\:~ -]+\.json'|[A-Za-z0-9_./\\:~ -]+\.json)$/i.test(args);
 }
 
 function parseWildArrangeShellArgs(command, cliCommandPrefix = "") {
@@ -724,19 +729,37 @@ function parseWildArrangeShellArgs(command, cliCommandPrefix = "") {
   return invocation ? invocation[1].trim() : null;
 }
 
-function isReadOnlyWildArrangeShellCommand(command, cliCommandPrefix = "") {
-  const args = parseWildArrangeShellArgs(command, cliCommandPrefix);
+function isReadOnlyWildArrangeShellCommand(command, cliCommandPrefix = "", controlRoot = "") {
+  const args = stripVerifiedControlRootOption(parseWildArrangeShellArgs(command, cliCommandPrefix), controlRoot);
   return Boolean(args && /^(?:status|doctor|summary|timeline|decisions|config\s+show|changes\s+list|adoption\s+inventory|review\s+checklist\s+--task\s+[A-Za-z0-9_.-]+|review\s+configure\s+--from\s+\.wildarrange[\\/]plan-drafts[\\/][A-Za-z0-9_.-]+\.json|prompts\s+show\s+--skill\s+[A-Za-z0-9][A-Za-z0-9._-]{0,99}|resume(?:\s+--session\s+[A-Za-z0-9_.-]+)?|continuation\s+check(?:\s+--session\s+[A-Za-z0-9_.-]+)?|help(?:\s+--all)?|--help(?:\s+--all)?)$/i.test(args));
 }
 
 async function isMatchingFeaturePlanImport(rootDir, command, gateId, cliCommandPrefix = "") {
-  const args = parseWildArrangeShellArgs(command, cliCommandPrefix);
+  const args = stripVerifiedControlRootOption(parseWildArrangeShellArgs(command, cliCommandPrefix), rootDir);
   const match = args?.match(/^plan\s+--from\s+(?:"([^"]+\.json)"|'([^']+\.json)'|([^\s]+\.json))$/i);
   const rawPath = match?.[1] || match?.[2] || match?.[3];
   if (!rawPath) return false;
   const planPath = path.isAbsolute(rawPath) ? rawPath : path.resolve(rootDir, rawPath);
   const plan = await readJson(planPath, null).catch(() => null);
   return plan?.feature_design_ref === gateId || plan?.featureDesignRef === gateId;
+}
+
+function stripVerifiedControlRootOption(args, controlRoot) {
+  if (typeof args !== "string") return args;
+  const pattern = /\s+--control-root\s+(?:"([^"]*)"|'([^']*)'|([^\s]+))/gi;
+  const matches = [...args.matchAll(pattern)];
+  if (matches.length === 0) return args;
+  const expected = normalizeControlRootPath(controlRoot);
+  for (const match of matches) {
+    const value = match[1] ?? match[2] ?? match[3] ?? "";
+    if (!expected || normalizeControlRootPath(value) !== expected) return null;
+  }
+  return args.replace(pattern, "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeControlRootPath(value) {
+  const normalized = path.resolve(String(value)).replace(/\\/g, "/").replace(/\/+$/, "");
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
 function featureGateSessionId(input) {
