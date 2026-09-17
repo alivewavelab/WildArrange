@@ -1,3 +1,4 @@
+import { checkExecutionReadiness } from "./execution-readiness.mjs";
 /**
  * Capability gateway: static registry + unified result envelope.
  *
@@ -127,6 +128,7 @@ async function adaptVerificationGenerate(ctx) {
 }
 
 const CAPABILITIES = {
+  "execution-readiness": { handler: async (ctx) => { const evidence = await checkExecutionReadiness(ctx.rootDir, ctx.task, ctx.options); return { status: evidence.pass ? "pass" : "fail", evidence, sideEffect: "state_written" }; }, owner: "capabilities/execution-readiness.mjs" },
   worker: { handler: adaptWorker, owner: "capabilities/worker.mjs" },
   verify: { handler: adaptVerify, owner: "capabilities/verify.mjs" },
   scope: { handler: adaptScope, owner: "capabilities/scope-guard.mjs" },

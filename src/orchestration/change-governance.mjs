@@ -1,3 +1,4 @@
+import { normalizeResponsibilityChanges } from "../infra/responsibility-contract.mjs";
 import { readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -337,6 +338,11 @@ function applySteeringProposal(taskState, proposal) {
   }
   if (proposal.kind === "revise_acceptance") {
     const target = taskState.tasks.find((task) => task.id === (proposal.targetTaskId || proposal.taskId));
+    if (proposal.responsibilityChanges !== undefined) {
+      const changes = normalizeResponsibilityChanges(proposal.responsibilityChanges, target.writable_paths);
+      if (!changes) throw new Error("responsibilityChanges cannot be removed");
+      target.responsibilityChanges = changes;
+    }
     if (Array.isArray(proposal.verify_commands)) target.verify_commands = normalizeStringArray(proposal.verify_commands, `task ${target.id} verify_commands`);
     if (Array.isArray(proposal.review_commands)) target.review_commands = normalizeStringArray(proposal.review_commands, `task ${target.id} review_commands`);
     if (Array.isArray(proposal.standards_commands)) target.standards_commands = normalizeStringArray(proposal.standards_commands, `task ${target.id} standards_commands`);

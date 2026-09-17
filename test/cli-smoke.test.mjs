@@ -312,6 +312,7 @@ test("cli smoke: a local target without bin imports a string-array verifier plan
         description: "Create a small receipt through the governed task.",
         owner: "ZhuRong",
         writable_paths: ["receipt.txt"],
+        responsibilityChanges: [{ script: "receipt.txt", additions: "Create accepted artifact", responsibilityBefore: "Absent", responsibilityAfter: "Own the accepted artifact", facts: [] }],
         worker_command: "node -e \"require('fs').writeFileSync('receipt.txt','ok')\"",
         verify_commands: ["node -e \"if(require('fs').readFileSync('receipt.txt','utf8')!=='ok')process.exit(1)\""],
         successCriteria: [{
