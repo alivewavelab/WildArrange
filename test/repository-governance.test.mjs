@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：repository-governance.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证仓库治理 inspect：真实注释违规（含模板表达式）、
+//   缺失目录 AGENTS、README 命令漂移、安全标记配对、未路由 Agents、不存在 CLI 命令。
+//   不测：自动修复违规或 git hook 安装。
+//
+// 【运行原理速读】
+//   在临时树写入违规/fixture 文件，调用 inspectRepositoryGovernance，
+//   断言 findings code 与 LuWu evidence 写入。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";

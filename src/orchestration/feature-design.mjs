@@ -1,8 +1,31 @@
+// =============================================================================
+// 文件名称：feature-design.mjs
+// 所属模块：orchestration
+// 作用说明：
+//   功能设计门状态机：在用户澄清需求与导入计划之间插入确认关卡；
+//   会话级 gate 持久化，计划导入时绑定 feature_design_ref。
+//
+// 【运行原理速读】
+//   可以把它想成「先对齐要做什么，再允许写计划」：
+//
+//   · 何时执行？
+//     路由命中 clarify-feature-design 或用户确认/导入计划时。
+//
+//   · 做了什么？
+//     awaiting_feature_confirmation → awaiting_plan_import → plan_imported。
+//
+//   · 和谁协作？
+//     host-runtime 在 Hook/路由前推进；plan-state 导入时校验绑定。
+// =============================================================================
 import { STATE_VERSION, createWorkId, ensureWildArrangeDirs, nowIso, readJson, resolveWildArrangePath, writeJsonAtomic } from "../infra/runtime-store.mjs";
 import { loadRoutesConfig, resolveRouteDecision } from "../infra/route-table.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
 
-// Business transitions are owned here. Snapshot/AI consumers only read state.
+/**
+ * 根据用户输入推进功能设计门（确认或新开 gate）。
+ * @param {string} rootDir 项目根目录
+ * @param {string|object} input 文本或含 text/sessionId 的对象
+ */
 export async function advanceFeatureDesign(rootDir, input) {
   const text = typeof input === "string" ? input : input?.text;
   if (!text || typeof text !== "string") return null;
@@ -20,6 +43,9 @@ export async function advanceFeatureDesign(rootDir, input) {
   });
 }
 
+/**
+ * 为会话创建新的功能设计 gate，状态 awaiting_feature_confirmation。
+ */
 export async function beginFeatureDesignGate(rootDir, sessionId, request) {
   await ensureWildArrangeDirs(rootDir);
   const at = nowIso();
@@ -42,12 +68,14 @@ export async function beginFeatureDesignGate(rootDir, sessionId, request) {
   return gate;
 }
 
+/** 读取会话当前活跃的功能设计 gate。 */
 export async function loadActiveFeatureDesignGate(rootDir, sessionId) {
   const pointer = await readJson(featureDesignSessionPath(rootDir, sessionId), null);
   if (!pointer?.gateId) return null;
   return readJson(featureDesignGatePath(rootDir, pointer.gateId), null);
 }
 
+/** 用户确认功能设计，gate 进入 awaiting_plan_import。 */
 export async function confirmFeatureDesignGate(rootDir, gate) {
   if (!gate || gate.status !== "awaiting_feature_confirmation") {
     throw new Error("feature design gate is not awaiting confirmation");
@@ -63,6 +91,7 @@ export async function confirmFeatureDesignGate(rootDir, gate) {
   return confirmed;
 }
 
+/** 计划导入前校验 feature_design_ref 与 gate 状态一致。 */
 export async function assertFeatureDesignPlanBinding(rootDir, plan) {
   if (!plan?.feature_design_ref) return null;
   const gate = await readJson(featureDesignGatePath(rootDir, plan.feature_design_ref), null);
@@ -73,6 +102,7 @@ export async function assertFeatureDesignPlanBinding(rootDir, plan) {
   return gate;
 }
 
+/** 计划导入成功后绑定 planId，gate 标记 plan_imported。 */
 export async function bindFeatureDesignPlan(rootDir, gate, planId) {
   if (!gate) return null;
   const at = nowIso();
@@ -98,4 +128,3 @@ function featureDesignSessionPath(rootDir, sessionId) {
 function safeStateSegment(value) {
   return String(value || "session").replace(/[^A-Za-z0-9_.-]+/g, "_").slice(0, 120) || "session";
 }
-

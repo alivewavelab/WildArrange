@@ -1,17 +1,22 @@
-/**
- * Shared delivery pipeline: the one place that owns gate order.
- *
- * Both the linear runtime and the parallel-agent admission path are meant
- * to call this instead of re-implementing the verify -> scope -> review ->
- * acceptance-proof -> checkpoint sequence themselves. Changing gate order,
- * or inserting a new gate, only happens here.
- *
- * Faithfully mirrors the existing gating semantics in wildarrange-node-runtime.mjs:
- * verify / scope / review always run in full (no early bail between them so
- * every gate's evidence is always collected), and acceptance-proof +
- * checkpoint only run if every prior gate (worker, verify, criteria, scope,
- * review) already passed.
- */
+// =============================================================================
+// 文件名称：delivery-pipeline.mjs
+// 所属模块：orchestration
+// 作用说明：
+//   共享交付流水线：强制质量门顺序的唯一来源。线性 runtime 与并行 admission
+//   均调用此处，而非各自实现 verify → scope → review → proof → checkpoint。
+//
+// 【运行原理速读】
+//   可以把它想成「任务完工前的固定安检通道」：
+//
+//   · 何时执行？
+//     linear-runtime 与 admission 在 worker 成功后进入 gates。
+//
+//   · 做了什么？
+//     verify/scope/review 全量收集证据 → 全通过后 runCompletionSegment → completed。
+//
+//   · 约束？
+//     改门顺序或新增 gate 只能在此文件；verify/scope/review 之间不得 early bail。
+// =============================================================================
 import { invokeCapability, capabilityModule, capabilityErrorEnvelope } from "../capabilities/gateway.mjs";
 import { lstat } from "node:fs/promises";
 import path from "node:path";
@@ -27,6 +32,9 @@ import { appendWisdom } from "../infra/task-reports.mjs";
 import { persistTaskState } from "./task-board.mjs";
 import { prepareContractReview } from "./contract-governance.mjs";
 
+// --- 门序与完成判定 ---
+
+/** 根据 scope/review 结果与 attempts 判断本次交付尝试是否应标记失败。 */
 export function shouldFailDeliveryAttempt(task, verifyResult, scopeResult, reviewResult) {
   if (scopeResult?.status === "fail") return true;
   if (scopeResult && scopeResult.status !== "pass") return true;
@@ -34,6 +42,7 @@ export function shouldFailDeliveryAttempt(task, verifyResult, scopeResult, revie
   return task.attempts >= task.maxAttempts;
 }
 
+/** 固定顺序提交 completed：账本 → wisdom → digest → persistTaskState。 */
 export async function commitTaskCompletionState(rootDir, options) {
   const { taskState, task, verifyResult, ledgerEvent, digestReason } = options;
   task.status = "completed";
@@ -45,13 +54,8 @@ export async function commitTaskCompletionState(rootDir, options) {
 }
 
 /**
- * Runs post-commit conveniences (snapshot, workflow summary, …) after a task
- * is already durably completed. Their failure must not un-complete the task,
- * but it must not vanish either (cross-review P1, round 5, 2026-07-21): the
- * failure is recorded as a `completion_side_effect_failed` ledger event
- * (best-effort) and returned to the caller as a warning list. Anything that
- * MUST exist for a completed task (wisdom, digest) belongs BEFORE the
- * canonical persist instead, where a failure keeps the task recoverable.
+ * 任务已 durable completed 后运行快照/摘要等便利副作用；失败不得反完成，
+ * 仅记 completion_side_effect_failed 并返回警告。wisdom/digest 必须在 persist 之前。
  */
 export async function runPostCompletionSideEffects(rootDir, planId, task, effects) {
   try {
@@ -79,6 +83,9 @@ const STEP_LABELS = {
   checkpoint: "存档",
 };
 
+// --- 主流水线 ---
+
+/** 运行 verify → scope → review → contract → completion 完整交付流水线。 */
 export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
   const evidence = { ...(options.initialEvidence || {}) };
   const results = [];
@@ -287,13 +294,11 @@ function pipelineOutcomeReason(status, results, criteria) {
   return "worker 执行未成功";
 }
 
+// --- 完成段 ---
+
 /**
- * The completion segment (acceptance-proof -> checkpoint) shared by the
- * pipeline above and by the single-step `node checkpoint` workflow, so
- * completion semantics have exactly one definition. A task may only become
- * `completed` when this returns status "completed": a failed or throwing
- * checkpoint write must never be silently absorbed (the gateway converts
- * throws into fail envelopes; we check the envelope status here).
+ * acceptance-proof → integration → checkpoint 共享完成段；仅 status "completed" 可置 completed。
+ * 线性单步 checkpoint 与主流水线共用此语义，checkpoint 失败不得静默吞掉。
  */
 export async function runCompletionSegment(rootDir, planId, task, evidence, options = {}) {
   // 交付事实解析在网关之外（含 admission claim 围栏），异常不得无审计穿透：
@@ -383,19 +388,11 @@ async function resolveDeliveryFacts(rootDir, task, options) {
   return { required, target: target?.runId ? target : null };
 }
 
+// --- 证据收集 ---
+
 /**
- * Read back, from the persisted evidence trail, the outcome of every gate
- * the pipeline runs. Used by the single-step workflow so its "may this task
- * complete" precondition follows GATE_STEPS instead of a hand-maintained
- * list: adding a gate step here makes the node workflow require it too.
- *
- * Freshness rule (cross-review P0, 2026-07-21): a gate result only counts if
- * its evidence entry was appended AFTER the latest worker run. The evidence
- * array is append-only, so array order is execution order — gate evidence
- * sitting before the last worker entry belongs to a previous execution round
- * (e.g. a round whose checkpoint failed) and must not certify the current
- * round's artifacts. last_* convenience fields are deliberately NOT trusted
- * here for the same reason.
+ * 从 task.evidence 轨迹回读各 gate 结果；单步 workflow 的前置条件与此 GATE_STEPS 对齐。
+ * 新鲜度规则：gate 证据必须在最近一次 worker 条目之后，否则属上一轮执行。
  */
 export function collectGateEvidenceFromTask(task) {
   const specs = {

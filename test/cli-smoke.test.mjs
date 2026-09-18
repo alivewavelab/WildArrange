@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：cli-smoke.test.mjs
+// 所属模块：test
+// 作用说明：
+//   CLI 冒烟：bin 可加载、init 创建 runtime、status/doctor 可运行、
+//   Codex Hook 绑定 control root 与 config digest、worktree 会话路径。
+//   不测：完整任务交付或并行 agent 大规模场景。
+//
+// 【运行原理速读】
+//   在临时项目目录 spawn CLI 子进程，检查退出码、stderr 协议与
+//   .wildarrange 目录及 adapter hook 安装产物。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";

@@ -1,9 +1,17 @@
-/**
- * AI-side routing: the full routeRequest flow (deterministic table match plus
- * optional semantic shadow via an LLM) and semantic route governance. The
- * deterministic table itself lives in src/infra/route-table.mjs so
- * orchestration can read it without depending on this zone.
- */
+// =============================================================================
+// 文件名称：routing.mjs
+// 所属模块：ai
+// 作用说明：
+//   用户请求路由：确定性路由表匹配 + 可选 LLM 语义 Shadow 治理 + 功能设计门。
+//   确定性路由表本体在 infra/route-table.mjs，本文件负责 AI 侧完整 routeRequest 流程。
+//
+// 【运行原理速读】
+//   · 何时触发？ UserPromptSubmit Hook、archivist fallback、CLI route 命令。
+//   · 做了什么？ ① resolveRouteDecision ② semanticRouteShadow 低置信/冲突降级
+//     ③ enforceFeatureDesignGate ④ emitDecision 与 writeDailyRoutingReview。
+//   · 与谁协作？ route-table、feature-design、llm-provider、decision-log。
+// =============================================================================
+
 import { DEFAULT_LEAD_AGENT } from "../infra/agent-registry.mjs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -18,6 +26,14 @@ import { loadActiveFeatureDesignGate } from "../orchestration/feature-design.mjs
 import { loadRoutesConfig, resolveRouteDecision, uniqueStrings } from "../infra/route-table.mjs";
 import { callOpenAICompatible, resolveAgentProvider } from "../infra/llm-provider.mjs";
 
+// --- 计划草稿指令 ---
+
+/**
+ * 当路由判定需要 Plan 时，生成宿主侧写 plan-draft JSON 的指令块；草稿-only 时不给 plan --from。
+ * @param {object|null} routeResult routeRequest 返回值
+ * @param {object} options sessionId、prompt、controlRoot、executionRoot
+ * @returns {object|null} planDraft 指令或 null
+ */
 export function buildPlanDraftDirective(routeResult, options = {}) {
   if (!routeResult || (routeResult.route !== "plan" && routeResult.needsPlan !== true)) return null;
   if (routeResult.featureDesign?.status === "awaiting_feature_confirmation") return null;
@@ -51,6 +67,14 @@ function isDraftOnlyPlanRequest(prompt) {
   return /(?:只|仅)(?:生成|创建|写|要).{0,12}(?:计划)?草稿(?=$|[\s，。！？；、,:：.!?;])|(?:先|暂时)?不(?:要|用|必)?(?:导入|登记)(?:(?:这|该|这个|本)?(?:份)?(?:正式)?(?:计划|草稿)(?=$|[\s，。！？；、,:：.!?;])|(?=\s*(?:$|[，。！？；,;])))|不要执行\s*plan\s+--from\b|\bdraft[ -]?only\b|\b(?:do not|don't) import(?:(?:\s+(?:the|this))?\s+(?:plan|draft)\b|(?=\s*(?:$|[,.!?;])))|\b(?:do not|don't) run\s+(?:the\s+)?plan\s+--from\b/i.test(prompt);
 }
 
+// --- 路由主流程 ---
+
+/**
+ * 对用户文本做完整路由决策（确定性 + 语义 Shadow + 功能设计门），写 ledger 与 decisions。
+ * @param {string} rootDir 项目根目录
+ * @param {string|object} input 纯文本或 { text, sessionId, allowLowConfidenceExecute }
+ * @returns {Promise<object>} 路由结果（intent、route、primaryAgent、skills 等）
+ */
 export async function routeRequest(rootDir, input) {
   await initRuntime(rootDir);
   const text = typeof input === "string" ? input : input?.text;
@@ -114,6 +138,8 @@ export async function routeRequest(rootDir, input) {
   return result;
 }
 
+// --- 功能设计门 ---
+
 function enforceFeatureDesignGate(result, gate) {
   const skill = {
     name: "clarify-feature-design",
@@ -145,6 +171,14 @@ function sanitizeDraftSegment(value) {
   return String(value || "session").replace(/[^A-Za-z0-9_.-]+/g, "_").slice(0, 80) || "session";
 }
 
+// --- 每日路由复盘 ---
+
+/**
+ * 汇总当日 routing 决策与人工标注，生成 reports/routing/{date}.* 复盘报告。
+ * @param {string} rootDir 项目根目录
+ * @param {object} options date、trigger、sessionId
+ * @returns {Promise<object>} 报告摘要（含 reportMdPath）
+ */
 export async function writeDailyRoutingReview(rootDir, options = {}) {
   await initRuntime(rootDir);
   const { config } = await loadWildArrangeConfig(rootDir);
@@ -382,6 +416,16 @@ function localDateFromTimestamp(value) {
   return localDate(parsed);
 }
 
+// --- 语义 Shadow 治理 ---
+
+/**
+ * 调用 LLM 对确定性路由做第二意见分类；未启用或无 provider 时返回 skipped。
+ * @param {string} rootDir 项目根目录
+ * @param {string} text 用户请求文本
+ * @param {object} deterministicRoute 确定性路由结果
+ * @param {object} options 可选预加载 config
+ * @returns {Promise<object>} status=pass|skipped|warn 及 intent/route/confidence
+ */
 export async function semanticRouteShadow(rootDir, text, deterministicRoute, options = {}) {
   const { config } = options.config ? { config: options.config } : await loadWildArrangeConfig(rootDir);
   const shadowConfig = config.routeGovernance?.semanticShadow || {};

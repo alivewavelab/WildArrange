@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：verification-governance.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 verification governance：scan 只读 envelope、apply-card 失败回滚、
+//   generate/freshness 需匹配 commit、handoff 新鲜度、生成物不占 legacy 文件名、Inventory HTML。
+//   不测：discovery 扫描安全规则（见 verification-discovery）。
+//
+// 【运行原理速读】
+//   临时目录 invoke scan/apply/generate capabilities，
+//   断言 registry/inventory digest 与 git blob 比较及 rollback 行为。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";

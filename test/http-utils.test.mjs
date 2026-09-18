@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：http-utils.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 HTTP 工具：readJsonBody 空体/坏 JSON/超大 payload；
+//   dashboard 面板对坏 JSON 返回一致 400。
+//   不测：TLS、WebSocket 或完整 REST 鉴权矩阵。
+//
+// 【运行原理速读】
+//   用 Readable 伪造 request body 测 readJsonBody；
+//   启动 dashboard 发 malformed POST，断言 400 与 error code。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";

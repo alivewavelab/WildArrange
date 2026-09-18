@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：file-lock.mjs
+// 所属模块：infra
+// 作用说明：
+//   统一 .wildarrange 文件锁：task-state 与 ledger 共用 stale 恢复与可诊断超时。
+//
+// 【运行原理速读】
+//   open wx 独占 → 死 pid 或不可解析 mtime 宽限后回收 → withFileLock 包裹回调。
+// =============================================================================
 /**
  * 统一的 .wildarrange 文件锁原语：task-state 锁与 ledger 锁共用。
  *
@@ -130,6 +139,9 @@ export async function inspectFileLock(rootDir, lockPath) {
   };
 }
 
+/**
+ * withFileLock：本模块对外异步 API。
+ */
 export async function withFileLock(rootDir, lockPath, lockName, ownerTag, fn, options = {}) {
   const waitTimeoutMs = options.waitTimeoutMs ?? LOCK_WAIT_TIMEOUT_MS;
   const retryMs = options.retryMs ?? LOCK_RETRY_MS;

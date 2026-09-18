@@ -1,13 +1,26 @@
 #!/usr/bin/env node
-
-// 从真实 import / require / from 生成 <script id="generated-graph">。
-// 不改 D 字典人话（plain / io / r）。已有人话边只补缺口。
-// 用法：node generate-module-graph.mjs [仓库根] [--depth=entry|all]
-// CONFIG 与 validate-module-file-map.mjs 对齐：MAP_PATH / OVERVIEW_PATH 可用环境变量覆盖。
+// =============================================================================
+// 文件名称：generate-module-graph.mjs
+// 所属模块：tooling/arch-module-graph
+// 作用说明：
+//   从源码 import/require/from 解析依赖，生成 architecture-overview.html 内
+//   <script id="generated-graph"> JSON 块。不改 D 字典人话（plain/io/r），
+//   已有人话边只补缺口。
+//
+// 【运行原理速读】
+//   · 何时跑？check:arch 或人工 node generate-module-graph.mjs [根] [--depth=entry|all]。
+//   · 做了什么？读 module-file-map.json → 展开 include → 解析 JS import →
+//     提取导出签名 → 写入/替换 generated-graph 脚本块。
+//   · 和其他部分的关系？
+//     CONFIG 与 validate-module-file-map.mjs 对齐（MAP_PATH / OVERVIEW_PATH 可环境变量覆盖）；
+//     反向同步门禁在 validate 侧校验生成结果是否覆盖模块文件。
+//   · 缺了它会怎样？架构总图缺少自动推导的跨文件边，需全手维护 D files。
+// =============================================================================
 
 import { existsSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, extname, relative, resolve, sep } from "node:path";
 
+// --- CLI 与 CONFIG ---
 const args = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const flags = new Set(process.argv.filter((a) => a.startsWith("--")));
 const depthFlag = [...flags].find((f) => f.startsWith("--depth="));
@@ -16,6 +29,7 @@ const root = resolve(args[0] ?? ".");
 const MAP_PATH = process.env.MAP_PATH || "tooling/arch-module-graph/module-file-map.json";
 const OVERVIEW_PATH = process.env.OVERVIEW_PATH || "docs/product/architecture-overview.html";
 
+// --- 文件分类正则 ---
 const TEST_FILE = /(?:\.test\.[^.]+$|_test\.[^.]+$|(?:^|\/)test_[^/]+$)/;
 const ENTRY_BASENAMES = /(^|\/)(index\.[^/]+|mod\.rs|__init__\.py)$/;
 const TYPES_FILE = /\.types\.[^.]+$/;
@@ -23,6 +37,7 @@ const JS_EXT = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]);
 const PY_EXT = new Set([".py"]);
 const RS_EXT = new Set([".rs"]);
 
+// --- 路径与 include 匹配 ---
 const toPosix = (path) => relative(root, path).split(sep).join("/");
 const walk = (directory) => {
   if (!existsSync(directory)) return [];
@@ -75,6 +90,7 @@ const expandInclude = (inc) => {
 const reverseExcluded = (posix) =>
   TEST_FILE.test(posix) || ENTRY_BASENAMES.test(posix) || TYPES_FILE.test(posix);
 
+// --- JS 模块解析 ---
 const tryFile = (posix) => {
   if (existsSync(resolve(root, posix)) && statSync(resolve(root, posix)).isFile()) return posix;
   return null;
@@ -130,6 +146,7 @@ const parseImports = (posix) => {
 
 const slug = (posix) => posix.replace(/[^\w]+/g, "-").replace(/^-|-$/g, "").slice(-40) || "f";
 
+// --- 导出签名提取（供 io 字段） ---
 const extractIo = (posix) => {
   const src = readFileSync(resolve(root, posix), "utf8");
   const ext = extname(posix);
@@ -155,6 +172,7 @@ const extractIo = (posix) => {
   return uniq.length ? uniq.join("；") : "待读代码填写";
 };
 
+// --- 图生成与 HTML 回写 ---
 const overviewPath = resolve(root, OVERVIEW_PATH);
 const overview = readFileSync(overviewPath, "utf8");
 const dStarts = [...overview.matchAll(/^\s{2}"([a-z0-9-]+)":\s*\{\s*name:/gm)];

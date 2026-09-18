@@ -1,3 +1,22 @@
+// =============================================================================
+// 文件名称：admission-recovery.mjs
+// 所属模块：orchestration
+// 作用说明：
+//   并行 admission 失败与恢复：回滚计划持久化、工作区还原、revalidation 与
+//   post-integration recovery 状态投影。均在 admission 任务锁内调用，不二次加锁。
+//
+// 【运行原理速读】
+//   可以把它想成「admission 出事后的急救箱」：
+//
+//   · 何时执行？
+//     apply 失败、回滚失败、集成基线变化或 checkpoint 后故障时。
+//
+//   · 做了什么？
+//     记录失败 → 回滚文件/patch → 审计入账本后提交 recovery/revalidation 状态。
+//
+//   · 约束？
+//     回滚失败保留 owner 与 rollback plan，禁止释放脏工作区。
+// =============================================================================
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
@@ -14,8 +33,10 @@ import { writeFailureReport } from "../infra/task-reports.mjs";
 import { persistTaskState } from "./task-board.mjs";
 import { loadTaskState } from "./plan-state.mjs";
 
-// Runs under admission's task lock. Recovery persistence owns whether the
-// restored workspace permits releasing the claim; never acquire a second lock.
+/**
+ * 在 admission 任务锁内记录 apply 失败：按回滚结果更新任务状态与账本。
+ * 恢复持久化决定是否可释放 claim；禁止在此再获取第二把任务锁。
+ */
 export async function recordApplyFailureWithinLock(rootDir, taskId, { runId, error, rollback }) {
   const taskState = await loadTaskState(rootDir);
   if (!taskState) return;
@@ -50,6 +71,7 @@ function rollbackPlanPath(rootDir, runId, taskId) {
   return resolveWildArrangePath(rootDir, "agent-runs", runId, `${taskId}.rollback-plan.json`);
 }
 
+/** 持久化 admission 前快照回滚计划，供 apply 失败后还原工作区。 */
 export async function persistRollbackPlan(rootDir, runId, taskId, rollbackPlan) {
   await writeJsonAtomic(rollbackPlanPath(rootDir, runId, taskId), {
     runId,
@@ -59,15 +81,18 @@ export async function persistRollbackPlan(rootDir, runId, taskId, rollbackPlan) 
   });
 }
 
+/** 读取已持久化的回滚计划。 */
 export async function loadPersistedRollbackPlan(rootDir, runId, taskId) {
   const stored = await readJson(rollbackPlanPath(rootDir, runId, taskId), null);
   return stored?.plan || null;
 }
 
+/** 删除已完成的回滚计划文件。 */
 export async function removePersistedRollbackPlan(rootDir, runId, taskId) {
   await rm(rollbackPlanPath(rootDir, runId, taskId), { force: true }).catch(() => {});
 }
 
+/** 检测 patch 是否已在工作区应用过（git apply --reverse --check）。 */
 export async function patchAlreadyApplied(rootDir, patch) {
   const patchPath = path.join(rootDir, ".wildarrange", "agent-runs", `recheck-${Date.now()}-${process.pid}.patch`);
   await writeFile(patchPath, patch, "utf8");
@@ -79,6 +104,7 @@ export async function patchAlreadyApplied(rootDir, patch) {
   }
 }
 
+/** 为即将写入的文件列表创建 files 模式回滚计划（保存原内容或 existed=false）。 */
 export async function createFileRollbackPlan(rootDir, files) {
   const entries = [];
   for (const file of files) {
@@ -98,6 +124,7 @@ export async function createFileRollbackPlan(rootDir, files) {
   return { mode: "files", paths: files.map((file) => file.path), entries };
 }
 
+/** 按回滚计划还原工作区（files 或 patch 模式），结果写入账本。 */
 export async function rollbackAdmissionChanges(rootDir, rollbackPlan) {
   if (!rollbackPlan || rollbackPlan.mode === "none") {
     return { status: "skipped", reason: "no rollback plan" };
@@ -137,6 +164,9 @@ export async function rollbackAdmissionChanges(rootDir, rollbackPlan) {
   }
 }
 
+/**
+ * 集成基线或 ownership 围栏失败：任务回 pending，审计入账本后持久化 revalidation_required。
+ */
 export async function persistAdmissionRevalidation(rootDir, taskState, task, options) {
   const fence = options.fence || {};
   task.status = "pending";
@@ -182,6 +212,9 @@ export async function persistAdmissionRevalidation(rootDir, taskState, task, opt
   };
 }
 
+/**
+ * 集成或 checkpoint 后需人工恢复：保持 verifying，禁止回滚已推送/已本地 commit 的交付。
+ */
 export async function persistPostIntegrationRecovery(rootDir, taskState, task, options) {
   const localDelivery = options.integrationCommit?.local === true
     || options.integrationCommit?.status === "committed_local";

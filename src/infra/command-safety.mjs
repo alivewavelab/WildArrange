@@ -1,3 +1,22 @@
+// =============================================================================
+// 文件名称：command-safety.mjs
+// 所属模块：infra
+// 作用说明：
+//   shell 命令安全评估：内置高风险模式不可削弱，配置 extraPatterns 仅做加法。
+//   command-runner 执行前必经 evaluateCommandSafety，blocked 时返回 exit 126。
+//
+// 【运行原理速读】
+//   可以把它想成「Agent 能跑什么命令的防火墙」：
+//
+//   · 何时执行？
+//     任意 verify/review/worker/CLI 命令 spawn 之前。
+//
+//   · 它做了什么？
+//     ① 正则扫描 sudo/rm -rf/git reset 等 ② 合并项目自定义模式 ③ 产出 allowed/findings。
+//
+//   · 缺了它会怎样？
+//     Agent 可能执行删库、改权限、远程 pipe shell 等越界命令。
+// =============================================================================
 const HIGH_RISK_PATTERNS = [
   {
     id: "sudo",
@@ -56,8 +75,12 @@ const HIGH_RISK_PATTERNS = [
   },
 ];
 
-// 把 wildarrange.config.json 里 commandSafety.extraPatterns 编译成可用的正则规则。
-// 内置 HIGH_RISK_PATTERNS 始终作为不可削弱的底线；这里只做“加法”，让用户补充项目专属危险命令。
+/**
+ * 将 wildarrange.config.json 中 commandSafety.extraPatterns 编译为正则规则列表。
+ * 内置 HIGH_RISK_PATTERNS 始终作为不可削弱的底线；此处只做加法。
+ * @param {object|null|undefined} config 运行时配置
+ * @returns {Array<{ id: string, pattern: RegExp, reason: string, source?: string }>}
+ */
 export function compileCommandSafetyPatterns(config) {
   const raw = Array.isArray(config?.commandSafety?.extraPatterns) ? config.commandSafety.extraPatterns : [];
   const compiled = [];
@@ -79,6 +102,12 @@ export function compileCommandSafetyPatterns(config) {
   return compiled;
 }
 
+/**
+ * 评估命令是否允许执行；allowUnsafe 或环境变量可 override。
+ * @param {unknown} command 待检命令文本
+ * @param {{ allowUnsafe?: boolean, extraPatterns?: object[] }} [options]
+ * @returns {{ allowed: boolean, level: string, findings: Array<{ id: string, reason: string }> }}
+ */
 export function evaluateCommandSafety(command, options = {}) {
   const text = typeof command === "string" ? command.trim() : "";
   if (!text) {
@@ -100,6 +129,12 @@ export function evaluateCommandSafety(command, options = {}) {
   };
 }
 
+/**
+ * 构造被安全策略拦截时的标准命令结果（exit 126）。
+ * @param {string} command 原始命令
+ * @param {{ findings: object[] }} safety evaluateCommandSafety 的返回值
+ * @returns {{ exitCode: number, stdout: string, stderr: string, safety: object }}
+ */
 export function blockedCommandResult(command, safety) {
   const summary = safety.findings.map((finding) => `${finding.id}: ${finding.reason}`).join("; ");
   return {

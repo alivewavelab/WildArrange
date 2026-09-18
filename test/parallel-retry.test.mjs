@@ -1,7 +1,16 @@
-/**
- * 中断对账 + partial 重试：batch 持久化 taskIds/command/agent；
- * status 暴露 incompleteTasks；parallel retry 只重跑未通过的任务。
- */
+// =============================================================================
+// 文件名称：parallel-retry.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 parallel 中断对账：batch 持久化 taskIds、status 暴露 incompleteTasks、
+//   retry 只重跑失败任务、CLI parallel retry。
+//   不测：index.json 并发丢失（见 parallel-run-index-lock）。
+//
+// 【运行原理速读】
+//   导入双任务计划，模拟一败一成，调用 parallelAgentStatus/retryParallelAgentRun，
+//   断言 incomplete 集合与重试后结果。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";

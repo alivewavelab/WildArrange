@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：project-document-init.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 initProjectDocuments：最小文档集、等待人类确认、
+//   已有文件 preserve、architecture 仅显式请求创建、设计 review 路由与 Skill。
+//   不测：architecture 内容质量或自动合并冲突。
+//
+// 【运行原理速读】
+//   临时目录 initRuntime 后调用 initProjectDocuments，
+//   断言 created/preserved/awaitingHumanConfirmation 与文件正文关键字。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";

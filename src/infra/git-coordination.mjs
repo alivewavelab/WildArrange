@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：git-coordination.mjs
+// 所属模块：infra
+// 作用说明：
+//   多 Agent Git 协调：stash、branch、merge 冲突与 worktree 生命周期。
+//
+// 【运行原理速读】
+//   coordinateGitState → 冲突检测 → ledger 记录 Git 副作用。
+// =============================================================================
 import { randomUUID } from "node:crypto";
 import { realpath, rm } from "node:fs/promises";
 import os from "node:os";
@@ -13,6 +22,9 @@ import {
 
 const GIT_TIMEOUT_MS = 30_000;
 
+/**
+ * ensureDeviceIdentity：本模块对外异步 API。
+ */
 export async function ensureDeviceIdentity(rootDir, options = {}) {
   const devicePath = resolveWildArrangePath(rootDir, "device.json");
   const current = await readJson(devicePath, null);
@@ -29,6 +41,9 @@ export async function ensureDeviceIdentity(rootDir, options = {}) {
   return device;
 }
 
+/**
+ * inspectGitCoordination：本模块对外异步 API。
+ */
 export async function inspectGitCoordination(rootDir, config = {}) {
   const mode = config.mode || "guarded";
   if (mode === "off") {
@@ -73,18 +88,28 @@ export async function inspectGitCoordination(rootDir, config = {}) {
   };
 }
 
+/**
+ * gitHead：本模块对外异步 API。
+ */
+// --- Git 只读探测 ---
 export async function gitHead(rootDir) {
   const head = await readGitHead(rootDir);
   if (!head.available) throw new Error(`cannot resolve Git HEAD: ${head.reason}`);
   return head.sha;
 }
 
+/**
+ * gitTree：本模块对外异步 API。
+ */
 export async function gitTree(rootDir, ref = "HEAD") {
   const result = await runGit(rootDir, ["rev-parse", `${ref}^{tree}`]);
   if (!result.ok) throw new Error(`cannot resolve Git tree for ${ref}: ${result.stderr || result.stdout}`);
   return result.stdout.trim();
 }
 
+/**
+ * inspectTaskWorktreeBaseline：本模块对外异步 API。
+ */
 export async function inspectTaskWorktreeBaseline(rootDir) {
   const topLevel = await readGitTopLevel(rootDir);
   if (!topLevel.available) {
@@ -112,6 +137,10 @@ export async function inspectTaskWorktreeBaseline(rootDir) {
   };
 }
 
+/**
+ * createTaskDeliveryCommit：本模块对外异步 API。
+ */
+// --- 任务交付 commit ---
 export async function createTaskDeliveryCommit(rootDir, options = {}) {
   const baseline = await inspectTaskWorktreeBaseline(rootDir);
   if (!baseline.available) {
@@ -229,6 +258,9 @@ export async function createTaskDeliveryCommit(rootDir, options = {}) {
   }
 }
 
+/**
+ * pushTaskDeliveryCommit：本模块对外异步 API。
+ */
 export async function pushTaskDeliveryCommit(rootDir, options = {}) {
   const branch = String(options.branch || "").trim();
   const commitSha = String(options.commitSha || "").trim();
@@ -249,6 +281,9 @@ export async function pushTaskDeliveryCommit(rootDir, options = {}) {
   };
 }
 
+/**
+ * synchronizeTaskWorktreeToDelivery：本模块对外异步 API。
+ */
 export async function synchronizeTaskWorktreeToDelivery(rootDir, options = {}) {
   const baseline = await inspectTaskWorktreeBaseline(rootDir);
   const expectedHead = String(options.expectedHead || "").trim();
@@ -290,6 +325,10 @@ export async function synchronizeTaskWorktreeToDelivery(rootDir, options = {}) {
   };
 }
 
+/**
+ * remoteBranchHead：本模块对外异步 API。
+ */
+// --- 远程 claim 与 push ---
 export async function remoteBranchHead(rootDir, remote, branch) {
   const result = await runGit(rootDir, ["ls-remote", "--heads", remote, `refs/heads/${branch}`], { timeoutMs: 60_000 });
   if (!result.ok) throw new Error(`cannot read ${remote}/${branch}: ${result.stderr || result.stdout}`);
@@ -297,6 +336,9 @@ export async function remoteBranchHead(rootDir, remote, branch) {
   return /^[0-9a-f]{40,64}$/i.test(first || "") ? first : null;
 }
 
+/**
+ * createRemoteClaim：本模块对外异步 API。
+ */
 export async function createRemoteClaim(rootDir, options) {
   const remoteHead = await remoteBranchHead(rootDir, options.remote, options.branch);
   if (remoteHead) {
@@ -318,12 +360,18 @@ export async function createRemoteClaim(rootDir, options) {
   return { baseSha, claimSha, remoteHeadSha: claimSha };
 }
 
+/**
+ * createMetadataCommit：本模块对外异步 API。
+ */
 export async function createMetadataCommit(rootDir, options) {
   const tree = await runGit(rootDir, ["rev-parse", `${options.parentSha}^{tree}`]);
   if (!tree.ok) throw new Error(`cannot resolve parent tree ${options.parentSha}: ${tree.stderr || tree.stdout}`);
   return commitTree(rootDir, tree.stdout.trim(), options.parentSha, options.message);
 }
 
+/**
+ * createTaskCheckpointCommit：本模块对外异步 API。
+ */
 export async function createTaskCheckpointCommit(rootDir, options) {
   const indexPath = path.join(os.tmpdir(), `wildarrange-checkpoint-index-${process.pid}-${randomUUID()}`);
   const env = { GIT_INDEX_FILE: indexPath };
@@ -342,6 +390,9 @@ export async function createTaskCheckpointCommit(rootDir, options) {
   }
 }
 
+/**
+ * pushCommit：本模块对外异步 API。
+ */
 export async function pushCommit(rootDir, options) {
   return runGit(rootDir, [
     "push",
@@ -350,30 +401,45 @@ export async function pushCommit(rootDir, options) {
   ], { timeoutMs: 120_000 });
 }
 
+/**
+ * fetchRemoteBranch：本模块对外异步 API。
+ */
 export async function fetchRemoteBranch(rootDir, remote, branch) {
   const result = await runGit(rootDir, ["fetch", "--no-tags", remote, `refs/heads/${branch}`], { timeoutMs: 120_000 });
   if (!result.ok) throw new Error(`cannot fetch ${remote}/${branch}: ${result.stderr || result.stdout}`);
   return gitHeadForRef(rootDir, "FETCH_HEAD");
 }
 
+/**
+ * commitIsAncestor：本模块对外异步 API。
+ */
 export async function commitIsAncestor(rootDir, ancestorSha, descendantRef = "HEAD") {
   if (!ancestorSha) return false;
   const result = await runGit(rootDir, ["merge-base", "--is-ancestor", ancestorSha, descendantRef]);
   return result.ok;
 }
 
+/**
+ * switchToTaskBranch：本模块对外异步 API。
+ */
 export async function switchToTaskBranch(rootDir, branch, commitSha) {
   const result = await runGit(rootDir, ["switch", "-C", branch, commitSha], { timeoutMs: 60_000 });
   if (!result.ok) throw new Error(`cannot switch to task branch ${branch}: ${result.stderr || result.stdout}`);
   return { branch, commitSha };
 }
 
+/**
+ * readCommitMessage：本模块对外异步 API。
+ */
 export async function readCommitMessage(rootDir, commitSha) {
   const result = await runGit(rootDir, ["show", "-s", "--format=%B", commitSha]);
   if (!result.ok) throw new Error(`cannot read commit ${commitSha}: ${result.stderr || result.stdout}`);
   return result.stdout;
 }
 
+/**
+ * listWorkingTreeChanges：本模块对外异步 API。
+ */
 export async function listWorkingTreeChanges(rootDir, options = {}) {
   const groups = await Promise.all([
     runGit(rootDir, ["diff", "--name-only", "-z", "--"]),
@@ -389,12 +455,18 @@ export async function listWorkingTreeChanges(rootDir, options = {}) {
     : paths.filter((filePath) => filePath !== ".wildarrange" && !filePath.startsWith(".wildarrange/"));
 }
 
+/**
+ * listTreeChanges：本模块对外异步 API。
+ */
 export async function listTreeChanges(rootDir, fromSha, toRef = "HEAD") {
   const result = await runGit(rootDir, ["diff", "--name-only", "-z", fromSha, toRef, "--"]);
   if (!result.ok) throw new Error(`cannot inspect Git tree changes ${fromSha}..${toRef}: ${result.stderr || result.stdout}`);
   return [...new Set(result.stdout.split("\0").filter(Boolean))].sort();
 }
 
+/**
+ * assertCleanWorkingTree：本模块对外异步 API。
+ */
 export async function assertCleanWorkingTree(rootDir) {
   const changedPaths = await listWorkingTreeChanges(rootDir);
   if (changedPaths.length > 0) {
@@ -403,6 +475,10 @@ export async function assertCleanWorkingTree(rootDir) {
   return true;
 }
 
+/**
+ * captureIntegrationGuard：本模块对外异步 API。
+ */
+// --- 集成 guard ---
 export async function captureIntegrationGuard(rootDir, config, options = {}) {
   if (config?.mode === "manual" && options.force !== true) {
     return { active: false, mode: "manual", reason: "manual mode did not request an integration guard" };
@@ -428,6 +504,9 @@ export async function captureIntegrationGuard(rootDir, config, options = {}) {
   };
 }
 
+/**
+ * verifyIntegrationGuard：本模块对外异步 API。
+ */
 export async function verifyIntegrationGuard(rootDir, guard) {
   if (!guard?.active) return { pass: true, active: false, reason: guard?.reason || null };
   if (!guard.expectedSha) {
@@ -444,11 +523,15 @@ export async function verifyIntegrationGuard(rootDir, guard) {
   };
 }
 
+/**
+ * taskBranchName：本模块对外API。
+ */
 export function taskBranchName(config, planId, taskId) {
   const prefix = String(config.taskBranchPrefix || "wildarrange/task").replace(/^\/+|\/+$/g, "");
   return [prefix, safeRefSegment(planId), safeRefSegment(taskId)].join("/");
 }
 
+// --- 内部 Git 辅助 ---
 async function resolveIntegrationBranch(rootDir, remote, configured) {
   if (configured && configured !== "auto") return configured;
   const advertisedHead = await runGit(rootDir, ["ls-remote", "--symref", remote, "HEAD"], { timeoutMs: 60_000 });

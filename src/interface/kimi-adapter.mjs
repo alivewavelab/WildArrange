@@ -1,11 +1,35 @@
+// =============================================================================
+// 文件名称：kimi-adapter.mjs
+// 所属模块：interface
+// 作用说明：
+//   生成 Kimi Code 插件 manifest、hook bridge 与安装说明。
+//   Kimi 侧 Hooks 为 fail-open，bridge 仅在 cwd 含治理标记时转发事件。
+//
+// 【运行原理速读】
+//   可以把它想成「Kimi 插件包的内容工厂」：
+//
+//   · 谁调用？
+//     adapters.mjs 写入 .wildarrange/adapters/kimi/plugin/，用户再 /plugins install。
+//
+//   · 它做了什么？
+//     ① buildKimiPluginManifest 声明 SessionStart/PreToolUse 等 hook
+//     ② bridge 解析 stdin → wildarrange hook run → 原样或 Stop 时 deny 续跑。
+//
+//   · 和其他宿主差异？
+//     无自毁定时器（Kimi 合同 fail-open）；Stop 用 permissionDecision deny 触发续跑。
+// =============================================================================
 import path from "node:path";
 import { renderHookBridgeExecution, renderHookBridgeUtilities } from "./hook-bridge-core.mjs";
 
+/** Kimi 插件在 kimi.plugin.json 中的 name。 */
 export const KIMI_ADAPTER_PLUGIN_NAME = "wildarrange-adapter";
+
+/** 插件 manifest 版本号。 */
 export const KIMI_ADAPTER_VERSION = "1.0.0";
 
 const KIMI_WRITE_TOOL_MATCHER = "^(Bash|Write|Edit)$";
 
+/** 构建 Kimi Code 插件 manifest（hooks 列表与 interface 展示元数据）。 */
 export function buildKimiPluginManifest() {
   const bridgeCommand = "node ./hooks/wildarrange-hook-bridge.mjs";
   const hook = (event, matcher) => ({
@@ -36,6 +60,11 @@ export function buildKimiPluginManifest() {
   };
 }
 
+/**
+ * 生成 Kimi hook bridge 脚本源码。
+ * @param {{ mode: string, packageName: string, localCliPath: string, controlRoot: string }} options
+ * @returns {string}
+ */
 export function renderKimiHookBridge({ mode, packageName, localCliPath, controlRoot }) {
   const cliSpec = mode === "npx"
     ? { kind: "npx", packageName }
@@ -89,6 +118,7 @@ ${renderHookBridgeUtilities()}
 `;
 }
 
+/** 生成 Kimi adapter 安装与 enforcement 说明（Markdown）。 */
 export function renderKimiAdapterReadme() {
   return `# WildArrange Kimi Code Adapter
 

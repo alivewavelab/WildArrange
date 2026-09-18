@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：runtime-config.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证配置加载：仓库根 config 含 example 全部键、无文件时内置默认、
+//   legacy runtime 名称字面量归一化。
+//   不测：环境变量覆盖矩阵或热重载。
+//
+// 【运行原理速读】
+//   读写 wildarrange.config.json fixture，调用 loadWildArrangeConfig，
+//   断言合并结果与 DEFAULT 键集合一致。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";

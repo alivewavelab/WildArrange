@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：runtime-snapshot.mjs
+// 所属模块：infra
+// 作用说明：
+//   运行时 state 快照 export/import 与 list/restore 备份。
+//
+// 【运行原理速读】
+//   captureSnapshot → tar 清单 → restoreSnapshot 原子替换。
+// =============================================================================
 import { existsSync } from "node:fs";
 import { lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -16,6 +25,9 @@ import {
 } from "./runtime-store.mjs";
 import { inspectCompletedTaskEvidence, loadTaskState } from "./task-state-store.mjs";
 
+/**
+ * writeSnapshot：本模块对外异步 API。
+ */
 export async function writeSnapshot(rootDir, stage, payload = {}) {
   await ensureWildArrangeDirs(rootDir);
   const snapshot = {
@@ -36,7 +48,11 @@ export async function writeSnapshot(rootDir, stage, payload = {}) {
   return snapshot;
 }
 
+// --- 任务包 ---
 // A frozen start-of-work projection and navigation only. tasks.json remains the live task authority.
+/**
+ * ensureTaskPacket：本模块对外异步 API。
+ */
 export async function ensureTaskPacket(rootDir, planId, task) {
   const dir = resolveTaskPacketPath(rootDir, planId, task.id);
   const components = [resolveWildArrangePath(rootDir), resolveWildArrangePath(rootDir, "task-packets"),
@@ -95,6 +111,9 @@ async function assertPacketComponentNotSymlink(file) {
   } catch (error) { if (error?.code !== "ENOENT") throw error; }
 }
 
+/**
+ * writeRuntimeContextSnapshot：本模块对外异步 API。
+ */
 export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
   const latestSnapshot = options.latestSnapshot || await readJson(resolveWildArrangePath(rootDir, "snapshots", "latest.json"), null);
   const work = await readJson(resolveWildArrangePath(rootDir, "work.json"), null);
@@ -207,6 +226,9 @@ function describeNextAction(tasks, runnable, cliCommandPrefix, options = {}) {
   return { reason, taskId: task?.id || null, planId: awaitingPlanApproval ? options.planId : null, command, text };
 }
 
+/**
+ * resolveRuntimeCliCommandPrefix：本模块对外异步 API。
+ */
 export async function resolveRuntimeCliCommandPrefix(rootDir, options = {}) {
   const preferred = normalizeRuntimeCliCommandPrefix(rootDir, options.preferredPrefix);
   if (preferred) return preferred;

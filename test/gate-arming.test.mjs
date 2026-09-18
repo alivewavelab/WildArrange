@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：gate-arming.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 gate arming 底线：review 同义反复、quality gates 未强制、
+//   verify 缺失/ trivial、completed 任务不占黄灯、status 集成与 acceptance proof。
+//   不测：用户自定义 config 的全部组合或 UI 展示。
+//
+// 【运行原理速读】
+//   调用 evaluateGateArming 传入各类 task/config fixture，
+//   断言 armed=false 与 issues 含预期 code；必要时连 statusReport 端到端。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";

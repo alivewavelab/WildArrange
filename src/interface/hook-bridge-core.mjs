@@ -1,5 +1,30 @@
+// =============================================================================
+// 文件名称：hook-bridge-core.mjs
+// 所属模块：interface
+// 作用说明：
+//   各宿主 hook bridge 共享的代码生成片段：CLI 子进程执行与项目根解析工具。
+//   输出为嵌入 bridge 脚本的字符串，非运行时模块。
+//
+// 【运行原理速读】
+//   可以把它想成「bridge 脚本的公共模板库」：
+//
+//   · 谁调用？
+//     cursor-adapter.mjs、kimi-adapter.mjs 在 render*HookBridge 时拼接进生成脚本。
+//
+//   · 它做了什么？
+//     ① renderHookBridgeExecution 生成 spawn wildarrange hook run 块（可选超时 SIGKILL）
+//     ② renderHookBridgeUtilities 生成 resolveWildArrangeProject 等辅助函数。
+//
+//   · 为什么单独抽离？
+//     Cursor（fail-closed + 25s 超时）与 Kimi（fail-open、无超时）共用同一 CLI 调用逻辑。
+// =============================================================================
 import path from "node:path";
 
+/**
+ * 生成 bridge 内调用 wildarrange hook run 并解析 JSON stdout 的代码块。
+ * @param {{ hostAdapter: string, controlRoot: string, timeoutMs?: number|null }} options
+ * @returns {string}
+ */
 export function renderHookBridgeExecution({ hostAdapter, controlRoot, timeoutMs = null }) {
   const timeoutBlock = Number.isInteger(timeoutMs) && timeoutMs > 0
     ? `const childTimer = setTimeout(() => {
@@ -48,6 +73,7 @@ try {
 }`;
 }
 
+/** 生成 bridge 内 resolveWildArrangeProject、resolveCliInvocation 等工具函数源码。 */
 export function renderHookBridgeUtilities() {
   return `function resolveWildArrangeProject(cwd) {
   if (typeof cwd !== "string" || !path.isAbsolute(cwd)) return null;

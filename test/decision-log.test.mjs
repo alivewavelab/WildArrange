@@ -1,9 +1,16 @@
-/**
- * 决策记录（decisions.jsonl）测试：
- * - 四个缝（delivery-pipeline / hooks / admission / routing）都发射决策记录；
- * - 投影（wildarrange decisions）逐条一致且能降级跳过坏行；
- * - 发射是 best-effort，绝不反噬主流程。
- */
+// =============================================================================
+// 文件名称：decision-log.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证决策日志：delivery 每门一条记录、contract/pipeline 失败变 blocked 证据、
+//   pre-tool deny、routing、parallel admission 带 runId。
+//   不测：标注统计聚合或 timeline 排序（见 decision-stats-timeline）。
+//
+// 【运行原理速读】
+//   触发各门禁/路由/准入路径，读取 decisions.jsonl，
+//   断言 decision type、rule、outcome 与 gate 一一对应。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";

@@ -1,13 +1,17 @@
-/**
- * Adversarial fault injection: a checkpoint write that fails must never be
- * silently absorbed into a "completed" outcome (cross-review P0, 2026-07-21).
- * The gateway converts capability throws into fail envelopes, so every
- * completion path has to check the checkpoint envelope status explicitly.
- *
- * Sabotage technique: occupy the exact plan checkpoint directory with a file.
- * This behaves the same on Windows and POSIX: ensureWildArrangeDirs still succeeds,
- * but the final plan/task evidence path cannot be created.
- */
+// =============================================================================
+// 文件名称：checkpoint-integrity.test.mjs
+// 所属模块：test
+// 作用说明：
+//   对抗性故障注入：checkpoint 写入失败时不得静默完成；
+//   覆盖 delivery pipeline、linear/parallel runtime、persistTaskState、
+//   acceptance-proof 抛错、跨轮次 gate 证据隔离。
+//   不测：正常 happy-path 性能或 UI 展示。
+//
+// 【运行原理速读】
+//   在临时目录占用/破坏 checkpoint 路径或 derived artifact，
+//   运行各完成路径并断言状态为 checkpoint_failed/recovery_required 而非 completed。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { chmod, cp, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";

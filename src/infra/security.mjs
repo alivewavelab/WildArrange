@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：security.mjs
+// 所属模块：infra
+// 作用说明：
+//   路径/命令/secret 扫描与 trust boundary 断言。
+//
+// 【运行原理速读】
+//   evaluateSecurity → pattern 匹配 → block/warn 结构化 findings。
+// =============================================================================
 import { existsSync } from "node:fs";
 import { copyFile, cp, lstat, mkdir, readFile, readdir, rm, stat, unlink } from "node:fs/promises";
 import path from "node:path";
@@ -40,6 +49,9 @@ const REQUIRED_STATE_FILES = [
   [".wildarrange", "work.json"],
 ];
 
+/**
+ * writeConfigBaseline：本模块对外异步 API。
+ */
 export async function writeConfigBaseline(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const baseline = {
@@ -59,6 +71,10 @@ export async function writeConfigBaseline(rootDir, options = {}) {
   return baseline;
 }
 
+/**
+ * verifyConfigBaseline：本模块对外异步 API。
+ */
+// --- 配置基线 ---
 export async function verifyConfigBaseline(rootDir) {
   await ensureWildArrangeDirs(rootDir);
   const baselinePath = resolveWildArrangePath(rootDir, ...CONFIG_BASELINE_PATH);
@@ -103,6 +119,10 @@ export async function verifyConfigBaseline(rootDir) {
   };
 }
 
+/**
+ * writeRuntimeStateBackup：本模块对外异步 API。
+ */
+// --- 运行时备份 ---
 export async function writeRuntimeStateBackup(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const backupId = createWorkId("backup");
@@ -139,6 +159,10 @@ export async function writeRuntimeStateBackup(rootDir, options = {}) {
   return manifest;
 }
 
+/**
+ * prepareArchiveRecoveryPackage：本模块对外异步 API。
+ */
+// --- 归档恢复包 ---
 export async function prepareArchiveRecoveryPackage(rootDir, options = {}) {
   let backupId = options.backupId;
   if (!backupId) {
@@ -188,6 +212,9 @@ export async function prepareArchiveRecoveryPackage(rootDir, options = {}) {
   return { backupId, transactionId, archivePackage };
 }
 
+/**
+ * updateArchiveRecoveryPackage：本模块对外异步 API。
+ */
 export async function updateArchiveRecoveryPackage(rootDir, options = {}) {
   assertSafeBackupId(options.backupId);
   assertSafeBackupId(options.transactionId, "archive transaction id");
@@ -215,6 +242,10 @@ export async function updateArchiveRecoveryPackage(rootDir, options = {}) {
   return archivePackages.find((entry) => entry.transactionId === options.transactionId);
 }
 
+/**
+ * listRuntimeStateBackups：本模块对外异步 API。
+ */
+// --- 备份列表与恢复 ---
 export async function listRuntimeStateBackups(rootDir) {
   const backupsDir = resolveWildArrangePath(rootDir, "backups");
   let entries = [];
@@ -245,6 +276,9 @@ export async function listRuntimeStateBackups(rootDir) {
   return backups.sort((left, right) => String(left.at).localeCompare(String(right.at)));
 }
 
+/**
+ * restoreRuntimeStateBackup：本模块对外异步 API。
+ */
 export async function restoreRuntimeStateBackup(rootDir, options = {}) {
   const backupId = options.backupId;
   if (!backupId || typeof backupId !== "string") {
@@ -405,6 +439,10 @@ async function copyBackupEntry(sourcePath, backupDir, relativePath) {
   return copyEntry(sourcePath, backupDir, relativePath);
 }
 
+/**
+ * verifyRuntimeState：本模块对外异步 API。
+ */
+// --- 运行时完整性校验 ---
 export async function verifyRuntimeState(rootDir) {
   const files = [];
   for (const segments of REQUIRED_STATE_FILES) {

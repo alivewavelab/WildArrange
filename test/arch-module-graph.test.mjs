@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：arch-module-graph.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证架构模块图脚本：文件映射校验、流程网格校验、
+//   从 JS import 生成模块图、未知模块名可重载。
+//   不测：运行时交付流水线或真实架构文档内容正确性。
+//
+// 【运行原理速读】
+//   调用 doc/ 下 arch-module-graph 脚本对仓库快照执行 validate/generate，
+//   断言退出码与输出结构符合门禁约定。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";

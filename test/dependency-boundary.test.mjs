@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：dependency-boundary.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 src 五区依赖边界：分区只能 import 允许的下层、
+//   未知顶层目录拒绝、bin 入口只引用五区 owner、gateway 唯一出口、capabilities 不 import ai。
+//   不测：运行时行为或 npm 包文件列表。
+//
+// 【运行原理速读】
+//   扫描 src/bin 下 import 语句与目录结构，
+//   对照 zone 规则表断言违规文件被检出。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";

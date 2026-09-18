@@ -1,3 +1,17 @@
+// =============================================================================
+// 文件名称：skill-matcher.mjs
+// 所属模块：ai
+// 作用说明：
+//   根据用户文本、阶段、Agent 与路由信号，对 Prompt Pack 中已注册 Skill 打分排序。
+//   只做匹配与评分，不加载 Skill 全文；全文加载由 injection.mjs 负责。
+//
+// 【运行原理速读】
+//   · 何时触发？ injection.mjs 开启动态挂载时，或 CLI/Dashboard 显式查询 Skill。
+//   · 做了什么？ ① 读取 prompt-pack 与 routes ② 多信号加权（显式/阶段/Agent/路由/关键词）
+//     ③ 过滤零分并截断至 limit。
+//   · 与谁协作？ route-table（与 resolveRouteDecision 共用信号匹配）、prompt-pack。
+// =============================================================================
+
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { normalizeAgentKey } from "../infra/agent-registry.mjs";
 import { renderPromptPackEntry } from "../infra/prompt-pack.mjs";
@@ -9,6 +23,12 @@ import {
 
 const DEFAULT_LIMIT = 6;
 
+/**
+ * 对注册 Skill 按多信号打分，返回按分数降序的匹配列表。
+ * @param {string} rootDir 项目根目录
+ * @param {object} options text/query、stage、category、agent、skills、limit
+ * @returns {Promise<object>} kind=skill_match，含 matched 数组与 routeSignals
+ */
 export async function matchSkills(rootDir, options = {}) {
   const { config } = await loadWildArrangeConfig(rootDir);
   const registry = await readJson(resolveWildArrangePath(rootDir, "prompt-pack.json"), null);

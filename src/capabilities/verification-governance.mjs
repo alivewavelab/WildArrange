@@ -1,8 +1,16 @@
-/**
- * Atomic capability actions for verification governance.
- * Orchestration owns session state; this module only scans, applies one
- * approved card, or writes the three artifacts.
- */
+// =============================================================================
+// 文件名称：verification-governance.mjs
+// 所属模块：capabilities
+// 作用说明：
+//   验证治理的原子能力：扫描验证宇宙、应用单张已批准差异卡、生成
+//   registry/bootstrap/inventory 制品。会话状态由 orchestration 持有。
+//
+// 【运行原理速读】
+//   · 何时执行？adoption 流程、CLI verification 子命令、gateway 注册能力。
+//   · 做了什么？scan → apply-card（ preimage/回滚/verify）→ generate 分阶段写制品。
+//   · 缺了它会怎样？验证命令/registry 变更无法经卡片审批与可恢复事务落地。
+// =============================================================================
+
 import { lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { runCommand } from "../infra/command-runner.mjs";
@@ -36,6 +44,9 @@ import {
   renderVerificationInventoryHtml,
 } from "../infra/verification-registry.mjs";
 
+// --- 公开 API ---
+
+/** 扫描验证治理宇宙，返回卡片与指纹等扫描结果。 */
 export async function scanVerificationGovernance(rootDir, options = {}) {
   const started = Date.now();
   const result = await scanVerificationUniverse(rootDir, options);
@@ -49,6 +60,10 @@ export async function scanVerificationGovernance(rootDir, options = {}) {
   };
 }
 
+/**
+ * 在 recovery 事务中应用单张验证差异卡：patch → verify → 提交或回滚。
+ * @param {object} options card、sessionId、expectedFingerprint、config
+ */
 export async function applyVerificationCard(rootDir, options = {}) {
   const card = options.card;
   if (!card?.id) throw new Error("apply-card requires card.id");
@@ -145,6 +160,10 @@ export async function applyVerificationCard(rootDir, options = {}) {
   }
 }
 
+/**
+ * 按 phase 生成 registry 或 handoff（bootstrap+inventory）治理制品。
+ * @param {object} options phase、cards、locator、registry、baselineRef
+ */
 export async function generateVerificationArtifacts(rootDir, options = {}) {
   const cards = options.cards || [];
   const locator = options.locator || readLocator((await loadWildArrangeConfig(rootDir)).config);
@@ -214,6 +233,8 @@ export async function generateVerificationArtifacts(rootDir, options = {}) {
   throw new Error(`unsupported generate phase: ${phase}`);
 }
 
+// --- 卡片路径解析 ---
+
 const DENIED_ARCHIVE_ROOTS = new Set([".wildarrange", ".git", "node_modules"]);
 
 function archiveDestination(card, archiveRootHint = "") {
@@ -239,6 +260,8 @@ function affectedPaths(card) {
   }
   return [...paths].filter(Boolean);
 }
+
+// --- Patch 应用 ---
 
 async function applyPatch(rootDir, card) {
   const patch = card.patch;
@@ -293,6 +316,8 @@ async function applyPatch(rootDir, card) {
   throw new Error(`unsupported patch kind: ${patch.kind}`);
 }
 
+// --- 批准命令执行 ---
+
 async function runApprovedCommands(rootDir, commands, config) {
   const results = [];
   for (const command of commands) {
@@ -321,6 +346,8 @@ async function gitComparablePathDigest(absolutePath) {
     throw error;
   }
 }
+
+// --- 制品写入 ---
 
 async function prepareArtifactWrites(rootDir, artifacts) {
   const prepared = [];
@@ -387,6 +414,8 @@ function artifactConflict(relativePath, reason) {
   error.evidence = { path: relativePath, reason };
   return error;
 }
+
+// --- 工具函数 ---
 
 async function mergeLocator(rootDir, locator) {
   const configPath = path.join(rootDir, "wildarrange.config.json");

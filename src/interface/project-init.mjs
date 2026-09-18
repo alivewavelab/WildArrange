@@ -1,3 +1,23 @@
+// =============================================================================
+// 文件名称：project-init.mjs
+// 所属模块：interface
+// 作用说明：
+//   从 linear pack 模板初始化项目文档（AGENTS、规范、架构占位等）。
+//   已存在文件不覆盖；结果写入 ledger 并返回待人工确认清单。
+//
+// 【运行原理速读】
+//   可以把它想成「项目文档的首次铺底」：
+//
+//   · 谁调用？
+//     wildarrange init --project-docs（及可选 --architecture）时触发。
+//
+//   · 它做了什么？
+//     ① 从 packs/wildarrange-linear/project-init 读模板 ② flag=wx 仅创建新文件
+//     ③ appendLedger project_documents_initialized 并提示架构审查 Skill。
+//
+//   · 缺了它会怎样？
+//     新项目无 AGENTS/测试策略占位，治理 Skill 与规范挂载缺少依据文件。
+// =============================================================================
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +32,11 @@ const PROJECT_DOCUMENT_TEMPLATES = [
   { source: "architecture.md", target: "doc/architecture.md", optional: "architecture" },
 ];
 
+/**
+ * 按模板创建项目文档；options.architecture 为 true 时额外写入 architecture.md。
+ * @param {string} rootDir
+ * @param {{ architecture?: boolean }} [options]
+ */
 export async function initProjectDocuments(rootDir, options = {}) {
   const selected = PROJECT_DOCUMENT_TEMPLATES.filter((template) => !template.optional || options[template.optional] === true);
   const loaded = await Promise.all(selected.map(async (template) => ({

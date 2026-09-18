@@ -1,10 +1,16 @@
-/**
- * LLM 可疑判断（异步审查）与 doctor 周期健康摘要测试：
- * - 无 provider 时确定性 fallback，不阻断、报告照出；
- * - LLM 返回的 decisionId 必须在输入包内，否则丢弃并计数；
- * - 报告只进 .wildarrange/reports/suspicion.*，不改配置/不动门（读侧断言）；
- * - doctor 新增 decisionHealth 分项：计数、坏行与孤儿标注预警。
- */
+// =============================================================================
+// 文件名称：suspicion-review.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 suspicion review：无 LLM 时确定性回退、LLM 输出锚定 packet decisionIds 并丢弃幻觉、
+//   doctor decisionHealth 统计与 orphan 警告。
+//   不测：真实模型推理质量或 prompt 迭代。
+//
+// 【运行原理速读】
+//   stub provider 或无 provider 跑 suspicion review，
+//   断言 findings 仅含 packet 内 id 且 doctor 段落计数正确。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";

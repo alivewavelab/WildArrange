@@ -1,3 +1,19 @@
+// =============================================================================
+// 文件名称：change-governance.mjs
+// 所属模块：orchestration
+// 作用说明：
+//   变更治理：scope 越界 ChangeRequest、review blocker、计划 steering、
+//   契约变更请求与人类 accept/reject 的持久化与索引。
+//
+// 【运行原理速读】
+//   可以把它想成「超出任务范围时的申诉与裁决台」：
+//
+//   · 何时执行？
+//     scope_guard 拦截、review 阻塞、主 Agent steering 或契约提案时。
+//
+//   · 做了什么？
+//     写 ChangeRequest → 任务 needs_user_decision → resolve 后恢复或改计划。
+// =============================================================================
 import { normalizeResponsibilityChanges } from "../infra/responsibility-contract.mjs";
 import { readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -26,6 +42,9 @@ import {
 } from "./plan-state.mjs";
 import { persistTaskState } from "./task-board.mjs";
 
+// --- 计划 steering ---
+
+/** 主 Agent 对当前计划的结构化 steering 提案（增删任务、改验收等）。 */
 export async function steerWorkflow(rootDir, proposal = {}) {
   return withTaskStateLock(rootDir, `steer:${proposal.kind || "unknown"}`, async () => {
     await ensureWildArrangeDirs(rootDir);
@@ -49,6 +68,9 @@ export async function steerWorkflow(rootDir, proposal = {}) {
   });
 }
 
+// --- review 与 scope 变更 ---
+
+/** 记录 review gate 阻塞并可选写入 ChangeRequest。 */
 export async function recordReviewBlocker(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `review-blocker:${options.taskId || "unknown"}`, async () => {
     await ensureWildArrangeDirs(rootDir);
@@ -87,6 +109,7 @@ export async function recordReviewBlocker(rootDir, options = {}) {
   });
 }
 
+/** 解析 review blocker，恢复任务 gate 流程。 */
 export async function resolveReviewBlocker(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `review-blocker-resolve:${options.taskId || "unknown"}`, async () => {
     await ensureWildArrangeDirs(rootDir);
@@ -116,6 +139,7 @@ export async function resolveReviewBlocker(rootDir, options = {}) {
   });
 }
 
+/** 读取并渲染 ChangeRequest 供人类 review。 */
 export async function reviewChangeRequest(rootDir, id) {
   const changeRequest = await readChangeRequest(rootDir, id);
   const reasons = [];
@@ -156,10 +180,12 @@ export async function reviewChangeRequest(rootDir, id) {
   return audit;
 }
 
+/** 人类 accept/reject scope ChangeRequest 并更新任务状态。 */
 export async function resolveChangeRequest(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `change-resolve:${options.id || "unknown"}`, () => resolveChangeRequestUnlocked(rootDir, options));
 }
 
+/** 按 id 读取 ChangeRequest JSON 记录。 */
 export async function readChangeRequest(rootDir, id) {
   if (!/^CR-[a-z0-9]+$/i.test(id || "")) throw new Error(`invalid change request id: ${id}`);
   const changeRequest = await readJson(resolveWildArrangePath(rootDir, "changes", `${id}.json`), null);
@@ -430,6 +456,9 @@ function normalizeDecision(decision) {
   return null;
 }
 
+// --- ChangeRequest 持久化 ---
+
+/** 由 scope 结果创建 scope ChangeRequest 并写报告。 */
 export async function writeChangeRequest(rootDir, planId, task, scopeResult, source = "scope_guard") {
   await ensureWildArrangeDirs(rootDir);
   const signature = hashContent(JSON.stringify({
@@ -488,6 +517,7 @@ export async function writeChangeRequest(rootDir, planId, task, scopeResult, sou
   return changeRequest;
 }
 
+/** 将 ChangeRequest 渲染为 Markdown 报告正文。 */
 export function renderChangeRequestMarkdown(changeRequest) {
   // 兼容 requiresLeadReview 重命名前写入的旧 invariant 键，保持字面量可检索。
   const legacyLeadReviewKey = "requiresSisyphusReview";
@@ -544,6 +574,7 @@ ${changeRequest.proposedActions.map((action) => `- ${action}`).join("\n")}
 `;
 }
 
+/** 刷新 open changes 索引文件供 dashboard 使用。 */
 export async function writeOpenChangesIndex(rootDir) {
   const changes = await listChangeRequests(rootDir);
   const openChanges = changes.filter((change) => change.status === "open");
@@ -563,6 +594,9 @@ export async function writeOpenChangesIndex(rootDir) {
 
 // Called under the task-state lock by the contract workflow. Changes keep one
 // authoritative JSON record; task state contains only a reference to it.
+// --- 契约变更 ---
+
+/** 创建契约类 ChangeRequest（contract_change 来源）。 */
 export async function writeContractChangeRequest(rootDir, planId, task, proposal) {
   const fingerprint = contractRequestFingerprint(proposal);
   const id = `CR-${hashContent(`${planId}/${task.id}/${fingerprint}`).slice(0, 24)}`;
@@ -587,6 +621,7 @@ export async function writeContractChangeRequest(rootDir, planId, task, proposal
   return record;
 }
 
+/** 记录人类对契约 ChangeRequest 的 accept/reject 决策。 */
 export async function recordContractChangeDecision(rootDir, options) {
   const request = await readChangeRequest(rootDir, options.id);
   if (request.source !== "contract_change" || request.fingerprint !== options.expectedFingerprint
@@ -619,11 +654,13 @@ async function persistContractRequest(rootDir, record) {
   await writeOpenChangesIndex(rootDir);
 }
 
+/** 计算契约 ChangeRequest 内容指纹，供 resolve 时校验。 */
 export function contractRequestFingerprint(request) {
   return hashContent(JSON.stringify({ content: request.content, evidence: request.evidence,
     rationale: request.rationale, alternatives: request.alternatives, recommendation: request.recommendation }));
 }
 
+/** 列出所有 ChangeRequest 记录（含 open 与已决议）。 */
 export async function listChangeRequests(rootDir) {
   await ensureWildArrangeDirs(rootDir);
   let entries = [];

@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：annotation-log.mjs
+// 所属模块：infra
+// 作用说明：
+//   决策标注回写：人/审查 Agent 对 decisions.jsonl 条目的 confirmed/rule_wrong 等分类标注。
+//
+// 【运行原理速读】
+//   annotate CLI 触发 → 校验 decisionId 存在 → append annotations.jsonl → 统计按规则聚合。
+// =============================================================================
 /**
  * annotations.jsonl — 决策标注回写。
  *
@@ -16,12 +25,21 @@ import path from "node:path";
 import { createWorkId, nowIso, resolveWildArrangePath } from "./runtime-store.mjs";
 import { readDecisions } from "./decision-log.mjs";
 
+/**
+ * 标注允许的强制分类枚举。
+ */
 export const ANNOTATION_CATEGORIES = ["confirmed", "rule_wrong", "case_wrong", "mislabeled"];
 
+/**
+ * 返回 annotations.jsonl 的绝对路径。
+ */
 export function annotationsLogPath(rootDir) {
   return resolveWildArrangePath(rootDir, "annotations.jsonl");
 }
 
+/**
+ * appendAnnotation：本模块对外异步 API。
+ */
 export async function appendAnnotation(rootDir, { decisionId, category, reason, author } = {}) {
   if (!decisionId || typeof decisionId !== "string") {
     throw new Error("annotate requires --decision <decisionId>");
@@ -49,6 +67,9 @@ export async function appendAnnotation(rootDir, { decisionId, category, reason, 
   return entry;
 }
 
+/**
+ * readAnnotations：本模块对外异步 API。
+ */
 export async function readAnnotations(rootDir) {
   let raw = "";
   try {
@@ -77,6 +98,9 @@ export async function readAnnotations(rootDir) {
  * 统计以「规则 × 标注」为单位：key 是决策的 gate + code（命中哪条规则），
  * value 是三类标注的计数。单条标注只是计数 +1，不绑架整条规则。
  * 决策日志已被截断的标注进 unmatched，不丢。
+ */
+/**
+ * annotationStats：本模块对外异步 API。
  */
 export async function annotationStats(rootDir) {
   const [annotations, decisions] = await Promise.all([readAnnotations(rootDir), readDecisions(rootDir, {})]);

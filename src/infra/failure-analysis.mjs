@@ -1,5 +1,17 @@
+// =============================================================================
+// 文件名称：failure-analysis.mjs
+// 所属模块：infra
+// 作用说明：
+//   任务失败摘要构建：从各 gate 结果推导 reason/failed/observed/fixBy/doNot。
+//
+// 【运行原理速读】
+//   buildFailureSummary → gateRejectionReason → 结构化 retryHint 供 task-board 展示。
+// =============================================================================
 import { nowIso } from "./runtime-store.mjs";
 
+/**
+ * 从 worker/verify/scope/review/criteria 结果构建 failure_summary 与 retryHint。
+ */
 export function buildFailureSummary(task, { workerResult, verifyResult, scopeResult, reviewResult, criteriaResult, nextStatus }) {
   const reason = gateRejectionReason(workerResult, verifyResult, scopeResult, reviewResult, criteriaResult);
   const failed = failureTarget(reason, workerResult, verifyResult, scopeResult, criteriaResult);

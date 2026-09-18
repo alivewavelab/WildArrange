@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：recovery-transaction.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 recovery-transaction：preimage 还原字节、缺失 preimage 删除 apply 新建、
+//   junction/symlink 父路径逃逸拒绝、inbound/realpath 安全、adoption/archive kind 区分。
+//   不测：真实 adoption 全流程（见 adoption-runtime）。
+//
+// 【运行原理速读】
+//   构造 apply 前后文件树与 symlink fixture，
+//   调用 capturePreimages/restorePreimages/assertRealpathInsideRoot 断言边界。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";

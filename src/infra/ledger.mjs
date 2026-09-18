@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：ledger.mjs
+// 所属模块：infra
+// 作用说明：
+//   ledger.jsonl 哈希链审计：append/verify/readVerified，tail 缓存 O(1) 追加。
+//
+// 【运行原理速读】
+//   withLedgerLock → prevHash 链 → hashLedgerEntry → verifyLedger 全量走查权威。
+// =============================================================================
 import { appendFile, mkdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { wildarrangeError } from "./error-protocol.mjs";
@@ -8,6 +17,9 @@ const LEDGER_LOCK_RETRY_MS = 20;
 const LEDGER_LOCK_WAIT_TIMEOUT_MS = 10_000;
 const LEDGER_TAIL_CACHE_VERSION = 1;
 
+/**
+ * appendLedger：本模块对外异步 API。
+ */
 export async function appendLedger(rootDir, event) {
   const ledgerPath = resolveWildArrangePath(rootDir, "ledger.jsonl");
   await mkdir(path.dirname(ledgerPath), { recursive: true });
@@ -17,6 +29,9 @@ export async function appendLedger(rootDir, event) {
 // 判重与追加必须在同一把 ledger 锁内完成；否则并发写方可能各自通过
 // 判重后双双追加，留下重复审计事件。判重只认通过 hash 链校验的条目，
 // 与 readVerifiedLedgerEntries 的证据口径一致。
+/**
+ * appendLedgerOnce：本模块对外异步 API。
+ */
 export async function appendLedgerOnce(rootDir, event, isDuplicate) {
   const ledgerPath = resolveWildArrangePath(rootDir, "ledger.jsonl");
   await mkdir(path.dirname(ledgerPath), { recursive: true });
@@ -49,6 +64,9 @@ async function appendLedgerLocked(rootDir, ledgerPath, event) {
   return entry;
 }
 
+/**
+ * verifyLedger：本模块对外异步 API。
+ */
 export async function verifyLedger(rootDir) {
   const walk = await walkLedger(rootDir);
   return {
@@ -62,6 +80,9 @@ export async function verifyLedger(rootDir) {
 
 // 只返回通过 hash 链校验的条目；doctor 等对账逻辑必须基于它，
 // 避免把手工追加的伪造事件当成完成证据。
+/**
+ * readVerifiedLedgerEntries：本模块对外异步 API。
+ */
 export async function readVerifiedLedgerEntries(rootDir) {
   const walk = await walkLedger(rootDir);
   return walk.entries.filter((item) => item.verified).map((item) => item.entry);
@@ -131,6 +152,9 @@ async function walkLedger(rootDir) {
   return { checked, legacy, failures, entries };
 }
 
+/**
+ * readLedgerTailHash：本模块对外异步 API。
+ */
 export async function readLedgerTailHash(rootDir) {
   return readLedgerLastHash(resolveWildArrangePath(rootDir, "ledger.jsonl"));
 }

@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：verification-discovery.mjs
+// 所属模块：infra
+// 作用说明：
+//   从 package.json/CI 等发现 verify/review 命令候选。
+//
+// 【运行原理速读】
+//   discoverVerificationCommands → 打分排序 → 去重输出。
+// =============================================================================
 /**
  * Deterministic read-only discovery of verification assets and consumer evidence.
  * Never executes discovered commands and never writes business files.
@@ -24,6 +33,9 @@ import {
   uniqueConsumers,
 } from "./verification-cards.mjs";
 
+/**
+ * EVIDENCE_GRADES：本模块对外API。
+ */
 export const EVIDENCE_GRADES = Object.freeze(["direct", "runner", "registered", "clue", "unknown"]);
 
 const EXCLUDED_DIR_NAMES = new Set([
@@ -68,10 +80,18 @@ const HOOK_GLOBS = [
   ".kimi-code/**",
 ];
 
+/**
+ * 检测命令文本是否含 eval/require 等动态执行线索。
+ */
+// --- 动态代码检测 ---
 export function hasDynamicCodeHint(text) {
   return /\bimport\s*\(\s*[^'"`]/.test(text) || /\beval\s*\(/.test(text) || /\bnew Function\b/.test(text);
 }
 
+/**
+ * scanVerificationUniverse：本模块对外异步 API。
+ */
+// --- 验证宇宙扫描 ---
 export async function scanVerificationUniverse(rootDir, options = {}) {
   const files = await listCandidateFiles(rootDir);
   const packageFacts = await collectPackageFacts(rootDir, files);
@@ -106,6 +126,10 @@ export async function scanVerificationUniverse(rootDir, options = {}) {
   };
 }
 
+/**
+ * captureCardLiveSnapshot：本模块对外异步 API。
+ */
+// --- 卡片实时快照 ---
 export async function captureCardLiveSnapshot(rootDir, card) {
   const targetDigest = await digestRelativeFile(rootDir, card?.path);
   const dependencyDigests = {};

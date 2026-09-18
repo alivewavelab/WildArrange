@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：p2-stability.test.mjs
+// 所属模块：test
+// 作用说明：
+//   P2 稳定性回归：workflow 在外部决策/contract 等待处停止、
+//   空 evidence gate 不空指针、repository governance 坏 Prompt Pack 可审计 finding。
+//   不测：P3 功能或 performance benchmark。
+//
+// 【运行原理速读】
+//   导入 minimal plan/prompt pack，跑 runWorkflow/runNextTask，
+//   断言停在 awaiting 状态且 ledger/findings 含可读证据。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";

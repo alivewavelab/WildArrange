@@ -1,3 +1,18 @@
+// =============================================================================
+// 文件名称：injection.mjs
+// 所属模块：ai
+// 作用说明：
+//   解析 wildarrange.config 中的 injectionPoints，按注入点组装 Markdown、Skill
+//   与工具清单；负责静态清单与动态按需挂载的取舍，不负责 Hook 事件分发或路由。
+//
+// 【运行原理速读】
+//   · 何时触发？ hooks.mjs / context.mjs 在 SessionStart、UserPromptSubmit、
+//     before_execute 等阶段按点名调用 resolveInjectionPoint。
+//   · 做了什么？ ① 展开模板路径并加载 Markdown/Skill 附件 ② 合并 Agent/任务
+//     绑定 Skill ③ 可选调用 skill-matcher 做动态减法挂载 ④ 返回预算与选型报告。
+//   · 与谁协作？ context-attachments、skill-matcher、runtime-config、task-state。
+// =============================================================================
+
 import { loadMarkdownAttachment, loadSkillAttachment, normalizeMaxChars } from "../infra/context-attachments.mjs";
 import {
   DEFAULT_LEAD_AGENT,
@@ -14,6 +29,14 @@ import { matchSkills } from "./skill-matcher.mjs";
 const DEFAULT_DYNAMIC_ALWAYS_MOUNT = ["wildarrange-injection-runtime"];
 const DEFAULT_DYNAMIC_MAX_SKILLS = 4;
 
+/**
+ * 解析指定注入点的完整挂载结果（Markdown、Skill、工具、预算与选型报告）。
+ * @param {string} rootDir 项目根目录
+ * @param {string} name 注入点名称（如 user_prompt_submit、before_execute）
+ * @param {object} variables 模板变量（agent、taskId、planId 等）
+ * @param {object} options 可选：text（请求文本）、stage、taskSkills、routeSkills
+ * @returns {Promise<object>} 注入点配置与已加载附件
+ */
 export async function resolveInjectionPoint(rootDir, name, variables = {}, options = {}) {
   const { config, sourcePath } = await loadWildArrangeConfig(rootDir);
   const point = config.injectionPoints?.[name] || { enabled: false, tools: [], markdown: [], skills: [] };
@@ -190,6 +213,12 @@ function normalizeMaxSkills(value, fallback) {
   return Math.min(parsed, 20);
 }
 
+/**
+ * 按 Agent 角色推断默认注入点名称；Jiuwei 有 taskId 时走 before_execute，否则 user_prompt_submit。
+ * @param {string} agent Agent 键名
+ * @param {object} options 可选 taskId
+ * @returns {string} 注入点名称
+ */
 export function defaultInjectionPointForAgent(agent, options = {}) {
   const normalized = normalizeAgentKey(agent);
   if (normalized === "BaiZe") return "before_review";

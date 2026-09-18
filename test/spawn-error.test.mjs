@@ -1,7 +1,16 @@
-/**
- * spawn error 处理：runCommand 的 spawn 级失败不再击穿进程；
- * runOneAgent 的未预期异常只产生该任务的 fail 结果，不拖垮整个批次。
- */
+// =============================================================================
+// 文件名称：spawn-error.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 spawn 级错误隔离：runCommand 坏 cwd 返回 127+spawnError；
+//   parallel 中单 task runner 崩溃不拖垮批次其余任务。
+//   不测：命令业务 exit code 语义或 retry 策略。
+//
+// 【运行原理速读】
+//   对不存在 cwd 调 runCommand；导入双任务 plan 令其一 runner 抛错，
+//   断言另一任务仍 completed 且 batch 结果完整。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";

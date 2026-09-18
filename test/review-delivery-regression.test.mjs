@@ -1,3 +1,17 @@
+// =============================================================================
+// 文件名称：review-delivery-regression.test.mjs
+// 所属模块：test
+// 作用说明：
+//   交付回归：共享 completion 强制 Git delivery、linear 仅 control root 持久化事实、
+//   execute diff 指纹证据、checkpoint 失败续跑不重跑 worker、
+//   重跑 gate 失败不可完成、未确认终止保持 recovery_required。
+//   不测：parallel index 并发或 adoption UI。
+//
+// 【运行原理速读】
+//   临时 git 仓库跑 linear delivery/checkpoint 失败与恢复路径，
+//   断言 commit fingerprint、doctor drift 与 gate 重跑结果。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";

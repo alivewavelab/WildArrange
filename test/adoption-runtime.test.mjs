@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：adoption-runtime.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 adoption 全生命周期：start 只读、decide/apply 边界、
+//   commit A/B blob 校验、resume/cancel、维护标记、指纹过期拒绝。
+//   不测：dashboard UI 渲染或 npm 打包边界。
+//
+// 【运行原理速读】
+//   在隔离临时目录初始化 runtime，逐步执行 startAdoption → decide → apply，
+//   检查业务文件 preimage、recovery manifest 与状态机转换。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";

@@ -1,12 +1,18 @@
-/**
- * LLM 可疑判断（异步审查，archivist 不变量）：
- * - 只读清洗后的结论包（id/gate/code/reason/summary + 标注计数），
- *   绝不摄入代码块、raw diff 或完整命令输出；
- * - 无 LLM key / provider 不可用时确定性 fallback，不阻断任何主线；
- * - 结论只进 .wildarrange/reports/suspicion.* 报告，不进完成链、不改配置、
- *   不动任何门开关；
- * - LLM 返回的 decisionId 必须在输入包内，否则丢弃并计数（防幻觉锚定）。
- */
+// =============================================================================
+// 文件名称：suspicion-review.mjs
+// 所属模块：ai
+// 作用说明：
+//   异步 LLM 审查门禁决策是否可疑；只消费脱敏后的决策包，不读代码/diff/命令输出。
+//   结论仅写入 reports/suspicion.*，不进完成链、不改配置、不改动任何门开关。
+//
+// 【运行原理速读】
+//   · 何时触发？ CLI 或后台任务显式调用 runSuspicionReview（非 Hook 主路径）。
+//   · 做了什么？ ① 读取可标注决策与标注统计 ② 无 LLM 时输出确定性基线
+//     ③ 有 LLM 时请求 JSON 可疑清单并校验 decisionId 防幻觉锚定。
+//   · 与谁协作？ decision-log、annotation-log、llm-provider（CangJie/archivist Agent）。
+//   · 缺了它会怎样？ 不影响任何 gate 放行/拦截，仅少一份人工复盘建议报告。
+// =============================================================================
+
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
@@ -58,6 +64,12 @@ function parseSuspicionJson(content) {
   }
 }
 
+/**
+ * 运行可疑决策异步审查，写入 suspicion.json 与 suspicion.md  advisory 报告。
+ * @param {string} rootDir 项目根目录
+ * @param {object} options limit 决策包条数上限，默认 50
+ * @returns {Promise<object>} 完整报告对象（含 deterministic 基线与 llm 状态）
+ */
 export async function runSuspicionReview(rootDir, { limit = PACKET_LIMIT } = {}) {
   await ensureWildArrangeDirs(rootDir);
   const { config } = await loadWildArrangeConfig(rootDir);

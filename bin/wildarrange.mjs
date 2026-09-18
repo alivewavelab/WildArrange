@@ -1,4 +1,31 @@
 #!/usr/bin/env node
+// =============================================================================
+// 文件名称：wildarrange.mjs
+// 所属模块：bin
+// 作用说明：
+//   WildArrange 命令行入口：解析 argv，按子命令路由到 orchestration、
+//   capabilities、infra、interface、ai 等模块；stdout 输出 JSON 契约，
+//   stderr 承载人类可读摘要。不负责业务规则本身，只做参数校验与委派。
+//
+// 【运行原理速读】
+//   可以把它想成「治理运行时的前台调度台」：
+//
+//   · 何时启动？
+//     开发者、CI 或 IDE Hook 执行 node bin/wildarrange.mjs <command>。
+//
+//   · 它具体做了什么？
+//     ① parseArgs 解析 --flag 与 positional；
+//     ② main 按 command 分支调用对应 src/ 模块；
+//     ③ 结果 JSON 写 stdout，门决策/进度写 stderr；
+//     ④ 未捕获错误经 error-protocol 格式化后 exit 1。
+//
+//   · 和其他部分的关系？
+//     hook run 注入 cli_command_prefix 后进入 host-runtime；
+//     run/plan/workflow 驱动 linear-runtime；guard/doctor 走 capabilities。
+//
+//   · 缺了它会怎样？
+//     无法初始化 .wildarrange、无法跑任务门禁，Hook 也找不到可信 CLI 前缀。
+// =============================================================================
 import { configureProjectReview, prepareProjectReview } from "../src/capabilities/project-review.mjs";
 import { generateContractArtifacts } from "../src/interface/contract-view.mjs";
 import { applyContractDecision, proposeContractChange, resolveContractChange } from "../src/orchestration/contract-governance.mjs";
@@ -111,6 +138,13 @@ import {
 } from "../src/infra/security.mjs";
 import { initProjectDocuments } from "../src/interface/project-init.mjs";
 
+// --- CLI 参数解析 ---
+
+/**
+ * 将 process.argv 切片解析为 { _: positional[], --key: string|true } 结构。
+ * @param {string[]} argv 不含 node 与脚本路径的参数列表
+ * @returns {{ _: string[], [key: string]: string | boolean | string[] }}
+ */
 function parseArgs(argv) {
   const args = { _: [] };
   for (let i = 0; i < argv.length; i += 1) {
@@ -133,20 +167,41 @@ function parseArgs(argv) {
 
 // parseArgs 的取值只有两种形态：带值时是字符串，裸标志时是 true。
 // strArg 把缺省、裸标志与空串统一收敛为 undefined，代替散落的 `!== true` 手工守卫。
+/**
+ * 从 parseArgs 结果中安全取出字符串参数；裸标志或空串返回 undefined。
+ * @param {Record<string, unknown>} args parseArgs 返回值
+ * @param {string} key 参数名（不含 -- 前缀）
+ * @returns {string|undefined}
+ */
 function strArg(args, key) {
   const value = args[key];
   return typeof value === "string" && value !== "" ? value : undefined;
 }
 
+/**
+ * 将逗号分隔 CLI 字符串拆成去空白后的数组；非字符串输入返回 []。
+ * @param {unknown} value --writable 等逗号列表原始值
+ * @returns {string[]}
+ */
 function splitCliList(value) {
   if (typeof value !== "string") return [];
   return value.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
+/**
+ * 向 stdout 输出 CLI 帮助文本。
+ * @param {{ all?: boolean }} [options] all=true 时列出全部子命令
+ */
 function printHelp({ all = false } = {}) {
   console.log(renderHelp({ all }));
 }
 
+// --- 命令分发：main ---
+
+/**
+ * CLI 主入口：解析 command 后路由到各 src/ 模块并输出 JSON。
+ * control-root 未指定时使用 process.cwd() 作为项目根。
+ */
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const command = args._[0];
@@ -154,6 +209,7 @@ async function main() {
     ? path.resolve(String(args["control-root"]))
     : process.cwd();
 
+  // --- 帮助与文档 ---
   if (!command || command === "help" || command === "--help") {
     printHelp({ all: args.all === true || args._[1] === "--all" });
     return;
@@ -172,6 +228,7 @@ async function main() {
     return;
   }
 
+  // --- 初始化与配置 ---
   if (command === "init") {
     await initRuntime(rootDir);
     const projectDocuments = args["project-docs"] === true
@@ -220,6 +277,7 @@ async function main() {
     throw new Error("wildarrange config requires init, show, baseline, or verify");
   }
 
+  // --- 宿主适配器 ---
   if (command === "adapter") {
     const subcommand = args._[1];
     if (subcommand === "install") {
@@ -246,6 +304,7 @@ async function main() {
     throw new Error("wildarrange adapter requires install, uninstall, or restore");
   }
 
+  // --- 多设备协调 ---
   if (command === "device") {
     const subcommand = args._[1];
     if (subcommand === "register") {
@@ -280,6 +339,7 @@ async function main() {
     throw new Error("wildarrange coordination requires status or claim");
   }
 
+  // --- 任务交接 ---
   if (command === "handoff") {
     const subcommand = args._[1];
     if (subcommand === "prepare") {
@@ -322,6 +382,7 @@ async function main() {
     throw new Error("wildarrange handoff requires prepare, push, accept, or takeover");
   }
 
+  // --- 注入点预览 ---
   if (command === "injection") {
     const subcommand = args._[1];
     if (subcommand === "show") {
@@ -339,6 +400,7 @@ async function main() {
     throw new Error("wildarrange injection requires show");
   }
 
+  // --- 宿主 Hook 执行 ---
   if (command === "hook") {
     const subcommand = args._[1];
     if (subcommand === "run") {
@@ -377,6 +439,7 @@ async function main() {
     throw new Error("wildarrange hook requires run");
   }
 
+  // --- 计划导入与审批 ---
   if (command === "plan") {
     if (args._[1] === "approve") {
       await initRuntime(rootDir);
@@ -406,6 +469,7 @@ async function main() {
     return;
   }
 
+  // --- 线性任务执行 ---
   if (command === "run") {
     const runStartedAt = new Date().toISOString();
     const result = await runNextTask(rootDir);
@@ -428,6 +492,7 @@ async function main() {
     return;
   }
 
+  // --- 工作流批量推进 ---
   if (command === "workflow") {
     if (!args.from && !args.sample) throw new Error("wildarrange workflow requires --from <plan.json> or --sample");
     const result = await runWorkflow(rootDir, {
@@ -440,6 +505,7 @@ async function main() {
     return;
   }
 
+  // --- 并行 Agent 运行 ---
   if (command === "parallel") {
     const subcommand = args._[1];
     if (subcommand === "run") {
@@ -505,6 +571,7 @@ async function main() {
     throw new Error("wildarrange parallel requires run, admit, list, status, close, or cleanup");
   }
 
+  // --- 档案员路由 ---
   if (command === "archivist") {
     const subcommand = args._[1];
     const turns = strArg(args, "turns")
@@ -546,6 +613,7 @@ async function main() {
     throw new Error("wildarrange archivist requires packet, run, or suggestions");
   }
 
+  // --- 单工作流节点 ---
   if (command === "node") {
     const nodeName = args._[1];
     if (!nodeName) throw new Error("wildarrange node requires route, execute, verify, scope, review, checkpoint, or retry");
@@ -557,6 +625,7 @@ async function main() {
     return;
   }
 
+  // --- 状态与影响分析 ---
   if (command === "status") {
     console.log(JSON.stringify(await statusReport(rootDir), null, 2));
     return;
@@ -569,6 +638,7 @@ async function main() {
     return;
   }
 
+  // --- 门决策与时间线 ---
   if (command === "decisions") {
     if (args._[1] === "stats") {
       console.log(JSON.stringify(await projectDecisionStats(rootDir), null, 2));
@@ -612,6 +682,7 @@ async function main() {
     return;
   }
 
+  // --- 审查与就绪 ---
   if (command === "review" && args._[1] === "configure") {
     if (!strArg(args, "from")) throw new Error("review configure requires --from <setup.json>");
     console.log(JSON.stringify(await configureProjectReview(rootDir, args.from, { apply: args.apply === true }), null, 2));
@@ -644,6 +715,7 @@ async function main() {
     return;
   }
 
+  // --- 人工标注 ---
   if (command === "annotate") {
     const subcommand = args._[1];
     if (subcommand === "list") {
@@ -672,6 +744,7 @@ async function main() {
     return;
   }
 
+  // --- 仓库测试 ---
   if (command === "test") {
     const positional = args._.slice(1);
     if (strArg(args, "zone") && positional.length > 0) {
@@ -687,6 +760,7 @@ async function main() {
     return;
   }
 
+  // --- 摘要与续跑 ---
   if (command === "summary") {
     console.log(JSON.stringify(await writeWorkflowSummary(rootDir, { reason: "cli" }), null, 2));
     return;
@@ -714,6 +788,7 @@ async function main() {
     throw new Error("wildarrange rules requires collect");
   }
 
+  // --- 仓库治理审计 ---
   if (command === "governance") {
     const subcommand = args._[1];
     if (subcommand === "audit") {
@@ -728,6 +803,7 @@ async function main() {
     throw new Error("wildarrange governance requires audit");
   }
 
+  // --- 契约治理 ---
   if (command === "contracts") {
     const subcommand = args._[1];
     if (subcommand === "propose") {
@@ -781,6 +857,7 @@ async function main() {
     throw new Error("wildarrange contracts requires scan, apply-card, generate, propose, or resolve");
   }
 
+  // --- Agent 上下文 ---
   if (command === "context") {
     const subcommand = args._[1];
     if (subcommand === "build") {
@@ -795,6 +872,7 @@ async function main() {
     throw new Error("wildarrange context requires build");
   }
 
+  // --- 成功标准证据 ---
   if (command === "evidence") {
     const subcommand = args._[1];
     if (subcommand === "record") {
@@ -812,6 +890,7 @@ async function main() {
     throw new Error("wildarrange evidence requires record");
   }
 
+  // --- 工作流转向 ---
   if (command === "steer") {
     if (!strArg(args, "from")) throw new Error("wildarrange steer requires --from <proposal.json>");
     const proposal = await readJson(path.resolve(rootDir, args.from));
@@ -819,6 +898,7 @@ async function main() {
     return;
   }
 
+  // --- 审查阻塞记录 ---
   if (command === "review-blockers") {
     const subcommand = args._[1];
     if (subcommand === "record") {
@@ -830,6 +910,7 @@ async function main() {
     throw new Error("wildarrange review-blockers requires record");
   }
 
+  // --- 任务板 ---
   if (command === "task") {
     const subcommand = args._[1];
     if (subcommand === "list") {
@@ -905,6 +986,7 @@ async function main() {
     throw new Error("wildarrange task requires list, get, claim, create, ready, or archive");
   }
 
+  // --- 团队消息 ---
   if (command === "team") {
     const subcommand = args._[1];
     if (subcommand === "send") {
@@ -926,6 +1008,7 @@ async function main() {
     throw new Error("wildarrange team requires send or inbox");
   }
 
+  // --- 会话恢复 ---
   if (command === "resume") {
     console.log(JSON.stringify(await resumeReport(rootDir, {
       sessionId: strArg(args, "session"),
@@ -934,6 +1017,7 @@ async function main() {
     return;
   }
 
+  // --- 变更请求 ---
   if (command === "changes") {
     const subcommand = args._[1];
     if (subcommand === "list") {
@@ -960,6 +1044,7 @@ async function main() {
     throw new Error("wildarrange changes requires list, review, or resolve");
   }
 
+  // --- 采纳面板 ---
   if (command === "adoption") {
     const subcommand = args._[1];
     const host = strArg(args, "host") || "127.0.0.1";
@@ -1007,6 +1092,7 @@ async function main() {
     throw new Error("wildarrange adoption requires start, status, resume, or recover");
   }
 
+  // --- Dashboard 服务 ---
   if (command === "serve") {
     const host = strArg(args, "host") || "127.0.0.1";
     const port = strArg(args, "port") ? Number(args.port) : 8765;
@@ -1016,6 +1102,7 @@ async function main() {
     await new Promise(() => {});
   }
 
+  // --- 账本与运行时状态 ---
   if (command === "ledger") {
     const subcommand = args._[1];
     if (subcommand === "verify") {
@@ -1066,6 +1153,7 @@ async function main() {
     throw new Error("wildarrange state requires backup, verify, list, restore, or migrate");
   }
 
+  // --- 体检与门禁 ---
   if (command === "doctor") {
     const result = await runDoctor(rootDir);
     console.log(JSON.stringify(result, null, 2));
@@ -1082,6 +1170,7 @@ async function main() {
     throw new Error("wildarrange guard requires scope");
   }
 
+  // --- 模型路由与 Prompt ---
   if (command === "route") {
     if (!strArg(args, "text")) throw new Error("wildarrange route requires --text <request>");
     console.log(JSON.stringify(await runHostRoute(rootDir, { text: args.text }, routeRequest), null, 2));
@@ -1129,6 +1218,12 @@ async function main() {
   throw new Error(`unknown command: ${command}`);
 }
 
+// --- stdin 读取与进程入口 ---
+
+/**
+ * 从 stdin 读取 Hook JSON 载荷；TTY 或无内容时抛错。
+ * @returns {Promise<string>} 原始 JSON 字符串
+ */
 async function readAllStdin() {
   if (process.stdin.isTTY) {
     throw new Error("wildarrange hook run requires --from <hook.json> or JSON on stdin");

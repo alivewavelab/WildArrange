@@ -1,3 +1,17 @@
+// =============================================================================
+// 文件名称：doctor.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 doctor 诊断：单检查崩溃不拖垮报告、只读不写 ledger、
+//   暴露 unarmed gates/缺失 adapter、adoption 后 runner 黄灯、
+//   Codex activation 证据绑定当前 hook config。
+//   不测：doctor 自动修复或任务执行。
+//
+// 【运行原理速读】
+//   构造损坏/未武装/已 adoption 的 runtime 状态，运行 runDoctor，
+//   断言 findings 含预期 code 且 ledger 行数不变。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";

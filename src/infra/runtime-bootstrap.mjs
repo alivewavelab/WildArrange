@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：runtime-bootstrap.mjs
+// 所属模块：infra
+// 作用说明：
+//   运行时 init/doctor 引导：目录、prompt-pack、配置与 ledger 自检。
+//
+// 【运行原理速读】
+//   ensureWildArrangeDirs → installPromptPack → verifyLedger → gate arming 提示。
+// =============================================================================
 import { existsSync } from "node:fs";
 import { appendLedger } from "./ledger.mjs";
 import { DEFAULT_PROMPT_PACK_DIR, installPromptPack, isPromptPackCurrent } from "./prompt-pack.mjs";
@@ -13,6 +22,9 @@ import {
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 
+/**
+ * initRuntime：本模块对外异步 API。
+ */
 export async function initRuntime(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const configResult = await writeDefaultWildArrangeConfig(rootDir, { force: options.force });

@@ -1,3 +1,23 @@
+// =============================================================================
+// 文件名称：doctor.mjs
+// 所属模块：interface
+// 作用说明：
+//   一键运行时体检：配置、门武装、adapter、完成态、ledger、基线、决策健康等分项检查。
+//   各分项独立 try/catch；结果写入 reports/doctor.json 与 doctor.md，不写 ledger。
+//
+// 【运行原理速读】
+//   可以把它想成「治理运行时的全科体检报告」：
+//
+//   · 谁调用？
+//     wildarrange doctor；Dashboard 健康摘要间接依赖其产出。
+//
+//   · 它做了什么？
+//     ① 按 SECTION_CHECKS 顺序跑 11 项 ② 汇总 findings 与 ok 标志
+//     ③ 渲染 Markdown 供人类快速浏览。
+//
+//   · 设计约束？
+//     诊断与门控分离：单项崩溃不拖垮全局；doctor 本身不 append ledger。
+// =============================================================================
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -36,6 +56,7 @@ const SECTION_CHECKS = [
   ["registryFreshness", checkRegistryFreshness],
 ];
 
+/** 执行全部分项检查并写入 doctor 报告文件。 */
 export async function runDoctor(rootDir) {
   await ensureWildArrangeDirs(rootDir);
   const findings = [];
@@ -73,6 +94,8 @@ export async function runDoctor(rootDir) {
 function addFinding(findings, severity, section, message, extra = {}) {
   findings.push({ severity, section, message, ...extra });
 }
+
+// --- 配置结构 ---
 
 async function checkConfigStructure(rootDir, findings) {
   const { config, sourcePath } = await loadWildArrangeConfig(rootDir);
@@ -141,6 +164,8 @@ async function checkConfigStructure(rootDir, findings) {
   };
 }
 
+// --- Ledger 完整性 ---
+
 async function checkLedgerIntegrity(rootDir, findings) {
   const result = await verifyLedger(rootDir);
   if (!result.ok) {
@@ -150,6 +175,8 @@ async function checkLedgerIntegrity(rootDir, findings) {
   }
   return { ok: result.ok, checked: result.checked, legacy: result.legacy, failureCount: result.failures.length };
 }
+
+// --- Ledger 与备份交叉对账 ---
 
 async function checkLedgerAgainstBackup(rootDir, findings) {
   const backups = await listRuntimeStateBackups(rootDir);
@@ -204,6 +231,8 @@ async function readLedgerLines(filePath) {
   }
 }
 
+// --- 配置基线 ---
+
 async function checkConfigBaseline(rootDir, findings) {
   const result = await verifyConfigBaseline(rootDir);
   if (result.status === "missing_baseline") {
@@ -215,6 +244,8 @@ async function checkConfigBaseline(rootDir, findings) {
   }
   return { status: result.status, failureCount: (result.failures || []).length };
 }
+
+// --- 运行态文件 ---
 
 async function checkRuntimeState(rootDir, findings) {
   const result = await verifyRuntimeState(rootDir);
@@ -350,7 +381,8 @@ async function inspectCodexHookExecution(rootDir, hooksPath) {
   };
 }
 
-// 周期健康摘要：门决策计数（纯计数不出率）、坏行与孤儿标注预警。
+// --- 决策日志健康 ---
+
 async function checkDecisionHealth(rootDir, findings) {
   const stats = await projectDecisionStats(rootDir);
   if (stats.skippedLines > 0) {
@@ -368,6 +400,8 @@ async function checkDecisionHealth(rootDir, findings) {
   };
 }
 
+// --- 验证 registry 新鲜度 ---
+
 async function checkRegistryFreshness(rootDir, findings) {
   const result = await evaluateRegistryFreshness(rootDir);
   if (result.stale) {
@@ -378,6 +412,8 @@ async function checkRegistryFreshness(rootDir, findings) {
   }
   return result;
 }
+
+// --- 仓库治理审计 ---
 
 async function checkRepositoryGovernance(rootDir, findings) {
   const reportPath = resolveWildArrangePath(rootDir, "reports", "governance", "latest.json");
@@ -399,6 +435,8 @@ async function checkRepositoryGovernance(rootDir, findings) {
     reportPath: path.relative(rootDir, reportPath),
   };
 }
+
+// --- 报告渲染 ---
 
 function renderDoctorMarkdown(report) {
   const lines = [

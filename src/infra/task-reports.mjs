@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：task-reports.mjs
+// 所属模块：infra
+// 作用说明：
+//   review/failure/readiness 报告 JSON+MD 写入与 ledger 记录。
+//
+// 【运行原理速读】
+//   writeReviewReport 等 → resolveTaskReportPath → renderMarkdown → appendLedger。
+// =============================================================================
 import { appendFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { normalizeRelativePath } from "./path-match.mjs";
@@ -10,6 +19,9 @@ import {
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 
+/**
+ * writeReviewReport：本模块对外异步 API。
+ */
 export async function writeReviewReport(rootDir, planId, task, reviewResult) {
   await ensureWildArrangeDirs(rootDir);
   const jsonPath = resolveTaskReportPath(rootDir, "reviews", planId, task.id, "json");
@@ -122,6 +134,9 @@ ${commentFindings.length > 0 ? commentFindings.map((finding) => `- ${finding.fil
 `;
 }
 
+/**
+ * writeFailureReport：本模块对外异步 API。
+ */
 export async function writeFailureReport(rootDir, planId, task) {
   if (!task.last_failure) return null;
   await ensureWildArrangeDirs(rootDir);
@@ -178,6 +193,9 @@ ${failure.changeRequest ? `## ChangeRequest
 `;
 }
 
+/**
+ * appendWisdom：本模块对外异步 API。
+ */
 export async function appendWisdom(rootDir, task, verifyResult) {
   const line = `- ${nowIso()} ${task.id}: ${task.subject} verified by ${verifyResult.results.length} command(s).\n`;
   await appendFile(resolveWildArrangePath(rootDir, "wisdom", "verification.md"), line, "utf8");

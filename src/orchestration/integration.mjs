@@ -1,3 +1,22 @@
+// =============================================================================
+// 文件名称：integration.mjs
+// 所属模块：orchestration
+// 作用说明：
+//   Git 交付集成：admission/线性完成前的 ownership 围栏、integration intent、
+//   候选路径收集与 task branch delivery commit 生成/推送。
+//
+// 【运行原理速读】
+//   可以把它想成「把任务成果安全写进 Git 历史」：
+//
+//   · 何时执行？
+//     delivery-pipeline 的 runCompletionSegment 与 admission 前置复核。
+//
+//   · 做了什么？
+//     验 owner/基线 → 写 intent → commit/push task branch → 绑定 integrationSha。
+//
+//   · 约束？
+//     push 成功后故障不得回滚；intent 是 checkpoint 前 durable 交付意图来源。
+// =============================================================================
 import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
 import {
@@ -29,6 +48,9 @@ import {
   taskContract,
 } from "./remote-ownership.mjs";
 
+// --- 围栏与 intent ---
+
+/** 断言无其他任务持有未恢复的 contract 工作区，避免并行写冲突。 */
 export function assertContractWorkspaceAvailable(tasks, resume = {}) {
   const held = tasks.find((task) => task.pendingContractChange && task.admission_claim
     && task.admission_claim.workspaceRestored !== true
@@ -36,10 +58,12 @@ export function assertContractWorkspaceAvailable(tasks, resume = {}) {
   if (held) throw new Error(`recovery_required: task ${held.id} has unrestored contract changes; resume admission run ${held.admission_claim.runId} before other workspace writes`);
 }
 
+/** 读取 run/task 的 integration intent 持久化记录。 */
 export async function readIntegrationIntent(rootDir, runId, taskId) {
   return readJson(integrationIntentPath(rootDir, runId, taskId), null);
 }
 
+/** 断言当前 ownership；已 push 的 delivery intent 可恢复性通过围栏。 */
 export async function assertTaskOrDeliveredOwnership(rootDir, planId, task) {
   try {
     return await assertCurrentTaskOwnership(rootDir, task);
@@ -57,6 +81,7 @@ export async function assertTaskOrDeliveredOwnership(rootDir, planId, task) {
   }
 }
 
+/** 收集相对 baseSha 的工作区与已提交变更路径（排除 .wildarrange）。 */
 export async function collectIntegrationCandidatePaths(rootDir, baseSha) {
   const [workingPaths, committedPaths] = await Promise.all([
     listWorkingTreeChanges(rootDir),
@@ -67,6 +92,7 @@ export async function collectIntegrationCandidatePaths(rootDir, baseSha) {
     .sort();
 }
 
+/** 复核 admission 前 owner、集成基线与工作区归属围栏。 */
 export async function verifyAdmissionFences(rootDir, taskId, integrationGuard, recoveryIntent = null) {
   const state = await loadTaskState(rootDir);
   const task = state?.tasks.find((candidate) => candidate.id === taskId);
@@ -149,6 +175,9 @@ export async function verifyAdmissionFences(rootDir, taskId, integrationGuard, r
   };
 }
 
+// --- delivery commit ---
+
+/** 生成本地 delivery commit 并可 push 到任务独占 task branch。 */
 export async function integrateAdmissionCommit(rootDir, options) {
   const coordination = options.task?.coordination;
   const localDeliveryTarget = coordination?.localGit === true

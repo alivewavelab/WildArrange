@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：prompt-pack.mjs
+// 所属模块：infra
+// 作用说明：
+//   Prompt Pack 安装、registry 校验与受信路径渲染 agents/skills/routes。
+//
+// 【运行原理速读】
+//   staging 原子 rename → sha256 比对 → renderPromptPackEntry 固定 installed 根。
+// =============================================================================
 import {
   lstat,
   mkdir,
@@ -23,9 +32,18 @@ import {
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 // This file lives at src/infra/prompt-pack.mjs, two levels below the project root.
+/**
+ * WildArrange 仓库根目录（相对本模块推导）。
+ */
 export const PROJECT_DIR = path.dirname(path.dirname(MODULE_DIR));
+/**
+ * 默认 Prompt Pack 目录（与 PROJECT_DIR 推导）。
+ */
 export const DEFAULT_PROMPT_PACK_DIR = path.join(PROJECT_DIR, "packs", DEFAULT_RUNTIME_NAME);
 
+/**
+ * 从 pack 目录安装 Prompt Pack 到 .wildarrange 并写 registry。
+ */
 export async function installPromptPack(rootDir, packDir = DEFAULT_PROMPT_PACK_DIR) {
   const canonicalPackDir = await realpath(packDir);
   const manifest = await readJson(path.join(canonicalPackDir, "manifest.json"));
@@ -40,6 +58,9 @@ export async function installPromptPack(rootDir, packDir = DEFAULT_PROMPT_PACK_D
   return registry;
 }
 
+/**
+ * isPromptPackCurrent：本模块对外异步 API。
+ */
 export async function isPromptPackCurrent(rootDir, packDir = DEFAULT_PROMPT_PACK_DIR) {
   try {
     const canonicalPackDir = await realpath(packDir);
@@ -107,6 +128,9 @@ function registryEntry(entry) {
   };
 }
 
+/**
+ * loadPromptPackEntries：本模块对外异步 API。
+ */
 export async function loadPromptPackEntries(packDir = DEFAULT_PROMPT_PACK_DIR, manifest = null) {
   const packManifest = manifest || await readJson(path.join(packDir, "manifest.json"));
   const agents = [];
@@ -128,6 +152,9 @@ async function loadPackTextEntry(packDir, name, relativePath, kind) {
   return { name, kind, relativePath, content, sha256: hashContent(content) };
 }
 
+/**
+ * listPromptPack：本模块对外异步 API。
+ */
 export async function listPromptPack(rootDir) {
   const registry = await readJson(resolveWildArrangePath(rootDir, "prompt-pack.json"), null);
   if (!registry) return null;
@@ -141,6 +168,9 @@ export async function listPromptPack(rootDir) {
   };
 }
 
+/**
+ * renderPromptPackEntry：本模块对外异步 API。
+ */
 export async function renderPromptPackEntry(rootDir, selector) {
   const registry = await readJson(resolveWildArrangePath(rootDir, "prompt-pack.json"), null);
   if (!registry) throw new Error("prompt pack is not installed; run wildarrange init");

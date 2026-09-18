@@ -1,7 +1,22 @@
-/**
- * Adoption session state machine. Does not enter task.status or reuse
- * approvePlan. Dashboard is the only write approval surface.
- */
+// =============================================================================
+// 文件名称：adoption.mjs
+// 所属模块：orchestration
+// 作用说明：
+//   验证卡 adoption 会话状态机：扫描、review、apply、registry commit；
+//   不进入 task.status，不 reuse approvePlan，dashboard 是唯一写批准面。
+//
+// 【运行原理速读】
+//   可以把它想成「把 verification 卡批量迁入 registry 的专用流程」：
+//
+//   · 何时执行？
+//     adoption start/status/resume/decide/apply CLI 与 dashboard。
+//
+//   · 做了什么？
+//     scanning → reviewing → apply 卡 → awaiting_registry_commit → finalized。
+//
+//   · 约束？
+//     敏感卡/路径需人类显式批准；中断须 recovery 或 resume，不可静默跳过。
+// =============================================================================
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
@@ -57,6 +72,9 @@ function preparedResumeAction(cardId) {
   return `运行 wildarrange adoption resume 以继续中断的事务 ${cardId}，不要重新 capture`;
 }
 
+// --- 会话生命周期 ---
+
+/** 启动 adoption 扫描会话或恢复已有 active session。 */
 export async function startAdoption(rootDir, options = {}) {
   return withAdoptionLock(rootDir, options.sessionId || "start", async () => {
     await reconcileAdoptionUnlocked(rootDir, options);
@@ -137,6 +155,7 @@ export async function startAdoption(rootDir, options = {}) {
   });
 }
 
+/** 返回当前 adoption 会话状态与卡列表摘要。 */
 export async function statusAdoption(rootDir, options = {}) {
   const session = await loadSession(rootDir, options.sessionId);
   if (!session) {
@@ -160,6 +179,7 @@ export async function statusAdoption(rootDir, options = {}) {
   };
 }
 
+/** 从中断的 apply/registry commit 事务 resume 继续执行。 */
 export async function resumeAdoption(rootDir, options = {}) {
   return withAdoptionLock(rootDir, options.sessionId || "resume", async () => {
     const reconciled = await reconcileAdoptionUnlocked(rootDir, options);
@@ -189,6 +209,7 @@ export async function resumeAdoption(rootDir, options = {}) {
   });
 }
 
+/** 从 recovery_required 状态恢复：还原 preimage 并重置会话。 */
 export async function recoverAdoption(rootDir, options = {}) {
   return withAdoptionLock(rootDir, options.sessionId || "recover", async () => {
     const session = await requiredSession(rootDir, options.sessionId);
@@ -238,6 +259,9 @@ export async function recoverAdoption(rootDir, options = {}) {
   });
 }
 
+// --- 协调与决策 ---
+
+/** 对账会话与 registry/git 现实，修复 stale 状态或标记 needs_review。 */
 export async function reconcileAdoption(rootDir, options = {}) {
   return withAdoptionLock(rootDir, options.sessionId || "reconcile", async () => {
     return reconcileAdoptionUnlocked(rootDir, options);
@@ -390,6 +414,7 @@ async function reconcileAdoptionUnlocked(rootDir, options = {}) {
   return { session, status: session.status, files };
 }
 
+/** 人类对单张 adoption 卡 approve/reject（dashboard 写批准面）。 */
 export async function decideAdoptionCard(rootDir, options = {}) {
   return withAdoptionLock(rootDir, options.sessionId || "decide", async () => {
     const session = await requiredSession(rootDir, options.sessionId);
@@ -444,6 +469,9 @@ export async function decideAdoptionCard(rootDir, options = {}) {
   });
 }
 
+// --- apply 与视图 ---
+
+/** 将已批准卡 apply 到 registry/项目文件（事务化 preimage）。 */
 export async function applyApprovedCards(rootDir, options = {}) {
   return withAdoptionLock(rootDir, options.sessionId || "apply", async () => {
     return applyApprovedCardsUnlocked(rootDir, options);
@@ -598,6 +626,7 @@ async function concludeAfterCard(rootDir, session, files) {
   return { ok: true, session, generated: generated.evidence };
 }
 
+/** 取消 adoption 会话并清理临时状态。 */
 export async function cancelAdoption(rootDir, options = {}) {
   return withAdoptionLock(rootDir, options.sessionId || "cancel", async () => {
     const session = await requiredSession(rootDir, options.sessionId);
@@ -618,6 +647,7 @@ export async function cancelAdoption(rootDir, options = {}) {
   });
 }
 
+/** 组装 dashboard adoption 面板所需的完整视图模型。 */
 export async function loadAdoptionViewModel(rootDir, options = {}) {
   const status = await statusAdoption(rootDir, options);
   const files = status.session ? await readSessionFiles(rootDir, status.session.sessionId) : null;
@@ -893,6 +923,7 @@ function mismatchLabels(diagnostics) {
     .map(([key]) => key);
 }
 
+/** 判断 adoption 卡是否触及敏感路径或 merge/delete/archive 动作。 */
 export function isSensitiveAdoptionCard(card) {
   return SENSITIVE_ACTIONS.has(card.action)
     || SENSITIVE_PATH_RE.test(card.path || "")

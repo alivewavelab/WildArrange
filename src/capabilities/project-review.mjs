@@ -1,3 +1,17 @@
+// =============================================================================
+// 文件名称：project-review.mjs
+// 所属模块：capabilities
+// 作用说明：
+//   按 wildarrange.config.json 的 review.steps 选择并执行项目级独立审查
+//   （含长期文档真实性步骤），校验引用与 verdict，产出 project_review receipt。
+//
+// 【运行原理速读】
+//   · 何时执行？review gate 内；acceptance proof 校验 projectReview 绑定。
+//   · 做了什么？selectSteps → 加载文档/Skill → 构建 packet → 独立审查者
+//     → validateProjectReviewVerdict → 防并发篡改 digest。
+//   · 缺了它会怎样？项目规范与文档一致性无法被机器绑定到任务完成。
+// =============================================================================
+
 import { realpath } from "node:fs/promises";
 import path from "node:path";
 import { readJson } from "../infra/runtime-store.mjs";
@@ -28,6 +42,13 @@ const isLongTermDocument = name => {
     || /^(?:doc|docs)\/.+\.(?:md|mdx|html)$/i.test(name);
 };
 
+/**
+ * 根据任务 writable_paths、responsibilityChanges 与 changedPaths 筛选适用审查步骤。
+ * @param {object} config WildArrange 配置
+ * @param {object} task 任务对象
+ * @param {string[]} [changedPaths] 已变更路径
+ * @returns {object[]} 审查步骤定义（含 id、documents、skills、required）
+ */
 export function selectProjectReviewSteps(config, task, changedPaths = []) {
   const raw = config.review?.steps ?? [];
   if (!Array.isArray(raw)) throw new Error("review.steps must be an array");
@@ -64,6 +85,10 @@ export function selectProjectReviewSteps(config, task, changedPaths = []) {
   return selected;
 }
 
+/**
+ * 预加载各步骤的文档与 Skill 附件，计算 policyDigest/contextDigest。
+ * @returns {Promise<object>} steps、pass（必需步骤无 issues 时为 true）
+ */
 export async function prepareProjectReview(rootDir, task, config, changedPaths = []) {
   const steps = selectProjectReviewSteps(config, task, changedPaths);
   const budget = config.review?.responsibility?.maxEvidenceChars || 500000;
@@ -95,6 +120,10 @@ export async function prepareProjectReview(rootDir, task, config, changedPaths =
     pass: prepared.every(step => !step.required || !step.issues.length) };
 }
 
+/**
+ * 将审查 packet 写入磁盘并通过命令或 LLM 独立审查者执行。
+ * @returns {Promise<object>} content 或 commandRecovery
+ */
 export async function executeReviewPacket(rootDir, packetPath, packet, config, settings = {}) {
   await writeJsonAtomic(packetPath, packet);
   if (settings.command) {
@@ -108,6 +137,10 @@ export async function executeReviewPacket(rootDir, packetPath, packet, config, s
   return { content: await runIndependentLlmReview(config, packet, settings) };
 }
 
+/**
+ * 校验独立审查者返回的 JSON verdict：digest 匹配、引用行精确、PASS/RETURN 规则。
+ * @throws {Error} 引用或决策不符合步骤要求时
+ */
 export function validateProjectReviewVerdict(value, packet) {
   if (value?.stepId !== packet.step.id || value.inputDigest !== packet.inputDigest) throw new Error("review response does not match step and input digest");
   if (!["PASS", "RETURN", "INCONCLUSIVE"].includes(value.decision) || !value.summary?.trim()) throw new Error("invalid review decision or summary");
@@ -138,6 +171,10 @@ export function validateProjectReviewVerdict(value, packet) {
   return value;
 }
 
+/**
+ * 顺序执行全部适用 project review 步骤，返回 kind=project_review 的 receipt。
+ * @param {string} executionRoot 收集源码 evidence 的工作根（可为 worktree）
+ */
 export async function runProjectReview(rootDir, task, scopeResult, config, executionRoot = rootDir) {
   const base = { kind: "project_review", at: nowIso(), pass: false, steps: [] };
   try {
@@ -171,6 +208,10 @@ export async function runProjectReview(rootDir, task, scopeResult, config, execu
   } catch (error) { return { ...base, error: error.message }; }
 }
 
+/**
+ * 判断已有 project_review receipt 是否与当前 policy 及必需步骤 PASS 对齐。
+ * @returns {boolean} 无适用步骤时视为 true
+ */
 export function hasAcceptedProjectReview(config, task, scope, receipt) {
   try {
     const steps = selectProjectReviewSteps(config, task, scope?.changedPaths || []);
@@ -180,6 +221,10 @@ export function hasAcceptedProjectReview(config, task, scope, receipt) {
   } catch { return false; }
 }
 
+/**
+ * 从 plan-draft 预览或应用 review 配置变更，并生成 checklist。
+ * @param {object} [options] apply 为 true 时写入配置
+ */
 export async function configureProjectReview(rootDir, draftPath, options = {}) {
   const root = await realpath(rootDir);
   const file = await realpath(path.resolve(root, draftPath));

@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：repository-governance.mjs
+// 所属模块：capabilities
+// 作用说明：
+//   扫描仓库布局与 comment/目录等治理规则，生成 latest 治理报告（JSON+MD）
+//   并写入 ledger。支持仅扫描 git 变更路径。
+//
+// 【运行原理速读】
+//   · 何时执行？doctor、手动 audit 或 gateway repository-governance。
+//   · 做了什么？loadWildArrangeConfig → inspectRepositoryGovernance → 写报告。
+//   · 缺了它会怎样？结构性违规（错误目录、禁用注释模式等）无法集中暴露。
+// =============================================================================
+
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -12,6 +25,12 @@ import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { collectGitChangedPaths } from "../infra/git-diff.mjs";
 import { inspectRepositoryGovernance } from "../infra/repository-layout.mjs";
 
+/**
+ * 运行仓库治理审计并持久化 latest 报告。
+ * @param {string} rootDir 项目根目录
+ * @param {object} [options] changedOnly、force
+ * @returns {Promise<object>} 含 status、findings、reportJsonPath
+ */
 export async function runRepositoryGovernanceAudit(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const { config, sourcePath } = await loadWildArrangeConfig(rootDir);

@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：responsibility-audit.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证责任声明与审计：字段/重复/越界拒绝、新 host plan 须先声明、
+//   独立 reviewer 全脚本、R3 拒绝带证据、伪造/矛盾 PASS 不可过。
+//   不测：多语言源码语义理解或自动 codegen。
+//
+// 【运行原理速读】
+//   fixture reviewer 命令 + importPlan/approvePlan，
+//   跑 runResponsibilityAudit/runReviewGate 断言 verdict 与 evidence 绑定。
+// =============================================================================
+
 import { resolveTaskAcceptancePath } from "../src/infra/runtime-store.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";

@@ -1,10 +1,23 @@
-/**
- * wildarrange decisions — decisions.jsonl 的只读投影。
- *
- * 每条决策渲染三行：发生了什么 → 命中哪条规则 → 证据在哪。
- * 投影是纯派生：只读 decisions.jsonl，绝不二次写入任何状态。
- * 读侧是尾部流式：--limit 约束真实内存占用，大文件只扫描尾部窗口。
- */
+// =============================================================================
+// 文件名称：decisions.mjs
+// 所属模块：interface
+// 作用说明：
+//   decisions.jsonl 的只读 CLI 投影与统计（decisions / decisions stats）。
+//   每条决策渲染「发生了什么 → 规则 → 证据」；绝不二次写入状态。
+//
+// 【运行原理速读】
+//   可以把它想成「门禁决策的查阅窗口」：
+//
+//   · 谁调用？
+//     wildarrange decisions、dashboard-panels 决策面板、doctor 决策健康分项。
+//
+//   · 它做了什么？
+//     ① projectDecisions 尾部流式读取并过滤 ② 渲染 text 或 json
+//     ③ projectDecisionStats 按 gate 聚合计数与 neverFiredGates。
+//
+//   · 和其他部分的关系？
+//     数据源为 infra/decision-log；标注关联来自 annotation-log。
+// =============================================================================
 import { readDecisions } from "../infra/decision-log.mjs";
 import { annotationStats } from "../infra/annotation-log.mjs";
 
@@ -21,6 +34,11 @@ const KNOWN_GATES = [
   "routing",
 ];
 
+/**
+ * 投影最近决策记录，支持 task/gate/since/annotatable 过滤。
+ * @param {string} rootDir
+ * @param {{ limit?: number, taskId?: string, gate?: string, since?: string, annotatable?: boolean, format?: string }} [options]
+ */
 export async function projectDecisions(rootDir, { limit = 50, taskId, gate, since, annotatable, format } = {}) {
   const hasFilter = Boolean(taskId || gate || since || annotatable);
   const filter = hasFilter

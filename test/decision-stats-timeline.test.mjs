@@ -1,8 +1,16 @@
-/**
- * 确定性统计审查（decisions stats）与统一时间线（timeline）测试：
- * - stats 出计数不出率：门×决策、门×规则、从未触发的门、标注关联；
- * - timeline 合并 ledger/decision/annotation 三源，倒序、可过滤、坏行降级。
- */
+// =============================================================================
+// 文件名称：decision-stats-timeline.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证确定性 decision stats（门×决策/规则、从未触发门、标注关联）
+//   与 timeline 三源合并倒序过滤；对应 CLI 可用。
+//   不测：LLM 生成内容或 dashboard 写入。
+//
+// 【运行原理速读】
+//   导入计划并产生 ledger/decision/annotation 事件，
+//   调用 projectDecisionStats/projectTimeline 与 CLI 断言计数与排序。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";

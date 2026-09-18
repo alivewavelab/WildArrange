@@ -1,17 +1,22 @@
-/**
- * Admission outcome projection: once the admission transaction
- * (./admission.mjs) has adjudicated a result, these helpers project it onto
- * the persisted surfaces — the task state (claim phase progress and
- * rollback-failure recovery), the agent-run lifecycle files (per-task
- * result.json, batch JSON, index.json) and the decisions.jsonl seam.
- *
- * Extracted from admission.mjs (architecture phase 4 split, ARC-002) — that
- * file mixed the claim -> apply -> gates transaction with this write-back
- * segment, two distinct reasons to change.
- *
- * The *WithinLock helpers run inside the caller's task-state lock hold and
- * MUST NOT acquire the task-state lock themselves.
- */
+// =============================================================================
+// 文件名称：admission-projection.mjs
+// 所属模块：orchestration
+// 作用说明：
+//   Admission 结果投影：事务裁决完成后，将 claim 阶段、回滚失败恢复、
+//   agent-run 生命周期与 decisions.jsonl 写回持久化面。自 admission.mjs 拆分（ARC-002）。
+//
+// 【运行原理速读】
+//   可以把它想成「admission 判完案后的文书工作」：
+//
+//   · 何时执行？
+//     admission.mjs 在 apply/gates 各阶段完成后调用 WithinLock 助手。
+//
+//   · 做了什么？
+//     决策缝写入、claim phase 推进、run result/batch/index 生命周期更新。
+//
+//   · 约束？
+//     WithinLock 助手禁止自行获取任务锁，必须在调用方锁持有期间运行。
+// =============================================================================
 import { appendLedger } from "../infra/ledger.mjs";
 import { emitDecision } from "../infra/decision-log.mjs";
 import {
@@ -43,11 +48,8 @@ export async function emitAdmissionDecision(rootDir, options, finalized) {
 }
 
 /**
- * Shared "rollback did not complete" persistence: the task stays verifying,
- * ownership/claim and the rollback plan are retained, the failure is recorded
- * on the task, and the admission reports recovery_required instead of
- * releasing a dirty workspace. Runs inside the caller's lock hold; MUST NOT
- * acquire the task-state lock.
+ * 回滚未完成时的共享持久化：任务保持 verifying，保留 ownership/claim 与 rollback plan，
+ * 返回 recovery_required 而非释放脏工作区。在调用方锁内运行，禁止自行加锁。
  */
 export async function persistRollbackFailureRecovery(rootDir, taskState, task, {
   rollback,
@@ -83,9 +85,8 @@ export async function persistRollbackFailureRecovery(rootDir, taskState, task, {
 }
 
 /**
- * Advances the persisted claim phase (applying -> finalizing) once the
- * child's files are on disk. Runs inside the caller's lock hold; MUST NOT
- * acquire the task-state lock.
+ * 子 agent 文件落盘后推进持久化 claim 阶段（applying → finalizing）。
+ * 在调用方锁内运行，禁止自行加锁。
  */
 export async function advanceClaimPhaseWithinLock(rootDir, taskId, runId, phase, appliedPaths) {
   const taskState = await loadTaskState(rootDir);
@@ -98,6 +99,7 @@ export async function advanceClaimPhaseWithinLock(rootDir, taskId, runId, phase,
   await persistTaskState(rootDir, taskState);
 }
 
+/** 更新 agent-run 的 result.json、batch JSON 与 index.json 中的 lifecycle 状态。 */
 export async function updateAgentRunLifecycle(rootDir, runId, taskId, status, details = {}) {
   const resultPath = resolveWildArrangePath(rootDir, "agent-runs", runId, taskId, "result.json");
   const result = await readJson(resultPath, null);

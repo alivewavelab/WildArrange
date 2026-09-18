@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：impact.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证依赖影响分析：反向传递闭包、同名 test 映射、未知路径降级、
+//   zoneTests/listRepoTests、wildarrange impact CLI。
+//   不测：实际执行选中测试或 CI 编排。
+//
+// 【运行原理速读】
+//   对已知 changed 文件调用 computeImpact/computeZoneTests，
+//   断言 affected/testsToRun 含预期路径且不逃逸仓库根。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import path from "node:path";

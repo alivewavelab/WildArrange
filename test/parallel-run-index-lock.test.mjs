@@ -1,8 +1,16 @@
-/**
- * 并发回归：run index.json 的 read-modify-write 必须串行化。
- * 两个并行 run 同时 register/append、并发 status 触发 reconcile 收养
- * 孤儿 run 目录时，index.json 不得丢失任何 run 或 task 条目。
- */
+// =============================================================================
+// 文件名称：parallel-run-index-lock.test.mjs
+// 所属模块：test
+// 作用说明：
+//   并发回归：parallel run index.json 读写必须串行化；
+//   并发 register/append 与 orphan run reconcile 不得丢 run/task 条目。
+//   不测：partial retry 业务逻辑或 CLI 输出格式。
+//
+// 【运行原理速读】
+//   并行启动多个 runParallelAgents，读 index.json，
+//   断言所有 runId 与 task 结果均保留且无重复收养。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";

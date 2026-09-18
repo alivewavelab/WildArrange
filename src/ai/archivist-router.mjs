@@ -1,3 +1,17 @@
+// =============================================================================
+// 文件名称：archivist-router.mjs
+// 所属模块：ai
+// 作用说明：
+//   档案员（CangJie）路由：构建结论包、LLM 路由/记忆决策、关键词演进建议与持久化。
+//   只摄入清洗后的结论文本，不含代码块/raw diff；LLM 不可用时 fallback 到确定性路由。
+//
+// 【运行原理速读】
+//   · 何时触发？ SessionStart/UserPromptSubmit/PostCompact 等 Hook（经 evaluateArchivistTrigger）。
+//   · 做了什么？ ① buildArchivistPacket ② LLM 或 fallbackArchivistDecision
+//     ③ 写 stage-summaries、memory events、pending 路由建议 ④ 人工 accept/reject 关键词。
+//   · 与谁协作？ routing.mjs（fallback）、llm-provider、ledger、runtime-snapshot。
+// =============================================================================
+
 import { appendFile, mkdir, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
@@ -17,6 +31,14 @@ import { routeRequest } from "./routing.mjs";
 
 const DEFAULT_STAGE = "default";
 
+// --- 路由包构建与执行 ---
+
+/**
+ * 构建档案员 LLM 输入包：结论文本、近期轮次、ledger 尾、阶段摘要与 memory 索引。
+ * @param {string} rootDir 项目根目录
+ * @param {object} options stage、turns、text、ledgerLimit、maxRecentTurns
+ * @returns {Promise<object>} kind=archivist_routing_packet（可能被截断）
+ */
 export async function buildArchivistPacket(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const { config } = await loadWildArrangeConfig(rootDir);
@@ -53,6 +75,12 @@ export async function buildArchivistPacket(rootDir, options = {}) {
   return truncatePacket(packet, Number(memoryConfig.maxRoutingPacketChars) || 12000);
 }
 
+/**
+ * 执行完整档案员路由：触发评估 → LLM/fallback → 持久化决策与记忆更新。
+ * @param {string} rootDir 项目根目录
+ * @param {object} options stage、trigger、text、turns、force、agent
+ * @returns {Promise<object>} kind=archivist_router_result 或 skipped 结果
+ */
 export async function runArchivistRouter(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const { config } = await loadWildArrangeConfig(rootDir);
@@ -137,6 +165,14 @@ export async function runArchivistRouter(rootDir, options = {}) {
   return artifact;
 }
 
+// --- 记忆事件与建议管理 ---
+
+/**
+ * 追加一条记忆事件到 memory/events.jsonl 并更新 memory/index.json。
+ * @param {string} rootDir 项目根目录
+ * @param {object} event 事件字段（kind、stage、tags 等）
+ * @returns {Promise<object>} 规范化后的事件
+ */
 export async function recordArchivistEvent(rootDir, event) {
   await ensureWildArrangeDirs(rootDir);
   const normalized = {
@@ -151,6 +187,11 @@ export async function recordArchivistEvent(rootDir, event) {
   return normalized;
 }
 
+/**
+ * 列出 routing/suggestions 下全部档案员关键词演进建议（按时间降序）。
+ * @param {string} rootDir 项目根目录
+ * @returns {Promise<object[]>} 建议对象数组
+ */
 export async function listArchivistRouteSuggestions(rootDir) {
   await ensureWildArrangeDirs(rootDir);
   const dirPath = resolveWildArrangePath(rootDir, "routing", "suggestions");
@@ -163,6 +204,12 @@ export async function listArchivistRouteSuggestions(rootDir) {
   return entries.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
 }
 
+/**
+ * 人工 accept/reject 档案员路由关键词建议；accept 时写入 routes-overrides.json。
+ * @param {string} rootDir 项目根目录
+ * @param {object} options id、decision（accept|reject）、evidence、rationale、reviewer
+ * @returns {Promise<object>} 更新后的建议 artifact
+ */
 export async function resolveArchivistRouteSuggestion(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   if (!options.id) throw new Error("archivist suggestion resolve requires id");
@@ -206,6 +253,8 @@ export async function resolveArchivistRouteSuggestion(rootDir, options = {}) {
   });
   return artifact;
 }
+
+// --- 决策持久化与 Fallback ---
 
 async function persistArchivistDecision(rootDir, payload) {
   const id = createWorkId("archive");
@@ -321,6 +370,8 @@ function normalizeDecision(decision) {
     usage: decision.usage || null,
   };
 }
+
+// --- 触发器与关键词演进 ---
 
 async function evaluateArchivistTrigger(rootDir, archivistConfig, options) {
   const triggerName = options.trigger || "manual";
@@ -463,6 +514,8 @@ function parseArchivistJson(content) {
     }
   }
 }
+
+// --- 记忆索引与包清洗 ---
 
 async function updateMemoryIndex(rootDir, event) {
   const indexPath = resolveWildArrangePath(rootDir, "memory", "index.json");

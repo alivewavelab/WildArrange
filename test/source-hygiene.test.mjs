@@ -1,3 +1,14 @@
+// =============================================================================
+// 文件名称：source-hygiene.test.mjs
+// 所属模块：test
+// 作用说明：
+//   源码卫生：ai/skill-matcher.mjs 与 ai/suspicion-review.mjs 必须 LF-only（无 CR）。
+//   不测：全仓库 EOL 策略或其他文件编码。
+//
+// 【运行原理速读】
+//   读取两文件 utf8 内容，断言不包含 \r 字节。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";

@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：ledger-tail.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 ledger 哈希链：尾行损坏 fail-closed、未哈希尾行拒绝扩展、
+//   verify/readTailHash、截断恢复与并发 append 一致性。
+//   不测：跨进程 ledger 复制或远程备份。
+//
+// 【运行原理速读】
+//   initRuntime 后 appendLedger，人为破坏 ledger.jsonl 尾行，
+//   断言后续 append 抛 ledger_tail_corrupt 且链状态可验证。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { appendFile, mkdir, mkdtemp, readFile, rm, stat, truncate, writeFile } from "node:fs/promises";
 import os from "node:os";

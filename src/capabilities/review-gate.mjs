@@ -1,3 +1,17 @@
+// =============================================================================
+// 文件名称：review-gate.mjs
+// 所属模块：capabilities
+// 作用说明：
+//   聚合确定性 review lane（职责审计、项目审查、scope、successCriteria、
+//   质量门、契约治理、LLM review 等），产出 review_gate evidence。
+//
+// 【运行原理速读】
+//   · 何时执行？verify 与 scope 通过后，acceptance proof 之前。
+//   · 做了什么？review/standards 命令 → quality gates → 独立审计 → 构建 lanes
+//     → 可选 LLM review → buildReviewFindingBundle。
+//   · 缺了它会怎样？任务可绕过多维复核直接声称完成。
+// =============================================================================
+
 import { runProjectReview } from "./project-review.mjs";
 import { runResponsibilityAudit } from "./responsibility-audit.mjs";
 import { runContractGovernanceReview } from "./contract-governance.mjs";
@@ -17,6 +31,13 @@ import { runQualityGates } from "./code-intel.mjs";
 import { isTrivialCommand } from "../infra/task-predicates.mjs";
 import { uniqueStrings } from "../infra/text-utils.mjs";
 
+/**
+ * 运行完整 review gate，返回 kind=review_gate 的多 lane 结果。
+ * @param {string} rootDir 控制根
+ * @param {object} task 任务对象
+ * @param {object} [evidence] 已有 worker/verify/scope 等 evidence
+ * @param {object} [options] executionRoot 覆盖工作目录
+ */
 export async function runReviewGate(rootDir, task, evidence = {}, options = {}) {
   const executionRoot = options.executionRoot || rootDir;
   const { config } = await loadWildArrangeConfig(rootDir);

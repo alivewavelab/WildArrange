@@ -1,3 +1,29 @@
+// =============================================================================
+// 文件名称：acceptance-proof.mjs
+// 所属模块：capabilities
+// 作用说明：
+//   汇总任务完成所需的全部门禁证据（worker、verifier、scope、review、
+//   successCriteria、delivery commit 等），生成可审计的 acceptance proof
+//   JSON/Markdown 报告，并可选写入 ledger。
+//
+// 【运行原理速读】
+//   可以把它想成「任务毕业的最终成绩单」：
+//
+//   · 何时执行？
+//     交付流水线在 review/verify/scope 均就绪后调用 writeAcceptanceProof。
+//
+//   · 它具体做了什么？
+//     ① 收集各 gate 最新 evidence；② buildAcceptanceProof 逐项 proofCheck；
+//     ③ 写出 JSON + Markdown；④ 记录 ledger 事件。
+//
+//   · 和其他部分的关系？
+//     依赖 project-review、responsibility-contract、gate-arming；被 gateway
+//     的 acceptance-proof 能力调用；与 checkpoint 共享 delivery SHA 绑定。
+//
+//   · 缺了它会怎样？
+//     任务无法宣称 completed；仅有 worker PASS 不足以关闭任务。
+// =============================================================================
+
 import { hasAcceptedProjectReview, prepareProjectReview } from "./project-review.mjs";
 import { hasAcceptedResponsibilityAudit } from "../infra/responsibility-contract.mjs";
 import { writeFile } from "node:fs/promises";
@@ -14,6 +40,15 @@ import { criteriaStatus } from "../infra/success-criteria.mjs";
 import { hasRealReviewLane } from "../infra/gate-arming.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 
+/**
+ * 构建 acceptance proof、写入 JSON/Markdown 报告，并可选追加 ledger 事件。
+ * @param {string} rootDir 项目根目录
+ * @param {string} planId 计划 ID
+ * @param {object} task 任务对象（含 evidence、verify_commands 等）
+ * @param {object} [evidence] 各 gate 结果与 delivery 上下文
+ * @param {object} [options] recordLedger 为 false 时不写 ledger
+ * @returns {Promise<object>} 完整 proof 对象（含 pass、checks、evidenceRefs）
+ */
 export async function writeAcceptanceProof(rootDir, planId, task, evidence = {}, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const { config } = await loadWildArrangeConfig(rootDir);
@@ -43,6 +78,14 @@ export async function writeAcceptanceProof(rootDir, planId, task, evidence = {},
   return proof;
 }
 
+/**
+ * 纯函数：根据任务与 evidence 组装全部 proofCheck 列表与 pass 判定。
+ * @param {string} planId 计划 ID
+ * @param {object} task 任务对象
+ * @param {object} [evidence] gate 结果与 projectReviewContextValid 等
+ * @param {object|null} [config] WildArrange 配置（审查 lane 判定用）
+ * @returns {object} acceptance_proof 结构体
+ */
 export function buildAcceptanceProof(planId, task, evidence = {}, config = null) {
   const verifyResult = evidence.verifyResult || task.last_verify_result || latestEvidence(task, "verifier");
   const scopeResult = evidence.scopeResult || task.last_scope_result || latestEvidence(task, "scope_guard");

@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：command-runner.mjs
+// 所属模块：infra
+// 作用说明：
+//   共享 shell 命令执行原语；所有 gate 执行命令前经 command-safety 评估。
+//
+// 【运行原理速读】
+//   runCommand/runCommandFile → evaluateCommandSafety → spawn → 超时杀进程树 → 输出截断。
+// =============================================================================
 /**
  * Command execution primitive shared by every gate that needs to run a
  * shell command (worker, verify, review, standards, ad-hoc CLI calls).
@@ -11,10 +20,16 @@ const DEFAULT_COMMAND_OUTPUT_MAX_CHARS = 200_000;
 const COMMAND_SIGKILL_GRACE_MS = 2_000;
 const WINDOWS_TERMINATION_CONFIRM_MS = 2_000;
 
+/**
+ * runCommand：本模块对外API。
+ */
 export function runCommand(command, cwd, timeoutMs = 120_000, options = {}) {
   return runProcess(command, [], command, cwd, timeoutMs, { ...options, shell: true });
 }
 
+/**
+ * runCommandFile：本模块对外API。
+ */
 export function runCommandFile(file, args, cwd, timeoutMs = 120_000, options = {}) {
   if (typeof file !== "string" || file.trim().length === 0) {
     throw new TypeError("command file is required");
@@ -30,6 +45,9 @@ export function runCommandFile(file, args, cwd, timeoutMs = 120_000, options = {
   });
 }
 
+/**
+ * quoteShellArgument：本模块对外API。
+ */
 export function quoteShellArgument(value, platform = process.platform) {
   const text = String(value);
   if (platform === "win32") return `"${text.replaceAll('"', '""')}"`;

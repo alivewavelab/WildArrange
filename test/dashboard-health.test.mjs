@@ -1,3 +1,15 @@
+// =============================================================================
+// 文件名称：dashboard-health.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 dashboard /health 端点返回真实 config baseline 与 ledger 检查结果。
+//   不测：其他 dashboard 面板或 adoption 写入路径。
+//
+// 【运行原理速读】
+//   初始化临时 runtime 并启动 dashboard，请求 health JSON，
+//   断言 config/ledger 相关字段非占位且与本地状态一致。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { appendFile, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";

@@ -1,3 +1,17 @@
+// =============================================================================
+// 文件名称：scope-guard.mjs
+// 所属模块：capabilities
+// 作用说明：
+//   校验 git 变更路径是否落在 task.writable_paths 内，并检测符号链接/
+//   realpath 逃逸。结果写入 ledger，不修改工作区文件。
+//
+// 【运行原理速读】
+//   · 何时执行？PreToolUse、交付前 review，或 gateway scope 能力调用。
+//   · 做了什么？收集 changedPaths → 与 writable_paths 匹配 → realpath 防逃逸
+//     → 返回 pass/fail/inconclusive 与 deniedPaths。
+//   · 缺了它会怎样？Agent 可越界改文件而仍被当作合法完成。
+// =============================================================================
+
 import { realpath } from "node:fs/promises";
 import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
@@ -6,6 +20,12 @@ import { collectGitChangedPaths } from "../infra/git-diff.mjs";
 import { normalizeRelativePath, pathAllowed } from "../infra/path-match.mjs";
 import { loadTaskState } from "../infra/task-state-store.mjs";
 
+/**
+ * 对指定任务执行范围守卫，比对变更路径与 writable_paths。
+ * @param {string} rootDir 控制根（ledger 写入位置）
+ * @param {object} [options] taskId、changedPaths、executionRoot、unavailableReason
+ * @returns {Promise<object>} status 为 pass|fail|inconclusive
+ */
 export async function scopeGuard(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const taskState = await loadTaskState(rootDir);

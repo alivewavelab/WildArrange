@@ -1,3 +1,22 @@
+// =============================================================================
+// 文件名称：handoff.mjs
+// 所属模块：orchestration
+// 作用说明：
+//   跨设备任务所有权交接：prepare → push → accept → 可选 takeover。
+//   基于 coordination packet 与 tree fingerprint，禁止 force push 与自动过期接管。
+//
+// 【运行原理速读】
+//   可以把它想成「把写权限正式交给另一台机器」：
+//
+//   · 何时执行？
+//     开发者显式调用 handoff 各子命令。
+//
+//   · 做了什么？
+//     准备交接包 → 非 force push → 目标设备 accept → 旧设备 fail-closed。
+//
+//   · 约束？
+//     push/accept 远端成功本地失败须可幂等补账；takeover 须显式理由。
+// =============================================================================
 import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
 import {
@@ -37,6 +56,9 @@ import {
   taskContract,
 } from "./remote-ownership.mjs";
 
+// --- prepare ---
+
+/** 准备任务 handoff：校验 owner、tree fingerprint 并写入待推送交接状态。 */
 export async function prepareTaskHandoff(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `handoff-prepare:${options.taskId || "unknown"}`, () =>
     prepareTaskHandoffUnlocked(rootDir, options));
@@ -150,6 +172,9 @@ async function prepareTaskHandoffUnlocked(rootDir, options = {}) {
   return record;
 }
 
+// --- push ---
+
+/** 将 handoff commit 非 force push 到远端 task branch。 */
 export async function pushTaskHandoff(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `handoff-push:${options.taskId || "unknown"}`, () =>
     pushTaskHandoffUnlocked(rootDir, options));
@@ -233,6 +258,9 @@ async function pushTaskHandoffUnlocked(rootDir, options = {}) {
   return pushedRecord;
 }
 
+// --- accept ---
+
+/** 目标设备接受 handoff，更新 coordination 为 accepted 写 owner。 */
 export async function acceptTaskHandoff(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `handoff-accept:${options.taskId || "unknown"}`, () =>
     acceptTaskHandoffUnlocked(rootDir, options));
@@ -385,6 +413,9 @@ async function acceptTaskHandoffUnlocked(rootDir, options = {}) {
   return { ...record, task: restored };
 }
 
+// --- takeover ---
+
+/** 显式 takeover 远端任务所有权（须理由，无自动过期）。 */
 export async function takeoverTaskOwnership(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `handoff-takeover:${options.taskId || "unknown"}`, () =>
     takeoverTaskOwnershipUnlocked(rootDir, options));

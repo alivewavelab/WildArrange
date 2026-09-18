@@ -1,21 +1,22 @@
-/**
- * Parallel-agent admission transaction: claiming a task on behalf of a run,
- * applying the child's files/patch into the shared workspace, running the
- * shared delivery pipeline, and rolling back / releasing on failure.
- *
- * Extracted from parallel-runtime.mjs (cross-review P2, round 7,
- * 2026-07-21) — that file kept growing past the 1000-line budget while
- * mixing spawn/collect/index concerns with this transaction.
- *
- * Concurrency model (cross-review P0, round 7, 2026-07-21): every
- * `withTaskStateLock` call in the codebase serializes on ONE lock file
- * (`.wildarrange/team/tasks.lock`), and the linear `wildarrange run` holds it for its
- * whole worker+gates cycle. Admission therefore holds that same lock for
- * the entire apply -> gates -> commit/rollback critical section, so two
- * admissions (same or different tasks, overlapping paths or not) and a
- * concurrent linear run can never interleave their workspace writes with
- * each other's gate runs.
- */
+// =============================================================================
+// 文件名称：admission.mjs
+// 所属模块：orchestration
+// 作用说明：
+//   并行 agent admission 事务：claim → pre-image → apply → gates →
+//   delivery commit/push 或 rollback → checkpoint → release。自 parallel-runtime 拆分。
+//
+// 【运行原理速读】
+//   可以把它想成「子 agent 成果入主工作区的海关」：
+//
+//   · 何时执行？
+//     parallel admit 命令或 awaiting_user_acceptance 后人类触发。
+//
+//   · 做了什么？
+//     任务锁内 claim → 写回滚计划 → apply → runDeliveryPipeline → 完成或 recovery。
+//
+//   · 约束？
+//     与 linear run 共用 tasks.lock；apply 前必须完成 claim；push 成功后禁止回滚释放。
+// =============================================================================
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
@@ -72,6 +73,10 @@ import { readChangeRequest } from "./change-governance.mjs";
 import { persistTaskState } from "./task-board.mjs";
 import { assertCurrentTaskOwnership } from "./remote-ownership.mjs";
 
+/**
+ * 并行 agent 结果 admission 主事务：claim → apply → gates → commit/rollback。
+ * @returns {Promise<object>} completed | recovery_required | revalidation_required 等
+ */
 export async function admitParallelAgentResult(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   if (!options.runId) throw new Error("parallel admit requires runId");
@@ -92,6 +97,7 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
     force: ["claimed", "accepted"].includes(guardTask?.coordination?.status),
   });
 
+  // --- claim 阶段 ---
   // Phase 1 — claim. Status adjudication, writable-paths precheck, the task
   // claim (verifying + admission evidence) and the started ledger event all
   // happen under one task-state lock, BEFORE any workspace file is touched
@@ -376,6 +382,7 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
       throw new Error(`parallel admission cannot resume ${options.taskId}: persisted rollback plan is missing; claim kept for manual recovery`);
     }
   } else {
+    // --- apply 阶段 ---
     // Phase 2 — apply the child's changes. ANY failure in here rolls the
     // workspace back to its pre-admission content before releasing the
     // claim. If rollback itself fails, ownership is intentionally retained
@@ -443,6 +450,7 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
     await advanceClaimPhaseWithinLock(rootDir, options.taskId, options.runId, "finalizing", appliedPaths);
   }
 
+  // --- gates 与完成 ---
   // Phase 3 — gates through the shared delivery pipeline. A crash anywhere
   // in here (review report, completion ledger, wisdom, digest, canonical
   // persist) must NOT roll the workspace back: the artifact may be good and
@@ -826,6 +834,9 @@ async function hasVerifiedRunCompletionEvent(rootDir, runId, planId, taskId) {
   );
 }
 
+// --- 辅助导出 ---
+
+/** 用 git diff/ls-files 收集 admission 后工作区实际变更路径。 */
 export async function collectActualAdmissionPaths(rootDir, fallbackPaths) {
   const result = await runCommandFile("git", ["-C", rootDir, "diff", "--name-only", "--", ".", ":!.wildarrange"], rootDir, 30_000);
   if (result.exitCode !== 0) return fallbackPaths;
@@ -840,6 +851,7 @@ export async function collectActualAdmissionPaths(rootDir, fallbackPaths) {
   return paths.length > 0 ? [...new Set(paths)] : fallbackPaths;
 }
 
+/** 读取 agent-runs 下某 run/task 的 result.json。 */
 export async function readParallelAgentResult(rootDir, runId, taskId) {
   const directPath = resolveWildArrangePath(rootDir, "agent-runs", runId, taskId, "result.json");
   const result = await readJson(directPath, null);
@@ -847,6 +859,7 @@ export async function readParallelAgentResult(rootDir, runId, taskId) {
   return result;
 }
 
+/** 规范化 parallel result.files 为 { path, content } 列表。 */
 export function normalizeProposedFiles(files) {
   if (!Array.isArray(files)) return [];
   return files.map((file, index) => {
@@ -861,6 +874,7 @@ export function normalizeProposedFiles(files) {
   });
 }
 
+/** normalizeProposedFiles 的安全版：失败时返回空数组。 */
 export function normalizeProposedFilesOrEmpty(files) {
   try {
     return normalizeProposedFiles(files);

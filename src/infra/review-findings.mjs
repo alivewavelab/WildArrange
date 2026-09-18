@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：review-findings.mjs
+// 所属模块：infra
+// 作用说明：
+//   确定性 lane/comment/LLM 审查 findings 归一化为 review_finding_bundle。
+//
+// 【运行原理速读】
+//   buildReviewFindingBundle → validateReviewFinding 校验 severity/evidence/fix。
+// =============================================================================
 import { nowIso } from "./runtime-store.mjs";
 
 const FAILING_LANE_SEVERITY = {
@@ -14,6 +23,9 @@ const FAILING_LANE_SEVERITY = {
   project_rules_context: "P2",
 };
 
+/**
+ * buildReviewFindingBundle：本模块对外API。
+ */
 export function buildReviewFindingBundle({ lanes = [], qualityResults = {}, llmReviews = [] } = {}) {
   const findings = [];
   const testingGaps = [];
@@ -88,6 +100,9 @@ export function buildReviewFindingBundle({ lanes = [], qualityResults = {}, llmR
   };
 }
 
+/**
+ * validateReviewFinding：本模块对外API。
+ */
 export function validateReviewFinding(finding, validatorName = "schema_validator") {
   const missing = [];
   if (!finding.title || typeof finding.title !== "string") missing.push("title");

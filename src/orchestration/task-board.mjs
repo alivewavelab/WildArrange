@@ -1,3 +1,19 @@
+// =============================================================================
+// 文件名称：task-board.mjs
+// 所属模块：orchestration
+// 作用说明：
+//   团队任务板：任务 CRUD、claim、证据记录、persistTaskState、
+//   outbox/消息、归档删除与 ledger 迁移。权威 taskState 写入入口之一。
+//
+// 【运行原理速读】
+//   可以把它想成「任务看板的唯一写后端」：
+//
+//   · 何时执行？
+//     task CLI、linear/parallel runtime、admission 持久化时。
+//
+//   · 做了什么？
+//     读改 taskState → transactWithLedger → 写 JSON → 可选 tasks.md 镜像。
+// =============================================================================
 import { responsibilityDigest } from "../infra/responsibility-contract.mjs";
 import { appendFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -43,6 +59,9 @@ import {
 } from "./plan-state.mjs";
 import { coordinateTaskClaim } from "./remote-ownership.mjs";
 
+// --- 查询 ---
+
+/** 列出团队任务（当前计划或 --all 跨计划 ledger 视图）。 */
 export async function listTeamTasks(rootDir, options = {}) {
   const ledger = await loadTaskLedger(rootDir);
   if (!ledger) return { planId: null, activePlanId: null, plans: [], total: 0, tasks: [] };
@@ -76,6 +95,7 @@ export async function listTeamTasks(rootDir, options = {}) {
   };
 }
 
+/** 按 taskId 获取单条任务详情。 */
 export async function getTeamTask(rootDir, taskId, options = {}) {
   const ledger = await loadTaskLedger(rootDir);
   if (!ledger) throw new Error("no task ledger found; create or import a task first");
@@ -85,6 +105,7 @@ export async function getTeamTask(rootDir, taskId, options = {}) {
   return { planId: task.planId, task };
 }
 
+/** 向任务 evidence 轨迹追加一条 gate/worker 证据条目。 */
 export async function recordTaskEvidence(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `evidence-record:${options.taskId || "unknown"}`, async () => {
     await ensureWildArrangeDirs(rootDir);
@@ -118,6 +139,9 @@ export async function recordTaskEvidence(rootDir, options = {}) {
   });
 }
 
+// --- claim 与创建 ---
+
+/** claim 任务供 worker 执行，含 coordination claim 与 blockedBy 检查。 */
 export async function claimTeamTask(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `team-task-claim:${options.taskId || "next"}`, () => claimTeamTaskUnlocked(rootDir, options));
 }
@@ -158,6 +182,7 @@ async function claimTeamTaskUnlocked(rootDir, options = {}) {
   return { planId: taskState.planId, task };
 }
 
+/** 返回尚未 completed 的 blockedBy 依赖 taskId 列表。 */
 export function unresolvedTaskBlockers(task, tasks) {
   return (task.blockedBy || []).filter((blockerId) => {
     const blocker = tasks.find((candidate) => candidate.id === blockerId);
@@ -165,6 +190,7 @@ export function unresolvedTaskBlockers(task, tasks) {
   });
 }
 
+/** 创建 draft 团队任务并写入 taskState。 */
 export async function createTeamTask(rootDir, rawTask) {
   return withTaskStateLock(rootDir, "team-task-create", () => createTeamTaskUnlocked(rootDir, rawTask));
 }
@@ -205,6 +231,7 @@ async function createTeamTaskUnlocked(rootDir, rawTask) {
   return { planId: taskState.planId, task: normalizedTask };
 }
 
+/** 将 draft 任务 ready：合并详情 JSON 并校验 validateTaskReady。 */
 export async function readyTeamTask(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `team-task-ready:${options.taskId || "unknown"}`, async () => {
     const ledger = await loadTaskLedger(rootDir);
@@ -239,10 +266,14 @@ export async function readyTeamTask(rootDir, options = {}) {
   });
 }
 
+// ---  runnable 与持久化 ---
+
+/** 在任务列表中找第一条 isTaskRunnable 的任务。 */
 export function findRunnableTask(tasks) {
   return tasks.find((task) => isTaskRunnable(task, tasks)) || null;
 }
 
+/** 判断任务是否 pending 且依赖已 completed。 */
 export function isTaskRunnable(task, tasks) {
   // A pending task holding a parallel run or admission claim is owned by that
   // run; both claims are released (set to null) when the run closes or the
@@ -253,6 +284,7 @@ export function isTaskRunnable(task, tasks) {
     && unresolvedTaskBlockers(task, tasks).length === 0;
 }
 
+/** 持久化权威 taskState 并刷新 tasks.md 等派生产物。 */
 export async function persistTaskState(rootDir, taskState) {
   const at = nowIso();
   taskState.updatedAt = at;
@@ -321,6 +353,9 @@ export async function persistTaskState(rootDir, taskState) {
   await writeJsonAtomic(resolveWildArrangePath(rootDir, "team", "tasks.json"), nextLedger);
 }
 
+// --- 迁移与归档 ---
+
+/** 迁移旧版 task ledger 格式到当前 taskState 结构。 */
 export async function migrateTaskLedgerState(rootDir) {
   return withTaskStateLock(rootDir, "task-ledger-migrate", async () => {
     await ensureWildArrangeDirs(rootDir);
@@ -387,6 +422,7 @@ export async function migrateTaskLedgerState(rootDir) {
   });
 }
 
+/** 归档任务证据并删除 taskState 条目（需 backupId）。 */
 export async function archiveAndDeleteTeamTask(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `team-task-archive-delete:${options.taskId || "unknown"}`, async () => {
     const ledger = await loadTaskLedger(rootDir);
@@ -806,6 +842,9 @@ async function ensureTaskCreationState(rootDir) {
   return { version: STATE_VERSION, planId, tasks: [], updatedAt: at };
 }
 
+// --- 消息与 outbox ---
+
+/** 将 worker 结果写入任务 outbox 供下游 agent 消费。 */
 export async function writeOutbox(rootDir, task, workerResult) {
   const outboxPath = resolveWildArrangePath(rootDir, "team", "outbox", `${task.id}-${Date.now()}.json`);
   await writeJsonAtomic(outboxPath, {
@@ -820,6 +859,7 @@ export async function writeOutbox(rootDir, task, workerResult) {
   });
 }
 
+/** 发送团队消息并记入 messages 目录。 */
 export async function sendTeamMessage(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const to = normalizeAgentName(options.to);
@@ -851,6 +891,7 @@ export async function sendTeamMessage(rootDir, options = {}) {
   };
 }
 
+/** 规范化 agent 显示名为 registry key。 */
 export function normalizeAgentName(value) {
   return normalizeAgentKey(value);
 }
@@ -860,6 +901,7 @@ async function appendTeamMessageIndex(rootDir, message) {
   await appendFile(resolveWildArrangePath(rootDir, "team", "messages.md"), line, "utf8");
 }
 
+/** 列出团队消息历史。 */
 export async function listTeamMessages(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const agent = normalizeAgentName(options.agent || options.to);

@@ -1,16 +1,31 @@
-/**
- * Gate arming floor ("门未武装" 黄灯).
- *
- * Default configs leave the review gate tautological and every quality gate
- * off, which would produce a stable stream of green lights worth nothing.
- * This module evaluates whether the gates are actually armed, so status can
- * show a persistent yellow lamp instead of green until they are. It is a
- * pure evaluation: it never writes config and never flips a gate by itself.
- */
+// =============================================================================
+// 文件名称：gate-arming.mjs
+// 所属模块：infra
+// 作用说明：
+//   门武装地板评估（「门未武装」黄灯）：默认配置下 review 可能同义反复、
+//   质量门全关，本模块纯评估 gates 是否真正武装，不写配置、不自动改门。
+//
+// 【运行原理速读】
+//   可以把它想成「验收仪表盘上的黄灯检测器」：
+//
+//   · 何时执行？
+//     status/dashboard 展示、doctor 检查活跃任务的门配置是否有效。
+//
+//   · 它做了什么？
+//     ① 扫 verify 缺失/trivial ② review 无独立 lane ③ qualityGates 无 required 项。
+//
+//   · 缺了它会怎样？
+//     全绿假象：verify 全是 true、review 复读 worker 结果，交付无真实信号。
+// =============================================================================
 import { isTrivialCommand } from "./task-predicates.mjs";
 
 const ACTIVE_TASK_STATUSES = new Set(["pending", "in_progress", "verifying", "failed", "review_blocked"]);
 
+/**
+ * 评估当前配置与活跃任务的门是否已真正武装。
+ * @param {{ config?: object, tasks?: object[] }} [params]
+ * @returns {{ armed: boolean, issues: object[] }}
+ */
 export function evaluateGateArming({ config, tasks = [] } = {}) {
   const issues = [];
   const activeTasks = (tasks || []).filter((task) => ACTIVE_TASK_STATUSES.has(task?.status));
@@ -55,6 +70,12 @@ export function evaluateGateArming({ config, tasks = [] } = {}) {
   return { armed: issues.length === 0, issues };
 }
 
+/**
+ * 判断任务是否具备独立于 worker/verify 的 review 信号 lane。
+ * @param {object|null|undefined} task 任务对象
+ * @param {object|null|undefined} config 运行时配置
+ * @returns {boolean}
+ */
 export function hasRealReviewLane(task, config) {
   if (task?.responsibilityChanges && typeof config?.review?.responsibility?.command === "string" && !isTrivialCommand(config.review.responsibility.command)) return true;
   if ((task?.review_commands || []).some((command) => !isTrivialCommand(command))) return true;

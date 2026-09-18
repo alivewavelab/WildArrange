@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：memory-digest.mjs
+// 所属模块：infra
+// 作用说明：
+//   任务/路由/ledger 进度快照写入 memory/digests 供 Archivist 消费。
+//
+// 【运行原理速读】
+//   buildMemoryDigest 聚合 → writeJsonAtomic + markdown → digest-index 更新。
+// =============================================================================
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendLedger } from "./ledger.mjs";
@@ -14,6 +23,9 @@ import {
 } from "./runtime-store.mjs";
 import { loadTaskState } from "./task-state-store.mjs";
 
+/**
+ * writeMemoryDigest：本模块对外异步 API。
+ */
 export async function writeMemoryDigest(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const digest = await buildMemoryDigest(rootDir, options);
@@ -36,6 +48,9 @@ export async function writeMemoryDigest(rootDir, options = {}) {
   return digest;
 }
 
+/**
+ * buildMemoryDigest：本模块对外异步 API。
+ */
 export async function buildMemoryDigest(rootDir, options = {}) {
   const taskState = await loadTaskState(rootDir).catch(() => null);
   const task = options.task || (options.taskId && taskState?.tasks?.find((candidate) => candidate.id === options.taskId)) || null;

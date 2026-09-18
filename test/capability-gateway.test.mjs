@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：capability-gateway.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 capability gateway：未知能力拒绝、业务 error.code 保留、
+//   注册表暴露、command 统一 envelope、command-safety 拦截、recovery 证据。
+//   不测：各 capability 内部业务逻辑的深度场景（由专项测试覆盖）。
+//
+// 【运行原理速读】
+//   通过 invokeCapability 调用注册/未注册能力，检查 envelope 字段、
+//   duration 与 capabilityErrorEnvelope 的 code/evidence 传递。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";

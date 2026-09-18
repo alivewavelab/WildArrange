@@ -1,5 +1,21 @@
+// =============================================================================
+// 文件名称：default-config.mjs
+// 所属模块：infra
+// 作用说明：
+//   wildarrange.config.json 内置默认值与 DEFAULT_RUNTIME_NAME。
+//
+// 【运行原理速读】
+//   DEFAULT_WILDARRANGE_CONFIG 深拷贝合并 → 新项目 init 起点。
+// =============================================================================
+/**
+ * 默认 Prompt Pack / runtime 名称。
+ */
 export const DEFAULT_RUNTIME_NAME = "wildarrange-linear";
 
+/**
+ * wildarrange.config.json 完整默认配置对象。
+ */
+// --- 默认配置对象 ---
 export const DEFAULT_WILDARRANGE_CONFIG = {
   version: 1,
   runtime: DEFAULT_RUNTIME_NAME,

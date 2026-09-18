@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：verification-cards.mjs
+// 所属模块：infra
+// 作用说明：
+//   验证卡片 UI/CLI 投影：human-readable 验证状态与下一步。
+//
+// 【运行原理速读】
+//   buildVerificationCards → 聚合 gate 结果 → markdown/html 片段。
+// =============================================================================
 /**
  * Adoption card construction for discovered verification assets.
  * Pure builders over scan facts; no filesystem or Git access.
@@ -6,11 +15,23 @@ import path from "node:path";
 import { normalizeRelativePath } from "./path-match.mjs";
 import { hashContent } from "./runtime-store.mjs";
 
+/**
+ * CARD_ACTIONS：本模块对外API。
+ */
 export const CARD_ACTIONS = Object.freeze(["adopt", "change", "merge", "archive", "delete", "defer"]);
+/**
+ * 需人工确认的危险 adoption 动作集合。
+ */
 export const DANGEROUS_ACTIONS = Object.freeze(["archive", "merge", "delete"]);
+/**
+ * 验证卡片 JSON schema 版本。
+ */
 export const CARD_SCHEMA_VERSION = 1;
 const ACTIVE_CONSUMER_GRADES = new Set(["direct", "runner", "registered"]);
 const OFFICIAL_NPM_SHORTCUTS = new Set(["test", "start", "stop", "restart", "lint"]);
+/**
+ * SUCCESSOR_MARKER_RE：本模块对外API。
+ */
 export const SUCCESSOR_MARKER_RE = /successor|superseded by|replaced by|归档至|历史方案/i;
 const CURRENT_SOURCE_RES = [
   /(^|\/)AGENTS\.md$/i,
@@ -22,25 +43,48 @@ const CURRENT_SOURCE_RES = [
   /(^|\/)\.cursor\/skills\//,
 ];
 
+/**
+ * STATIC_SCRIPT_RE：本模块对外API。
+ */
 export const STATIC_SCRIPT_RE = /^(lint|typecheck|types|format|fmt|eslint|tsc|check)([:_-]|$)/i;
+/**
+ * 识别 review/audit 类 npm script 的正则。
+ */
 export const REVIEW_SCRIPT_RE = /^(review|audit|inspect)([:_-]|$)/i;
+/**
+ * 识别 test/verify 类 npm script 的正则。
+ */
 export const TEST_SCRIPT_RE = /^(test|verify|coverage|spec)([:_-]|$)/i;
 const DYNAMIC_HINT_RE = /\bimport\s*\(|\beval\s*\(|\bnew Function\b|\brequire\s*\(\s*[^'"`]/;
 
+/**
+ * fingerprintCard：本模块对外API。
+ */
+// --- 卡片指纹与危险动作 ---
 export function fingerprintCard(card) {
   return hashContent(stableStringify(cardFingerprintPayload(card)));
 }
 
+/**
+ * cardAllowsDangerousAction：本模块对外API。
+ */
 export function cardAllowsDangerousAction(card) {
   const unknown = card.consumers?.some((consumer) => consumer.grade === "unknown") || card.confidence === "unknown";
   return !unknown;
 }
 
+/**
+ * cardFingerprintPayload：本模块对外API。
+ */
 export function cardFingerprintPayload(card) {
   const { status: _status, ...rest } = card;
   return rest;
 }
 
+/**
+ * buildAdoptionCards：本模块对外API。
+ */
+// --- 卡片构建 ---
 export function buildAdoptionCards(assets, options = {}) {
   const cards = [];
   const packageFacts = options.packageFacts || { scripts: [], packages: [] };
@@ -319,6 +363,9 @@ function assignCardIds(cards) {
   });
 }
 
+/**
+ * isCurrentSourceOfTruth：本模块对外API。
+ */
 export function isCurrentSourceOfTruth(relativePath) {
   return CURRENT_SOURCE_RES.some((pattern) => pattern.test(relativePath));
 }
@@ -353,6 +400,7 @@ function findSuccessor(relativePath, head, fileSet) {
   return null;
 }
 
+// --- 归档与脚本推断 ---
 function cardForArchive(asset, ctx = {}) {
   const missing = [];
   if (isCurrentSourceOfTruth(asset.path)) {
@@ -522,6 +570,10 @@ function configuredLocator(config = {}) {
   return locator.registryPath && locator.bootstrapPath && locator.inventoryPath ? locator : null;
 }
 
+/**
+ * uniqueConsumers：本模块对外API。
+ */
+// --- 消费者与序列化 ---
 export function uniqueConsumers(consumers) {
   const seen = new Set();
   const result = [];
@@ -534,6 +586,9 @@ export function uniqueConsumers(consumers) {
   return result;
 }
 
+/**
+ * indexTextByPath：本模块对外API。
+ */
 export function indexTextByPath(textIndex = {}) {
   const textByPath = new Map();
   for (const hit of [...(textIndex.registered || []), ...(textIndex.clues || [])]) {
@@ -546,6 +601,9 @@ function normalizeCommand(command) {
   return String(command || "").trim().replace(/\s+/g, " ");
 }
 
+/**
+ * stableStringify：本模块对外API。
+ */
 export function stableStringify(value) {
   if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(",")}]`;
   if (value && typeof value === "object") {

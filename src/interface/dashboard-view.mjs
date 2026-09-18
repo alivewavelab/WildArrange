@@ -1,3 +1,23 @@
+// =============================================================================
+// 文件名称：dashboard-view.mjs
+// 所属模块：interface
+// 作用说明：
+//   生成本地 Dashboard 单页 HTML（样式、布局、内嵌客户端脚本）。
+//   通过 fetch /api/* 与 dashboard.mjs 通信；不持有服务端状态。
+//
+// 【运行原理速读】
+//   可以把它想成「驾驶舱的前端壳」：
+//
+//   · 谁调用？
+//     dashboard.mjs 在 GET / 时 sendHtml(renderDashboardHtml())。
+//
+//   · 它做了什么？
+//     ① 拼接五视图（总览/工单/复盘/日志/治理）② 内嵌 loadState 等客户端逻辑
+//     ③ 嵌入 adoption-panel 与 dashboard-panels 的 HTML/JS 片段。
+//
+//   · 约束？
+//     模板字符串内的 JS 不能含反引号与 ${}（除模板插值）；token 存 sessionStorage。
+// =============================================================================
 import { PRODUCT_NAME } from "../infra/runtime-config.mjs";
 import {
   PANELS_SCRIPT,
@@ -9,6 +29,7 @@ import {
   ADOPTION_VIEW_HTML,
 } from "./adoption-panel.mjs";
 
+/** 返回完整 Dashboard 单页 HTML 字符串（含 CSS 与内嵌 script）。 */
 export function renderDashboardHtml() {
   return `<!doctype html>
 <html lang="zh-CN">
@@ -292,6 +313,7 @@ ${ADOPTION_VIEW_HTML}
     </div>
   </div>
   <script>
+    // --- 客户端引导：token 与 fetch 封装 ---
     const DASHBOARD_TOKEN_KEY = "wildarrange.dashboard.token";
     const el = (id) => document.getElementById(id);
     const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
@@ -344,6 +366,7 @@ ${ADOPTION_VIEW_HTML}
         step.classList.toggle("active", active);
       });
     }
+    // --- 总览状态加载与渲染 ---
     async function loadState() {
       const response = await dashboardFetch("/api/state", { cache: "no-store" });
       if (!response.ok) throw new Error(response.status === 401 ? "此页面未获得访问权限，请从项目所在设备重新打开 Dashboard" : "Dashboard state failed");
@@ -402,6 +425,7 @@ ${ADOPTION_VIEW_HTML}
         ? '<div class="workspace-empty">当前没有独立工作区。任务进入并行执行后，会在这里显示各自的目录与分支。</div>'
         : '<div class="workspace-list">' + workspaces.map((workspace) => '<div class="workspace-row"><div><span class="workspace-chip">' + esc(workspace.agent || "Agent") + '</span><strong style="display:block">' + esc(workspace.taskId) + '</strong></div><div><strong>' + esc(workspace.subject) + '</strong></div><code title="' + esc(workspace.branch || "") + '">' + esc(workspace.branch || "独立工作区（detached）") + '</code><code title="' + esc(workspace.workDir || "") + '">' + esc(workspace.workDir || "—") + '</code></div>').join("") + '</div>';
     }
+    // --- 运行日志与操作历史 ---
     function renderRunHistory(data) {
       latestRunData = data;
       const status = data.status || {};
@@ -442,6 +466,7 @@ ${ADOPTION_VIEW_HTML}
       if (/verify|review|scope|acceptance|checkpoint/.test(key)) return "quality";
       return "task";
     }
+    // --- 工单总账看板 ---
     function renderTaskLedger(ledger) {
       latestTaskLedger = ledger || { tasks: [], plans: [], counts: {}, typeCounts: {} };
       const tasks = latestTaskLedger.tasks || [];
@@ -487,6 +512,7 @@ ${ADOPTION_VIEW_HTML}
       if (item.event === "evidence_added") return "新增 " + String(item.count || 0) + " 条证据";
       return item.status ? "状态 " + item.status : "已记录";
     }
+    // --- 运行提醒面板 ---
     function renderAttention(attention) {
       if (!attention || attention.total === 0) {
         el("attentionTitle").textContent = "当前运行正常";
@@ -590,6 +616,7 @@ ${ADOPTION_VIEW_HTML}
         return null;
       }
     }
+    // --- 事件绑定与首屏加载 ---
     document.querySelectorAll(".nav [data-view], [data-jump]").forEach((button) => button.addEventListener("click", () => switchView(button.dataset.view || button.dataset.jump)));
     el("runFilters").addEventListener("click", (event) => {
       const button = event.target.closest("button[data-run-category]");

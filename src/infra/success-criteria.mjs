@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：success-criteria.mjs
+// 所属模块：infra
+// 作用说明：
+//   任务 successCriteria 纯状态机：统计与 verifier 证据绑定。
+//
+// 【运行原理速读】
+//   criteriaStatus → applyVerifierEvidenceToCriteria 按 verifierCommandRefs 匹配。
+// =============================================================================
 /**
  * Pure success-criteria state machine for a task. Needed by both
  * orchestration (task-board, delivery-pipeline) and capabilities
@@ -6,6 +15,9 @@
  */
 import { nowIso } from "./runtime-store.mjs";
 
+/**
+ * criteriaStatus：本模块对外API。
+ */
 export function criteriaStatus(task) {
   const criteria = task.successCriteria || [];
   if (criteria.length === 0) return { total: 0, passed: 0, failed: 0, pending: 0, pass: true };
@@ -15,6 +27,9 @@ export function criteriaStatus(task) {
   return { total: criteria.length, passed, failed, pending, pass: failed === 0 && pending === 0 && passed === criteria.length };
 }
 
+/**
+ * applyVerifierEvidenceToCriteria：本模块对外API。
+ */
 export function applyVerifierEvidenceToCriteria(task, verifyResult) {
   if (!verifyResult?.pass) return [];
   const recorded = [];

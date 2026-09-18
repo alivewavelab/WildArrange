@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：feature-design-skill.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 wildarrange-linear pack 中 clarify-feature-design：
+//   manifest/routes 注册、路由选 skill、SKILL 正文约束（对话内确认、禁止落盘草稿）。
+//   不测：运行时 host hook 或 plan import 流程。
+//
+// 【运行原理速读】
+//   读取 packs/wildarrange-linear 静态文件，
+//   调用 resolveRouteDecision 断言 skills 列表与 SKILL 必需段落。
+// =============================================================================
+
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";

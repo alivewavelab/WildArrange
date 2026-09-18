@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：transact-with-ledger.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 transactWithLedger 原子性：ledger outage 前 abort 无残留、
+//   persist 失败 ledger 仍审计、claimTeamTask/importPlan/recovery 同类不变式。
+//   不测：真实磁盘满或网络分区下的长期恢复。
+//
+// 【运行原理速读】
+//   模拟 ledger 写入失败或 persist 抛错，
+//   断言 authoritative state 未提交且 ledger 行可对照。
+// =============================================================================
+
 import test from "node:test";
 import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";

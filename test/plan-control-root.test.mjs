@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：plan-control-root.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 task worktree 计划 import 使用 control root 且仍属 pre-plan 允许；
+//   带 foreign control root 的 shell 命令被拒绝。
+//   不测：完整 linear delivery 或 parallel agent 批次。
+//
+// 【运行原理速读】
+//   创建 worktree 会话，importPlan 与 preToolUseGuard shell 命令，
+//   断言路径解析到安装 control root 且 foreign root deny。
+// =============================================================================
+
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import os from 'node:os';

@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：git-coordination.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 Git 协作：handoff 准备/推送/接管、parallel/linear 与 worktree、
+//   remote ownership 登记与 claim、memory digest、integration guard、delivery commit。
+//   不测：真实远程 push 或 GitHub PR 集成。
+//
+// 【运行原理速读】
+//   在临时 git 仓库初始化 runtime，执行 claim/handoff/worktree 序列，
+//   断言 HEAD、changed paths 与 coordination 状态一致。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";

@@ -1,3 +1,18 @@
+// =============================================================================
+// 文件名称：hooks.mjs
+// 所属模块：ai
+// 作用说明：
+//   WildArrange 宿主 Hook 主入口：按 SessionStart/UserPromptSubmit/PreToolUse 等
+//   事件收集 facts、解析注入点、渲染上下文并写入 ledger 与 decisions 投影。
+//   不负责具体路由表或范围校验实现，分别委托 routing.mjs 与 pre-tool-guard.mjs。
+//
+// 【运行原理速读】
+//   · 何时触发？ bin/wildarrange.mjs hook run 或 Cursor hooks.json 回调。
+//   · 做了什么？ ① 按事件分支收集 route/scope/archivist 等 facts ② resolveInjectionPoint
+//     ③ renderHookInjectionMarkdown ④ 写 sessions/hooks 报告与 emitDecision。
+//   · 与谁协作？ injection、routing、context、pre-tool-guard、hook-render、capabilities。
+// =============================================================================
+
 import path from "node:path";
 import {
   DEFAULT_EXECUTOR_AGENT,
@@ -34,6 +49,14 @@ import {
 } from "./pre-tool-guard.mjs";
 import { renderHookInjectionMarkdown, renderPreToolUseHookOutput } from "./hook-render.mjs";
 
+// --- 主 Hook 入口 ---
+
+/**
+ * 执行一次完整的 Hook 注入流程：收集 facts、解析注入点、渲染 output 并持久化。
+ * @param {string} rootDir 控制根目录（.wildarrange 所在项目根）
+ * @param {object} input 宿主 Hook 载荷（hook_event_name、prompt、tool_name 等）
+ * @returns {Promise<object>} kind=wildarrange_hook_injection 的结果对象
+ */
 export async function runInjectionHook(rootDir, input = {}) {
   const controlRoot = rootDir;
   const executionRoot = input.cwd && typeof input.cwd === "string" ? input.cwd : controlRoot;
@@ -219,6 +242,8 @@ export async function runInjectionHook(rootDir, input = {}) {
   return result;
 }
 
+// --- 决策投影与辅助 ---
+
 function summarizeHookToolInput(value) {
   if (!value || typeof value !== "object") return null;
   const redact = (item, key = "") => {
@@ -245,6 +270,8 @@ function hookDecisionCode(preflight, resultGate) {
   if (resultGate && resultGate.decision !== "pass") return "tool_result_gate";
   return null;
 }
+
+// --- 事件映射与 CLI 改写 ---
 
 function injectionPointForHookEvent(event) {
   if (event === "SessionStart") return "session_start";

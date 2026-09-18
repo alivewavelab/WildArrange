@@ -1,9 +1,21 @@
+// =============================================================================
+// 文件名称：git-worktree.mjs
+// 所属模块：infra
+// 作用说明：
+//   并行 Agent git worktree 隔离、patch 收集与 admission 应用。
+//
+// 【运行原理速读】
+//   prepareAgentWorktree → collectAgentWorktreePatch → applyAgentPatch 预检后 apply。
+// =============================================================================
 import { mkdir, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { runCommandFile } from "./command-runner.mjs";
 import { readGitHead, readGitTopLevel } from "./git-diff.mjs";
 import { uniqueStrings } from "./text-utils.mjs";
 
+/**
+ * prepareAgentWorktree：本模块对外异步 API。
+ */
 export async function prepareAgentWorktree(rootDir, taskRunDir, options = {}) {
   if (options.isolation !== "git-worktree") {
     return {
@@ -50,6 +62,9 @@ export async function prepareAgentWorktree(rootDir, taskRunDir, options = {}) {
   };
 }
 
+/**
+ * collectAgentWorktreePatch：本模块对外异步 API。
+ */
 export async function collectAgentWorktreePatch(rootDir, worktree, options = {}) {
   if (worktree?.isolation !== "git-worktree" || worktree.available !== true) {
     return null;
@@ -79,6 +94,9 @@ export async function collectAgentWorktreePatch(rootDir, worktree, options = {})
   };
 }
 
+/**
+ * captureWorkspaceSnapshot：本模块对外异步 API。
+ */
 export async function captureWorkspaceSnapshot(rootDir, options = {}) {
   const label = options.label || "pre-execute";
   const git = await gitAvailable(rootDir);
@@ -118,6 +136,9 @@ export async function captureWorkspaceSnapshot(rootDir, options = {}) {
   };
 }
 
+/**
+ * applyAgentPatch：本模块对外异步 API。
+ */
 export async function applyAgentPatch(rootDir, patch, options = {}) {
   if (!patch || typeof patch !== "string" || patch.trim().length === 0) {
     throw new Error("parallel admission patch is empty");
@@ -138,6 +159,9 @@ export async function applyAgentPatch(rootDir, patch, options = {}) {
   };
 }
 
+/**
+ * extractPatchPaths：本模块对外API。
+ */
 export function extractPatchPaths(patch) {
   return uniqueStrings(String(patch || "")
     .split(/\r?\n/)

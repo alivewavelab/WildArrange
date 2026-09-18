@@ -1,9 +1,16 @@
-/**
- * CLI 分层与文档生成物测试：
- * - 默认 --help 只显示核心六命令；--help --all 显示完整注册表；
- * - docs commands 从注册表物化 Markdown（单一事实源）；
- * - 注册表条目与真实 CLI 分发一致（help 全量输出覆盖注册表每条命令）。
- */
+// =============================================================================
+// 文件名称：cli-help.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 CLI 分层帮助：默认六核心命令、--help --all 全注册表、
+//   docs commands 物化 Markdown、renderHelp 子集关系。
+//   不测：各子命令业务语义或远程安装流程。
+//
+// 【运行原理速读】
+//   执行 wildarrange --help / --help --all / docs commands，
+//   对照 COMMAND_REGISTRY 与 CORE_COMMANDS 断言输出覆盖与分层。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";

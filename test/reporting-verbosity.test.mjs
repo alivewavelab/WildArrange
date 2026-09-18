@@ -1,8 +1,16 @@
-/**
- * 汇报分级测试：reporting.verbosity 控制 wildarrange run 结束时的门决策汇总。
- * verbose（默认）= stderr 输出逐门投影；normal = 一行；quiet = 只 JSON。
- * stdout 的 JSON 契约在任何级别下都不得改变。
- */
+// =============================================================================
+// 文件名称：reporting-verbosity.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 reporting.verbosity：verbose 默认 stderr 逐门汇总、normal 一行、quiet 无汇总；
+//   stdout JSON 契约各级不变；非法 verbosity 清晰报错。
+//   不测：门决策正确性（由 delivery 测试覆盖）。
+//
+// 【运行原理速读】
+//   临时目录导入 passing plan，spawn wildarrange run 带不同 verbosity，
+//   分割 stdout/stderr 断言行数与 JSON 结构一致。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";

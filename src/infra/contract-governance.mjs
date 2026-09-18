@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：contract-governance.mjs
+// 所属模块：infra
+// 作用说明：
+//   公开契约变更治理：breaking 检测、版本与审批投影。
+//
+// 【运行原理速读】
+//   scan contract surfaces → diff breaking → governance report。
+// =============================================================================
 import { mkdir, readFile, readdir, realpath, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { hashContent, nowIso, readJson, writeJsonAtomic } from "./runtime-store.mjs";
@@ -6,12 +15,21 @@ import { extractImportSpecifiers, maskSource } from "./dependency-graph.mjs";
 import { withFileLock } from "./file-lock.mjs";
 import { uniqueStrings } from "./text-utils.mjs";
 
+/**
+ * CONTRACT_SCHEMA_VERSION：本模块对外API。
+ */
 export const CONTRACT_SCHEMA_VERSION = 1;
+/**
+ * 契约发现器名称列表（如 tauri-ipc）。
+ */
 export const CONTRACT_DISCOVERERS = Object.freeze(["tauri-ipc"]);
 
 const SKIP_DIRS = new Set([".git", ".wildarrange", "node_modules", "target", "dist", "build", ".tmp"]);
 const CONTRACT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9:._/-]{0,199}$/;
 
+/**
+ * contractGovernancePaths：本模块对外API。
+ */
 export function contractGovernancePaths(rootDir) {
   const runtimeRoot = path.join(rootDir, ".wildarrange", "contracts");
   return {
@@ -25,6 +43,9 @@ export function contractGovernancePaths(rootDir) {
   };
 }
 
+/**
+ * readContractRegistry：本模块对外异步 API。
+ */
 export async function readContractRegistry(rootDir) {
   const filePath = contractGovernancePaths(rootDir).registry;
   const registry = await readJson(filePath, null);
@@ -35,6 +56,9 @@ export async function readContractRegistry(rootDir) {
   return registry;
 }
 
+/**
+ * emptyContractRegistry：本模块对外API。
+ */
 export function emptyContractRegistry() {
   return {
     kind: "contract_registry",
@@ -44,6 +68,10 @@ export function emptyContractRegistry() {
   };
 }
 
+/**
+ * scanContractGovernanceUniverse：本模块对外异步 API。
+ */
+// --- 扫描与持久化 ---
 export async function scanContractGovernanceUniverse(rootDir, options = {}) {
   const discoverer = options.discoverer || "tauri-ipc";
   if (!CONTRACT_DISCOVERERS.includes(discoverer)) {
@@ -81,6 +109,9 @@ export async function scanContractGovernanceUniverse(rootDir, options = {}) {
   };
 }
 
+/**
+ * persistContractScan：本模块对外异步 API。
+ */
 export async function persistContractScan(rootDir, scan) {
   return withContractGovernanceLock(rootDir, "persist-scan", () => persistContractScanUnlocked(rootDir, scan));
 }
@@ -107,6 +138,10 @@ async function persistContractScanUnlocked(rootDir, scan) {
   };
 }
 
+/**
+ * withContractGovernanceLock：本模块对外异步 API。
+ */
+// --- 锁与引用检查 ---
 export async function withContractGovernanceLock(rootDir, ownerTag, fn) {
   const paths = contractGovernancePaths(rootDir);
   await mkdir(paths.runtimeRoot, { recursive: true });
@@ -119,6 +154,9 @@ export async function withContractGovernanceLock(rootDir, ownerTag, fn) {
   );
 }
 
+/**
+ * inspectContractReferences：本模块对外异步 API。
+ */
 export async function inspectContractReferences(rootDir, contract) {
   const findings = [];
   if (contract.moduleRef) {
@@ -143,6 +181,9 @@ export async function inspectContractReferences(rootDir, contract) {
   return findings;
 }
 
+/**
+ * inspectApprovalRef：本模块对外异步 API。
+ */
 export async function inspectApprovalRef(rootDir, item) {
   const approvalRef = String(item.approvalRef || "").trim();
   if (!approvalRef) return { pass: false, reason: "approvalRef is missing" };
@@ -158,6 +199,9 @@ export async function inspectApprovalRef(rootDir, item) {
   return { pass: false, reason: "approvalRef does not identify an approved remove decision for this contract" };
 }
 
+/**
+ * assertContractReferences：本模块对外异步 API。
+ */
 export async function assertContractReferences(rootDir, contract) {
   const findings = await inspectContractReferences(rootDir, contract);
   if (findings.length > 0) {
@@ -165,6 +209,10 @@ export async function assertContractReferences(rootDir, contract) {
   }
 }
 
+/**
+ * discoverTauriIpcContracts：本模块对外异步 API。
+ */
+// --- Tauri IPC 发现 ---
 export async function discoverTauriIpcContracts(rootDir) {
   const files = await walkSourceFiles(rootDir);
   const rustFiles = files.filter((item) => item.endsWith(".rs"));
@@ -216,11 +264,17 @@ export async function discoverTauriIpcContracts(rootDir) {
   };
 }
 
+/**
+ * findTauriCommands：本模块对外API。
+ */
 export function findTauriCommands(source) {
   const pattern = /#\s*\[\s*tauri::command(?:\([^\]]*\))?\s*\][\s\S]{0,600}?\b(?:pub\s+)?(?:async\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*(\([^)]*\)(?:\s*->\s*[^\{;]+)?)/g;
   return [...maskSource(String(source)).matchAll(pattern)].map((match) => ({ name: match[1], signature: `${match[1]}${match[2].trim()}`, index: match.index }));
 }
 
+/**
+ * findRegisteredCommands：本模块对外API。
+ */
 export function findRegisteredCommands(source) {
   const output = [];
   const pattern = /tauri::generate_handler!\s*\[([\s\S]*?)\]/g;
@@ -234,6 +288,9 @@ export function findRegisteredCommands(source) {
   return output;
 }
 
+/**
+ * findFrontendInvokes：本模块对外API。
+ */
 export function findFrontendInvokes(source, bindingNames = ["invoke"]) {
   const original = String(source);
   const masked = maskSource(original);
@@ -254,6 +311,10 @@ export function findFrontendInvokes(source, bindingNames = ["invoke"]) {
   return found;
 }
 
+/**
+ * buildContractDiffCards：本模块对外API。
+ */
+// --- diff 卡片与合并 ---
 export function buildContractDiffCards(baseline = [], current = [], at = nowIso()) {
   const before = new Map(baseline.filter((item) => item.lifecycle !== "retired").map((item) => [item.id, normalizeContract(item)]));
   const after = new Map(current.map((item) => [item.id, normalizeContract(item)]));
@@ -350,6 +411,10 @@ function normalizeContract(value) {
   };
 }
 
+/**
+ * applyApprovedCard：本模块对外API。
+ */
+// --- 审批与归档 ---
 export function applyApprovedCard(registry, card) {
   const contracts = new Map(registry.contracts.map((item) => [item.id, item]));
   if (card.action === "remove") {
@@ -394,27 +459,40 @@ function expirePendingCard(card, at) {
   return Number.isFinite(age) && age >= 30 * 24 * 60 * 60 * 1000 ? { ...card, status: "expired" } : card;
 }
 
+/**
+ * cardTouchesPaths：本模块对外API。
+ */
 export function cardTouchesPaths(card, changedPaths) {
   if (changedPaths.size === 0) return false;
   const paths = [card.baseline, card.candidate].flatMap(contractSourcePaths);
   return paths.some((item) => changedPaths.has(normalizeSlash(item)));
 }
 
+/**
+ * declarationCoversSource：本模块对外API。
+ */
 export function declarationCoversSource(declarations, sourcePath) {
   const normalized = normalizeSlash(sourcePath);
   return declarations.some((item) => item.kind === "database" && (item.sourcePaths || []).map(normalizeSlash).includes(normalized));
 }
 
+/**
+ * isContractScanPath：本模块对外API。
+ */
 export function isContractScanPath(value) {
   const normalized = normalizeSlash(value);
   return /(^|\/)src-tauri\/src\/.*\.rs$/.test(normalized) || /(^|\/)client\/src\/.*\.(?:[cm]?[jt]sx?)$/.test(normalized);
 }
 
+/**
+ * contractSourcePaths：本模块对外API。
+ */
 export function contractSourcePaths(contract) {
   if (!contract?.source) return [];
   return [...(contract.source.declarations || []), ...(contract.source.registrations || []), ...(contract.source.manualDeclarations || []), ...(contract.callers || [])].map((item) => item.path).filter(Boolean);
 }
 
+// --- 源码遍历 ---
 async function walkSourceFiles(rootDir) {
   const files = [];
   for (const sourceRoot of sourceRoots(rootDir)) await walk(sourceRoot, files);
@@ -478,20 +556,33 @@ function tauriInvokeBindings(source) {
   return uniqueStrings(bindings);
 }
 
+/**
+ * safeCardName：本模块对外API。
+ */
+// --- 路径与安全工具 ---
 export function safeCardName(value) {
   return requireSafeId(value, "card id").replace(/[^A-Za-z0-9._-]/g, "_");
 }
 
+/**
+ * requireSafeId：本模块对外API。
+ */
 export function requireSafeId(value, label) {
   const normalized = String(value || "").trim();
   if (!CONTRACT_ID_RE.test(normalized)) throw contractError("contract_id_invalid", `${label} is invalid`);
   return normalized;
 }
 
+/**
+ * normalizeSlash：本模块对外API。
+ */
 export function normalizeSlash(value) {
   return String(value || "").replaceAll("\\", "/").replace(/^\.\//, "");
 }
 
+/**
+ * relative：本模块对外API。
+ */
 export function relative(rootDir, value) {
   return normalizeSlash(path.relative(rootDir, value));
 }
@@ -514,6 +605,9 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/**
+ * contractError：本模块对外API。
+ */
 export function contractError(code, message) {
   return Object.assign(new Error(message), { code });
 }

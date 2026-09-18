@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：hook-result-gate.mjs
+// 所属模块：infra
+// 作用说明：
+//   PostToolUse 工具结果硬失败检测，block/warn 并写 ledger。
+//
+// 【运行原理速读】
+//   flatten 响应 → 非零 exit/显式失败态 → 正则扫描 MCP/shell 失败 → appendLedger。
+// =============================================================================
 import { appendLedger } from "./ledger.mjs";
 import { nowIso } from "./runtime-store.mjs";
 
@@ -8,6 +17,9 @@ const HARD_FAILURE_PATTERNS = [
   { name: "shell_failure", regex: /\b(exit code|exited with code|process\.exit|failed|error|exception|could not apply patch|cannot apply patch|unable to apply patch)\b/i },
 ];
 
+/**
+ * evaluateHookResultGate：本模块对外异步 API。
+ */
 export async function evaluateHookResultGate(rootDir, input = {}) {
   const toolName = String(input.tool_name || input.toolName || "");
   const response = input.tool_response
@@ -41,6 +53,9 @@ export async function evaluateHookResultGate(rootDir, input = {}) {
   return result;
 }
 
+/**
+ * detectToolResultFindings：本模块对外API。
+ */
 export function detectToolResultFindings(response, options = {}) {
   const findings = [];
   const flat = flattenToolResponse(response);

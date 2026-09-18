@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：task-state-lock.mjs
+// 所属模块：infra
+// 作用说明：
+//   task-state 专用文件锁包装，委托 file-lock.mjs。
+//
+// 【运行原理速读】
+//   withTaskStateLock → resolve task-state.lock → withFileLock 执行变更。
+// =============================================================================
 import { ensureWildArrangeDirs, resolveWildArrangePath } from "./runtime-store.mjs";
 import { withFileLock } from "./file-lock.mjs";
 import { appendLedger } from "./ledger.mjs";
@@ -15,6 +24,9 @@ function throwIfForeignMaintenance(ownerTag, marker) {
   throw error;
 }
 
+/**
+ * withTaskStateLock：本模块对外异步 API。
+ */
 export async function withTaskStateLock(rootDir, ownerTag, fn) {
   await ensureWildArrangeDirs(rootDir);
   throwIfForeignMaintenance(ownerTag, await readMaintenanceMarker(rootDir));
@@ -30,6 +42,9 @@ export async function withTaskStateLock(rootDir, ownerTag, fn) {
 // persist 不执行（无账状态不得出现）；persist 失败时账本已留痕（可审计）。
 // 锁方向全仓固定为 任务状态锁(外，由调用方持有) → ledger 锁(内，由
 // appendLedger 自取)；本函数自身不获取任务状态锁，禁止反向嵌套。
+/**
+ * transactWithLedger：本模块对外异步 API。
+ */
 export async function transactWithLedger(rootDir, event, persist) {
   const entry = await appendLedger(rootDir, event);
   await persist(entry);

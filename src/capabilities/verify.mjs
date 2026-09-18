@@ -1,8 +1,29 @@
+// =============================================================================
+// 文件名称：verify.mjs
+// 所属模块：capabilities
+// 作用说明：
+//   按 task.verify_commands 顺序执行验收命令，汇总 exitCode 形成 verifier
+//   evidence。首条失败即短路，不继续后续命令。
+//
+// 【运行原理速读】
+//   · 何时执行？worker 完成后由 orchestration 或 gateway verify 能力触发。
+//   · 做了什么？加载 command-safety 规则 → 逐条 runCommand → 返回 pass 与
+//     results 数组（长度须与 verify_commands 一致才算完整证据）。
+//   · 缺了它会怎样？review gate 与 acceptance proof 均无法证明目标已验收。
+// =============================================================================
+
 import { compileCommandSafetyPatterns } from "../infra/command-safety.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { nowIso } from "../infra/runtime-store.mjs";
 import { runCommand } from "../infra/command-runner.mjs";
 
+/**
+ * 顺序执行 task.verify_commands，首败即停，返回 verifier evidence。
+ * @param {string} rootDir 项目根目录
+ * @param {object} task 含 verify_commands 的任务
+ * @param {object} [options] executionRoot 覆盖命令 cwd
+ * @returns {Promise<object>} kind=verifier，含 pass 与 results
+ */
 export async function runVerifier(rootDir, task, options = {}) {
   if (!Array.isArray(task.verify_commands) || task.verify_commands.length === 0) {
     return {

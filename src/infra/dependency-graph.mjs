@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：dependency-graph.mjs
+// 所属模块：infra
+// 作用说明：
+//   模块依赖图与变更影响测试选择（arch-module-graph 消费）。
+//
+// 【运行原理速读】
+//   computeImpact changedPaths → BFS 依赖 → testsToRun 列表。
+// =============================================================================
 /**
  * Import scanner + impact graph.
  *
@@ -26,11 +35,20 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { normalizeRelativePath } from "./path-match.mjs";
 
+/**
+ * ZONES：本模块对外API。
+ */
 export const ZONES = ["interface", "orchestration", "ai", "capabilities", "infra"];
+/**
+ * 无法归类时的 zone 占位符。
+ */
 export const UNKNOWN_ZONE = "unknown";
 
 const MASK = "\u0000";
 
+/**
+ * maskSource：本模块对外API。
+ */
 export function maskSource(source) {
   let out = "";
   let i = 0;
@@ -117,6 +135,10 @@ export function maskSource(source) {
 }
 
 /** Decodes a quoted JS string literal (with quotes) into its runtime value. */
+// --- 源码解析 ---
+/**
+ * decodeStringLiteral：本模块对外 API。
+ */
 export function decodeStringLiteral(raw) {
   const body = raw.slice(1, -1);
   let out = "";
@@ -148,6 +170,9 @@ export function decodeStringLiteral(raw) {
 const STATIC_IMPORT_REGEX = /(?<![\w.$])(?:import|export)\s+(?:[^'"`]*?from\s+)?((["'])\u0000*\2)/dg;
 const DYNAMIC_IMPORT_REGEX = /(?<![\w.$])import\s*\(\s*((["'])\u0000*\2)/dg;
 
+/**
+ * extractImportSpecifiers：本模块对外API。
+ */
 export function extractImportSpecifiers(source) {
   const masked = maskSource(source);
   const specifiers = [];
@@ -162,6 +187,9 @@ export function extractImportSpecifiers(source) {
   return specifiers;
 }
 
+/**
+ * classifyZone：本模块对外API。
+ */
 export function classifyZone(srcDir, absolutePath) {
   const relativeToSrc = path.relative(srcDir, absolutePath);
   const [firstSegment] = relativeToSrc.split(path.sep);
@@ -179,6 +207,9 @@ function assertKnownZone(srcDir, absolutePath, role) {
   throw error;
 }
 
+/**
+ * listMjsFiles：本模块对外异步 API。
+ */
 export async function listMjsFiles(dir) {
   let entries;
   try {
@@ -204,6 +235,10 @@ export async function listMjsFiles(dir) {
  * from/to relative to src/. This is exactly the graph the boundary test
  * enforces on; keep the semantics stable.
  */
+/**
+ * buildDependencyEdges：本模块对外异步 API。
+ */
+// --- 依赖边构建 ---
 export async function buildDependencyEdges(rootDir) {
   const srcDir = path.join(rootDir, "src");
   const files = await listMjsFiles(srcDir);
@@ -234,6 +269,9 @@ export async function buildDependencyEdges(rootDir) {
  * dirs (default src/bin/test), edges from/to relative to rootDir, targets
  * kept only when they resolve inside one of the scanned dirs.
  */
+/**
+ * buildRepoImportGraph：本模块对外异步 API。
+ */
 export async function buildRepoImportGraph(rootDir, { dirs = ["src", "bin", "test"] } = {}) {
   const roots = dirs.map((dir) => path.join(rootDir, dir));
   const files = (await Promise.all(roots.map((dir) => listMjsFiles(dir)))).flat();
@@ -259,6 +297,10 @@ export async function buildRepoImportGraph(rootDir, { dirs = ["src", "bin", "tes
  * test/dependency-boundary.test.mjs is always included — any import-graph
  * change can flip a boundary.
  */
+/**
+ * computeImpact：本模块对外异步 API。
+ */
+// --- 影响分析与测试选择 ---
 export async function computeImpact(rootDir, changedPaths) {
   const { files, edges } = await buildRepoImportGraph(rootDir);
   const known = new Set(files);
@@ -307,6 +349,9 @@ export async function computeImpact(rootDir, changedPaths) {
 }
 
 /** 仓库内全部测试文件（test/*.test.mjs），相对路径排序。 */
+/**
+ * listRepoTests：本模块对外异步 API。
+ */
 export async function listRepoTests(rootDir) {
   const files = await listMjsFiles(path.join(rootDir, "test"));
   return files
@@ -319,6 +364,9 @@ export async function listRepoTests(rootDir) {
  * 分区测试选择：某区的应跑测试 = 引用了该区文件的测试（反向传递闭包）
  * + 命名对位测试 + 常驻的依赖边界测试。wildarrange test --zone 用它把
  * "我只改了 infra" 映射到最小证明集，低代码维护者不必背测试矩阵。
+ */
+/**
+ * computeZoneTests：本模块对外异步 API。
  */
 export async function computeZoneTests(rootDir, zone) {
   if (!ZONES.includes(zone)) {

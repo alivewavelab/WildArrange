@@ -1,3 +1,23 @@
+// =============================================================================
+// 文件名称：adapters.mjs
+// 所属模块：interface
+// 作用说明：
+//   宿主 adapter 的安装、卸载与备份恢复：生成 Codex/Cursor/Kimi hooks、rules、skills 与报告。
+//   只物化项目文件；宿主信任与 hook 实际执行需用户另行激活。
+//
+// 【运行原理速读】
+//   可以把它想成「多宿主治理接入的安装程序」：
+//
+//   · 谁调用？
+//     wildarrange adapter install|uninstall|restore。
+//
+//   · 它做了什么？
+//     ① 备份既有文件 ② 按 target 写入 hooks/bridge/rules/skills/plugin
+//     ③ 写 install-report 与 ledger adapter_files_generated。
+//
+//   · 缺了它会怎样？
+//     IDE 内 Agent 无 hook 硬拦截与 slash 命令入口，只能靠人工跑 CLI。
+// =============================================================================
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -33,6 +53,13 @@ import {
 const SLASH_COMMAND_PREFIX = "wildarrange";
 const ADAPTER_TARGETS = new Set(["all", "codex", "cursor", "kimi"]);
 
+// --- Adapter 安装 ---
+
+/**
+ * 安装指定 target（all/codex/cursor/kimi）的 adapter 文件并返回安装报告。
+ * @param {string} rootDir
+ * @param {{ target?: string, mode?: string, packageName?: string, package?: string }} [options]
+ */
 export async function installAdapter(rootDir, options = {}) {
   const target = options.target || "all";
   if (!ADAPTER_TARGETS.has(target)) {
@@ -215,6 +242,9 @@ export async function installAdapter(rootDir, options = {}) {
   return report;
 }
 
+// --- Adapter 卸载 ---
+
+/** 删除已安装的 adapter 文件；删除前复制到 .wildarrange/adapters/backups/。 */
 export async function uninstallAdapter(rootDir, options = {}) {
   const target = options.target || "all";
   if (!ADAPTER_TARGETS.has(target)) {
@@ -291,6 +321,9 @@ export async function uninstallAdapter(rootDir, options = {}) {
   return report;
 }
 
+// --- 备份恢复 ---
+
+/** 从指定 backupId 目录恢复 adapter 文件到项目根。 */
 export async function restoreAdapterBackup(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const backupId = options.backupId || options.backup;
@@ -353,6 +386,9 @@ async function backupExistingAdapterFile(rootDir, filePath, backupId) {
   return reportPath(rootDir, backupPath);
 }
 
+// --- CLI 前缀与 Hook 命令 ---
+
+/** 根据 local/npx 模式返回 wildarrange CLI 调用前缀字符串。 */
 export function adapterCliPrefix({ mode = "local", packageName = DEFAULT_PACKAGE_NAME, localCliPath } = {}) {
   if (!/^(?:@[A-Za-z0-9][A-Za-z0-9._-]*\/)?[A-Za-z0-9][A-Za-z0-9._-]*$/.test(packageName)) {
     throw new Error("adapter package must be a plain npm package name or @scope/name");
@@ -365,6 +401,8 @@ export function adapterCliPrefix({ mode = "local", packageName = DEFAULT_PACKAGE
 function adapterHookCommand({ mode, packageName, controlRoot }) {
   return `${adapterCliPrefix({ mode, packageName })} hook run --adapter-mode ${mode} --adapter-package ${JSON.stringify(packageName)} --control-root "${path.resolve(controlRoot)}"`;
 }
+
+// --- Slash 命令与宿主 Hook 配置生成 ---
 
 // 统一的 slash 命令集：Cursor 渲染成 .cursor/commands/<name>.md，
 // Codex 渲染成 .agents/skills/<name>/SKILL.md。两者本质都是"让 AI 代你执行 CLI"的提示词。
@@ -561,6 +599,8 @@ Required behavior:
 `;
 }
 
+// --- 安装/卸载/恢复报告 ---
+
 function renderAdapterInstallReport(report) {
   const lines = [
     `# ${PRODUCT_NAME} Adapter Install Report`,
@@ -633,6 +673,8 @@ function renderAdapterRestoreReport(report) {
   }
   return `${lines.join("\n")}\n`;
 }
+
+// --- 备份工具 ---
 
 async function listBackupFiles(rootDir, baseDir = rootDir) {
   const entries = await readdir(rootDir, { withFileTypes: true });

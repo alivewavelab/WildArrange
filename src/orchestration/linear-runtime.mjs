@@ -1,3 +1,22 @@
+// =============================================================================
+// 文件名称：linear-runtime.mjs
+// 所属模块：orchestration
+// 作用说明：
+//   线性任务运行时：runNextTask 与分步 workflow node（execute/verify/scope/
+//   review/checkpoint/retry）。持有 tasks.lock 贯穿 worker+gates 周期。
+//
+// 【运行原理速读】
+//   可以把它想成「一次只推进一个任务的流水线司机」：
+//
+//   · 何时执行？
+//     wildarrange run、workflow 循环或分步 node CLI。
+//
+//   · 做了什么？
+//     找 runnable → claim → worker → delivery-pipeline → completed 或失败/重试。
+//
+//   · 约束？
+//     runNextTask().status 是下一步动作；持久 status 以 task.status 为准。
+// =============================================================================
 import { runHostRoute } from "./host-runtime.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
 import {
@@ -31,6 +50,9 @@ import { assertCommandWorkerAgent } from "../infra/agent-registry.mjs";
 import { assertTaskOrDeliveredOwnership, assertContractWorkspaceAvailable } from "./integration.mjs";
 import { ensureLinearDeliveryWorkspace } from "./linear-delivery.mjs";
 
+// --- 主循环 ---
+
+/** 在 tasks.lock 下推进下一个 runnable 任务（worker + gates 全周期）。 */
 export async function runNextTask(rootDir, options = {}) {
   return withTaskStateLock(rootDir, "run-next-task", () => runNextTaskUnlocked(rootDir, options));
 }
@@ -293,6 +315,9 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   return { status: task.status === "failed" ? "failed" : "retry", task, workerResult, verifyResult, scopeResult, reviewResult };
 }
 
+// --- 分步 workflow node ---
+
+/** 分步 workflow 入口：route/execute/verify/scope/review/checkpoint/retry。 */
 export async function runWorkflowNode(rootDir, nodeName, options = {}) {
   if (nodeName === "route") {
     return runHostRoute(rootDir, { text: options.text }, routeRequest);
@@ -318,6 +343,7 @@ export async function runWorkflowNode(rootDir, nodeName, options = {}) {
   throw new Error(`unknown workflow node: ${nodeName}`);
 }
 
+/** 仅执行 worker 阶段（execute node）。 */
 export async function executeTaskNode(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `node-execute:${options.taskId || "next"}`, () => executeTaskNodeUnlocked(rootDir, options));
 }
@@ -403,6 +429,7 @@ async function executeTaskNodeUnlocked(rootDir, options = {}) {
   return { status: "executed", task, workerResult };
 }
 
+/** 仅运行 verify gate（verify node）。 */
 export async function verifyTaskNode(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `node-verify:${options.taskId || "next"}`, () => verifyTaskNodeUnlocked(rootDir, options));
 }
@@ -443,6 +470,7 @@ async function verifyTaskNodeUnlocked(rootDir, options = {}) {
   return { status: verifyResult.pass ? "verified" : task.status === "failed" ? "failed" : "verify_failed", task, verifyResult };
 }
 
+/** 仅运行 scope gate（scope node）。 */
 export async function scopeTaskNode(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `node-scope:${options.taskId || "next"}`, () => scopeTaskNodeUnlocked(rootDir, options));
 }
@@ -476,6 +504,7 @@ async function scopeTaskNodeUnlocked(rootDir, options = {}) {
   return { status: scopeResult.status, task, scopeResult };
 }
 
+/** 仅运行 review gate（review node）。 */
 export async function reviewTaskNode(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `node-review:${options.taskId || "next"}`, () => reviewTaskNodeUnlocked(rootDir, options));
 }
@@ -533,6 +562,7 @@ async function reviewTaskNodeUnlocked(rootDir, options = {}) {
   return { status: reviewResult.pass ? "reviewed" : "review_failed", task, reviewResult };
 }
 
+/** 运行 completion 段：acceptance-proof + checkpoint（checkpoint node）。 */
 export async function checkpointTaskNode(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `node-checkpoint:${options.taskId || "next"}`, () => checkpointTaskNodeUnlocked(rootDir, options));
 }
@@ -690,6 +720,7 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
   return { status: task.status === "failed" ? "failed" : "retry", task, verifyResult, scopeResult, reviewResult };
 }
 
+/** 失败任务重试：重置状态并重新进入 execute 流程（retry node）。 */
 export async function retryTaskNode(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `node-retry:${options.taskId || "next"}`, () => retryTaskNodeUnlocked(rootDir, options));
 }

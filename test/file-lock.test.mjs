@@ -1,7 +1,16 @@
-/**
- * file-lock 原语测试：ledger 锁的 stale 恢复（死 pid / 旧格式不可解析）
- * 与锁超时的可诊断错误（owner/pid/存活状态）。
- */
+// =============================================================================
+// 文件名称：file-lock.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 file-lock 原语：ledger 锁 dead-pid/旧格式 stale 回收、
+//   锁超时错误含 owner/pid/存活诊断。
+//   不测：跨机器分布式锁或 NFS 语义。
+//
+// 【运行原理速读】
+//   预写损坏/过期 lock 文件后调用 appendLedger/withFileLock，
+//   断言成功写入或抛出可诊断超时而非永久阻塞。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";

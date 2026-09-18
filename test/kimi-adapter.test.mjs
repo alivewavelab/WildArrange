@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：kimi-adapter.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 Kimi adapter：plugin manifest/hooks、bridge 标记、
+//   共享 Skills、无效 target 失败、install/uninstall/backup、plan import 集成。
+//   不测：Cursor/Codex adapter 或 Kimi 宿主真实联网。
+//
+// 【运行原理速读】
+//   installAdapter(kimi) 读取 .wildarrange/adapters/kimi 产物，
+//   断言 hook 事件列表、trustAction 与 Skills 目录结构。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";

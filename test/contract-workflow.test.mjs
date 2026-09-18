@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：contract-workflow.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证契约变更工作流：计划内接口直通、计划外等待审批、
+//   数据库提案 impact、worker 先提案后实现、admission 恢复与拒绝释放。
+//   不测：Tauri IPC 解析细节或 dashboard 面板。
+//
+// 【运行原理速读】
+//   导入含 contract 变更的计划，模拟 propose/approve/reject 序列，
+//   检查 task 状态、共享 registry 与 workspace claim 回放。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import os from "node:os";

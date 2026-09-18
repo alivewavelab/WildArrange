@@ -1,16 +1,30 @@
-/**
- * CLI 命令注册表：--help 与文档生成物的单一事实源。
- *
- * 分层规则：core 六命令（init/plan/run/status/decisions/doctor）覆盖日常
- * 主循环，默认 --help 只显示它们；其余命令一律落 --help --all 非核心区。
- * 新命令必须先登记到这里再实现——README 命令真实性检查以 --help --all
- * 输出为准，未登记的命令会被 governance audit 拦截。
- */
+// =============================================================================
+// 文件名称：cli-help.mjs
+// 所属模块：interface
+// 作用说明：
+//   CLI 命令注册表与 --help / docs commands 的单一事实源。
+//   登记每条 wildarrange 子命令的 usage 与中文说明；不实现命令逻辑本身。
+//
+// 【运行原理速读】
+//   可以把它想成「命令菜单的总台账」：
+//
+//   · 谁调用？
+//     bin/wildarrange.mjs 在 --help、--help --all 与 docs commands --write 时读取。
+//
+//   · 它做了什么？
+//     ① 维护 CORE_COMMANDS 与 COMMAND_REGISTRY ② renderHelp 按 core/all 过滤输出
+//     ③ renderCommandsMarkdown 生成 README 命令表。
+//
+//   · 和其他部分的关系？
+//     新命令必须先登记再实现；governance audit 以 --help --all 输出校验命令真实性。
+// =============================================================================
 import { DEFAULT_EXECUTOR_AGENT, DEFAULT_LEAD_AGENT } from "../infra/agent-registry.mjs";
 import { DEFAULT_PACKAGE_NAME, PRODUCT_NAME } from "../infra/runtime-config.mjs";
 
+/** 默认 --help 展示的核心六命令（日常主循环）。 */
 export const CORE_COMMANDS = ["init", "plan", "run", "status", "decisions", "doctor"];
 
+/** 全部 CLI 子命令的 usage、说明与是否 core 标记。 */
 export const COMMAND_REGISTRY = [
   { usage: "review configure --from <setup.json> [--apply]", desc: "预览项目审查与执行准备配置；明确确认后 --apply，只能更新治理配置" },
   { usage: "review checklist --task <taskId>", desc: "解析本任务项目审查清单和必需依据，不启动执行器" },
@@ -151,6 +165,11 @@ Such plans must declare a command-worker task.owner (Jiuwei or ZhuRong) on every
 Each host semantic task must also use a real, non-trivial worker_command that changes writable_paths inside its isolated task worktree; version checks and process.exit(0) are placeholders, not implementation.
 `;
 
+/**
+ * 渲染终端 --help 文本；默认仅 core 六命令，--all 时输出完整注册表。
+ * @param {{ all?: boolean }} [options]
+ * @returns {string}
+ */
 export function renderHelp({ all = false } = {}) {
   const entries = all ? COMMAND_REGISTRY : COMMAND_REGISTRY.filter((entry) => entry.core === true);
   const lines = entries.map((entry) => `  wildarrange ${entry.usage}`);
@@ -164,6 +183,10 @@ ${lines.join("\n")}
 ${hint}${PLAN_SCHEMA}`;
 }
 
+/**
+ * 从 COMMAND_REGISTRY 生成 Markdown 命令表，供 docs commands --write 写入文档。
+ * @returns {string}
+ */
 export function renderCommandsMarkdown() {
   const rows = COMMAND_REGISTRY.map((entry) => `| \`wildarrange ${entry.usage}\` | ${entry.desc} |`);
   return [

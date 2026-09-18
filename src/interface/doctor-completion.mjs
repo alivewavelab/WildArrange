@@ -1,3 +1,23 @@
+// =============================================================================
+// 文件名称：doctor-completion.mjs
+// 所属模块：interface
+// 作用说明：
+//   doctor 的「完成态完整性」分项：校验已完成任务的证据链、账本一致性与派生视图分叉。
+//   只追加 findings，不修改任务或 ledger。
+//
+// 【运行原理速读】
+//   可以把它想成「完成声称的审计员」：
+//
+//   · 谁调用？
+//     doctor.mjs 的 completionAudit 检查项。
+//
+//   · 它做了什么？
+//     ① 校验 checkpoint/acceptance_proof/ledger 完成事件 ② 检测孤儿完成事件
+//     ③ 对比 plan JSON、tasks.md 与 canonical tasks.json ④ 检查 delivery worktree 漂移。
+//
+//   · 缺了它会怎样？
+//     「标记 completed 但无证据」或账本/镜像分叉无法在一键体检中被发现。
+// =============================================================================
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -21,6 +41,12 @@ function addFinding(findings, severity, section, message, extra = {}) {
   findings.push({ severity, section, message, ...extra });
 }
 
+/**
+ * 审计已完成与待重验任务的证据链；发现写入 findings 数组。
+ * @param {string} rootDir
+ * @param {Array<{ severity: string, section: string, message: string }>} findings
+ * @returns {Promise<Record<string, unknown>>} 分项摘要计数
+ */
 export async function checkCompletionIntegrity(rootDir, findings) {
   const taskLedger = await loadTaskLedger(rootDir);
   if (!taskLedger) {

@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：verification-discovery.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 verification discovery：动态 code hint 谓词、unknown 永不 dangerous、
+//   扫描 id/digest 稳定、不写业务文件/不执行发现命令、unknown consumer 无 merge/delete、卡片问答。
+//   不测：apply-card 或 registry freshness（见 verification-governance）。
+//
+// 【运行原理速读】
+//   对 fixture 项目重复 scanVerificationDiscovery，
+//   断言卡片 kind、stable id 与文件系统无副作用。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";

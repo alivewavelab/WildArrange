@@ -1,3 +1,22 @@
+// =============================================================================
+// 文件名称：linear-delivery.mjs
+// 所属模块：orchestration
+// 作用说明：
+//   线性任务 Git 交付工作区：为单任务准备或复用隔离 worktree、分支与基线 SHA；
+//   处理依赖交付 SHA 与远端 coordination 的对齐。
+//
+// 【运行原理速读】
+//   可以把它想成「给线性 worker 一块专属施工场地」：
+//
+//   · 何时执行？
+//     linear-runtime 在 worker 执行前调用 ensureLinearDeliveryWorkspace。
+//
+//   · 做了什么？
+//     复用已有 worktree 或 capture 基线 → 解析依赖 SHA → prepareAgentWorktree。
+//
+//   · 缺了它会怎样？
+//     Git 协调开启时无法在正确 task branch 上提交 delivery commit。
+// =============================================================================
 import { lstat } from "node:fs/promises";
 import path from "node:path";
 import { resolveWildArrangePath } from "../infra/runtime-store.mjs";
@@ -6,6 +25,10 @@ import { commitIsAncestor, inspectTaskWorktreeBaseline, taskBranchName } from ".
 import { readIntegrationIntent } from "./integration.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 
+/**
+ * 确保线性任务具备可用的 Git 交付 worktree（创建或校验复用）。
+ * @returns {Promise<object|null>} delivery_workspace 描述，非 Git 项目可能为 null
+ */
 export async function ensureLinearDeliveryWorkspace(rootDir, planId, task, tasks = []) {
   if (task.delivery_workspace?.workDir && task.delivery_workspace?.branch && task.delivery_workspace?.baseSha) {
     const existing = await inspectTaskWorktreeBaseline(task.delivery_workspace.workDir);

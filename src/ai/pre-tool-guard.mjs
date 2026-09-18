@@ -1,3 +1,17 @@
+// =============================================================================
+// 文件名称：pre-tool-guard.mjs
+// 所属模块：ai
+// 作用说明：
+//   PreToolUse Hook 预检：Shell 高危命令、任务范围、计划审批与功能设计门拦截。
+//   还导出 Hook 事件/路径/CLI 前缀规范化工具，供 hooks.mjs 复用。
+//
+// 【运行原理速读】
+//   · 何时触发？ hooks.mjs 在 PreToolUse 事件调用 preToolUseGuard。
+//   · 做了什么？ ① 命令安全评估 ② 功能设计门/计划审批检查 ③ writable_paths 范围校验
+//     ④ 返回 allow/deny 与结构化 code。
+//   · 与谁协作？ command-safety、task-state、plan-state、feature-design、path-match。
+// =============================================================================
+
 import { realpathSync } from "node:fs";
 import path from "node:path";
 import {
@@ -17,8 +31,18 @@ import { loadPlanApproval } from "../orchestration/plan-state.mjs";
 import { compileCommandSafetyPatterns, evaluateCommandSafety } from "../infra/command-safety.mjs";
 import { loadActiveFeatureDesignGate } from "../orchestration/feature-design.mjs";
 
+/** Hook 输入上携带可信 CLI 前缀的 Symbol 键（由 adapter 注入，防 shell 伪造）。 */
 export const TRUSTED_CLI_COMMAND_PREFIX = Symbol("wildarrange.trustedCliCommandPrefix");
 
+// --- PreToolUse 守卫主流程 ---
+
+/**
+ * 对 PreToolUse 工具调用做预检，返回 allow/deny 决策与结构化 code/reason。
+ * @param {string} rootDir 控制根目录
+ * @param {object} input 宿主 Hook 载荷（tool_name、tool_input 等）
+ * @param {object} options executionRoot 执行根目录
+ * @returns {Promise<object>} kind=pre_tool_use_guard
+ */
 export async function preToolUseGuard(rootDir, input = {}, options = {}) {
   const event = normalizeHookEvent(input.hook_event_name || input.event || input.name);
   if (event !== "PreToolUse") throw new Error("preToolUseGuard requires PreToolUse input");
@@ -253,6 +277,14 @@ function hasInvalidCreateGoalPayload(value) {
   return isPlainObject(value) && Object.keys(value).some((key) => key !== "objective");
 }
 
+// --- Hook 输入规范化 ---
+
+/**
+ * 将宿主 Hook 事件名规范为 SessionStart/UserPromptSubmit/PreToolUse 等标准枚举。
+ * @param {string} value 原始事件名（含 snake_case 别名）
+ * @returns {string} 规范事件名
+ * @throws {Error} 不支持的事件
+ */
 export function normalizeHookEvent(value) {
   const raw = String(value || "").trim();
   const aliases = {
@@ -278,6 +310,11 @@ export function normalizeHookEvent(value) {
   return event;
 }
 
+/**
+ * 从 Hook 输入或环境变量提取 taskId。
+ * @param {object} input Hook 载荷
+ * @returns {string} taskId 或空字符串
+ */
 export function normalizeHookTaskId(input) {
   const direct = input.taskId || input.task_id || process.env.WILDARRANGE_TASK_ID;
   if (direct && typeof direct === "string") return direct;
@@ -289,6 +326,14 @@ export function normalizeHookTaskId(input) {
   return "";
 }
 
+// --- 路径提取 ---
+
+/**
+ * 从 Hook 输入（含 apply_patch、tool_response）递归提取项目相对路径列表。
+ * @param {object} input Hook 载荷
+ * @param {string} rootDir 执行根目录
+ * @returns {string[]} 去重后的相对路径
+ */
 export function extractHookTargetPaths(input, rootDir) {
   const values = [];
   collectPathLikeValues(input.tool_input || input.toolInput, values);
@@ -298,6 +343,12 @@ export function extractHookTargetPaths(input, rootDir) {
   return uniqueStrings(values.map((value) => normalizeHookTargetPath(value, rootDir)).filter(Boolean));
 }
 
+/**
+ * PreToolUse 专用路径提取；apply_patch 只解析 patch 头，避免误读 tool_response。
+ * @param {object} input Hook 载荷
+ * @param {string} rootDir 执行根目录
+ * @returns {string[]} 去重后的相对路径
+ */
 export function extractPreToolTargetPaths(input, rootDir) {
   const toolName = String(input.tool_name || input.toolName || "");
   if (!/^(?:functions\.)?apply_patch$/i.test(toolName)) return extractHookTargetPaths(input, rootDir);
@@ -377,6 +428,8 @@ function isPlanDraftWrite(targetPaths) {
   return targetPaths.length > 0
     && targetPaths.every((targetPath) => /^\.wildarrange\/plan-drafts\/[A-Za-z0-9_.-]+\.json$/.test(targetPath));
 }
+
+// --- Shell 与功能设计门 ---
 
 const READ_ONLY_WILDARRANGE_SHELL_ARGS = /^(?:status|doctor|summary|timeline|decisions|config\s+show|changes\s+list|adoption\s+inventory|review\s+checklist\s+--task\s+[A-Za-z0-9_.-]+|review\s+configure\s+--from\s+\.wildarrange[\\/]plan-drafts[\\/][A-Za-z0-9_.-]+\.json|prompts\s+show\s+--skill\s+[A-Za-z0-9][A-Za-z0-9._-]{0,99}|resume(?:\s+--session\s+[A-Za-z0-9_.-]+)?|continuation\s+check(?:\s+--session\s+[A-Za-z0-9_.-]+)?|help(?:\s+--all)?|--help(?:\s+--all)?)$/i;
 
@@ -493,6 +546,11 @@ function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+/**
+ * 规范化宿主注入的可信 CLI 命令前缀（用于 rewriteCanonicalCliCommands）。
+ * @param {string} value 原始前缀
+ * @returns {string} 合法前缀或空字符串
+ */
 export function normalizeHookCliCommandPrefix(value) {
   if (typeof value !== "string") return "";
   const prefix = value.trim();

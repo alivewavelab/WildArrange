@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：git-diff.mjs
+// 所属模块：infra
+// 作用说明：
+//   只读 git/文件清单变更探测，不做 scope 裁决（scope-guard 负责）。
+//
+// 【运行原理速读】
+//   collectGitChangedPaths → index/worktree 指纹 → classifyManifestPathChanges。
+// =============================================================================
 /**
  * Generic git/file-manifest change probes and read-only git primitives. These
  * only *read* repository state; they make no scope/pass-fail decision (that is
@@ -12,6 +21,9 @@ import path from "node:path";
 import { runCommandFile } from "./command-runner.mjs";
 import { normalizeRelativePath } from "./path-match.mjs";
 
+/**
+ * collectGitDiff：本模块对外异步 API。
+ */
 export async function collectGitDiff(rootDir) {
   const gitDir = path.join(rootDir, ".git");
   if (!existsSync(gitDir)) return "";
@@ -19,18 +31,27 @@ export async function collectGitDiff(rootDir) {
   return result.exitCode === 0 ? result.stdout : "";
 }
 
+/**
+ * readGitHead：本模块对外异步 API。
+ */
 export async function readGitHead(rootDir) {
   const result = await runCommandFile("git", ["-C", rootDir, "rev-parse", "HEAD"], rootDir, 15_000);
   if (result.exitCode !== 0) return { available: false, sha: null, reason: result.stderr || "git rev-parse failed" };
   return { available: true, sha: result.stdout.trim() };
 }
 
+/**
+ * readGitTopLevel：本模块对外异步 API。
+ */
 export async function readGitTopLevel(rootDir) {
   const result = await runCommandFile("git", ["-C", rootDir, "rev-parse", "--show-toplevel"], rootDir, 15_000);
   if (result.exitCode !== 0) return { available: false, topLevel: null, reason: result.stderr || "project is not a Git repository" };
   return { available: true, topLevel: result.stdout.trim() };
 }
 
+/**
+ * collectGitChangedPaths：本模块对外异步 API。
+ */
 export async function collectGitChangedPaths(rootDir) {
   const gitDir = path.join(rootDir, ".git");
   if (!existsSync(gitDir)) {
@@ -80,6 +101,9 @@ export async function collectGitChangedPaths(rootDir) {
   };
 }
 
+/**
+ * buildChangedPathDiffEvidence：本模块对外API。
+ */
 export function buildChangedPathDiffEvidence(beforeChanged, afterChanged, options = {}) {
   const beforeFingerprints = beforeChanged?.fingerprints;
   const afterFingerprints = afterChanged?.fingerprints;
@@ -187,6 +211,9 @@ async function fingerprintWorkspacePath(rootDir, filePath) {
   }
 }
 
+/**
+ * changedPathsIntroducedByTask：本模块对外API。
+ */
 export function changedPathsIntroducedByTask(beforeChanged, afterChanged) {
   if (!beforeChanged.available || !afterChanged.available) {
     return undefined;
@@ -199,6 +226,9 @@ export function changedPathsIntroducedByTask(beforeChanged, afterChanged) {
   return afterChanged.paths.map(normalizeRelativePath).filter((filePath) => !before.has(filePath));
 }
 
+/**
+ * classifyManifestPathChanges：本模块对外API。
+ */
 export function classifyManifestPathChanges(beforeFingerprints = {}, afterFingerprints = {}) {
   const allPaths = new Set([
     ...Object.keys(beforeFingerprints).map(normalizeRelativePath),

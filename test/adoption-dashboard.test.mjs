@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：adoption-dashboard.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 dashboard adoption 面板的 HTTP 契约：GET 可用性、鉴权、
+//   单卡审批/拒绝、批量敏感操作拦截、pending 卡 409。
+//   不测：adoption 运行时事务、git blob 校验或 recovery 恢复。
+//
+// 【运行原理速读】
+//   启动临时 dashboard 服务，用 HTTP 请求 adoption 路由，
+//   断言状态码、JSON 体与 Host/Origin/token 门禁行为。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import http from "node:http";

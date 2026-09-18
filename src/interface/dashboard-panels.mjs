@@ -1,10 +1,23 @@
-/**
- * Dashboard 路由复盘、决策面板与运维面板的 ViewModel 与渲染片段。
- *
- * 读取侧均为派生视图（decisions/annotations/locks/runs/gateArming）；唯一
- * 写入是路由人工复盘标注，复用 annotation-log，绝不改 routes/config/gate。
- * 独立成模块是为了守住 dashboard.mjs 的 1000 行拆分线。
- */
+// =============================================================================
+// 文件名称：dashboard-panels.mjs
+// 所属模块：interface
+// 作用说明：
+//   Dashboard 决策复盘、路由复盘与运维面板的 ViewModel 与内嵌 HTML/JS 片段。
+//   读取侧均为派生视图；唯一写入是路由人工标注（annotation-log）。
+//
+// 【运行原理速读】
+//   可以把它想成「驾驶舱侧边栏的数据适配层」：
+//
+//   · 谁调用？
+//     dashboard.mjs 的 /api/panels/* 与 dashboard-view.mjs 的内嵌脚本。
+//
+//   · 它做了什么？
+//     ① build*PanelViewModel 聚合 decisions/locks/parallel/gateArming
+//     ② annotateRouteDecision 写入标注 ③ renderPanelsHtml/PANELS_SCRIPT 供前端渲染。
+//
+//   · 职责边界？
+//     不改 routes/config/gate；从 dashboard.mjs 拆出以控制单文件体量。
+// =============================================================================
 import { stat } from "node:fs/promises";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { evaluateGateArming } from "../infra/gate-arming.mjs";
@@ -19,6 +32,7 @@ import { appendAnnotation, readAnnotations } from "../infra/annotation-log.mjs";
 
 const ROUTE_REVIEW_CATEGORIES = ["confirmed", "rule_wrong", "case_wrong"];
 
+/** 按日期聚合 routing 决策及其同 session 的工具链，附带最新人工标注。 */
 export async function buildRouteReviewPanelViewModel(rootDir, { date = localDate(), limit = 100 } = {}) {
   const [{ records, skippedLines }, annotations, dailyReport] = await Promise.all([
     readDecisions(rootDir, { filter: (record) => typeof record.ts === "string" && localDate(record.ts) === date }),
@@ -85,6 +99,7 @@ export async function buildRouteReviewPanelViewModel(rootDir, { date = localDate
   };
 }
 
+/** 对 routing 决策写入人工复盘标注（confirmed/rule_wrong/case_wrong）。 */
 export async function annotateRouteDecision(rootDir, { decisionId, category, reason } = {}) {
   if (!ROUTE_REVIEW_CATEGORIES.includes(category)) {
     throw new Error(`route review category must be ${ROUTE_REVIEW_CATEGORIES.join("|")}`);
@@ -101,6 +116,7 @@ function localDate(value = new Date()) {
   return new Intl.DateTimeFormat("en-CA").format(parsed);
 }
 
+/** 决策面板：最近记录 + gate 统计 + neverFiredGates。 */
 export async function buildDecisionsPanelViewModel(rootDir, { limit = 20 } = {}) {
   const [recent, stats] = await Promise.all([
     projectDecisions(rootDir, { limit }),
@@ -116,6 +132,7 @@ export async function buildDecisionsPanelViewModel(rootDir, { limit = 20 } = {})
   };
 }
 
+/** 运维面板：门武装、文件锁、并行 run、registry 新鲜度与日志文件体积。 */
 export async function buildOpsPanelViewModel(rootDir) {
   const { config } = await loadWildArrangeConfig(rootDir);
   const taskState = await loadTaskState(rootDir);

@@ -1,3 +1,22 @@
+// =============================================================================
+// 文件名称：contract-governance.mjs
+// 所属模块：orchestration
+// 作用说明：
+//   契约变更治理编排：交付流水线中扫描契约、拦截计划外变更、
+//   写入 ChangeRequest 并处理人类 accept/reject 后的任务状态恢复。
+//
+// 【运行原理速读】
+//   可以把它想成「接口改动的海关」：
+//
+//   · 何时执行？
+//     delivery-pipeline 在 scope/review 之间调用 prepareContractReview。
+//
+//   · 做了什么？
+//     扫描 → 对比批准范围 → 必要时 needs_user_decision → resolve 后恢复 verifying/pending。
+//
+//   · 约束？
+//     扫描不能代替人类批准；批准绑定规范化声明指纹而非 worker 布尔值。
+// =============================================================================
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { invokeCapability } from "../capabilities/gateway.mjs";
@@ -65,8 +84,10 @@ async function scanTask(rootDir, task, executionRoot, evidence) {
   return result.evidence;
 }
 
-// Invoked by the delivery owner under its task lock. Detection may block a
-// task, but cannot manufacture human approval or rerun the worker.
+/**
+ * 交付 owner 在任务锁下准备契约审查：检测计划外变更，必要时阻塞并开 ChangeRequest。
+ * 检测可阻塞任务，但不能伪造人类批准或重跑 worker。
+ */
 export async function prepareContractReview(rootDir, planId, task, executionRoot, evidence) {
   let review = await scanTask(rootDir, task, executionRoot, evidence);
   const declared = itemsOf(task);
@@ -124,6 +145,7 @@ export async function prepareContractReview(rootDir, planId, task, executionRoot
   return review;
 }
 
+/** 将人类对 registry card 的 approve/reject 决策委托给 contract-governance 能力。 */
 export async function applyContractDecision(rootDir, options) {
   if (!["approve", "reject"].includes(options.decision) || !options.expectedFingerprint || !String(options.reason || "").trim()) {
     throw new Error("a current contract fingerprint and explicit decision reason are required");
@@ -131,6 +153,7 @@ export async function applyContractDecision(rootDir, options) {
   return invokeCapability("contract-governance-apply-card", { rootDir, options });
 }
 
+/** 从 JSON 文件提案契约变更，任务进入 needs_user_decision。 */
 export async function proposeContractChange(rootDir, options) {
   return withTaskStateLock(rootDir, "contract-change-propose", async () => {
     const state = await loadTaskState(rootDir);
@@ -149,6 +172,7 @@ export async function proposeContractChange(rootDir, options) {
   });
 }
 
+/** 解析契约 ChangeRequest：accept 时更新 task.contractChanges 并恢复 gate 流程。 */
 export async function resolveContractChange(rootDir, options) {
   return withTaskStateLock(rootDir, "contract-change-resolve", async () => {
     const before = await readChangeRequest(rootDir, options.id);

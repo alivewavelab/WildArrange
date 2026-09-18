@@ -1,21 +1,25 @@
 #!/usr/bin/env node
-
-// 模块文件归属与命名门禁（architecture-map skill）。
-// 复制到新项目后只改顶部 CONFIG。命名正则、测试豁免、反向同步范围都从 CONFIG 派生。
+// =============================================================================
+// 文件名称：validate-module-file-map.mjs
+// 所属模块：tooling/arch-module-graph
+// 作用说明：
+//   模块文件归属与命名门禁（architecture-map skill）：校验 module-file-map.json、
+//   监视区源码命名、架构页 D 字典三方一致，以及反向同步覆盖率。
+//   flow-grid 布局校验在同目录 validate-flow-grid.mjs（check:arch 串联）。
 //
-// 强制项：
-// 1. 监视区内每个文件必须命中唯一一个模块 include（最长前缀优先），否则判孤儿；同等长度命中多个判冲突。
-// 2. 映射表登记的路径必须真实存在；目录前缀命中 0 个受监视文件判失效（allowEmpty 除外）。
-// 3. 同模块 include 不得冗余嵌套。跨模块嵌套允许，按最长前缀判主属。
-// 4. 命名统一 kebab 风格（放行 PascalCase/camelCase 惯用名）；禁止桶文件；
-//    测试文件基名必须能对上被测文件。
-// 5. module-registry ↔ 映射表 designId ↔ D 字典 key 三方一致。
-// 6. D 字典 files 的 p 路径必须存在，且归属（主属或镜像）覆盖其所在模块；
-//    跨模块引用（extTo/extFrom 带 p、extLinks 的 a/b）只查存在性。
-// 7. 反向同步：GRAPH_DEPTH=all 时 include 的实现文件必须进图（D files 或 generated-graph）；
-//    entry 时每模块至少画一个入口。豁免测试文件、index.*、mod.rs、__init__.py、*.types.*，及 D 目录节点。
-//
-// 总图 flow-grid 卡片布局校验已拆到同目录 validate-flow-grid.mjs（check:arch 串联执行）。
+// 【运行原理速读】
+//   · 何时跑？npm run check:arch 或 CI 架构门禁。
+//   · 强制项概览：
+//     ① 监视区文件须唯一归属模块（最长前缀），否则孤儿/冲突；
+//     ② 映射表路径须存在，空前缀须 allowEmpty；
+//     ③ 同模块 include 不得冗余嵌套；
+//     ④ kebab 命名 + 禁桶文件 + 测试基名配对；
+//     ⑤ module-registry ↔ designId ↔ D key 一致；
+//     ⑥ D files 的 p 须存在且归属正确；
+//     ⑦ GRAPH_DEPTH=all/entry 反向同步覆盖实现文件或入口。
+//   · 复制到新项目后只改下方 CONFIG；命名正则与豁免范围从 CONFIG 派生。
+//   · 失败 exit 1 并逐条 stderr；通过 stdout 汇总模块数与 graph 覆盖率。
+// =============================================================================
 
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, extname, relative, resolve, sep } from "node:path";
@@ -25,9 +29,10 @@ const errors = [];
 const expect = (condition, message) => { if (!condition) errors.push(message); };
 const toPosix = (path) => relative(root, path).split(sep).join("/");
 
-// ── 按项目调整（CONFIG）──────────────────────────────────────────
+// --- CONFIG：按项目调整 ---
 // 复制后必须填 WATCH_ZONES，空数组会失败（禁止沿用某个产品仓库的目录）。
 // 例：{ dir: "src", exts: new Set([".ts", ".tsx"]) }
+// MAP_PATH / OVERVIEW_PATH 也可用环境变量覆盖（与 generate-module-graph.mjs 对齐）。
 const WATCH_ZONES = [
   { dir: "bin", exts: new Set([".mjs"]) },
   { dir: "src/interface", exts: new Set([".mjs"]) },
@@ -57,6 +62,7 @@ const NAME_EXEMPT = /(?:^|\/)(__init__|__main__)\.py$|(?:^|\/)mod\.rs$/;
 const TYPES_FILE = /\.types\.[^.]+$/;
 const BANNED_BASENAME = /^(utils?|helpers?|common|misc|shared|constants)(\.[a-z0-9-]+)*\.[a-z0-9]+$/;
 
+// --- 路径工具与监视区扫描 ---
 const EXCLUDED = (posix) =>
   TEST_FILE.test(posix) || GENERATED_PREFIXES.some((p) => posix.startsWith(p));
 
@@ -129,6 +135,7 @@ if (WATCH_ZONES.length > 0 && watched.length === 0) {
     `WATCH_ZONES 未扫到任何文件：${WATCH_ZONES.map((z) => z.dir).join("、")}\n  → 把 dir / exts 改成这个项目的源码，否则门禁是假绿`);
 }
 
+// --- 映射表归属校验 ---
 const mapPath = resolve(root, MAP_PATH);
 expect(existsSync(mapPath), `missing module file map: ${MAP_PATH}`);
 const map = existsSync(mapPath) ? JSON.parse(readFileSync(mapPath, "utf8")) : { modules: {}, unowned: [] };
@@ -236,6 +243,7 @@ for (let i = 0; i < flatPrefixes.length; i++) {
   }
 }
 
+// --- 命名与目录规范 ---
 const seenDirErrors = new Set();
 for (const zone of WATCH_ZONES) {
   const zoneAbs = resolve(root, zone.dir);
@@ -270,6 +278,7 @@ for (const zone of WATCH_ZONES) {
   }
 }
 
+// --- 测试文件基名配对 ---
 for (const { posix, zone } of allSourceFiles) {
   const testMatch = posix.match(/^(.*\/)?([^/]+)\.test\.([^./]+)$/);
   if (!testMatch) continue;
@@ -283,6 +292,7 @@ for (const { posix, zone } of allSourceFiles) {
     `测试文件基名与被测文件不匹配：${posix}\n  → 找到同目录 ${base}.* 之一`);
 }
 
+// --- 架构页 D 字典与反向同步 ---
 const overviewPath = resolve(root, OVERVIEW_PATH);
 let overview = "";
 let dBlocks = [];
@@ -426,6 +436,7 @@ if (!existsSync(overviewPath)) {
   }
 }
 
+// --- 结果输出 ---
 if (errors.length) {
   console.error(errors.join("\n"));
   process.exit(1);

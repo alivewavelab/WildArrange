@@ -1,4 +1,16 @@
-/** End-to-end integration coverage across the five runtime zones. */
+// =============================================================================
+// 文件名称：runtime-integration.test.mjs
+// 所属模块：test
+// 作用说明：
+//   五区端到端集成：init/runtime 持久化、prompt pack 安装、路由/on-demand skill、
+//   config 模型与 injection、task-bound Skills、plan/workflow/parallel/linear/dashboard/doctor 协作。
+//   不测：单个模块的全部边界（由各专项 test 覆盖）。
+//
+// 【运行原理速读】
+//   大型临时项目串联 init → import → run → dashboard HTTP，
+//   断言跨 zone 文件产物与状态机终态符合治理契约。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";

@@ -1,17 +1,28 @@
+// =============================================================================
+// 文件名称：gateway.mjs
+// 所属模块：capabilities
+// 作用说明：
+//   能力网关：静态注册表 + 统一结果信封。orchestration 只能通过
+//   invokeCapability 调用能力，不得直接 import 各 capability 实现文件。
+//
+// 【运行原理速读】
+//   可以把它想成「所有门禁的统一前台」：
+//
+//   · 谁调用？src/orchestration/* 在流水线各阶段 invokeCapability(name, ctx)。
+//
+//   · 它具体做了什么？
+//     ① 查 CAPABILITIES 注册表；② adapter 调用具体实现；③ normalizeEnvelope
+//     统一 status/evidence/sideEffect/duration_ms/error。
+//
+//   · 和其他部分的关系？
+//     聚合 worker/verify/scope/review/governance 等子模块；新增能力只需
+//     注册一条 entry，不必改 orchestration。
+//
+//   · 缺了它会怎样？
+//     编排层与能力实现耦合，gate 结果格式不一致，难以审计与扩展。
+// =============================================================================
+
 import { checkExecutionReadiness } from "./execution-readiness.mjs";
-/**
- * Capability gateway: static registry + unified result envelope.
- *
- * Orchestration (src/orchestration/*) must call capabilities only through
- * `invokeCapability(name, ctx)`. It must never import a capability
- * implementation file directly. This is the single seam that lets a new
- * check get added (register one more entry below) without touching any
- * orchestration code, and lets every gate outcome be reported the same way
- * (status / evidence / sideEffect / duration_ms / cost / error).
- *
- * First version is intentionally a static object literal, not a dynamic
- * plugin loader: every capability is a real import at the top of this file.
- */
 import { runCommand } from "../infra/command-runner.mjs";
 import { buildErrorProtocol, wildarrangeError } from "../infra/error-protocol.mjs";
 import { runVerifier } from "./verify.mjs";
@@ -147,10 +158,17 @@ const CAPABILITIES = {
   "contract-governance-generate-artifacts": { handler: adaptContractGenerate, owner: "capabilities/contract-governance.mjs" },
 };
 
+/** 返回已注册能力名称列表。 */
 export function listRegisteredCapabilities() {
   return Object.keys(CAPABILITIES);
 }
 
+/**
+ * 按名称调用能力，捕获异常并归一化为统一信封。
+ * @param {string} name 注册表中的能力名
+ * @param {object} [ctx] rootDir、task、planId、evidence、options
+ * @returns {Promise<object>} capability、status、evidence、sideEffect、duration_ms
+ */
 export async function invokeCapability(name, ctx = {}) {
   const adapter = CAPABILITIES[name]?.handler;
   if (!adapter) {
@@ -172,6 +190,12 @@ export async function invokeCapability(name, ctx = {}) {
 
 const SYSTEM_ERROR_CODE_RE = /^(ERR_[A-Z0-9_]+|E[A-Z][A-Z0-9]*)$/;
 
+/**
+ * 将 thrown error 转为 fail 状态的标准 capability 信封。
+ * @param {string} name 能力名
+ * @param {Error|object} error 原始错误
+ * @param {number} durationMs 耗时毫秒
+ */
 export function capabilityErrorEnvelope(name, error, durationMs) {
   const rawCode = error?.code;
   const code = typeof rawCode === "string"
@@ -209,4 +233,5 @@ function normalizeEnvelope(name, outcome, durationMs) {
   };
 }
 
+/** 返回能力对应的 owner 模块路径（用于错误协议定位）。 */
 export function capabilityModule(name) { return CAPABILITIES[name]?.owner || "capabilities/gateway.mjs"; }

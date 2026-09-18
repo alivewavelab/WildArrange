@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：state-migration.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证状态迁移：legacy agent 别名、未来 schema 拒绝、legacy completed fail-closed、
+//   根 config 权威覆盖 runtime 键、migrate 投影与 task ledger、无 proof chain 的 completed 拒绝。
+//   不测：在线零停机升级或远程 sync。
+//
+// 【运行原理速读】
+//   写入 legacy tasks/config fixture，调用 migrate* / statusReport，
+//   断言归一化字段与 doctor/status 拒绝原因。
+// =============================================================================
+
 import test from "node:test";
 import assert from "node:assert/strict";
 import { access, appendFile, chmod, lstat, mkdtemp, mkdir, readFile, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";

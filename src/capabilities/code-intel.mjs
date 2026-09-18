@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：code-intel.mjs
+// 所属模块：capabilities
+// 作用说明：
+//   实现 review gate 内的静态质量门：LSP/AST 命令、hashline 锚点校验、
+//   注释策略检查。被 review-gate 与 acceptance-proof 的独立 review 判定引用。
+//
+// 【运行原理速读】
+//   · 何时执行？runReviewGate 在 review/standards 命令之后串行调用。
+//   · 做了什么？runQualityGates 编排四门；任一命令需进程恢复则短路返回。
+//   · 缺了它会怎样？类型/结构/锚点/注释类回归无法被确定性 gate 捕获。
+// =============================================================================
+
 import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
@@ -9,6 +22,15 @@ import { runCommand } from "../infra/command-runner.mjs";
 import { normalizeRelativePath, pathMatchesPattern } from "../infra/path-match.mjs";
 import { extractComments } from "../infra/repository-layout.mjs";
 
+// --- 质量门编排 ---
+
+/**
+ * 顺序运行 LSP、AST、hashline、comment 四门，汇总 pass。
+ * @param {string} rootDir 项目根
+ * @param {object} task 任务（可含 lsp_commands 等覆盖）
+ * @param {object|null} [scopeResult] 用于 comment 候选路径
+ * @param {object} [config] qualityGates 与 repositoryGovernance 配置
+ */
 export async function runQualityGates(rootDir, task, scopeResult = null, config = {}) {
   const lspResult = await runLspDiagnosticsGate(rootDir, task, config);
   if (commandGateNeedsRecovery(lspResult)) return interruptedQualityGates(lspResult, "lspResult");
@@ -27,6 +49,9 @@ export async function runQualityGates(rootDir, task, scopeResult = null, config 
   };
 }
 
+// --- LSP / AST 命令门 ---
+
+/** 运行 LSP/类型检查命令门；未启用且无 task 命令时 skipped。 */
 export async function runLspDiagnosticsGate(rootDir, task, config = {}) {
   const gateConfig = config.qualityGates?.lspDiagnostics || {};
   const commands = [
@@ -43,6 +68,7 @@ export async function runLspDiagnosticsGate(rootDir, task, config = {}) {
   return runCommandGate(rootDir, "lsp_diagnostics", commands, gateConfig.timeoutMs || 120_000);
 }
 
+/** 运行 AST/结构搜索命令门；未启用且无 task 命令时 skipped。 */
 export async function runAstStructureGate(rootDir, task, config = {}) {
   const gateConfig = config.qualityGates?.astStructure || {};
   const commands = [
@@ -59,6 +85,9 @@ export async function runAstStructureGate(rootDir, task, config = {}) {
   return runCommandGate(rootDir, "ast_structure", commands, gateConfig.timeoutMs || 120_000);
 }
 
+// --- Hashline 锚点门 ---
+
+/** 校验配置的 hashline 锚点：文件存在、行内容 SHA256 与声明一致。 */
 export async function runHashlineAnchorsGate(rootDir, task, config = {}) {
   const gateConfig = config.qualityGates?.hashlineAnchors || {};
   const anchors = normalizeHashlineAnchors([
@@ -130,6 +159,9 @@ export async function runHashlineAnchorsGate(rootDir, task, config = {}) {
   };
 }
 
+// --- 注释检查门 ---
+
+/** 扫描变更/可写路径中的注释，匹配禁用模式与 repository 策略规则。 */
 export async function runCommentCheckerGate(rootDir, task, scopeResult = null, config = {}) {
   const gateConfig = config.qualityGates?.commentChecker || {};
   if (gateConfig.enabled === false) {
@@ -210,6 +242,8 @@ export async function runCommentCheckerGate(rootDir, task, scopeResult = null, c
   };
 }
 
+// --- 进程恢复与中断 ---
+
 function commandGateNeedsRecovery(result) {
   return (result?.results || []).some((entry) => entry?.recoveryRequired === true || entry?.terminationFailed === true);
 }
@@ -236,6 +270,9 @@ function interruptedQualityGates(commandResult, resultName, completed = {}) {
   };
 }
 
+// --- 命令执行与门状态 ---
+
+/** 对单行文本 trimEnd 后计算 content hash，供 hashline 比对。 */
 export function hashLine(content) {
   return hashContent(String(content ?? "").trimEnd());
 }
@@ -266,6 +303,8 @@ function missingCommandsGate(kind, required, reason) {
   return { kind, at: nowIso(), status, pass: status !== "fail", results: [], reason };
 }
 
+// --- Hashline 规范化 ---
+
 function normalizeHashlineAnchors(anchors) {
   return anchors
     .map((anchor) => {
@@ -284,6 +323,8 @@ function normalizeHashlineAnchors(anchors) {
     })
     .filter(Boolean);
 }
+
+// --- 注释候选与模式 ---
 
 function commentCandidatePaths(task, scopeResult) {
   const paths = [];
@@ -317,6 +358,8 @@ function normalizeRegexFlags(rawFlags = "") {
   flags.add("i");
   return [...flags].sort().join("");
 }
+
+// --- 路径工具 ---
 
 function isLikelyTextPath(filePath) {
   return /\.(cjs|css|html|js|json|jsx|md|mjs|py|rb|rs|sh|ts|tsx|txt|vue|yaml|yml)$/i.test(filePath);

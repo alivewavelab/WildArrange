@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：rule-scanner.mjs
+// 所属模块：infra
+// 作用说明：
+//   项目 AGENTS/rules 扫描匹配 targetPaths，预算截断后写 context.json。
+//
+// 【运行原理速读】
+//   scanProjectRules → nested AGENTS → applyRuleBudget → ledger 事件。
+// =============================================================================
 import { existsSync } from "node:fs";
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -27,6 +36,9 @@ const PROJECT_RULE_DIRS = [
   ".github/instructions",
 ];
 
+/**
+ * scanProjectRules：本模块对外异步 API。
+ */
 export async function scanProjectRules(rootDir, options = {}) {
   const controlRoot = options.controlRoot || rootDir;
   await ensureWildArrangeDirs(controlRoot);

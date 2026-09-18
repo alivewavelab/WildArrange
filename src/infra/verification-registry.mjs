@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：verification-registry.mjs
+// 所属模块：infra
+// 作用说明：
+//   验证命令注册表：discover 结果持久化与 task 绑定查询。
+//
+// 【运行原理速读】
+//   registerVerification → registry.json → resolveForTask。
+// =============================================================================
 /**
  * Shared schema, canonical digest, declared-input fingerprint and freshness
  * for Registry / Bootstrap / Inventory. doctor, status and generators must
@@ -13,14 +22,29 @@ import { loadWildArrangeConfig } from "./runtime-config.mjs";
 import { hashContent, nowIso, readJson } from "./runtime-store.mjs";
 import { fingerprintCard, stableStringify } from "./verification-cards.mjs";
 
+/**
+ * REGISTRY_SCHEMA_VERSION：本模块对外API。
+ */
 export const REGISTRY_SCHEMA_VERSION = 1;
+/**
+ * bootstrap 制品 schema 版本。
+ */
 export const BOOTSTRAP_SCHEMA_VERSION = 1;
+/**
+ * inventory 制品 schema 版本。
+ */
 export const INVENTORY_SCHEMA_VERSION = 1;
 
+/**
+ * emptyLocator：本模块对外API。
+ */
 export function emptyLocator() {
   return { registryPath: "", bootstrapPath: "", inventoryPath: "", archiveRoot: "" };
 }
 
+/**
+ * readLocator：本模块对外API。
+ */
 export function readLocator(config = {}) {
   const raw = config.verificationGovernance || {};
   return {
@@ -31,19 +55,32 @@ export function readLocator(config = {}) {
   };
 }
 
+/**
+ * locatorConfigured：本模块对外API。
+ */
 export function locatorConfigured(locator) {
   return Boolean(locator?.registryPath && locator?.bootstrapPath && locator?.inventoryPath);
 }
 
+/**
+ * digestCanonical：本模块对外API。
+ */
 export function digestCanonical(value) {
   return hashContent(stableStringify(value));
 }
 
+/**
+ * digestGitComparableContent：本模块对外API。
+ */
 export function digestGitComparableContent(value) {
   const text = Buffer.isBuffer(value) ? value.toString("utf8") : String(value ?? "");
   return hashContent(text.replaceAll("\r\n", "\n"));
 }
 
+/**
+ * buildRegistryFromCards：本模块对外API。
+ */
+// --- registry 构建 ---
 export function buildRegistryFromCards(cards, options = {}) {
   const adopted = (cards || []).filter((card) => card.status === "approved" && card.action === "adopt");
   const deferred = (cards || []).filter((card) => card.action === "defer" || card.status === "deferred");
@@ -97,6 +134,10 @@ export function buildRegistryFromCards(cards, options = {}) {
   return { ...registry, digest: digestCanonical(withoutDigest(registry)) };
 }
 
+/**
+ * buildBootstrap：本模块对外API。
+ */
+// --- bootstrap 与 inventory ---
 export function buildBootstrap({ baselineRef, registryDigest, locator }) {
   const bootstrap = {
     kind: "verification_bootstrap",
@@ -109,6 +150,9 @@ export function buildBootstrap({ baselineRef, registryDigest, locator }) {
   return { ...bootstrap, digest: digestCanonical(withoutDigest(bootstrap)) };
 }
 
+/**
+ * buildInventory：本模块对外API。
+ */
 export function buildInventory({
   registryDigest,
   bootstrapDigest,
@@ -140,6 +184,9 @@ export function buildInventory({
   return { ...inventory, digest: digestCanonical(withoutDigest(inventory)) };
 }
 
+/**
+ * renderVerificationInventoryHtml：本模块对外API。
+ */
 export function renderVerificationInventoryHtml(inventory) {
   const views = inventory?.views || buildInventoryViews([]);
   const data = JSON.stringify(inventory).replaceAll("<", "\\u003c");
@@ -176,6 +223,9 @@ export function renderVerificationInventoryHtml(inventory) {
 </html>\n`;
 }
 
+/**
+ * parseVerificationInventory：本模块对外API。
+ */
 export function parseVerificationInventory(text) {
   const source = String(text || "").trim();
   if (!source) return null;
@@ -185,6 +235,9 @@ export function parseVerificationInventory(text) {
   return JSON.parse(match[1]);
 }
 
+/**
+ * readVerificationInventory：本模块对外异步 API。
+ */
 export async function readVerificationInventory(filePath, fallback = undefined) {
   try {
     return parseVerificationInventory(await readFile(filePath, "utf8"));
@@ -194,6 +247,10 @@ export async function readVerificationInventory(filePath, fallback = undefined) 
   }
 }
 
+/**
+ * computeDeclaredInputFingerprint：本模块对外异步 API。
+ */
+// --- 输入指纹 ---
 export async function computeDeclaredInputFingerprint(rootDir, relativePaths, options = {}) {
   const exclude = new Set((options.exclude || []).map((item) => normalizeRelativePath(item)));
   const fingerprints = [];
@@ -210,6 +267,9 @@ export async function computeDeclaredInputFingerprint(rootDir, relativePaths, op
   return digestCanonical(fingerprints);
 }
 
+/**
+ * declaredInputPaths：本模块对外API。
+ */
 export function declaredInputPaths(registry, locator, extra = []) {
   const paths = [
     locator?.registryPath,
@@ -225,12 +285,18 @@ export function declaredInputPaths(registry, locator, extra = []) {
   return [...new Set(paths)].sort();
 }
 
+/**
+ * gitTreeContains：本模块对外异步 API。
+ */
 export async function gitTreeContains(rootDir, relativePath, ref) {
   if (!relativePath || !ref) return false;
   const result = await runCommandFile("git", ["-C", rootDir, "cat-file", "-e", `${ref}:${normalizeRelativePath(relativePath)}`], rootDir, 15_000);
   return result.exitCode === 0;
 }
 
+/**
+ * readGitBlobDigest：本模块对外异步 API。
+ */
 export async function readGitBlobDigest(rootDir, relativePath, ref) {
   if (!relativePath || !ref) return { available: false, digest: null };
   const spec = `${ref}:${normalizeRelativePath(relativePath)}`;
@@ -239,12 +305,19 @@ export async function readGitBlobDigest(rootDir, relativePath, ref) {
   return { available: true, digest: digestGitComparableContent(result.stdout) };
 }
 
+/**
+ * gitBlobDigestEquals：本模块对外异步 API。
+ */
 export async function gitBlobDigestEquals(rootDir, relativePath, ref, expectedDigest) {
   if (!expectedDigest) return false;
   const blob = await readGitBlobDigest(rootDir, relativePath, ref);
   return blob.available === true && blob.digest === expectedDigest;
 }
 
+/**
+ * evaluateRegistryFreshness：本模块对外异步 API。
+ */
+// --- 新鲜度评估 ---
 export async function evaluateRegistryFreshness(rootDir, options = {}) {
   const { config } = options.config ? { config: options.config } : await loadWildArrangeConfig(rootDir).catch(() => ({ config: {} }));
   const locator = readLocator(config);
@@ -330,6 +403,9 @@ function withoutDigest(value) {
   return rest;
 }
 
+/**
+ * readGitInventoryContext：本模块对外异步 API。
+ */
 export async function readGitInventoryContext(rootDir, baselineRef = null, options = {}) {
   const head = await readGitHead(rootDir);
   if (!head.available) return { baselineRef, headSha: null, branch: null, wip: [] };

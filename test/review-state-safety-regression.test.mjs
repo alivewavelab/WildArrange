@@ -1,3 +1,17 @@
+// =============================================================================
+// 文件名称：review-state-safety-regression.test.mjs
+// 所属模块：test
+// 作用说明：
+//   状态安全回归：active claim 时 plan 重 import 拒绝、claimed pending 不可 runnable、
+//   parallel cleanup 保留 awaiting-acceptance worktree、并发 contract 审批保留双卡、
+//   Windows timeout recovery_required。
+//   不测：正常 happy-path 完成速度或 UI。
+//
+// 【运行原理速读】
+//   构造 claim/cleanup/contract 并发 fixture，
+//   调用 importPlan/isTaskRunnable/cleanupParallelAgentRun 断言状态不变式。
+// =============================================================================
+
 import { applyContractCardDecision, inspectContractTask } from "../src/capabilities/contract-governance.mjs";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";

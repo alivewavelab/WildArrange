@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：llm-provider.mjs
+// 所属模块：infra
+// 作用说明：
+//   OpenAI 兼容 LLM 审查调用与 Agent provider 解析。
+//
+// 【运行原理速读】
+//   resolveAgentProvider → callOpenAICompatible → parseReviewJson → runLlmReview。
+// =============================================================================
 import { loadWildArrangeConfig } from "./runtime-config.mjs";
 import { nowIso } from "./runtime-store.mjs";
 
@@ -10,6 +19,9 @@ const REVIEW_AGENT_PROFILES = {
   },
 };
 
+/**
+ * runLlmReview：本模块对外异步 API。
+ */
 export async function runLlmReview(rootDir, agentName, task, evidence = {}, options = {}) {
   const { config } = options.config ? { config: options.config } : await loadWildArrangeConfig(rootDir);
   const llmConfig = config.review?.llm || {};
@@ -82,6 +94,9 @@ export async function runLlmReview(rootDir, agentName, task, evidence = {}, opti
   }
 }
 
+/**
+ * resolveAgentProvider：本模块对外API。
+ */
 export function resolveAgentProvider(config, agentName) {
   const archivistProfile = config.archivistRouter?.agent === agentName ? config.archivistRouter : null;
   const agent = config.agents?.[agentName] || archivistProfile;
@@ -114,6 +129,9 @@ export function resolveAgentProvider(config, agentName) {
   };
 }
 
+/**
+ * callOpenAICompatible：本模块对外异步 API。
+ */
 export async function callOpenAICompatible(options) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs || 45_000);
@@ -246,6 +264,9 @@ function asString(value) {
 }
 
 // Required responsibility review never converts unavailable providers into PASS.
+/**
+ * runIndependentLlmReview：本模块对外异步 API。
+ */
 export async function runIndependentLlmReview(config, packet, options = {}) {
   const provider = resolveAgentProvider(config, "BaiZe");
   if (config.review?.llm?.enabled !== true || !provider.available) {

@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：responsibility-evidence.mjs
+// 所属模块：infra
+// 作用说明：
+//   职责审查只读证据包：全脚本+diff，超预算 fail-closed。
+//
+// 【运行原理速读】
+//   walk 源码 inventory → 读文件/hash → git diff → packet digest。
+// =============================================================================
 import { lstat, readFile, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import { createReadStream } from "node:fs";
@@ -11,6 +20,9 @@ const SOURCE = /\.(?:[cm]?[jt]sx?|py|rs|go|java|kt|cs|cpp|cc|c|h|hpp|rb|php|swif
 const EXCLUDED = new Set([".git", ".wildarrange", "node_modules", "vendor", "dist", "build", "target", ".venv"]);
 
 // Evidence only: no decisions, no writes, no silent truncation.
+/**
+ * collectResponsibilityEvidence：本模块对外异步 API。
+ */
 export async function collectResponsibilityEvidence(rootDir, changes, changedPaths, maxChars = 500000) {
   if (!Array.isArray(changedPaths)) throw new Error("changed-path evidence is missing");
   const root = await realpath(rootDir);

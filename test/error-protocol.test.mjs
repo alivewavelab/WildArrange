@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：error-protocol.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证统一错误协议：inline 格式含 code/module/next_action、
+//   gateway unknown/throw 携带 protocol、delivery blocked、CLI 非零 stderr。
+//   不测：各业务错误的具体文案国际化。
+//
+// 【运行原理速读】
+//   构造 buildErrorProtocol/wildarrangeError 与 gateway/delivery/CLI 路径，
+//   断言 formatErrorInline 与 errorProtocolOf 输出一致。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";

@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：llm-provider.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 runLlmReview：stub fetch 下 decision 映射、
+//   非法 JSON/空 content 降级、provider 配置路由。
+//   不测：真实 LLM API 延迟、计费或模型质量。
+//
+// 【运行原理速读】
+//   临时替换 globalThis.fetch 返回固定 choices，
+//   调用 runLlmReview 断言 verdict 字段与 hallucination 过滤。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import test from "node:test";
 import { runLlmReview } from "../src/infra/llm-provider.mjs";

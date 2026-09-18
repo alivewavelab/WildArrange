@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：recovery-transaction.mjs
+// 所属模块：infra
+// 作用说明：
+//   adoption/archive 共享的 preimage 复制、digest 与恢复 manifest 原语。
+//
+// 【运行原理速读】
+//   capturePreimages → writeRecoveryManifest → restorePreimages 按 digest 类型恢复。
+// =============================================================================
 /**
  * Product-neutral copy / path / digest / manifest / restore primitives.
  * Archive and adoption keep their own persistent schemas; this module only
@@ -15,15 +24,27 @@ import {
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 
+/**
+ * adoption 恢复 manifest 的 kind 标识。
+ */
 export const ADOPTION_RECOVERY_KIND = "adoption_change_recovery";
+/**
+ * task archive 恢复 manifest 的 kind 标识。
+ */
 export const ARCHIVE_RECOVERY_KIND = "task_archive_recovery";
 
+/**
+ * 断言 id 为安全单段标识符，否则抛错。
+ */
 export function assertSafeId(value, label = "id") {
   if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)) {
     throw new Error(`${label} must be a safe single-segment identifier`);
   }
 }
 
+/**
+ * resolveInboundPath：本模块对外API。
+ */
 export function resolveInboundPath(rootDir, candidate, options = {}) {
   if (typeof candidate !== "string" || !candidate) throw new Error("recovery path must be a non-empty string");
   const sourcePath = path.isAbsolute(candidate) ? path.resolve(candidate) : path.resolve(rootDir, candidate);
@@ -40,6 +61,9 @@ export function resolveInboundPath(rootDir, candidate, options = {}) {
   return sourcePath;
 }
 
+/**
+ * resolveRelativeInside：本模块对外API。
+ */
 export function resolveRelativeInside(parentDir, relativePath, label) {
   if (typeof relativePath !== "string" || path.isAbsolute(relativePath)) {
     throw new Error(`${label} must be relative`);
@@ -52,6 +76,9 @@ export function resolveRelativeInside(parentDir, relativePath, label) {
   return targetPath;
 }
 
+/**
+ * assertRealpathInsideRoot：本模块对外异步 API。
+ */
 export async function assertRealpathInsideRoot(rootDir, absolutePath, displayPath) {
   const rootPath = path.resolve(rootDir);
   const targetPath = path.resolve(absolutePath);
@@ -94,6 +121,9 @@ export async function assertRealpathInsideRoot(rootDir, absolutePath, displayPat
   }
 }
 
+/**
+ * copyEntry：本模块对外异步 API。
+ */
 export async function copyEntry(sourcePath, destParent, relativePath) {
   let sourceStat;
   try {
@@ -118,6 +148,9 @@ export async function copyEntry(sourcePath, destParent, relativePath) {
   return { path: relativePath, status: "copied", type: "file", bytes: sourceStat.size };
 }
 
+/**
+ * digestPath：本模块对外异步 API。
+ */
 export async function digestPath(absolutePath) {
   try {
     const info = await lstat(absolutePath);
@@ -136,6 +169,9 @@ export async function digestPath(absolutePath) {
   }
 }
 
+/**
+ * capturePreimages：本模块对外异步 API。
+ */
 export async function capturePreimages(rootDir, relativePaths, stagingDir, options = {}) {
   await mkdir(stagingDir, { recursive: true });
   const entries = [];
@@ -151,6 +187,9 @@ export async function capturePreimages(rootDir, relativePaths, stagingDir, optio
   return entries;
 }
 
+/**
+ * restorePreimages：本模块对外异步 API。
+ */
 export async function restorePreimages(rootDir, stagingDir, entries, options = {}) {
   const restored = [];
   for (const entry of entries || []) {
@@ -183,6 +222,9 @@ export async function restorePreimages(rootDir, stagingDir, entries, options = {
   return restored;
 }
 
+/**
+ * createAdoptionRecoveryManifest：本模块对外API。
+ */
 export function createAdoptionRecoveryManifest({
   transactionId,
   sessionId,
@@ -205,25 +247,40 @@ export function createAdoptionRecoveryManifest({
   };
 }
 
+/**
+ * writeRecoveryManifest：本模块对外异步 API。
+ */
 export async function writeRecoveryManifest(manifestPath, manifest) {
   await writeJsonAtomic(manifestPath, manifest);
   return manifest;
 }
 
+/**
+ * readRecoveryManifest：本模块对外异步 API。
+ */
 export async function readRecoveryManifest(manifestPath) {
   return readJson(manifestPath, null);
 }
 
+/**
+ * adoptionSessionDir：本模块对外API。
+ */
 export function adoptionSessionDir(rootDir, sessionId) {
   assertSafeId(sessionId, "adoption session id");
   return resolveWildArrangePath(rootDir, "adoption", sessionId);
 }
 
+/**
+ * adoptionTransactionDir：本模块对外API。
+ */
 export function adoptionTransactionDir(rootDir, sessionId, cardId) {
   assertSafeId(cardId, "adoption card id");
   return path.join(adoptionSessionDir(rootDir, sessionId), "transactions", cardId);
 }
 
+/**
+ * writeMaintenanceMarker：本模块对外异步 API。
+ */
 export async function writeMaintenanceMarker(rootDir, payload) {
   const markerPath = resolveWildArrangePath(rootDir, "adoption", "maintenance.json");
   const marker = {
@@ -235,10 +292,16 @@ export async function writeMaintenanceMarker(rootDir, payload) {
   return marker;
 }
 
+/**
+ * readMaintenanceMarker：本模块对外异步 API。
+ */
 export async function readMaintenanceMarker(rootDir) {
   return readJson(resolveWildArrangePath(rootDir, "adoption", "maintenance.json"), null);
 }
 
+/**
+ * clearMaintenanceMarker：本模块对外异步 API。
+ */
 export async function clearMaintenanceMarker(rootDir) {
   const markerPath = resolveWildArrangePath(rootDir, "adoption", "maintenance.json");
   if (!existsSync(markerPath)) return false;

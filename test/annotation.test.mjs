@@ -1,10 +1,16 @@
-/**
- * 标注回写测试：
- * - 拦截与非确定性放行带 annotatable 标记与决策 id，确定性 PASS 不进标注队列；
- * - 标注强制分类、决策 id 必须存在；
- * - 统计以「规则 × 标注」为单位；
- * - 硬约束钉死：标注路径绝不写 config / verify_commands / 任何门开关。
- */
+// =============================================================================
+// 文件名称：annotation.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证标注回写：deny/拦截可标注、确定性 PASS 不入队、
+//   强制分类与 decision id、按规则×分类统计、绝不写 config/门开关。
+//   不测：LLM 路由语义或真实宿主 Hook 安装。
+//
+// 【运行原理速读】
+//   导入通过计划，触发 hook/路由产生决策，写入标注并跑 stats/CLI，
+//   断言 annotation 文件与 config/tasks 未被篡改。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";

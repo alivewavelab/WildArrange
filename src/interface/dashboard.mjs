@@ -1,3 +1,23 @@
+// =============================================================================
+// 文件名称：dashboard.mjs
+// 所属模块：interface
+// 作用说明：
+//   本地 Dashboard HTTP 服务：状态查询、任务操作、面板 API 与 Adoption 路由委托。
+//   默认仅 loopback；非本机绑定需显式 token，写操作校验 Host/Origin/Cookie。
+//
+// 【运行原理速读】
+//   可以把它想成「治理运行时的本地 Web 控制台」：
+//
+//   · 谁调用？
+//     wildarrange serve / adoption start 启动 http.createServer 监听。
+//
+//   · 它做了什么？
+//     ① /api/state 等读 orchestration ② POST 触发 run/node/task 写操作
+//     ③ / 返回 dashboard-view 单页 HTML。
+//
+//   · 安全模型？
+//     loopback 自动生成 HttpOnly cookie token；跨站 POST 需 SameSite/Origin 对齐。
+// =============================================================================
 import http from "node:http";
 import { readFile } from "node:fs/promises";
 import { randomBytes, timingSafeEqual } from "node:crypto";
@@ -26,8 +46,14 @@ import { tryHandleAdoptionApi } from "./adoption-panel.mjs";
 import { renderDashboardHtml } from "./dashboard-view.mjs";
 import { SAFE_ID, readJsonBody, sendJson } from "./http-utils.mjs";
 
+/** 请求参数非法时抛出，映射为 HTTP 400。 */
 class DashboardBadRequest extends Error {}
 
+/**
+ * 启动 Dashboard HTTP 服务并返回 listening 的 server 实例。
+ * @param {string} rootDir
+ * @param {{ host?: string, port?: number, token?: string }} [options]
+ */
 export function startDashboardServer(rootDir, options = {}) {
   const host = options.host || "127.0.0.1";
   const port = Number.isInteger(options.port) ? options.port : 8765;
@@ -42,6 +68,7 @@ export function startDashboardServer(rootDir, options = {}) {
   const server = http.createServer(async (request, response) => {
     try {
       const url = new URL(request.url || "/", `http://${host}:${port}`);
+      // --- API 安全：Host / Origin / Token ---
       if (url.pathname.startsWith("/api/") && !isAllowedHost(request, host)) {
         sendJson(response, 403, { ok: false, error: "forbidden_host" });
         return;
@@ -54,6 +81,7 @@ export function startDashboardServer(rootDir, options = {}) {
         sendJson(response, 401, { ok: false, error: "unauthorized" });
         return;
       }
+      // --- 状态与静态资源 ---
       if (url.pathname === "/api/state") {
         const data = await dashboardData(rootDir);
         sendJson(response, 200, data);
@@ -65,6 +93,7 @@ export function startDashboardServer(rootDir, options = {}) {
         response.end(asset);
         return;
       }
+      // --- 工作流与任务 API ---
       if (request.method === "POST" && url.pathname === "/api/run-next") {
         const result = await runNextTask(rootDir);
         sendJson(response, 200, { ok: true, result });
@@ -146,6 +175,7 @@ export function startDashboardServer(rootDir, options = {}) {
         sendJson(response, 200, { ok: true, result });
         return;
       }
+      // --- 面板 ViewModel API ---
       if (request.method === "GET" && url.pathname === "/api/panels/decisions") {
         sendJson(response, 200, await buildDecisionsPanelViewModel(rootDir));
         return;
@@ -195,6 +225,8 @@ export function startDashboardServer(rootDir, options = {}) {
     server.listen(port, host, () => resolve(server));
   });
 }
+
+// --- 认证与同源校验 ---
 
 function isLoopbackHost(host) {
   return host === "localhost" || host === "::1" || host === "127.0.0.1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
@@ -274,6 +306,8 @@ function parseHostName(header) {
   }
   return value.split(":")[0];
 }
+
+// --- 请求参数校验 ---
 
 function safeDecodeSegment(value, label) {
   try {

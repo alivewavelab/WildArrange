@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：runtime-config.mjs
+// 所属模块：infra
+// 作用说明：
+//   wildarrange.config.json 加载、默认值合并与环境覆盖。
+//
+// 【运行原理速读】
+//   loadWildArrangeConfig → deepMerge default-config → 返回 sourcePath。
+// =============================================================================
 import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import path from "node:path";
@@ -11,11 +20,26 @@ import {
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 
+/**
+ * WILDARRANGE_CONFIG_FILE：本模块对外API。
+ */
 export const WILDARRANGE_CONFIG_FILE = "wildarrange.config.json";
+/**
+ * 产品显示名称常量。
+ */
 export const PRODUCT_NAME = "WildArrange";
+/**
+ * npm 包默认名称。
+ */
 export const DEFAULT_PACKAGE_NAME = "@alivewavelab/wildarrange";
+/**
+ * CLI 默认命令名。
+ */
 export const DEFAULT_CLI_COMMAND = "wildarrange";
 
+/**
+ * loadWildArrangeConfig：本模块对外异步 API。
+ */
 export async function loadWildArrangeConfig(rootDir) {
   const rootConfigPath = path.join(rootDir, WILDARRANGE_CONFIG_FILE);
   const runtimeConfigPath = resolveWildArrangePath(rootDir, "config.json");
@@ -32,6 +56,9 @@ export async function loadWildArrangeConfig(rootDir) {
   };
 }
 
+/**
+ * migrateRuntimeConfigState：本模块对外异步 API。
+ */
 export async function migrateRuntimeConfigState(rootDir) {
   await ensureWildArrangeDirs(rootDir);
   const rootConfigPath = path.join(rootDir, WILDARRANGE_CONFIG_FILE);
@@ -58,6 +85,9 @@ export async function migrateRuntimeConfigState(rootDir) {
   };
 }
 
+/**
+ * writeDefaultWildArrangeConfig：本模块对外异步 API。
+ */
 export async function writeDefaultWildArrangeConfig(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const targetPath = options.root === true ? path.join(rootDir, WILDARRANGE_CONFIG_FILE) : resolveWildArrangePath(rootDir, "config.json");
@@ -210,6 +240,9 @@ function isPlainObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * updateProjectGovernanceConfig：本模块对外异步 API。
+ */
 export async function updateProjectGovernanceConfig(rootDir, patch, options = {}) {
   if (!patch || typeof patch !== "object" || Array.isArray(patch) || Object.keys(patch).some(key => !["review", "executionReadiness"].includes(key))) throw new Error("setup may only change review and executionReadiness");
   if (patch.review !== undefined && !isPlainObject(patch.review)) throw new Error("review must be an object");

@@ -1,3 +1,17 @@
+// =============================================================================
+// 文件名称：responsibility-audit.mjs
+// 所属模块：capabilities
+// 作用说明：
+//   对声明了 responsibilityChanges 的任务执行 BaiZe 独立职责审计（R1-R5），
+//   校验计划批准、scope 覆盖与源码引用，产出 responsibility_audit receipt。
+//
+// 【运行原理速读】
+//   · 何时执行？review gate 的 responsibility_audit lane。
+//   · 做了什么？ledger 批准链 → collectResponsibilityEvidence → 独立审查 packet
+//     → validateResponsibilityVerdict。
+//   · 缺了它会怎样？职责边界变更可未经独立审计即被当作完成。
+// =============================================================================
+
 import { loadSkillAttachment } from "../infra/context-attachments.mjs";
 import { executeReviewPacket } from "./project-review.mjs";
 import { RESPONSIBILITY_RULES, RESPONSIBILITY_REVIEW_INSTRUCTIONS, responsibilityDigest, normalizeResponsibilityChanges } from "../infra/responsibility-contract.mjs";
@@ -5,6 +19,11 @@ import { collectResponsibilityEvidence } from "../infra/responsibility-evidence.
 import { readVerifiedLedgerEntries } from "../infra/ledger.mjs";
 import { nowIso, readJson, resolveWildArrangePath, resolveTaskReportPath } from "../infra/runtime-store.mjs";
 
+/**
+ * 运行完整职责审计流程；legacy 无 declaration 时返回 NOT_AUDITED。
+ * @param {string} controlRoot ledger 与配置根
+ * @param {string} executionRoot 源码 evidence 收集根
+ */
 export async function runResponsibilityAudit(controlRoot, task, scopeResult, config, executionRoot = controlRoot) {
   const base = { kind: "responsibility_audit", at: nowIso(), reviewer: "BaiZe" };
   const blocked = (reason) => ({ ...base, pass: false, decision: "RETURN", summary: reason, findings: [] });
@@ -46,6 +65,10 @@ export async function runResponsibilityAudit(controlRoot, task, scopeResult, con
   } catch (error) { return blocked(`Responsibility audit incomplete: ${error.message}`); }
 }
 
+/**
+ * 校验审计 JSON：R1-R5 各一条 check、finding 与源码行引用一致。
+ * @returns {object} pass、decision、checks、findings、summary
+ */
 export function validateResponsibilityVerdict(result, source) {
   if (!["PASS", "RETURN"].includes(result?.decision)) throw new Error("invalid audit decision");
   if (!Array.isArray(result.checks) || result.checks.length !== 5 || new Set(result.checks.map((c) => c.rule)).size !== 5) throw new Error("audit must cover R1-R5 exactly once");

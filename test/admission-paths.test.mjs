@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：admission-paths.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 collectActualAdmissionPaths 从 git 工作区收集实际准入路径：
+//   含未跟踪新文件、无 tracked diff 时的 untracked、非 git 目录回退。
+//   不测：并行准入裁决、dashboard 写入或 adoption 事务。
+//
+// 【运行原理速读】
+//   在临时 git 仓库中创建/修改文件，调用 collectActualAdmissionPaths，
+//   断言返回路径集合正确排除 .wildarrange 并覆盖各 git 状态分支。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";

@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：contract-governance.mjs
+// 所属模块：capabilities
+// 作用说明：
+//   契约治理能力的薄封装：扫描契约宇宙、审查任务 contractChanges、
+//   应用人类批准的差异卡、生成 registry 视图。重逻辑在 infra 层。
+//
+// 【运行原理速读】
+//   · 何时执行？review gate 的 contract_governance lane；CLI contracts 子命令。
+//   · 做了什么？scan → 比对变更与声明 → apply-card 原子更新 registry。
+//   · 缺了它会怎样？公开契约变更可绕过声明与审批直接合入。
+// =============================================================================
+
 import {
   persistContractScan,
   scanContractGovernanceUniverse,
@@ -7,6 +20,7 @@ import { mkdir, rename, rm } from "node:fs/promises";
 import { nowIso, readJson, writeJsonAtomic } from "../infra/runtime-store.mjs";
 import { contractGovernancePaths, readContractRegistry, withContractGovernanceLock, requireSafeId, safeCardName, contractError, assertContractReferences, applyApprovedCard, relative, cardTouchesPaths, normalizeSlash, inspectApprovalRef, inspectContractReferences, declarationCoversSource, isContractScanPath } from "../infra/contract-governance.mjs";
 
+/** 扫描契约治理宇宙；inspectTask 时转为任务审查模式。 */
 export async function scanContractGovernance(rootDir, options = {}) {
   if (options.inspectTask) return inspectContractTask(rootDir, options.inspectTask, options.evidence || {}, options);
   const startedAt = Date.now();
@@ -19,15 +33,18 @@ export async function scanContractGovernance(rootDir, options = {}) {
   };
 }
 
+/** 应用契约差异卡（approve/reject）的公开入口，内部加锁。 */
 export async function applyContractGovernanceCard(rootDir, options = {}) {
   return applyContractCardDecision(rootDir, options);
 }
 
+/** 读取 registry 与 currentScan，生成契约治理只读视图。 */
 export async function generateContractGovernanceArtifacts(rootDir) {
   const paths = contractGovernancePaths(rootDir);
   return { kind: "contract_governance_view", registry: await readContractRegistry(rootDir), scan: await readJson(paths.currentScan, null) };
 }
 
+/** 对任务执行契约治理审查，包装为 review gate 可用的 evidence 形态。 */
 export async function runContractGovernanceReview(rootDir, task, evidence = {}, options = {}) {
   const result = await inspectContractTask(rootDir, task, evidence, options);
   return {
@@ -37,6 +54,11 @@ export async function runContractGovernanceReview(rootDir, task, evidence = {}, 
   };
 }
 
+/**
+ * 在文件锁保护下执行差异卡决策（approve/reject），含回滚与归档。
+ * @param {string} rootDir 项目根目录
+ * @param {object} options cardId、decision、reason、expectedFingerprint
+ */
 export async function applyContractCardDecision(rootDir, options = {}) {
   return withContractGovernanceLock(rootDir, `apply-card:${options.cardId || "unknown"}`, () =>
     applyContractCardDecisionUnlocked(rootDir, options));
@@ -127,6 +149,10 @@ async function applyContractCardDecisionUnlocked(rootDir, options = {}) {
 }
 
 
+/**
+ * 审查任务的 contractChanges 是否与扫描结果、registry 及变更路径对齐。
+ * @returns {Promise<object>} status 为 pass|fail|warn，含 findings 与 scan
+ */
 export async function inspectContractTask(rootDir, task, evidence = {}, options = {}) {
   const controlRoot = options.controlRoot || rootDir;
   const declarations = Array.isArray(task?.contractChanges?.items) ? task.contractChanges.items : [];

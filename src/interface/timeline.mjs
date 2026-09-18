@@ -1,13 +1,23 @@
-/**
- * wildarrange timeline — 统一时间线投影。
- *
- * 把三个日志源合并成一条倒序时间线，回答"这个仓库最近发生了什么"：
- * - ledger（hash 链，只取通过校验的条目）：权威事件；
- * - decisions（派生）：每一次拦截/放行的决策；
- * - annotations（派生）：人/审查者对决策的标注。
- *
- * 只读派生投影，不二次写入任何状态。
- */
+// =============================================================================
+// 文件名称：timeline.mjs
+// 所属模块：interface
+// 作用说明：
+//   合并 ledger、decisions、annotations 为统一倒序时间线 CLI 投影。
+//   只读派生视图，回答「仓库最近发生了什么」。
+//
+// 【运行原理速读】
+//   可以把它想成「三类日志的合并时间轴」：
+//
+//   · 谁调用？
+//     wildarrange timeline（--task / --source / --format json）。
+//
+//   · 它做了什么？
+//     ① 分别读取三源 ② 可选按 taskId 过滤（标注经 decisionId 归属）
+//     ③ 按 ts 倒序、同源稳定序后 limit 截断。
+//
+//   · 数据源权威级？
+//     ledger 仅 hash 链校验通过的条目；decisions/annotations 跳过坏行并计数。
+// =============================================================================
 import { readVerifiedLedgerEntries } from "../infra/ledger.mjs";
 import { readDecisions } from "../infra/decision-log.mjs";
 import { readAnnotations } from "../infra/annotation-log.mjs";
@@ -50,6 +60,11 @@ function annotationToRow(record) {
   };
 }
 
+/**
+ * 构建统一时间线投影。
+ * @param {string} rootDir
+ * @param {{ limit?: number, taskId?: string, source?: string, format?: string }} [options]
+ */
 export async function projectTimeline(rootDir, { limit = 50, taskId, source, format } = {}) {
   const wantSources = source && KNOWN_SOURCES.includes(source) ? [source] : KNOWN_SOURCES;
   const rows = [];

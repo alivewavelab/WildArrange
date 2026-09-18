@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：contract-governance.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证契约治理：Tauri IPC 解析/发现、扫描持久化卡片与 registry、
+//   未声明变更拦截、CLI contract 子命令、skill 匹配。
+//   不测：非 Tauri 技术栈的前端契约或生产数据库迁移。
+//
+// 【运行原理速读】
+//   用 fixture 源码片段与临时项目目录跑 scan/persist/inspect，
+//   断言 parser 输出、registry 更新与 review 门禁决策。
+// =============================================================================
+
 import { applyContractCardDecision, inspectContractTask } from "../src/capabilities/contract-governance.mjs";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";

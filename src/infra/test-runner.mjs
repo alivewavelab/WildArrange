@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：test-runner.mjs
+// 所属模块：infra
+// 作用说明：
+//   依赖图驱动测试选择与 node --test 执行，CI/本地一致。
+//
+// 【运行原理速读】
+//   selectRepoTests zone/impact → runRepoTests 剥离 NODE_TEST_* 后 spawnSync。
+// =============================================================================
 /**
  * Repo test selection and execution: maps "what changed" (or a zone) to the
  * minimal test set via dependency-graph, then spawns `node --test` and
@@ -6,6 +15,9 @@
 import { spawnSync } from "node:child_process";
 import { computeImpact, computeZoneTests, listRepoTests } from "./dependency-graph.mjs";
 
+/**
+ * selectRepoTests：本模块对外异步 API。
+ */
 export async function selectRepoTests(rootDir, { zone, changedPaths = [] } = {}) {
   if (zone) {
     const report = await computeZoneTests(rootDir, zone);
@@ -19,6 +31,9 @@ export async function selectRepoTests(rootDir, { zone, changedPaths = [] } = {})
   return { tests, selectionNote: `全量测试 ${tests.length} 个` };
 }
 
+/**
+ * runRepoTests：本模块对外API。
+ */
 export function runRepoTests(rootDir, tests) {
   // 继承 NODE_TEST_CONTEXT 时，子进程 node --test 会误以为自己是由
   // 外层 runner 启动的 IPC 子进程而空跑退出（exit 0、零测试）——从

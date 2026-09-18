@@ -1,3 +1,19 @@
+// =============================================================================
+// 文件名称：status.mjs
+// 所属模块：orchestration
+// 作用说明：
+//   工作流状态与注意力报告：汇总任务计数、门武装、变更请求、
+//   并行 run 与需人工决策项；为 dashboard 与 workflow 摘要提供数据面。
+//
+// 【运行原理速读】
+//   可以把它想成「项目健康仪表盘的数据层」：
+//
+//   · 何时执行？
+//     CLI status/dashboard、workflow 结束或 attention 查询时。
+//
+//   · 做了什么？
+//     读 taskState/ledger/changes → 聚合 counts 与 attention 列表 → 可选写 summary 文件。
+// =============================================================================
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -20,6 +36,9 @@ import { listChangeRequests } from "./change-governance.mjs";
 import { parallelAgentStatus } from "./parallel-runtime.mjs";
 import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
 
+// --- 工作流摘要 ---
+
+/** 生成 workflow-summary.json/md 并记入 ledger。 */
 export async function writeWorkflowSummary(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const status = await statusReport(rootDir);
@@ -72,6 +91,9 @@ export async function writeWorkflowSummary(rootDir, options = {}) {
   return summary;
 }
 
+// --- 状态报告 ---
+
+/** 返回计划任务各状态计数、门武装与完成证据完整性。 */
 export async function statusReport(rootDir) {
   const work = await readJson(resolveWildArrangePath(rootDir, "work.json"), null);
   const taskState = await loadTaskState(rootDir);
@@ -113,6 +135,9 @@ export async function statusReport(rootDir) {
   };
 }
 
+// --- 仪表盘 ---
+
+/** 组装 dashboard 所需的 status、tasks、health、attention 等完整视图。 */
 export async function dashboardData(rootDir) {
   const status = await statusReport(rootDir);
   const taskState = await loadTaskState(rootDir);
@@ -185,6 +210,9 @@ function buildActiveWorkspaces(tasks, runs) {
     }));
 }
 
+// --- 账本与注意力 ---
+
+/** 返回跨计划 task ledger 视图（counts、plans、tasks 列表）。 */
 export async function taskLedgerReport(rootDir) {
   const ledger = await loadTaskLedger(rootDir);
   if (!ledger) {
@@ -207,6 +235,7 @@ export async function taskLedgerReport(rootDir) {
   };
 }
 
+/** 汇总需开发者注意力的事项：open changes、失败任务、待验收 parallel run 等。 */
 export async function attentionReport(rootDir, options = {}) {
   const taskState = options.taskState !== undefined ? options.taskState : await loadTaskState(rootDir);
   const changes = options.changes !== undefined ? options.changes : await listChangeRequests(rootDir);
@@ -294,6 +323,7 @@ export async function attentionReport(rootDir, options = {}) {
   };
 }
 
+/** 读取 ledger.jsonl 尾部若干条 JSON 事件。 */
 export async function readLedgerTail(rootDir, limit) {
   try {
     const content = await readFile(resolveWildArrangePath(rootDir, "ledger.jsonl"), "utf8");

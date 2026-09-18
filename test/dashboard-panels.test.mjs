@@ -1,7 +1,16 @@
-/**
- * Dashboard 路由复盘/决策/运维面板测试：GET 端点返回 ViewModel，
- * 路由复盘标注只写 annotations，不改配置或路由表。
- */
+// =============================================================================
+// 文件名称：dashboard-panels.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 decisions/ops/route review 只读面板视图模型；
+//   损坏 decisions.jsonl 降级不 500；route review 关联 prompt/工具/人工审查。
+//   不测：adoption 写入或 health 端点。
+//
+// 【运行原理速读】
+//   启动 dashboard，GET 各 panel 路由，注入坏 JSONL fixture，
+//   断言 200 视图结构与链接字段完整。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";

@@ -1,3 +1,18 @@
+// =============================================================================
+// 文件名称：context.mjs
+// 所属模块：ai
+// 作用说明：
+//   构建 Agent 运行时上下文包（身份 Prompt、任务摘要、规则、注入点、Git 变更），
+//   并管理会话 lineage、resume 报告与 Stop Hook 续跑指令。不负责 Hook 事件分发。
+//
+// 【运行原理速读】
+//   · 何时触发？ hooks.mjs（SessionStart/PreToolUse）、CLI resume/continuation、
+//     buildAgentContext 被显式调用。
+//   · 做了什么？ ① 解析任务与 Agent ② resolveInjectionPoint ③ 写 context-agents/*
+//     ④ recordRuntimeSession / resumeReport / continuationDirective。
+//   · 与谁协作？ injection、task-board、rule-scanner、runtime-snapshot、status。
+// =============================================================================
+
 import { renderResponsibilityChanges } from "../infra/responsibility-contract.mjs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -27,6 +42,14 @@ import { scanProjectRules } from "../infra/rule-scanner.mjs";
 import { findRunnableTask, normalizeAgentName } from "../orchestration/task-board.mjs";
 import { statusReport } from "../orchestration/status.mjs";
 
+// --- Agent 上下文构建 ---
+
+/**
+ * 为指定 Agent/任务构建完整上下文包，写入 context-agents/*.json|.md 并记 ledger。
+ * @param {string} rootDir 控制根目录
+ * @param {object} options agent、taskId、planId、executionRoot、injectionPoint、role
+ * @returns {Promise<object>} kind=wildarrange_agent_context
+ */
 export async function buildAgentContext(rootDir, options = {}) {
   const executionRoot = options.executionRoot || rootDir;
   await ensureWildArrangeDirs(rootDir);
@@ -119,10 +142,23 @@ export async function buildAgentContext(rootDir, options = {}) {
   return context;
 }
 
+/**
+ * 写入运行时上下文快照（委托 runtime-snapshot）。
+ * @param {string} rootDir 项目根目录
+ * @param {object} options 快照原因与附加数据
+ */
 export async function writeContextSnapshot(rootDir, options = {}) {
   return writeRuntimeContextSnapshot(rootDir, options);
 }
 
+// --- 会话与续跑 ---
+
+/**
+ * 记录或更新会话 lineage（sessions/lineage.json）。
+ * @param {string} rootDir 项目根目录
+ * @param {object} options sessionId、source
+ * @returns {Promise<object>} 更新后的 lineage
+ */
 export async function recordRuntimeSession(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const sessionId = options.sessionId || process.env.WILDARRANGE_SESSION_ID || process.env.CODEX_SESSION_ID || process.env.CURSOR_SESSION_ID || createWorkId("session");
@@ -145,6 +181,11 @@ export async function recordRuntimeSession(rootDir, options = {}) {
   return lineage;
 }
 
+/**
+ * 生成恢复报告：会话 lineage + 最新快照 + status + nextAction。
+ * @param {string} rootDir 项目根目录
+ * @param {object} options sessionId、source、cliCommandPrefix
+ */
 export async function resumeReport(rootDir, options = {}) {
   const lineage = await recordRuntimeSession(rootDir, {
     sessionId: options.sessionId,
@@ -176,6 +217,12 @@ export async function resumeReport(rootDir, options = {}) {
   return resume;
 }
 
+/**
+ * 判断 Stop Hook 是否应续跑，写入 sessions/continuation.* 并返回 directive。
+ * @param {string} rootDir 项目根目录
+ * @param {object} options sessionId、source、cliCommandPrefix
+ * @returns {Promise<object>} shouldContinue、reason、nextCommand、resume
+ */
 export async function continuationDirective(rootDir, options = {}) {
   const resume = await resumeReport(rootDir, {
     sessionId: options.sessionId,
@@ -206,6 +253,8 @@ export async function continuationDirective(rootDir, options = {}) {
   await appendLedger(rootDir, { type: "continuation_checked", shouldContinue, reason: directive.reason, taskId: directive.taskId });
   return directive;
 }
+
+// --- 渲染与 Prompt 预算 ---
 
 function stageForInjectionPoint(pointName) {
   if (pointName === "before_execute") return "execute";

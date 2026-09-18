@@ -1,3 +1,19 @@
+// =============================================================================
+// 文件名称：plan-state.mjs
+// 所属模块：orchestration
+// 作用说明：
+//   计划与任务状态：计划/任务规范化、图校验、导入、批准、路由 enrichment
+//   与 tasks.md 派生。权威 taskState 的读写在 infra/task-state-store。
+//
+// 【运行原理速读】
+//   可以把它想成「计划 JSON 的编译器与入库员」：
+//
+//   · 何时执行？
+//     plan import/approve、任务 ready、编排层读 loadTaskState 时。
+//
+//   · 做了什么？
+//     normalize → validate → 写 ledger → persist → 可选写 Markdown 镜像。
+// =============================================================================
 import { normalizeResponsibilityChanges, responsibilityDigest, renderResponsibilityChanges } from "../infra/responsibility-contract.mjs";
 import { writeFile } from "node:fs/promises";
 import {
@@ -33,6 +49,9 @@ import { assertFeatureDesignPlanBinding, bindFeatureDesignPlan } from "./feature
 import { loadRoutesConfig, resolveRouteDecision } from "../infra/route-table.mjs";
 import { isPossibleNoopTask, isTrivialCommand } from "../infra/task-predicates.mjs";
 
+// --- 规范化 ---
+
+/** 规范化计划对象：title、tasks、defaults 等必填与结构约束。 */
 export function normalizePlan(rawPlan) {
   if (!rawPlan || typeof rawPlan !== "object") {
     throw new Error("plan must be a JSON object");
@@ -73,6 +92,7 @@ function normalizePlanDefaults(rawPlan) {
   return defaults;
 }
 
+/** 规范化字符串数组字段，非法项抛错。 */
 export function normalizeStringArray(value, label) {
   if (!Array.isArray(value)) throw new Error(`${label} must be an array`);
   return uniqueStrings(value.map((item) => {
@@ -91,6 +111,7 @@ function normalizeSkillArray(value, label) {
   return skills;
 }
 
+/** 规范化单条任务：命令、路径、successCriteria、contractChanges 等。 */
 export function normalizeTask(task, index, defaults = {}, options = {}) {
   if (!task || typeof task !== "object") {
     throw new Error(`task ${index + 1} must be an object`);
@@ -167,6 +188,9 @@ export function normalizeTask(task, index, defaults = {}, options = {}) {
   };
 }
 
+// --- 校验 ---
+
+/** 校验 draft 任务 ready 前必填字段是否齐全。 */
 export function validateTaskReady(task) {
   if (!task || typeof task !== "object") throw new Error("task is required");
   if (!Array.isArray(task.verify_commands) || task.verify_commands.length === 0) {
@@ -184,6 +208,7 @@ export function validateTaskReady(task) {
   return task;
 }
 
+/** 规范化 workType 枚举值。 */
 export function normalizeWorkType(value) {
   if (typeof value !== "string" || !TASK_WORK_TYPES.has(value)) {
     throw new Error(`invalid task workType: ${value}`);
@@ -191,6 +216,7 @@ export function normalizeWorkType(value) {
   return value;
 }
 
+/** 规范化 task source 枚举值。 */
 export function normalizeTaskSource(value) {
   if (typeof value !== "string" || !TASK_SOURCES.has(value)) {
     throw new Error(`invalid task source: ${value}`);
@@ -198,6 +224,7 @@ export function normalizeTaskSource(value) {
   return value;
 }
 
+/** 规范化 task priority 枚举值。 */
 export function normalizeTaskPriority(value) {
   const normalized = typeof value === "string" ? value.toUpperCase() : value;
   if (!TASK_PRIORITIES.has(normalized)) throw new Error(`invalid task priority: ${value}`);
@@ -228,6 +255,7 @@ function normalizeTaskRequest(value, subject, source) {
   };
 }
 
+/** 规范化任务契约变更声明列表。 */
 export function normalizeContractChanges(value, taskId, owner) {
   if (value === undefined || value === null) return { declared: false, items: [] };
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -287,6 +315,7 @@ function detectTaskGovernanceWarnings({ workerCommand, verifyCommands, writableP
   return warnings;
 }
 
+/** 规范化 successCriteria 并与 verify_commands 索引对齐。 */
 export function normalizeSuccessCriteria(value, taskId, subject, verifyCommands) {
   if (value === undefined) return seedDefaultSuccessCriteria(taskId, subject, verifyCommands);
   if (!Array.isArray(value)) throw new Error(`task ${taskId} successCriteria must be an array`);
@@ -371,6 +400,7 @@ function seedDefaultSuccessCriteria(taskId, subject, verifyCommands) {
   ];
 }
 
+/** 校验任务 status 是否为允许枚举值。 */
 export function validateStatus(status) {
   if (!TASK_STATUSES.has(status)) {
     throw new Error(`invalid task status: ${status}`);
@@ -378,6 +408,7 @@ export function validateStatus(status) {
   return status;
 }
 
+/** 校验计划任务图：blockedBy 无环、引用存在等。 */
 export function validatePlanGraph(plan) {
   const ids = new Set();
   for (const task of plan.tasks) {
@@ -426,6 +457,9 @@ export function validatePlanGraph(plan) {
   return plan;
 }
 
+// --- 导入与批准 ---
+
+/** 从 JSON 文件导入计划：规范化、校验、写 taskState 与 ledger。 */
 export async function importPlan(rootDir, planPath, options = {}) {
   return withTaskStateLock(rootDir, "import-plan", () => importPlanUnlocked(rootDir, planPath, options));
 }
@@ -502,6 +536,7 @@ function assertPlanImportDoesNotReplaceActiveWork(existingLedger, plan) {
   throw new Error(`cannot import plan ${plan.id} while active task ownership must be preserved: ${details}`);
 }
 
+/** 校验语义生成计划的额外质量规则。 */
 export function validateSemanticGeneratedPlan(plan) {
   if (plan.generated_by !== "host_semantic") return plan;
   const invalidOwners = plan.tasks
@@ -568,6 +603,7 @@ function mergePlanIntoTaskLedger(existingLedger, plan) {
   };
 }
 
+/** 读取当前计划是否需人类批准及批准状态。 */
 export async function loadPlanApproval(rootDir) {
   const work = await readJson(resolveWildArrangePath(rootDir, "work.json"), null);
   const approval = work?.planApproval;
@@ -581,6 +617,7 @@ export async function loadPlanApproval(rootDir) {
   };
 }
 
+/** 人类批准计划：写 plan_approved 账本事件并解除 run 阻塞。 */
 export async function approvePlan(rootDir, options = {}) {
   return withTaskStateLock(rootDir, "approve-plan", async () => {
     const workPath = resolveWildArrangePath(rootDir, "work.json");
@@ -611,6 +648,9 @@ export async function approvePlan(rootDir, options = {}) {
   });
 }
 
+// --- 路由 enrichment ---
+
+/** 为计划各任务解析并写入 route_decision。 */
 export async function enrichPlanWithRoutes(rootDir, plan) {
   const routes = await loadRoutesConfig(rootDir);
   const planRouteDecision = resolveRouteDecision(routes, `${plan.title}\n${plan.objective}`);
@@ -637,6 +677,7 @@ export async function enrichPlanWithRoutes(rootDir, plan) {
   return plan;
 }
 
+/** 导入质量门禁：noop/trivial 任务等启发式检查。 */
 export function validatePlanImportQuality(plan) {
   const route = plan.route_decision;
   const planText = `${plan.title}\n${plan.objective}\n${plan.tasks.map((task) => `${task.subject}\n${task.description}`).join("\n")}`;
@@ -655,6 +696,7 @@ export function validatePlanImportQuality(plan) {
   return plan;
 }
 
+/** 为单任务 enrich route_decision 字段。 */
 export function enrichTaskWithRouteDecision(task, routes) {
   const routeDecision = resolveRouteDecision(routes, `${task.subject}\n${task.description}`);
   task.route_decision = routeDecision;
@@ -666,6 +708,7 @@ export function enrichTaskWithRouteDecision(task, routes) {
   return task;
 }
 
+/** 将计划任务写入派生 tasks.md 镜像（非权威状态）。 */
 export async function writeTasksMarkdown(rootDir, plan) {
   const lines = [
     `# ${plan.title}`,
@@ -710,4 +753,5 @@ export async function writeTasksMarkdown(rootDir, plan) {
   await writeFile(resolveWildArrangePath(rootDir, "team", "tasks.md"), `${lines.join("\n")}\n`, "utf8");
 }
 
+/** 从权威 store 加载当前 taskState（re-export）。 */
 export { loadTaskState };

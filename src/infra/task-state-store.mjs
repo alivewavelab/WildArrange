@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：task-state-store.mjs
+// 所属模块：infra
+// 作用说明：
+//   plan 级 task-state.json 读写与任务列表 CRUD。
+//
+// 【运行原理速读】
+//   loadTaskState → transact 写 → 版本与 planId 校验。
+// =============================================================================
 /**
  * `.wildarrange/team/tasks.json` is the single project-wide task ledger. Runtime
  * consumers still need an active-plan projection, so this infra owner exposes
@@ -21,12 +30,18 @@ import {
 import { normalizeAgentKey } from "./agent-registry.mjs";
 import { readVerifiedLedgerEntries } from "./ledger.mjs";
 
+/**
+ * loadTaskLedger：本模块对外异步 API。
+ */
 export async function loadTaskLedger(rootDir) {
   const raw = await readJson(resolveWildArrangePath(rootDir, "team", "tasks.json"), null);
   if (!raw) return null;
   return normalizeTaskLedger(raw);
 }
 
+/**
+ * loadTaskState：本模块对外异步 API。
+ */
 export async function loadTaskState(rootDir, options = {}) {
   const ledger = await loadTaskLedger(rootDir);
   if (!ledger) return null;
@@ -146,6 +161,9 @@ function hasGitDeliveryEvidence(delivery) {
     || ["no_change", "committed_local", "pushed"].includes(delivery.status);
 }
 
+/**
+ * normalizeTaskLedger：本模块对外API。
+ */
 export function normalizeTaskLedger(raw) {
   assertSupportedTaskLedger(raw);
   const activePlanId = raw.activePlanId || raw.planId || null;
@@ -230,10 +248,16 @@ function withLegacyTrace(task, fallbackAt) {
   };
 }
 
+/**
+ * taskRef：本模块对外API。
+ */
 export function taskRef(planId, taskId) {
   return `${planId}:${taskId}`;
 }
 
+/**
+ * withTaskIdentity：本模块对外API。
+ */
 export function withTaskIdentity(task, planId) {
   if (!planId) return { ...task };
   return {

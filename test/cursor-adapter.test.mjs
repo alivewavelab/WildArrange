@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：cursor-adapter.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 Cursor adapter：hooks.json fail-closed、bridge 跨项目/worktree 拒绝、
+//   task worktree 绑定 control root、preToolUse/beforeShellExecution 协议映射。
+//   不测：Kimi/Codex 等其他宿主 adapter。
+//
+// 【运行原理速读】
+//   installAdapter(cursor) 后读取 hooks 与 bridge 源码，spawn bridge 进程
+//   模拟 Hook 事件，断言 permission/deny 与路径隔离。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";

@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：project-review.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证项目级 review：加载全量文档/Skill、缺失文档/Skill 阻断 worker、
+//   execution readiness 握手、governed worker 上下文、INCONCLUSIVE 阻断完成。
+//   不测：真实 LLM reviewer 或跨仓库多项目。
+//
+// 【运行原理速读】
+//   fixture adapter 模拟 review/readiness 命令，导入 plan 跑 linear/parallel，
+//   断言 checkpoint 前 review 绑定与 blocked 原因。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from "node:fs/promises";

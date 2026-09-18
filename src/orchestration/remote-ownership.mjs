@@ -1,3 +1,22 @@
+// =============================================================================
+// 文件名称：remote-ownership.mjs
+// 所属模块：orchestration
+// 作用说明：
+//   Git 远端任务所有权：设备注册、task branch claim、ownership 断言与
+//   coordination packet 编解码。保证单写 owner 与 handoff 前的远端一致性。
+//
+// 【运行原理速读】
+//   可以把它想成「多设备协作时的写权限公证处」：
+//
+//   · 何时执行？
+//     任务 claim、admission 前、handoff 各阶段与线性 worker 写前。
+//
+//   · 做了什么？
+//     创 claim commit → 校验 deviceId 与 remoteHeadSha → 解析 packet。
+//
+//   · 约束？
+//     force push 禁止；ownership 变化必须 revalidation，禁止静默接管。
+// =============================================================================
 import { createHash } from "node:crypto";
 import { appendLedger, appendLedgerOnce, readLedgerTailHash } from "../infra/ledger.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
@@ -12,6 +31,7 @@ import {
   taskBranchName,
 } from "../infra/git-coordination.mjs";
 
+/** 注册或刷新本机 coordination 设备身份并记入账本。 */
 export async function registerCoordinationDevice(rootDir, options = {}) {
   const device = await ensureDeviceIdentity(rootDir, options);
   await appendLedger(rootDir, {
@@ -23,6 +43,7 @@ export async function registerCoordinationDevice(rootDir, options = {}) {
   return device;
 }
 
+/** 返回 Git 协调模式、本机设备与 git 上下文的综合状态。 */
 export async function coordinationStatus(rootDir) {
   const { config, sourcePath } = await loadWildArrangeConfig(rootDir);
   const device = await ensureDeviceIdentity(rootDir);
@@ -43,6 +64,10 @@ export async function coordinationStatus(rootDir) {
   };
 }
 
+/**
+ * 为任务在远端 task branch 上 claim 写所有权（或复用/降级/manual）。
+ * @returns {Promise<object>} claimed | degraded | disabled | manual 等状态
+ */
 export async function coordinateTaskClaim(rootDir, options) {
   const { config } = await loadWildArrangeConfig(rootDir);
   const coordination = config.gitCoordination;
@@ -146,6 +171,9 @@ export async function coordinateTaskClaim(rootDir, options) {
   return result;
 }
 
+/**
+ * 断言当前设备仍为任务远端写 owner 且 remoteHeadSha 未变；否则 fail-closed。
+ */
 export async function assertCurrentTaskOwnership(rootDir, task) {
   if (!task?.coordination || ["disabled", "manual", "degraded"].includes(task.coordination.status)) {
     return { pass: true, active: false, reason: task?.coordination?.reason || null };
@@ -165,6 +193,7 @@ export async function assertCurrentTaskOwnership(rootDir, task) {
   return { pass: true, active: true, remoteHeadSha: actualSha, deviceId: device.deviceId };
 }
 
+/** 构建带 SHA256 校验的 coordination packet（上限 48KB）。 */
 export function buildCoordinationPacket(kind, fields) {
   const body = { ...fields, version: 1, kind, createdAt: nowIso() };
   const canonical = JSON.stringify(body);
@@ -178,6 +207,7 @@ export function buildCoordinationPacket(kind, fields) {
   };
 }
 
+/** 渲染写入 Git commit message 的 coordination 包格式。 */
 export function renderCoordinationCommitMessage(subject, packet) {
   return [
     `wildarrange(coordination): ${subject}`,
@@ -187,6 +217,7 @@ export function renderCoordinationCommitMessage(subject, packet) {
   ].join("\n");
 }
 
+/** 从 commit message 解析并校验 coordination packet。 */
 export function parseCoordinationPacket(message) {
   const encoded = String(message || "").match(/^WildArrange-Packet:\s*(\S+)\s*$/m)?.[1];
   const expectedHash = String(message || "").match(/^WildArrange-Packet-SHA256:\s*([0-9a-f]+)\s*$/mi)?.[1];
@@ -204,6 +235,7 @@ export function parseCoordinationPacket(message) {
   return body;
 }
 
+/** 从任务对象提取写入 coordination packet 的契约字段子集。 */
 export function taskContract(task) {
   const keys = [
     "id",

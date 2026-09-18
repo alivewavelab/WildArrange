@@ -1,3 +1,15 @@
+// =============================================================================
+// 文件名称：runtime-snapshot-ownership.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 runtime snapshot 为唯一上下文渲染入口；init 保持自动 refresh。
+//   不测：snapshot 内容全文 diff 或 dashboard 面板。
+//
+// 【运行原理速读】
+//   initRuntime 后检查 snapshot 文件由 writeRuntimeContextSnapshot 生成，
+//   断言 refresh 触发条件与单一 ownership 不变量。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";

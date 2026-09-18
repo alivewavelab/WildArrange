@@ -1,9 +1,21 @@
+// =============================================================================
+// 文件名称：context-attachments.mjs
+// 所属模块：infra
+// 作用说明：
+//   加载 Markdown 与 Skill 附件注入 Agent 上下文，含路径边界与 sha256 完整性校验。
+//
+// 【运行原理速读】
+//   loadMarkdownAttachment/loadSkillAttachment → realpath 边界 → 预算截断并显式标记。
+// =============================================================================
 import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { readJson, resolveWildArrangePath, hashContent } from "./runtime-store.mjs";
 import { assertPathInsideRoot, normalizeRelativePath } from "./path-match.mjs";
 import { renderPromptPackEntry } from "./prompt-pack.mjs";
 
+/**
+ * loadMarkdownAttachment：本模块对外异步 API。
+ */
 export async function loadMarkdownAttachment(rootDir, relativePath, maxChars) {
   if (!relativePath || path.isAbsolute(relativePath) || relativePath.includes("..")) return null;
   const filePath = path.join(rootDir, relativePath);
@@ -25,6 +37,9 @@ export async function loadMarkdownAttachment(rootDir, relativePath, maxChars) {
   };
 }
 
+/**
+ * loadSkillAttachment：本模块对外异步 API。
+ */
 export async function loadSkillAttachment(rootDir, skillName, maxChars) {
   const registry = await readJson(resolveWildArrangePath(rootDir, "prompt-pack.json"), null);
   const entry = registry?.skills?.[skillName];
@@ -73,6 +88,9 @@ async function resolveProjectSkill(rootDir, skillName) {
   }
 }
 
+/**
+ * normalizeMaxChars：本模块对外API。
+ */
 export function normalizeMaxChars(value, fallback) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;

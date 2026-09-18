@@ -1,3 +1,22 @@
+// =============================================================================
+// 文件名称：parallel-runtime.mjs
+// 所属模块：orchestration
+// 作用说明：
+//   并行 agent 运行：spawn worktree、收集结果、索引 run 生命周期；
+//   admission 事务在 admission.mjs，此处 re-export 保持单一入口。
+//
+// 【运行原理速读】
+//   可以把它想成「批量派出隔离子 agent 并登记成果」：
+//
+//   · 何时执行？
+//     parallel run/list/status/retry/close/cleanup CLI。
+//
+//   · 做了什么？
+//     选 runnable 任务 → worktree → spawn → 写 result → awaiting_user_acceptance。
+//
+//   · 约束？
+//     只读长期身份 DiJiang/BaiZe/LuWu 禁止；admission 见 admission.mjs。
+// =============================================================================
 import { invokeCapability } from "../capabilities/gateway.mjs";
 import { mkdir, readdir } from "node:fs/promises";
 import path from "node:path";
@@ -38,13 +57,14 @@ import {
 } from "./task-board.mjs";
 import { assertCurrentTaskOwnership, coordinateTaskClaim } from "./remote-ownership.mjs";
 
-// The admission transaction (claim -> apply -> gates -> commit/rollback)
-// lives in ./admission.mjs; re-exported here so existing callers of the
-// parallel runtime keep one entry point (five-zone round 7 split).
+/** admission 主事务 re-export，保持 parallel 模块单一入口。 */
 export { admitParallelAgentResult } from "./admission.mjs";
 
 const DEFAULT_PARALLEL_TIMEOUT_MS = 120_000;
 
+// --- 运行与 spawn ---
+
+/** 对可并行任务 spawn 子 agent，创建 run 目录与 index 条目。 */
 export async function runParallelAgents(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const taskState = await loadTaskState(rootDir);
@@ -214,6 +234,9 @@ async function withRunIndexLock(rootDir, fn) {
   return withFileLock(rootDir, lockPath, "parallel run index lock", "parallel-run-index", fn);
 }
 
+// --- 查询与生命周期 ---
+
+/** 列出 agent-runs 索引中所有 parallel run 及结果摘要。 */
 export async function listParallelAgentRuns(rootDir) {
   await ensureWildArrangeDirs(rootDir);
   return withRunIndexLock(rootDir, async () => {
@@ -285,6 +308,7 @@ async function registerRunIndexEntry(rootDir, runId) {
   });
 }
 
+/** 返回 parallel run 详细状态，供 status/dashboard 使用。 */
 export async function parallelAgentStatus(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const index = await listParallelAgentRuns(rootDir);
@@ -341,6 +365,9 @@ export async function parallelAgentStatus(rootDir, options = {}) {
  * 已通过的任务绝不重跑；已完成/进行中的任务跳过并说明。重跑是一个新 run
  * （复用原批次的 command/agent/isolation），不改写原 run 的任何证据。
  */
+// --- 重试与清理 ---
+
+/** 对失败或中断的 parallel run 重试 spawn/collect。 */
 export async function retryParallelAgentRun(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   if (!options.runId) throw new Error("parallel retry requires --run <runId>");
@@ -412,6 +439,7 @@ export async function retryParallelAgentRun(rootDir, options = {}) {
   };
 }
 
+/** 关闭 run：标记 lifecycle 为 closed，保留结果供审计。 */
 export async function closeParallelAgentRun(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   if (!options.runId) throw new Error("parallel close requires --run <runId>");
@@ -443,6 +471,7 @@ export async function closeParallelAgentRun(rootDir, options = {}) {
   };
 }
 
+/** 清理 run worktree 与临时文件（需 run 已 closed 且无 pending admission）。 */
 export async function cleanupParallelAgentRun(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   if (!options.runId) throw new Error("parallel cleanup requires --run <runId>");

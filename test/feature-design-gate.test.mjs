@@ -1,3 +1,17 @@
+// =============================================================================
+// 文件名称：feature-design-gate.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证功能设计门禁：public host 拥有 feature confirmation、
+//   AI routing 不独占、draft-only 不写正式 import、依赖约束不压制 import、
+//   preToolUse/plan 门禁与 host hook 协作。
+//   不测：clarify-feature-design Skill 正文（见 feature-design-skill）。
+//
+// 【运行原理速读】
+//   初始化 runtime，跑 classifyRoute/runHostRoute/hook injection，
+//   检查 loadActiveFeatureDesignGate 状态与 plan import 副作用。
+// =============================================================================
+
 import { runHostHook, runHostRoute } from "../src/orchestration/host-runtime.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";

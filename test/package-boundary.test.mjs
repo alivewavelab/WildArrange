@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：package-boundary.test.mjs
+// 所属模块：test
+// 作用说明：
+//   验证 npm 包边界：pack 排除 plans/受限 prompt/runtime 状态、
+//   发布 Markdown 相对链接可解析、离线安装后 CLI 最小 smoke。
+//   不测：npm registry 发布流程或 semver 策略。
+//
+// 【运行原理速读】
+//   读取 package.json files/ignore 规则并 npm pack --dry-run，
+//   在临时目录 npm install  tarball 后跑 wildarrange --help。
+// =============================================================================
+
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";

@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：repository-layout.mjs
+// 所属模块：infra
+// 作用说明：
+//   仓库布局契约：分区路径、允许依赖与 arch 合规校验。
+//
+// 【运行原理速读】
+//   validateRepositoryLayout → module graph 对照 → 违规报告。
+// =============================================================================
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -12,6 +21,9 @@ const DEFAULT_IGNORED = new Set([".git", ".wildarrange", "node_modules", "covera
 const SOURCE_EXTENSIONS = new Set([".cjs", ".js", ".jsx", ".mjs", ".ts", ".tsx"]);
 const execFileAsync = promisify(execFile);
 
+/**
+ * inspectRepositoryGovernance：本模块对外异步 API。
+ */
 export async function inspectRepositoryGovernance(rootDir, policy = {}, options = {}) {
   if (policy.enabled !== true && options.force !== true) {
     return {
@@ -95,6 +107,7 @@ export async function inspectRepositoryGovernance(rootDir, policy = {}, options 
   };
 }
 
+// --- 边界与文档检查 ---
 async function checkAgentBoundaries(rootDir, boundaries, findings) {
   for (const boundary of normalizeList(boundaries)) {
     const boundaryPath = path.join(rootDir, boundary);
@@ -402,6 +415,10 @@ async function checkCommentRules(rootDir, candidateFiles, rules, findings) {
   }
 }
 
+/**
+ * extractComments：本模块对外API。
+ */
+// --- 注释解析 ---
 export function extractComments(filePath, content) {
   const extension = path.extname(filePath).toLowerCase();
   if (SOURCE_EXTENSIONS.has(extension) || extension === ".css" || extension === ".rs") {
@@ -597,6 +614,7 @@ function extractDelimitedComments(content, open, close) {
   return comments;
 }
 
+// --- 文件遍历与工具 ---
 async function collectGovernedFiles(rootDir, governedRoots, ignored) {
   const files = [];
   for (const governedRoot of governedRoots) {

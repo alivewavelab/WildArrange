@@ -1,10 +1,19 @@
 #!/usr/bin/env node
 
-// 架构总图 flow-grid 卡片布局门禁（architecture-map skill）。
-// 从 validate-module-file-map.mjs 拆出：归属校验管文件与模块，本门禁只管总图排版。
+// =============================================================================
+// 文件名称：validate-flow-grid.mjs
+// 所属模块：tooling/arch-module-graph
+// 作用说明：
+//   校验产品总图 HTML 中 flow-grid 卡片布局是否与预期子元素数一致。
+//   从 validate-module-file-map.mjs 拆出：归属校验管文件与模块，本脚本只管总图排版。
+//   不负责模块文件归属、命名或 D 字典同步。
 //
-// 强制项：
-// 1. 总图 `.flow.nK` / `.flow.shell` 的直接子元素数必须对得上，防止卡片掉进 92px 标签列。
+// 【运行原理速读】
+//   · 何时跑？npm run check:arch 或 CI 架构门禁阶段。
+//   · 做了什么？读取 architecture-overview.html，统计各 `.flow.nK` / `.flow.shell`
+//     的直接子 div 数量，与 FLOW_EXPECT 配置比对。
+//   · 缺了它会怎样？卡片可能掉进 92px 标签列，总图布局不可读。
+// =============================================================================
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";

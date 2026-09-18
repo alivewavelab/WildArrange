@@ -1,7 +1,23 @@
-/**
- * Adoption Dashboard panel: ViewModel, HTML/JS and write-API input checks.
- * Interface does not import capabilities or apply patches itself.
- */
+// =============================================================================
+// 文件名称：adoption-panel.mjs
+// 所属模块：interface
+// 作用说明：
+//   Adoption（项目治理接管）Dashboard 面板：治理文件索引、会话卡片 UI 与 /api/adoption/* 路由。
+//   写操作委托 orchestration/adoption；本模块不直接 apply 补丁或改 capabilities。
+//
+// 【运行原理速读】
+//   可以把它想成「老项目治理接管的 Web 前台」：
+//
+//   · 谁调用？
+//     dashboard.mjs 委托 tryHandleAdoptionApi；dashboard-view 嵌入 ADOPTION_* 片段。
+//
+//   · 它做了什么？
+//     ① buildGovernanceFileIndex 扫描并分组治理文件 ② 只读预览与决策/apply API
+//     ③ 前端脚本逐卡批准、单卡 apply、reconcile/recover。
+//
+//   · 安全边界？
+//     文件预览限 512KB、路径必须在项目内且属于治理分组；敏感卡需额外确认。
+// =============================================================================
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -16,6 +32,8 @@ import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { evaluateRegistryFreshness, readLocator, readVerificationInventory } from "../infra/verification-registry.mjs";
 import { readJson } from "../infra/runtime-store.mjs";
 import { SAFE_ID, readJsonBody, sendJson } from "./http-utils.mjs";
+
+// --- 面板 UI 常量与内嵌片段 ---
 
 const GOVERNANCE_EXCLUDES = new Set([".git", ".wildarrange", "node_modules", ".tmp", "dist", "build", "coverage"]);
 const GOVERNANCE_GROUPS = [
@@ -32,8 +50,10 @@ const GOVERNANCE_LEDGERS = [
   { id: "inventory", label: "资产单", title: "治理资产", description: "项目当前使用、归档、删除或暂缓的治理内容。", locatorKey: "inventoryPath" },
 ];
 
+/** Dashboard 侧栏「项目治理」导航按钮 HTML 片段。 */
 export const ADOPTION_NAV_BUTTON = `<button data-view="adoption" data-label="项目治理"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M4 12h10M4 17h7"/><path d="M16 14l3 3 5-6"/></svg><span>项目治理</span></button>`;
 
+/** Adoption 主视图 HTML（治理总账、文件网格、整理会话与卡片列表）。 */
 export const ADOPTION_VIEW_HTML = `
         <div class="view" data-view-panel="adoption">
           <h1 class="section-title">项目治理</h1>
@@ -62,6 +82,7 @@ export const ADOPTION_VIEW_HTML = `
         </div>
 `;
 
+/** Adoption 面板客户端脚本（内嵌于 dashboard-view，不可含反引号）。 */
 export const ADOPTION_SCRIPT = `
     const ADOPTION_SENSITIVE = new Set(["merge", "delete", "archive"]);
     let governancePreviewPath = "";
@@ -245,6 +266,9 @@ export const ADOPTION_SCRIPT = `
     });
 `;
 
+// --- 治理文件索引 ---
+
+/** 扫描项目治理相关文件并按 gates/tests/product 等分组，附带 registry 三账 freshness。 */
 export async function buildGovernanceFileIndex(rootDir) {
   const files = await listProjectFiles(rootDir);
   const configResult = await loadWildArrangeConfig(rootDir).catch(() => ({ config: {} }));
@@ -319,6 +343,8 @@ function governanceGroupFor(relativePath) {
   return null;
 }
 
+// --- 只读预览 ---
+
 async function readGovernancePreview(rootDir, requestedPath) {
   const relative = String(requestedPath || "").replaceAll("\\", "/");
   if (!governanceGroupFor(relative)) throw Object.assign(new Error("该文件不属于项目治理范围"), { code: "invalid_path" });
@@ -333,6 +359,9 @@ async function readGovernancePreview(rootDir, requestedPath) {
   return { path: relative, content: await readFile(actual, "utf8"), sizeBytes: info.size, updatedAt: info.mtime.toISOString() };
 }
 
+// --- Adoption HTTP API ---
+
+/** 处理 /api/adoption/* 请求；非 adoption 路径返回 false 由 dashboard 继续路由。 */
 export async function tryHandleAdoptionApi(request, response, url, rootDir) {
   if (!url.pathname.startsWith("/api/adoption/")) return false;
   try {

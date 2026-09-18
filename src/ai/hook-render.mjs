@@ -1,5 +1,27 @@
+// =============================================================================
+// 文件名称：hook-render.mjs
+// 所属模块：ai
+// 作用说明：
+//   将 Hook 运行时事实与注入点内容渲染为宿主可消费的 Markdown 或 JSON 输出。
+//   不负责收集 facts 或解析配置，只做字符串拼装与 Cursor PreToolUse 协议封装。
+//
+// 【运行原理速读】
+//   · 何时触发？ hooks.mjs 在 runInjectionHook 末尾调用本模块渲染 output。
+//   · 做了什么？ ① 生成 <wildarrange-injection> 块 ② 按 facts 分区插入路由/计划/
+//     续跑/范围门等指令 ③ PreToolUse 时封装 permissionDecision JSON。
+//   · 与谁协作？ hooks.mjs（facts 来源）、injection.mjs（injectionPoint 附件）。
+// =============================================================================
+
 import { PRODUCT_NAME } from "../infra/runtime-config.mjs";
 
+// --- PreToolUse 输出 ---
+
+/**
+ * 渲染 PreToolUse Hook 的 JSON 行输出；deny 时附带 permissionDecision。
+ * @param {object|null} preflight preToolUseGuard 返回的预检结果
+ * @param {string} contextMarkdown 已渲染的注入 Markdown
+ * @returns {string} 单行 JSON + 换行
+ */
 export function renderPreToolUseHookOutput(preflight, contextMarkdown) {
   const output = {
     hookSpecificOutput: {
@@ -14,6 +36,11 @@ export function renderPreToolUseHookOutput(preflight, contextMarkdown) {
   return `${JSON.stringify(output)}\n`;
 }
 
+/**
+ * 渲染完整的 WildArrange 运行时注入 Markdown 块（含必须行为、挂载与 facts 分区）。
+ * @param {object} params event、pointName、sessionId、taskId、targetPaths、facts、injectionPoint
+ * @returns {string} Markdown 文本
+ */
 export function renderHookInjectionMarkdown({ event, pointName, sessionId, taskId, targetPaths, facts, injectionPoint }) {
   const lines = [
     `<wildarrange-injection event="${event}" point="${pointName}">`,
@@ -47,6 +74,8 @@ export function renderHookInjectionMarkdown({ event, pointName, sessionId, taskI
   lines.push("</wildarrange-injection>", "");
   return lines.join("\n");
 }
+
+// --- Hook 事实块渲染 ---
 
 function appendHookFacts(lines, facts) {
   if (facts.route) {
@@ -221,6 +250,8 @@ function appendHookFacts(lines, facts) {
   appendAttentionReport(lines, facts.attention);
 }
 
+// --- 决策关注项 ---
+
 // 把待人决策事项渲染成“请主动问开发者”的指令块（通用推送：以 AI 对话为通道，不依赖任何外部 IM）。
 function appendAttentionReport(lines, attention) {
   if (!attention || (attention.total || 0) === 0) return;
@@ -257,6 +288,8 @@ function appendShortList(lines, label, items) {
     lines.push(`  - ${item}`);
   }
 }
+
+// --- 挂载与 Skill 报告 ---
 
 function appendInjectionAttachments(lines, injectionPoint) {
   lines.push("## Markdown 挂载", "");

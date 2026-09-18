@@ -1,3 +1,16 @@
+// =============================================================================
+// 文件名称：execution-readiness.mjs
+// 所属模块：capabilities
+// 作用说明：
+//   在 worker 启动前校验必需 Skill、项目审查依据与 adapter 握手探针，
+//   生成 execution context 与 readiness 报告。legacy 任务可跳过。
+//
+// 【运行原理速读】
+//   · 何时执行？任务声明 responsibilityChanges 或必需 review step 时。
+//   · 做了什么？加载 Skill → prepareProjectReview → 写 context → 探针握手。
+//   · 缺了它会怎样？无 Skill/审查依据的任务可能带着错误上下文开工。
+// =============================================================================
+
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
@@ -8,6 +21,13 @@ import { runCommand } from "../infra/command-runner.mjs";
 import { compileCommandSafetyPatterns } from "../infra/command-safety.mjs";
 import { prepareProjectReview, executeReviewPacket, selectProjectReviewSteps } from "./project-review.mjs";
 
+/**
+ * 执行开工就绪检查：Skill、审查附件、adapter 探针与 context 预算。
+ * @param {string} rootDir 项目根目录
+ * @param {object} task 任务对象
+ * @param {object} [options] workerCommand 覆盖
+ * @returns {Promise<object>} kind=execution_readiness，status 为 ready|blocked|recovery_required
+ */
 export async function checkExecutionReadiness(rootDir, task, options = {}) {
   const { config } = await loadWildArrangeConfig(rootDir);
   const required = Boolean(task.responsibilityChanges) || selectProjectReviewSteps(config, task).some(step => step.required);

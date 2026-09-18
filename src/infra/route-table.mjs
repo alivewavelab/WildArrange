@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：route-table.mjs
+// 所属模块：infra
+// 作用说明：
+//   routes.json 确定性路由表匹配，无 LLM；matchSignals 唯一实现。
+//
+// 【运行原理速读】
+//   loadRoutesConfig → resolveRouteDecision askGate/intent/domain 合并 → buildRouteResult。
+// =============================================================================
 /**
  * Deterministic route table: loading routes.json (+ reviewed overrides) and
  * matching request text against it. Pure table lookup with no LLM calls, so
@@ -21,6 +30,9 @@ import {
 import { renderPromptPackEntry } from "./prompt-pack.mjs";
 import { uniqueStrings } from "./text-utils.mjs";
 
+/**
+ * loadRoutesConfig：本模块对外异步 API。
+ */
 export async function loadRoutesConfig(rootDir) {
   const routes = JSON.parse(await renderPromptPackEntry(rootDir, { routes: true }));
   const overrides = await readJson(resolveWildArrangePath(rootDir, "routing", "routes-overrides.json"), null);
@@ -36,6 +48,9 @@ export async function loadRoutesConfig(rootDir) {
 // feature-design gate detection (feature-design.mjs); this call-site set is
 // pinned in test/dependency-boundary.test.mjs, so adding a new orchestration
 // caller is an explicit, reviewed decision.
+/**
+ * resolveRouteDecision：本模块对外API。
+ */
 export function resolveRouteDecision(routes, text) {
   const lowerText = text.toLowerCase();
   const askGate = routes.askGate || {};
@@ -92,6 +107,9 @@ function bestMatch(entries, lowerText) {
 // ASCII word-like signals match on word boundaries so "pr" does not fire
 // inside "prompt" and "bug" does not fire inside "debugging"; anything else
 // (e.g. Chinese signals) falls back to plain substring matching.
+/**
+ * matchSignals：本模块对外API。
+ */
 export function matchSignals(lowerText, signals) {
   return signals.filter((signal) => signalMatches(lowerText, String(signal).toLowerCase()));
 }
@@ -254,8 +272,14 @@ function normalizeRoutableAgent(value, fieldName) {
   return normalized;
 }
 
+/**
+ * 从 re-export 再导出 text-utils 的 uniqueStrings。
+ */
 export { uniqueStrings };
 
+/**
+ * higherRisk：本模块对外API。
+ */
 export function higherRisk(left = "low", right = "low") {
   const order = { low: 1, medium: 2, high: 3 };
   return (order[right] || 1) > (order[left] || 1) ? right : left;

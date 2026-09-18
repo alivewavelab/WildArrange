@@ -1,3 +1,12 @@
+// =============================================================================
+// 文件名称：decision-log.mjs
+// 所属模块：infra
+// 作用说明：
+//   decisions.jsonl 统一决策投影：gate/hook/admission/routing 的可丢派生日志。
+//
+// 【运行原理速读】
+//   emitDecision 吞错 append → readDecisions 尾部倒读 limit 条，坏行跳过。
+// =============================================================================
 /**
  * decisions.jsonl — 统一决策记录。
  *
@@ -37,10 +46,16 @@ const DECISION_FIELDS = [
 const READ_CHUNK_BYTES = 64 * 1024;
 const ensuredDirs = new Set();
 
+/**
+ * decisionsLogPath：本模块对外API。
+ */
 export function decisionsLogPath(rootDir) {
   return resolveWildArrangePath(rootDir, "decisions.jsonl");
 }
 
+/**
+ * appendDecision：本模块对外异步 API。
+ */
 export async function appendDecision(rootDir, record) {
   // id 是标注回写的锚点：人/审查 Agent 用 `wildarrange annotate --decision <id>`
   // 指认某条决策。annotatable 标记该决策是否进标注队列（拦截与非确定性
@@ -111,6 +126,9 @@ function parseDecisionLine(line) {
  * - records 按时间升序（文件顺序）；
  * - total 是本次扫描到的有效记录数（不是全文件总数，除非 truncated=false）；
  * - truncated=true 表示只扫描了文件尾部，更早的记录未加载。
+ */
+/**
+ * readDecisions：本模块对外异步 API。
  */
 export async function readDecisions(rootDir, { limit, filter } = {}) {
   const filePath = decisionsLogPath(rootDir);

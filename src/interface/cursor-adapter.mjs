@@ -1,7 +1,30 @@
+// =============================================================================
+// 文件名称：cursor-adapter.mjs
+// 所属模块：interface
+// 作用说明：
+//   生成 Cursor 宿主适配产物：hooks.json 配置、hook bridge 脚本与 README。
+//   将 Cursor 生命周期事件映射为 WildArrange 规范事件并 fail-closed 阻断越界写操作。
+//
+// 【运行原理速读】
+//   可以把它想成「Cursor 与治理运行时的翻译层」：
+//
+//   · 谁调用？
+//     adapters.mjs 在 adapter install --target cursor 时生成 .cursor/ 下文件。
+//
+//   · 它做了什么？
+//     ① buildCursorHooksConfig 写 hooks.json ② renderCursorHookBridge 生成 bridge
+//     ③ bridge  stdin 收 JSON → 调 wildarrange hook run → stdout 回 permission/context。
+//
+//   · 关键约束？
+//     preToolUse / beforeShellExecution fail-closed；定位不到治理项目时阻断写类操作。
+// =============================================================================
 import path from "node:path";
 import { renderHookBridgeExecution, renderHookBridgeUtilities } from "./hook-bridge-core.mjs";
 
+/** Cursor hooks.json 的 version 字段。 */
 export const CURSOR_HOOKS_VERSION = 1;
+
+/** 相对项目根的 hook bridge 脚本路径。 */
 export const CURSOR_BRIDGE_PATH = ".cursor/hooks/wildarrange-hook-bridge.mjs";
 
 // 覆盖 Cursor 文档已列出的写类工具名；未知名称不会匹配，无副作用。
@@ -21,6 +44,10 @@ const CURSOR_EVENT_MAP = {
   subagentStop: "SubagentStop",
 };
 
+/**
+ * 构建 Cursor hooks.json 内容：写类工具与终端命令走 fail-closed PreToolUse。
+ * @param {{ bridgeCommand: string }} options
+ */
 export function buildCursorHooksConfig({ bridgeCommand }) {
   const hook = (extra = {}) => ({ command: bridgeCommand, ...extra });
   return {
@@ -38,6 +65,11 @@ export function buildCursorHooksConfig({ bridgeCommand }) {
   };
 }
 
+/**
+ * 生成 Cursor hook bridge 可执行脚本源码（嵌入 CLI 调用与 Cursor 输出协议）。
+ * @param {{ mode: string, packageName: string, localCliPath: string, controlRoot: string }} options
+ * @returns {string}
+ */
 export function renderCursorHookBridge({ mode, packageName, localCliPath, controlRoot }) {
   const cliSpec = mode === "npx"
     ? { kind: "npx", packageName }
@@ -166,6 +198,11 @@ ${renderHookBridgeUtilities()}
 `;
 }
 
+/**
+ * 生成 Cursor adapter 说明文档（硬 hook + 软 rules 双层 enforcement 说明）。
+ * @param {{ hookCommand: string }} options
+ * @returns {string}
+ */
 export function renderCursorAdapterReadme({ hookCommand }) {
   return `# WildArrange Cursor Adapter
 
