@@ -20,7 +20,8 @@ import {
   restorePreimages,
   writeRecoveryManifest,
 } from "../infra/recovery-transaction.mjs";
-import { fingerprintCard, scanVerificationUniverse } from "../infra/verification-discovery.mjs";
+import { fingerprintCard } from "../infra/verification-cards.mjs";
+import { scanVerificationUniverse } from "../infra/verification-discovery.mjs";
 import {
   buildBootstrap,
   buildInventory,

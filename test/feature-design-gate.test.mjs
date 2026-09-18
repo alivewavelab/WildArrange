@@ -6,7 +6,8 @@ import os from "node:os";
 import path from "node:path";
 
 import { buildPlanDraftDirective, routeRequest as classifyRoute } from "../src/ai/routing.mjs";
-import { preToolUseGuard, runInjectionHook as renderHook } from "../src/ai/hooks.mjs";
+import { runInjectionHook as renderHook } from "../src/ai/hooks.mjs";
+import { preToolUseGuard } from "../src/ai/pre-tool-guard.mjs";
 import { importPlan, loadPlanApproval } from "../src/orchestration/plan-state.mjs";
 import { loadActiveFeatureDesignGate } from "../src/orchestration/feature-design.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";

@@ -1,5 +1,6 @@
 import { ensureWildArrangeDirs, resolveWildArrangePath } from "./runtime-store.mjs";
 import { withFileLock } from "./file-lock.mjs";
+import { appendLedger } from "./ledger.mjs";
 import { readMaintenanceMarker } from "./recovery-transaction.mjs";
 
 // 锁获取/stale 恢复/超时诊断的实现在 file-lock.mjs（与 ledger 锁共用）；
@@ -22,4 +23,15 @@ export async function withTaskStateLock(rootDir, ownerTag, fn) {
     throwIfForeignMaintenance(ownerTag, await readMaintenanceMarker(rootDir));
     return fn();
   });
+}
+
+// 非完成路径的统一事务原语：先写审计账本（appendLedger），再改实际状态
+// （persist），与完成路径 commitTaskCompletionState 的顺序一致。账本失败时
+// persist 不执行（无账状态不得出现）；persist 失败时账本已留痕（可审计）。
+// 锁方向全仓固定为 任务状态锁(外，由调用方持有) → ledger 锁(内，由
+// appendLedger 自取)；本函数自身不获取任务状态锁，禁止反向嵌套。
+export async function transactWithLedger(rootDir, event, persist) {
+  const entry = await appendLedger(rootDir, event);
+  await persist(entry);
+  return entry;
 }

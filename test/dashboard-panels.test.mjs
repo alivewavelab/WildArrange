@@ -122,6 +122,11 @@ test("decisions and ops panels serve read-only view models", async () => {
       assert.doesNotMatch(html, /从 IDE 提出需求/);
       assert.match(html, /当前运行正常/);
       assert.doesNotMatch(html, />Run next</);
+      // 死前端代码不回归：无容器、无调用方的渲染函数与其专属 CSS 已被清除
+      assert.doesNotMatch(html, /routeReviewLabel|renderRouteTool|renderRouteReview|renderRouteReviews|loadRouteReviews/);
+      assert.doesNotMatch(html, /renderOpsPanel/);
+      assert.doesNotMatch(html, /renderInbox|loadInbox|renderChanges/);
+      assert.doesNotMatch(html, /route-review-|route-daily-summary|route-tool|signal-chip|signal-row|review-state|route-empty/);
     });
   });
 });

@@ -21,23 +21,22 @@ import {
   adoptionTransactionDir,
   adoptionSessionDir,
   clearMaintenanceMarker,
-  readMaintenanceMarker,
   restorePreimages,
   writeRecoveryManifest,
   writeMaintenanceMarker,
 } from "../infra/recovery-transaction.mjs";
-import { captureCardLiveSnapshot, fingerprintCard } from "../infra/verification-discovery.mjs";
+import { fingerprintCard } from "../infra/verification-cards.mjs";
+import { captureCardLiveSnapshot } from "../infra/verification-discovery.mjs";
 import * as verificationRegistry from "../infra/verification-registry.mjs";
 import {
   digestCanonical,
   digestGitComparableContent,
   evaluateRegistryFreshness,
   gitTreeContains,
-  locatorConfigured,
-  readGitHead,
   readLocator,
   readVerificationInventory,
 } from "../infra/verification-registry.mjs";
+import { readGitHead } from "../infra/git-diff.mjs";
 
 const SESSION_STATES = new Set([
   "scanning",
@@ -83,7 +82,19 @@ export async function startAdoption(rootDir, options = {}) {
     };
     await writeSessionFiles(rootDir, session, { cards: [], approvals: {}, scan: null });
 
-    const scanEnvelope = await invokeCapability("verification-governance-scan", { rootDir, options });
+    let scanEnvelope;
+    try {
+      scanEnvelope = await invokeCapability("verification-governance-scan", { rootDir, options });
+    } catch (error) {
+      session.status = "needs_review";
+      session.nextAction = "扫描异常中断，排查原因后重新运行 adoption start";
+      session.error = {
+        code: typeof error?.code === "string" ? error.code : "scan_crashed",
+        message: error instanceof Error ? error.message : String(error),
+      };
+      await writeSessionFiles(rootDir, session);
+      return { ok: false, session, error: session.error };
+    }
     if (scanEnvelope.status !== "pass") {
       session.status = "needs_review";
       session.nextAction = "检查扫描失败原因后重试 start";
@@ -403,9 +414,6 @@ export async function decideAdoptionCard(rootDir, options = {}) {
       if (decision.decision === "approved" && isSensitiveAdoptionCard(card) && decisions.length > 1) {
         throw adoptionError("sensitive_card", "删除/合并必须逐卡批准");
       }
-      if (decision.decision === "approved" && SENSITIVE_PATH_RE.test(card.path) && decisions.length > 1) {
-        throw adoptionError("sensitive_card", "AGENTS/CI/配置变化必须逐卡批准");
-      }
       card.status = decision.decision === "approved" ? "approved" : decision.decision === "rejected" ? "rejected" : "deferred";
       files.approvals[card.id] = {
         decision: decision.decision,
@@ -509,7 +517,7 @@ async function applyApprovedCardsUnlocked(rootDir, options = {}) {
     }
     const approvedFingerprint = files.approvals[card.id]?.cardFingerprint;
     const currentFingerprint = fingerprintLiveCard(card);
-    if (options.ignoreLiveFingerprint !== true && approvedFingerprint && approvedFingerprint !== currentFingerprint) {
+    if (approvedFingerprint && approvedFingerprint !== currentFingerprint) {
       card.status = "stale";
       session.status = "needs_review";
       session.nextAction = `卡片 ${card.id} 已过期，重新批准`;
@@ -890,5 +898,3 @@ export function isSensitiveAdoptionCard(card) {
     || SENSITIVE_PATH_RE.test(card.path || "")
     || (Array.isArray(card.verify) && card.verify.length > 0);
 }
-
-export { locatorConfigured, readMaintenanceMarker };

@@ -69,6 +69,18 @@ async function removeLock(lockPath) {
   await unlink(lockPath).catch(() => undefined);
 }
 
+// 持锁方释放路径：删除前复核锁文件仍是自己写入的那份（内容与 mtime 均未变）。
+// 否则说明锁已被 stale 回收并被他人重新获取，放弃删除，避免误删新 owner 的锁。
+async function removeHeldLock(lockPath, expectedContent, expectedMtimeMs) {
+  try {
+    const [content, lockStat] = await Promise.all([readFile(lockPath, "utf8"), stat(lockPath)]);
+    if (content !== expectedContent || lockStat.mtimeMs !== expectedMtimeMs) return;
+  } catch {
+    return;
+  }
+  await unlink(lockPath).catch(() => undefined);
+}
+
 async function lockTimeoutError(rootDir, lockPath, lockName, waitedMs) {
   const relative = path.relative(rootDir, lockPath);
   const state = await readLockState(lockPath);
@@ -123,6 +135,8 @@ export async function withFileLock(rootDir, lockPath, lockName, ownerTag, fn, op
   const retryMs = options.retryMs ?? LOCK_RETRY_MS;
   const startedAt = Date.now();
 
+  let ownerContent;
+  let acquiredMtimeMs;
   for (;;) {
     if (Date.now() - startedAt > waitTimeoutMs) {
       throw await lockTimeoutError(rootDir, lockPath, lockName, Date.now() - startedAt);
@@ -130,10 +144,12 @@ export async function withFileLock(rootDir, lockPath, lockName, ownerTag, fn, op
     try {
       const handle = await open(lockPath, "wx");
       try {
-        await handle.writeFile(lockOwnerContent(ownerTag));
+        ownerContent = lockOwnerContent(ownerTag);
+        await handle.writeFile(ownerContent);
       } finally {
         await handle.close();
       }
+      acquiredMtimeMs = (await stat(lockPath)).mtimeMs;
       break;
     } catch (error) {
       if (error?.code !== "EEXIST") throw error;
@@ -148,6 +164,6 @@ export async function withFileLock(rootDir, lockPath, lockName, ownerTag, fn, op
   try {
     return await fn();
   } finally {
-    await removeLock(lockPath);
+    await removeHeldLock(lockPath, ownerContent, acquiredMtimeMs);
   }
 }

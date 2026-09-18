@@ -1,6 +1,7 @@
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { normalizeAgentKey } from "../infra/agent-registry.mjs";
 import { renderPromptPackEntry } from "../infra/prompt-pack.mjs";
+import { matchSignals } from "../infra/route-table.mjs";
 import {
   readJson,
   resolveWildArrangePath,
@@ -104,12 +105,14 @@ async function loadSkillSummaries(rootDir, registry) {
   return entries;
 }
 
+// Route signals reuse the single matcher in infra/route-table.mjs (word
+// boundaries for ASCII signals, substring otherwise) so the route-signal
+// boost hits exactly what resolveRouteDecision would hit.
 function collectRouteSignals(routes, text) {
   const signals = { intents: [], skills: [] };
   for (const intent of routes?.intents || []) {
     const keywords = [...(intent.signals || []), ...(intent.keywords || []), ...(intent.mustInclude || [])].map(normalizeText).filter(Boolean);
-    const hit = keywords.some((keyword) => keyword && text.includes(keyword));
-    if (!hit) continue;
+    if (matchSignals(text, keywords).length === 0) continue;
     signals.intents.push(intent.name);
     for (const skill of intent.skills || []) {
       if (!signals.skills.includes(skill)) signals.skills.push(skill);
@@ -117,7 +120,7 @@ function collectRouteSignals(routes, text) {
   }
   for (const bundle of routes?.planSkillBundles || routes?.planAgentBundles || []) {
     const keywords = [...(bundle.signals || [])].map(normalizeText).filter(Boolean);
-    if (!keywords.some((keyword) => keyword && text.includes(keyword))) continue;
+    if (matchSignals(text, keywords).length === 0) continue;
     if (!signals.skills.includes(bundle.name)) signals.skills.push(bundle.name);
   }
   return signals;

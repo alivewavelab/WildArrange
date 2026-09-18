@@ -3,7 +3,7 @@ import test from 'node:test';
 import os from 'node:os';
 import path from 'node:path';
 import { buildPlanDraftDirective } from '../src/ai/routing.mjs';
-import { preToolUseGuard } from '../src/ai/hooks.mjs';
+import { preToolUseGuard } from '../src/ai/pre-tool-guard.mjs';
 
 test('task worktree plan imports use the control root and remain pre-plan-allowed', async () => {
   const controlRoot = path.join(os.tmpdir(), 'wildarrange-control-root');

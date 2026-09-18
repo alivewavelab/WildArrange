@@ -11,25 +11,42 @@ const LEDGER_TAIL_CACHE_VERSION = 1;
 export async function appendLedger(rootDir, event) {
   const ledgerPath = resolveWildArrangePath(rootDir, "ledger.jsonl");
   await mkdir(path.dirname(ledgerPath), { recursive: true });
+  return withLedgerLock(rootDir, () => appendLedgerLocked(rootDir, ledgerPath, event));
+}
+
+// 判重与追加必须在同一把 ledger 锁内完成；否则并发写方可能各自通过
+// 判重后双双追加，留下重复审计事件。判重只认通过 hash 链校验的条目，
+// 与 readVerifiedLedgerEntries 的证据口径一致。
+export async function appendLedgerOnce(rootDir, event, isDuplicate) {
+  const ledgerPath = resolveWildArrangePath(rootDir, "ledger.jsonl");
+  await mkdir(path.dirname(ledgerPath), { recursive: true });
   return withLedgerLock(rootDir, async () => {
-    const tail = await resolveTailHashForAppend(rootDir, ledgerPath);
-    const entry = {
-      id: createWorkId("evt"),
-      at: nowIso(),
-      prevHash: tail.hash,
-      ...event,
-    };
-    entry.hash = hashLedgerEntry(entry);
-    const line = `${JSON.stringify(entry)}\n`;
-    await appendFile(ledgerPath, line, "utf8");
-    // 缓存只是追加路径的 O(1) 提示；verifyLedger 全量走查仍是唯一权威。
-    await writeJsonAtomic(tailCachePath(rootDir), {
-      version: LEDGER_TAIL_CACHE_VERSION,
-      hash: entry.hash,
-      size: tail.size + Buffer.byteLength(line, "utf8"),
-    });
-    return entry;
+    const walk = await walkLedger(rootDir);
+    if (walk.entries.some((item) => item.verified && isDuplicate(item.entry))) {
+      return { entry: null, skipped: true };
+    }
+    return { entry: await appendLedgerLocked(rootDir, ledgerPath, event), skipped: false };
   });
+}
+
+async function appendLedgerLocked(rootDir, ledgerPath, event) {
+  const tail = await resolveTailHashForAppend(rootDir, ledgerPath);
+  const entry = {
+    id: createWorkId("evt"),
+    at: nowIso(),
+    prevHash: tail.hash,
+    ...event,
+  };
+  entry.hash = hashLedgerEntry(entry);
+  const line = `${JSON.stringify(entry)}\n`;
+  await appendFile(ledgerPath, line, "utf8");
+  // 缓存只是追加路径的 O(1) 提示；verifyLedger 全量走查仍是唯一权威。
+  await writeJsonAtomic(tailCachePath(rootDir), {
+    version: LEDGER_TAIL_CACHE_VERSION,
+    hash: entry.hash,
+    size: tail.size + Buffer.byteLength(line, "utf8"),
+  });
+  return entry;
 }
 
 export async function verifyLedger(rootDir) {
@@ -65,6 +82,9 @@ async function walkLedger(rootDir) {
   const entries = [];
   let previousHash = null;
   let chainStarted = false;
+  // 一旦出现坏行或校验失败，链的可信度即告破产：后续条目即使自洽
+  // （伪造者可以用 prevHash:null 重启一条自洽链）也不得再标 verified。
+  let chainBroken = false;
   let checked = 0;
   let legacy = 0;
   const lines = content.split(/\r?\n/).filter(Boolean);
@@ -76,6 +96,7 @@ async function walkLedger(rootDir) {
     } catch {
       failures.push({ line: lineNumber, reason: "invalid_json" });
       previousHash = null;
+      chainBroken = true;
       continue;
     }
     if (!entry.hash) {
@@ -83,6 +104,7 @@ async function walkLedger(rootDir) {
       if (chainStarted) {
         failures.push({ line: lineNumber, reason: "unhashed_entry_after_chain_start" });
         entries.push({ entry, line: lineNumber, verified: false });
+        chainBroken = true;
         continue;
       }
       legacy += 1;
@@ -92,7 +114,7 @@ async function walkLedger(rootDir) {
     }
     chainStarted = true;
     checked += 1;
-    let verified = true;
+    let verified = !chainBroken;
     if ((entry.prevHash || null) !== previousHash) {
       failures.push({ line: lineNumber, reason: "prev_hash_mismatch", expected: previousHash, actual: entry.prevHash || null });
       verified = false;
@@ -102,6 +124,7 @@ async function walkLedger(rootDir) {
       failures.push({ line: lineNumber, reason: "hash_mismatch", expected: expectedHash, actual: entry.hash });
       verified = false;
     }
+    if (!verified) chainBroken = true;
     entries.push({ entry, line: lineNumber, verified });
     previousHash = entry.hash;
   }

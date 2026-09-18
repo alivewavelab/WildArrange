@@ -1,11 +1,8 @@
 import { runHostRoute } from "./host-runtime.mjs";
-import { lstat } from "node:fs/promises";
-import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
 import {
   ensureWildArrangeDirs,
   nowIso,
-  resolveWildArrangePath,
 } from "../infra/runtime-store.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { ensureTaskPacket, writeSnapshot } from "../infra/runtime-snapshot.mjs";
@@ -14,7 +11,7 @@ import { prepareContractReview } from "./contract-governance.mjs";
 import { buildFailureSummary } from "../infra/failure-analysis.mjs";
 import { writeFailureReport, writeReviewReport } from "../infra/task-reports.mjs";
 import { routeRequest } from "../ai/routing.mjs";
-import { captureWorkspaceSnapshot, prepareAgentWorktree } from "../infra/git-worktree.mjs";
+import { captureWorkspaceSnapshot } from "../infra/git-worktree.mjs";
 import { buildChangedPathDiffEvidence, changedPathsIntroducedByTask, collectGitChangedPaths } from "../infra/git-diff.mjs";
 import { applyVerifierEvidenceToCriteria, criteriaStatus } from "../infra/success-criteria.mjs";
 import { invokeCapability } from "../capabilities/gateway.mjs";
@@ -31,9 +28,8 @@ import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
 import { findRunnableTask, persistTaskState, writeOutbox } from "./task-board.mjs";
 import { assertCurrentTaskOwnership, coordinateTaskClaim } from "./remote-ownership.mjs";
 import { assertCommandWorkerAgent } from "../infra/agent-registry.mjs";
-import { assertTaskOrDeliveredOwnership, readIntegrationIntent, assertContractWorkspaceAvailable } from "./integration.mjs";
-import { commitIsAncestor, inspectTaskWorktreeBaseline, taskBranchName } from "../infra/git-coordination.mjs";
-import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
+import { assertTaskOrDeliveredOwnership, assertContractWorkspaceAvailable } from "./integration.mjs";
+import { ensureLinearDeliveryWorkspace } from "./linear-delivery.mjs";
 
 export async function runNextTask(rootDir, options = {}) {
   return withTaskStateLock(rootDir, "run-next-task", () => runNextTaskUnlocked(rootDir, options));
@@ -204,26 +200,11 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   }
 
   if (pipelineResult.status === "revalidation_required") {
-    task.status = "pending";
-    task.coordination = {
-      ...task.coordination,
-      status: "stale",
-      staleReason: pipelineResult.evidence.integrationGuard?.reason || "task_ownership_changed",
-    };
-    task.last_failure = {
-      at: nowIso(),
-      reason: "task_ownership_changed",
-      summary: pipelineResult.evidence.integrationGuard?.error || "remote task ownership changed before completion",
+    await persistRevalidationRequired(rootDir, taskState, task, {
+      integrationGuard: pipelineResult.evidence.integrationGuard,
+      summaryFallback: "remote task ownership changed before completion",
       retryHint: "旧设备必须停止写入；由当前远端 owner 继续任务并重新运行全部质量门",
-    };
-    task.updatedAt = nowIso();
-    await writeFailureReport(rootDir, taskState.planId, task);
-    await persistTaskState(rootDir, taskState);
-    await appendLedger(rootDir, {
-      type: "task_completion_revalidation_required",
-      planId: taskState.planId,
-      taskId: task.id,
-      reason: task.last_failure.reason,
+      ledgerEvent: { type: "task_completion_revalidation_required", planId: taskState.planId, taskId: task.id, reason: "task_ownership_changed" },
     });
     return { status: "revalidation_required", task, workerResult, verifyResult, scopeResult, reviewResult, acceptanceProof };
   }
@@ -260,46 +241,27 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   }
 
   if (pipelineResult.status === "checkpoint_failed") {
-    // Every gate and the acceptance proof passed, but the checkpoint write
-    // itself failed (e.g. checkpoints dir unwritable). Completion requires a
-    // durable checkpoint, so the task goes back to pending for retry instead
-    // of being silently marked completed.
-    task.status = task.delivery?.integrationSha || task.delivery?.commitSha ? "verifying" : "pending";
-    task.last_failure = buildFailureSummary(task, {
+    await persistCheckpointWriteFailure(rootDir, taskState, task, {
       workerResult,
       verifyResult,
       scopeResult,
       reviewResult,
-      criteriaResult: criteria,
-      nextStatus: task.status,
+      criteria,
+      checkpointError: pipelineResult.evidence.checkpointError?.message,
     });
-    task.last_failure.reason = "checkpoint_failed";
-    task.last_failure.summary = `checkpoint write failed: ${pipelineResult.evidence.checkpointError?.message || "unknown error"}`;
-    task.last_failure.retryHint = "checkpoint 写入失败（检查 .wildarrange/checkpoints 目录是否可写），修复后重跑即可，所有质量门已通过";
-    task.updatedAt = nowIso();
-    await writeFailureReport(rootDir, taskState.planId, task);
-    await persistTaskState(rootDir, taskState);
-    await appendLedger(rootDir, { type: "checkpoint_write_failed", planId: taskState.planId, taskId: task.id, error: pipelineResult.evidence.checkpointError?.message || null });
-    await writeSnapshot(rootDir, "checkpoint_write_failed", { planId: taskState.planId, taskId: task.id });
     return { status: task.status === "verifying" ? "recovery_required" : "retry", task, workerResult, verifyResult, scopeResult, reviewResult, acceptanceProof };
   }
 
   if (acceptanceProof) {
     // Every upstream gate passed, but acceptance-proof itself found a gap.
-    task.status = shouldFailDeliveryAttempt(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
-    task.last_failure = buildFailureSummary(task, {
+    await persistAcceptanceProofFailure(rootDir, taskState, task, {
       workerResult,
       verifyResult,
       scopeResult,
       reviewResult,
-      criteriaResult: criteria,
-      nextStatus: task.status,
+      criteria,
+      failureSummary: `acceptance proof failed: ${acceptanceProof.checks.filter((check) => check.status === "fail").map((check) => check.name).join(", ")}`,
     });
-    task.last_failure.reason = "acceptance_proof_failed";
-    task.last_failure.summary = `acceptance proof failed: ${acceptanceProof.checks.filter((check) => check.status === "fail").map((check) => check.name).join(", ")}`;
-    task.updatedAt = nowIso();
-    await writeFailureReport(rootDir, taskState.planId, task);
-    await persistTaskState(rootDir, taskState);
     return { status: task.status === "failed" ? "failed" : "retry", task, workerResult, verifyResult, scopeResult, reviewResult, acceptanceProof };
   }
 
@@ -638,65 +600,36 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
     }
     const acceptanceProof = completion.proofEnvelope.evidence;
     if (completion.status === "proof_failed") {
-      task.status = shouldFailDeliveryAttempt(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
-      task.last_failure = buildFailureSummary(task, {
-        workerResult,
-        verifyResult,
-        scopeResult,
-        reviewResult,
-        criteriaResult: criteria,
-        nextStatus: task.status,
-      });
-      task.last_failure.reason = "acceptance_proof_failed";
       // acceptanceProof can be null when the proof capability threw (the
       // gateway converts throws into fail envelopes with null evidence).
       const failedChecks = (acceptanceProof?.checks || []).filter((check) => check.status === "fail").map((check) => check.name).join(", ");
-      task.last_failure.summary = `acceptance proof failed: ${failedChecks || completion.proofEnvelope.error?.message || "acceptance proof capability failed"}`;
-      task.updatedAt = nowIso();
-      await writeFailureReport(rootDir, taskState.planId, task);
-      await persistTaskState(rootDir, taskState);
-      return { status: task.status === "failed" ? "failed" : "retry", task, verifyResult, scopeResult, reviewResult, acceptanceProof };
-    }
-    if (completion.status === "checkpoint_failed") {
-      task.status = task.delivery?.integrationSha || task.delivery?.commitSha ? "verifying" : "pending";
-      task.last_failure = buildFailureSummary(task, {
+      await persistAcceptanceProofFailure(rootDir, taskState, task, {
         workerResult,
         verifyResult,
         scopeResult,
         reviewResult,
-        criteriaResult: criteria,
-        nextStatus: task.status,
+        criteria,
+        failureSummary: `acceptance proof failed: ${failedChecks || completion.proofEnvelope.error?.message || "acceptance proof capability failed"}`,
       });
-      task.last_failure.reason = "checkpoint_failed";
-      task.last_failure.summary = `checkpoint write failed: ${completion.checkpointEnvelope?.error?.message || "unknown error"}`;
-      task.last_failure.retryHint = "checkpoint 写入失败（检查 .wildarrange/checkpoints 目录是否可写），修复后重跑即可，所有质量门已通过";
-      task.updatedAt = nowIso();
-      await writeFailureReport(rootDir, taskState.planId, task);
-      await persistTaskState(rootDir, taskState);
-      await appendLedger(rootDir, { type: "checkpoint_write_failed", planId: taskState.planId, taskId: task.id, error: completion.checkpointEnvelope?.error?.message || null });
-      await writeSnapshot(rootDir, "checkpoint_write_failed", { planId: taskState.planId, taskId: task.id });
+      return { status: task.status === "failed" ? "failed" : "retry", task, verifyResult, scopeResult, reviewResult, acceptanceProof };
+    }
+    if (completion.status === "checkpoint_failed") {
+      await persistCheckpointWriteFailure(rootDir, taskState, task, {
+        workerResult,
+        verifyResult,
+        scopeResult,
+        reviewResult,
+        criteria,
+        checkpointError: completion.checkpointEnvelope?.error?.message,
+      });
       return { status: task.status === "verifying" ? "recovery_required" : "retry", task, verifyResult, scopeResult, reviewResult, acceptanceProof };
     }
     if (completion.status === "revalidation_required") {
-      task.status = "pending";
-      task.coordination = {
-        ...task.coordination,
-        status: "stale",
-        staleReason: completion.integrationGate?.reason || "task_ownership_changed",
-      };
-      task.last_failure = {
-        at: nowIso(),
-        reason: "task_ownership_changed",
-        summary: completion.integrationGate?.error || "remote task ownership changed before checkpoint",
+      await persistRevalidationRequired(rootDir, taskState, task, {
+        integrationGuard: completion.integrationGate,
+        summaryFallback: "remote task ownership changed before checkpoint",
         retryHint: "旧设备必须停止写入；由当前远端 owner 重新运行质量门与 checkpoint",
-      };
-      task.updatedAt = nowIso();
-      await writeFailureReport(rootDir, taskState.planId, task);
-      await persistTaskState(rootDir, taskState);
-      await appendLedger(rootDir, {
-        type: "node_checkpoint_revalidation_required",
-        planId: taskState.planId,
-        taskId: task.id,
+        ledgerEvent: { type: "node_checkpoint_revalidation_required", planId: taskState.planId, taskId: task.id },
       });
       return { status: "revalidation_required", task, verifyResult, scopeResult, reviewResult, acceptanceProof };
     }
@@ -875,101 +808,6 @@ function resolveRetryTask(tasks, taskId) {
   return task;
 }
 
-async function ensureLinearDeliveryWorkspace(rootDir, planId, task, tasks = []) {
-  if (task.delivery_workspace?.workDir && task.delivery_workspace?.branch && task.delivery_workspace?.baseSha) {
-    const existing = await inspectTaskWorktreeBaseline(task.delivery_workspace.workDir);
-    const expectedHead = task.delivery_workspace.deliverySha || task.delivery_workspace.baseSha;
-    if (!existing.available || existing.branch !== task.delivery_workspace.branch || existing.headSha !== expectedHead) {
-      const intent = await readIntegrationIntent(rootDir, task.delivery_workspace.runId, task.id);
-      const persistedDeliverySha = task.delivery?.integrationSha || task.delivery?.commitSha || task.delivery?.actualSha || null;
-      const intentOwnsCurrentHead = intent
-        && intent.planId === planId
-        && intent.taskId === task.id
-        && intent.runId === task.delivery_workspace.runId
-        && intent.branch === task.delivery_workspace.branch
-        && intent.expectedSha === task.delivery_workspace.baseSha
-        && intent.integrationSha === existing.headSha
-        && (!persistedDeliverySha || persistedDeliverySha === intent.integrationSha)
-        && ["prepared", "prepared_local", "committed_local", "pushed", "push_outcome_unknown"].includes(intent.status);
-      if (!existing.available || existing.branch !== task.delivery_workspace.branch || !intentOwnsCurrentHead) {
-        throw new Error(`persisted linear task worktree changed: expected ${task.delivery_workspace.branch}@${expectedHead}, got ${existing.branch || "unknown"}@${existing.headSha || "unknown"}`);
-      }
-      // Only the pre-checkpoint durable intent can reconcile a stale task-state SHA.
-      task.delivery_workspace.deliverySha = intent.integrationSha;
-    }
-    return task.delivery_workspace;
-  }
-
-  const baseline = await captureWorkspaceSnapshot(rootDir, { label: `linear-delivery-${planId}-${task.id}` });
-  if (baseline.available !== true) {
-    const hasGitMarker = await lstat(path.join(rootDir, ".git")).then(() => true).catch((error) => {
-      if (error?.code === "ENOENT") return false;
-      throw error;
-    });
-    if (!hasGitMarker && ["project is not a Git repository", "project root is not the git toplevel"].includes(baseline.reason)) return null;
-    throw new Error(`cannot establish linear Git delivery baseline: ${baseline.reason || "unknown Git error"}`);
-  }
-  if (!baseline.headCommit) throw new Error("cannot establish linear Git delivery baseline: Git repository has no initial commit");
-
-  const dependencySha = await resolveDependencyDeliverySha(rootDir, task, tasks);
-  const remoteHeadSha = task.coordination?.remoteHeadSha || null;
-  if (task.coordination?.localGit !== true && remoteHeadSha && dependencySha
-    && !(await commitIsAncestor(rootDir, dependencySha, remoteHeadSha))) {
-    throw new Error(`task ${task.id} task branch does not contain dependency delivery ${dependencySha}; create an integration task first`);
-  }
-  const startPoint = task.coordination?.localGit === true && dependencySha
-    ? dependencySha
-    : remoteHeadSha || dependencySha || baseline.headCommit;
-  if (dependencySha && task.coordination?.localGit === true) {
-    task.coordination = { ...task.coordination, baseSha: dependencySha, remoteHeadSha: dependencySha };
-  }
-  const { config } = await loadWildArrangeConfig(rootDir);
-  const branch = task.coordination?.branch || taskBranchName(config.gitCoordination, planId, task.id);
-  if (["disabled", "manual"].includes(task.coordination?.status)) {
-    task.coordination = {
-      ...task.coordination,
-      localGit: true,
-      branch,
-      baseSha: startPoint,
-      remoteHeadSha: startPoint,
-    };
-  }
-  const safePlan = String(planId).replace(/[^A-Za-z0-9._-]/g, "_");
-  const safeTask = String(task.id).replace(/[^A-Za-z0-9._-]/g, "_");
-  const runId = `linear-${safePlan}-${safeTask}`;
-  const runDir = resolveWildArrangePath(rootDir, "linear-runs", safePlan, safeTask);
-  const prepared = await prepareAgentWorktree(rootDir, runDir, {
-    isolation: "git-worktree",
-    branchName: branch,
-    startPoint,
-  });
-  if (prepared.available !== true) throw new Error(`linear task worktree is required for Git delivery: ${prepared.reason}`);
-  task.delivery_workspace = {
-    kind: "linear_task_worktree",
-    runId,
-    workDir: path.resolve(prepared.workDir),
-    branch,
-    baseSha: startPoint,
-  };
-  return task.delivery_workspace;
-}
-
-async function resolveDependencyDeliverySha(rootDir, task, tasks) {
-  const dependencyShas = [];
-  for (const taskId of task.blockedBy || []) {
-    const dependency = tasks.find((candidate) => candidate.id === taskId);
-    const deliverySha = dependency?.delivery?.integrationSha || dependency?.delivery?.commitSha || dependency?.delivery?.actualSha || dependency?.delivery_workspace?.deliverySha;
-    if (!deliverySha) throw new Error(`task ${task.id} dependency ${taskId} has no bound delivery commit`);
-    if (!dependencyShas.includes(deliverySha)) dependencyShas.push(deliverySha);
-  }
-  if (dependencyShas.length < 2) return dependencyShas[0] || null;
-  for (const candidate of [...dependencyShas].reverse()) {
-    const containsAll = await Promise.all(dependencyShas.map((sha) => commitIsAncestor(rootDir, sha, candidate)));
-    if (containsAll.every(Boolean)) return candidate;
-  }
-  throw new Error(`task ${task.id} dependencies are on unrelated delivery branches; create an integration task first`);
-}
-
 async function persistCommandRecoveryRequired(rootDir, taskState, task, commandEvidence, result = {}) {
   task.status = "verifying";
   task.last_failure = {
@@ -984,6 +822,66 @@ async function persistCommandRecoveryRequired(rootDir, taskState, task, commandE
   await persistTaskState(rootDir, taskState);
   await appendLedger(rootDir, { type: "command_recovery_required", planId: taskState.planId, taskId: task.id, pid: commandEvidence?.pid || null });
   return { status: "recovery_required", task, ...result };
+}
+
+async function persistRevalidationRequired(rootDir, taskState, task, { integrationGuard, summaryFallback, retryHint, ledgerEvent }) {
+  task.status = "pending";
+  task.coordination = {
+    ...task.coordination,
+    status: "stale",
+    staleReason: integrationGuard?.reason || "task_ownership_changed",
+  };
+  task.last_failure = {
+    at: nowIso(),
+    reason: "task_ownership_changed",
+    summary: integrationGuard?.error || summaryFallback,
+    retryHint,
+  };
+  task.updatedAt = nowIso();
+  await writeFailureReport(rootDir, taskState.planId, task);
+  await persistTaskState(rootDir, taskState);
+  await appendLedger(rootDir, ledgerEvent);
+}
+
+// Every gate and the acceptance proof passed, but the checkpoint write
+// itself failed (e.g. checkpoints dir unwritable). Completion requires a
+// durable checkpoint, so the task goes back to pending for retry instead
+// of being silently marked completed.
+async function persistCheckpointWriteFailure(rootDir, taskState, task, { workerResult, verifyResult, scopeResult, reviewResult, criteria, checkpointError }) {
+  task.status = task.delivery?.integrationSha || task.delivery?.commitSha ? "verifying" : "pending";
+  task.last_failure = buildFailureSummary(task, {
+    workerResult,
+    verifyResult,
+    scopeResult,
+    reviewResult,
+    criteriaResult: criteria,
+    nextStatus: task.status,
+  });
+  task.last_failure.reason = "checkpoint_failed";
+  task.last_failure.summary = `checkpoint write failed: ${checkpointError || "unknown error"}`;
+  task.last_failure.retryHint = "checkpoint 写入失败（检查 .wildarrange/checkpoints 目录是否可写），修复后重跑即可，所有质量门已通过";
+  task.updatedAt = nowIso();
+  await writeFailureReport(rootDir, taskState.planId, task);
+  await persistTaskState(rootDir, taskState);
+  await appendLedger(rootDir, { type: "checkpoint_write_failed", planId: taskState.planId, taskId: task.id, error: checkpointError || null });
+  await writeSnapshot(rootDir, "checkpoint_write_failed", { planId: taskState.planId, taskId: task.id });
+}
+
+async function persistAcceptanceProofFailure(rootDir, taskState, task, { workerResult, verifyResult, scopeResult, reviewResult, criteria, failureSummary }) {
+  task.status = shouldFailDeliveryAttempt(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
+  task.last_failure = buildFailureSummary(task, {
+    workerResult,
+    verifyResult,
+    scopeResult,
+    reviewResult,
+    criteriaResult: criteria,
+    nextStatus: task.status,
+  });
+  task.last_failure.reason = "acceptance_proof_failed";
+  task.last_failure.summary = failureSummary;
+  task.updatedAt = nowIso();
+  await writeFailureReport(rootDir, taskState.planId, task);
+  await persistTaskState(rootDir, taskState);
 }
 
 async function taskOwnershipGate(rootDir, taskId) {

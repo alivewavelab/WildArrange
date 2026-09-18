@@ -12,7 +12,7 @@
  * checkpoint only run if every prior gate (worker, verify, criteria, scope,
  * review) already passed.
  */
-import { invokeCapability, capabilityModule } from "../capabilities/gateway.mjs";
+import { invokeCapability, capabilityModule, capabilityErrorEnvelope } from "../capabilities/gateway.mjs";
 import { lstat } from "node:fs/promises";
 import path from "node:path";
 import { assertTaskOrDeliveredOwnership, integrateAdmissionCommit } from "./integration.mjs";
@@ -102,7 +102,17 @@ export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
 
   for (const stepName of GATE_STEPS) {
     if (stepName === "review") {
-      evidence.contractGovernance = await prepareContractReview(rootDir, planId, task, options.executionRoot || rootDir, evidence);
+      // 契约治理预处理在网关之外，异常不得无审计穿透：转成 review 门 fail
+      // 信封，照常发射门决策并经 finish() 收尾。
+      try {
+        evidence.contractGovernance = await prepareContractReview(rootDir, planId, task, options.executionRoot || rootDir, evidence);
+      } catch (error) {
+        const envelope = capabilityErrorEnvelope("review", error, 0);
+        results.push(envelope);
+        recordStepEvidence(stepName, evidence, envelope, task);
+        await emitGateDecision(rootDir, planId, task, envelope, options.runId);
+        return finish("blocked");
+      }
     }
     const envelope = await invokeCapability(stepName, buildStepContext(stepName, { rootDir, planId, task, evidence, options }));
     results.push(envelope);
@@ -286,7 +296,16 @@ function pipelineOutcomeReason(status, results, criteria) {
  * throws into fail envelopes; we check the envelope status here).
  */
 export async function runCompletionSegment(rootDir, planId, task, evidence, options = {}) {
-  const delivery = await resolveDeliveryFacts(rootDir, task, options);
+  // 交付事实解析在网关之外（含 admission claim 围栏），异常不得无审计穿透：
+  // 转成 acceptance-proof fail 信封，由调用方按既有 proof_failed 分支经 finish() 收尾。
+  let delivery;
+  try {
+    delivery = await resolveDeliveryFacts(rootDir, task, options);
+  } catch (error) {
+    const proofEnvelope = capabilityErrorEnvelope("acceptance-proof", error, 0);
+    await emitGateDecision(rootDir, planId, task, proofEnvelope, options.runId);
+    return { status: "proof_failed", proofEnvelope, checkpointEnvelope: null };
+  }
   evidence.deliveryRequired = delivery.required;
   evidence.deliveryPending = delivery.required && Boolean(delivery.target);
   // Entry flags cannot waive Git delivery. Missing targets fail the proof,

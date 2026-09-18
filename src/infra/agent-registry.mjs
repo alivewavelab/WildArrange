@@ -5,19 +5,19 @@ export const LONG_LIVED_AGENTS = Object.freeze(["Jiuwei", "DiJiang", "ZhuRong", 
 export const COMMAND_WORKER_AGENTS = Object.freeze(["Jiuwei", "ZhuRong"]);
 export const READ_ONLY_LONG_LIVED_AGENTS = Object.freeze(["DiJiang", "BaiZe", "LuWu"]);
 const READ_ONLY_LONG_LIVED_AGENT_SET = new Set(READ_ONLY_LONG_LIVED_AGENTS);
-const legacyAgentName = (...parts) => parts.join("");
+// 旧版宿主配置里的历史 Agent 名，映射到当前长期 Agent 白名单。
 export const AGENT_ALIASES = {
-  [legacyAgentName("Sisy", "phus")]: "Jiuwei",
-  [legacyAgentName("Sisy", "phus", "-junior")]: "LuWu",
-  [legacyAgentName("sisy", "phus_junior")]: "LuWu",
-  [legacyAgentName("At", "las")]: "Jiuwei",
-  [legacyAgentName("Hephae", "stus")]: "ZhuRong",
-  [legacyAgentName("Prome", "theus")]: "DiJiang",
-  [legacyAgentName("Ora", "cle")]: "BaiZe",
-  [legacyAgentName("Libra", "rian")]: "BaiZe",
-  [legacyAgentName("Exp", "lore")]: "BaiZe",
-  [legacyAgentName("Me", "tis")]: "BaiZe",
-  [legacyAgentName("Mo", "mus")]: "BaiZe",
+  Sisyphus: "Jiuwei",
+  "Sisyphus-junior": "LuWu",
+  sisyphus_junior: "LuWu",
+  Atlas: "Jiuwei",
+  Hephaestus: "ZhuRong",
+  Prometheus: "DiJiang",
+  Oracle: "BaiZe",
+  Librarian: "BaiZe",
+  Explore: "BaiZe",
+  Metis: "BaiZe",
+  Momus: "BaiZe",
   YingLong: "Jiuwei",
   LuanNiao: "BaiZe",
   QiongQi: "BaiZe",

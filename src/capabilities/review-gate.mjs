@@ -15,6 +15,7 @@ import { scanProjectRules } from "../infra/rule-scanner.mjs";
 import { criteriaStatus } from "../infra/success-criteria.mjs";
 import { runQualityGates } from "./code-intel.mjs";
 import { isTrivialCommand } from "../infra/task-predicates.mjs";
+import { uniqueStrings } from "../infra/text-utils.mjs";
 
 export async function runReviewGate(rootDir, task, evidence = {}, options = {}) {
   const executionRoot = options.executionRoot || rootDir;
@@ -292,8 +293,4 @@ function commandObservation(result) {
 function truncateForSummary(value, limit = 500) {
   if (value.length <= limit) return value;
   return `${value.slice(0, limit - 15)}...[truncated]`;
-}
-
-function uniqueStrings(values) {
-  return [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))];
 }

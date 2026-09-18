@@ -139,6 +139,34 @@ test("gateway: apply-card without card.id stays a fail envelope", async () => {
   });
 });
 
+test("gateway: contract-governance-scan with inspectTask must not report fail/warn as pass", async () => {
+  await withTempDir(async (dir) => {
+    const failing = await invokeCapability("contract-governance-scan", {
+      rootDir: dir,
+      options: {
+        inspectTask: { id: "T001", contractChanges: { items: [{ contractId: "c1", kind: "api", action: "remove", summary: "drop endpoint" }] } },
+        evidence: { scopeResult: { status: "pass", changedPaths: [] } },
+      },
+    });
+    assert.equal(failing.capability, "contract-governance-scan");
+    assert.equal(failing.status, "fail");
+    assert.equal(failing.evidence.status, "fail");
+    assert.equal(failing.sideEffect, "none");
+
+    const warning = await invokeCapability("contract-governance-scan", {
+      rootDir: dir,
+      options: { inspectTask: { id: "T002" }, evidence: { scopeResult: { status: "pass", changedPaths: [] } } },
+    });
+    assert.equal(warning.status, "warn");
+    assert.notEqual(warning.status, "pass");
+    assert.equal(warning.sideEffect, "none");
+
+    const plain = await invokeCapability("contract-governance-scan", { rootDir: dir, options: {} });
+    assert.equal(plain.status, "pass");
+    assert.equal(plain.sideEffect, "state_written");
+  });
+});
+
 test("gateway: a throwing capability is caught and reported as a fail envelope, not an unhandled rejection", async () => {
   await withTempDir(async (dir) => {
     // scopeGuard() reads task state from disk itself; with no imported plan

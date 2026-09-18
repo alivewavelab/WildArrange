@@ -39,6 +39,7 @@ import {
   listChangeRequests,
   recordReviewBlocker,
   resolveChangeRequest,
+  resolveReviewBlocker,
   reviewChangeRequest,
   steerWorkflow,
 } from "../src/orchestration/change-governance.mjs";
@@ -59,7 +60,8 @@ import {
   resolveArchivistRouteSuggestion,
   runArchivistRouter,
 } from "../src/ai/archivist-router.mjs";
-import { TRUSTED_CLI_COMMAND_PREFIX, preToolUseGuard, runInjectionHook as renderHook } from "../src/ai/hooks.mjs";
+import { runInjectionHook as renderHook } from "../src/ai/hooks.mjs";
+import { TRUSTED_CLI_COMMAND_PREFIX, preToolUseGuard } from "../src/ai/pre-tool-guard.mjs";
 import { runHostHook, runHostRoute } from "../src/orchestration/host-runtime.mjs";
 import { matchSkills } from "../src/ai/skill-matcher.mjs";
 import { resolveInjectionPoint } from "../src/ai/injection.mjs";
@@ -2195,6 +2197,33 @@ test("plan import rejects unknown blockedBy before writing task state", async ()
   });
 });
 
+test("plan import never persists a requested completed status", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = path.join(dir, "forged-completion-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Forged completion",
+      objective: "A plan file claiming its work is already done",
+      tasks: [{
+        id: "T001",
+        subject: "Pretends to be done without any verification",
+        status: "completed",
+        writable_paths: ["receipt.txt"],
+        verify_commands: ["true"],
+      }],
+    }, null, 2));
+
+    const plan = await importPlan(dir, planPath);
+    assert.equal(plan.tasks[0].status, "needs_user_decision");
+    const ledger = await readJson(resolveWildArrangePath(dir, "team", "tasks.json"));
+    assert.equal(ledger.tasks.length, 1);
+    assert.equal(ledger.tasks[0].status, "needs_user_decision");
+    assert.equal(ledger.tasks[0].history.at(-1).status, "needs_user_decision");
+    const persistedPlan = await readJson(resolveWildArrangePath(dir, "plans", `${plan.id}.json`));
+    assert.equal(persistedPlan.tasks[0].status, "needs_user_decision");
+  });
+});
+
 test("plan import rejects high-risk product plans that are under-split", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
@@ -2387,6 +2416,26 @@ test("project rules and agent context collect matching local governance", async 
     assert.equal(context.task.id, "T001");
     assert.equal(context.projectRules.matched, 3);
     assert.match(await readFile(resolveWildArrangePath(dir, "context-agents", "BaiZe-T001.md"), "utf8"), /WildArrange Agent Context/);
+  });
+});
+
+test("project rules parse CRLF frontmatter", async () => {
+  await withTempDir(async (dir) => {
+    await mkdir(path.join(dir, ".cursor", "rules"), { recursive: true });
+    await writeFile(
+      path.join(dir, ".cursor", "rules", "windows.md"),
+      "---\r\ndescription: CRLF rule\r\nglobs: [\"src/**\"]\r\nalwaysApply: false\r\n---\r\nCRLF 正文规则。\r\n",
+    );
+    await initRuntime(dir);
+
+    const rules = await scanProjectRules(dir, { targetPaths: ["src/app.js"] });
+    const rule = rules.rules.find((entry) => entry.path === ".cursor/rules/windows.md");
+    assert.ok(rule);
+    assert.equal(rule.description, "CRLF rule");
+    assert.deepEqual(rule.globs, ["src/**"]);
+    assert.equal(rule.alwaysApply, false);
+    assert.match(rule.content, /CRLF 正文规则/);
+    assert.doesNotMatch(rule.content, /description: CRLF rule/);
   });
 });
 
@@ -2640,6 +2689,113 @@ test("review blockers create a resolution task without completing the blocked ta
     const status = await statusReport(dir);
     assert.equal(status.review_blocked, 1);
     assert.match(await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8"), /review_blocker_recorded/);
+  });
+});
+
+test("review blocker resolution returns the blocked task to pending only after the resolution task completes", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = path.join(dir, "blocker-resolve-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Review blocker resolution",
+      tasks: [{
+        id: "T001",
+        subject: "Task needing final review",
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
+      }],
+    }));
+    await importPlan(dir, planPath);
+    await runWorkflowNode(dir, "execute", { taskId: "T001" });
+    await runWorkflowNode(dir, "verify", { taskId: "T001" });
+
+    const blocked = await recordReviewBlocker(dir, {
+      taskId: "T001",
+      evidence: "BaiZe final review found missing browser evidence.",
+      rationale: "The blocker must be resolved as a separate task.",
+      writable_paths: ["src/**"],
+      worker_command: nodeEval("const fs=require('fs');fs.mkdirSync('src',{recursive:true});fs.writeFileSync('src/blocker-resolution.txt','blocker resolved\\n')"),
+      verify_commands: [nodeEval("const fs=require('fs');if(fs.readFileSync('src/blocker-resolution.txt','utf8').trim()!=='blocker resolved')process.exit(1)")],
+      review_commands: [nodeEval("const fs=require('fs');const lines=fs.readFileSync('src/blocker-resolution.txt','utf8').trim().split(/\\r?\\n/);if(lines.length!==1||!lines[0].startsWith('blocker resolved'))process.exit(1)")],
+    });
+    assert.equal(blocked.blockedTask.status, "review_blocked");
+
+    const taskStatePath = resolveWildArrangePath(dir, "team", "tasks.json");
+    await assert.rejects(
+      () => resolveReviewBlocker(dir, {
+        taskId: "T001",
+        evidence: "Premature unblock attempt without a finished resolution task.",
+        rationale: "This must be rejected while the resolution task is still pending.",
+      }),
+      /complete it before unblocking/,
+    );
+    let persisted = await readJson(taskStatePath);
+    assert.equal(persisted.tasks.find((task) => task.id === "T001").status, "review_blocked");
+
+    const completed = await runNextTask(dir);
+    assert.equal(completed.status, "completed", JSON.stringify({ status: completed.status, task: completed.task?.id, failure: completed.task?.last_failure }));
+    assert.equal(completed.task.id, blocked.resolutionTask.id);
+
+    const resolved = await resolveReviewBlocker(dir, {
+      taskId: "T001",
+      evidence: `Resolution task ${blocked.resolutionTask.id} finished with a passing verifier.`,
+      rationale: "The blocked task re-enters the delivery pipeline for a fresh run.",
+    });
+    assert.equal(resolved.unblockedTask.status, "pending");
+    persisted = await readJson(taskStatePath);
+    const unblocked = persisted.tasks.find((task) => task.id === "T001");
+    assert.equal(unblocked.status, "pending");
+    assert.ok(unblocked.reviewBlocker.resolvedAt);
+    assert.match(await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8"), /review_blocker_resolved/);
+  });
+});
+
+test("steering mark_blocked rejects completed or verifying targets", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = path.join(dir, "mark-blocked-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Mark blocked guard",
+      tasks: [{
+        id: "T001",
+        subject: "Task that completes",
+        writable_paths: ["src/**"],
+        worker_command: nodeEval("const fs=require('fs');fs.mkdirSync('src',{recursive:true});fs.writeFileSync('src/mark-blocked.txt','terminal guard\\n')"),
+        verify_commands: [nodeEval("const fs=require('fs');if(fs.readFileSync('src/mark-blocked.txt','utf8').trim()!=='terminal guard')process.exit(1)")],
+        review_commands: [nodeEval("const fs=require('fs');const lines=fs.readFileSync('src/mark-blocked.txt','utf8').trim().split(/\\r?\\n/);if(lines.length!==1||!lines[0].startsWith('terminal guard'))process.exit(1)")],
+      }, {
+        id: "T002",
+        subject: "Task stuck verifying",
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+        review_commands: ["node --version"],
+      }],
+    }));
+    await importPlan(dir, planPath);
+    const completed = await runNextTask(dir);
+    assert.equal(completed.status, "completed", JSON.stringify({ status: completed.status, task: completed.task?.id, failure: completed.task?.last_failure }));
+    assert.equal(completed.task.id, "T001");
+
+    const taskStatePath = resolveWildArrangePath(dir, "team", "tasks.json");
+    const taskState = await readJson(taskStatePath);
+    taskState.tasks.find((task) => task.id === "T002").status = "verifying";
+    await writeFile(taskStatePath, JSON.stringify(taskState, null, 2));
+
+    for (const targetTaskId of ["T001", "T002"]) {
+      const result = await steerWorkflow(dir, {
+        kind: "mark_blocked",
+        targetTaskId,
+        evidence: "Worker reported an unresolved dependency.",
+        rationale: "The task should wait for a human decision.",
+      });
+      assert.equal(result.accepted, false);
+      assert.ok(result.audit.invariant.rejectedReasons.some((reason) => reason.includes("mark_blocked cannot target completed or verifying")));
+    }
+
+    const persisted = await readJson(taskStatePath);
+    assert.equal(persisted.tasks.find((task) => task.id === "T001").status, "completed");
+    assert.equal(persisted.tasks.find((task) => task.id === "T002").status, "verifying");
   });
 });
 
@@ -3934,6 +4090,24 @@ test("pathAllowed supports exact paths, directories, globs, and empty scopes", (
   assert.equal(pathAllowed("src/index.js.map", ["src/index.js"]), false);
   assert.equal(pathAllowed("docs/plan.md", ["src/**"]), false);
   assert.equal(pathAllowed("src/index.js", []), false);
+});
+
+test("pathAllowed folds dot segments and rejects .. escapes and absolute paths", () => {
+  // escaping/absolute inputs are denied even against permissive scopes
+  assert.equal(pathAllowed("src/../.wildarrange/ledger.jsonl", ["src/**"]), false);
+  assert.equal(pathAllowed("../outside.txt", ["**"]), false);
+  assert.equal(pathAllowed("src/../../outside.txt", ["src/**", "**"]), false);
+  assert.equal(pathAllowed("/etc/passwd", ["**"]), false);
+  assert.equal(pathAllowed("C:/Windows/system.ini", ["**"]), false);
+  assert.equal(pathAllowed("\\\\server\\share\\file.txt", ["**"]), false);
+  // escaping/absolute patterns never match
+  assert.equal(pathAllowed("src/index.js", ["../**"]), false);
+  assert.equal(pathAllowed("src/index.js", ["/abs/**"]), false);
+  // legitimate relative paths and ** globs are unaffected
+  assert.equal(pathAllowed("src/./index.js", ["src/**"]), true);
+  assert.equal(pathAllowed("src/lib/../index.js", ["src/**"]), true);
+  assert.equal(pathAllowed("src/infra/example.mjs", ["src/**/*.mjs"]), true);
+  assert.equal(pathAllowed("src/index.js", ["**"]), true);
 });
 
 test("manifest change classification covers added, deleted, and modified files", () => {

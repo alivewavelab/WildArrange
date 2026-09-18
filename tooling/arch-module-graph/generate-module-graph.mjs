@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// 从真实 import / use / from 生成 <script id="generated-graph">。
+// 从真实 import / require / from 生成 <script id="generated-graph">。
 // 不改 D 字典人话（plain / io / r）。已有人话边只补缺口。
 // 用法：node generate-module-graph.mjs [仓库根] [--depth=entry|all]
 // CONFIG 与 validate-module-file-map.mjs 对齐：MAP_PATH / OVERVIEW_PATH 可用环境变量覆盖。
@@ -102,80 +102,12 @@ const resolveJs = (fromPosix, spec) => {
     norm,
     norm + ".ts", norm + ".tsx", norm + ".js", norm + ".mjs",
     norm + "/index.ts", norm + "/index.tsx", norm + "/index.js",
-    norm + "/mod.rs",
   ];
   for (const c of candidates) {
     const hit = tryFile(c.replace(/\/+/g, "/"));
     if (hit) return hit;
   }
   return null;
-};
-
-const resolvePyRel = (fromPosix, dots, rest) => {
-  let dir = dirname(fromPosix);
-  for (let i = 1; i < dots.length; i++) dir = dirname(dir);
-  const parts = rest ? rest.split(".") : [];
-  const stem = parts.length ? `${dir}/${parts.join("/")}` : dir;
-  return tryFile(stem + ".py") || tryFile(stem + "/__init__.py");
-};
-
-const resolvePyAbs = (fromPosix, mod, names = []) => {
-  if (!mod || mod === "__future__") return [];
-  const rel = mod.replace(/\./g, "/");
-  const bases = [];
-  let dir = dirname(fromPosix);
-  while (true) {
-    bases.push(dir === "." ? "" : dir);
-    if (!dir || dir === ".") break;
-    const next = dirname(dir);
-    if (next === dir) break;
-    dir = next;
-  }
-  bases.push("");
-  const hits = [];
-  for (const base of [...new Set(bases)]) {
-    const stem = base ? `${base}/${rel}` : rel;
-    const asMod = tryFile(`${stem}.py`) || tryFile(`${stem}/__init__.py`);
-    if (asMod) hits.push(asMod);
-    for (const name of names) {
-      if (!/^[A-Za-z_]\w*$/.test(name) || name === "*") continue;
-      const sub = tryFile(`${stem}/${name}.py`) || tryFile(`${stem}/${name}/__init__.py`);
-      if (sub) hits.push(sub);
-    }
-  }
-  return hits;
-};
-
-const importedNames = (clause) =>
-  clause
-    .replace(/[()]/g, " ")
-    .split(",")
-    .map((part) => part.trim().split(/\s+as\s+/i)[0].trim())
-    .filter(Boolean);
-
-const rustRoots = () => {
-  const roots = new Set();
-  for (const m of Object.values(modules)) {
-    for (const inc of m.include ?? []) {
-      if (inc.includes("src-tauri/src") || inc.endsWith(".rs") || inc.includes("/src/")) {
-        if (inc.includes("src-tauri/src")) roots.add(inc.split("src-tauri/src")[0] + "src-tauri/src");
-      }
-    }
-  }
-  if (existsSync(resolve(root, "client/src-tauri/src"))) roots.add("client/src-tauri/src");
-  if (existsSync(resolve(root, "src"))) roots.add("src");
-  return [...roots];
-};
-
-const resolveRust = (fromPosix, cratePath) => {
-  const segs = cratePath.split("::");
-  for (const rroot of rustRoots()) {
-    const stem = `${rroot}/${segs.join("/")}`;
-    const hit = tryFile(stem + ".rs") || tryFile(stem + "/mod.rs");
-    if (hit) return hit;
-  }
-  const local = `${dirname(fromPosix)}/${segs[segs.length - 1]}`;
-  return tryFile(local + ".rs") || tryFile(local + "/mod.rs");
 };
 
 const parseImports = (posix) => {
@@ -192,36 +124,6 @@ const parseImports = (posix) => {
       for (const m of src.matchAll(re)) specs.push(m[1]);
     }
     return specs.map((s) => resolveJs(posix, s)).filter(Boolean);
-  }
-  if (PY_EXT.has(ext)) {
-    const out = [];
-    for (const m of src.matchAll(/^from\s+(\.+)([\w.]*)\s+import/gm)) {
-      const hit = resolvePyRel(posix, m[1], m[2]);
-      if (hit) out.push(hit);
-    }
-    for (const m of src.matchAll(/^from\s+([\w.]+)\s+import\s+(.+)$/gm)) {
-      if (m[1].startsWith(".")) continue;
-      out.push(...resolvePyAbs(posix, m[1], importedNames(m[2])));
-    }
-    for (const m of src.matchAll(/^import\s+([\w.]+(?:\s*,\s*[\w.]+)*)$/gm)) {
-      for (const spec of m[1].split(",")) {
-        const name = spec.trim().split(/\s+as\s+/i)[0].trim();
-        out.push(...resolvePyAbs(posix, name));
-      }
-    }
-    return out;
-  }
-  if (RS_EXT.has(ext)) {
-    const out = [];
-    for (const m of src.matchAll(/\buse\s+crate::([a-z0-9_]+(?:::[a-z0-9_]+)*)/g)) {
-      const hit = resolveRust(posix, m[1]);
-      if (hit) out.push(hit);
-    }
-    for (const m of src.matchAll(/\bmod\s+([a-z0-9_]+);/g)) {
-      const hit = tryFile(`${dirname(posix)}/${m[1]}.rs`) || tryFile(`${dirname(posix)}/${m[1]}/mod.rs`);
-      if (hit) out.push(hit);
-    }
-    return out;
   }
   return [];
 };

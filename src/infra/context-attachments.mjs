@@ -1,7 +1,7 @@
 import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { readJson, resolveWildArrangePath, hashContent } from "./runtime-store.mjs";
-import { assertPathInsideRoot } from "./path-match.mjs";
+import { assertPathInsideRoot, normalizeRelativePath } from "./path-match.mjs";
 import { renderPromptPackEntry } from "./prompt-pack.mjs";
 
 export async function loadMarkdownAttachment(rootDir, relativePath, maxChars) {
@@ -71,10 +71,6 @@ async function resolveProjectSkill(rootDir, skillName) {
   } catch {
     return null;
   }
-}
-
-function normalizeRelativePath(filePath) {
-  return filePath.replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+/g, "/");
 }
 
 export function normalizeMaxChars(value, fallback) {

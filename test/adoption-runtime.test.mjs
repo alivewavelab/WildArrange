@@ -24,7 +24,7 @@ import {
 import { runCommandFile } from "../src/infra/command-runner.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { hashContent, readJson, resolveWildArrangePath, writeJsonAtomic } from "../src/infra/runtime-store.mjs";
-import { fingerprintCard } from "../src/infra/verification-discovery.mjs";
+import { fingerprintCard } from "../src/infra/verification-cards.mjs";
 import { digestCanonical, gitBlobDigestEquals, readVerificationInventory } from "../src/infra/verification-registry.mjs";
 
 async function withTempDir(fn) {
@@ -928,5 +928,28 @@ test("cards that execute verifier commands cannot be batch-approved", async () =
       }),
       (error) => error?.code === "sensitive_card",
     );
+  });
+});
+
+test("scan crash settles the session to needs_review instead of stuck scanning", async () => {
+  await withTempDir(async (dir) => {
+    await seedProject(dir);
+    const scanBoom = new Error("scan exploded");
+    Object.defineProperty(scanBoom, "code", {
+      get() { throw new Error("error metadata unreadable"); },
+    });
+    const options = { serve: false };
+    Object.defineProperty(options, "suggestedLocator", {
+      get() { throw scanBoom; },
+    });
+    const crashed = await startAdoption(dir, options);
+    assert.equal(crashed.ok, false);
+    assert.equal(crashed.session.status, "needs_review");
+    assert.equal(crashed.error.code, "scan_crashed");
+    const persisted = await statusAdoption(dir, {});
+    assert.equal(persisted.session.status, "needs_review");
+    const retry = await startAdoption(dir, { serve: false });
+    assert.equal(retry.ok, true);
+    assert.equal(retry.session.status, "reviewing");
   });
 });

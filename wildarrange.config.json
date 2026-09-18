@@ -9,6 +9,10 @@
     "cursor": {
       "enabled": true,
       "hookMode": "cli-adapter"
+    },
+    "kimi": {
+      "enabled": true,
+      "hookMode": "plugin-adapter"
     }
   },
   "modelProviders": {
@@ -45,31 +49,36 @@
       "role": "workflow_orchestrator",
       "provider": "host",
       "model": "host-default",
-      "reasoning": "high"
+      "reasoning": "high",
+      "skills": []
     },
     "DiJiang": {
       "role": "planner",
       "provider": "host",
       "model": "host-default",
-      "reasoning": "high"
+      "reasoning": "high",
+      "skills": []
     },
     "ZhuRong": {
       "role": "implementation_worker",
       "provider": "host",
       "model": "host-default",
-      "reasoning": "medium"
+      "reasoning": "medium",
+      "skills": []
     },
     "BaiZe": {
       "role": "independent_reviewer",
       "provider": "host",
       "model": "host-default",
-      "reasoning": "xhigh"
+      "reasoning": "xhigh",
+      "skills": []
     },
     "LuWu": {
       "role": "repository_steward",
       "provider": "host",
       "model": "host-default",
-      "reasoning": "high"
+      "reasoning": "high",
+      "skills": []
     }
   },
   "archivistRouter": {
@@ -133,13 +142,123 @@
       ]
     }
   },
+  "routeGovernance": {
+    "dailyReview": {
+      "enabled": true,
+      "trigger": "stop",
+      "maxItems": 20
+    },
+    "semanticShadow": {
+      "enabled": true,
+      "agent": "CangJie",
+      "timeoutMs": 30000,
+      "lowConfidenceThreshold": 0.5,
+      "conflictRoute": "plan",
+      "enforceLowConfidence": true
+    }
+  },
+  "gitCoordination": {
+    "mode": "guarded",
+    "remote": "origin",
+    "integrationBranch": "auto",
+    "taskBranchPrefix": "wildarrange/task",
+    "requireWorktreeForParallelWrites": true,
+    "requireVerificationBeforeHandoff": false,
+    "requireCleanHandoff": true,
+    "requireTakeoverReason": true
+  },
   "parallelAgents": {
     "enabled": true,
     "defaultMaxAgents": 2,
     "isolation": "run-dir",
-    "timeoutMs": 120000
+    "timeoutMs": 120000,
+    "retainUntilUserAcceptance": true,
+    "defaultAdapter": null,
+    "spawnAdapters": {
+      "codex": {
+        "command": "",
+        "note": "填入 Codex CLI 子 Agent 命令模板；可用变量：{rootDir}, {runDir}, {workDir}, {taskJson}, {outputJson}, {taskId}, {agent}"
+      },
+      "cursor": {
+        "command": "",
+        "note": "填入 Cursor 子 Agent 命令模板；可用变量：{rootDir}, {runDir}, {workDir}, {taskJson}, {outputJson}, {taskId}, {agent}"
+      }
+    }
+  },
+  "skillMatcher": {
+    "enabled": true,
+    "defaultLimit": 6,
+    "stageBoosts": {
+      "ideate": ["review-product-intent", "map-user-journey", "research-domain-benchmark", "ultraresearch"],
+      "clarify": ["review-product-intent", "design-acceptance", "start-work"],
+      "plan": ["init-deep", "review-plan-risk", "review-plan-readiness", "review-scope-tradeoff", "design-acceptance"],
+      "design": ["frontend-ui-ux", "review-ux-interaction", "visual-qa"],
+      "execute": ["programming", "debugging", "refactor", "run-linear-delivery"],
+      "verify": ["review-work", "design-acceptance", "visual-qa", "configure-project-review", "project-onboarding", "review-architecture-design"],
+      "review": ["review-work", "review-plan-risk", "review-plan-readiness", "remove-ai-slops"],
+      "deploy": ["publish", "pre-publish-review"],
+      "recall": ["get-unpublished-changes"]
+    }
+  },
+  "contextBudgets": {
+    "prompt": {
+      "maxChars": 12000
+    },
+    "markdown": {
+      "maxChars": 12000
+    },
+    "skill": {
+      "maxChars": 80000
+    },
+    "points": {
+      "session_start": {
+        "markdownMaxChars": 12000,
+        "skillMaxChars": 60000
+      },
+      "user_prompt_submit": {
+        "markdownMaxChars": 12000,
+        "skillMaxChars": 60000
+      },
+      "pre_tool_use": {
+        "markdownMaxChars": 8000,
+        "skillMaxChars": 16000
+      },
+      "post_tool_use": {
+        "markdownMaxChars": 8000,
+        "skillMaxChars": 12000
+      },
+      "post_compact": {
+        "markdownMaxChars": 16000,
+        "skillMaxChars": 60000
+      },
+      "before_execute": {
+        "markdownMaxChars": 20000,
+        "skillMaxChars": 80000
+      },
+      "before_review": {
+        "markdownMaxChars": 24000,
+        "skillMaxChars": 80000
+      },
+      "before_checkpoint": {
+        "markdownMaxChars": 24000,
+        "skillMaxChars": 60000
+      },
+      "repository_governance": {
+        "markdownMaxChars": 20000,
+        "skillMaxChars": 40000
+      },
+      "stop": {
+        "markdownMaxChars": 12000,
+        "skillMaxChars": 24000
+      }
+    }
   },
   "review": {
+    "responsibility": {
+      "command": null,
+      "timeoutMs": 120000,
+      "maxEvidenceChars": 500000
+    },
     "llm": {
       "enabled": false,
       "required": false,
@@ -149,7 +268,14 @@
       "temperature": 0,
       "timeoutMs": 45000,
       "maxEvidenceChars": 12000
-    }
+    },
+    "steps": []
+  },
+  "verificationGovernance": {
+    "registryPath": "",
+    "bootstrapPath": "",
+    "inventoryPath": "",
+    "archiveRoot": ""
   },
   "qualityGates": {
     "lspDiagnostics": {
@@ -157,6 +283,17 @@
       "required": true,
       "commands": ["node --test test/dependency-boundary.test.mjs"],
       "timeoutMs": 120000
+    },
+    "astStructure": {
+      "enabled": false,
+      "required": false,
+      "commands": [],
+      "timeoutMs": 120000
+    },
+    "hashlineAnchors": {
+      "enabled": false,
+      "required": false,
+      "anchors": []
     },
     "commentChecker": {
       "enabled": true,
@@ -464,5 +601,11 @@
         "mode": "static"
       }
     }
+  },
+  "executionReadiness": {
+    "workerProbe": null,
+    "researchProbe": null,
+    "researchSkills": [],
+    "timeoutMs": 30000
   }
 }

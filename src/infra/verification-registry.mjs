@@ -7,10 +7,11 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { runCommandFile } from "./command-runner.mjs";
+import { readGitHead } from "./git-diff.mjs";
 import { normalizeRelativePath } from "./path-match.mjs";
 import { loadWildArrangeConfig } from "./runtime-config.mjs";
 import { hashContent, nowIso, readJson } from "./runtime-store.mjs";
-import { fingerprintCard, stableStringify } from "./verification-discovery.mjs";
+import { fingerprintCard, stableStringify } from "./verification-cards.mjs";
 
 export const REGISTRY_SCHEMA_VERSION = 1;
 export const BOOTSTRAP_SCHEMA_VERSION = 1;
@@ -222,12 +223,6 @@ export function declaredInputPaths(registry, locator, extra = []) {
     ...(registry?.planDefaults?.review_commands || []).map(commandHintPath),
   ].filter(Boolean).map((item) => normalizeRelativePath(item)).filter((item) => !item.includes(" "));
   return [...new Set(paths)].sort();
-}
-
-export async function readGitHead(rootDir) {
-  const result = await runCommandFile("git", ["-C", rootDir, "rev-parse", "HEAD"], rootDir, 15_000);
-  if (result.exitCode !== 0) return { available: false, sha: null, reason: result.stderr || "git rev-parse failed" };
-  return { available: true, sha: result.stdout.trim() };
 }
 
 export async function gitTreeContains(rootDir, relativePath, ref) {

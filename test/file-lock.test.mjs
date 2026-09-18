@@ -85,3 +85,39 @@ test("lock timeout on an unparsable fresh lock explains the stale grace", async 
     );
   });
 });
+
+test("release does not delete a lock that was reclaimed and re-acquired by another owner", async () => {
+  await withTempDir(async (dir) => {
+    const lockPath = path.join(dir, "race.lock");
+    // 持锁期间锁被 stale 回收并被他人重新获取：内容已换，释放时必须放弃删除。
+    const intruderContent = `other-owner\n999999\n${Date.now()}\n`;
+    await withFileLock(dir, lockPath, "race lock", "first-owner", async () => {
+      await writeFile(lockPath, intruderContent, "utf8");
+    });
+    assert.equal(await readFile(lockPath, "utf8"), intruderContent, "new owner's lock must survive the first owner's release");
+  });
+});
+
+test("release rechecks the mtime fingerprint even when the content is unchanged", async () => {
+  await withTempDir(async (dir) => {
+    const lockPath = path.join(dir, "race-mtime.lock");
+    let heldContent;
+    await withFileLock(dir, lockPath, "race lock", "first-owner", async () => {
+      heldContent = await readFile(lockPath, "utf8");
+      // 内容逐字节相同但 mtime 已变：仍是他人重建的锁，不得删除。
+      await writeFile(lockPath, heldContent, "utf8");
+      const later = new Date(Date.now() + 5000);
+      await utimes(lockPath, later, later);
+    });
+    assert.equal(await readFile(lockPath, "utf8"), heldContent, "re-created lock with identical bytes must still survive");
+  });
+});
+
+test("a normal release still removes its own lock", async () => {
+  await withTempDir(async (dir) => {
+    const lockPath = path.join(dir, "normal.lock");
+    await withFileLock(dir, lockPath, "normal lock", "owner", async () => {});
+    await assert.rejects(readFile(lockPath, "utf8"), /ENOENT/, "own lock must be released");
+  });
+});
+

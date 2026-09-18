@@ -15,8 +15,8 @@ import {
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { evaluateRegistryFreshness, readLocator, readVerificationInventory } from "../infra/verification-registry.mjs";
 import { readJson } from "../infra/runtime-store.mjs";
+import { SAFE_ID, readJsonBody, sendJson } from "./http-utils.mjs";
 
-const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const GOVERNANCE_EXCLUDES = new Set([".git", ".wildarrange", "node_modules", ".tmp", "dist", "build", "coverage"]);
 const GOVERNANCE_GROUPS = [
   { id: "gates", label: "质量门", title: "交付检查链", description: "测试、改动范围、独立复核、验收证明和完成入账。" },
@@ -440,40 +440,4 @@ function validOptionalId(value, label) {
   if (value === undefined || value === null || value === "") return undefined;
   validateId(value, label);
   return value;
-}
-
-function sendJson(response, statusCode, value) {
-  response.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
-  response.end(`${JSON.stringify(value, null, 2)}\n`);
-}
-
-function readJsonBody(request) {
-  return new Promise((resolve, reject) => {
-    let body = "";
-    let bodyBytes = 0;
-    let settled = false;
-    request.on("data", (chunk) => {
-      if (settled) return;
-      bodyBytes += chunk.length;
-      if (bodyBytes > 64_000) {
-        settled = true;
-        reject(Object.assign(new Error("request body too large"), { code: "payload_too_large" }));
-        return;
-      }
-      body += chunk.toString();
-    });
-    request.on("end", () => {
-      if (settled) return;
-      if (!body) {
-        resolve({});
-        return;
-      }
-      try {
-        resolve(JSON.parse(body));
-      } catch {
-        reject(Object.assign(new Error("invalid json"), { code: "invalid_json" }));
-      }
-    });
-    request.on("error", reject);
-  });
 }

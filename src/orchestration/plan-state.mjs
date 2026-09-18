@@ -26,7 +26,8 @@ import {
 } from "../infra/task-state-store.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
-import { withTaskStateLock } from "../infra/task-state-lock.mjs";
+import { transactWithLedger, withTaskStateLock } from "../infra/task-state-lock.mjs";
+import { uniqueStrings } from "../infra/text-utils.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { assertFeatureDesignPlanBinding, bindFeatureDesignPlan } from "./feature-design.mjs";
 import { loadRoutesConfig, resolveRouteDecision } from "../infra/route-table.mjs";
@@ -104,6 +105,9 @@ export function normalizeTask(task, index, defaults = {}, options = {}) {
   if (verifyCommands.length === 0 && requestedStatus !== "draft") {
     throw new Error(`task ${id} requires at least one verify command`);
   }
+  // Imported/requested "completed" is never trusted: only the delivery pipeline
+  // may persist a terminal completed state after the proof chain passes.
+  const status = requestedStatus === "completed" ? "needs_user_decision" : validateStatus(requestedStatus);
   const taskReviewCommands = normalizeStringArray(task.review_commands ?? task.reviewCommands ?? [], `task ${id} review_commands`);
   const reviewCommands = uniqueStrings([...(defaults.review_commands || []), ...taskReviewCommands]);
   const taskStandardsCommands = normalizeStringArray(task.standards_commands ?? task.standardsCommands ?? [], `task ${id} standards_commands`);
@@ -139,7 +143,7 @@ export function normalizeTask(task, index, defaults = {}, options = {}) {
     priority,
     parentTaskRef,
     request,
-    status: validateStatus(requestedStatus),
+    status,
     owner,
     owner_source: explicitOwner ? "explicit" : "default",
     attempts: Number.isInteger(task.attempts) ? task.attempts : 0,
@@ -157,7 +161,7 @@ export function normalizeTask(task, index, defaults = {}, options = {}) {
     contractChanges,
     responsibilityChanges: normalizeResponsibilityChanges(task.responsibilityChanges, writablePaths),
     evidence: Array.isArray(task.evidence) ? task.evidence : [],
-    history: Array.isArray(task.history) ? task.history : [{ at: createdAt, event: "created", status: validateStatus(requestedStatus), source }],
+    history: Array.isArray(task.history) ? task.history : [{ at: createdAt, event: "created", status, source }],
     createdAt,
     updatedAt: nowIso(),
   };
@@ -282,8 +286,6 @@ function detectTaskGovernanceWarnings({ workerCommand, verifyCommands, writableP
   }
   return warnings;
 }
-
-export { isPossibleNoopTask, isTrivialCommand } from "../infra/task-predicates.mjs";
 
 export function normalizeSuccessCriteria(value, taskId, subject, verifyCommands) {
   if (value === undefined) return seedDefaultSuccessCriteria(taskId, subject, verifyCommands);
@@ -445,9 +447,6 @@ async function importPlanUnlocked(rootDir, planPath, options) {
   assertPlanImportDoesNotReplaceActiveWork(existingLedger, plan);
   const taskLedger = mergePlanIntoTaskLedger(existingLedger, plan);
   const targetPath = resolveWildArrangePath(rootDir, "plans", `${plan.id}.json`);
-  await writeJsonAtomic(targetPath, plan);
-  await writeTasksMarkdown(rootDir, plan);
-  await writeJsonAtomic(resolveWildArrangePath(rootDir, "team", "tasks.json"), taskLedger);
 
   const { config } = await loadWildArrangeConfig(rootDir);
   const approvalRequired = plan.generated_by === "host_semantic" || plan.tasks.some((task) => task.responsibilityChanges) || config?.planApproval?.required === true;
@@ -456,26 +455,32 @@ async function importPlanUnlocked(rootDir, planPath, options) {
     workId: createWorkId(),
     createdAt: nowIso(),
   });
-  await writeJsonAtomic(resolveWildArrangePath(rootDir, "work.json"), {
-    ...work,
-    stage: "planned",
-    activePlanId: plan.id,
-    status: approvalRequired ? "awaiting_plan_approval" : "ready",
-    planApproval: {
-      required: approvalRequired,
-      status: approvalRequired ? "pending" : "approved",
-      planId: plan.id,
-      updatedAt: nowIso(),
-    },
-    updatedAt: nowIso(),
-  });
-  await appendLedger(rootDir, {
+  // 审计先行：plan_imported 入账本后才提交 plan/tasks.json/work.json 等实际
+  // 状态，与完成路径 commitTaskCompletionState 同一方向（ARC-003）。
+  await transactWithLedger(rootDir, {
     responsibilityAuditRequired: plan.generated_by === "host_semantic" || plan.tasks.some((task) => task.responsibilityChanges),
     type: "plan_imported",
     planId: plan.id,
     taskCount: plan.tasks.length,
     generatedBy: plan.generated_by,
     approvalRequired,
+  }, async () => {
+    await writeJsonAtomic(targetPath, plan);
+    await writeTasksMarkdown(rootDir, plan);
+    await writeJsonAtomic(resolveWildArrangePath(rootDir, "team", "tasks.json"), taskLedger);
+    await writeJsonAtomic(resolveWildArrangePath(rootDir, "work.json"), {
+      ...work,
+      stage: "planned",
+      activePlanId: plan.id,
+      status: approvalRequired ? "awaiting_plan_approval" : "ready",
+      planApproval: {
+        required: approvalRequired,
+        status: approvalRequired ? "pending" : "approved",
+        planId: plan.id,
+        updatedAt: nowIso(),
+      },
+      updatedAt: nowIso(),
+    });
   });
   await bindFeatureDesignPlan(rootDir, featureDesignGate, plan.id);
   await writeSnapshot(rootDir, "planned", { planId: plan.id });
@@ -706,7 +711,3 @@ export async function writeTasksMarkdown(rootDir, plan) {
 }
 
 export { loadTaskState };
-
-function uniqueStrings(values) {
-  return [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))];
-}

@@ -55,7 +55,8 @@ async function adaptReview(ctx) {
 
 async function adaptContractScan(ctx) {
   const raw = await scanContractGovernance(ctx.rootDir, ctx.options || {});
-  return { status: "pass", evidence: raw, sideEffect: ctx.options?.write === false ? "none" : "state_written" };
+  const readOnly = Boolean(ctx.options?.inspectTask) || ctx.options?.write === false;
+  return { status: raw.status || "pass", evidence: raw, sideEffect: readOnly ? "none" : "state_written" };
 }
 
 async function adaptContractApplyCard(ctx) {

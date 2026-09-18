@@ -18,8 +18,6 @@ import { loadActiveFeatureDesignGate } from "../orchestration/feature-design.mjs
 import { loadRoutesConfig, resolveRouteDecision, uniqueStrings } from "../infra/route-table.mjs";
 import { callOpenAICompatible, resolveAgentProvider } from "../infra/llm-provider.mjs";
 
-export { loadRoutesConfig, resolveRouteDecision } from "../infra/route-table.mjs";
-
 export function buildPlanDraftDirective(routeResult, options = {}) {
   if (!routeResult || (routeResult.route !== "plan" && routeResult.needsPlan !== true)) return null;
   if (routeResult.featureDesign?.status === "awaiting_feature_confirmation") return null;

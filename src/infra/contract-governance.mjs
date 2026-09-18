@@ -4,6 +4,7 @@ import { hashContent, nowIso, readJson, writeJsonAtomic } from "./runtime-store.
 import { loadWildArrangeConfig } from "./runtime-config.mjs";
 import { extractImportSpecifiers, maskSource } from "./dependency-graph.mjs";
 import { withFileLock } from "./file-lock.mjs";
+import { uniqueStrings } from "./text-utils.mjs";
 
 export const CONTRACT_SCHEMA_VERSION = 1;
 export const CONTRACT_DISCOVERERS = Object.freeze(["tauri-ipc"]);
@@ -485,10 +486,6 @@ export function requireSafeId(value, label) {
   const normalized = String(value || "").trim();
   if (!CONTRACT_ID_RE.test(normalized)) throw contractError("contract_id_invalid", `${label} is invalid`);
   return normalized;
-}
-
-function uniqueStrings(values) {
-  return [...new Set((Array.isArray(values) ? values : []).filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim()))];
 }
 
 export function normalizeSlash(value) {

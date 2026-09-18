@@ -20,7 +20,7 @@ import { admitParallelAgentResult, runParallelAgents } from "../src/orchestratio
 import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { runCommand } from "../src/infra/command-runner.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
-import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { readJson, resolveTaskCheckpointPath, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 
 const execFileAsync = promisify(execFile);
 const WILDARRANGE_BIN = path.resolve(import.meta.dirname, "..", "bin", "wildarrange.mjs");
@@ -91,6 +91,96 @@ test("delivery pipeline emits one decision record per gate plus a pipeline outco
     // 验收证明门必须带出证据路径，投影才能指到报告。
     const proof = records.find((candidate) => candidate.gate === "acceptance-proof");
     assert.ok(proof.evidencePath, "acceptance-proof decision carries an evidence path");
+  });
+});
+
+test("contract governance prep failure becomes fail evidence and a blocked outcome instead of a raw throw", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const plan = await importPassingPlan(dir);
+    // 初始化空契约注册表，让契约扫描本身 pass，注入点稳定在 JSON.parse。
+    await mkdir(path.join(dir, "tooling", "contracts"), { recursive: true });
+    await writeFile(path.join(dir, "tooling", "contracts", "contract-registry.json"),
+      JSON.stringify({ kind: "contract_registry", schemaVersion: 1, updatedAt: new Date().toISOString(), contracts: [] }));
+    const taskState = await loadTaskState(dir);
+    const task = taskState.tasks.find((candidate) => candidate.id === "T001");
+
+    // worker 输出一行损坏的契约变更声明，prepareContractReview 的 JSON.parse 必然抛错。
+    const result = await runDeliveryPipeline(dir, plan.id, task, {
+      initialEvidence: {
+        workerResult: { kind: "worker", command: task.worker_command, exitCode: 0, stdout: "WILDARRANGE_CONTRACT_CHANGE={broken\n", stderr: "" },
+      },
+    });
+    assert.equal(result.status, "blocked", JSON.stringify(result, null, 2));
+    const reviewStep = result.steps.find((step) => step.capability === "review");
+    assert.equal(reviewStep.status, "fail");
+    assert.equal(reviewStep.error.code, "capability_threw");
+    assert.equal(result.evidence.reviewResult.pass, false);
+
+    const { records } = await readDecisions(dir);
+    const review = records.find((candidate) => candidate.gate === "review");
+    assert.ok(review, "missing review gate decision record");
+    assert.equal(review.decision, "fail");
+    assert.ok(review.reason, "review fail decision carries the underlying error message");
+    const pipeline = records.find((candidate) => candidate.gate === "pipeline");
+    assert.ok(pipeline, "missing pipeline outcome record");
+    assert.equal(pipeline.decision, "blocked");
+    // 失败路径不得留下 checkpoint。
+    assert.equal(await readJson(resolveTaskCheckpointPath(dir, plan.id, task.id), null), null);
+  });
+});
+
+test("delivery target mismatch becomes fail evidence and a blocked outcome instead of a raw throw", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    await mkdir(path.join(dir, "src"), { recursive: true });
+    await writeFile(path.join(dir, "src", "decision-fixture.txt"), "checked\n", "utf8");
+    // writable_paths 额外覆盖契约注册表：注册表放在 tooling/contracts 下，
+    // 让契约扫描本身 pass（不落在 scope 门之外），流程才能走到完成段。
+    const planPath = resolveWildArrangePath(dir, "artifacts", "delivery-mismatch-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Delivery mismatch",
+      tasks: [
+        {
+          id: "T001",
+          subject: "Task whose delivery target is not the admitted one",
+          worker_command: nodeEval("process.exit(0)"),
+          verify_commands: [nodeEval("const fs=require('fs');const assert=require('assert/strict');assert.equal(fs.readFileSync('src/decision-fixture.txt','utf8').trim(),'checked')")],
+          review_commands: [nodeEval("const fs=require('fs');const assert=require('assert/strict');assert.equal(fs.statSync('src/decision-fixture.txt').size,8)")],
+          writable_paths: ["src/**", "tooling/contracts/**"],
+        },
+      ],
+    }, null, 2));
+    const plan = await importPlan(dir, planPath);
+    await mkdir(path.join(dir, "tooling", "contracts"), { recursive: true });
+    await writeFile(path.join(dir, "tooling", "contracts", "contract-registry.json"),
+      JSON.stringify({ kind: "contract_registry", schemaVersion: 1, updatedAt: new Date().toISOString(), contracts: [] }));
+    const taskState = await loadTaskState(dir);
+    const task = taskState.tasks.find((candidate) => candidate.id === "T001");
+
+    // delivery.runId 与任务 admission_claim 不一致，触发 resolveDeliveryFacts 的交付围栏异常。
+    const result = await runDeliveryPipeline(dir, plan.id, task, {
+      initialEvidence: {
+        workerResult: { kind: "worker", command: task.worker_command, exitCode: 0, stdout: "fixture prepared", stderr: "" },
+      },
+      delivery: { runId: "unadmitted-run" },
+    });
+    assert.equal(result.status, "blocked", JSON.stringify(result, null, 2));
+    const proofStep = result.steps.find((step) => step.capability === "acceptance-proof");
+    assert.equal(proofStep.status, "fail");
+    assert.match(proofStep.error.message, /does not match the current admission claim/);
+    assert.equal(result.evidence.acceptanceProof.pass, false);
+
+    const { records } = await readDecisions(dir);
+    const proof = records.find((candidate) => candidate.gate === "acceptance-proof");
+    assert.ok(proof, "missing acceptance-proof gate decision record");
+    assert.equal(proof.decision, "fail");
+    assert.match(proof.reason, /does not match the current admission claim/);
+    const pipeline = records.find((candidate) => candidate.gate === "pipeline");
+    assert.ok(pipeline, "missing pipeline outcome record");
+    assert.equal(pipeline.decision, "blocked");
+    // 失败路径不得留下 checkpoint。
+    assert.equal(await readJson(resolveTaskCheckpointPath(dir, plan.id, task.id), null), null);
   });
 });
 

@@ -1,10 +1,8 @@
 import { existsSync } from "node:fs";
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import {
-  DEFAULT_WILDARRANGE_CONFIG,
-  loadWildArrangeConfig,
-} from "./runtime-config.mjs";
+import { DEFAULT_WILDARRANGE_CONFIG } from "./default-config.mjs";
+import { loadWildArrangeConfig } from "./runtime-config.mjs";
 import {
   STATE_VERSION,
   ensureWildArrangeDirs,
@@ -13,7 +11,8 @@ import {
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 import { appendLedger } from "./ledger.mjs";
-import { pathMatchesPattern } from "./path-match.mjs";
+import { normalizeRelativePath, pathMatchesPattern } from "./path-match.mjs";
+import { uniqueStrings } from "./text-utils.mjs";
 
 const PROJECT_RULE_FILES = [
   "AGENTS.md",
@@ -147,13 +146,15 @@ async function readRuleFile(rootDir, absolutePath, sourceName) {
 }
 
 function parseRuleMarkdown(content) {
-  if (!content.startsWith("---\n")) {
+  const open = /^---\r?\n/.exec(content);
+  if (!open) {
     return { frontmatter: {}, body: content, title: firstMarkdownHeading(content) };
   }
-  const end = content.indexOf("\n---", 4);
-  if (end < 0) return { frontmatter: {}, body: content, title: firstMarkdownHeading(content) };
-  const rawFrontmatter = content.slice(4, end).trim();
-  const body = content.slice(end + 4).replace(/^\r?\n/, "");
+  const rest = content.slice(open[0].length);
+  const endMatch = /\r?\n---(?:\r?\n|$)/.exec(rest);
+  if (!endMatch) return { frontmatter: {}, body: content, title: firstMarkdownHeading(content) };
+  const rawFrontmatter = rest.slice(0, endMatch.index).trim();
+  const body = rest.slice(endMatch.index + endMatch[0].length);
   return { frontmatter: parseSimpleFrontmatter(rawFrontmatter), body, title: firstMarkdownHeading(body) };
 }
 
@@ -211,14 +212,6 @@ function renderRulesMarkdown(result) {
   }
   if (result.rules.length === 0) lines.push("- No matching rules.");
   return `${lines.join("\n")}\n`;
-}
-
-function uniqueStrings(values) {
-  return [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))];
-}
-
-function normalizeRelativePath(filePath) {
-  return filePath.replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+/g, "/");
 }
 
 async function safeReadDir(dirPath, options = undefined) {

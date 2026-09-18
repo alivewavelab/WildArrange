@@ -12,6 +12,7 @@ import {
   writeRuntimeStateBackup,
 } from "../src/infra/security.mjs";
 import { loadTaskLedger } from "../src/infra/task-state-store.mjs";
+import { normalizeAgentKey } from "../src/infra/agent-registry.mjs";
 import { appendLedger } from "../src/infra/ledger.mjs";
 import { writeRuntimeContextSnapshot } from "../src/infra/runtime-snapshot.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
@@ -50,6 +51,21 @@ function legacyTask(status = "completed") {
     updatedAt: "2026-06-10T00:01:00.000Z",
   };
 }
+
+test("legacy agent aliases stay plain literals mapping to long-lived agents", () => {
+  // 回归：AGENT_ALIASES 字面量化后映射关系不变。
+  assert.equal(normalizeAgentKey("Sisyphus"), "Jiuwei");
+  assert.equal(normalizeAgentKey("Sisyphus-junior"), "LuWu");
+  assert.equal(normalizeAgentKey("sisyphus_junior"), "LuWu");
+  assert.equal(normalizeAgentKey("Atlas"), "Jiuwei");
+  assert.equal(normalizeAgentKey("Hephaestus"), "ZhuRong");
+  assert.equal(normalizeAgentKey("Prometheus"), "DiJiang");
+  assert.equal(normalizeAgentKey("Oracle"), "BaiZe");
+  assert.equal(normalizeAgentKey("Librarian"), "BaiZe");
+  assert.equal(normalizeAgentKey("Explore"), "BaiZe");
+  assert.equal(normalizeAgentKey("Metis"), "BaiZe");
+  assert.equal(normalizeAgentKey("Momus"), "BaiZe");
+});
 
 test("task ledger rejects future schema versions", async () => {
   await withTempDir(async (dir) => {
@@ -802,6 +818,66 @@ test("state restore recovers the exact Plan, proof, DoneClaim, and artifact arch
     assert.equal(JSON.parse(await readFile(artifactPath, "utf8")).result, "recover me");
     assert.equal(JSON.parse(await readFile(outboxPath, "utf8")).done, true);
     assert.equal(JSON.parse(await readFile(checkpointPath, "utf8")).checkpoint, true);
+  });
+});
+
+test("state restore downgrades a forged completed task whose proof chain fails after restore", async () => {
+  await withTempDir(async (dir) => {
+    const planId = "P-RESTORE";
+    const currentTask = (id) => ({
+      ...legacyTask("completed"),
+      id,
+      planId,
+      ref: `${planId}:${id}`,
+      history: [{ at: "2026-09-10T00:00:00.000Z", event: "completed", status: "completed" }],
+    });
+    const tasksPath = path.join(dir, ".wildarrange", "team", "tasks.json");
+    await writeJson(tasksPath, {
+      version: 1,
+      kind: "task_ledger",
+      planId,
+      activePlanId: planId,
+      plans: [{ id: planId, taskIds: ["T-LEGIT", "T-FORGED"] }],
+      tasks: [currentTask("T-LEGIT"), currentTask("T-FORGED")],
+    });
+    await writeJson(path.join(dir, ".wildarrange", "work.json"), { activePlanId: planId, status: "ready" });
+    // T-LEGIT 具备完整证据链；T-FORGED 只有 completed 状态、没有任何证据。
+    await writeJson(path.join(dir, ".wildarrange", "reports", "acceptance", planId, "T-LEGIT.json"), {
+      kind: "acceptance_proof",
+      planId,
+      taskId: "T-LEGIT",
+      pass: true,
+    });
+    await writeJson(path.join(dir, ".wildarrange", "checkpoints", planId, "T-LEGIT.json"), {
+      planId,
+      taskId: "T-LEGIT",
+      verifyResult: { pass: true },
+      scopeResult: { status: "pass" },
+      reviewResult: { pass: true },
+    });
+    await appendLedger(dir, { type: "node_checkpoint_completed", planId, taskId: "T-LEGIT" });
+
+    const backup = await writeRuntimeStateBackup(dir, { reason: "forged_completed_drill" });
+    // 备份后把伪造任务从现场移除，让它只在恢复时重新出现。
+    const live = JSON.parse(await readFile(tasksPath, "utf8"));
+    live.tasks = live.tasks.filter((task) => task.id !== "T-FORGED");
+    await writeJson(tasksPath, live);
+
+    const restored = await restoreRuntimeStateBackup(dir, { backupId: backup.backupId });
+    assert.deepEqual(restored.downgradedCompleted.map((entry) => entry.taskId), ["T-FORGED"]);
+
+    const after = JSON.parse(await readFile(tasksPath, "utf8"));
+    const legit = after.tasks.find((task) => task.id === "T-LEGIT");
+    const forged = after.tasks.find((task) => task.id === "T-FORGED");
+    assert.equal(legit.status, "completed");
+    assert.equal(forged.status, "needs_user_decision");
+    assert.equal(forged.completionRevalidation.required, true);
+    assert.equal(forged.completionRevalidation.reason, "restored_completed_without_valid_proof_chain");
+    assert.equal(forged.completionRevalidation.previousStatus, "completed");
+    assert.ok(forged.completionRevalidation.failures.length > 0);
+    assert.ok(forged.history.some((entry) => entry.event === "restore_completion_requires_revalidation"
+      && entry.from === "completed" && entry.to === "needs_user_decision"));
+    assert.match(await readFile(path.join(dir, ".wildarrange", "ledger.jsonl"), "utf8"), /"downgradedCompletedCount":1/);
   });
 });
 

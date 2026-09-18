@@ -19,6 +19,7 @@ import {
   resolveWildArrangePath,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
+import { inspectCompletedTaskEvidence, normalizeTaskLedger } from "./task-state-store.mjs";
 
 const CONFIG_BASELINE_PATH = ["security", "config-baseline.json"];
 const BACKUP_STATE_FILES = [
@@ -311,12 +312,18 @@ export async function restoreRuntimeStateBackup(rootDir, options = {}) {
     await unlink(resolveWildArrangePath(rootDir, "ledger-tail.json")).catch(() => undefined);
   }
 
+  // 备份只证明“当时状态长这样”，不证明完成证据仍然成立：恢复回来的
+  // completed 必须重新过证据链，不合格的一律降级为 needs_user_decision，
+  // 防止伪造备份把没有 verifier/scope/review/acceptance 证据的任务落成终态。
+  const downgradedCompleted = await revalidateRestoredCompletedTasks(rootDir);
+
   await appendLedger(rootDir, {
     type: "runtime_state_restored",
     backupId,
     preRestoreBackupId: preRestore.backupId,
     restoredCount: restored.length,
     skippedCount: skipped.length,
+    downgradedCompletedCount: downgradedCompleted.length,
   });
 
   return {
@@ -327,8 +334,49 @@ export async function restoreRuntimeStateBackup(rootDir, options = {}) {
     preRestoreBackupId: preRestore.backupId,
     restored,
     skipped,
+    downgradedCompleted,
     archivePackages: manifest.archivePackages || [],
   };
+}
+
+async function revalidateRestoredCompletedTasks(rootDir) {
+  const tasksPath = resolveWildArrangePath(rootDir, "team", "tasks.json");
+  const raw = await readJson(tasksPath, null);
+  if (!raw || !Array.isArray(raw.tasks)) return [];
+  const integrity = await inspectCompletedTaskEvidence(rootDir, normalizeTaskLedger(raw));
+  if (integrity.invalid.length === 0) return [];
+  const invalidByRef = new Map(integrity.invalid.map((entry) => [entry.taskRef, entry]));
+  const fallbackPlanId = raw.activePlanId || raw.planId || null;
+  const downgraded = [];
+  const tasks = raw.tasks.map((task) => {
+    const invalid = invalidByRef.get(`${task.planId || fallbackPlanId}:${task.id}`);
+    if (!invalid || task.status !== "completed") return task;
+    const at = nowIso();
+    downgraded.push({ taskId: task.id, taskRef: invalid.taskRef, failures: invalid.failures });
+    return {
+      ...task,
+      status: "needs_user_decision",
+      completionRevalidation: {
+        required: true,
+        reason: "restored_completed_without_valid_proof_chain",
+        previousStatus: "completed",
+        detectedAt: at,
+        failures: invalid.failures,
+      },
+      history: [
+        ...(Array.isArray(task.history) ? task.history : []),
+        {
+          at,
+          event: "restore_completion_requires_revalidation",
+          from: "completed",
+          to: "needs_user_decision",
+        },
+      ],
+      updatedAt: at,
+    };
+  });
+  await writeJsonAtomic(tasksPath, { ...raw, tasks, updatedAt: nowIso() });
+  return downgraded;
 }
 
 function assertSafeBackupId(value, label = "backup id") {

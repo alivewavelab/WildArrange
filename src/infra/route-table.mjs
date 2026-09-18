@@ -4,6 +4,9 @@
  * it lives in infra — orchestration (plan import enrichment, task board) can
  * use it without depending on the ai zone. The semantic/LLM routing layers
  * (routeRequest, semanticRouteShadow) stay in src/ai/routing.mjs.
+ * matchSignals is the single signal-matching implementation: every consumer
+ * (this file, ai/skill-matcher.mjs) shares it instead of keeping a private
+ * variant, so hit rates cannot drift apart.
  */
 import {
   DEFAULT_EXECUTOR_AGENT,
@@ -16,6 +19,7 @@ import {
   resolveWildArrangePath,
 } from "./runtime-store.mjs";
 import { renderPromptPackEntry } from "./prompt-pack.mjs";
+import { uniqueStrings } from "./text-utils.mjs";
 
 export async function loadRoutesConfig(rootDir) {
   const routes = JSON.parse(await renderPromptPackEntry(rootDir, { routes: true }));
@@ -23,6 +27,15 @@ export async function loadRoutesConfig(rootDir) {
   return applyRouteOverrides(routes, overrides);
 }
 
+// Read-only contract: resolveRouteDecision is a pure lookup over the routes
+// table — no persistence, no ledger writes, no task-state advances. The
+// authoritative routing of a user request goes through ai/routing.mjs
+// routeRequest, which wraps this with ledger evidence, decision projection
+// and semantic shadow. Orchestration may call resolveRouteDecision only for
+// read/enrichment decisions: plan import enrichment (plan-state.mjs) and
+// feature-design gate detection (feature-design.mjs); this call-site set is
+// pinned in test/dependency-boundary.test.mjs, so adding a new orchestration
+// caller is an explicit, reviewed decision.
 export function resolveRouteDecision(routes, text) {
   const lowerText = text.toLowerCase();
   const askGate = routes.askGate || {};
@@ -75,7 +88,11 @@ function bestMatch(entries, lowerText) {
   return best;
 }
 
-function matchSignals(lowerText, signals) {
+// Single signal-matching implementation, shared with ai/skill-matcher.mjs:
+// ASCII word-like signals match on word boundaries so "pr" does not fire
+// inside "prompt" and "bug" does not fire inside "debugging"; anything else
+// (e.g. Chinese signals) falls back to plain substring matching.
+export function matchSignals(lowerText, signals) {
   return signals.filter((signal) => signalMatches(lowerText, String(signal).toLowerCase()));
 }
 
@@ -237,9 +254,7 @@ function normalizeRoutableAgent(value, fieldName) {
   return normalized;
 }
 
-export function uniqueStrings(values) {
-  return [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))];
-}
+export { uniqueStrings };
 
 export function higherRisk(left = "low", right = "low") {
   const order = { low: 1, medium: 2, high: 3 };

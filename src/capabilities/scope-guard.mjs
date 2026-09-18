@@ -6,9 +6,6 @@ import { collectGitChangedPaths } from "../infra/git-diff.mjs";
 import { normalizeRelativePath, pathAllowed } from "../infra/path-match.mjs";
 import { loadTaskState } from "../infra/task-state-store.mjs";
 
-export { collectGitDiff, collectGitChangedPaths, changedPathsIntroducedByTask, classifyManifestPathChanges } from "../infra/git-diff.mjs";
-export { pathAllowed, pathMatchesPattern } from "../infra/path-match.mjs";
-
 export async function scopeGuard(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const taskState = await loadTaskState(rootDir);

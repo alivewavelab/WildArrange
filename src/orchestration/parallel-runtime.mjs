@@ -7,6 +7,7 @@ import {
   normalizeAgentKey,
 } from "../infra/agent-registry.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
+import { withFileLock } from "../infra/file-lock.mjs";
 import {
   createWorkId,
   ensureWildArrangeDirs,
@@ -22,9 +23,11 @@ import { ensureTaskPacket, writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { resolveAgentSpawn } from "../infra/agent-spawn.mjs";
 import { collectAgentWorktreePatch, prepareAgentWorktree } from "../infra/git-worktree.mjs";
 import { commitIsAncestor, inspectGitCoordination } from "../infra/git-coordination.mjs";
+import { readGitHead } from "../infra/git-diff.mjs";
 import { runCommand, runCommandFile } from "../infra/command-runner.mjs";
 import { assertPathInsideRoot } from "../infra/path-match.mjs";
-import { normalizeProposedFilesOrEmpty, updateAgentRunLifecycle } from "./admission.mjs";
+import { normalizeProposedFilesOrEmpty } from "./admission.mjs";
+import { updateAgentRunLifecycle } from "./admission-projection.mjs";
 import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
 import {
   findRunnableTask,
@@ -202,10 +205,21 @@ export async function runParallelAgents(rootDir, options = {}) {
   }
 }
 
+// index.json 的三处 read-modify-write（reconcile 收养孤儿 run、register、
+// append）共用一把文件锁：并发 run 或并发 status 同时读写时，无锁会在
+// read 与 write 之间互丢条目。
+async function withRunIndexLock(rootDir, fn) {
+  const lockPath = resolveWildArrangePath(rootDir, "agent-runs", "index.json.lock");
+  await mkdir(path.dirname(lockPath), { recursive: true });
+  return withFileLock(rootDir, lockPath, "parallel run index lock", "parallel-run-index", fn);
+}
+
 export async function listParallelAgentRuns(rootDir) {
   await ensureWildArrangeDirs(rootDir);
-  const index = await readJson(resolveWildArrangePath(rootDir, "agent-runs", "index.json"), { runs: [] });
-  return reconcileRunIndex(rootDir, index);
+  return withRunIndexLock(rootDir, async () => {
+    const index = await readJson(resolveWildArrangePath(rootDir, "agent-runs", "index.json"), { runs: [] });
+    return reconcileRunIndex(rootDir, index);
+  });
 }
 
 /**
@@ -262,11 +276,13 @@ async function reconcileRunIndex(rootDir, index) {
 
 async function registerRunIndexEntry(rootDir, runId) {
   const indexPath = resolveWildArrangePath(rootDir, "agent-runs", "index.json");
-  const index = await readJson(indexPath, { runs: [] });
-  if (!index.runs.some((run) => run.runId === runId)) {
-    index.runs.push({ runId, createdAt: nowIso(), updatedAt: nowIso(), results: [] });
-    await writeJsonAtomic(indexPath, index);
-  }
+  return withRunIndexLock(rootDir, async () => {
+    const index = await readJson(indexPath, { runs: [] });
+    if (!index.runs.some((run) => run.runId === runId)) {
+      index.runs.push({ runId, createdAt: nowIso(), updatedAt: nowIso(), results: [] });
+      await writeJsonAtomic(indexPath, index);
+    }
+  });
 }
 
 export async function parallelAgentStatus(rootDir, options = {}) {
@@ -497,12 +513,12 @@ async function inspectParallelCleanupFence(worktreeDir, entry, task, gitContext,
     return { pass: false, reason: "worktree_dirty", details: { changes: worktreeStatus.stdout.trim().split(/\r?\n/) } };
   }
   const mainRef = gitContext?.integrationBranch || "main";
-  const worktreeHead = await runCommandFile("git", ["-C", worktreeDir, "rev-parse", "HEAD"], worktreeDir, 30_000);
-  if (worktreeHead.exitCode !== 0) {
-    return { pass: false, reason: "worktree_head_unknown", details: { error: worktreeHead.stderr || worktreeHead.stdout } };
+  const worktreeHead = await readGitHead(worktreeDir);
+  if (!worktreeHead.available) {
+    return { pass: false, reason: "worktree_head_unknown", details: { error: worktreeHead.reason } };
   }
-  if (!await commitIsAncestor(worktreeDir, worktreeHead.stdout.trim(), mainRef).catch(() => false)) {
-    return { pass: false, reason: "worktree_head_not_in_main", details: { worktreeHead: worktreeHead.stdout.trim(), mainRef } };
+  if (!await commitIsAncestor(worktreeDir, worktreeHead.sha, mainRef).catch(() => false)) {
+    return { pass: false, reason: "worktree_head_not_in_main", details: { worktreeHead: worktreeHead.sha, mainRef } };
   }
   if (lifecycle !== "released") return { pass: true };
   if (task.status !== "completed") {
@@ -781,27 +797,29 @@ function buildTaskPacket(task, context) {
 
 async function appendRunIndex(rootDir, runId, results) {
   const indexPath = resolveWildArrangePath(rootDir, "agent-runs", "index.json");
-  const index = await readJson(indexPath, { runs: [] });
-  const existing = index.runs.find((run) => run.runId === runId);
-  const entries = results.map((result) => ({
-    taskId: result.taskId,
-    agent: result.agent,
-    pass: result.pass,
-    runDir: result.runDir,
-    lifecycle: result.lifecycle || null,
-  }));
-  if (existing) {
-    existing.updatedAt = nowIso();
-    existing.results.push(...entries);
-  } else {
-    index.runs.push({
-      runId,
-      createdAt: nowIso(),
-      updatedAt: nowIso(),
-      results: entries,
-    });
-  }
-  await writeJsonAtomic(indexPath, index);
+  return withRunIndexLock(rootDir, async () => {
+    const index = await readJson(indexPath, { runs: [] });
+    const existing = index.runs.find((run) => run.runId === runId);
+    const entries = results.map((result) => ({
+      taskId: result.taskId,
+      agent: result.agent,
+      pass: result.pass,
+      runDir: result.runDir,
+      lifecycle: result.lifecycle || null,
+    }));
+    if (existing) {
+      existing.updatedAt = nowIso();
+      existing.results.push(...entries);
+    } else {
+      index.runs.push({
+        runId,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+        results: entries,
+      });
+    }
+    await writeJsonAtomic(indexPath, index);
+  });
 }
 
 function buildAgentLifecycle(pass, config, statusOverride = null) {

@@ -19,13 +19,11 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
-import { emitDecision } from "../infra/decision-log.mjs";
 import {
   ensureWildArrangeDirs,
   nowIso,
   readJson,
   resolveWildArrangePath,
-  writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
@@ -39,7 +37,7 @@ import { buildFailureSummary } from "../infra/failure-analysis.mjs";
 import { writeFailureReport, writeReviewReport } from "../infra/task-reports.mjs";
 import { applyAgentPatch, extractPatchPaths } from "../infra/git-worktree.mjs";
 import { runCommandFile } from "../infra/command-runner.mjs";
-import { assertPathInsideRoot, pathAllowed } from "../infra/path-match.mjs";
+import { assertPathInsideRoot, normalizeRelativePath, pathAllowed } from "../infra/path-match.mjs";
 import {
   commitTaskCompletionState,
   runDeliveryPipeline,
@@ -57,6 +55,12 @@ import {
   rollbackAdmissionChanges,
   recordApplyFailureWithinLock,
 } from "./admission-recovery.mjs";
+import {
+  advanceClaimPhaseWithinLock,
+  emitAdmissionDecision,
+  persistRollbackFailureRecovery,
+  updateAgentRunLifecycle,
+} from "./admission-projection.mjs";
 import {
   collectIntegrationCandidatePaths,
   assertContractWorkspaceAvailable,
@@ -199,23 +203,6 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
     sideEffectWarnings,
     task: finalized.task,
   };
-}
-
-/** 决策投影：admission 是四个决策缝之一，结果（含回滚原因）进 decisions.jsonl。 */
-async function emitAdmissionDecision(rootDir, options, finalized) {
-  const rollback = finalized.rollback || null;
-  await emitDecision(rootDir, {
-    gate: "admission",
-    decision: finalized.status,
-    code: rollback?.status === "rollback_failed" ? "rollback_failed" : finalized.status === "completed" ? null : finalized.status,
-    reason: finalized.note || rollback?.error || (rollback ? `rollback: ${rollback.status}` : null),
-    summary: `admit run ${options.runId} task ${options.taskId} -> ${finalized.status}${finalized.appliedPaths?.length ? ` (${finalized.appliedPaths.length} paths)` : ""}`,
-    evidencePath: finalized.acceptanceProof?.reportMdPath || finalized.acceptanceProof?.reportJsonPath || null,
-    taskId: options.taskId,
-    runId: options.runId,
-    // admission 是归属决策（非确定性放行）且失败即拦截：全部进标注队列。
-    annotatable: true,
-  });
 }
 
 /** Phase 1 body — runs under the task-state lock. */
@@ -536,26 +523,12 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
     }
     const rollback = await rollbackAdmissionChanges(rootDir, rollbackPlan);
     if (rollback.status !== "rolled_back") {
-      task.status = "verifying";
-      task.last_failure = {
-        at: nowIso(),
+      return persistRollbackFailureRecovery(rootDir, taskState, task, {
+        rollback,
         reason: "admission_rollback_failed",
         summary: `parallel admission revalidation failed and workspace rollback did not complete: ${rollback.error || rollback.reason || "unknown error"}`,
         retryHint: `任务所有权和 rollback plan 已保留；修复文件系统问题后，用同一 run ${runId} 重新 admit`,
-      };
-      task.updatedAt = nowIso();
-      await writeFailureReport(rootDir, taskState.planId, task);
-      await persistTaskState(rootDir, taskState);
-      return {
-        status: "recovery_required",
-        planId: taskState.planId,
-        task,
-        acceptanceProof: null,
-        verifyResult: null,
-        scopeResult: null,
-        reviewResult: null,
-        rollback,
-      };
+      });
     }
     return persistAdmissionRevalidation(rootDir, taskState, task, {
       fence: initialFence,
@@ -587,26 +560,12 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
   if (unattributedPaths.length > 0) {
     const rollback = await rollbackAdmissionChanges(rootDir, rollbackPlan);
     if (rollback.status !== "rolled_back") {
-      task.status = "verifying";
-      task.last_failure = {
-        at: nowIso(),
+      return persistRollbackFailureRecovery(rootDir, taskState, task, {
+        rollback,
         reason: "admission_rollback_failed",
         summary: `unattributed workspace changes were found and rollback failed: ${unattributedPaths.join(", ")}`,
         retryHint: `任务所有权和 rollback plan 已保留；修复工作区后，用同一 run ${runId} 重新 admit`,
-      };
-      task.updatedAt = nowIso();
-      await writeFailureReport(rootDir, taskState.planId, task);
-      await persistTaskState(rootDir, taskState);
-      return {
-        status: "recovery_required",
-        planId: taskState.planId,
-        task,
-        acceptanceProof: null,
-        verifyResult: null,
-        scopeResult: null,
-        reviewResult: null,
-        rollback,
-      };
+      });
     }
     return persistAdmissionRevalidation(rootDir, taskState, task, {
       fence: {
@@ -687,32 +646,15 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
       ? await rollbackAdmissionChanges(rootDir, rollbackPlan)
       : { status: "not_attempted", reason: "local_degraded_delivery_retained" };
     if (durableDeliveryCompleted && deliveryRollback.status !== "rolled_back") {
-      task.status = "verifying";
-      task.last_failure = buildFailureSummary(task, {
-        workerResult,
-        verifyResult,
-        scopeResult,
-        reviewResult,
-        criteriaResult: criteria,
-        nextStatus: task.status,
-      });
-      task.last_failure.reason = "delivery_cleanup_failed";
-      task.last_failure.summary = `task branch delivery succeeded but shared checkout cleanup failed: ${deliveryRollback.error || deliveryRollback.reason || "unknown error"}`;
-      task.last_failure.retryHint = `delivery commit 已在任务分支；保留 owner 与 rollback plan，修复工作区后用同一 run 恢复。涉及路径：${(deliveryRollback.paths || []).join(", ") || "unknown"}`;
-      task.updatedAt = nowIso();
-      await writeFailureReport(rootDir, taskState.planId, task);
-      await persistTaskState(rootDir, taskState);
-      return {
-        status: "recovery_required",
-        planId: taskState.planId,
-        task,
-        acceptanceProof,
-        verifyResult,
-        scopeResult,
-        reviewResult,
-        integrationCommit: pipelineResult.evidence.integrationCommit || null,
+      return persistRollbackFailureRecovery(rootDir, taskState, task, {
         rollback: deliveryRollback,
-      };
+        reason: "delivery_cleanup_failed",
+        summary: `task branch delivery succeeded but shared checkout cleanup failed: ${deliveryRollback.error || deliveryRollback.reason || "unknown error"}`,
+        retryHint: `delivery commit 已在任务分支；保留 owner 与 rollback plan，修复工作区后用同一 run 恢复。涉及路径：${(deliveryRollback.paths || []).join(", ") || "unknown"}`,
+        failureContext: { workerResult, verifyResult, scopeResult, reviewResult, criteriaResult: criteria },
+        gateResults: { acceptanceProof, verifyResult, scopeResult, reviewResult },
+        integrationCommit: pipelineResult.evidence.integrationCommit || null,
+      });
     }
     task.delivery = pipelineResult.evidence.integrationCommit || null;
     if (deliveryWorktreeDir) {
@@ -786,22 +728,14 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
   const rollback = await rollbackAdmissionChanges(rootDir, rollbackPlan);
 
   if (rollback.status !== "rolled_back") {
-    task.status = "verifying";
-    task.last_failure = buildFailureSummary(task, {
-      workerResult,
-      verifyResult,
-      scopeResult,
-      reviewResult,
-      criteriaResult: criteria,
-      nextStatus: task.status,
+    return persistRollbackFailureRecovery(rootDir, taskState, task, {
+      rollback,
+      reason: "admission_rollback_failed",
+      summary: `parallel admission rollback failed: ${rollback.error || rollback.reason || "unknown error"}`,
+      retryHint: `任务所有权和 rollback plan 已保留；修复文件系统问题后，用同一 run 重新 admit。涉及路径：${(rollback.paths || []).join(", ") || "unknown"}`,
+      failureContext: { workerResult, verifyResult, scopeResult, reviewResult, criteriaResult: criteria },
+      gateResults: { acceptanceProof, verifyResult, scopeResult, reviewResult },
     });
-    task.last_failure.reason = "admission_rollback_failed";
-    task.last_failure.summary = `parallel admission rollback failed: ${rollback.error || rollback.reason || "unknown error"}`;
-    task.last_failure.retryHint = `任务所有权和 rollback plan 已保留；修复文件系统问题后，用同一 run 重新 admit。涉及路径：${(rollback.paths || []).join(", ") || "unknown"}`;
-    task.updatedAt = nowIso();
-    await writeFailureReport(rootDir, taskState.planId, task);
-    await persistTaskState(rootDir, taskState);
-    return { status: "recovery_required", planId: taskState.planId, task, acceptanceProof, verifyResult, scopeResult, reviewResult, rollback };
   }
 
   if (pipelineResult.status === "awaiting_user_decision") {
@@ -876,22 +810,6 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
 }
 
 /**
- * Advances the persisted claim phase (applying -> finalizing) once the
- * child's files are on disk. Runs inside the caller's lock hold; MUST NOT
- * acquire the task-state lock.
- */
-async function advanceClaimPhaseWithinLock(rootDir, taskId, runId, phase, appliedPaths) {
-  const taskState = await loadTaskState(rootDir);
-  const task = taskState?.tasks.find((candidate) => candidate.id === taskId);
-  if (!task || task.admission_claim?.runId !== runId) return;
-  task.admission_claim.phase = phase;
-  task.admission_claim.workspaceRestored = false;
-  task.admission_claim.appliedPaths = appliedPaths;
-  task.updatedAt = nowIso();
-  await persistTaskState(rootDir, taskState);
-}
-
-/**
  * True only when the chain-verified ledger contains a completed admission
  * event for this exact run+task. Used by the resume branch: an admission
  * that failed and rolled back also left admission evidence on the task, so
@@ -908,10 +826,17 @@ async function hasVerifiedRunCompletionEvent(rootDir, runId, planId, taskId) {
   );
 }
 
-async function collectActualAdmissionPaths(rootDir, fallbackPaths) {
+export async function collectActualAdmissionPaths(rootDir, fallbackPaths) {
   const result = await runCommandFile("git", ["-C", rootDir, "diff", "--name-only", "--", ".", ":!.wildarrange"], rootDir, 30_000);
   if (result.exitCode !== 0) return fallbackPaths;
   const paths = result.stdout.split(/\r?\n/).map((line) => normalizeRelativePath(line.trim())).filter(Boolean);
+  const untracked = await runCommandFile("git", ["-C", rootDir, "ls-files", "--others", "--exclude-standard", "--", ".", ":!.wildarrange"], rootDir, 30_000);
+  if (untracked.exitCode === 0) {
+    for (const line of untracked.stdout.split(/\r?\n/)) {
+      const filePath = normalizeRelativePath(line.trim());
+      if (filePath) paths.push(filePath);
+    }
+  }
   return paths.length > 0 ? [...new Set(paths)] : fallbackPaths;
 }
 
@@ -922,58 +847,11 @@ export async function readParallelAgentResult(rootDir, runId, taskId) {
   return result;
 }
 
-export async function updateAgentRunLifecycle(rootDir, runId, taskId, status, details = {}) {
-  const resultPath = resolveWildArrangePath(rootDir, "agent-runs", runId, taskId, "result.json");
-  const result = await readJson(resultPath, null);
-  if (result) {
-    result.lifecycle = {
-      ...(result.lifecycle || {}),
-      status,
-      updatedAt: nowIso(),
-      ...details,
-    };
-    await writeJsonAtomic(resultPath, result);
-  }
-
-  const batchPath = resolveWildArrangePath(rootDir, "agent-runs", `${runId}.json`);
-  const batch = await readJson(batchPath, null);
-  if (batch) {
-    for (const entry of batch.results || []) {
-      if (entry.taskId !== taskId) continue;
-      entry.lifecycle = {
-        ...(entry.lifecycle || {}),
-        status,
-        updatedAt: nowIso(),
-        ...details,
-      };
-    }
-    await writeJsonAtomic(batchPath, batch);
-  }
-
-  const indexPath = resolveWildArrangePath(rootDir, "agent-runs", "index.json");
-  const index = await readJson(indexPath, { runs: [] });
-  for (const run of index.runs || []) {
-    if (run.runId !== runId) continue;
-    for (const entry of run.results || []) {
-      if (entry.taskId !== taskId) continue;
-      entry.lifecycle = {
-        ...(entry.lifecycle || {}),
-        status,
-        updatedAt: nowIso(),
-        ...details,
-      };
-    }
-    run.updatedAt = nowIso();
-  }
-  await writeJsonAtomic(indexPath, index);
-  await appendLedger(rootDir, { type: "parallel_agent_lifecycle_updated", runId, taskId, status });
-}
-
 export function normalizeProposedFiles(files) {
   if (!Array.isArray(files)) return [];
   return files.map((file, index) => {
     if (!file || typeof file !== "object") throw new Error(`result.files[${index}] must be an object`);
-    const filePath = normalizeRelativePath(file.path || file.file);
+    const filePath = normalizeRelativePath(String(file.path || file.file || ""));
     if (!filePath) throw new Error(`result.files[${index}].path is required`);
     if (path.isAbsolute(filePath) || filePath.startsWith("../") || filePath.includes("/../")) {
       throw new Error(`result.files[${index}].path must stay inside the project`);
@@ -993,9 +871,5 @@ export function normalizeProposedFilesOrEmpty(files) {
 
 function normalizePatchPaths(paths) {
   if (!Array.isArray(paths)) return [];
-  return paths.map(normalizeRelativePath).filter((filePath) => filePath && !path.isAbsolute(filePath) && !filePath.startsWith("../") && !filePath.includes("/../"));
-}
-
-function normalizeRelativePath(filePath) {
-  return String(filePath || "").replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+/g, "/");
+  return paths.map((filePath) => normalizeRelativePath(String(filePath || ""))).filter((filePath) => filePath && !path.isAbsolute(filePath) && !filePath.startsWith("../") && !filePath.includes("/../"));
 }

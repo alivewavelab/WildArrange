@@ -47,7 +47,7 @@ test("Cursor adapter generates project hooks.json with fail-closed preToolUse", 
   });
 });
 
-test("Cursor Hook bridge ignores unrelated projects without creating .wildarrange", async () => {
+test("Cursor Hook bridge denies writes from unrelated projects without creating .wildarrange", async () => {
   await withTempDir(async (wildArrangeDir) => {
     await installAdapter(wildArrangeDir, { target: "cursor", mode: "local" });
     const bridgePath = path.join(wildArrangeDir, BRIDGE_RELATIVE_PATH);
@@ -61,8 +61,38 @@ test("Cursor Hook bridge ignores unrelated projects without creating .wildarrang
         tool_input: { path: "src/app.js" },
       });
       assert.equal(result.exitCode, 0);
-      assert.equal(result.stdout, "");
+      const output = JSON.parse(result.stdout);
+      assert.equal(output.permission, "deny");
+      assert.match(output.agent_message, /could not resolve a governed project/);
       assert.equal(existsSync(path.join(unrelatedDir, ".wildarrange")), false);
+
+      const session = await runBridge(bridgePath, {
+        hook_event_name: "sessionStart",
+        conversation_id: "cursor-unrelated-session",
+        cwd: unrelatedDir,
+      });
+      assert.equal(session.exitCode, 0);
+      assert.equal(session.stdout, "");
+    });
+  });
+});
+
+test("Cursor Hook bridge denies writes from git worktrees without WildArrange markers", async () => {
+  await withTempDir(async (wildArrangeDir) => {
+    await installAdapter(wildArrangeDir, { target: "cursor", mode: "local" });
+    const bridgePath = path.join(wildArrangeDir, BRIDGE_RELATIVE_PATH);
+
+    await withTempDir(async (worktreeDir) => {
+      await writeFile(path.join(worktreeDir, ".git"), "gitdir: /elsewhere/.git/worktrees/probe\n");
+      const result = await runBridge(bridgePath, {
+        hook_event_name: "beforeShellExecution",
+        conversation_id: "cursor-gitfile",
+        cwd: worktreeDir,
+        command: "rm -rf src",
+      });
+      assert.equal(result.exitCode, 0);
+      assert.equal(JSON.parse(result.stdout).permission, "deny");
+      assert.equal(existsSync(path.join(worktreeDir, ".wildarrange")), false);
     });
   });
 });
@@ -93,7 +123,9 @@ test("Cursor Hook bridge keeps task-worktree sessions on the installed control r
       tool_name: "Write",
       tool_input: { path: "src/app.js" },
     });
-    assert.deepEqual(JSON.parse(allowed.stdout), { permission: "allow" });
+    const allowedOutput = JSON.parse(allowed.stdout);
+    assert.equal(allowedOutput.permission, "allow");
+    assert.match(allowedOutput.additional_context, /wildarrange-injection/);
     assert.equal(existsSync(path.join(executionRoot, ".wildarrange")), false);
     assert.equal(existsSync(path.join(controlRoot, ".wildarrange", "sessions", "hooks", "cursor-task-worktree-PreToolUse.json")), true);
   });
@@ -114,7 +146,9 @@ test("Cursor Hook bridge maps preToolUse deny/allow to the Cursor permission pro
       tool_input: { path: "src/app.js", content: "ok" },
     });
     assert.equal(allowed.exitCode, 0);
-    assert.deepEqual(JSON.parse(allowed.stdout), { permission: "allow" });
+    const allowedOutput = JSON.parse(allowed.stdout);
+    assert.equal(allowedOutput.permission, "allow");
+    assert.match(allowedOutput.additional_context, /wildarrange-injection/);
 
     const denied = await runBridge(bridgePath, {
       hook_event_name: "preToolUse",
@@ -179,7 +213,9 @@ test("Cursor beforeShellExecution gates integrated terminal commands like Bash",
       task_id: "T001",
       command: "node ./bin/wildarrange.mjs doctor",
     });
-    assert.deepEqual(JSON.parse(safe.stdout), { permission: "allow" });
+    const safeOutput = JSON.parse(safe.stdout);
+    assert.equal(safeOutput.permission, "allow");
+    assert.match(safeOutput.additional_context, /wildarrange-injection/);
   });
 });
 

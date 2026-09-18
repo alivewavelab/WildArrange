@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { appendLedger } from "../infra/ledger.mjs";
+import { appendLedger, appendLedgerOnce, readLedgerTailHash } from "../infra/ledger.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { nowIso } from "../infra/runtime-store.mjs";
 import {
@@ -11,7 +11,6 @@ import {
   remoteBranchHead,
   taskBranchName,
 } from "../infra/git-coordination.mjs";
-import { readLedgerTailHash, readVerifiedLedgerEntries } from "../infra/ledger.mjs";
 
 export async function registerCoordinationDevice(rootDir, options = {}) {
   const device = await ensureDeviceIdentity(rootDir, options);
@@ -225,13 +224,10 @@ export function taskContract(task) {
   return Object.fromEntries(keys.filter((key) => task[key] !== undefined).map((key) => [key, task[key]]));
 }
 
+// 判重与追加由 appendLedgerOnce 在同一把 ledger 锁内原子完成（ARC-003）；
+// 判重口径沿用此前的已校验条目（verified entries）。
 async function recordRemoteClaimLedgerOnce(rootDir, planId, taskId, claim) {
-  const entries = await readVerifiedLedgerEntries(rootDir);
-  if (entries.some((entry) => entry.type === "remote_task_claimed"
-    && entry.planId === planId
-    && entry.taskId === taskId
-    && entry.remoteHeadSha === claim.remoteHeadSha)) return;
-  await appendLedger(rootDir, {
+  await appendLedgerOnce(rootDir, {
     type: "remote_task_claimed",
     planId,
     taskId,
@@ -240,5 +236,8 @@ async function recordRemoteClaimLedgerOnce(rootDir, planId, taskId, claim) {
     branch: claim.branch,
     remoteHeadSha: claim.remoteHeadSha,
     reconciled: claim.reconciled === true,
-  });
+  }, (entry) => entry.type === "remote_task_claimed"
+    && entry.planId === planId
+    && entry.taskId === taskId
+    && entry.remoteHeadSha === claim.remoteHeadSha);
 }

@@ -17,7 +17,7 @@ import test from "node:test";
 import { runDeliveryPipeline } from "../src/orchestration/delivery-pipeline.mjs";
 import { persistTaskState } from "../src/orchestration/task-board.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
-import { admitParallelAgentResult, parallelAgentStatus, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
+import { admitParallelAgentResult, closeParallelAgentRun, parallelAgentStatus, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
 import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtime.mjs";
 import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { runCommand } from "../src/infra/command-runner.mjs";
@@ -1392,6 +1392,11 @@ test("adversarial: parallel admission refuses a task completed by other means BE
   // Cross-review P1 (round 4, 2026-07-21): admission used to write the
   // child's files into the workspace first and validate the task status
   // afterwards, so a doomed admission could still clobber the workspace.
+  // Setup note (ARC-015): a pending task holding a parallel_run_claim is no
+  // longer runnable by the linear flow, so "completed by other means" is
+  // staged by closing the parallel run through its real lifecycle (which
+  // releases the claim), then completing the task linearly and admitting
+  // with the stale runId.
   await withTempDir(async (dir) => {
     await initRuntime(dir);
     const planPath = resolveWildArrangePath(dir, "artifacts", "parallel-precheck-plan.json");
@@ -1416,7 +1421,15 @@ test("adversarial: parallel admission refuses a task completed by other means BE
     ].join(" ");
     const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
 
-    // Complete the task through the linear flow, NOT through this admission.
+    // The run is superseded: close it through the real lifecycle, which
+    // releases the parallel_run_claim, then complete the task through the
+    // linear flow, NOT through this admission.
+    await closeParallelAgentRun(dir, { runId: batch.runId, reason: "superseded_by_linear_flow" });
+    assert.equal(
+      (await loadTaskState(dir)).tasks[0].parallel_run_claim,
+      null,
+      "closing the run must release its parallel_run_claim",
+    );
     await initGitBaseline(dir);
     const completed = await runNextTask(dir);
     assert.equal(completed.status, "completed");

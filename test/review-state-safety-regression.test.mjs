@@ -15,8 +15,8 @@ import {
 } from "../src/infra/contract-governance.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { admitParallelAgentResult, cleanupParallelAgentRun, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
-import { importPlan } from "../src/orchestration/plan-state.mjs";
-import { claimTeamTask, getTeamTask } from "../src/orchestration/task-board.mjs";
+import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
+import { claimTeamTask, findRunnableTask, getTeamTask, isTaskRunnable, persistTaskState } from "../src/orchestration/task-board.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -37,6 +37,58 @@ test("plan reimport refuses to replace an active task claim", async () => {
     const after = await getTeamTask(rootDir, "T001");
     assert.equal(after.status, before.status);
     assert.deepEqual(after.coordination, before.coordination);
+  });
+});
+
+test("a claimed pending task is not runnable until the claim is released", async () => {
+  await withTempDir(async (rootDir) => {
+    await initRuntime(rootDir);
+    await importPlan(rootDir, await writePlan(rootDir));
+
+    const claimState = await loadTaskState(rootDir);
+    claimState.tasks[0].parallel_run_claim = {
+      runId: "agent_run_busy",
+      owner: "ZhuRong",
+      claimedAt: new Date().toISOString(),
+    };
+    await persistTaskState(rootDir, claimState);
+
+    const claimedTasks = (await loadTaskState(rootDir)).tasks;
+    assert.equal(claimedTasks[0].status, "pending");
+    assert.equal(isTaskRunnable(claimedTasks[0], claimedTasks), false);
+    assert.equal(findRunnableTask(claimedTasks), null);
+    await assert.rejects(
+      claimTeamTask(rootDir, { owner: "ZhuRong" }),
+      /no runnable task available to claim/,
+    );
+
+    const admissionState = await loadTaskState(rootDir);
+    admissionState.tasks[0].parallel_run_claim = null;
+    admissionState.tasks[0].admission_claim = {
+      runId: "agent_run_admitting",
+      agent: "ZhuRong",
+      claimedAt: new Date().toISOString(),
+      phase: "applying",
+    };
+    await persistTaskState(rootDir, admissionState);
+
+    const admittedTasks = (await loadTaskState(rootDir)).tasks;
+    assert.equal(isTaskRunnable(admittedTasks[0], admittedTasks), false);
+    assert.equal(findRunnableTask(admittedTasks), null);
+    await assert.rejects(
+      claimTeamTask(rootDir, { owner: "ZhuRong" }),
+      /no runnable task available to claim/,
+    );
+
+    const releasedState = await loadTaskState(rootDir);
+    releasedState.tasks[0].admission_claim = null;
+    await persistTaskState(rootDir, releasedState);
+
+    const releasedTasks = (await loadTaskState(rootDir)).tasks;
+    assert.equal(isTaskRunnable(releasedTasks[0], releasedTasks), true);
+    const claimed = await claimTeamTask(rootDir, { owner: "ZhuRong" });
+    assert.equal(claimed.task.id, "T001");
+    assert.equal(claimed.task.status, "in_progress");
   });
 });
 

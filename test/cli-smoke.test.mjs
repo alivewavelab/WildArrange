@@ -354,6 +354,24 @@ test("cli smoke: a local target without bin imports a string-array verifier plan
   });
 });
 
+test("cli smoke: workflow treats a bare --maxSteps flag as the default step budget", async () => {
+  await withTempProjectDir(async (dir) => {
+    assert.equal((await runCli(["init"], dir)).code, 0);
+    // --maxSteps without a value parses to true; Number(true) === 1 would
+    // silently shrink the step budget, so the flag must fall back to the
+    // default instead of producing NaN or 1.
+    for (const extra of [[], ["--maxSteps"], ["--maxSteps", "not-a-number"], ["--maxSteps", "5"]]) {
+      const result = await runCli(["workflow", "--sample", ...extra], dir);
+      assert.equal(result.code, 0, `workflow --sample ${extra.join(" ")} failed.\nstderr: ${result.stderr}`);
+      assert.doesNotMatch(result.stderr + result.stdout, /NaN/);
+      const parsed = JSON.parse(result.stdout);
+      assert.equal(parsed.ok, true);
+      assert.equal(parsed.results.length, 2);
+      assert.equal(parsed.results.at(-1).status, "complete");
+    }
+  });
+});
+
 test("cli smoke: governance audit writes a deterministic report", async () => {
   await withTempProjectDir(async (dir) => {
     const init = await runCli(["init"], dir);

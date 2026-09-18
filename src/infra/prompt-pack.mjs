@@ -10,7 +10,7 @@ import {
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { normalizeAgentKey } from "./agent-registry.mjs";
-import { DEFAULT_RUNTIME_NAME } from "./runtime-config.mjs";
+import { DEFAULT_RUNTIME_NAME } from "./default-config.mjs";
 import {
   STATE_VERSION,
   createWorkId,

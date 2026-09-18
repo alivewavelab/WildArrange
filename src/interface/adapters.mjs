@@ -99,7 +99,8 @@ export async function installAdapter(rootDir, options = {}) {
 
     const cursorDir = path.join(rootDir, ".cursor", "rules");
     await mkdir(cursorDir, { recursive: true });
-    const legacyCursorRulePath = path.join(cursorDir, ["wildarrange", "flow.mdc"].join(""));
+    // 旧版受管规则文件名（已退役），安装时清理。
+    const legacyCursorRulePath = path.join(cursorDir, "wildarrangeflow.mdc");
     if (existsSync(legacyCursorRulePath)) {
       const legacyRuleBackup = await backupExistingAdapterFile(rootDir, legacyCursorRulePath, backupId);
       await unlink(legacyCursorRulePath);
@@ -233,7 +234,8 @@ export async function uninstallAdapter(rootDir, options = {}) {
     candidates.push({ target: "cursor", path: path.join(rootDir, ".cursor", "hooks.json") });
     candidates.push({ target: "cursor", path: path.join(rootDir, CURSOR_BRIDGE_PATH) });
     candidates.push({ target: "cursor", path: path.join(rootDir, ".cursor", "rules", "wildarrange.mdc") });
-    candidates.push({ target: "cursor", path: path.join(rootDir, ".cursor", "rules", ["wildarrange", "flow.mdc"].join("")) });
+    // 旧版受管规则文件名（已退役），卸载时一并清理。
+    candidates.push({ target: "cursor", path: path.join(rootDir, ".cursor", "rules", "wildarrangeflow.mdc") });
     candidates.push({ target: "cursor", path: resolveWildArrangePath(rootDir, "adapters", "cursor", "README.md") });
     for (const command of slashCommands) {
       candidates.push({ target: "cursor", path: path.join(rootDir, ".cursor", "commands", `${command.name}.md`) });

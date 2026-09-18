@@ -3,9 +3,9 @@ import { appendFile, mkdir, mkdtemp, readFile, rm, stat, truncate, writeFile } f
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { appendLedger, readLedgerTailHash, verifyLedger } from "../src/infra/ledger.mjs";
+import { appendLedger, readLedgerTailHash, readVerifiedLedgerEntries, verifyLedger } from "../src/infra/ledger.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
-import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { hashContent, readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 
 test("appendLedger is fail-closed when the ledger tail line is corrupted", async () => {
   await withTempDir(async (dir) => {
@@ -88,6 +88,32 @@ test("legacy ledgers without any hash chain still accept appends", async () => {
     const content = await readFile(ledgerPath, "utf8");
     assert.match(content, /legacy_event/);
     assert.match(content, /new_event/);
+  });
+});
+
+test("forged self-consistent entries after a broken line never enter the verified chain", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const legit = await appendLedger(dir, { type: "task_verified", taskId: "T-legit" });
+    const ledgerPath = resolveWildArrangePath(dir, "ledger.jsonl");
+    await appendFile(ledgerPath, "{broken json line\n", "utf8");
+    // 伪造 prevHash:null 的自洽 hashed 条目（模拟攻击者手工重启一条链）
+    const forged = { id: "evt-forged", at: new Date().toISOString(), prevHash: null, type: "task_verified", taskId: "T-forged" };
+    forged.hash = hashContent(JSON.stringify(forged));
+    await appendFile(ledgerPath, `${JSON.stringify(forged)}\n`, "utf8");
+    // 挂在伪造条目之后的延伸条目同样不得被信任
+    const chained = { id: "evt-chained", at: new Date().toISOString(), prevHash: forged.hash, type: "task_verified", taskId: "T-chained" };
+    chained.hash = hashContent(JSON.stringify(chained));
+    await appendFile(ledgerPath, `${JSON.stringify(chained)}\n`, "utf8");
+
+    const verification = await verifyLedger(dir);
+    assert.equal(verification.ok, false);
+    assert.ok(verification.failures.some((failure) => failure.reason === "invalid_json"));
+
+    const verified = await readVerifiedLedgerEntries(dir);
+    assert.ok(verified.some((entry) => entry.id === legit.id), "entries before the break stay verified");
+    assert.ok(!verified.some((entry) => entry.taskId === "T-forged"), "forged entry must not be trusted");
+    assert.ok(!verified.some((entry) => entry.taskId === "T-chained"), "entries chained onto the forgery must not be trusted");
   });
 });
 

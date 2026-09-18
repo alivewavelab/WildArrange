@@ -1,6 +1,8 @@
 import { mkdir, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { runCommandFile } from "./command-runner.mjs";
+import { readGitHead, readGitTopLevel } from "./git-diff.mjs";
+import { uniqueStrings } from "./text-utils.mjs";
 
 export async function prepareAgentWorktree(rootDir, taskRunDir, options = {}) {
   if (options.isolation !== "git-worktree") {
@@ -88,8 +90,8 @@ export async function captureWorkspaceSnapshot(rootDir, options = {}) {
   if (!sameRoot) {
     return { kind: "workspace_snapshot", available: false, label, reason: "project root is not the git toplevel" };
   }
-  const head = await runCommandFile("git", ["-C", rootDir, "rev-parse", "HEAD"], rootDir, 15_000);
-  const headCommit = head.exitCode === 0 ? head.stdout.trim() : null;
+  const head = await readGitHead(rootDir);
+  const headCommit = head.available ? head.sha : null;
   const stash = await runCommandFile("git", ["-C", rootDir, "stash", "create", `wildarrange ${label}`], rootDir, 30_000);
   const stashCommit = stash.exitCode === 0 ? stash.stdout.trim() : null;
   if (stash.exitCode !== 0) {
@@ -146,11 +148,11 @@ export function extractPatchPaths(patch) {
 }
 
 async function gitAvailable(rootDir) {
-  const result = await runCommandFile("git", ["-C", rootDir, "rev-parse", "--show-toplevel"], rootDir, 15_000);
-  if (result.exitCode !== 0) {
+  const result = await readGitTopLevel(rootDir);
+  if (!result.available) {
     return { available: false, reason: "project is not a Git repository" };
   }
-  return { available: true, topLevel: result.stdout.trim() };
+  return { available: true, topLevel: result.topLevel };
 }
 
 async function pathsEqual(left, right) {
@@ -171,8 +173,4 @@ function normalizePatchPath(filePath) {
 
 function splitLines(value) {
   return String(value || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-}
-
-function uniqueStrings(values) {
-  return [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))];
 }

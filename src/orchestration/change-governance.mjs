@@ -16,6 +16,7 @@ import {
 } from "../infra/runtime-store.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
+import { uniqueStrings } from "../infra/text-utils.mjs";
 import {
   loadTaskState,
   normalizeStringArray,
@@ -86,6 +87,35 @@ export async function recordReviewBlocker(rootDir, options = {}) {
   });
 }
 
+export async function resolveReviewBlocker(rootDir, options = {}) {
+  return withTaskStateLock(rootDir, `review-blocker-resolve:${options.taskId || "unknown"}`, async () => {
+    await ensureWildArrangeDirs(rootDir);
+    const taskState = await loadTaskState(rootDir);
+    if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
+    const task = taskState.tasks.find((candidate) => candidate.id === options.taskId);
+    if (!task) throw new Error(`unknown task: ${options.taskId}`);
+    if (task.status !== "review_blocked") throw new Error(`task ${task.id} is ${task.status}; cannot resolve review blocker`);
+    const evidence = typeof options.evidence === "string" ? options.evidence.trim() : "";
+    const rationale = typeof options.rationale === "string" ? options.rationale.trim() : "";
+    if (!evidence) throw new Error("review blocker resolution evidence is required");
+    if (!rationale) throw new Error("review blocker resolution rationale is required");
+    if (hasWeakeningLanguage(`${evidence}\n${rationale}`)) throw new Error("review blocker resolution appears to weaken verification");
+    const resolutionTaskId = task.reviewBlocker?.resolutionTaskId;
+    const resolutionTask = resolutionTaskId
+      ? taskState.tasks.find((candidate) => candidate.id === resolutionTaskId)
+      : null;
+    if (!resolutionTask) throw new Error(`task ${task.id} has no recorded review blocker resolution task`);
+    if (resolutionTask.status !== "completed") throw new Error(`resolution task ${resolutionTask.id} is ${resolutionTask.status}; complete it before unblocking ${task.id}`);
+    task.status = "pending";
+    task.reviewBlocker = { ...task.reviewBlocker, resolvedAt: nowIso(), resolutionEvidence: evidence, resolutionRationale: rationale };
+    task.updatedAt = nowIso();
+    await persistTaskState(rootDir, taskState);
+    await appendLedger(rootDir, { type: "review_blocker_resolved", planId: taskState.planId, taskId: task.id, resolutionTaskId, evidence });
+    await writeSnapshot(rootDir, "review_blocker_resolved", { planId: taskState.planId, taskId: task.id, resolutionTaskId });
+    return { planId: taskState.planId, unblockedTask: task, resolutionTask };
+  });
+}
+
 export async function reviewChangeRequest(rootDir, id) {
   const changeRequest = await readChangeRequest(rootDir, id);
   const reasons = [];
@@ -93,7 +123,8 @@ export async function reviewChangeRequest(rootDir, id) {
   if (changeRequest.status !== "open") reasons.push(`change request is ${changeRequest.status}`);
   if (!changeRequest.evidence || !changeRequest.rationale) reasons.push("missing evidence or rationale");
   if (changeRequest.invariants?.autoApply !== false) reasons.push("autoApply invariant must be false");
-  const legacyLeadReviewKey = ["requires", "Sisy", "phus", "Review"].join("");
+  // 兼容 requiresLeadReview 重命名前写入的旧 invariant 键，保持字面量可检索。
+  const legacyLeadReviewKey = "requiresSisyphusReview";
   if (changeRequest.invariants?.requiresLeadReview !== true && changeRequest.invariants?.[legacyLeadReviewKey] !== true) {
     reasons.push("requiresLeadReview invariant must be true");
   }
@@ -234,6 +265,7 @@ function validateSteeringProposal(taskState, proposal) {
   const targets = targetTaskIds.map((id) => taskState.tasks.find((task) => task.id === id));
   if (targets.some((task) => !task)) reasons.push("unknown target task");
   if ((kind === "split_task" || kind === "revise_acceptance") && targets.some((task) => task && task.status !== "pending")) reasons.push(`${kind} only applies to pending tasks`);
+  if (kind === "mark_blocked" && targets.some((task) => task && ["completed", "verifying"].includes(task.status))) reasons.push("mark_blocked cannot target completed or verifying tasks");
   if (kind === "add_task" && (!proposal.task || typeof proposal.task !== "object")) reasons.push("add_task requires task object");
   if (kind === "split_task" && (!Array.isArray(proposal.tasks) || proposal.tasks.length === 0)) reasons.push("split_task requires tasks array");
   if (kind === "revise_acceptance") {
@@ -398,10 +430,6 @@ function normalizeDecision(decision) {
   return null;
 }
 
-function uniqueStrings(values) {
-  return [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))];
-}
-
 export async function writeChangeRequest(rootDir, planId, task, scopeResult, source = "scope_guard") {
   await ensureWildArrangeDirs(rootDir);
   const signature = hashContent(JSON.stringify({
@@ -461,7 +489,8 @@ export async function writeChangeRequest(rootDir, planId, task, scopeResult, sou
 }
 
 export function renderChangeRequestMarkdown(changeRequest) {
-  const legacyLeadReviewKey = ["requires", "Sisy", "phus", "Review"].join("");
+  // 兼容 requiresLeadReview 重命名前写入的旧 invariant 键，保持字面量可检索。
+  const legacyLeadReviewKey = "requiresSisyphusReview";
   return `# ChangeRequest ${changeRequest.id}
 
 | Field | Value |

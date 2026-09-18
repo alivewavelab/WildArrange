@@ -150,6 +150,44 @@ test("dependency boundary: orchestration -> ai stays limited to the pinned edge 
   assert.deepEqual(unexpected, [], `new orchestration -> ai dependency introduced: ${JSON.stringify(unexpected)}`);
 });
 
+test("dependency boundary: orchestration calls resolveRouteDecision only at pinned read-only call sites", async () => {
+  // resolveRouteDecision is a pure read-only lookup over the routes table
+  // (contract pinned in src/infra/route-table.mjs). Orchestration may use it
+  // only for read/enrichment decisions — plan import enrichment and
+  // feature-design gate detection. Write-path routing (ledger evidence,
+  // decision projection, semantic shadow) belongs to ai/routing.mjs
+  // routeRequest. Naming every orchestration file that mentions the symbol
+  // makes a new direct caller a conscious, reviewed decision.
+  const PINNED_CALLERS = ["feature-design.mjs", "plan-state.mjs"];
+  const files = await listMjsFiles(path.join(SRC_DIR, "orchestration"));
+  const callers = [];
+  for (const filePath of files) {
+    const source = await readFile(filePath, "utf8");
+    if (source.includes("resolveRouteDecision")) callers.push(path.basename(filePath));
+  }
+  assert.deepEqual(
+    callers.sort(),
+    PINNED_CALLERS,
+    `orchestration resolveRouteDecision call sites are pinned to ${PINNED_CALLERS.join(", ")}; justify any new caller here`,
+  );
+});
+
+test("dependency boundary: route signal matching has a single implementation in infra/route-table.mjs", async () => {
+  // skill-matcher used to match route signals with bare substring includes
+  // while route-table used word-boundary regexes, so the same signals hit
+  // differently per consumer. The matcher now lives only in
+  // infra/route-table.mjs and skill-matcher reuses it.
+  const skillMatcher = await readFile(path.join(SRC_DIR, "ai", "skill-matcher.mjs"), "utf8");
+  assert.ok(
+    /import\s*\{[^}]*\bmatchSignals\b[^}]*\}\s*from\s*["']\.\.\/infra\/route-table\.mjs["']/.test(skillMatcher),
+    "ai/skill-matcher.mjs must reuse matchSignals from infra/route-table.mjs",
+  );
+  assert.ok(
+    !/function\s+(matchSignals|signalMatches)\b/.test(skillMatcher),
+    "ai/skill-matcher.mjs must not grow a second signal-matching implementation",
+  );
+});
+
 test("dependency boundary: no non-literal dynamic imports anywhere in src/", async () => {
   // The other boundary tests only see static imports and import("literal").
   // Anything else — import(variable), template literals, and expressions
@@ -283,6 +321,21 @@ test("dependency boundary: src root contains no runtime .mjs files", async () =>
     .filter((filePath) => path.dirname(filePath) === SRC_DIR)
     .map((filePath) => path.basename(filePath));
   assert.deepEqual(rootFiles, [], `src/ root runtime files are forbidden: ${rootFiles.join(", ")}`);
+});
+
+test("dependency boundary: no dead barrel re-exports of other modules' symbols", async () => {
+  // Phase-2 clarify cleanup: ai/routing.mjs re-exported loadRoutesConfig /
+  // resolveRouteDecision and capabilities/scope-guard.mjs re-exported
+  // git-diff/path-match helpers, although every consumer imports the real
+  // owners directly. Re-exports must not come back: the real owners are
+  // infra/route-table.mjs, infra/git-diff.mjs and infra/path-match.mjs.
+  const routing = await import("../src/ai/routing.mjs");
+  assert.equal("loadRoutesConfig" in routing, false, "ai/routing.mjs must not re-export loadRoutesConfig");
+  assert.equal("resolveRouteDecision" in routing, false, "ai/routing.mjs must not re-export resolveRouteDecision");
+  const scopeGuardModule = await import("../src/capabilities/scope-guard.mjs");
+  for (const name of ["collectGitDiff", "collectGitChangedPaths", "changedPathsIntroducedByTask", "classifyManifestPathChanges", "pathAllowed", "pathMatchesPattern"]) {
+    assert.equal(name in scopeGuardModule, false, `capabilities/scope-guard.mjs must not re-export ${name}`);
+  }
 });
 
 test("dependency boundary: no module-level import cycles anywhere in src/", async () => {

@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { buildAcceptanceProof } from "../src/capabilities/acceptance-proof.mjs";
 import { evaluateGateArming } from "../src/infra/gate-arming.mjs";
-import { DEFAULT_WILDARRANGE_CONFIG } from "../src/infra/runtime-config.mjs";
+import { DEFAULT_WILDARRANGE_CONFIG } from "../src/infra/default-config.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
 import { statusReport } from "../src/orchestration/status.mjs";
@@ -35,6 +35,17 @@ test("gate arming floor flags missing and trivial verify commands per task", asy
   assert.ok(result.issues.some((issue) => issue.code === "verify_trivial" && issue.taskId === "T002"));
   // completed 任务不再占用黄灯。
   assert.ok(!result.issues.some((issue) => issue.taskId === "T003"));
+});
+
+test("gate arming floor finds no review tautology when there are no active tasks", async () => {
+  // 回归：review 扫描范围恒等于 activeTasks，空集不得凭空产生 review_tautology。
+  const noTasks = evaluateGateArming({ config: UNARMED_CONFIG, tasks: [] });
+  assert.ok(!noTasks.issues.some((issue) => issue.code === "review_tautology"));
+  const onlyCompleted = evaluateGateArming({
+    config: UNARMED_CONFIG,
+    tasks: [{ id: "T001", status: "completed", verify_commands: ["node --test"] }],
+  });
+  assert.ok(!onlyCompleted.issues.some((issue) => issue.code === "review_tautology"));
 });
 
 test("gate arming floor goes green once gates are really armed", async () => {

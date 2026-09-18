@@ -9,6 +9,7 @@ import {
   resolveWildArrangePath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
+import { transactWithLedger } from "../infra/task-state-lock.mjs";
 import { writeFailureReport } from "../infra/task-reports.mjs";
 import { persistTaskState } from "./task-board.mjs";
 import { loadTaskState } from "./plan-state.mjs";
@@ -156,7 +157,8 @@ export async function persistAdmissionRevalidation(rootDir, taskState, task, opt
   };
   task.updatedAt = nowIso();
   await writeFailureReport(rootDir, taskState.planId, task);
-  await appendLedger(rootDir, {
+  // 审计先行：revalidation 事件入账本后才提交回退状态（ARC-003）。
+  await transactWithLedger(rootDir, {
     type: "parallel_admission_revalidation_required",
     planId: taskState.planId,
     taskId: task.id,
@@ -164,8 +166,7 @@ export async function persistAdmissionRevalidation(rootDir, taskState, task, opt
     expectedSha: fence.expectedSha || null,
     actualSha: fence.actualSha || null,
     reason: fence.reason || null,
-  });
-  await persistTaskState(rootDir, taskState);
+  }, () => persistTaskState(rootDir, taskState));
   if (typeof options.removeRollbackPlan === "function") {
     await options.removeRollbackPlan();
   }
@@ -197,8 +198,9 @@ export async function persistPostIntegrationRecovery(rootDir, taskState, task, o
   };
   task.updatedAt = nowIso();
   await writeFailureReport(rootDir, taskState.planId, task);
-  await persistTaskState(rootDir, taskState);
-  await appendLedger(rootDir, {
+  // 审计先行：recovery 事件入账本后才提交 recovery_required 状态（ARC-003），
+  // 崩溃窗口不再留下无审计的状态变更。
+  await transactWithLedger(rootDir, {
     type: options.checkpointFailed
       ? "checkpoint_write_failed_after_integration"
       : "post_integration_recovery_required",
@@ -207,7 +209,7 @@ export async function persistPostIntegrationRecovery(rootDir, taskState, task, o
     runId: options.runId,
     integrationSha: options.integrationCommit?.integrationSha || null,
     error: options.error || options.integrationCommit?.reason || null,
-  });
+  }, () => persistTaskState(rootDir, taskState));
   return {
     status: "recovery_required",
     planId: taskState.planId,

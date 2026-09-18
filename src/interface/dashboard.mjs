@@ -24,9 +24,9 @@ import {
 } from "./dashboard-panels.mjs";
 import { tryHandleAdoptionApi } from "./adoption-panel.mjs";
 import { renderDashboardHtml } from "./dashboard-view.mjs";
+import { SAFE_ID, readJsonBody, sendJson } from "./http-utils.mjs";
 
 class DashboardBadRequest extends Error {}
-class DashboardPayloadTooLarge extends Error {}
 
 export function startDashboardServer(rootDir, options = {}) {
   const host = options.host || "127.0.0.1";
@@ -179,11 +179,11 @@ export function startDashboardServer(rootDir, options = {}) {
       }
       sendJson(response, 404, { error: "not_found" });
     } catch (error) {
-      if (error instanceof DashboardBadRequest) {
+      if (error instanceof DashboardBadRequest || error?.code === "invalid_json") {
         sendJson(response, 400, { ok: false, error: error.message });
         return;
       }
-      if (error instanceof DashboardPayloadTooLarge) {
+      if (error?.code === "payload_too_large") {
         sendJson(response, 413, { ok: false, error: error.message });
         return;
       }
@@ -289,7 +289,7 @@ function validateOptionalDashboardId(value, label) {
 }
 
 function validateDashboardId(value, label) {
-  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)) {
+  if (typeof value !== "string" || !SAFE_ID.test(value)) {
     throw new DashboardBadRequest(`invalid ${label}`);
   }
 }
@@ -298,47 +298,6 @@ function validateNodeName(value) {
   if (typeof value !== "string" || !/^[a-z][a-z-]{0,31}$/.test(value)) {
     throw new DashboardBadRequest("invalid node");
   }
-}
-
-function readJsonBody(request) {
-  return new Promise((resolve, reject) => {
-    let body = "";
-    let bodyBytes = 0;
-    let settled = false;
-    request.on("data", (chunk) => {
-      if (settled) return;
-      bodyBytes += chunk.length;
-      if (bodyBytes > 64_000) {
-        settled = true;
-        reject(new DashboardPayloadTooLarge("request body too large"));
-        return;
-      }
-      body += chunk.toString();
-    });
-    request.on("end", () => {
-      if (settled) return;
-      settled = true;
-      if (!body.trim()) {
-        resolve({});
-        return;
-      }
-      try {
-        resolve(JSON.parse(body));
-      } catch {
-        reject(new Error("invalid JSON body"));
-      }
-    });
-    request.on("error", (error) => {
-      if (settled) return;
-      settled = true;
-      reject(error);
-    });
-  });
-}
-
-function sendJson(response, statusCode, value) {
-  response.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
-  response.end(`${JSON.stringify(value, null, 2)}\n`);
 }
 
 function sendHtml(response, statusCode, html, headers = {}) {

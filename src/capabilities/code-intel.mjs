@@ -6,7 +6,7 @@ import {
   nowIso,
 } from "../infra/runtime-store.mjs";
 import { runCommand } from "../infra/command-runner.mjs";
-import { pathMatchesPattern } from "../infra/path-match.mjs";
+import { normalizeRelativePath, pathMatchesPattern } from "../infra/path-match.mjs";
 import { extractComments } from "../infra/repository-layout.mjs";
 
 export async function runQualityGates(rootDir, task, scopeResult = null, config = {}) {
@@ -320,10 +320,6 @@ function normalizeRegexFlags(rawFlags = "") {
 
 function isLikelyTextPath(filePath) {
   return /\.(cjs|css|html|js|json|jsx|md|mjs|py|rb|rs|sh|ts|tsx|txt|vue|yaml|yml)$/i.test(filePath);
-}
-
-function normalizeRelativePath(filePath) {
-  return String(filePath || "").replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+/g, "/");
 }
 
 function pathInsideRoot(rootDir, absolutePath) {

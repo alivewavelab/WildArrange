@@ -138,7 +138,7 @@ test("project reviewer returns an actionable finding and cannot create checkpoin
 });
 
 test("setup Hook permits only the exact governance command before a task exists", async t => {
-  const { preToolUseGuard } = await import("../src/ai/hooks.mjs");
+  const { preToolUseGuard } = await import("../src/ai/pre-tool-guard.mjs");
   const root = await mkdtemp(path.join(os.tmpdir(), "wa-setup-hook-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   await initRuntime(root);
@@ -170,6 +170,28 @@ test("changed review documents invalidate an earlier acceptance receipt", async 
   await writeFile(path.join(root, "rules.md"), "REVISED_STANDARD\nChanged requirement.\n");
   const proof = await writeAcceptanceProof(root, task.planId, task, { scopeResult: scope, reviewResult: { kind: "review_gate", pass: true, projectReview: review } }, { recordLedger: false });
   assert.equal(proof.checks.find(c => c.code === "project_review_bound" || c.name === "project_review_bound" || c.id === "project_review_bound")?.status, "fail");
+});
+
+// CODE-006 回归：scope 结果只存在于 task.evidence（kind 为 "scope_guard"）时，
+// writeAcceptanceProof 也必须用它复核 review 上下文，不能让旧 receipt 在文档变更后蒙混过关。
+test("scope evidence recorded only as scope_guard still binds the acceptance proof to fresh review context", async t => {
+  const { writeAcceptanceProof } = await import("../src/capabilities/acceptance-proof.mjs");
+  const { root, config, task } = await fixture(t);
+  delete task.responsibilityChanges;
+  task.writable_paths = [];
+  delete task.last_scope_result;
+  const scope = { status: "pass", changedPaths: ["target.mjs"] };
+  const review = await runProjectReview(root, task, scope, config);
+  assert.equal(review.pass, true);
+  task.evidence = [{ kind: "scope_guard", at: new Date().toISOString(), ...scope }];
+
+  const findBoundCheck = proof => proof.checks.find(c => c.name === "project_review_bound");
+  const fresh = await writeAcceptanceProof(root, task.planId, task, { reviewResult: { kind: "review_gate", pass: true, projectReview: review } }, { recordLedger: false });
+  assert.equal(findBoundCheck(fresh)?.status, "pass", JSON.stringify(findBoundCheck(fresh)));
+
+  await writeFile(path.join(root, "rules.md"), "REVISED_STANDARD\nChanged requirement.\n");
+  const stale = await writeAcceptanceProof(root, task.planId, task, { reviewResult: { kind: "review_gate", pass: true, projectReview: review } }, { recordLedger: false });
+  assert.equal(findBoundCheck(stale)?.status, "fail");
 });
 
 test("a rule for another module does not require an unrelated legacy worker probe", async t => {

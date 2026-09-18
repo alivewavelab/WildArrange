@@ -66,7 +66,18 @@ const event = EVENT_MAP[payload.hook_event_name];
 if (!event) process.exit(0);
 
 const projectDir = resolveWildArrangeProject(payload.cwd || payload.workspace_roots?.[0]);
-if (!projectDir) process.exit(0);
+if (!projectDir) {
+  // fail-closed：定位不到治理项目时，写类事件显式阻断而不是静默放行；
+  // 其余事件无写权限通道，保持静默退出。
+  if (event === "PreToolUse") {
+    writeCursorOutput({
+      permission: "deny",
+      user_message: "WildArrange 未能确认当前目录属于受治理项目，已按 fail-closed 阻断本次写操作。",
+      agent_message: "WildArrange could not resolve a governed project for this working directory and denied the write fail-closed. Run the tool from the WildArrange project root or its registered task worktree.",
+    });
+  }
+  process.exit(0);
+}
 
 const isShellExecution = payload.hook_event_name === "beforeShellExecution";
 const normalizedPayload = {
@@ -85,7 +96,12 @@ ${renderHookBridgeExecution({ hostAdapter: "cursor", controlRoot, timeoutMs: 25_
 
 if (event === "PreToolUse") {
   if (result.decision === "allow") {
-    writeCursorOutput({ permission: "allow" });
+    // 放行也把判定依据回传给宿主，避免宿主对治理结论一无所知。
+    const output = { permission: "allow" };
+    if (typeof result.output === "string" && result.output.trim()) {
+      output.additional_context = result.output;
+    }
+    writeCursorOutput(output);
   } else {
     // fail-closed：deny 之外的任何结论（含 null/未知值）都按阻断处理。
     const reason = result.decision === "deny"

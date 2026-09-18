@@ -48,7 +48,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "check:arch": "node tooling/arch-module-graph/validate-module-file-map.mjs",
+    "check:arch": "node tooling/arch-module-graph/validate-module-file-map.mjs && node tooling/arch-module-graph/validate-flow-grid.mjs",
     "test": "node tooling/run-tests.mjs",
     "wildarrange": "node ./bin/wildarrange.mjs"
   }

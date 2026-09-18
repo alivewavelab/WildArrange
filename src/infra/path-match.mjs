@@ -13,17 +13,30 @@ export function assertPathInsideRoot(rootDir, absolutePath, displayPath, label =
 }
 
 export function normalizeRelativePath(filePath) {
-  return filePath.replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+/g, "/");
+  const unified = filePath.replaceAll("\\", "/").replace(/\/+/g, "/");
+  const segments = [];
+  for (const segment of unified.split("/")) {
+    if (!segment || segment === ".") continue;
+    if (segment === ".." && segments.length > 0 && segments[segments.length - 1] !== "..") {
+      segments.pop();
+    } else {
+      segments.push(segment);
+    }
+  }
+  const prefix = unified.startsWith("/") ? "/" : "";
+  return `${prefix}${segments.join("/")}`;
 }
 
 export function pathAllowed(filePath, writablePaths) {
   if (writablePaths.length === 0) return false;
   const normalizedFile = normalizeRelativePath(filePath);
+  if (escapesRelativeRoot(normalizedFile)) return false;
   return writablePaths.some((pattern) => pathMatchesPattern(normalizedFile, pattern));
 }
 
 export function pathMatchesPattern(filePath, pattern) {
   const normalizedPattern = normalizeRelativePath(pattern);
+  if (escapesRelativeRoot(normalizedPattern)) return false;
   if (normalizedPattern === filePath) return true;
   if (normalizedPattern.endsWith("/**")) {
     const prefix = normalizedPattern.slice(0, -3);
@@ -35,6 +48,13 @@ export function pathMatchesPattern(filePath, pattern) {
   }
 
   return new RegExp(`^${globPatternSource(normalizedPattern)}$`).test(filePath);
+}
+
+function escapesRelativeRoot(filePath) {
+  return filePath.startsWith("/")
+    || /^[A-Za-z]:(\/|$)/.test(filePath)
+    || filePath === ".."
+    || filePath.startsWith("../");
 }
 
 function globPatternSource(pattern) {

@@ -1,8 +1,9 @@
 /**
- * Generic git/file-manifest change probes. These only *read* what changed;
- * they make no scope/pass-fail decision (that is capabilities/scope-guard.mjs).
- * Used by capabilities (scope-guard), orchestration (linear/parallel runtime,
- * context/resume reporting) alike, so this stays infra-level.
+ * Generic git/file-manifest change probes and read-only git primitives. These
+ * only *read* repository state; they make no scope/pass-fail decision (that is
+ * capabilities/scope-guard.mjs). Used by capabilities (scope-guard),
+ * orchestration (linear/parallel runtime, context/resume reporting) alike, so
+ * this stays infra-level.
  */
 import { existsSync } from "node:fs";
 import { lstat, readFile, readlink, readdir, stat } from "node:fs/promises";
@@ -16,6 +17,18 @@ export async function collectGitDiff(rootDir) {
   if (!existsSync(gitDir)) return "";
   const result = await runCommandFile("git", ["-C", rootDir, "diff", "--", ".", ":!.wildarrange"], rootDir, 30_000);
   return result.exitCode === 0 ? result.stdout : "";
+}
+
+export async function readGitHead(rootDir) {
+  const result = await runCommandFile("git", ["-C", rootDir, "rev-parse", "HEAD"], rootDir, 15_000);
+  if (result.exitCode !== 0) return { available: false, sha: null, reason: result.stderr || "git rev-parse failed" };
+  return { available: true, sha: result.stdout.trim() };
+}
+
+export async function readGitTopLevel(rootDir) {
+  const result = await runCommandFile("git", ["-C", rootDir, "rev-parse", "--show-toplevel"], rootDir, 15_000);
+  if (result.exitCode !== 0) return { available: false, topLevel: null, reason: result.stderr || "project is not a Git repository" };
+  return { available: true, topLevel: result.stdout.trim() };
 }
 
 export async function collectGitChangedPaths(rootDir) {

@@ -6,8 +6,9 @@ import test from "node:test";
 
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { inspectRepositoryGovernance } from "../src/infra/repository-layout.mjs";
-import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { importPlan } from "../src/orchestration/plan-state.mjs";
+import { readJson, resolveTaskCheckpointPath, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
+import { proposeContractChange } from "../src/orchestration/contract-governance.mjs";
 import { runNextTask } from "../src/orchestration/linear-runtime.mjs";
 import { runWorkflow } from "../src/orchestration/workflow.mjs";
 
@@ -119,6 +120,40 @@ test("runWorkflow stops after the first state that requires an external decision
     const result = await runWorkflow(dir, { maxSteps: 5 });
     assert.equal(result.results.length, 1);
     assert.equal(result.results[0].status, "awaiting_plan_approval");
+  });
+});
+
+test("runWorkflow stops immediately when a task waits for a user contract decision", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const planPath = path.join(dir, "contract-wait-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      id: "contract-wait",
+      title: "Contract wait regression",
+      tasks: [{
+        id: "T001",
+        subject: "Wait for a contract decision",
+        verify_commands: [nodeEval("process.exit(0)")],
+      }],
+    }, null, 2), "utf8");
+    await importPlan(dir, planPath);
+    await writeFile(path.join(dir, "proposal.json"), JSON.stringify({
+      reason: "新功能必须保存语言",
+      impact: "users 表增加 locale，可空，无存量迁移",
+      alternatives: "会话内保存",
+      recommendation: "增加可空字段",
+      items: [{ contractId: "db:users.locale", kind: "database", action: "add", summary: "用户语言",
+        sourcePaths: ["src/app.js"], expected: { table: "users", column: "locale", nullable: true } }],
+    }, null, 2));
+    await proposeContractChange(dir, { taskId: "T001", from: "proposal.json" });
+
+    const result = await runWorkflow(dir, { maxSteps: 5 });
+    assert.equal(result.results.length, 1);
+    assert.equal(result.results[0].status, "awaiting_user_decision", JSON.stringify(result.results[0]));
+    const task = (await loadTaskState(dir)).tasks[0];
+    assert.equal(task.status, "needs_user_decision");
+    assert.equal(task.attempts, 0);
+    assert.equal(await readJson(resolveTaskCheckpointPath(dir, "contract-wait", "T001"), null), null);
   });
 });
 

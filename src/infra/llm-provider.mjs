@@ -53,7 +53,7 @@ export async function runLlmReview(rootDir, agentName, task, evidence = {}, opti
     });
     const parsed = parseReviewJson(response.content);
     const decision = String(parsed.decision || parsed.status || "").toUpperCase();
-    const status = decision === "FAIL" ? "fail" : decision === "WARN" ? "warn" : "pass";
+    const status = decision === "PASS" ? "pass" : decision === "FAIL" ? "fail" : "warn";
     return {
       kind: "llm_review",
       at: nowIso(),
@@ -61,8 +61,8 @@ export async function runLlmReview(rootDir, agentName, task, evidence = {}, opti
       provider: resolved.providerName,
       model: resolved.model,
       status,
-      pass: status !== "fail",
-      decision: decision || "PASS",
+      pass: decision === "PASS" || decision === "WARN",
+      decision: decision || "WARN",
       summary: asString(parsed.summary) || response.content.slice(0, 500),
       findings: Array.isArray(parsed.findings) ? parsed.findings.slice(0, 20) : [],
       usage: response.usage || null,

@@ -168,48 +168,6 @@ export function renderDashboardHtml() {
     .attention-chip { display:inline-flex; align-items:center; padding:3px 7px; border-radius:99px; color:#9f2f1c; background:#ffe2da; font-size:10px; font-weight:900; }
     .history { display:grid; gap:7px; margin-top:8px; }
     .history-row { display:grid; grid-template-columns:150px 120px minmax(0,1fr); gap:10px; padding:7px 0; border-top:1px dashed var(--line); font-size:11px; }
-    .route-review-shell {
-      position: relative;
-      overflow: hidden;
-      color: #edf7f1;
-      border: 0;
-      background: radial-gradient(circle at 88% -20%, #2f6956 0, transparent 42%), var(--forest);
-      box-shadow: var(--shadow);
-    }
-    .route-review-shell::before { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .13; background-image: linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px); background-size: 28px 28px; }
-    .route-review-shell > * { position: relative; }
-    .route-review-head { display: flex; justify-content: space-between; gap: 18px; align-items: end; margin-bottom: 16px; }
-    .route-review-head h2 { font-size: 22px; margin: 2px 0 3px; letter-spacing: -.02em; }
-    .route-review-head .muted { color: #a9c6b7; }
-    .route-review-head input { color-scheme:dark; background:#21483c; color:#edf7f1; border-color:#4a7465; }
-    .route-review-head button { color:var(--forest); background:var(--mint); border-color:var(--mint); font-weight:700; }
-    .route-review-shell .eyebrow { color:var(--mint); }
-    .route-review-stats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-    .route-review-stats span { padding: 6px 10px; border: 1px solid #354963; border-radius: 999px; background: rgba(13, 23, 38, .75); }
-    .route-daily-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 14px 0 10px; padding: 10px 12px; border: 1px solid #355a69; border-radius: 10px; background: rgba(20, 51, 62, .7); }
-    .route-daily-summary code { color: var(--mint); }
-    .route-review-list { display: grid; gap: 10px; max-height: 760px; overflow: auto; padding-right: 4px; }
-    .route-review-card { border: 1px solid #30435d; border-left: 4px solid #6685ac; border-radius: 8px; padding: 13px; background: rgba(13, 23, 38, .92); }
-    .route-review-card.route-ok { border-left-color: #51d6a6; }
-    .route-review-card.route-issue { border-left-color: #ff806c; }
-    .route-review-meta { display: flex; gap: 10px; flex-wrap: wrap; color: #8fa3bf; font-size: 11px; }
-    .route-request { margin: 10px 0; font-size: 16px; font-weight: 650; color: #fff; white-space: pre-wrap; }
-    .route-result { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
-    .route-result strong { padding:4px 9px; border-radius:5px; color:var(--forest); background:var(--mint); text-transform:uppercase; }
-    .route-result span, .signal-chip { padding: 3px 7px; border: 1px solid #405675; border-radius: 5px; color: #c5d3e7; font-size: 12px; }
-    .route-reason, .route-semantic { margin-top: 8px; color: #aebed4; font-size: 12px; }
-    .signal-row { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 6px; }
-    .signal-chip { border-color:#618b64; color:var(--mint); }
-    .route-tools { margin-top: 10px; border-top: 1px solid #293b55; padding-top: 9px; }
-    .route-tools summary { cursor: pointer; color: #c8d6e8; }
-    .route-tool { margin-top: 7px; padding: 8px; border-radius: 5px; background: #16243a; font-size: 12px; }
-    .route-tool-stage { color: #73b5ff; margin-right: 7px; }
-    .route-tool pre { margin-top: 7px; background: #0d1726; color: #dce8f8; max-height: 180px; }
-    .route-review-actions { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 12px; }
-    .route-review-actions button { margin-left: 5px; background: transparent; border-color: #425976; color: #dbe7f7; font-size: 12px; }
-    .route-review-actions button:hover { border-color:var(--mint); color:var(--mint); }
-    .review-state { color: #9fb0c8; font-size: 12px; }
-    .route-empty { padding: 28px; text-align: center; border: 1px dashed #405675; color: #9fb0c8; }
     .failure-box pre {
       background: transparent;
       padding: 0;
@@ -257,7 +215,7 @@ export function renderDashboardHtml() {
     .ledger-column { border:0; background:var(--panel); }
     .workspace-row code { font-size:11px; }
     @media (max-width: 900px) { .workspace-row{grid-template-columns:minmax(100px,.7fr) minmax(150px,1.3fr)}.workspace-row code{grid-column:span 1}.dashboard-grid{grid-template-columns:1fr} }
-    @media (max-width: 640px) { .app{display:block}.rail{position:static;width:100%;height:auto;padding:10px 16px}.brand{margin:0}.brand-wordmark{width:150px}.nav,.nav-label,.rail-foot{display:none}.topbar{padding:14px 16px}.status-pill,.top-actions .notice{display:none}main{padding:24px 16px 44px}h1{font-size:39px}.hero{grid-template-columns:1fr}.hero-stamp{border-left:0;border-top:1px solid var(--ink)}.pipeline{grid-template-columns:repeat(2,minmax(0,1fr));overflow:hidden}.step small{display:block;overflow:hidden;text-overflow:ellipsis}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.task-card{grid-template-columns:44px minmax(0,1fr)}.task-card>.status-badge{display:none}.panel-head{align-items:flex-start}.panel-head .primary{padding-inline:9px;font-size:12px}.route-review-head,.route-review-actions{align-items:flex-start;flex-direction:column}.workspace-row{grid-template-columns:1fr}.workspace-row code{grid-column:auto} }
+    @media (max-width: 640px) { .app{display:block}.rail{position:static;width:100%;height:auto;padding:10px 16px}.brand{margin:0}.brand-wordmark{width:150px}.nav,.nav-label,.rail-foot{display:none}.topbar{padding:14px 16px}.status-pill,.top-actions .notice{display:none}main{padding:24px 16px 44px}h1{font-size:39px}.hero{grid-template-columns:1fr}.hero-stamp{border-left:0;border-top:1px solid var(--ink)}.pipeline{grid-template-columns:repeat(2,minmax(0,1fr));overflow:hidden}.step small{display:block;overflow:hidden;text-overflow:ellipsis}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.task-card{grid-template-columns:44px minmax(0,1fr)}.task-card>.status-badge{display:none}.panel-head{align-items:flex-start}.panel-head .primary{padding-inline:9px;font-size:12px}.workspace-row{grid-template-columns:1fr}.workspace-row code{grid-column:auto} }
   </style>
 </head>
 <body>
@@ -428,7 +386,6 @@ ${ADOPTION_VIEW_HTML}
       renderActiveWorkspaces(data.activeWorkspaces || []);
       renderTaskLedger(data.taskLedger || null);
       renderAttention(data.attention || null);
-      renderChanges(data.changes || []);
       const health = data.health || {};
       const healthLabel = (check) => check?.status === "pass" ? "正常" : check?.status === "fail" ? "需处理 · 查看体检" : check?.status === "unchecked" ? "未检查 · 查看体检" : "未知 · 查看体检";
       el("healthSummary").innerHTML = '<div class="health-row"><span>配置基线</span><b>' + healthLabel(health.configBaseline) + '</b></div><div class="health-row"><span>可信账本</span><b>' + healthLabel(health.ledger) + '</b></div><div class="health-row"><span>IDE 适配器</span><b>查看体检</b></div>';
@@ -530,9 +487,6 @@ ${ADOPTION_VIEW_HTML}
       if (item.event === "evidence_added") return "新增 " + String(item.count || 0) + " 条证据";
       return item.status ? "状态 " + item.status : "已记录";
     }
-    function renderInbox(messages) {
-      if (el("inbox")) el("inbox").textContent = JSON.stringify(messages || [], null, 2);
-    }
     function renderAttention(attention) {
       if (!attention || attention.total === 0) {
         el("attentionTitle").textContent = "当前运行正常";
@@ -566,13 +520,6 @@ ${ADOPTION_VIEW_HTML}
           '<pre>' + esc(item.admitHint || "") + '</pre></div>');
       }
       el("attention").innerHTML = blocks.join("");
-    }
-    function renderChanges(changes) {
-      if (!el("changes")) return;
-      const openChanges = changes.filter((change) => change.status === "open");
-      el("changes").innerHTML = openChanges.length === 0 ? '<div class="muted">没有待处理的变更请求</div>' : '<table><thead><tr><th>编号</th><th>任务</th><th>越界路径</th><th>报告</th></tr></thead><tbody>' + openChanges.map((change) => {
-        return '<tr><td><strong>' + esc(change.id) + '</strong></td><td>' + esc(change.taskId) + '<br><span class="muted">' + esc(change.subject) + '</span></td><td>' + esc((change.deniedPaths || []).join(", ")) + '</td><td><span class="muted">' + esc(change.reportMdPath || "") + '</span></td></tr>';
-      }).join("") + '</tbody></table>';
     }
     function actionButtons(task) {
       if (task.status === "completed") return '<span class="muted">Done</span>';
@@ -672,16 +619,6 @@ ${ADOPTION_VIEW_HTML}
       const card = event.target.closest(".ledger-card");
       if (card) card.classList.toggle("expanded");
     });
-    async function loadInbox(agent) {
-      const query = agent ? "?agent=" + encodeURIComponent(agent) : "";
-      const response = await dashboardFetch("/api/team/inbox" + query, { cache: "no-store" });
-      const payload = await response.json();
-      if (!response.ok || payload.ok === false) {
-        throw new Error(payload.error || "Inbox failed");
-      }
-      renderInbox(payload.result);
-      return payload;
-    }
     ${ADOPTION_SCRIPT}
     ${PANELS_SCRIPT}
     loadState();

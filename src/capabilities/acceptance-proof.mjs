@@ -19,7 +19,7 @@ export async function writeAcceptanceProof(rootDir, planId, task, evidence = {},
   const { config } = await loadWildArrangeConfig(rootDir);
   let projectReviewContextValid = false;
   try {
-    const scope = evidence.scopeResult || task.last_scope_result || latestEvidence(task, "scope_check");
+    const scope = evidence.scopeResult || task.last_scope_result || latestEvidence(task, "scope_guard");
     const review = evidence.reviewResult || task.last_review_result || latestEvidence(task, "review_gate");
     const current = await prepareProjectReview(rootDir, task, config, scope?.changedPaths || []);
     projectReviewContextValid = !current.steps.length || (current.pass && current.contextDigest === review?.projectReview?.contextDigest);

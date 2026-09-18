@@ -20,6 +20,7 @@ import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { collectGitChangedPaths } from "../infra/git-diff.mjs";
 import { renderPromptPackEntry } from "../infra/prompt-pack.mjs";
 import { writeRuntimeContextSnapshot } from "../infra/runtime-snapshot.mjs";
+import { uniqueStrings } from "../infra/text-utils.mjs";
 import { defaultInjectionPointForAgent, resolveInjectionPoint } from "./injection.mjs";
 import { loadTaskState } from "../infra/task-state-store.mjs";
 import { scanProjectRules } from "../infra/rule-scanner.mjs";
@@ -403,6 +404,3 @@ function renderContinuationMarkdown(directive) {
   ].join("\n");
 }
 
-function uniqueStrings(values) {
-  return [...new Set(values.filter((value) => typeof value === "string" && value.length > 0))];
-}

@@ -7,14 +7,15 @@
 // 1. 监视区内每个文件必须命中唯一一个模块 include（最长前缀优先），否则判孤儿；同等长度命中多个判冲突。
 // 2. 映射表登记的路径必须真实存在；目录前缀命中 0 个受监视文件判失效（allowEmpty 除外）。
 // 3. 同模块 include 不得冗余嵌套。跨模块嵌套允许，按最长前缀判主属。
-// 4. 命名风格由 zone.style 决定；禁止桶文件；Rust 禁止 <dir>.rs 与 <dir>/ 并存；
+// 4. 命名统一 kebab 风格（放行 PascalCase/camelCase 惯用名）；禁止桶文件；
 //    测试文件基名必须能对上被测文件。
 // 5. module-registry ↔ 映射表 designId ↔ D 字典 key 三方一致。
 // 6. D 字典 files 的 p 路径必须存在，且归属（主属或镜像）覆盖其所在模块；
 //    跨模块引用（extTo/extFrom 带 p、extLinks 的 a/b）只查存在性。
 // 7. 反向同步：GRAPH_DEPTH=all 时 include 的实现文件必须进图（D files 或 generated-graph）；
 //    entry 时每模块至少画一个入口。豁免测试文件、index.*、mod.rs、__init__.py、*.types.*，及 D 目录节点。
-// 8. 总图 `.flow.nK` / `.flow.shell` 的直接子元素数必须对得上，防止卡片掉进 92px 标签列。
+//
+// 总图 flow-grid 卡片布局校验已拆到同目录 validate-flow-grid.mjs（check:arch 串联执行）。
 
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, extname, relative, resolve, sep } from "node:path";
@@ -26,15 +27,14 @@ const toPosix = (path) => relative(root, path).split(sep).join("/");
 
 // ── 按项目调整（CONFIG）──────────────────────────────────────────
 // 复制后必须填 WATCH_ZONES，空数组会失败（禁止沿用某个产品仓库的目录）。
-// 例：{ dir: "src", exts: new Set([".ts", ".tsx"]), style: "kebab" }
-// 例：{ dir: "frontend", exts: new Set([".py"]), style: "snake" }
+// 例：{ dir: "src", exts: new Set([".ts", ".tsx"]) }
 const WATCH_ZONES = [
-  { dir: "bin", exts: new Set([".mjs"]), style: "kebab" },
-  { dir: "src/interface", exts: new Set([".mjs"]), style: "kebab" },
-  { dir: "src/orchestration", exts: new Set([".mjs"]), style: "kebab" },
-  { dir: "src/ai", exts: new Set([".mjs"]), style: "kebab" },
-  { dir: "src/capabilities", exts: new Set([".mjs"]), style: "kebab" },
-  { dir: "src/infra", exts: new Set([".mjs"]), style: "kebab" }
+  { dir: "bin", exts: new Set([".mjs"]) },
+  { dir: "src/interface", exts: new Set([".mjs"]) },
+  { dir: "src/orchestration", exts: new Set([".mjs"]) },
+  { dir: "src/ai", exts: new Set([".mjs"]) },
+  { dir: "src/capabilities", exts: new Set([".mjs"]) },
+  { dir: "src/infra", exts: new Set([".mjs"]) }
 ];
 const GENERATED_PREFIXES = [];
 const MAP_PATH = "tooling/arch-module-graph/module-file-map.json";
@@ -56,7 +56,6 @@ const ENTRY_BASENAMES = /(^|\/)(index\.[^/]+|mod\.rs|__init__\.py)$/;
 const NAME_EXEMPT = /(?:^|\/)(__init__|__main__)\.py$|(?:^|\/)mod\.rs$/;
 const TYPES_FILE = /\.types\.[^.]+$/;
 const BANNED_BASENAME = /^(utils?|helpers?|common|misc|shared|constants)(\.[a-z0-9-]+)*\.[a-z0-9]+$/;
-const FLOW_EXPECT = { n2: 3, n3: 5, n4: 7, n5: 9, n6: 11, n7: 13, n8: 15, shell: 3 };
 
 const EXCLUDED = (posix) =>
   TEST_FILE.test(posix) || GENERATED_PREFIXES.some((p) => posix.startsWith(p));
@@ -70,23 +69,12 @@ const walk = (directory, depth = Infinity) => {
   });
 };
 
-const normalizeStyle = (style) => {
-  if (style === "rust" || style === "python" || style === "snake") return "snake";
-  if (style === "strict" || style === "kebab-strict") return "kebab-strict";
-  return "kebab";
-};
-
 const extAlt = (exts) => [...exts].map((e) => e.slice(1).replace(/[.+^${}()|[\]\\]/g, "\\$&")).join("|");
 
 const nameReFor = (zone) => {
   if (zone.nameRe) return zone.nameRe;
   const alt = extAlt(zone.exts);
-  const style = normalizeStyle(zone.style);
-  if (style === "snake") return new RegExp(`^[a-z][a-z0-9_]*\\.(${alt})$`);
-  if (style === "kebab-strict") {
-    return new RegExp(`^[a-z0-9]+(-[a-z0-9]+)*(\\.[a-z0-9]+(-[a-z0-9]+)*)*\\.(${alt})$`);
-  }
-  // kebab 默认放行 React/Next 惯用名：Button.tsx、useDarkMode.ts、jwt-auth.guard.ts
+  // 放行 React/Next 惯用名：Button.tsx、useDarkMode.ts、jwt-auth.guard.ts
   return new RegExp(
     `^([A-Z][A-Za-z0-9]*|[a-z][A-Za-z0-9]*|[a-z0-9]+(-[a-z0-9]+)*)(\\.[A-Za-z0-9]+(-[A-Za-z0-9]+)*)*\\.(${alt})$`,
   );
@@ -94,44 +82,7 @@ const nameReFor = (zone) => {
 
 const dirReFor = (zone) => {
   if (zone.dirRe) return zone.dirRe;
-  const style = normalizeStyle(zone.style);
-  if (style === "snake") return /^[a-z][a-z0-9_]*$/;
-  if (style === "kebab-strict") return /^[a-z0-9]+(-[a-z0-9]+)*$/;
   return /^([A-Z][A-Za-z0-9]*|[a-z0-9]+(-[a-z0-9]+)*)$/;
-};
-
-const countDirectDivChildren = (html, start) => {
-  const gt = html.indexOf(">", start);
-  if (gt < 0) return 0;
-  let i = gt + 1, depth = 1, n = 0;
-  while (i < html.length && depth > 0) {
-    const open = html.indexOf("<div", i);
-    const close = html.indexOf("</div>", i);
-    if (close < 0) break;
-    if (open >= 0 && open < close) {
-      if (depth === 1) n += 1;
-      depth += 1;
-      i = open + 4;
-    } else {
-      depth -= 1;
-      i = close + 6;
-    }
-  }
-  return n;
-};
-
-const lintFlowGrids = (html) => {
-  for (const match of html.matchAll(/<div\s+class="([^"]*\bflow\b[^"]*)"/g)) {
-    const cls = match[1];
-    if (/\bgrid4\b/.test(cls)) continue;
-    const kind = ["shell", "n8", "n7", "n6", "n5", "n4", "n3", "n2"].find((k) => new RegExp(`\\b${k}\\b`).test(cls));
-    if (!kind) continue;
-    const got = countDirectDivChildren(html, match.index);
-    const want = FLOW_EXPECT[kind];
-    expect(got === want,
-      `总图 .flow.${kind} 应有 ${want} 个直接子元素（卡与箭头交错），实际 ${got}\n` +
-      `  → 子元素数量必须和 nK 对上；单张卡不要写 n2。漏写包裹时卡片会掉进左侧 92px 标签列`);
-  }
 };
 
 const globToRe = (pattern) => {
@@ -160,9 +111,9 @@ for (const zone of WATCH_ZONES) {
   for (const file of walk(zoneAbs, zone.maxDepth ?? Infinity)) {
     const posix = toPosix(file);
     if (!zone.exts.has(extname(file))) continue;
-    allSourceFiles.push({ posix, style: normalizeStyle(zone.style), zone });
+    allSourceFiles.push({ posix, zone });
     if (!EXCLUDED(posix)) {
-      watched.push({ posix, style: normalizeStyle(zone.style), zone });
+      watched.push({ posix, zone });
       count += 1;
     }
   }
@@ -172,7 +123,7 @@ for (const zone of WATCH_ZONES) {
 }
 
 expect(WATCH_ZONES.length > 0,
-  `WATCH_ZONES 为空\n  → 复制后门禁必须改成这个项目的源码目录，例如 { dir: "src", exts: new Set([".ts"]), style: "kebab" }`);
+  `WATCH_ZONES 为空\n  → 复制后门禁必须改成这个项目的源码目录，例如 { dir: "src", exts: new Set([".ts"]) }`);
 if (WATCH_ZONES.length > 0 && watched.length === 0) {
   expect(WATCH_ZONES.every((z) => z.allowMissing || z.allowEmpty),
     `WATCH_ZONES 未扫到任何文件：${WATCH_ZONES.map((z) => z.dir).join("、")}\n  → 把 dir / exts 改成这个项目的源码，否则门禁是假绿`);
@@ -291,7 +242,7 @@ for (const zone of WATCH_ZONES) {
   if (!existsSync(zoneAbs)) continue;
   const dirRule = dirReFor(zone);
   const nameRule = nameReFor(zone);
-  const dirLabel = normalizeStyle(zone.style) === "snake" ? "snake_case" : "kebab-case / PascalCase";
+  const dirLabel = "kebab-case / PascalCase";
   for (const entry of walk(zoneAbs, zone.maxDepth ?? Infinity)) {
     const posix = toPosix(entry);
     if (EXCLUDED(posix)) continue;
@@ -319,13 +270,6 @@ for (const zone of WATCH_ZONES) {
   }
 }
 
-for (const { posix, style } of allSourceFiles) {
-  if (style !== "snake" || !posix.endsWith(".rs")) continue;
-  const siblingDir = posix.slice(0, -".rs".length) + "/";
-  expect(!existsSync(resolve(root, siblingDir)),
-    `Rust 禁止 <dir>.rs 与 <dir>/ 并存：${posix}\n  → 合并为 ${siblingDir}mod.rs`);
-}
-
 for (const { posix, zone } of allSourceFiles) {
   const testMatch = posix.match(/^(.*\/)?([^/]+)\.test\.([^./]+)$/);
   if (!testMatch) continue;
@@ -347,7 +291,6 @@ if (!existsSync(overviewPath)) {
   errors.push(`missing architecture overview: ${OVERVIEW_PATH}\n  → 从 skill 的 template.html 复制到此路径并填 D 字典`);
 } else {
   overview = readFileSync(overviewPath, "utf8");
-  lintFlowGrids(overview);
   const registryMatch = overview.match(/<script type="application\/json" id="module-registry">([\s\S]*?)<\/script>/);
   expect(registryMatch, `${OVERVIEW_PATH} missing module-registry script block`);
   const registry = registryMatch ? JSON.parse(registryMatch[1]) : [];

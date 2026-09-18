@@ -3,6 +3,7 @@ import { realpath, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { runCommandFile } from "./command-runner.mjs";
+import { readGitHead, readGitTopLevel } from "./git-diff.mjs";
 import {
   nowIso,
   readJson,
@@ -33,19 +34,19 @@ export async function inspectGitCoordination(rootDir, config = {}) {
   if (mode === "off") {
     return { enabled: false, active: false, mode, reason: "git coordination is disabled" };
   }
-  const topLevelResult = await runGit(rootDir, ["rev-parse", "--show-toplevel"]);
-  if (!topLevelResult.ok) {
+  const topLevelResult = await readGitTopLevel(rootDir);
+  if (!topLevelResult.available) {
     return unavailable(mode, "project is not a Git repository");
   }
-  const topLevel = await canonicalPath(topLevelResult.stdout.trim());
+  const topLevel = await canonicalPath(topLevelResult.topLevel);
   if (topLevel !== await canonicalPath(rootDir)) {
     return unavailable(mode, "project root is not the Git toplevel");
   }
-  const headResult = await runGit(rootDir, ["rev-parse", "HEAD"]);
-  if (!headResult.ok) {
+  const headResult = await readGitHead(rootDir);
+  if (!headResult.available) {
     return unavailable(mode, "Git repository has no baseline commit", { topLevel });
   }
-  const head = headResult.stdout.trim();
+  const head = headResult.sha;
   const remote = config.remote || "origin";
   const remoteResult = await runGit(rootDir, ["remote", "get-url", remote]);
   if (!remoteResult.ok) {
@@ -73,9 +74,9 @@ export async function inspectGitCoordination(rootDir, config = {}) {
 }
 
 export async function gitHead(rootDir) {
-  const result = await runGit(rootDir, ["rev-parse", "HEAD"]);
-  if (!result.ok) throw new Error(`cannot resolve Git HEAD: ${result.stderr || result.stdout}`);
-  return result.stdout.trim();
+  const head = await readGitHead(rootDir);
+  if (!head.available) throw new Error(`cannot resolve Git HEAD: ${head.reason}`);
+  return head.sha;
 }
 
 export async function gitTree(rootDir, ref = "HEAD") {
@@ -85,17 +86,17 @@ export async function gitTree(rootDir, ref = "HEAD") {
 }
 
 export async function inspectTaskWorktreeBaseline(rootDir) {
-  const topLevel = await runGit(rootDir, ["rev-parse", "--show-toplevel"]);
-  if (!topLevel.ok) {
+  const topLevel = await readGitTopLevel(rootDir);
+  if (!topLevel.available) {
     return { available: false, clean: false, reason: "project is not a Git repository", changedPaths: [] };
   }
   const canonicalRoot = await canonicalPath(rootDir);
-  const canonicalTopLevel = await canonicalPath(topLevel.stdout.trim());
+  const canonicalTopLevel = await canonicalPath(topLevel.topLevel);
   if (canonicalRoot !== canonicalTopLevel) {
     return { available: false, clean: false, reason: "project root is not the Git toplevel", changedPaths: [] };
   }
-  const head = await runGit(rootDir, ["rev-parse", "HEAD"]);
-  if (!head.ok) {
+  const head = await readGitHead(rootDir);
+  if (!head.available) {
     return { available: false, clean: false, reason: "Git repository has no baseline commit", changedPaths: [] };
   }
   const branch = await runGit(rootDir, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
@@ -103,7 +104,7 @@ export async function inspectTaskWorktreeBaseline(rootDir) {
   return {
     available: true,
     clean: changedPaths.length === 0,
-    headSha: head.stdout.trim(),
+    headSha: head.sha,
     branch: branch.ok ? branch.stdout.trim() : null,
     detached: !branch.ok,
     changedPaths,

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { captureCardLiveSnapshot, DANGEROUS_ACTIONS, fingerprintCard, scanVerificationUniverse } from "../src/infra/verification-discovery.mjs";
+import { DANGEROUS_ACTIONS, fingerprintCard } from "../src/infra/verification-cards.mjs";
+import { captureCardLiveSnapshot, hasDynamicCodeHint, scanVerificationUniverse } from "../src/infra/verification-discovery.mjs";
 
 async function withTempDir(fn) {
   const baseDir = path.join(process.cwd(), ".tmp");
@@ -36,6 +37,30 @@ async function writeFixture(dir) {
   await writeFile(path.join(dir, "docs", "TESTING.md"), "# old testing notes\n");
   await writeFile(path.join(dir, "marker-seed.txt"), "seed\n");
 }
+
+test("discovery: dynamic code hint predicate covers non-literal import, eval and new Function", () => {
+  assert.equal(hasDynamicCodeHint("export async function load(name) { return import(name); }"), true);
+  assert.equal(hasDynamicCodeHint("const out = eval('1 + 1');"), true);
+  assert.equal(hasDynamicCodeHint("const build = new Function('return 1');"), true);
+  assert.equal(hasDynamicCodeHint("const mod = await import('./static.mjs');"), false);
+  assert.equal(hasDynamicCodeHint("import { n } from './app.mjs';\nexport const ok = n;"), false);
+  assert.equal(hasDynamicCodeHint("export const n = 1;"), false);
+});
+
+test("discovery: code assets with dynamic code hints stay unknown and never dangerous", async () => {
+  await withTempDir(async (dir) => {
+    await writeFixture(dir);
+    await writeFile(path.join(dir, "test", "dynamic-fn.test.mjs"), "const build = new Function('return 1');\nexport const ok = build();\n");
+    await writeFile(path.join(dir, "test", "dynamic-import.test.mjs"), "export async function load(name) { return import(name); }\n");
+    const { cards } = await scanVerificationUniverse(dir);
+    for (const relativePath of ["test/dynamic-fn.test.mjs", "test/dynamic-import.test.mjs"]) {
+      const card = cards.find((item) => item.path === relativePath);
+      assert.ok(card, `expected a card for ${relativePath}`);
+      assert.equal(card.confidence, "unknown", `${relativePath} must stay unknown`);
+      assert.ok(!DANGEROUS_ACTIONS.includes(card.action), `${relativePath} action=${card.action}`);
+    }
+  });
+});
 
 test("discovery: repeat scans are ordered, stable ids and digests", async () => {
   await withTempDir(async (dir) => {

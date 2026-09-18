@@ -34,8 +34,7 @@ export function evaluateGateArming({ config, tasks = [] } = {}) {
     }
   }
 
-  const reviewScope = activeTasks.length > 0 ? activeTasks : [];
-  const tasksWithoutRealReview = reviewScope.filter((task) => !hasRealReviewLane(task, config));
+  const tasksWithoutRealReview = activeTasks.filter((task) => !hasRealReviewLane(task, config));
   if (tasksWithoutRealReview.length > 0) {
     issues.push({
       code: "review_tautology",

@@ -11,7 +11,7 @@ import {
 } from "../infra/runtime-store.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
-import { runCommandFile } from "../infra/command-runner.mjs";
+import { readGitHead } from "../infra/git-diff.mjs";
 import { callOpenAICompatible, resolveAgentProvider } from "../infra/llm-provider.mjs";
 import { routeRequest } from "./routing.mjs";
 
@@ -334,7 +334,8 @@ async function evaluateArchivistTrigger(rootDir, archivistConfig, options) {
   });
   const triggers = archivistConfig.triggers || {};
   const stage = normalizeStage(options.stage || DEFAULT_STAGE);
-  const gitHead = triggers.gitHeadChanged ? await readGitHead(rootDir) : null;
+  const gitHeadProbe = triggers.gitHeadChanged ? await readGitHead(rootDir) : null;
+  const gitHead = gitHeadProbe?.available ? gitHeadProbe.sha || null : null;
   const gitChanged = Boolean(gitHead && state.lastGitHead && gitHead !== state.lastGitHead);
   const firstRun = !state.lastRunAt;
   let shouldRun = false;
@@ -383,12 +384,6 @@ async function evaluateArchivistTrigger(rootDir, archivistConfig, options) {
     gitChanged,
     promptCounts: state.promptCounts,
   };
-}
-
-async function readGitHead(rootDir) {
-  const result = await runCommandFile("git", ["-C", rootDir, "rev-parse", "HEAD"], rootDir, 15_000);
-  if (result.exitCode !== 0) return null;
-  return result.stdout.trim() || null;
 }
 
 function promptThresholdForStage(config, stage) {

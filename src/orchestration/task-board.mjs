@@ -26,7 +26,7 @@ import {
   DEFAULT_LEAD_AGENT,
   normalizeAgentKey,
 } from "../infra/agent-registry.mjs";
-import { withTaskStateLock } from "../infra/task-state-lock.mjs";
+import { transactWithLedger, withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import {
   prepareArchiveRecoveryPackage,
@@ -42,7 +42,6 @@ import {
   writeTasksMarkdown,
 } from "./plan-state.mjs";
 import { coordinateTaskClaim } from "./remote-ownership.mjs";
-export { applyVerifierEvidenceToCriteria, criteriaStatus } from "../infra/success-criteria.mjs";
 
 export async function listTeamTasks(rootDir, options = {}) {
   const ledger = await loadTaskLedger(rootDir);
@@ -147,14 +146,14 @@ async function claimTeamTaskUnlocked(rootDir, options = {}) {
   task.coordination = coordination;
   task.claimedAt = nowIso();
   task.updatedAt = nowIso();
-  await persistTaskState(rootDir, taskState);
-  await appendLedger(rootDir, {
+  // 审计先行：team_task_claimed 入账本后才提交 in_progress 状态（ARC-003）。
+  await transactWithLedger(rootDir, {
     type: "team_task_claimed",
     planId: taskState.planId,
     taskId: task.id,
     owner: task.owner,
     coordinationStatus: coordination.status,
-  });
+  }, () => persistTaskState(rootDir, taskState));
   await writeSnapshot(rootDir, "team_task_claimed", { planId: taskState.planId, taskId: task.id, owner: task.owner });
   return { planId: taskState.planId, task };
 }
@@ -245,7 +244,13 @@ export function findRunnableTask(tasks) {
 }
 
 export function isTaskRunnable(task, tasks) {
-  return task?.status === "pending" && unresolvedTaskBlockers(task, tasks).length === 0;
+  // A pending task holding a parallel run or admission claim is owned by that
+  // run; both claims are released (set to null) when the run closes or the
+  // admission settles, which makes the task runnable again.
+  return task?.status === "pending"
+    && !task.parallel_run_claim?.runId
+    && !task.admission_claim?.runId
+    && unresolvedTaskBlockers(task, tasks).length === 0;
 }
 
 export async function persistTaskState(rootDir, taskState) {

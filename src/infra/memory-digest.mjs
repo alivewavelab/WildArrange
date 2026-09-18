@@ -1,6 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendLedger } from "./ledger.mjs";
+import { readGitHead } from "./git-diff.mjs";
 import {
   createWorkId,
   ensureWildArrangeDirs,
@@ -11,7 +12,6 @@ import {
   resolveTaskCheckpointPath,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
-import { runCommandFile } from "./command-runner.mjs";
 import { loadTaskState } from "./task-state-store.mjs";
 
 export async function writeMemoryDigest(rootDir, options = {}) {
@@ -46,7 +46,7 @@ export async function buildMemoryDigest(rootDir, options = {}) {
     ? await readTaskCheckpoint(rootDir, taskState.planId, task.id)
     : null;
   const ledgerTail = await readLedgerTail(rootDir, Number(options.ledgerLimit) || 20);
-  const gitHead = await readGitHead(rootDir);
+  const gitHead = await readDigestGitHead(rootDir);
   const stage = options.stage || route?.route || work?.stage || "default";
   return {
     kind: "memory_digest",
@@ -110,10 +110,10 @@ async function readJsonLines(filePath) {
   return raw.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
 }
 
-async function readGitHead(rootDir) {
-  const current = await runCommandFile("git", ["-C", rootDir, "rev-parse", "HEAD"], rootDir, 15_000);
-  if (current.exitCode === 0 && current.stdout.trim()) {
-    return { value: current.stdout.trim(), source: "git" };
+async function readDigestGitHead(rootDir) {
+  const current = await readGitHead(rootDir);
+  if (current.available && current.sha) {
+    return { value: current.sha, source: "git" };
   }
   const head = await readJson(resolveWildArrangePath(rootDir, "routing", "archivist-trigger-state.json"), null);
   return head?.lastGitHead ? { value: head.lastGitHead, source: "archivist-trigger-state" } : null;

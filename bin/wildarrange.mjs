@@ -5,7 +5,6 @@ import { applyContractDecision, proposeContractChange, resolveContractChange } f
 import { runHostRoute, runHostHook } from "../src/orchestration/host-runtime.mjs";
 import path from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { startDashboardServer } from "../src/interface/dashboard.mjs";
 import {
@@ -46,7 +45,6 @@ import {
   steerWorkflow,
 } from "../src/orchestration/change-governance.mjs";
 import {
-  archiveAndDeleteTeamTask,
   claimTeamTask,
   createTeamTask,
   getTeamTask,
@@ -57,6 +55,7 @@ import {
   recordTaskEvidence,
   sendTeamMessage,
 } from "../src/orchestration/task-board.mjs";
+import { archiveTeamTaskWithBackup } from "../src/orchestration/task-archive.mjs";
 import { approvePlan, importPlan, loadPlanApproval } from "../src/orchestration/plan-state.mjs";
 import { statusReport, writeWorkflowSummary } from "../src/orchestration/status.mjs";
 import { createSamplePlan, runWorkflow } from "../src/orchestration/workflow.mjs";
@@ -74,7 +73,8 @@ import {
 } from "../src/ai/context.mjs";
 import { matchSkills } from "../src/ai/skill-matcher.mjs";
 import { resolveInjectionPoint } from "../src/ai/injection.mjs";
-import { runInjectionHook, TRUSTED_CLI_COMMAND_PREFIX } from "../src/ai/hooks.mjs";
+import { runInjectionHook } from "../src/ai/hooks.mjs";
+import { TRUSTED_CLI_COMMAND_PREFIX } from "../src/ai/pre-tool-guard.mjs";
 import { routeRequest } from "../src/ai/routing.mjs";
 import { runSuspicionReview } from "../src/ai/suspicion-review.mjs";
 import { runRepositoryGovernanceAudit } from "../src/capabilities/repository-governance.mjs";
@@ -85,7 +85,8 @@ import {
   appendAnnotation,
   readAnnotations,
 } from "../src/infra/annotation-log.mjs";
-import { computeImpact, computeZoneTests, listRepoTests } from "../src/infra/dependency-graph.mjs";
+import { computeImpact } from "../src/infra/dependency-graph.mjs";
+import { runRepoTests, selectRepoTests } from "../src/infra/test-runner.mjs";
 import { errorProtocolOf, formatErrorInline } from "../src/infra/error-protocol.mjs";
 import { hashContent } from "../src/infra/runtime-store.mjs";
 import { verifyLedger } from "../src/infra/ledger.mjs";
@@ -130,6 +131,13 @@ function parseArgs(argv) {
   return args;
 }
 
+// parseArgs 的取值只有两种形态：带值时是字符串，裸标志时是 true。
+// strArg 把缺省、裸标志与空串统一收敛为 undefined，代替散落的 `!== true` 手工守卫。
+function strArg(args, key) {
+  const value = args[key];
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
 function splitCliList(value) {
   if (typeof value !== "string") return [];
   return value.split(",").map((item) => item.trim()).filter(Boolean);
@@ -142,7 +150,7 @@ function printHelp({ all = false } = {}) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const command = args._[0];
-  const rootDir = args["control-root"] && args["control-root"] !== true
+  const rootDir = strArg(args, "control-root")
     ? path.resolve(String(args["control-root"]))
     : process.cwd();
 
@@ -199,7 +207,7 @@ async function main() {
     }
     if (subcommand === "baseline") {
       console.log(JSON.stringify(await writeConfigBaseline(rootDir, {
-        reason: args.reason && args.reason !== true ? args.reason : "manual",
+        reason: strArg(args, "reason") || "manual",
       }), null, 2));
       return;
     }
@@ -216,20 +224,20 @@ async function main() {
     const subcommand = args._[1];
     if (subcommand === "install") {
       console.log(JSON.stringify(await installAdapter(rootDir, {
-        target: args.target && args.target !== true ? args.target : "all",
-        mode: args.mode && args.mode !== true ? args.mode : "local",
-        packageName: args.package && args.package !== true ? args.package : DEFAULT_PACKAGE_NAME,
+        target: strArg(args, "target") || "all",
+        mode: strArg(args, "mode") || "local",
+        packageName: strArg(args, "package") || DEFAULT_PACKAGE_NAME,
       }), null, 2));
       return;
     }
     if (subcommand === "uninstall") {
       console.log(JSON.stringify(await uninstallAdapter(rootDir, {
-        target: args.target && args.target !== true ? args.target : "all",
+        target: strArg(args, "target") || "all",
       }), null, 2));
       return;
     }
     if (subcommand === "restore") {
-      if (!args.backup || args.backup === true) throw new Error("wildarrange adapter restore requires --backup <backupId>");
+      if (!strArg(args, "backup")) throw new Error("wildarrange adapter restore requires --backup <backupId>");
       console.log(JSON.stringify(await restoreAdapterBackup(rootDir, {
         backupId: args.backup,
       }), null, 2));
@@ -242,7 +250,7 @@ async function main() {
     const subcommand = args._[1];
     if (subcommand === "register") {
       console.log(JSON.stringify(await registerCoordinationDevice(rootDir, {
-        name: args.name && args.name !== true ? args.name : undefined,
+        name: strArg(args, "name"),
         force: Boolean(args.force),
       }), null, 2));
       return;
@@ -261,10 +269,10 @@ async function main() {
       return;
     }
     if (subcommand === "claim") {
-      if (!args.task || args.task === true) throw new Error("wildarrange coordination claim requires --task <taskId>");
+      if (!strArg(args, "task")) throw new Error("wildarrange coordination claim requires --task <taskId>");
       console.log(JSON.stringify(await claimTeamTask(rootDir, {
         taskId: args.task,
-        owner: args.owner && args.owner !== true ? args.owner : undefined,
+        owner: strArg(args, "owner"),
         forceCoordination: true,
       }), null, 2));
       return;
@@ -275,38 +283,38 @@ async function main() {
   if (command === "handoff") {
     const subcommand = args._[1];
     if (subcommand === "prepare") {
-      if (!args.task || args.task === true) throw new Error("wildarrange handoff prepare requires --task <taskId>");
-      if (!args["to-device-id"] || args["to-device-id"] === true) throw new Error("wildarrange handoff prepare requires --to-device-id <uuid>");
+      if (!strArg(args, "task")) throw new Error("wildarrange handoff prepare requires --task <taskId>");
+      if (!strArg(args, "to-device-id")) throw new Error("wildarrange handoff prepare requires --to-device-id <uuid>");
       console.log(JSON.stringify(await prepareTaskHandoff(rootDir, {
         taskId: args.task,
         toDeviceId: args["to-device-id"],
-        toDeviceName: args["to-device-name"] && args["to-device-name"] !== true ? args["to-device-name"] : undefined,
-        toOwner: args["to-owner"] && args["to-owner"] !== true ? args["to-owner"] : undefined,
+        toDeviceName: strArg(args, "to-device-name"),
+        toOwner: strArg(args, "to-owner"),
       }), null, 2));
       return;
     }
     if (subcommand === "push") {
-      if (!args.task || args.task === true) throw new Error("wildarrange handoff push requires --task <taskId>");
+      if (!strArg(args, "task")) throw new Error("wildarrange handoff push requires --task <taskId>");
       console.log(JSON.stringify(await pushTaskHandoff(rootDir, { taskId: args.task }), null, 2));
       return;
     }
     if (subcommand === "accept") {
-      if (!args.task || args.task === true) throw new Error("wildarrange handoff accept requires --task <taskId>");
+      if (!strArg(args, "task")) throw new Error("wildarrange handoff accept requires --task <taskId>");
       console.log(JSON.stringify(await acceptTaskHandoff(rootDir, {
         taskId: args.task,
-        planId: args.plan && args.plan !== true ? args.plan : undefined,
+        planId: strArg(args, "plan"),
       }), null, 2));
       return;
     }
     if (subcommand === "takeover") {
-      if (!args.plan || args.plan === true) throw new Error("wildarrange handoff takeover requires --plan <planId>");
-      if (!args.task || args.task === true) throw new Error("wildarrange handoff takeover requires --task <taskId>");
-      if (!args["expected-device-id"] || args["expected-device-id"] === true) throw new Error("wildarrange handoff takeover requires --expected-device-id <uuid>");
+      if (!strArg(args, "plan")) throw new Error("wildarrange handoff takeover requires --plan <planId>");
+      if (!strArg(args, "task")) throw new Error("wildarrange handoff takeover requires --task <taskId>");
+      if (!strArg(args, "expected-device-id")) throw new Error("wildarrange handoff takeover requires --expected-device-id <uuid>");
       console.log(JSON.stringify(await takeoverTaskOwnership(rootDir, {
         planId: args.plan,
         taskId: args.task,
         expectedDeviceId: args["expected-device-id"],
-        owner: args.owner && args.owner !== true ? args.owner : undefined,
+        owner: strArg(args, "owner"),
         reason: args.reason,
       }), null, 2));
       return;
@@ -317,14 +325,14 @@ async function main() {
   if (command === "injection") {
     const subcommand = args._[1];
     if (subcommand === "show") {
-      if (!args.point || args.point === true) throw new Error("wildarrange injection show requires --point <name>");
+      if (!strArg(args, "point")) throw new Error("wildarrange injection show requires --point <name>");
       console.log(JSON.stringify(await resolveInjectionPoint(rootDir, args.point, {
-        agent: args.agent && args.agent !== true ? args.agent : "",
-        taskId: args.task && args.task !== true ? args.task : "",
-        planId: args.plan && args.plan !== true ? args.plan : "",
+        agent: strArg(args, "agent") || "",
+        taskId: strArg(args, "task") || "",
+        planId: strArg(args, "plan") || "",
       }, {
-        text: args.text && args.text !== true ? args.text : "",
-        stage: args.stage && args.stage !== true ? args.stage : "",
+        text: strArg(args, "text") || "",
+        stage: strArg(args, "stage") || "",
       }), null, 2));
       return;
     }
@@ -334,16 +342,14 @@ async function main() {
   if (command === "hook") {
     const subcommand = args._[1];
     if (subcommand === "run") {
-      const payload = args.from && args.from !== true
+      const payload = strArg(args, "from")
         ? await readJson(path.resolve(rootDir, args.from))
         : JSON.parse(await readAllStdin());
-      const hostAdapter = args.host && args.host !== true ? String(args.host) : String(process.env.WILDARRANGE_HOST_ADAPTER || "");
+      const hostAdapter = strArg(args, "host") || String(process.env.WILDARRANGE_HOST_ADAPTER || "");
       if (hostAdapter) payload.host_adapter = hostAdapter;
-      const hasAdapterMode = args["adapter-mode"] && args["adapter-mode"] !== true;
+      const hasAdapterMode = strArg(args, "adapter-mode") !== undefined;
       const adapterMode = hasAdapterMode ? String(args["adapter-mode"]) : "local";
-      const adapterPackage = args["adapter-package"] && args["adapter-package"] !== true
-        ? String(args["adapter-package"])
-        : DEFAULT_PACKAGE_NAME;
+      const adapterPackage = strArg(args, "adapter-package") || DEFAULT_PACKAGE_NAME;
       // The hook payload originates in the host and is untrusted. Always derive
       // the command prefix from this running CLI and its generated adapter flags.
       const cliCommandPrefix = hasAdapterMode
@@ -375,9 +381,9 @@ async function main() {
     if (args._[1] === "approve") {
       await initRuntime(rootDir);
       const result = await approvePlan(rootDir, {
-        planId: args.plan && args.plan !== true ? args.plan : undefined,
-        approver: args.by && args.by !== true ? args.by : undefined,
-        note: args.note && args.note !== true ? args.note : undefined,
+        planId: strArg(args, "plan"),
+        approver: strArg(args, "by"),
+        note: strArg(args, "note"),
       });
       console.log(JSON.stringify(result, null, 2));
       return;
@@ -427,7 +433,7 @@ async function main() {
     const result = await runWorkflow(rootDir, {
       planPath: args.from ? path.resolve(rootDir, args.from) : null,
       sample: Boolean(args.sample),
-      maxSteps: Number.isInteger(Number(args.maxSteps)) ? Number(args.maxSteps) : undefined,
+      maxSteps: Number.isInteger(Number(args.maxSteps)) && args.maxSteps !== true ? Number(args.maxSteps) : undefined,
     });
     console.log(JSON.stringify(result, null, 2));
     process.exitCode = result.ok ? 0 : 2;
@@ -438,13 +444,13 @@ async function main() {
     const subcommand = args._[1];
     if (subcommand === "run") {
       console.log(JSON.stringify(await runParallelAgents(rootDir, {
-        maxAgents: args["max-agents"] && args["max-agents"] !== true ? Number(args["max-agents"]) : undefined,
-        taskIds: args.task && args.task !== true ? String(args.task).split(",").map((item) => item.trim()).filter(Boolean) : [],
-        agent: args.agent && args.agent !== true ? args.agent : undefined,
-        adapter: args.adapter && args.adapter !== true ? args.adapter : undefined,
-        isolation: args.isolation && args.isolation !== true ? args.isolation : undefined,
-        command: args.command && args.command !== true ? args.command : undefined,
-        timeoutMs: args.timeout && args.timeout !== true ? Number(args.timeout) : undefined,
+        maxAgents: strArg(args, "max-agents") ? Number(args["max-agents"]) : undefined,
+        taskIds: strArg(args, "task") ? String(args.task).split(",").map((item) => item.trim()).filter(Boolean) : [],
+        agent: strArg(args, "agent"),
+        adapter: strArg(args, "adapter"),
+        isolation: strArg(args, "isolation"),
+        command: strArg(args, "command"),
+        timeoutMs: strArg(args, "timeout") ? Number(args.timeout) : undefined,
         coordinate: Boolean(args.coordinate),
       }), null, 2));
       return;
@@ -455,41 +461,41 @@ async function main() {
     }
     if (subcommand === "status") {
       console.log(JSON.stringify(await parallelAgentStatus(rootDir, {
-        runId: args.run && args.run !== true ? args.run : undefined,
+        runId: strArg(args, "run"),
       }), null, 2));
       return;
     }
     if (subcommand === "close") {
-      if (!args.run || args.run === true) throw new Error("wildarrange parallel close requires --run <runId>");
+      if (!strArg(args, "run")) throw new Error("wildarrange parallel close requires --run <runId>");
       console.log(JSON.stringify(await closeParallelAgentRun(rootDir, {
         runId: args.run,
-        taskId: args.task && args.task !== true ? args.task : undefined,
-        reason: args.reason && args.reason !== true ? args.reason : undefined,
+        taskId: strArg(args, "task"),
+        reason: strArg(args, "reason"),
       }), null, 2));
       return;
     }
     if (subcommand === "cleanup") {
-      if (!args.run || args.run === true) throw new Error("wildarrange parallel cleanup requires --run <runId>");
+      if (!strArg(args, "run")) throw new Error("wildarrange parallel cleanup requires --run <runId>");
       console.log(JSON.stringify(await cleanupParallelAgentRun(rootDir, {
         runId: args.run,
       }), null, 2));
       return;
     }
     if (subcommand === "retry") {
-      if (!args.run || args.run === true) throw new Error("wildarrange parallel retry requires --run <runId>");
+      if (!strArg(args, "run")) throw new Error("wildarrange parallel retry requires --run <runId>");
       console.log(JSON.stringify(await retryParallelAgentRun(rootDir, {
         runId: args.run,
-        command: args.command && args.command !== true ? args.command : undefined,
-        agent: args.agent && args.agent !== true ? args.agent : undefined,
-        isolation: args.isolation && args.isolation !== true ? args.isolation : undefined,
-        maxAgents: args["max-agents"] && args["max-agents"] !== true ? Number(args["max-agents"]) : undefined,
-        timeoutMs: args.timeout && args.timeout !== true ? Number(args.timeout) : undefined,
+        command: strArg(args, "command"),
+        agent: strArg(args, "agent"),
+        isolation: strArg(args, "isolation"),
+        maxAgents: strArg(args, "max-agents") ? Number(args["max-agents"]) : undefined,
+        timeoutMs: strArg(args, "timeout") ? Number(args.timeout) : undefined,
       }), null, 2));
       return;
     }
     if (subcommand === "admit") {
-      if (!args.run || args.run === true) throw new Error("wildarrange parallel admit requires --run <runId>");
-      if (!args.task || args.task === true) throw new Error("wildarrange parallel admit requires --task <taskId>");
+      if (!strArg(args, "run")) throw new Error("wildarrange parallel admit requires --run <runId>");
+      if (!strArg(args, "task")) throw new Error("wildarrange parallel admit requires --task <taskId>");
       console.log(JSON.stringify(await admitParallelAgentResult(rootDir, {
         runId: args.run,
         taskId: args.task,
@@ -501,13 +507,13 @@ async function main() {
 
   if (command === "archivist") {
     const subcommand = args._[1];
-    const turns = args.turns && args.turns !== true
+    const turns = strArg(args, "turns")
       ? await readJson(path.resolve(rootDir, args.turns))
       : [];
     const options = {
-      text: args.text && args.text !== true ? args.text : "",
-      stage: args.stage && args.stage !== true ? args.stage : undefined,
-      trigger: args.trigger && args.trigger !== true ? args.trigger : "cli",
+      text: strArg(args, "text") || "",
+      stage: strArg(args, "stage"),
+      trigger: strArg(args, "trigger") || "cli",
       turns,
       force: Boolean(args.force),
     };
@@ -526,12 +532,12 @@ async function main() {
         return;
       }
       if (action === "resolve") {
-        if (!args.id || args.id === true) throw new Error("wildarrange archivist suggestions resolve requires --id <id>");
+        if (!strArg(args, "id")) throw new Error("wildarrange archivist suggestions resolve requires --id <id>");
         console.log(JSON.stringify(await resolveArchivistRouteSuggestion(rootDir, {
           id: args.id,
           decision: args.decision,
-          evidence: args.evidence && args.evidence !== true ? args.evidence : "",
-          rationale: args.rationale && args.rationale !== true ? args.rationale : "",
+          evidence: strArg(args, "evidence") || "",
+          rationale: strArg(args, "rationale") || "",
         }), null, 2));
         return;
       }
@@ -578,8 +584,8 @@ async function main() {
     }
     const projection = await projectDecisions(rootDir, {
       limit,
-      taskId: args.task && args.task !== true ? args.task : undefined,
-      gate: args.gate && args.gate !== true ? args.gate : undefined,
+      taskId: strArg(args, "task"),
+      gate: strArg(args, "gate"),
       annotatable: args.annotatable === true ? true : undefined,
       format: args.format === "json" ? "json" : undefined,
     });
@@ -594,8 +600,8 @@ async function main() {
   if (command === "timeline") {
     const projection = await projectTimeline(rootDir, {
       limit: Number.isInteger(Number(args.limit)) && args.limit !== true ? Number(args.limit) : 50,
-      taskId: args.task && args.task !== true ? args.task : undefined,
-      source: args.source && args.source !== true ? args.source : undefined,
+      taskId: strArg(args, "task"),
+      source: strArg(args, "source"),
       format: args.format === "json" ? "json" : undefined,
     });
     if (args.format === "json") {
@@ -607,12 +613,12 @@ async function main() {
   }
 
   if (command === "review" && args._[1] === "configure") {
-    if (!args.from || args.from === true) throw new Error("review configure requires --from <setup.json>");
+    if (!strArg(args, "from")) throw new Error("review configure requires --from <setup.json>");
     console.log(JSON.stringify(await configureProjectReview(rootDir, args.from, { apply: args.apply === true }), null, 2));
     return;
   }
   if ((command === "review" && args._[1] === "checklist") || command === "readiness") {
-    if (!args.task || args.task === true) throw new Error("this command requires --task <taskId>");
+    if (!strArg(args, "task")) throw new Error("this command requires --task <taskId>");
     const { task } = await getTeamTask(rootDir, args.task);
     if (command === "readiness") {
       const approval = await loadPlanApproval(rootDir);
@@ -657,47 +663,27 @@ async function main() {
       return;
     }
     const entry = await appendAnnotation(rootDir, {
-      decisionId: args.decision && args.decision !== true ? args.decision : undefined,
-      category: args.category && args.category !== true ? args.category : undefined,
-      reason: args.reason && args.reason !== true ? args.reason : undefined,
-      author: args.author && args.author !== true ? args.author : undefined,
+      decisionId: strArg(args, "decision"),
+      category: strArg(args, "category"),
+      reason: strArg(args, "reason"),
+      author: strArg(args, "author"),
     });
     console.log(JSON.stringify({ kind: "wildarrange_annotation", recorded: entry }, null, 2));
     return;
   }
 
   if (command === "test") {
-    // 分区/影响面测试选择：把"我改了哪"映射到最小应跑测试集，
-    // 退出码透传 node --test，CI 与本地表现一致。
     const positional = args._.slice(1);
-    if (args.zone && args.zone !== true && positional.length > 0) {
+    if (strArg(args, "zone") && positional.length > 0) {
       throw new Error("wildarrange test: --zone 与文件参数互斥，请只选一种选择方式");
     }
-    let tests;
-    let selectionNote;
-    if (args.zone && args.zone !== true) {
-      const report = await computeZoneTests(rootDir, args.zone);
-      tests = report.testsToRun;
-      selectionNote = report.summary;
-    } else if (positional.length > 0) {
-      const report = await computeImpact(rootDir, positional);
-      tests = report.testsToRun;
-      selectionNote = report.summary;
-    } else {
-      tests = await listRepoTests(rootDir);
-      selectionNote = `全量测试 ${tests.length} 个`;
-    }
+    const { tests, selectionNote } = await selectRepoTests(rootDir, {
+      zone: strArg(args, "zone"),
+      changedPaths: positional,
+    });
     console.error(`[wildarrange test] ${selectionNote}`);
     for (const file of tests) console.error(`[wildarrange test]   ${file}`);
-    // 继承 NODE_TEST_CONTEXT 时，子进程 node --test 会误以为自己是由
-    // 外层 runner 启动的 IPC 子进程而空跑退出（exit 0、零测试）——从
-    // 测试进程或 npm script 里调 wildarrange test 必须剥掉这些 runner 私有变量。
-    const childEnv = { ...process.env };
-    for (const key of Object.keys(childEnv)) {
-      if (key.startsWith("NODE_TEST_")) delete childEnv[key];
-    }
-    const run = spawnSync(process.execPath, ["--test", ...tests], { cwd: rootDir, stdio: "inherit", env: childEnv });
-    process.exitCode = typeof run.status === "number" ? run.status : 1;
+    process.exitCode = runRepoTests(rootDir, tests);
     return;
   }
 
@@ -710,7 +696,7 @@ async function main() {
     const subcommand = args._[1];
     if (subcommand === "check") {
       console.log(JSON.stringify(await continuationDirective(rootDir, {
-        sessionId: args.session && args.session !== true ? args.session : undefined,
+        sessionId: strArg(args, "session"),
         source: "cli",
       }), null, 2));
       return;
@@ -721,7 +707,7 @@ async function main() {
   if (command === "rules") {
     const subcommand = args._[1];
     if (subcommand === "collect") {
-      const targetPaths = args.target && args.target !== true ? [args.target] : [];
+      const targetPaths = strArg(args, "target") ? [args.target] : [];
       console.log(JSON.stringify(await scanProjectRules(rootDir, { targetPaths }), null, 2));
       return;
     }
@@ -745,20 +731,20 @@ async function main() {
   if (command === "contracts") {
     const subcommand = args._[1];
     if (subcommand === "propose") {
-      if (!args.task || args.task === true || !args.from || args.from === true) throw new Error("contracts propose requires --task <id> --from <proposal.json>");
+      if (!strArg(args, "task") || !strArg(args, "from")) throw new Error("contracts propose requires --task <id> --from <proposal.json>");
       console.log(JSON.stringify(await proposeContractChange(rootDir, { taskId: args.task, from: args.from }), null, 2));
       return;
     }
     if (subcommand === "resolve") {
       for (const key of ["id", "decision", "expected-fingerprint", "reason"]) {
-        if (!args[key] || args[key] === true) throw new Error(`contracts resolve requires --${key}`);
+        if (!strArg(args, key)) throw new Error(`contracts resolve requires --${key}`);
       }
       console.log(JSON.stringify(await resolveContractChange(rootDir, { id: args.id, decision: args.decision,
         expectedFingerprint: args["expected-fingerprint"], reason: args.reason }), null, 2));
       return;
     }
     if (subcommand === "scan") {
-      const source = args.from && args.from !== true ? await readJson(path.resolve(rootDir, args.from)) : [];
+      const source = strArg(args, "from") ? await readJson(path.resolve(rootDir, args.from)) : [];
       const declarations = Array.isArray(source) ? source : source?.items || [];
       const result = await invokeCapability("contract-governance-scan", {
         rootDir,
@@ -769,15 +755,15 @@ async function main() {
       return;
     }
     if (subcommand === "apply-card") {
-      if (!args.card || args.card === true) throw new Error("wildarrange contracts apply-card requires --card <cardId>");
-      if (!args.decision || args.decision === true) throw new Error("wildarrange contracts apply-card requires --decision approve|reject");
-      if (!args.reason || args.reason === true) throw new Error("wildarrange contracts apply-card requires --reason <text>");
-      if (!args["expected-fingerprint"] || args["expected-fingerprint"] === true) throw new Error("wildarrange contracts apply-card requires --expected-fingerprint <sha256>");
+      if (!strArg(args, "card")) throw new Error("wildarrange contracts apply-card requires --card <cardId>");
+      if (!strArg(args, "decision")) throw new Error("wildarrange contracts apply-card requires --decision approve|reject");
+      if (!strArg(args, "reason")) throw new Error("wildarrange contracts apply-card requires --reason <text>");
+      if (!strArg(args, "expected-fingerprint")) throw new Error("wildarrange contracts apply-card requires --expected-fingerprint <sha256>");
       const result = await applyContractDecision(rootDir, {
           cardId: args.card,
           decision: args.decision,
           reason: args.reason,
-          expectedFingerprint: args["expected-fingerprint"] && args["expected-fingerprint"] !== true ? args["expected-fingerprint"] : undefined,
+          expectedFingerprint: strArg(args, "expected-fingerprint"),
       });
       console.log(JSON.stringify(result, null, 2));
       process.exitCode = result.status === "pass" ? 0 : 2;
@@ -799,10 +785,10 @@ async function main() {
     const subcommand = args._[1];
     if (subcommand === "build") {
       console.log(JSON.stringify(await buildAgentContext(rootDir, {
-        agent: args.agent && args.agent !== true ? args.agent : undefined,
-        taskId: args.task && args.task !== true ? args.task : undefined,
-        planId: args.plan && args.plan !== true ? args.plan : undefined,
-        injectionPoint: args.point && args.point !== true ? args.point : undefined,
+        agent: strArg(args, "agent"),
+        taskId: strArg(args, "task"),
+        planId: strArg(args, "plan"),
+        injectionPoint: strArg(args, "point"),
       }), null, 2));
       return;
     }
@@ -812,14 +798,14 @@ async function main() {
   if (command === "evidence") {
     const subcommand = args._[1];
     if (subcommand === "record") {
-      if (!args.task || args.task === true) throw new Error("wildarrange evidence record requires --task <taskId>");
-      if (!args.criterion || args.criterion === true) throw new Error("wildarrange evidence record requires --criterion <criterionId>");
+      if (!strArg(args, "task")) throw new Error("wildarrange evidence record requires --task <taskId>");
+      if (!strArg(args, "criterion")) throw new Error("wildarrange evidence record requires --criterion <criterionId>");
       console.log(JSON.stringify(await recordTaskEvidence(rootDir, {
         taskId: args.task,
         criterionId: args.criterion,
-        status: args.status && args.status !== true ? args.status : "pass",
+        status: strArg(args, "status") || "pass",
         evidence: args.evidence,
-        source: args.source && args.source !== true ? args.source : "cli",
+        source: strArg(args, "source") || "cli",
       }), null, 2));
       return;
     }
@@ -827,7 +813,7 @@ async function main() {
   }
 
   if (command === "steer") {
-    if (!args.from || args.from === true) throw new Error("wildarrange steer requires --from <proposal.json>");
+    if (!strArg(args, "from")) throw new Error("wildarrange steer requires --from <proposal.json>");
     const proposal = await readJson(path.resolve(rootDir, args.from));
     console.log(JSON.stringify(await steerWorkflow(rootDir, proposal), null, 2));
     return;
@@ -836,7 +822,7 @@ async function main() {
   if (command === "review-blockers") {
     const subcommand = args._[1];
     if (subcommand === "record") {
-      if (!args.from || args.from === true) throw new Error("wildarrange review-blockers record requires --from <blocker.json>");
+      if (!strArg(args, "from")) throw new Error("wildarrange review-blockers record requires --from <blocker.json>");
       const blocker = await readJson(path.resolve(rootDir, args.from));
       console.log(JSON.stringify(await recordReviewBlocker(rootDir, blocker), null, 2));
       return;
@@ -849,72 +835,70 @@ async function main() {
     if (subcommand === "list") {
       console.log(JSON.stringify(await listTeamTasks(rootDir, {
         all: Boolean(args.all),
-        status: args.status && args.status !== true ? args.status : undefined,
-        owner: args.owner && args.owner !== true ? args.owner : undefined,
-        workType: args.type && args.type !== true ? args.type : undefined,
-        priority: args.priority && args.priority !== true ? String(args.priority).toUpperCase() : undefined,
-        planId: args.plan && args.plan !== true ? args.plan : undefined,
-        search: args.search && args.search !== true ? args.search : undefined,
+        status: strArg(args, "status"),
+        owner: strArg(args, "owner"),
+        workType: strArg(args, "type"),
+        priority: strArg(args, "priority") ? String(args.priority).toUpperCase() : undefined,
+        planId: strArg(args, "plan"),
+        search: strArg(args, "search"),
       }), null, 2));
       return;
     }
     if (subcommand === "get") {
-      if (!args.task || args.task === true) throw new Error("wildarrange task get requires --task <taskId>");
+      if (!strArg(args, "task")) throw new Error("wildarrange task get requires --task <taskId>");
       console.log(JSON.stringify(await getTeamTask(rootDir, args.task, {
-        planId: args.plan && args.plan !== true ? args.plan : undefined,
+        planId: strArg(args, "plan"),
       }), null, 2));
       return;
     }
     if (subcommand === "claim") {
       console.log(JSON.stringify(await claimTeamTask(rootDir, {
-        taskId: args.task && args.task !== true ? args.task : undefined,
-        owner: args.owner && args.owner !== true ? args.owner : undefined,
+        taskId: strArg(args, "task"),
+        owner: strArg(args, "owner"),
         forceCoordination: Boolean(args.coordinate),
       }), null, 2));
       return;
     }
     if (subcommand === "create") {
       let task;
-      if (args.from && args.from !== true) {
+      if (strArg(args, "from")) {
         task = await readJson(path.resolve(rootDir, args.from));
       } else {
-        const subject = args.title && args.title !== true ? args.title : args.subject && args.subject !== true ? args.subject : null;
+        const subject = strArg(args, "title") || strArg(args, "subject") || null;
         if (!subject) throw new Error("wildarrange task create requires --from <task.json> or --title <text>");
         task = {
           subject,
-          description: args.description && args.description !== true ? args.description : subject,
-          workType: args.type && args.type !== true ? args.type : "maintenance",
-          priority: args.priority && args.priority !== true ? String(args.priority).toUpperCase() : "P1",
-          source: args.source && args.source !== true ? args.source : "user",
-          parentTaskRef: args.parent && args.parent !== true ? args.parent : null,
+          description: strArg(args, "description") || subject,
+          workType: strArg(args, "type") || "maintenance",
+          priority: strArg(args, "priority") ? String(args.priority).toUpperCase() : "P1",
+          source: strArg(args, "source") || "user",
+          parentTaskRef: strArg(args, "parent") || null,
           writable_paths: splitCliList(args.writable),
-          verify_commands: args.verify && args.verify !== true ? [args.verify] : [],
-          review_commands: args.review && args.review !== true ? [args.review] : [],
+          verify_commands: strArg(args, "verify") ? [args.verify] : [],
+          review_commands: strArg(args, "review") ? [args.review] : [],
         };
       }
       console.log(JSON.stringify(await createTeamTask(rootDir, task), null, 2));
       return;
     }
     if (subcommand === "ready") {
-      if (!args.task || args.task === true) throw new Error("wildarrange task ready requires --task <taskId>");
-      if (!args.from || args.from === true) throw new Error("wildarrange task ready requires --from <task-details.json>");
+      if (!strArg(args, "task")) throw new Error("wildarrange task ready requires --task <taskId>");
+      if (!strArg(args, "from")) throw new Error("wildarrange task ready requires --from <task-details.json>");
       const patch = await readJson(path.resolve(rootDir, args.from));
       console.log(JSON.stringify(await readyTeamTask(rootDir, {
         taskId: args.task,
-        planId: args.plan && args.plan !== true ? args.plan : undefined,
+        planId: strArg(args, "plan"),
         patch,
       }), null, 2));
       return;
     }
     if (subcommand === "archive") {
-      if (!args.task || args.task === true) throw new Error("wildarrange task archive requires --task <taskId>");
+      if (!strArg(args, "task")) throw new Error("wildarrange task archive requires --task <taskId>");
       if (args.delete !== true) throw new Error("wildarrange task archive requires explicit --delete confirmation");
-      const backup = await writeRuntimeStateBackup(rootDir, { reason: `pre-task-archive:${args.task}` });
-      console.log(JSON.stringify(await archiveAndDeleteTeamTask(rootDir, {
+      console.log(JSON.stringify(await archiveTeamTaskWithBackup(rootDir, {
         taskId: args.task,
-        planId: args.plan && args.plan !== true ? args.plan : undefined,
-        reason: args.reason && args.reason !== true ? args.reason : "user_archived",
-        backupId: backup.backupId,
+        planId: strArg(args, "plan"),
+        reason: strArg(args, "reason") || "user_archived",
       }), null, 2));
       return;
     }
@@ -944,7 +928,7 @@ async function main() {
 
   if (command === "resume") {
     console.log(JSON.stringify(await resumeReport(rootDir, {
-      sessionId: args.session && args.session !== true ? args.session : undefined,
+      sessionId: strArg(args, "session"),
       source: "cli",
     }), null, 2));
     return;
@@ -957,12 +941,12 @@ async function main() {
       return;
     }
     if (subcommand === "review") {
-      if (!args.id || args.id === true) throw new Error("wildarrange changes review requires --id <CR-id>");
+      if (!strArg(args, "id")) throw new Error("wildarrange changes review requires --id <CR-id>");
       console.log(JSON.stringify(await reviewChangeRequest(rootDir, args.id), null, 2));
       return;
     }
     if (subcommand === "resolve") {
-      if (!args.id || args.id === true) throw new Error("wildarrange changes resolve requires --id <CR-id>");
+      if (!strArg(args, "id")) throw new Error("wildarrange changes resolve requires --id <CR-id>");
       const result = await resolveChangeRequest(rootDir, {
         id: args.id,
         decision: args.decision,
@@ -978,11 +962,10 @@ async function main() {
 
   if (command === "adoption") {
     const subcommand = args._[1];
-    const host = args.host && args.host !== true ? args.host : "127.0.0.1";
-    const port = args.port && args.port !== true ? Number(args.port) : 8765;
-    const token = args.token && args.token !== true
-      ? args.token
-      : process.env.WILDARRANGE_DASHBOARD_TOKEN || randomBytes(24).toString("base64url");
+    const host = strArg(args, "host") || "127.0.0.1";
+    const port = strArg(args, "port") ? Number(args.port) : 8765;
+    const token = strArg(args, "token")
+      || process.env.WILDARRANGE_DASHBOARD_TOKEN || randomBytes(24).toString("base64url");
     const startServer = async (options) => {
       const server = await startDashboardServer(rootDir, options);
       const address = server.address();
@@ -997,13 +980,13 @@ async function main() {
     }
     if (subcommand === "status") {
       console.log(JSON.stringify(await statusAdoption(rootDir, {
-        sessionId: args.session && args.session !== true ? args.session : undefined,
+        sessionId: strArg(args, "session"),
       }), null, 2));
       return;
     }
     if (subcommand === "resume") {
       const result = await resumeAdoption(rootDir, {
-        sessionId: args.session && args.session !== true ? args.session : undefined,
+        sessionId: strArg(args, "session"),
         host,
         port,
         token,
@@ -1015,7 +998,7 @@ async function main() {
     }
     if (subcommand === "recover") {
       const result = await recoverAdoption(rootDir, {
-        sessionId: args.session && args.session !== true ? args.session : undefined,
+        sessionId: strArg(args, "session"),
       });
       console.log(JSON.stringify(result, null, 2));
       process.exitCode = result.ok ? 0 : 2;
@@ -1025,9 +1008,9 @@ async function main() {
   }
 
   if (command === "serve") {
-    const host = args.host && args.host !== true ? args.host : "127.0.0.1";
-    const port = args.port && args.port !== true ? Number(args.port) : 8765;
-    const token = args.token && args.token !== true ? args.token : undefined;
+    const host = strArg(args, "host") || "127.0.0.1";
+    const port = strArg(args, "port") ? Number(args.port) : 8765;
+    const token = strArg(args, "token");
     await startDashboardServer(rootDir, { host, port, token });
     console.log(JSON.stringify({ ok: true, url: `http://${host}:${port}/` }, null, 2));
     await new Promise(() => {});
@@ -1048,7 +1031,7 @@ async function main() {
     const subcommand = args._[1];
     if (subcommand === "backup") {
       console.log(JSON.stringify(await writeRuntimeStateBackup(rootDir, {
-        reason: args.reason && args.reason !== true ? args.reason : "manual",
+        reason: strArg(args, "reason") || "manual",
       }), null, 2));
       return;
     }
@@ -1063,7 +1046,7 @@ async function main() {
       return;
     }
     if (subcommand === "restore") {
-      if (!args.backup || args.backup === true) throw new Error("wildarrange state restore requires --backup <backupId>");
+      if (!strArg(args, "backup")) throw new Error("wildarrange state restore requires --backup <backupId>");
       console.log(JSON.stringify(await restoreRuntimeStateBackup(rootDir, { backupId: args.backup }), null, 2));
       return;
     }
@@ -1100,7 +1083,7 @@ async function main() {
   }
 
   if (command === "route") {
-    if (!args.text || args.text === true) throw new Error("wildarrange route requires --text <request>");
+    if (!strArg(args, "text")) throw new Error("wildarrange route requires --text <request>");
     console.log(JSON.stringify(await runHostRoute(rootDir, { text: args.text }, routeRequest), null, 2));
     return;
   }
@@ -1131,12 +1114,12 @@ async function main() {
     if (subcommand === "match") {
       await initRuntime(rootDir);
       console.log(JSON.stringify(await matchSkills(rootDir, {
-        text: args.text && args.text !== true ? args.text : "",
-        stage: args.stage && args.stage !== true ? args.stage : undefined,
-        agent: args.agent && args.agent !== true ? args.agent : undefined,
-        category: args.category && args.category !== true ? args.category : undefined,
-        skills: args.skills && args.skills !== true ? args.skills : undefined,
-        limit: args.limit && args.limit !== true ? Number(args.limit) : undefined,
+        text: strArg(args, "text") || "",
+        stage: strArg(args, "stage"),
+        agent: strArg(args, "agent"),
+        category: strArg(args, "category"),
+        skills: strArg(args, "skills"),
+        limit: strArg(args, "limit") ? Number(args.limit) : undefined,
       }), null, 2));
       return;
     }

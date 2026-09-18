@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -24,7 +24,9 @@ import {
 } from "../src/orchestration/remote-ownership.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
-import { collectGitChangedPaths } from "../src/infra/git-diff.mjs";
+import { collectGitChangedPaths, readGitHead, readGitTopLevel } from "../src/infra/git-diff.mjs";
+import { buildMemoryDigest, writeMemoryDigest } from "../src/infra/memory-digest.mjs";
+import { uniqueStrings } from "../src/infra/text-utils.mjs";
 import { prepareAgentWorktree } from "../src/infra/git-worktree.mjs";
 import { loadWildArrangeConfig } from "../src/infra/runtime-config.mjs";
 import { readJson } from "../src/infra/runtime-store.mjs";
@@ -1218,6 +1220,68 @@ async function readLedger(rootDir) {
   const raw = await readFile(path.join(rootDir, ".wildarrange", "ledger.jsonl"), "utf8");
   return raw.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
 }
+
+test("git read primitives resolve HEAD/toplevel from one owner", async () => {
+  await withTempDir(async (dir) => {
+    const repo = path.join(dir, "repo");
+    await mkdir(repo, { recursive: true });
+    const missingHead = await readGitHead(repo);
+    assert.deepEqual(missingHead, { available: false, sha: null, reason: missingHead.reason });
+    assert.equal(typeof missingHead.reason, "string");
+    const missingTopLevel = await readGitTopLevel(repo);
+    assert.equal(missingTopLevel.available, false);
+    assert.equal(missingTopLevel.topLevel, null);
+
+    await git(dir, ["init", "--initial-branch=main", repo]);
+    await writeFile(path.join(repo, "README.md"), "seed\n", "utf8");
+    await git(repo, ["add", "README.md"]);
+    await git(repo, ["-c", "user.name=Seed", "-c", "user.email=seed@example.invalid", "commit", "-m", "initial"]);
+    const expectedHead = (await git(repo, ["rev-parse", "HEAD"])).trim();
+
+    const head = await readGitHead(repo);
+    assert.deepEqual(head, { available: true, sha: expectedHead });
+    const topLevel = await readGitTopLevel(repo);
+    assert.equal(topLevel.available, true);
+    assert.equal(await realpath(topLevel.topLevel), await realpath(repo));
+  });
+});
+
+test("memory digest consumes the shared git HEAD primitive with persisted fallback", async () => {
+  await withTempDir(async (dir) => {
+    const repo = path.join(dir, "repo");
+    await mkdir(repo, { recursive: true });
+    await git(dir, ["init", "--initial-branch=main", repo]);
+    await writeFile(path.join(repo, "README.md"), "seed\n", "utf8");
+    await git(repo, ["add", "README.md"]);
+    await git(repo, ["-c", "user.name=Seed", "-c", "user.email=seed@example.invalid", "commit", "-m", "initial"]);
+    const expectedHead = (await git(repo, ["rev-parse", "HEAD"])).trim();
+
+    const digest = await writeMemoryDigest(repo, { reason: "git-read-probe" });
+    assert.deepEqual(digest.gitHead, { value: expectedHead, source: "git" });
+    const persisted = await readJson(path.join(repo, ".wildarrange", "memory", "last-digest.json"), null);
+    assert.deepEqual(persisted.gitHead, { value: expectedHead, source: "git" });
+
+    // Without a git repository the digest falls back to the archivist trigger
+    // state, and with neither it records null instead of a fabricated value.
+    const plain = path.join(dir, "plain");
+    await mkdir(path.join(plain, ".wildarrange", "routing"), { recursive: true });
+    await writeFile(
+      path.join(plain, ".wildarrange", "routing", "archivist-trigger-state.json"),
+      JSON.stringify({ lastGitHead: "fallback-sha" }),
+      "utf8",
+    );
+    const fallbackDigest = await writeMemoryDigest(plain, { reason: "git-read-probe" });
+    assert.deepEqual(fallbackDigest.gitHead, { value: "fallback-sha", source: "archivist-trigger-state" });
+    const emptyDigest = await buildMemoryDigest(path.join(dir, "empty"), { reason: "git-read-probe" });
+    assert.equal(emptyDigest.gitHead, null);
+  });
+});
+
+test("text-utils uniqueStrings is the single dedupe owner", () => {
+  assert.deepEqual(uniqueStrings(["a", "b", "a", "", "b", "c"]), ["a", "b", "c"]);
+  assert.deepEqual(uniqueStrings(["x", null, 7, "x", " y "]), ["x", " y "]);
+  assert.deepEqual(uniqueStrings([]), []);
+});
 
 async function withRemoteClones(fn) {
   await withTempDir(async (dir) => {
