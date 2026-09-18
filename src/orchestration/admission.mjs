@@ -37,8 +37,7 @@ import { readVerifiedLedgerEntries } from "../infra/ledger.mjs";
 import { buildFailureSummary } from "../infra/failure-analysis.mjs";
 import { writeFailureReport, writeReviewReport } from "../infra/task-reports.mjs";
 import { applyAgentPatch, extractPatchPaths } from "../infra/git-worktree.mjs";
-import { runCommandFile } from "../infra/command-runner.mjs";
-import { assertPathInsideRoot, normalizeRelativePath, pathAllowed } from "../infra/path-match.mjs";
+import { assertPathInsideRoot, pathAllowed } from "../infra/path-match.mjs";
 import {
   commitTaskCompletionState,
   runDeliveryPipeline,
@@ -72,6 +71,20 @@ import { loadTaskState } from "./plan-state.mjs";
 import { readChangeRequest } from "./change-governance.mjs";
 import { persistTaskState } from "./task-board.mjs";
 import { assertCurrentTaskOwnership } from "./remote-ownership.mjs";
+import {
+  collectActualAdmissionPaths,
+  normalizePatchPaths,
+  normalizeProposedFiles,
+  normalizeProposedFilesOrEmpty,
+  readParallelAgentResult,
+} from "./admission-inputs.mjs";
+
+export {
+  collectActualAdmissionPaths,
+  normalizeProposedFiles,
+  normalizeProposedFilesOrEmpty,
+  readParallelAgentResult,
+};
 
 /**
  * 并行 agent 结果 admission 主事务：claim → apply → gates → commit/rollback。
@@ -877,59 +890,4 @@ async function hasVerifiedRunCompletionEvent(rootDir, runId, planId, taskId) {
       && entry.planId === planId
       && entry.status === "completed",
   );
-}
-
-// --- 辅助导出 ---
-
-/** 用 git diff/ls-files 收集 admission 后工作区实际变更路径。 */
-export async function collectActualAdmissionPaths(rootDir, fallbackPaths) {
-  const result = await runCommandFile("git", ["-C", rootDir, "diff", "--name-only", "--", ".", ":!.wildarrange"], rootDir, 30_000);
-  if (result.exitCode !== 0) return fallbackPaths;
-  const paths = result.stdout.split(/\r?\n/).map((line) => normalizeRelativePath(line.trim())).filter(Boolean);
-  const untracked = await runCommandFile("git", ["-C", rootDir, "ls-files", "--others", "--exclude-standard", "--", ".", ":!.wildarrange"], rootDir, 30_000);
-  if (untracked.exitCode === 0) {
-    for (const line of untracked.stdout.split(/\r?\n/)) {
-      const filePath = normalizeRelativePath(line.trim());
-      if (filePath) paths.push(filePath);
-    }
-  }
-  return paths.length > 0 ? [...new Set(paths)] : fallbackPaths;
-}
-
-/** 读取 agent-runs 下某 run/task 的 result.json。 */
-export async function readParallelAgentResult(rootDir, runId, taskId) {
-  const directPath = resolveWildArrangePath(rootDir, "agent-runs", runId, taskId, "result.json");
-  const result = await readJson(directPath, null);
-  if (!result) throw new Error(`parallel result not found: ${path.relative(rootDir, directPath)}`);
-  return result;
-}
-
-/** 规范化 parallel result.files 为 { path, content } 列表。 */
-export function normalizeProposedFiles(files) {
-  if (!Array.isArray(files)) return [];
-  return files.map((file, index) => {
-    if (!file || typeof file !== "object") throw new Error(`result.files[${index}] must be an object`);
-    const filePath = normalizeRelativePath(String(file.path || file.file || ""));
-    if (!filePath) throw new Error(`result.files[${index}].path is required`);
-    if (path.isAbsolute(filePath) || filePath.startsWith("../") || filePath.includes("/../")) {
-      throw new Error(`result.files[${index}].path must stay inside the project`);
-    }
-    if (typeof file.content !== "string") throw new Error(`result.files[${index}].content must be a string`);
-    return { path: filePath, content: file.content };
-  });
-}
-
-/** normalizeProposedFiles 的安全版：失败时返回空数组。 */
-export function normalizeProposedFilesOrEmpty(files) {
-  try {
-    return normalizeProposedFiles(files);
-  } catch {
-    return [];
-  }
-}
-
-/** 归一化 patch 声明的路径列表，拒绝绝对路径与 ../ 逃逸。 */
-function normalizePatchPaths(paths) {
-  if (!Array.isArray(paths)) return [];
-  return paths.map((filePath) => normalizeRelativePath(String(filePath || ""))).filter((filePath) => filePath && !path.isAbsolute(filePath) && !filePath.startsWith("../") && !filePath.includes("/../"));
 }

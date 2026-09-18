@@ -2406,7 +2406,7 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
           "id": "src-orchestration-admission-mjs",
           "p": "src/orchestration/admission.mjs",
           "r": "admission.mjs",
-          "io": "admitParallelAgentResult(rootDir, options = {) → 导出；collectActualAdmissionPaths(rootDir, fallbackPat) → 导出",
+          "io": "admitParallelAgentResult(rootDir, options = {) → 导出",
           "to": [
             {
               "t": "src-orchestration-delivery-pipeline-mjs",
@@ -2447,6 +2447,11 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "t": "src-orchestration-remote-ownership-mjs",
               "io": "remote-ownership.mjs",
               "p": "src/orchestration/remote-ownership.mjs"
+            },
+            {
+              "t": "src-orchestration-admission-inputs-mjs",
+              "io": "admission-inputs.mjs",
+              "p": "src/orchestration/admission-inputs.mjs"
             }
           ],
           "extTo": [
@@ -2502,12 +2507,6 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "t": "git-worktree.mjs",
               "io": "git-worktree.mjs",
               "p": "src/infra/git-worktree.mjs",
-              "m": "infra"
-            },
-            {
-              "t": "command-runner.mjs",
-              "io": "command-runner.mjs",
-              "p": "src/infra/command-runner.mjs",
               "m": "infra"
             },
             {
@@ -2870,7 +2869,7 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
           "id": "src-orchestration-admission-mjs",
           "p": "src/orchestration/admission.mjs",
           "r": "admission.mjs",
-          "io": "admitParallelAgentResult(rootDir, options = {) → 导出；collectActualAdmissionPaths(rootDir, fallbackPat) → 导出",
+          "io": "admitParallelAgentResult(rootDir, options = {) → 导出",
           "to": [
             {
               "t": "src-orchestration-delivery-pipeline-mjs",
@@ -2911,6 +2910,11 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "t": "src-orchestration-remote-ownership-mjs",
               "io": "remote-ownership.mjs",
               "p": "src/orchestration/remote-ownership.mjs"
+            },
+            {
+              "t": "src-orchestration-admission-inputs-mjs",
+              "io": "admission-inputs.mjs",
+              "p": "src/orchestration/admission-inputs.mjs"
             }
           ],
           "extTo": [
@@ -2966,12 +2970,6 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "t": "git-worktree.mjs",
               "io": "git-worktree.mjs",
               "p": "src/infra/git-worktree.mjs",
-              "m": "infra"
-            },
-            {
-              "t": "command-runner.mjs",
-              "io": "command-runner.mjs",
-              "p": "src/infra/command-runner.mjs",
               "m": "infra"
             },
             {
