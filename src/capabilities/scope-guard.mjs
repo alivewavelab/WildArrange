@@ -38,6 +38,7 @@ export async function scopeGuard(rootDir, options = {}) {
 
   if (!collected.available) {
     const guarded = (task.writable_paths || []).length > 0;
+    // §3.4：有 writable_paths 但拿不到 diff 时 fail-closed；无边界则 inconclusive。
     const result = {
       status: guarded ? "fail" : "inconclusive",
       taskId: task.id,
@@ -79,6 +80,7 @@ export async function scopeGuard(rootDir, options = {}) {
   return result;
 }
 
+/** 解析变更路径 realpath，检测符号链接逃逸与路径别名。 */
 async function resolveChangedPathRealpaths(rootDir, changedPaths) {
   const rootReal = await realpath(rootDir).catch(() => rootDir);
   const findings = [];
@@ -91,6 +93,7 @@ async function resolveChangedPathRealpaths(rootDir, changedPaths) {
     if (!actual) continue;
     const realRelative = normalizeRelativePath(path.relative(rootReal, actual));
     const escapesRoot = realRelative === ".." || realRelative.startsWith("../") || path.isAbsolute(realRelative);
+    // §3.4：realpath 与声明路径不一致或逃出 root 时计入 deniedPaths。
     if (escapesRoot || realRelative !== filePath) {
       findings.push({
         path: filePath,
@@ -103,6 +106,7 @@ async function resolveChangedPathRealpaths(rootDir, changedPaths) {
   return findings;
 }
 
+/** 按 taskId 或首个 in_progress/verifying/pending 任务解析守卫目标。 */
 function resolveGuardTask(tasks, taskId) {
   const task = taskId
     ? tasks.find((candidate) => candidate.id === taskId)

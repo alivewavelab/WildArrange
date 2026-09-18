@@ -116,9 +116,13 @@ export async function persistContractScan(rootDir, scan) {
   return withContractGovernanceLock(rootDir, "persist-scan", () => persistContractScanUnlocked(rootDir, scan));
 }
 
+/**
+ * 在无锁前提下持久化契约扫描结果并归档 superseded cards。
+ */
 async function persistContractScanUnlocked(rootDir, scan) {
   const paths = contractGovernancePaths(rootDir);
   await mkdir(paths.cards, { recursive: true });
+  // §3.4 锁顺序：先归档 current-scan 再写入新扫描，失败时可从 archive 回滚。
   await archiveCurrentSnapshot(paths, scan.at);
   await writeJsonAtomic(paths.currentScan, scan);
   await archiveSupersededCards(paths, new Set(scan.cards.map((card) => card.id)));
@@ -338,6 +342,9 @@ export function buildContractDiffCards(baseline = [], current = [], at = nowIso(
   });
 }
 
+/**
+ * 归一化 ManualDeclarations 输入为稳定形态。
+ */
 function normalizeManualDeclarations(items) {
   return items.map((item, index) => ({ ...normalizeContract({
     id: requireSafeId(item.contractId || item.id || `manual:${index + 1}`, `declaration ${index + 1} contractId`),
@@ -358,11 +365,17 @@ function normalizeManualDeclarations(items) {
   }), declarationAction: String(item.action || "add").toLowerCase() }));
 }
 
+/**
+ * withoutDeclarationAction 内部辅助。
+ */
 function withoutDeclarationAction(item) {
   const { declarationAction: _ignored, ...contract } = item;
   return contract;
 }
 
+/**
+ * approvedOverlay 内部辅助。
+ */
 function approvedOverlay(item) {
   return {
     id: item.id,
@@ -383,6 +396,9 @@ function approvedOverlay(item) {
   };
 }
 
+/**
+ * 合并 Contracts 集合/对象。
+ */
 function mergeContracts(discovered, manual) {
   const merged = new Map(discovered.map((item) => [item.id, item]));
   for (const item of manual) {
@@ -398,6 +414,9 @@ function mergeContracts(discovered, manual) {
   return [...merged.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 
+/**
+ * 归一化 Contract 输入为稳定形态。
+ */
 function normalizeContract(value) {
   const id = requireSafeId(value.id, "contract id");
   return {
@@ -431,6 +450,9 @@ export function applyApprovedCard(registry, card) {
   };
 }
 
+/**
+ * archiveCurrentSnapshot 内部辅助。
+ */
 async function archiveCurrentSnapshot(paths, at) {
   const previous = await readJson(paths.currentScan, null);
   if (!previous) return;
@@ -439,6 +461,9 @@ async function archiveCurrentSnapshot(paths, at) {
   await rename(paths.currentScan, path.join(paths.archiveSnapshots, `${stamp}.json`));
 }
 
+/**
+ * archiveSupersededCards 内部辅助。
+ */
 async function archiveSupersededCards(paths, currentIds) {
   let entries = [];
   try { entries = await readdir(paths.cards); } catch (error) { if (error?.code === "ENOENT") return; throw error; }
@@ -454,6 +479,9 @@ async function archiveSupersededCards(paths, currentIds) {
   }
 }
 
+/**
+ * expirePendingCard 内部辅助。
+ */
 function expirePendingCard(card, at) {
   const age = Date.parse(at) - Date.parse(card.createdAt);
   return Number.isFinite(age) && age >= 30 * 24 * 60 * 60 * 1000 ? { ...card, status: "expired" } : card;
@@ -493,16 +521,25 @@ export function contractSourcePaths(contract) {
 }
 
 // --- 源码遍历 ---
+/**
+ * walkSourceFiles 内部辅助。
+ */
 async function walkSourceFiles(rootDir) {
   const files = [];
   for (const sourceRoot of sourceRoots(rootDir)) await walk(sourceRoot, files);
   return [...new Set(files)];
 }
 
+/**
+ * sourceRoots 内部辅助。
+ */
 function sourceRoots(rootDir) {
   return [path.join(rootDir, "src"), path.join(rootDir, "client", "src"), path.join(rootDir, "src-tauri", "src"), path.join(rootDir, "client", "src-tauri", "src")];
 }
 
+/**
+ * 递归遍历目录，跳过 ignored 目录名。
+ */
 async function walk(directory, output) {
   let entries;
   try { entries = await readdir(directory, { withFileTypes: true }); } catch (error) { if (error?.code === "ENOENT") return; throw error; }
@@ -514,6 +551,9 @@ async function walk(directory, output) {
   }
 }
 
+/**
+ * contractFingerprint 内部辅助。
+ */
 function contractFingerprint(value) {
   const copy = { ...value };
   delete copy.approvedAt;
@@ -521,25 +561,40 @@ function contractFingerprint(value) {
   return hashContent(JSON.stringify(sortObject(copy)));
 }
 
+/**
+ * sortObject 内部辅助。
+ */
 function sortObject(value) {
   if (Array.isArray(value)) return value.map(sortObject);
   if (!value || typeof value !== "object") return value;
   return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortObject(value[key])]));
 }
 
+/**
+ * addList 内部辅助。
+ */
 function addList(map, key, value) {
   map.set(key, [...(map.get(key) || []), value]);
 }
 
+/**
+ * lineOf 内部辅助。
+ */
 function lineOf(source, index) {
   return String(source).slice(0, index).split("\n").length;
 }
 
+/**
+ * importsTauriApi 内部辅助。
+ */
 function importsTauriApi(source) {
   const specifiers = extractImportSpecifiers(source);
   return specifiers.some((item) => item === "@tauri-apps/api/core" || item === "@tauri-apps/api/tauri");
 }
 
+/**
+ * tauriInvokeBindings 内部辅助。
+ */
 function tauriInvokeBindings(source) {
   if (!importsTauriApi(source)) return [];
   const original = String(source);
@@ -587,11 +642,17 @@ export function relative(rootDir, value) {
   return normalizeSlash(path.relative(rootDir, value));
 }
 
+/**
+ * pathInside 内部辅助。
+ */
 function pathInside(rootDir, absolutePath) {
   const rel = path.relative(path.resolve(rootDir), path.resolve(absolutePath));
   return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 
+/**
+ * realpathInside 内部辅助。
+ */
 async function realpathInside(rootDir, absolutePath) {
   try {
     const [realRoot, realTarget] = await Promise.all([realpath(rootDir), realpath(absolutePath)]);
@@ -601,6 +662,9 @@ async function realpathInside(rootDir, absolutePath) {
   }
 }
 
+/**
+ * 转义 RegExp 特殊字符。
+ */
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -611,3 +675,4 @@ function escapeRegExp(value) {
 export function contractError(code, message) {
   return Object.assign(new Error(message), { code });
 }
+

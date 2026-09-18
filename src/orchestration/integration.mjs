@@ -68,6 +68,7 @@ export async function assertTaskOrDeliveredOwnership(rootDir, planId, task) {
   try {
     return await assertCurrentTaskOwnership(rootDir, task);
   } catch (originalError) {
+    // §3.4：ownership 丢失但 intent 已 push 时，用 delivery intent 围栏恢复性放行 proof/checkpoint。
     const workspace = task?.delivery_workspace;
     const intent = workspace?.runId ? await readIntegrationIntent(rootDir, workspace.runId, task.id) : null;
     const coordination = task?.coordination;
@@ -396,8 +397,7 @@ export async function integrateAdmissionCommit(rootDir, options) {
           pass: false,
           active: true,
           // The transport failed after a push attempt and read-back could
-          // not prove either outcome. Preserve the workspace and ownership;
-          // rolling back here could contradict an accepted remote commit.
+          // §3.4：push 结果未知时保留 intent 与 ownership，禁止回滚可能已在远端的 commit。
           pushed: true,
           pushOutcome: "unknown",
           reason: "integration_push_outcome_unknown",
@@ -514,6 +514,7 @@ export async function integrateAdmissionCommit(rootDir, options) {
   };
 }
 
+/** 无 remote 时在本地 task worktree 生成本地 delivery commit。 */
 async function integrateLocalAdmissionCommit(rootDir, options, deliveryTarget) {
   if (options.integrationGuard?.active === true) {
     return {
@@ -673,6 +674,7 @@ async function integrateLocalAdmissionCommit(rootDir, options, deliveryTarget) {
   };
 }
 
+/** 检查远端 branch 是否包含指定 integration commit。 */
 async function inspectRemoteCommitContainment(rootDir, remote, branch, commitSha) {
   try {
     const advertisedSha = await remoteBranchHead(rootDir, remote, branch);
@@ -698,6 +700,7 @@ async function inspectRemoteCommitContainment(rootDir, remote, branch, commitSha
   }
 }
 
+/** 返回 run/task integration intent JSON 路径。 */
 function integrationIntentPath(rootDir, runId, taskId) {
   return resolveWildArrangePath(
     rootDir,

@@ -29,6 +29,7 @@ import {
  * @param {object|null} [deliveryBaseline] delivery commit 基线
  */
 export async function writeCheckpoint(rootDir, planId, task, verifyResult, scopeResult = null, reviewResult = null, deliveryBaseline = null) {
+  // §3.4：checkpoint 只快照证据，不做 pass/fail 判定；判定由 acceptance proof 负责。
   const checkpointPath = resolveTaskCheckpointPath(rootDir, planId, task.id);
   await writeJsonAtomic(checkpointPath, {
     planId,

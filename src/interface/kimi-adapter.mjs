@@ -29,7 +29,10 @@ export const KIMI_ADAPTER_VERSION = "1.0.0";
 
 const KIMI_WRITE_TOOL_MATCHER = "^(Bash|Write|Edit)$";
 
-/** 构建 Kimi Code 插件 manifest（hooks 列表与 interface 展示元数据）。 */
+/**
+ * 构建 Kimi Code 插件 manifest（hooks 列表与 interface 展示元数据）。
+ * @returns {object}
+ */
 export function buildKimiPluginManifest() {
   const bridgeCommand = "node ./hooks/wildarrange-hook-bridge.mjs";
   const hook = (event, matcher) => ({
@@ -110,6 +113,7 @@ if (payload.hook_event_name === "Stop" && result.continuation?.required === true
 
 if (typeof result.output === "string") process.stdout.write(result.output);
 
+/** Kimi hook 失败出口：写 stderr 并以指定码退出。 */
 function failHook(message, exitCode = 1) {
   if (message) console.error(message);
   process.exit(exitCode);
@@ -118,7 +122,10 @@ ${renderHookBridgeUtilities()}
 `;
 }
 
-/** 生成 Kimi adapter 安装与 enforcement 说明（Markdown）。 */
+/**
+ * 生成 Kimi adapter 安装与 enforcement 说明（Markdown）。
+ * @returns {string}
+ */
 export function renderKimiAdapterReadme() {
   return `# WildArrange Kimi Code Adapter
 

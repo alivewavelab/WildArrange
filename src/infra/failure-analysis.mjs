@@ -38,6 +38,9 @@ export function buildFailureSummary(task, { workerResult, verifyResult, scopeRes
   };
 }
 
+/**
+ * rejectionReason 内部辅助。
+ */
 function rejectionReason(workerResult, verifyResult, scopeResult) {
   if (workerResult.exitCode !== 0) return "worker_failed";
   if (!verifyResult.pass) return "verifier_failed";
@@ -46,6 +49,9 @@ function rejectionReason(workerResult, verifyResult, scopeResult) {
   return "unknown";
 }
 
+/**
+ * gateRejectionReason 内部辅助。
+ */
 function gateRejectionReason(workerResult, verifyResult, scopeResult, reviewResult, criteriaResult) {
   const base = rejectionReason(workerResult, verifyResult, scopeResult);
   if (base !== "unknown") return base;
@@ -54,6 +60,9 @@ function gateRejectionReason(workerResult, verifyResult, scopeResult, reviewResu
   return "unknown";
 }
 
+/**
+ * failureTarget 内部辅助。
+ */
 function failureTarget(reason, workerResult, verifyResult, scopeResult, criteriaResult) {
   if (reason === "worker_failed") return workerResult.command || "worker command";
   if (reason === "verifier_failed") {
@@ -67,6 +76,9 @@ function failureTarget(reason, workerResult, verifyResult, scopeResult, criteria
   return "checkpoint gate";
 }
 
+/**
+ * failureObserved 内部辅助。
+ */
 function failureObserved(reason, workerResult, verifyResult, scopeResult, reviewResult, criteriaResult) {
   if (reason === "worker_failed") return commandObservation(workerResult);
   if (reason === "verifier_failed") {
@@ -89,12 +101,18 @@ function failureObserved(reason, workerResult, verifyResult, scopeResult, review
   return "missing or inconclusive gate evidence";
 }
 
+/**
+ * commandObservation 内部辅助。
+ */
 function commandObservation(result) {
   const stdout = truncateForSummary((result.stdout || "").trim());
   const stderr = truncateForSummary((result.stderr || "").trim());
   return [`exitCode=${result.exitCode ?? 1}`, stdout ? `stdout=${stdout}` : null, stderr ? `stderr=${stderr}` : null].filter(Boolean).join("; ");
 }
 
+/**
+ * failureFixBy 内部辅助。
+ */
 function failureFixBy(reason, task, scopeResult, reviewResult, criteriaResult) {
   if (reason === "worker_failed") return "修复 worker_command 或交给 ZhuRong 重新实现同一任务，然后重跑 execute。";
   if (reason === "verifier_failed") return "按失败命令输出修正实现，不改验收标准；修完后重跑 verify 和 checkpoint。";
@@ -114,6 +132,9 @@ function failureFixBy(reason, task, scopeResult, reviewResult, criteriaResult) {
   return "补齐缺失证据后重新进入 verify/checkpoint。";
 }
 
+/**
+ * failureDoNot 内部辅助。
+ */
 function failureDoNot(reason) {
   if (reason === "scope_guard_failed") return "不要直接重试同一 worker；先处理范围漂移。";
   if (reason === "scope_guard_inconclusive") return "不要把“看不到改动”当作“没有越界”。";
@@ -124,7 +145,11 @@ function failureDoNot(reason) {
   return "不要在证据不完整时 checkpoint。";
 }
 
+/**
+ * 截断 ForSummary 以控制摘要长度。
+ */
 function truncateForSummary(value, limit = 500) {
   if (value.length <= limit) return value;
   return `${value.slice(0, limit - 15)}...[truncated]`;
 }
+

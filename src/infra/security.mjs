@@ -290,8 +290,7 @@ export async function restoreRuntimeStateBackup(rootDir, options = {}) {
   if (!manifest || manifest.kind !== "runtime_state_backup") {
     throw new Error(`unknown state backup: ${backupId}`);
   }
-  // Validate the complete manifest before creating the pre-restore backup or
-  // touching live state. A damaged manifest must fail without side effects.
+  // §3.4 回滚安全：损坏 manifest 必须在写 pre-restore 备份或动 live state 前 fail-closed。
   for (const file of manifest.files || []) {
     resolveManifestRelativePath(backupDir, file.path, "backup source");
     resolveManifestRelativePath(rootDir, file.path, "restore target");
@@ -373,6 +372,9 @@ export async function restoreRuntimeStateBackup(rootDir, options = {}) {
   };
 }
 
+/**
+ * 恢复备份后重验 completed 任务证据链，不合格降级为 needs_user_decision。
+ */
 async function revalidateRestoredCompletedTasks(rootDir) {
   const tasksPath = resolveWildArrangePath(rootDir, "team", "tasks.json");
   const raw = await readJson(tasksPath, null);
@@ -413,10 +415,16 @@ async function revalidateRestoredCompletedTasks(rootDir) {
   return downgraded;
 }
 
+/**
+ * 断言 backupId 为安全单段标识符。
+ */
 function assertSafeBackupId(value, label = "backup id") {
   assertSafeId(value, label);
 }
 
+/**
+ * 解析归档恢复源路径，禁止指向 backups 目录。
+ */
 function resolveBackupSourcePath(rootDir, candidate) {
   try {
     return resolveInboundPath(rootDir, candidate, {
@@ -431,10 +439,16 @@ function resolveBackupSourcePath(rootDir, candidate) {
   }
 }
 
+/**
+ * 在 manifest 父目录内解析相对路径，越界抛错。
+ */
 function resolveManifestRelativePath(parentDir, relativePath, label) {
   return resolveRelativeInside(parentDir, relativePath, label);
 }
 
+/**
+ * 复制单条备份条目到备份目录（委托 copyEntry）。
+ */
 async function copyBackupEntry(sourcePath, backupDir, relativePath) {
   return copyEntry(sourcePath, backupDir, relativePath);
 }
@@ -484,6 +498,9 @@ export async function verifyRuntimeState(rootDir) {
   };
 }
 
+/**
+ * 收集 wildarrange.config 与运行时 config 的 SHA256 指纹。
+ */
 async function collectConfigFingerprints(rootDir) {
   const candidates = [
     path.join(rootDir, WILDARRANGE_CONFIG_FILE),
@@ -501,3 +518,4 @@ async function collectConfigFingerprints(rootDir) {
   }
   return files;
 }
+

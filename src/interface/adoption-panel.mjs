@@ -298,6 +298,7 @@ export async function buildGovernanceFileIndex(rootDir) {
   return { kind: "wildarrange_governance_files", freshness, ledgers, groups };
 }
 
+/** 按 registry/bootstrap/inventory 类型生成治理总账卡片的人类可读摘要。 */
 function governanceLedgerSummary(id, value) {
   if (!value) return "0 项";
   if (id === "registry") {
@@ -310,6 +311,7 @@ function governanceLedgerSummary(id, value) {
   return `${count} 项资产`;
 }
 
+/** 递归扫描项目根，收集属于治理分组的文件路径与体积（排除 node_modules 等）。 */
 async function listProjectFiles(rootDir) {
   const result = [];
   async function visit(directory) {
@@ -331,6 +333,7 @@ async function listProjectFiles(rootDir) {
   return result.sort((left, right) => left.path.localeCompare(right.path));
 }
 
+/** 按路径模式将相对路径映射到 gates/tests/product 等治理分组 id；不匹配返回 null。 */
 function governanceGroupFor(relativePath) {
   const value = String(relativePath || "").replaceAll("\\", "/");
   if (/verification-(registry|bootstrap)\.json$|verification-inventory\.(json|html)$/i.test(value)) return "gates";
@@ -345,13 +348,16 @@ function governanceGroupFor(relativePath) {
 
 // --- 只读预览 ---
 
+/** 只读读取治理文件预览；校验分组归属、路径逃逸与 512KB 体积上限。 */
 async function readGovernancePreview(rootDir, requestedPath) {
   const relative = String(requestedPath || "").replaceAll("\\", "/");
   if (!governanceGroupFor(relative)) throw Object.assign(new Error("该文件不属于项目治理范围"), { code: "invalid_path" });
   const root = path.resolve(rootDir);
   const absolute = path.resolve(root, relative);
+  // 符号链接解析前：拒绝 .. 或绝对路径逃出项目根。
   if (absolute !== root && !absolute.startsWith(`${root}${path.sep}`)) throw Object.assign(new Error("文件路径超出项目范围"), { code: "invalid_path" });
   const actual = await realpath(absolute);
+  // realpath 后再次校验，防止软链指向项目外。
   if (actual !== root && !actual.startsWith(`${root}${path.sep}`)) throw Object.assign(new Error("文件真实路径超出项目范围"), { code: "invalid_path" });
   const info = await stat(actual);
   if (!info.isFile()) throw Object.assign(new Error("目标不是文件"), { code: "invalid_path" });
@@ -361,7 +367,14 @@ async function readGovernancePreview(rootDir, requestedPath) {
 
 // --- Adoption HTTP API ---
 
-/** 处理 /api/adoption/* 请求；非 adoption 路径返回 false 由 dashboard 继续路由。 */
+/**
+ * 处理 /api/adoption/* 请求；非 adoption 路径返回 false 由 dashboard 继续路由。
+ * @param {import("node:http").IncomingMessage} request
+ * @param {import("node:http").ServerResponse} response
+ * @param {URL} url
+ * @param {string} rootDir
+ * @returns {Promise<boolean>} 已处理为 true，否则 false
+ */
 export async function tryHandleAdoptionApi(request, response, url, rootDir) {
   if (!url.pathname.startsWith("/api/adoption/")) return false;
   try {
@@ -379,6 +392,7 @@ export async function tryHandleAdoptionApi(request, response, url, rootDir) {
       }));
       return true;
     }
+    // 写操作统一 POST；GET 之外的非 POST 方法直接 405。
     if (request.method !== "POST") {
       sendJson(response, 405, { ok: false, error: "method_not_allowed" });
       return true;
@@ -409,10 +423,12 @@ export async function tryHandleAdoptionApi(request, response, url, rootDir) {
       }
       validateId(cardId, "cardId");
       const result = await applyApprovedCards(rootDir, { sessionId, cardId });
+      // orchestration 层拒绝批量 apply：接口层映射为 400 而非 409。
       if (result?.status === "single_card_required") {
         sendJson(response, 400, { ok: false, error: result.nextAction || "一次只 Apply 一张卡", status: "single_card_required" });
         return true;
       }
+      // 会话状态不允许 apply（仍有 pending、applying 等）→ 409 冲突。
       if (result?.ok === false) {
         sendJson(response, 409, {
           ok: false,
@@ -432,6 +448,7 @@ export async function tryHandleAdoptionApi(request, response, url, rootDir) {
     }
     if (url.pathname === "/api/adoption/recover") {
       const result = await recoverAdoption(rootDir, { sessionId });
+      // recover 失败表示事务仍卡在 recovery_required，HTTP 409 提示前端继续对账而非重试 apply。
       sendJson(response, result.ok === false ? 409 : 200, { ok: result.ok !== false, result, error: result.error });
       return true;
     }
@@ -443,6 +460,7 @@ export async function tryHandleAdoptionApi(request, response, url, rootDir) {
     sendJson(response, 404, { ok: false, error: "not_found" });
     return true;
   } catch (error) {
+    // 按 orchestration 抛出的 error.code 映射 HTTP 状态：413 体积、400 参数、409 会话冲突、500 未知。
     const status = error?.code === "payload_too_large"
       ? 413
       : error?.code === "file_too_large"
@@ -457,6 +475,7 @@ export async function tryHandleAdoptionApi(request, response, url, rootDir) {
   }
 }
 
+/** 校验 sessionId/cardId 等必填 id；不合法时抛 code=invalid_id。 */
 function validateId(value, label) {
   if (typeof value !== "string" || !SAFE_ID.test(value)) {
     const error = new Error(`invalid ${label}`);
@@ -465,6 +484,7 @@ function validateId(value, label) {
   }
 }
 
+/** 可选 id：空值返回 undefined，有值则走 validateId。 */
 function validOptionalId(value, label) {
   if (value === undefined || value === null || value === "") return undefined;
   validateId(value, label);

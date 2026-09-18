@@ -83,6 +83,9 @@ export async function isPromptPackCurrent(rootDir, packDir = DEFAULT_PROMPT_PACK
   }
 }
 
+/**
+ * registryIdentity 内部辅助。
+ */
 function registryIdentity(manifest, entries, canonicalPackDir) {
   return {
     name: manifest.name,
@@ -98,6 +101,9 @@ function registryIdentity(manifest, entries, canonicalPackDir) {
   };
 }
 
+/**
+ * registryIdentityFromRegistry 内部辅助。
+ */
 function registryIdentityFromRegistry(registry) {
   return {
     name: registry.name,
@@ -111,6 +117,9 @@ function registryIdentityFromRegistry(registry) {
   };
 }
 
+/**
+ * materializedEntries 内部辅助。
+ */
 function materializedEntries(entries) {
   return [
     ...entries.agents,
@@ -120,6 +129,9 @@ function materializedEntries(entries) {
   ];
 }
 
+/**
+ * registryEntry 内部辅助。
+ */
 function registryEntry(entry) {
   return {
     path: entry.relativePath,
@@ -146,6 +158,9 @@ export async function loadPromptPackEntries(packDir = DEFAULT_PROMPT_PACK_DIR, m
   return { manifest: packManifest, agents, skills, tools, routes };
 }
 
+/**
+ * loadPackTextEntry 内部辅助。
+ */
 async function loadPackTextEntry(packDir, name, relativePath, kind) {
   const filePath = await resolvePackEntryPath(packDir, relativePath, `${kind} ${name}`);
   const content = await readFile(filePath, "utf8");
@@ -205,6 +220,9 @@ export async function renderPromptPackEntry(rootDir, selector) {
   return content;
 }
 
+/**
+ * materializePromptPack 内部辅助。
+ */
 async function materializePromptPack(rootDir, entries) {
   const runtimeRoot = resolveWildArrangePath(rootDir);
   const runtimeStat = await lstat(runtimeRoot).catch(() => null);
@@ -246,6 +264,9 @@ async function materializePromptPack(rootDir, entries) {
   return installedRoot;
 }
 
+/**
+ * 解析 TrustedInstalledRoot 路径或引用，越界/逃逸抛错。
+ */
 async function resolveTrustedInstalledRoot(rootDir, label) {
   const runtimeRoot = resolveWildArrangePath(rootDir);
   const installedRoot = resolveWildArrangePath(rootDir, "prompt-pack", "installed");
@@ -269,6 +290,9 @@ async function resolveTrustedInstalledRoot(rootDir, label) {
   return realInstalledRoot;
 }
 
+/**
+ * 解析 PackEntryPath 路径或引用，越界/逃逸抛错。
+ */
 async function resolvePackEntryPath(packDir, relativePath, label) {
   if (typeof packDir !== "string" || packDir.length === 0) {
     throw new Error(`invalid prompt-pack root for ${label}`);
@@ -285,13 +309,20 @@ async function resolvePackEntryPath(packDir, relativePath, label) {
   return candidate;
 }
 
+/**
+ * 判断 isSafeRelativePath 条件。
+ */
 function isSafeRelativePath(value) {
   if (typeof value !== "string" || value.length === 0 || path.isAbsolute(value)) return false;
   const segments = value.replaceAll("\\", "/").split("/");
   return segments.every((segment) => segment.length > 0 && segment !== "." && segment !== "..");
 }
 
+/**
+ * 判断 isInsideRoot 条件。
+ */
 function isInsideRoot(rootDir, filePath) {
   const relative = path.relative(rootDir, filePath);
   return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
+

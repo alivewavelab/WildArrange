@@ -44,6 +44,9 @@ export async function appendLedgerOnce(rootDir, event, isDuplicate) {
   });
 }
 
+/**
+ * 在已持 ledger 锁下追加 hash 链条目。
+ */
 async function appendLedgerLocked(rootDir, ledgerPath, event) {
   const tail = await resolveTailHashForAppend(rootDir, ledgerPath);
   const entry = {
@@ -88,6 +91,9 @@ export async function readVerifiedLedgerEntries(rootDir) {
   return walk.entries.filter((item) => item.verified).map((item) => item.entry);
 }
 
+/**
+ * 逐行遍历 ledger 并解析 JSON。
+ */
 async function walkLedger(rootDir) {
   const ledgerPath = resolveWildArrangePath(rootDir, "ledger.jsonl");
   let content = "";
@@ -159,6 +165,9 @@ export async function readLedgerTailHash(rootDir) {
   return readLedgerLastHash(resolveWildArrangePath(rootDir, "ledger.jsonl"));
 }
 
+/**
+ * 返回 ledger 尾 hash 缓存文件路径。
+ */
 function tailCachePath(rootDir) {
   return resolveWildArrangePath(rootDir, "ledger-tail.json");
 }
@@ -166,6 +175,9 @@ function tailCachePath(rootDir) {
 // 追加路径的尾 hash 解析：缓存命中（文件尺寸未变）时 O(1)；尺寸变大
 // （正常追加后缓存未更新、或崩溃恢复）时回退到 fail-closed 全量扫描；
 // 尺寸变小说明 ledger 被截断/重写，拒绝追加。
+/**
+ * 解析追加前应用的 tail hash（缓存或全量扫描）。
+ */
 async function resolveTailHashForAppend(rootDir, ledgerPath) {
   let size;
   try {
@@ -191,6 +203,9 @@ async function resolveTailHashForAppend(rootDir, ledgerPath) {
 
 // fail-closed 尾行扫描：尾部坏行不再静默返回 null（那会让下一次追加
 // 以 prevHash=null 悄悄分叉链），而是拒绝追加并指向修复动作。
+/**
+ * 读取 ledger 最后一行的 hash 字段。
+ */
 async function readLedgerLastHash(ledgerPath) {
   let content;
   try {
@@ -230,6 +245,9 @@ async function readLedgerLastHash(ledgerPath) {
   return lastHash;
 }
 
+/**
+ * 计算单条 ledger 条目的链式 hash。
+ */
 function hashLedgerEntry(entry) {
   const { hash, ...unsigned } = entry || {};
   return hashContent(JSON.stringify(unsigned));
@@ -238,6 +256,9 @@ function hashLedgerEntry(entry) {
 // ledger 锁与任务状态锁共用 file-lock.mjs：stale 恢复（死 pid 立即、
 // 不可解析按 mtime 宽限）与可诊断超时（错误带 owner/pid/存活状态）。
 // 旧的二行 `pid\nts` 锁格式不可解析，崩溃残留会在宽限期后自动回收。
+/**
+ * 在 ledger 文件锁内执行回调。
+ */
 async function withLedgerLock(rootDir, fn) {
   const lockPath = resolveWildArrangePath(rootDir, "ledger.lock");
   await mkdir(path.dirname(lockPath), { recursive: true });
@@ -246,3 +267,4 @@ async function withLedgerLock(rootDir, fn) {
     retryMs: LEDGER_LOCK_RETRY_MS,
   });
 }
+

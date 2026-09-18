@@ -98,6 +98,7 @@ export async function preToolUseGuard(rootDir, input = {}, options = {}) {
     };
   }
 
+  // 无法解析 patch 目标时拒绝写入，避免范围门对未知路径放行
   if (isApplyPatchTool && targetPaths.length === 0) {
     const reason = "apply_patch target paths could not be parsed; refusing a file mutation whose planned scope cannot be verified";
     await appendLedger(rootDir, {
@@ -121,6 +122,7 @@ export async function preToolUseGuard(rootDir, input = {}, options = {}) {
 
   const featureDesignGate = await loadActiveFeatureDesignGate(rootDir, featureGateSessionId(input));
   if (featureDesignGate?.status === "awaiting_feature_confirmation") {
+    // 功能设计未确认前：仅只读 WildArrange 命令放行，禁止文件变更与实现类 shell
     const blocked = (isShellTool && !isReadOnlyWildArrangeShellCommand(shellCommand, cliCommandPrefix, rootDir)) || targetPaths.length > 0;
     if (blocked) {
       return denyFeatureDesignToolUse(rootDir, {
@@ -273,6 +275,7 @@ export async function preToolUseGuard(rootDir, input = {}, options = {}) {
   };
 }
 
+/** create_goal 只允许 objective 字段，其他键视为非法生命周期混用。 */
 function hasInvalidCreateGoalPayload(value) {
   return isPlainObject(value) && Object.keys(value).some((key) => key !== "objective");
 }
@@ -357,6 +360,7 @@ export function extractPreToolTargetPaths(input, rootDir) {
   return uniqueStrings(values.map((value) => normalizeHookTargetPath(value, rootDir)).filter(Boolean));
 }
 
+/** 从 apply_patch 工具输入解析目标文件路径，兼容 native 与 git unified diff 格式。 */
 function collectApplyPatchTargetPaths(input, output) {
   const toolName = String(input.tool_name || input.toolName || "");
   if (!/^(?:functions\.)?apply_patch$/i.test(toolName)) return;
@@ -392,6 +396,7 @@ function collectApplyPatchTargetPaths(input, output) {
   }
 }
 
+/** 去除 patch 头路径两侧引号，保留原始相对路径。 */
 function cleanPatchHeaderPath(value) {
   const trimmed = String(value || "").trim();
   if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
@@ -400,6 +405,7 @@ function cleanPatchHeaderPath(value) {
   return trimmed;
 }
 
+/** 递归扫描 tool_input 中 path/file/target 等键，收集候选文件路径。 */
 function collectPathLikeValues(value, output, explicitPath = false) {
   if (typeof value === "string") {
     if (explicitPath && isCandidateFilePath(value)) output.push(value);
@@ -419,11 +425,13 @@ function collectPathLikeValues(value, output, explicitPath = false) {
   }
 }
 
+/** 排除 URL、多行与空字节，判断字符串是否像项目文件路径。 */
 function isCandidateFilePath(value) {
   if (!value || value.includes("\n") || value.includes("\0")) return false;
   return !/^(https?:|data:|mailto:)/i.test(value);
 }
 
+/** 判断是否仅为 .wildarrange/plan-drafts/*.json 的计划草稿写入。 */
 function isPlanDraftWrite(targetPaths) {
   return targetPaths.length > 0
     && targetPaths.every((targetPath) => /^\.wildarrange\/plan-drafts\/[A-Za-z0-9_.-]+\.json$/.test(targetPath));
@@ -433,6 +441,7 @@ function isPlanDraftWrite(targetPaths) {
 
 const READ_ONLY_WILDARRANGE_SHELL_ARGS = /^(?:status|doctor|summary|timeline|decisions|config\s+show|changes\s+list|adoption\s+inventory|review\s+checklist\s+--task\s+[A-Za-z0-9_.-]+|review\s+configure\s+--from\s+\.wildarrange[\\/]plan-drafts[\\/][A-Za-z0-9_.-]+\.json|prompts\s+show\s+--skill\s+[A-Za-z0-9][A-Za-z0-9._-]{0,99}|resume(?:\s+--session\s+[A-Za-z0-9_.-]+)?|continuation\s+check(?:\s+--session\s+[A-Za-z0-9_.-]+)?|help(?:\s+--all)?|--help(?:\s+--all)?)$/i;
 
+/** 无活跃任务或计划待批时，仅允许只读/计划管理类 WildArrange shell 子命令。 */
 function isAllowedPrePlanShellCommand(command, cliCommandPrefix = "", controlRoot = "") {
   const args = stripVerifiedControlRootOption(parseWildArrangeShellArgs(command, cliCommandPrefix), controlRoot);
   if (!args) return false;
@@ -443,6 +452,7 @@ function isAllowedPrePlanShellCommand(command, cliCommandPrefix = "", controlRoo
   return /^plan\s+--from\s+(?:"[A-Za-z0-9_./\\:~ -]+\.json"|'[A-Za-z0-9_./\\:~ -]+\.json'|[A-Za-z0-9_./\\:~ -]+\.json)$/i.test(args);
 }
 
+/** 从 shell 命令提取 wildarrange 子命令参数；拒绝 shell 元字符与管道注入。 */
 function parseWildArrangeShellArgs(command, cliCommandPrefix = "") {
   if (typeof command !== "string") return null;
   const trimmed = command.trim();
@@ -457,11 +467,13 @@ function parseWildArrangeShellArgs(command, cliCommandPrefix = "") {
   return invocation ? invocation[1].trim() : null;
 }
 
+/** 判断 shell 命令是否为功能设计门允许的只读 WildArrange 子命令。 */
 function isReadOnlyWildArrangeShellCommand(command, cliCommandPrefix = "", controlRoot = "") {
   const args = stripVerifiedControlRootOption(parseWildArrangeShellArgs(command, cliCommandPrefix), controlRoot);
   return Boolean(args && READ_ONLY_WILDARRANGE_SHELL_ARGS.test(args));
 }
 
+/** 校验 plan --from 导入的 JSON 是否绑定当前功能设计 gateId。 */
 async function isMatchingFeaturePlanImport(rootDir, command, gateId, cliCommandPrefix = "") {
   const args = stripVerifiedControlRootOption(parseWildArrangeShellArgs(command, cliCommandPrefix), rootDir);
   const match = args?.match(/^plan\s+--from\s+(?:"([^"]+\.json)"|'([^']+\.json)'|([^\s]+\.json))$/i);
@@ -472,6 +484,7 @@ async function isMatchingFeaturePlanImport(rootDir, command, gateId, cliCommandP
   return plan?.feature_design_ref === gateId || plan?.featureDesignRef === gateId;
 }
 
+/** 剥离并校验 --control-root 选项，值与当前控制根不一致则拒绝解析。 */
 function stripVerifiedControlRootOption(args, controlRoot) {
   if (typeof args !== "string") return args;
   const pattern = /\s+--control-root\s+(?:"([^"]*)"|'([^']*)'|([^\s]+))/gi;
@@ -480,20 +493,24 @@ function stripVerifiedControlRootOption(args, controlRoot) {
   const expected = normalizeControlRootPath(controlRoot);
   for (const match of matches) {
     const value = match[1] ?? match[2] ?? match[3] ?? "";
+    // 防止通过伪造 --control-root 绕过功能设计门或范围校验
     if (!expected || normalizeControlRootPath(value) !== expected) return null;
   }
   return args.replace(pattern, "").replace(/\s+/g, " ").trim();
 }
 
+/** 规范化控制根路径用于跨平台相等性比较（Windows 忽略大小写）。 */
 function normalizeControlRootPath(value) {
   const normalized = path.resolve(String(value)).replace(/\\/g, "/").replace(/\/+$/, "");
   return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
+/** 解析功能设计门绑定的 sessionId，缺失时回退 session 占位符。 */
 function featureGateSessionId(input) {
   return String(input.session_id || input.sessionId || process.env.WILDARRANGE_SESSION_ID || process.env.CODEX_SESSION_ID || process.env.CURSOR_SESSION_ID || "session");
 }
 
+/** 功能设计门拦截：写 ledger 并返回结构化 deny 决策。 */
 async function denyFeatureDesignToolUse(rootDir, options) {
   await appendLedger(rootDir, {
     type: "pre_tool_use_denied",
@@ -518,6 +535,7 @@ async function denyFeatureDesignToolUse(rootDir, options) {
   };
 }
 
+/** 将绝对/相对路径规范为相对 rootDir 的路径，经 realpath 解析防 symlink 逃逸。 */
 function normalizeHookTargetPath(value, rootDir) {
   const absoluteTarget = path.isAbsolute(value) ? value : path.resolve(rootDir, value);
   const relative = path.relative(
@@ -527,6 +545,7 @@ function normalizeHookTargetPath(value, rootDir) {
   return normalizeRelativePath(relative);
 }
 
+/** 向上追溯 realpath 至最近存在祖先，再拼回缺失尾段，处理尚未创建的文件路径。 */
 function canonicalizePotentialPath(value) {
   let current = path.resolve(value);
   const missingSegments = [];
@@ -542,6 +561,7 @@ function canonicalizePotentialPath(value) {
   }
 }
 
+/** 判断是否为非 null 的 plain object（非数组）。 */
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

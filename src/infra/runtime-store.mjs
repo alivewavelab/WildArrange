@@ -57,9 +57,8 @@ export function resolveWildArrangePath(rootDir, ...segments) {
   return path.join(rootDir, WILDARRANGE_DIR, ...segments);
 }
 
-// Evidence identity must remain a one-to-one mapping even though both IDs may
-// contain "-". New files therefore use plan/task directory segments; the
-// legacy flat helpers exist only for guarded compatibility reads and cleanup.
+// §3.4 证据路径：planId 与 taskId 均允许连字符，必须用目录分段而非单 `-` 拼接，
+// 否则 stem 碰撞；legacy 扁平路径仅用于 guarded 兼容读取。
 /**
  * resolveTaskPacketPath：本模块对外API。
  */
@@ -205,14 +204,21 @@ export function hashContent(content) {
   return createHash("sha256").update(content).digest("hex");
 }
 
+/**
+ * 断言 planId/taskId 为安全证据路径段。
+ */
 function assertEvidenceSegment(value, label) {
   if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)) {
     throw new Error(`${label} must be a safe evidence path segment`);
   }
 }
 
+/**
+ * 断言证据文件扩展名仅为 json 或 md。
+ */
 function assertEvidenceExtension(value) {
   if (!new Set(["json", "md"]).has(value)) {
     throw new Error(`unsupported evidence extension: ${value}`);
   }
 }
+

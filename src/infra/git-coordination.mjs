@@ -54,6 +54,7 @@ export async function inspectGitCoordination(rootDir, config = {}) {
     return unavailable(mode, "project is not a Git repository");
   }
   const topLevel = await canonicalPath(topLevelResult.topLevel);
+  // §3.4 Git 边界：项目根必须等于 toplevel realpath，避免在嵌套 worktree 误协调。
   if (topLevel !== await canonicalPath(rootDir)) {
     return unavailable(mode, "project root is not the Git toplevel");
   }
@@ -211,6 +212,7 @@ export async function createTaskDeliveryCommit(rootDir, options = {}) {
       expectedHead,
       options.message || "wildarrange: task delivery",
     );
+    // §3.4 Git 乐观锁：update-ref 带 expectedHead，并发改分支时拒绝移动 HEAD。
     const update = await runGit(rootDir, ["update-ref", "HEAD", commitSha, expectedHead]);
     if (!update.ok) {
       return {
@@ -265,6 +267,7 @@ export async function pushTaskDeliveryCommit(rootDir, options = {}) {
   const branch = String(options.branch || "").trim();
   const commitSha = String(options.commitSha || "").trim();
   const prefix = String(options.taskBranchPrefix || "wildarrange/task").replace(/^\/+|\/+$/g, "");
+  // §3.4 安全：只允许 push 到 task branch 前缀，禁止自动写入 main 或共享分支。
   if (!branch || !branch.startsWith(`${prefix}/`)) {
     throw new Error(`refusing automatic push outside task branch prefix ${prefix}/: ${branch || "missing"}`);
   }
@@ -532,6 +535,9 @@ export function taskBranchName(config, planId, taskId) {
 }
 
 // --- 内部 Git 辅助 ---
+/**
+ * 解析远端集成基线分支名；auto 时依次尝试 ls-remote HEAD 与 remote/HEAD。
+ */
 async function resolveIntegrationBranch(rootDir, remote, configured) {
   if (configured && configured !== "auto") return configured;
   const advertisedHead = await runGit(rootDir, ["ls-remote", "--symref", remote, "HEAD"], { timeoutMs: 60_000 });
@@ -546,12 +552,18 @@ async function resolveIntegrationBranch(rootDir, remote, configured) {
   return "main";
 }
 
+/**
+ * 解析 Git ref 为 commit SHA。
+ */
 async function gitHeadForRef(rootDir, ref) {
   const result = await runGit(rootDir, ["rev-parse", ref]);
   if (!result.ok) throw new Error(`cannot resolve ${ref}: ${result.stderr || result.stdout}`);
   return result.stdout.trim();
 }
 
+/**
+ * 用 commit-tree 创建协调 commit，固定 author/committer 身份。
+ */
 async function commitTree(rootDir, treeSha, parentSha, message) {
   const result = await runGit(rootDir, ["commit-tree", treeSha, "-p", parentSha, "-m", message], {
     env: {
@@ -565,6 +577,9 @@ async function commitTree(rootDir, treeSha, parentSha, message) {
   return result.stdout.trim();
 }
 
+/**
+ * 以 argv 数组调用 git -C，禁止 shell 拼接用户输入。
+ */
 async function runGit(rootDir, args, options = {}) {
   const result = await runCommandFile("git", ["-C", rootDir, ...args], rootDir, options.timeoutMs || GIT_TIMEOUT_MS, {
     env: options.env,
@@ -578,17 +593,26 @@ async function runGit(rootDir, args, options = {}) {
   };
 }
 
+/**
+ * Git 协调不可用时的结构化返回；strict 模式直接抛错。
+ */
 function unavailable(mode, reason, extra = {}) {
   if (mode === "strict") throw new Error(`git coordination strict mode: ${reason}`);
   return { enabled: true, active: false, mode, reason, ...extra };
 }
 
+/**
+ * 将 planId/taskId 归一化为安全 Git ref 段，非法值抛错。
+ */
 function safeRefSegment(value) {
   const normalized = String(value || "").trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
   if (!normalized || normalized === "." || normalized === "..") throw new Error(`invalid Git task branch segment: ${value}`);
   return normalized;
 }
 
+/**
+ * 去重并排序 Git 路径，排除 .wildarrange 运行时目录。
+ */
 function uniqueGitPaths(values) {
   return [...new Set(values
     .map((value) => String(value || "").replaceAll("\\", "/").replace(/^\.\//, ""))
@@ -596,12 +620,18 @@ function uniqueGitPaths(values) {
     .sort();
 }
 
+/**
+ * 归一化设备名为安全标识符。
+ */
 function normalizeDeviceName(value) {
   const normalized = String(value || "").trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
   if (!normalized) throw new Error("device name is required");
   return normalized;
 }
 
+/**
+ * realpath 解析路径；ENOENT 时回退 resolve。
+ */
 async function canonicalPath(value) {
   try {
     return await realpath(value);
@@ -609,3 +639,4 @@ async function canonicalPath(value) {
     return path.resolve(value);
   }
 }
+

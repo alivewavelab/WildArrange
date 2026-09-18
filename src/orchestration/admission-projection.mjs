@@ -30,7 +30,12 @@ import { writeFailureReport } from "../infra/task-reports.mjs";
 import { loadTaskState } from "./plan-state.mjs";
 import { persistTaskState } from "./task-board.mjs";
 
-/** 决策投影：admission 是四个决策缝之一，结果（含回滚原因）进 decisions.jsonl。 */
+/**
+ * 决策投影：admission 是四个决策缝之一，结果（含回滚原因）写入 decisions.jsonl。
+ * @param {string} rootDir 项目根
+ * @param {object} options 含 runId、taskId
+ * @param {object} finalized admission 终态（status、rollback、acceptanceProof 等）
+ */
 export async function emitAdmissionDecision(rootDir, options, finalized) {
   const rollback = finalized.rollback || null;
   await emitDecision(rootDir, {
@@ -99,7 +104,14 @@ export async function advanceClaimPhaseWithinLock(rootDir, taskId, runId, phase,
   await persistTaskState(rootDir, taskState);
 }
 
-/** 更新 agent-run 的 result.json、batch JSON 与 index.json 中的 lifecycle 状态。 */
+/**
+ * 更新 agent-run 的 result.json、batch JSON 与 index.json 中的 lifecycle 状态。
+ * @param {string} rootDir 项目根
+ * @param {string} runId 并行 run ID
+ * @param {string} taskId 任务 ID
+ * @param {string} status 生命周期状态（released、awaiting_revision 等）
+ * @param {object} [details] admissionStatus、rollback 等附加字段
+ */
 export async function updateAgentRunLifecycle(rootDir, runId, taskId, status, details = {}) {
   const resultPath = resolveWildArrangePath(rootDir, "agent-runs", runId, taskId, "result.json");
   const result = await readJson(resultPath, null);

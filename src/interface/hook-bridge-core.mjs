@@ -26,6 +26,7 @@ import path from "node:path";
  * @returns {string}
  */
 export function renderHookBridgeExecution({ hostAdapter, controlRoot, timeoutMs = null }) {
+  // Cursor 要求 fail-closed：子进程挂死时 SIGKILL 并走 failHook；Kimi 传 null 则不生成定时器。
   const timeoutBlock = Number.isInteger(timeoutMs) && timeoutMs > 0
     ? `const childTimer = setTimeout(() => {
   child.kill("SIGKILL");
@@ -96,6 +97,7 @@ export function renderHookBridgeUtilities() {
   }
 }
 
+/** 判断路径存在且为普通文件（非目录）。 */
 function isRegularFile(filePath) {
   if (!existsSync(filePath)) return false;
   try {
@@ -105,6 +107,7 @@ function isRegularFile(filePath) {
   }
 }
 
+/** 将 hook bridge 配置解析为可 spawn 的 CLI 命令与参数。 */
 function resolveCliInvocation(spec) {
   if (spec.kind === "local") {
     return { command: process.execPath, args: [spec.cliPath] };

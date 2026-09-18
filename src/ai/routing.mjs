@@ -63,6 +63,7 @@ export function buildPlanDraftDirective(routeResult, options = {}) {
   };
 }
 
+/** 检测用户是否明确要求只写计划草稿、不执行 plan --from 导入。 */
 function isDraftOnlyPlanRequest(prompt) {
   return /(?:只|仅)(?:生成|创建|写|要).{0,12}(?:计划)?草稿(?=$|[\s，。！？；、,:：.!?;])|(?:先|暂时)?不(?:要|用|必)?(?:导入|登记)(?:(?:这|该|这个|本)?(?:份)?(?:正式)?(?:计划|草稿)(?=$|[\s，。！？；、,:：.!?;])|(?=\s*(?:$|[，。！？；,;])))|不要执行\s*plan\s+--from\b|\bdraft[ -]?only\b|\b(?:do not|don't) import(?:(?:\s+(?:the|this))?\s+(?:plan|draft)\b|(?=\s*(?:$|[,.!?;])))|\b(?:do not|don't) run\s+(?:the\s+)?plan\s+--from\b/i.test(prompt);
 }
@@ -140,6 +141,7 @@ export async function routeRequest(rootDir, input) {
 
 // --- 功能设计门 ---
 
+/** 活跃功能设计门强制将路由收敛到 plan/clarify，并注入 clarify-feature-design Skill。 */
 function enforceFeatureDesignGate(result, gate) {
   const skill = {
     name: "clarify-feature-design",
@@ -167,6 +169,7 @@ function enforceFeatureDesignGate(result, gate) {
   };
 }
 
+/** 将 sessionId 等片段规范为 plan-drafts 文件名安全段。 */
 function sanitizeDraftSegment(value) {
   return String(value || "session").replace(/[^A-Za-z0-9_.-]+/g, "_").slice(0, 80) || "session";
 }
@@ -221,6 +224,7 @@ export async function writeDailyRoutingReview(rootDir, options = {}) {
       if (item.sessionId) activeRouteBySession.set(item.sessionId, item);
       continue;
     }
+    // 将同 session 的 post_tool_use 决策关联到最近 routing 记录，供复盘追溯
     if (record.gate === "post_tool_use" && record.sessionId) {
       const active = activeRouteBySession.get(record.sessionId);
       if (active) {
@@ -286,6 +290,7 @@ export async function writeDailyRoutingReview(rootDir, options = {}) {
   };
 }
 
+/** 按 route+signal 聚合已确认误判，供每日复盘报告展示重复模式。 */
 function routingIssuePatterns(issues) {
   const groups = new Map();
   for (const issue of issues) {
@@ -301,6 +306,7 @@ function routingIssuePatterns(issues) {
   return [...groups.values()].sort((left, right) => right.count - left.count);
 }
 
+/** 将每日路由复盘对象渲染为 Markdown 报告正文。 */
 function renderDailyRoutingReview(report) {
   const lines = [
     `# WildArrange 路由每日复盘｜${report.date}`,
@@ -388,6 +394,7 @@ function renderDailyRoutingReview(report) {
   return lines.join("\n");
 }
 
+/** 将人工标注 category 映射为中文展示标签。 */
 function reviewLabel(category) {
   if (category === "confirmed") return "确认正确";
   if (category === "rule_wrong") return "规则错误";
@@ -395,21 +402,25 @@ function reviewLabel(category) {
   return "待确认";
 }
 
+/** 压缩单行文本至 160 字符，供复盘报告摘要展示。 */
 function compactText(value) {
   const text = String(value || "(无原文)").replace(/\s+/g, " ").trim();
   return text.length > 160 ? `${text.slice(0, 160)}…` : text;
 }
 
+/** 将 tool_input 摘要 JSON 压缩至 300 字符。 */
 function compactToolInput(value) {
   if (!value) return "";
   const text = JSON.stringify(value).replace(/\s+/g, " ");
   return text.length > 300 ? `${text.slice(0, 300)}…` : text;
 }
 
+/** 格式化为 en-CA 本地日期字符串（YYYY-MM-DD）。 */
 function localDate(value) {
   return new Intl.DateTimeFormat("en-CA").format(value);
 }
 
+/** 从 ISO 时间戳解析本地日期，非法输入返回 null。 */
 function localDateFromTimestamp(value) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
@@ -464,6 +475,7 @@ export async function semanticRouteShadow(rootDir, text, deterministicRoute, opt
   }
 }
 
+/** 合并语义 Shadow 结果，低置信或路由冲突时将 execute 降级为 plan/ask。 */
 async function applySemanticRouteGovernance(rootDir, text, deterministic, input) {
   const { config } = await loadWildArrangeConfig(rootDir);
   const shadowConfig = config.routeGovernance?.semanticShadow || {};
@@ -491,6 +503,7 @@ async function applySemanticRouteGovernance(rootDir, text, deterministic, input)
     };
   }
 
+  // 低置信或语义冲突时禁止直接 execute，默认降级为 plan 或 ask
   if (
     input?.allowLowConfidenceExecute !== true
     && shadowConfig.enforceLowConfidence !== false
@@ -515,6 +528,7 @@ async function applySemanticRouteGovernance(rootDir, text, deterministic, input)
   return result;
 }
 
+/** 规范化 LLM 语义路由 JSON 字段与置信度区间。 */
 function normalizeSemanticRoute(raw, usage) {
   const confidence = Number(raw.confidence);
   return {
@@ -529,6 +543,7 @@ function normalizeSemanticRoute(raw, usage) {
   };
 }
 
+/** 解析语义 Shadow LLM 回复；失败时从文本中提取 JSON 对象。 */
 function parseSemanticJson(content) {
   try {
     return JSON.parse(content);

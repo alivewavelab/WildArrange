@@ -66,6 +66,7 @@ export async function buildAgentContext(rootDir, options = {}) {
   const resumeContext = await writeContextSnapshot(rootDir, { reason: `agent-context:${agent}` });
   const role = options.role || roleForAgent(agent);
   const injectionPointName = options.injectionPoint || defaultInjectionPointForAgent(agent, { taskId: task?.id });
+  // 仅执行前注入点挂载任务绑定 Skill，其他阶段走静态注入点清单
   const taskSkills = injectionPointName === "before_execute"
     ? task?.skills || []
     : [];
@@ -230,6 +231,7 @@ export async function continuationDirective(rootDir, options = {}) {
     cliCommandPrefix: options.cliCommandPrefix,
   });
   const action = resume.nextActionDetails;
+  // 计划待批、人工决策或无未完成工作时禁止 Stop Hook 自动续跑
   const shouldContinue = !["awaiting_plan_approval", "awaiting_user_decision", "no_unfinished_work"].includes(action.reason);
   const directive = {
     kind: "wildarrange_continuation_directive",
@@ -256,6 +258,7 @@ export async function continuationDirective(rootDir, options = {}) {
 
 // --- 渲染与 Prompt 预算 ---
 
+/** 将注入点名称映射为 skill-matcher 使用的 stage 标签。 */
 function stageForInjectionPoint(pointName) {
   if (pointName === "before_execute") return "execute";
   if (pointName === "before_review") return "review";
@@ -265,6 +268,7 @@ function stageForInjectionPoint(pointName) {
   return "";
 }
 
+/** 按 taskId 精确查找，否则回退到可运行或 in_progress/verifying/failed 任务。 */
 function resolveContextTask(tasks, taskId, planId) {
   const scopedTasks = planId ? tasks.filter((task) => task.planId === planId) : tasks;
   if (taskId) {
@@ -275,6 +279,7 @@ function resolveContextTask(tasks, taskId, planId) {
   return findRunnableTask(scopedTasks) || scopedTasks.find((task) => task.status === "in_progress" || task.status === "verifying" || task.status === "failed") || null;
 }
 
+/** 将 Agent 键名映射为上下文包中的 role 枚举。 */
 function roleForAgent(agent) {
   if (agent === "BaiZe") return "independent_reviewer";
   if (agent === "DiJiang") return "planner";
@@ -284,6 +289,7 @@ function roleForAgent(agent) {
   return "linear_worker";
 }
 
+/** 将 Agent 上下文对象渲染为人类可读的 Markdown 报告。 */
 function renderAgentContextMarkdown(context) {
   const lines = [
     "# WildArrange Agent Context",
@@ -338,6 +344,7 @@ function renderAgentContextMarkdown(context) {
   return `${lines.join("\n")}\n`;
 }
 
+/** 裁剪任务对象为上下文包所需字段，含失败/变更/复核摘要。 */
 function summarizeTaskForContext(task) {
   return {
     id: task.id,
@@ -370,6 +377,7 @@ function summarizeTaskForContext(task) {
   };
 }
 
+/** 向 Markdown 行数组追加单任务详情块（职责、命令、门禁状态）。 */
 function appendTaskContext(lines, task) {
   lines.push(`- ${task.id}: ${task.subject}`);
   lines.push(`  - Status: ${task.status}; category=${task.category || "unresolved"}; attempts=${task.attempts}/${task.maxAttempts}`);
@@ -386,6 +394,7 @@ function appendTaskContext(lines, task) {
   }
 }
 
+/** 格式化附件字符数与预算截断状态，供 Markdown 报告展示。 */
 function renderAttachmentSize(item) {
   const loaded = item.loadedChars ?? String(item.content || "").length;
   const budget = item.budgetChars ?? "unknown";
@@ -393,6 +402,7 @@ function renderAttachmentSize(item) {
   return `${loaded}/${item.chars} chars, budget ${budget}${suffix}`;
 }
 
+/** 按 contextBudgets 截断 Agent 身份 Prompt，超长时追加截断说明标记。 */
 function prepareAgentPrompt(value, maxChars, agent) {
   const original = String(value || "");
   const budgetChars = normalizePromptBudget(maxChars);
@@ -421,12 +431,14 @@ function prepareAgentPrompt(value, maxChars, agent) {
   };
 }
 
+/** 解析 Prompt 字符预算，非法值回退 12000 并 clamp 到 [500, 500000]。 */
 function normalizePromptBudget(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return 12_000;
   return Math.max(500, Math.min(Math.floor(parsed), 500_000));
 }
 
+/** 读取 sessions/lineage.json，不存在时返回空 lineage 默认结构。 */
 async function readSessionLineage(rootDir) {
   return readJson(resolveWildArrangePath(rootDir, "sessions", "lineage.json"), {
     version: STATE_VERSION,
@@ -436,6 +448,7 @@ async function readSessionLineage(rootDir) {
   });
 }
 
+/** 将续跑 directive 渲染为 Markdown，供 sessions/continuation.md 写入。 */
 function renderContinuationMarkdown(directive) {
   return [
     "# WildArrange Continuation Directive",

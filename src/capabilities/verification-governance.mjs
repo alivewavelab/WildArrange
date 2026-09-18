@@ -46,7 +46,12 @@ import {
 
 // --- 公开 API ---
 
-/** 扫描验证治理宇宙，返回卡片与指纹等扫描结果。 */
+/**
+ * 扫描验证治理宇宙，返回卡片与指纹等扫描结果。
+ * @param {string} rootDir 项目根
+ * @param {object} [options] 传给 scanVerificationUniverse 的选项
+ * @returns {Promise<object>} kind=verification_governance_scan
+ */
 export async function scanVerificationGovernance(rootDir, options = {}) {
   const started = Date.now();
   const result = await scanVerificationUniverse(rootDir, options);
@@ -84,6 +89,7 @@ export async function applyVerificationCard(rootDir, options = {}) {
     });
     await assertRealpathInsideRoot(rootDir, absolutePath, relativePath);
   }
+  // §3.4：recovery_required 事务复用已有 preimage，避免重复 capture 覆盖 staging。
   const reusePreimage = existing && ["prepared", "recovery_required"].includes(existing.status) && Array.isArray(existing.preimage);
   const preimage = reusePreimage
     ? existing.preimage
@@ -128,6 +134,7 @@ export async function applyVerificationCard(rootDir, options = {}) {
     await writeJsonAtomic(path.join(txnDir, "postimage.json"), postimage);
     return { kind: "verification_governance_apply", status: "committed", cardId: card.id, paths, verifyResults, manifest };
   } catch (error) {
+    // §3.4：apply/verify 失败时先 restore preimage，再向上抛原错误或 recovery_required。
     try {
       await restorePreimages(rootDir, stagingDir, preimage, {
         denyPrefixes: [path.join(rootDir, ".git")],
@@ -237,6 +244,7 @@ export async function generateVerificationArtifacts(rootDir, options = {}) {
 
 const DENIED_ARCHIVE_ROOTS = new Set([".wildarrange", ".git", "node_modules"]);
 
+/** 计算 archive_move 的目标相对路径，禁止写入 .wildarrange/.git 等根。 */
 function archiveDestination(card, archiveRootHint = "") {
   const source = String(card.patch?.path || card.path || "").replaceAll("\\", "/");
   const rawRoot = String(card.patch?.archiveRoot || archiveRootHint || "").trim().replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
@@ -250,6 +258,7 @@ function archiveDestination(card, archiveRootHint = "") {
   return `${archiveRoot}/${source}`.replace(/\/+/g, "/");
 }
 
+/** 从差异卡解析 apply/verify 阶段需 preimage 的所有相对路径。 */
 function affectedPaths(card) {
   const paths = new Set();
   if (card.path && card.patch) paths.add(card.path);
@@ -263,6 +272,7 @@ function affectedPaths(card) {
 
 // --- Patch 应用 ---
 
+/** 按 patch.kind 应用 json_merge、write_text、archive_move 等变更。 */
 async function applyPatch(rootDir, card) {
   const patch = card.patch;
   if (!patch) return;
@@ -318,6 +328,7 @@ async function applyPatch(rootDir, card) {
 
 // --- 批准命令执行 ---
 
+/** 执行卡上批准的 verify 命令，不安全命令以 exitCode 126 记录而不执行。 */
 async function runApprovedCommands(rootDir, commands, config) {
   const results = [];
   for (const command of commands) {
@@ -337,6 +348,7 @@ async function runApprovedCommands(rootDir, commands, config) {
   return results;
 }
 
+/** 读取文件内容计算 git 可比 digest；缺失目录返回固定标记。 */
 async function gitComparablePathDigest(absolutePath) {
   try {
     return digestGitComparableContent(await readFile(absolutePath));
@@ -349,6 +361,7 @@ async function gitComparablePathDigest(absolutePath) {
 
 // --- 制品写入 ---
 
+/** 校验目标路径可写且语义一致；已有同义制品则标记 reused 跳过写入。 */
 async function prepareArtifactWrites(rootDir, artifacts) {
   const prepared = [];
   for (const artifact of artifacts) {
@@ -382,6 +395,7 @@ async function prepareArtifactWrites(rootDir, artifacts) {
   return prepared;
 }
 
+/** 非 reused 制品原子写入；写入前再次确认目标仍为 ENOENT。 */
 async function commitPreparedArtifact(prepared) {
   if (prepared.reused) return;
   try {
@@ -397,16 +411,19 @@ async function commitPreparedArtifact(prepared) {
   }
 }
 
+/** 比较两制品语义（忽略 generatedAt/digest 元字段）是否相同。 */
 function sameArtifactMeaning(left, right) {
   return digestCanonical(artifactMeaning(left)) === digestCanonical(artifactMeaning(right));
 }
 
+/** 剥离时间戳与 digest 后返回制品可比对的语义体。 */
 function artifactMeaning(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const { generatedAt: _generatedAt, digest: _digest, ...meaning } = value;
   return meaning;
 }
 
+/** 构造 artifact_conflict 错误，含 nextAction 指引人工移走冲突文件。 */
 function artifactConflict(relativePath, reason) {
   const error = new Error(`治理文件目标冲突：${relativePath}（${reason}）`);
   error.code = "artifact_conflict";
@@ -417,6 +434,7 @@ function artifactConflict(relativePath, reason) {
 
 // --- 工具函数 ---
 
+/** 将 approved locator 合并写入 wildarrange.config.json。 */
 async function mergeLocator(rootDir, locator) {
   const configPath = path.join(rootDir, "wildarrange.config.json");
   const current = await readJson(configPath, {});
@@ -426,6 +444,7 @@ async function mergeLocator(rootDir, locator) {
   });
 }
 
+/** 递归合并 JSON 对象；overlay 数组整体替换 base 数组。 */
 function deepMerge(base, overlay) {
   if (Array.isArray(overlay)) return overlay.slice();
   if (!overlay || typeof overlay !== "object") return overlay;
@@ -436,6 +455,7 @@ function deepMerge(base, overlay) {
   return result;
 }
 
+/** 脱敏命令输出中的 token/secret/api_key/password 赋值片段。 */
 function redactSecrets(text) {
   return String(text).replace(/(token|secret|api[_-]?key|password)\s*[:=]\s*\S+/gi, "$1=[redacted]");
 }

@@ -84,6 +84,9 @@ export function hasRealReviewLane(task, config) {
   return hasEnabledQualityGate(config);
 }
 
+/**
+ * 判断 hasEnabledQualityGate 条件。
+ */
 function hasEnabledQualityGate(config) {
   const gates = config?.qualityGates || {};
   if (gates.lspDiagnostics?.enabled === true && (gates.lspDiagnostics.commands || []).length > 0) return true;
@@ -94,6 +97,9 @@ function hasEnabledQualityGate(config) {
   return false;
 }
 
+/**
+ * 判断 hasRequiredQualityGate 条件。
+ */
 function hasRequiredQualityGate(config) {
   const gates = config?.qualityGates || {};
   if (gates.lspDiagnostics?.enabled === true && gates.lspDiagnostics?.required === true) return true;
@@ -102,3 +108,4 @@ function hasRequiredQualityGate(config) {
   if (gates.commentChecker?.enabled === true && gates.commentChecker?.blockOnFindings === true) return true;
   return false;
 }
+

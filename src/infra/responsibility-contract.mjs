@@ -70,6 +70,9 @@ export function contractPath(value) {
   return normalized;
 }
 
+/**
+ * requiredText 内部辅助。
+ */
 function requiredText(value, label) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${label} is required`);
   return value.trim();
@@ -105,3 +108,4 @@ export function hasAcceptedResponsibilityAudit(task, audit) {
     && audit.checks.every((check) => RESPONSIBILITY_RULES[check.rule] && check.decision === "PASS")
     && Array.isArray(audit.findings) && audit.findings.length === 0;
 }
+

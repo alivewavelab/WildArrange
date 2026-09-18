@@ -20,7 +20,12 @@ import { mkdir, rename, rm } from "node:fs/promises";
 import { nowIso, readJson, writeJsonAtomic } from "../infra/runtime-store.mjs";
 import { contractGovernancePaths, readContractRegistry, withContractGovernanceLock, requireSafeId, safeCardName, contractError, assertContractReferences, applyApprovedCard, relative, cardTouchesPaths, normalizeSlash, inspectApprovalRef, inspectContractReferences, declarationCoversSource, isContractScanPath } from "../infra/contract-governance.mjs";
 
-/** 扫描契约治理宇宙；inspectTask 时转为任务审查模式。 */
+/**
+ * 扫描契约治理宇宙；inspectTask 时转为任务审查模式。
+ * @param {string} rootDir 项目根
+ * @param {object} [options] inspectTask、write、persistenceRoot
+ * @returns {Promise<object>} 扫描结果，含 durationMs 与可选 written 路径
+ */
 export async function scanContractGovernance(rootDir, options = {}) {
   if (options.inspectTask) return inspectContractTask(rootDir, options.inspectTask, options.evidence || {}, options);
   const startedAt = Date.now();
@@ -33,18 +38,34 @@ export async function scanContractGovernance(rootDir, options = {}) {
   };
 }
 
-/** 应用契约差异卡（approve/reject）的公开入口，内部加锁。 */
+/**
+ * 应用契约差异卡（approve/reject）的公开入口，内部加锁。
+ * @param {string} rootDir 项目根
+ * @param {object} [options] cardId、decision、reason、expectedFingerprint
+ * @returns {Promise<object>} kind=contract_governance_decision
+ */
 export async function applyContractGovernanceCard(rootDir, options = {}) {
   return applyContractCardDecision(rootDir, options);
 }
 
-/** 读取 registry 与 currentScan，生成契约治理只读视图。 */
+/**
+ * 读取 registry 与 currentScan，生成契约治理只读视图。
+ * @param {string} rootDir 项目根
+ * @returns {Promise<object>} kind=contract_governance_view
+ */
 export async function generateContractGovernanceArtifacts(rootDir) {
   const paths = contractGovernancePaths(rootDir);
   return { kind: "contract_governance_view", registry: await readContractRegistry(rootDir), scan: await readJson(paths.currentScan, null) };
 }
 
-/** 对任务执行契约治理审查，包装为 review gate 可用的 evidence 形态。 */
+/**
+ * 对任务执行契约治理审查，包装为 review gate 可用的 evidence 形态。
+ * @param {string} rootDir 执行根
+ * @param {object} task 含 contractChanges
+ * @param {object} [evidence] scopeResult 等
+ * @param {object} [options] controlRoot
+ * @returns {Promise<object>} kind=contract_governance_review
+ */
 export async function runContractGovernanceReview(rootDir, task, evidence = {}, options = {}) {
   const result = await inspectContractTask(rootDir, task, evidence, options);
   return {
@@ -64,6 +85,7 @@ export async function applyContractCardDecision(rootDir, options = {}) {
     applyContractCardDecisionUnlocked(rootDir, options));
 }
 
+/** 无锁状态下执行差异卡决策：归档、更新 registry、失败时回滚 pending 卡。 */
 async function applyContractCardDecisionUnlocked(rootDir, options = {}) {
   const cardId = requireSafeId(options.cardId, "cardId");
   const decision = String(options.decision || "").trim();
@@ -78,6 +100,7 @@ async function applyContractCardDecisionUnlocked(rootDir, options = {}) {
   const card = await readJson(cardPath, null);
   if (!card) throw contractError("contract_card_missing", `contract card not found: ${cardId}`);
   if (!options.expectedFingerprint) throw contractError("contract_card_fingerprint_required", "contract decision requires expectedFingerprint");
+  // §3.4：指纹不匹配说明卡内容已被新 scan 覆盖，禁止基于 stale 卡做决策。
   if (options.expectedFingerprint !== card.fingerprint) {
     throw contractError("contract_card_stale", "contract card fingerprint no longer matches");
   }
@@ -118,6 +141,7 @@ async function applyContractCardDecisionUnlocked(rootDir, options = {}) {
   try {
     if (decision === "approve") await writeJsonAtomic(paths.registry, registry);
   } catch (error) {
+    // §3.4：registry 写入失败时尽量恢复 pending 卡，避免卡消失而 registry 未变。
     let restored = false;
     try {
       await renameFile(retiredPath, cardPath);

@@ -56,7 +56,11 @@ const SECTION_CHECKS = [
   ["registryFreshness", checkRegistryFreshness],
 ];
 
-/** 执行全部分项检查并写入 doctor 报告文件。 */
+/**
+ * 执行全部分项检查并写入 doctor 报告文件。
+ * @param {string} rootDir
+ * @returns {Promise<{ kind: string, ok: boolean, findings: Array<object>, sections: object }>}
+ */
 export async function runDoctor(rootDir) {
   await ensureWildArrangeDirs(rootDir);
   const findings = [];
@@ -91,12 +95,14 @@ export async function runDoctor(rootDir) {
   return report;
 }
 
+/** 向 doctor findings 数组追加一条分项结论。 */
 function addFinding(findings, severity, section, message, extra = {}) {
   findings.push({ severity, section, message, ...extra });
 }
 
 // --- 配置结构 ---
 
+/** 检查 wildarrange.config.json 未知键、未注册 skill 与缺失 markdown 挂载。 */
 async function checkConfigStructure(rootDir, findings) {
   const { config, sourcePath } = await loadWildArrangeConfig(rootDir);
   const knownTopLevelKeys = new Set(Object.keys(DEFAULT_WILDARRANGE_CONFIG));
@@ -166,6 +172,7 @@ async function checkConfigStructure(rootDir, findings) {
 
 // --- Ledger 完整性 ---
 
+/** 校验 ledger.jsonl hash 链完整性。 */
 async function checkLedgerIntegrity(rootDir, findings) {
   const result = await verifyLedger(rootDir);
   if (!result.ok) {
@@ -178,6 +185,7 @@ async function checkLedgerIntegrity(rootDir, findings) {
 
 // --- Ledger 与备份交叉对账 ---
 
+/** 将当前 ledger 与最新 state 备份中的 ledger 前缀逐行对账，检测重写或截断。 */
 async function checkLedgerAgainstBackup(rootDir, findings) {
   const backups = await listRuntimeStateBackups(rootDir);
   if (backups.length === 0) {
@@ -221,6 +229,7 @@ async function checkLedgerAgainstBackup(rootDir, findings) {
   };
 }
 
+/** 读取 ledger 文件非空行；ENOENT 返回空数组。 */
 async function readLedgerLines(filePath) {
   try {
     const content = await readFile(filePath, "utf8");
@@ -233,6 +242,7 @@ async function readLedgerLines(filePath) {
 
 // --- 配置基线 ---
 
+/** 校验 config hash 基线是否与当前配置一致。 */
 async function checkConfigBaseline(rootDir, findings) {
   const result = await verifyConfigBaseline(rootDir);
   if (result.status === "missing_baseline") {
@@ -247,6 +257,7 @@ async function checkConfigBaseline(rootDir, findings) {
 
 // --- 运行态文件 ---
 
+/** 校验运行态关键文件（tasks.json、prompt-pack 等）是否存在。 */
 async function checkRuntimeState(rootDir, findings) {
   const result = await verifyRuntimeState(rootDir);
   if (!result.ok) {
@@ -257,8 +268,10 @@ async function checkRuntimeState(rootDir, findings) {
   return { status: result.status, failureCount: (result.failures || []).length };
 }
 
-// 门武装分项：门未武装时 acceptance-proof 的 review_not_tautological 会把任务
-// 挡在 completed 之外——doctor 必须把这件事摆到台面上，而不是埋在 status JSON 里。
+/**
+ * 门武装分项：门未武装时 acceptance-proof 会把任务挡在 completed 之外，
+ * doctor 必须把这件事摆到台面上，而不是埋在 status JSON 里。
+ */
 async function checkGateArming(rootDir, findings) {
   const { config } = await loadWildArrangeConfig(rootDir);
   const taskState = await loadTaskState(rootDir).catch(() => null);
@@ -269,8 +282,10 @@ async function checkGateArming(rootDir, findings) {
   return { status: arming.armed ? "ok" : "warn", armed: arming.armed, issueCount: arming.issues.length };
 }
 
-// Adapter 分项：硬拦截装没装、装得对不对，必须有体检。`.cursor/` 不进 git，
-// 团队成员各自跑 adapter install，漏装的人机器上 AI 不受约束——这里兜底发现。
+/**
+ * Adapter 分项：硬拦截装没装、装得对不对，必须有体检。
+ * `.cursor/` 不进 git，团队成员各自 install，漏装时 AI 不受约束——这里兜底发现。
+ */
 async function checkAdapters(rootDir, findings) {
   const { config, sourcePath } = await loadWildArrangeConfig(rootDir);
   if (!sourcePath) {
@@ -364,6 +379,7 @@ async function checkAdapters(rootDir, findings) {
   };
 }
 
+/** 从 ledger 查找与当前 Codex hooks.json digest 匹配的 hook_injection_run 回执。 */
 async function inspectCodexHookExecution(rootDir, hooksPath) {
   const currentDigest = hashContent(await readFile(hooksPath, "utf8"));
   const entries = await readVerifiedLedgerEntries(rootDir);
@@ -383,6 +399,7 @@ async function inspectCodexHookExecution(rootDir, hooksPath) {
 
 // --- 决策日志健康 ---
 
+/** 检查 decisions.jsonl 坏行与孤儿标注（annotation 指向已截断决策）。 */
 async function checkDecisionHealth(rootDir, findings) {
   const stats = await projectDecisionStats(rootDir);
   if (stats.skippedLines > 0) {
@@ -402,6 +419,7 @@ async function checkDecisionHealth(rootDir, findings) {
 
 // --- 验证 registry 新鲜度 ---
 
+/** 检查 verification registry 相对 bootstrap/inventory 是否过期（stale 黄灯）。 */
 async function checkRegistryFreshness(rootDir, findings) {
   const result = await evaluateRegistryFreshness(rootDir);
   if (result.stale) {
@@ -415,6 +433,7 @@ async function checkRegistryFreshness(rootDir, findings) {
 
 // --- 仓库治理审计 ---
 
+/** 读取最新 governance audit 报告并映射 fail/warn 到 doctor findings。 */
 async function checkRepositoryGovernance(rootDir, findings) {
   const reportPath = resolveWildArrangePath(rootDir, "reports", "governance", "latest.json");
   const report = await readJson(reportPath, null);
@@ -438,6 +457,7 @@ async function checkRepositoryGovernance(rootDir, findings) {
 
 // --- 报告渲染 ---
 
+/** 将 doctor 报告对象渲染为 Markdown 供 reports/doctor.md 写入。 */
 function renderDoctorMarkdown(report) {
   const lines = [
     "# WildArrange Doctor Report",
@@ -471,12 +491,14 @@ function renderDoctorMarkdown(report) {
   return `${lines.join("\n")}\n`;
 }
 
+/** 格式化单个 adapter 目标的状态摘要（供 doctor.md Sections 行）。 */
 function renderAdapterTarget(target) {
   if (!target.configured) return `${target.target}:NOT CONFIGURED`;
   if (target.target === "codex") return `${target.target}:configured/${target.activation === "execution_observed" ? "execution observed" : "ACTIVATION UNVERIFIED"}`;
   return `${target.target}:configured`;
 }
 
+/** 安全渲染分项摘要；分项崩溃或未运行时返回占位文本。 */
 function sectionValue(section, render) {
   if (!section) return "not run";
   if (section.status === "check_failed") return `CHECK FAILED (${section.error})`;

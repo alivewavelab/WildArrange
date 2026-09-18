@@ -32,6 +32,7 @@ export async function runResponsibilityAudit(controlRoot, task, scopeResult, con
     const imported = [...entries].reverse().find((e) => e.type === "plan_imported" && e.planId === task.planId);
     const changes = normalizeResponsibilityChanges(task.responsibilityChanges, task.writable_paths);
     if (!changes) {
+      // §3.4：新计划要求职责声明时无 declaration 直接 blocked；旧任务标 NOT_AUDITED。
       if (imported?.responsibilityAuditRequired) return blocked("R1: task is missing approved responsibilityChanges");
       return { ...base, pass: false, decision: "NOT_AUDITED", legacy: true, summary: "Legacy task has no responsibility declaration; no responsibility audit was performed", findings: [] };
     }
@@ -39,6 +40,7 @@ export async function runResponsibilityAudit(controlRoot, task, scopeResult, con
     if (work?.activePlanId !== task.planId || work?.planApproval?.status !== "approved") return blocked("R1: current plan still awaits human approval");
     const approved = [...entries].reverse().find((e) => e.type === "plan_approved" && e.planId === task.planId);
     const digest = responsibilityDigest(changes);
+    // §3.4：digest 与 plan_approved 快照不一致说明声明在批准后又被改动。
     if (approved?.responsibilityScopes?.[task.id] !== digest) return blocked("R1: responsibility changes are unapproved or changed after approval; return for plan confirmation");
     if (scopeResult?.status !== "pass") return blocked("Responsibility audit requires passing scope evidence");
     const uncovered = (scopeResult.changedPaths || []).filter((name) => !changes.some((item) => item.script === name));
@@ -59,6 +61,7 @@ export async function runResponsibilityAudit(controlRoot, task, scopeResult, con
     if (response.commandRecovery) return { ...blocked("Reviewer termination requires recovery"), commandRecovery: response.commandRecovery };
     const content = response.content;
     const after = await collectResponsibilityEvidence(executionRoot, changes, scopeResult.changedPaths, budget);
+    // §3.4：审计执行期间源码变化则 receipt 无效，须重跑 verify/review。
     if (after.digest !== source.digest) return blocked("Source changed during independent audit; rerun verification and review");
     const result = validateResponsibilityVerdict(JSON.parse(content), source);
     return { ...base, ...result, packetPath, sourceDigest: source.digest, responsibilityDigest: digest };

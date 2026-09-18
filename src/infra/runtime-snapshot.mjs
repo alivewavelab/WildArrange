@@ -105,6 +105,9 @@ export async function ensureTaskPacket(rootDir, planId, task) {
   return { directory: dir, baselinePath, indexPath, researchPath };
 }
 
+/**
+ * 断言 PacketComponentNotSymlink 条件，不满足则抛错。
+ */
 async function assertPacketComponentNotSymlink(file) {
   try {
     if ((await lstat(file)).isSymbolicLink()) throw new Error(`task packet path is a symlink: ${file}`);
@@ -164,6 +167,9 @@ export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
   return context;
 }
 
+/**
+ * 构建 StatusReport 结构。
+ */
 function buildStatusReport(work, taskState, changes, completionIntegrity) {
   const openChanges = changes.filter((change) => change.status === "open").length;
   if (!taskState) return { work, planId: null, total: 0, completed: 0, invalidCompleted: 0, completionIntegrity, draft: 0, pending: 0, failed: 0, openChanges };
@@ -189,11 +195,17 @@ function buildStatusReport(work, taskState, changes, completionIntegrity) {
   };
 }
 
+/**
+ * 查找 RunnableTaskForContext 匹配项。
+ */
 function findRunnableTaskForContext(tasks) {
   const completed = new Set(tasks.filter((task) => task.status === "completed").map((task) => task.id));
   return tasks.find((task) => task.status === "pending" && (task.blockedBy || []).every((id) => completed.has(id))) || null;
 }
 
+/**
+ * 判断 isCurrentPlanAwaitingApproval 条件。
+ */
 function isCurrentPlanAwaitingApproval(work, taskState) {
   const activePlanId = work?.activePlanId || null;
   const taskPlanId = taskState?.planId || taskState?.activePlanId || null;
@@ -207,6 +219,9 @@ function isCurrentPlanAwaitingApproval(work, taskState) {
 
 // A read-only description of current state, shared by resume and Stop output.
 // Executing any suggested command still goes through the runtime's own gates.
+/**
+ * describeNextAction 内部辅助。
+ */
 function describeNextAction(tasks, runnable, cliCommandPrefix, options = {}) {
   const recovery = tasks.find((task) => task.pendingContractChange && task.admission_claim
     && task.admission_claim.workspaceRestored !== true);
@@ -244,6 +259,9 @@ export async function resolveRuntimeCliCommandPrefix(rootDir, options = {}) {
   return existsSync(path.join(rootDir, "bin", "wildarrange.mjs")) ? "node ./bin/wildarrange.mjs" : null;
 }
 
+/**
+ * 读取 InstalledHookCliCommandPrefix 并返回结构化结果。
+ */
 async function readInstalledHookCliCommandPrefix(rootDir) {
   for (const hookPath of [
     path.join(rootDir, ".codex", "hooks.json"),
@@ -278,6 +296,9 @@ async function readInstalledHookCliCommandPrefix(rootDir) {
   return null;
 }
 
+/**
+ * 收集 HookCommands 条目。
+ */
 function collectHookCommands(value, output = []) {
   if (Array.isArray(value)) {
     for (const item of value) collectHookCommands(item, output);
@@ -290,6 +311,9 @@ function collectHookCommands(value, output = []) {
   return output;
 }
 
+/**
+ * 归一化 RuntimeCliCommandPrefix 输入为稳定形态。
+ */
 function normalizeRuntimeCliCommandPrefix(rootDir, value) {
   if (typeof value !== "string") return null;
   const prefix = value.trim();
@@ -309,15 +333,24 @@ function normalizeRuntimeCliCommandPrefix(rootDir, value) {
   return `node "${absoluteCliPath}"`;
 }
 
+/**
+ * 从内容中提取 NpxPackageNameFromCliPath。
+ */
 function extractNpxPackageNameFromCliPath(cliPath) {
   const normalized = cliPath.replaceAll("\\", "/");
   return normalized.match(/\/node_modules\/((?:@[A-Za-z0-9][A-Za-z0-9._-]*\/)?[A-Za-z0-9][A-Za-z0-9._-]*)\/bin\/wildarrange\.mjs$/i)?.[1] || null;
 }
 
+/**
+ * 渲染 CliCommand 为 Markdown/HTML。
+ */
 function renderCliCommand(cliCommandPrefix, args) {
   return cliCommandPrefix ? `${cliCommandPrefix} ${args}` : null;
 }
 
+/**
+ * 读取 ChangeRequests 并返回结构化结果。
+ */
 async function readChangeRequests(rootDir) {
   const dirPath = resolveWildArrangePath(rootDir, "changes");
   let entries;
@@ -336,6 +369,9 @@ async function readChangeRequests(rootDir) {
   return changes.sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
 }
 
+/**
+ * 读取 SessionLineage 并返回结构化结果。
+ */
 async function readSessionLineage(rootDir) {
   return readJson(resolveWildArrangePath(rootDir, "sessions", "lineage.json"), {
     version: STATE_VERSION,
@@ -345,6 +381,9 @@ async function readSessionLineage(rootDir) {
   });
 }
 
+/**
+ * 汇总 TaskForContext 为摘要。
+ */
 function summarizeTaskForContext(task) {
   return {
     id: task.id,
@@ -379,6 +418,9 @@ function summarizeTaskForContext(task) {
   };
 }
 
+/**
+ * 汇总 ChangeForContext 为摘要。
+ */
 function summarizeChangeForContext(change) {
   return {
     id: change.id,
@@ -390,6 +432,9 @@ function summarizeChangeForContext(change) {
   };
 }
 
+/**
+ * 渲染 ContextMarkdown 为 Markdown/HTML。
+ */
 function renderContextMarkdown(context) {
   const status = context.status || {};
   const lines = [
@@ -466,6 +511,9 @@ function renderContextMarkdown(context) {
   return `${lines.join("\n")}\n`;
 }
 
+/**
+ * appendTaskContext 内部辅助。
+ */
 function appendTaskContext(lines, task) {
   lines.push(`- ${task.id}: ${task.subject}`);
   lines.push(`  - Status: ${task.status}; category=${task.category || "unresolved"}; attempts=${task.attempts}/${task.maxAttempts}`);
@@ -480,3 +528,4 @@ function appendTaskContext(lines, task) {
     lines.push(`  - Retry hint: ${(task.lastFailure.retryHint || "").replace(/\n/g, " / ")}`);
   }
 }
+

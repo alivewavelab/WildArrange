@@ -228,6 +228,7 @@ export async function runParallelAgents(rootDir, options = {}) {
 // index.json 的三处 read-modify-write（reconcile 收养孤儿 run、register、
 // append）共用一把文件锁：并发 run 或并发 status 同时读写时，无锁会在
 // read 与 write 之间互丢条目。
+/** 在 agent-runs/index.json 文件锁内执行 fn。 */
 async function withRunIndexLock(rootDir, fn) {
   const lockPath = resolveWildArrangePath(rootDir, "agent-runs", "index.json.lock");
   await mkdir(path.dirname(lockPath), { recursive: true });
@@ -297,6 +298,7 @@ async function reconcileRunIndex(rootDir, index) {
   return index;
 }
 
+/** 将 runId 预注册到 index.json 为 running 状态。 */
 async function registerRunIndexEntry(rootDir, runId) {
   const indexPath = resolveWildArrangePath(rootDir, "agent-runs", "index.json");
   return withRunIndexLock(rootDir, async () => {
@@ -516,6 +518,7 @@ export async function cleanupParallelAgentRun(rootDir, options = {}) {
   };
 }
 
+/** 检查 worktree 是否满足 cleanup 围栏（无残留改动）。 */
 async function inspectParallelCleanupFence(worktreeDir, entry, task, gitContext, runPlanId) {
   const lifecycle = entry.lifecycle?.status || null;
   const cleanableLifecycle = new Set(["closed", "failed", "skipped", "released"]);
@@ -565,6 +568,7 @@ async function inspectParallelCleanupFence(worktreeDir, entry, task, gitContext,
   return { pass: true };
 }
 
+/** 按 options 从 tasks 中筛选可并行执行的候选任务。 */
 function selectParallelTasks(tasks, options) {
   if (Array.isArray(options.taskIds) && options.taskIds.length > 0) {
     const selected = options.taskIds.map((taskId) => {
@@ -635,6 +639,7 @@ async function runOneAgent(rootDir, runDir, runId, task, options) {
   }
 }
 
+/** spawn 单个子 agent 并收集 result.json 与生命周期。 */
 async function runOneAgentInner(rootDir, runDir, runId, task, options) {
   const agent = normalizeAgentKey(options.agent || task.owner || `Agent${options.index + 1}`) || `Agent${options.index + 1}`;
   const taskRunDir = path.join(runDir, task.id);
@@ -719,6 +724,7 @@ async function runOneAgentInner(rootDir, runDir, runId, task, options) {
   return result;
 }
 
+/** 解析 parallel run 的 isolation 模式（worktree/run-dir）。 */
 function resolveParallelIsolation(config, gitCoordination, options) {
   const requested = options.isolation || config.parallelAgents?.isolation || "run-dir";
   const coordination = config.gitCoordination || {};
@@ -731,6 +737,7 @@ function resolveParallelIsolation(config, gitCoordination, options) {
   return enforceWorktree ? "git-worktree" : requested;
 }
 
+/** 为选中任务写入 parallel_run_claim 并持久化。 */
 async function claimParallelRunTasks(rootDir, planId, selectedTasks, options) {
   return withTaskStateLock(rootDir, `parallel-run-claim:${options.runId}`, async () => {
     const taskState = await loadTaskState(rootDir);
@@ -740,6 +747,7 @@ async function claimParallelRunTasks(rootDir, planId, selectedTasks, options) {
       if (!task || task.status !== "pending") {
         throw new Error(`task ${selected.id} is no longer pending; refusing parallel run ${options.runId}`);
       }
+      // §3.4：同一任务同时只能有一个 parallel_run_claim，防止双写 owner/worktree。
       if (task.parallel_run_claim?.runId) {
         throw new Error(`task ${task.id} already has writable parallel run ${task.parallel_run_claim.runId}`);
       }
@@ -763,12 +771,14 @@ async function claimParallelRunTasks(rootDir, planId, selectedTasks, options) {
   });
 }
 
+/** run 失败时释放仍持有的 parallel_run_claim。 */
 async function releaseFailedParallelRunClaims(rootDir, runId, results) {
   const failedIds = results.filter((result) => result.pass !== true).map((result) => result.taskId);
   if (failedIds.length === 0) return;
   await clearParallelRunClaims(rootDir, runId, failedIds);
 }
 
+/** 清除指定 run 在任务上的 parallel_run_claim。 */
 async function clearParallelRunClaims(rootDir, runId, taskIds) {
   await withTaskStateLock(rootDir, `parallel-run-release:${runId}`, async () => {
     const taskState = await loadTaskState(rootDir);
@@ -785,11 +795,13 @@ async function clearParallelRunClaims(rootDir, runId, taskIds) {
   });
 }
 
+/** 从 results 汇总本 run 使用的 isolation 类型集合。 */
 function uniqueIsolation(results) {
   const values = [...new Set(results.map((result) => result.isolation).filter(Boolean))];
   return values.length === 1 ? values[0] : values.length === 0 ? null : "mixed";
 }
 
+/** 组装 spawn 子 agent 用的任务上下文 packet。 */
 function buildTaskPacket(task, context) {
   return {
     kind: "parallel_agent_task_packet",
@@ -824,6 +836,7 @@ function buildTaskPacket(task, context) {
   };
 }
 
+/** 将 run 结果摘要追加/更新到 index.json。 */
 async function appendRunIndex(rootDir, runId, results) {
   const indexPath = resolveWildArrangePath(rootDir, "agent-runs", "index.json");
   return withRunIndexLock(rootDir, async () => {
@@ -851,6 +864,7 @@ async function appendRunIndex(rootDir, runId, results) {
   });
 }
 
+/** 根据 pass/config 构造 agent lifecycle 初始状态。 */
 function buildAgentLifecycle(pass, config, statusOverride = null) {
   if (statusOverride === "skipped") {
     return {
@@ -880,6 +894,7 @@ function buildAgentLifecycle(pass, config, statusOverride = null) {
   };
 }
 
+/** 汇总 run 内各 task lifecycle 为 run 级摘要。 */
 function summarizeRunLifecycle(results) {
   const counts = {};
   for (const result of results) {
@@ -889,6 +904,7 @@ function summarizeRunLifecycle(results) {
   return counts;
 }
 
+/** 构造 parallel 完成后的 team 消息正文。 */
 function buildMessageBody(task, result) {
   const lines = [
     `Task: ${task.id} ${task.subject}`,
@@ -902,18 +918,21 @@ function buildMessageBody(task, result) {
   return lines.join("\n");
 }
 
+/** 归一化 maxAgents CLI 参数为安全整数。 */
 function normalizeMaxAgents(value) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) return 2;
   return Math.min(parsed, 8);
 }
 
+/** 归一化 timeout CLI 参数为毫秒。 */
 function normalizeTimeout(value) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) return DEFAULT_PARALLEL_TIMEOUT_MS;
   return parsed;
 }
 
+/** 截断字符串到指定长度并加省略号。 */
 function truncate(value, limit) {
   return value.length <= limit ? value : `${value.slice(0, limit - 20)}\n...[truncated]`;
 }

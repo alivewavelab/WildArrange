@@ -57,6 +57,7 @@ export async function runNextTask(rootDir, options = {}) {
   return withTaskStateLock(rootDir, "run-next-task", () => runNextTaskUnlocked(rootDir, options));
 }
 
+/** 锁内选取并推进下一个可运行线性任务节点。 */
 async function runNextTaskUnlocked(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const taskState = await loadTaskState(rootDir);
@@ -92,6 +93,7 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
     // run) — adjudicating it here would hijack that transaction and send the
     // task back to pending under the admitter's feet (cross-review P1,
     // round 6, 2026-07-21).
+    // §3.4：持有 admission_claim 的 verifying 任务禁止 linear run 劫持，须由原 run 续跑 admission。
     const claimed = taskState.tasks.find((candidate) => candidate.status === "verifying" && candidate.admission_claim?.runId);
     if (claimed) {
       await appendLedger(rootDir, { type: "run_blocked_by_admission_claim", planId: taskState.planId, taskId: claimed.id, runId: claimed.admission_claim.runId });
@@ -348,6 +350,7 @@ export async function executeTaskNode(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `node-execute:${options.taskId || "next"}`, () => executeTaskNodeUnlocked(rootDir, options));
 }
 
+/** 锁内执行 worker 节点并更新 verifying 状态。 */
 async function executeTaskNodeUnlocked(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const taskState = await loadTaskState(rootDir);
@@ -434,6 +437,7 @@ export async function verifyTaskNode(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `node-verify:${options.taskId || "next"}`, () => verifyTaskNodeUnlocked(rootDir, options));
 }
 
+/** 锁内单独运行 verify gate 节点。 */
 async function verifyTaskNodeUnlocked(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const taskState = await loadTaskState(rootDir);
@@ -475,6 +479,7 @@ export async function scopeTaskNode(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `node-scope:${options.taskId || "next"}`, () => scopeTaskNodeUnlocked(rootDir, options));
 }
 
+/** 锁内单独运行 scope gate 节点。 */
 async function scopeTaskNodeUnlocked(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const taskState = await loadTaskState(rootDir);
@@ -509,6 +514,7 @@ export async function reviewTaskNode(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `node-review:${options.taskId || "next"}`, () => reviewTaskNodeUnlocked(rootDir, options));
 }
 
+/** 锁内单独运行 review gate 节点。 */
 async function reviewTaskNodeUnlocked(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const taskState = await loadTaskState(rootDir);
@@ -567,6 +573,7 @@ export async function checkpointTaskNode(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `node-checkpoint:${options.taskId || "next"}`, () => checkpointTaskNodeUnlocked(rootDir, options));
 }
 
+/** 锁内收集 gate 证据并运行 completion 段。 */
 async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const taskState = await loadTaskState(rootDir);
@@ -725,6 +732,7 @@ export async function retryTaskNode(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `node-retry:${options.taskId || "next"}`, () => retryTaskNodeUnlocked(rootDir, options));
 }
 
+/** 锁内将 failed/pending 任务重置为可重试状态。 */
 async function retryTaskNodeUnlocked(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const taskState = await loadTaskState(rootDir);
@@ -793,6 +801,7 @@ async function retryTaskNodeUnlocked(rootDir, options = {}) {
   return { status: "pending", task, failure };
 }
 
+/** worker 执行前用 git stash 记录工作区 preimage。 */
 async function recordPreExecuteSnapshot(rootDir, planId, task, executionRoot = rootDir) {
   try {
     const snapshot = await captureWorkspaceSnapshot(executionRoot, { label: `pre-execute ${task.id} attempt ${task.attempts}` });
@@ -818,6 +827,7 @@ async function recordPreExecuteSnapshot(rootDir, planId, task, executionRoot = r
   }
 }
 
+/** 解析单步 node 命令目标任务与允许状态。 */
 function resolveNodeTask(tasks, taskId, allowedStatuses) {
   assertContractWorkspaceAvailable(tasks);
   const task = taskId ? tasks.find((candidate) => candidate.id === taskId) : findRunnableTask(tasks) || tasks.find((candidate) => allowedStatuses.includes(candidate.status));
@@ -828,6 +838,7 @@ function resolveNodeTask(tasks, taskId, allowedStatuses) {
   return task;
 }
 
+/** 解析 retry 命令目标任务。 */
 function resolveRetryTask(tasks, taskId) {
   const task = taskId
     ? tasks.find((candidate) => candidate.id === taskId)
@@ -839,6 +850,7 @@ function resolveRetryTask(tasks, taskId) {
   return task;
 }
 
+/** 命令终止未确认时持久化 recovery_required 状态。 */
 async function persistCommandRecoveryRequired(rootDir, taskState, task, commandEvidence, result = {}) {
   task.status = "verifying";
   task.last_failure = {
@@ -855,6 +867,7 @@ async function persistCommandRecoveryRequired(rootDir, taskState, task, commandE
   return { status: "recovery_required", task, ...result };
 }
 
+/** 集成基线变化时持久化 revalidation_required。 */
 async function persistRevalidationRequired(rootDir, taskState, task, { integrationGuard, summaryFallback, retryHint, ledgerEvent }) {
   task.status = "pending";
   task.coordination = {
@@ -878,6 +891,7 @@ async function persistRevalidationRequired(rootDir, taskState, task, { integrati
 // itself failed (e.g. checkpoints dir unwritable). Completion requires a
 // durable checkpoint, so the task goes back to pending for retry instead
 // of being silently marked completed.
+/** checkpoint 写入失败时将任务回 pending 并记账。 */
 async function persistCheckpointWriteFailure(rootDir, taskState, task, { workerResult, verifyResult, scopeResult, reviewResult, criteria, checkpointError }) {
   task.status = task.delivery?.integrationSha || task.delivery?.commitSha ? "verifying" : "pending";
   task.last_failure = buildFailureSummary(task, {
@@ -898,6 +912,7 @@ async function persistCheckpointWriteFailure(rootDir, taskState, task, { workerR
   await writeSnapshot(rootDir, "checkpoint_write_failed", { planId: taskState.planId, taskId: task.id });
 }
 
+/** acceptance proof 失败时持久化 blocked 摘要。 */
 async function persistAcceptanceProofFailure(rootDir, taskState, task, { workerResult, verifyResult, scopeResult, reviewResult, criteria, failureSummary }) {
   task.status = shouldFailDeliveryAttempt(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
   task.last_failure = buildFailureSummary(task, {
@@ -915,6 +930,7 @@ async function persistAcceptanceProofFailure(rootDir, taskState, task, { workerR
   await persistTaskState(rootDir, taskState);
 }
 
+/** Git 协调开启时校验当前设备仍持有任务写 ownership。 */
 async function taskOwnershipGate(rootDir, taskId) {
   const state = await loadTaskState(rootDir);
   const task = state?.tasks.find((candidate) => candidate.id === taskId);

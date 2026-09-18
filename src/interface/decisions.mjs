@@ -61,6 +61,7 @@ export async function projectDecisions(rootDir, { limit = 50, taskId, gate, sinc
   return { ...projection, text: renderDecisionsText(records, { skippedLines, total, truncated, gate }) };
 }
 
+/** 将决策记录数组渲染为 CLI 可读的多行文本。 */
 function renderDecisionsText(records, { skippedLines, total, truncated, gate }) {
   const lines = [];
   lines.push(`决策记录：显示 ${records.length} 条（本次扫描 ${total} 条${truncated ? "，仅文件尾部窗口，更早记录未加载" : ""}）`);
@@ -82,6 +83,7 @@ function renderDecisionsText(records, { skippedLines, total, truncated, gate }) 
   return lines.join("\n");
 }
 
+/** 格式化单条决策的标题行（时间、gate、decision、task/run/id 标记）。 */
 function renderRecordHeader(record) {
   const parts = [`[${record.ts || "?"}]`, record.gate || "unknown", String(record.decision || "?").toUpperCase()];
   if (record.taskId) parts.push(`task=${record.taskId}`);
@@ -91,6 +93,7 @@ function renderRecordHeader(record) {
   return parts.join("  ");
 }
 
+/** 拼接决策的 code 与 reason 为「命中规则」一行。 */
 function renderRuleLine(record) {
   const code = record.code ? `${record.code}` : null;
   const reason = record.reason || null;

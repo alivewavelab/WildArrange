@@ -56,6 +56,9 @@ export function applyVerifierEvidenceToCriteria(task, verifyResult) {
   return recorded;
 }
 
+/**
+ * matchedVerifierCommands 内部辅助。
+ */
 function matchedVerifierCommands(criterion, verifyCommands, results) {
   const refs = Array.isArray(criterion?.verifierCommandRefs) ? criterion.verifierCommandRefs : [];
   if (refs.length === 0) return [];
@@ -68,3 +71,4 @@ function matchedVerifierCommands(criterion, verifyCommands, results) {
   }
   return matched;
 }
+

@@ -126,6 +126,9 @@ function buildArmedConfig() {
   };
 }
 
+/**
+ * 归一化 RuntimeConfig 输入为稳定形态。
+ */
 function normalizeRuntimeConfig(config) {
   if (!isPlainObject(config)) return config;
   const normalized = { ...config };
@@ -160,6 +163,9 @@ function normalizeRuntimeConfig(config) {
   return normalized;
 }
 
+/**
+ * 归一化 GitCoordination 输入为稳定形态。
+ */
 function normalizeGitCoordination(value) {
   const input = isPlainObject(value) ? value : {};
   const mode = String(input.mode || "guarded").trim().toLowerCase();
@@ -189,10 +195,16 @@ function normalizeGitCoordination(value) {
   return normalized;
 }
 
+/**
+ * nonEmptyConfigString 内部辅助。
+ */
 function nonEmptyConfigString(value, fallback) {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
+/**
+ * 归一化 AgentMap 输入为稳定形态。
+ */
 function normalizeAgentMap(agents) {
   if (!isPlainObject(agents)) return agents;
   const normalized = {};
@@ -213,6 +225,9 @@ function normalizeAgentMap(agents) {
   return normalized;
 }
 
+/**
+ * 归一化 AgentSkills 输入为稳定形态。
+ */
 function normalizeAgentSkills(value, agentName) {
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw new Error(`agents.${agentName}.skills must be an array`);
@@ -227,6 +242,9 @@ function normalizeAgentSkills(value, agentName) {
   return skills;
 }
 
+/**
+ * deepMerge 内部辅助。
+ */
 function deepMerge(base, override) {
   if (!isPlainObject(base) || !isPlainObject(override)) return override;
   const result = { ...base };
@@ -236,6 +254,9 @@ function deepMerge(base, override) {
   return result;
 }
 
+/**
+ * 判断 isPlainObject 条件。
+ */
 function isPlainObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -257,3 +278,4 @@ export async function updateProjectGovernanceConfig(rootDir, patch, options = {}
   }
   return { config, applied: options.apply === true, configPath: WILDARRANGE_CONFIG_FILE };
 }
+

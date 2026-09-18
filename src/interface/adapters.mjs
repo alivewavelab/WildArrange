@@ -59,6 +59,7 @@ const ADAPTER_TARGETS = new Set(["all", "codex", "cursor", "kimi"]);
  * 安装指定 target（all/codex/cursor/kimi）的 adapter 文件并返回安装报告。
  * @param {string} rootDir
  * @param {{ target?: string, mode?: string, packageName?: string, package?: string }} [options]
+ * @returns {Promise<object>} install-report 对象
  */
 export async function installAdapter(rootDir, options = {}) {
   const target = options.target || "all";
@@ -244,7 +245,11 @@ export async function installAdapter(rootDir, options = {}) {
 
 // --- Adapter 卸载 ---
 
-/** 删除已安装的 adapter 文件；删除前复制到 .wildarrange/adapters/backups/。 */
+/**
+ * 删除已安装的 adapter 文件；删除前复制到 .wildarrange/adapters/backups/。
+ * @param {string} rootDir
+ * @param {{ target?: string }} [options]
+ */
 export async function uninstallAdapter(rootDir, options = {}) {
   const target = options.target || "all";
   if (!ADAPTER_TARGETS.has(target)) {
@@ -277,6 +282,7 @@ export async function uninstallAdapter(rootDir, options = {}) {
     candidates.push({ target: "kimi", path: resolveWildArrangePath(rootDir, "adapters", "kimi", "README.md") });
   }
   if (target === "all" || target === "codex" || target === "kimi") {
+    // .agents/skills/ 为 Codex 与 Kimi 共享；仅卸载一方时若对方仍启用则保留 skill 文件。
     const siblingStillUsesSharedSkills = target === "kimi"
       ? existsSync(path.join(rootDir, ".codex", "hooks.json"))
       : target === "codex"
@@ -323,7 +329,11 @@ export async function uninstallAdapter(rootDir, options = {}) {
 
 // --- 备份恢复 ---
 
-/** 从指定 backupId 目录恢复 adapter 文件到项目根。 */
+/**
+ * 从指定 backupId 目录恢复 adapter 文件到项目根。
+ * @param {string} rootDir
+ * @param {{ backupId?: string, backup?: string }} [options]
+ */
 export async function restoreAdapterBackup(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const backupId = options.backupId || options.backup;
@@ -373,10 +383,12 @@ export async function restoreAdapterBackup(rootDir, options = {}) {
   return report;
 }
 
+/** 生成带时间戳的 adapter 备份目录名（install/uninstall/pre-restore 前缀）。 */
 function createAdapterBackupId(prefix) {
   return `${prefix}-${new Date().toISOString().replace(/[:.]/g, "-")}`;
 }
 
+/** 若目标文件存在则复制到 .wildarrange/adapters/backups/<backupId>/ 并返回备份相对路径。 */
 async function backupExistingAdapterFile(rootDir, filePath, backupId) {
   if (!existsSync(filePath)) return null;
   const relativePath = reportPath(rootDir, filePath);
@@ -388,7 +400,11 @@ async function backupExistingAdapterFile(rootDir, filePath, backupId) {
 
 // --- CLI 前缀与 Hook 命令 ---
 
-/** 根据 local/npx 模式返回 wildarrange CLI 调用前缀字符串。 */
+/**
+ * 根据 local/npx 模式返回 wildarrange CLI 调用前缀字符串。
+ * @param {{ mode?: string, packageName?: string, localCliPath?: string }} [options]
+ * @returns {string}
+ */
 export function adapterCliPrefix({ mode = "local", packageName = DEFAULT_PACKAGE_NAME, localCliPath } = {}) {
   if (!/^(?:@[A-Za-z0-9][A-Za-z0-9._-]*\/)?[A-Za-z0-9][A-Za-z0-9._-]*$/.test(packageName)) {
     throw new Error("adapter package must be a plain npm package name or @scope/name");
@@ -398,14 +414,19 @@ export function adapterCliPrefix({ mode = "local", packageName = DEFAULT_PACKAGE
   return `node "${path.resolve(localCliPath || path.join(PROJECT_DIR, "bin", "wildarrange.mjs"))}"`;
 }
 
+/** 拼接宿主 hook bridge 调用的完整 wildarrange hook run 命令行。 */
 function adapterHookCommand({ mode, packageName, controlRoot }) {
   return `${adapterCliPrefix({ mode, packageName })} hook run --adapter-mode ${mode} --adapter-package ${JSON.stringify(packageName)} --control-root "${path.resolve(controlRoot)}"`;
 }
 
 // --- Slash 命令与宿主 Hook 配置生成 ---
 
-// 统一的 slash 命令集：Cursor 渲染成 .cursor/commands/<name>.md，
-// Codex 渲染成 .agents/skills/<name>/SKILL.md。两者本质都是"让 AI 代你执行 CLI"的提示词。
+/**
+ * 统一的 slash 命令集：Cursor 渲染成 .cursor/commands/<name>.md，
+ * Codex/Kimi 渲染成 .agents/skills/<name>/SKILL.md。
+ * @param {string} cliPrefix 已解析的 wildarrange CLI 调用前缀
+ * @returns {Array<{ name: string, title: string, description: string, body: string }>}
+ */
 function buildSlashCommands(cliPrefix) {
   const fence = (lines) => ["```bash", ...lines, "```"].join("\n");
   return [
@@ -549,14 +570,17 @@ function buildSlashCommands(cliPrefix) {
   ];
 }
 
+/** 将 slash 命令渲染为 Cursor .cursor/commands/<name>.md 正文。 */
 function renderCursorCommand(command) {
   return `# ${command.title}\n\n> ${command.description}\n\n${command.body}\n`;
 }
 
+/** 将 slash 命令渲染为 Codex/Kimi .agents/skills/<name>/SKILL.md 正文。 */
 function renderCodexSkill(command) {
   return `---\nname: ${command.name}\ndescription: ${command.description}\n---\n\n# ${command.title}\n\n${command.body}\n`;
 }
 
+/** 构建 Codex .codex/hooks.json 的 hooks 配置（全生命周期映射到 wildarrange hook run）。 */
 function buildCodexHooksConfig(command) {
   const hook = (timeout, statusMessage) => ({ type: "command", command, timeout, statusMessage });
   return {
@@ -580,6 +604,7 @@ function buildCodexHooksConfig(command) {
   };
 }
 
+/** 生成 Cursor alwaysApply 规则 .cursor/rules/wildarrange.mdc 正文。 */
 function renderCursorRule({ hookCommand, cliPrefix }) {
   return `---
 alwaysApply: true
@@ -601,6 +626,7 @@ Required behavior:
 
 // --- 安装/卸载/恢复报告 ---
 
+/** 将 installAdapter 报告对象渲染为 Markdown 供 install-report.md 写入。 */
 function renderAdapterInstallReport(report) {
   const lines = [
     `# ${PRODUCT_NAME} Adapter Install Report`,
@@ -636,6 +662,7 @@ function renderAdapterInstallReport(report) {
   return `${lines.join("\n")}\n`;
 }
 
+/** 将 uninstallAdapter 报告对象渲染为 Markdown。 */
 function renderAdapterUninstallReport(report) {
   const lines = [
     `# ${PRODUCT_NAME} Adapter Uninstall Report`,
@@ -658,6 +685,7 @@ function renderAdapterUninstallReport(report) {
   return `${lines.join("\n")}\n`;
 }
 
+/** 将 restoreAdapterBackup 报告对象渲染为 Markdown。 */
 function renderAdapterRestoreReport(report) {
   const lines = [
     `# ${PRODUCT_NAME} Adapter Restore Report`,
@@ -676,6 +704,7 @@ function renderAdapterRestoreReport(report) {
 
 // --- 备份工具 ---
 
+/** 递归列出备份目录下全部文件的相对路径（按字典序排序）。 */
 async function listBackupFiles(rootDir, baseDir = rootDir) {
   const entries = await readdir(rootDir, { withFileTypes: true });
   const files = [];
@@ -693,6 +722,7 @@ async function listBackupFiles(rootDir, baseDir = rootDir) {
   return files.sort();
 }
 
+/** 将绝对路径转为相对项目根的标准化路径，供报告与备份索引使用。 */
 function reportPath(rootDir, filePath) {
   return normalizeRelativePath(path.relative(rootDir, filePath));
 }

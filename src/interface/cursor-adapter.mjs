@@ -47,6 +47,7 @@ const CURSOR_EVENT_MAP = {
 /**
  * 构建 Cursor hooks.json 内容：写类工具与终端命令走 fail-closed PreToolUse。
  * @param {{ bridgeCommand: string }} options
+ * @returns {object}
  */
 export function buildCursorHooksConfig({ bridgeCommand }) {
   const hook = (extra = {}) => ({ command: bridgeCommand, ...extra });
@@ -166,6 +167,7 @@ if (typeof result.output === "string" && result.output.trim() && event !== "User
 }
 process.exit(0);
 
+/** 从 hook JSON 输出提取 deny 原因，解析失败时用默认文案。 */
 function extractDenyReason(output) {
   if (typeof output !== "string") return "out of planned scope";
   try {
@@ -176,10 +178,12 @@ function extractDenyReason(output) {
   }
 }
 
+/** 向 Cursor 写一行 JSON hook 响应。 */
 function writeCursorOutput(value) {
   process.stdout.write(JSON.stringify(value) + "\\n");
 }
 
+/** Cursor hook 失败出口：PreToolUse 时 fail-closed 返回 deny。 */
 function failHook(message) {
   console.error(message);
   if (event === "PreToolUse") {

@@ -141,9 +141,10 @@ import { initProjectDocuments } from "../src/interface/project-init.mjs";
 // --- CLI 参数解析 ---
 
 /**
- * 将 process.argv 切片解析为 { _: positional[], --key: string|true } 结构。
+ * 将 process.argv 切片解析为 { _: string[], --key: string | true } 结构。
+ * positional 入 `_`；`--flag` 无后继值时为 true，否则取下一 token 为字符串。
  * @param {string[]} argv 不含 node 与脚本路径的参数列表
- * @returns {{ _: string[], [key: string]: string | boolean | string[] }}
+ * @returns {{ _: string[], [key: string]: string | boolean }}
  */
 function parseArgs(argv) {
   const args = { _: [] };
@@ -189,8 +190,10 @@ function splitCliList(value) {
 }
 
 /**
- * 向 stdout 输出 CLI 帮助文本。
- * @param {{ all?: boolean }} [options] all=true 时列出全部子命令
+ * 向 stdout 输出 CLI 帮助文本（人类可读，非 JSON 契约）。
+ * @param {{ all?: boolean }} [options] 帮助渲染选项
+ * @param {boolean} [options.all=false] true 时列出 COMMAND_REGISTRY 全部子命令
+ * @returns {void}
  */
 function printHelp({ all = false } = {}) {
   console.log(renderHelp({ all }));
@@ -201,6 +204,10 @@ function printHelp({ all = false } = {}) {
 /**
  * CLI 主入口：解析 command 后路由到各 src/ 模块并输出 JSON。
  * control-root 未指定时使用 process.cwd() 作为项目根。
+ * 多数子命令成功时隐式 exit 0；门禁/验证类命令在失败时显式置 process.exitCode=2；
+ * readiness/test 等按业务语义置 1；未捕获异常由底部 catch 格式化后 exit 1。
+ * @returns {Promise<void>}
+ * @throws {Error} 未知子命令、缺必填参数或子命令路由未命中时抛出，由 catch 统一处理
  */
 async function main() {
   const args = parseArgs(process.argv.slice(2));
@@ -210,11 +217,13 @@ async function main() {
     : process.cwd();
 
   // --- 帮助与文档 ---
+  // §3.4：help 走人类可读 stdout，不输出 JSON 契约；无 command 时同样视为请求帮助。
   if (!command || command === "help" || command === "--help") {
     printHelp({ all: args.all === true || args._[1] === "--all" });
     return;
   }
 
+  // §3.4：docs commands --write 落盘 doc/generated/commands.md；否则原样写 stdout 供管道消费。
   if (command === "docs" && args._[1] === "commands") {
     const markdown = renderCommandsMarkdown();
     if (args.write === true) {
@@ -231,6 +240,7 @@ async function main() {
   // --- 初始化与配置 ---
   if (command === "init") {
     await initRuntime(rootDir);
+    // §3.4：--project-docs 为 opt-in；未指定时不生成架构/规范文档，只初始化 .wildarrange。
     const projectDocuments = args["project-docs"] === true
       ? await initProjectDocuments(rootDir, { architecture: args.architecture === true })
       : null;
@@ -271,6 +281,7 @@ async function main() {
     if (subcommand === "verify") {
       const result = await verifyConfigBaseline(rootDir);
       console.log(JSON.stringify(result, null, 2));
+      // §3.4：baseline 漂移属治理失败，exit 2 供 CI/doctor 区分于普通 CLI 参数错误（exit 1）。
       process.exitCode = result.ok ? 0 : 2;
       return;
     }
@@ -412,8 +423,8 @@ async function main() {
       const hasAdapterMode = strArg(args, "adapter-mode") !== undefined;
       const adapterMode = hasAdapterMode ? String(args["adapter-mode"]) : "local";
       const adapterPackage = strArg(args, "adapter-package") || DEFAULT_PACKAGE_NAME;
-      // The hook payload originates in the host and is untrusted. Always derive
-      // the command prefix from this running CLI and its generated adapter flags.
+      // §3.4：Hook 载荷来自宿主且不可信；cli_command_prefix 必须取自当前进程 CLI，
+      // 禁止信任 payload 内嵌前缀，否则 PreToolUse 可被伪造绕过。
       const cliCommandPrefix = hasAdapterMode
         ? adapterCliPrefix({
           mode: adapterMode,
@@ -424,11 +435,13 @@ async function main() {
       if (!cliCommandPrefix) throw new Error("WildArrange CLI command prefix is unavailable; reinstall the adapter");
       payload.cli_command_prefix = cliCommandPrefix;
       payload[TRUSTED_CLI_COMMAND_PREFIX] = cliCommandPrefix;
+      // §3.4：Codex 宿主附加 hooks.json 摘要，供 suspicion-review 检测 Hook 配置被篡改。
       if (hostAdapter === "codex") {
         const hookConfig = await readFile(path.join(rootDir, ".codex", "hooks.json"), "utf8");
         payload.hook_config_digest = hashContent(hookConfig);
       }
       const result = await runHostHook(rootDir, payload, runInjectionHook);
+      // §3.4：默认写 result.output 供 IDE Hook 管道；--format json 才输出完整结构化契约。
       if (args.format === "json") {
         console.log(JSON.stringify(result, null, 2));
       } else {
@@ -451,6 +464,7 @@ async function main() {
       console.log(JSON.stringify(result, null, 2));
       return;
     }
+    // §3.4：import 与 approve 互斥入口；缺 --from 时提示走 approve 子命令而非静默读默认文件。
     if (!args.from) throw new Error("wildarrange plan requires --from <plan.json>（或 wildarrange plan approve 确认已导入计划）");
     await initRuntime(rootDir);
     const plan = await importPlan(rootDir, path.resolve(rootDir, args.from), { requireResponsibility: true });
@@ -462,6 +476,7 @@ async function main() {
       responsibilityChanges: plan.tasks.map((task) => ({ taskId: task.id, changes: task.responsibilityChanges })),
       approvalRequired: approval.required,
       approvalStatus: approval.status,
+      // §3.4：nextStep 仅作人类指引，不阻断 import；run 前由 linear-runtime 再次校验 approval。
       nextStep: approval.required && approval.status !== "approved"
         ? "计划待开发者确认；确认后才可 run。执行 node ./bin/wildarrange.mjs plan approve 或在编辑器里用 /wildarrange-approve。"
         : "可直接 node ./bin/wildarrange.mjs run。",
@@ -474,10 +489,8 @@ async function main() {
     const runStartedAt = new Date().toISOString();
     const result = await runNextTask(rootDir);
     console.log(JSON.stringify(result, null, 2));
-    // 汇报分级（reporting.verbosity）：run 结束在 stderr 输出一次门决策
-    // 汇总，stdout 的 JSON 契约不变。verbose=逐门三行投影；normal=一行；
-    // quiet=不输出。框架初期默认 verbose，让人能审判每一条门决策。
-    // 汇总只含本次 run 的决策（since=run 开始时间），不混历史记录。
+    // §3.4：门决策汇总写 stderr，stdout JSON 契约不变；since=runStartedAt 只含本次 run。
+    // reporting.verbosity：verbose=逐门投影；normal=一行；quiet=静默；默认 verbose。
     const { config } = await loadWildArrangeConfig(rootDir);
     const verbosity = config.reporting?.verbosity || "verbose";
     const taskId = result.task?.id || result.taskId || null;
@@ -501,6 +514,7 @@ async function main() {
       maxSteps: Number.isInteger(Number(args.maxSteps)) && args.maxSteps !== true ? Number(args.maxSteps) : undefined,
     });
     console.log(JSON.stringify(result, null, 2));
+    // §3.4：workflow 批量推进失败（任一步 gate 未过）置 exit 2，便于 CI 与 run 单步区分语义。
     process.exitCode = result.ok ? 0 : 2;
     return;
   }
@@ -617,6 +631,7 @@ async function main() {
   if (command === "node") {
     const nodeName = args._[1];
     if (!nodeName) throw new Error("wildarrange node requires route, execute, verify, scope, review, checkpoint, or retry");
+    // §3.4：--task/--text 裸标志（无值）视为 undefined，由 runWorkflowNode 按节点默认行为处理。
     const result = await runWorkflowNode(rootDir, nodeName, {
       taskId: args.task === true ? undefined : args.task,
       text: args.text === true ? undefined : args.text,
@@ -645,6 +660,7 @@ async function main() {
       return;
     }
     let limit = 50;
+    // §3.4：--limit 裸标志忽略（保持默认 50）；非法非负整数抛错 exit 1。
     if (args.limit !== undefined && args.limit !== true) {
       const parsed = Number(args.limit);
       if (!Number.isInteger(parsed) || parsed < 0) {
@@ -693,9 +709,11 @@ async function main() {
     const { task } = await getTeamTask(rootDir, args.task);
     if (command === "readiness") {
       const approval = await loadPlanApproval(rootDir);
+      // §3.4：计划未批准时早退 JSON 占位，exit 0；与 readiness 未 pass（exit 1）区分。
       if (approval.required && approval.status !== "approved") { console.log(JSON.stringify({ status: "awaiting_plan_approval" })); return; }
       const result = await invokeCapability("execution-readiness", { rootDir, task });
       console.log(JSON.stringify(result, null, 2));
+      // §3.4：就绪门未 pass 置 exit 1（任务级阻塞），不用 2（治理/基线类失败）。
       if (result.status !== "pass") process.exitCode = 1;
     } else {
       const { config } = await loadWildArrangeConfig(rootDir);
@@ -756,6 +774,7 @@ async function main() {
     });
     console.error(`[wildarrange test] ${selectionNote}`);
     for (const file of tests) console.error(`[wildarrange test]   ${file}`);
+    // §3.4：exit 码透传 test-runner（失败数/255），非固定 2；选型摘要已在 stderr。
     process.exitCode = runRepoTests(rootDir, tests);
     return;
   }
@@ -797,6 +816,7 @@ async function main() {
         force: Boolean(args.force),
       });
       console.log(JSON.stringify(result, null, 2));
+      // §3.4：治理审计未 pass 置 exit 2，与 doctor/verify 类门禁一致。
       process.exitCode = result.pass ? 0 : 2;
       return;
     }
@@ -827,6 +847,7 @@ async function main() {
         options: { declarations, discoverer: "tauri-ipc" },
       });
       console.log(JSON.stringify(result, null, 2));
+      // §3.4：契约扫描未 pass 置 exit 2；stdout 仍输出完整 evidence 供修复。
       process.exitCode = result.status === "pass" ? 0 : 2;
       return;
     }
@@ -842,6 +863,7 @@ async function main() {
           expectedFingerprint: strArg(args, "expected-fingerprint"),
       });
       console.log(JSON.stringify(result, null, 2));
+      // §3.4：卡片决策未 pass（指纹不匹配等）置 exit 2，禁止静默当作已应用。
       process.exitCode = result.status === "pass" ? 0 : 2;
       return;
     }
@@ -851,6 +873,7 @@ async function main() {
       const result = { capability: "contract-governance-generate-artifacts", status: "pass", evidence,
         sideEffect: "files_changed", duration_ms: Date.now() - startedAt, cost: null, error: null };
       console.log(JSON.stringify(result, null, 2));
+      // §3.4：generate 当前恒 pass；仍走统一 exit 映射，便于未来引入生成失败语义。
       process.exitCode = result.status === "pass" ? 0 : 2;
       return;
     }
@@ -975,6 +998,7 @@ async function main() {
     }
     if (subcommand === "archive") {
       if (!strArg(args, "task")) throw new Error("wildarrange task archive requires --task <taskId>");
+      // §3.4：归档为破坏性操作，必须显式 --delete 裸标志，防止脚本误删任务。
       if (args.delete !== true) throw new Error("wildarrange task archive requires explicit --delete confirmation");
       console.log(JSON.stringify(await archiveTeamTaskWithBackup(rootDir, {
         taskId: args.task,
@@ -1051,6 +1075,11 @@ async function main() {
     const port = strArg(args, "port") ? Number(args.port) : 8765;
     const token = strArg(args, "token")
       || process.env.WILDARRANGE_DASHBOARD_TOKEN || randomBytes(24).toString("base64url");
+    /**
+     * 启动 Dashboard HTTP 服务并构造带 token 的 adoption 深链 URL。
+     * @param {{ host?: string, port?: number, token?: string }} options 监听与鉴权参数
+     * @returns {Promise<{ server: import("node:http").Server, url: string }>}
+     */
     const startServer = async (options) => {
       const server = await startDashboardServer(rootDir, options);
       const address = server.address();
@@ -1060,6 +1089,7 @@ async function main() {
     if (subcommand === "start") {
       const result = await startAdoption(rootDir, { host, port, token, startServer });
       console.log(JSON.stringify(result, null, 2));
+      // §3.4：start 成功后永不 resolve，保持进程与 Dashboard 存活；Ctrl+C 为唯一退出。
       if (result.ok && result.url) await new Promise(() => {});
       return;
     }
@@ -1078,6 +1108,7 @@ async function main() {
         startServer,
       });
       console.log(JSON.stringify(result, null, 2));
+      // §3.4：resume 与 start 相同，成功启动后阻塞进程直至用户中断。
       if (result.ok && result.url) await new Promise(() => {});
       return;
     }
@@ -1086,6 +1117,7 @@ async function main() {
         sessionId: strArg(args, "session"),
       });
       console.log(JSON.stringify(result, null, 2));
+      // §3.4：recover 失败（会话不可恢复）置 exit 2，供自动化脚本重试或告警。
       process.exitCode = result.ok ? 0 : 2;
       return;
     }
@@ -1099,6 +1131,7 @@ async function main() {
     const token = strArg(args, "token");
     await startDashboardServer(rootDir, { host, port, token });
     console.log(JSON.stringify({ ok: true, url: `http://${host}:${port}/` }, null, 2));
+    // §3.4：serve 为长期前台服务，故意不 return；与 adoption start/resume 阻塞语义一致。
     await new Promise(() => {});
   }
 
@@ -1108,6 +1141,7 @@ async function main() {
     if (subcommand === "verify") {
       const result = await verifyLedger(rootDir);
       console.log(JSON.stringify(result, null, 2));
+      // §3.4：账本完整性失败置 exit 2，表示运行时状态不可信而非参数错误。
       process.exitCode = result.ok ? 0 : 2;
       return;
     }
@@ -1125,6 +1159,7 @@ async function main() {
     if (subcommand === "verify") {
       const result = await verifyRuntimeState(rootDir);
       console.log(JSON.stringify(result, null, 2));
+      // §3.4：运行时状态校验失败置 exit 2，与 ledger verify 同级门禁语义。
       process.exitCode = result.ok ? 0 : 2;
       return;
     }
@@ -1138,6 +1173,7 @@ async function main() {
       return;
     }
     if (subcommand === "migrate") {
+      // §3.4：migrate 前先写 pre-state-migrate 备份，失败则不会动 live state。
       const backup = await writeRuntimeStateBackup(rootDir, { reason: "pre-state-migrate" });
       const config = await migrateRuntimeConfigState(rootDir);
       const tasks = await migrateTaskLedgerState(rootDir);
@@ -1157,6 +1193,7 @@ async function main() {
   if (command === "doctor") {
     const result = await runDoctor(rootDir);
     console.log(JSON.stringify(result, null, 2));
+    // §3.4：doctor 未 ok 置 exit 2，供 CI/Hook 在继续任务前 fail-closed。
     process.exitCode = result.ok ? 0 : 2;
     return;
   }
@@ -1164,6 +1201,7 @@ async function main() {
   if (command === "guard") {
     const subcommand = args._[1];
     if (subcommand === "scope") {
+      // §3.4：缺 --task 时 scopeGuard 走当前上下文推断；裸 --task 标志同 node 命令语义。
       console.log(JSON.stringify(await scopeGuard(rootDir, { taskId: args.task === true ? undefined : args.task }), null, 2));
       return;
     }
@@ -1215,14 +1253,16 @@ async function main() {
     throw new Error("wildarrange skills requires match");
   }
 
+  // §3.4：未知 command 抛错 → catch 格式化 stderr 并 exit 1（用法/路由错误，非门禁失败）。
   throw new Error(`unknown command: ${command}`);
 }
 
 // --- stdin 读取与进程入口 ---
 
 /**
- * 从 stdin 读取 Hook JSON 载荷；TTY 或无内容时抛错。
- * @returns {Promise<string>} 原始 JSON 字符串
+ * 从 stdin 读取 Hook JSON 载荷；供 hook run 在无 --from 时消费管道输入。
+ * @returns {Promise<string>} 原始 JSON 字符串（已 trim）
+ * @throws {Error} TTY 环境、空 stdin 或管道无内容时抛出
  */
 async function readAllStdin() {
   if (process.stdin.isTTY) {
@@ -1235,6 +1275,7 @@ async function readAllStdin() {
   return raw;
 }
 
+// §3.4：未捕获异常统一走 error-protocol 单行 stderr，exit 1（参数/路由/运行时错误）。
 main().catch((error) => {
   const protocol = errorProtocolOf(error, {
     code: "cli_error",

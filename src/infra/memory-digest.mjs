@@ -91,6 +91,9 @@ export async function buildMemoryDigest(rootDir, options = {}) {
   };
 }
 
+/**
+ * updateDigestIndex 内部辅助。
+ */
 async function updateDigestIndex(rootDir, digest) {
   const indexPath = resolveWildArrangePath(rootDir, "memory", "digest-index.json");
   const index = await readJson(indexPath, { version: 1, digests: [], keywords: {} });
@@ -110,6 +113,9 @@ async function updateDigestIndex(rootDir, digest) {
   await writeJsonAtomic(indexPath, index);
 }
 
+/**
+ * 读取 LedgerTail 并返回结构化结果。
+ */
 async function readLedgerTail(rootDir, limit) {
   try {
     const content = await readJsonLines(resolveWildArrangePath(rootDir, "ledger.jsonl"));
@@ -119,12 +125,18 @@ async function readLedgerTail(rootDir, limit) {
   }
 }
 
+/**
+ * 读取 JsonLines 并返回结构化结果。
+ */
 async function readJsonLines(filePath) {
   const { readFile } = await import("node:fs/promises");
   const raw = await readFile(filePath, "utf8");
   return raw.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
 }
 
+/**
+ * 读取 DigestGitHead 并返回结构化结果。
+ */
 async function readDigestGitHead(rootDir) {
   const current = await readGitHead(rootDir);
   if (current.available && current.sha) {
@@ -134,6 +146,9 @@ async function readDigestGitHead(rootDir) {
   return head?.lastGitHead ? { value: head.lastGitHead, source: "archivist-trigger-state" } : null;
 }
 
+/**
+ * 汇总 Task 为摘要。
+ */
 function summarizeTask(task) {
   return {
     id: task.id,
@@ -146,6 +161,9 @@ function summarizeTask(task) {
   };
 }
 
+/**
+ * progressFromLedger 内部辅助。
+ */
 function progressFromLedger(events, task) {
   const taskId = task?.id;
   return events
@@ -154,6 +172,9 @@ function progressFromLedger(events, task) {
     .slice(-8);
 }
 
+/**
+ * decisionsFromTask 内部辅助。
+ */
 function decisionsFromTask(task, checkpoint, latestArchivist) {
   return [
     task?.last_review_result?.pass === true ? "review gate passed" : "",
@@ -162,6 +183,9 @@ function decisionsFromTask(task, checkpoint, latestArchivist) {
   ].filter(Boolean).slice(0, 8);
 }
 
+/**
+ * artifactRefs 内部辅助。
+ */
 function artifactRefs(planId, task, checkpoint) {
   return [
     checkpoint?.reportJsonPath || (planId && task?.id
@@ -172,6 +196,9 @@ function artifactRefs(planId, task, checkpoint) {
   ].filter(Boolean);
 }
 
+/**
+ * 读取 TaskCheckpoint 并返回结构化结果。
+ */
 async function readTaskCheckpoint(rootDir, planId, taskId) {
   const current = await readJson(resolveTaskCheckpointPath(rootDir, planId, taskId), null);
   if (current?.planId === planId && current?.taskId === taskId) return current;
@@ -179,6 +206,9 @@ async function readTaskCheckpoint(rootDir, planId, taskId) {
   return legacy?.planId === planId && legacy?.taskId === taskId ? legacy : null;
 }
 
+/**
+ * implementationNotes 内部辅助。
+ */
 function implementationNotes(task) {
   return (task?.evidence || [])
     .filter((entry) => ["worker", "parallel_agent_admission"].includes(entry.kind))
@@ -188,12 +218,18 @@ function implementationNotes(task) {
     .map((value) => String(value).slice(0, 240));
 }
 
+/**
+ * pitfallsFromTask 内部辅助。
+ */
 function pitfallsFromTask(task) {
   const failure = task?.last_failure;
   if (!failure) return [];
   return [`${failure.reason}: ${failure.summary || failure.retryHint || ""}`.trim()];
 }
 
+/**
+ * digestKeywords 内部辅助。
+ */
 function digestKeywords(digest) {
   return [
     digest.reason,
@@ -205,11 +241,17 @@ function digestKeywords(digest) {
   ].filter(Boolean);
 }
 
+/**
+ * 将数组项归一化为相对路径并过滤空值。
+ */
 function normalizeList(value) {
   if (!Array.isArray(value)) return [];
   return value.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 20);
 }
 
+/**
+ * 渲染 DigestMarkdown 为 Markdown/HTML。
+ */
 function renderDigestMarkdown(digest) {
   return `# Memory Digest
 
@@ -247,16 +289,26 @@ ${listBlock(digest.openQuestions)}
 `;
 }
 
+/**
+ * 列出 Block 条目。
+ */
 function listBlock(items) {
   return items.length > 0 ? items.map((item) => `- ${item}`).join("\n") : "- None";
 }
 
+/**
+ * formatGitHead 内部辅助。
+ */
 function formatGitHead(gitHead) {
   if (!gitHead) return "";
   if (typeof gitHead === "string") return gitHead;
   return `${gitHead.value || ""}${gitHead.source ? ` (${gitHead.source})` : ""}`;
 }
 
+/**
+ * sanitizeSegment 内部辅助。
+ */
 function sanitizeSegment(value) {
   return String(value || "digest").replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || "digest";
 }
+

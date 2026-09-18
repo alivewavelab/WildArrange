@@ -57,6 +57,7 @@ export async function writeAcceptanceProof(rootDir, planId, task, evidence = {},
     const scope = evidence.scopeResult || task.last_scope_result || latestEvidence(task, "scope_guard");
     const review = evidence.reviewResult || task.last_review_result || latestEvidence(task, "review_gate");
     const current = await prepareProjectReview(rootDir, task, config, scope?.changedPaths || []);
+    // §3.4：审查依据或 digest 已变时不得复用旧 projectReview PASS。
     projectReviewContextValid = !current.steps.length || (current.pass && current.contextDigest === review?.projectReview?.contextDigest);
   } catch { /* Missing or changed review inputs cannot reuse an old pass. */ }
   const proof = buildAcceptanceProof(planId, task, { ...evidence, projectReviewContextValid }, config);
@@ -186,9 +187,17 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
   };
 }
 
+/**
+ * 判定 review gate 是否实际执行了至少一条非空转独立复核 lane。
+ * @param {object|null} reviewResult review_gate evidence
+ * @param {object|null} [config] 质量门与 commentChecker 配置
+ * @param {object} [task] 是否声明 responsibilityChanges
+ * @returns {{ pass: boolean, sources: string[], reasons: string[] }}
+ */
 function hasExecutedIndependentReview(reviewResult, config = null, task = {}) {
   if (!reviewResult || reviewResult.kind !== "review_gate") return { pass: false, sources: [], reasons: ["missing review result"] };
   const sources = [];
+  // §3.4：职责审计 receipt 本身算一条独立 lane，但须与当前声明 digest 绑定。
   if (task.responsibilityChanges && hasAcceptedResponsibilityAudit(task, reviewResult.responsibilityAudit)) sources.push("responsibility_audit");
   const reasons = [];
   for (const [name, results] of [["review_commands", reviewResult.reviewCommandResults], ["standards_commands", reviewResult.standardsCommandResults]]) {
@@ -212,6 +221,7 @@ function hasExecutedIndependentReview(reviewResult, config = null, task = {}) {
   return { pass: sources.length > 0, sources, reasons };
 }
 
+/** 将 delivery/integration commit 字段归一化为 acceptance proof 可引用的基线摘要。 */
 function summarizeDeliveryBaseline(delivery) {
   if (!delivery) return null;
   return {
@@ -225,6 +235,7 @@ function summarizeDeliveryBaseline(delivery) {
   };
 }
 
+/** 构造单项 proof check：condition 为真则 status=pass。 */
 function proofCheck(name, condition, details) {
   return {
     name,
@@ -234,10 +245,12 @@ function proofCheck(name, condition, details) {
   };
 }
 
+/** 从 task.evidence 倒序取指定 kind 的最新条目。 */
 function latestEvidence(task, kind) {
   return [...(task.evidence || [])].reverse().find((entry) => entry.kind === kind);
 }
 
+/** 压缩 worker/command 结果为 acceptance proof 引用字段。 */
 function summarizeCommand(result) {
   if (!result) return null;
   return {
@@ -247,6 +260,7 @@ function summarizeCommand(result) {
   };
 }
 
+/** 将 proof 对象渲染为 Markdown 报告正文。 */
 function renderAcceptanceProofMarkdown(proof) {
   const checks = proof.checks
     .map((check) => `| ${check.name} | ${check.status} | ${check.evidence} | ${check.requiredFix} |`)

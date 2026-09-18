@@ -152,6 +152,9 @@ export async function captureCardLiveSnapshot(rootDir, card) {
 const NON_FILE_CONSUMER_BY = new Set(["", "scan", "dynamic-or-generated"]);
 const REPO_RELATIVE_FILE_RE = /[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+\.[A-Za-z0-9]+/g;
 
+/**
+ * 收集 LiveSnapshotPaths 条目。
+ */
 async function collectLiveSnapshotPaths(rootDir, card) {
   const depPaths = new Set(["package.json"]);
   addLiveSnapshotPath(depPaths, card?.patch?.path, card?.path);
@@ -167,6 +170,9 @@ async function collectLiveSnapshotPaths(rootDir, card) {
   return [...depPaths].sort();
 }
 
+/**
+ * 列出 KnownConsumerFiles 条目。
+ */
 async function listKnownConsumerFiles(rootDir) {
   const found = [];
   for (const rel of [".cursor/hooks.json", ".husky/pre-commit"]) {
@@ -186,6 +192,9 @@ async function listKnownConsumerFiles(rootDir) {
   return found;
 }
 
+/**
+ * addLiveSnapshotPath 内部辅助。
+ */
 function addLiveSnapshotPath(depPaths, value, targetPath) {
   const rel = resolveConsumerFilePath(value);
   if (!rel) return;
@@ -193,6 +202,9 @@ function addLiveSnapshotPath(depPaths, value, targetPath) {
   depPaths.add(rel);
 }
 
+/**
+ * 解析 ConsumerFilePath 路径或引用，越界/逃逸抛错。
+ */
 function resolveConsumerFilePath(value) {
   const raw = String(value || "").trim();
   if (!raw || NON_FILE_CONSUMER_BY.has(raw)) return null;
@@ -203,6 +215,9 @@ function resolveConsumerFilePath(value) {
   return null;
 }
 
+/**
+ * classifyAssets 内部辅助。
+ */
 function classifyAssets({ files, packageFacts, textIndex, importIndex, config }) {
   const textByPath = indexTextByPath(textIndex);
   const assets = [];
@@ -225,6 +240,9 @@ function classifyAssets({ files, packageFacts, textIndex, importIndex, config })
   return assets;
 }
 
+/**
+ * classifyFileKind 内部辅助。
+ */
 function classifyFileKind(relativePath, packageFacts, config, headText = "") {
   if (relativePath === "wildarrange.config.json" || relativePath === ".wildarrange/config.json") return "runtime_gate";
   if (CI_GLOBS.some((pattern) => pathMatchesPattern(relativePath, pattern))) return "runtime_gate";
@@ -245,6 +263,9 @@ function classifyFileKind(relativePath, packageFacts, config, headText = "") {
   return null;
 }
 
+/**
+ * purposeForKind 内部辅助。
+ */
 function purposeForKind(kind, filePath, packageFacts) {
   if (kind === "test_fixture") return `测试夹具：${filePath}`;
   if (kind === "behavior_suite") return `行为测试或 verify 入口：${filePath}`;
@@ -256,6 +277,9 @@ function purposeForKind(kind, filePath, packageFacts) {
   return packageFacts.scripts.find((item) => item.command.includes(filePath))?.name || filePath;
 }
 
+/**
+ * 查找 Consumers 匹配项。
+ */
 function findConsumers(relativePath, { packageFacts, textIndex, importIndex }) {
   const consumers = [];
   const base = path.posix.basename(relativePath);
@@ -288,6 +312,9 @@ function findConsumers(relativePath, { packageFacts, textIndex, importIndex }) {
   return uniqueConsumers(consumers);
 }
 
+/**
+ * strongestConfidence 内部辅助。
+ */
 function strongestConfidence(consumers) {
   if (consumers.some((item) => item.grade === "unknown")) return "unknown";
   if (consumers.some((item) => item.grade === "direct")) return "high";
@@ -295,6 +322,9 @@ function strongestConfidence(consumers) {
   return "low";
 }
 
+/**
+ * digestRelativeFile 内部辅助。
+ */
 async function digestRelativeFile(rootDir, relativePath) {
   if (!relativePath) return "missing";
   const absolutePath = path.join(rootDir, relativePath);
@@ -302,6 +332,9 @@ async function digestRelativeFile(rootDir, relativePath) {
   return hashContent(await readFile(absolutePath));
 }
 
+/**
+ * 列出 CandidateFiles 条目。
+ */
 async function listCandidateFiles(rootDir) {
   const files = [];
   await walk(rootDir, "", files);
@@ -309,6 +342,9 @@ async function listCandidateFiles(rootDir) {
   return files;
 }
 
+/**
+ * 递归遍历目录，跳过 ignored 目录名。
+ */
 async function walk(rootDir, relativeDir, files) {
   const absoluteDir = relativeDir ? path.join(rootDir, relativeDir) : rootDir;
   let entries = [];
@@ -349,6 +385,9 @@ async function walk(rootDir, relativeDir, files) {
   }
 }
 
+/**
+ * 收集 PackageFacts 条目。
+ */
 async function collectPackageFacts(rootDir, files) {
   const packages = [];
   const scripts = [];
@@ -369,6 +408,9 @@ async function collectPackageFacts(rootDir, files) {
   return { packages, scripts };
 }
 
+/**
+ * 收集 TextIndex 条目。
+ */
 async function collectTextIndex(rootDir, files) {
   const registered = [];
   const clues = [];
@@ -383,6 +425,9 @@ async function collectTextIndex(rootDir, files) {
   return { registered, clues };
 }
 
+/**
+ * 收集 ImportIndex 条目。
+ */
 async function collectImportIndex(rootDir, files) {
   const edges = [];
   const unknown = new Set();
@@ -402,8 +447,12 @@ async function collectImportIndex(rootDir, files) {
   return { edges, unknown };
 }
 
+/**
+ * 读取 TextLimited 并返回结构化结果。
+ */
 async function readTextLimited(absolutePath, maxBytes = 200_000) {
   if (!existsSync(absolutePath)) return "";
   const handle = await readFile(absolutePath);
   return handle.subarray(0, maxBytes).toString("utf8");
 }
+

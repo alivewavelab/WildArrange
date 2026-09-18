@@ -41,6 +41,9 @@ export function isTrivialCommand(command) {
   return trivialCommand(command);
 }
 
+/**
+ * trivialCommand 内部辅助。
+ */
 function trivialCommand(command) {
   const normalized = String(command || "").replace(/\s+/g, " ").trim();
   if (normalized === "" || /^(?:true|echo(?:\s+.*)?)$/i.test(normalized)) return true;
@@ -49,3 +52,4 @@ function trivialCommand(command) {
   // process.exit(0) 收尾）都是有效验证，不误伤。
   return /^node -e ["']process\.exit\(0\);?["']$/.test(normalized);
 }
+

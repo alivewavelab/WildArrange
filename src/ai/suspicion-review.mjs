@@ -23,6 +23,7 @@ import { callOpenAICompatible, resolveAgentProvider } from "../infra/llm-provide
 
 const PACKET_LIMIT = 50;
 
+/** 脱敏决策记录供 LLM 审查包使用，截断 reason/summary 防 token 膨胀。 */
 function sanitizeDecision(record) {
   return {
     id: record.id || null,
@@ -36,6 +37,7 @@ function sanitizeDecision(record) {
   };
 }
 
+/** 无 LLM 时的确定性基线：统计 deny 规则分布与人工标注热点。 */
 function buildDeterministicBaseline(decisions, annotations) {
   const denies = decisions.filter((record) => record.decision !== "allow" && record.decision !== "pass");
   const byRule = {};
@@ -53,6 +55,7 @@ function buildDeterministicBaseline(decisions, annotations) {
   };
 }
 
+/** 从 LLM 回复中提取并解析 suspicious 清单 JSON。 */
 function parseSuspicionJson(content) {
   if (typeof content !== "string") return null;
   const match = content.match(/\{[\s\S]*\}/);
@@ -129,6 +132,7 @@ export async function runSuspicionReview(rootDir, { limit = PACKET_LIMIT } = {})
           if (item && validIds.has(item.decisionId)) {
             suspicious.push({ decisionId: item.decisionId, reason: String(item.reason || "").slice(0, 500) });
           } else {
+            // 丢弃 LLM 幻觉引用的 decisionId，防止报告锚定到不存在的决策
             dropped += 1;
           }
         }
@@ -155,6 +159,7 @@ export async function runSuspicionReview(rootDir, { limit = PACKET_LIMIT } = {})
   return report;
 }
 
+/** 将 suspicion 审查报告渲染为 Markdown advisory 文档。 */
 function renderSuspicionMarkdown(report) {
   const lines = [
     "# Suspicion Review（异步审查，仅建议）",

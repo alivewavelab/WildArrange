@@ -256,6 +256,7 @@ export async function resolveArchivistRouteSuggestion(rootDir, options = {}) {
 
 // --- 决策持久化与 Fallback ---
 
+/** 将档案员决策写入 stage-summaries、memory events、关键词建议与 last-archivist-result。 */
 async function persistArchivistDecision(rootDir, payload) {
   const id = createWorkId("archive");
   const stage = payload.packet.stage;
@@ -305,6 +306,7 @@ async function persistArchivistDecision(rootDir, payload) {
   return artifact;
 }
 
+/** 组装 CangJie LLM 用户消息：约束 JSON 输出结构与 keywordSuggestions 字段格式。 */
 function buildArchivistPrompt(packet) {
   return JSON.stringify({
     instruction: [
@@ -318,6 +320,7 @@ function buildArchivistPrompt(packet) {
   }, null, 2);
 }
 
+/** LLM 不可用时的确定性降级：走 routeRequest 并写入 fallback 记忆与 ledger 进展摘要。 */
 async function fallbackArchivistDecision(rootDir, packet, reason) {
   let routeDecision = null;
   if (packet.input) {
@@ -350,6 +353,7 @@ async function fallbackArchivistDecision(rootDir, packet, reason) {
   };
 }
 
+/** 裁剪并规范化 LLM/fallback 决策字段，防止超长数组污染持久化。 */
 function normalizeDecision(decision) {
   const contextInjection = decision.contextInjection && typeof decision.contextInjection === "object" ? decision.contextInjection : {};
   return {
@@ -373,6 +377,7 @@ function normalizeDecision(decision) {
 
 // --- 触发器与关键词演进 ---
 
+/** 评估本次是否应运行档案员：会话/压缩/工作流/git 头变更/用户 prompt 窗口等触发器。 */
 async function evaluateArchivistTrigger(rootDir, archivistConfig, options) {
   const triggerName = options.trigger || "manual";
   const statePath = resolveWildArrangePath(rootDir, "routing", "archivist-trigger-state.json");
@@ -404,6 +409,7 @@ async function evaluateArchivistTrigger(rootDir, archivistConfig, options) {
   } else if (triggerName === "workflowCheckpoint" && triggers.workflowCheckpoint !== false) {
     shouldRun = true;
     reason = "workflowCheckpoint";
+  // git 头变更视为工作区上下文漂移，触发档案员重新路由
   } else if (gitChanged) {
     shouldRun = true;
     reason = "gitHeadChanged";
@@ -415,6 +421,7 @@ async function evaluateArchivistTrigger(rootDir, archivistConfig, options) {
     if (firstRun || currentCount >= threshold) {
       shouldRun = true;
       reason = firstRun ? "firstUserPrompt" : `promptWindow:${stage}:${currentCount}/${threshold}`;
+      // 达到窗口阈值后清零，避免每轮 prompt 都触发档案员
       state.promptCounts[stage] = 0;
     }
   } else if (triggerName === "manual" || triggerName === "cli") {
@@ -437,6 +444,7 @@ async function evaluateArchivistTrigger(rootDir, archivistConfig, options) {
   };
 }
 
+/** 按阶段读取 prompt 计数阈值，并 clamp 到配置的 min/max 区间。 */
 function promptThresholdForStage(config, stage) {
   const min = Number(config.min || 5);
   const max = Number(config.max || 20);
@@ -444,12 +452,14 @@ function promptThresholdForStage(config, stage) {
   return Math.max(min, Math.min(selected, max));
 }
 
+/** 人工 accept 后将关键词建议合并进 routes-overrides.json，受保护路由需证据与理由。 */
 async function applyKeywordSuggestions(rootDir, suggestions, resolution) {
   const { config } = await loadWildArrangeConfig(rootDir);
   const protectedTargets = new Set(config.archivistRouter?.keywordEvolution?.protectedTargets || []);
   const normalized = normalizeKeywordSuggestions(suggestions);
   const accepted = [];
   for (const suggestion of normalized) {
+    // 受保护路由不允许无证据自动演进，防止 LLM 建议污染核心意图表
     if (protectedTargets.has(suggestion.target) && (!resolution.evidence || !resolution.rationale)) {
       throw new Error(`protected route suggestion ${suggestion.target} requires evidence and rationale`);
     }
@@ -461,6 +471,7 @@ async function applyKeywordSuggestions(rootDir, suggestions, resolution) {
   const existingKeys = new Set((overlay.patches || []).map((patch) => `${patch.target}:${(patch.signals || []).join("|")}`));
   for (const suggestion of accepted) {
     const key = `${suggestion.target}:${suggestion.signals.join("|")}`;
+    // 同一 target+signals 组合不重复写入 overlay
     if (existingKeys.has(key)) continue;
     overlay.patches.push({
       target: suggestion.target,
@@ -476,6 +487,7 @@ async function applyKeywordSuggestions(rootDir, suggestions, resolution) {
   return accepted;
 }
 
+/** 校验 keywordSuggestions 的 target 命名空间与 signals 非空，丢弃非法项。 */
 function normalizeKeywordSuggestions(suggestions) {
   if (!Array.isArray(suggestions)) return [];
   return suggestions
@@ -495,16 +507,19 @@ function normalizeKeywordSuggestions(suggestions) {
     .slice(0, 50);
 }
 
+/** 将置信度解析为 [0,1] 有限数，非法输入返回 null。 */
 function normalizeConfidence(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return null;
   return Math.max(0, Math.min(1, parsed));
 }
 
+/** 解析档案员 LLM 回复；纯 JSON 失败时尝试从文本中提取首个 JSON 对象。 */
 function parseArchivistJson(content) {
   try {
     return JSON.parse(content);
   } catch {
+    // 模型偶发包裹说明文字，回退到贪婪 JSON 块提取
     const match = content.match(/\{[\s\S]*\}/);
     if (!match) return { summary: content };
     try {
@@ -517,6 +532,7 @@ function parseArchivistJson(content) {
 
 // --- 记忆索引与包清洗 ---
 
+/** 根据记忆事件累加 keywords 计数并去重 artifacts/preferences。 */
 async function updateMemoryIndex(rootDir, event) {
   const indexPath = resolveWildArrangePath(rootDir, "memory", "index.json");
   const index = await readJson(indexPath, { keywords: {}, artifacts: [], preferences: [] });
@@ -533,6 +549,7 @@ async function updateMemoryIndex(rootDir, event) {
   await writeJsonAtomic(indexPath, index);
 }
 
+/** 读取 ledger.jsonl 尾部若干行；文件不存在时返回空数组。 */
 async function readLedgerTail(rootDir, limit) {
   try {
     const content = await readFile(resolveWildArrangePath(rootDir, "ledger.jsonl"), "utf8");
@@ -543,6 +560,7 @@ async function readLedgerTail(rootDir, limit) {
   }
 }
 
+/** 读取同 stage 的近期阶段摘要，不足 limit 时用其他 stage 摘要填充。 */
 async function readStageSummaries(rootDir, stage, limit) {
   const dirPath = resolveWildArrangePath(rootDir, "memory", "stage-summaries");
   try {
@@ -561,6 +579,7 @@ async function readStageSummaries(rootDir, stage, limit) {
   }
 }
 
+/** 将 ledger 事件压缩为路由包可携带的轻量字段子集。 */
 function summarizeLedgerEvent(event) {
   return {
     at: event.at,
@@ -573,6 +592,7 @@ function summarizeLedgerEvent(event) {
   };
 }
 
+/** 规范化对话轮次：统一 role 并清洗 content 中的代码块与 diff 行。 */
 function cleanTurn(turn) {
   return {
     role: asString(turn.role || "unknown"),
@@ -580,16 +600,19 @@ function cleanTurn(turn) {
   };
 }
 
+/** 档案员只摄入结论文本：剥离 fenced code 与 unified diff 行，避免 raw diff 进入 LLM。 */
 function cleanConclusionText(value) {
   return asString(value)
     .replace(/```[\s\S]*?```/g, "[code block removed]")
     .split(/\r?\n/)
+    // 过滤 diff 头与 hunk 标记，防止代码变更原文进入记忆
     .filter((line) => !/^\s*([+\-]{3}|@@|\+|-|diff --git|index [a-f0-9]+\.\.)/.test(line))
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
+/** 路由包超字符预算时按比例裁剪 turns/ledger/summaries，并标记 truncated。 */
 function truncatePacket(packet, maxChars) {
   const raw = JSON.stringify(packet);
   if (raw.length <= maxChars) return packet;
@@ -602,6 +625,7 @@ function truncatePacket(packet, maxChars) {
   };
 }
 
+/** 解析近期对话窗口大小：显式 override 优先，否则按 stage 配置并 clamp 上限。 */
 function resolveTurnWindow(memoryConfig, stage, override) {
   if (Number.isInteger(Number(override))) return Number(override);
   const windows = memoryConfig.recentTurnWindows || {};
@@ -610,15 +634,18 @@ function resolveTurnWindow(memoryConfig, stage, override) {
   return Math.max(1, Math.min(selected, max));
 }
 
+/** 过滤非法 turn 对象，保留可用于路由包的对话轮次。 */
 function normalizeTurns(turns) {
   return Array.isArray(turns) ? turns.filter((turn) => turn && typeof turn === "object") : [];
 }
 
+/** 将任意数组规范为去空白、去空串的字符串列表并截断至 50 条。 */
 function normalizeStringList(value) {
   if (!Array.isArray(value)) return [];
   return value.map(asString).map((item) => item.trim()).filter(Boolean).slice(0, 50);
 }
 
+/** 从 ledger 尾事件提取最近任务进展摘要行，供 fallback contextInjection。 */
 function extractLedgerProgress(events) {
   return events
     .filter((event) => event.type && (event.taskId || event.status))
@@ -626,11 +653,13 @@ function extractLedgerProgress(events) {
     .map((event) => `${event.type}${event.taskId ? ` ${event.taskId}` : ""}${event.status ? ` ${event.status}` : ""}`);
 }
 
+/** 规范化 stage 名称，空值回退到 default。 */
 function normalizeStage(value) {
   const stage = asString(value).trim();
   return stage || DEFAULT_STAGE;
 }
 
+/** 将值安全转为字符串；非 string 返回空串。 */
 function asString(value) {
   return typeof value === "string" ? value : "";
 }

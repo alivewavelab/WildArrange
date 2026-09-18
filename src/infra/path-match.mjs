@@ -88,6 +88,9 @@ export function pathMatchesPattern(filePath, pattern) {
   return new RegExp(`^${globPatternSource(normalizedPattern)}$`).test(filePath);
 }
 
+/**
+ * 转义 sRelativeRoot 特殊字符。
+ */
 function escapesRelativeRoot(filePath) {
   return filePath.startsWith("/")
     || /^[A-Za-z]:(\/|$)/.test(filePath)
@@ -95,6 +98,9 @@ function escapesRelativeRoot(filePath) {
     || filePath.startsWith("../");
 }
 
+/**
+ * globPatternSource 内部辅助。
+ */
 function globPatternSource(pattern) {
   let source = "";
   for (let index = 0; index < pattern.length; index += 1) {
@@ -113,3 +119,4 @@ function globPatternSource(pattern) {
   }
   return source;
 }
+

@@ -108,6 +108,13 @@ export async function ensureLinearDeliveryWorkspace(rootDir, planId, task, tasks
   return task.delivery_workspace;
 }
 
+/**
+ * 从 blockedBy 依赖任务解析线性 worktree 起始 SHA；多分支无共同祖先时抛错。
+ * @param {string} rootDir 项目根
+ * @param {object} task 当前任务（含 blockedBy）
+ * @param {object[]} tasks 计划内全部任务
+ * @returns {Promise<string|null>} 单一依赖 delivery SHA，或无依赖时为 null
+ */
 async function resolveDependencyDeliverySha(rootDir, task, tasks) {
   const dependencyShas = [];
   for (const taskId of task.blockedBy || []) {

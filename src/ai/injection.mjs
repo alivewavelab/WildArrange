@@ -63,6 +63,7 @@ export async function resolveInjectionPoint(rootDir, name, variables = {}, optio
       if (loaded) skills.push(loaded);
       else missingSkills.push({ name: skill, reason: "not_found" });
     } catch (error) {
+      // Prompt Pack hash 校验失败时记录告警，不阻断其余 Skill 加载
       missingSkills.push({
         name: skill,
         reason: "integrity_failed",
@@ -83,6 +84,7 @@ export async function resolveInjectionPoint(rootDir, name, variables = {}, optio
   };
 }
 
+/** 解析任务绑定的 Skill 列表；仅 before_execute 注入点消费任务级绑定。 */
 async function resolveTaskBoundSkills(rootDir, pointName, variables, options) {
   // M1 只有执行前宿主入口会真实消费任务绑定；复核与 checkpoint 仍使用各自
   // 注入点的静态 Skill，不把尚未接入宿主的阶段伪装成已挂载。
@@ -98,8 +100,10 @@ async function resolveTaskBoundSkills(rootDir, pointName, variables, options) {
   return normalizeStringList(task?.skills, []);
 }
 
-// 按需挂载只做"减法"：静态清单是上限，动态匹配决定哪些真正带全文进入上下文，
-// 未命中的降级为路径引用；绝不因为文本命中关键词就注入清单之外的技能全文。
+/**
+ * 按需挂载只做"减法"：静态清单是上限，动态匹配决定哪些 Skill 带全文进入上下文。
+ * 未命中降级为路径引用，不因文本命中就注入清单外 Skill 全文。
+ */
 async function selectPointSkills(rootDir, config, point, context) {
   const pointSkills = (point.skills || []).filter((skill) => typeof skill === "string" && skill.length > 0);
   const normalizedAgent = normalizeAgentKey(context.agent);
@@ -202,11 +206,13 @@ async function selectPointSkills(rootDir, config, point, context) {
   };
 }
 
+/** 过滤非空字符串数组；非数组时回退到 fallback。 */
 function normalizeStringList(value, fallback) {
   if (!Array.isArray(value)) return fallback;
   return value.filter((item) => typeof item === "string" && item.length > 0);
 }
 
+/** 解析动态挂载 Skill 数量上限，非法值回退默认并 clamp 至 20。 */
 function normalizeMaxSkills(value, fallback) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0) return fallback;
@@ -229,10 +235,12 @@ export function defaultInjectionPointForAgent(agent, options = {}) {
   return "before_execute";
 }
 
+/** 展开注入点路径模板中的 {agent}、{taskId} 等占位符。 */
 function expandTemplate(value, variables) {
   return String(value).replace(/\{([A-Za-z0-9_]+)\}/g, (_, key) => variables[key] || "");
 }
 
+/** 合并全局、按注入点与点级 contextBudgets，得到 markdown/skill 字符预算。 */
 function resolvePointBudgets(contextBudgets = {}, pointName, pointBudgets = {}) {
   const globalMarkdown = contextBudgets.markdown?.maxChars ?? contextBudgets.markdownMaxChars;
   const globalSkill = contextBudgets.skill?.maxChars ?? contextBudgets.skillMaxChars;

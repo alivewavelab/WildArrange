@@ -123,6 +123,9 @@ export function validateReviewFinding(finding, validatorName = "schema_validator
   };
 }
 
+/**
+ * 归一化 Severity 输入为稳定形态。
+ */
 function normalizeSeverity(value) {
   const text = String(value || "").toUpperCase();
   if (["P0", "P1", "P2", "P3"].includes(text)) return text;
@@ -131,3 +134,4 @@ function normalizeSeverity(value) {
   if (text === "LOW") return "P2";
   return null;
 }
+

@@ -34,7 +34,14 @@ import { prepareContractReview } from "./contract-governance.mjs";
 
 // --- 门序与完成判定 ---
 
-/** 根据 scope/review 结果与 attempts 判断本次交付尝试是否应标记失败。 */
+/**
+ * 根据 scope/review 结果与 attempts 判断本次交付尝试是否应标记失败。
+ * @param {object} task 含 attempts、maxAttempts
+ * @param {object} verifyResult verifier 结果
+ * @param {object} scopeResult scope 结果
+ * @param {object} reviewResult review 结果
+ * @returns {boolean} true 表示应标记 failed 而非 pending 重试
+ */
 export function shouldFailDeliveryAttempt(task, verifyResult, scopeResult, reviewResult) {
   if (scopeResult?.status === "fail") return true;
   if (scopeResult && scopeResult.status !== "pass") return true;
@@ -42,7 +49,11 @@ export function shouldFailDeliveryAttempt(task, verifyResult, scopeResult, revie
   return task.attempts >= task.maxAttempts;
 }
 
-/** 固定顺序提交 completed：账本 → wisdom → digest → persistTaskState。 */
+/**
+ * 固定顺序提交 completed：账本 → wisdom → digest → persistTaskState。
+ * @param {string} rootDir 项目根
+ * @param {object} options taskState、task、verifyResult、ledgerEvent、digestReason
+ */
 export async function commitTaskCompletionState(rootDir, options) {
   const { taskState, task, verifyResult, ledgerEvent, digestReason } = options;
   task.status = "completed";
@@ -85,7 +96,14 @@ const STEP_LABELS = {
 
 // --- 主流水线 ---
 
-/** 运行 verify → scope → review → contract → completion 完整交付流水线。 */
+/**
+ * 运行 verify → scope → review → contract → completion 完整交付流水线。
+ * @param {string} rootDir 项目根
+ * @param {string} planId 计划 ID
+ * @param {object} task 任务对象
+ * @param {object} [options] initialEvidence、changedPaths、preCompletionGate、delivery、runId
+ * @returns {Promise<object>} status 与 steps/evidence/criteria
+ */
 export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
   const evidence = { ...(options.initialEvidence || {}) };
   const results = [];
@@ -146,6 +164,7 @@ export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
   const gatesAllPass = workerExitOk && criteria.pass && results.every((result) => result.status === "pass");
 
   // pipeline 总账。emitDecision 是 best-effort，绝不反噬门控。
+  // §3.4：任一 gate 未全 pass 时不得进入 completion 段，避免部分证据冒充完成。
   if (!gatesAllPass) {
     return finish("blocked");
   }
@@ -186,6 +205,7 @@ export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
   return finish("completed");
 }
 
+/** 从 worker/verify/review 结果中查找需人工确认进程终止的 recovery 证据。 */
 function findCommandRecoveryEvidence(evidence) {
   const candidates = [
     evidence.workerResult,
@@ -197,6 +217,7 @@ function findCommandRecoveryEvidence(evidence) {
   return candidates.find((result) => result?.recoveryRequired === true || result?.terminationFailed === true) || null;
 }
 
+/** 从 gate 信封或约定路径推导决策记录用的 evidencePath。 */
 function envelopeEvidencePath(envelope, planId, task) {
   const evidence = envelope?.evidence;
   if (evidence && typeof evidence === "object") {
@@ -262,6 +283,7 @@ function deriveGateFailure(envelope) {
   }
 }
 
+/** 单门完成后发射 decisions.jsonl 记录；构造失败不得反噬门控主流程。 */
 async function emitGateDecision(rootDir, planId, task, envelope, runId = null) {
   // 防御深度：记录构造也必须 best-effort，未来字段提取逻辑抛错不得反噬门控。
   try {
@@ -285,6 +307,7 @@ async function emitGateDecision(rootDir, planId, task, envelope, runId = null) {
   }
 }
 
+/** 为 pipeline 总账决策生成人类可读 reason 摘要。 */
 function pipelineOutcomeReason(status, results, criteria) {
   if (status === "completed") return "全部 gate 通过，checkpoint 已落盘";
   if (status === "revalidation_required") return "集成基线在 gate 期间变化或存在无归属改动";
@@ -334,6 +357,7 @@ export async function runCompletionSegment(rootDir, planId, task, evidence, opti
     evidence.integrationCommit = integrationGate;
     evidence.deliveryBaseline = integrationGate;
     evidence.deliveryPending = false;
+    // §3.4：integration 围栏失败只回滚本 run 路径，已 push 的 delivery 由 integration 层保留 intent。
     if (integrationGate?.pass !== true) {
       await emitGateDecision(rootDir, planId, task, proofEnvelope, options.runId);
       return { status: "revalidation_required", proofEnvelope, integrationGate, checkpointEnvelope: null };
@@ -370,6 +394,7 @@ export async function runCompletionSegment(rootDir, planId, task, evidence, opti
   return { status: "completed", proofEnvelope, integrationGate, checkpointEnvelope };
 }
 
+/** 判定本任务是否必须 Git delivery commit，并解析 delivery target（含 admission claim 对齐）。 */
 async function resolveDeliveryFacts(rootDir, task, options) {
   const workspace = task.delivery_workspace;
   const target = options.delivery || (workspace?.workDir && workspace?.runId && workspace?.baseSha
@@ -425,6 +450,7 @@ export function collectGateEvidenceFromTask(task) {
   return { evidence, failedSteps };
 }
 
+/** 按 gate 名组装 invokeCapability 所需的 ctx 对象。 */
 function buildStepContext(stepName, { rootDir, planId, task, evidence, options }) {
   switch (stepName) {
     case "verify":
@@ -455,6 +481,7 @@ function buildStepContext(stepName, { rootDir, planId, task, evidence, options }
   }
 }
 
+/** 将网关信封归一化写入 evidence，verify 步额外更新 successCriteria。 */
 function recordStepEvidence(stepName, evidence, envelope, task) {
   const stepEvidence = normalizeStepEvidence(stepName, envelope);
   if (stepName === "verify") {
@@ -471,6 +498,7 @@ function recordStepEvidence(stepName, evidence, envelope, task) {
   return undefined;
 }
 
+/** 能力抛错或无 evidence 时合成最小 fail/inconclusive 结构，供后续 gate 与 proof 读取。 */
 function normalizeStepEvidence(stepName, envelope) {
   if (envelope.evidence && typeof envelope.evidence === "object") return envelope.evidence;
   const error = envelope.error || null;
@@ -521,6 +549,7 @@ const GATE_NEXT_ACTIONS = {
   checkpoint: "运行 node ./bin/wildarrange.mjs doctor 检查状态完整性",
 };
 
+/** 组装 pipeline 返回体：步骤列表、耗时、费用与 error 协议。 */
 function finalizePipelineResult(status, results, evidence, extra = {}) {
   const totalDurationMs = results.reduce((sum, result) => sum + (result.duration_ms || 0), 0);
   const totalCostAmount = results.reduce((sum, result) => sum + (result.cost?.amount || 0), 0);
@@ -539,6 +568,7 @@ function finalizePipelineResult(status, results, evidence, extra = {}) {
   };
 }
 
+/** 非 completed 时为 CLI/AI 生成统一 error-protocol 结构。 */
 function pipelineErrorProtocol(status, results, extra) {
   if (status === "awaiting_user_decision") return buildErrorProtocol({ code: status, module: "orchestration/contract-governance.mjs",
     message: "计划外契约变更等待人类决定", nextAction: `主 Agent 阅读 ${extra.changeRequest?.reportMdPath || "变更报告"}，解释必要性、影响和替代方案；得到明确决定后运行 contracts resolve。` });
@@ -575,6 +605,7 @@ function pipelineErrorProtocol(status, results, extra) {
   });
 }
 
+/** 渲染各 gate 耗时/费用的一行摘要，供 status 与决策投影使用。 */
 function renderPipelineSummary(results, totalDurationMs, totalCostAmount, costCurrency) {
   const stepLine = results
     .map((result) => {
@@ -588,6 +619,7 @@ function renderPipelineSummary(results, totalDurationMs, totalCostAmount, costCu
   return `${stepLine}\n总耗时 ${formatDuration(totalDurationMs)}${costPart}`;
 }
 
+/** 毫秒格式化为 ms 或 s 字符串。 */
 function formatDuration(ms) {
   if (typeof ms !== "number") return "?";
   if (ms < 1000) return `${Math.round(ms)}ms`;

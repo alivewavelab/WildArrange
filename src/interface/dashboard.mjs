@@ -46,7 +46,10 @@ import { tryHandleAdoptionApi } from "./adoption-panel.mjs";
 import { renderDashboardHtml } from "./dashboard-view.mjs";
 import { SAFE_ID, readJsonBody, sendJson } from "./http-utils.mjs";
 
-/** 请求参数非法时抛出，映射为 HTTP 400。 */
+/**
+ * 请求参数非法时抛出，由 dashboard 请求处理器映射为 HTTP 400。
+ * @extends Error
+ */
 class DashboardBadRequest extends Error {}
 
 /**
@@ -228,18 +231,22 @@ export function startDashboardServer(rootDir, options = {}) {
 
 // --- 认证与同源校验 ---
 
+/** 判断绑定地址是否为 loopback（localhost / 127.x / ::1）。 */
 function isLoopbackHost(host) {
   return host === "localhost" || host === "::1" || host === "127.0.0.1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
 }
 
+/** 非安全方法：除 GET/HEAD/OPTIONS 外均视为可能改状态的写操作。 */
 function isUnsafeMethod(method) {
   return !["GET", "HEAD", "OPTIONS"].includes(String(method || "GET").toUpperCase());
 }
 
+/** loopback 上 GET 可读匿名；写操作或非 loopback 绑定一律要求 token。 */
 function requiresApiAuth(request, host) {
   return isUnsafeMethod(request.method) || !isLoopbackHost(host);
 }
 
+/** 校验 Bearer / X-WildArrange-Token / HttpOnly cookie 是否与配置 token 一致（timing-safe）。 */
 function isAuthorized(request, token) {
   if (!token) return false;
   const auth = request.headers.authorization || "";
@@ -248,6 +255,7 @@ function isAuthorized(request, token) {
   return safeTokenEquals(readCookie(request, "wildarrange_dashboard"), token);
 }
 
+/** 从 Cookie 头解析指定名称的值；解码失败返回空字符串。 */
 function readCookie(request, name) {
   const cookies = String(request.headers.cookie || "").split(";");
   for (const cookie of cookies) {
@@ -262,10 +270,12 @@ function readCookie(request, name) {
   return "";
 }
 
+/** 生成 loopback 首次访问 / 时下发的 HttpOnly 会话 cookie 字符串。 */
 function renderDashboardSessionCookie(token) {
   return `wildarrange_dashboard=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/`;
 }
 
+/** 常量时间比较 token，避免时序侧信道。 */
 function safeTokenEquals(actual, expected) {
   if (typeof actual !== "string" || typeof expected !== "string") return false;
   const actualBuffer = Buffer.from(actual);
@@ -274,6 +284,7 @@ function safeTokenEquals(actual, expected) {
   return timingSafeEqual(actualBuffer, expectedBuffer);
 }
 
+/** 校验 Host 头与服务器绑定地址一致；loopback 绑定时允许任意 loopback Host。 */
 function isAllowedHost(request, configuredHost) {
   const header = request.headers.host;
   if (!header || typeof header !== "string") return false;
@@ -283,10 +294,12 @@ function isAllowedHost(request, configuredHost) {
   return hostName === configuredHost;
 }
 
+/** 写操作 CSRF 防护：拒绝 cross-site；有 Origin 时必须与绑定 host 同源。 */
 function isSameSiteRequest(request, configuredHost) {
   const fetchSite = String(request.headers["sec-fetch-site"] || "").toLowerCase();
   if (fetchSite === "cross-site") return false;
   const origin = request.headers.origin;
+  // 无 Origin 的非浏览器客户端（curl 等）在 loopback 场景下放行。
   if (!origin) return true;
   try {
     const originHost = new URL(origin).hostname;
@@ -297,6 +310,7 @@ function isSameSiteRequest(request, configuredHost) {
   }
 }
 
+/** 从 Host 头提取主机名（支持 IPv6 [addr]:port 与 hostname:port）。 */
 function parseHostName(header) {
   const value = header.trim();
   if (!value) return "";
@@ -309,6 +323,7 @@ function parseHostName(header) {
 
 // --- 请求参数校验 ---
 
+/** URL 路径段 decodeURIComponent；非法编码抛 DashboardBadRequest。 */
 function safeDecodeSegment(value, label) {
   try {
     return decodeURIComponent(value);
@@ -317,23 +332,27 @@ function safeDecodeSegment(value, label) {
   }
 }
 
+/** 可选 dashboard id：空值跳过，有值则校验 SAFE_ID。 */
 function validateOptionalDashboardId(value, label) {
   if (value === undefined || value === null || value === "") return;
   validateDashboardId(value, label);
 }
 
+/** 校验 taskId/planId/decisionId 等是否符合 SAFE_ID 模式。 */
 function validateDashboardId(value, label) {
   if (typeof value !== "string" || !SAFE_ID.test(value)) {
     throw new DashboardBadRequest(`invalid ${label}`);
   }
 }
 
+/** 校验 /api/node/<name> 中的 workflow 节点名（小写连字符，最长 32）。 */
 function validateNodeName(value) {
   if (typeof value !== "string" || !/^[a-z][a-z-]{0,31}$/.test(value)) {
     throw new DashboardBadRequest("invalid node");
   }
 }
 
+/** 写入 HTML 响应并结束连接（首页与静态页）。 */
 function sendHtml(response, statusCode, html, headers = {}) {
   response.writeHead(statusCode, { "content-type": "text/html; charset=utf-8", ...headers });
   response.end(html);

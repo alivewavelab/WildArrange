@@ -175,6 +175,7 @@ export async function runInjectionHook(rootDir, input = {}) {
   });
   const renderedContext = injectionPoint.enabled ? renderHookInjectionMarkdown({ event, pointName, sessionId, taskId: effectiveTaskId, targetPaths, facts, injectionPoint }) : "";
   const contextMarkdown = rewriteCanonicalCliCommands(renderedContext, cliCommandPrefix);
+  // deny 时即使注入点关闭也要输出 PreToolUse JSON，以便宿主拦截工具调用
   const shouldRenderPreToolOutput = event === "PreToolUse"
     && (injectionPoint.enabled || facts.preflight?.decision === "deny");
   const output = shouldRenderPreToolOutput
@@ -244,6 +245,7 @@ export async function runInjectionHook(rootDir, input = {}) {
 
 // --- 决策投影与辅助 ---
 
+/** 递归脱敏 tool_input 用于 decisions 投影，截断深层嵌套与敏感键值。 */
 function summarizeHookToolInput(value) {
   if (!value || typeof value !== "object") return null;
   const redact = (item, key = "") => {
@@ -263,8 +265,9 @@ function summarizeHookToolInput(value) {
   return redact(value);
 }
 
-// code 是结构化字段，由 preToolUseGuard 的返回直接携带；绝不能从
-// reason 散文反推（改文案就会静默丢失投影的"命中规则"）。
+/**
+ * 从 preflight/resultGate 提取结构化 decision code；禁止从 reason 散文反推。
+ */
 function hookDecisionCode(preflight, resultGate) {
   if (preflight?.code) return preflight.code;
   if (resultGate && resultGate.decision !== "pass") return "tool_result_gate";
@@ -273,6 +276,7 @@ function hookDecisionCode(preflight, resultGate) {
 
 // --- 事件映射与 CLI 改写 ---
 
+/** 将宿主 Hook 事件名映射为 wildarrange.config 中的 injectionPoints 键名。 */
 function injectionPointForHookEvent(event) {
   if (event === "SessionStart") return "session_start";
   if (event === "UserPromptSubmit") return "user_prompt_submit";
@@ -283,11 +287,13 @@ function injectionPointForHookEvent(event) {
   throw new Error(`unsupported hook event: ${event}`);
 }
 
+/** 无 agentContext 时按 Hook 事件推断默认 Agent（主 Agent 或执行 Worker）。 */
 function defaultAgentForHookEvent(event) {
   if (event === "SessionStart" || event === "UserPromptSubmit" || event === "Stop" || event === "PostCompact") return DEFAULT_LEAD_AGENT;
   return DEFAULT_EXECUTOR_AGENT;
 }
 
+/** Hook 侧档案员调用包装：失败时降级为 warn 结果，不阻断注入主流程。 */
 async function runArchivistForHook(rootDir, input, options) {
   try {
     return await runArchivistRouter(rootDir, {
@@ -307,6 +313,7 @@ async function runArchivistForHook(rootDir, input, options) {
   }
 }
 
+/** 为 skill-matcher 提供请求文本；工具类 Hook 无可靠文本则留空走静态挂载。 */
 function injectionTextForHookEvent(event, input, facts) {
   if (event === "UserPromptSubmit") return String(input.prompt || "");
   if (event === "SessionStart" || event === "PostCompact") return String(facts.resume?.nextAction || "");
@@ -314,12 +321,14 @@ function injectionTextForHookEvent(event, input, facts) {
   return "";
 }
 
+/** 按 Hook 事件推断 skill-matcher stage（plan/recall 等）。 */
 function injectionStageForHookEvent(event, facts) {
   if (event === "UserPromptSubmit") return stageForRoute(facts.route);
   if (event === "SessionStart" || event === "PostCompact") return "recall";
   return "";
 }
 
+/** 将路由 intent 映射为注入/skill-matcher 使用的 stage 标签。 */
 function stageForRoute(route) {
   const intent = route?.intent;
   if (intent === "plan") return "plan";
@@ -330,6 +339,7 @@ function stageForRoute(route) {
   return "default";
 }
 
+/** 从 Hook 载荷提取对话轮次，兼容 turns/messages/conversation 多种字段名。 */
 function extractHookTurns(input) {
   const source = input.turns || input.messages || input.conversation || [];
   if (!Array.isArray(source)) return [];
@@ -343,19 +353,23 @@ function extractHookTurns(input) {
   }).filter((turn) => turn && turn.content);
 }
 
+/** 从 Hook 输入或环境变量解析 sessionId，缺失时生成新 ID。 */
 function normalizeHookSessionId(input) {
   return String(input.session_id || input.sessionId || process.env.WILDARRANGE_SESSION_ID || process.env.CODEX_SESSION_ID || process.env.CURSOR_SESSION_ID || createWorkId("session"));
 }
 
+/** 读取当前活跃 planId，供注入点模板变量与 agentContext 绑定。 */
 async function currentPlanId(rootDir) {
   const taskState = await loadTaskState(rootDir);
   return taskState?.planId || "";
 }
 
+/** 将 sessionId/event 等片段规范为安全文件名（仅保留字母数字与 _.-）。 */
 function sanitizeFileSegment(value) {
   return String(value || "unknown").replace(/[^A-Za-z0-9_.-]+/g, "_").slice(0, 80) || "unknown";
 }
 
+/** 用 adapter 注入的可信 CLI 前缀替换 Markdown 中的 canonical 命令路径。 */
 function rewriteCanonicalCliCommands(value, cliCommandPrefix) {
   if (typeof value !== "string" || !cliCommandPrefix) return value;
   return value.replaceAll("node ./bin/wildarrange.mjs", cliCommandPrefix);

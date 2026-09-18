@@ -49,6 +49,7 @@ export function readJsonBody(request) {
     request.on("data", (chunk) => {
       if (settled) return;
       bodyBytes += chunk.length;
+      // 流式累计字节，超限立即 reject，避免大 body 占满内存。
       if (bodyBytes > MAX_BODY_BYTES) {
         settled = true;
         reject(Object.assign(new Error("request body too large"), { code: "payload_too_large" }));

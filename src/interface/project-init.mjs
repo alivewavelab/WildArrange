@@ -24,6 +24,7 @@ import { fileURLToPath } from "node:url";
 import { appendLedger } from "../infra/ledger.mjs";
 
 const PROJECT_DOCUMENT_TEMPLATE_DIR = fileURLToPath(new URL("../../packs/wildarrange-linear/project-init/", import.meta.url));
+/** linear pack 模板清单：source 为 pack 内文件名，target 为项目根相对路径；optional 需显式 flag 才写入。 */
 const PROJECT_DOCUMENT_TEMPLATES = [
   { source: "AGENTS.template.md", target: "AGENTS.md" },
   { source: "code-and-interface-conventions.md", target: "doc/standards/code-and-interface-conventions.md" },

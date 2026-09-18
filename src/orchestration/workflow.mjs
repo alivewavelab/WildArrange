@@ -105,6 +105,7 @@ export async function createSamplePlan(rootDir, targetPath = resolveWildArrangeP
   return targetPath;
 }
 
+/** 将内联 Node 脚本编码为 `node -e` 单行命令，供样例计划 worker/verify 使用。 */
 function nodeEvalCommand(source) {
   const encoded = Buffer.from(source, "utf8").toString("base64");
   return `node -e "eval(Buffer.from('${encoded}','base64').toString())"`;

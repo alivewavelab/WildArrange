@@ -171,6 +171,9 @@ export function extractPatchPaths(patch) {
     .filter(Boolean));
 }
 
+/**
+ * gitAvailable 内部辅助。
+ */
 async function gitAvailable(rootDir) {
   const result = await readGitTopLevel(rootDir);
   if (!result.available) {
@@ -179,6 +182,9 @@ async function gitAvailable(rootDir) {
   return { available: true, topLevel: result.topLevel };
 }
 
+/**
+ * pathsEqual 内部辅助。
+ */
 async function pathsEqual(left, right) {
   if (!left || !right) return false;
   try {
@@ -188,6 +194,9 @@ async function pathsEqual(left, right) {
   }
 }
 
+/**
+ * 归一化 PatchPath 输入为稳定形态。
+ */
 function normalizePatchPath(filePath) {
   const normalized = String(filePath || "").replaceAll("\\", "/");
   if (!normalized || normalized === "/dev/null") return null;
@@ -195,6 +204,10 @@ function normalizePatchPath(filePath) {
   return normalized;
 }
 
+/**
+ * splitLines 内部辅助。
+ */
 function splitLines(value) {
   return String(value || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 }
+

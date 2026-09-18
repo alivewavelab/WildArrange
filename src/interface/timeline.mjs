@@ -24,6 +24,7 @@ import { readAnnotations } from "../infra/annotation-log.mjs";
 
 const KNOWN_SOURCES = ["ledger", "decision", "annotation"];
 
+/** 将 ledger 条目投影为时间线行（source=ledger）。 */
 function ledgerEntryToRow(entry) {
   const parts = [entry.type || "event"];
   if (entry.taskId) parts.push(`task=${entry.taskId}`);
@@ -38,6 +39,7 @@ function ledgerEntryToRow(entry) {
   };
 }
 
+/** 将 decision-log 记录投影为时间线行（source=decision）。 */
 function decisionToRow(record) {
   return {
     ts: record.ts || null,
@@ -49,6 +51,7 @@ function decisionToRow(record) {
   };
 }
 
+/** 将 annotation-log 记录投影为时间线行（source=annotation，taskId 经 ref 间接归属）。 */
 function annotationToRow(record) {
   return {
     ts: record.ts || null,
@@ -117,6 +120,7 @@ export async function projectTimeline(rootDir, { limit = 50, taskId, source, for
   return { ...projection, text: renderTimelineText(limited, projection) };
 }
 
+/** 将时间线投影渲染为 CLI 可读的多行文本。 */
 function renderTimelineText(records, projection) {
   const lines = [];
   lines.push(`时间线：共 ${projection.total} 条，显示 ${records.length} 条（ledger 已校验 ${projection.sources.ledger ?? 0} 条）`);

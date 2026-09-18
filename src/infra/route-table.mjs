@@ -92,6 +92,9 @@ export function resolveRouteDecision(routes, text) {
   ]);
 }
 
+/**
+ * bestMatch 内部辅助。
+ */
 function bestMatch(entries, lowerText) {
   let best = null;
   for (const entry of entries) {
@@ -114,6 +117,9 @@ export function matchSignals(lowerText, signals) {
   return signals.filter((signal) => signalMatches(lowerText, String(signal).toLowerCase()));
 }
 
+/**
+ * matchPlanSkillBundles 内部辅助。
+ */
 function matchPlanSkillBundles(entries, lowerText) {
   return entries
     .map((entry) => ({ ...entry, matchedSignals: matchSignals(lowerText, entry.signals || []) }))
@@ -127,6 +133,9 @@ function matchPlanSkillBundles(entries, lowerText) {
     }));
 }
 
+/**
+ * signalMatches 内部辅助。
+ */
 function signalMatches(lowerText, signal) {
   if (!signal) return false;
   if (!/^[a-z0-9][a-z0-9\s_-]*$/i.test(signal)) {
@@ -136,18 +145,30 @@ function signalMatches(lowerText, signal) {
   return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, "i").test(lowerText);
 }
 
+/**
+ * 判断 hasPlanningCreationSignal 条件。
+ */
 function hasPlanningCreationSignal(lowerText) {
   return /(新增|新功能|大功能|做一个|实现|开发|设计|计划|方案|mvp|一期|从零)/i.test(lowerText);
 }
 
+/**
+ * 判断 hasExplicitContinuationSignal 条件。
+ */
 function hasExplicitContinuationSignal(lowerText) {
   return /(继续做|继续执行|按计划|已有计划|下一个任务|run next|next task|继续当前任务)/i.test(lowerText);
 }
 
+/**
+ * 判断 hasProductPlanningSignal 条件。
+ */
 function hasProductPlanningSignal(lowerText) {
   return /(做一个|从零|mvp|一期|产品|需求|提醒|待办|todo|管理|管事|复杂|工具|小程序)/i.test(lowerText);
 }
 
+/**
+ * 合并 Route 集合/对象。
+ */
 function mergeRoute(defaults, intent, domain, complexity, lowerText = "") {
   const merged = {
     ...defaults,
@@ -207,6 +228,9 @@ function mergeRoute(defaults, intent, domain, complexity, lowerText = "") {
   return merged;
 }
 
+/**
+ * 应用 PlanningGate 变换或覆盖。
+ */
 function applyPlanningGate(merged, lowerText) {
   if (
     merged.route !== "execute"
@@ -227,6 +251,9 @@ function applyPlanningGate(merged, lowerText) {
   merged.adjustmentReason = "product/design signals require planning before execution";
 }
 
+/**
+ * 构建 RouteResult 结构。
+ */
 function buildRouteResult(routes, text, route, domain, complexity, matchedSignals) {
   const intentName = route.intent || routes.defaults.intent;
   const signals = uniqueStrings(matchedSignals);
@@ -264,6 +291,9 @@ function buildRouteResult(routes, text, route, domain, complexity, matchedSignal
   };
 }
 
+/**
+ * 归一化 RoutableAgent 输入为稳定形态。
+ */
 function normalizeRoutableAgent(value, fieldName) {
   const normalized = normalizeAgentKey(value) || DEFAULT_EXECUTOR_AGENT;
   if (!LONG_LIVED_AGENTS.includes(normalized)) {
@@ -285,6 +315,9 @@ export function higherRisk(left = "low", right = "low") {
   return (order[right] || 1) > (order[left] || 1) ? right : left;
 }
 
+/**
+ * 应用 RouteOverrides 变换或覆盖。
+ */
 function applyRouteOverrides(routes, overrides) {
   if (!overrides || !Array.isArray(overrides.patches)) return routes;
   const next = structuredClone(routes);
@@ -302,9 +335,13 @@ function applyRouteOverrides(routes, overrides) {
   return next;
 }
 
+/**
+ * routeConfidence 内部辅助。
+ */
 function routeConfidence(signals, risk) {
   const base = signals.length === 0 ? 0.48 : Math.min(0.92, 0.55 + signals.length * 0.08);
   if (risk === "high") return Math.max(0.5, base - 0.08);
   if (risk === "low") return Math.min(0.95, base + 0.05);
   return base;
 }
+

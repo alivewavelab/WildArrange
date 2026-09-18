@@ -27,11 +27,14 @@ import { loadTaskState, normalizeTask } from "./plan-state.mjs";
 import { persistTaskState } from "./task-board.mjs";
 import { readChangeRequest, writeContractChangeRequest, recordContractChangeDecision, contractRequestFingerprint } from "./change-governance.mjs";
 
+/** 对 contractChanges 条目序列化后取内容哈希，用于批准指纹比对。 */
 const digest = (value) => hashContent(JSON.stringify(value));
+/** 读取任务上的 contractChanges.items，缺省为空数组。 */
 const itemsOf = (task) => task.contractChanges?.items || [];
 
 // Approval is bound to the exact normalized declarations, not an editable
 // worker-supplied boolean. Existing plan approval events are the authority.
+/** 判断任务当前 contractChanges 指纹是否已被 plan 批准或 CR accept 绑定。 */
 async function approvedScope(rootDir, planId, task) {
   const fingerprint = digest(itemsOf(task));
   const events = await readVerifiedLedgerEntries(rootDir);
@@ -46,6 +49,7 @@ async function approvedScope(rootDir, planId, task) {
       && event.fingerprint === request.fingerprint && event.decision === "accept");
 }
 
+/** 将扫描 card 转为 ChangeRequest 用的规范化声明条目。 */
 function candidateDeclaration(card) {
   const value = card.candidate || card.baseline;
   const sources = value?.source || {};
@@ -58,6 +62,7 @@ function candidateDeclaration(card) {
   };
 }
 
+/** 判断扫描 card 是否被任务已批准声明 item 覆盖。 */
 function matchesApprovedDeclaration(item, card) {
   if (item.contractId !== card.contractId || item.action !== card.action) return false;
   if (card.action === "remove") return Boolean(item.compatibility && item.rollback);
@@ -75,6 +80,7 @@ function matchesApprovedDeclaration(item, card) {
   return Boolean(item.expected && Object.keys(item.expected).length && item.verificationRefs?.length);
 }
 
+/** 经 gateway 对任务执行契约扫描（不写 registry）。 */
 async function scanTask(rootDir, task, executionRoot, evidence) {
   const result = await invokeCapability("contract-governance-scan", { rootDir: executionRoot,
     options: { write: false, inspectTask: task, evidence, controlRoot: rootDir } });
@@ -204,6 +210,7 @@ export async function resolveContractChange(rootDir, options) {
   });
 }
 
+/** 校验 worker/CLI 提案必填字段并归一化 contractChanges.items。 */
 function normalizeProposal(task, proposal) {
   for (const key of ["reason", "impact", "alternatives", "recommendation"]) {
     if (typeof proposal[key] !== "string" || !proposal[key].trim()) throw new Error(`contract proposal requires ${key}`);

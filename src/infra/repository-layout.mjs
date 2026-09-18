@@ -25,6 +25,7 @@ const execFileAsync = promisify(execFile);
  * inspectRepositoryGovernance：本模块对外异步 API。
  */
 export async function inspectRepositoryGovernance(rootDir, policy = {}, options = {}) {
+  // §3.4 安全：治理未显式启用时跳过，force 仅供 doctor/CI 强制全量审计。
   if (policy.enabled !== true && options.force !== true) {
     return {
       kind: "repository_governance",
@@ -108,6 +109,9 @@ export async function inspectRepositoryGovernance(rootDir, policy = {}, options 
 }
 
 // --- 边界与文档检查 ---
+/**
+ * 检查治理边界目录及 AGENTS.md 是否存在且非空壳。
+ */
 async function checkAgentBoundaries(rootDir, boundaries, findings) {
   for (const boundary of normalizeList(boundaries)) {
     const boundaryPath = path.join(rootDir, boundary);
@@ -127,6 +131,9 @@ async function checkAgentBoundaries(rootDir, boundaries, findings) {
   }
 }
 
+/**
+ * 校验成对文档的 CLI 命令指纹一致。
+ */
 async function checkDocumentationPairs(rootDir, pairs, findings) {
   for (const pair of Array.isArray(pairs) ? pairs : []) {
     if (!Array.isArray(pair) || pair.length !== 2) continue;
@@ -155,6 +162,9 @@ async function checkDocumentationPairs(rootDir, pairs, findings) {
   }
 }
 
+/**
+ * 校验必需文档是否含指定 marker 模式。
+ */
 async function checkDocumentationRequirements(rootDir, requirements, findings) {
   for (const requirement of Array.isArray(requirements) ? requirements : []) {
     const relativePath = normalizeRelativePath(requirement.path || "");
@@ -172,6 +182,9 @@ async function checkDocumentationRequirements(rootDir, requirements, findings) {
   }
 }
 
+/**
+ * 校验 Prompt Pack manifest 与 routes 注册一致性。
+ */
 async function checkPromptPackManifest(rootDir, findings) {
   const packDir = path.join(rootDir, "packs", "wildarrange-linear");
   const manifestPath = path.join(packDir, "manifest.json");
@@ -273,6 +286,9 @@ async function checkPromptPackManifest(rootDir, findings) {
   }
 }
 
+/**
+ * 读取 Prompt Pack JSON；解析失败写入 findings 并返回 null。
+ */
 async function readPromptPackJson(filePath, relativePath, ruleId, findings) {
   try {
     return JSON.parse(await readFile(filePath, "utf8"));
@@ -289,6 +305,9 @@ async function readPromptPackJson(filePath, relativePath, ruleId, findings) {
   }
 }
 
+/**
+ * 对照真实 CLI --help --all 校验文档命令真实性。
+ */
 async function checkDocumentedCliCommands(rootDir, pairs, findings) {
   const binPath = path.join(rootDir, "bin", "wildarrange.mjs");
   if (!existsSync(binPath)) return;
@@ -319,6 +338,9 @@ async function checkDocumentedCliCommands(rootDir, pairs, findings) {
   }
 }
 
+/**
+ * 校验架构台账是否登记全部运行时模块。
+ */
 async function checkArchitectureLedgers(rootDir, ledgerPaths, findings) {
   const paths = normalizeList(ledgerPaths);
   if (paths.length === 0) return;
@@ -345,6 +367,9 @@ async function checkArchitectureLedgers(rootDir, ledgerPaths, findings) {
   }
 }
 
+/**
+ * 全量扫描 governed 目录的 kebab-case 命名合规。
+ */
 async function checkNaming(rootDir, governedRoots, naming, ignored, findings) {
   if (!naming.directories && !naming.sourceFiles) return;
   const exceptions = new Set(naming.exceptions || []);
@@ -364,6 +389,9 @@ async function checkNaming(rootDir, governedRoots, naming, ignored, findings) {
   }
 }
 
+/**
+ * 仅对 changedPaths 做 kebab-case 命名检查。
+ */
 async function checkChangedPathNaming(rootDir, changedPaths, governedRoots, naming, findings) {
   if (!naming.directories && !naming.sourceFiles) return;
   const exceptions = new Set(naming.exceptions || []);
@@ -391,6 +419,9 @@ async function checkChangedPathNaming(rootDir, changedPaths, governedRoots, nami
   }
 }
 
+/**
+ * 按 commentRules 检查注释 blocked/required 模式。
+ */
 async function checkCommentRules(rootDir, candidateFiles, rules, findings) {
   for (const filePath of candidateFiles) {
     const matchedRules = rules.filter((rule) => normalizeList(rule.globs).some((glob) => pathMatchesPattern(filePath, glob)));
@@ -433,6 +464,9 @@ export function extractComments(filePath, content) {
   return [];
 }
 
+/**
+ * 词法扫描 JS/TS 源码提取 // 与块注释（跳过字符串/正则/模板）。
+ */
 function extractSlashComments(content) {
   const comments = [];
   let line = 1;
@@ -563,6 +597,9 @@ function extractSlashComments(content) {
   return comments;
 }
 
+/**
+ * 判断 / 在源码位置是否开启正则字面量而非除法。
+ */
 function canStartRegex(content, slashIndex) {
   let cursor = slashIndex - 1;
   while (cursor >= 0 && /\s/.test(content[cursor])) cursor -= 1;
@@ -574,6 +611,9 @@ function canStartRegex(content, slashIndex) {
   return /^(?:return|case|throw|typeof|instanceof|in|of|yield|await|delete|void|new)$/.test(previousWord);
 }
 
+/**
+ * 提取 # 风格注释（跳过引号内与 shebang）。
+ */
 function extractHashComments(content) {
   const comments = [];
   content.split(/\r?\n/).forEach((line, index) => {
@@ -597,6 +637,9 @@ function extractHashComments(content) {
   return comments;
 }
 
+/**
+ * 提取定界符包裹的注释（如 HTML <!-- -->）。
+ */
 function extractDelimitedComments(content, open, close) {
   const comments = [];
   let cursor = 0;
@@ -615,6 +658,9 @@ function extractDelimitedComments(content, open, close) {
 }
 
 // --- 文件遍历与工具 ---
+/**
+ * 收集 governedRoots 下全部文件相对路径。
+ */
 async function collectGovernedFiles(rootDir, governedRoots, ignored) {
   const files = [];
   for (const governedRoot of governedRoots) {
@@ -625,6 +671,9 @@ async function collectGovernedFiles(rootDir, governedRoots, ignored) {
   return [...new Set(files)].sort();
 }
 
+/**
+ * 递归遍历目录，跳过 ignored 目录名。
+ */
 async function walk(rootDir, relativeDir, ignored, visitor) {
   const absoluteDir = path.join(rootDir, relativeDir);
   const entries = await readdir(absoluteDir, { withFileTypes: true }).catch(() => []);
@@ -636,6 +685,9 @@ async function walk(rootDir, relativeDir, ignored, visitor) {
   }
 }
 
+/**
+ * 从文本提取 wildarrange CLI 命令指纹。
+ */
 function extractCliFingerprints(content) {
   const commands = new Set();
   const commandPattern = /(?:node\s+\.\/bin\/wildarrange\.mjs|npx\s+wildarrange|(?<![@/A-Za-z0-9_-])wildarrange)\s+([a-z-]+)(?:[ \t]+(?!-{1,2})([a-z-]+))?/g;
@@ -647,6 +699,9 @@ function extractCliFingerprints(content) {
   return commands;
 }
 
+/**
+ * 将模式编译为正则；非法模式退化为字面转义匹配。
+ */
 function safeRegex(pattern) {
   try {
     return new RegExp(pattern, "i");
@@ -655,28 +710,46 @@ function safeRegex(pattern) {
   }
 }
 
+/**
+ * 判断目录名是否为 kebab-case。
+ */
 function isKebabCase(value) {
   return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value);
 }
 
+/**
+ * 判断 .mjs 源文件 stem 是否为 kebab-case（含 test/spec 后缀）。
+ */
 function isKebabSourceStem(value) {
   return /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.(?:test|spec|config))?$/.test(value);
 }
 
+/**
+ * 将数组项归一化为相对路径并过滤空值。
+ */
 function normalizeList(value) {
   return Array.isArray(value) ? value.map((item) => normalizeRelativePath(String(item))).filter(Boolean) : [];
 }
 
+/**
+ * 判断 filePath 是否在 directoryPath 目录树内。
+ */
 function pathIsWithin(filePath, directoryPath) {
   const normalizedFile = normalizeRelativePath(filePath).replace(/\/$/, "");
   const normalizedDirectory = normalizeRelativePath(directoryPath).replace(/\/$/, "");
   return normalizedFile === normalizedDirectory || normalizedFile.startsWith(`${normalizedDirectory}/`);
 }
 
+/**
+ * 将值转为非空字符串数组。
+ */
 function stringList(value) {
   return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
 }
 
+/**
+ * 构造 repository governance finding 对象。
+ */
 function finding(ruleId, severity, filePath, line, evidence, requiredFix) {
   return {
     ruleId,
@@ -688,6 +761,9 @@ function finding(ruleId, severity, filePath, line, evidence, requiredFix) {
   };
 }
 
+/**
+ * 由 ruleId/path/line/evidence 生成稳定 finding id。
+ */
 function stableFindingId(findingValue) {
   const digest = createHash("sha256")
     .update(`${findingValue.ruleId}\0${findingValue.path}\0${findingValue.line || 0}\0${findingValue.evidence}`)
@@ -695,3 +771,4 @@ function stableFindingId(findingValue) {
     .slice(0, 12);
   return `RG-${digest}`;
 }
+

@@ -147,6 +147,9 @@ export function buildChangedPathDiffEvidence(beforeChanged, afterChanged, option
   };
 }
 
+/**
+ * 收集 IndexFingerprints 条目。
+ */
 async function collectIndexFingerprints(rootDir, paths) {
   const metadataByPath = new Map();
   for (const batch of batchIndexPaths(paths)) {
@@ -165,6 +168,9 @@ async function collectIndexFingerprints(rootDir, paths) {
   return new Map([...metadataByPath].map(([filePath, entries]) => [filePath, entries.sort().join(";")]));
 }
 
+/**
+ * batchIndexPaths 内部辅助。
+ */
 function batchIndexPaths(paths) {
   const batches = [];
   let batch = [];
@@ -186,15 +192,24 @@ function batchIndexPaths(paths) {
   return batches;
 }
 
+/**
+ * gitProbeFailed 内部辅助。
+ */
 function gitProbeFailed(result) {
   return result.exitCode !== 0 || result.outputTruncated?.stdout === true;
 }
 
+/**
+ * gitProbeFailureReason 内部辅助。
+ */
 function gitProbeFailureReason(result) {
   if (result.outputTruncated?.stdout === true) return "git changed path output was truncated";
   return result.stderr || (result.exitCode !== 0 ? `git probe failed with exit ${result.exitCode}` : "");
 }
 
+/**
+ * fingerprintWorkspacePath 内部辅助。
+ */
 async function fingerprintWorkspacePath(rootDir, filePath) {
   try {
     const absolutePath = path.join(rootDir, filePath);
@@ -249,6 +264,9 @@ export function classifyManifestPathChanges(beforeFingerprints = {}, afterFinger
 
 const FILE_MANIFEST_SKIP_DIRS = new Set([".git", ".wildarrange", "node_modules"]);
 
+/**
+ * 收集 FileManifest 条目。
+ */
 async function collectFileManifest(rootDir, relativeDir = "") {
   const absoluteDir = path.join(rootDir, relativeDir);
   const entries = await readdir(absoluteDir, { withFileTypes: true });
@@ -267,6 +285,10 @@ async function collectFileManifest(rootDir, relativeDir = "") {
   return manifest;
 }
 
+/**
+ * splitNullPaths 内部辅助。
+ */
 function splitNullPaths(value) {
   return String(value || "").split("\0").filter((entry) => entry.length > 0);
 }
+

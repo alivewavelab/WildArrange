@@ -58,6 +58,7 @@ export async function runReviewGate(rootDir, task, evidence = {}, options = {}) 
   const contractGovernance = evidence.contractGovernance || await runContractGovernanceReview(options.executionRoot || rootDir, task, evidence, { controlRoot: rootDir });
 
   for (const command of task.review_commands || []) {
+    // §3.4：echo/node --version 等空转命令跳过，不得作为独立 review 证据。
     if (isTrivialCommand(command)) {
       reviewCommandResults.push({ command, exitCode: null, skipped: true, reason: "trivial_review_command" });
       continue;
@@ -68,6 +69,7 @@ export async function runReviewGate(rootDir, task, evidence = {}, options = {}) 
   }
 
   const commandRecovery = reviewCommandResults.find(requiresCommandRecovery);
+  // §3.4：review 命令需 recovery 时不再跑 standards/quality，避免并行残留进程。
   if (commandRecovery) return recoveryRequiredReview(commandRecovery, reviewCommandResults, standardsCommandResults, criteria);
 
   for (const command of task.standards_commands || []) {
@@ -253,10 +255,12 @@ export async function runReviewGate(rootDir, task, evidence = {}, options = {}) 
   };
 }
 
+/** 命令结果是否标记 recoveryRequired 或 terminationFailed。 */
 function requiresCommandRecovery(result) {
   return result?.recoveryRequired === true || result?.terminationFailed === true;
 }
 
+/** 构造 pass=false 的 review_gate，仅含 command_termination lane 与 recovery 证据。 */
 function recoveryRequiredReview(commandEvidence, reviewCommandResults, standardsCommandResults, criteria, qualityResults = null) {
   return {
     kind: "review_gate",
@@ -279,6 +283,7 @@ function recoveryRequiredReview(commandEvidence, reviewCommandResults, standards
   };
 }
 
+/** 构建单条 review lane；statusOverride 用于 warn/skipped 等非 fail 告警。 */
 function reviewLane(name, agent, condition, options) {
   const status = options.statusOverride || (condition ? "pass" : "fail");
   return {
@@ -290,6 +295,7 @@ function reviewLane(name, agent, condition, options) {
   };
 }
 
+/** 检查 worker/verifier evidence 对象是否完整且与 verify_commands 对齐。 */
 function reviewEvidenceIntegrity(task, evidence) {
   const reasons = [];
   if (!workerEvidenceComplete(evidence.workerResult)) reasons.push("workerResult missing kind/exitCode");
@@ -297,20 +303,24 @@ function reviewEvidenceIntegrity(task, evidence) {
   return { pass: reasons.length === 0, reasons };
 }
 
+/** worker evidence 是否含 kind 与整数 exitCode。 */
 function workerEvidenceComplete(workerResult) {
   return workerResult?.kind === "worker" && Number.isInteger(workerResult.exitCode);
 }
 
+/** verifier 是否 pass 且 results 条数与 verify_commands 一致。 */
 function verifierEvidenceComplete(task, verifyResult) {
   if (!verifyResult || verifyResult.kind !== "verifier") return false;
   if (verifyResult.pass !== true) return false;
   return Array.isArray(verifyResult.results) && verifyResult.results.length > 0 && verifyResult.results.length === task.verify_commands.length;
 }
 
+/** 压缩命令 stdout/stderr 供 lane summary 展示。 */
 function commandObservation(result) {
   return `exit=${result.exitCode}; stdout=${truncateForSummary(result.stdout || "", 180)}; stderr=${truncateForSummary(result.stderr || "", 180)}`;
 }
 
+/** 截断过长字符串并追加 [truncated] 标记。 */
 function truncateForSummary(value, limit = 500) {
   if (value.length <= limit) return value;
   return `${value.slice(0, limit - 15)}...[truncated]`;

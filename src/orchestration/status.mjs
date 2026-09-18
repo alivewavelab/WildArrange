@@ -181,6 +181,7 @@ export async function dashboardData(rootDir) {
   };
 }
 
+/** 单项 health check 包装：独立 try/catch 不拖垮整表。 */
 async function dashboardHealthCheck(check, classify, nextAction) {
   try {
     const result = await check();
@@ -191,6 +192,7 @@ async function dashboardHealthCheck(check, classify, nextAction) {
   }
 }
 
+/** 从 parallel runs 构建仍活跃的 worktree 列表。 */
 function buildActiveWorkspaces(tasks, runs) {
   const tasksById = new Map(tasks.map((task) => [task.id, task]));
   return runs.flatMap((run) => (run.results || [])
@@ -344,6 +346,7 @@ export async function readLedgerTail(rootDir, limit) {
   }
 }
 
+/** 读取文本文件，ENOENT 时返回 fallback。 */
 async function readTextFile(filePath, fallback = "") {
   try {
     return await readFile(filePath, "utf8");
@@ -353,6 +356,7 @@ async function readTextFile(filePath, fallback = "") {
   }
 }
 
+/** 将 workflow summary 对象渲染为 Markdown 报告。 */
 function renderWorkflowSummaryMarkdown(summary) {
   const status = summary.status || {};
   const lines = [
@@ -407,6 +411,7 @@ function renderWorkflowSummaryMarkdown(summary) {
   return `${lines.join("\n")}\n`;
 }
 
+/** 精简 ChangeRequest 字段供 summary 嵌入。 */
 function summarizeChangeForSummary(change) {
   return {
     id: change.id,

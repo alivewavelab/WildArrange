@@ -106,6 +106,7 @@ export async function assertRealpathInsideRoot(rootDir, absolutePath, displayPat
     if (error?.code !== "ENOENT") throw error;
   }
 
+  // §3.4 安全：目标尚不存在时沿祖先链 realpath，阻断符号链接逃逸项目根。
   let ancestor = path.dirname(targetPath);
   for (;;) {
     try {
@@ -214,6 +215,7 @@ export async function restorePreimages(rootDir, stagingDir, entries, options = {
     if (entry.type && entry.type !== actualType) {
       throw new Error(`preimage type changed: ${relativePath}; expected ${entry.type}, got ${actualType}`);
     }
+    // §3.4 回滚：先 rm 再写入，file/dir/symlink 类型切换时不留半写状态。
     await rm(targetPath, { recursive: true, force: true });
     if (actualType === "file") await copyFile(sourcePath, targetPath);
     else await cp(sourcePath, targetPath, { recursive: actualType === "directory", force: true, verbatimSymlinks: true });
@@ -309,6 +311,10 @@ export async function clearMaintenanceMarker(rootDir) {
   return true;
 }
 
+/**
+ * 去重、过滤空值并按字典序排序字符串数组。
+ */
 function uniqueSorted(values) {
   return [...new Set((values || []).filter(Boolean))].sort();
 }
+

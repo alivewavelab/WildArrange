@@ -51,7 +51,13 @@ export async function runQualityGates(rootDir, task, scopeResult = null, config 
 
 // --- LSP / AST 命令门 ---
 
-/** 运行 LSP/类型检查命令门；未启用且无 task 命令时 skipped。 */
+/**
+ * 运行 LSP/类型检查命令门；未启用且无 task 命令时 skipped。
+ * @param {string} rootDir 项目根
+ * @param {object} task 可含 lsp_commands 覆盖
+ * @param {object} [config] qualityGates.lspDiagnostics
+ * @returns {Promise<object>} kind=lsp_diagnostics，含 status 与 results
+ */
 export async function runLspDiagnosticsGate(rootDir, task, config = {}) {
   const gateConfig = config.qualityGates?.lspDiagnostics || {};
   const commands = [
@@ -68,7 +74,13 @@ export async function runLspDiagnosticsGate(rootDir, task, config = {}) {
   return runCommandGate(rootDir, "lsp_diagnostics", commands, gateConfig.timeoutMs || 120_000);
 }
 
-/** 运行 AST/结构搜索命令门；未启用且无 task 命令时 skipped。 */
+/**
+ * 运行 AST/结构搜索命令门；未启用且无 task 命令时 skipped。
+ * @param {string} rootDir 项目根
+ * @param {object} task 可含 ast_commands 覆盖
+ * @param {object} [config] qualityGates.astStructure
+ * @returns {Promise<object>} kind=ast_structure，含 status 与 results
+ */
 export async function runAstStructureGate(rootDir, task, config = {}) {
   const gateConfig = config.qualityGates?.astStructure || {};
   const commands = [
@@ -87,7 +99,13 @@ export async function runAstStructureGate(rootDir, task, config = {}) {
 
 // --- Hashline 锚点门 ---
 
-/** 校验配置的 hashline 锚点：文件存在、行内容 SHA256 与声明一致。 */
+/**
+ * 校验配置的 hashline 锚点：文件存在、行内容 SHA256 与声明一致。
+ * @param {string} rootDir 项目根
+ * @param {object} task 可含 hashline_anchors/hashline_refs
+ * @param {object} [config] qualityGates.hashlineAnchors
+ * @returns {Promise<object>} kind=hashline_anchors，含 anchors 与 findings
+ */
 export async function runHashlineAnchorsGate(rootDir, task, config = {}) {
   const gateConfig = config.qualityGates?.hashlineAnchors || {};
   const anchors = normalizeHashlineAnchors([
@@ -161,7 +179,14 @@ export async function runHashlineAnchorsGate(rootDir, task, config = {}) {
 
 // --- 注释检查门 ---
 
-/** 扫描变更/可写路径中的注释，匹配禁用模式与 repository 策略规则。 */
+/**
+ * 扫描变更/可写路径中的注释，匹配禁用模式与 repository 策略规则。
+ * @param {string} rootDir 项目根
+ * @param {object} task writable_paths 等
+ * @param {object|null} [scopeResult] changedPaths 候选
+ * @param {object} [config] qualityGates.commentChecker 与 repositoryGovernance
+ * @returns {Promise<object>} kind=comment_checker，blockOnFindings 时 findings 导致 fail
+ */
 export async function runCommentCheckerGate(rootDir, task, scopeResult = null, config = {}) {
   const gateConfig = config.qualityGates?.commentChecker || {};
   if (gateConfig.enabled === false) {
@@ -231,6 +256,7 @@ export async function runCommentCheckerGate(rootDir, task, scopeResult = null, c
   }
 
   const blockOnFindings = gateConfig.blockOnFindings === true;
+  // §3.4：blockOnFindings=false 时仅 warn，不阻断 review gate 整体 pass。
   const status = findings.length === 0 ? "pass" : blockOnFindings ? "fail" : "warn";
   return {
     kind: "comment_checker",
@@ -244,10 +270,12 @@ export async function runCommentCheckerGate(rootDir, task, scopeResult = null, c
 
 // --- 进程恢复与中断 ---
 
+/** 命令门结果是否含需进程恢复或终止未确认的条目。 */
 function commandGateNeedsRecovery(result) {
   return (result?.results || []).some((entry) => entry?.recoveryRequired === true || entry?.terminationFailed === true);
 }
 
+/** 前序命令门需 recovery 时，后续质量门统一标为 not_run 并返回 pass=false。 */
 function interruptedQualityGates(commandResult, resultName, completed = {}) {
   const interrupted = {
     kind: "quality_gate_not_run",
@@ -277,11 +305,13 @@ export function hashLine(content) {
   return hashContent(String(content ?? "").trimEnd());
 }
 
+/** 顺序执行命令列表，首条非零 exitCode 即短路。 */
 async function runCommandGate(rootDir, kind, commands, timeoutMs) {
   const results = [];
   for (const command of commands) {
     const result = await runCommand(command, rootDir, timeoutMs);
     results.push({ command, ...result });
+    // §3.4：与 verifier 一致，首败即停，避免后续命令掩盖根因。
     if (result.exitCode !== 0) break;
   }
   const pass = results.every((result) => result.exitCode === 0);
@@ -294,10 +324,12 @@ async function runCommandGate(rootDir, kind, commands, timeoutMs) {
   };
 }
 
+/** 门未启用且无 task 覆盖命令时的 skipped 结果（pass=true）。 */
 function skippedGate(kind, reason) {
   return { kind, at: nowIso(), status: "skipped", pass: true, results: [], reason };
 }
 
+/** 门已启用但无命令：required 时 fail，否则 warn。 */
 function missingCommandsGate(kind, required, reason) {
   const status = required ? "fail" : "warn";
   return { kind, at: nowIso(), status, pass: status !== "fail", results: [], reason };
@@ -305,6 +337,7 @@ function missingCommandsGate(kind, required, reason) {
 
 // --- Hashline 规范化 ---
 
+/** 将 task/config 中的 hashline 锚点规范化为 { file, line, sha256, content? }。 */
 function normalizeHashlineAnchors(anchors) {
   return anchors
     .map((anchor) => {
@@ -326,6 +359,7 @@ function normalizeHashlineAnchors(anchors) {
 
 // --- 注释候选与模式 ---
 
+/** 合并 scope 变更路径与 task.writable_paths（排除 glob）作为注释扫描候选。 */
 function commentCandidatePaths(task, scopeResult) {
   const paths = [];
   if (Array.isArray(scopeResult?.changedPaths)) paths.push(...scopeResult.changedPaths);
@@ -333,6 +367,7 @@ function commentCandidatePaths(task, scopeResult) {
   return [...new Set(paths.map(normalizeRelativePath))];
 }
 
+/** 将字符串或 { name, pattern, flags? } 转为带 regex 的模式对象。 */
 function commentPatterns(rawPatterns) {
   const source = Array.isArray(rawPatterns) && rawPatterns.length > 0 ? rawPatterns : defaultCommentPatternDefinitions();
   return source
@@ -344,6 +379,7 @@ function commentPatterns(rawPatterns) {
     .filter(Boolean);
 }
 
+/** 未配置 patterns 时的默认禁用注释模式（AI 署名、占位符、lorem）。 */
 function defaultCommentPatternDefinitions() {
   return [
     { name: "ai_attribution", pattern: "\\b(as an ai|generated by ai|ai generated|chatgpt|claude generated)\\b" },
@@ -352,6 +388,7 @@ function defaultCommentPatternDefinitions() {
   ];
 }
 
+/** 过滤非法 regex flags 并强制 case-insensitive。 */
 function normalizeRegexFlags(rawFlags = "") {
   const allowed = new Set(["d", "i", "m", "s", "u"]);
   const flags = new Set(String(rawFlags).split("").filter((flag) => allowed.has(flag)));
@@ -361,10 +398,12 @@ function normalizeRegexFlags(rawFlags = "") {
 
 // --- 路径工具 ---
 
+/** 按扩展名判断是否像可扫描的文本源文件。 */
 function isLikelyTextPath(filePath) {
   return /\.(cjs|css|html|js|json|jsx|md|mjs|py|rb|rs|sh|ts|tsx|txt|vue|yaml|yml)$/i.test(filePath);
 }
 
+/** 绝对路径解析后是否仍在项目根内（防 .. 与绝对路径逃逸）。 */
 function pathInsideRoot(rootDir, absolutePath) {
   const relative = path.relative(rootDir, absolutePath);
   return relative && !relative.startsWith("..") && !path.isAbsolute(relative);

@@ -103,6 +103,9 @@ export async function emitDecision(rootDir, record) {
   }
 }
 
+/**
+ * 解析 DecisionLine 文本/结构。
+ */
 function parseDecisionLine(line) {
   const trimmed = line.trim();
   if (!trimmed) return { kind: "empty" };
@@ -198,3 +201,4 @@ export async function readDecisions(rootDir, { limit, filter } = {}) {
     await handle.close();
   }
 }
+

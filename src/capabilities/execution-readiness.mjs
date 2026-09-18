@@ -33,6 +33,7 @@ export async function checkExecutionReadiness(rootDir, task, options = {}) {
   const required = Boolean(task.responsibilityChanges) || selectProjectReviewSteps(config, task).some(step => step.required);
   const result = { kind: "execution_readiness", at: nowIso(), taskId: task.id, planId: task.planId, required,
     pass: !required, issues: [], skills: [], probes: [] };
+  // §3.4：无职责变更且无必需 review step 的旧任务跳过就绪门，保持向后兼容。
   if (!required) return { ...result, status: "legacy_not_checked" };
   const budget = config.review?.responsibility?.maxEvidenceChars || 500000;
   const command = options.workerCommand ?? task.worker_command;
@@ -91,6 +92,7 @@ export async function checkExecutionReadiness(rootDir, task, options = {}) {
           else if (raw.exitCode !== 0 || raw.outputTruncated?.stdout) throw new Error("adapter handshake command failed or output was truncated");
           else response = { content: raw.stdout };
         }
+        // §3.4：握手进程未确认终止时不继续解析 JSON，避免误判 ready。
         if (response.commandRecovery) { result.commandRecovery = response.commandRecovery; throw new Error("handshake process requires recovery"); }
         const answer = JSON.parse(response.content);
         if (answer.ready !== true || answer.challenge !== challenge || !Array.isArray(answer.loadedSkills) || probe.skills.some(skill => !answer.loadedSkills.includes(skill.name))) throw new Error("adapter did not acknowledge current handshake and every required Skill");
@@ -98,6 +100,7 @@ export async function checkExecutionReadiness(rootDir, task, options = {}) {
       } catch (error) {
         result.issues.push(`${probe.id}: ${error.message}`);
         result.probes.push({ role: probe.id, pass: false, reason: error.message });
+        // §3.4：任一 probe 触发 recovery 即中断剩余 probe，状态标 recovery_required。
         if (result.commandRecovery) break;
       }
     }

@@ -58,6 +58,9 @@ export async function writeReviewReport(rootDir, planId, task, reviewResult) {
   return report;
 }
 
+/**
+ * 渲染 ReviewMarkdown 为 Markdown/HTML。
+ */
 function renderReviewMarkdown(report) {
   const lanes = report.lanes.map((lane) => `| ${lane.name} | ${lane.agent} | ${lane.status} | ${lane.summary} |`).join("\n");
   const failed = report.lanes
@@ -165,6 +168,9 @@ export async function writeFailureReport(rootDir, planId, task) {
   return report;
 }
 
+/**
+ * 渲染 FailureMarkdown 为 Markdown/HTML。
+ */
 function renderFailureMarkdown(report) {
   const failure = report.failure;
   return `# Task Failure
@@ -200,3 +206,4 @@ export async function appendWisdom(rootDir, task, verifyResult) {
   const line = `- ${nowIso()} ${task.id}: ${task.subject} verified by ${verifyResult.results.length} command(s).\n`;
   await appendFile(resolveWildArrangePath(rootDir, "wisdom", "verification.md"), line, "utf8");
 }
+

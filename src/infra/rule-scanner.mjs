@@ -79,6 +79,9 @@ export async function scanProjectRules(rootDir, options = {}) {
   return result;
 }
 
+/**
+ * 读取 ApplicableNestedAgents 并返回结构化结果。
+ */
 async function readApplicableNestedAgents(rootDir, targetPaths, knownPaths) {
   const relativeFiles = [];
   for (const targetPath of targetPaths) {
@@ -110,6 +113,9 @@ async function readApplicableNestedAgents(rootDir, targetPaths, knownPaths) {
   return rules;
 }
 
+/**
+ * 应用 RuleBudget 变换或覆盖。
+ */
 function applyRuleBudget(rules, ruleConfig) {
   const maxRuleChars = Number.isInteger(ruleConfig.maxRuleChars) ? ruleConfig.maxRuleChars : DEFAULT_WILDARRANGE_CONFIG.ruleInjection.maxRuleChars;
   const maxResultChars = Number.isInteger(ruleConfig.maxResultChars) ? ruleConfig.maxResultChars : DEFAULT_WILDARRANGE_CONFIG.ruleInjection.maxResultChars;
@@ -126,6 +132,9 @@ function applyRuleBudget(rules, ruleConfig) {
   return output;
 }
 
+/**
+ * 读取 RuleDir 并返回结构化结果。
+ */
 async function readRuleDir(rootDir, dirPath, sourceName) {
   const entries = await safeReadDir(dirPath, { withFileTypes: true });
   const rules = [];
@@ -141,6 +150,9 @@ async function readRuleDir(rootDir, dirPath, sourceName) {
   return rules;
 }
 
+/**
+ * 读取 RuleFile 并返回结构化结果。
+ */
 async function readRuleFile(rootDir, absolutePath, sourceName) {
   const content = await readFile(absolutePath, "utf8").catch(() => null);
   if (content === null) return null;
@@ -157,6 +169,9 @@ async function readRuleFile(rootDir, absolutePath, sourceName) {
   };
 }
 
+/**
+ * 解析 RuleMarkdown 文本/结构。
+ */
 function parseRuleMarkdown(content) {
   const open = /^---\r?\n/.exec(content);
   if (!open) {
@@ -170,6 +185,9 @@ function parseRuleMarkdown(content) {
   return { frontmatter: parseSimpleFrontmatter(rawFrontmatter), body, title: firstMarkdownHeading(body) };
 }
 
+/**
+ * 解析 SimpleFrontmatter 文本/结构。
+ */
 function parseSimpleFrontmatter(raw) {
   const result = {};
   for (const line of raw.split(/\r?\n/)) {
@@ -188,20 +206,32 @@ function parseSimpleFrontmatter(raw) {
   return result;
 }
 
+/**
+ * firstMarkdownHeading 内部辅助。
+ */
 function firstMarkdownHeading(content) {
   return content.split(/\r?\n/).find((line) => line.startsWith("# "))?.slice(2).trim() || null;
 }
 
+/**
+ * 归一化 RuleTargetPaths 输入为稳定形态。
+ */
 function normalizeRuleTargetPaths(paths) {
   return uniqueStrings(paths.map(normalizeRelativePath).filter(Boolean));
 }
 
+/**
+ * ruleMatchesTargets 内部辅助。
+ */
 function ruleMatchesTargets(rule, targetPaths) {
   if (rule.alwaysApply || targetPaths.length === 0) return true;
   if (!Array.isArray(rule.globs) || rule.globs.length === 0) return false;
   return targetPaths.some((targetPath) => rule.globs.some((glob) => pathMatchesPattern(targetPath, glob)));
 }
 
+/**
+ * 渲染 RulesMarkdown 为 Markdown/HTML。
+ */
 function renderRulesMarkdown(result) {
   const lines = [
     "# WildArrange Project Rules Context",
@@ -226,6 +256,9 @@ function renderRulesMarkdown(result) {
   return `${lines.join("\n")}\n`;
 }
 
+/**
+ * safeReadDir 内部辅助。
+ */
 async function safeReadDir(dirPath, options = undefined) {
   try {
     return await readdir(dirPath, options);
@@ -235,7 +268,11 @@ async function safeReadDir(dirPath, options = undefined) {
   }
 }
 
+/**
+ * 截断 ForSummary 以控制摘要长度。
+ */
 function truncateForSummary(value, limit = 500) {
   if (value.length <= limit) return value;
   return `${value.slice(0, limit - 15)}...[truncated]`;
 }
+

@@ -146,6 +146,7 @@ export async function claimTeamTask(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `team-task-claim:${options.taskId || "next"}`, () => claimTeamTaskUnlocked(rootDir, options));
 }
 
+/** 锁内 claim 团队任务并更新 owner/in_progress。 */
 async function claimTeamTaskUnlocked(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const taskState = await loadTaskState(rootDir);
@@ -195,6 +196,7 @@ export async function createTeamTask(rootDir, rawTask) {
   return withTaskStateLock(rootDir, "team-task-create", () => createTeamTaskUnlocked(rootDir, rawTask));
 }
 
+/** 锁内创建 draft 团队任务并写入 ledger。 */
 async function createTeamTaskUnlocked(rootDir, rawTask) {
   await ensureWildArrangeDirs(rootDir);
   const taskState = await ensureTaskCreationState(rootDir);
@@ -714,6 +716,7 @@ export async function archiveAndDeleteTeamTask(rootDir, options = {}) {
   });
 }
 
+/** 在 ledger 中按 taskId/planId 解析任务引用。 */
 function resolveLedgerTask(ledger, taskId, planId) {
   if (!taskId) return null;
   if (planId) {
@@ -730,12 +733,14 @@ function resolveLedgerTask(ledger, taskId, planId) {
   return matches.length === 1 ? matches[0] : null;
 }
 
+/** 断言 state ID segment 安全可用于路径。 */
 function assertSafeStateId(value, label) {
   if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)) {
     throw new Error(`${label} must be a safe single-segment identifier`);
   }
 }
 
+/** 校验 ledger 内任务 identity 字段完整。 */
 function validateLedgerTaskIdentities(ledger) {
   const pairs = new Set();
   const refs = new Set();
@@ -754,6 +759,7 @@ function validateLedgerTaskIdentities(ledger) {
   }
 }
 
+/** 折叠路径列表中的父子重复项。 */
 function collapseNestedPaths(paths) {
   const normalized = [...new Set(paths.map((candidate) => path.resolve(candidate)))]
     .sort((left, right) => left.length - right.length);
@@ -761,10 +767,12 @@ function collapseNestedPaths(paths) {
     candidate.startsWith(`${parent}${path.sep}`)));
 }
 
+/** 判断 evidence 条目是否归属指定 task。 */
 function evidenceBelongsToTask(evidence, task) {
   return evidence?.planId === task.planId && evidence?.taskId === task.id;
 }
 
+/** 捕获单文件 admission 回滚用 preimage。 */
 async function captureFilePreimage(filePath) {
   try {
     return { exists: true, content: await readFile(filePath) };
@@ -774,6 +782,7 @@ async function captureFilePreimage(filePath) {
   }
 }
 
+/** 按 preimage 还原单文件内容或删除新建文件。 */
 async function restoreFilePreimage(filePath, preimage) {
   if (!preimage.exists) {
     await rm(filePath, { recursive: true, force: true });
@@ -783,6 +792,7 @@ async function restoreFilePreimage(filePath, preimage) {
   await writeFile(filePath, preimage.content);
 }
 
+/** 追加 task history 记录（status/owner 变更）。 */
 function appendTaskHistory(task, previous, at) {
   if (!previous) return task;
   const history = [...(task.history || previous.history || [])];
@@ -803,6 +813,7 @@ function appendTaskHistory(task, previous, at) {
   return { ...task, history };
 }
 
+/** 确保 team task 创建所需的 ledger 结构存在。 */
 async function ensureTaskCreationState(rootDir) {
   const current = await loadTaskState(rootDir);
   if (current) return current;
@@ -896,6 +907,7 @@ export function normalizeAgentName(value) {
   return normalizeAgentKey(value);
 }
 
+/** 向 team 消息索引追加一条 outbox 记录。 */
 async function appendTeamMessageIndex(rootDir, message) {
   const line = `- ${message.at} ${message.from} -> ${message.to}: ${message.summary} (${message.id})\n`;
   await appendFile(resolveWildArrangePath(rootDir, "team", "messages.md"), line, "utf8");
@@ -928,6 +940,7 @@ export async function listTeamMessages(rootDir, options = {}) {
   return messages;
 }
 
+/** 读取目录，不存在时返回空数组而非抛错。 */
 async function safeReadDir(dirPath, options = undefined) {
   try {
     return await readdir(dirPath, options);

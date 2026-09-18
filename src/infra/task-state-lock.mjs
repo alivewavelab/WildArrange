@@ -15,6 +15,9 @@ import { readMaintenanceMarker } from "./recovery-transaction.mjs";
 // 锁获取/stale 恢复/超时诊断的实现在 file-lock.mjs（与 ledger 锁共用）；
 // 本模块只保留任务状态锁的路径与默认参数。owner 内容三行格式
 // `ownerTag\npid\nacquiredAt` 由对抗测试钉死，不得更改。
+/**
+ * 检测到外来 maintenance marker 时抛错，防止并发恢复。
+ */
 function throwIfForeignMaintenance(ownerTag, marker) {
   if (String(ownerTag).startsWith("adoption")) return;
   if (marker?.kind !== "adoption_maintenance") return;
@@ -50,3 +53,4 @@ export async function transactWithLedger(rootDir, event, persist) {
   await persist(entry);
   return entry;
 }
+

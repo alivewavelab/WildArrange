@@ -26,6 +26,7 @@ import { runCommand } from "../infra/command-runner.mjs";
  */
 export async function runWorker(rootDir, task, options = {}) {
   const command = options.workerCommand || task.worker_command;
+  // §3.4：无 worker_command 时返回 exitCode=0 占位，表示实现由外部完成而非跳过 gate。
   if (!command) {
     return {
       kind: "worker",

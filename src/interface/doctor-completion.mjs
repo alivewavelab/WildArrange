@@ -37,6 +37,7 @@ const COMPLETION_LEDGER_EVENT_TYPES = new Set([
   "parallel_agent_admission_completed",
 ]);
 
+/** 向 doctor findings 数组追加一条分项结论（severity/section/message）。 */
 function addFinding(findings, severity, section, message, extra = {}) {
   findings.push({ severity, section, message, ...extra });
 }
@@ -235,6 +236,7 @@ export async function checkCompletionIntegrity(rootDir, findings) {
   };
 }
 
+/** 从 team/tasks.md 解析 taskId → status 映射（供与 canonical tasks.json 对账）。 */
 function parseTasksMarkdownStatuses(markdown) {
   const statuses = new Map();
   let currentTaskId = null;
@@ -253,6 +255,7 @@ function parseTasksMarkdownStatuses(markdown) {
   return statuses;
 }
 
+/** 从 hash 链校验通过的 ledger 收集完成事件 refs，并标记无 planId 的歧义遗留事件。 */
 async function collectCompletionLedgerEvents(rootDir, tasks) {
   const refs = new Set();
   const planIdsByTaskId = new Map();

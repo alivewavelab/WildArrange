@@ -117,6 +117,9 @@ export async function inspectCompletedTaskEvidence(rootDir, taskState, options =
   return { checked: completedTasks.length, invalid };
 }
 
+/**
+ * pathExists 内部辅助。
+ */
 async function pathExists(filePath) {
   try {
     await stat(filePath);
@@ -127,6 +130,9 @@ async function pathExists(filePath) {
   }
 }
 
+/**
+ * 读取 TaskEvidenceJson 并返回结构化结果。
+ */
 async function readTaskEvidenceJson(rootDir, kind, planId, taskId) {
   const canonicalPath = kind === "checkpoint"
     ? resolveTaskCheckpointPath(rootDir, planId, taskId)
@@ -140,19 +146,31 @@ async function readTaskEvidenceJson(rootDir, kind, planId, taskId) {
   return legacy?.planId === planId && legacy?.taskId === taskId ? legacy : null;
 }
 
+/**
+ * deliveryCommitSha 内部辅助。
+ */
 function deliveryCommitSha(delivery) {
   const sha = rawDeliveryCommitSha(delivery);
   return isGitCommitSha(sha) ? sha.toLowerCase() : null;
 }
 
+/**
+ * rawDeliveryCommitSha 内部辅助。
+ */
 function rawDeliveryCommitSha(delivery) {
   return delivery?.commitSha || delivery?.deliverySha || delivery?.integrationSha || delivery?.actualSha || null;
 }
 
+/**
+ * 判断 isGitCommitSha 条件。
+ */
 function isGitCommitSha(value) {
   return typeof value === "string" && /^[0-9a-f]{40}$/i.test(value);
 }
 
+/**
+ * 判断 hasGitDeliveryEvidence 条件。
+ */
 function hasGitDeliveryEvidence(delivery) {
   if (!delivery) return false;
   return Boolean(deliveryCommitSha(delivery))
@@ -184,6 +202,9 @@ export function normalizeTaskLedger(raw) {
   };
 }
 
+/**
+ * 断言 SupportedTaskLedger 条件，不满足则抛错。
+ */
 function assertSupportedTaskLedger(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error("task ledger must be a JSON object");
@@ -203,6 +224,9 @@ function assertSupportedTaskLedger(raw) {
   }
 }
 
+/**
+ * 归一化 StoredTask 输入为稳定形态。
+ */
 function normalizeStoredTask(task, activePlanId, fallbackAt, legacyLedger) {
   const planId = task.planId || activePlanId;
   const legacyTask = legacyLedger || !task.planId || !task.ref || !Array.isArray(task.history);
@@ -235,6 +259,9 @@ function normalizeStoredTask(task, activePlanId, fallbackAt, legacyLedger) {
   return normalized;
 }
 
+/**
+ * withLegacyTrace 内部辅助。
+ */
 function withLegacyTrace(task, fallbackAt) {
   if (Array.isArray(task.history) && task.history.length > 0) return task;
   return {
@@ -267,6 +294,9 @@ export function withTaskIdentity(task, planId) {
   };
 }
 
+/**
+ * 从上下文推断 Plans。
+ */
 function inferPlans(tasks, activePlanId) {
   const ids = [...new Set(tasks.map((task) => task.planId).filter(Boolean))];
   if (activePlanId && !ids.includes(activePlanId)) ids.push(activePlanId);
@@ -277,3 +307,4 @@ function inferPlans(tasks, activePlanId) {
     taskIds: tasks.filter((task) => task.planId === id).map((task) => task.id),
   }));
 }
+

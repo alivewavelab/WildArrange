@@ -25,16 +25,19 @@ import { runCommand } from "../infra/command-runner.mjs";
 import { compileCommandSafetyPatterns } from "../infra/command-safety.mjs";
 import { resolveAgentProvider, runIndependentLlmReview } from "../infra/llm-provider.mjs";
 
+/** 校验非空字符串配置项，否则抛错。 */
 const requiredText = (value, label) => {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${label} is required`);
   return value.trim();
 };
+/** 校验非空字符串数组并去重。 */
 const strings = (value, label) => {
   if (!Array.isArray(value) || value.some(item => typeof item !== "string" || !item.trim())) throw new Error(`${label} must be a string array`);
   return [...new Set(value.map(item => item.trim()))];
 };
 
 const DOCUMENT_TRUTH_ID = "document-current-truth";
+/** 判断路径是否为需 D1-D3 约束的长期文档（排除 plans/reports 等）。 */
 const isLongTermDocument = name => {
   if (typeof name !== "string" || name.startsWith(".wildarrange/")) return false;
   if (/(^|\/)(?:verification-archive|node_modules|vendor|plans|reports|research|evidence)\//i.test(name)) return false;
@@ -77,6 +80,7 @@ export function selectProjectReviewSteps(config, task, changedPaths = []) {
   const selected = steps.filter(step => targets.some(target => /[*?]/.test(target) || pathAllowed(target, step.appliesTo)));
   const documents = targets.filter(target => !/[*?]/.test(target) && isLongTermDocument(target));
   if (documents.length) {
+    // §3.4：变更涉及长期文档时自动注入内置 D1-D3 步骤，禁止配置覆盖。
     if (ids.has(DOCUMENT_TRUTH_ID)) throw new Error(`${DOCUMENT_TRUTH_ID} is a built-in review step and cannot be overridden`);
     selected.push({ id: DOCUMENT_TRUTH_ID, title: "Long-term document truth", appliesTo: documents,
       requirement: "D1: Long-term documentation describes current effective behavior, structure, use and limitations; task timeline, attempts, raw logs, research chronology and unlanded proposals belong in task evidence. D2: Maintain a current fact in one authoritative source and link to it elsewhere; verified translations and generated views are allowed. D3: Mark historical designs as historical. Cite each changed long-term document. Return only source-backed violations with exact line and required fix. Dates, versions and genuine migration instructions alone are not violations.",
@@ -130,6 +134,7 @@ export async function executeReviewPacket(rootDir, packetPath, packet, config, s
     const result = await runCommand(settings.command, rootDir, settings.timeoutMs || 120000, {
       extraPatterns: compileCommandSafetyPatterns(config), env: { WILDARRANGE_REVIEW_PACKET: packetPath },
     });
+    // §3.4：审查命令进程未确认终止时短路，交由上层 recovery 而非 INCONCLUSIVE。
     if (result.terminationFailed || result.recoveryRequired) return { commandRecovery: result };
     if (result.exitCode !== 0 || result.outputTruncated?.stdout) throw new Error("independent reviewer failed or output was truncated");
     return { content: result.stdout };
@@ -202,6 +207,7 @@ export async function runProjectReview(rootDir, task, scopeResult, config, execu
     }
     const after = await collectResponsibilityEvidence(executionRoot, task.responsibilityChanges || [], scopeResult.changedPaths, budget);
     const contextAfter = await prepareProjectReview(rootDir, task, config, scopeResult.changedPaths);
+    // §3.4：审查进行中源码或 policy 变化则作废本轮 receipt，防 TOCTOU 通过。
     if (after.digest !== source.digest || contextAfter.contextDigest !== prepared.contextDigest) throw new Error("source or review requirements changed during review");
     result.pass = result.steps.every(step => !step.required || step.decision === "PASS");
     return result;
@@ -223,7 +229,10 @@ export function hasAcceptedProjectReview(config, task, scope, receipt) {
 
 /**
  * 从 plan-draft 预览或应用 review 配置变更，并生成 checklist。
+ * @param {string} rootDir 项目根
+ * @param {string} draftPath .wildarrange/plan-drafts 下的 JSON 路径
  * @param {object} [options] apply 为 true 时写入配置
+ * @returns {Promise<object>} applied、configPath、checklist 等
  */
 export async function configureProjectReview(rootDir, draftPath, options = {}) {
   const root = await realpath(rootDir);

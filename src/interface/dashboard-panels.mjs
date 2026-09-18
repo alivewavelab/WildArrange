@@ -45,6 +45,7 @@ export async function buildRouteReviewPanelViewModel(rootDir, { date = localDate
   const routes = [];
   const activeRouteBySession = new Map();
   for (const record of records) {
+    // 同 session 内 routing 决策之后的 pre/post_tool_use 挂到该路由卡片的 tools 链。
     if (record.gate === "routing") {
       const review = latestAnnotation.get(record.id) || null;
       const route = {
@@ -110,6 +111,7 @@ export async function annotateRouteDecision(rootDir, { decisionId, category, rea
   return appendAnnotation(rootDir, { decisionId, category, reason, author: "dashboard" });
 }
 
+/** 将 Date 或 ISO 字符串格式化为 YYYY-MM-DD（en-CA  locale，供路由复盘面板按日筛选）。 */
 function localDate(value = new Date()) {
   const parsed = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;

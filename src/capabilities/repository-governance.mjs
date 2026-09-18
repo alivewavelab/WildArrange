@@ -35,6 +35,7 @@ export async function runRepositoryGovernanceAudit(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const { config, sourcePath } = await loadWildArrangeConfig(rootDir);
   const changed = options.changedOnly === true ? await collectGitChangedPaths(rootDir) : null;
+  // §3.4：git diff 不可用时降级全量扫描，并在报告中标记 changedOnlyFallback。
   const effectiveChangedOnly = options.changedOnly === true && changed?.available === true;
   const result = await inspectRepositoryGovernance(rootDir, config.repositoryGovernance || {}, {
     force: options.force === true,
@@ -66,6 +67,7 @@ export async function runRepositoryGovernanceAudit(rootDir, options = {}) {
   return report;
 }
 
+/** 将治理审计 report 渲染为 latest.md 正文。 */
 function renderGovernanceMarkdown(report) {
   const lines = [
     "# WildArrange Repository Governance",

@@ -79,8 +79,12 @@ export function renderSpawnCommand(command, context) {
     .replaceAll("{outputJson}", quoteShellArgument(context.resultPath));
 }
 
+/**
+ * 归一化 AdapterName 输入为稳定形态。
+ */
 function normalizeAdapterName(value) {
   if (typeof value !== "string") return null;
   const trimmed = value.trim().toLowerCase();
   return trimmed || null;
 }
+

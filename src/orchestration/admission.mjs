@@ -211,7 +211,10 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
   };
 }
 
-/** Phase 1 body — runs under the task-state lock. */
+/**
+ * Phase 1：在任务锁内完成 status 裁决、writable_paths 预检、claim 持久化与 started 账本。
+ * @returns {Promise<object>} kind 为 claimed | reclaimed | resume | awaiting_user_decision
+ */
 async function claimAdmission(rootDir, options, { result, files, proposedPaths }) {
   const taskState = await loadTaskState(rootDir);
   if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
@@ -349,7 +352,10 @@ async function claimAdmission(rootDir, options, { result, files, proposedPaths }
   return { kind: "claimed", workerResult, writablePaths: task.writable_paths || [] };
 }
 
-/** Phases 2+3 body — runs under one continuous task-state lock hold. */
+/**
+ * Phase 2+3：在同一把任务锁内连续 apply 与 gates；崩溃时 claim 保留在 finalizing。
+ * @returns {Promise<object>} completed | recovery_required | revalidation_required 等
+ */
 async function runAdmissionTransaction(rootDir, options, { claim, result, files, proposedPaths, integrationGuard }) {
   // Phase 1 and this transaction use separate lock holds. A duplicate call
   // from the same run may have captured an older phase while waiting, so the
@@ -428,6 +434,7 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
       }
     } catch (error) {
       const applyError = error instanceof Error ? error : new Error(String(error));
+      // §3.4：apply 失败须在同 claim 下回滚；rollback 失败保留 owner 与 plan，禁止释放脏工作区。
       const rollback = applyError.code === "patch_precheck_failed" && !resumeApplying
         ? { status: "rolled_back", reason: "patch_not_applied", paths: [] }
         : await rollbackAdmissionChanges(rootDir, rollbackPlan);
@@ -486,13 +493,8 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
 }
 
 /**
- * Phase 3 body — gate the applied changes and commit or roll back. Runs
- * inside the caller's lock hold; MUST NOT acquire the task-state lock.
- * On any non-completed outcome the workspace rollback happens FIRST, while
- * this admission still owns the claim — releasing the claim before rolling
- * back opened a window where a successor run could claim, complete, and
- * then be clobbered by the old rollback (cross-review P0, round 7,
- * 2026-07-21).
+ * Phase 3：经 delivery-pipeline 跑 gate 并完成或回滚；在调用方锁内运行，禁止二次加锁。
+ * 非 completed 时须先回滚工作区再释放 claim，避免后继 run 被旧 rollback 覆盖。
  */
 async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, changedPaths, runId, rollbackPlan, integrationGuard, deliveryWorktreeDir, deliveryFromWorktree }) {
   const taskState = await loadTaskState(rootDir);
@@ -511,6 +513,7 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
       && integrationGuard?.expectedSha
       && await commitIsAncestor(rootDir, integrationIntent.integrationSha, integrationGuard.expectedSha));
   if (!initialFence.pass) {
+    // §3.4：delivery 已 durable 时围栏失败走 post-integration recovery，禁止回滚已 push 成果。
     if (durableDeliveryExists) {
       return persistPostIntegrationRecovery(rootDir, taskState, task, {
         runId,
@@ -732,7 +735,7 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
     });
   }
 
-  // Non-completed: restore the workspace BEFORE releasing the claim.
+  // §3.4：gate 未 completed 时先回滚共享 checkout，再释放 claim，避免后继 run 与旧 rollback 竞态。
   const rollback = await rollbackAdmissionChanges(rootDir, rollbackPlan);
 
   if (rollback.status !== "rolled_back") {
@@ -818,10 +821,8 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
 }
 
 /**
- * True only when the chain-verified ledger contains a completed admission
- * event for this exact run+task. Used by the resume branch: an admission
- * that failed and rolled back also left admission evidence on the task, so
- * evidence alone cannot prove "this run is the one that completed the task".
+ * 仅当 hash 链账本存在本 run+task 的 completed admission 事件时为 true。
+ * resume 分支专用：失败回滚也会留下 evidence，不能单靠 evidence 证明完成。
  */
 async function hasVerifiedRunCompletionEvent(rootDir, runId, planId, taskId) {
   const entries = await readVerifiedLedgerEntries(rootDir);
@@ -883,6 +884,7 @@ export function normalizeProposedFilesOrEmpty(files) {
   }
 }
 
+/** 归一化 patch 声明的路径列表，拒绝绝对路径与 ../ 逃逸。 */
 function normalizePatchPaths(paths) {
   if (!Array.isArray(paths)) return [];
   return paths.map((filePath) => normalizeRelativePath(String(filePath || ""))).filter((filePath) => filePath && !path.isAbsolute(filePath) && !filePath.startsWith("../") && !filePath.includes("/../"));

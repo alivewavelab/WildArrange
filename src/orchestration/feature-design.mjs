@@ -117,14 +117,17 @@ export async function bindFeatureDesignPlan(rootDir, gate, planId) {
   return bound;
 }
 
+/** 功能设计 gate 文件的绝对路径。 */
 function featureDesignGatePath(rootDir, gateId) {
   return resolveWildArrangePath(rootDir, "sessions", "feature-design", `${safeStateSegment(gateId)}.json`);
 }
 
+/** 会话 → 当前 gateId 指针文件路径。 */
 function featureDesignSessionPath(rootDir, sessionId) {
   return resolveWildArrangePath(rootDir, "sessions", "feature-design", "by-session", `${safeStateSegment(sessionId)}.json`);
 }
 
+/** 将 session/gate ID 归一化为安全文件名片段。 */
 function safeStateSegment(value) {
   return String(value || "session").replace(/[^A-Za-z0-9_.-]+/g, "_").slice(0, 120) || "session";
 }

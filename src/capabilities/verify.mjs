@@ -45,6 +45,7 @@ export async function runVerifier(rootDir, task, options = {}) {
   for (const command of task.verify_commands) {
     const result = await runCommand(command, options.executionRoot || rootDir, 120_000, { extraPatterns });
     results.push({ command, ...result });
+    // §3.4：首条验收命令失败即停，后续命令不能掩盖首个失败根因。
     if (result.exitCode !== 0) break;
   }
 

@@ -68,6 +68,7 @@ const SESSION_STATES = new Set([
 
 const SENSITIVE_ACTIONS = new Set(["merge", "delete", "archive"]);
 const SENSITIVE_PATH_RE = /(^|\/)(AGENTS\.md|package\.json|wildarrange\.config\.json)$/i;
+/** 根据 cardId 生成 adoption resume 子命令提示。 */
 function preparedResumeAction(cardId) {
   return `运行 wildarrange adoption resume 以继续中断的事务 ${cardId}，不要重新 capture`;
 }
@@ -268,6 +269,7 @@ export async function reconcileAdoption(rootDir, options = {}) {
   });
 }
 
+/** 锁内对账 adoption 会话与 Git/artifact 锚点，修复中断状态。 */
 async function reconcileAdoptionUnlocked(rootDir, options = {}) {
   const session = await loadSession(rootDir, options.sessionId);
   if (!session) return { session: null, status: "idle" };
@@ -478,6 +480,7 @@ export async function applyApprovedCards(rootDir, options = {}) {
   });
 }
 
+/** 锁内逐张应用已批准卡片并记录 postimage 效应。 */
 async function applyApprovedCardsUnlocked(rootDir, options = {}) {
   if (Array.isArray(options.cardIds) && options.cardIds.length !== 1) {
     return { ok: false, status: "single_card_required", nextAction: "一次只 Apply 一张卡" };
@@ -589,6 +592,7 @@ async function applyApprovedCardsUnlocked(rootDir, options = {}) {
   return concludeAfterCard(rootDir, session, files);
 }
 
+/** 单卡应用后更新会话阶段、inventory 与下一阶段动作。 */
 async function concludeAfterCard(rootDir, session, files) {
   const remaining = files.cards.filter((item) => item.status === "approved" && !item.appliedAt);
   if (remaining.length > 0) {
@@ -658,6 +662,7 @@ export async function loadAdoptionViewModel(rootDir, options = {}) {
   };
 }
 
+/** 注册 adoption 维护 marker，阻止并发 wildarrange run。 */
 async function registerMaintenance(rootDir, session, files) {
   await withTaskStateLock(rootDir, `adoption:${session.sessionId}`, async () => {
     const activity = await detectActiveRun(rootDir);
@@ -672,6 +677,7 @@ async function registerMaintenance(rootDir, session, files) {
   });
 }
 
+/** 检测是否有活跃 linear/parallel run 与 adoption 互斥。 */
 async function detectActiveRun(rootDir) {
   const taskState = await loadTaskState(rootDir).catch(() => null);
   const busy = (taskState?.tasks || []).find((task) => ["in_progress", "verifying"].includes(task.status));
@@ -683,12 +689,14 @@ async function detectActiveRun(rootDir) {
   return null;
 }
 
+/** 在 adoption 文件锁内执行 fn，按 sessionId 串行化写操作。 */
 async function withAdoptionLock(rootDir, sessionId, fn) {
   const lockPath = resolveWildArrangePath(rootDir, "adoption", "adoption.lock");
   await mkdir(path.dirname(lockPath), { recursive: true });
   return withFileLock(rootDir, lockPath, "adoption lock", `adoption:${sessionId}`, fn, { waitTimeoutMs: 15_000 });
 }
 
+/** 查找当前未完成的 adoption 会话指针。 */
 async function findActiveSession(rootDir) {
   const root = resolveWildArrangePath(rootDir, "adoption");
   let entries = [];
@@ -707,17 +715,20 @@ async function findActiveSession(rootDir) {
   return sessions[0] || null;
 }
 
+/** 读取 adoption 会话 JSON。 */
 async function loadSession(rootDir, sessionId) {
   if (sessionId) return readJson(path.join(adoptionSessionDir(rootDir, sessionId), "session.json"), null);
   return findActiveSession(rootDir);
 }
 
+/** 加载会话，不存在时抛 adoption 错误。 */
 async function requiredSession(rootDir, sessionId) {
   const session = await loadSession(rootDir, sessionId);
   if (!session) throw adoptionError("no_session", "没有可操作的 adoption 会话");
   return session;
 }
 
+/** 读取会话目录下 cards/transactions 等附属文件。 */
 async function readSessionFiles(rootDir, sessionId) {
   const dir = adoptionSessionDir(rootDir, sessionId);
   const session = await readJson(path.join(dir, "session.json"), null);
@@ -740,6 +751,7 @@ async function readSessionFiles(rootDir, sessionId) {
   return { session, cards, approvals, scan, transactions, inventory };
 }
 
+/** 原子写入 adoption 会话附属文件集合。 */
 async function writeSessionFiles(rootDir, session, files = {}) {
   if (!SESSION_STATES.has(session.status)) throw adoptionError("invalid_status", `invalid session status ${session.status}`);
   const dir = adoptionSessionDir(rootDir, session.sessionId);
@@ -749,16 +761,19 @@ async function writeSessionFiles(rootDir, session, files = {}) {
   if (files.scan) await writeJsonAtomic(path.join(dir, "scan.json"), files.scan);
 }
 
+/** 从 cards 中取首张 approved 卡片的定位信息。 */
 function takeApprovedLocator(cards) {
   const card = (cards || []).find((item) => item.asset === "config_locator" && item.status === "approved" && item.patch?.value?.verificationGovernance);
   return card?.patch?.value?.verificationGovernance || null;
 }
 
+/** 返回建议下一张待处理卡片的定位信息。 */
 function suggestedLocator(cards) {
   const card = (cards || []).find((item) => item.asset === "config_locator" && item.patch?.value?.verificationGovernance);
   return card?.patch?.value?.verificationGovernance || readLocator({});
 }
 
+/** 在 transactions 列表中按 status 查找条目。 */
 function findTransaction(transactions, status) {
   for (const [cardId, txn] of Object.entries(transactions || {})) {
     if (txn?.status === status) return { cardId, txn };
@@ -766,6 +781,7 @@ function findTransaction(transactions, status) {
   return null;
 }
 
+/** 捕获 Dashboard 批准卡片的实时指纹快照。 */
 async function captureLiveApprovalSnapshot(rootDir, card) {
   const snapshot = await captureCardLiveSnapshot(rootDir, card);
   return {
@@ -774,18 +790,21 @@ async function captureLiveApprovalSnapshot(rootDir, card) {
   };
 }
 
+/** 读取当前 Git HEAD SHA 作为 adoption 锚点 A。 */
 async function captureProjectHeadSha(rootDir) {
   if (!existsSync(path.join(rootDir, ".git"))) return null;
   const head = await readGitHead(rootDir).catch(() => ({ available: false, sha: null }));
   return head.available ? head.sha : null;
 }
 
+/** 计算批准卡内容指纹，用于与快照比对。 */
 function fingerprintLiveCard(card) {
   const clone = JSON.parse(JSON.stringify({ ...card, fingerprint: "" }));
   delete clone.status;
   return fingerprintCard(clone);
 }
 
+/** 比较 expected/actual 批准快照是否一致。 */
 function snapshotsMatch(expected, actual) {
   if (!expected || !actual) return false;
   if (expected.targetDigest !== actual.targetDigest) return false;
@@ -800,6 +819,7 @@ function snapshotsMatch(expected, actual) {
   return true;
 }
 
+/** 计算项目内相对路径文件的 UTF-8 内容哈希。 */
 async function fileUtf8Digest(rootDir, relativePath) {
   if (!relativePath) return null;
   const absolutePath = path.join(rootDir, relativePath);
@@ -812,10 +832,12 @@ async function fileUtf8Digest(rootDir, relativePath) {
   }
 }
 
+/** 从 artifact 错误映射 recovery 下一步提示。 */
 function artifactFailureNextAction(error, fallback) {
   return error?.next_action || error?.nextAction || fallback;
 }
 
+/** 采集本轮写入制品的路径与 digest 列表。 */
 async function captureWrittenArtifactDigests(rootDir, session, locator = {}) {
   const registryDigest = await fileUtf8Digest(rootDir, locator.registryPath);
   if (registryDigest) session.registryDigest = registryDigest;
@@ -831,6 +853,7 @@ async function captureWrittenArtifactDigests(rootDir, session, locator = {}) {
   }
 }
 
+/** 将会话内制品 digest 持久化到 inventory。 */
 async function rememberArtifactDigests(rootDir, session, locator = {}) {
   if (!session.registryDigest) {
     const digest = await fileUtf8Digest(rootDir, locator.registryPath);
@@ -854,6 +877,7 @@ async function rememberArtifactDigests(rootDir, session, locator = {}) {
   }
 }
 
+/** 在会话 appliedEffects 中记录单卡 postimage。 */
 function recordAppliedEffect(session, cardId, postimage = []) {
   const paths = (postimage || []).map((item) => ({
     path: item.path,
@@ -864,6 +888,7 @@ function recordAppliedEffect(session, cardId, postimage = []) {
   session.appliedEffects = [...rest, { cardId, paths }];
 }
 
+/** 按当前 HEAD 刷新 locator 对应 appliedEffect。 */
 async function refreshLocatorAppliedEffect(rootDir, session) {
   const locatorFile = session.locatorFile || "wildarrange.config.json";
   const digest = session.locatorDigest || await fileUtf8Digest(rootDir, locatorFile);
@@ -878,6 +903,7 @@ async function refreshLocatorAppliedEffect(rootDir, session) {
   }
 }
 
+/** 校验 appliedEffects 是否与给定 HEAD 一致。 */
 async function appliedEffectsMatchHead(rootDir, session, headSha) {
   if (!headSha) return false;
   for (const effect of session.appliedEffects || []) {
@@ -894,16 +920,19 @@ async function appliedEffectsMatchHead(rootDir, session, headSha) {
   return true;
 }
 
+/** 检查 inventory 内嵌 digest 声明自洽。 */
 function inventoryDigestSelfConsistent(inventory) {
   if (!inventory || typeof inventory !== "object" || !inventory.digest) return false;
   const { digest: _digest, ...rest } = inventory;
   return inventory.digest === digestCanonical(rest);
 }
 
+/** 归一化 adoption 涉及的相对路径。 */
 function normalizeAdoptionPath(relativePath) {
   return String(relativePath || "").replaceAll("\\", "/");
 }
 
+/** 若 Git 可用则比对 blob digest 与期望值。 */
 async function gitBlobDigestEqualsIfAvailable(rootDir, relativePath, ref, expectedDigest) {
   const compare = verificationRegistry.gitBlobDigestEquals;
   if (typeof compare !== "function") return null;
@@ -911,12 +940,14 @@ async function gitBlobDigestEqualsIfAvailable(rootDir, relativePath, ref, expect
   return compare(rootDir, relativePath, ref, expectedDigest);
 }
 
+/** 构造带 code 的 adoption 专用 Error。 */
 function adoptionError(code, message) {
   const error = new Error(message);
   error.code = code;
   return error;
 }
 
+/** 将 mismatch diagnostics 格式化为人类可读标签列表。 */
 function mismatchLabels(diagnostics) {
   return Object.entries(diagnostics || {})
     .filter(([key, value]) => !["phase", "gitAvailable"].includes(key) && value !== "matched")

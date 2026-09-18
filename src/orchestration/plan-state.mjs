@@ -80,6 +80,7 @@ export function normalizePlan(rawPlan) {
   return plan;
 }
 
+/** 归一化计划 defaults 段（skills、verify 等）。 */
 function normalizePlanDefaults(rawPlan) {
   const rawDefaults = rawPlan.defaults && typeof rawPlan.defaults === "object" ? rawPlan.defaults : {};
   const defaults = {
@@ -101,6 +102,7 @@ export function normalizeStringArray(value, label) {
   }));
 }
 
+/** 校验并归一化 Skill 名数组为安全单段标识符。 */
 function normalizeSkillArray(value, label) {
   const skills = normalizeStringArray(value, label);
   for (const skill of skills) {
@@ -231,6 +233,7 @@ export function normalizeTaskPriority(value) {
   return normalized;
 }
 
+/** 从 subject/description 推断 workType 分类。 */
 function inferWorkType(text) {
   if (/(验收.{0,8}(纠错|打回|修正)|acceptance.{0,8}(correction|rework))/i.test(text)) return "acceptance_correction";
   if (/(bug|缺陷|故障|报错|崩溃|修复)/i.test(text)) return "bug";
@@ -238,12 +241,14 @@ function inferWorkType(text) {
   return "maintenance";
 }
 
+/** 归一化可选文本字段并校验长度。 */
 function normalizeOptionalText(value, label) {
   if (value === undefined || value === null || value === "") return null;
   if (typeof value !== "string" || value.trim().length === 0) throw new Error(`${label} must be a non-empty string`);
   return value.trim();
 }
 
+/** 归一化 task 上的 request 对象结构。 */
 function normalizeTaskRequest(value, subject, source) {
   if (value === undefined || value === null) return { summary: subject, source, evidenceRefs: [] };
   if (typeof value === "string") return { summary: value.trim() || subject, source, evidenceRefs: [] };
@@ -297,12 +302,14 @@ export function normalizeContractChanges(value, taskId, owner) {
   return { declared, items };
 }
 
+/** 归一化 task owner 字符串。 */
 function normalizeTaskOwner(value, taskId) {
   const normalized = normalizeAgentKey(value);
   if (!normalized) throw new Error(`task ${taskId} owner must be a non-empty agent name`);
   return normalized;
 }
 
+/** 检测 worker/verify/writable_paths 治理黄灯。 */
 function detectTaskGovernanceWarnings({ workerCommand, verifyCommands, writablePaths }) {
   const warnings = [];
   if (isPossibleNoopTask({ worker_command: workerCommand, verify_commands: verifyCommands, writable_paths: writablePaths })) {
@@ -342,6 +349,7 @@ export function normalizeSuccessCriteria(value, taskId, subject, verifyCommands)
   });
 }
 
+/** 归一化 successCriteria 中的 verifierCommandRefs。 */
 function normalizeVerifierCommandRefs(value, verifyCommands, label) {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) throw new Error(`${label} verifierCommandRefs must be an array`);
@@ -363,6 +371,7 @@ function normalizeVerifierCommandRefs(value, verifyCommands, label) {
   }));
 }
 
+/** 为新任务生成默认 successCriteria 条目。 */
 function seedDefaultSuccessCriteria(taskId, subject, verifyCommands) {
   const verifierText = verifyCommands.join(" && ");
   const verifierCommandRefs = verifyCommands.map((_, index) => String(index));
@@ -464,6 +473,7 @@ export async function importPlan(rootDir, planPath, options = {}) {
   return withTaskStateLock(rootDir, "import-plan", () => importPlanUnlocked(rootDir, planPath, options));
 }
 
+/** 锁内执行计划导入、合并 ledger 与 route enrichment。 */
 async function importPlanUnlocked(rootDir, planPath, options) {
   await ensureWildArrangeDirs(rootDir);
   const rawPlan = await readJson(planPath);
@@ -521,6 +531,7 @@ async function importPlanUnlocked(rootDir, planPath, options) {
   return plan;
 }
 
+/** 导入前断言不会覆盖进行中的 active work。 */
 function assertPlanImportDoesNotReplaceActiveWork(existingLedger, plan) {
   const protectedTasks = (existingLedger?.tasks || []).filter((task) => {
     const replacedByImport = task.planId === plan.id;
@@ -558,6 +569,7 @@ export function validateSemanticGeneratedPlan(plan) {
   return plan;
 }
 
+/** 将新计划任务合并进全项目 task ledger。 */
 function mergePlanIntoTaskLedger(existingLedger, plan) {
   const at = nowIso();
   const previousTasks = new Map((existingLedger?.tasks || [])

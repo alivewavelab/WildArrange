@@ -345,6 +345,7 @@ export async function evaluateRegistryFreshness(rootDir, options = {}) {
   }
   const currentRegistryDigest = digestCanonical(withoutDigest(registry));
   const currentBootstrapDigest = digestCanonical(withoutDigest(bootstrap));
+  // §3.4 新鲜度：Inventory 必须钉住 Registry/Bootstrap digest，手工改盘即判 stale。
   if (inventory.registryDigest !== currentRegistryDigest || inventory.bootstrapDigest !== currentBootstrapDigest) {
     return {
       kind: "registry_freshness",
@@ -392,11 +393,17 @@ export async function evaluateRegistryFreshness(rootDir, options = {}) {
   };
 }
 
+/**
+ * 从命令字符串提取脚本/配置文件路径提示。
+ */
 function commandHintPath(command) {
   const match = String(command || "").match(/(?:^|\s)((?:[\w./-]+)\.(?:mjs|js|cjs|ts|json|yml|yaml))\b/);
   return match ? match[1] : "";
 }
 
+/**
+ * 复制对象并移除 digest 字段（freshness 比较用）。
+ */
 function withoutDigest(value) {
   if (!value || typeof value !== "object") return value;
   const { digest: _digest, ...rest } = value;
@@ -428,6 +435,9 @@ export async function readGitInventoryContext(rootDir, baselineRef = null, optio
   };
 }
 
+/**
+ * 将 verification cards 分组为 inventory 视图。
+ */
 function buildInventoryViews(cards) {
   const summaries = (cards || []).map(summarizeInventoryCard);
   return {
@@ -439,6 +449,9 @@ function buildInventoryViews(cards) {
   };
 }
 
+/**
+ * 提取 card 的 inventory 摘要字段。
+ */
 function summarizeInventoryCard(card = {}) {
   return {
     id: card.id || "",
@@ -456,10 +469,17 @@ function summarizeInventoryCard(card = {}) {
   };
 }
 
+/**
+ * 渲染单条 inventory 卡片为 HTML article。
+ */
 function renderInventoryEntry(entry) {
   return `<article class="entry"><span class="tag">${escapeHtml(entry.action)} · ${escapeHtml(entry.status)}</span><h3>${escapeHtml(entry.path || entry.id || "未命名资产")}</h3><dl><dt>是什么</dt><dd>${escapeHtml(entry.owner || "未登记 Owner")}</dd><dt>作用</dt><dd>${escapeHtml(entry.purpose || "未说明")}</dd><dt>为什么</dt><dd>${escapeHtml(entry.reason || "未说明")}</dd><dt>完成后</dt><dd>${escapeHtml(entry.afterState || "保持原状")}</dd><dt>最大后果</dt><dd>${escapeHtml(entry.maxConsequence || "未发现额外后果")}</dd><dt>如何恢复</dt><dd>${escapeHtml(entry.rollback || "无需恢复")}</dd></dl></article>`;
 }
 
+/**
+ * HTML 特殊字符转义。
+ */
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
 }
+

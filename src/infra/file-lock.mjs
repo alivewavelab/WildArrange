@@ -27,16 +27,25 @@ const LOCK_WAIT_TIMEOUT_MS = 15_000;
 // writer completes the two steps within milliseconds.
 const LOCK_UNPARSEABLE_STALE_AFTER_MS = 10_000;
 
+/**
+ * 延迟指定毫秒后 resolve 的 Promise。
+ */
 function delay(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
 }
 
+/**
+ * 生成锁文件三行内容：ownerTag、pid、acquiredAt。
+ */
 function lockOwnerContent(ownerTag) {
   return `${ownerTag}\n${process.pid}\n${Date.now()}\n`;
 }
 
+/**
+ * 解析锁文件内容为 owner 对象；格式不符返回 null。
+ */
 function parseLockOwner(content) {
   const lines = content.split(/\r?\n/).filter(Boolean);
   if (lines.length !== 3) return null;
@@ -47,6 +56,9 @@ function parseLockOwner(content) {
   return { ownerTag: lines[0], ownerPid, acquiredAt };
 }
 
+/**
+ * 用 kill(pid,0) 探测进程是否存活；EPERM 视为存活。
+ */
 function isPidAlive(pid) {
   try {
     process.kill(pid, 0);
@@ -57,6 +69,9 @@ function isPidAlive(pid) {
   }
 }
 
+/**
+ * 读取锁文件内容与 stat，供诊断与 stale 判定。
+ */
 async function readLockState(lockPath) {
   try {
     const [content, lockStat] = await Promise.all([readFile(lockPath, "utf8"), stat(lockPath)]);
@@ -67,19 +82,29 @@ async function readLockState(lockPath) {
   }
 }
 
+/**
+ * 判断锁文件是否 stale：不可解析内容按 mtime 宽限，否则看 owner pid 是否已死。
+ */
 async function isStaleLock(lockPath) {
   const state = await readLockState(lockPath);
   if (!state.exists) return false;
+  // §3.4 锁顺序：wx 创建与写入非原子；崩溃留空壳锁，仅靠 mtime 宽限回收，避免误删活 writer。
   if (!state.owner) return Date.now() - state.mtimeMs > LOCK_UNPARSEABLE_STALE_AFTER_MS;
   return !isPidAlive(state.owner.ownerPid);
 }
 
+/**
+ * 无条件删除锁文件（stale 回收路径）。
+ */
 async function removeLock(lockPath) {
   await unlink(lockPath).catch(() => undefined);
 }
 
 // 持锁方释放路径：删除前复核锁文件仍是自己写入的那份（内容与 mtime 均未变）。
 // 否则说明锁已被 stale 回收并被他人重新获取，放弃删除，避免误删新 owner 的锁。
+/**
+ * 持锁方释放：仅当内容与 mtime 未变时才删除，避免误删新 owner。
+ */
 async function removeHeldLock(lockPath, expectedContent, expectedMtimeMs) {
   try {
     const [content, lockStat] = await Promise.all([readFile(lockPath, "utf8"), stat(lockPath)]);
@@ -90,6 +115,9 @@ async function removeHeldLock(lockPath, expectedContent, expectedMtimeMs) {
   await unlink(lockPath).catch(() => undefined);
 }
 
+/**
+ * 构造可诊断的超时错误，附带当前锁 owner 与 pid 存活状态。
+ */
 async function lockTimeoutError(rootDir, lockPath, lockName, waitedMs) {
   const relative = path.relative(rootDir, lockPath);
   const state = await readLockState(lockPath);
@@ -165,6 +193,7 @@ export async function withFileLock(rootDir, lockPath, lockName, ownerTag, fn, op
       break;
     } catch (error) {
       if (error?.code !== "EEXIST") throw error;
+      // §3.4 stale 回收先于重试：dead pid 与不可解析锁均删除后重试 wx，不阻塞其他进程。
       if (await isStaleLock(lockPath)) {
         await removeLock(lockPath);
         continue;
@@ -179,3 +208,4 @@ export async function withFileLock(rootDir, lockPath, lockName, ownerTag, fn, op
     await removeHeldLock(lockPath, ownerContent, acquiredMtimeMs);
   }
 }
+

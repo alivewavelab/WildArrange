@@ -29,6 +29,7 @@ export function renderPreToolUseHookOutput(preflight, contextMarkdown) {
       additionalContext: contextMarkdown,
     },
   };
+  // Cursor PreToolUse 协议：deny 时必须附带 permissionDecision 字段
   if (preflight?.decision === "deny") {
     output.hookSpecificOutput.permissionDecision = "deny";
     output.hookSpecificOutput.permissionDecisionReason = preflight.reason || `${PRODUCT_NAME} pre-tool-use guard denied this tool call.`;
@@ -77,6 +78,7 @@ export function renderHookInjectionMarkdown({ event, pointName, sessionId, taskI
 
 // --- Hook 事实块渲染 ---
 
+/** 按 facts 分区追加路由/计划/续跑/范围门等运行时事实 Markdown 块。 */
 function appendHookFacts(lines, facts) {
   if (facts.route) {
     lines.push("## 路由决策", "");
@@ -252,7 +254,9 @@ function appendHookFacts(lines, facts) {
 
 // --- 决策关注项 ---
 
-// 把待人决策事项渲染成“请主动问开发者”的指令块（通用推送：以 AI 对话为通道，不依赖任何外部 IM）。
+/**
+ * 把待人决策事项渲染成“请主动问开发者”指令块（以 AI 对话为通道，不依赖外部 IM）。
+ */
 function appendAttentionReport(lines, attention) {
   if (!attention || (attention.total || 0) === 0) return;
   lines.push("## 需要开发者决策（请主动向开发者提问，不要替他决定）", "");
@@ -280,6 +284,7 @@ function appendAttentionReport(lines, attention) {
   lines.push("");
 }
 
+/** 向 lines 追加最多 3 条的非空短列表项。 */
 function appendShortList(lines, label, items) {
   const selected = Array.isArray(items) ? items.filter(Boolean).slice(0, 3) : [];
   if (selected.length === 0) return;
@@ -291,6 +296,7 @@ function appendShortList(lines, label, items) {
 
 // --- 挂载与 Skill 报告 ---
 
+/** 渲染注入点的 Markdown 与 Skill 全文挂载及选型报告。 */
 function appendInjectionAttachments(lines, injectionPoint) {
   lines.push("## Markdown 挂载", "");
   if (injectionPoint.markdown.length === 0) {
@@ -311,6 +317,7 @@ function appendInjectionAttachments(lines, injectionPoint) {
   appendSkillSelectionReport(lines, injectionPoint.skillSelection);
 }
 
+/** 输出 Skill 完整性告警、按需引用与清单外高分建议。 */
 function appendSkillSelectionReport(lines, selection) {
   if (!selection) return;
   const referenced = selection.referenced || [];
@@ -319,6 +326,7 @@ function appendSkillSelectionReport(lines, selection) {
   if (missing.length > 0) {
     lines.push("## Skill 配置告警", "");
     for (const item of missing) {
+      // hash 校验失败时拒绝注入全文，防止篡改的 Skill 进入宿主上下文
       if (item.reason === "integrity_failed") {
         lines.push(`- ${item.name} 完整性校验失败，已拒绝加载：${item.detail || "Prompt Pack 路径或 hash 不可信"}`);
       } else {
@@ -338,6 +346,7 @@ function appendSkillSelectionReport(lines, selection) {
   lines.push("");
 }
 
+/** 生成挂载附件的元信息行（路径、来源、字符预算与截断状态）。 */
 function renderAttachmentMeta(item) {
   const source = item.path ? `path=${item.path}` : "";
   const origin = item.source ? `source=${item.source}` : "";

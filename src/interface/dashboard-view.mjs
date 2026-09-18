@@ -29,7 +29,10 @@ import {
   ADOPTION_VIEW_HTML,
 } from "./adoption-panel.mjs";
 
-/** 返回完整 Dashboard 单页 HTML 字符串（含 CSS 与内嵌 script）。 */
+/**
+ * 返回完整 Dashboard 单页 HTML 字符串（含 CSS 与内嵌 script）。
+ * @returns {string}
+ */
 export function renderDashboardHtml() {
   return `<!doctype html>
 <html lang="zh-CN">

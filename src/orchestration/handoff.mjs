@@ -64,6 +64,7 @@ export async function prepareTaskHandoff(rootDir, options = {}) {
     prepareTaskHandoffUnlocked(rootDir, options));
 }
 
+/** prepare 锁内实现：校验 owner、收集 tree 变更并写入 handoff 记录。 */
 async function prepareTaskHandoffUnlocked(rootDir, options = {}) {
   if (!options.taskId) throw new Error("handoff prepare requires taskId");
   const toDeviceId = String(options.toDeviceId || options.toDevice || "").trim();
@@ -180,6 +181,7 @@ export async function pushTaskHandoff(rootDir, options = {}) {
     pushTaskHandoffUnlocked(rootDir, options));
 }
 
+/** push 锁内实现：重算 tree fingerprint 后非 force push，支持幂等补账。 */
 async function pushTaskHandoffUnlocked(rootDir, options = {}) {
   if (!options.taskId) throw new Error("handoff push requires taskId");
   const record = await readHandoffRecord(rootDir, options.taskId);
@@ -215,6 +217,7 @@ async function pushTaskHandoffUnlocked(rootDir, options = {}) {
   }
   const actualSha = await remoteBranchHead(rootDir, record.remote, record.branch);
   const alreadyPushed = actualSha === record.checkpointSha;
+  // §3.4：远端已成功但本地 ledger 缺失时，识别 reconciled 并补写 audit，禁止重复 force push。
   if (!alreadyPushed && actualSha !== record.previousRemoteHeadSha) {
     throw new Error(`handoff push refused: remote task head changed from ${record.previousRemoteHeadSha} to ${actualSha || "missing"}`);
   }
@@ -266,6 +269,7 @@ export async function acceptTaskHandoff(rootDir, options = {}) {
     acceptTaskHandoffUnlocked(rootDir, options));
 }
 
+/** accept 锁内实现：验证 offer packet、写 accept commit 并恢复本地 task/coordination。 */
 async function acceptTaskHandoffUnlocked(rootDir, options = {}) {
   if (!options.taskId) throw new Error("handoff accept requires taskId");
   const { config } = await loadWildArrangeConfig(rootDir);
@@ -279,6 +283,7 @@ async function acceptTaskHandoffUnlocked(rootDir, options = {}) {
   const branch = taskBranchName(config.gitCoordination, planId, options.taskId);
   const checkpointSha = await fetchRemoteBranch(rootDir, context.remote, branch);
   const offer = parseCoordinationPacket(await readCommitMessage(rootDir, checkpointSha));
+  // §3.4：远端已是 accept commit 时走 resume 路径，补本地状态而不重复 push。
   if (offer.kind === "handoff_accept") {
     if (offer.planId !== planId || offer.task?.id !== options.taskId) {
       throw new Error(`remote branch ${branch} contains an acceptance for another task`);
@@ -421,6 +426,7 @@ export async function takeoverTaskOwnership(rootDir, options = {}) {
     takeoverTaskOwnershipUnlocked(rootDir, options));
 }
 
+/** takeover 锁内实现：显式理由接管，无时钟自动过期；支持识别自身已发布的 takeover。 */
 async function takeoverTaskOwnershipUnlocked(rootDir, options = {}) {
   if (!options.taskId) throw new Error("handoff takeover requires taskId");
   if (!options.planId) throw new Error("handoff takeover requires planId");
@@ -436,6 +442,7 @@ async function takeoverTaskOwnershipUnlocked(rootDir, options = {}) {
   const previousSha = await fetchRemoteBranch(rootDir, context.remote, branch);
   const previousPacket = parseCoordinationPacket(await readCommitMessage(rootDir, previousSha));
   const expectedDeviceId = String(options.expectedDeviceId || options.expectedDevice);
+  // §3.4：本设备已 push takeover 但本地 persist 中断时，按 packet 幂等恢复 accepted 状态。
   if (previousPacket.kind === "task_takeover"
     && previousPacket.device?.deviceId === device.deviceId) {
     if (previousPacket.previousOwnerDevice?.deviceId !== expectedDeviceId) {
@@ -537,6 +544,7 @@ async function takeoverTaskOwnershipUnlocked(rootDir, options = {}) {
   return { status: "accepted", planId: options.planId, taskId: options.taskId, branch, takeoverSha, task };
 }
 
+/** 将 handoff/takeover packet 中的 task 与 coordination 写回本地 tasks.json（必要时补建 plan）。 */
 async function restoreAcceptedTask(rootDir, options) {
   await ensureWildArrangeDirs(rootDir);
   let state = await loadTaskState(rootDir);
@@ -569,40 +577,48 @@ async function restoreAcceptedTask(rootDir, options) {
   return task;
 }
 
+/** 加载当前导入计划；无计划时抛错。 */
 async function requireTaskState(rootDir) {
   const taskState = await loadTaskState(rootDir);
   if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
   return taskState;
 }
 
+/** 在 taskState 中查找 taskId，不存在则抛错。 */
 function requireTask(taskState, taskId) {
   const task = taskState.tasks.find((candidate) => candidate.id === taskId);
   if (!task) throw new Error(`unknown task: ${taskId}`);
   return task;
 }
 
+/** 返回 coordination/handoffs 下某任务的 handoff JSON 路径。 */
 function handoffRecordPath(rootDir, taskId) {
   const safeTaskId = String(taskId).replace(/[^A-Za-z0-9._-]/g, "_");
   return resolveWildArrangePath(rootDir, "coordination", "handoffs", `${safeTaskId}.json`);
 }
 
+/** 判断路径是否属于 .wildarrange 运行时目录（handoff 变更清单排除项）。 */
 function isWildArrangeRuntimePath(filePath) {
   return filePath === ".wildarrange" || filePath.startsWith(".wildarrange/");
 }
 
+/** 校验字符串是否为合法 UUID 形态 deviceId。 */
 function isDeviceId(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
 }
 
+/** 读取持久化的 handoff 记录 JSON。 */
 async function readHandoffRecord(rootDir, taskId) {
   return readJson(handoffRecordPath(rootDir, taskId), null);
 }
 
+/** 原子写入 handoff 记录并返回相对路径。 */
 async function writeHandoffRecord(rootDir, taskId, record) {
   await writeJsonAtomic(handoffRecordPath(rootDir, taskId), record);
   return path.relative(rootDir, handoffRecordPath(rootDir, taskId));
 }
 
+/** 幂等写入 task_ownership_taken_over 账本事件（同 remoteHeadSha 不重复）。 */
 async function recordTakeoverLedgerOnce(rootDir, event) {
   const entries = await readVerifiedLedgerEntries(rootDir);
   if (entries.some((entry) => entry.type === "task_ownership_taken_over"

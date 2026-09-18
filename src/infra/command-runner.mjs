@@ -54,6 +54,9 @@ export function quoteShellArgument(value, platform = process.platform) {
   return `'${text.replaceAll("'", "'\\''")}'`;
 }
 
+/**
+ * spawn 子进程并收集 stdout/stderr，支持超时与输出截断。
+ */
 function runProcess(file, args, command, cwd, timeoutMs, options) {
   return new Promise((resolve) => {
     const safety = evaluateCommandSafety(options.safetyCommand || command, { allowUnsafe: options.allowUnsafe === true, extraPatterns: options.extraPatterns });
@@ -202,6 +205,9 @@ function runProcess(file, args, command, cwd, timeoutMs, options) {
   });
 }
 
+/**
+ * POSIX 下向进程组发 SIGTERM/SIGKILL。
+ */
 function killPosixProcessGroup(child, signal) {
   if (!child.pid) return;
   try {
@@ -211,6 +217,9 @@ function killPosixProcessGroup(child, signal) {
   }
 }
 
+/**
+ * Windows 下 taskkill 终止进程树。
+ */
 function killWindowsProcessTree(child) {
   return new Promise((resolve) => {
     const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
@@ -247,10 +256,16 @@ function killWindowsProcessTree(child) {
   });
 }
 
+/**
+ * 格式化命令参数片段供日志展示。
+ */
 function formatCommandPart(value) {
   return /^[A-Za-z0-9_./:@=+-]+$/.test(value) ? value : JSON.stringify(value);
 }
 
+/**
+ * 提取命令文本供 command-safety 规则匹配。
+ */
 function commandTextForSafety(file, args, command) {
   if (!/(^|[\\/])git(?:\.exe)?$/i.test(file)) return command;
   let index = 0;
@@ -274,9 +289,13 @@ function commandTextForSafety(file, args, command) {
   return `${command}\n${canonical}`;
 }
 
+/**
+ * 追加字符串并在超长时截断保留尾部。
+ */
 function appendCapped(current, chunk, maxChars) {
   if (current.length >= maxChars) return { value: current, truncated: true };
   const available = maxChars - current.length;
   if (chunk.length <= available) return { value: current + chunk, truncated: false };
   return { value: current + chunk.slice(0, available), truncated: true };
 }
+

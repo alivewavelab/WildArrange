@@ -65,6 +65,9 @@ export async function loadSkillAttachment(rootDir, skillName, maxChars) {
   };
 }
 
+/**
+ * 解析 ProjectSkill 路径或引用，越界/逃逸抛错。
+ */
 async function resolveProjectSkill(rootDir, skillName) {
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(String(skillName))) return null;
   const skillsRoot = path.join(rootDir, ".agents", "skills");
@@ -97,6 +100,9 @@ export function normalizeMaxChars(value, fallback) {
   return Math.max(500, Math.min(Math.floor(parsed), 500_000));
 }
 
+/**
+ * prepareAttachmentContent 内部辅助。
+ */
 function prepareAttachmentContent(value, maxChars, label) {
   const budgetChars = normalizeMaxChars(maxChars, 12_000);
   if (value.length <= budgetChars) {
@@ -119,3 +125,4 @@ function prepareAttachmentContent(value, maxChars, label) {
     truncated: true,
   };
 }
+

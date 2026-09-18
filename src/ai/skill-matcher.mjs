@@ -104,6 +104,7 @@ export async function matchSkills(rootDir, options = {}) {
   };
 }
 
+/** 加载 Prompt Pack 中各 Skill 的摘要与 haystack，供关键词与名称匹配。 */
 async function loadSkillSummaries(rootDir, registry) {
   const entries = [];
   for (const [name, entry] of Object.entries(registry.skills || {})) {
@@ -125,9 +126,9 @@ async function loadSkillSummaries(rootDir, registry) {
   return entries;
 }
 
-// Route signals reuse the single matcher in infra/route-table.mjs (word
-// boundaries for ASCII signals, substring otherwise) so the route-signal
-// boost hits exactly what resolveRouteDecision would hit.
+/**
+ * 复用 route-table 的 matchSignals，使 route-signal 加分与 resolveRouteDecision 命中一致。
+ */
 function collectRouteSignals(routes, text) {
   const signals = { intents: [], skills: [] };
   for (const intent of routes?.intents || []) {
@@ -146,6 +147,7 @@ function collectRouteSignals(routes, text) {
   return signals;
 }
 
+/** 按 Agent 角色推断默认 Skill 加分列表，用于无显式绑定时偏置匹配。 */
 function inferAgentSkillBoosts(agent) {
   if (!agent) return [];
   if (agent === "Jiuwei") return ["start-work", "run-linear-delivery", "review-work"];
@@ -156,6 +158,7 @@ function inferAgentSkillBoosts(agent) {
   return [];
 }
 
+/** 统计请求文本 token 在 Skill haystack 中的命中数，上限 8 以抑制噪声。 */
 function scoreKeywordHits(text, entry) {
   if (!text) return 0;
   const tokens = text
@@ -169,22 +172,26 @@ function scoreKeywordHits(text, entry) {
   return Math.min(hits, 8);
 }
 
+/** 将字符串或逗号分隔输入规范为非空字符串数组。 */
 function normalizeStringArray(value) {
   if (Array.isArray(value)) return value.map(String).filter(Boolean);
   if (typeof value === "string") return value.split(",").map((item) => item.trim()).filter(Boolean);
   return [];
 }
 
+/** 规范化 stageBoosts 配置为非空字符串数组。 */
 function normalizeStageBoosts(value) {
   return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
 }
 
+/** 解析匹配结果条数上限，非法值回退 DEFAULT_LIMIT 并 clamp 至 20。 */
 function normalizeLimit(value) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) return DEFAULT_LIMIT;
   return Math.min(parsed, 20);
 }
 
+/** 规范化匹配用文本：trim 并折叠空白。 */
 function normalizeText(value) {
   return String(value || "").toLowerCase().trim();
 }

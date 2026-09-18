@@ -193,6 +193,7 @@ export async function readChangeRequest(rootDir, id) {
   return changeRequest;
 }
 
+/** 锁内解析 ChangeRequest accept/reject 并更新任务状态。 */
 async function resolveChangeRequestUnlocked(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const id = options.id;
@@ -273,6 +274,7 @@ async function resolveChangeRequestUnlocked(rootDir, options = {}) {
   return { status: changeRequest.status, changeRequest, task: task || null };
 }
 
+/** 校验转向提案字段完整性与任务引用合法。 */
 function validateSteeringProposal(taskState, proposal) {
   const reasons = [];
   if (!proposal || typeof proposal !== "object") reasons.push("proposal must be an object");
@@ -327,6 +329,7 @@ function validateSteeringProposal(taskState, proposal) {
   };
 }
 
+/** 校验验收修订不得弱化 successCriteria/verify。 */
 function validateAcceptanceRevisionStrength(target, proposal) {
   const reasons = [];
   for (const [field, label] of [
@@ -356,6 +359,7 @@ function validateAcceptanceRevisionStrength(target, proposal) {
   return reasons;
 }
 
+/** 批量校验任务 acceptance 不变量。 */
 function validateTaskAcceptanceInvariants(tasks) {
   for (const task of tasks) {
     if (!Array.isArray(task.verify_commands) || task.verify_commands.length === 0) {
@@ -364,6 +368,7 @@ function validateTaskAcceptanceInvariants(tasks) {
   }
 }
 
+/** 将已批准转向提案合并进 taskState。 */
 function applySteeringProposal(taskState, proposal) {
   const planDefaults = {};
   if (proposal.kind === "add_task") {
@@ -420,6 +425,7 @@ function applySteeringProposal(taskState, proposal) {
   return {};
 }
 
+/** 生成 steering 决策的时间戳与 actor 标记。 */
 function steeringStamp(proposal) {
   return {
     kind: proposal.kind,
@@ -430,6 +436,7 @@ function steeringStamp(proposal) {
   };
 }
 
+/** 汇总 taskState 上 steering 相关字段供报告使用。 */
 function summarizeSteeringState(taskState) {
   return {
     planId: taskState.planId,
@@ -437,6 +444,7 @@ function summarizeSteeringState(taskState) {
   };
 }
 
+/** 在现有 tasks 中生成下一个可用 Txxx 编号。 */
 function nextTaskId(tasks) {
   const max = tasks.reduce((current, task) => {
     const match = /^T(\d+)$/.exec(task.id);
@@ -445,11 +453,13 @@ function nextTaskId(tasks) {
   return `T${String(max + 1).padStart(3, "0")}`;
 }
 
+/** 检测文本是否含弱化 gate/验收的措辞。 */
 function hasWeakeningLanguage(value) {
   return /\b(skip|bypass|weaken|remove|omit|auto[-\s]?complete|mark complete|complete faster)\b/i.test(value)
     && /\b(test|tests|verification|review|quality gate|complete|completion)\b/i.test(value);
 }
 
+/** 归一化人类决定字符串为 accept/reject。 */
 function normalizeDecision(decision) {
   if (decision === "accept" || decision === "accepted") return "accept";
   if (decision === "reject" || decision === "rejected") return "reject";
@@ -647,6 +657,7 @@ export async function recordContractChangeDecision(rootDir, options) {
   return request;
 }
 
+/** 持久化契约 ChangeRequest 到 .wildarrange/changes。 */
 async function persistContractRequest(rootDir, record) {
   await writeJsonAtomic(resolveWildArrangePath(rootDir, "changes", `${record.id}.json`), record);
   await writeFile(resolveWildArrangePath(rootDir, "changes", `${record.id}.md`),

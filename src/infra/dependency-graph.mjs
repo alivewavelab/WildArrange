@@ -196,6 +196,9 @@ export function classifyZone(srcDir, absolutePath) {
   return ZONES.includes(firstSegment) ? firstSegment : UNKNOWN_ZONE;
 }
 
+/**
+ * 断言 KnownZone 条件，不满足则抛错。
+ */
 function assertKnownZone(srcDir, absolutePath, role) {
   const zone = classifyZone(srcDir, absolutePath);
   if (zone !== UNKNOWN_ZONE) return zone;
@@ -412,3 +415,4 @@ export async function computeZoneTests(rootDir, zone) {
     summary: `${zone} 区应跑 ${testList.length} 个测试`,
   };
 }
+

@@ -189,6 +189,9 @@ export function buildAdoptionCards(assets, options = {}) {
   return assignCardIds(cards);
 }
 
+/**
+ * 为指定资产构造 verification card。
+ */
 function cardForAsset(asset, ctx = {}) {
   const { packageFacts, existingCommands } = ctx;
   const consumers = asset.consumers;
@@ -329,6 +332,9 @@ function cardForAsset(asset, ctx = {}) {
   });
 }
 
+/**
+ * 构造 Card 实例。
+ */
 function makeCard(fields) {
   return {
     schemaVersion: CARD_SCHEMA_VERSION,
@@ -355,6 +361,9 @@ function makeCard(fields) {
   };
 }
 
+/**
+ * 分配 CardIds 标识。
+ */
 function assignCardIds(cards) {
   return cards.map((card, index) => {
     const id = `card_${String(index + 1).padStart(3, "0")}_${hashContent(`${card.action}:${card.path}:${card.owner}`).slice(0, 8)}`;
@@ -370,6 +379,9 @@ export function isCurrentSourceOfTruth(relativePath) {
   return CURRENT_SOURCE_RES.some((pattern) => pattern.test(relativePath));
 }
 
+/**
+ * 解析 ArchiveRoot 路径或引用，越界/逃逸抛错。
+ */
 function resolveArchiveRoot(files = []) {
   const hasDocs = files.some((file) => {
     const rel = file.path || file;
@@ -378,6 +390,9 @@ function resolveArchiveRoot(files = []) {
   return hasDocs ? "docs/verification-archive" : "verification-archive";
 }
 
+/**
+ * 从内容中提取 SuccessorPath。
+ */
 function extractSuccessorPath(head) {
   const text = String(head || "").slice(0, 4096);
   if (!SUCCESSOR_MARKER_RE.test(text)) return null;
@@ -385,6 +400,9 @@ function extractSuccessorPath(head) {
   return match ? normalizeRelativePath(match[1].replace(/\\/g, "/")) : null;
 }
 
+/**
+ * 查找 Successor 匹配项。
+ */
 function findSuccessor(relativePath, head, fileSet) {
   const fromText = extractSuccessorPath(head);
   if (fromText && fileSet.has(fromText)) return fromText;
@@ -401,6 +419,9 @@ function findSuccessor(relativePath, head, fileSet) {
 }
 
 // --- 归档与脚本推断 ---
+/**
+ * 为指定资产构造 verification card。
+ */
 function cardForArchive(asset, ctx = {}) {
   const missing = [];
   if (isCurrentSourceOfTruth(asset.path)) {
@@ -456,14 +477,23 @@ function cardForArchive(asset, ctx = {}) {
   });
 }
 
+/**
+ * 从候选中选择 KeepScriptName。
+ */
 function pickKeepScriptName(names) {
   return names.find((name) => OFFICIAL_NPM_SHORTCUTS.has(name)) || names[0];
 }
 
+/**
+ * 转义 RegExp 特殊字符。
+ */
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/**
+ * scriptNameMentioned 内部辅助。
+ */
 function scriptNameMentioned(text, name) {
   const escaped = escapeRegExp(name);
   if (new RegExp(`\\bnpm(?:\\.cmd)?\\s+run\\s+${escaped}\\b`).test(text)) return true;
@@ -471,6 +501,9 @@ function scriptNameMentioned(text, name) {
   return new RegExp(`(?:["'\`]${escaped}["'\`]|\\bscripts?\\s*[:=]\\s*["'\`]?${escaped}\\b)`, "i").test(text);
 }
 
+/**
+ * 查找 ScriptNameConsumers 匹配项。
+ */
 function findScriptNameConsumers(name, { packageFacts, textIndex, packagePath }) {
   const consumers = [];
   for (const hit of textIndex.registered || []) {
@@ -493,6 +526,9 @@ function findScriptNameConsumers(name, { packageFacts, textIndex, packagePath })
   return uniqueConsumers(consumers);
 }
 
+/**
+ * 从上下文推断 Command。
+ */
 function inferCommand(relativePath, packageFacts, nameRe) {
   const hit = packageFacts.scripts.find((item) => nameRe.test(item.name) && (item.command.includes(relativePath) || item.command.includes(path.posix.basename(relativePath))));
   if (hit) return `npm run ${hit.name}`;
@@ -500,6 +536,9 @@ function inferCommand(relativePath, packageFacts, nameRe) {
   return named ? `npm run ${named.name}` : null;
 }
 
+/**
+ * 收集 ExistingCommands 条目。
+ */
 function collectExistingCommands(config = {}) {
   const qualityGates = [];
   for (const gate of Object.values(config.qualityGates || {})) {
@@ -513,6 +552,9 @@ function collectExistingCommands(config = {}) {
   };
 }
 
+/**
+ * 将 EquivalentScripts 按等价关系分组。
+ */
 function groupEquivalentScripts(scripts) {
   const groups = new Map();
   for (const script of scripts) {
@@ -534,6 +576,9 @@ function groupEquivalentScripts(scripts) {
   return [...groups.values()].filter((group) => group.names.length > 1);
 }
 
+/**
+ * 建议 Locator 候选。
+ */
 function suggestLocator(assets) {
   const hasDocs = assets.some((asset) => asset.path.startsWith("doc/") || asset.path.startsWith("docs/"));
   const hasTooling = assets.some((asset) => asset.path.startsWith("tooling/"));
@@ -558,6 +603,9 @@ function suggestLocator(assets) {
   };
 }
 
+/**
+ * 读取已配置的 Locator。
+ */
 function configuredLocator(config = {}) {
   const value = config.verificationGovernance;
   if (!value || typeof value !== "object") return null;
@@ -597,6 +645,9 @@ export function indexTextByPath(textIndex = {}) {
   return textByPath;
 }
 
+/**
+ * 归一化 Command 输入为稳定形态。
+ */
 function normalizeCommand(command) {
   return String(command || "").trim().replace(/\s+/g, " ");
 }
@@ -611,3 +662,4 @@ export function stableStringify(value) {
   }
   return JSON.stringify(value);
 }
+

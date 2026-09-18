@@ -67,6 +67,7 @@ export async function recordApplyFailureWithinLock(rootDir, taskId, { runId, err
   await persistTaskState(rootDir, taskState);
 }
 
+/** 返回 agent-runs 下某 run/task 持久化回滚计划的 JSON 路径。 */
 function rollbackPlanPath(rootDir, runId, taskId) {
   return resolveWildArrangePath(rootDir, "agent-runs", runId, `${taskId}.rollback-plan.json`);
 }

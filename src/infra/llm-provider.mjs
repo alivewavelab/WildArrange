@@ -164,6 +164,9 @@ export async function callOpenAICompatible(options) {
   }
 }
 
+/**
+ * 构建 ReviewPrompt 结构。
+ */
 function buildReviewPrompt(agentName, task, evidence, llmConfig) {
   const maxChars = Number.isInteger(llmConfig.maxEvidenceChars) ? llmConfig.maxEvidenceChars : 12000;
   const profile = REVIEW_AGENT_PROFILES[agentName] || {
@@ -198,6 +201,9 @@ function buildReviewPrompt(agentName, task, evidence, llmConfig) {
   return truncate(JSON.stringify(payload, null, 2), maxChars);
 }
 
+/**
+ * 构建 ReviewSystemPrompt 结构。
+ */
 function buildReviewSystemPrompt(agentName) {
   const profile = REVIEW_AGENT_PROFILES[agentName] || REVIEW_AGENT_PROFILES.BaiZe;
   return [
@@ -208,6 +214,9 @@ function buildReviewSystemPrompt(agentName) {
   ].join("\n");
 }
 
+/**
+ * 汇总 Evidence 为摘要。
+ */
 function summarizeEvidence(evidence) {
   return {
     workerResult: summarizeCommandResult(evidence.workerResult),
@@ -224,6 +233,9 @@ function summarizeEvidence(evidence) {
   };
 }
 
+/**
+ * 汇总 CommandResult 为摘要。
+ */
 function summarizeCommandResult(result) {
   if (!result) return null;
   return {
@@ -235,6 +247,9 @@ function summarizeCommandResult(result) {
   };
 }
 
+/**
+ * 解析 ReviewJson 文本/结构。
+ */
 function parseReviewJson(content) {
   try {
     return JSON.parse(content);
@@ -249,16 +264,25 @@ function parseReviewJson(content) {
   }
 }
 
+/**
+ * 归一化 BaseUrl 输入为稳定形态。
+ */
 function normalizeBaseUrl(value) {
   if (!value || typeof value !== "string") return null;
   return value.replace(/\/+$/, "");
 }
 
+/**
+ * 截断  以控制摘要长度。
+ */
 function truncate(value, limit) {
   if (value.length <= limit) return value;
   return `${value.slice(0, limit - 20)}\n...[truncated]`;
 }
 
+/**
+ * asString 内部辅助。
+ */
 function asString(value) {
   return typeof value === "string" ? value : "";
 }
@@ -281,3 +305,4 @@ export async function runIndependentLlmReview(config, packet, options = {}) {
   });
   return response.content;
 }
+

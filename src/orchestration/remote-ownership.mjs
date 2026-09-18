@@ -258,6 +258,7 @@ export function taskContract(task) {
 
 // 判重与追加由 appendLedgerOnce 在同一把 ledger 锁内原子完成（ARC-003）；
 // 判重口径沿用此前的已校验条目（verified entries）。
+/** 幂等写入 remote_task_claimed 账本事件。 */
 async function recordRemoteClaimLedgerOnce(rootDir, planId, taskId, claim) {
   await appendLedgerOnce(rootDir, {
     type: "remote_task_claimed",

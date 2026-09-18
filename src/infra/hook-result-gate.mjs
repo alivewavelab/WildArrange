@@ -126,11 +126,17 @@ export function detectToolResultFindings(response, options = {}) {
   return dedupeFindings(findings);
 }
 
+/**
+ * 汇总 Decision 为摘要。
+ */
 function summarizeDecision(decision, findings) {
   if (decision === "pass") return "tool result has no detected hard failure";
   return `${decision}: ${findings.map((finding) => finding.name).join(", ")}`;
 }
 
+/**
+ * flattenToolResponse 内部辅助。
+ */
 function flattenToolResponse(value) {
   if (value == null) return "";
   if (typeof value === "string") return value;
@@ -144,6 +150,9 @@ function flattenToolResponse(value) {
   return "";
 }
 
+/**
+ * firstNumericValue 内部辅助。
+ */
 function firstNumericValue(value, keys) {
   const found = findFirstValue(value, keys);
   if (typeof found === "number") return Number.isInteger(found) ? found : null;
@@ -152,16 +161,25 @@ function firstNumericValue(value, keys) {
   return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
+/**
+ * firstStringValue 内部辅助。
+ */
 function firstStringValue(value, keys) {
   const found = findFirstValue(value, keys);
   return typeof found === "string" ? found : null;
 }
 
+/**
+ * booleanValue 内部辅助。
+ */
 function booleanValue(value, keys) {
   const found = findFirstValue(value, keys);
   return typeof found === "boolean" ? found : null;
 }
 
+/**
+ * 收集 NamedTextValues 条目。
+ */
 function collectNamedTextValues(value, keyName, output = []) {
   if (!value || typeof value !== "object") return output;
   for (const [key, nested] of Object.entries(value)) {
@@ -171,6 +189,9 @@ function collectNamedTextValues(value, keyName, output = []) {
   return output;
 }
 
+/**
+ * 查找 FirstValue 匹配项。
+ */
 function findFirstValue(value, keys) {
   if (!value || typeof value !== "object") return null;
   for (const key of keys) {
@@ -185,6 +206,9 @@ function findFirstValue(value, keys) {
   return null;
 }
 
+/**
+ * dedupeFindings 内部辅助。
+ */
 function dedupeFindings(findings) {
   const seen = new Set();
   const output = [];
@@ -197,7 +221,11 @@ function dedupeFindings(findings) {
   return output;
 }
 
+/**
+ * 截断  以控制摘要长度。
+ */
 function truncate(value, limit) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   return text.length <= limit ? text : `${text.slice(0, limit - 15)}...[truncated]`;
 }
+

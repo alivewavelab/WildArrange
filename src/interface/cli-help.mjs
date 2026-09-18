@@ -131,6 +131,7 @@ export const COMMAND_REGISTRY = [
   { usage: "prompts show --routes", desc: "查看路由表" },
 ];
 
+/** --help 末尾附带的 plan.json 最小 schema 说明（供宿主语义生成计划时对照）。 */
 const PLAN_SCHEMA = `
 Plan schema:
   {
