@@ -8,7 +8,7 @@
 //   resolveWildArrangePath → writeJsonAtomic rename → hashContent/createWorkId。
 // =============================================================================
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 /**
@@ -194,7 +194,32 @@ export async function writeTextAtomic(filePath, content) {
   await mkdir(path.dirname(filePath), { recursive: true });
   const tempPath = `${filePath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
   await writeFile(tempPath, String(content), "utf8");
-  await rename(tempPath, filePath);
+  try {
+    await renameWithRetry(tempPath, filePath);
+  } catch (error) {
+    await rm(tempPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
+/**
+ * 在 Windows 文件仍被短暂占用时，对原子替换做有限重试。
+ * 只重试可恢复的共享/占用错误；其他错误立即向上抛出。
+ */
+export async function renameWithRetry(sourcePath, targetPath, options = {}) {
+  const attempts = Number.isInteger(options.attempts) && options.attempts > 0 ? options.attempts : 5;
+  const delayMs = Number.isInteger(options.delayMs) && options.delayMs >= 0 ? options.delayMs : 25;
+  const renameImpl = typeof options.renameImpl === "function" ? options.renameImpl : rename;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await renameImpl(sourcePath, targetPath);
+      return;
+    } catch (error) {
+      const retryable = ["EPERM", "EACCES", "EBUSY"].includes(error?.code);
+      if (!retryable || attempt === attempts) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delayMs * attempt));
+    }
+  }
 }
 
 /**

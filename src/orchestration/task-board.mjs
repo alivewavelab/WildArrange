@@ -58,6 +58,7 @@ import {
   writeTasksMarkdown,
 } from "./plan-state.mjs";
 import { coordinateTaskClaim } from "./remote-ownership.mjs";
+export { migrateTaskLedgerState } from "./task-migration.mjs";
 
 // --- 查询 ---
 
@@ -133,8 +134,13 @@ export async function recordTaskEvidence(rootDir, options = {}) {
     criterion.lastUpdatedAt = entry.at;
     task.evidence.push(entry);
     task.updatedAt = nowIso();
-    await persistTaskState(rootDir, taskState);
-    await appendLedger(rootDir, { type: "criterion_evidence_recorded", planId: taskState.planId, taskId: task.id, criterionId: criterion.id, status });
+    await transactWithLedger(rootDir, {
+      type: "criterion_evidence_recorded",
+      planId: taskState.planId,
+      taskId: task.id,
+      criterionId: criterion.id,
+      status,
+    }, () => persistTaskState(rootDir, taskState));
     return { planId: taskState.planId, task, criterion, evidence: entry };
   });
 }
@@ -217,8 +223,7 @@ async function createTeamTaskUnlocked(rootDir, rawTask) {
   const nextTasks = [...taskState.tasks, normalizedTask];
   validatePlanGraph({ ...plan, tasks: nextTasks });
   taskState.tasks = nextTasks;
-  await persistTaskState(rootDir, taskState);
-  await appendLedger(rootDir, {
+  await transactWithLedger(rootDir, {
     type: "team_task_created",
     planId: taskState.planId,
     taskId: normalizedTask.id,
@@ -228,7 +233,7 @@ async function createTeamTaskUnlocked(rootDir, rawTask) {
     source: normalizedTask.source,
     priority: normalizedTask.priority,
     blockedBy: normalizedTask.blockedBy,
-  });
+  }, () => persistTaskState(rootDir, taskState));
   await writeSnapshot(rootDir, "team_task_created", { planId: taskState.planId, taskId: normalizedTask.id });
   return { planId: taskState.planId, task: normalizedTask };
 }
@@ -256,13 +261,12 @@ export async function readyTeamTask(rootDir, options = {}) {
     const routes = await loadRoutesConfig(rootDir);
     enrichTaskWithRouteDecision(nextTask, routes);
     taskState.tasks = taskState.tasks.map((task) => task.id === existing.id ? nextTask : task);
-    await persistTaskState(rootDir, taskState);
-    await appendLedger(rootDir, {
+    await transactWithLedger(rootDir, {
       type: "team_task_readied",
       planId: existing.planId,
       taskId: existing.id,
       taskRef: existing.ref,
-    });
+    }, () => persistTaskState(rootDir, taskState));
     await writeSnapshot(rootDir, "team_task_readied", { planId: existing.planId, taskId: existing.id });
     return { planId: existing.planId, task: nextTask };
   });
@@ -356,74 +360,6 @@ export async function persistTaskState(rootDir, taskState) {
 }
 
 // --- 迁移与归档 ---
-
-/** 迁移旧版 task ledger 格式到当前 taskState 结构。 */
-export async function migrateTaskLedgerState(rootDir) {
-  return withTaskStateLock(rootDir, "task-ledger-migrate", async () => {
-    await ensureWildArrangeDirs(rootDir);
-    const ledger = await loadTaskLedger(rootDir);
-    if (!ledger) {
-      return {
-        kind: "task_ledger_migration",
-        status: "not_required",
-        migratedTasks: 0,
-        revalidationRequired: 0,
-      };
-    }
-
-    const at = nowIso();
-    const nextLedger = {
-      ...ledger,
-      version: STATE_VERSION,
-      kind: "task_ledger",
-      planId: ledger.activePlanId,
-      activePlanId: ledger.activePlanId,
-      // §3.4：迁移不得清除 completionRevalidation 标记；已标记任务须继续强制重验收。
-      tasks: ledger.tasks.map((task) => task.completionRevalidation?.required === true
-        ? {
-            ...task,
-            completionRevalidation: {
-              ...task.completionRevalidation,
-              migratedAt: task.completionRevalidation.migratedAt || at,
-            },
-          }
-        : task),
-      updatedAt: at,
-    };
-
-    // §3.4：canonical tasks.json 最后写入；plan/md 镜像先对齐，避免半迁移可读状态。
-    for (const planEntry of nextLedger.plans || []) {
-      const planPath = resolveWildArrangePath(rootDir, "plans", `${planEntry.id}.json`);
-      const plan = await readJson(planPath, null);
-      if (!plan) continue;
-      const tasks = nextLedger.tasks.filter((task) => task.planId === planEntry.id);
-      const nextPlan = { ...plan, tasks, updatedAt: at };
-      await writeJsonAtomic(planPath, nextPlan);
-      if (planEntry.id === nextLedger.activePlanId) {
-        await writeTasksMarkdown(rootDir, nextPlan);
-      }
-    }
-
-    await writeJsonAtomic(resolveWildArrangePath(rootDir, "team", "tasks.json"), nextLedger);
-    const revalidationRequired = nextLedger.tasks.filter((task) => task.completionRevalidation?.required === true).length;
-    const normalizedOwners = nextLedger.tasks.filter((task) => task.owner && task.history?.some((entry) => entry.event === "legacy_imported")).length;
-    await appendLedger(rootDir, {
-      type: "task_ledger_migrated",
-      activePlanId: nextLedger.activePlanId,
-      taskCount: nextLedger.tasks.length,
-      revalidationRequired,
-      normalizedOwners,
-    });
-    return {
-      kind: "task_ledger_migration",
-      status: "migrated",
-      activePlanId: nextLedger.activePlanId,
-      migratedTasks: nextLedger.tasks.length,
-      revalidationRequired,
-      normalizedOwners,
-    };
-  });
-}
 
 /** 归档任务证据并删除 taskState 条目（需 backupId）。 */
 export async function archiveAndDeleteTeamTask(rootDir, options = {}) {

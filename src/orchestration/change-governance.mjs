@@ -30,7 +30,7 @@ import {
   resolveWildArrangePath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
-import { withTaskStateLock } from "../infra/task-state-lock.mjs";
+import { transactWithLedger, withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { uniqueStrings } from "../infra/text-utils.mjs";
 import {
@@ -59,10 +59,14 @@ export async function steerWorkflow(rootDir, proposal = {}) {
     const result = applySteeringProposal(taskState, proposal);
     validatePlanGraph({ tasks: taskState.tasks });
     validateTaskAcceptanceInvariants(taskState.tasks);
-    await persistTaskState(rootDir, taskState);
     audit.before = summarizeSteeringState(before);
     audit.after = summarizeSteeringState(taskState);
-    await appendLedger(rootDir, { type: "steering_applied", kind: audit.kind, targetTaskIds: audit.targetTaskIds, evidence: audit.evidence });
+    await transactWithLedger(rootDir, {
+      type: "steering_applied",
+      kind: audit.kind,
+      targetTaskIds: audit.targetTaskIds,
+      evidence: audit.evidence,
+    }, () => persistTaskState(rootDir, taskState));
     await writeSnapshot(rootDir, "steering_applied", { kind: audit.kind, targetTaskIds: audit.targetTaskIds });
     return { accepted: true, audit, result, taskState };
   });
@@ -102,8 +106,13 @@ export async function recordReviewBlocker(rootDir, options = {}) {
     task.updatedAt = nowIso();
     taskState.tasks.push(blockerTask);
     validatePlanGraph({ tasks: taskState.tasks });
-    await persistTaskState(rootDir, taskState);
-    await appendLedger(rootDir, { type: "review_blocker_recorded", planId: taskState.planId, taskId: task.id, resolutionTaskId: blockerTask.id, evidence });
+    await transactWithLedger(rootDir, {
+      type: "review_blocker_recorded",
+      planId: taskState.planId,
+      taskId: task.id,
+      resolutionTaskId: blockerTask.id,
+      evidence,
+    }, () => persistTaskState(rootDir, taskState));
     await writeSnapshot(rootDir, "review_blocker_recorded", { planId: taskState.planId, taskId: task.id, resolutionTaskId: blockerTask.id });
     return { planId: taskState.planId, blockedTask: task, resolutionTask: blockerTask };
   });
@@ -132,8 +141,13 @@ export async function resolveReviewBlocker(rootDir, options = {}) {
     task.status = "pending";
     task.reviewBlocker = { ...task.reviewBlocker, resolvedAt: nowIso(), resolutionEvidence: evidence, resolutionRationale: rationale };
     task.updatedAt = nowIso();
-    await persistTaskState(rootDir, taskState);
-    await appendLedger(rootDir, { type: "review_blocker_resolved", planId: taskState.planId, taskId: task.id, resolutionTaskId, evidence });
+    await transactWithLedger(rootDir, {
+      type: "review_blocker_resolved",
+      planId: taskState.planId,
+      taskId: task.id,
+      resolutionTaskId,
+      evidence,
+    }, () => persistTaskState(rootDir, taskState));
     await writeSnapshot(rootDir, "review_blocker_resolved", { planId: taskState.planId, taskId: task.id, resolutionTaskId });
     return { planId: taskState.planId, unblockedTask: task, resolutionTask };
   });
@@ -253,22 +267,22 @@ async function resolveChangeRequestUnlocked(rootDir, options = {}) {
     changeRequest.appliedWritablePaths = task.writable_paths;
   }
 
-  if (taskState && task) await persistTaskState(rootDir, taskState);
-
   const jsonPath = resolveWildArrangePath(rootDir, "changes", `${id}.json`);
   const mdPath = resolveWildArrangePath(rootDir, "changes", `${id}.md`);
   changeRequest.reportJsonPath = path.relative(rootDir, jsonPath);
   changeRequest.reportMdPath = path.relative(rootDir, mdPath);
-  await writeJsonAtomic(jsonPath, changeRequest);
-  await writeFile(mdPath, renderChangeRequestMarkdown(changeRequest), "utf8");
-  await writeOpenChangesIndex(rootDir);
-  await appendLedger(rootDir, {
+  await transactWithLedger(rootDir, {
     type: "change_request_resolved",
     planId: changeRequest.planId,
     taskId: changeRequest.taskId,
     changeRequestId: id,
     decision,
     appliedScope: changeRequest.appliedScope,
+  }, async () => {
+    if (taskState && task) await persistTaskState(rootDir, taskState);
+    await writeJsonAtomic(jsonPath, changeRequest);
+    await writeFile(mdPath, renderChangeRequestMarkdown(changeRequest), "utf8");
+    await writeOpenChangesIndex(rootDir);
   });
   await writeSnapshot(rootDir, "change_request_resolved", { changeRequestId: id, decision, appliedScope: changeRequest.appliedScope });
   return { status: changeRequest.status, changeRequest, task: task || null };

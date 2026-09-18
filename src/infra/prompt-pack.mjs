@@ -26,6 +26,7 @@ import {
   hashContent,
   nowIso,
   readJson,
+  renameWithRetry,
   resolveWildArrangePath,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
@@ -257,7 +258,7 @@ async function materializePromptPack(rootDir, entries) {
       await writeFile(filePath, content, "utf8");
     }
     await rm(installedRoot, { recursive: true, force: true });
-    await rename(stagingRoot, installedRoot);
+    await renameWithRetry(stagingRoot, installedRoot);
   } catch (error) {
     await rm(stagingRoot, { recursive: true, force: true });
     throw error;
