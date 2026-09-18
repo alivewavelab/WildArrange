@@ -646,16 +646,15 @@ export async function approvePlan(rootDir, options = {}) {
       approvedAt: nowIso(),
       note: options.note || "",
     };
-    await writeJsonAtomic(workPath, {
-      ...work,
-      status: "ready",
-      planApproval: nextApproval,
-      updatedAt: nowIso(),
-    });
     const state = await loadTaskState(rootDir);
-    await appendLedger(rootDir, { type: "plan_approved", planId: work.activePlanId, approver: nextApproval.approvedBy,
+    await transactWithLedger(rootDir, { type: "plan_approved", planId: work.activePlanId, approver: nextApproval.approvedBy,
       responsibilityScopes: Object.fromEntries((state?.tasks || []).map((task) => [task.id, responsibilityDigest(task.responsibilityChanges)])),
-      contractScopes: Object.fromEntries((state?.tasks || []).map((task) => [task.id, hashContent(JSON.stringify(task.contractChanges?.items || []))])) });
+      contractScopes: Object.fromEntries((state?.tasks || []).map((task) => [task.id, hashContent(JSON.stringify(task.contractChanges?.items || []))])) }, () => writeJsonAtomic(workPath, {
+        ...work,
+        status: "ready",
+        planApproval: nextApproval,
+        updatedAt: nowIso(),
+      }));
     return { planId: work.activePlanId, status: "approved", approval: nextApproval };
   });
 }

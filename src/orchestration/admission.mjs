@@ -27,7 +27,7 @@ import {
   resolveWildArrangePath,
 } from "../infra/runtime-store.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
-import { withTaskStateLock } from "../infra/task-state-lock.mjs";
+import { transactWithLedger, withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import {
   captureIntegrationGuard,
@@ -656,7 +656,13 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
     task.last_failure.commandEvidence = pipelineResult.evidence.commandRecovery;
     task.updatedAt = nowIso();
     await writeFailureReport(rootDir, taskState.planId, task);
-    await persistTaskState(rootDir, taskState);
+    await transactWithLedger(rootDir, {
+      type: "parallel_agent_command_recovery_required",
+      planId: taskState.planId,
+      taskId: task.id,
+      runId,
+      pid: pipelineResult.evidence.commandRecovery?.pid || null,
+    }, () => persistTaskState(rootDir, taskState));
     return { status: "recovery_required", planId: taskState.planId, task, acceptanceProof, verifyResult, scopeResult, reviewResult, rollback: { status: "not_attempted", reason: "command_process_state_unknown" } };
   }
 
@@ -776,7 +782,12 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
     task.status = "needs_user_decision";
     task.admission_claim = { ...task.admission_claim, phase: "applying", appliedPaths: [], workspaceRestored: true };
     task.last_failure = null;
-    await persistTaskState(rootDir, taskState);
+    await transactWithLedger(rootDir, {
+      type: "parallel_agent_admission_awaiting_user_decision",
+      planId: taskState.planId,
+      taskId: task.id,
+      runId,
+    }, () => persistTaskState(rootDir, taskState));
     await removePersistedRollbackPlan(rootDir, runId, taskId);
     return { status: "awaiting_user_decision", planId: taskState.planId, task, changeRequest: pipelineResult.changeRequest,
       verifyResult, scopeResult, reviewResult, rollback };
@@ -798,9 +809,14 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
     task.last_failure.retryHint = "checkpoint 写入失败（检查 .wildarrange/checkpoints 目录是否可写），修复后重新 admit 即可，所有质量门已通过";
     task.updatedAt = nowIso();
     await writeFailureReport(rootDir, taskState.planId, task);
-    await persistTaskState(rootDir, taskState);
+    await transactWithLedger(rootDir, {
+      type: "checkpoint_write_failed",
+      planId: taskState.planId,
+      taskId: task.id,
+      runId,
+      error: pipelineResult.evidence.checkpointError?.message || null,
+    }, () => persistTaskState(rootDir, taskState));
     await removePersistedRollbackPlan(rootDir, runId, taskId);
-    await appendLedger(rootDir, { type: "checkpoint_write_failed", planId: taskState.planId, taskId: task.id, error: pipelineResult.evidence.checkpointError?.message || null });
     return { status: "retry", planId: taskState.planId, task, acceptanceProof, verifyResult, scopeResult, reviewResult, rollback };
   }
 
@@ -836,7 +852,14 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
   }
   task.updatedAt = nowIso();
   await writeFailureReport(rootDir, taskState.planId, task);
-  await persistTaskState(rootDir, taskState);
+  await transactWithLedger(rootDir, {
+    type: "parallel_agent_admission_rejected",
+    planId: taskState.planId,
+    taskId: task.id,
+    runId,
+    nextStatus: task.status,
+    reason: task.last_failure.reason,
+  }, () => persistTaskState(rootDir, taskState));
   await removePersistedRollbackPlan(rootDir, runId, taskId);
   return { status: task.status === "failed" ? "failed" : "retry", planId: taskState.planId, task, acceptanceProof, verifyResult, scopeResult, reviewResult, rollback };
 }

@@ -133,8 +133,13 @@ export async function recordTaskEvidence(rootDir, options = {}) {
     criterion.lastUpdatedAt = entry.at;
     task.evidence.push(entry);
     task.updatedAt = nowIso();
-    await persistTaskState(rootDir, taskState);
-    await appendLedger(rootDir, { type: "criterion_evidence_recorded", planId: taskState.planId, taskId: task.id, criterionId: criterion.id, status });
+    await transactWithLedger(rootDir, {
+      type: "criterion_evidence_recorded",
+      planId: taskState.planId,
+      taskId: task.id,
+      criterionId: criterion.id,
+      status,
+    }, () => persistTaskState(rootDir, taskState));
     return { planId: taskState.planId, task, criterion, evidence: entry };
   });
 }
@@ -217,8 +222,7 @@ async function createTeamTaskUnlocked(rootDir, rawTask) {
   const nextTasks = [...taskState.tasks, normalizedTask];
   validatePlanGraph({ ...plan, tasks: nextTasks });
   taskState.tasks = nextTasks;
-  await persistTaskState(rootDir, taskState);
-  await appendLedger(rootDir, {
+  await transactWithLedger(rootDir, {
     type: "team_task_created",
     planId: taskState.planId,
     taskId: normalizedTask.id,
@@ -228,7 +232,7 @@ async function createTeamTaskUnlocked(rootDir, rawTask) {
     source: normalizedTask.source,
     priority: normalizedTask.priority,
     blockedBy: normalizedTask.blockedBy,
-  });
+  }, () => persistTaskState(rootDir, taskState));
   await writeSnapshot(rootDir, "team_task_created", { planId: taskState.planId, taskId: normalizedTask.id });
   return { planId: taskState.planId, task: normalizedTask };
 }
@@ -256,13 +260,12 @@ export async function readyTeamTask(rootDir, options = {}) {
     const routes = await loadRoutesConfig(rootDir);
     enrichTaskWithRouteDecision(nextTask, routes);
     taskState.tasks = taskState.tasks.map((task) => task.id === existing.id ? nextTask : task);
-    await persistTaskState(rootDir, taskState);
-    await appendLedger(rootDir, {
+    await transactWithLedger(rootDir, {
       type: "team_task_readied",
       planId: existing.planId,
       taskId: existing.id,
       taskRef: existing.ref,
-    });
+    }, () => persistTaskState(rootDir, taskState));
     await writeSnapshot(rootDir, "team_task_readied", { planId: existing.planId, taskId: existing.id });
     return { planId: existing.planId, task: nextTask };
   });

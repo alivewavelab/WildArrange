@@ -23,7 +23,7 @@ import {
   ensureWildArrangeDirs,
   nowIso,
 } from "../infra/runtime-store.mjs";
-import { withTaskStateLock } from "../infra/task-state-lock.mjs";
+import { transactWithLedger, withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { ensureTaskPacket, writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { readChangeRequest, writeChangeRequest } from "./change-governance.mjs";
 import { prepareContractReview } from "./contract-governance.mjs";
@@ -126,7 +126,11 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
     if (readiness?.commandRecovery) {
       task.status = "needs_user_decision";
       task.last_readiness_result = readiness;
-      await persistTaskState(rootDir, taskState);
+      await transactWithLedger(rootDir, {
+        type: "task_readiness_recovery_required",
+        planId: taskState.planId,
+        taskId: task.id,
+      }, () => persistTaskState(rootDir, taskState));
     }
     return { status: readiness?.commandRecovery ? "recovery_required" : "readiness_blocked", task, readiness, error: readinessEnvelope.error };
   }
@@ -142,8 +146,12 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   task.status = "in_progress";
   task.attempts += 1;
   task.updatedAt = nowIso();
-  await persistTaskState(rootDir, taskState);
-  await appendLedger(rootDir, { type: "task_started", planId: taskState.planId, taskId: task.id, attempt: task.attempts });
+  await transactWithLedger(rootDir, {
+    type: "task_started",
+    planId: taskState.planId,
+    taskId: task.id,
+    attempt: task.attempts,
+  }, () => persistTaskState(rootDir, taskState));
   await writeSnapshot(rootDir, "task_started", { planId: taskState.planId, taskId: task.id, attempt: task.attempts });
 
   const executionRoot = deliveryWorkspace?.workDir || rootDir;
@@ -165,9 +173,13 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   task.evidence.push(workerResult);
   task.evidence.push(buildChangedPathDiffEvidence(beforeChanged, afterChanged, { at: nowIso() }));
   task.updatedAt = nowIso();
-  await persistTaskState(rootDir, taskState);
+  await transactWithLedger(rootDir, {
+    type: "worker_done_claim",
+    planId: taskState.planId,
+    taskId: task.id,
+    exitCode: workerResult.exitCode,
+  }, () => persistTaskState(rootDir, taskState));
   await writeOutbox(rootDir, task, workerResult);
-  await appendLedger(rootDir, { type: "worker_done_claim", planId: taskState.planId, taskId: task.id, exitCode: workerResult.exitCode });
   await writeSnapshot(rootDir, "worker_done", { planId: taskState.planId, taskId: task.id, exitCode: workerResult.exitCode });
 
   if (workerResult?.recoveryRequired === true || workerResult?.terminationFailed === true) {
@@ -214,7 +226,12 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   await writeSnapshot(rootDir, "reviewed", { planId: taskState.planId, taskId: task.id, pass: reviewResult.pass });
 
   if (pipelineResult.status === "awaiting_user_decision") {
-    await persistTaskState(rootDir, taskState);
+    await transactWithLedger(rootDir, {
+      type: "task_awaiting_user_decision",
+      planId: taskState.planId,
+      taskId: task.id,
+      changeRequestId: pipelineResult.changeRequest?.id || null,
+    }, () => persistTaskState(rootDir, taskState));
     return { status: "awaiting_user_decision", task, changeRequest: pipelineResult.changeRequest, verifyResult, scopeResult, reviewResult };
   }
   if (pipelineResult.status === "recovery_required") {
@@ -303,8 +320,7 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   });
   task.updatedAt = nowIso();
   await writeFailureReport(rootDir, taskState.planId, task);
-  await persistTaskState(rootDir, taskState);
-  await appendLedger(rootDir, {
+  await transactWithLedger(rootDir, {
     type: "task_rejected",
     planId: taskState.planId,
     taskId: task.id,
@@ -312,7 +328,7 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
     attempt: task.attempts,
     reason: task.last_failure.reason,
     retryHint: task.last_failure.retryHint,
-  });
+  }, () => persistTaskState(rootDir, taskState));
   await writeSnapshot(rootDir, "task_rejected", { planId: taskState.planId, taskId: task.id, nextStatus: task.status });
   return { status: task.status === "failed" ? "failed" : "retry", task, workerResult, verifyResult, scopeResult, reviewResult };
 }
@@ -368,7 +384,11 @@ async function executeTaskNodeUnlocked(rootDir, options = {}) {
     if (readiness?.commandRecovery) {
       task.status = "needs_user_decision";
       task.last_readiness_result = readiness;
-      await persistTaskState(rootDir, taskState);
+      await transactWithLedger(rootDir, {
+        type: "node_readiness_recovery_required",
+        planId: taskState.planId,
+        taskId: task.id,
+      }, () => persistTaskState(rootDir, taskState));
     }
     return { status: readiness?.commandRecovery ? "recovery_required" : "readiness_blocked", task, readiness, error: readinessEnvelope.error };
   }
@@ -384,15 +404,24 @@ async function executeTaskNodeUnlocked(rootDir, options = {}) {
     task.status = "in_progress";
     task.attempts += 1;
     task.updatedAt = nowIso();
-    await persistTaskState(rootDir, taskState);
-    await appendLedger(rootDir, { type: "node_execute_started", planId: taskState.planId, taskId: task.id, attempt: task.attempts });
+    await transactWithLedger(rootDir, {
+      type: "node_execute_started",
+      planId: taskState.planId,
+      taskId: task.id,
+      attempt: task.attempts,
+    }, () => persistTaskState(rootDir, taskState));
     await writeSnapshot(rootDir, "node_execute_started", { planId: taskState.planId, taskId: task.id });
   } else {
     await assertCurrentTaskOwnership(rootDir, task);
   }
 
   const deliveryWorkspace = await ensureLinearDeliveryWorkspace(rootDir, taskState.planId, task, taskState.tasks);
-  await persistTaskState(rootDir, taskState);
+  await transactWithLedger(rootDir, {
+    type: "node_execute_workspace_prepared",
+    planId: taskState.planId,
+    taskId: task.id,
+    worktree: deliveryWorkspace?.workDir || null,
+  }, () => persistTaskState(rootDir, taskState));
   const executionRoot = deliveryWorkspace?.workDir || rootDir;
   const workspaceSnapshot = await recordPreExecuteSnapshot(rootDir, taskState.planId, task, executionRoot);
   const beforeChanged = await collectGitChangedPaths(executionRoot);
@@ -422,9 +451,13 @@ async function executeTaskNodeUnlocked(rootDir, options = {}) {
     unavailableReason: beforeChanged.available ? afterChanged.reason : beforeChanged.reason,
   });
   task.updatedAt = nowIso();
-  await persistTaskState(rootDir, taskState);
+  await transactWithLedger(rootDir, {
+    type: "node_execute_completed",
+    planId: taskState.planId,
+    taskId: task.id,
+    exitCode: workerResult.exitCode,
+  }, () => persistTaskState(rootDir, taskState));
   await writeOutbox(rootDir, task, workerResult);
-  await appendLedger(rootDir, { type: "node_execute_completed", planId: taskState.planId, taskId: task.id, exitCode: workerResult.exitCode });
   await writeSnapshot(rootDir, "node_execute_completed", { planId: taskState.planId, taskId: task.id, exitCode: workerResult.exitCode });
   if (workerResult?.recoveryRequired === true || workerResult?.terminationFailed === true) {
     return persistCommandRecoveryRequired(rootDir, taskState, task, workerResult);
@@ -462,13 +495,18 @@ async function verifyTaskNodeUnlocked(rootDir, options = {}) {
     });
   }
   task.updatedAt = nowIso();
-  await appendLedger(rootDir, { type: "node_verify_completed", planId: taskState.planId, taskId: task.id, pass: verifyResult.pass, criterionEvidenceCount: criterionEvidence.length });
   if (!verifyResult.pass) {
     await writeFailureReport(rootDir, taskState.planId, task);
-    await persistTaskState(rootDir, taskState);
+  }
+  await transactWithLedger(rootDir, {
+    type: "node_verify_completed",
+    planId: taskState.planId,
+    taskId: task.id,
+    pass: verifyResult.pass,
+    criterionEvidenceCount: criterionEvidence.length,
+  }, () => persistTaskState(rootDir, taskState));
+  if (!verifyResult.pass) {
     await appendLedger(rootDir, { type: "node_verify_failed", planId: taskState.planId, taskId: task.id, reason: task.last_failure.reason });
-  } else {
-    await persistTaskState(rootDir, taskState);
   }
   await writeSnapshot(rootDir, "node_verify_completed", { planId: taskState.planId, taskId: task.id, pass: verifyResult.pass });
   return { status: verifyResult.pass ? "verified" : task.status === "failed" ? "failed" : "verify_failed", task, verifyResult };
@@ -504,7 +542,12 @@ async function scopeTaskNodeUnlocked(rootDir, options = {}) {
     task.last_change_request = await writeChangeRequest(rootDir, taskState.planId, task, scopeResult, "node_scope");
   }
   task.updatedAt = nowIso();
-  await persistTaskState(rootDir, taskState);
+  await transactWithLedger(rootDir, {
+    type: "node_scope_completed",
+    planId: taskState.planId,
+    taskId: task.id,
+    status: scopeResult.status,
+  }, () => persistTaskState(rootDir, taskState));
   await writeSnapshot(rootDir, "node_scope_completed", { planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult.status });
   return { status: scopeResult.status, task, scopeResult };
 }
@@ -542,7 +585,12 @@ async function reviewTaskNodeUnlocked(rootDir, options = {}) {
 
   if (contractGovernance.changeRequest) {
     task.status = "needs_user_decision";
-    await persistTaskState(rootDir, taskState);
+    await transactWithLedger(rootDir, {
+      type: "node_review_awaiting_user_decision",
+      planId: taskState.planId,
+      taskId: task.id,
+      changeRequestId: contractGovernance.changeRequest.id || null,
+    }, () => persistTaskState(rootDir, taskState));
     return { status: "awaiting_user_decision", task, changeRequest: contractGovernance.changeRequest, reviewResult };
   }
   if (!reviewResult.pass) {
@@ -557,13 +605,12 @@ async function reviewTaskNodeUnlocked(rootDir, options = {}) {
     await writeFailureReport(rootDir, taskState.planId, task);
   }
 
-  await persistTaskState(rootDir, taskState);
-  await appendLedger(rootDir, {
+  await transactWithLedger(rootDir, {
     type: reviewResult.pass ? "node_review_passed" : "node_review_failed",
     planId: taskState.planId,
     taskId: task.id,
     failedLaneCount: reviewResult.lanes.filter((lane) => lane.status === "fail").length,
-  });
+  }, () => persistTaskState(rootDir, taskState));
   await writeSnapshot(rootDir, "node_review_completed", { planId: taskState.planId, taskId: task.id, pass: reviewResult.pass });
   return { status: reviewResult.pass ? "reviewed" : "review_failed", task, reviewResult };
 }
@@ -626,7 +673,12 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
         integrationGate: pipeline.evidence.integrationCommit,
       };
       if (pipeline.status === "awaiting_user_decision") {
-        await persistTaskState(rootDir, taskState);
+        await transactWithLedger(rootDir, {
+          type: "node_checkpoint_awaiting_user_decision",
+          planId: taskState.planId,
+          taskId: task.id,
+          changeRequestId: pipeline.changeRequest?.id || null,
+        }, () => persistTaskState(rootDir, taskState));
         return { status: "awaiting_user_decision", task, changeRequest: pipeline.changeRequest, verifyResult, scopeResult, reviewResult };
       }
       if (pipeline.status === "recovery_required") {
@@ -679,7 +731,13 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
       }
       task.updatedAt = nowIso();
       await writeFailureReport(rootDir, taskState.planId, task);
-      await persistTaskState(rootDir, taskState);
+      await transactWithLedger(rootDir, {
+        type: "node_checkpoint_rejected",
+        planId: taskState.planId,
+        taskId: task.id,
+        nextStatus: task.status,
+        reason: task.last_failure.reason,
+      }, () => persistTaskState(rootDir, taskState));
       return { status: task.status === "verifying" ? "recovery_required" : task.status === "failed" ? "failed" : "retry", task, verifyResult, scopeResult, reviewResult, acceptanceProof };
     }
     // Checkpoint durably written — only now may the task become completed.
@@ -714,15 +772,14 @@ async function checkpointTaskNodeUnlocked(rootDir, options = {}) {
   });
   task.updatedAt = nowIso();
   await writeFailureReport(rootDir, taskState.planId, task);
-  await persistTaskState(rootDir, taskState);
-  await appendLedger(rootDir, {
+  await transactWithLedger(rootDir, {
     type: "node_checkpoint_rejected",
     planId: taskState.planId,
     taskId: task.id,
     nextStatus: task.status,
     reason: task.last_failure.reason,
     retryHint: task.last_failure.retryHint,
-  });
+  }, () => persistTaskState(rootDir, taskState));
   await writeSnapshot(rootDir, "node_checkpoint_rejected", { planId: taskState.planId, taskId: task.id, nextStatus: task.status });
   return { status: task.status === "failed" ? "failed" : "retry", task, verifyResult, scopeResult, reviewResult };
 }
@@ -744,7 +801,12 @@ async function retryTaskNodeUnlocked(rootDir, options = {}) {
     const scopeResult = task.last_scope_result || [...task.evidence].reverse().find((entry) => entry.kind === "scope_guard");
     if (!task.last_change_request && scopeResult?.status === "fail") {
       task.last_change_request = await writeChangeRequest(rootDir, taskState.planId, task, scopeResult, "retry_block");
-      await persistTaskState(rootDir, taskState);
+      await transactWithLedger(rootDir, {
+        type: "node_retry_change_request_recorded",
+        planId: taskState.planId,
+        taskId: task.id,
+        changeRequestId: task.last_change_request?.id || null,
+      }, () => persistTaskState(rootDir, taskState));
     }
     const changeRequest = task.last_change_request?.id ? await readChangeRequest(rootDir, task.last_change_request.id) : task.last_change_request;
     if (!changeRequest || changeRequest.status === "open") {
@@ -789,14 +851,13 @@ async function retryTaskNodeUnlocked(rootDir, options = {}) {
   task.manual_retry_count = (task.manual_retry_count || 0) + 1;
   task.maxAttempts = Math.max(task.maxAttempts || 1, task.attempts + 1);
   task.updatedAt = nowIso();
-  await persistTaskState(rootDir, taskState);
-  await appendLedger(rootDir, {
+  await transactWithLedger(rootDir, {
     type: "node_retry_reopened",
     planId: taskState.planId,
     taskId: task.id,
     manualRetryCount: task.manual_retry_count,
     previousReason: failure?.reason || "unknown",
-  });
+  }, () => persistTaskState(rootDir, taskState));
   await writeSnapshot(rootDir, "node_retry_reopened", { planId: taskState.planId, taskId: task.id });
   return { status: "pending", task, failure };
 }
@@ -862,8 +923,12 @@ async function persistCommandRecoveryRequired(rootDir, taskState, task, commandE
   };
   task.updatedAt = nowIso();
   await writeFailureReport(rootDir, taskState.planId, task);
-  await persistTaskState(rootDir, taskState);
-  await appendLedger(rootDir, { type: "command_recovery_required", planId: taskState.planId, taskId: task.id, pid: commandEvidence?.pid || null });
+  await transactWithLedger(rootDir, {
+    type: "command_recovery_required",
+    planId: taskState.planId,
+    taskId: task.id,
+    pid: commandEvidence?.pid || null,
+  }, () => persistTaskState(rootDir, taskState));
   return { status: "recovery_required", task, ...result };
 }
 
@@ -883,8 +948,7 @@ async function persistRevalidationRequired(rootDir, taskState, task, { integrati
   };
   task.updatedAt = nowIso();
   await writeFailureReport(rootDir, taskState.planId, task);
-  await persistTaskState(rootDir, taskState);
-  await appendLedger(rootDir, ledgerEvent);
+  await transactWithLedger(rootDir, ledgerEvent, () => persistTaskState(rootDir, taskState));
 }
 
 // Every gate and the acceptance proof passed, but the checkpoint write
@@ -907,8 +971,12 @@ async function persistCheckpointWriteFailure(rootDir, taskState, task, { workerR
   task.last_failure.retryHint = "checkpoint 写入失败（检查 .wildarrange/checkpoints 目录是否可写），修复后重跑即可，所有质量门已通过";
   task.updatedAt = nowIso();
   await writeFailureReport(rootDir, taskState.planId, task);
-  await persistTaskState(rootDir, taskState);
-  await appendLedger(rootDir, { type: "checkpoint_write_failed", planId: taskState.planId, taskId: task.id, error: checkpointError || null });
+  await transactWithLedger(rootDir, {
+    type: "checkpoint_write_failed",
+    planId: taskState.planId,
+    taskId: task.id,
+    error: checkpointError || null,
+  }, () => persistTaskState(rootDir, taskState));
   await writeSnapshot(rootDir, "checkpoint_write_failed", { planId: taskState.planId, taskId: task.id });
 }
 
@@ -927,7 +995,13 @@ async function persistAcceptanceProofFailure(rootDir, taskState, task, { workerR
   task.last_failure.summary = failureSummary;
   task.updatedAt = nowIso();
   await writeFailureReport(rootDir, taskState.planId, task);
-  await persistTaskState(rootDir, taskState);
+  await transactWithLedger(rootDir, {
+    type: "acceptance_proof_failed",
+    planId: taskState.planId,
+    taskId: task.id,
+    nextStatus: task.status,
+    reason: task.last_failure.reason,
+  }, () => persistTaskState(rootDir, taskState));
 }
 
 /** Git 协调开启时校验当前设备仍持有任务写 ownership。 */

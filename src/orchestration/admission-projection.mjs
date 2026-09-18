@@ -18,6 +18,7 @@
 //     WithinLock 助手禁止自行获取任务锁，必须在调用方锁持有期间运行。
 // =============================================================================
 import { appendLedger } from "../infra/ledger.mjs";
+import { transactWithLedger } from "../infra/task-state-lock.mjs";
 import { emitDecision } from "../infra/decision-log.mjs";
 import {
   nowIso,
@@ -74,7 +75,13 @@ export async function persistRollbackFailureRecovery(rootDir, taskState, task, {
   task.last_failure.retryHint = retryHint;
   task.updatedAt = nowIso();
   await writeFailureReport(rootDir, taskState.planId, task);
-  await persistTaskState(rootDir, taskState);
+  await transactWithLedger(rootDir, {
+    type: "parallel_agent_admission_recovery_required",
+    planId: taskState.planId,
+    taskId: task.id,
+    reason,
+    rollbackStatus: rollback?.status || null,
+  }, () => persistTaskState(rootDir, taskState));
   const result = {
     status: "recovery_required",
     planId: taskState.planId,
@@ -101,7 +108,14 @@ export async function advanceClaimPhaseWithinLock(rootDir, taskId, runId, phase,
   task.admission_claim.workspaceRestored = false;
   task.admission_claim.appliedPaths = appliedPaths;
   task.updatedAt = nowIso();
-  await persistTaskState(rootDir, taskState);
+  await transactWithLedger(rootDir, {
+    type: "parallel_agent_claim_phase_updated",
+    planId: taskState.planId,
+    taskId,
+    runId,
+    phase,
+    appliedPaths,
+  }, () => persistTaskState(rootDir, taskState));
 }
 
 /**
@@ -122,7 +136,6 @@ export async function updateAgentRunLifecycle(rootDir, runId, taskId, status, de
       updatedAt: nowIso(),
       ...details,
     };
-    await writeJsonAtomic(resultPath, result);
   }
 
   const batchPath = resolveWildArrangePath(rootDir, "agent-runs", `${runId}.json`);
@@ -137,7 +150,6 @@ export async function updateAgentRunLifecycle(rootDir, runId, taskId, status, de
         ...details,
       };
     }
-    await writeJsonAtomic(batchPath, batch);
   }
 
   const indexPath = resolveWildArrangePath(rootDir, "agent-runs", "index.json");
@@ -155,6 +167,14 @@ export async function updateAgentRunLifecycle(rootDir, runId, taskId, status, de
     }
     run.updatedAt = nowIso();
   }
-  await writeJsonAtomic(indexPath, index);
-  await appendLedger(rootDir, { type: "parallel_agent_lifecycle_updated", runId, taskId, status });
+  await transactWithLedger(rootDir, {
+    type: "parallel_agent_lifecycle_updated",
+    runId,
+    taskId,
+    status,
+  }, async () => {
+    if (result) await writeJsonAtomic(resultPath, result);
+    if (batch) await writeJsonAtomic(batchPath, batch);
+    await writeJsonAtomic(indexPath, index);
+  });
 }

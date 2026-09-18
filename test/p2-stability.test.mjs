@@ -19,7 +19,7 @@ import test from "node:test";
 
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { inspectRepositoryGovernance } from "../src/infra/repository-layout.mjs";
-import { readJson, resolveTaskCheckpointPath, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { readJson, renameWithRetry, resolveTaskCheckpointPath, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { proposeContractChange } from "../src/orchestration/contract-governance.mjs";
 import { runNextTask } from "../src/orchestration/linear-runtime.mjs";
@@ -56,6 +56,22 @@ async function writeMinimalPromptPack(rootDir, toolContent = "{\"tools\":[]}") {
   return packDir;
 }
 
+test("renameWithRetry retries transient Windows sharing errors", async () => {
+  let attempts = 0;
+  await renameWithRetry("source", "target", {
+    attempts: 3,
+    delayMs: 0,
+    renameImpl: async () => {
+      attempts += 1;
+      if (attempts < 3) {
+        const error = new Error("temporarily locked");
+        error.code = "EPERM";
+        throw error;
+      }
+    },
+  });
+  assert.equal(attempts, 3);
+});
 async function ledgerEntries(rootDir) {
   const content = await readFile(resolveWildArrangePath(rootDir, "ledger.jsonl"), "utf8");
   return content.trim().split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));

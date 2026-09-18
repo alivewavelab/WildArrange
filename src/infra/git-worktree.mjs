@@ -7,7 +7,7 @@
 // 【运行原理速读】
 //   prepareAgentWorktree → collectAgentWorktreePatch → applyAgentPatch 预检后 apply。
 // =============================================================================
-import { mkdir, realpath, writeFile } from "node:fs/promises";
+import { lstat, mkdir, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { runCommandFile } from "./command-runner.mjs";
 import { readGitHead, readGitTopLevel } from "./git-diff.mjs";
@@ -40,6 +40,26 @@ export async function prepareAgentWorktree(rootDir, taskRunDir, options = {}) {
   await mkdir(taskRunDir, { recursive: true });
   const branchName = String(options.branchName || "").trim();
   const startPoint = String(options.startPoint || "HEAD").trim();
+  const existing = await inspectExistingWorktree(worktreeDir, branchName);
+  if (existing?.available === true) {
+    return {
+      isolation: "git-worktree",
+      workDir: worktreeDir,
+      available: true,
+      branch: existing.branch,
+      startPoint: existing.headSha,
+      reused: true,
+      reason: null,
+    };
+  }
+  if (existing?.error) {
+    return {
+      isolation: "git-worktree",
+      workDir: taskRunDir,
+      available: false,
+      reason: existing.error,
+    };
+  }
   const addArgs = branchName
     ? ["-C", rootDir, "worktree", "add", "-b", branchName, worktreeDir, startPoint]
     : ["-C", rootDir, "worktree", "add", "--detach", worktreeDir, startPoint];
@@ -60,6 +80,37 @@ export async function prepareAgentWorktree(rootDir, taskRunDir, options = {}) {
     startPoint,
     reason: null,
   };
+}
+
+/**
+ * 账本故障可能发生在 worktree 已创建、任务状态尚未落盘的窗口。
+ * 恢复时先复用并核对同一路径，避免再次创建同名分支；不接受无法
+ * 证明为 Git worktree 或分支不一致的旧目录。
+ */
+async function inspectExistingWorktree(worktreeDir, expectedBranch) {
+  const marker = await lstat(worktreeDir).catch((error) => {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  });
+  if (!marker) return null;
+  if (marker.isSymbolicLink()) {
+    return { error: `existing worktree path is a symlink: ${worktreeDir}` };
+  }
+  const inside = await runCommandFile("git", ["-C", worktreeDir, "rev-parse", "--is-inside-work-tree"], worktreeDir, 30_000);
+  if (inside.exitCode !== 0 || inside.stdout.trim() !== "true") {
+    return { error: `existing worktree path is not a Git worktree: ${worktreeDir}` };
+  }
+  const branchResult = await runCommandFile("git", ["-C", worktreeDir, "rev-parse", "--abbrev-ref", "HEAD"], worktreeDir, 30_000);
+  const headResult = await runCommandFile("git", ["-C", worktreeDir, "rev-parse", "HEAD"], worktreeDir, 30_000);
+  if (branchResult.exitCode !== 0 || headResult.exitCode !== 0) {
+    return { error: `existing Git worktree identity could not be verified: ${worktreeDir}` };
+  }
+  const branch = branchResult.stdout.trim();
+  const headSha = headResult.stdout.trim();
+  if (expectedBranch && branch !== expectedBranch) {
+    return { error: `existing Git worktree branch mismatch: expected ${expectedBranch}, got ${branch}` };
+  }
+  return { available: true, branch: branch === "HEAD" ? null : branch, headSha };
 }
 
 /**
