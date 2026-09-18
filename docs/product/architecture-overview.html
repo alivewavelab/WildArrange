@@ -2139,7 +2139,7 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
           "id": "src-orchestration-linear-runtime-mjs",
           "p": "src/orchestration/linear-runtime.mjs",
           "r": "linear-runtime.mjs",
-          "io": "runNextTask(rootDir, options = {) → 导出；runWorkflowNode(rootDir, nodeName, o) → 导出",
+          "io": "runWorkflowNode(rootDir, nodeName, o) → 导出；runNextTask(rootDir, options = {) → 导出",
           "to": [
             {
               "t": "src-orchestration-host-runtime-mjs",
@@ -2150,11 +2150,6 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "t": "src-orchestration-change-governance-mjs",
               "io": "change-governance.mjs",
               "p": "src/orchestration/change-governance.mjs"
-            },
-            {
-              "t": "rc-orchestration-contract-governance-mjs",
-              "io": "contract-governance.mjs",
-              "p": "src/orchestration/contract-governance.mjs"
             },
             {
               "t": "src-orchestration-delivery-pipeline-mjs",
@@ -2195,6 +2190,16 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "t": "src-orchestration-linear-recovery-mjs",
               "io": "linear-recovery.mjs",
               "p": "src/orchestration/linear-recovery.mjs"
+            },
+            {
+              "t": "rc-orchestration-linear-task-support-mjs",
+              "io": "linear-task-support.mjs",
+              "p": "src/orchestration/linear-task-support.mjs"
+            },
+            {
+              "t": "src-orchestration-linear-workflow-mjs",
+              "io": "linear-workflow.mjs",
+              "p": "src/orchestration/linear-workflow.mjs"
             }
           ],
           "extTo": [
@@ -2241,21 +2246,9 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "ai"
             },
             {
-              "t": "git-worktree.mjs",
-              "io": "git-worktree.mjs",
-              "p": "src/infra/git-worktree.mjs",
-              "m": "infra"
-            },
-            {
               "t": "git-diff.mjs",
               "io": "git-diff.mjs",
               "p": "src/infra/git-diff.mjs",
-              "m": "infra"
-            },
-            {
-              "t": "success-criteria.mjs",
-              "io": "success-criteria.mjs",
-              "p": "src/infra/success-criteria.mjs",
               "m": "infra"
             },
             {
@@ -2263,12 +2256,6 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "io": "gateway.mjs",
               "p": "src/capabilities/gateway.mjs",
               "m": "capabilities"
-            },
-            {
-              "t": "path-match.mjs",
-              "io": "path-match.mjs",
-              "p": "src/infra/path-match.mjs",
-              "m": "infra"
             },
             {
               "t": "agent-registry.mjs",
@@ -2580,7 +2567,7 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
           "id": "src-orchestration-linear-runtime-mjs",
           "p": "src/orchestration/linear-runtime.mjs",
           "r": "linear-runtime.mjs",
-          "io": "runNextTask(rootDir, options = {) → 导出；runWorkflowNode(rootDir, nodeName, o) → 导出",
+          "io": "runWorkflowNode(rootDir, nodeName, o) → 导出；runNextTask(rootDir, options = {) → 导出",
           "to": [
             {
               "t": "src-orchestration-host-runtime-mjs",
@@ -2591,11 +2578,6 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "t": "src-orchestration-change-governance-mjs",
               "io": "change-governance.mjs",
               "p": "src/orchestration/change-governance.mjs"
-            },
-            {
-              "t": "rc-orchestration-contract-governance-mjs",
-              "io": "contract-governance.mjs",
-              "p": "src/orchestration/contract-governance.mjs"
             },
             {
               "t": "src-orchestration-delivery-pipeline-mjs",
@@ -2636,6 +2618,16 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "t": "src-orchestration-linear-recovery-mjs",
               "io": "linear-recovery.mjs",
               "p": "src/orchestration/linear-recovery.mjs"
+            },
+            {
+              "t": "rc-orchestration-linear-task-support-mjs",
+              "io": "linear-task-support.mjs",
+              "p": "src/orchestration/linear-task-support.mjs"
+            },
+            {
+              "t": "src-orchestration-linear-workflow-mjs",
+              "io": "linear-workflow.mjs",
+              "p": "src/orchestration/linear-workflow.mjs"
             }
           ],
           "extTo": [
@@ -2682,21 +2674,9 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "ai"
             },
             {
-              "t": "git-worktree.mjs",
-              "io": "git-worktree.mjs",
-              "p": "src/infra/git-worktree.mjs",
-              "m": "infra"
-            },
-            {
               "t": "git-diff.mjs",
               "io": "git-diff.mjs",
               "p": "src/infra/git-diff.mjs",
-              "m": "infra"
-            },
-            {
-              "t": "success-criteria.mjs",
-              "io": "success-criteria.mjs",
-              "p": "src/infra/success-criteria.mjs",
               "m": "infra"
             },
             {
@@ -2704,12 +2684,6 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "io": "gateway.mjs",
               "p": "src/capabilities/gateway.mjs",
               "m": "capabilities"
-            },
-            {
-              "t": "path-match.mjs",
-              "io": "path-match.mjs",
-              "p": "src/infra/path-match.mjs",
-              "m": "infra"
             },
             {
               "t": "agent-registry.mjs",

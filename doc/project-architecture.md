@@ -177,7 +177,7 @@ SQL/数据库字段首版仍需人工声明精确结构及验证引用，Tauri �
 
 计划批准 gate：当 `planApproval.required` 为 true，`importPlan` 将计划标为 `awaiting_plan_approval`，`runNextTask` 在 `approvePlan`（CLI `plan approve` / slash `/wildarrange-approve`）记录批准前拒绝启动任务。默认关闭，线性循环不受影响除非显式开启。
 - `src/orchestration/workflow.mjs`：workflow 入口、样例计划生成与计划模板复制。
-- `src/orchestration/linear-runtime.mjs`：execute/verify/scope/review/checkpoint/retry 的线性任务节点运行时；每个 gate 调用经 `capabilities/gateway.mjs` 的 `invokeCapability`。失败状态、恢复状态与 ownership 二次验权由 `src/orchestration/linear-recovery.mjs` 持有。delivery worktree 段（持久 worktree 基线核对、durable intent 对账、依赖 delivery SHA 裁决与 worktree 创建）在 `src/orchestration/linear-delivery.mjs`。
+- `src/orchestration/linear-runtime.mjs`：连续 `runNextTask` 的任务选择、claim、worker 执行与 delivery pipeline 编排；每个 gate 调用经 `capabilities/gateway.mjs` 的 `invokeCapability`。分步 execute/verify/scope/review/checkpoint/retry 节点由 `src/orchestration/linear-workflow.mjs` 持有；失败状态、恢复状态与 ownership 二次验权由 `src/orchestration/linear-recovery.mjs` 持有。worker 前工作区快照由 `src/orchestration/linear-task-support.mjs` 统一记录。delivery worktree 段（持久 worktree 基线核对、durable intent 对账、依赖 delivery SHA 裁决与 worktree 创建）在 `src/orchestration/linear-delivery.mjs`。
 - `src/orchestration/delivery-pipeline.mjs`：线性运行时与并行 Agent admission（完整 pipeline）及单步 `node checkpoint` workflow（经 `runCompletionSegment` + `collectGateEvidenceFromTask`）共用的 verify -> scope -> review -> acceptance-proof -> checkpoint 序列，因此增删重排 gate 只有一处。`shouldFailDeliveryAttempt` 统一判断失败/重试，`commitTaskCompletionState` 只统一 ledger -> wisdom -> digest -> canonical `tasks.json` 的完成提交顺序；各调用方继续提供自己的 ledger 事件、digest reason 与提交后动作。checkpoint 写失败返回 `checkpoint_failed` 而非 `completed`——调用方将任务回 `pending` 并写 `checkpoint_write_failed` ledger 条目；完成严格需要 durable checkpoint。Gate 证据绑定执行轮次：每次新 worker run 清空 `last_*` gate 字段；`collectGateEvidenceFromTask` 只接受 append-only 证据链中最新 worker 条目之后的 gate 证据，checkpoint 失败轮次的 passing 证据不能借给后续未验证轮次。完成事务可幂等恢复：若在 completion ledger 事件之后、canonical `tasks.json` 保存之前中断，`run` 检测任务卡在 `verifying` 并用 checkpoint-node 逻辑裁决（全新全 pass 证据则幂等完成；否则回 `pending`）；`in_progress` 任务故意不动（可能正当 claim）；持有 `admission_claim` 的 `verifying` 任务 likewise 留给并行 admission owner（`run` 报告 `blocked` 与 resume 提示而非劫持进行中事务）。completed 任务必须有的产物（wisdom 行、memory digest）在事务**内**写入——completion ledger 事件之后、canonical persist 之前——失败则任务保持可恢复而非无产物完成；提交后便利（snapshot、workflow summary）经 `runPostCompletionSideEffects` best-effort，失败转为 `completion_side_effect_failed` ledger 事件与结果上 `sideEffectWarnings` 条目，而非 un-complete 任务。
 - `src/orchestration/plan-state.mjs`：计划归一化、图校验、计划导入、路由 enrichment、任务状态加载与计划批准状态（`loadPlanApproval` / `approvePlan`）。
 - `src/orchestration/task-board.mjs`：全项目工单总账编排；新功能、Bug、验收纠错和维护任务共享 Task 模型。信息不足时先写 `draft`，补齐 writable paths、success criteria 与 verify commands 后经 `task ready` 转为 `pending`。负责跨 Plan list/get、claim、证据记录、单文件状态持久化、outbox 与 durable 消息板；同一 Task 内 verifier 失败只追加 attempt/history，不制造新工单。
@@ -437,7 +437,7 @@ adapter 专用行为属于 `src/interface/adapters.mjs`、`src/interface/kimi-ad
 | `src/orchestration/feature-design.mjs`                        | 需求确认、计划绑定与 feature design 状态迁移的唯一业务 owner |
 | `src/orchestration/host-runtime.mjs`                          | 宿主事件的业务前置编排；CLI 显式组合 AI 渲染入口，不添加反向 import |
 | `src/orchestration/contract-governance.mjs`                    | 批准契约范围、计划外变更申请/决定/等待与登记更新编排，复用现有 ChangeRequest |
-| `src/orchestration/linear-runtime.mjs`                        | 线性任务节点运行时、重试 / checkpoint，经 gateway 调用能力       |
+| `src/orchestration/linear-runtime.mjs`                        | 连续 runNextTask 编排与 route 入口，经 gateway 调用能力         |
 | `src/orchestration/linear-recovery.mjs`                       | 线性任务失败状态、恢复状态与 ownership 二次验权；只写 ledger-first 事实，不调度 worker |
 | `src/orchestration/linear-delivery.mjs`                       | 线性任务 delivery worktree 编排：持久 worktree 基线核对、durable intent 对账、依赖 delivery SHA 裁决与 worktree 创建 |
 | `src/orchestration/parallel-runtime.mjs`                      | 命令型子 Agent 并行运行、隔离结果、skipped/cleanup 生命周期状态、runner 崩溃逐任务容错、中断对账（incompleteTasks）与 `parallel retry` partial 重试 |
@@ -448,6 +448,8 @@ adapter 专用行为属于 `src/interface/adapters.mjs`、`src/interface/kimi-ad
 | `src/orchestration/admission-inputs.mjs`                    | admission 结果读取、候选文件/补丁路径归一化与实际变更收集；不推进事务状态 |
 | `src/orchestration/admission-claim.mjs`                     | admission 第一阶段：状态裁决、ownership 检查、claim 持久化与启动账本；不触碰业务文件 |
 | `src/orchestration/admission-finalize.mjs`                  | admission 完成阶段：门禁、交付、回滚与完成落账；不负责 claim 或直接 apply |
+| `src/orchestration/linear-workflow.mjs`                    | 分步 workflow 节点：execute、verify、scope、review、checkpoint、retry |
+| `src/orchestration/linear-task-support.mjs`                | 线性 worker 前工作区快照事实采集；不推进任务状态或运行质量门 |
 | `src/orchestration/admission-projection.mjs`                  | admission 结果投影：claim 阶段推进与回滚失败恢复落盘、agent-run lifecycle 写回、decisions.jsonl 决策投影 |
 | `src/orchestration/admission-recovery.mjs`                    | admission 回滚计划、补丁恢复、revalidation / 已集成恢复状态落盘，禁止已 push 成果回滚 |
 | `src/orchestration/delivery-pipeline.mjs`                     | 按任务/工作区事实确定交付要求及强制完成终点，复用 integration Git 事务；统一 gate 与完成提交顺序 |
