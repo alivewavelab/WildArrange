@@ -74,6 +74,7 @@ export async function runInjectionHook(rootDir, input = {}) {
   const facts = {};
 
   if (event === "SessionStart") {
+    // §3.4：会话启动 → 恢复报告、规则扫描、Lead 上下文与记忆 digest。
     facts.resume = await resumeReport(controlRoot, { sessionId, source: "hook:session_start", cliCommandPrefix });
     facts.rules = await scanProjectRules(executionRoot, { controlRoot });
     facts.agentContext = await buildAgentContext(controlRoot, {
@@ -94,6 +95,7 @@ export async function runInjectionHook(rootDir, input = {}) {
       route: facts.route,
     }).catch((error) => ({ error: error.message }));
   } else if (event === "UserPromptSubmit") {
+    // §3.4：用户提交 → 路由决策、计划草稿指令与 Archivist 记忆摄入。
     facts.route = input.prompt ? await routeRequest(controlRoot, { text: input.prompt, sessionId }) : null;
     facts.planDraft = buildPlanDraftDirective(facts.route, {
       sessionId,
@@ -109,6 +111,7 @@ export async function runInjectionHook(rootDir, input = {}) {
       text: input.prompt || "",
     });
   } else if (event === "PreToolUse") {
+    // §3.4：工具调用前 → 范围预检；有任务时重建 before_execute 上下文。
     facts.targetPaths = targetPaths;
     facts.rules = await scanProjectRules(executionRoot, { controlRoot, targetPaths });
     facts.preflight = await preToolUseGuard(controlRoot, input, { executionRoot });
@@ -122,6 +125,7 @@ export async function runInjectionHook(rootDir, input = {}) {
       }).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
     }
   } else if (event === "PostToolUse") {
+    // §3.4：工具完成后 → 结果门评估与可选 scope 快检，不阻断 Hook 输出。
     facts.targetPaths = targetPaths;
     facts.rules = await scanProjectRules(executionRoot, { controlRoot, targetPaths });
     facts.resultGate = await evaluateHookResultGate(controlRoot, input);
@@ -131,6 +135,7 @@ export async function runInjectionHook(rootDir, input = {}) {
         .catch((error) => ({ status: "inconclusive", reason: error.message }));
     }
   } else if (event === "PostCompact") {
+    // §3.4：上下文压缩后 → 重建 resume/规则/Lead 上下文，补偿丢失的对话面。
     facts.resume = await resumeReport(controlRoot, { sessionId, source: "hook:post_compact", cliCommandPrefix });
     facts.rules = await scanProjectRules(executionRoot, { controlRoot });
     facts.agentContext = await buildAgentContext(controlRoot, {
@@ -150,6 +155,7 @@ export async function runInjectionHook(rootDir, input = {}) {
       stage: "resume",
     }).catch((error) => ({ error: error.message }));
   } else if (event === "Stop") {
+    // §3.4：会话结束 → 续跑指令与日路由审查，供宿主决定是否自动 resume。
     facts.continuation = await continuationDirective(controlRoot, { sessionId, source: "hook:stop", cliCommandPrefix });
     facts.routingReview = await writeDailyRoutingReview(controlRoot, {
       trigger: "hook:stop",

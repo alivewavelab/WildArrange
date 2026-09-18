@@ -60,6 +60,7 @@ import { assertCurrentTaskOwnership, coordinateTaskClaim } from "./remote-owners
 /** admission 主事务 re-export，保持 parallel 模块单一入口。 */
 export { admitParallelAgentResult } from "./admission.mjs";
 
+/** 并行子 agent 默认超时（毫秒）；可被 CLI/config 覆盖。 */
 const DEFAULT_PARALLEL_TIMEOUT_MS = 120_000;
 
 // --- 运行与 spawn ---
@@ -732,6 +733,7 @@ function resolveParallelIsolation(config, gitCoordination, options) {
     && coordination.requireWorktreeForParallelWrites !== false
     && (gitCoordination.active || gitCoordination.localGitAvailable === true);
   if (enforceWorktree && options.isolation && options.isolation !== "git-worktree") {
+    // §3.4：可写 parallel 在 guarded/strict 模式下必须 worktree 隔离，禁止 run-dir 直写主 checkout。
     throw new Error("parallel writable agents require git-worktree isolation; weaken gitCoordination.requireWorktreeForParallelWrites in config to opt out");
   }
   return enforceWorktree ? "git-worktree" : requested;
@@ -741,10 +743,14 @@ function resolveParallelIsolation(config, gitCoordination, options) {
 async function claimParallelRunTasks(rootDir, planId, selectedTasks, options) {
   return withTaskStateLock(rootDir, `parallel-run-claim:${options.runId}`, async () => {
     const taskState = await loadTaskState(rootDir);
-    if (!taskState || taskState.planId !== planId) throw new Error(`active plan changed before parallel run ${options.runId}`);
+    if (!taskState || taskState.planId !== planId) {
+      // §3.4：spawn 与 claim 分锁；plan 漂移时拒绝写入 parallel_run_claim。
+      throw new Error(`active plan changed before parallel run ${options.runId}`);
+    }
     for (const selected of selectedTasks) {
       const task = taskState.tasks.find((candidate) => candidate.id === selected.id);
       if (!task || task.status !== "pending") {
+        // §3.4：仅 pending 可 claim；状态变化后 refuse run，防双写。
         throw new Error(`task ${selected.id} is no longer pending; refusing parallel run ${options.runId}`);
       }
       // §3.4：同一任务同时只能有一个 parallel_run_claim，防止双写 owner/worktree。

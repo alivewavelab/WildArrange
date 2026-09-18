@@ -21,6 +21,7 @@ import {
   resolveWildArrangePath,
 } from "../infra/runtime-store.mjs";
 
+/** matchSkills 默认返回条数上限；config.skillMatcher.defaultLimit 未配置时使用。 */
 const DEFAULT_LIMIT = 6;
 
 /**

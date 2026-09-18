@@ -44,6 +44,7 @@ export const ZONES = ["interface", "orchestration", "ai", "capabilities", "infra
  */
 export const UNKNOWN_ZONE = "unknown";
 
+/** maskSource 替换字面量内容的占位符（NUL，与 import 正则 \u0000 对齐）。 */
 const MASK = "\u0000";
 
 /**
@@ -167,7 +168,9 @@ export function decodeStringLiteral(raw) {
   return out;
 }
 
+/** 在 masked 视图上匹配静态 import/export-from 的正则（d=g 全局+indices）。 */
 const STATIC_IMPORT_REGEX = /(?<![\w.$])(?:import|export)\s+(?:[^'"`]*?from\s+)?((["'])\u0000*\2)/dg;
+/** 在 masked 视图上匹配动态 import() 的正则。 */
 const DYNAMIC_IMPORT_REGEX = /(?<![\w.$])import\s*\(\s*((["'])\u0000*\2)/dg;
 
 /**

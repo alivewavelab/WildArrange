@@ -48,6 +48,7 @@ export const COMMAND_WORKER_AGENTS = Object.freeze(["Jiuwei", "ZhuRong"]);
  * READ_ONLY_LONG_LIVED_AGENTS：本模块对外导出常量或符号。
  */
 export const READ_ONLY_LONG_LIVED_AGENTS = Object.freeze(["DiJiang", "BaiZe", "LuWu"]);
+/** READ_ONLY_LONG_LIVED_AGENTS 的 Set 视图，供 O(1) worker 校验。 */
 const READ_ONLY_LONG_LIVED_AGENT_SET = new Set(READ_ONLY_LONG_LIVED_AGENTS);
 /** 旧版宿主配置里的历史 Agent 名，映射到当前长期 Agent 白名单。 */
 /**

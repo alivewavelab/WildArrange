@@ -23,7 +23,9 @@ const errors = [];
 const expect = (condition, message) => { if (!condition) errors.push(message); };
 
 // ── 按项目调整（CONFIG）──────────────────────────────────────────
+// §3.2：产品总图 HTML 相对路径；须与 validate-module-file-map.mjs 的 OVERVIEW_PATH 一致。
 const OVERVIEW_PATH = "docs/product/architecture-overview.html";
+// §3.2：各 .flow 类名下直接子 div 期望数（卡与箭头交错：nK → 2K+1；shell → 3）。
 const FLOW_EXPECT = { n2: 3, n3: 5, n4: 7, n5: 9, n6: 11, n7: 13, n8: 15, shell: 3 };
 
 const countDirectDivChildren = (html, start) => {

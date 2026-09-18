@@ -24,6 +24,7 @@ import { appendFile, mkdir, open } from "node:fs/promises";
 import path from "node:path";
 import { createWorkId, nowIso, resolveWildArrangePath } from "./runtime-store.mjs";
 
+/** decisions.jsonl 允许写入的字段白名单（读侧投影用）。 */
 const DECISION_FIELDS = [
   "gate",
   "decision",
@@ -43,6 +44,7 @@ const DECISION_FIELDS = [
   "toolInputSummary",
 ];
 
+/** 从 decisions.jsonl 尾部倒读时每块读取的字节数。 */
 const READ_CHUNK_BYTES = 64 * 1024;
 const ensuredDirs = new Set();
 

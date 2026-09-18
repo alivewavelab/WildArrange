@@ -21,6 +21,7 @@
 import { readDecisions } from "../infra/decision-log.mjs";
 import { annotationStats } from "../infra/annotation-log.mjs";
 
+/** decisions.jsonl 已知的 gate 名，供空结果提示与 stats  neverFiredGates 对照。 */
 const KNOWN_GATES = [
   "verify",
   "scope",

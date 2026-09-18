@@ -80,16 +80,19 @@ async function prepareTaskHandoffUnlocked(rootDir, options = {}) {
     throw new Error(`task ${task.id} cannot be handed off from status ${task.status}`);
   }
   if (task.admission_claim?.runId) {
+    // §3.4：admission 事务进行中禁止 handoff，避免双设备写 owner 与 task branch 竞态。
     throw new Error(`task ${task.id} is in active admission run ${task.admission_claim.runId}; finish or recover that transaction before handoff`);
   }
   if (!task.coordination || !["claimed", "accepted"].includes(task.coordination.status)) {
     throw new Error(`task ${task.id} has no active remote ownership claim`);
   }
   if (task.coordination.deviceId !== device.deviceId) {
+    // §3.4：仅当前写 owner 可发起 handoff；fail-closed 防越权移交。
     throw new Error(`task ${task.id} is owned by device ${task.coordination.deviceName || task.coordination.deviceId}`);
   }
   const remoteHeadSha = await remoteBranchHead(rootDir, task.coordination.remote, task.coordination.branch);
   if (remoteHeadSha !== task.coordination.remoteHeadSha) {
+    // §3.4：远端 head 与 coordination 不一致时拒绝 prepare，须先 reconcile ownership。
     throw new Error(`task ${task.id} remote ownership changed; expected ${task.coordination.remoteHeadSha}, got ${remoteHeadSha || "missing"}`);
   }
   let handoffVerification = null;
@@ -97,6 +100,7 @@ async function prepareTaskHandoffUnlocked(rootDir, options = {}) {
     const verifyEnvelope = await invokeCapability("verify", { rootDir, task });
     handoffVerification = verifyEnvelope.evidence;
     if (verifyEnvelope.status !== "pass" || handoffVerification?.pass !== true) {
+      // §3.4：requireVerificationBeforeHandoff 时 verifier 失败禁止移交未验收树。
       throw new Error(`task ${task.id} verifier must pass against the current handoff tree`);
     }
   }
@@ -112,6 +116,7 @@ async function prepareTaskHandoffUnlocked(rootDir, options = {}) {
   const writablePaths = task.writable_paths || [];
   const deniedPaths = changedPaths.filter((filePath) => !pathAllowed(filePath, writablePaths));
   if (config.gitCoordination.requireCleanHandoff && deniedPaths.length > 0) {
+    // §3.4：handoff tree 须落在任务边界内；越界变更不得进入 offer packet。
     throw new Error(`handoff has changes outside task writable_paths: ${deniedPaths.join(", ")}`);
   }
   const includedPaths = changedPaths.filter((filePath) => pathAllowed(filePath, writablePaths));
@@ -186,6 +191,7 @@ async function pushTaskHandoffUnlocked(rootDir, options = {}) {
   if (!options.taskId) throw new Error("handoff push requires taskId");
   const record = await readHandoffRecord(rootDir, options.taskId);
   if (!record || !["prepared", "pushed"].includes(record.status)) {
+    // §3.4：push 必须基于 prepare 快照；缺失记录时 fail-closed，禁止盲推。
     throw new Error(`task ${options.taskId} has no prepared handoff`);
   }
   const taskState = await requireTaskState(rootDir);
@@ -199,6 +205,7 @@ async function pushTaskHandoffUnlocked(rootDir, options = {}) {
     .sort();
   const deniedPaths = currentPaths.filter((filePath) => !pathAllowed(filePath, task.writable_paths || []));
   if (deniedPaths.length > 0) {
+    // §3.4：push 前重算 tree；越界须拒绝并 require 重新 prepare。
     throw new Error(`handoff changed after prepare and now contains out-of-scope paths: ${deniedPaths.join(", ")}`);
   }
   const includedPaths = currentPaths.filter((filePath) => pathAllowed(filePath, task.writable_paths || []));
@@ -213,12 +220,14 @@ async function pushTaskHandoffUnlocked(rootDir, options = {}) {
   ]);
   if (preparedTreeSha !== currentTreeSha
     || JSON.stringify(includedPaths) !== JSON.stringify(record.changedPaths || [])) {
+    // §3.4：checkpoint tree 与 prepare 不一致时拒绝 push，防止推送非验收树。
     throw new Error(`handoff workspace changed after prepare; run handoff prepare --task ${options.taskId} again`);
   }
   const actualSha = await remoteBranchHead(rootDir, record.remote, record.branch);
   const alreadyPushed = actualSha === record.checkpointSha;
   // §3.4：远端已成功但本地 ledger 缺失时，识别 reconciled 并补写 audit，禁止重复 force push。
   if (!alreadyPushed && actualSha !== record.previousRemoteHeadSha) {
+    // §3.4：非幂等 reconciled 且远端已前进时拒绝非 force push，防覆盖他人 commit。
     throw new Error(`handoff push refused: remote task head changed from ${record.previousRemoteHeadSha} to ${actualSha || "missing"}`);
   }
   if (!alreadyPushed) {
@@ -227,6 +236,7 @@ async function pushTaskHandoffUnlocked(rootDir, options = {}) {
       branch: record.branch,
       commitSha: record.checkpointSha,
     });
+    // §3.4：push 失败不得更新 coordination 为 offered；本地状态保持 prepared。
     if (!pushed.ok) throw new Error(`handoff push failed without force: ${pushed.stderr || pushed.stdout}`);
   }
   task.coordination = {
@@ -286,6 +296,7 @@ async function acceptTaskHandoffUnlocked(rootDir, options = {}) {
   // §3.4：远端已是 accept commit 时走 resume 路径，补本地状态而不重复 push。
   if (offer.kind === "handoff_accept") {
     if (offer.planId !== planId || offer.task?.id !== options.taskId) {
+      // §3.4：远端 accept packet 身份须与本地 device/plan 一致，禁止错任务幂等恢复。
       throw new Error(`remote branch ${branch} contains an acceptance for another task`);
     }
     if (offer.acceptedByDevice?.deviceId !== device.deviceId) {
@@ -350,6 +361,7 @@ async function acceptTaskHandoffUnlocked(rootDir, options = {}) {
     throw new Error(`remote branch ${branch} does not contain the expected handoff offer`);
   }
   if (offer.toDeviceId !== device.deviceId) {
+    // §3.4：handoff offer 须指向本 device；错 packet 拒绝 accept，防 ownership 劫持。
     throw new Error(`handoff targets deviceId ${offer.toDeviceId}; current deviceId is ${device.deviceId}`);
   }
   await assertCleanWorkingTree(rootDir);
@@ -369,6 +381,7 @@ async function acceptTaskHandoffUnlocked(rootDir, options = {}) {
     throw new Error(`handoff accept refused: remote task head changed from ${checkpointSha} to ${remoteBeforePush || "missing"}`);
   }
   const pushed = await pushCommit(rootDir, { remote: context.remote, branch, commitSha: acceptSha });
+  // §3.4：accept push 失败时本地不得写入 accepted owner；须 reconcile 远端后再试。
   if (!pushed.ok) throw new Error(`handoff accept lost ownership race: ${pushed.stderr || pushed.stdout}`);
   await switchToTaskBranch(rootDir, branch, acceptSha);
 

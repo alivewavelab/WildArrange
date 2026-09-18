@@ -30,6 +30,7 @@ import {
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 
+/** 本模块所在目录（用于推导 WildArrange 仓库根）。 */
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 // This file lives at src/infra/prompt-pack.mjs, two levels below the project root.
 /**

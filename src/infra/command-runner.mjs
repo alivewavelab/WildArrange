@@ -16,8 +16,11 @@
 import { spawn } from "node:child_process";
 import { blockedCommandResult, evaluateCommandSafety } from "./command-safety.mjs";
 
+/** 命令 stdout/stderr 合并后的最大保留字符数（超出截断）。 */
 const DEFAULT_COMMAND_OUTPUT_MAX_CHARS = 200_000;
+/** SIGTERM 后等待进程退出的宽限（毫秒），超时再 SIGKILL。 */
 const COMMAND_SIGKILL_GRACE_MS = 2_000;
+/** Windows 上 taskkill 后轮询确认进程已退出的间隔。 */
 const WINDOWS_TERMINATION_CONFIRM_MS = 2_000;
 
 /**

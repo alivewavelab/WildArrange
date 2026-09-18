@@ -53,6 +53,7 @@ import {
 } from "../infra/verification-registry.mjs";
 import { readGitHead } from "../infra/git-diff.mjs";
 
+/** adoption 会话合法状态集合，供 reconcile/transition 校验。 */
 const SESSION_STATES = new Set([
   "scanning",
   "reviewing",
@@ -66,7 +67,9 @@ const SESSION_STATES = new Set([
   "cancelled",
 ]);
 
+/** 须逐卡人类批准的敏感卡动作（merge/delete/archive）。 */
 const SENSITIVE_ACTIONS = new Set(["merge", "delete", "archive"]);
+/** 匹配 AGENTS.md、package.json、wildarrange.config.json 的敏感路径正则。 */
 const SENSITIVE_PATH_RE = /(^|\/)(AGENTS\.md|package\.json|wildarrange\.config\.json)$/i;
 /** 根据 cardId 生成 adoption resume 子命令提示。 */
 function preparedResumeAction(cardId) {
@@ -493,6 +496,7 @@ async function applyApprovedCardsUnlocked(rootDir, options = {}) {
   const files = await readSessionFiles(rootDir, session.sessionId);
   const recovery = findTransaction(files.transactions, "recovery_required");
   if (recovery) {
+    // §3.4：存在 recovery_required 事务时禁止新 apply，须先 resume/restore preimage。
     session.status = "recovery_required";
     session.nextAction = `卡片 ${recovery.cardId} 回滚失败，保留 maintenance marker`;
     await writeSessionFiles(rootDir, session, files);

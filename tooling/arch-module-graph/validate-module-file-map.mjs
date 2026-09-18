@@ -30,9 +30,8 @@ const expect = (condition, message) => { if (!condition) errors.push(message); }
 const toPosix = (path) => relative(root, path).split(sep).join("/");
 
 // --- CONFIG：按项目调整 ---
-// 复制后必须填 WATCH_ZONES，空数组会失败（禁止沿用某个产品仓库的目录）。
-// 例：{ dir: "src", exts: new Set([".ts", ".tsx"]) }
-// MAP_PATH / OVERVIEW_PATH 也可用环境变量覆盖（与 generate-module-graph.mjs 对齐）。
+// 复制到新项目时必须改写本块；空 WATCH_ZONES 会直接 fail（禁止沿用其他仓库目录）。
+// §3.2：监视区列表。dir 相对仓库根；exts 为 Set<扩展名>；可选 allowMissing / allowEmpty / maxDepth / nameRe / dirRe。
 const WATCH_ZONES = [
   { dir: "bin", exts: new Set([".mjs"]) },
   { dir: "src/interface", exts: new Set([".mjs"]) },
@@ -41,11 +40,17 @@ const WATCH_ZONES = [
   { dir: "src/capabilities", exts: new Set([".mjs"]) },
   { dir: "src/infra", exts: new Set([".mjs"]) }
 ];
+// §3.2：跳过归属与命名校验的 posix 路径前缀（生成物、vendor 等）。
 const GENERATED_PREFIXES = [];
+// §3.2：module-file-map.json 相对路径；须与 generate-module-graph.mjs 的 MAP_PATH 一致。
 const MAP_PATH = "tooling/arch-module-graph/module-file-map.json";
+// §3.2：产品总图 HTML 相对路径；须含 module-registry 脚本块与 D 字典。
 const OVERVIEW_PATH = "docs/product/architecture-overview.html";
+// §3.2：允许保留 utils/helpers/common 等桶文件名的 posix 白名单（第三方脚手架固定产物）。
 const ALLOWED_BUCKET_FILES = [];
+// §3.2：反向同步深度。"entry"=每模块至少一个入口脚本；"all"=全部实现文件须出现在 D 字典。
 const GRAPH_DEPTH = "entry"; // "all" | "entry"
+// §3.2：目录名豁免正则（locale、__dunder__、脚手架占位目录等，不参与 kebab/Pascal 校验）。
 const DIR_EXEMPT = [
   /^\[.+\]$/,
   /^\(.+\)$/,
@@ -56,10 +61,15 @@ const DIR_EXEMPT = [
   /^[a-z]{2}(-[A-Z]{2})?$/,
 ];
 
+// §3.2：以下命名正则从 WATCH_ZONES.exts 派生，复制项目时一般不需手改。
 const TEST_FILE = /(?:\.test\.[^.]+$|_test\.[^.]+$|(?:^|\/)test_[^/]+$)/;
+/** 入口聚合文件豁免命名风格校验。 */
 const ENTRY_BASENAMES = /(^|\/)(index\.[^/]+|mod\.rs|__init__\.py)$/;
+/** 语言惯例入口名（__init__/__main__/mod.rs）豁免目录命名风格校验。 */
 const NAME_EXEMPT = /(?:^|\/)(__init__|__main__)\.py$|(?:^|\/)mod\.rs$/;
+/** 类型侧车文件豁免实现归属扫描。 */
 const TYPES_FILE = /\.types\.[^.]+$/;
+/** 禁止的桶文件名（utils/helpers/common 等），防职责模糊的大杂烩模块。 */
 const BANNED_BASENAME = /^(utils?|helpers?|common|misc|shared|constants)(\.[a-z0-9-]+)*\.[a-z0-9]+$/;
 
 // --- 路径工具与监视区扫描 ---

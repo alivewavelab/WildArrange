@@ -19,6 +19,7 @@
 // =============================================================================
 import { isTrivialCommand } from "./task-predicates.mjs";
 
+/** 参与门武装评估的活跃任务状态集合（不含 completed/draft 等终态或草稿）。 */
 const ACTIVE_TASK_STATUSES = new Set(["pending", "in_progress", "verifying", "failed", "review_blocked"]);
 
 /**

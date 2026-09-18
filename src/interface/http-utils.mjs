@@ -52,6 +52,7 @@ export function readJsonBody(request) {
       // 流式累计字节，超限立即 reject，避免大 body 占满内存。
       if (bodyBytes > MAX_BODY_BYTES) {
         settled = true;
+        // §3.4：body 超 64KB 立即 reject，防止 Dashboard API 被大 payload 拖垮内存。
         reject(Object.assign(new Error("request body too large"), { code: "payload_too_large" }));
         return;
       }
@@ -67,6 +68,7 @@ export function readJsonBody(request) {
       try {
         resolve(JSON.parse(body));
       } catch {
+        // §3.4：非法 JSON 拒绝解析，避免半结构对象进入 adoption/annotation 写路径。
         reject(Object.assign(new Error("invalid JSON body"), { code: "invalid_json" }));
       }
     });

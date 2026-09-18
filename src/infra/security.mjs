@@ -30,7 +30,9 @@ import {
 } from "./runtime-store.mjs";
 import { inspectCompletedTaskEvidence, normalizeTaskLedger } from "./task-state-store.mjs";
 
+/** 配置完整性基线文件在 .wildarrange 下的相对路径段。 */
 const CONFIG_BASELINE_PATH = ["security", "config-baseline.json"];
+/** state restore 备份清单：须与 ledger 尾 hash 缓存同进同出。 */
 const BACKUP_STATE_FILES = [
   [".wildarrange", "ledger.jsonl"],
   // 尾 hash 缓存必须与 ledger 同进同出，否则恢复后缓存尺寸对不上会被
@@ -44,6 +46,7 @@ const BACKUP_STATE_FILES = [
   [WILDARRANGE_CONFIG_FILE],
   [".wildarrange", "config.json"],
 ];
+/** doctor 运行时完整性检查的最低必备状态文件。 */
 const REQUIRED_STATE_FILES = [
   [".wildarrange", "ledger.jsonl"],
   [".wildarrange", "work.json"],
@@ -105,6 +108,7 @@ export async function verifyConfigBaseline(rootDir) {
     }
   }
   for (const [filePath] of current.entries()) {
+    // 基线未登记的新配置文件也视为完整性失败（防静默扩面）
     if (!expected.has(filePath)) failures.push({ path: filePath, reason: "new_config_file" });
   }
 
@@ -188,6 +192,7 @@ export async function prepareArchiveRecoveryPackage(rootDir, options = {}) {
     const relativePath = normalizeRelativePath(path.relative(rootDir, sourcePath));
     recoveryPaths.push(relativePath);
     const existing = entriesByPath.get(relativePath);
+    // 已在备份 manifest 中且成功复制的路径不必重复 copy
     if (existing?.status === "copied") continue;
     entriesByPath.set(relativePath, await copyBackupEntry(sourcePath, backupDir, relativePath));
   }
@@ -324,6 +329,7 @@ export async function restoreRuntimeStateBackup(rootDir, options = {}) {
         ? "directory"
         : "file";
     if (file.type && file.type !== actualType) {
+      // §3.4 回滚安全：备份条目类型与现场不一致时 fail-closed，禁止半恢复
       throw new Error(`backup entry type changed: ${file.path}; expected ${file.type}, got ${actualType}`);
     }
     await mkdir(path.dirname(targetPath), { recursive: true });
@@ -479,6 +485,7 @@ export async function verifyRuntimeState(rootDir) {
       files.push({ path: ".wildarrange/team/tasks.json", status: "present", bytes: fileStat.size });
     }
   } else {
+    // 无 active plan 时不强制 tasks.json 存在；有 plan 则上面已标 missing
     files.push({
       path: ".wildarrange/team/tasks.json",
       status: existsSync(tasksPath) ? "present" : "not_required",

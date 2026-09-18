@@ -156,10 +156,12 @@ export async function digestPath(absolutePath) {
   try {
     const info = await lstat(absolutePath);
     if (info.isSymbolicLink()) {
+      // symlink  preimage 只 hash 目标字符串，不跟随（防目录逃逸）
       const { readlink } = await import("node:fs/promises");
       return hashContent(`symlink:${await readlink(absolutePath)}`);
     }
     if (info.isDirectory()) {
+      // 目录 digest 仅含直接子项名排序串，不深 walk（与 capture 时 copy 范围一致）
       const names = (await readdir(absolutePath)).sort();
       return hashContent(`dir:${names.join("\n")}`);
     }

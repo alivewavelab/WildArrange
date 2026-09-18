@@ -36,6 +36,7 @@ const strings = (value, label) => {
   return [...new Set(value.map(item => item.trim()))];
 };
 
+/** 内置长期文档真实性审查步骤 ID（D1-D3），变更触及长期文档时自动注入。 */
 const DOCUMENT_TRUTH_ID = "document-current-truth";
 /** 判断路径是否为需 D1-D3 约束的长期文档（排除 plans/reports 等）。 */
 const isLongTermDocument = name => {

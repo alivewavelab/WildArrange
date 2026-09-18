@@ -21,6 +21,7 @@ import { readDecisions } from "../infra/decision-log.mjs";
 import { annotationStats } from "../infra/annotation-log.mjs";
 import { callOpenAICompatible, resolveAgentProvider } from "../infra/llm-provider.mjs";
 
+/** 单次审查包纳入的可标注决策条数上限，防止 LLM token 膨胀。 */
 const PACKET_LIMIT = 50;
 
 /** 脱敏决策记录供 LLM 审查包使用，截断 reason/summary 防 token 膨胀。 */
@@ -99,6 +100,7 @@ export async function runSuspicionReview(rootDir, { limit = PACKET_LIMIT } = {})
     const archivistAgent = config.archivistRouter?.agent || "CangJie";
     const resolved = resolveAgentProvider(config, archivistAgent);
     if (!resolved.available) {
+      // §3.4：无 LLM 时仅输出确定性基线，报告明确标注 skipped，不影响任何 gate。
       report.llm = { status: "skipped", reason: resolved.reason };
     } else {
       try {

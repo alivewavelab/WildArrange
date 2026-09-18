@@ -20,7 +20,9 @@
 import { open, readFile, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 
+/** 获取锁失败时的重试间隔（毫秒）。 */
 const LOCK_RETRY_MS = 50;
+/** 等待锁的最大时长（毫秒）；超时抛可诊断错误。 */
 const LOCK_WAIT_TIMEOUT_MS = 15_000;
 // Grace for a lock file whose owner line was never written (the acquiring
 // process died between creating the file and writing the content). A live

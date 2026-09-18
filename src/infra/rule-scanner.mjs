@@ -23,6 +23,7 @@ import { appendLedger } from "./ledger.mjs";
 import { normalizeRelativePath, pathMatchesPattern } from "./path-match.mjs";
 import { uniqueStrings } from "./text-utils.mjs";
 
+/** 项目根扫描的单文件规则清单（与 ruleInjection.projectSingleFiles 对齐）。 */
 const PROJECT_RULE_FILES = [
   "AGENTS.md",
   "CLAUDE.md",
@@ -30,6 +31,7 @@ const PROJECT_RULE_FILES = [
   ".github/copilot-instructions.md",
 ];
 
+/** 项目根扫描的规则目录清单（与 ruleInjection.projectRuleDirs 对齐）。 */
 const PROJECT_RULE_DIRS = [
   ".claude/rules",
   ".cursor/rules",

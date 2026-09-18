@@ -27,12 +27,15 @@ export const DANGEROUS_ACTIONS = Object.freeze(["archive", "merge", "delete"]);
  * 验证卡片 JSON schema 版本。
  */
 export const CARD_SCHEMA_VERSION = 1;
+/** 视为「活跃消费者」的证据等级；unknown 触发危险动作门禁。 */
 const ACTIVE_CONSUMER_GRADES = new Set(["direct", "runner", "registered"]);
+/** npm lifecycle 官方 shortcut 名；discovery 不把它们当普通 script 推断。 */
 const OFFICIAL_NPM_SHORTCUTS = new Set(["test", "start", "stop", "restart", "lint"]);
 /**
  * SUCCESSOR_MARKER_RE：本模块对外API。
  */
 export const SUCCESSOR_MARKER_RE = /successor|superseded by|replaced by|归档至|历史方案/i;
+/** 识别「当前权威来源」文件路径的正则列表（AGENTS、config、skills 等）。 */
 const CURRENT_SOURCE_RES = [
   /(^|\/)AGENTS\.md$/i,
   /(^|\/)CLAUDE\.md$/i,
@@ -55,6 +58,7 @@ export const REVIEW_SCRIPT_RE = /^(review|audit|inspect)([:_-]|$)/i;
  * 识别 test/verify 类 npm script 的正则。
  */
 export const TEST_SCRIPT_RE = /^(test|verify|coverage|spec)([:_-]|$)/i;
+/** package.json scripts 中含动态执行线索时的降级标记正则。 */
 const DYNAMIC_HINT_RE = /\bimport\s*\(|\beval\s*\(|\bnew Function\b|\brequire\s*\(\s*[^'"`]/;
 
 /**

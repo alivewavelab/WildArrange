@@ -30,6 +30,7 @@ import { projectDecisions, projectDecisionStats } from "./decisions.mjs";
 import { readDecisions } from "../infra/decision-log.mjs";
 import { appendAnnotation, readAnnotations } from "../infra/annotation-log.mjs";
 
+/** 路由复盘面板允许的人工标注 category 白名单。 */
 const ROUTE_REVIEW_CATEGORIES = ["confirmed", "rule_wrong", "case_wrong"];
 
 /** 按日期聚合 routing 决策及其同 session 的工具链，附带最新人工标注。 */
@@ -193,6 +194,7 @@ export function renderPanelsHtml() {
     </section>`;
 }
 
+/** 决策/路由复盘面板内嵌前端脚本（分类过滤、标注提交、并行状态刷新）。 */
 export const PANELS_SCRIPT = `
     let decisionPayload = { recent: [], gates: [], neverFiredGates: [] };
     let decisionCategory = "all";

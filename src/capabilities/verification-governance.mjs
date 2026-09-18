@@ -242,6 +242,7 @@ export async function generateVerificationArtifacts(rootDir, options = {}) {
 
 // --- 卡片路径解析 ---
 
+/** archive_move 禁止作为归档根的一级目录，防止验证产物写入治理/版本控制/依赖树。 */
 const DENIED_ARCHIVE_ROOTS = new Set([".wildarrange", ".git", "node_modules"]);
 
 /** 计算 archive_move 的目标相对路径，禁止写入 .wildarrange/.git 等根。 */

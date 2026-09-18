@@ -61,6 +61,7 @@ export async function preToolUseGuard(rootDir, input = {}, options = {}) {
     const safety = evaluateCommandSafety(shellCommand, {
       extraPatterns: compileCommandSafetyPatterns(config),
     });
+    // §3.4：command-safety 命中高危模式时 fail-closed，优先于任务范围校验。
     if (!safety.allowed) {
       const reason = `high-risk shell command blocked: ${safety.findings.map((finding) => `${finding.id}: ${finding.reason}`).join("; ")}`;
       await appendLedger(rootDir, {
@@ -439,6 +440,7 @@ function isPlanDraftWrite(targetPaths) {
 
 // --- Shell 与功能设计门 ---
 
+/** 无活跃任务/计划待批时允许的 WildArrange CLI 子命令参数白名单（只读与计划管理类）。 */
 const READ_ONLY_WILDARRANGE_SHELL_ARGS = /^(?:status|doctor|summary|timeline|decisions|config\s+show|changes\s+list|adoption\s+inventory|review\s+checklist\s+--task\s+[A-Za-z0-9_.-]+|review\s+configure\s+--from\s+\.wildarrange[\\/]plan-drafts[\\/][A-Za-z0-9_.-]+\.json|prompts\s+show\s+--skill\s+[A-Za-z0-9][A-Za-z0-9._-]{0,99}|resume(?:\s+--session\s+[A-Za-z0-9_.-]+)?|continuation\s+check(?:\s+--session\s+[A-Za-z0-9_.-]+)?|help(?:\s+--all)?|--help(?:\s+--all)?)$/i;
 
 /** 无活跃任务或计划待批时，仅允许只读/计划管理类 WildArrange shell 子命令。 */

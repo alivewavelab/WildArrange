@@ -42,6 +42,7 @@ import { checkCompletionIntegrity } from "./doctor-completion.mjs";
 
 // 诊断与门控分离：每个检查独立 try/catch，单项崩溃只把自己的分项标红，
 // 其余分项照常输出；doctor 不再写 hash 链 ledger（诊断不该抢门控的锁）。
+/** doctor 分项检查顺序与 handler 映射（config → registryFreshness）。 */
 const SECTION_CHECKS = [
   ["config", checkConfigStructure],
   ["gateArming", checkGateArming],
@@ -71,6 +72,7 @@ export async function runDoctor(rootDir) {
       sections[name] = await check(rootDir, findings);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      // §3.4：单项检查崩溃只标红本项，其余分项照常输出；doctor 不写 ledger。
       addFinding(findings, "error", name, `doctor check "${name}" itself failed: ${message}`, { checkFailed: true });
       sections[name] = { status: "check_failed", error: message };
     }

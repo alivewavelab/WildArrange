@@ -24,7 +24,10 @@ import { DEFAULT_PACKAGE_NAME, PRODUCT_NAME } from "../infra/runtime-config.mjs"
 /** 默认 --help 展示的核心六命令（日常主循环）。 */
 export const CORE_COMMANDS = ["init", "plan", "run", "status", "decisions", "doctor"];
 
-/** 全部 CLI 子命令的 usage、说明与是否 core 标记。 */
+/**
+ * 全部 CLI 子命令的 usage、说明与是否 core 标记。
+ * 新命令须先登记再于 bin/wildarrange.mjs 实现；governance audit 以 --help --all 校验真实性。
+ */
 export const COMMAND_REGISTRY = [
   { usage: "review configure --from <setup.json> [--apply]", desc: "预览项目审查与执行准备配置；明确确认后 --apply，只能更新治理配置" },
   { usage: "review checklist --task <taskId>", desc: "解析本任务项目审查清单和必需依据，不启动执行器" },

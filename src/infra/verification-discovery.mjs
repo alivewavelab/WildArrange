@@ -38,6 +38,7 @@ import {
  */
 export const EVIDENCE_GRADES = Object.freeze(["direct", "runner", "registered", "clue", "unknown"]);
 
+/** 验证宇宙 walk 时跳过的目录名。 */
 const EXCLUDED_DIR_NAMES = new Set([
   ".git",
   ".wildarrange",
@@ -53,6 +54,7 @@ const EXCLUDED_DIR_NAMES = new Set([
   "out",
 ]);
 
+/** 识别测试文件的 glob 模式（相对仓库根）。 */
 const TEST_FILE_GLOBS = [
   "test/**",
   "tests/**",
@@ -66,6 +68,7 @@ const TEST_FILE_GLOBS = [
   "**/*.spec.ts",
 ];
 
+/** CI 配置文件 glob 模式。 */
 const CI_GLOBS = [
   ".github/workflows/**",
   ".gitlab-ci.yml",
@@ -73,6 +76,7 @@ const CI_GLOBS = [
   ".circleci/config.yml",
 ];
 
+/** 宿主 hook / git hook 配置 glob 模式。 */
 const HOOK_GLOBS = [
   ".husky/**",
   ".cursor/hooks.json",
@@ -149,7 +153,9 @@ export async function captureCardLiveSnapshot(rootDir, card) {
   };
 }
 
+/** consumer.by 非文件路径时的占位值（scan/动态生成等）。 */
 const NON_FILE_CONSUMER_BY = new Set(["", "scan", "dynamic-or-generated"]);
+/** 从文本中提取 repo 相对文件路径的全局正则（consumer 线索扫描用）。 */
 const REPO_RELATIVE_FILE_RE = /[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+\.[A-Za-z0-9]+/g;
 
 /**

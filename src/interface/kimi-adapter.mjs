@@ -27,6 +27,7 @@ export const KIMI_ADAPTER_PLUGIN_NAME = "wildarrange-adapter";
 /** 插件 manifest 版本号。 */
 export const KIMI_ADAPTER_VERSION = "1.0.0";
 
+/** PreToolUse matcher：覆盖 Kimi 侧已知写类工具名。 */
 const KIMI_WRITE_TOOL_MATCHER = "^(Bash|Write|Edit)$";
 
 /**

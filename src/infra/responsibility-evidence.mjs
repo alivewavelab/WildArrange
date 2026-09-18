@@ -16,7 +16,9 @@ import { hashContent } from "./runtime-store.mjs";
 import { assertPathInsideRoot } from "./path-match.mjs";
 import { contractPath } from "./responsibility-contract.mjs";
 
+/** 职责证据 walk 时识别的源码扩展名正则。 */
 const SOURCE = /\.(?:[cm]?[jt]sx?|py|rs|go|java|kt|cs|cpp|cc|c|h|hpp|rb|php|swift|vue|svelte|sql|sh|ps1)$/i;
+/** walk 时跳过的目录名（含 vendor 与构建产物）。 */
 const EXCLUDED = new Set([".git", ".wildarrange", "node_modules", "vendor", "dist", "build", "target", ".venv"]);
 
 // Evidence only: no decisions, no writes, no silent truncation.

@@ -10,7 +10,9 @@
 import { loadWildArrangeConfig } from "./runtime-config.mjs";
 import { nowIso } from "./runtime-store.mjs";
 
+/** OpenAI 兼容 chat completions 默认 HTTP 路径。 */
 const DEFAULT_CHAT_PATH = "/chat/completions";
+/** 各审查 Agent 的 lane/focus/failBias 固定 profile（packet 构造用）。 */
 const REVIEW_AGENT_PROFILES = {
   BaiZe: {
     lane: "independent_review",

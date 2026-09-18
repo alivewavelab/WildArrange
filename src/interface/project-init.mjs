@@ -23,6 +23,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { appendLedger } from "../infra/ledger.mjs";
 
+/** linear pack 内 project-init 模板目录的绝对路径。 */
 const PROJECT_DOCUMENT_TEMPLATE_DIR = fileURLToPath(new URL("../../packs/wildarrange-linear/project-init/", import.meta.url));
 /** linear pack 模板清单：source 为 pack 内文件名，target 为项目根相对路径；optional 需显式 flag 才写入。 */
 const PROJECT_DOCUMENT_TEMPLATES = [
@@ -54,6 +55,7 @@ export async function initProjectDocuments(rootDir, options = {}) {
       await writeFile(targetPath, template.content, { encoding: "utf8", flag: "wx" });
       created.push(template.target);
     } catch (error) {
+      // §3.4：EEXIST 保留用户已有文件；其它写入错误须重抛，禁止半初始化状态静默继续。
       if (error?.code !== "EEXIST") throw error;
       preserved.push(template.target);
     }

@@ -233,6 +233,7 @@ async function claimAdmission(rootDir, options, { result, files, proposedPaths }
     // round 5, 2026-07-21).
     const completedByThisRun = await hasVerifiedRunCompletionEvent(rootDir, options.runId, taskState.planId, options.taskId);
     if (!completedByThisRun) {
+      // §3.4：已完成任务仅允许 hash 链 verified 的本 run 幂等 resume，禁止跨 run 重复 apply。
       throw new Error(`task ${options.taskId} is already completed; refusing to apply parallel result from run ${options.runId}`);
     }
     const admissionEvidence = [...(task.evidence || [])].reverse().find(
@@ -247,11 +248,13 @@ async function claimAdmission(rootDir, options, { result, files, proposedPaths }
   // (reclaim and continue from the recorded phase, without re-running the
   // parts that already happened).
   if (task.pendingContractChange && task.last_failure?.reason !== "admission_rollback_failed") {
+    // §3.4：并发 admission 须 fail-closed；非本 run 不得改写等待契约决议的任务。
     if (task.admission_claim?.runId && task.admission_claim.runId !== options.runId) throw new Error("another admission owns this waiting task");
     return { kind: "awaiting_user_decision", task, changeRequest: await readChangeRequest(rootDir, task.pendingContractChange) };
   }
   if (task.admission_claim?.runId && task.status === "verifying") {
     if (task.admission_claim.runId !== options.runId) {
+      // §3.4：持久 claim 是事务权威；非 owner run 拒绝进入，崩溃须原 run 续跑。
       throw new Error(`task ${options.taskId} is currently claimed by parallel admission run ${task.admission_claim.runId} (phase: ${task.admission_claim.phase}); refusing run ${options.runId}. 若那次 admission 已崩溃，用原 run 重新 admit 即可续跑`);
     }
     // A finalizing run may already have pushed its integration commit. Let
@@ -289,13 +292,16 @@ async function claimAdmission(rootDir, options, { result, files, proposedPaths }
   }
   await assertCurrentTaskOwnership(rootDir, task);
   if (!["pending", "in_progress", "verifying"].includes(task.status)) {
+    // §3.4：非法 status 不得进入 apply，避免在终态任务上留下半写 evidence。
     throw new Error(`task ${options.taskId} status ${task.status} cannot admit parallel result`);
   }
   if (task.parallel_run_claim?.runId && task.parallel_run_claim.runId !== options.runId) {
+    // §3.4：parallel_run_claim 与 admission_claim 互斥，防止双 run 同时写工作区。
     throw new Error(`task ${options.taskId} is claimed by parallel admission run ${task.parallel_run_claim.runId}; refusing run ${options.runId}`);
   }
   const denied = proposedPaths.filter((filePath) => !pathAllowed(filePath, task.writable_paths || []));
   if (denied.length > 0) {
+    // §3.4：apply 前路径越界须 fail-closed，不得 touch 工作区后再由 scope 补救。
     throw new Error(`parallel admission denied by writable_paths: ${denied.join(", ")}`);
   }
 
@@ -363,10 +369,12 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
   const liveTaskState = await loadTaskState(rootDir);
   const liveTask = liveTaskState?.tasks.find((candidate) => candidate.id === options.taskId);
   if (liveTask?.status !== "verifying" || liveTask.admission_claim?.runId !== options.runId) {
+    // §3.4：Phase1/2 分锁间隙以持久 claim 为准；stale transaction 拒绝 apply。
     throw new Error(`task ${options.taskId} admission ownership changed before apply; refusing stale transaction from run ${options.runId}`);
   }
   const livePhase = liveTask.admission_claim.phase;
   if (!["applying", "finalizing"].includes(livePhase)) {
+    // §3.4：未知 phase 保留 claim 供人工恢复，禁止静默释放或换 run。
     throw new Error(`task ${options.taskId} has unsupported admission phase ${livePhase || "missing"}; claim kept for manual recovery`);
   }
   const resumeFinalizing = livePhase === "finalizing";
@@ -385,6 +393,7 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
         ? { mode: "patch", patch: result.result.patch, paths: appliedPaths }
         : null);
     if (!rollbackPlan) {
+      // §3.4：finalizing 续跑须用中断前 preimage；无 plan 禁止 re-apply 已变异工作区。
       throw new Error(`parallel admission cannot resume ${options.taskId}: persisted rollback plan is missing; claim kept for manual recovery`);
     }
   } else {
@@ -403,6 +412,7 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
           ? await loadPersistedRollbackPlan(rootDir, options.runId, options.taskId)
           : await createFileRollbackPlan(rootDir, files);
         if (!rollbackPlan) {
+          // §3.4：applying 续跑须用中断前 preimage；无 plan 禁止对已变异工作区重 apply。
           throw new Error(`parallel admission cannot resume ${options.taskId}: persisted rollback plan is missing; claim kept for manual recovery`);
         }
         // A new admission persists its pre-images BEFORE the first write.
@@ -427,6 +437,7 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
         const actualPaths = await collectActualAdmissionPaths(rootDir, proposedPaths);
         const actualDenied = actualPaths.filter((filePath) => !pathAllowed(filePath, claim.writablePaths));
         if (actualDenied.length > 0) {
+          // §3.4：实际写入路径二次校验；越界触发同 claim 回滚，不得带着脏文件进 gate。
           throw new Error(`parallel admission denied by actual written paths: ${actualDenied.join(", ")}`);
         }
         rollbackPlan.paths = actualPaths;
@@ -482,6 +493,7 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
     return { ...finalized, appliedPaths };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    // §3.4：finalize 崩溃保留 finalizing claim 与磁盘变更，禁止回滚；同 run 续跑 gate。
     await appendLedger(rootDir, {
       type: "parallel_agent_admission_finalize_interrupted",
       runId: options.runId,
@@ -504,6 +516,7 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
   // Ownership gate: finalize may only commit on behalf of the run that
   // holds the persisted claim (cross-review P0, round 6, 2026-07-21).
   if (task.admission_claim?.runId !== runId) {
+    // §3.4：仅 claim holder 可 finalize；防止 hijack 进行中的 admission 事务。
     throw new Error(`task ${taskId} admission claim is ${task.admission_claim ? `held by run ${task.admission_claim.runId}` : "no longer held"}; refusing to finalize on behalf of run ${runId}`);
   }
   const integrationIntent = await readIntegrationIntent(rootDir, runId, taskId);
@@ -534,6 +547,7 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
     }
     const rollback = await rollbackAdmissionChanges(rootDir, rollbackPlan);
     if (rollback.status !== "rolled_back") {
+      // §3.4：revalidation 回滚失败须 retain owner 与 rollback plan，禁止释放脏 checkout。
       return persistRollbackFailureRecovery(rootDir, taskState, task, {
         rollback,
         reason: "admission_rollback_failed",
@@ -571,6 +585,7 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
   if (unattributedPaths.length > 0) {
     const rollback = await rollbackAdmissionChanges(rootDir, rollbackPlan);
     if (rollback.status !== "rolled_back") {
+      // §3.4：unattributed 变更回滚失败同样 retain claim，禁止后继 run 覆盖 preimage。
       return persistRollbackFailureRecovery(rootDir, taskState, task, {
         rollback,
         reason: "admission_rollback_failed",
@@ -625,6 +640,7 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
   await writeReviewReport(rootDir, taskState.planId, task, reviewResult);
 
   if (pipelineResult.status === "recovery_required") {
+    // §3.4：gate 命令终止未确认时保持 verifying 与 claim，禁止释放 owner/worktree。
     task.status = "verifying";
     task.last_failure = buildFailureSummary(task, {
       workerResult,
@@ -657,6 +673,7 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
       ? await rollbackAdmissionChanges(rootDir, rollbackPlan)
       : { status: "not_attempted", reason: "local_degraded_delivery_retained" };
     if (durableDeliveryCompleted && deliveryRollback.status !== "rolled_back") {
+      // §3.4：task branch 已 durable 时 cleanup 失败只 retain delivery 与 claim，禁止反完成。
       return persistRollbackFailureRecovery(rootDir, taskState, task, {
         rollback: deliveryRollback,
         reason: "delivery_cleanup_failed",
@@ -718,6 +735,7 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
   if (pipelineResult.status !== "completed"
     && (pipelineResult.evidence.integrationCommit?.pushed === true
       || pipelineResult.evidence.integrationCommit?.status === "committed_local")) {
+    // §3.4：push/commit 后 checkpoint 或 fence 失败走 post-integration recovery，禁止回滚已 push 成果。
     return persistPostIntegrationRecovery(rootDir, taskState, task, {
       runId,
       integrationCommit: pipelineResult.evidence.integrationCommit,
@@ -739,6 +757,7 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
   const rollback = await rollbackAdmissionChanges(rootDir, rollbackPlan);
 
   if (rollback.status !== "rolled_back") {
+    // §3.4：rollback 失败 retain owner 与 plan；禁止释放 claim 让后继 run 踩脏工作区。
     return persistRollbackFailureRecovery(rootDir, taskState, task, {
       rollback,
       reason: "admission_rollback_failed",
@@ -750,6 +769,7 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
   }
 
   if (pipelineResult.status === "awaiting_user_decision") {
+    // §3.4：人类等待须清空共享 checkout 但 retain owner；批准后须新 preimage 重 apply。
     // A human wait must never retain temporary files in the shared checkout.
     // Keep the task/run owner, but replay the child result against a NEW
     // preimage after approval; the old preimage cannot erase another task.
@@ -762,6 +782,7 @@ async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, chan
       verifyResult, scopeResult, reviewResult, rollback };
   }
   if (pipelineResult.status === "checkpoint_failed") {
+    // §3.4：checkpoint 失败不得标记 completed；释放 claim 前须确认 evidence 可重跑 checkpoint。
     task.status = "pending";
     task.admission_claim = null;
     task.last_failure = buildFailureSummary(task, {

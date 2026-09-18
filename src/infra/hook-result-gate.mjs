@@ -10,6 +10,7 @@
 import { appendLedger } from "./ledger.mjs";
 import { nowIso } from "./runtime-store.mjs";
 
+/** PostToolUse 工具输出中视为硬失败的正则模式（block 级）。 */
 const HARD_FAILURE_PATTERNS = [
   { name: "mcp_transport_failure", regex: /\b(mcp|transport|socket|econnreset|econnrefused|timed out|timeout)\b/i },
   { name: "permission_denied", regex: /\b(permission denied|eperm|eacces|operation not permitted)\b/i },

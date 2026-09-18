@@ -55,6 +55,7 @@ export function assertContractWorkspaceAvailable(tasks, resume = {}) {
   const held = tasks.find((task) => task.pendingContractChange && task.admission_claim
     && task.admission_claim.workspaceRestored !== true
     && !(task.id === resume.taskId && task.admission_claim.runId === resume.runId));
+  // §3.4：未恢复 contract 工作区时禁止其它 workspace 写，须先 resume 原 admission run。
   if (held) throw new Error(`recovery_required: task ${held.id} has unrestored contract changes; resume admission run ${held.admission_claim.runId} before other workspace writes`);
 }
 

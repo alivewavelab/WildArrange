@@ -35,7 +35,9 @@ import { SAFE_ID, readJsonBody, sendJson } from "./http-utils.mjs";
 
 // --- 面板 UI 常量与内嵌片段 ---
 
+/** 治理文件索引扫描时跳过的目录名。 */
 const GOVERNANCE_EXCLUDES = new Set([".git", ".wildarrange", "node_modules", ".tmp", "dist", "build", "coverage"]);
+/** 治理文件 UI 分组定义（id/label/描述）。 */
 const GOVERNANCE_GROUPS = [
   { id: "gates", label: "质量门", title: "交付检查链", description: "测试、改动范围、独立复核、验收证明和完成入账。" },
   { id: "tests", label: "自动测试", title: "行为与边界测试", description: "项目测试、静态检查及其真实执行入口。" },
@@ -44,6 +46,7 @@ const GOVERNANCE_GROUPS = [
   { id: "rules", label: "项目规范", title: "Agent 行动边界", description: "根规范和各目录就近生效的维护约定。" },
   { id: "automation", label: "自动化入口", title: "宿主、CI 与 Hook", description: "宿主适配器、持续集成和自动拦截入口。" },
 ];
+/** 验证治理三台账（registry/bootstrap/inventory）在面板中的展示元数据。 */
 const GOVERNANCE_LEDGERS = [
   { id: "registry", label: "门单", title: "检查规则", description: "交付前必须经过哪些测试、复核和质量门。", locatorKey: "registryPath" },
   { id: "bootstrap", label: "测试单", title: "执行基线", description: "这些检查以哪个版本、哪套配置为准。", locatorKey: "bootstrapPath" },

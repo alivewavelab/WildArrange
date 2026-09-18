@@ -50,7 +50,9 @@ import {
   renderCursorHookBridge,
 } from "./cursor-adapter.mjs";
 
+/** Codex slash 命令前缀，与 install 写入的 commands 目录名一致。 */
 const SLASH_COMMAND_PREFIX = "wildarrange";
+/** adapter install/uninstall 允许的 target 白名单。 */
 const ADAPTER_TARGETS = new Set(["all", "codex", "cursor", "kimi"]);
 
 // --- Adapter 安装 ---
@@ -64,6 +66,7 @@ const ADAPTER_TARGETS = new Set(["all", "codex", "cursor", "kimi"]);
 export async function installAdapter(rootDir, options = {}) {
   const target = options.target || "all";
   if (!ADAPTER_TARGETS.has(target)) {
+    // §3.4：非法 target 立即 fail-closed，避免写入部分宿主文件后难以回滚。
     throw new Error("adapter target must be all, codex, cursor, or kimi");
   }
   const mode = options.mode || "local";

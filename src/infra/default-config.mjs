@@ -17,13 +17,15 @@ export const DEFAULT_RUNTIME_NAME = "wildarrange-linear";
  */
 // --- 默认配置对象 ---
 export const DEFAULT_WILDARRANGE_CONFIG = {
-  version: 1,
-  runtime: DEFAULT_RUNTIME_NAME,
+  version: 1, // 配置 schema 版本；与 runtime-store STATE_VERSION 独立
+  runtime: DEFAULT_RUNTIME_NAME, // 使用的 Prompt Pack / 编排 runtime 名
+  // 宿主 adapter 开关与 hook 接入模式（cli-adapter / plugin-adapter）
   adapters: {
     codex: { enabled: true, hookMode: "cli-adapter" },
     cursor: { enabled: true, hookMode: "cli-adapter" },
     kimi: { enabled: true, hookMode: "plugin-adapter" },
   },
+  // LLM 提供商端点与 API key 环境变量名；host 表示走 IDE 内置模型
   modelProviders: {
     host: { type: "host", adapter: "auto" },
     deepseek: { type: "openai-compatible", apiKeyEnv: "DEEPSEEK_API_KEY", baseUrlEnv: "DEEPSEEK_BASE_URL", defaultBaseUrl: "https://api.deepseek.com" },
@@ -31,6 +33,7 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
     qwen: { type: "openai-compatible", apiKeyEnv: "QWEN_API_KEY", baseUrlEnv: "QWEN_BASE_URL", defaultBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1" },
     gemini: { type: "openai-compatible", apiKeyEnv: "GEMINI_API_KEY", baseUrlEnv: "GEMINI_BASE_URL" },
   },
+  // 长期 Agent 角色、provider、推理档位与挂载 skill 列表
   agents: {
     Jiuwei: { role: "workflow_orchestrator", provider: "host", model: "host-default", reasoning: "high", skills: [] },
     DiJiang: { role: "planner", provider: "host", model: "host-default", reasoning: "high", skills: [] },
@@ -38,6 +41,7 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
     BaiZe: { role: "independent_reviewer", provider: "host", model: "host-default", reasoning: "xhigh", skills: [] },
     LuWu: { role: "repository_steward", provider: "host", model: "host-default", reasoning: "high", skills: [] },
   },
+  // 可选「仓颉」路由/记忆子系统；默认关闭，启用后按 trigger 写入结构化记忆
   archivistRouter: {
     enabled: false,
     agent: "CangJie",
@@ -86,6 +90,7 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
       protectedTargets: ["askGate", "intents.review", "intents.release_git", "intents.change_request"],
     },
   },
+  // 路由决策的日终审查与语义 shadow 低置信度兜底
   routeGovernance: {
     dailyReview: {
       enabled: true,
@@ -101,16 +106,18 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
       enforceLowConfidence: true,
     },
   },
+  // Git 多 Agent 写协调：mode off|manual|guarded|strict；strict 不可单独削弱子开关
   gitCoordination: {
-    mode: "guarded",
-    remote: "origin",
-    integrationBranch: "auto",
-    taskBranchPrefix: "wildarrange/task",
-    requireWorktreeForParallelWrites: true,
-    requireVerificationBeforeHandoff: false,
-    requireCleanHandoff: true,
-    requireTakeoverReason: true,
+    mode: "guarded", // off=禁用；manual=仅显式请求；guarded=有 guard；strict=最严
+    remote: "origin", // 远端名，用于 fetch/push 与 integration guard
+    integrationBranch: "auto", // auto 时解析 remote HEAD；否则固定分支名
+    taskBranchPrefix: "wildarrange/task", // 自动 push 仅允许此前缀下的任务分支
+    requireWorktreeForParallelWrites: true, // 并行写必须隔离 worktree
+    requireVerificationBeforeHandoff: false, // true 时 handoff 前须 verify PASS
+    requireCleanHandoff: true, // handoff 前工作区须干净（不含 .wildarrange 运行时）
+    requireTakeoverReason: true, // 接管任务须留 immutable 原因（normalize 不可关）
   },
+  // 并行 spawn 子 Agent：隔离目录、超时与 adapter 命令模板占位
   parallelAgents: {
     enabled: true,
     defaultMaxAgents: 2,
@@ -129,6 +136,7 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
       },
     },
   },
+  // Hook 注入 skill 的动态匹配：阶段加权与 alwaysMount 底线 skill
   skillMatcher: {
     enabled: true,
     defaultLimit: 6,
@@ -149,6 +157,7 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
       recall: ["get-unpublished-changes"],
     },
   },
+  // 各 injection point 的 markdown/skill 字符预算上限
   contextBudgets: {
     prompt: { maxChars: 12_000 },
     markdown: { maxChars: 12_000 },
@@ -166,7 +175,9 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
       stop: { markdownMaxChars: 12_000, skillMaxChars: 24_000 },
     },
   },
+  // 执行前 worker/research 探测命令；null 表示不探测
   executionReadiness: { workerProbe: null, researchProbe: null, researchSkills: [], timeoutMs: 30000 },
+  // 审查 lane 步骤、职责命令与可选 LLM 审查配置
   review: {
     steps: [],
     responsibility: { command: null, timeoutMs: 120000, maxEvidenceChars: 500000 },
@@ -179,6 +190,7 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
       maxEvidenceChars: 12000,
     },
   },
+  // 在 command-safety 内置模式之上追加项目自定义高风险正则（只增不减）
   commandSafety: {
     extraPatterns: [],
   },
@@ -188,14 +200,16 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
     verbosity: "verbose",
   },
   planApproval: {
-    required: false,
+    required: false, // true 时计划须人类批准后才能 execute
   },
+  // 验证制品 registry/bootstrap/inventory 路径；空串表示用默认推导路径
   verificationGovernance: {
     registryPath: "",
     bootstrapPath: "",
     inventoryPath: "",
     archiveRoot: "",
   },
+  // 质量门：lsp/ast/hashline/commentChecker；required=true 时失败阻断交付
   qualityGates: {
     lspDiagnostics: {
       enabled: false,
@@ -225,6 +239,7 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
       ],
     },
   },
+  // AGENTS/rules 静态与动态注入预算及扫描路径
   ruleInjection: {
     mode: "both",
     maxRuleChars: 12000,
@@ -234,6 +249,7 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
     projectSingleFiles: ["AGENTS.md", "CLAUDE.md", "CONTEXT.md", ".github/copilot-instructions.md"],
     projectRuleDirs: [".claude/rules", ".cursor/rules", ".github/instructions"],
   },
+  // 仓库布局/命名/文档对治理；默认关闭，启用后 audit 违规写报告
   repositoryGovernance: {
     enabled: false,
     governedRoots: [],
@@ -249,6 +265,7 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
     },
     commentRules: [],
   },
+  // 各 Hook 点的 tools/markdown/skills/rules 注入清单（与 ai/injection 对齐）
   injectionPoints: {
     session_start: {
       enabled: true,

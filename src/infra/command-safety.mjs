@@ -17,6 +17,7 @@
 //   · 缺了它会怎样？
 //     Agent 可能执行删库、改权限、远程 pipe shell 等越界命令。
 // =============================================================================
+/** 内置高风险 shell 模式；config.commandSafety.extraPatterns 只能追加，不能替换。 */
 const HIGH_RISK_PATTERNS = [
   {
     id: "sudo",

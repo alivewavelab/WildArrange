@@ -31,6 +31,7 @@ import { inspectCompletedTaskEvidence, loadTaskLedger, taskRef } from "../infra/
 import { normalizeRelativePath } from "../infra/path-match.mjs";
 import { inspectTaskWorktreeBaseline } from "../infra/git-coordination.mjs";
 
+/** 视为「任务完成」的 ledger 事件类型，用于孤儿完成事件与证据链对账。 */
 const COMPLETION_LEDGER_EVENT_TYPES = new Set([
   "task_verified",
   "node_checkpoint_completed",

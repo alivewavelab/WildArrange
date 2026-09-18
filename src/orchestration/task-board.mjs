@@ -378,6 +378,7 @@ export async function migrateTaskLedgerState(rootDir) {
       kind: "task_ledger",
       planId: ledger.activePlanId,
       activePlanId: ledger.activePlanId,
+      // §3.4：迁移不得清除 completionRevalidation 标记；已标记任务须继续强制重验收。
       tasks: ledger.tasks.map((task) => task.completionRevalidation?.required === true
         ? {
             ...task,
@@ -390,7 +391,7 @@ export async function migrateTaskLedgerState(rootDir) {
       updatedAt: at,
     };
 
-    // Keep plan JSON mirrors aligned before committing the canonical ledger.
+    // §3.4：canonical tasks.json 最后写入；plan/md 镜像先对齐，避免半迁移可读状态。
     for (const planEntry of nextLedger.plans || []) {
       const planPath = resolveWildArrangePath(rootDir, "plans", `${planEntry.id}.json`);
       const plan = await readJson(planPath, null);

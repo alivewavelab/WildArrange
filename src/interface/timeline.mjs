@@ -22,6 +22,7 @@ import { readVerifiedLedgerEntries } from "../infra/ledger.mjs";
 import { readDecisions } from "../infra/decision-log.mjs";
 import { readAnnotations } from "../infra/annotation-log.mjs";
 
+/** timeline CLI --source 过滤允许的源名。 */
 const KNOWN_SOURCES = ["ledger", "decision", "annotation"];
 
 /** 将 ledger 条目投影为时间线行（source=ledger）。 */

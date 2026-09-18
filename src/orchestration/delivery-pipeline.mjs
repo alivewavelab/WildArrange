@@ -84,8 +84,10 @@ export async function runPostCompletionSideEffects(rootDir, planId, task, effect
   }
 }
 
+/** 强制质量门顺序（verify → scope → review）；completion 段由 runCompletionSegment 单独负责。 */
 const GATE_STEPS = ["verify", "scope", "review"];
 
+/** 各 gate / completion 步骤的中文展示名，供决策记录与 pipeline 摘要使用。 */
 const STEP_LABELS = {
   verify: "验证",
   scope: "范围守卫",
@@ -132,6 +134,7 @@ export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
       try {
         evidence.contractGovernance = await prepareContractReview(rootDir, planId, task, options.executionRoot || rootDir, evidence);
       } catch (error) {
+        // §3.4：契约预处理异常须转成 review fail 信封，禁止无审计穿透 gate 顺序。
         const envelope = capabilityErrorEnvelope("review", error, 0);
         results.push(envelope);
         recordStepEvidence(stepName, evidence, envelope, task);
@@ -151,6 +154,7 @@ export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
     await emitGateDecision(rootDir, planId, task, envelope, options.runId);
     const recoveryEvidence = findCommandRecoveryEvidence(evidence);
     if (recoveryEvidence) {
+      // §3.4：进程终止未确认时停止 pipeline，禁止带着未知子进程进入下一 gate。
       evidence.commandRecovery = recoveryEvidence;
       return finish("recovery_required");
     }
@@ -242,7 +246,9 @@ function deriveGateFailure(envelope) {
   const evidence = envelope.evidence;
   const fallback = { code: `${envelope.capability}_failed`, reason: null };
   if (!evidence || typeof evidence !== "object") return fallback;
+  // 按 capability 从 evidence 推导可审计的 code/reason（FAIL 不得 code/reason 双空）。
   switch (envelope.capability) {
+    // verify：取首条 exitCode≠0 的命令与 stderr 片段作为 reason。
     case "verify": {
       const failing = (evidence.results || []).find((result) => result.exitCode !== 0);
       if (!failing) return fallback;
@@ -252,6 +258,7 @@ function deriveGateFailure(envelope) {
         reason: `\`${failing.command}\` exit=${failing.exitCode}${stderr ? `：${stderr}` : ""}`,
       };
     }
+    // scope：区分 inconclusive 与 violation，优先 evidence.reason，否则列 deniedPaths。
     case "scope": {
       const denied = (evidence.deniedPaths || []).slice(0, 5).join(", ");
       return {
@@ -259,6 +266,7 @@ function deriveGateFailure(envelope) {
         reason: evidence.reason || (denied ? `越界路径：${denied}` : null),
       };
     }
+    // review：汇总 fail lane 名称与首条 summary。
     case "review": {
       const failedLanes = (evidence.lanes || []).filter((lane) => lane.status === "fail");
       if (failedLanes.length === 0) return fallback;
@@ -268,6 +276,7 @@ function deriveGateFailure(envelope) {
         reason: `失败 lane：${failedLanes.map((lane) => lane.name).join(", ")}${first.summary ? `（${String(first.summary).slice(0, 160)}）` : ""}`,
       };
     }
+    // acceptance-proof：取 fail checks 名与 evidence 拼接。
     case "acceptance-proof": {
       const failed = (evidence.checks || []).filter((check) => check.status === "fail");
       if (failed.length === 0) return fallback;
@@ -276,8 +285,10 @@ function deriveGateFailure(envelope) {
         reason: failed.map((check) => `${check.name}: ${check.evidence}`).join("; ").slice(0, 300),
       };
     }
+    // worker：以 exitCode 构造 worker_failed reason。
     case "worker":
       return { code: "worker_failed", reason: `exitCode=${evidence.exitCode}` };
+    // 未知 capability：回退 ${capability}_failed，保证总有 code。
     default:
       return fallback;
   }
@@ -452,15 +463,19 @@ export function collectGateEvidenceFromTask(task) {
 
 /** 按 gate 名组装 invokeCapability 所需的 ctx 对象。 */
 function buildStepContext(stepName, { rootDir, planId, task, evidence, options }) {
+  // 为 invokeCapability 组装各 gate 所需 ctx；门间不得共享未声明字段。
   switch (stepName) {
+    // verify 仅需 executionRoot 覆盖 worker 执行目录。
     case "verify":
       return { rootDir, task, options: { executionRoot: options.executionRoot } };
+    // scope 需 changedPaths/unavailableReason/executionRoot。
     case "scope":
       return {
         rootDir,
         task,
         options: { changedPaths: options.changedPaths, unavailableReason: options.unavailableReason, executionRoot: options.executionRoot },
       };
+    // review 只读上游 worker/verify/scope/contract 证据，不重新跑 worker。
     case "review":
       return {
         rootDir,
@@ -473,9 +488,11 @@ function buildStepContext(stepName, { rootDir, planId, task, evidence, options }
         },
         options: { executionRoot: options.executionRoot },
       };
+    // completion 段：需 planId + 全量 evidence 轨迹。
     case "acceptance-proof":
     case "checkpoint":
       return { rootDir, planId, task, evidence };
+    // 非 gate 步骤：透传 rootDir/planId/task/evidence/options。
     default:
       return { rootDir, planId, task, evidence, options };
   }
@@ -541,6 +558,7 @@ function normalizeStepEvidence(stepName, envelope) {
   return { kind: `${stepName}_evidence`, at: nowIso(), pass: false, error };
 }
 
+/** 各 gate 失败时写入 error-protocol 的 nextAction 文案模板。 */
 const GATE_NEXT_ACTIONS = {
   verify: "查看 .wildarrange 下最新 verify report，修复验证失败后重跑 node ./bin/wildarrange.mjs run",
   scope: "改动超出任务 writable_paths；缩小改动范围或走 ChangeRequest 调整计划",

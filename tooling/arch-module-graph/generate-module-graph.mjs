@@ -24,17 +24,26 @@ import { dirname, extname, relative, resolve, sep } from "node:path";
 const args = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const flags = new Set(process.argv.filter((a) => a.startsWith("--")));
 const depthFlag = [...flags].find((f) => f.startsWith("--depth="));
+// §3.2：图生成深度；--depth= 优先，其次 GRAPH_DEPTH 环境变量，默认 "entry"（与 validate 门禁一致）。
 const GRAPH_DEPTH = (depthFlag && depthFlag.slice("--depth=".length)) || process.env.GRAPH_DEPTH || "entry";
 const root = resolve(args[0] ?? ".");
+// §3.2：module-file-map.json 相对路径；环境变量 MAP_PATH 可覆盖。
 const MAP_PATH = process.env.MAP_PATH || "tooling/arch-module-graph/module-file-map.json";
+// §3.2：产品总图 HTML 相对路径；环境变量 OVERVIEW_PATH 可覆盖。
 const OVERVIEW_PATH = process.env.OVERVIEW_PATH || "docs/product/architecture-overview.html";
 
 // --- 文件分类正则 ---
+// §3.2：以下扩展名/路径正则用于跳过测试、入口聚合与类型声明文件，不参与反向同步。
 const TEST_FILE = /(?:\.test\.[^.]+$|_test\.[^.]+$|(?:^|\/)test_[^/]+$)/;
+/** 入口聚合文件（index/mod/__init__）不参与反向同步图节点。 */
 const ENTRY_BASENAMES = /(^|\/)(index\.[^/]+|mod\.rs|__init__\.py)$/;
+/** 类型声明侧车文件（*.types.*）跳过实现图。 */
 const TYPES_FILE = /\.types\.[^.]+$/;
+/** JS/TS 系扩展名集合，用于解析 import 图。 */
 const JS_EXT = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]);
+/** Python 扩展名集合。 */
 const PY_EXT = new Set([".py"]);
+/** Rust 扩展名集合。 */
 const RS_EXT = new Set([".rs"]);
 
 // --- 路径与 include 匹配 ---

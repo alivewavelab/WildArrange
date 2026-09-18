@@ -27,12 +27,10 @@ export const CURSOR_HOOKS_VERSION = 1;
 /** 相对项目根的 hook bridge 脚本路径。 */
 export const CURSOR_BRIDGE_PATH = ".cursor/hooks/wildarrange-hook-bridge.mjs";
 
-// 覆盖 Cursor 文档已列出的写类工具名；未知名称不会匹配，无副作用。
+/** 覆盖 Cursor 文档已列出的写类工具名；未知名称不会匹配，无副作用。 */
 const CURSOR_WRITE_TOOL_MATCHER = "Write|Delete|Edit|StrReplace|MultiEdit|Shell";
 
-// Cursor 事件名（camelCase）→ WildArrange 规范事件名（PascalCase）。
-// beforeSubmitPrompt 没有 additional_context 注入通道，只用于路由与决策留痕。
-// beforeShellExecution 走与 preToolUse 相同的 permission 输出协议，覆盖集成终端命令。
+/** Cursor 事件名（camelCase）→ WildArrange 规范事件名（PascalCase）；beforeSubmitPrompt 无注入通道，beforeShellExecution 与 preToolUse 同协议。 */
 const CURSOR_EVENT_MAP = {
   sessionStart: "SessionStart",
   beforeSubmitPrompt: "UserPromptSubmit",

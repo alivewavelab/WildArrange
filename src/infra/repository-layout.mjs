@@ -17,7 +17,9 @@ import { LONG_LIVED_AGENTS } from "./agent-registry.mjs";
 import { loadWildArrangeConfig } from "./runtime-config.mjs";
 import { normalizeRelativePath, pathMatchesPattern } from "./path-match.mjs";
 
+/** 布局扫描默认忽略的目录名。 */
 const DEFAULT_IGNORED = new Set([".git", ".wildarrange", "node_modules", "coverage"]);
+/** 计为「源码文件」的扩展名集合。 */
 const SOURCE_EXTENSIONS = new Set([".cjs", ".js", ".jsx", ".mjs", ".ts", ".tsx"]);
 const execFileAsync = promisify(execFile);
 

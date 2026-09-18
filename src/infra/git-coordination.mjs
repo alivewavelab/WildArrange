@@ -20,6 +20,7 @@ import {
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 
+/** 默认本地 git 子命令超时（毫秒）；push/fetch 等长操作单独覆盖。 */
 const GIT_TIMEOUT_MS = 30_000;
 
 /**
@@ -173,6 +174,7 @@ export async function createTaskDeliveryCommit(rootDir, options = {}) {
   const actualPaths = uniqueGitPaths(baseline.changedPaths);
   const requested = new Set(requestedPaths);
   const unownedPaths = actualPaths.filter((filePath) => !requested.has(filePath));
+  // §3.4 归属校验：工作区有变更但未列入任务 changedPaths 时拒绝 commit
   if (unownedPaths.length > 0) {
     return {
       pass: false,
@@ -491,6 +493,7 @@ export async function captureIntegrationGuard(rootDir, config, options = {}) {
   const advertisedSha = await remoteBranchHead(rootDir, context.remote, context.integrationBranch);
   if (!advertisedSha) {
     const reason = `remote integration branch ${context.remote}/${context.integrationBranch} does not exist`;
+    // §3.4 strict 模式：远端集成基线不可解析时直接失败，不允许无 guard 交付
     if (context.mode === "strict") throw new Error(`git coordination strict mode: ${reason}`);
     return { active: false, mode: context.mode, reason };
   }

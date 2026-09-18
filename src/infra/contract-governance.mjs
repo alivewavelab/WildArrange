@@ -24,7 +24,9 @@ export const CONTRACT_SCHEMA_VERSION = 1;
  */
 export const CONTRACT_DISCOVERERS = Object.freeze(["tauri-ipc"]);
 
+/** 契约扫描 walk 时跳过的目录名。 */
 const SKIP_DIRS = new Set([".git", ".wildarrange", "node_modules", "target", "dist", "build", ".tmp"]);
+/** 合法 contract id 格式（单段、最长 200 字符）。 */
 const CONTRACT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9:._/-]{0,199}$/;
 
 /**

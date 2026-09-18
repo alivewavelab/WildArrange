@@ -16,9 +16,10 @@ import { readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+// §3.2：仓库根目录（本脚本位于 tooling/，向上一级）。
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// §3.2：测试根目录；仅扫描顶层 *.test.mjs，子目录用例由 selectRepoTests 或单文件 node --test 执行。
 const testDir = path.join(rootDir, "test");
-// 固定模式：只跑顶层 *.test.mjs，子目录用例需单独指定或由 selectRepoTests 选择
 const testFiles = readdirSync(testDir)
   .filter((name) => name.endsWith(".test.mjs"))
   .sort();
@@ -31,6 +32,7 @@ for (const [index, name] of testFiles.entries()) {
   const result = spawnSync(process.execPath, ["--test", relativePath], {
     cwd: rootDir,
     stdio: "inherit",
+    // §3.2：单文件超时 180s，防止挂死用例拖垮 CI 全量跑。
     timeout: 180_000,
   });
   if (result.error) {

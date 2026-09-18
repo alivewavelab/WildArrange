@@ -154,6 +154,16 @@ async function adaptVerificationGenerate(ctx) {
   return { status: "pass", evidence: raw, sideEffect: "files_changed" };
 }
 
+/**
+ * 静态能力注册表：键为 invokeCapability 名称，值为 adapter handler 与 owner 模块路径。
+ * orchestration 只能经此表调用；新增能力须在此登记并补充 delivery-pipeline 接线。
+ *
+ * 键含义速查：
+ * - execution-readiness / worker / verify / scope / review / acceptance-proof / checkpoint：交付质量门链
+ * - command / command-safety：命令执行与安全评估（infra 适配）
+ * - repository-governance：仓库布局与命名审计
+ * - verification-governance-* / contract-governance-*：验证与契约治理 scan/apply/generate 三件套
+ */
 const CAPABILITIES = {
   "execution-readiness": { handler: async (ctx) => { const evidence = await checkExecutionReadiness(ctx.rootDir, ctx.task, ctx.options); return { status: evidence.pass ? "pass" : "fail", evidence, sideEffect: "state_written" }; }, owner: "capabilities/execution-readiness.mjs" },
   worker: { handler: adaptWorker, owner: "capabilities/worker.mjs" },
@@ -203,6 +213,7 @@ export async function invokeCapability(name, ctx = {}) {
   }
 }
 
+/** Node/系统级错误码模式；匹配时不向外透传，统一映射为 capability_threw。 */
 const SYSTEM_ERROR_CODE_RE = /^(ERR_[A-Z0-9_]+|E[A-Z][A-Z0-9]*)$/;
 
 /**

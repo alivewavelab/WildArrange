@@ -262,6 +262,7 @@ export function classifyManifestPathChanges(beforeFingerprints = {}, afterFinger
     .sort((left, right) => left.path.localeCompare(right.path));
 }
 
+/** file manifest 递归 walk 时跳过的目录名。 */
 const FILE_MANIFEST_SKIP_DIRS = new Set([".git", ".wildarrange", "node_modules"]);
 
 /**

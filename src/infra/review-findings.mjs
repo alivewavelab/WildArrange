@@ -9,6 +9,7 @@
 // =============================================================================
 import { nowIso } from "./runtime-store.mjs";
 
+/** 各 review lane 失败时的默认严重级别（P0 阻断交付）。 */
 const FAILING_LANE_SEVERITY = {
   goal_compliance: "P0",
   scope_fidelity: "P0",

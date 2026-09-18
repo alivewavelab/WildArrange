@@ -29,6 +29,7 @@ import { readGitHead } from "../infra/git-diff.mjs";
 import { callOpenAICompatible, resolveAgentProvider } from "../infra/llm-provider.mjs";
 import { routeRequest } from "./routing.mjs";
 
+/** 档案员路由与记忆窗口的默认 stage 键，对应 config 中未显式配置时的回退值。 */
 const DEFAULT_STAGE = "default";
 
 // --- 路由包构建与执行 ---
@@ -85,6 +86,7 @@ export async function runArchivistRouter(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const { config } = await loadWildArrangeConfig(rootDir);
   const archivistConfig = config.archivistRouter || {};
+  // §3.4：未启用且非 force 时跳过，保证无 LLM 配置时 Hook 仍可 fail-open 继续。
   if (archivistConfig.enabled !== true && options.force !== true) {
     const result = {
       kind: "archivist_router",
@@ -138,10 +140,12 @@ export async function runArchivistRouter(rootDir, options = {}) {
       llmStatus = "called";
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
+      // §3.4：LLM 调用失败时降级确定性 fallback，不阻断 Hook 主流程。
       decision = await fallbackArchivistDecision(rootDir, packet, reason);
       llmStatus = "fallback";
     }
   } else {
+    // §3.4：无可用 provider/key 时直接走 routing.mjs 确定性路由，保持 fail-open。
     decision = await fallbackArchivistDecision(rootDir, packet, resolved.reason);
     llmStatus = "fallback";
   }

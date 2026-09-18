@@ -26,7 +26,9 @@ import {
 import { loadTaskState } from "../infra/task-state-store.mjs";
 import { matchSkills } from "./skill-matcher.mjs";
 
+/** 动态挂载模式下始终带全文的 Skill 名（运行时注入说明），不受匹配分数影响。 */
 const DEFAULT_DYNAMIC_ALWAYS_MOUNT = ["wildarrange-injection-runtime"];
+/** 动态部分除 alwaysMount 外最多再挂载的 Skill 全文数量上限。 */
 const DEFAULT_DYNAMIC_MAX_SKILLS = 4;
 
 /**

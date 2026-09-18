@@ -212,6 +212,7 @@ function printHelp({ all = false } = {}) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const command = args._[0];
+  // §3.2：--control-root 指定治理控制根；缺省 process.cwd()（Hook/CI 可指向非 CWD 项目）。
   const rootDir = strArg(args, "control-root")
     ? path.resolve(String(args["control-root"]))
     : process.cwd();
@@ -238,6 +239,7 @@ async function main() {
   }
 
   // --- 初始化与配置 ---
+  // §3.4：init 创建 .wildarrange 运行时；--sample/--project-docs 为可选附加步骤，不阻断 init 本身。
   if (command === "init") {
     await initRuntime(rootDir);
     // §3.4：--project-docs 为 opt-in；未指定时不生成架构/规范文档，只初始化 .wildarrange。
@@ -257,6 +259,7 @@ async function main() {
     return;
   }
 
+  // §3.4：config 管理 wildarrange.config.json 读写与 hash 基线；不涉及任务执行或门禁跑批。
   if (command === "config") {
     const subcommand = args._[1];
     if (subcommand === "init") {
@@ -289,6 +292,7 @@ async function main() {
   }
 
   // --- 宿主适配器 ---
+  // §3.4：adapter 安装/卸载/恢复 Cursor·Codex·Kimi Hook 桥接；local 模式指向当前 bin 路径。
   if (command === "adapter") {
     const subcommand = args._[1];
     if (subcommand === "install") {
@@ -316,6 +320,7 @@ async function main() {
   }
 
   // --- 多设备协调 ---
+  // §3.4：device 登记本机 UUID 与名称，供 handoff/coordination 识别设备身份。
   if (command === "device") {
     const subcommand = args._[1];
     if (subcommand === "register") {
@@ -332,6 +337,7 @@ async function main() {
     throw new Error("wildarrange device requires register or status");
   }
 
+  // §3.4：coordination 查看 Git 协调状态或 force 领取远端任务 owner。
   if (command === "coordination") {
     const subcommand = args._[1];
     if (subcommand === "status") {
@@ -351,6 +357,7 @@ async function main() {
   }
 
   // --- 任务交接 ---
+  // §3.4：handoff 跨设备 prepare→push→accept 链路；takeover 为 owner 离线时的显式接管。
   if (command === "handoff") {
     const subcommand = args._[1];
     if (subcommand === "prepare") {
@@ -394,6 +401,7 @@ async function main() {
   }
 
   // --- 注入点预览 ---
+  // §3.4：injection show 只读预览 Prompt 注入解析结果，不写入 ledger 也不触发 Hook。
   if (command === "injection") {
     const subcommand = args._[1];
     if (subcommand === "show") {
@@ -412,6 +420,7 @@ async function main() {
   }
 
   // --- 宿主 Hook 执行 ---
+  // §3.4：hook run 是 IDE/Codex 生命周期入口；stdin/--from 二选一，输出默认走 Hook 管道文本。
   if (command === "hook") {
     const subcommand = args._[1];
     if (subcommand === "run") {
@@ -453,6 +462,7 @@ async function main() {
   }
 
   // --- 计划导入与审批 ---
+  // §3.4：plan 导入含职责变更的计划并等待人工 approve；approve 子命令单独确认已导入计划。
   if (command === "plan") {
     if (args._[1] === "approve") {
       await initRuntime(rootDir);
@@ -520,6 +530,7 @@ async function main() {
   }
 
   // --- 并行 Agent 运行 ---
+  // §3.4：parallel 管理子 Agent 批次 run/admit/close；admit 走 admission 事务，非直接 merge。
   if (command === "parallel") {
     const subcommand = args._[1];
     if (subcommand === "run") {
@@ -586,6 +597,7 @@ async function main() {
   }
 
   // --- 档案员路由 ---
+  // §3.4：archivist 生成/执行档案路由包；suggestions 供人类审核 LLM 路由建议。
   if (command === "archivist") {
     const subcommand = args._[1];
     const turns = strArg(args, "turns")
@@ -628,6 +640,7 @@ async function main() {
   }
 
   // --- 单工作流节点 ---
+  // §3.4：node 单步跑 workflow 节点（route/execute/verify/scope/review/checkpoint/retry）。
   if (command === "node") {
     const nodeName = args._[1];
     if (!nodeName) throw new Error("wildarrange node requires route, execute, verify, scope, review, checkpoint, or retry");
@@ -641,11 +654,13 @@ async function main() {
   }
 
   // --- 状态与影响分析 ---
+  // §3.4：status 汇总计划/任务/门武装/待决策的人类可读快照，供续跑前快速定位。
   if (command === "status") {
     console.log(JSON.stringify(await statusReport(rootDir), null, 2));
     return;
   }
 
+  // §3.4：impact 按改动路径反查依赖图影响面，供 scope/review 前评估 blast radius。
   if (command === "impact") {
     const changed = args._.slice(1);
     if (changed.length === 0) throw new Error("wildarrange impact requires at least one changed file path, e.g. wildarrange impact src/infra/ledger.mjs");
@@ -654,6 +669,7 @@ async function main() {
   }
 
   // --- 门决策与时间线 ---
+  // §3.4：decisions 投影 ledger 门决策；stats 聚合触发率，默认 text 输出供人类扫读。
   if (command === "decisions") {
     if (args._[1] === "stats") {
       console.log(JSON.stringify(await projectDecisionStats(rootDir), null, 2));
@@ -683,6 +699,7 @@ async function main() {
     return;
   }
 
+  // §3.4：timeline 按时间序合并 ledger/任务/审查事件；--format json 供脚本消费。
   if (command === "timeline") {
     const projection = await projectTimeline(rootDir, {
       limit: Number.isInteger(Number(args.limit)) && args.limit !== true ? Number(args.limit) : 50,
@@ -699,11 +716,13 @@ async function main() {
   }
 
   // --- 审查与就绪 ---
+  // §3.4：review configure 预览/应用项目审查配置；--apply 才写入治理配置。
   if (command === "review" && args._[1] === "configure") {
     if (!strArg(args, "from")) throw new Error("review configure requires --from <setup.json>");
     console.log(JSON.stringify(await configureProjectReview(rootDir, args.from, { apply: args.apply === true }), null, 2));
     return;
   }
+  // §3.4：readiness 跑 execution-readiness 门；checklist 只解析审查清单，不启动 Worker。
   if ((command === "review" && args._[1] === "checklist") || command === "readiness") {
     if (!strArg(args, "task")) throw new Error("this command requires --task <taskId>");
     const { task } = await getTeamTask(rootDir, args.task);
@@ -721,10 +740,12 @@ async function main() {
     }
     return;
   }
+  // §3.4：adoption inventory 只读扫描验证资产，供老项目接管 Skill 建来源映射。
   if (command === "adoption" && args._[1] === "inventory") {
     console.log(JSON.stringify(await invokeCapability("verification-governance-scan", { rootDir }), null, 2));
     return;
   }
+  // §3.4：review suspicious 异步 LLM 审查门决策可疑模式，不阻断当前任务流。
   if (command === "review" && args._[1] === "suspicious") {
     const report = await runSuspicionReview(rootDir, {
       limit: Number.isInteger(Number(args.limit)) && args.limit !== true ? Number(args.limit) : undefined,
@@ -734,6 +755,7 @@ async function main() {
   }
 
   // --- 人工标注 ---
+  // §3.4：annotate 记录门决策人工标注，供 decisions stats 与路由复盘消费。
   if (command === "annotate") {
     const subcommand = args._[1];
     if (subcommand === "list") {
@@ -763,6 +785,7 @@ async function main() {
   }
 
   // --- 仓库测试 ---
+  // §3.4：test 按 --zone 或改动路径选型后跑 test-runner；--zone 与文件参数互斥。
   if (command === "test") {
     const positional = args._.slice(1);
     if (strArg(args, "zone") && positional.length > 0) {
@@ -780,11 +803,13 @@ async function main() {
   }
 
   // --- 摘要与续跑 ---
+  // §3.4：summary 写入 workflow 人类可读摘要文件，供 resume/新会话恢复上下文。
   if (command === "summary") {
     console.log(JSON.stringify(await writeWorkflowSummary(rootDir, { reason: "cli" }), null, 2));
     return;
   }
 
+  // §3.4：continuation check 判断会话是否还有待办/失败需续跑，供 Hook 停步前调用。
   if (command === "continuation") {
     const subcommand = args._[1];
     if (subcommand === "check") {
@@ -797,6 +822,7 @@ async function main() {
     throw new Error("wildarrange continuation requires check");
   }
 
+  // §3.4：rules collect 扫描 AGENTS.md 与项目规则注入候选，供 rule-scanner 门禁使用。
   if (command === "rules") {
     const subcommand = args._[1];
     if (subcommand === "collect") {
@@ -808,6 +834,7 @@ async function main() {
   }
 
   // --- 仓库治理审计 ---
+  // §3.4：governance audit 扫描仓库规范/AGENTS/命令真实性；--changed-only 仅审计 diff 触及区。
   if (command === "governance") {
     const subcommand = args._[1];
     if (subcommand === "audit") {
@@ -824,6 +851,7 @@ async function main() {
   }
 
   // --- 契约治理 ---
+  // §3.4：contracts 管理 IPC/契约变更 propose→resolve 与 scan/apply-card 门禁流水线。
   if (command === "contracts") {
     const subcommand = args._[1];
     if (subcommand === "propose") {
@@ -881,6 +909,7 @@ async function main() {
   }
 
   // --- Agent 上下文 ---
+  // §3.4：context build 组装 Agent 运行时上下文包，供宿主或调试注入。
   if (command === "context") {
     const subcommand = args._[1];
     if (subcommand === "build") {
@@ -896,6 +925,7 @@ async function main() {
   }
 
   // --- 成功标准证据 ---
+  // §3.4：evidence record 手工补录 successCriteria 证据，不替代 verifier/review 自动门禁。
   if (command === "evidence") {
     const subcommand = args._[1];
     if (subcommand === "record") {
@@ -914,6 +944,7 @@ async function main() {
   }
 
   // --- 工作流转向 ---
+  // §3.4：steer 提交工作流转向提案，须经 change-governance 审批后才改 plan 路径。
   if (command === "steer") {
     if (!strArg(args, "from")) throw new Error("wildarrange steer requires --from <proposal.json>");
     const proposal = await readJson(path.resolve(rootDir, args.from));
@@ -922,6 +953,7 @@ async function main() {
   }
 
   // --- 审查阻塞记录 ---
+  // §3.4：review-blockers record 登记审查阻塞项，关联 task 与 change-governance 流程。
   if (command === "review-blockers") {
     const subcommand = args._[1];
     if (subcommand === "record") {
@@ -934,6 +966,7 @@ async function main() {
   }
 
   // --- 任务板 ---
+  // §3.4：task 管理任务板 CRUD/claim/ready；archive 为破坏性操作须显式 --delete。
   if (command === "task") {
     const subcommand = args._[1];
     if (subcommand === "list") {
@@ -1011,6 +1044,7 @@ async function main() {
   }
 
   // --- 团队消息 ---
+  // §3.4：team 在 Agent 间传递异步消息（send/inbox），不替代 task 状态机。
   if (command === "team") {
     const subcommand = args._[1];
     if (subcommand === "send") {
@@ -1033,6 +1067,7 @@ async function main() {
   }
 
   // --- 会话恢复 ---
+  // §3.4：resume 输出会话恢复报告 JSON，供新 chat 注入计划/失败/下一步上下文。
   if (command === "resume") {
     console.log(JSON.stringify(await resumeReport(rootDir, {
       sessionId: strArg(args, "session"),
@@ -1042,6 +1077,7 @@ async function main() {
   }
 
   // --- 变更请求 ---
+  // §3.4：changes 列出/审查/决议 ChangeRequest；resolve --apply-scope 才扩 writable_paths。
   if (command === "changes") {
     const subcommand = args._[1];
     if (subcommand === "list") {
@@ -1069,8 +1105,10 @@ async function main() {
   }
 
   // --- 采纳面板 ---
+  // §3.4：adoption 启动/恢复验证治理 Dashboard；start/resume 成功后会阻塞进程保活。
   if (command === "adoption") {
     const subcommand = args._[1];
+    // §3.2：Dashboard 默认 host/port；token 优先 CLI，其次 WILDARRANGE_DASHBOARD_TOKEN，否则随机 24 字节 base64url。
     const host = strArg(args, "host") || "127.0.0.1";
     const port = strArg(args, "port") ? Number(args.port) : 8765;
     const token = strArg(args, "token")
@@ -1125,7 +1163,9 @@ async function main() {
   }
 
   // --- Dashboard 服务 ---
+  // §3.4：serve 启动只读 Dashboard HTTP 服务；无 adoption 流程，成功即永久阻塞。
   if (command === "serve") {
+    // §3.2：与 adoption 共用默认 host/port；token 可选，未指定则 Dashboard 无鉴权。
     const host = strArg(args, "host") || "127.0.0.1";
     const port = strArg(args, "port") ? Number(args.port) : 8765;
     const token = strArg(args, "token");
@@ -1136,6 +1176,7 @@ async function main() {
   }
 
   // --- 账本与运行时状态 ---
+  // §3.4：ledger verify 校验 hash 链完整性；失败表示审计轨迹不可信。
   if (command === "ledger") {
     const subcommand = args._[1];
     if (subcommand === "verify") {
@@ -1148,6 +1189,7 @@ async function main() {
     throw new Error("wildarrange ledger requires verify");
   }
 
+  // §3.4：state 备份/校验/恢复/迁移 .wildarrange 关键文件；migrate 自动先写 pre-state-migrate 备份。
   if (command === "state") {
     const subcommand = args._[1];
     if (subcommand === "backup") {
@@ -1198,6 +1240,7 @@ async function main() {
     return;
   }
 
+  // §3.4：guard 暴露 PreToolUse 同款 scope 门禁，供 CLI 调试或脚本预检。
   if (command === "guard") {
     const subcommand = args._[1];
     if (subcommand === "scope") {
@@ -1209,12 +1252,14 @@ async function main() {
   }
 
   // --- 模型路由与 Prompt ---
+  // §3.4：route 对用户请求做确定性+语义路由，返回 agent/skills/intent 建议。
   if (command === "route") {
     if (!strArg(args, "text")) throw new Error("wildarrange route requires --text <request>");
     console.log(JSON.stringify(await runHostRoute(rootDir, { text: args.text }, routeRequest), null, 2));
     return;
   }
 
+  // §3.4：prompts 列出或渲染 Prompt Pack 条目，供调试注入点与路由表。
   if (command === "prompts") {
     const subcommand = args._[1];
     if (subcommand === "list") {
@@ -1236,6 +1281,7 @@ async function main() {
     throw new Error("wildarrange prompts requires list or show");
   }
 
+  // §3.4：skills match 按文本/stage 匹配 Skill 列表，不执行 Skill 本身。
   if (command === "skills") {
     const subcommand = args._[1];
     if (subcommand === "match") {

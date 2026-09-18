@@ -187,6 +187,7 @@ function normalizeGitCoordination(value) {
   };
   // strict is a profile, not a collection of individually weakenable flags.
   if (mode === "strict") {
+    // strict 是固定 profile：子开关在此一并强制为 true，不可通过配置单独放宽
     normalized.requireWorktreeForParallelWrites = true;
     normalized.requireVerificationBeforeHandoff = true;
     normalized.requireCleanHandoff = true;

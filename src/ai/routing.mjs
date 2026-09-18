@@ -88,6 +88,7 @@ export async function routeRequest(rootDir, input) {
   let result = await applySemanticRouteGovernance(rootDir, text, deterministic, input || {});
   const sessionId = typeof input === "object" ? input?.sessionId || input?.session_id || "session" : "session";
   const activeFeatureGate = await loadActiveFeatureDesignGate(rootDir, sessionId);
+  // §3.4：活跃功能设计门覆盖确定性路由，强制收敛到 plan/clarify 直至确认并导入 Plan。
   if (["awaiting_feature_confirmation", "awaiting_plan_import"].includes(activeFeatureGate?.status)) {
     result = enforceFeatureDesignGate(result, activeFeatureGate);
   }

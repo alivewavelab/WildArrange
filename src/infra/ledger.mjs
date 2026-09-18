@@ -13,8 +13,11 @@ import { wildarrangeError } from "./error-protocol.mjs";
 import { withFileLock } from "./file-lock.mjs";
 import { createWorkId, hashContent, nowIso, readJson, resolveWildArrangePath, writeJsonAtomic } from "./runtime-store.mjs";
 
+/** ledger 锁重试间隔（毫秒）；略短于通用 file-lock 默认值。 */
 const LEDGER_LOCK_RETRY_MS = 20;
+/** ledger 锁等待上限（毫秒）；append 路径应快速失败以便诊断。 */
 const LEDGER_LOCK_WAIT_TIMEOUT_MS = 10_000;
+/** ledger-tail.json 缓存 schema 版本；尺寸不匹配时 fail-closed 回退全量扫描。 */
 const LEDGER_TAIL_CACHE_VERSION = 1;
 
 /**
@@ -189,6 +192,7 @@ async function resolveTailHashForAppend(rootDir, ledgerPath) {
   const cache = await readJson(tailCachePath(rootDir), null);
   if (cache && cache.version === LEDGER_TAIL_CACHE_VERSION && Number.isInteger(cache.size)) {
     if (size < cache.size) {
+      // §3.4 追加前 fail-closed：ledger 被截断/重写时拒绝续链，避免 prevHash 分叉
       throw wildarrangeError({
         code: "ledger_truncated",
         module: "infra/ledger.mjs",
@@ -198,6 +202,7 @@ async function resolveTailHashForAppend(rootDir, ledgerPath) {
     }
     if (size === cache.size) return { hash: cache.hash || null, size };
   }
+  // 缓存 miss 或尺寸变大：回退全量尾行扫描（权威路径）
   return { hash: await readLedgerLastHash(ledgerPath), size };
 }
 
