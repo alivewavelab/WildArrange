@@ -1,0 +1,3354 @@
+{
+  "schema_version": "1.4",
+  "review_id": "wildarrange-2026-09-17-full-review",
+  "summary": "对 WildArrange 全仓（src 五区 89 个 .mjs、bin、tooling、packs、test 44 文件）的全量只读架构审查。五区分层与 gateway 单一缝真实成立（依赖边界测试每次 npm test 强制），事务密集型编排层（admission 崩溃续跑、ledger hash 链、delivery pipeline）成熟度高于平均，测试体系 529 用例全绿且无越权扩张。主要债务：9 个 ≥700 行文件多数混合多种变化原因（3 个破千行线）、非完成路径缺统一审计顺序原语并已产生散点倒置缺陷、路由信号匹配三处分散语义不一致、Dashboard 前端改版半成品留下死代码与无 UI 的在线 API、死 re-export 违反项目自定 barrel 禁令。本报告已合并另一 Agent 第三轮审查的可实证声明（经本审查独立复测确认）：importPlan/steering 可持久化无证据 completed、parallel_run_claim 任务仍可被线性 run 选中两个 P0，以及 ledger 坏行后伪造链仍被读侧标 verified、pathAllowed 不折叠 .. 可绕过 scope、Cursor allow 丢注入上下文、review_blocked 无解除边等 P1——完成态权威与 scope 边界的收口比表面更弱。三项评分 82/71/78，不触发系统性整改路线，但安全相关的局部整改清单优先级很高。",
+  "scope": {
+    "root": "D:/Development/WildArrange",
+    "kind": "repository",
+    "included": [
+      "src/",
+      "bin/",
+      "tooling/",
+      "test/",
+      "packs/",
+      "wildarrange.config.json",
+      "wildarrange.config.example.json",
+      "package.json"
+    ],
+    "excluded": [
+      "doc/",
+      "docs/",
+      "examples/",
+      "outputs/",
+      ".wildarrange/",
+      ".tmp/",
+      "node_modules",
+      "README 等纯文档内容"
+    ],
+    "rules_read": [
+      "AGENTS.md",
+      "doc/development-workflow.md",
+      "doc/code-maintenance.md",
+      "doc/project-architecture.md",
+      "doc/AGENTS.md",
+      "bin/AGENTS.md",
+      "src/AGENTS.md",
+      "src/interface/AGENTS.md",
+      "src/orchestration/AGENTS.md",
+      "src/ai/AGENTS.md",
+      "src/capabilities/AGENTS.md",
+      "src/infra/AGENTS.md",
+      "test/AGENTS.md",
+      "packs/wildarrange-linear/AGENTS.md"
+    ]
+  },
+  "review_basis": {
+    "revision": "336de904b12e32662283954e9f6c6bf6c244ab78（当前工作区快照，git status 干净）",
+    "required_modules": [
+      "bin-cli",
+      "interface-dashboard",
+      "interface-adapters",
+      "interface-doctor",
+      "interface-read-models",
+      "orch-linear-runtime",
+      "orch-admission",
+      "orch-parallel-runtime",
+      "orch-adoption",
+      "orch-task-board",
+      "orch-plan-state",
+      "orch-delivery-pipeline",
+      "orch-git-sync",
+      "orch-governance",
+      "orch-status",
+      "ai-hooks",
+      "ai-routing",
+      "ai-context",
+      "cap-gateway",
+      "cap-gates",
+      "cap-governance",
+      "infra-runtime",
+      "infra-persistence",
+      "infra-command",
+      "infra-git",
+      "infra-analysis",
+      "infra-verification",
+      "tooling",
+      "packs-config",
+      "test-suite"
+    ],
+    "runtime_evidence": [
+      "npm test 实测：44/44 测试文件、529 用例全绿，总耗时 256.7s（2026-09-17，最慢 runtime-integration 62.4s / git-coordination 62.2s / checkpoint-integrity 38.5s）",
+      "分区抽跑：capabilities 相关 5 测试文件全绿；git-coordination/dependency-boundary/verification-discovery/contract-governance/recovery-transaction 84 用例全绿",
+      "CLI 实测：未知命令走错误协议 exit 1；node --check 全部 .mjs 通过；--maxSteps 裸标志静默变 1 经 node -e 实证"
+    ],
+    "evidence_cutoff": "2026-09-17T18:30:00+08:00"
+  },
+  "module_coverage": [
+    {
+      "module_id": "bin-cli",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "无多余层，但渗入 3-4 段业务流程（archive 备份编排、test runner、hook 胶水）",
+        "duplicate_controls": "args 取值守卫惯用法手工重复 108 处无 helper，已漏出 P1（--maxSteps）",
+        "cohesion": "大体内聚（命令面单变化轴），业务流程渗漏是例外",
+        "abstraction_clarity": "平铺 if 链意图直白，未遮蔽",
+        "long_file_responsibility": "1168 行破千行线，命令路由+嵌入业务流程两类变化原因",
+        "extension_locality": "新命令需改 bin+cli-help 两处代码加 README×2 与 smoke test",
+        "style_consistency": "主导写法统一，个别分支漏 === true 守卫",
+        "test_boundary_and_proportionality": "无测试设施越界，21 个测试文件经子进程驱动"
+      },
+      "evidence_ids": [
+        "E-001",
+        "E-002",
+        "E-003",
+        "E-004",
+        "E-005"
+      ]
+    },
+    {
+      "module_id": "interface-dashboard",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "无中间件层，if 链直连与规模匹配",
+        "duplicate_controls": "adoption-panel 复制 dashboard 的 sendJson/readJsonBody/SAFE_ID 且行为已漂移（400 vs 500）",
+        "cohesion": "dashboard.mjs 纯 HTTP 边界内聚；dashboard-view 三语言合一内聚弱",
+        "abstraction_clarity": "面板外挂模式（NAV_BUTTON/VIEW_HTML/SCRIPT）帮助理解但未通用化",
+        "long_file_responsibility": "dashboard-view 691 行混合 CSS/HTML/客户端 JS 三种变化原因",
+        "extension_locality": "新面板需改 dashboard-view 三处；死代码证明增删会留残骸",
+        "style_consistency": "错误响应形状 {error} vs {ok:false,error} 不统一",
+        "test_boundary_and_proportionality": "未越界；约 110 行死 JS/CSS + 三个在线 API 无 UI 入口"
+      },
+      "evidence_ids": [
+        "E-050",
+        "E-051",
+        "E-052",
+        "E-066",
+        "E-077"
+      ]
+    },
+    {
+      "module_id": "interface-adapters",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "无多余层",
+        "duplicate_controls": "三宿主备份→写文件→report→ledger 同构直排，未过早抽象，可接受",
+        "cohesion": "各 adapter 职责清晰，hook-bridge-core 共享骨架正确",
+        "abstraction_clarity": "fail-open/fail-closed 按宿主合同显式参数化，是好示范",
+        "long_file_responsibility": "adapters.mjs 654 行，其中约 140 行 prompt 文案与安装机制两种变化原因",
+        "extension_locality": "新宿主需改 ADAPTER_TARGETS+install+uninstall+doctor+cli-help 五处，无注册表",
+        "style_consistency": "三处 join(\"\") 隐晦拼接规避自匹配",
+        "test_boundary_and_proportionality": "未越界"
+      },
+      "evidence_ids": [
+        "E-070",
+        "E-075"
+      ]
+    },
+    {
+      "module_id": "interface-doctor",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "无多余层，SECTION_CHECKS 表驱动直接有效",
+        "duplicate_controls": "无重复门禁，单项 try/catch 隔离设计正确",
+        "cohesion": "内聚（全是体检）",
+        "abstraction_clarity": "表驱动帮助理解",
+        "long_file_responsibility": "708 行超评估线，混合检查项与报告渲染两种变化原因，checkCompletionIntegrity 单函数 186 行",
+        "extension_locality": "新增检查加一行注册+一个函数，不动框架",
+        "style_consistency": "动态 import 偏离静态主导；finding 消息中英文混杂；硬编码 macOS /Users/ 正则",
+        "test_boundary_and_proportionality": "未越界"
+      },
+      "evidence_ids": [
+        "E-053",
+        "E-054",
+        "E-081"
+      ]
+    },
+    {
+      "module_id": "interface-read-models",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "无",
+        "duplicate_controls": "无",
+        "cohesion": "decisions/timeline/cli-help/contract-view/project-init 均干净内聚",
+        "abstraction_clarity": "cli-help 纯数据表，帮助理解",
+        "long_file_responsibility": "均 ≤181 行",
+        "extension_locality": "新命令登记 cli-help 即可（但与 bin 构成双事实源）",
+        "style_consistency": "一致",
+        "test_boundary_and_proportionality": "未越界"
+      },
+      "evidence_ids": [
+        "E-005"
+      ]
+    },
+    {
+      "module_id": "orch-linear-runtime",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "runWorkflowNode 薄分发器有真实调用方",
+        "duplicate_controls": "checkpoint_failed/revalidation_required/acceptance-proof 失败处置块三处逐行重复",
+        "cohesion": "主体内聚但超大",
+        "abstraction_clarity": "checkpoint 节点重包装与整链直接读取双路径并存，属遮蔽",
+        "long_file_responsibility": "1002 行破千行线，混合整链循环/分步节点/delivery worktree 管理/恢复辅助四类变化原因",
+        "extension_locality": "加节点只改分发链+CLI",
+        "style_consistency": "14+ 处裸 throw 未走错误协议（与本区主导一致、与条文分叉）",
+        "test_boundary_and_proportionality": "未越界，测试充分"
+      },
+      "evidence_ids": [
+        "E-011",
+        "E-012",
+        "E-080"
+      ]
+    },
+    {
+      "module_id": "orch-admission",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "无，分层与事务阶段一一对应",
+        "duplicate_controls": "rollback 失败恢复持久化块文件内复制 4 份",
+        "cohesion": "主体内聚，尾部混入 agent-run 存储投影与输入归一化",
+        "abstraction_clarity": "phase 状态机+persisted rollback plan 权威，崩溃续跑设计成熟",
+        "long_file_responsibility": "1001 行破千行线，准入事务与 agent-run 投影两种变化原因",
+        "extension_locality": "加准入模式只改本文件+recovery+pipeline 选项",
+        "style_consistency": "27 处裸 throw 与本区一致；同模块双 import",
+        "test_boundary_and_proportionality": "未越界；writable_paths 实际复核漏未跟踪新文件（P2）"
+      },
+      "evidence_ids": [
+        "E-013",
+        "E-014",
+        "E-065",
+        "E-082"
+      ]
+    },
+    {
+      "module_id": "orch-parallel-runtime",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "admitParallelAgentResult 兼容转口有真实消费方",
+        "duplicate_controls": "run index.json 三处 read-modify-write 均无锁（P2）",
+        "cohesion": "中等内聚",
+        "abstraction_clarity": "runOneAgent 容错包裹与 fence 逐条拒绝原因清晰",
+        "long_file_responsibility": "872 行混合执行引擎/run 索引维护/worktree 清理三块变化原因",
+        "extension_locality": "新 isolation 模式只改 resolveParallelIsolation+infra",
+        "style_consistency": "合规",
+        "test_boundary_and_proportionality": "未越界，8 个测试文件覆盖"
+      },
+      "evidence_ids": [
+        "E-027"
+      ]
+    },
+    {
+      "module_id": "orch-adoption",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "gitBlobDigestEqualsIfAvailable 对静态导出做 typeof 防御+namespace import，无收益间接",
+        "duplicate_controls": "stale 处理块逐字重复；SENSITIVE_PATH_RE 检查被蕴含是死检查",
+        "cohesion": "状态机内聚，digest/git 校验工具族是另一职责",
+        "abstraction_clarity": "namespace 动态取函数遮蔽意图",
+        "long_file_responsibility": "894 行混合会话流转/审批策略/恢复事务/digest 校验四种变化原因",
+        "extension_locality": "新状态改 SESSION_STATES+if 链，集中",
+        "style_consistency": "自制 adoptionError 第三套错误形；nextAction 中英混杂",
+        "test_boundary_and_proportionality": "ignoreLiveFingerprint 死参数无任何调用方，疑似调试残留"
+      },
+      "evidence_ids": [
+        "E-015",
+        "E-020",
+        "E-021"
+      ]
+    },
+    {
+      "module_id": "orch-task-board",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "normalizeAgentName 零增值别名",
+        "duplicate_controls": "派生物先写 canonical 后写事务模式重复三次无共享原语",
+        "cohesion": "任务账本内聚，归档事务与团队消息是不同变化原因",
+        "abstraction_clarity": "写入顺序与回滚注释清晰传达不变量",
+        "long_file_responsibility": "891 行混合生命周期/持久化格式/归档/消息四个变化原因",
+        "extension_locality": "新任务字段走 plan-state normalizeTask，新消息类型需改核心段",
+        "style_consistency": "26 处裸 throw 与本区一致",
+        "test_boundary_and_proportionality": "未越界，7+ 测试文件"
+      },
+      "evidence_ids": [
+        "E-016",
+        "E-023"
+      ]
+    },
+    {
+      "module_id": "orch-plan-state",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "两个 re-export shim 违反 barrel 禁令",
+        "duplicate_controls": "uniqueStrings 与 route-table 同实现（全仓 6 处散点拷贝之一）",
+        "cohesion": "纯函数 schema 层与 IO 事务层两类职责同居",
+        "abstraction_clarity": "normalize/validate 命名平直，环检测意图清楚",
+        "long_file_responsibility": "712 行混合 schema 层与 IO 事务层两种变化原因",
+        "extension_locality": "加 task 字段只改 normalizeTask",
+        "style_consistency": "合规",
+        "test_boundary_and_proportionality": "未越界；importPlan 权威账本先于 ledger 写入（P2 审计倒置）"
+      },
+      "evidence_ids": [
+        "E-017",
+        "E-022"
+      ]
+    },
+    {
+      "module_id": "orch-delivery-pipeline",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "无",
+        "duplicate_controls": "无，所有门统一走 invokeCapability",
+        "cohesion": "内聚良好，是本区唯一全用 buildErrorProtocol 的标杆",
+        "abstraction_clarity": "deriveGateFailure 集中证据推导，帮助理解",
+        "long_file_responsibility": "579 行单一职责",
+        "extension_locality": "新门需同步六处平行表（GATE_STEPS/STEP_LABELS/...），全在本文件但易漏",
+        "style_consistency": "本区最佳",
+        "test_boundary_and_proportionality": "未越界；prepareContractReview 异常逃逸无审计（P2）"
+      },
+      "evidence_ids": [
+        "E-026",
+        "E-069"
+      ]
+    },
+    {
+      "module_id": "orch-git-sync",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "无",
+        "duplicate_controls": "ledger 幂等去重写块 integration 内联 3 次、handoff 内联 2 次、另有 takeover 抽函数、admission 又一套，四种写法并存",
+        "cohesion": "integration/handoff/remote-ownership 各自内聚良好",
+        "abstraction_clarity": "inspectRemoteCommitContainment 封装 ls-remote 坑，好抽象",
+        "long_file_responsibility": "均 ≤679 行",
+        "extension_locality": "新交付/协调模式改 dispatch 或扩展 remote-ownership，封闭集合可接受",
+        "style_consistency": "integration 同模块双 import；大量裸 throw",
+        "test_boundary_and_proportionality": "未越界；recordRemoteClaimLedgerOnce 非原子（P2）"
+      },
+      "evidence_ids": [
+        "E-071",
+        "E-076"
+      ]
+    },
+    {
+      "module_id": "orch-governance",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "无",
+        "duplicate_controls": "review 不变量检查与 resolve 裁决两套互不约束的门槛",
+        "cohesion": "steering+CR 同属计划变更治理，内聚合理",
+        "abstraction_clarity": "join 拼出 requiresSisyphusReview 的混淆键是遮蔽反例",
+        "long_file_responsibility": "均 ≤612 行",
+        "extension_locality": "新 steering kind 需同步三处，封闭集合可接受",
+        "style_consistency": "rationale 硬编码 Agent 名泄漏角色配置",
+        "test_boundary_and_proportionality": "未越界；mark_blocked 可改写终态（P2）"
+      },
+      "evidence_ids": [
+        "E-024",
+        "E-025"
+      ]
+    },
+    {
+      "module_id": "orch-status",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "无",
+        "duplicate_controls": "无，复用 infra 的 gate-arming/config-baseline/ledger 校验",
+        "cohesion": "status/workflow/host-runtime 各自内聚",
+        "abstraction_clarity": "host-runtime 注入式 classify/render 是清晰的依赖反转",
+        "long_file_responsibility": "均 ≤389 行",
+        "extension_locality": "workflow 终止状态列表漏 awaiting_user_decision 正是 P1 根源",
+        "style_consistency": "合规",
+        "test_boundary_and_proportionality": "未越界"
+      },
+      "evidence_ids": [
+        "E-010"
+      ]
+    },
+    {
+      "module_id": "ai-hooks",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "无",
+        "duplicate_controls": "shell 白名单两处重复；deny 返回字面量五处高度重复",
+        "cohesion": "否——安全门+渲染+编排三职责混居",
+        "abstraction_clarity": "渲染辅助函数帮助理解，184 行事件 if 链遮蔽流程",
+        "long_file_responsibility": "1144 行全区最大且破千行线，明确混合安全策略/渲染模板/事件接线三类变化原因",
+        "extension_locality": "加新 hook 事件需改主函数+4 个映射函数，属改核心",
+        "style_consistency": "uniqueStrings/normalizeRelativePath 本地重写而不导入",
+        "test_boundary_and_proportionality": "未越界"
+      },
+      "evidence_ids": [
+        "E-045",
+        "E-046"
+      ]
+    },
+    {
+      "module_id": "ai-routing",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "routing.mjs:21 死 re-export 违反 barrel 禁令",
+        "duplicate_controls": "路由信号匹配 route-table/routing/skill-matcher 三处分散且语义不一致",
+        "cohesion": "routing/archivist-router/suspicion-review 各自内聚",
+        "abstraction_clarity": "400+ 字符多重 lookahead 正则不可人读审查",
+        "long_file_responsibility": "均 ≤588 行",
+        "extension_locality": "加路由规则只改 routes.json，好；信号匹配分散是例外",
+        "style_consistency": "JSON 容错解析两处近重复",
+        "test_boundary_and_proportionality": "未越界；truncatePacket 不截 input 可击穿预算"
+      },
+      "evidence_ids": [
+        "E-018",
+        "E-047",
+        "E-048",
+        "E-049"
+      ]
+    },
+    {
+      "module_id": "ai-context",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "writeContextSnapshot 一行透传仅一个测试直接用",
+        "duplicate_controls": "uniqueStrings 本地拷贝",
+        "cohesion": "context/injection/skill-matcher 各自内聚",
+        "abstraction_clarity": "截断 marker 显式化帮助理解",
+        "long_file_responsibility": "均 ≤408 行",
+        "extension_locality": "加注入点只改配置，好",
+        "style_consistency": "skill-matcher 每次全量渲染所有 skill 取 excerpt，线性 IO 放大",
+        "test_boundary_and_proportionality": "未越界"
+      },
+      "evidence_ids": [
+        "E-072",
+        "E-078"
+      ]
+    },
+    {
+      "module_id": "cap-gateway",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "无",
+        "duplicate_controls": "adapter 是必要的信封映射",
+        "cohesion": "静态注册表+信封归一化，单一缝真实成立",
+        "abstraction_clarity": "七字段信封帮助理解",
+        "long_file_responsibility": "211 行",
+        "extension_locality": "新 capability 只需实现文件+gateway 一行注册",
+        "style_consistency": "遵循",
+        "test_boundary_and_proportionality": "未越界；contract-scan 信封 status 失真（P1）"
+      },
+      "evidence_ids": [
+        "E-055",
+        "E-067"
+      ]
+    },
+    {
+      "module_id": "cap-gates",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "scope-guard.mjs:9-10 死 re-export（barrel 残留）",
+        "duplicate_controls": "acceptance-proof 与 review-gate 的证据校验重复但属有意纵深防御；review-gate 两个命令循环近重复",
+        "cohesion": "各 gate 原子职责内聚",
+        "abstraction_clarity": "lane 声明式写法帮助理解",
+        "long_file_responsibility": "均 ≤332 行",
+        "extension_locality": "加 lane/check 只改本文件",
+        "style_consistency": "遵循",
+        "test_boundary_and_proportionality": "未越界；acceptance-proof scope_check 死分支（P2）；code-intel 词法校验无 realpath（P3）"
+      },
+      "evidence_ids": [
+        "E-019",
+        "E-056",
+        "E-057",
+        "E-058"
+      ]
+    },
+    {
+      "module_id": "cap-governance",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "无",
+        "duplicate_controls": "无",
+        "cohesion": "verification-governance/contract-governance/project-review/responsibility-audit 各自内聚",
+        "abstraction_clarity": "citation 逐行比对、R1-R5 审计意图明确",
+        "long_file_responsibility": "最大 411 行，内聚可接受",
+        "extension_locality": "符合 gateway 注册模式",
+        "style_consistency": "遵循",
+        "test_boundary_and_proportionality": "未越界，preimage 回滚体系严密"
+      },
+      "evidence_ids": [
+        "E-068"
+      ]
+    },
+    {
+      "module_id": "infra-runtime",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "无",
+        "duplicate_controls": "无",
+        "cohesion": "runtime-store/prompt-pack/bootstrap/agent-registry 内聚",
+        "abstraction_clarity": "agent-registry 字符串拼接构造别名键遮蔽意图",
+        "long_file_responsibility": "runtime-config 545 行嵌 320 行默认配置数据字面量，产品配置与加载机制两种变化原因",
+        "extension_locality": "新增 injection point/skill/agent 默认值必须改 infra 核心文件",
+        "style_consistency": "字符串拼接 vs 模板字面量混用",
+        "test_boundary_and_proportionality": "未越界"
+      },
+      "evidence_ids": [
+        "E-030",
+        "E-036",
+        "E-068"
+      ]
+    },
+    {
+      "module_id": "infra-persistence",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "security.mjs 三个零收益改名包装",
+        "duplicate_controls": "无重复门禁；ledger 双走查是性能问题非重复门禁",
+        "cohesion": "ledger/file-lock/decision-log/task-state-store 各自内聚且 fail-closed 设计成熟",
+        "abstraction_clarity": "尾 hash 缓存三态注释精确，帮助理解",
+        "long_file_responsibility": "均 ≤460 行",
+        "extension_locality": "不改框架",
+        "style_consistency": "错误协议采纳不一致（仅 ledger 走 wildarrangeError）",
+        "test_boundary_and_proportionality": "未越界；file-lock stale 回收窄竞态（P2）；annotation-log 无界全量扫描（P2）"
+      },
+      "evidence_ids": [
+        "E-029",
+        "E-031",
+        "E-032",
+        "E-035",
+        "E-063",
+        "E-073"
+      ]
+    },
+    {
+      "module_id": "infra-command",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "无",
+        "duplicate_controls": "无",
+        "cohesion": "command-runner/command-safety/agent-spawn/llm-provider 各自内聚",
+        "abstraction_clarity": "退出码协议区分度高，帮助理解",
+        "long_file_responsibility": "runProcess 146 行混合 spawn 装配/超时杀树/输出截断/四种结束路径，净嵌套 8 层全区最深",
+        "extension_locality": "新增 reviewer profile 需改 infra 代码（有 fallback）",
+        "style_consistency": "遵循",
+        "test_boundary_and_proportionality": "未越界"
+      },
+      "evidence_ids": [
+        "E-038"
+      ]
+    },
+    {
+      "module_id": "infra-git",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "无",
+        "duplicate_controls": "git rev-parse HEAD 四份、变更探针两套、toplevel 探测两份——读原语无 owner",
+        "cohesion": "diff=只读事实、worktree=临时施工、coordination=写与远端，边界注释清晰",
+        "abstraction_clarity": "临时 GIT_INDEX_FILE+update-ref 乐观锁注释解释为什么，教科书级",
+        "long_file_responsibility": "均 ≤527 行",
+        "extension_locality": "不改框架",
+        "style_consistency": "参数数组+shell:false 全批合规",
+        "test_boundary_and_proportionality": "未越界"
+      },
+      "evidence_ids": [
+        "E-041",
+        "E-071"
+      ]
+    },
+    {
+      "module_id": "infra-analysis",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "无",
+        "duplicate_controls": "uniqueStrings 四份、normalizeRelativePath 三份、truncate 三份",
+        "cohesion": "dependency-graph/route-table/rule-scanner 等各自内聚",
+        "abstraction_clarity": "dependency-graph 头注 24 行是全区最好的文档化范例；route-table 硬编码产品启发式与纯表查询自述矛盾",
+        "long_file_responsibility": "均 ≤366 行",
+        "extension_locality": "新增 intent/domain 走 routes.json 不改核心，硬编码启发式例外",
+        "style_consistency": "两文件函数体内动态 import 偏离静态主导",
+        "test_boundary_and_proportionality": "未越界；rule-scanner CRLF frontmatter 不兼容（P2）"
+      },
+      "evidence_ids": [
+        "E-034",
+        "E-042",
+        "E-043",
+        "E-064",
+        "E-081"
+      ]
+    },
+    {
+      "module_id": "infra-verification",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "无",
+        "duplicate_controls": "同文件两套动态 import 检测各自演化（已产生恒假死代码 P1）",
+        "cohesion": "verification-discovery 不内聚，其余内聚",
+        "abstraction_clarity": "digest 链与 CRLF 归一化比较帮助理解",
+        "long_file_responsibility": "verification-discovery 916 行混合目录行走/分类启发/卡构建/快照 digest 四种变化原因，应拆",
+        "extension_locality": "新 asset kind 改三处 switch，同文件内扩散可接受；新 discoverer 需改核心 CONTRACT_DISCOVERERS",
+        "style_consistency": "遵循",
+        "test_boundary_and_proportionality": "未越界"
+      },
+      "evidence_ids": [
+        "E-039",
+        "E-040",
+        "E-044"
+      ]
+    },
+    {
+      "module_id": "tooling",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "Rust/Python/Next.js 规则对本仓库无当前收益（模板残留）",
+        "duplicate_controls": "两脚本互相复制 28 行辅助函数；与 src/dependency-graph 各有一份 import 解析器",
+        "cohesion": "validate-module-file-map 单脚本承载 8 类门禁（含 HTML 卡片计数），职责过载——脚本职能写爆实锤",
+        "abstraction_clarity": "手写 HTML 扫描脆弱性未注释",
+        "long_file_responsibility": "validate 489 行混合多变化原因",
+        "extension_locality": "加新检查需进上帝脚本",
+        "style_consistency": "裸 console.error+exit(1) 与统一错误协议有出入（开发工具可豁免）",
+        "test_boundary_and_proportionality": "本身是开发工具，未进生产路径"
+      },
+      "evidence_ids": [
+        "E-006",
+        "E-007",
+        "E-008"
+      ]
+    },
+    {
+      "module_id": "packs-config",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "无",
+        "duplicate_controls": "routes 与 manifest 交叉引用经脚本核验零缺失",
+        "cohesion": "agents/skills/routes/tools/project-init 五类边界清晰，是本次审查最干净的部分",
+        "abstraction_clarity": "帮助理解",
+        "long_file_responsibility": "tool-contract.json 1593 行纯数据单变化轴",
+        "extension_locality": "新 Skill 走 manifest+routes+默认配置+测试，路径明确",
+        "style_consistency": "组织一致",
+        "test_boundary_and_proportionality": "无 contract-only/roadmap 项；live config 与 example 键漂移（P2）"
+      },
+      "evidence_ids": [
+        "E-009",
+        "E-074"
+      ]
+    },
+    {
+      "module_id": "test-suite",
+      "status": "reviewed",
+      "check_results": {
+        "unnecessary_layers": "无",
+        "duplicate_controls": "adoption-runtime 三对近重复测试（CODE 评审波次双份）",
+        "cohesion": "四层（单元/集成/对抗/包体）边界清晰",
+        "abstraction_clarity": "故障注入用物理手段直白可读，无 mock 框架",
+        "long_file_responsibility": "runtime-integration 5261 行/124 用例/62s，逼近 180s 单文件超时",
+        "extension_locality": "新跨区边需手工进钉死名单——刻意摩擦设计",
+        "style_consistency": "断言风格统一；临时目录根两种约定混用；评审编号进测试名",
+        "test_boundary_and_proportionality": "生产边界/授权范围/复杂度匹配三项均未发现越界；44/44 全绿 257s"
+      },
+      "evidence_ids": [
+        "E-059",
+        "E-060",
+        "E-061",
+        "E-062"
+      ]
+    }
+  ],
+  "architecture": {
+    "current": {
+      "components": [
+        {
+          "id": "bin-cli",
+          "name": "CLI 入口",
+          "responsibility": "参数解析、命令路由、输出格式与退出码（渗入少量业务流程）",
+          "paths": [
+            "bin/wildarrange.mjs"
+          ]
+        },
+        {
+          "id": "interface-dashboard",
+          "name": "Dashboard 与面板",
+          "responsibility": "本地 HTTP API、页面渲染、治理接管面板",
+          "paths": [
+            "src/interface/dashboard.mjs",
+            "src/interface/dashboard-view.mjs",
+            "src/interface/dashboard-panels.mjs",
+            "src/interface/adoption-panel.mjs"
+          ]
+        },
+        {
+          "id": "interface-adapters",
+          "name": "宿主 Adapter",
+          "responsibility": "Codex/Cursor/Kimi 安装卸载恢复与 Hook bridge 生成",
+          "paths": [
+            "src/interface/adapters.mjs",
+            "src/interface/cursor-adapter.mjs",
+            "src/interface/kimi-adapter.mjs",
+            "src/interface/hook-bridge-core.mjs"
+          ]
+        },
+        {
+          "id": "interface-doctor",
+          "name": "Doctor 体检",
+          "responsibility": "一致性体检、对账与报告",
+          "paths": [
+            "src/interface/doctor.mjs"
+          ]
+        },
+        {
+          "id": "interface-read-models",
+          "name": "只读投影与帮助",
+          "responsibility": "decisions/timeline/cli-help/contract-view/project-init",
+          "paths": [
+            "src/interface/decisions.mjs",
+            "src/interface/timeline.mjs",
+            "src/interface/cli-help.mjs",
+            "src/interface/contract-view.mjs",
+            "src/interface/project-init.mjs"
+          ]
+        },
+        {
+          "id": "orch-linear-runtime",
+          "name": "线性运行时",
+          "responsibility": "runNextTask 整链与七个分步节点的执行、门编排与失败落账",
+          "paths": [
+            "src/orchestration/linear-runtime.mjs"
+          ]
+        },
+        {
+          "id": "orch-admission",
+          "name": "并行准入事务",
+          "responsibility": "claim→apply→gates→delivery/rollback 的崩溃可续跑事务",
+          "paths": [
+            "src/orchestration/admission.mjs",
+            "src/orchestration/admission-recovery.mjs"
+          ]
+        },
+        {
+          "id": "orch-parallel-runtime",
+          "name": "并行运行时",
+          "responsibility": "命令型子 Agent 批跑、隔离、结果收集与生命周期",
+          "paths": [
+            "src/orchestration/parallel-runtime.mjs"
+          ]
+        },
+        {
+          "id": "orch-adoption",
+          "name": "治理接管",
+          "responsibility": "老项目验证治理接管会话状态机与逐卡事务",
+          "paths": [
+            "src/orchestration/adoption.mjs"
+          ]
+        },
+        {
+          "id": "orch-task-board",
+          "name": "任务账本",
+          "responsibility": "全项目工单总账、claim/证据/持久化与消息板",
+          "paths": [
+            "src/orchestration/task-board.mjs"
+          ]
+        },
+        {
+          "id": "orch-plan-state",
+          "name": "计划状态",
+          "responsibility": "计划归一化、图校验、导入、批准与任务状态加载",
+          "paths": [
+            "src/orchestration/plan-state.mjs"
+          ]
+        },
+        {
+          "id": "orch-delivery-pipeline",
+          "name": "交付流水线",
+          "responsibility": "verify→scope→review→acceptance-proof→checkpoint 唯一顺序来源与完成提交",
+          "paths": [
+            "src/orchestration/delivery-pipeline.mjs"
+          ]
+        },
+        {
+          "id": "orch-git-sync",
+          "name": "Git 交付与交接",
+          "responsibility": "delivery commit/push、跨设备 handoff、远端 ownership",
+          "paths": [
+            "src/orchestration/integration.mjs",
+            "src/orchestration/handoff.mjs",
+            "src/orchestration/remote-ownership.mjs"
+          ]
+        },
+        {
+          "id": "orch-governance",
+          "name": "变更治理",
+          "responsibility": "steering、ChangeRequest、契约变更批准与 feature design 门",
+          "paths": [
+            "src/orchestration/change-governance.mjs",
+            "src/orchestration/contract-governance.mjs",
+            "src/orchestration/feature-design.mjs"
+          ]
+        },
+        {
+          "id": "orch-status",
+          "name": "状态与工作流入口",
+          "responsibility": "status/attention 报告、workflow 主循环、宿主业务前置",
+          "paths": [
+            "src/orchestration/status.mjs",
+            "src/orchestration/workflow.mjs",
+            "src/orchestration/host-runtime.mjs"
+          ]
+        },
+        {
+          "id": "ai-hooks",
+          "name": "宿主 Hook",
+          "responsibility": "六类宿主事件的 facts 采集、注入渲染与 PreToolUse 安全门",
+          "paths": [
+            "src/ai/hooks.mjs"
+          ]
+        },
+        {
+          "id": "ai-routing",
+          "name": "路由",
+          "responsibility": "routeRequest 全流程、ArchivistRouter、LLM 怀疑审查",
+          "paths": [
+            "src/ai/routing.mjs",
+            "src/ai/archivist-router.mjs",
+            "src/ai/suspicion-review.mjs"
+          ]
+        },
+        {
+          "id": "ai-context",
+          "name": "上下文与注入",
+          "responsibility": "Agent 上下文、注入点解析、Skill 匹配",
+          "paths": [
+            "src/ai/context.mjs",
+            "src/ai/injection.mjs",
+            "src/ai/skill-matcher.mjs"
+          ]
+        },
+        {
+          "id": "cap-gateway",
+          "name": "能力网关",
+          "responsibility": "静态注册表与七字段结果信封，上层唯一接缝",
+          "paths": [
+            "src/capabilities/gateway.mjs"
+          ]
+        },
+        {
+          "id": "cap-gates",
+          "name": "原子质量门",
+          "responsibility": "worker/verify/scope/review/code-intel/acceptance-proof/checkpoint",
+          "paths": [
+            "src/capabilities/worker.mjs",
+            "src/capabilities/verify.mjs",
+            "src/capabilities/scope-guard.mjs",
+            "src/capabilities/review-gate.mjs",
+            "src/capabilities/code-intel.mjs",
+            "src/capabilities/acceptance-proof.mjs",
+            "src/capabilities/checkpoint.mjs"
+          ]
+        },
+        {
+          "id": "cap-governance",
+          "name": "治理能力",
+          "responsibility": "验证治理/契约/仓库治理/项目审查/职责审计原子能力",
+          "paths": [
+            "src/capabilities/verification-governance.mjs",
+            "src/capabilities/contract-governance.mjs",
+            "src/capabilities/repository-governance.mjs",
+            "src/capabilities/project-review.mjs",
+            "src/capabilities/responsibility-audit.mjs",
+            "src/capabilities/execution-readiness.mjs"
+          ]
+        },
+        {
+          "id": "infra-runtime",
+          "name": "运行时底座",
+          "responsibility": "路径/原子写/配置/快照/prompt-pack/bootstrap/agent 白名单",
+          "paths": [
+            "src/infra/runtime-store.mjs",
+            "src/infra/runtime-config.mjs",
+            "src/infra/runtime-bootstrap.mjs",
+            "src/infra/runtime-snapshot.mjs",
+            "src/infra/prompt-pack.mjs",
+            "src/infra/agent-registry.mjs"
+          ]
+        },
+        {
+          "id": "infra-persistence",
+          "name": "持久化与锁",
+          "responsibility": "hash 链 ledger、决策/标注日志、文件锁、任务状态存储、备份恢复",
+          "paths": [
+            "src/infra/ledger.mjs",
+            "src/infra/decision-log.mjs",
+            "src/infra/annotation-log.mjs",
+            "src/infra/file-lock.mjs",
+            "src/infra/task-state-lock.mjs",
+            "src/infra/task-state-store.mjs",
+            "src/infra/security.mjs",
+            "src/infra/recovery-transaction.mjs",
+            "src/infra/task-reports.mjs"
+          ]
+        },
+        {
+          "id": "infra-command",
+          "name": "命令与 LLM",
+          "responsibility": "子进程执行、命令安全、spawn 模板、OpenAI 兼容 provider",
+          "paths": [
+            "src/infra/command-runner.mjs",
+            "src/infra/command-safety.mjs",
+            "src/infra/agent-spawn.mjs",
+            "src/infra/llm-provider.mjs"
+          ]
+        },
+        {
+          "id": "infra-git",
+          "name": "Git 原语",
+          "responsibility": "只读探针、worktree 施工、写与远端协调",
+          "paths": [
+            "src/infra/git-diff.mjs",
+            "src/infra/git-worktree.mjs",
+            "src/infra/git-coordination.mjs"
+          ]
+        },
+        {
+          "id": "infra-analysis",
+          "name": "分析与规则",
+          "responsibility": "import 扫描器、路由表、规则扫描、仓库布局、记忆 digest、纯判定工具",
+          "paths": [
+            "src/infra/dependency-graph.mjs",
+            "src/infra/route-table.mjs",
+            "src/infra/rule-scanner.mjs",
+            "src/infra/repository-layout.mjs",
+            "src/infra/memory-digest.mjs",
+            "src/infra/failure-analysis.mjs",
+            "src/infra/task-predicates.mjs",
+            "src/infra/success-criteria.mjs",
+            "src/infra/path-match.mjs",
+            "src/infra/error-protocol.mjs",
+            "src/infra/gate-arming.mjs",
+            "src/infra/hook-result-gate.mjs",
+            "src/infra/context-attachments.mjs",
+            "src/infra/responsibility-contract.mjs",
+            "src/infra/responsibility-evidence.mjs"
+          ]
+        },
+        {
+          "id": "infra-verification",
+          "name": "验证治理底座",
+          "responsibility": "验证资产扫描、registry freshness、契约 schema、review findings",
+          "paths": [
+            "src/infra/verification-discovery.mjs",
+            "src/infra/verification-registry.mjs",
+            "src/infra/contract-governance.mjs",
+            "src/infra/review-findings.mjs"
+          ]
+        },
+        {
+          "id": "tooling",
+          "name": "开发工具",
+          "responsibility": "测试串行 runner 与架构模块图门禁",
+          "paths": [
+            "tooling/run-tests.mjs",
+            "tooling/arch-module-graph/"
+          ]
+        },
+        {
+          "id": "packs-config",
+          "name": "Prompt Pack 与配置",
+          "responsibility": "角色/技能/路由表/工具合同与根配置",
+          "paths": [
+            "packs/wildarrange-linear/",
+            "wildarrange.config.json"
+          ]
+        },
+        {
+          "id": "test-suite",
+          "name": "测试体系",
+          "responsibility": "44 个测试文件四层验证与架构边界门禁",
+          "paths": [
+            "test/"
+          ]
+        }
+      ],
+      "edges": [
+        {
+          "from": "bin-cli",
+          "to": "interface-dashboard",
+          "relation": "组合调用"
+        },
+        {
+          "from": "bin-cli",
+          "to": "orch-linear-runtime",
+          "relation": "组合调用"
+        },
+        {
+          "from": "bin-cli",
+          "to": "cap-gates",
+          "relation": "三处直接 import 能力实现（违规例外）"
+        },
+        {
+          "from": "interface-dashboard",
+          "to": "orch-status",
+          "relation": "读 ViewModel"
+        },
+        {
+          "from": "interface-doctor",
+          "to": "infra-persistence",
+          "relation": "校验 ledger/备份"
+        },
+        {
+          "from": "orch-linear-runtime",
+          "to": "cap-gateway",
+          "relation": "invokeCapability 唯一缝"
+        },
+        {
+          "from": "orch-linear-runtime",
+          "to": "ai-routing",
+          "relation": "白名单内唯一 orchestration→ai 边"
+        },
+        {
+          "from": "orch-admission",
+          "to": "orch-delivery-pipeline",
+          "relation": "共享 gate 序列"
+        },
+        {
+          "from": "orch-delivery-pipeline",
+          "to": "cap-gateway",
+          "relation": "invokeCapability"
+        },
+        {
+          "from": "orch-git-sync",
+          "to": "infra-git",
+          "relation": "Git 原语"
+        },
+        {
+          "from": "ai-hooks",
+          "to": "cap-gateway",
+          "relation": "scope 检查经 gateway"
+        },
+        {
+          "from": "ai-hooks",
+          "to": "orch-governance",
+          "relation": "只读边（feature design 推进）"
+        },
+        {
+          "from": "ai-routing",
+          "to": "infra-analysis",
+          "relation": "确定性路由表"
+        },
+        {
+          "from": "cap-gateway",
+          "to": "cap-gates",
+          "relation": "静态注册"
+        },
+        {
+          "from": "cap-gates",
+          "to": "infra-persistence",
+          "relation": "ledger/锁/原子写"
+        },
+        {
+          "from": "cap-gates",
+          "to": "infra-command",
+          "relation": "命令执行与安全预检"
+        },
+        {
+          "from": "tooling",
+          "to": "test-suite",
+          "relation": "串行执行"
+        },
+        {
+          "from": "test-suite",
+          "to": "orch-delivery-pipeline",
+          "relation": "依赖边界与故障注入验证"
+        }
+      ]
+    }
+  },
+  "evidence": [
+    {
+      "id": "E-001",
+      "kind": "file",
+      "path": "bin/wildarrange.mjs",
+      "line_start": 430,
+      "summary": "--maxSteps 缺 !== true 守卫，裸标志被静默解释为 1（node -e 实证）；同文件 108 处手工取值守卫"
+    },
+    {
+      "id": "E-002",
+      "kind": "file",
+      "path": "bin/wildarrange.mjs",
+      "line_start": 909,
+      "summary": "task archive 的备份→删除事务顺序编排在 CLI 组合层"
+    },
+    {
+      "id": "E-003",
+      "kind": "file",
+      "path": "bin/wildarrange.mjs",
+      "line_start": 669,
+      "summary": "35 行 test runner 住在 CLI；NODE_TEST_* 环境剥离修复未同步 tooling/run-tests.mjs"
+    },
+    {
+      "id": "E-004",
+      "kind": "file",
+      "path": "bin/wildarrange.mjs",
+      "line_start": 2,
+      "summary": "CLI 直接 import project-review/repository-governance/scope-guard 实现，绕过 gateway"
+    },
+    {
+      "id": "E-005",
+      "kind": "file",
+      "path": "src/interface/cli-help.mjs",
+      "line_start": 14,
+      "summary": "命令注册表与 bin if 链构成命令面双事实源，测试只覆盖 help→注册表单向"
+    },
+    {
+      "id": "E-006",
+      "kind": "file",
+      "path": "tooling/arch-module-graph/validate-module-file-map.mjs",
+      "line_start": 6,
+      "summary": "头注释自述单脚本承载 8 类门禁，含 HTML flow 卡片计数等展示层关注"
+    },
+    {
+      "id": "E-007",
+      "kind": "file",
+      "path": "tooling/arch-module-graph/validate-module-file-map.mjs",
+      "line_start": 73,
+      "summary": "Rust/Python/Next.js 命名规则对本仓库（纯 .mjs）无当前收益"
+    },
+    {
+      "id": "E-008",
+      "kind": "file",
+      "path": "tooling/arch-module-graph/generate-module-graph.mjs",
+      "line_start": 165,
+      "summary": "硬编码 client/src-tauri/src，本仓库不存在该目录；另有 Rust/Python import 解析死代码"
+    },
+    {
+      "id": "E-009",
+      "kind": "configuration",
+      "path": "wildarrange.config.json",
+      "summary": "live config 缺 routeGovernance/gitCoordination/skillMatcher/contextBudgets 等 example 已有键，靠 runtime-config 默认值兜底（脚本 diff 实证）"
+    },
+    {
+      "id": "E-010",
+      "kind": "file",
+      "path": "src/orchestration/workflow.mjs",
+      "line_start": 28,
+      "summary": "主循环 break 列表缺 awaiting_user_decision，决策请求空转至 maxSteps=50"
+    },
+    {
+      "id": "E-011",
+      "kind": "file",
+      "path": "src/orchestration/linear-runtime.mjs",
+      "line_start": 262,
+      "summary": "checkpoint_failed/revalidation_required/acceptance-proof 失败处置块三处逐行重复（262-285≈660-679 等）"
+    },
+    {
+      "id": "E-012",
+      "kind": "file",
+      "path": "src/orchestration/linear-runtime.mjs",
+      "summary": "1002 行破千行上限，混合整链循环/分步节点语义/delivery worktree 管理/恢复辅助四类变化原因"
+    },
+    {
+      "id": "E-013",
+      "kind": "file",
+      "path": "src/orchestration/admission.mjs",
+      "line_start": 537,
+      "summary": "rollback 失败恢复持久化块文件内复制 4 份（537-559、588-610、689-716、788-805）；文件 1001 行破线"
+    },
+    {
+      "id": "E-014",
+      "kind": "file",
+      "path": "src/orchestration/admission.mjs",
+      "line_start": 911,
+      "summary": "collectActualAdmissionPaths 用 git diff --name-only 不含未跟踪新文件，writable_paths 实际复核对新建文件失效"
+    },
+    {
+      "id": "E-015",
+      "kind": "file",
+      "path": "src/orchestration/adoption.mjs",
+      "line_start": 894,
+      "summary": "export { locatorConfigured, readMaintenanceMarker } 纯 re-export 全仓无消费方（已 grep 核实）"
+    },
+    {
+      "id": "E-016",
+      "kind": "file",
+      "path": "src/orchestration/task-board.mjs",
+      "line_start": 45,
+      "summary": "export { applyVerifierEvidenceToCriteria, criteriaStatus } dead re-export，消费方均直连 infra"
+    },
+    {
+      "id": "E-017",
+      "kind": "file",
+      "path": "src/orchestration/plan-state.mjs",
+      "line_start": 286,
+      "summary": "isPossibleNoopTask/isTrivialCommand 与 loadTaskState 两个 shim 转口（286、708）"
+    },
+    {
+      "id": "E-018",
+      "kind": "file",
+      "path": "src/ai/routing.mjs",
+      "line_start": 21,
+      "summary": "export { loadRoutesConfig, resolveRouteDecision } from infra/route-table 死 re-export"
+    },
+    {
+      "id": "E-019",
+      "kind": "file",
+      "path": "src/capabilities/scope-guard.mjs",
+      "line_start": 9,
+      "summary": "两行 re-export（collectGitDiff/pathAllowed 等）全仓无消费者，barrel 残留"
+    },
+    {
+      "id": "E-020",
+      "kind": "file",
+      "path": "src/orchestration/adoption.mjs",
+      "line_start": 84,
+      "summary": "scan 阶段 invokeCapability 异常时 session 永久卡 scanning，reconcile/resume 均无法推进"
+    },
+    {
+      "id": "E-021",
+      "kind": "file",
+      "path": "src/orchestration/adoption.mjs",
+      "line_start": 512,
+      "summary": "options.ignoreLiveFingerprint 无任何调用方（已 grep src/bin/test 确认），疑似调试残留"
+    },
+    {
+      "id": "E-022",
+      "kind": "file",
+      "path": "src/orchestration/plan-state.mjs",
+      "line_start": 450,
+      "summary": "importPlan 权威 tasks.json(450) 先于 appendLedger(472) 写入；同函数 enrichPlanWithRoutes 顺序相反"
+    },
+    {
+      "id": "E-023",
+      "kind": "file",
+      "path": "src/orchestration/task-board.mjs",
+      "line_start": 150,
+      "summary": "claimTeamTask 先 persist 后 appendLedger，ledger 失败则任务易主无审计且重试被拒"
+    },
+    {
+      "id": "E-024",
+      "kind": "file",
+      "path": "src/orchestration/change-governance.mjs",
+      "line_start": 96,
+      "summary": "[\"requires\",\"Sisy\",\"phus\",\"Review\"].join(\"\") 拼出 requiresSisyphusReview，grep 不到该不变量键"
+    },
+    {
+      "id": "E-025",
+      "kind": "file",
+      "path": "src/orchestration/change-governance.mjs",
+      "line_start": 236,
+      "summary": "mark_blocked 未限制目标状态，可把 completed/verifying 任务改写为 needs_user_decision"
+    },
+    {
+      "id": "E-026",
+      "kind": "file",
+      "path": "src/orchestration/delivery-pipeline.mjs",
+      "line_start": 105,
+      "summary": "prepareContractReview 异常逃逸 runDeliveryPipeline：无 finish()、无 emitDecision、无错误协议"
+    },
+    {
+      "id": "E-027",
+      "kind": "file",
+      "path": "src/orchestration/parallel-runtime.mjs",
+      "line_start": 263,
+      "summary": "run index.json 三处 read-modify-write 均无 withFileLock，并发互丢条目"
+    },
+    {
+      "id": "E-028",
+      "kind": "file",
+      "path": "src/orchestration/admission.mjs",
+      "line_start": 148,
+      "summary": "withTaskStateLock 全局单锁内执行 worker/verifier/git 网络 IO（admission 文件头已声明为刻意取舍）"
+    },
+    {
+      "id": "E-029",
+      "kind": "file",
+      "path": "src/infra/file-lock.mjs",
+      "line_start": 140,
+      "summary": "stale 判定到 removeLock 之间无复核，窄竞态可误删他人活锁"
+    },
+    {
+      "id": "E-030",
+      "kind": "file",
+      "path": "src/infra/runtime-config.mjs",
+      "line_start": 19,
+      "summary": "DEFAULT_WILDARRANGE_CONFIG 320 行产品默认配置数据嵌在 infra 加载机制代码里"
+    },
+    {
+      "id": "E-031",
+      "kind": "file",
+      "path": "src/infra/annotation-log.mjs",
+      "line_start": 34,
+      "summary": "readDecisions 不传 limit 时对 decisions.jsonl 无界全量扫描"
+    },
+    {
+      "id": "E-032",
+      "kind": "file",
+      "path": "src/infra/runtime-snapshot.mjs",
+      "line_start": 103,
+      "summary": "每次写快照 readVerifiedLedgerEntries 与 verifyLedger 各自全量走查 ledger 一次"
+    },
+    {
+      "id": "E-033",
+      "kind": "file",
+      "path": "src/infra/gate-arming.mjs",
+      "line_start": 37,
+      "summary": "const reviewScope = activeTasks.length > 0 ? activeTasks : [] 恒等死代码"
+    },
+    {
+      "id": "E-034",
+      "kind": "file",
+      "path": "src/infra/context-attachments.mjs",
+      "line_start": 76,
+      "summary": "normalizeRelativePath 与 path-match.mjs:15-17 逐字符相同（安全敏感函数多份实现之一）"
+    },
+    {
+      "id": "E-035",
+      "kind": "file",
+      "path": "src/infra/security.mjs",
+      "line_start": 334,
+      "summary": "assertSafeBackupId 等三个零收益改名包装转发 recovery-transaction 原语"
+    },
+    {
+      "id": "E-036",
+      "kind": "file",
+      "path": "src/infra/agent-registry.mjs",
+      "line_start": 8,
+      "summary": "legacyAgentName(\"Sisy\",\"phus\") 拼接构造全部 10 个遗留别名键，无注释说明动机"
+    },
+    {
+      "id": "E-037",
+      "kind": "file",
+      "path": "src/infra/runtime-snapshot.mjs",
+      "line_start": 198,
+      "summary": "describeNextAction 三个字段各为一行 4-5 层嵌套三元，全 infra 最难读段"
+    },
+    {
+      "id": "E-038",
+      "kind": "file",
+      "path": "src/infra/command-runner.mjs",
+      "line_start": 39,
+      "summary": "runProcess 146 行净嵌套 8 层（全区最深），混合 spawn 装配/超时杀树/截断/四种结束路径"
+    },
+    {
+      "id": "E-039",
+      "kind": "file",
+      "path": "src/infra/verification-discovery.mjs",
+      "line_start": 840,
+      "summary": ".every(typeof === string) 恒 true 致 dynamicHint 恒 false，new Function 永不被标记，与 :888 判定矛盾"
+    },
+    {
+      "id": "E-040",
+      "kind": "file",
+      "path": "src/infra/verification-discovery.mjs",
+      "summary": "916 行混合目录行走/分类启发/卡构建/快照 digest 四种变化原因，已超 700 评估线"
+    },
+    {
+      "id": "E-041",
+      "kind": "file",
+      "path": "src/infra/git-coordination.mjs",
+      "line_start": 75,
+      "summary": "git rev-parse HEAD 实现共四份（另 verification-registry:227、memory-digest:113 等）；变更探针两套"
+    },
+    {
+      "id": "E-042",
+      "kind": "file",
+      "path": "src/infra/route-table.mjs",
+      "line_start": 104,
+      "summary": "硬编码中文信号正则/DiJiang/BaiZe/visual 特判（104-168），与文件头纯表查询自述矛盾"
+    },
+    {
+      "id": "E-043",
+      "kind": "file",
+      "path": "src/infra/rule-scanner.mjs",
+      "line_start": 150,
+      "summary": "frontmatter 解析 startsWith(\"---\\n\") 不兼容 CRLF，Windows 下 globs/alwaysApply 全丢"
+    },
+    {
+      "id": "E-044",
+      "kind": "file",
+      "path": "src/infra/repository-layout.mjs",
+      "line_start": 419,
+      "summary": "extractSlashComments+canStartRegex 是 dependency-graph 词法器之外的第二套并行词法器"
+    },
+    {
+      "id": "E-045",
+      "kind": "file",
+      "path": "src/ai/hooks.mjs",
+      "summary": "1144 行全区最大且破千行线，混合 PreToolUse 安全策略/注入渲染/事件编排三类变化原因"
+    },
+    {
+      "id": "E-046",
+      "kind": "file",
+      "path": "src/ai/hooks.mjs",
+      "line_start": 704,
+      "summary": "isAllowedPrePlanShellCommand 与 isReadOnlyWildArrangeShellCommand 两个白名单正则重复"
+    },
+    {
+      "id": "E-047",
+      "kind": "file",
+      "path": "src/ai/skill-matcher.mjs",
+      "line_start": 107,
+      "summary": "collectRouteSignals 用裸 includes 匹配与 route-table:95 词边界正则同一批 signals，命中率不同；orchestration 三处直调 resolveRouteDecision 绕过 routeRequest"
+    },
+    {
+      "id": "E-048",
+      "kind": "file",
+      "path": "src/ai/archivist-router.mjs",
+      "line_start": 545,
+      "summary": "truncatePacket 不截 packet.input 与 memoryIndex，截断后不重测预算"
+    },
+    {
+      "id": "E-049",
+      "kind": "file",
+      "path": "src/ai/routing.mjs",
+      "line_start": 53,
+      "summary": "isDraftOnlyPlanRequest 单条 400+ 字符多重 lookahead 正则，人读无法审查"
+    },
+    {
+      "id": "E-050",
+      "kind": "file",
+      "path": "src/interface/dashboard-panels.mjs",
+      "line_start": 189,
+      "summary": "路由复盘/运维面板约 60+ 行 JS 引用的 DOM 容器不存在、无调用方；对应后端 API 仍在线且有测试"
+    },
+    {
+      "id": "E-051",
+      "kind": "file",
+      "path": "src/interface/adoption-panel.mjs",
+      "line_start": 445,
+      "summary": "复制 dashboard.mjs:303-347 的 sendJson/readJsonBody/64KB 上限且行为漂移（400 vs 500、空 body 判断不同）"
+    },
+    {
+      "id": "E-052",
+      "kind": "file",
+      "path": "src/interface/dashboard-view.mjs",
+      "line_start": 533,
+      "summary": "renderInbox/loadInbox/renderChanges 死函数 + 约 48 行 .route-review-* 死 CSS"
+    },
+    {
+      "id": "E-053",
+      "kind": "file",
+      "path": "src/interface/doctor.mjs",
+      "line_start": 564,
+      "summary": "陈旧规则检测硬编码 macOS /Users/ 正则，Windows 上恒空转；:560 动态 import 仅为 readdir"
+    },
+    {
+      "id": "E-054",
+      "kind": "file",
+      "path": "src/interface/doctor.mjs",
+      "line_start": 153,
+      "summary": "checkCompletionIntegrity 单函数 186 行；文件 708 行超分区评估线"
+    },
+    {
+      "id": "E-055",
+      "kind": "file",
+      "path": "src/capabilities/gateway.mjs",
+      "line_start": 56,
+      "summary": "adaptContractScan 无条件 status:\"pass\"，inspectTask 返回 fail/warn 时信封失真，调用方检查永不触发"
+    },
+    {
+      "id": "E-056",
+      "kind": "file",
+      "path": "src/capabilities/acceptance-proof.mjs",
+      "line_start": 22,
+      "summary": "latestEvidence(task, \"scope_check\") 永不命中（实际 kind 为 scope_guard），死分支"
+    },
+    {
+      "id": "E-057",
+      "kind": "file",
+      "path": "src/capabilities/code-intel.mjs",
+      "line_start": 329,
+      "summary": "pathInsideRoot 仅词法校验无 realpath，可经符号链接读 root 外文件（低危只读）"
+    },
+    {
+      "id": "E-058",
+      "kind": "file",
+      "path": "src/capabilities/review-gate.mjs",
+      "line_start": 38,
+      "summary": "两个命令循环近乎逐字重复（38-46/51-59），code-intel 已有同类 helper"
+    },
+    {
+      "id": "E-059",
+      "kind": "test",
+      "path": "test/adoption-runtime.test.mjs",
+      "line_start": 373,
+      "summary": "三对近重复测试（concurrent start×2、cancel during applying×2、maintenance marker lock×2）"
+    },
+    {
+      "id": "E-060",
+      "kind": "test",
+      "path": "test/runtime-integration.test.mjs",
+      "summary": "5261 行/124 用例/62.4s，占全目录 30% 行数，逼近 180s 单文件超时"
+    },
+    {
+      "id": "E-061",
+      "kind": "test",
+      "path": "test/",
+      "summary": "npm test 实测 44/44 文件、529 用例全绿，256.7s，无 flaky 迹象（2026-09-17）"
+    },
+    {
+      "id": "E-062",
+      "kind": "test",
+      "path": "test/dependency-boundary.test.mjs",
+      "summary": "13 用例对抗闭环：掩码/Unicode 转义/动态 import 字面量/scheme 白名单/环检测/钉死边名单，实测 0.49s"
+    },
+    {
+      "id": "E-063",
+      "kind": "file",
+      "path": "src/infra/ledger.mjs",
+      "line_start": 122,
+      "summary": "尾 hash 缓存三态+尾行损坏 fail-closed 拒绝续链，防篡改降级链（亮点）"
+    },
+    {
+      "id": "E-064",
+      "kind": "file",
+      "path": "src/infra/dependency-graph.mjs",
+      "line_start": 34,
+      "summary": "词法掩码扫描器：注释 blank、字面量置 sentinel、specifier 原文切片，一个实现服务四个消费方（亮点）"
+    },
+    {
+      "id": "E-065",
+      "kind": "file",
+      "path": "src/orchestration/admission.mjs",
+      "line_start": 324,
+      "summary": "phase 状态机+persisted pre-image rollback plan+链验证 ledger 的崩溃续跑设计（亮点）"
+    },
+    {
+      "id": "E-066",
+      "kind": "file",
+      "path": "src/interface/dashboard.mjs",
+      "line_start": 45,
+      "summary": "Host→Origin/Sec-Fetch-Site→token 三道写防护+timingSafeEqual+64KB 熔断（亮点）"
+    },
+    {
+      "id": "E-067",
+      "kind": "file",
+      "path": "src/capabilities/gateway.mjs",
+      "summary": "七字段信封+静态注册表，orchestration/ai 仅经此到达能力实现（全仓仅 bin 三处例外）（亮点）"
+    },
+    {
+      "id": "E-068",
+      "kind": "file",
+      "path": "src/infra/prompt-pack.mjs",
+      "line_start": 219,
+      "summary": "读取侧固定 installed 根+lstat 拒符号链接+realpath 双边界+entry hash 复核（亮点）"
+    },
+    {
+      "id": "E-069",
+      "kind": "file",
+      "path": "src/orchestration/delivery-pipeline.mjs",
+      "line_start": 37,
+      "summary": "commitTaskCompletionState 统一 ledger→wisdom→digest→canonical persist 完成提交顺序（亮点）"
+    },
+    {
+      "id": "E-070",
+      "kind": "file",
+      "path": "src/interface/hook-bridge-core.mjs",
+      "summary": "两宿主 bridge 共享骨架，timeoutMs/fail 策略全部参数化显式注入（亮点）"
+    },
+    {
+      "id": "E-071",
+      "kind": "file",
+      "path": "src/orchestration/integration.mjs",
+      "line_start": 326,
+      "summary": "push 失败先 read-back 再判负，无法证伪置 push_outcome_unknown 保留 intent/ownership（亮点）"
+    },
+    {
+      "id": "E-072",
+      "kind": "file",
+      "path": "src/ai/archivist-router.mjs",
+      "line_start": 111,
+      "summary": "LLM 失败全链路确定性 fallback 不阻断主线；防幻觉 decisionId 锚定（亮点）"
+    },
+    {
+      "id": "E-073",
+      "kind": "file",
+      "path": "src/infra/file-lock.mjs",
+      "line_start": 72,
+      "summary": "锁超时错误带 owner/pid/存活/持锁时长，可直接贴给 AI 定位（亮点）"
+    },
+    {
+      "id": "E-074",
+      "kind": "file",
+      "path": "packs/wildarrange-linear/",
+      "summary": "agents/skills/routes/tools/project-init 五类边界清晰，manifest↔routes↔tool-contract 交叉引用核验零缺失（亮点）"
+    },
+    {
+      "id": "E-075",
+      "kind": "file",
+      "path": "src/interface/adapters.mjs",
+      "line_start": 102,
+      "summary": "[\"wildarrange\",\"flow.mdc\"].join(\"\") 隐晦拼接三处（另 :236、doctor.mjs:572），应命名常量+注释"
+    },
+    {
+      "id": "E-076",
+      "kind": "file",
+      "path": "src/orchestration/remote-ownership.mjs",
+      "line_start": 228,
+      "summary": "recordRemoteClaimLedgerOnce 读→判重→append 三步无锁非原子，远端 claim 先生效后写 ledger"
+    },
+    {
+      "id": "E-077",
+      "kind": "file",
+      "path": "src/interface/dashboard.mjs",
+      "line_start": 180,
+      "summary": "错误响应形状不统一（{error} vs {ok:false,error}）；500 直出 error.message 可能泄漏内部路径"
+    },
+    {
+      "id": "E-078",
+      "kind": "file",
+      "path": "src/ai/skill-matcher.mjs",
+      "summary": "skill-matcher.mjs 与 suspicion-review.mjs 为 CRLF，.gitattributes 规定 eol=lf，其余文件 LF"
+    },
+    {
+      "id": "E-079",
+      "kind": "documentation",
+      "path": "doc/project-architecture.md",
+      "summary": "五区分层、七条不变量、目录约定表逐文件登记职责，是阅读路径的主要支撑（亮点）"
+    },
+    {
+      "id": "E-080",
+      "kind": "file",
+      "path": "src/orchestration/",
+      "summary": "全区 13 个文件 224 处裸 throw new Error，buildErrorProtocol 仅 delivery-pipeline 出口使用，条文与实现分叉"
+    },
+    {
+      "id": "E-081",
+      "kind": "file",
+      "path": "src/interface/doctor.mjs",
+      "line_start": 560,
+      "summary": "函数体内动态 import(\"node:fs/promises\") 取 readdir；recovery-transaction:125、memory-digest:108 同样偏离静态主导"
+    },
+    {
+      "id": "E-082",
+      "kind": "file",
+      "path": "src/orchestration/admission.mjs",
+      "line_start": 21,
+      "summary": "同模块（../infra/ledger.mjs）两条 import 语句（21+37）；integration.mjs:2+23 同样"
+    },
+    {
+      "id": "E-083",
+      "kind": "file",
+      "path": "src/orchestration/plan-state.mjs",
+      "line_start": 103,
+      "summary": "normalizeTask 经 validateStatus(372) 直接接受 status=completed；实证：importPlan 后 task.status=completed，loadTaskLedger 读侧仍 completed，全程无 worker/verify/scope/review/proof/checkpoint"
+    },
+    {
+      "id": "E-084",
+      "kind": "file",
+      "path": "src/orchestration/task-board.mjs",
+      "line_start": 247,
+      "summary": "isTaskRunnable 仅查 pending+blockers；实证：带 parallel_run_claim 的 pending 任务返回 true；linear-runtime.mjs:77 只守 admission_claim 不守 parallel_run_claim"
+    },
+    {
+      "id": "E-085",
+      "kind": "file",
+      "path": "src/infra/ledger.mjs",
+      "summary": "实证：坏 JSON 行后写入 prevHash:null 的自洽 hashed 条目，verifyLedger.ok=false（fail-closed 成立）但 readVerifiedLedgerEntries 仍把伪造条目标 verified——读侧消费者（doctor 对账/快照/proof 校验）可见伪造证据"
+    },
+    {
+      "id": "E-086",
+      "kind": "file",
+      "path": "src/infra/path-match.mjs",
+      "line_start": 15,
+      "summary": "normalizeRelativePath 不折叠 ..；实证 pathAllowed(\"src/../.wildarrange/ledger.jsonl\", [\"src/**\"]) === true——writable_paths 词法层可被 .. 绕过（realpath 层只校验在 root 内，.wildarrange 在 root 内）"
+    },
+    {
+      "id": "E-087",
+      "kind": "file",
+      "path": "src/interface/cursor-adapter.mjs",
+      "line_start": 87,
+      "summary": "PreToolUse allow 仅输出 {permission:\"allow\"}，result.output 携带的执行前 Skill 上下文未作为 additional_context 转发——task.skills 挂载在 Cursor allow 路径上不发生"
+    },
+    {
+      "id": "E-088",
+      "kind": "file",
+      "path": "src/interface/cursor-adapter.mjs",
+      "line_start": 69,
+      "summary": "无 projectDir 时 process.exit(0) 无任何输出；hook-bridge-core.mjs:66 遇 .git（含 worktree gitfile）即停止上行——无根配置的 Git worktree 发现失败后宿主默认放行（宿主语义未实机点击确认）"
+    },
+    {
+      "id": "E-089",
+      "kind": "file",
+      "path": "src/orchestration/change-governance.mjs",
+      "line_start": 74,
+      "summary": "reviewBlockerFor 只写不读（全仓无读取方）；review_blocked 无任何回到 pending 的转移边——resolution task 机制只接了一半"
+    },
+    {
+      "id": "E-090",
+      "kind": "file",
+      "path": "src/infra/llm-provider.mjs",
+      "line_start": 55,
+      "summary": "未知 decision（FAIL/WARN 之外任意值）映射为 status=pass 且 pass=true，LLM 幻觉文本可变成通过信号"
+    },
+    {
+      "id": "E-091",
+      "kind": "file",
+      "path": "src/interface/doctor.mjs",
+      "line_start": 66,
+      "summary": "ok = findings 无 error 即真：门未武装/假完成等全 warn 场景 doctor.ok 仍为 true"
+    },
+    {
+      "id": "E-092",
+      "kind": "file",
+      "path": "src/infra/security.mjs",
+      "line_start": 247,
+      "summary": "restoreRuntimeStateBackup 恢复 tasks.json 后不重验 completed 证据——含无 proof completed 的备份可写回权威状态（与 E-083 同根因）"
+    },
+    {
+      "id": "E-093",
+      "kind": "test",
+      "path": ".tmp/review-xcheck/",
+      "summary": "本审查对另一 Agent 第三轮审查声明的独立复测脚本与输出（pathAllowed/importPlan/isTaskRunnable/ledger 四项动态实证全部复现）"
+    }
+  ],
+  "scores": {
+    "occam": {
+      "score": 82,
+      "confidence": "high",
+      "summary": "核心接缝（gateway、delivery pipeline、bridge 共享、词法扫描器）复杂度均有真实收益；扣分集中在死代码/死 re-export 与无 owner 的原语复制。",
+      "deduction_total": 18,
+      "subdimensions": [
+        {
+          "id": "business_effect_preservation",
+          "name": "精简保留业务效果",
+          "source": "core",
+          "status": "healthy",
+          "conclusion": "gate 纵深防御（acceptance-proof 独立重验 review 证据）经核实为有意设计，所有精简建议保留必要行为与已确认测试保障",
+          "deduction": 0,
+          "evidence_ids": [
+            "E-061",
+            "E-062",
+            "E-067"
+          ]
+        },
+        {
+          "id": "redundant_layers",
+          "name": "冗余架构层",
+          "source": "core",
+          "status": "problem",
+          "conclusion": "6 处死 re-export 违反项目自定 barrel 禁令；security 三个零收益包装、adoption typeof 防御与死参数、Dashboard 约 110 行死 JS/CSS、tooling 多语言模板残留，均属无当前收益的层",
+          "deduction": 8,
+          "evidence_ids": [
+            "E-015",
+            "E-016",
+            "E-017",
+            "E-018",
+            "E-019",
+            "E-021",
+            "E-035",
+            "E-050",
+            "E-052",
+            "E-007",
+            "E-008",
+            "E-033"
+          ]
+        },
+        {
+          "id": "duplicate_controls",
+          "name": "重复门禁与验证",
+          "source": "core",
+          "status": "problem",
+          "conclusion": "git 读原语四份、uniqueStrings 六处、normalizeRelativePath 三份、HTTP 设施复制且行为漂移、双 shell 白名单、路由信号匹配三处语义不一致、orchestration 失败处置块多处逐行重复",
+          "deduction": 8,
+          "evidence_ids": [
+            "E-041",
+            "E-034",
+            "E-051",
+            "E-046",
+            "E-047",
+            "E-011",
+            "E-013"
+          ]
+        },
+        {
+          "id": "middleware_and_abstraction_cost",
+          "name": "中间件与抽象成本",
+          "source": "core",
+          "status": "healthy",
+          "conclusion": "gateway 单一缝、hook-bridge-core 参数化共享、dependency-graph 词法掩码的复杂度均有证据证明收益覆盖成本",
+          "deduction": 0,
+          "evidence_ids": [
+            "E-064",
+            "E-067",
+            "E-070"
+          ]
+        },
+        {
+          "id": "speculative_complexity",
+          "name": "投机性复杂度",
+          "source": "core",
+          "status": "watch",
+          "conclusion": "route-table 硬编码产品启发式与 llm-provider 单条目 profiles 属轻度预付，影响有限",
+          "deduction": 2,
+          "evidence_ids": [
+            "E-042"
+          ]
+        }
+      ]
+    },
+    "maintainability": {
+      "score": 71,
+      "confidence": "high",
+      "summary": "阅读路径与诊断性优秀（目录约定、AGENTS 渐进披露、可诊断锁与体检）；主要债务是 9 个 ≥700 行文件混合变化原因、错误协议双轨、字符串混淆，以及状态写入权威未收口（completed 可经 import/steering/restore 绕门写入）。",
+      "deduction_total": 29,
+      "subdimensions": [
+        {
+          "id": "module_ownership",
+          "name": "模块职责与所有权",
+          "source": "core",
+          "status": "watch",
+          "conclusion": "五区边界由测试强制、职责登记完整；但 CLI 渗入业务流程、validate 脚本职能写爆、live config 漂移显示局部所有权失守",
+          "deduction": 5,
+          "evidence_ids": [
+            "E-002",
+            "E-003",
+            "E-006",
+            "E-009",
+            "E-079"
+          ]
+        },
+        {
+          "id": "reading_path",
+          "name": "阅读路径",
+          "source": "core",
+          "status": "healthy",
+          "conclusion": "目录约定逐文件登记职责+AGENTS 渐进披露+架构文档不变量，维护者可沿有限路径定位行为",
+          "deduction": 0,
+          "evidence_ids": [
+            "E-079",
+            "E-074"
+          ]
+        },
+        {
+          "id": "abstraction_clarity",
+          "name": "抽象可理解性",
+          "source": "core",
+          "status": "watch",
+          "conclusion": "多处无注释字符串混淆（join 拼不变量键/别名/文件名），审查者无法 grep 到关键标识符",
+          "deduction": 4,
+          "evidence_ids": [
+            "E-024",
+            "E-036",
+            "E-075"
+          ]
+        },
+        {
+          "id": "state_and_error_clarity",
+          "name": "状态与错误真源",
+          "source": "core",
+          "status": "problem",
+          "conclusion": "完成路径有 commitTaskCompletionState 统一原语，但非完成路径（导入/批准/claim/恢复）无对应物：已产生 ledger/persist 顺序倒置、异常逃逸无审计，且 normalizeTask/steering/restore 可绕过 pipeline 直接写 completed（实证）；错误协议条文与 224 处裸 throw 长期分叉",
+          "deduction": 10,
+          "evidence_ids": [
+            "E-022",
+            "E-023",
+            "E-026",
+            "E-076",
+            "E-069",
+            "E-080",
+            "E-083",
+            "E-092"
+          ]
+        },
+        {
+          "id": "long_file_responsibility",
+          "name": "长文件职责",
+          "source": "core",
+          "status": "problem",
+          "conclusion": "9 个 ≥700 行文件中至少 7 个混合两种以上变化原因，3 个破千行上限（hooks 1144、linear-runtime 1002、admission 1001）；部分拆分行数驱动而非内聚驱动",
+          "deduction": 10,
+          "evidence_ids": [
+            "E-045",
+            "E-012",
+            "E-013",
+            "E-040",
+            "E-054",
+            "E-030"
+          ]
+        },
+        {
+          "id": "diagnosability",
+          "name": "可诊断性",
+          "source": "core",
+          "status": "healthy",
+          "conclusion": "锁超时带 owner/pid、ledger 篡改检测、doctor 独立容错分项、决策投影与 attention 报告构成完整诊断面",
+          "deduction": 0,
+          "evidence_ids": [
+            "E-063",
+            "E-073",
+            "E-066"
+          ]
+        },
+        {
+          "id": "nesting_and_syntax_discipline",
+          "name": "嵌套深度与语法糖克制",
+          "source": "agent_added",
+          "status": "healthy",
+          "conclusion": "全区净嵌套最深 8 层仅 runProcess 一处，其余 ≤5 且多为事务/词法器固有深度；无 Proxy/元编程/过度函数式炫技；仅个别超长正则与嵌套三元",
+          "deduction": 0,
+          "evidence_ids": [
+            "E-038",
+            "E-037",
+            "E-049"
+          ]
+        }
+      ]
+    },
+    "extensibility": {
+      "score": 78,
+      "confidence": "high",
+      "summary": "同类能力扩展多数局部化（capability 注册一行、检查项注册一行、skill 走 pack）；扣分集中在决策点扩散（命令面/路由/白名单双事实源）与需改框架核心的扩展路径。",
+      "deduction_total": 22,
+      "subdimensions": [
+        {
+          "id": "same_kind_locality",
+          "name": "同类能力局部性",
+          "source": "core",
+          "status": "watch",
+          "conclusion": "新 capability/检查项/skill 局部化好；但新 hook 事件需改主函数+4 个映射函数、新 steering kind 三处同步、新契约 discoverer 需改核心注册表",
+          "deduction": 4,
+          "evidence_ids": [
+            "E-045",
+            "E-042"
+          ]
+        },
+        {
+          "id": "framework_core_stability",
+          "name": "框架核心稳定性",
+          "source": "core",
+          "status": "problem",
+          "conclusion": "320 行默认配置数据嵌 infra 核心，新增 injection point/skill/agent 默认值都要改底座；hooks 千行混合文件使安全策略/渲染/编排任一变化都改同一核心文件",
+          "deduction": 6,
+          "evidence_ids": [
+            "E-030",
+            "E-045",
+            "E-042"
+          ]
+        },
+        {
+          "id": "decision_point_diffusion",
+          "name": "决策点扩散",
+          "source": "core",
+          "status": "problem",
+          "conclusion": "命令面双事实源（bin if 链↔cli-help 注册表，测试单向）、路由信号三处语义不一致、双 shell 白名单、delivery-pipeline 六处平行表、108 处手工取值守卫（已漏出 P1）",
+          "deduction": 7,
+          "evidence_ids": [
+            "E-005",
+            "E-047",
+            "E-046",
+            "E-001"
+          ]
+        },
+        {
+          "id": "interface_schema_test_radius",
+          "name": "接口与测试扩散半径",
+          "source": "core",
+          "status": "healthy",
+          "conclusion": "gateway 信封统一、capability 注册一行、cli-help 单一事实源驱动物化文档；测试随改动同步由规范强制",
+          "deduction": 0,
+          "evidence_ids": [
+            "E-067",
+            "E-005",
+            "E-061"
+          ]
+        },
+        {
+          "id": "extension_point_usability",
+          "name": "扩展点真实可用性",
+          "source": "core",
+          "status": "watch",
+          "conclusion": "声明的扩展点真实可用（gateway 注册、routes.json、pack manifest）；但面板外挂模式未通用化（新面板改 dashboard-view 三处）、adapter 无注册表需改五处",
+          "deduction": 3,
+          "evidence_ids": [
+            "E-050",
+            "E-051"
+          ]
+        },
+        {
+          "id": "config_template_drift",
+          "name": "配置模板漂移",
+          "source": "agent_added",
+          "status": "watch",
+          "conclusion": "live config 落后 example 多个治理键，靠默认值兜底；新增配置面时漂移会放大集成成本",
+          "deduction": 2,
+          "evidence_ids": [
+            "E-009"
+          ]
+        }
+      ]
+    }
+  },
+  "architecture_findings": [
+    {
+      "id": "ARC-001",
+      "category": "LONG_MIXED_FILE",
+      "priority": "must_address",
+      "title": "hooks.mjs 1144 行混合安全门/渲染/编排三类变化原因",
+      "actual_consequence": "安全策略、渲染模板、事件接线任一变化都改同一破线文件；加 hook 事件需同步主函数+4 个映射函数；安全门恰恰是评审最需聚焦的代码却被稀释",
+      "root_cause": "宿主 Hook 全部职责单点聚合，行数上限治理失效",
+      "target_state": "hooks.mjs 只留事件编排（约 400 行），安全门与渲染各自独立文件",
+      "shortest_change": "拆出 pre-tool-guard.mjs（安全/解析）与 hook-render.mjs（渲染），依赖方向不变",
+      "validation": "npm test 中 hooks 相关测试与 cli-smoke 全绿；dependency-boundary 不新增边",
+      "evidence_ids": [
+        "E-045",
+        "E-046"
+      ]
+    },
+    {
+      "id": "ARC-002",
+      "category": "LONG_MIXED_FILE",
+      "priority": "must_address",
+      "title": "三个千行/准千行 orchestration 文件混合多种变化原因",
+      "actual_consequence": "linear-runtime(1002)/admission(1001)/adoption(894)/task-board(891) 各混合 2-4 类变化原因；linear-runtime 三处失败处置块逐行重复正是历史上出过 P0 的同款分叉风险",
+      "root_cause": "千行上限治理压线失效，拆分以行数而非内聚为驱动",
+      "target_state": "每文件单一变化原因；失败处置抽共享助手；admission 尾部 agent-run 投影外移",
+      "shortest_change": "先抽 linear-runtime 三处失败处置块为助手函数并删重复，再按变化原因拆 delivery worktree 段与 admission 投影段",
+      "validation": "checkpoint-integrity、runtime-integration、adoption-runtime 全绿；行数回到 ≤1000",
+      "evidence_ids": [
+        "E-011",
+        "E-012",
+        "E-013"
+      ]
+    },
+    {
+      "id": "ARC-003",
+      "category": "ABSTRACTION_OVERHEAD",
+      "priority": "must_address",
+      "title": "非完成路径缺'审计先入 ledger'统一原语",
+      "actual_consequence": "plan-state importPlan 先写账后审计、task-board claim 先 persist 后 ledger、admission-recovery 同文件两处顺序相反、remote-ownership claim 非原子——同一根因的散点缺陷，崩溃窗口留无审计状态变更",
+      "root_cause": "完成路径有 commitTaskCompletionState，非完成路径（导入/批准/claim/恢复）无对应事务原语，顺序靠各自记性",
+      "target_state": "所有状态变更路径经统一的'ledger 先行'事务原语或明文顺序约定",
+      "shortest_change": "在 task-state-lock 层提供 transactWithLedger 助手（先 appendLedger 后 persist），迁移四处已知倒置点",
+      "validation": "checkpoint-integrity 与 state-migration 全绿；新增一条顺序回归测试",
+      "evidence_ids": [
+        "E-022",
+        "E-023",
+        "E-076",
+        "E-069"
+      ]
+    },
+    {
+      "id": "ARC-004",
+      "category": "EXTENSION_DIFFUSION",
+      "priority": "must_address",
+      "title": "路由信号匹配三处分散且语义不一致",
+      "actual_consequence": "route-table 词边界正则与 skill-matcher 裸 includes 对同一批 signals 命中率不同；orchestration 三处直调 resolveRouteDecision 绕过 routeRequest 的 ledger/决策投影/semantic shadow；routing.mjs:21 死 re-export 正是归属犹豫的痕迹",
+      "root_cause": "'路由逻辑该住哪里'没有唯一答案，route-table/routing/skill-matcher 各自演化",
+      "target_state": "信号匹配单一实现供全部消费方复用；resolveRouteDecision 限定计划富化只读用途",
+      "shortest_change": "route-table 导出通用信号匹配，skill-matcher 改为复用；删 routing.mjs:21；在依赖边界测试或注释中钉死 resolveRouteDecision 用途",
+      "validation": "路由相关测试全绿；新增一条两处命中率一致性测试",
+      "evidence_ids": [
+        "E-047",
+        "E-042",
+        "E-018"
+      ]
+    },
+    {
+      "id": "ARC-005",
+      "category": "OCCAM_REDUNDANCY",
+      "priority": "must_address",
+      "title": "Dashboard 前端改版半成品：死代码与无 UI 的在线 API",
+      "actual_consequence": "约 110 行死 JS/CSS 每页运送；路由人工复盘这一治理功能在 UI 上实际不可达，而 /api/panels/routes 等三个 API 仍在线且有测试——功能状态对维护者不透明",
+      "root_cause": "面板改版只完成一半，容器删除后 JS/CSS/API 未同步收尾",
+      "target_state": "要么恢复 review 视图容器与监听器，要么删除死 JS/CSS 并评估 API 去留，二选一并记录",
+      "shortest_change": "确认产品意图后删 renderRouteReviews/renderOpsPanel/renderInbox 等死函数与死 CSS，或恢复容器",
+      "validation": "dashboard-panels 测试按取舍同步更新后全绿",
+      "evidence_ids": [
+        "E-050",
+        "E-052"
+      ]
+    },
+    {
+      "id": "ARC-006",
+      "category": "OCCAM_REDUNDANCY",
+      "priority": "watch",
+      "title": "死 re-export/barrel 违反项目明文禁令（6 处）",
+      "actual_consequence": "adoption/task-board/plan-state/routing/scope-guard 的死转口与'禁止 barrel/shim'规范直接冲突，给读者制造虚假归属",
+      "root_cause": "历史拆分后转口未随消费方迁移清理",
+      "target_state": "无死转口；有真实消费方的 parallel-runtime 转口完成迁移后删除",
+      "shortest_change": "删 6 行已核实无消费方的 re-export；parallel-runtime.mjs:41 的消费方改直连后删除",
+      "validation": "npm test 全绿",
+      "evidence_ids": [
+        "E-015",
+        "E-016",
+        "E-017",
+        "E-018",
+        "E-019"
+      ]
+    },
+    {
+      "id": "ARC-007",
+      "category": "DUPLICATE_VALIDATION",
+      "priority": "watch",
+      "title": "git 读原语与安全敏感小工具无 owner 多点复制",
+      "actual_consequence": "rev-parse HEAD 四份、变更探针两套、uniqueStrings 六处、normalizeRelativePath 三份（路径归一化是安全敏感函数）——漂移时已观察到行为差异",
+      "root_cause": "git 三文件只划了读/写/施工职责边界，底层原语未指定 owner",
+      "target_state": "git 读原语收敛 git-diff.mjs，小工具收敛 path-match/runtime-store，单一实现",
+      "shortest_change": "删除本地复刻改为 import；git-coordination 保留写操作",
+      "validation": "git-coordination/dependency-boundary 全绿",
+      "evidence_ids": [
+        "E-041",
+        "E-034"
+      ]
+    },
+    {
+      "id": "ARC-008",
+      "category": "ABSTRACTION_OVERHEAD",
+      "priority": "watch",
+      "title": "错误协议条文与实现双轨（224 处裸 throw）",
+      "actual_consequence": "规范写 {code,module,message,next_action}，orchestration 全区 224 处裸 throw、infra 仅 ledger 走协议工厂、task-state-lock 手工拼 camelCase 字段——新代码无所适从，下游按协议解析会漏",
+      "root_cause": "条文未区分'区内部抛出'与'边界出口协议化'，实现先行",
+      "target_state": "条文写明'区内部 throw、边界出口 buildErrorProtocol'并收敛少量边界",
+      "shortest_change": "修规范条文（需用户批准）+ task-state-lock 改协议工厂；不改 224 处内部 throw",
+      "validation": "error-protocol 测试全绿",
+      "evidence_ids": [
+        "E-080",
+        "E-069"
+      ]
+    },
+    {
+      "id": "ARC-009",
+      "category": "MIXED_RESPONSIBILITY",
+      "priority": "watch",
+      "title": "validate-module-file-map 单脚本 8 类门禁+多语言模板残留",
+      "actual_consequence": "一个 489 行上帝脚本混合文件归属/命名/测试对位/registry 同步/HTML 卡片计数 8 类关注，含对本仓库无用的 Rust/Python/Next 规则——'脚本职能写爆'实锤",
+      "root_cause": "门禁脚本从多语言模板移植后未按本仓库裁剪",
+      "target_state": "每脚本单一门禁职责；模板残留规则删除或显式标注",
+      "shortest_change": "flow-grid HTML lint 拆独立脚本；删 Rust/Python/Next 规则；两脚本共享 28 行辅助抽 shared.mjs",
+      "validation": "npm run check:arch 通过",
+      "evidence_ids": [
+        "E-006",
+        "E-007",
+        "E-008"
+      ]
+    },
+    {
+      "id": "ARC-010",
+      "category": "FRAMEWORK_MODIFICATION",
+      "priority": "watch",
+      "title": "320 行产品默认配置嵌 infra 核心",
+      "actual_consequence": "新增 injection point/skill/agent 默认值都要改 runtime-config.mjs 底座文件，配置调整与加载机制修复两种变化原因互相污染",
+      "root_cause": "配置 schema 事实 owner 未与配置加载机制分离",
+      "target_state": "默认配置独立数据模块，runtime-config 只留加载/归一/迁移",
+      "shortest_change": "DEFAULT_WILDARRANGE_CONFIG 抽为 default-config 数据模块并 import",
+      "validation": "runtime-config 相关测试全绿",
+      "evidence_ids": [
+        "E-030"
+      ]
+    },
+    {
+      "id": "ARC-011",
+      "category": "DUPLICATE_VALIDATION",
+      "priority": "watch",
+      "title": "Dashboard HTTP 设施复制且行为漂移",
+      "actual_consequence": "adoption-panel 复制 sendJson/readJsonBody/SAFE_ID 后已漂移：JSON 解析失败 400 vs 500、空 body 判断不同——同一 API 面两种错误行为",
+      "root_cause": "'新面板自我包含'模式缺共享底座",
+      "target_state": "interface 内部 http-utils 单一实现，两面板复用",
+      "shortest_change": "抽 src/interface/http-utils.mjs 共享四处，统一 400 行为",
+      "validation": "dashboard/adoption-dashboard 测试全绿",
+      "evidence_ids": [
+        "E-051",
+        "E-077"
+      ]
+    },
+    {
+      "id": "ARC-012",
+      "category": "EXTENSION_DIFFUSION",
+      "priority": "watch",
+      "title": "命令面双事实源与 108 处手工取值守卫",
+      "actual_consequence": "bin if 链与 cli-help 注册表需手工同步，测试只单向覆盖；取值守卫惯用法手工复制 108 处，已漏出 --maxSteps 静默变 1 的 P1",
+      "root_cause": "命令分发与命令注册分离且无 helper 承载惯用法",
+      "target_state": "注册表每条在 bin 有分支被测试双向钉死；strArg helper 承载守卫",
+      "shortest_change": "加注册表→bin 分支存在性测试；抽 5 行 strArg(args,key) helper 逐步替换",
+      "validation": "cli-help/cli-smoke 全绿；--maxSteps 裸标志行为有测试",
+      "evidence_ids": [
+        "E-005",
+        "E-001"
+      ]
+    },
+    {
+      "id": "ARC-013",
+      "category": "OCCAM_REDUNDANCY",
+      "priority": "watch",
+      "title": "live config 与 example 配置键漂移",
+      "actual_consequence": "本仓库自用的治理配置落后于自己发布的模板（缺 routeGovernance/gitCoordination/skillMatcher 等 9 组键），靠 runtime-config 默认值兜底，真实行为与文件所见不一致",
+      "root_cause": "example 演进后 live config 未跟进，无漂移检查",
+      "target_state": "live config 与 example/默认配置一致，漂移可被检查",
+      "shortest_change": "config init 重新生成或补齐 live config；加 example↔默认配置漂移检查",
+      "validation": "doctor 与 status 输出不变",
+      "evidence_ids": [
+        "E-009"
+      ]
+    },
+    {
+      "id": "ARC-014",
+      "category": "MIXED_RESPONSIBILITY",
+      "priority": "must_address",
+      "title": "完成态写权限未收口：import/steering/restore 可绕过 pipeline 写 completed",
+      "actual_consequence": "normalizeTask 经 validateStatus 直接接受 status=completed（实证：importPlan 只需一条 trivial verify 命令即可持久化 completed，读侧不降级）；steering mark_blocked 可改写终态；state restore 写回无 proof completed——delivery pipeline 的 verify/scope/review/proof/checkpoint 全链可被状态写入入口绕过，doctor 标红但不纠正权威状态",
+      "root_cause": "状态写入没有统一权威：normalizeTask/steering/restore 各自接受终态，不经过完成证据校验（与 ARC-003 同族但更严重：不仅是审计顺序，是完成资格本身）",
+      "target_state": "completed 只能由 commitTaskCompletionState 产生；所有状态写入入口对终态降级或拒绝",
+      "shortest_change": "normalizeTask 把 requestedStatus=completed 降级为 pending/needs_user_decision；steering 禁终态目标；restore 后跑完成证据校验并降级不合格项",
+      "validation": "复测脚本（.tmp/review-xcheck/）importPlan 不得再得到 completed；新增回归测试",
+      "evidence_ids": [
+        "E-083",
+        "E-092",
+        "E-025"
+      ]
+    },
+    {
+      "id": "ARC-015",
+      "category": "EXTENSION_DIFFUSION",
+      "priority": "must_address",
+      "title": "并行 claim 与线性 runnable 未互斥",
+      "actual_consequence": "isTaskRunnable 只查 pending+blockers（实证：带 parallel_run_claim 的 pending 任务返回 true），linear-runtime 只守 admission_claim 不守 parallel_run_claim——子 Agent 已认领/已产出的任务可被 runNextTask 再开线性 worker 并独立 completed，破坏一任务一可写 worktree",
+      "root_cause": "claim 归属判断分散：并行 claim 写在 parallel-runtime，可运行判断在 task-board，二者不同步",
+      "target_state": "任何 claim（parallel_run_claim/admission_claim）都使任务对所有执行入口不可运行",
+      "shortest_change": "isTaskRunnable 排除两种 claim；线性入口同样拒绝并给出 resume 提示",
+      "validation": "并行 pass 后立即 run 必须 blocked；新增回归测试",
+      "evidence_ids": [
+        "E-084"
+      ]
+    },
+    {
+      "id": "ARC-016",
+      "category": "MIXED_RESPONSIBILITY",
+      "priority": "must_address",
+      "title": "scope/宿主边界存在三处实证绕过面",
+      "actual_consequence": "pathAllowed 不折叠 ..（writable_paths=[\"src/**\"] 可写 src/../.wildarrange/ledger.jsonl）；ledger 坏行后 prevHash:null 伪造链仍被读侧标 verified；Cursor allow 丢注入上下文且无 projectDir 时静默 exit 0——词法 scope 层与宿主桥接层各自的边界承诺比文档宣称的弱",
+      "root_cause": "路径归一化只做分隔符/斜杠规整不做 .. 折叠；ledger 读侧信任链重启；Cursor 桥接的 allow/发现失败分支未闭合",
+      "target_state": "词法层拒绝 .. 与绝对路径逃逸；读侧 verified 以 verifyLedger 为准；Cursor allow 附带上下文、发现失败显式 deny 或回退",
+      "shortest_change": "normalizeRelativePath 折叠并拒绝 ..；walkLedger 失败后续条目标 unverified；cursor-adapter 改 allow 输出与 !projectDir 分支（被锁死的测试同步改）",
+      "validation": "复测脚本四项全部转负；新增对抗回归测试",
+      "evidence_ids": [
+        "E-086",
+        "E-085",
+        "E-087",
+        "E-088",
+        "E-093"
+      ]
+    },
+    {
+      "id": "ARC-017",
+      "category": "ABSTRACTION_OVERHEAD",
+      "priority": "watch",
+      "title": "review_blocked 状态机只接了一半",
+      "actual_consequence": "reviewBlockerFor 只写不读，review_blocked 无任何回到 pending 的转移边——被阻断任务只能停留在终态之外的孤岛，resolution task 完成也不会联动解除",
+      "root_cause": "review blocker 机制实现了记录侧，未实现解除侧",
+      "target_state": "resolution task 完成时联动解除，或提供显式解除命令",
+      "shortest_change": "checkpoint/完成钩子里检查 reviewBlockerFor 并解除，或加 changes unblock 命令",
+      "validation": "review_blocked 任务可经设计路径回到 pending 的回归测试",
+      "evidence_ids": [
+        "E-089"
+      ]
+    }
+  ],
+  "style_consistency": {
+    "status": "mixed",
+    "baseline": "根 AGENTS.md + doc/code-maintenance.md + src/AGENTS.md 明文规范；项目无 formatter/linter 配置，以同一职责内主导写法为基线（Node ESM、camelCase、async/await、静态 import、node:assert/strict）",
+    "checks": {
+      "formatting_and_imports": "命名/异步/布局全区高度一致；例外：2 个文件 CRLF（.gitattributes 规定 LF）、3 处函数体内动态 import 偏离静态主导、2 处同模块双 import 语句",
+      "naming": "camelCase 全区统一，未发现术语分裂",
+      "error_handling": "错误协议条文与实现双轨：orchestration 224 处裸 throw、infra 仅 ledger 走协议工厂、task-state-lock 手工拼 camelCase、adoption 自制第三套错误形；主导写法（结果对象 {pass,reason}）在 gate 返回一致",
+      "control_flow": "if/return 主导；少数 4-5 层嵌套三元（runtime-snapshot:198-206、adoption-panel:417-425、integration:96-135）偏离主导写法",
+      "data_and_api_shapes": "gateway 七字段信封统一；dashboard 错误响应 {error} vs {ok:false,error} 两种形状并存",
+      "dependency_usage": "静态 import 主导、零外部依赖纪律全仓遵守；工具函数来源不统一（uniqueStrings/normalizeRelativePath 本地重写而非导入）",
+      "test_style": "断言风格（node:assert/strict）、夹具（withTempDir 受控拷贝）、命名全部统一；临时目录根两种约定（cwd/.tmp vs os.tmpdir）混用；评审编号进测试名"
+    },
+    "findings": [
+      {
+        "id": "STYLE-001",
+        "priority": "watch",
+        "title": "无注释的字符串混淆写法",
+        "actual_consequence": "join 拼出的不变量键/别名/文件名 grep 不到，审查者无法判断是兼容别名还是后门",
+        "preferred_pattern": "字面量+一行注释说明规避自匹配的动机，或命名常量",
+        "shortest_correction": "change-governance.mjs:96、agent-registry.mjs:8-26、runtime-config.mjs:432、adapters.mjs:102/236、doctor.mjs:572 共 7 处改字面量加注释",
+        "evidence_ids": [
+          "E-024",
+          "E-036",
+          "E-075"
+        ],
+        "maintainability_impact": {
+          "proven": true,
+          "reason": "已证明阻碍审查（不变量键无法被 grep 定位），按此扣 abstraction_clarity 4 分"
+        }
+      },
+      {
+        "id": "STYLE-002",
+        "priority": "must_address",
+        "title": "108 处手工复制的参数取值守卫无 helper",
+        "actual_consequence": "每个新分支手工复制守卫，已漏出 --maxSteps 静默变 1 的 P1，同类风险存在于所有缺守卫的透传点",
+        "preferred_pattern": "strArg(args, key) 一行 helper 承载 !== true 守卫",
+        "shortest_correction": "抽 5 行 helper，先修已漏点再逐步替换",
+        "evidence_ids": [
+          "E-001"
+        ],
+        "maintainability_impact": {
+          "proven": true,
+          "reason": "已产生真实 P1 缺陷，漏改风险被实证"
+        }
+      },
+      {
+        "id": "STYLE-003",
+        "priority": "watch",
+        "title": "行尾 CRLF/LF 不一致",
+        "actual_consequence": "skill-matcher.mjs、suspicion-review.mjs 为 CRLF，违反 .gitattributes eol=lf，跨平台 diff 噪音",
+        "preferred_pattern": "统一 LF",
+        "shortest_correction": "两文件转 LF",
+        "evidence_ids": [
+          "E-078"
+        ],
+        "maintainability_impact": {
+          "proven": false,
+          "reason": "机械格式差异，未证明维护后果"
+        }
+      },
+      {
+        "id": "STYLE-004",
+        "priority": "watch",
+        "title": "函数体内动态 import 偏离静态主导",
+        "actual_consequence": "doctor:560、recovery-transaction:125、memory-digest:108 三处零收益动态 import，扩大扫描器误报面",
+        "preferred_pattern": "顶部静态 import（全区主导写法）",
+        "shortest_correction": "三处提升到顶部",
+        "evidence_ids": [
+          "E-081"
+        ],
+        "maintainability_impact": {
+          "proven": false,
+          "reason": "写法癖好，未证明缺陷风险"
+        }
+      },
+      {
+        "id": "STYLE-005",
+        "priority": "watch",
+        "title": "嵌套三元偏离 if/return 主导写法",
+        "actual_consequence": "runtime-snapshot:198-206 为全 infra 最难读段；adoption-panel:417-425 错误码四元嵌套",
+        "preferred_pattern": "早退/guard clause 或具名布尔量",
+        "shortest_correction": "两处改直排 if",
+        "evidence_ids": [
+          "E-037"
+        ],
+        "maintainability_impact": {
+          "proven": false,
+          "reason": "局部可读性问题，未证明漏改风险"
+        }
+      },
+      {
+        "id": "STYLE-006",
+        "priority": "watch",
+        "title": "同模块双 import 语句与未使用 import",
+        "actual_consequence": "admission:21+37、integration:2+23 同模块两条 import；dashboard.mjs:5-7 未使用 import",
+        "preferred_pattern": "合并为一条 import",
+        "shortest_correction": "合并/删除三处",
+        "evidence_ids": [
+          "E-082"
+        ],
+        "maintainability_impact": {
+          "proven": false,
+          "reason": "机械整洁度问题"
+        }
+      }
+    ]
+  },
+  "test_review": {
+    "status": "mixed",
+    "approved_baseline": "doc/testing-and-acceptance.md 缺失（已记录）；以 test/AGENTS.md 明文授权的四层（单元/集成/对抗故障注入/包体冒烟）与硬规则（断言持久状态、失败路径证明）为项目批准基线",
+    "checks": {
+      "production_boundary": "未发现污染：package.json files 白名单不含 test/（package-boundary 实测包体排除）；src 无 import 指向 test/；无 NODE_ENV/test-only 分支",
+      "scope_authorization": "未发现越权扩张：34 个 adversarial 用例在 test/AGENTS.md:9 授权范围内；全目录无 fuzz/property/soak/golden/快照；dependency-boundary 对抗用例属门禁自证",
+      "unit_and_regression_fit": "基本匹配：93 个 src 文件 74 个被直接 import、19 个传递覆盖，唯一无静态链的 contract-view 由 CLI 子进程覆盖；最高风险区（ledger/锁/checkpoint/rollback）均有专项对抗文件",
+      "redundancy_and_brittleness": "adoption-runtime 三对近重复测试（CODE 评审波次双份，约 60 行可去重）；无纯返回值断言式废测试；普遍遵守断言持久状态硬规则",
+      "loop_cost": "全量 257s 不算轻但有 wildarrange test --zone 影响面子集缓解；runtime-integration 单文件 62s 已达 180s 超时 1/3，继续膨胀会触碰超时"
+    },
+    "findings": [
+      {
+        "id": "TEST-001",
+        "priority": "watch",
+        "category": "REDUNDANT_TESTS",
+        "title": "adoption-runtime 三对近重复测试",
+        "actual_consequence": "改语义需同步两处易漏；约 60 行重复",
+        "approved_baseline": "test/AGENTS.md 授权对抗/故障注入，但未授权重复",
+        "shortest_correction": "合并 :373/:460、:390/:484、:182/:546 三对，保留持久状态断言更全的一例",
+        "preserved_protection": "并发互斥、维护标记、锁 TOCTOU 三项业务保障全部保留",
+        "evidence_ids": [
+          "E-059"
+        ]
+      },
+      {
+        "id": "TEST-002",
+        "priority": "watch",
+        "category": "EXCESSIVE_TEST_GATE",
+        "title": "runtime-integration 5261 行单文件逼近超时",
+        "actual_consequence": "62.4s 已达 180s 单文件超时的 1/3，失败定位与导航成本高，继续膨胀将触超时",
+        "approved_baseline": "test/AGENTS.md 未限制单文件规模，属自发膨胀",
+        "shortest_correction": "按域拆 3-4 个文件，不增删用例",
+        "preserved_protection": "124 个用例全部保留",
+        "evidence_ids": [
+          "E-060"
+        ]
+      }
+    ]
+  },
+  "conventional_code_findings": [
+    {
+      "id": "CODE-001",
+      "severity": "P1",
+      "title": "workflow 主循环缺 awaiting_user_decision 终止状态",
+      "consequence": "契约/scope 需用户决策时主循环不退出，同一决策请求空转至 maxSteps=50",
+      "smallest_correction": "workflow.mjs:28 的 includes 列表加 awaiting_user_decision",
+      "evidence_ids": [
+        "E-010"
+      ],
+      "architecture_cause": {
+        "proven": false,
+        "reason": "单点遗漏，无共同结构根因"
+      }
+    },
+    {
+      "id": "CODE-002",
+      "severity": "P1",
+      "title": "--maxSteps 裸标志静默解释为 1",
+      "consequence": "用户以为不设限实际只执行一步；同类风险存在于所有缺 !== true 守卫的透传点",
+      "smallest_correction": "bin/wildarrange.mjs:430 比照 :596 补守卫；抽 strArg helper",
+      "evidence_ids": [
+        "E-001"
+      ],
+      "architecture_cause": {
+        "proven": true,
+        "reason": "108 处手工复制惯用法无 helper 是直接根因",
+        "architecture_finding_id": "ARC-012"
+      }
+    },
+    {
+      "id": "CODE-003",
+      "severity": "P1",
+      "title": "contract-scan 信封 status 失真",
+      "consequence": "inspectTask 返回 fail/warn 时信封恒 pass，orchestration 的 status!==\"pass\" 检查永不触发，统一判定承诺名存实亡；sideEffect 误报 state_written",
+      "smallest_correction": "gateway.mjs:56-59 按 raw.status 映射；inspectTask 路径 sideEffect 报 none",
+      "evidence_ids": [
+        "E-055"
+      ],
+      "architecture_cause": {
+        "proven": false,
+        "reason": "单 adapter 硬编码缺陷"
+      }
+    },
+    {
+      "id": "CODE-004",
+      "severity": "P1",
+      "title": "verification-discovery 动态检测恒假死代码",
+      "consequence": "new Function/变量 require 永不置位 dynamicHint，且与同文件 :888 判定矛盾，危险卡降级可能失效",
+      "smallest_correction": "删 :840，把 :841 扩为与 :888 同一判定（抽共享谓词）",
+      "evidence_ids": [
+        "E-039"
+      ],
+      "architecture_cause": {
+        "proven": false,
+        "reason": "同文件两套检测各自演化的局部问题"
+      }
+    },
+    {
+      "id": "CODE-005",
+      "severity": "P1",
+      "title": "adoption scan 异常会话永久卡死",
+      "consequence": "invokeCapability 异常时 session 停 scanning，reconcile/resume 均无法推进，只能手工删目录",
+      "smallest_correction": "scan 调用包 try/catch，异常置 needs_review 并记录错误",
+      "evidence_ids": [
+        "E-020"
+      ],
+      "architecture_cause": {
+        "proven": false,
+        "reason": "单点异常处理缺口"
+      }
+    },
+    {
+      "id": "CODE-006",
+      "severity": "P2",
+      "title": "acceptance-proof scope_check 死分支",
+      "consequence": "latestEvidence(task,\"scope_check\") 永不命中（实际 kind 为 scope_guard），该校验形同虚设",
+      "smallest_correction": "acceptance-proof.mjs:22 改为 scope_guard",
+      "evidence_ids": [
+        "E-056"
+      ],
+      "architecture_cause": {
+        "proven": false,
+        "reason": "字符串漂移单点缺陷"
+      }
+    },
+    {
+      "id": "CODE-007",
+      "severity": "P2",
+      "title": "admission 实际路径复核漏未跟踪新文件",
+      "consequence": "补丁新建的越界文件不进 actualPaths，writable_paths 事后复核对新建文件失效，仅靠预检兜底",
+      "smallest_correction": "改用 git status --porcelain 或补 git ls-files --others",
+      "evidence_ids": [
+        "E-014"
+      ],
+      "architecture_cause": {
+        "proven": false,
+        "reason": "单点探针选型缺陷"
+      }
+    },
+    {
+      "id": "CODE-008",
+      "severity": "P2",
+      "title": "importPlan 审计顺序倒置",
+      "consequence": "权威 tasks.json 先于 ledger 写入，崩溃窗口留无审计状态变更",
+      "smallest_correction": "appendLedger 移到状态写入之前",
+      "evidence_ids": [
+        "E-022"
+      ],
+      "architecture_cause": {
+        "proven": true,
+        "reason": "非完成路径缺统一审计顺序原语的散点表现之一",
+        "architecture_finding_id": "ARC-003"
+      }
+    },
+    {
+      "id": "CODE-009",
+      "severity": "P2",
+      "title": "mark_blocked 可改写终态任务",
+      "consequence": "completed/verifying 任务可被 steering 改写为 needs_user_decision，绕过完成顺序不变量",
+      "smallest_correction": "validate 中对 mark_blocked 禁终态目标",
+      "evidence_ids": [
+        "E-025"
+      ],
+      "architecture_cause": {
+        "proven": false,
+        "reason": "单点校验缺口"
+      }
+    },
+    {
+      "id": "CODE-010",
+      "severity": "P2",
+      "title": "file-lock stale 回收窄竞态",
+      "consequence": "stale 判定到 removeLock 之间无复核，多进程场景可误删他人活锁导致双写",
+      "smallest_correction": "removeLock 前 stat 复核 mtime/内容指纹一致再删",
+      "evidence_ids": [
+        "E-029"
+      ],
+      "architecture_cause": {
+        "proven": false,
+        "reason": "锁协议未带代际信息的单点缺陷"
+      }
+    },
+    {
+      "id": "CODE-011",
+      "severity": "P2",
+      "title": "rule-scanner frontmatter 不兼容 CRLF",
+      "consequence": "Windows 编辑器写出的 ---\\r\\n 使 globs/alwaysApply 全丢，规则退化且截断混入 frontmatter 文本",
+      "smallest_correction": "startsWith 改 /^---\\r?\\n/ 匹配",
+      "evidence_ids": [
+        "E-043"
+      ],
+      "architecture_cause": {
+        "proven": false,
+        "reason": "单点解析缺陷"
+      }
+    },
+    {
+      "id": "CODE-012",
+      "severity": "P2",
+      "title": "parallel run index.json 无锁读写",
+      "consequence": "三处 read-modify-write 无 withFileLock，两进程并发 parallel 时索引条目互丢",
+      "smallest_correction": "三处统一包 withFileLock",
+      "evidence_ids": [
+        "E-027"
+      ],
+      "architecture_cause": {
+        "proven": false,
+        "reason": "单设施加锁遗漏"
+      }
+    },
+    {
+      "id": "CODE-013",
+      "severity": "P2",
+      "title": "delivery-pipeline 两处异常逃逸无审计",
+      "consequence": "prepareContractReview/resolveDeliveryFacts 抛错穿透 runDeliveryPipeline：无 finish()、无 emitDecision、无错误协议，门控中断不留痕",
+      "smallest_correction": "L105/L356 包 try/catch 转 fail 证据走 finish",
+      "evidence_ids": [
+        "E-026"
+      ],
+      "architecture_cause": {
+        "proven": true,
+        "reason": "非完成/门控路径错误协议化无统一原语",
+        "architecture_finding_id": "ARC-003"
+      }
+    },
+    {
+      "id": "CODE-014",
+      "severity": "P2",
+      "title": "无界扫描与重复走查的性能隐患",
+      "consequence": "annotation-log 对 decisions.jsonl 无界全扫；runtime-snapshot 每次写快照双走查全量 ledger；随日志增长成本线性放大",
+      "smallest_correction": "校验传 limit+filter 提前终止；ledger 导出 {entries,verification} 合一走查",
+      "evidence_ids": [
+        "E-031",
+        "E-032"
+      ],
+      "architecture_cause": {
+        "proven": false,
+        "reason": "两处独立的读取模式缺陷"
+      }
+    },
+    {
+      "id": "CODE-015",
+      "severity": "P3",
+      "title": "doctor 陈旧规则检测硬编码 macOS 路径",
+      "consequence": "Windows 上该项检查恒空转，与项目跨平台自称矛盾",
+      "smallest_correction": "doctor.mjs:564 正则覆盖 Windows 用户路径形态",
+      "evidence_ids": [
+        "E-053"
+      ],
+      "architecture_cause": {
+        "proven": false,
+        "reason": "单点平台假设"
+      }
+    },
+    {
+      "id": "CODE-016",
+      "severity": "P3",
+      "title": "code-intel 路径校验无 realpath",
+      "consequence": "hashline/comment 门可经符号链接读取 root 外文件内容写入 findings（低危只读，与 scope-guard 标准不一致）",
+      "smallest_correction": "pathInsideRoot 复用 scope-guard 的 realpath 校验",
+      "evidence_ids": [
+        "E-057"
+      ],
+      "architecture_cause": {
+        "proven": false,
+        "reason": "单点校验强度不一致"
+      }
+    },
+    {
+      "id": "CODE-017",
+      "severity": "P0",
+      "title": "importPlan/steering 可持久化无证据 completed（第三轮审查声明，本审查复测确认）",
+      "consequence": "一条 trivial verify 命令即可经 plan 导入把任务写成 completed，绕过 worker/verifier/scope/review/acceptance-proof/checkpoint 全链；Dashboard 计为已完成，doctor 标红但不改权威状态",
+      "smallest_correction": "normalizeTask 对 requestedStatus=completed 降级为 pending/needs_user_decision；steering 同样禁终态",
+      "evidence_ids": [
+        "E-083",
+        "E-093"
+      ],
+      "architecture_cause": {
+        "proven": true,
+        "reason": "状态写入无统一权威，完成资格未收口",
+        "architecture_finding_id": "ARC-014"
+      }
+    },
+    {
+      "id": "CODE-018",
+      "severity": "P0",
+      "title": "带 parallel_run_claim 的任务仍可被线性 run 选中（复测确认）",
+      "consequence": "子 Agent 已认领/已产出待 admit 的任务可被 runNextTask 再开线性 worker 并独立 completed，破坏一任务一可写 worktree 与单写 owner",
+      "smallest_correction": "isTaskRunnable 排除 parallel_run_claim/admission_claim；线性入口拒绝并给 resume 提示",
+      "evidence_ids": [
+        "E-084",
+        "E-093"
+      ],
+      "architecture_cause": {
+        "proven": true,
+        "reason": "claim 归属判断分散在 task-board 与 parallel-runtime 两处不同步",
+        "architecture_finding_id": "ARC-015"
+      }
+    },
+    {
+      "id": "CODE-019",
+      "severity": "P1",
+      "title": "ledger 坏行后 prevHash:null 伪造链仍被读侧标 verified（复测确认）",
+      "consequence": "verifyLedger.ok=false 成立，但 readVerifiedLedgerEntries 把坏行后的伪造条目列入可信集——直接消费读侧入口的对账/快照/proof 校验可见伪造证据",
+      "smallest_correction": "walkLedger 在 failures 出现后停止将后续条目标 verified（或要求链重启带显式授权事件）",
+      "evidence_ids": [
+        "E-085",
+        "E-093"
+      ],
+      "architecture_cause": {
+        "proven": false,
+        "reason": "读侧信任模型的单点缺陷"
+      }
+    },
+    {
+      "id": "CODE-020",
+      "severity": "P1",
+      "title": "pathAllowed 不折叠 .. 可绕过 writable_paths（复测确认）",
+      "consequence": "writable_paths=[\"src/**\"] 的任务可经 src/../.wildarrange/ledger.jsonl 写运行时状态（realpath 层只校验在 root 内，.wildarrange 在 root 内），scope 词法层失效",
+      "smallest_correction": "normalizeRelativePath 折叠并拒绝 .. 与绝对路径",
+      "evidence_ids": [
+        "E-086",
+        "E-093"
+      ],
+      "architecture_cause": {
+        "proven": true,
+        "reason": "scope 边界承诺链上的词法层缺陷",
+        "architecture_finding_id": "ARC-016"
+      }
+    },
+    {
+      "id": "CODE-021",
+      "severity": "P1",
+      "title": "Cursor allow 路径丢弃执行前 Skill 上下文",
+      "consequence": "PreToolUse allow 只输出 {permission:\"allow\"}，规范宣称的 task.skills 真实挂载在 Cursor 上不发生；Kimi/Codex 路径不受影响",
+      "smallest_correction": "allow 输出附带 additional_context: result.output；被 deepEqual 锁死的测试同步改",
+      "evidence_ids": [
+        "E-087"
+      ],
+      "architecture_cause": {
+        "proven": true,
+        "reason": "宿主桥接输出协议未闭合",
+        "architecture_finding_id": "ARC-016"
+      }
+    },
+    {
+      "id": "CODE-022",
+      "severity": "P1",
+      "title": "Cursor 桥接发现失败静默 exit 0",
+      "consequence": "无 projectDir（含无根配置的 Git worktree：gitfile 停止上行）时不输出任何内容直接 exit 0，宿主默认放行写操作——scope guard 在该路径上不生效（宿主默认语义未实机点击确认）",
+      "smallest_correction": "!projectDir 分支显式 deny 或回退烘焙 controlRoot；补 gitfile 无标记测试",
+      "evidence_ids": [
+        "E-088"
+      ],
+      "architecture_cause": {
+        "proven": true,
+        "reason": "宿主桥接失败分支未闭合",
+        "architecture_finding_id": "ARC-016"
+      }
+    },
+    {
+      "id": "CODE-023",
+      "severity": "P1",
+      "title": "review_blocked 无合法解除边",
+      "consequence": "被阻断任务永久停留 review_blocked：reviewBlockerFor 只写不读，resolution task 完成不联动解除，也无显式解除命令",
+      "smallest_correction": "完成钩子联动解除或加显式 unblock 命令",
+      "evidence_ids": [
+        "E-089"
+      ],
+      "architecture_cause": {
+        "proven": true,
+        "reason": "状态机解除侧未实现",
+        "architecture_finding_id": "ARC-017"
+      }
+    },
+    {
+      "id": "CODE-024",
+      "severity": "P2",
+      "title": "LLM 未知决策映射为 PASS",
+      "consequence": "decision 为 FAIL/WARN 之外任意值（幻觉文本、APPROVE 等）时 status=pass 且 pass=true，可充当独立 review 信号",
+      "smallest_correction": "仅 PASS/FAIL/WARN 合法；其余按 WARN 且 pass=false 处理",
+      "evidence_ids": [
+        "E-090"
+      ],
+      "architecture_cause": {
+        "proven": false,
+        "reason": "单点解析缺陷"
+      }
+    },
+    {
+      "id": "CODE-025",
+      "severity": "P2",
+      "title": "doctor.ok 对全部 warn 为真",
+      "consequence": "门未武装、假完成等全 warn 场景 doctor.ok=true、退出码为绿——'看起来有治理'的假绿信号",
+      "smallest_correction": "门未武装与假完成至少一项升 error，或拆分 ok 与 armed 两个字段",
+      "evidence_ids": [
+        "E-091"
+      ],
+      "architecture_cause": {
+        "proven": false,
+        "reason": "严重度分级的设计取舍，但事实成立"
+      }
+    },
+    {
+      "id": "CODE-026",
+      "severity": "P2",
+      "title": "state restore 可写回无 proof 的 completed",
+      "consequence": "含无证据 completed 的备份恢复后不重验完成证据，权威状态直接回写",
+      "smallest_correction": "restore 后跑完成证据校验，不合格项降级 needs_user_decision",
+      "evidence_ids": [
+        "E-092"
+      ],
+      "architecture_cause": {
+        "proven": true,
+        "reason": "状态写入无统一权威的恢复路径表现",
+        "architecture_finding_id": "ARC-014"
+      }
+    }
+  ],
+  "remediation_trigger": {
+    "required": false,
+    "reason": "三项分数 82/71/78：无两项低于 70，也无任一项低于 40，不触发系统性整改路线；但存在 8 个 must_address 架构问题与 2 个 P0 + 8 个 P1 常规缺陷（含完成态写权限与 scope 边界的实证绕过面），安全相关的局部整改优先级很高。注：另一 Agent 第三轮审查给出 58/64/59 并判定整改必需，分歧主要来自其把 P0/P1 门禁绕过洞计入架构扣分、并把 Archivist/Skill 群/Tauri discoverer 判为投机复杂度——本审查按规则只把共同结构性根因计入，产品已批准的特性不扣",
+    "low_dimensions": []
+  },
+  "target_architecture": {
+    "components": [
+      {
+        "id": "bin-cli",
+        "name": "CLI 入口",
+        "responsibility": "纯参数解析与命令路由（业务流程全部下沉）",
+        "paths": [
+          "bin/wildarrange.mjs"
+        ]
+      },
+      {
+        "id": "interface-dashboard",
+        "name": "Dashboard 与面板",
+        "responsibility": "HTTP API 与页面渲染（无死代码，面板状态透明）",
+        "paths": [
+          "src/interface/dashboard.mjs",
+          "src/interface/dashboard-view.mjs",
+          "src/interface/dashboard-panels.mjs",
+          "src/interface/adoption-panel.mjs"
+        ]
+      },
+      {
+        "id": "interface-http-utils",
+        "name": "HTTP 共享设施",
+        "responsibility": "sendJson/readJsonBody/id 校验单一实现",
+        "paths": [
+          "src/interface/http-utils.mjs"
+        ]
+      },
+      {
+        "id": "interface-adapters",
+        "name": "宿主 Adapter",
+        "responsibility": "保持不变",
+        "paths": [
+          "src/interface/adapters.mjs",
+          "src/interface/cursor-adapter.mjs",
+          "src/interface/kimi-adapter.mjs",
+          "src/interface/hook-bridge-core.mjs"
+        ]
+      },
+      {
+        "id": "interface-doctor",
+        "name": "Doctor 体检",
+        "responsibility": "体检分项（checkCompletionIntegrity 已拆出）",
+        "paths": [
+          "src/interface/doctor.mjs"
+        ]
+      },
+      {
+        "id": "interface-read-models",
+        "name": "只读投影与帮助",
+        "responsibility": "保持不变",
+        "paths": [
+          "src/interface/decisions.mjs",
+          "src/interface/timeline.mjs",
+          "src/interface/cli-help.mjs",
+          "src/interface/contract-view.mjs",
+          "src/interface/project-init.mjs"
+        ]
+      },
+      {
+        "id": "orch-linear-runtime",
+        "name": "线性运行时",
+        "responsibility": "整链与分步节点（失败处置共享助手、delivery worktree 段拆出，≤1000 行）",
+        "paths": [
+          "src/orchestration/linear-runtime.mjs"
+        ]
+      },
+      {
+        "id": "orch-admission",
+        "name": "并行准入事务",
+        "responsibility": "准入事务（agent-run 投影外移，≤1000 行）",
+        "paths": [
+          "src/orchestration/admission.mjs",
+          "src/orchestration/admission-recovery.mjs"
+        ]
+      },
+      {
+        "id": "orch-parallel-runtime",
+        "name": "并行运行时",
+        "responsibility": "保持不变（run index 加锁）",
+        "paths": [
+          "src/orchestration/parallel-runtime.mjs"
+        ]
+      },
+      {
+        "id": "orch-adoption",
+        "name": "治理接管",
+        "responsibility": "接管状态机（digest 工具族拆出、死代码清除）",
+        "paths": [
+          "src/orchestration/adoption.mjs"
+        ]
+      },
+      {
+        "id": "orch-task-board",
+        "name": "任务账本",
+        "responsibility": "保持不变（死 re-export 删除、审计顺序统一）",
+        "paths": [
+          "src/orchestration/task-board.mjs"
+        ]
+      },
+      {
+        "id": "orch-plan-state",
+        "name": "计划状态",
+        "responsibility": "schema 层与 IO 事务层可分拆；审计顺序统一",
+        "paths": [
+          "src/orchestration/plan-state.mjs"
+        ]
+      },
+      {
+        "id": "orch-delivery-pipeline",
+        "name": "交付流水线",
+        "responsibility": "保持不变（异常路径协议化）",
+        "paths": [
+          "src/orchestration/delivery-pipeline.mjs"
+        ]
+      },
+      {
+        "id": "orch-git-sync",
+        "name": "Git 交付与交接",
+        "responsibility": "保持不变（幂等 ledger 写法统一）",
+        "paths": [
+          "src/orchestration/integration.mjs",
+          "src/orchestration/handoff.mjs",
+          "src/orchestration/remote-ownership.mjs"
+        ]
+      },
+      {
+        "id": "orch-governance",
+        "name": "变更治理",
+        "responsibility": "保持不变（混淆键改字面量、终态校验补齐）",
+        "paths": [
+          "src/orchestration/change-governance.mjs",
+          "src/orchestration/contract-governance.mjs",
+          "src/orchestration/feature-design.mjs"
+        ]
+      },
+      {
+        "id": "orch-status",
+        "name": "状态与工作流入口",
+        "responsibility": "保持不变（终止状态列表补齐）",
+        "paths": [
+          "src/orchestration/status.mjs",
+          "src/orchestration/workflow.mjs",
+          "src/orchestration/host-runtime.mjs"
+        ]
+      },
+      {
+        "id": "ai-hooks",
+        "name": "宿主 Hook 编排",
+        "responsibility": "仅事件编排（约 400 行）",
+        "paths": [
+          "src/ai/hooks.mjs"
+        ]
+      },
+      {
+        "id": "ai-pre-tool-guard",
+        "name": "PreToolUse 安全门",
+        "responsibility": "shell 白名单（共享只读 pattern）/apply_patch 解析/范围门/特性设计门",
+        "paths": [
+          "src/ai/pre-tool-guard.mjs"
+        ]
+      },
+      {
+        "id": "ai-hook-render",
+        "name": "Hook 注入渲染",
+        "responsibility": "facts 渲染与预算化输出",
+        "paths": [
+          "src/ai/hook-render.mjs"
+        ]
+      },
+      {
+        "id": "ai-routing",
+        "name": "路由",
+        "responsibility": "routeRequest 全流程（死 re-export 删除；信号匹配复用 route-table 单一实现）",
+        "paths": [
+          "src/ai/routing.mjs",
+          "src/ai/archivist-router.mjs",
+          "src/ai/suspicion-review.mjs"
+        ]
+      },
+      {
+        "id": "ai-context",
+        "name": "上下文与注入",
+        "responsibility": "保持不变",
+        "paths": [
+          "src/ai/context.mjs",
+          "src/ai/injection.mjs",
+          "src/ai/skill-matcher.mjs"
+        ]
+      },
+      {
+        "id": "cap-gateway",
+        "name": "能力网关",
+        "responsibility": "保持不变（contract-scan 信封修复、CLI 例外消除或登记）",
+        "paths": [
+          "src/capabilities/gateway.mjs"
+        ]
+      },
+      {
+        "id": "cap-gates",
+        "name": "原子质量门",
+        "responsibility": "保持不变（死 re-export/死分支清除）",
+        "paths": [
+          "src/capabilities/"
+        ]
+      },
+      {
+        "id": "cap-governance",
+        "name": "治理能力",
+        "responsibility": "保持不变",
+        "paths": [
+          "src/capabilities/verification-governance.mjs",
+          "src/capabilities/contract-governance.mjs",
+          "src/capabilities/repository-governance.mjs",
+          "src/capabilities/project-review.mjs",
+          "src/capabilities/responsibility-audit.mjs",
+          "src/capabilities/execution-readiness.mjs"
+        ]
+      },
+      {
+        "id": "infra-runtime",
+        "name": "运行时底座",
+        "responsibility": "加载/归一/迁移机制（默认配置抽独立数据模块）",
+        "paths": [
+          "src/infra/runtime-config.mjs",
+          "src/infra/default-config.mjs",
+          "src/infra/runtime-store.mjs",
+          "src/infra/runtime-bootstrap.mjs",
+          "src/infra/runtime-snapshot.mjs",
+          "src/infra/prompt-pack.mjs",
+          "src/infra/agent-registry.mjs"
+        ]
+      },
+      {
+        "id": "infra-persistence",
+        "name": "持久化与锁",
+        "responsibility": "保持不变（零收益包装删除、锁竞态修复、走查合一）",
+        "paths": [
+          "src/infra/ledger.mjs",
+          "src/infra/decision-log.mjs",
+          "src/infra/annotation-log.mjs",
+          "src/infra/file-lock.mjs",
+          "src/infra/task-state-lock.mjs",
+          "src/infra/task-state-store.mjs",
+          "src/infra/security.mjs",
+          "src/infra/recovery-transaction.mjs",
+          "src/infra/task-reports.mjs"
+        ]
+      },
+      {
+        "id": "infra-command",
+        "name": "命令与 LLM",
+        "responsibility": "保持不变（runProcess 超时杀树抽函数）",
+        "paths": [
+          "src/infra/command-runner.mjs",
+          "src/infra/command-safety.mjs",
+          "src/infra/agent-spawn.mjs",
+          "src/infra/llm-provider.mjs"
+        ]
+      },
+      {
+        "id": "infra-git",
+        "name": "Git 原语",
+        "responsibility": "读探针单一 owner（git-diff），写与远端留 git-coordination",
+        "paths": [
+          "src/infra/git-diff.mjs",
+          "src/infra/git-worktree.mjs",
+          "src/infra/git-coordination.mjs"
+        ]
+      },
+      {
+        "id": "infra-analysis",
+        "name": "分析与规则",
+        "responsibility": "保持不变（小工具单一实现、CRLF 修复、route-table 启发式归属明确）",
+        "paths": [
+          "src/infra/dependency-graph.mjs",
+          "src/infra/route-table.mjs",
+          "src/infra/rule-scanner.mjs",
+          "src/infra/repository-layout.mjs",
+          "src/infra/memory-digest.mjs",
+          "src/infra/"
+        ]
+      },
+      {
+        "id": "infra-verification",
+        "name": "验证治理底座",
+        "responsibility": "扫描/注册/契约（verification-discovery 拆出卡构建模块）",
+        "paths": [
+          "src/infra/verification-discovery.mjs",
+          "src/infra/verification-cards.mjs",
+          "src/infra/verification-registry.mjs",
+          "src/infra/contract-governance.mjs",
+          "src/infra/review-findings.mjs"
+        ]
+      },
+      {
+        "id": "tooling",
+        "name": "开发工具",
+        "responsibility": "每脚本单一门禁职责，共享辅助抽 shared.mjs，模板残留清除",
+        "paths": [
+          "tooling/"
+        ]
+      },
+      {
+        "id": "packs-config",
+        "name": "Prompt Pack 与配置",
+        "responsibility": "保持不变（live config 与 example 对齐）",
+        "paths": [
+          "packs/wildarrange-linear/",
+          "wildarrange.config.json"
+        ]
+      },
+      {
+        "id": "test-suite",
+        "name": "测试体系",
+        "responsibility": "保持不变（重复测试合并、巨型文件按域拆分）",
+        "paths": [
+          "test/"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "bin-cli",
+        "to": "orch-linear-runtime",
+        "relation": "组合调用（不再直达 capability 实现）"
+      },
+      {
+        "from": "interface-dashboard",
+        "to": "interface-http-utils",
+        "relation": "共享 HTTP 设施"
+      },
+      {
+        "from": "ai-hooks",
+        "to": "ai-pre-tool-guard",
+        "relation": "事件编排调用安全门"
+      },
+      {
+        "from": "ai-hooks",
+        "to": "ai-hook-render",
+        "relation": "事件编排调用渲染"
+      },
+      {
+        "from": "orch-linear-runtime",
+        "to": "cap-gateway",
+        "relation": "invokeCapability 唯一缝（不变）"
+      },
+      {
+        "from": "ai-routing",
+        "to": "infra-analysis",
+        "relation": "信号匹配单一实现"
+      },
+      {
+        "from": "cap-gates",
+        "to": "infra-persistence",
+        "relation": "ledger/锁（不变）"
+      },
+      {
+        "from": "infra-runtime",
+        "to": "infra-persistence",
+        "relation": "配置加载不依赖（默认配置纯数据）"
+      }
+    ]
+  },
+  "architecture_changes": [
+    {
+      "action": "keep",
+      "items": [
+        "五区分层与依赖边界测试",
+        "cap-gateway 单一缝与七字段信封",
+        "orch-delivery-pipeline 门序列唯一来源",
+        "infra-persistence 锁/ledger fail-closed 设计",
+        "packs-config 组织",
+        "test-suite 四层结构"
+      ],
+      "reason": "复杂性均有证据证明收益，是本项目最成熟的部分",
+      "evidence_ids": [
+        "E-061",
+        "E-062",
+        "E-063",
+        "E-064",
+        "E-067",
+        "E-069",
+        "E-074"
+      ]
+    },
+    {
+      "action": "delete",
+      "items": [
+        "6 处死 re-export/barrel 残留",
+        "Dashboard 死 JS/CSS（或恢复 UI，二选一）",
+        "adoption 死参数与死检查",
+        "gate-arming 恒等式、context-attachments 死检查",
+        "verification-discovery:840 恒假代码",
+        "tooling 多语言模板残留规则"
+      ],
+      "reason": "无当前收益且有明确删除证据（消费方已 grep 核实）",
+      "evidence_ids": [
+        "E-015",
+        "E-016",
+        "E-017",
+        "E-018",
+        "E-019",
+        "E-021",
+        "E-033",
+        "E-039",
+        "E-050",
+        "E-052",
+        "E-007",
+        "E-008"
+      ]
+    },
+    {
+      "action": "merge",
+      "items": [
+        "git 读原语收敛 git-diff.mjs",
+        "uniqueStrings/normalizeRelativePath/truncate 单一实现",
+        "Dashboard HTTP 设施抽 http-utils",
+        "双 shell 白名单共享只读 pattern",
+        "linear-runtime 三处失败处置块抽助手"
+      ],
+      "reason": "重复实现已观察到行为漂移，合并消除扩散",
+      "evidence_ids": [
+        "E-041",
+        "E-034",
+        "E-051",
+        "E-046",
+        "E-011"
+      ]
+    },
+    {
+      "action": "move",
+      "items": [
+        "CLI 内 archive 备份编排与 test runner 下沉 src",
+        "runtime-config 默认配置抽数据模块",
+        "hooks.mjs 拆安全门/渲染/编排",
+        "verification-discovery 卡构建段拆出",
+        "admission 尾部 agent-run 投影外移"
+      ],
+      "reason": "职责错位与长文件混合变化原因，搬移后明确所有权",
+      "evidence_ids": [
+        "E-002",
+        "E-003",
+        "E-030",
+        "E-045",
+        "E-040",
+        "E-013"
+      ]
+    },
+    {
+      "action": "clarify",
+      "items": [
+        "错误协议条文区分区内部 throw 与边界协议化",
+        "route-table 硬编码启发式归属（表数据 vs 内置策略）",
+        "resolveRouteDecision 限定计划富化只读用途",
+        "字符串混淆改字面量+注释"
+      ],
+      "reason": "条文/自述与实现分叉，先明确归属再谈修改",
+      "evidence_ids": [
+        "E-080",
+        "E-042",
+        "E-047",
+        "E-024"
+      ]
+    }
+  ],
+  "remediation_steps": [
+    {
+      "order": 1,
+      "action": "修复实证安全洞（含第三轮审查声明经复测确认的项）：normalizeTask/steering 拒绝或降级 completed、isTaskRunnable 排除 parallel_run_claim、normalizeRelativePath 折叠并拒绝 ..、walkLedger 坏行后停止标 verified、Cursor allow 附带 additional_context 且 !projectDir 显式收口、review_blocked 提供解除边、LLM 未知决策不得映射 pass",
+      "preserved_behavior": "合法完成链（commitTaskCompletionState）与合法 scope 判定行为不变",
+      "validation": ".tmp/review-xcheck 复测脚本全部转负 + 每项新增对抗回归测试 + npm test 全绿",
+      "evidence_ids": [
+        "E-083",
+        "E-084",
+        "E-085",
+        "E-086",
+        "E-087",
+        "E-088",
+        "E-089",
+        "E-090"
+      ]
+    },
+    {
+      "order": 2,
+      "action": "修复 5 个 P1 功能缺陷：workflow.mjs:28 终止状态、bin:430 maxSteps 守卫、gateway.mjs:56-59 信封 status、verification-discovery.mjs:840 恒假检测、adoption.mjs scan 异常卡死",
+      "preserved_behavior": "各功能现有通过路径行为不变",
+      "validation": "npm test 全绿 + 每个缺陷新增/更新对应回归测试",
+      "evidence_ids": [
+        "E-010",
+        "E-001",
+        "E-055",
+        "E-039",
+        "E-020"
+      ]
+    },
+    {
+      "order": 3,
+      "action": "删除死代码包：6 处死 re-export、Dashboard 死 JS/CSS（或恢复 UI）、adoption 死参数/死检查、恒等式、恒假代码、tooling 模板残留",
+      "preserved_behavior": "所有现存可达功能不变；Dashboard 取舍需产品确认",
+      "validation": "npm test 全绿；删除项均有 grep 无消费方证据",
+      "evidence_ids": [
+        "E-015",
+        "E-016",
+        "E-017",
+        "E-018",
+        "E-019",
+        "E-050",
+        "E-052"
+      ]
+    },
+    {
+      "order": 4,
+      "action": "抽 strArg 参数守卫 helper 并修复所有缺守卫透传点；加注册表→bin 分支存在性测试",
+      "preserved_behavior": "全部 CLI 命令参数行为不变",
+      "validation": "cli-smoke/cli-help 全绿；--maxSteps 裸标志行为有测试",
+      "evidence_ids": [
+        "E-001",
+        "E-005"
+      ]
+    },
+    {
+      "order": 5,
+      "action": "在 task-state-lock 层提供 ledger 先行事务助手，迁移 plan-state/task-board/admission-recovery/remote-ownership 四处顺序倒置点",
+      "preserved_behavior": "状态机与 ledger 事件序列语义不变，仅顺序纠正",
+      "validation": "checkpoint-integrity、state-migration 全绿 + 新增顺序回归测试",
+      "evidence_ids": [
+        "E-022",
+        "E-023",
+        "E-076"
+      ]
+    },
+    {
+      "order": 6,
+      "action": "拆 hooks.mjs 为事件编排/pre-tool-guard/hook-render 三文件；统一信号匹配到 route-table 单一实现并删 routing.mjs:21",
+      "preserved_behavior": "六类宿主事件输出与 PreToolUse 判定完全一致",
+      "validation": "hooks 相关测试与 dependency-boundary 全绿；新增两处命中率一致性测试",
+      "evidence_ids": [
+        "E-045",
+        "E-046",
+        "E-047",
+        "E-018"
+      ]
+    },
+    {
+      "order": 7,
+      "action": "长文件治理：抽 linear-runtime 失败处置助手、拆 delivery worktree 段、admission 投影外移、verification-discovery 拆卡构建、doctor 拆 checkCompletionIntegrity、默认配置抽数据模块",
+      "preserved_behavior": "各模块对外行为不变",
+      "validation": "npm test 全绿；目标文件回到 ≤1000 行",
+      "evidence_ids": [
+        "E-012",
+        "E-013",
+        "E-040",
+        "E-054",
+        "E-030"
+      ]
+    },
+    {
+      "order": 8,
+      "action": "原语收敛与澄清：git 读原语归 git-diff、小工具归 path-match/runtime-store、HTTP 设施归 http-utils、CLI 业务流程下沉、字符串混淆改字面量+注释、错误协议条文修订（需用户批准）、live config 补齐、adoption-runtime 重复测试合并、doctor.ok 与 armed 拆分",
+      "preserved_behavior": "各调用方行为不变",
+      "validation": "npm test + npm run check:arch 全绿；doctor 输出变化经确认",
+      "evidence_ids": [
+        "E-041",
+        "E-034",
+        "E-051",
+        "E-002",
+        "E-003",
+        "E-024",
+        "E-080",
+        "E-009",
+        "E-059",
+        "E-091"
+      ]
+    }
+  ],
+  "limitations": [
+    "项目规范 doc/standards/code-and-interface-conventions.md 缺失：以 AGENTS 链与 doc/code-maintenance.md 作为代码与接口一致性基线",
+    "项目测试策略 doc/testing-and-acceptance.md 缺失：以 test/AGENTS.md 明文授权的四层结构作为批准基线，未推断更高测试强度已获批准",
+    "architecture-review/ 目录在审查前已存在另一 Agent 第三轮审查产物（评分 58/64/59），已备份至 .tmp/architecture-review-prev/；本报告独立形成后，对其全部 P0/P1 声明做了逐项交叉验证（脚本在 .tmp/review-xcheck/）：11 项中 10 项复现确认并合入本报告，仅'审查总线回放车道属同义反复'一项保留分歧（本审查判为有意纵深防御）；其评分更严的主因是把常规 BUG 计入架构扣分并把产品已批准特性判为投机复杂度，与本审查规则不同",
+    "npm test 单次全绿不能证明无 flaky；file-lock 竞态、index.json 并发互丢等多进程问题未实机复现，按代码证据定级",
+    "Windows 实机行为（rule-scanner CRLF、doctor macOS 正则、大小写不敏感 FS 的 realpath 比较）部分为静态推断；Cursor 宿主对空输出的默认放行语义未在真实宿主点击确认",
+    "prompt 文件（packs agents/skills 正文）未逐字全读，仅评估组织与边界"
+  ]
+}
