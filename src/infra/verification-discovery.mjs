@@ -255,9 +255,9 @@ function classifyFileKind(relativePath, packageFacts, config, headText = "") {
   if (HOOK_GLOBS.some((pattern) => pathMatchesPattern(relativePath, pattern))) return "host_hook";
   if (/(^|\/)(__fixtures__|fixtures)(\/|$)/i.test(relativePath)) return "test_fixture";
   if (TEST_FILE_GLOBS.some((pattern) => pathMatchesPattern(relativePath, pattern))) return "behavior_suite";
-  if (/(^|\/)(AGENTS|TESTING|ACCEPTANCE|VERIFICATION)[^/]*\.(md|html)$/i.test(relativePath)) return "historical_archive";
+  // 当前规则、Skill 与测试规范属于项目真源，不应先制造一张“不能归档”的假审批。
+  if (isCurrentSourceOfTruth(relativePath)) return null;
   if (/(^|\/)(legacy|archive|history)\/.*\.(md|json|txt)$/i.test(relativePath)) return "historical_archive";
-  if (isCurrentSourceOfTruth(relativePath) && /\.(md|html)$/i.test(relativePath)) return "historical_archive";
   if (headText && SUCCESSOR_MARKER_RE.test(String(headText).slice(0, 4096))) return "historical_archive";
   const script = packageFacts.scripts.find((item) => item.command.includes(relativePath) || item.command.endsWith(path.posix.basename(relativePath)));
   if (script) {
@@ -461,4 +461,3 @@ async function readTextLimited(absolutePath, maxBytes = 200_000) {
   const handle = await readFile(absolutePath);
   return handle.subarray(0, maxBytes).toString("utf8");
 }
-

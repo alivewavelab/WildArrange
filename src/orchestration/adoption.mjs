@@ -419,7 +419,7 @@ async function reconcileAdoptionUnlocked(rootDir, options = {}) {
   return { session, status: session.status, files };
 }
 
-/** 人类对单张 adoption 卡 approve/reject（dashboard 写批准面）。 */
+/** 人类对单张 adoption 卡批准、拒绝、暂缓或撤销决定（dashboard 写批准面）。 */
 export async function decideAdoptionCard(rootDir, options = {}) {
   return withAdoptionLock(rootDir, options.sessionId || "decide", async () => {
     const session = await requiredSession(rootDir, options.sessionId);
@@ -438,24 +438,29 @@ export async function decideAdoptionCard(rootDir, options = {}) {
         await writeSessionFiles(rootDir, session, files);
         throw adoptionError("card_stale", `card ${card.id} fingerprint stale`);
       }
-      if (!["approved", "rejected", "deferred"].includes(decision.decision)) {
+      if (!["approved", "rejected", "deferred", "pending"].includes(decision.decision)) {
         throw adoptionError("invalid_decision", `invalid decision: ${decision.decision}`);
       }
       if (decision.decision === "approved" && isSensitiveAdoptionCard(card) && decisions.length > 1) {
         throw adoptionError("sensitive_card", "删除/合并必须逐卡批准");
       }
-      card.status = decision.decision === "approved" ? "approved" : decision.decision === "rejected" ? "rejected" : "deferred";
-      files.approvals[card.id] = {
-        decision: decision.decision,
-        at: nowIso(),
-        fingerprint: card.fingerprint,
-        ...(decision.decision === "approved"
-          ? {
-            snapshot: await captureLiveApprovalSnapshot(rootDir, card),
-            cardFingerprint: fingerprintLiveCard(card),
-          }
-          : {}),
-      };
+      if (decision.decision === "pending") {
+        card.status = "pending";
+        delete files.approvals[card.id];
+      } else {
+        card.status = decision.decision === "approved" ? "approved" : decision.decision === "rejected" ? "rejected" : "deferred";
+        files.approvals[card.id] = {
+          decision: decision.decision,
+          at: nowIso(),
+          fingerprint: card.fingerprint,
+          ...(decision.decision === "approved"
+            ? {
+              snapshot: await captureLiveApprovalSnapshot(rootDir, card),
+              cardFingerprint: fingerprintLiveCard(card),
+            }
+            : {}),
+        };
+      }
     }
     const pending = files.cards.filter((card) => card.status === "pending" || card.status === "stale");
     const approved = files.cards.filter((card) => card.status === "approved" && !card.appliedAt);
@@ -659,10 +664,16 @@ export async function cancelAdoption(rootDir, options = {}) {
 export async function loadAdoptionViewModel(rootDir, options = {}) {
   const status = await statusAdoption(rootDir, options);
   const files = status.session ? await readSessionFiles(rootDir, status.session.sessionId) : null;
+  const configResult = await loadWildArrangeConfig(rootDir).catch(() => ({ config: {} }));
+  const locator = readLocator(configResult.config);
+  const inventory = locator.inventoryPath
+    ? await readVerificationInventory(path.join(rootDir, locator.inventoryPath), null)
+    : null;
   return {
     ...status,
     cards: files?.cards || [],
     approvals: files?.approvals || {},
+    inventory,
   };
 }
 

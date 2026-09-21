@@ -145,7 +145,7 @@ test("discovery: an existing locator remains the source of truth on later scans"
   });
 });
 
-test("discovery: current AGENTS and live skills never get dangerous actions", async () => {
+test("discovery: current AGENTS and live skills do not create fake archive approvals", async () => {
   await withTempDir(async (dir) => {
     await writeFixture(dir);
     await writeFile(path.join(dir, "AGENTS.md"), "# current agents\n");
@@ -160,23 +160,18 @@ test("discovery: current AGENTS and live skills never get dangerous actions", as
     const protectedPaths = ["AGENTS.md", "src/AGENTS.md", "packs/x/skills/current.md"];
     for (const relativePath of protectedPaths) {
       const card = cards.find((item) => item.path === relativePath);
-      assert.ok(card, `expected a card for ${relativePath}`);
-      assert.ok(!["archive", "merge", "delete"].includes(card.action), `${relativePath} action=${card.action}`);
+      assert.equal(card, undefined, `current source ${relativePath} must not become an approval card`);
     }
   });
 });
 
-test("discovery: TESTING.md without successor or still referenced can only defer", async () => {
+test("discovery: current TESTING.md without a successor does not create a fake archive approval", async () => {
   await withTempDir(async (dir) => {
     await writeFixture(dir);
     await writeFile(path.join(dir, "README.md"), "See docs/TESTING.md\n");
     const { cards } = await scanVerificationUniverse(dir);
     const testing = cards.find((card) => card.path === "docs/TESTING.md");
-    assert.ok(testing, "expected a card for docs/TESTING.md");
-    assert.equal(testing.action, "defer");
-    assert.equal(testing.patch, null);
-    assert.match(String(testing.reason), /successor|后继|引用|消费者|缺少|暂缓/i);
-    assert.doesNotMatch(String(testing.reason), /建议归档而不是删除/);
+    assert.equal(testing, undefined);
   });
 });
 

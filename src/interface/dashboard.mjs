@@ -21,6 +21,7 @@
 import http from "node:http";
 import { readFile } from "node:fs/promises";
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import path from "node:path";
 import {
   DEFAULT_EXECUTOR_AGENT,
   DEFAULT_LEAD_AGENT,
@@ -207,7 +208,7 @@ export function startDashboardServer(rootDir, options = {}) {
         const headers = isLoopbackHost(host)
           ? { "set-cookie": renderDashboardSessionCookie(token) }
           : {};
-        sendHtml(response, 200, renderDashboardHtml(), headers);
+        sendHtml(response, 200, renderDashboardHtml(path.basename(path.resolve(rootDir))), headers);
         return;
       }
       sendJson(response, 404, { error: "not_found" });
