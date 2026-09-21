@@ -415,7 +415,7 @@ test("cli smoke: adoption start auto-provisions a usable Dashboard token", async
       const output = await waitForOutput(child, /"url":\s*"([^"]+)"/);
       const match = output.match(/"url":\s*"([^"]+)"/);
       const dashboardUrl = new URL(match[1]);
-      assert.equal(dashboardUrl.hash.startsWith("#adoption?token="), true);
+      assert.equal(dashboardUrl.hash.startsWith("#approvals?token="), true);
       const token = new URLSearchParams(dashboardUrl.hash.split("?")[1]).get("token");
       assert.ok(token && token.length >= 24);
       const sessionResponse = await fetch(`${dashboardUrl.origin}/api/adoption/session`);

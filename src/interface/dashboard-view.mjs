@@ -31,15 +31,22 @@ import {
 
 /**
  * 返回完整 Dashboard 单页 HTML 字符串（含 CSS 与内嵌 script）。
+ * @param {string} [projectName] 当前受治理项目的显示名称。
  * @returns {string}
  */
-export function renderDashboardHtml() {
+export function renderDashboardHtml(projectName = PRODUCT_NAME) {
+  const displayProjectName = typeof projectName === "string" && projectName.trim() ? projectName.trim() : PRODUCT_NAME;
+  const projectNameHtml = escapeHtml(displayProjectName);
+  const projectNameScriptValue = JSON.stringify(displayProjectName)
+    .replaceAll("<", "\\u003c")
+    .replaceAll("\u2028", "\\u2028")
+    .replaceAll("\u2029", "\\u2029");
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${PRODUCT_NAME} 驾驶舱</title>
+  <title>${projectNameHtml} · ${PRODUCT_NAME} 驾驶舱</title>
   <style>
     :root {
       --ink: #17211d; --muted: #65706a; --paper: #f4f0e7; --panel: #fffdf7;
@@ -65,6 +72,8 @@ export function renderDashboardHtml() {
     .nav button { display: flex; align-items: center; gap: 11px; width: 100%; padding: 11px 12px; border: 0; border-radius: 12px; color: #bcd0c6; background: transparent; text-align: left; cursor: pointer; transition: .2s ease; }
     .nav button:hover { color: #fff; background: rgba(255,255,255,.06); transform: translateX(2px); }
     .nav button.active { color: #fff; background: rgba(191,230,207,.13); box-shadow: inset 0 0 0 1px rgba(191,230,207,.12); }
+    .nav button.nav-subitem { margin-top:-6px; padding-left:41px; font-size:12px; }
+    .nav-count { display:inline-grid; place-items:center; min-width:20px; height:20px; margin-left:auto; padding:0 6px; color:#171715; background:var(--mint); font-size:10px; font-weight:900; }
     .nav svg { width: 18px; height: 18px; stroke-width: 1.8; }
     .rail-foot { position: absolute; left: 22px; right: 22px; bottom: 24px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,.1); color: #a9c6b7; font-size: 11px; }
     .rail-foot i,.server-dot { display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: #68d59e; box-shadow: 0 0 0 5px rgba(104,213,158,.1); }
@@ -163,6 +172,36 @@ export function renderDashboardHtml() {
     .governance-grid > section > button { margin-top:8px; }
     .governance-file-list { display:grid; flex:1; min-height:0; gap:6px; margin-top:12px; padding-right:4px; overflow:auto; align-content:start; }
     .governance-file { width:100%; display:flex; justify-content:space-between; gap:12px; text-align:left; background:#f8f5ed; }
+    .adoption-card { min-width:0; padding:20px 22px; border:1px solid var(--line); background:var(--panel); }
+    .adoption-card > div,.adoption-detail,.adoption-detail-value { min-width:0; }
+    .adoption-detail-value { overflow-wrap:anywhere; word-break:break-word; }
+    .adoption-card .form-row { flex-wrap:wrap; margin-bottom:0; }
+    .approval-tabs { display:flex; gap:0; margin:0 0 18px; border-bottom:1px solid var(--ink); }
+    .approval-tab { min-width:132px; padding:12px 18px; border:0; border-right:1px solid var(--line); background:transparent; text-align:left; font-weight:800; }
+    .approval-tab.active { color:#fff; background:var(--ink); }
+    .approval-tab span { margin-left:8px; font-variant-numeric:tabular-nums; }
+    .approval-empty { padding:28px 22px; }
+    .approval-groups,.approval-items,.archive-list,.archive-entries { display:grid; gap:14px; }
+    .approval-group { padding:0; overflow:hidden; border:1px solid var(--line); background:var(--panel); }
+    .approval-group-head { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; padding:20px 22px 12px; }
+    .approval-group-head h2,.approval-item-head h3,.archive-entry h3 { margin:5px 0; }
+    .approval-group-paths { padding:0 22px 16px; color:var(--muted); overflow-wrap:anywhere; }
+    .approval-group > details > summary,.approval-item-details > summary,.archive-entry > details > summary { padding:13px 22px; border-top:1px solid var(--line); cursor:pointer; font-weight:800; }
+    .approval-items { padding:14px; border-top:1px solid var(--line); background:#ede9df; }
+    .approval-item { padding:17px 18px; }
+    .approval-item-head { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; }
+    .approval-item-details { margin-top:12px; padding:4px 22px 2px; border-top:1px solid var(--line); }
+    .archive-toolbar { display:grid; grid-template-columns:auto minmax(220px,520px) auto; align-items:center; gap:12px; margin-bottom:18px; }
+    .archive-toolbar label { font-weight:800; }
+    .archive-toolbar input { width:100%; padding:12px 14px; border:1px solid var(--line); background:var(--panel); }
+    .archive-section { padding:0; border:1px solid var(--line); background:var(--panel); }
+    .archive-section-head { display:flex; align-items:end; justify-content:space-between; gap:20px; padding:20px 22px; border-bottom:1px solid var(--line); }
+    .archive-section-head h2 { margin:5px 0 0; }
+    .archive-entries { padding:14px; }
+    .archive-entry { padding:16px 18px; border:1px solid var(--line); background:#f8f5ed; }
+    .archive-entry dl { display:grid; grid-template-columns:90px 1fr; gap:8px 12px; margin:0; padding:14px 22px; }
+    .archive-entry dt { font-weight:800; }
+    .archive-entry dd { margin:0; color:var(--muted); overflow-wrap:anywhere; }
     .section-kicker { margin:22px 0 10px; color:var(--muted); font-size:12px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; }
     .governance-ledger-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }
     .governance-ledger-grid > section { min-height:210px; display:flex; flex-direction:column; }
@@ -202,8 +241,8 @@ export function renderDashboardHtml() {
     .section-intro { margin:-8px 0 22px; color:var(--muted); }
     .danger-count { display:inline-grid; place-items:center; min-width:20px; height:20px; padding:0 6px; margin-left:7px; border-radius:99px; color:#fff; background:var(--signal); font-size:10px; }
     @keyframes rise { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
-    @media (max-width: 980px) { .app{grid-template-columns:76px minmax(0,1fr)} .rail{padding-inline:17px}.brand-text,.nav span,.nav-label,.rail-foot{display:none}.nav button{justify-content:center;padding:12px 0}.hero,.dashboard-grid{grid-template-columns:1fr}.hero-stamp{justify-self:stretch;width:100%}.ops,.two,.log-grid{grid-template-columns:1fr}.governance-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.governance-ledger-grid{grid-template-columns:1fr}.ledger-toolbar{grid-template-columns:1fr 1fr} }
-    @media (max-width: 640px) { .governance-grid{grid-template-columns:1fr}.activity-row{grid-template-columns:1fr;gap:4px} }
+    @media (max-width: 980px) { .app{grid-template-columns:76px minmax(0,1fr)} .rail{padding-inline:17px}.brand-text,.nav span,.nav-label,.rail-foot{display:none}.nav button,.nav button.nav-subitem{justify-content:center;padding:12px 0}.hero,.dashboard-grid{grid-template-columns:1fr}.hero-stamp{justify-self:stretch;width:100%}.ops,.two,.log-grid{grid-template-columns:1fr}.governance-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.governance-ledger-grid{grid-template-columns:1fr}.ledger-toolbar{grid-template-columns:1fr 1fr} }
+    @media (max-width: 640px) { .governance-grid{grid-template-columns:1fr}.activity-row{grid-template-columns:1fr;gap:4px}.approval-group-head,.approval-item-head,.archive-section-head{display:grid}.archive-toolbar,.archive-entry dl{grid-template-columns:1fr} }
     /* Grid workbench theme: information hierarchy comes from rules and spacing. */
     :root { --ink:#141412; --muted:#6d6b64; --paper:#f2efe8; --panel:#f8f5ee; --forest:#171715; --forest-2:#262622; --mint:#d3482f; --signal:#d3482f; --gold:#d3482f; --line:#cbc6ba; --good:#24704d; --bad:#bd3528; --warn:#a56519; --shadow:none; --radius:0; }
     body { background:var(--paper); font-family:Arial,"PingFang SC","Microsoft YaHei",sans-serif; }
@@ -259,14 +298,14 @@ export function renderDashboardHtml() {
 
     <div class="shell">
       <header class="topbar">
-        <div class="crumb">项目 / <b>${PRODUCT_NAME}</b> / <span id="viewLabel">总览</span></div>
+        <div class="crumb">项目 / <b>${projectNameHtml}</b> / <span id="viewLabel">总览</span></div>
         <div class="top-actions"><span class="notice" id="notice"></span><span class="status-pill"><i class="server-dot"></i><span id="gateStatus">正在读取质量门</span></span><button id="refresh">刷新</button></div>
       </header>
 
       <main>
         <div class="view active" data-view-panel="overview">
           <section class="hero" style="padding:0;border:0;background:transparent;box-shadow:none">
-            <div><div class="eyebrow">当前运行状态 · <span id="generatedAt">—</span></div><h1 id="heroTitle">${PRODUCT_NAME}</h1><p id="heroText">正在读取项目状态。</p></div>
+            <div><div class="eyebrow">当前运行状态 · <span id="generatedAt">—</span></div><h1 id="heroTitle">${projectNameHtml}</h1><p id="heroText">正在读取项目状态。</p></div>
             <div class="hero-stamp"><div class="eyebrow">当前计划</div><strong id="planProgress">0 / 0</strong><small id="subtitle">正在加载</small></div>
           </section>
           <div class="pipeline" id="pipeline">
@@ -318,12 +357,14 @@ ${ADOPTION_VIEW_HTML}
   <script>
     // --- 客户端引导：token 与 fetch 封装 ---
     const DASHBOARD_TOKEN_KEY = "wildarrange.dashboard.token";
+    const DASHBOARD_PROJECT_NAME = ${projectNameScriptValue};
     const el = (id) => document.getElementById(id);
     const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
-    if (location.hash.startsWith("#adoption?")) {
+    const dashboardHashMatch = location.hash.match(/^#(adoption|approvals|archives)\?/);
+    if (dashboardHashMatch) {
       const token = new URLSearchParams(location.hash.slice(location.hash.indexOf("?") + 1)).get("token") || "";
       if (token) sessionStorage.setItem(DASHBOARD_TOKEN_KEY, token);
-      history.replaceState(null, "", location.pathname + location.search + "#adoption");
+      history.replaceState(null, "", location.pathname + location.search + "#" + dashboardHashMatch[1]);
     }
     function dashboardFetch(url, options = {}) {
       const headers = new Headers(options.headers || {});
@@ -385,7 +426,7 @@ ${ADOPTION_VIEW_HTML}
       el("planProgress").textContent = (status.completed ?? 0) + " / " + (status.total ?? 0);
       el("subtitle").textContent = status.total ? "任务完成 · " + (data.attention?.total || 0) + " 项待处理" : "尚未导入计划";
       el("gateStatus").textContent = status.gateArming?.armed ? "所有质量门已武装" : "质量门需要检查";
-      el("heroTitle").textContent = "${PRODUCT_NAME}";
+      el("heroTitle").textContent = DASHBOARD_PROJECT_NAME;
       if (failed > 0) {
         el("heroText").textContent = "当前有 " + failed + " 项任务遇到阻断。";
       } else if (waiting > 0) {
@@ -655,4 +696,15 @@ ${ADOPTION_VIEW_HTML}
   </script>
 </body>
 </html>`;
+}
+
+/** 转义服务端插入 HTML 文本节点的项目名。 */
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[character]);
 }

@@ -17,6 +17,7 @@ import http from "node:http";
 import path from "node:path";
 import test from "node:test";
 import { startDashboardServer } from "../src/interface/dashboard.mjs";
+import { renderDashboardHtml } from "../src/interface/dashboard-view.mjs";
 import { decideAdoptionCard, startAdoption } from "../src/orchestration/adoption.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 
@@ -36,6 +37,41 @@ async function listen(dir, options = {}) {
   const address = server.address();
   return { server, base: `http://127.0.0.1:${address.port}` };
 }
+
+test("dashboard shows the governed project name and groups adoption cards into four concise sections", () => {
+  const page = renderDashboardHtml("cli-subagents-iteration");
+  assert.match(page, /<title>cli-subagents-iteration · WildArrange 驾驶舱<\/title>/);
+  assert.match(page, /项目 \/ <b>cli-subagents-iteration<\/b>/);
+  assert.match(page, /const DASHBOARD_PROJECT_NAME = "cli-subagents-iteration";/);
+  assert.match(page, /article\.className = "adoption-card approval-item"/);
+  assert.match(page, /\.adoption-card \{ min-width:0;/);
+  assert.doesNotMatch(page, /article\.className = "task-card";\n        const sensitive/);
+  for (const label of ["治理账本", "Hook 与运行时质量门", "静态检查", "测试与夹具"]) {
+    assert.match(page, new RegExp(label));
+  }
+  assert.doesNotMatch(page, /其他高风险判断/);
+  assert.match(page, /id="adoptionCards" class="approval-groups"/);
+  assert.match(page, /<details open><summary>收起 \/ 展开这组判断<\/summary>/);
+  assert.doesNotMatch(page, /查看影响与证据/);
+  assert.match(page, /告诉系统三份治理清单放在哪里/);
+  for (const label of ["这是干什么的", "点批准后", "可能的影响", "为什么建议这样做", "反悔怎么办", "给开发者看的位置和依据"]) {
+    assert.match(page, new RegExp(label));
+  }
+  assert.doesNotMatch(page, /谁在使用: card\.consumers/);
+  assert.doesNotMatch(page, /是什么: card\.asset/);
+  assert.match(page, /旧项目初始化时，系统只扫描并提出建议，不会静默收录、归档或删除/);
+  for (const label of ["批准收录", "不收录", "批准归档", "不归档", "批准删除", "不删除", "批准合并", "不合并"]) {
+    assert.match(page, new RegExp(label));
+  }
+  assert.match(page, /撤销决定/);
+});
+
+test("dashboard escapes a project name before embedding it in HTML or script", () => {
+  const page = renderDashboardHtml('</script><b class="bad">');
+  assert.doesNotMatch(page, /<b class="bad">/);
+  assert.match(page, /&lt;\/script&gt;&lt;b class=&quot;bad&quot;&gt;/);
+  assert.match(page, /const DASHBOARD_PROJECT_NAME = "\\u003c\/script>\\u003cb class=\\"bad\\">";/);
+});
 
 function request(base, pathname, { method = "GET", token, headers = {}, body } = {}) {
   return new Promise((resolve, reject) => {
@@ -72,15 +108,25 @@ test("dashboard adoption GET is available and HTML contains the panel", async ()
     try {
       const page = await request(base, "/");
       assert.equal(page.status, 200);
-      assert.match(page.text, /location\.hash\.startsWith\("#adoption\?"\)/);
+      assert.match(page.text, /location\.hash\.match\(\/\^#\(adoption\|approvals\|archives\)/);
       assert.match(page.text, /sessionStorage\.setItem\(DASHBOARD_TOKEN_KEY, token\)/);
       assert.match(page.text, /项目治理/);
+      assert.match(page.text, /data-view="approvals" data-label="审批"/);
+      assert.match(page.text, /data-view="archives" data-label="归档"/);
+      assert.match(page.text, /data-adoption-filter="pending"/);
+      assert.match(page.text, /data-adoption-filter="approved"/);
+      assert.match(page.text, /data-view-panel="archives"/);
+      assert.match(page.text, /id="archiveSearch"/);
+      assert.match(page.text, /id="archiveList"/);
+      assert.match(page.text, /这里复用资产单，只读展示/);
       assert.match(page.text, /治理问题整理/);
       assert.match(page.text, /id="governanceCleanup" hidden/);
       assert.match(page.text, /id="governanceLedgers"/);
-      assert.match(page.text, /当前只保留原样，不提供归档、合并或删除/);
+      assert.ok(page.text.indexOf('data-view-panel="approvals"') < page.text.indexOf('id="governanceCleanup"'), "approval controls belong to the approvals view");
+      assert.match(page.text, /现在还没查清它是否仍被使用，所以系统只保留原样/);
       const api = await request(base, "/api/adoption/session");
       assert.equal(api.status, 200);
+      assert.ok(Object.hasOwn(api.json, "inventory"));
       assert.equal(api.json.ok, true);
       const governance = await request(base, "/api/adoption/governance");
       assert.equal(governance.status, 200);
@@ -174,6 +220,15 @@ test("dashboard can approve one card at a time and rejects batched sensitive app
       });
       assert.equal(approved.status, 200);
       assert.equal(approved.json.ok, true);
+      const reset = await request(base, "/api/adoption/decision", {
+        method: "POST",
+        token,
+        body: { sessionId: started.session.sessionId, cardId: card.id, decision: "pending", fingerprint: card.fingerprint },
+      });
+      assert.equal(reset.status, 200);
+      const afterReset = await request(base, "/api/adoption/session", { token });
+      assert.equal(afterReset.json.cards.find((item) => item.id === card.id).status, "pending");
+      assert.equal(afterReset.json.approvals[card.id], undefined);
     } finally {
       server.close();
     }

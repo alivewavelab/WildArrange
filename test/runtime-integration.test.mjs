@@ -1200,6 +1200,50 @@ test("pre-tool-use guard only allows a JSON plan draft before the first task exi
     assert.equal(shellDenied.decision, "deny");
     assert.equal(shellDenied.code, "no_active_task_shell");
 
+    for (const command of [
+      "git status --short --branch",
+      "git --no-pager diff --stat",
+      "git diff --cached --name-status --no-ext-diff --no-textconv",
+      "git rev-parse HEAD",
+      "git branch --show-current",
+      "git worktree list --porcelain",
+      "git ls-files --modified --deleted --others --exclude-standard",
+    ]) {
+      const readOnlyGit = await preToolUseGuard(dir, {
+        hook_event_name: "PreToolUse",
+        session_id: "session-plan-draft",
+        cwd: dir,
+        tool_name: "Bash",
+        tool_input: { command },
+      });
+      assert.equal(readOnlyGit.decision, "allow", command);
+      assert.equal(readOnlyGit.code, "no_file_target", command);
+    }
+
+    for (const [command, expectedCode] of [
+      ["git add src/unplanned.js", "no_active_task_shell"],
+      ["git checkout -- src/unplanned.js", "no_active_task_shell"],
+      ["git reset --hard", "high_risk_command"],
+      ["git clean -fd", "high_risk_command"],
+      ["git status --short && node -e \"process.exit(1)\"", "no_active_task_shell"],
+      ["git diff --output=diff.txt", "no_active_task_shell"],
+      ["git diff --ext-diff", "no_active_task_shell"],
+      ["git diff --textconv", "no_active_task_shell"],
+      ["git log --oneline", "no_active_task_shell"],
+      ["git show HEAD", "no_active_task_shell"],
+      ["git -c core.pager=evil status", "no_active_task_shell"],
+    ]) {
+      const unsafeGit = await preToolUseGuard(dir, {
+        hook_event_name: "PreToolUse",
+        session_id: "session-plan-draft",
+        cwd: dir,
+        tool_name: "Bash",
+        tool_input: { command },
+      });
+      assert.equal(unsafeGit.decision, "deny", command);
+      assert.equal(unsafeGit.code, expectedCode, command);
+    }
+
     const planImportAllowed = await preToolUseGuard(dir, {
       hook_event_name: "PreToolUse",
       session_id: "session-plan-draft",

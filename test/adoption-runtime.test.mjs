@@ -20,6 +20,7 @@ import {
   applyApprovedCards,
   cancelAdoption,
   decideAdoptionCard,
+  loadAdoptionViewModel,
   reconcileAdoption,
   recoverAdoption,
   resumeAdoption,
@@ -107,6 +108,38 @@ test("adoption start is read-only on business files and rejects a second start",
     const second = await startAdoption(dir, { serve: false });
     assert.equal(second.ok, false);
     assert.equal(second.status, "session_exists");
+  });
+});
+
+test("a mistaken approval can return to pending before apply with no business write", async () => {
+  await withTempDir(async (dir) => {
+    await seedProject(dir);
+    const configPath = path.join(dir, "wildarrange.config.json");
+    const existedBefore = existsSync(configPath);
+    const before = existedBefore ? await readFile(configPath, "utf8") : null;
+    const started = await startAdoption(dir, { serve: false });
+    const card = started.cards.find((item) => item.asset === "runtime_gate") || started.cards[0];
+    await decideAdoptionCard(dir, {
+      sessionId: started.session.sessionId,
+      cardId: card.id,
+      decision: "approved",
+      fingerprint: card.fingerprint,
+    });
+    const approved = await loadAdoptionViewModel(dir, { sessionId: started.session.sessionId });
+    assert.equal(approved.cards.find((item) => item.id === card.id).status, "approved");
+    assert.ok(approved.approvals[card.id]?.snapshot);
+
+    await decideAdoptionCard(dir, {
+      sessionId: started.session.sessionId,
+      cardId: card.id,
+      decision: "pending",
+      fingerprint: card.fingerprint,
+    });
+    const reset = await loadAdoptionViewModel(dir, { sessionId: started.session.sessionId });
+    assert.equal(reset.cards.find((item) => item.id === card.id).status, "pending");
+    assert.equal(reset.approvals[card.id], undefined);
+    assert.equal(existsSync(configPath), existedBefore);
+    if (existedBefore) assert.equal(await readFile(configPath, "utf8"), before);
   });
 });
 

@@ -1122,7 +1122,7 @@ async function main() {
       const server = await startDashboardServer(rootDir, options);
       const address = server.address();
       const actualPort = typeof address === "object" && address ? address.port : options.port || 8765;
-      return { server, url: `http://${options.host || host}:${actualPort}/#adoption?token=${encodeURIComponent(options.token || token)}` };
+      return { server, url: `http://${options.host || host}:${actualPort}/#approvals?token=${encodeURIComponent(options.token || token)}` };
     };
     if (subcommand === "start") {
       const result = await startAdoption(rootDir, { host, port, token, startServer });
