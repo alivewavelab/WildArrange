@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WildArrange 外置治理控制面详细设计</title>
+  <style>
+    :root{color-scheme:light dark;--bg:#f6f7fb;--panel:#fff;--text:#18202a;--muted:#5f6b7a;--line:#d9dee7;--accent:#1457d9;--code:#eef2f8}
+    @media(prefers-color-scheme:dark){:root{--bg:#11151b;--panel:#191f28;--text:#edf2f7;--muted:#a7b1bf;--line:#353d49;--accent:#79a7ff;--code:#222a35}}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.65 system-ui,"Segoe UI",sans-serif}main{max-width:1120px;margin:auto;padding:36px 22px 72px}header,section{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:24px;margin-bottom:18px}header{border-left:5px solid var(--accent)}h1,h2,h3{line-height:1.25;margin-top:0}h1{font-size:38px}h2{font-size:24px;border-bottom:1px solid var(--line);padding-bottom:10px}h3{font-size:18px;margin-top:22px}code,pre{font-family:ui-monospace,Consolas,monospace}code{background:var(--code);padding:1px 5px;border-radius:5px}pre{background:var(--code);border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto}table{border-collapse:collapse;width:100%;display:block;overflow-x:auto}th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}th{background:var(--code)}.muted{color:var(--muted)}.hard{font-weight:750;color:var(--accent)}
+  </style>
+</head>
+<body><main>
+<header>
+  <p class="muted">设计日期：2026-09-22 ｜ 基线：<code>main@7fda8829</code> ｜ 分支：<code>codex/external-governance-control-plane</code></p>
+  <h1>外置治理控制面详细设计</h1>
+  <p><strong>决策：</strong>WildArrange 采用“客户代码仓库 + 独立治理仓库 + 本机运行状态”三仓面。WildArrange 生成的规则、任务、报告、状态和宿主适配文件默认不进入客户代码仓库；每次验收绑定项目 commit 与治理 commit。</p>
+  <p><strong>本次明确不改：</strong>任何 <code>AGENTS.md</code>、AGENTS schema、允许路径清单或既有质量门顺序。</p>
+</header>
+
+<section>
+  <h2>1. 目标与不可牺牲约束</h2>
+  <ol>
+    <li><strong>客户仓库零污染：</strong>接管前后客户仓库不新增 WildArrange 文件，<code>git status --porcelain</code> 保持一致。</li>
+    <li><strong>治理独立演进：</strong>质量门、测试目录、风险映射、验收规则和治理决定在独立治理仓库中版本化、评审和回滚。</li>
+    <li><strong>产品测试不复制：</strong>单元、集成和端到端测试仍与产品代码同仓、同分支、同提交；治理仓库只登记测试路径、命令、风险、合格线和证据。</li>
+    <li><strong>Agent 不得自降门槛：</strong>功能 Agent 无权修改生效治理政策。新增、削弱或删除永久控制项必须成为独立治理任务并获人类批准。</li>
+    <li><strong>不新增第二真源：</strong>task ledger 与现有交付链语义不变；外置只改变所有权和存储位置。</li>
+  </ol>
+</section>
+
+<section>
+  <h2>2. 三仓面模型</h2>
+  <pre>Project Repository                 Governance Repository
+客户产品代码仓库                   独立治理仓库
+src / test / build / product docs policy / registry / decisions
+         │ project SHA                    │ governance SHA
+         └──────────────┬─────────────────┘
+                        ▼
+                双 SHA 集成验收
+
+Runtime State（仅本机）
+锁、缓存、原始日志、临时报告、备份、Adapter 生成物</pre>
+  <table>
+    <thead><tr><th>仓面</th><th>权威内容</th><th>禁止内容</th><th>版本策略</th></tr></thead>
+    <tbody>
+      <tr><td><code>projectRoot</code></td><td>产品源码、产品测试、迁移、构建入口、客户文档</td><td>WildArrange 任务、治理规则副本、运行日志和生成式 Hook</td><td>客户 Git；功能任务独占 branch/worktree</td></tr>
+      <tr><td><code>governanceRoot</code></td><td>政策、验证目录、门禁定义、治理任务、批准决定、清洗后验收结论</td><td>产品测试源码复制品、高频缓存、完整原始命令输出</td><td>独立 Git；治理任务独占 branch/worktree</td></tr>
+      <tr><td><code>runtimeRoot</code></td><td>锁、派生状态、缓存、备份、Prompt Pack 安装副本、Adapter 生成物</td><td>需要跨设备共同评审的长期政策</td><td>不建 Git，不作为第二事实源</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>3. 路径、身份与安全</h2>
+  <pre>WorkspaceContext {
+  projectRoot,
+  governanceRoot,
+  runtimeRoot,
+  projectId,
+  governanceId,
+  projectWorkspaceId,
+  mode: "external" | "legacy"
+}</pre>
+  <h3>3.1 本机运行目录</h3>
+  <pre>Windows: %LOCALAPPDATA%\WildArrange\projects\&lt;projectId&gt;\
+macOS:   ~/Library/Application Support/WildArrange/projects/&lt;projectId&gt;/
+Linux:   $XDG_STATE_HOME/wildarrange/projects/&lt;projectId&gt;/</pre>
+  <p><code>runtimeRoot</code> 可由显式参数或 <code>WILDARRANGE_STATE_HOME</code> 覆盖。治理仓库必须显式连接，不向客户仓库写指针文件。</p>
+  <h3>3.2 身份规则</h3>
+  <ul>
+    <li>Git 项目以 <code>git rev-parse --git-common-dir</code> 的真实路径生成本机 <code>projectId</code>；同一仓库多个 linked worktree 共用权威任务状态。</li>
+    <li>独立 clone 默认拥有不同本机身份，避免跨 clone 共用锁。</li>
+    <li>跨设备通过治理仓库合同与双 SHA 对账，不依赖本机绝对路径。</li>
+    <li>非 Git 项目以项目真实路径生成本机身份，不自动 <code>git init</code>。</li>
+  </ul>
+  <h3>3.3 路径安全</h3>
+  <ul>
+    <li>三根都执行绝对路径、realpath 和符号链接边界校验。</li>
+    <li>外置模式拒绝 <code>governanceRoot</code> 或 <code>runtimeRoot</code> 位于 <code>projectRoot</code> 内。</li>
+    <li>治理规则只能从已连接仓库的登记路径加载，prompt 不能指定任意磁盘路径。</li>
+  </ul>
+</section>
+
+<section>
+  <h2>4. 治理仓库合同</h2>
+  <pre>governance-repository/
+├─ wildarrange-governance.json
+├─ policy/
+│  ├─ AGENTS.md
+│  └─ quality-policy.json
+├─ verification/
+│  ├─ registry.json
+│  └─ baselines/
+├─ tasks/
+├─ acceptance/
+└─ decisions/</pre>
+  <p>最小合同不保存本机路径：</p>
+  <pre>{
+  "schemaVersion": 1,
+  "project": {
+    "repository": "https://github.com/example/product",
+    "defaultBranch": "main"
+  },
+  "policyRoot": "policy",
+  "verificationRegistry": "verification/registry.json"
+}</pre>
+  <p>验证目录登记 suite/gate，而非复制测试或逐个登记测试用例：</p>
+  <pre>{
+  "id": "orders-integration",
+  "kind": "test-suite",
+  "risk": "订单事务或金额计算回归",
+  "projectPaths": ["test/orders/**"],
+  "command": "npm test -- test/orders",
+  "evidenceRequired": "exit_code_0",
+  "owner": "orders",
+  "executionCost": "medium",
+  "retirementCondition": "订单模块删除或被新 suite 完整替代"
+}</pre>
+</section>
+
+<section>
+  <h2>5. Agent 权限与双仓库任务</h2>
+  <table>
+    <thead><tr><th>任务</th><th>可写仓库</th><th>内容</th><th>批准</th></tr></thead>
+    <tbody>
+      <tr><td>功能 / BUG / 重构</td><td>仅项目仓库</td><td>产品代码、产品测试、必要产品文档</td><td>现有项目交付链</td></tr>
+      <tr><td>治理提案</td><td>默认只读</td><td>候选差异、风险和理由</td><td>不产生生效治理 commit</td></tr>
+      <tr><td>治理变更</td><td>仅治理仓库</td><td>政策、门禁、验证目录、退出条件</td><td>独立治理任务 + 人类批准</td></tr>
+      <tr><td>集成验收</td><td>不直接修改任一仓库</td><td>绑定项目 delivery SHA 与治理 SHA</td><td>双 SHA 固定后运行</td></tr>
+    </tbody>
+  </table>
+  <p class="hard">一个可写任务不得同时写项目仓库和治理仓库。</p>
+  <p>两边必须共同变化时，拆成项目任务、治理任务和只做联合验收的 integration task；分别拥有 branch/worktree 和证据。</p>
+</section>
+
+<section>
+  <h2>6. 治理演进闭环</h2>
+  <p class="hard">观察项目 → 发现缺口 → 候选治理提案 → 人类批准 → 治理 commit → 后续任务加载 → 统计效果 → 保留、修订或退休</p>
+  <ul>
+    <li>扫描、失败和 Review finding 只能产生候选风险，不能自动新增永久门禁。</li>
+    <li>永久控制项必须包含风险、证据、范围、机制、负责人、执行成本和退休条件。</li>
+    <li>功能 Agent 无治理仓库写权限，不能通过削弱规则完成自证。</li>
+    <li>治理规则必须通过治理仓库自己的 review 和人类 merge；项目 checkpoint 不能代替。</li>
+  </ul>
+</section>
+
+<section>
+  <h2>7. CLI、兼容与宿主激活</h2>
+  <pre># 目标接口；尚未实现
+wildarrange project attach --project-root D:\Projects\game --governance-root D:\Governance\game-governance
+wildarrange project show
+wildarrange init
+wildarrange state migrate --to external --dry-run
+wildarrange doctor</pre>
+  <ul>
+    <li>新增 <code>--project-root</code>、<code>--governance-root</code>、<code>--runtime-root</code>。</li>
+    <li>旧 <code>--control-root</code> 在兼容期仅表示 legacy 单根模式；与新参数并用时拒绝。</li>
+    <li>发现旧 <code>.wildarrange</code> 时继续 legacy 模式并提示迁移，不能静默创建第二 ledger。</li>
+    <li>Adapter 必须由用户显式安装到用户级或外部运行目录，不能静默改用户级配置。</li>
+    <li>Hook 根据工作目录识别连接项目，再从治理仓库和运行目录加载规则与状态。</li>
+    <li>若宿主只能加载项目内 Hook，<code>doctor</code> 必须报告零污染模式未激活，不能生成 shim 后冒充完成。</li>
+  </ul>
+</section>
+
+<section>
+  <h2>8. 状态、配置与规则优先级</h2>
+  <h3>8.1 单一状态真源</h3>
+  <pre>显式 runtimeRoot
+  → 外部项目 registry 映射
+  → legacy projectRoot/.wildarrange（仅兼容）</pre>
+  <p>任务状态仍只有一个权威 task ledger；计划、Markdown 和报告仍为派生物。</p>
+  <h3>8.2 规则只叠加、不覆盖</h3>
+  <pre>WildArrange 内置不可削弱底线
+  + governanceRoot/policy
+  + projectRoot 中客户自己已有规则（只读输入）</pre>
+  <p>冲突时停止并报告，不使用“后读覆盖前读”。WildArrange 不生成或改写客户项目中的 <code>AGENTS.md</code>。</p>
+  <h3>8.3 配置职责</h3>
+  <ul>
+    <li>团队共享治理配置进入治理仓库。</li>
+    <li>设备路径、令牌、缓存和锁进入本机运行目录。</li>
+    <li>客户项目已有产品配置保持原 owner，WildArrange 不搬运。</li>
+  </ul>
+</section>
+
+<section>
+  <h2>9. 迁移与回滚</h2>
+  <ol>
+    <li>冻结项目根、HEAD、旧状态和锁。</li>
+    <li>验证 task ledger、ledger hash 链和关键恢复文件。</li>
+    <li>复制到外置临时目录并生成关键文件 digest。</li>
+    <li>验证复制后的账本、proof、checkpoint、配置和 Prompt Pack。</li>
+    <li>原子写外部 registry，再以新根执行 <code>doctor</code>。</li>
+    <li>迁移成功后保留外置恢复包；旧目录仅在用户明确确认后删除。</li>
+  </ol>
+  <p>任何失败都保持旧目录为唯一真源；不得出现两个可写 ledger。</p>
+</section>
+
+<section>
+  <h2>10. 代码责任</h2>
+  <table>
+    <thead><tr><th>责任</th><th>Owner</th><th>变化</th></tr></thead>
+    <tbody>
+      <tr><td>三根解析、身份、registry、路径边界</td><td><code>src/infra/</code></td><td>新增单一 context owner；runtime-store 消费已解析 runtime root</td></tr>
+      <tr><td>CLI project attach/show</td><td><code>bin/</code> + <code>src/interface/</code></td><td>CLI 只路由；Interface 组合 Infra</td></tr>
+      <tr><td>外部规则注入</td><td><code>src/ai/</code> + <code>src/infra/rule-scanner.mjs</code></td><td>Infra 安全读取；AI 注入，不复制文件</td></tr>
+      <tr><td>宿主激活与诊断</td><td><code>src/interface/adapters.mjs</code>、<code>doctor.mjs</code></td><td>生成物外置；未激活明确报告</td></tr>
+      <tr><td>双仓库任务与验收</td><td><code>src/orchestration/</code> + <code>src/infra/git-*.mjs</code></td><td>每任务单仓写；integration 绑定双 SHA</td></tr>
+      <tr><td>文档与架构登记</td><td><code>README*</code>、架构文档、产品总图</td><td>只写已实现并验证能力</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>11. 实施切片</h2>
+  <ol>
+    <li><strong>基础路径：</strong>三根上下文、外部 registry、路径安全、legacy 检测；证明 init 不写客户仓库。</li>
+    <li><strong>治理连接：</strong>治理合同、attach/show、外部政策安全加载与双 SHA 展示。</li>
+    <li><strong>状态迁移：</strong>旧 <code>.wildarrange</code> 的验证、复制、切换和回滚；不自动删除。</li>
+    <li><strong>宿主激活：</strong>外置 Adapter 生成与真实生命周期证明；不支持的宿主保持未激活。</li>
+    <li><strong>双仓交付：</strong>任务单仓目标、治理 branch/worktree、integration 双 SHA 验收。</li>
+    <li><strong>文档发布：</strong>README、架构文档、总图、包体和迁移指南。</li>
+  </ol>
+  <p>每个切片都要有独立自动测试，不能用后一阶段的计划替代前一阶段验收。</p>
+</section>
+
+<section>
+  <h2>12. 验收标准</h2>
+  <table>
+    <thead><tr><th>类别</th><th>必须证明</th></tr></thead>
+    <tbody>
+      <tr><td>零污染</td><td>attach/init 前后客户目录树和 Git 状态不新增 WildArrange 文件</td></tr>
+      <tr><td>身份</td><td>同一 common-dir 的 worktree 共用 projectId；独立 clone 不共享锁</td></tr>
+      <tr><td>路径安全</td><td>拒绝根目录嵌套、符号链接逃逸和未登记绝对路径</td></tr>
+      <tr><td>单真源</td><td>legacy/external 不双写；迁移失败继续读取旧权威状态</td></tr>
+      <tr><td>规则</td><td>外部政策可注入；客户规则只读；冲突停止；截断显式报告</td></tr>
+      <tr><td>Git</td><td>项目 commit 不含治理文件；治理 commit 不含产品文件；均不移动 main</td></tr>
+      <tr><td>权限</td><td>功能 Agent 无法修改治理仓库；治理变化要求独立批准</td></tr>
+      <tr><td>绑定</td><td>验收同时保存并复核 project SHA 与 governance SHA</td></tr>
+      <tr><td>恢复</td><td>复制中断、digest 不符、registry 切换失败都可恢复</td></tr>
+      <tr><td>宿主</td><td>Codex/Cursor/Kimi 各自产生真实生命周期回执；生成文件不等于激活</td></tr>
+    </tbody>
+  </table>
+  <p>交付门：相关测试 → <code>npm test</code> → <code>npm run check:arch</code> → <code>npm pack --dry-run</code> → <code>git diff --check</code>。</p>
+</section>
+
+<section>
+  <h2>13. 排除项与完成定义</h2>
+  <ul>
+    <li>不使用嵌套 Git、submodule、隐藏 orphan branch 或项目内 ignored 目录冒充独立治理。</li>
+    <li>不复制产品测试源码，不建立第二任务状态表、第二完成链或第二审批事实。</li>
+    <li>不自动创建、推送或合并客户 GitHub 仓库；治理远端创建和授权仍由人类完成。</li>
+    <li>不因路径分离修改 AGENTS 规范、依赖白名单或质量门强度。</li>
+  </ul>
+  <p class="hard">只有真实客户项目在零 WildArrange 生成文件的情况下完成连接、规则注入、任务执行、完整交付门和双 SHA 验收，并可从迁移失败恢复，才可称为完成。</p>
+  <p>静态映射、单元测试、Adapter 文件生成或单次 Hook 事件都不能单独证明完成。</p>
+</section>
+</main></body></html>
