@@ -48,6 +48,7 @@ import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { assertFeatureDesignPlanBinding, bindFeatureDesignPlan } from "./feature-design.mjs";
 import { loadRoutesConfig, resolveRouteDecision } from "../infra/route-table.mjs";
 import { isPossibleNoopTask, isTrivialCommand } from "../infra/task-predicates.mjs";
+import { loadGovernanceVerificationDefaults } from "../infra/workspace-context.mjs";
 
 // --- 规范化 ---
 
@@ -477,7 +478,17 @@ export async function importPlan(rootDir, planPath, options = {}) {
 async function importPlanUnlocked(rootDir, planPath, options) {
   await ensureWildArrangeDirs(rootDir);
   const rawPlan = await readJson(planPath);
-  const plan = normalizePlan(rawPlan);
+  const governanceBinding = await loadGovernanceVerificationDefaults(rootDir);
+  const plan = normalizePlan(applyGovernanceDefaults(rawPlan, governanceBinding));
+  if (governanceBinding) {
+    plan.governance_binding = {
+      registryPath: governanceBinding.registryRelativePath,
+      registryDigest: governanceBinding.registryDigest,
+      projectRevision: governanceBinding.projectRevision,
+      governanceRevision: governanceBinding.governanceRevision,
+      boundAt: nowIso(),
+    };
+  }
   validateSemanticGeneratedPlan(plan);
   if (options.requireResponsibility === true || plan.generated_by === "host_semantic") {
     for (const task of plan.tasks) {
@@ -529,6 +540,19 @@ async function importPlanUnlocked(rootDir, planPath, options) {
   await bindFeatureDesignPlan(rootDir, featureDesignGate, plan.id);
   await writeSnapshot(rootDir, "planned", { planId: plan.id });
   return plan;
+}
+
+/** 外置治理命令只做加法，项目计划不能覆盖或删减强制默认项。 */
+function applyGovernanceDefaults(rawPlan, governanceBinding) {
+  if (!governanceBinding) return rawPlan;
+  const rawDefaults = rawPlan.defaults && typeof rawPlan.defaults === "object" ? rawPlan.defaults : {};
+  const defaults = { ...rawDefaults };
+  for (const field of ["verify_commands", "standards_commands", "review_commands"]) {
+    const projectValues = rawDefaults[field] ?? rawDefaults[field.replace(/_([a-z])/g, (_, char) => char.toUpperCase())] ?? [];
+    if (!Array.isArray(projectValues)) throw new Error(`defaults.${field} must be an array`);
+    defaults[field] = uniqueStrings([...governanceBinding.planDefaults[field], ...projectValues]);
+  }
+  return { ...rawPlan, defaults };
 }
 
 /** 导入前断言不会覆盖进行中的 active work。 */
@@ -596,6 +620,7 @@ function mergePlanIntoTaskLedger(existingLedger, plan) {
     id: plan.id,
     title: plan.title,
     objective: plan.objective,
+    governance_binding: plan.governance_binding || null,
     taskIds: plan.tasks.map((task) => task.id),
     createdAt: (existingLedger?.plans || []).find((candidate) => candidate.id === plan.id)?.createdAt || plan.createdAt,
     updatedAt: at,

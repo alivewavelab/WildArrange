@@ -47,9 +47,11 @@ export async function loadTaskState(rootDir, options = {}) {
   if (!ledger) return null;
   const planId = options.planId || ledger.activePlanId || ledger.planId || null;
   if (!planId) return null;
+  const plan = ledger.plans.find((candidate) => candidate.id === planId) || null;
   return {
     version: ledger.version,
     planId,
+    governance_binding: plan?.governance_binding || null,
     tasks: ledger.tasks.filter((task) => task.planId === planId),
     updatedAt: ledger.updatedAt,
   };
@@ -307,4 +309,3 @@ function inferPlans(tasks, activePlanId) {
     taskIds: tasks.filter((task) => task.planId === id).map((task) => task.id),
   }));
 }
-

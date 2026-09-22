@@ -39,6 +39,7 @@ import { evaluateRegistryFreshness } from "../infra/verification-registry.mjs";
 import { normalizeRelativePath } from "../infra/path-match.mjs";
 import { projectDecisionStats } from "./decisions.mjs";
 import { checkCompletionIntegrity } from "./doctor-completion.mjs";
+import { getBoundWorkspaceContext } from "../infra/workspace-context.mjs";
 
 // 诊断与门控分离：每个检查独立 try/catch，单项崩溃只把自己的分项标红，
 // 其余分项照常输出；doctor 不再写 hash 链 ledger（诊断不该抢门控的锁）。
@@ -297,6 +298,30 @@ async function checkAdapters(rootDir, findings) {
   const cursorEnabled = config.adapters?.cursor?.enabled === true;
   const codexEnabled = config.adapters?.codex?.enabled === true;
   const kimiEnabled = config.adapters?.kimi?.enabled === true;
+  const workspace = getBoundWorkspaceContext(rootDir);
+  if (workspace?.mode === "external") {
+    const enabledTargets = [
+      ["cursor", cursorEnabled],
+      ["codex", codexEnabled],
+      ["kimi", kimiEnabled],
+    ].filter(([, enabled]) => enabled).map(([target]) => target);
+    for (const target of enabledTargets) {
+      addFinding(findings, "error", "adapters", `外置治理已连接，但 ${target} 的零项目文件生命周期 Adapter 尚未激活；不能把 CLI 可运行当成宿主治理已生效`, {
+        target,
+        code: "external_adapter_not_activated",
+        nextAction: "继续通过显式 WildArrange CLI 执行门禁；在用户级或外部 Adapter 完成真实生命周期验证前，不要生成项目内 shim",
+      });
+      targets.push({ target, configured: false, activation: "external_not_activated" });
+    }
+    return {
+      status: enabledTargets.length > 0 ? "error" : "skipped",
+      mode: "external",
+      reason: enabledTargets.length > 0 ? "zero-project-file host adapters are not activated" : "no host adapters enabled",
+      targets,
+      staleRules: [],
+      legacyManagedRules: [],
+    };
+  }
 
   if (cursorEnabled) {
     const hooksPath = path.join(rootDir, ".cursor", "hooks.json");

@@ -2,11 +2,14 @@
 
 | 命令 | 说明 |
 | ---- | ---- |
+| `wildarrange project init-governance --governance-root <path> --repository <git-url> [--default-branch main]` | 在项目外创建不覆盖已有文件的治理仓库骨架；不自动操作 Git |
+| `wildarrange project attach --governance-root <path> [--project-root <path>] [--runtime-root <path>]` | 把客户项目连接到独立治理仓库；映射写入项目外部状态目录 |
+| `wildarrange project show [--project-root <path>]` | 查看项目、治理仓库和运行态三根连接 |
 | `wildarrange review configure --from <setup.json> [--apply]` | 预览项目审查与执行准备配置；明确确认后 --apply，只能更新治理配置 |
 | `wildarrange review checklist --task <taskId>` | 解析本任务项目审查清单和必需依据，不启动执行器 |
 | `wildarrange readiness --task <taskId>` | 检查已批准任务必需的执行器、Skill、规范与握手，不启动业务 Worker |
 | `wildarrange adoption inventory` | 只读扫描旧仓库文件与验证资产，供接管 Skill 建立来源映射 |
-| `wildarrange init [--sample] [--project-docs] [--architecture]` | 初始化运行时；显式补建项目文档并提示设计审查 Skill，可选未批准架构模板 |
+| `wildarrange init [--sample] [--project-docs] [--architecture]` | 初始化运行时；外置治理项目不写客户仓库，legacy 模式可显式补建项目文档 |
 | `wildarrange plan --from <plan.json>` | 导入含 responsibilityChanges 的计划；等待人工确认职责与事实归属 |
 | `wildarrange plan approve [--plan <planId>]` | 确认待执行计划（语义生成计划或已开启 planApproval） |
 | `wildarrange run` | 跑下一个任务（worker→verifier→scope→review→checkpoint） |
@@ -88,6 +91,7 @@
 | `wildarrange docs commands [--write]` | 从命令注册表生成命令文档（单一事实源） |
 | `wildarrange state backup [--reason "..."]` | 备份运行态关键文件 |
 | `wildarrange state migrate` | 备份后迁移运行态任务总账与旧投影；不改根 wildarrange.config.json |
+| `wildarrange state migrate --to external --governance-root <path> [--runtime-root <path>] [--dry-run]` | 校验并复制旧运行态，摘要一致后才连接独立治理仓库；保留项目内源目录 |
 | `wildarrange state verify` | 校验运行态关键文件 |
 | `wildarrange state list` | 列出运行态备份 |
 | `wildarrange state restore --backup <backupId>` | 恢复运行态备份 |

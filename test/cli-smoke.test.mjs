@@ -33,11 +33,12 @@ async function withTempProjectDir(fn) {
   }
 }
 
-async function runCli(args, cwd) {
+async function runCli(args, cwd, options = {}) {
   try {
     const result = await execFileAsync(process.execPath, [CLI_PATH, ...args], {
       cwd,
       encoding: "utf8",
+      env: { ...process.env, ...(options.env || {}) },
     });
     return { code: 0, stdout: result.stdout, stderr: result.stderr };
   } catch (error) {
@@ -48,6 +49,111 @@ async function runCli(args, cwd) {
     };
   }
 }
+
+test("cli smoke: attached external governance keeps init out of the project repository", async () => {
+  await withTempProjectDir(async (dir) => {
+    const governanceRoot = path.join(path.dirname(dir), `${path.basename(dir)}-governance`);
+    const stateHome = path.join(path.dirname(dir), `${path.basename(dir)}-state`);
+    const env = { WILDARRANGE_STATE_HOME: stateHome };
+    await mkdir(path.join(governanceRoot, "policy"), { recursive: true });
+    await writeFile(path.join(governanceRoot, "policy", "AGENTS.md"), "# External governance\n\nCLI_EXTERNAL_POLICY_PROBE\n");
+    await writeFile(path.join(governanceRoot, "wildarrange-governance.json"), JSON.stringify({
+      schemaVersion: 1,
+      project: { repository: "https://example.test/product.git", defaultBranch: "main" },
+      policyRoot: "policy",
+      verificationRegistry: "verification/registry.json",
+    }, null, 2));
+    try {
+      const attached = await runCli(["project", "attach", "--governance-root", governanceRoot], dir, { env });
+      assert.equal(attached.code, 0, attached.stderr);
+      const connection = JSON.parse(attached.stdout);
+      assert.equal(connection.mode, "external");
+      assert.equal(connection.projectRoot, dir);
+      assert.equal(connection.governanceRoot, governanceRoot);
+      assert.equal(existsSync(path.join(dir, ".wildarrange")), false);
+
+      const init = await runCli(["init"], dir, { env });
+      assert.equal(init.code, 0, init.stderr);
+      const initialized = JSON.parse(init.stdout);
+      assert.equal(initialized.workspaceMode, "external");
+      assert.equal(initialized.runtime, connection.runtimeRoot);
+      assert.equal(existsSync(path.join(connection.runtimeRoot, "work.json")), true);
+      assert.equal(existsSync(path.join(dir, ".wildarrange")), false);
+
+      const rules = await runCli(["rules", "collect"], dir, { env });
+      assert.equal(rules.code, 0, rules.stderr);
+      const ruleResult = JSON.parse(rules.stdout);
+      assert.equal(ruleResult.governancePolicyRules, 1);
+      assert.ok(ruleResult.rules.some((rule) => rule.source === "governance_policy" && rule.content.includes("CLI_EXTERNAL_POLICY_PROBE")));
+      assert.equal(existsSync(path.join(dir, "AGENTS.md")), false);
+
+      const shown = await runCli(["project", "show"], dir, { env });
+      assert.equal(shown.code, 0, shown.stderr);
+      assert.equal(JSON.parse(shown.stdout).runtimeRoot, connection.runtimeRoot);
+
+      const doctor = await runCli(["doctor"], dir, { env });
+      assert.equal(doctor.code, 2, doctor.stderr);
+      const doctorReport = JSON.parse(doctor.stdout);
+      assert.equal(doctorReport.sections.adapters.mode, "external");
+      assert.ok(doctorReport.findings.some((finding) => finding.code === "external_adapter_not_activated"));
+
+      const adapter = await runCli(["adapter", "install", "--target", "codex"], dir, { env });
+      assert.equal(adapter.code, 1);
+      assert.match(adapter.stderr, /project-local adapter installation is disabled/);
+      assert.equal(existsSync(path.join(dir, ".codex")), false);
+    } finally {
+      await rm(governanceRoot, { recursive: true, force: true });
+      await rm(stateHome, { recursive: true, force: true });
+    }
+  });
+});
+
+test("cli smoke: legacy state migrates transactionally and remains recoverable outside the project", async () => {
+  await withTempProjectDir(async (dir) => {
+    const governanceRoot = path.join(path.dirname(dir), `${path.basename(dir)}-migration-governance`);
+    const stateHome = path.join(path.dirname(dir), `${path.basename(dir)}-migration-state`);
+    const env = { WILDARRANGE_STATE_HOME: stateHome };
+    await mkdir(path.join(governanceRoot, "policy"), { recursive: true });
+    await writeFile(path.join(governanceRoot, "wildarrange-governance.json"), JSON.stringify({
+      schemaVersion: 1,
+      project: { repository: "https://example.test/legacy-product.git" },
+      policyRoot: "policy",
+      verificationRegistry: "verification/registry.json",
+    }, null, 2));
+    try {
+      const initialized = await runCli(["init"], dir, { env });
+      assert.equal(initialized.code, 0, initialized.stderr);
+      const legacyWork = await readFile(path.join(dir, ".wildarrange", "work.json"), "utf8");
+
+      const directAttach = await runCli(["project", "attach", "--governance-root", governanceRoot], dir, { env });
+      assert.equal(directAttach.code, 1);
+      assert.match(directAttach.stderr, /state migrate --to external/);
+
+      const preview = await runCli(["state", "migrate", "--to", "external", "--governance-root", governanceRoot, "--dry-run"], dir, { env });
+      assert.equal(preview.code, 0, preview.stderr);
+      assert.equal(JSON.parse(preview.stdout).status, "planned");
+      assert.equal(existsSync(path.join(stateHome, "registry.json")), false);
+
+      const migration = await runCli(["state", "migrate", "--to", "external", "--governance-root", governanceRoot], dir, { env });
+      assert.equal(migration.code, 0, migration.stderr);
+      const migrated = JSON.parse(migration.stdout);
+      assert.equal(migrated.status, "migrated");
+      assert.equal(await readFile(path.join(migrated.context.runtimeRoot, "work.json"), "utf8"), legacyWork);
+      assert.equal(await readFile(path.join(dir, ".wildarrange", "work.json"), "utf8"), legacyWork);
+
+      const verified = await runCli(["state", "verify"], dir, { env });
+      assert.equal(verified.code, 0, verified.stderr);
+      assert.equal(JSON.parse(verified.stdout).ok, true);
+      const backup = await runCli(["state", "backup", "--reason", "external-smoke"], dir, { env });
+      assert.equal(backup.code, 0, backup.stderr);
+      assert.ok(JSON.parse(backup.stdout).files.some((file) => file.path === ".wildarrange/work.json" && file.status === "copied"));
+      assert.equal(existsSync(path.join(dir, ".wildarrange", "backups")), false);
+    } finally {
+      await rm(governanceRoot, { recursive: true, force: true });
+      await rm(stateHome, { recursive: true, force: true });
+    }
+  });
+});
 
 async function runCliWithInput(args, cwd, input) {
   const child = spawn(process.execPath, [CLI_PATH, ...args], {

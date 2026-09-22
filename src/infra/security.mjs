@@ -26,6 +26,7 @@ import {
   nowIso,
   readJson,
   resolveWildArrangePath,
+  resolveWildArrangeRoot,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 import { inspectCompletedTaskEvidence, normalizeTaskLedger } from "./task-state-store.mjs";
@@ -34,22 +35,22 @@ import { inspectCompletedTaskEvidence, normalizeTaskLedger } from "./task-state-
 const CONFIG_BASELINE_PATH = ["security", "config-baseline.json"];
 /** state restore 备份清单：须与 ledger 尾 hash 缓存同进同出。 */
 const BACKUP_STATE_FILES = [
-  [".wildarrange", "ledger.jsonl"],
+  { scope: "runtime", segments: ["ledger.jsonl"] },
   // 尾 hash 缓存必须与 ledger 同进同出，否则恢复后缓存尺寸对不上会被
   // fail-closed 当成截断。
-  [".wildarrange", "ledger-tail.json"],
-  [".wildarrange", "work.json"],
-  [".wildarrange", "team", "tasks.json"],
-  [".wildarrange", "snapshots", "context.json"],
-  [".wildarrange", "snapshots", "context.md"],
-  [".wildarrange", "security", "config-baseline.json"],
-  [WILDARRANGE_CONFIG_FILE],
-  [".wildarrange", "config.json"],
+  { scope: "runtime", segments: ["ledger-tail.json"] },
+  { scope: "runtime", segments: ["work.json"] },
+  { scope: "runtime", segments: ["team", "tasks.json"] },
+  { scope: "runtime", segments: ["snapshots", "context.json"] },
+  { scope: "runtime", segments: ["snapshots", "context.md"] },
+  { scope: "runtime", segments: ["security", "config-baseline.json"] },
+  { scope: "project", segments: [WILDARRANGE_CONFIG_FILE] },
+  { scope: "runtime", segments: ["config.json"] },
 ];
 /** doctor 运行时完整性检查的最低必备状态文件。 */
 const REQUIRED_STATE_FILES = [
-  [".wildarrange", "ledger.jsonl"],
-  [".wildarrange", "work.json"],
+  ["ledger.jsonl"],
+  ["work.json"],
 ];
 
 /**
@@ -133,9 +134,13 @@ export async function writeRuntimeStateBackup(rootDir, options = {}) {
   const backupDir = resolveWildArrangePath(rootDir, "backups", backupId);
   await mkdir(backupDir, { recursive: true });
   const files = [];
-  for (const segments of BACKUP_STATE_FILES) {
-    const sourcePath = path.join(rootDir, ...segments);
-    const relativePath = normalizeRelativePath(path.relative(rootDir, sourcePath));
+  for (const descriptor of BACKUP_STATE_FILES) {
+    const sourcePath = descriptor.scope === "runtime"
+      ? resolveWildArrangePath(rootDir, ...descriptor.segments)
+      : path.join(rootDir, ...descriptor.segments);
+    const relativePath = descriptor.scope === "runtime"
+      ? normalizeRelativePath(path.join(".wildarrange", ...descriptor.segments))
+      : normalizeRelativePath(path.join(...descriptor.segments));
     if (!existsSync(sourcePath)) {
       files.push({ path: relativePath, status: "missing" });
       continue;
@@ -189,7 +194,7 @@ export async function prepareArchiveRecoveryPackage(rootDir, options = {}) {
   const recoveryPaths = [];
   for (const candidate of [...new Set(options.paths || [])]) {
     const sourcePath = resolveBackupSourcePath(rootDir, candidate);
-    const relativePath = normalizeRelativePath(path.relative(rootDir, sourcePath));
+    const relativePath = logicalStatePath(rootDir, sourcePath);
     recoveryPaths.push(relativePath);
     const existing = entriesByPath.get(relativePath);
     // 已在备份 manifest 中且成功复制的路径不必重复 copy
@@ -298,7 +303,7 @@ export async function restoreRuntimeStateBackup(rootDir, options = {}) {
   // §3.4 回滚安全：损坏 manifest 必须在写 pre-restore 备份或动 live state 前 fail-closed。
   for (const file of manifest.files || []) {
     resolveManifestRelativePath(backupDir, file.path, "backup source");
-    resolveManifestRelativePath(rootDir, file.path, "restore target");
+    resolveRestoreTarget(rootDir, file.path);
   }
 
   // 恢复前先给当前状态留底，恢复错了还能再退回来
@@ -312,7 +317,7 @@ export async function restoreRuntimeStateBackup(rootDir, options = {}) {
       continue;
     }
     const sourcePath = resolveManifestRelativePath(backupDir, file.path, "backup source");
-    const targetPath = resolveManifestRelativePath(rootDir, file.path, "restore target");
+    const targetPath = resolveRestoreTarget(rootDir, file.path);
     let sourceStat;
     try {
       sourceStat = await lstat(sourcePath);
@@ -433,6 +438,23 @@ function assertSafeBackupId(value, label = "backup id") {
  */
 function resolveBackupSourcePath(rootDir, candidate) {
   try {
+    const runtimeRoot = resolveWildArrangeRoot(rootDir);
+    const absoluteCandidate = path.isAbsolute(candidate) ? path.resolve(candidate) : null;
+    if (absoluteCandidate && pathInside(runtimeRoot, absoluteCandidate)) {
+      if (pathInside(resolveWildArrangePath(rootDir, "backups"), absoluteCandidate)) {
+        throw new Error("denied runtime backup path");
+      }
+      return absoluteCandidate;
+    }
+    const normalized = normalizeRelativePath(String(candidate));
+    if (normalized === ".wildarrange" || normalized.startsWith(".wildarrange/")) {
+      const suffix = normalized === ".wildarrange" ? [] : normalized.slice(".wildarrange/".length).split("/");
+      const runtimeCandidate = resolveWildArrangePath(rootDir, ...suffix);
+      if (pathInside(resolveWildArrangePath(rootDir, "backups"), runtimeCandidate)) {
+        throw new Error("denied runtime backup path");
+      }
+      return runtimeCandidate;
+    }
     return resolveInboundPath(rootDir, candidate, {
       denyPrefixes: [resolveWildArrangePath(rootDir, "backups")],
     });
@@ -452,6 +474,32 @@ function resolveManifestRelativePath(parentDir, relativePath, label) {
   return resolveRelativeInside(parentDir, relativePath, label);
 }
 
+/** manifest 中 `.wildarrange/...` 是稳定逻辑路径；实际目标可位于项目外。 */
+function resolveRestoreTarget(rootDir, relativePath) {
+  const normalized = normalizeRelativePath(String(relativePath));
+  if (normalized === ".wildarrange" || normalized.startsWith(".wildarrange/")) {
+    const suffix = normalized === ".wildarrange" ? [] : normalized.slice(".wildarrange/".length).split("/");
+    return resolveWildArrangePath(rootDir, ...suffix);
+  }
+  return resolveManifestRelativePath(rootDir, normalized, "restore target");
+}
+
+/** 把实际运行态路径投影为兼容旧备份的 `.wildarrange/...` 逻辑路径。 */
+function logicalStatePath(rootDir, absolutePath) {
+  const runtimeRoot = resolveWildArrangeRoot(rootDir);
+  if (pathInside(runtimeRoot, absolutePath)) {
+    const relative = normalizeRelativePath(path.relative(runtimeRoot, absolutePath));
+    return relative ? `.wildarrange/${relative}` : ".wildarrange";
+  }
+  return normalizeRelativePath(path.relative(rootDir, absolutePath));
+}
+
+function pathInside(rootDir, candidate) {
+  const root = process.platform === "win32" ? path.resolve(rootDir).toLowerCase() : path.resolve(rootDir);
+  const target = process.platform === "win32" ? path.resolve(candidate).toLowerCase() : path.resolve(candidate);
+  return target === root || target.startsWith(`${root}${path.sep}`);
+}
+
 /**
  * 复制单条备份条目到备份目录（委托 copyEntry）。
  */
@@ -466,8 +514,8 @@ async function copyBackupEntry(sourcePath, backupDir, relativePath) {
 export async function verifyRuntimeState(rootDir) {
   const files = [];
   for (const segments of REQUIRED_STATE_FILES) {
-    const filePath = path.join(rootDir, ...segments);
-    const relativePath = normalizeRelativePath(path.relative(rootDir, filePath));
+    const filePath = resolveWildArrangePath(rootDir, ...segments);
+    const relativePath = normalizeRelativePath(path.join(".wildarrange", ...segments));
     if (!existsSync(filePath)) {
       files.push({ path: relativePath, status: "missing" });
       continue;
@@ -476,7 +524,7 @@ export async function verifyRuntimeState(rootDir) {
     files.push({ path: relativePath, status: "present", bytes: fileStat.size });
   }
   const work = await readJson(resolveWildArrangePath(rootDir, "work.json"), null);
-  const tasksPath = path.join(rootDir, ".wildarrange", "team", "tasks.json");
+  const tasksPath = resolveWildArrangePath(rootDir, "team", "tasks.json");
   if (work?.activePlanId) {
     if (!existsSync(tasksPath)) {
       files.push({ path: ".wildarrange/team/tasks.json", status: "missing" });
@@ -510,19 +558,19 @@ export async function verifyRuntimeState(rootDir) {
  */
 async function collectConfigFingerprints(rootDir) {
   const candidates = [
-    path.join(rootDir, WILDARRANGE_CONFIG_FILE),
-    resolveWildArrangePath(rootDir, "config.json"),
+    { path: path.join(rootDir, WILDARRANGE_CONFIG_FILE), logicalPath: WILDARRANGE_CONFIG_FILE },
+    { path: resolveWildArrangePath(rootDir, "config.json"), logicalPath: ".wildarrange/config.json" },
   ];
   const files = [];
-  for (const filePath of candidates) {
+  for (const candidate of candidates) {
+    const filePath = candidate.path;
     if (!existsSync(filePath)) continue;
     const content = await readFile(filePath, "utf8");
     files.push({
-      path: normalizeRelativePath(path.relative(rootDir, filePath)),
+      path: candidate.logicalPath,
       hash: hashContent(content),
       bytes: Buffer.byteLength(content),
     });
   }
   return files;
 }
-

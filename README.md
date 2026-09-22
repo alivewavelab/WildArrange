@@ -44,6 +44,42 @@ WildArrange 只保留 5 个长期 Agent。确定性 Router 是系统节点，不
 - npm 公共包无需登录即可安装；只有发布者执行 `npm publish` 时需要登录。
 - 使用 Git worktree 隔离时，项目还需要安装 Git。
 
+### 独立治理仓库（零项目生成文件）
+
+需要让客户代码仓库保持纯净时，使用三根模式：客户项目仓库保存产品代码与产品测试，独立治理仓库保存政策和验证注册表，本机状态目录保存 ledger、锁、报告、备份与 Prompt Pack。WildArrange 不会向客户项目生成 `AGENTS.md`、`.wildarrange/` 或 Adapter 文件。
+
+先在客户项目根执行：
+
+```bash
+npx wildarrange project init-governance \
+  --governance-root ../my-project-governance \
+  --repository https://github.com/example/my-project.git \
+  --default-branch main
+```
+
+该命令只在治理目录创建缺失的 `wildarrange-governance.json`、`policy/AGENTS.md`、`verification/registry.json` 和空职责目录；不覆盖已有文件，也不自动 `git init`、commit 或 push。人工补齐政策后，把治理仓库初始化并提交，再回到客户项目连接：
+
+```bash
+npx wildarrange project attach --governance-root ../my-project-governance
+npx wildarrange init
+npx wildarrange project show
+```
+
+若客户项目已经有 `.wildarrange/`，`project attach` 会拒绝直接切换。先预演，再迁移：
+
+```bash
+npx wildarrange state migrate --to external \
+  --governance-root ../my-project-governance --dry-run
+npx wildarrange state migrate --to external \
+  --governance-root ../my-project-governance
+```
+
+迁移会先校验 ledger，再复制并逐项比对摘要，最后才写项目外 registry；旧 `.wildarrange/` 始终保留，不自动删除。之后 `state verify`、`state backup` 和 `state restore` 都操作外置运行态，但备份清单继续使用兼容的 `.wildarrange/...` 逻辑路径。
+
+计划导入时，治理仓库 `verification/registry.json` 的 `planDefaults.verify_commands`、`standards_commands` 和 `review_commands` 只会叠加，项目计划不能删减；registry 摘要与项目/治理 revision 会写入唯一 task ledger。若治理仓库是 Git 仓库且存在未提交改动，计划导入会拒绝，防止功能 Agent 偷改门槛后立即自证。
+
+当前版本的外置 CLI、规则注入、迁移和门禁绑定已可用；Codex/Cursor/Kimi 的零项目文件生命周期 Adapter 尚未实现，外置模式下 `adapter install` 会明确拒绝，`doctor` 也不能把治理报告为已激活。不要用项目内 shim 冒充零污染接入。
+
 ### 临时体验
 
 只想在当前项目快速试用时，可直接运行：
@@ -56,7 +92,7 @@ npx @alivewavelab/wildarrange@latest doctor
 
 这种方式每次通过 `npx` 解析版本，适合体验，不适合作为团队项目的固定依赖。
 
-### 项目内正式安装（推荐）
+### 项目内正式安装（legacy 兼容模式）
 
 长期使用时，把 WildArrange 固定为项目的 `devDependency`：
 

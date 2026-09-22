@@ -8,6 +8,9 @@
 | 场景                | 命令                                                               |
 | ----------------- | ---------------------------------------------------------------- |
 | 初始化运行时            | `node ./bin/wildarrange.mjs init`                                      |
+| 创建独立治理仓库骨架    | `node ./bin/wildarrange.mjs project init-governance --governance-root <path> --repository <git-url>`（只创建缺失文件，不操作 Git） |
+| 连接独立治理仓库        | `node ./bin/wildarrange.mjs project attach --governance-root <path>` |
+| 查看三根连接            | `node ./bin/wildarrange.mjs project show` |
 | 生成默认配置            | `node ./bin/wildarrange.mjs config init --root`（`--armed` 直接武装质量门） |
 | 登记当前设备            | `node ./bin/wildarrange.mjs device register --name macbook`             |
 | 查看 Git 协调状态       | `node ./bin/wildarrange.mjs coordination status`                        |
@@ -49,6 +52,7 @@
 | 分区/影响面测试 | `node ./bin/wildarrange.mjs test --zone infra` |
 | 备份运行态关键文件      | `node ./bin/wildarrange.mjs state backup --reason before-risky-agent`   |
 | 迁移旧运行态           | `node ./bin/wildarrange.mjs state migrate`（自动先备份；旧 completed 无当前 proof 时回到待决策） |
+| 外置旧运行态           | `node ./bin/wildarrange.mjs state migrate --to external --governance-root <path> [--dry-run]`（源目录保留，registry 最后切换） |
 | 归档并删除旧任务        | `node ./bin/wildarrange.mjs task archive --task T001 [--plan <planId>] --delete --reason "obsolete"` |
 | 校验运行态关键文件      | `node ./bin/wildarrange.mjs state verify`                               |
 | 列出运行态备份        | `node ./bin/wildarrange.mjs state list`                                 |

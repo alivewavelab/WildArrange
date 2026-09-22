@@ -44,6 +44,42 @@ Role prompts live under `packs/wildarrange-linear/agents/`, and Skills live unde
 - The public npm package can be installed without signing in. Only maintainers need npm authentication for `npm publish`.
 - Git is required when using Git worktree isolation.
 
+### Separate Governance Repository (Zero Generated Project Files)
+
+Use three-root mode when the customer repository must remain clean: the customer repository owns product code and product tests, a separate governance repository owns policy and the verification registry, and local state owns the ledger, locks, reports, backups, and installed Prompt Pack. WildArrange does not generate `AGENTS.md`, `.wildarrange/`, or adapter files in the customer project.
+
+Run this from the customer project root:
+
+```bash
+npx wildarrange project init-governance \
+  --governance-root ../my-project-governance \
+  --repository https://github.com/example/my-project.git \
+  --default-branch main
+```
+
+This creates only missing files under the governance root: `wildarrange-governance.json`, `policy/AGENTS.md`, `verification/registry.json`, and empty responsibility directories. It never overwrites existing files and does not run `git init`, commit, or push. Complete the policy, initialize and commit the governance repository, then connect it from the customer project:
+
+```bash
+npx wildarrange project attach --governance-root ../my-project-governance
+npx wildarrange init
+npx wildarrange project show
+```
+
+If the customer project already contains `.wildarrange/`, direct attachment is rejected. Preview and then migrate it:
+
+```bash
+npx wildarrange state migrate --to external \
+  --governance-root ../my-project-governance --dry-run
+npx wildarrange state migrate --to external \
+  --governance-root ../my-project-governance
+```
+
+Migration verifies the ledger, copies the tree, compares every digest, and writes the external registry last. The old `.wildarrange/` directory is preserved. `state verify`, `state backup`, and `state restore` then operate on external state while manifests keep compatible `.wildarrange/...` logical paths.
+
+On plan import, `planDefaults.verify_commands`, `standards_commands`, and `review_commands` from the governance repository's `verification/registry.json` are additive and cannot be removed by the project plan. Its digest and both project/governance revisions are stored in the single task ledger. If the governance root is a Git repository with uncommitted changes, plan import fails closed.
+
+External CLI operation, rule injection, migration, and gate binding are available now. Zero-project-file lifecycle adapters for Codex, Cursor, and Kimi are not implemented yet: `adapter install` rejects external mode, and `doctor` must not report host governance as active. Do not use a project shim and call it zero-pollution integration.
+
 ### Try It Without Pinning
 
 For a quick trial in the current project:
@@ -56,7 +92,7 @@ npx @alivewavelab/wildarrange@latest doctor
 
 This resolves the package through `npx` on each invocation. It is useful for evaluation, but it is not the recommended setup for a long-lived team project.
 
-### Project-Local Installation (Recommended)
+### Project-Local Installation (Legacy Compatibility Mode)
 
 Pin WildArrange as a project `devDependency`:
 

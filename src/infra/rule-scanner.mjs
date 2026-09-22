@@ -22,6 +22,7 @@ import {
 import { appendLedger } from "./ledger.mjs";
 import { normalizeRelativePath, pathMatchesPattern } from "./path-match.mjs";
 import { uniqueStrings } from "./text-utils.mjs";
+import { getBoundWorkspaceContext } from "./workspace-context.mjs";
 
 /** 项目根扫描的单文件规则清单（与 ruleInjection.projectSingleFiles 对齐）。 */
 const PROJECT_RULE_FILES = [
@@ -48,6 +49,10 @@ export async function scanProjectRules(rootDir, options = {}) {
   const ruleConfig = config.ruleInjection || DEFAULT_WILDARRANGE_CONFIG.ruleInjection;
   const targetPaths = normalizeRuleTargetPaths(options.targetPaths || []);
   const allRules = [];
+  const workspace = getBoundWorkspaceContext(controlRoot);
+  if (workspace?.mode === "external" && workspace.governanceContract?.policyPath) {
+    allRules.push(...await readGovernancePolicyRules(workspace.governanceRoot, workspace.governanceContract.policyPath));
+  }
   for (const filePath of ruleConfig.projectSingleFiles || PROJECT_RULE_FILES) {
     const absolutePath = path.join(rootDir, filePath);
     if (existsSync(absolutePath)) {
@@ -68,6 +73,8 @@ export async function scanProjectRules(rootDir, options = {}) {
     configPath: sourcePath,
     targetPaths,
     total: allRules.length,
+    governanceRoot: workspace?.mode === "external" ? workspace.governanceRoot : null,
+    governancePolicyRules: allRules.filter((rule) => rule.source === "governance_policy").length,
     matched: budgetedRules.length,
     rules: budgetedRules,
   };
@@ -79,6 +86,15 @@ export async function scanProjectRules(rootDir, options = {}) {
   await writeFile(mdPath, renderRulesMarkdown(result), "utf8");
   await appendLedger(controlRoot, { type: "project_rules_scanned", total: result.total, matched: result.matched, targetPathCount: targetPaths.length });
   return result;
+}
+
+/** 读取治理仓库 policy 根下全部 Markdown；路径加 governance/ 前缀避免与项目规则混淆。 */
+async function readGovernancePolicyRules(governanceRoot, policyRoot) {
+  const rules = await readRuleDir(governanceRoot, policyRoot, "governance_policy");
+  return rules.map((rule) => ({
+    ...rule,
+    path: normalizeRelativePath(path.join("governance", rule.path)),
+  }));
 }
 
 /**
@@ -277,4 +293,3 @@ function truncateForSummary(value, limit = 500) {
   if (value.length <= limit) return value;
   return `${value.slice(0, limit - 15)}...[truncated]`;
 }
-

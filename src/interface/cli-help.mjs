@@ -29,11 +29,14 @@ export const CORE_COMMANDS = ["init", "plan", "run", "status", "decisions", "doc
  * 新命令须先登记再于 bin/wildarrange.mjs 实现；governance audit 以 --help --all 校验真实性。
  */
 export const COMMAND_REGISTRY = [
+  { usage: "project init-governance --governance-root <path> --repository <git-url> [--default-branch main]", desc: "在项目外创建不覆盖已有文件的治理仓库骨架；不自动操作 Git" },
+  { usage: "project attach --governance-root <path> [--project-root <path>] [--runtime-root <path>]", desc: "把客户项目连接到独立治理仓库；映射写入项目外部状态目录" },
+  { usage: "project show [--project-root <path>]", desc: "查看项目、治理仓库和运行态三根连接" },
   { usage: "review configure --from <setup.json> [--apply]", desc: "预览项目审查与执行准备配置；明确确认后 --apply，只能更新治理配置" },
   { usage: "review checklist --task <taskId>", desc: "解析本任务项目审查清单和必需依据，不启动执行器" },
   { usage: "readiness --task <taskId>", desc: "检查已批准任务必需的执行器、Skill、规范与握手，不启动业务 Worker" },
   { usage: "adoption inventory", desc: "只读扫描旧仓库文件与验证资产，供接管 Skill 建立来源映射" },
-  { usage: "init [--sample] [--project-docs] [--architecture]", desc: "初始化运行时；显式补建项目文档并提示设计审查 Skill，可选未批准架构模板", core: true },
+  { usage: "init [--sample] [--project-docs] [--architecture]", desc: "初始化运行时；外置治理项目不写客户仓库，legacy 模式可显式补建项目文档", core: true },
   { usage: "plan --from <plan.json>", desc: "导入含 responsibilityChanges 的计划；等待人工确认职责与事实归属", core: true },
   { usage: "plan approve [--plan <planId>]", desc: "确认待执行计划（语义生成计划或已开启 planApproval）" },
   { usage: "run", desc: "跑下一个任务（worker→verifier→scope→review→checkpoint）", core: true },
@@ -116,6 +119,7 @@ export const COMMAND_REGISTRY = [
   { usage: "docs commands [--write]", desc: "从命令注册表生成命令文档（单一事实源）" },
   { usage: "state backup [--reason \"...\"]", desc: "备份运行态关键文件" },
   { usage: "state migrate", desc: "备份后迁移运行态任务总账与旧投影；不改根 wildarrange.config.json" },
+  { usage: "state migrate --to external --governance-root <path> [--runtime-root <path>] [--dry-run]", desc: "校验并复制旧运行态，摘要一致后才连接独立治理仓库；保留项目内源目录" },
   { usage: "state verify", desc: "校验运行态关键文件" },
   { usage: "state list", desc: "列出运行态备份" },
   { usage: "state restore --backup <backupId>", desc: "恢复运行态备份" },

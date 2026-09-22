@@ -137,6 +137,13 @@ import {
   writeRuntimeStateBackup,
 } from "../src/infra/security.mjs";
 import { initProjectDocuments } from "../src/interface/project-init.mjs";
+import {
+  attachProjectConnection,
+  initializeProjectGovernance,
+  migrateProjectConnection,
+  projectConnectionView,
+  showProjectConnection,
+} from "../src/interface/project-connection.mjs";
 
 // --- CLI 参数解析 ---
 
@@ -212,10 +219,10 @@ function printHelp({ all = false } = {}) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const command = args._[0];
-  // §3.2：--control-root 指定治理控制根；缺省 process.cwd()（Hook/CI 可指向非 CWD 项目）。
-  const rootDir = strArg(args, "control-root")
-    ? path.resolve(String(args["control-root"]))
-    : process.cwd();
+  const legacyControlRoot = strArg(args, "control-root");
+  const explicitProjectRoot = strArg(args, "project-root");
+  if (legacyControlRoot && explicitProjectRoot) throw new Error("--control-root cannot be combined with --project-root");
+  const requestedProjectRoot = path.resolve(explicitProjectRoot || legacyControlRoot || process.cwd());
 
   // --- 帮助与文档 ---
   // §3.4：help 走人类可读 stdout，不输出 JSON 契约；无 command 时同样视为请求帮助。
@@ -228,19 +235,69 @@ async function main() {
   if (command === "docs" && args._[1] === "commands") {
     const markdown = renderCommandsMarkdown();
     if (args.write === true) {
-      const target = path.join(rootDir, "doc", "generated", "commands.md");
+      const target = path.join(requestedProjectRoot, "doc", "generated", "commands.md");
       await mkdir(path.dirname(target), { recursive: true });
       await writeFile(target, markdown, "utf8");
-      console.log(JSON.stringify({ ok: true, path: path.relative(rootDir, target), commands: COMMAND_REGISTRY.length }));
+      console.log(JSON.stringify({ ok: true, path: path.relative(requestedProjectRoot, target), commands: COMMAND_REGISTRY.length }));
     } else {
       process.stdout.write(markdown);
     }
     return;
   }
 
+  // --- 项目与独立治理仓库连接 ---
+  if (command === "project") {
+    const subcommand = args._[1];
+    if (subcommand === "init-governance") {
+      const governanceRoot = strArg(args, "governance-root");
+      const repository = strArg(args, "repository");
+      if (!governanceRoot || !repository) throw new Error("wildarrange project init-governance requires --governance-root <path> --repository <git-url>");
+      console.log(JSON.stringify(await initializeProjectGovernance(requestedProjectRoot, {
+        governanceRoot: path.resolve(governanceRoot),
+        repository,
+        defaultBranch: strArg(args, "default-branch"),
+      }), null, 2));
+      return;
+    }
+    if (subcommand === "attach") {
+      const governanceRoot = strArg(args, "governance-root");
+      if (!governanceRoot) throw new Error("wildarrange project attach requires --governance-root <path>");
+      const context = await attachProjectConnection(requestedProjectRoot, {
+        governanceRoot: path.resolve(governanceRoot),
+        runtimeRoot: strArg(args, "runtime-root") ? path.resolve(String(args["runtime-root"])) : undefined,
+      });
+      console.log(JSON.stringify(projectConnectionView(context), null, 2));
+      return;
+    }
+    if (subcommand === "show") {
+      const context = await showProjectConnection(requestedProjectRoot, { legacy: Boolean(legacyControlRoot) });
+      console.log(JSON.stringify(projectConnectionView(context), null, 2));
+      return;
+    }
+    throw new Error("wildarrange project requires init-governance, attach, or show");
+  }
+
+  if (command === "state" && args._[1] === "migrate" && strArg(args, "to") === "external") {
+    const governanceRoot = strArg(args, "governance-root");
+    if (!governanceRoot) throw new Error("external state migration requires --governance-root <path>");
+    const result = await migrateProjectConnection(requestedProjectRoot, {
+      governanceRoot: path.resolve(governanceRoot),
+      runtimeRoot: strArg(args, "runtime-root") ? path.resolve(String(args["runtime-root"])) : undefined,
+      dryRun: args["dry-run"] === true,
+    });
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  const workspace = await showProjectConnection(requestedProjectRoot, { legacy: Boolean(legacyControlRoot) });
+  const rootDir = workspace.projectRoot;
+
   // --- 初始化与配置 ---
   // §3.4：init 创建 .wildarrange 运行时；--sample/--project-docs 为可选附加步骤，不阻断 init 本身。
   if (command === "init") {
+    if (workspace.mode === "external" && args["project-docs"] === true) {
+      throw new Error("external governance mode does not write project governance documents; store WildArrange policy in the governance repository");
+    }
     await initRuntime(rootDir);
     // §3.4：--project-docs 为 opt-in；未指定时不生成架构/规范文档，只初始化 .wildarrange。
     const projectDocuments = args["project-docs"] === true
@@ -252,7 +309,9 @@ async function main() {
     }
     console.log(JSON.stringify({
       ok: true,
-      runtime: path.join(rootDir, ".wildarrange"),
+      runtime: workspace.runtimeRoot,
+      workspaceMode: workspace.mode,
+      governanceRoot: workspace.governanceRoot,
       samplePlan: samplePath,
       projectDocuments,
     }, null, 2));
@@ -263,6 +322,9 @@ async function main() {
   if (command === "config") {
     const subcommand = args._[1];
     if (subcommand === "init") {
+      if (workspace.mode === "external" && args.root === true) {
+        throw new Error("external governance mode does not write wildarrange.config.json into the project repository");
+      }
       await initRuntime(rootDir);
       console.log(JSON.stringify(await writeDefaultWildArrangeConfig(rootDir, {
         root: Boolean(args.root),
@@ -296,6 +358,9 @@ async function main() {
   if (command === "adapter") {
     const subcommand = args._[1];
     if (subcommand === "install") {
+      if (workspace.mode === "external") {
+        throw new Error("project-local adapter installation is disabled in external governance mode; external host activation is required");
+      }
       console.log(JSON.stringify(await installAdapter(rootDir, {
         target: strArg(args, "target") || "all",
         mode: strArg(args, "mode") || "local",

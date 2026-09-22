@@ -1,0 +1,480 @@
+// =============================================================================
+// 文件名称：workspace-context.mjs
+// 所属模块：infra
+// 作用说明：
+//   解析客户项目根、独立治理仓库根与本机运行态根；维护外部项目连接表。
+//
+// 【运行原理速读】
+//   project identity → external registry → validated three-root context
+//   → bindWildArrangeRuntimeRoot。未连接项目保持 legacy 单根兼容。
+// =============================================================================
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { cp, lstat, mkdir, readFile, readdir, readlink, realpath, rename, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { runCommandFile } from "./command-runner.mjs";
+import { verifyLedger } from "./ledger.mjs";
+import { buildRegistryFromCards, digestCanonical } from "./verification-registry.mjs";
+import {
+  bindWildArrangeRuntimeRoot,
+  readJson,
+  writeJsonAtomic,
+} from "./runtime-store.mjs";
+import { writeFile } from "node:fs/promises";
+
+export const WORKSPACE_REGISTRY_VERSION = 1;
+export const GOVERNANCE_CONTRACT_FILE = "wildarrange-governance.json";
+const BOUND_CONTEXTS = new Map();
+
+/** 在独立目录创建最小治理仓库骨架；只创建缺失文件，不初始化或操作 Git。 */
+export async function initializeGovernanceRepository(projectRoot, options = {}) {
+  const project = await canonicalExistingDirectory(projectRoot, "project root");
+  const governanceRoot = path.resolve(requiredText(options.governanceRoot, "governance root"));
+  assertSeparateRoot(project, governanceRoot, "governance root");
+  const repository = requiredText(options.repository, "project repository");
+  await mkdir(path.join(governanceRoot, "policy"), { recursive: true });
+  await mkdir(path.join(governanceRoot, "verification"), { recursive: true });
+  for (const directory of ["tasks", "acceptance", "decisions"]) {
+    await mkdir(path.join(governanceRoot, directory), { recursive: true });
+  }
+  const targets = [
+    {
+      path: path.join(governanceRoot, GOVERNANCE_CONTRACT_FILE),
+      value: `${JSON.stringify({
+        schemaVersion: 1,
+        project: { repository, ...(options.defaultBranch ? { defaultBranch: options.defaultBranch } : {}) },
+        policyRoot: "policy",
+        verificationRegistry: "verification/registry.json",
+      }, null, 2)}\n`,
+    },
+    {
+      path: path.join(governanceRoot, "policy", "AGENTS.md"),
+      value: "# Project governance policy\n\n> Replace the placeholders below, review them with a human, then commit this governance repository before importing project plans.\n\n## Quality policy\n\n- [待确认] Project-specific non-negotiable quality rules.\n\n## Risk boundaries\n\n- [待确认] Risks that require additional verification or human approval.\n",
+    },
+    {
+      path: path.join(governanceRoot, "verification", "registry.json"),
+      value: `${JSON.stringify(buildRegistryFromCards([]), null, 2)}\n`,
+    },
+  ];
+  const created = [];
+  const preserved = [];
+  for (const target of targets) {
+    try {
+      await writeFile(target.path, target.value, { encoding: "utf8", flag: "wx" });
+      created.push(path.relative(governanceRoot, target.path).split(path.sep).join("/"));
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      preserved.push(path.relative(governanceRoot, target.path).split(path.sep).join("/"));
+    }
+  }
+  return {
+    kind: "governance_repository_initialized",
+    governanceRoot,
+    created,
+    preserved,
+    gitInitialized: false,
+    attached: false,
+  };
+}
+
+/** 返回平台默认的 WildArrange 本机状态目录。 */
+export function defaultWildArrangeStateHome(env = process.env, platform = process.platform) {
+  if (typeof env.WILDARRANGE_STATE_HOME === "string" && env.WILDARRANGE_STATE_HOME.trim()) {
+    return path.resolve(env.WILDARRANGE_STATE_HOME);
+  }
+  if (platform === "win32") {
+    const localAppData = env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+    return path.join(localAppData, "WildArrange");
+  }
+  if (platform === "darwin") return path.join(os.homedir(), "Library", "Application Support", "WildArrange");
+  return path.join(env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state"), "wildarrange");
+}
+
+/** 读取并校验治理仓库合同。 */
+export async function loadGovernanceContract(governanceRoot) {
+  const root = await canonicalExistingDirectory(governanceRoot, "governance root");
+  const contractPath = path.join(root, GOVERNANCE_CONTRACT_FILE);
+  const contract = await readJson(contractPath, null);
+  if (!contract) throw new Error(`governance contract is missing: ${contractPath}`);
+  if (contract.schemaVersion !== 1) throw new Error("governance contract schemaVersion must be 1");
+  if (!contract.project || typeof contract.project.repository !== "string" || !contract.project.repository.trim()) {
+    throw new Error("governance contract project.repository is required");
+  }
+  const policyRoot = assertSafeRelativePath(contract.policyRoot || "policy", "policyRoot");
+  const verificationRegistry = assertSafeRelativePath(contract.verificationRegistry || "verification/registry.json", "verificationRegistry");
+  const policyPath = await canonicalExistingDirectory(path.resolve(root, policyRoot), "governance policy root");
+  assertPathInside(root, policyPath, "policyRoot");
+  assertPathInside(root, path.resolve(root, verificationRegistry), "verificationRegistry");
+  return {
+    path: contractPath,
+    root,
+    contract: {
+      ...contract,
+      policyRoot,
+      verificationRegistry,
+      policyPath,
+    },
+  };
+}
+
+/** 将客户项目显式连接到独立治理仓库，并把映射写到项目外部 registry。 */
+export async function attachGovernanceRepository(projectRoot, options = {}) {
+  const candidate = await prepareExternalConnection(projectRoot, options);
+  if (existsSync(path.join(candidate.project, ".wildarrange"))) {
+    throw new Error("legacy .wildarrange state exists; run `wildarrange state migrate --to external --governance-root <path>` so state is verified before attachment");
+  }
+  return commitExternalConnection(candidate);
+}
+
+/**
+ * 把 legacy 项目运行态事务式迁移到项目外部。源目录只读保留；目标摘要校验
+ * 通过后才写 registry，因此失败不会改变权威运行态。
+ */
+export async function migrateLegacyWorkspace(projectRoot, options = {}) {
+  const candidate = await prepareExternalConnection(projectRoot, options);
+  const sourceRoot = path.join(candidate.project, ".wildarrange");
+  const sourceStat = await lstat(sourceRoot).catch((error) => error?.code === "ENOENT" ? null : Promise.reject(error));
+  if (!sourceStat?.isDirectory() || sourceStat.isSymbolicLink()) {
+    throw new Error(`legacy runtime directory is missing or unsafe: ${sourceRoot}`);
+  }
+  if (!existsSync(path.join(sourceRoot, "work.json")) || !existsSync(path.join(sourceRoot, "ledger.jsonl"))) {
+    throw new Error("legacy runtime must contain work.json and ledger.jsonl before migration");
+  }
+
+  bindWildArrangeRuntimeRoot(candidate.project, sourceRoot);
+  const ledger = await verifyLedger(candidate.project);
+  if (!ledger.ok) throw new Error(`legacy ledger verification failed: ${JSON.stringify(ledger.failures)}`);
+  const work = JSON.parse(await readFile(path.join(sourceRoot, "work.json"), "utf8"));
+  if (!work || typeof work !== "object" || Array.isArray(work)) throw new Error("legacy work.json is invalid");
+  const sourceManifest = await collectTreeManifest(sourceRoot);
+  const plan = {
+    kind: "external_runtime_migration",
+    status: options.dryRun === true ? "planned" : "migrated",
+    dryRun: options.dryRun === true,
+    sourceRoot,
+    runtimeRoot: candidate.runtimeRoot,
+    governanceRoot: candidate.governance.root,
+    registryPath: candidate.registryPath,
+    files: sourceManifest.filter((entry) => entry.type === "file").length,
+    entries: sourceManifest.length,
+    sourcePreserved: true,
+  };
+  if (options.dryRun === true) return plan;
+  if (existsSync(candidate.runtimeRoot)) throw new Error(`external runtime target already exists: ${candidate.runtimeRoot}`);
+
+  const stagingRoot = `${candidate.runtimeRoot}.migration-${randomUUID()}`;
+  let committedRuntime = false;
+  try {
+    await mkdir(path.dirname(stagingRoot), { recursive: true });
+    await cp(sourceRoot, stagingRoot, { recursive: true, force: false, errorOnExist: true, verbatimSymlinks: true });
+    const sourceAfterCopy = await collectTreeManifest(sourceRoot);
+    const targetManifest = await collectTreeManifest(stagingRoot);
+    if (!sameManifest(sourceManifest, sourceAfterCopy)) throw new Error("legacy runtime changed while migration was copying; retry after writers stop");
+    if (!sameManifest(sourceManifest, targetManifest)) throw new Error("external runtime copy digest mismatch");
+    await rename(stagingRoot, candidate.runtimeRoot);
+    committedRuntime = true;
+    const context = await commitExternalConnection(candidate);
+    return { ...plan, context: workspaceContextView(context) };
+  } catch (error) {
+    await rm(stagingRoot, { recursive: true, force: true }).catch(() => undefined);
+    if (committedRuntime) await rm(candidate.runtimeRoot, { recursive: true, force: true }).catch(() => undefined);
+    bindWildArrangeRuntimeRoot(candidate.project, sourceRoot);
+    throw error;
+  }
+}
+
+/** 解析项目当前三根；没有外部连接时保持 legacy 单根模式。 */
+export async function resolveWorkspaceContext(projectRoot, options = {}) {
+  const project = await canonicalExistingDirectory(projectRoot, "project root");
+  const identity = await resolveProjectIdentity(project);
+  const stateHome = path.resolve(options.stateHome || defaultWildArrangeStateHome(options.env));
+  const registryPath = path.join(stateHome, "registry.json");
+
+  if (options.legacy === true) {
+    const runtimeRoot = path.join(project, ".wildarrange");
+    return bindWorkspaceContext(workspaceContext({
+      projectId: identity.projectId,
+      projectRoot: project,
+      projectIdentitySource: identity.source,
+      governanceId: null,
+      governanceRoot: null,
+      runtimeRoot,
+      contractPath: null,
+      attachedAt: null,
+    }, null, registryPath, "legacy"));
+  }
+
+  const registry = await readWorkspaceRegistry(registryPath);
+  const entry = registry.projects[identity.projectId];
+  if (!entry) {
+    const runtimeRoot = path.join(project, ".wildarrange");
+    return bindWorkspaceContext(workspaceContext({
+      projectId: identity.projectId,
+      projectRoot: project,
+      projectIdentitySource: identity.source,
+      governanceId: null,
+      governanceRoot: null,
+      runtimeRoot,
+      contractPath: null,
+      attachedAt: null,
+    }, null, registryPath, "legacy"));
+  }
+
+  const governance = await loadGovernanceContract(entry.governanceRoot);
+  assertSeparateRoot(project, governance.root, "governance root");
+  assertSeparateRoot(project, entry.runtimeRoot, "runtime root");
+  assertSeparateRoot(governance.root, entry.runtimeRoot, "runtime root");
+  // linked worktree 与主 checkout 共用 git common-dir，因此共享 projectId 与
+  // runtime；但本次命令的 projectRoot 必须保持当前 worktree，而非首次 attach 路径。
+  return bindWorkspaceContext(workspaceContext({ ...entry, projectRoot: project }, governance.contract, registryPath, "external"));
+}
+
+/** 绑定完整工作区上下文，供规则扫描与长寿命宿主读取。 */
+export function bindWorkspaceContext(context) {
+  const projectRoot = path.resolve(context.projectRoot);
+  bindWildArrangeRuntimeRoot(projectRoot, context.runtimeRoot);
+  BOUND_CONTEXTS.set(projectRoot, context);
+  return context;
+}
+
+/** 返回当前进程已绑定的工作区上下文。 */
+export function getBoundWorkspaceContext(projectRoot) {
+  return BOUND_CONTEXTS.get(path.resolve(projectRoot)) || null;
+}
+
+/** 清除完整上下文绑定；runtime-store 的路径绑定由其独立测试接口清理。 */
+export function clearWorkspaceContext(projectRoot) {
+  return BOUND_CONTEXTS.delete(path.resolve(projectRoot));
+}
+
+/** 使用 Git common-dir（否则项目 realpath）生成本机项目身份。 */
+export async function resolveProjectIdentity(projectRoot) {
+  const project = await canonicalExistingDirectory(projectRoot, "project root");
+  const result = await runCommandFile("git", ["-C", project, "rev-parse", "--git-common-dir"], project, 15_000);
+  if (result.exitCode === 0 && result.stdout.trim()) {
+    const candidate = path.isAbsolute(result.stdout.trim())
+      ? result.stdout.trim()
+      : path.resolve(project, result.stdout.trim());
+    const commonDir = await realpath(candidate).catch(() => path.resolve(candidate));
+    return { projectId: stableId("project", commonDir), source: "git_common_dir", identityPath: commonDir };
+  }
+  return { projectId: stableId("project", project), source: "project_realpath", identityPath: project };
+}
+
+/** registry 路径及其当前内容，供诊断与测试使用。 */
+export async function readWorkspaceRegistry(registryPath) {
+  const registry = await readJson(registryPath, null);
+  if (!registry) return { schemaVersion: WORKSPACE_REGISTRY_VERSION, projects: {} };
+  if (registry.schemaVersion !== WORKSPACE_REGISTRY_VERSION || !registry.projects || typeof registry.projects !== "object" || Array.isArray(registry.projects)) {
+    throw new Error("workspace registry is invalid");
+  }
+  return registry;
+}
+
+/**
+ * 读取外置治理仓库的验证注册表。连接后的计划导入必须使用这里返回的
+ * planDefaults，并把 registry digest 与双仓 revision 固化为任务证据。
+ */
+export async function loadGovernanceVerificationDefaults(projectRoot) {
+  const context = getBoundWorkspaceContext(projectRoot);
+  if (!context || context.mode !== "external") return null;
+  const registryPath = path.resolve(context.governanceRoot, context.governanceContract.verificationRegistry);
+  assertPathInside(context.governanceRoot, registryPath, "verificationRegistry");
+  const registry = await readJson(registryPath, null);
+  if (!registry) throw new Error(`external governance verification registry is missing: ${registryPath}`);
+  if (registry.kind !== "verification_registry" || registry.schemaVersion !== 1) {
+    throw new Error("external governance verification registry must be kind=verification_registry schemaVersion=1");
+  }
+  const { digest, ...unsigned } = registry;
+  const actualDigest = digestCanonical(unsigned);
+  if (typeof digest !== "string" || digest !== actualDigest) {
+    throw new Error("external governance verification registry digest mismatch");
+  }
+  const planDefaults = registry.planDefaults || {};
+  for (const field of ["verify_commands", "standards_commands", "review_commands"]) {
+    if (!Array.isArray(planDefaults[field]) || planDefaults[field].some((value) => typeof value !== "string" || !value.trim())) {
+      throw new Error(`external governance verification registry ${field} must be an array of commands`);
+    }
+  }
+  const [projectRevision, governanceRevision] = await Promise.all([
+    inspectGitRevision(context.projectRoot),
+    inspectGitRevision(context.governanceRoot),
+  ]);
+  if (governanceRevision.available && governanceRevision.clean !== true) {
+    throw new Error("external governance repository has uncommitted changes; commit or revert them before importing a project plan");
+  }
+  return {
+    registryPath,
+    registryRelativePath: context.governanceContract.verificationRegistry,
+    registryDigest: digest,
+    planDefaults: {
+      verify_commands: [...planDefaults.verify_commands],
+      standards_commands: [...planDefaults.standards_commands],
+      review_commands: [...planDefaults.review_commands],
+    },
+    projectRevision,
+    governanceRevision,
+  };
+}
+
+async function prepareExternalConnection(projectRoot, options) {
+  const project = await canonicalExistingDirectory(projectRoot, "project root");
+  const governance = await loadGovernanceContract(requiredText(options.governanceRoot, "governance root"));
+  assertSeparateRoot(project, governance.root, "governance root");
+  const identity = await resolveProjectIdentity(project);
+  const stateHome = path.resolve(options.stateHome || defaultWildArrangeStateHome(options.env));
+  const runtimeRoot = path.resolve(options.runtimeRoot || path.join(stateHome, "projects", identity.projectId, "runtime"));
+  assertSeparateRoot(project, runtimeRoot, "runtime root");
+  assertSeparateRoot(governance.root, runtimeRoot, "runtime root");
+  return {
+    project,
+    governance,
+    identity,
+    stateHome,
+    runtimeRoot,
+    registryPath: path.join(stateHome, "registry.json"),
+  };
+}
+
+async function commitExternalConnection(candidate) {
+  const registry = await readWorkspaceRegistry(candidate.registryPath);
+  const entry = {
+    projectId: candidate.identity.projectId,
+    projectRoot: candidate.project,
+    projectIdentitySource: candidate.identity.source,
+    governanceId: stableId("governance", candidate.governance.root),
+    governanceRoot: candidate.governance.root,
+    runtimeRoot: candidate.runtimeRoot,
+    contractPath: candidate.governance.path,
+    attachedAt: new Date().toISOString(),
+  };
+  registry.projects[candidate.identity.projectId] = entry;
+  await mkdir(candidate.stateHome, { recursive: true });
+  await writeJsonAtomic(candidate.registryPath, registry);
+  return bindWorkspaceContext(workspaceContext(entry, candidate.governance.contract, candidate.registryPath, "external"));
+}
+
+async function collectTreeManifest(rootDir) {
+  const entries = [];
+  async function visit(currentDir, relativeDir = "") {
+    const names = await readdir(currentDir);
+    names.sort((left, right) => left.localeCompare(right));
+    for (const name of names) {
+      const absolute = path.join(currentDir, name);
+      const relative = path.posix.join(relativeDir.split(path.sep).join("/"), name);
+      const entryStat = await lstat(absolute);
+      if (entryStat.isSymbolicLink()) {
+        entries.push({ path: relative, type: "symlink", target: await readlink(absolute) });
+      } else if (entryStat.isDirectory()) {
+        entries.push({ path: relative, type: "directory" });
+        await visit(absolute, relative);
+      } else if (entryStat.isFile()) {
+        const content = await readFile(absolute);
+        entries.push({ path: relative, type: "file", bytes: entryStat.size, sha256: createHash("sha256").update(content).digest("hex") });
+      } else {
+        throw new Error(`unsupported legacy runtime entry: ${absolute}`);
+      }
+    }
+  }
+  await visit(rootDir);
+  return entries;
+}
+
+function sameManifest(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function workspaceContextView(context) {
+  return {
+    mode: context.mode,
+    projectId: context.projectId,
+    governanceId: context.governanceId,
+    projectRoot: context.projectRoot,
+    governanceRoot: context.governanceRoot,
+    runtimeRoot: context.runtimeRoot,
+    registryPath: context.registryPath,
+  };
+}
+
+async function inspectGitRevision(rootDir) {
+  const topLevel = await runCommandFile("git", ["-C", rootDir, "rev-parse", "--show-toplevel"], rootDir, 15_000);
+  if (topLevel.exitCode !== 0) return { available: false, sha: null, clean: null };
+  const [rootReal, topLevelReal] = await Promise.all([
+    realpath(rootDir).catch(() => path.resolve(rootDir)),
+    realpath(topLevel.stdout.trim()).catch(() => path.resolve(topLevel.stdout.trim())),
+  ]);
+  if (normalizeForComparison(rootReal) !== normalizeForComparison(topLevelReal)) {
+    return { available: false, sha: null, clean: null, reason: "root is not the Git toplevel" };
+  }
+  const head = await runCommandFile("git", ["-C", rootDir, "rev-parse", "HEAD"], rootDir, 15_000);
+  if (head.exitCode !== 0) return { available: false, sha: null, clean: null };
+  const status = await runCommandFile("git", ["-C", rootDir, "status", "--porcelain"], rootDir, 15_000);
+  return {
+    available: status.exitCode === 0,
+    sha: head.stdout.trim(),
+    clean: status.exitCode === 0 ? status.stdout.trim().length === 0 : null,
+  };
+}
+
+function workspaceContext(entry, contract, registryPath, mode) {
+  return {
+    mode,
+    attached: mode === "external",
+    projectRoot: entry.projectRoot,
+    governanceRoot: entry.governanceRoot,
+    runtimeRoot: path.resolve(entry.runtimeRoot),
+    projectId: entry.projectId,
+    governanceId: entry.governanceId,
+    projectIdentitySource: entry.projectIdentitySource,
+    governanceContract: contract,
+    governanceContractPath: entry.contractPath,
+    registryPath,
+    attachedAt: entry.attachedAt,
+  };
+}
+
+async function canonicalExistingDirectory(value, label) {
+  const absolute = path.resolve(requiredText(value, label));
+  if (!existsSync(absolute)) throw new Error(`${label} does not exist: ${absolute}`);
+  return realpath(absolute);
+}
+
+function assertSeparateRoot(containerRoot, candidateRoot, label) {
+  const container = path.resolve(containerRoot);
+  const candidate = path.resolve(candidateRoot);
+  if (pathIsInside(container, candidate) || pathIsInside(candidate, container)) {
+    throw new Error(`${label} must be separate from ${container}`);
+  }
+}
+
+function assertPathInside(rootDir, candidate, label) {
+  if (!pathIsInside(rootDir, candidate)) throw new Error(`${label} escapes the governance repository`);
+}
+
+function pathIsInside(rootDir, candidate) {
+  const root = normalizeForComparison(path.resolve(rootDir));
+  const target = normalizeForComparison(path.resolve(candidate));
+  return target === root || target.startsWith(`${root}${path.sep}`);
+}
+
+function normalizeForComparison(value) {
+  const resolved = path.resolve(value);
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+function assertSafeRelativePath(value, label) {
+  if (typeof value !== "string" || !value.trim() || path.isAbsolute(value)) throw new Error(`${label} must be a relative path`);
+  const normalized = path.normalize(value);
+  if (normalized === ".." || normalized.startsWith(`..${path.sep}`)) throw new Error(`${label} escapes the governance repository`);
+  return normalized.split(path.sep).join("/");
+}
+
+function requiredText(value, label) {
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${label} is required`);
+  return value.trim();
+}
+
+function stableId(kind, value) {
+  return `${kind}_${createHash("sha256").update(normalizeForComparison(value)).digest("hex").slice(0, 24)}`;
+}
