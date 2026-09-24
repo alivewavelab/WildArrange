@@ -148,7 +148,9 @@ async function writeCodexBundle(externalRoot, bridge, activationId, cliPrefix) {
   await mkdir(path.dirname(bridgePath), { recursive: true });
   await writeFile(bridgePath, bridge, "utf8");
   await writePluginSkills(pluginRoot, cliPrefix);
-  const marketplacePath = path.join(marketplaceRoot, "marketplace.json");
+  // Codex CLI discovers a local marketplace from the standard repository
+  // manifest location under the marketplace root.
+  const marketplacePath = path.join(marketplaceRoot, ".agents", "plugins", "marketplace.json");
   await writeJsonAtomic(marketplacePath, {
     name: "wildarrange-local",
     interface: { displayName: "WildArrange Local" },

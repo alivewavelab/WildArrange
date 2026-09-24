@@ -34,6 +34,10 @@ test("external adapters generate all host bundles without writing customer repos
     assert.equal(existsSync(path.join(projectRoot, ".wildarrange")), false);
     assert.equal(report.activationVerified, false);
     assert.equal(existsSync(report.targets.codex.marketplacePath), true);
+    assert.equal(
+      report.targets.codex.marketplacePath,
+      path.join(runtimeRoot, "adapters", "external", "codex-marketplace", ".agents", "plugins", "marketplace.json"),
+    );
     assert.equal(existsSync(report.targets.codex.bridgePath), true);
     assert.equal(existsSync(report.targets.cursor.bridgePath), true);
     assert.equal(existsSync(report.targets.kimi.manifestPath), true);
