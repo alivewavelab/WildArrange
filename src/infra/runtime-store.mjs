@@ -8,6 +8,7 @@
 //   resolveWildArrangePath → writeJsonAtomic rename → hashContent/createWorkId。
 // =============================================================================
 import { createHash, randomUUID } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -67,7 +68,7 @@ export function resolveWildArrangePath(rootDir, ...segments) {
  * 返回项目当前绑定的运行态根；无绑定时使用项目内 legacy 目录。
  */
 export function resolveWildArrangeRoot(rootDir) {
-  const projectRoot = path.resolve(rootDir);
+  const projectRoot = runtimeRootKey(rootDir);
   // Map lookup uses a canonical absolute key, but the legacy fallback must keep
   // the caller's relative/absolute shape. Several evidence contracts rely on
   // `resolveWildArrangePath(".", ...)` returning `.wildarrange/...`, not a cwd-
@@ -79,7 +80,7 @@ export function resolveWildArrangeRoot(rootDir) {
  * 为当前进程绑定外置运行态根。调用方必须先完成 realpath/边界验证。
  */
 export function bindWildArrangeRuntimeRoot(projectRoot, runtimeRoot) {
-  const project = path.resolve(projectRoot);
+  const project = runtimeRootKey(projectRoot);
   const runtime = path.resolve(runtimeRoot);
   RUNTIME_ROOTS.set(project, runtime);
   return runtime;
@@ -89,7 +90,17 @@ export function bindWildArrangeRuntimeRoot(projectRoot, runtimeRoot) {
  * 清除项目运行态根绑定，主要供隔离测试与长寿命宿主切换项目。
  */
 export function clearWildArrangeRuntimeRoot(projectRoot) {
-  return RUNTIME_ROOTS.delete(path.resolve(projectRoot));
+  return RUNTIME_ROOTS.delete(runtimeRootKey(projectRoot));
+}
+
+function runtimeRootKey(rootDir) {
+  const absolute = path.resolve(rootDir);
+  try {
+    const canonical = realpathSync.native(absolute);
+    return process.platform === "win32" ? canonical.toLowerCase() : canonical;
+  } catch {
+    return process.platform === "win32" ? absolute.toLowerCase() : absolute;
+  }
 }
 
 // §3.4 证据路径：planId 与 taskId 均允许连字符，必须用目录分段而非单 `-` 拼接，

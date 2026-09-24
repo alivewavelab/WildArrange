@@ -78,7 +78,26 @@ Migration verifies the ledger, copies the tree, compares every digest, and write
 
 On plan import, `planDefaults.verify_commands`, `standards_commands`, and `review_commands` from the governance repository's `verification/registry.json` are additive and cannot be removed by the project plan. Its digest and both project/governance revisions are stored in the single task ledger. If the governance root is a Git repository with uncommitted changes, plan import fails closed.
 
-External CLI operation, rule injection, migration, and gate binding are available now. Zero-project-file lifecycle adapters for Codex, Cursor, and Kimi are not implemented yet: `adapter install` rejects external mode, and `doctor` must not report host governance as active. Do not use a project shim and call it zero-pollution integration.
+In external mode, zero-project-file adapter bundles are generated under `runtimeRoot/adapters/external`:
+
+```bash
+npx wildarrange adapter install --target all --mode local
+npx wildarrange adapter activate --target cursor
+npx wildarrange doctor
+```
+
+Cursor activation backs up and merges the user-level `~/.cursor/hooks.json`, replacing only WildArrange-managed entries. Codex and Kimi still require explicit installation, review, and trust through the `nextActions` returned by `adapter install`. Generated files or configured user hooks are not activation proof: `doctor` reports `execution_observed` only after a real lifecycle receipt matches the current `activationId`. The bridge first identifies the working directory; unattached projects exit without creating state.
+
+Each plan task may declare `"repositoryTarget": "project"` (default) or `"governance"`. One task can write only one repository. Governance tasks use their own governance branch/worktree through the linear `wildarrange run` path, and cross-repository work must be split into separate tasks. Parallel admission and cross-device handoff still own only the project repository; they reject governance tasks instead of falling back to the customer checkout. After both deliveries exist, bind their full SHAs in an integration receipt that modifies neither repository:
+
+```bash
+npx wildarrange integration accept \
+  --project-sha <40-char-project-sha> \
+  --governance-sha <40-char-governance-sha> \
+  --reason "release candidate"
+```
+
+Task acceptance proof binds the imported two-repository baseline and that task's delivery SHA. `integration accept` also reloads and verifies the verification-registry digest from the specified governance commit.
 
 ### Try It Without Pinning
 

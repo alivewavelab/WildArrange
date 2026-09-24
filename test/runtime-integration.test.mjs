@@ -2208,6 +2208,13 @@ test("plan graph validation rejects invalid task dependencies", () => {
       { id: "T003", blockedBy: ["T001"] },
     ],
   }), /dependency cycle/);
+
+  assert.throws(() => validatePlanGraph({
+    tasks: [
+      { id: "T001", repositoryTarget: "governance", blockedBy: [] },
+      { id: "T002", repositoryTarget: "project", blockedBy: ["T001"] },
+    ],
+  }), /another repository.*integration accept/);
 });
 
 test("plan import rejects unsafe task Skill names before persisting", async () => {

@@ -39,6 +39,7 @@ import { isPossibleNoopTask, isTrivialCommand } from "../infra/task-predicates.m
 import { criteriaStatus } from "../infra/success-criteria.mjs";
 import { hasRealReviewLane } from "../infra/gate-arming.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
+import { inspectTaskRepositoryBinding } from "../infra/repository-binding.mjs";
 
 /**
  * 构建 acceptance proof、写入 JSON/Markdown 报告，并可选追加 ledger 事件。
@@ -60,7 +61,23 @@ export async function writeAcceptanceProof(rootDir, planId, task, evidence = {},
     // §3.4：审查依据或 digest 已变时不得复用旧 projectReview PASS。
     projectReviewContextValid = !current.steps.length || (current.pass && current.contextDigest === review?.projectReview?.contextDigest);
   } catch { /* Missing or changed review inputs cannot reuse an old pass. */ }
-  const proof = buildAcceptanceProof(planId, task, { ...evidence, projectReviewContextValid }, config);
+  let repositoryBinding = null;
+  try {
+    repositoryBinding = await inspectTaskRepositoryBinding(rootDir, task, evidence);
+  } catch (error) {
+    repositoryBinding = {
+      kind: "dual_repository_binding",
+      status: "fail",
+      pass: false,
+      reason: error?.message || String(error),
+      checks: {},
+    };
+  }
+  const proof = buildAcceptanceProof(planId, task, {
+    ...evidence,
+    projectReviewContextValid,
+    repositoryBinding,
+  }, config);
   const jsonPath = resolveTaskAcceptancePath(rootDir, planId, task.id, "json");
   const mdPath = resolveTaskAcceptancePath(rootDir, planId, task.id, "md");
   proof.reportJsonPath = path.relative(rootDir, jsonPath);
@@ -99,6 +116,12 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
   const executedReview = hasExecutedIndependentReview(reviewResult, config, task);
 
   const checks = [
+    ...(task.governance_binding ? [proofCheck("dual_repository_binding", evidence.repositoryBinding?.pass === true, {
+      evidence: evidence.repositoryBinding?.pass === true
+        ? `target=${evidence.repositoryBinding.repositoryTarget}; project=${evidence.repositoryBinding.projectSha || "pending"}; governance=${evidence.repositoryBinding.governanceSha || "pending"}`
+        : evidence.repositoryBinding?.reason || "missing dual-repository binding",
+      requiredFix: "恢复计划导入时的未修改仓库基线，并让交付 commit 与正确的项目/治理仓库绑定；跨仓结果另写 integration acceptance receipt。",
+    })] : []),
     proofCheck("project_review_bound", evidence.projectReviewContextValid !== false && hasAcceptedProjectReview(config || {}, task, scopeResult, reviewResult?.projectReview), {
       evidence: reviewResult?.projectReview ? `policy=${reviewResult.projectReview.policyDigest}` : "no applicable project review receipt",
       requiredFix: "重新执行当前项目必需审查清单，不得使用旧配置的通过结果。",
@@ -183,6 +206,7 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
       review: reviewResult ? { pass: reviewResult.pass, failedLanes: reviewLanes.filter((lane) => lane.status === "fail").map((lane) => lane.name) } : null,
       successCriteria: criteria,
       deliveryBaseline,
+      repositoryBinding: evidence.repositoryBinding || null,
     },
   };
 }

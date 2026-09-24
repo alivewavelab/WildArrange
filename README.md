@@ -78,7 +78,26 @@ npx wildarrange state migrate --to external \
 
 计划导入时，治理仓库 `verification/registry.json` 的 `planDefaults.verify_commands`、`standards_commands` 和 `review_commands` 只会叠加，项目计划不能删减；registry 摘要与项目/治理 revision 会写入唯一 task ledger。若治理仓库是 Git 仓库且存在未提交改动，计划导入会拒绝，防止功能 Agent 偷改门槛后立即自证。
 
-当前版本的外置 CLI、规则注入、迁移和门禁绑定已可用；Codex/Cursor/Kimi 的零项目文件生命周期 Adapter 尚未实现，外置模式下 `adapter install` 会明确拒绝，`doctor` 也不能把治理报告为已激活。不要用项目内 shim 冒充零污染接入。
+外置模式的零项目文件 Adapter 会生成到 `runtimeRoot/adapters/external`，不会写客户仓库：
+
+```bash
+npx wildarrange adapter install --target all --mode local
+npx wildarrange adapter activate --target cursor
+npx wildarrange doctor
+```
+
+Cursor 的 `activate` 会备份并合并用户级 `~/.cursor/hooks.json`，只替换 WildArrange 自己的条目。Codex 与 Kimi 仍要求按 `adapter install` 返回的 `nextActions` 在各自插件界面显式安装、审查和信任。文件已生成或用户配置已写入都不等于激活；只有与当前 `activationId` 匹配的真实生命周期回执出现后，`doctor` 才报告 `execution_observed`。Bridge 会先识别工作目录，未连接项目静默退出且不创建状态。
+
+每张计划任务可声明 `"repositoryTarget": "project"`（默认）或 `"governance"`。一个任务只能写一个仓库；治理任务从治理仓库自己的 branch/worktree 走线性 `wildarrange run` 交付，跨仓依赖必须拆成两张任务。当前并行 admission 与跨设备 handoff 仍只拥有项目仓库，遇到治理任务会明确拒绝，不会回落写客户仓库。两个交付都完成后，用完整 SHA 写不修改任一仓库的集成验收收据：
+
+```bash
+npx wildarrange integration accept \
+  --project-sha <40-char-project-sha> \
+  --governance-sha <40-char-governance-sha> \
+  --reason "release candidate"
+```
+
+任务 acceptance proof 会绑定计划导入时的双仓基线与本任务交付 SHA；`integration accept` 还会从指定治理 commit 重新校验 verification registry 摘要。
 
 ### 临时体验
 

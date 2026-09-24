@@ -24,6 +24,7 @@ import { captureWorkspaceSnapshot, prepareAgentWorktree } from "../infra/git-wor
 import { commitIsAncestor, inspectTaskWorktreeBaseline, taskBranchName } from "../infra/git-coordination.mjs";
 import { readIntegrationIntent } from "./integration.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
+import { resolveTaskRepositoryRoot } from "../infra/workspace-context.mjs";
 
 /**
  * 确保线性任务具备可用的 Git 交付 worktree（创建或校验复用）。
@@ -54,9 +55,10 @@ export async function ensureLinearDeliveryWorkspace(rootDir, planId, task, tasks
     return task.delivery_workspace;
   }
 
-  const baseline = await captureWorkspaceSnapshot(rootDir, { label: `linear-delivery-${planId}-${task.id}` });
+  const repositoryRoot = resolveTaskRepositoryRoot(rootDir, task);
+  const baseline = await captureWorkspaceSnapshot(repositoryRoot, { label: `linear-delivery-${planId}-${task.id}` });
   if (baseline.available !== true) {
-    const hasGitMarker = await lstat(path.join(rootDir, ".git")).then(() => true).catch((error) => {
+    const hasGitMarker = await lstat(path.join(repositoryRoot, ".git")).then(() => true).catch((error) => {
       if (error?.code === "ENOENT") return false;
       throw error;
     });
@@ -65,10 +67,10 @@ export async function ensureLinearDeliveryWorkspace(rootDir, planId, task, tasks
   }
   if (!baseline.headCommit) throw new Error("cannot establish linear Git delivery baseline: Git repository has no initial commit");
 
-  const dependencySha = await resolveDependencyDeliverySha(rootDir, task, tasks);
+  const dependencySha = await resolveDependencyDeliverySha(repositoryRoot, task, tasks);
   const remoteHeadSha = task.coordination?.remoteHeadSha || null;
   if (task.coordination?.localGit !== true && remoteHeadSha && dependencySha
-    && !(await commitIsAncestor(rootDir, dependencySha, remoteHeadSha))) {
+    && !(await commitIsAncestor(repositoryRoot, dependencySha, remoteHeadSha))) {
     throw new Error(`task ${task.id} task branch does not contain dependency delivery ${dependencySha}; create an integration task first`);
   }
   const startPoint = task.coordination?.localGit === true && dependencySha
@@ -92,7 +94,7 @@ export async function ensureLinearDeliveryWorkspace(rootDir, planId, task, tasks
   const safeTask = String(task.id).replace(/[^A-Za-z0-9._-]/g, "_");
   const runId = `linear-${safePlan}-${safeTask}`;
   const runDir = resolveWildArrangePath(rootDir, "linear-runs", safePlan, safeTask);
-  const prepared = await prepareAgentWorktree(rootDir, runDir, {
+  const prepared = await prepareAgentWorktree(repositoryRoot, runDir, {
     isolation: "git-worktree",
     branchName: branch,
     startPoint,
@@ -104,6 +106,8 @@ export async function ensureLinearDeliveryWorkspace(rootDir, planId, task, tasks
     workDir: path.resolve(prepared.workDir),
     branch,
     baseSha: startPoint,
+    repositoryTarget: task.repositoryTarget || "project",
+    repositoryRoot,
   };
   return task.delivery_workspace;
 }
@@ -119,6 +123,9 @@ async function resolveDependencyDeliverySha(rootDir, task, tasks) {
   const dependencyShas = [];
   for (const taskId of task.blockedBy || []) {
     const dependency = tasks.find((candidate) => candidate.id === taskId);
+    if (dependency && (dependency.repositoryTarget || "project") !== (task.repositoryTarget || "project")) {
+      throw new Error(`task ${task.id} depends on ${taskId} from another repository; complete both deliveries and bind them with an integration acceptance receipt`);
+    }
     const deliverySha = dependency?.delivery?.integrationSha || dependency?.delivery?.commitSha || dependency?.delivery?.actualSha || dependency?.delivery_workspace?.deliverySha;
     if (!deliverySha) throw new Error(`task ${task.id} dependency ${taskId} has no bound delivery commit`);
     if (!dependencyShas.includes(deliverySha)) dependencyShas.push(deliverySha);

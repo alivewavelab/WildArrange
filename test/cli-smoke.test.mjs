@@ -95,12 +95,18 @@ test("cli smoke: attached external governance keeps init out of the project repo
       assert.equal(doctor.code, 2, doctor.stderr);
       const doctorReport = JSON.parse(doctor.stdout);
       assert.equal(doctorReport.sections.adapters.mode, "external");
-      assert.ok(doctorReport.findings.some((finding) => finding.code === "external_adapter_not_activated"));
+      assert.ok(doctorReport.findings.some((finding) => finding.code === "external_adapter_not_prepared"));
 
       const adapter = await runCli(["adapter", "install", "--target", "codex"], dir, { env });
-      assert.equal(adapter.code, 1);
-      assert.match(adapter.stderr, /project-local adapter installation is disabled/);
+      assert.equal(adapter.code, 0, adapter.stderr);
+      const adapterReport = JSON.parse(adapter.stdout);
+      assert.equal(adapterReport.targets.codex.status, "bundle_generated");
+      assert.equal(existsSync(adapterReport.targets.codex.pluginRoot), true);
       assert.equal(existsSync(path.join(dir, ".codex")), false);
+
+      const waiting = await runCli(["doctor"], dir, { env });
+      assert.equal(waiting.code, 2, waiting.stderr);
+      assert.ok(JSON.parse(waiting.stdout).findings.some((finding) => finding.code === "external_adapter_activation_unverified"));
     } finally {
       await rm(governanceRoot, { recursive: true, force: true });
       await rm(stateHome, { recursive: true, force: true });

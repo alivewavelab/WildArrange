@@ -430,7 +430,7 @@ function adapterHookCommand({ mode, packageName, controlRoot }) {
  * @param {string} cliPrefix 已解析的 wildarrange CLI 调用前缀
  * @returns {Array<{ name: string, title: string, description: string, body: string }>}
  */
-function buildSlashCommands(cliPrefix) {
+export function buildSlashCommands(cliPrefix) {
   const fence = (lines) => ["```bash", ...lines, "```"].join("\n");
   return [
     ...[{ suffix: "setup", skill: "configure-project-review", title: "项目审查与执行配置" },

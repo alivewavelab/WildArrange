@@ -40,6 +40,7 @@ import { normalizeRelativePath } from "../infra/path-match.mjs";
 import { projectDecisionStats } from "./decisions.mjs";
 import { checkCompletionIntegrity } from "./doctor-completion.mjs";
 import { getBoundWorkspaceContext } from "../infra/workspace-context.mjs";
+import { loadExternalAdapterReport } from "./external-adapters.mjs";
 
 // 诊断与门控分离：每个检查独立 try/catch，单项崩溃只把自己的分项标红，
 // 其余分项照常输出；doctor 不再写 hash 链 ledger（诊断不该抢门控的锁）。
@@ -291,32 +292,58 @@ async function checkGateArming(rootDir, findings) {
  */
 async function checkAdapters(rootDir, findings) {
   const { config, sourcePath } = await loadWildArrangeConfig(rootDir);
-  if (!sourcePath) {
+  const workspace = getBoundWorkspaceContext(rootDir);
+  if (!sourcePath && workspace?.mode !== "external") {
     return { status: "skipped", reason: "no wildarrange.config.json; adapter checks only run for configured projects" };
   }
   const targets = [];
   const cursorEnabled = config.adapters?.cursor?.enabled === true;
   const codexEnabled = config.adapters?.codex?.enabled === true;
   const kimiEnabled = config.adapters?.kimi?.enabled === true;
-  const workspace = getBoundWorkspaceContext(rootDir);
   if (workspace?.mode === "external") {
+    const installReport = await loadExternalAdapterReport(rootDir);
     const enabledTargets = [
       ["cursor", cursorEnabled],
       ["codex", codexEnabled],
       ["kimi", kimiEnabled],
     ].filter(([, enabled]) => enabled).map(([target]) => target);
     for (const target of enabledTargets) {
-      addFinding(findings, "error", "adapters", `外置治理已连接，但 ${target} 的零项目文件生命周期 Adapter 尚未激活；不能把 CLI 可运行当成宿主治理已生效`, {
+      const prepared = installReport?.targets?.[target] || null;
+      const activation = prepared?.activationId
+        ? await inspectExternalHookExecution(rootDir, target, prepared.activationId)
+        : { status: "not_prepared", lastObservedAt: null, lastEvent: null, sessionId: null };
+      if (!prepared) {
+        addFinding(findings, "error", "adapters", `外置治理已连接，但 ${target} 的零项目文件 Adapter 包尚未生成`, {
+          target,
+          code: "external_adapter_not_prepared",
+          nextAction: `运行 wildarrange adapter install --target ${target}`,
+        });
+      } else if (activation.status !== "execution_observed") {
+        addFinding(findings, "error", "adapters", `${target} 外置 Adapter 已生成，但尚无宿主真实生命周期回执；不能认定治理已激活`, {
+          target,
+          code: "external_adapter_activation_unverified",
+          nextAction: (prepared.nextActions || []).join("；"),
+        });
+      }
+      targets.push({
         target,
-        code: "external_adapter_not_activated",
-        nextAction: "继续通过显式 WildArrange CLI 执行门禁；在用户级或外部 Adapter 完成真实生命周期验证前，不要生成项目内 shim",
+        configured: Boolean(prepared),
+        prepared: Boolean(prepared),
+        activation: activation.status,
+        activationId: prepared?.activationId || null,
+        lastObservedAt: activation.lastObservedAt,
+        lastEvent: activation.lastEvent,
+        sessionId: activation.sessionId,
       });
-      targets.push({ target, configured: false, activation: "external_not_activated" });
     }
     return {
-      status: enabledTargets.length > 0 ? "error" : "skipped",
+      status: enabledTargets.length === 0
+        ? "skipped"
+        : (targets.every((entry) => entry.activation === "execution_observed") ? "ok" : "error"),
       mode: "external",
-      reason: enabledTargets.length > 0 ? "zero-project-file host adapters are not activated" : "no host adapters enabled",
+      reason: enabledTargets.length > 0
+        ? (targets.every((entry) => entry.activation === "execution_observed") ? "all enabled external adapters observed" : "external adapter lifecycle receipt missing")
+        : "no host adapters enabled",
       targets,
       staleRules: [],
       legacyManagedRules: [],
@@ -424,6 +451,23 @@ async function inspectCodexHookExecution(rootDir, hooksPath) {
   };
 }
 
+/** 外置 Adapter 以生成报告 activationId 与宿主回执绑定，三宿主共用同一证据语义。 */
+async function inspectExternalHookExecution(rootDir, hostAdapter, activationId) {
+  const entries = await readVerifiedLedgerEntries(rootDir);
+  const latest = entries
+    .filter((entry) => entry.type === "hook_injection_run"
+      && entry.hostAdapter === hostAdapter
+      && entry.hookConfigDigest === activationId)
+    .at(-1);
+  if (!latest) return { status: "unverified", lastObservedAt: null, lastEvent: null, sessionId: null };
+  return {
+    status: "execution_observed",
+    lastObservedAt: latest.at,
+    lastEvent: latest.event || null,
+    sessionId: latest.sessionId || null,
+  };
+}
+
 // --- 决策日志健康 ---
 
 /** 检查 decisions.jsonl 坏行与孤儿标注（annotation 指向已截断决策）。 */
@@ -521,7 +565,7 @@ function renderDoctorMarkdown(report) {
 /** 格式化单个 adapter 目标的状态摘要（供 doctor.md Sections 行）。 */
 function renderAdapterTarget(target) {
   if (!target.configured) return `${target.target}:NOT CONFIGURED`;
-  if (target.target === "codex") return `${target.target}:configured/${target.activation === "execution_observed" ? "execution observed" : "ACTIVATION UNVERIFIED"}`;
+  if (target.activation) return `${target.target}:configured/${target.activation === "execution_observed" ? "execution observed" : "ACTIVATION UNVERIFIED"}`;
   return `${target.target}:configured`;
 }
 

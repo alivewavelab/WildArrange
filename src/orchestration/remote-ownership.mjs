@@ -21,6 +21,8 @@ import { createHash } from "node:crypto";
 import { appendLedger, appendLedgerOnce, readLedgerTailHash } from "../infra/ledger.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { nowIso } from "../infra/runtime-store.mjs";
+import { runCommandFile } from "../infra/command-runner.mjs";
+import { resolveTaskRepositoryRoot } from "../infra/workspace-context.mjs";
 import {
   createRemoteClaim,
   ensureDeviceIdentity,
@@ -72,6 +74,26 @@ export async function coordinateTaskClaim(rootDir, options) {
   const { config } = await loadWildArrangeConfig(rootDir);
   const coordination = config.gitCoordination;
   const forced = options.force === true;
+  if (options.task?.repositoryTarget === "governance") {
+    const governanceRoot = resolveTaskRepositoryRoot(rootDir, options.task);
+    const head = await runCommandFile("git", ["-C", governanceRoot, "rev-parse", "HEAD"], governanceRoot, 15_000);
+    if (head.exitCode !== 0 || !head.stdout.trim()) {
+      throw new Error("governance repository task requires a Git repository with an initial commit");
+    }
+    const device = await ensureDeviceIdentity(rootDir);
+    return {
+      status: "degraded",
+      mode: "local_governance",
+      reason: "governance repository uses its own local task branch and never reuses project remote ownership",
+      deviceId: device.deviceId,
+      deviceName: device.name,
+      localGit: true,
+      branch: taskBranchName(coordination, options.planId, options.task.id),
+      baseSha: head.stdout.trim(),
+      remoteHeadSha: head.stdout.trim(),
+      repositoryTarget: "governance",
+    };
+  }
   if (options.task?.coordination && ["claimed", "accepted"].includes(options.task.coordination.status)) {
     await assertCurrentTaskOwnership(rootDir, options.task);
     return { ...options.task.coordination, reused: true };
@@ -252,6 +274,8 @@ export function taskContract(task) {
     "skills",
     "route_decision",
     "maxAttempts",
+    "repositoryTarget",
+    "governance_binding",
   ];
   return Object.fromEntries(keys.filter((key) => task[key] !== undefined).map((key) => [key, task[key]]));
 }

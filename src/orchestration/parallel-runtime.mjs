@@ -85,6 +85,10 @@ export async function runParallelAgents(rootDir, options = {}) {
     await appendLedger(rootDir, { type: "parallel_agents_idle", reason: "no runnable tasks" });
     return { status: "idle", runId: null, tasks: [] };
   }
+  const governanceTasks = tasks.filter((task) => task.repositoryTarget === "governance");
+  if (governanceTasks.length > 0) {
+    throw new Error(`governance repository tasks currently require the linear \`wildarrange run\` delivery path; parallel admission is project-root only: ${governanceTasks.map((task) => task.id).join(", ")}`);
+  }
   tasks.forEach((task, index) => {
     assertCommandWorkerAgent(options.agent || task.owner || `Agent${index + 1}`);
   });

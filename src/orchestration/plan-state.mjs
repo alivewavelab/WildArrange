@@ -149,6 +149,7 @@ export function normalizeTask(task, index, defaults = {}, options = {}) {
   const createdAt = task.createdAt || nowIso();
   const explicitOwner = normalizeOptionalText(task.owner, `task ${id} owner`);
   const owner = normalizeTaskOwner(explicitOwner || DEFAULT_EXECUTOR_AGENT, id);
+  const repositoryTarget = normalizeRepositoryTarget(task.repositoryTarget ?? task.repository_target ?? task.repository ?? "project", id);
   const contractChanges = normalizeContractChanges(task.contractChanges ?? task.contract_changes, id, owner);
   const skills = uniqueStrings([
     ...(defaults.skills || []),
@@ -169,6 +170,7 @@ export function normalizeTask(task, index, defaults = {}, options = {}) {
     request,
     status,
     owner,
+    repositoryTarget,
     owner_source: explicitOwner ? "explicit" : "default",
     attempts: Number.isInteger(task.attempts) ? task.attempts : 0,
     maxAttempts: Number.isInteger(task.maxAttempts) ? task.maxAttempts : 3,
@@ -209,6 +211,14 @@ export function validateTaskReady(task) {
     throw new Error(`task ${task.id} acceptance_correction requires parentTaskRef`);
   }
   return task;
+}
+
+/** 单个可写任务只能选择项目仓或治理仓；跨仓修改必须拆成两个任务。 */
+export function normalizeRepositoryTarget(value, taskId = "task") {
+  if (!["project", "governance"].includes(value)) {
+    throw new Error(`task ${taskId} repositoryTarget must be project or governance; split cross-repository work into separate tasks`);
+  }
+  return value;
 }
 
 /** 规范化 workType 枚举值。 */
@@ -436,15 +446,19 @@ export function validatePlanGraph(plan) {
     }
   }
 
+  const tasksById = new Map(plan.tasks.map((task) => [task.id, task]));
   for (const task of plan.tasks) {
     for (const blocker of task.blockedBy) {
       if (!ids.has(blocker)) throw new Error(`task ${task.id} blockedBy references unknown task: ${blocker}`);
+      const dependency = tasksById.get(blocker);
+      if ((dependency.repositoryTarget || "project") !== (task.repositoryTarget || "project")) {
+        throw new Error(`task ${task.id} depends on ${blocker} from another repository; split cross-repository work into separate deliveries and bind their SHAs with integration accept`);
+      }
     }
   }
 
   const visiting = new Set();
   const visited = new Set();
-  const tasksById = new Map(plan.tasks.map((task) => [task.id, task]));
   const stack = [];
 
   function visit(taskId) {
@@ -480,6 +494,10 @@ async function importPlanUnlocked(rootDir, planPath, options) {
   const rawPlan = await readJson(planPath);
   const governanceBinding = await loadGovernanceVerificationDefaults(rootDir);
   const plan = normalizePlan(applyGovernanceDefaults(rawPlan, governanceBinding));
+  const governanceTasks = plan.tasks.filter((task) => task.repositoryTarget === "governance");
+  if (governanceTasks.length > 0 && !governanceBinding) {
+    throw new Error(`governance repository tasks require an attached external governance workspace: ${governanceTasks.map((task) => task.id).join(", ")}`);
+  }
   if (governanceBinding) {
     plan.governance_binding = {
       registryPath: governanceBinding.registryRelativePath,
@@ -488,6 +506,7 @@ async function importPlanUnlocked(rootDir, planPath, options) {
       governanceRevision: governanceBinding.governanceRevision,
       boundAt: nowIso(),
     };
+    plan.tasks = plan.tasks.map((task) => ({ ...task, governance_binding: plan.governance_binding }));
   }
   validateSemanticGeneratedPlan(plan);
   if (options.requireResponsibility === true || plan.generated_by === "host_semantic") {

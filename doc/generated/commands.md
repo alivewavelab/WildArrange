@@ -5,6 +5,7 @@
 | `wildarrange project init-governance --governance-root <path> --repository <git-url> [--default-branch main]` | 在项目外创建不覆盖已有文件的治理仓库骨架；不自动操作 Git |
 | `wildarrange project attach --governance-root <path> [--project-root <path>] [--runtime-root <path>]` | 把客户项目连接到独立治理仓库；映射写入项目外部状态目录 |
 | `wildarrange project show [--project-root <path>]` | 查看项目、治理仓库和运行态三根连接 |
+| `wildarrange integration accept --project-sha <40-char-sha> --governance-sha <40-char-sha> [--id <id>] [--reason "..."]` | 校验两个仓库的提交与治理注册表，并在项目外运行态写双 SHA 集成验收收据 |
 | `wildarrange review configure --from <setup.json> [--apply]` | 预览项目审查与执行准备配置；明确确认后 --apply，只能更新治理配置 |
 | `wildarrange review checklist --task <taskId>` | 解析本任务项目审查清单和必需依据，不启动执行器 |
 | `wildarrange readiness --task <taskId>` | 检查已批准任务必需的执行器、Skill、规范与握手，不启动业务 Worker |
@@ -28,11 +29,12 @@
 | `wildarrange handoff push --task T001` | 推送跨设备交接 |
 | `wildarrange handoff accept --task T001 [--plan P20260731]` | 接受跨设备交接 |
 | `wildarrange handoff takeover --plan P20260731 --task T001 --expected-device-id <uuid> --reason "owner offline"` | 显式接管（记录预期旧设备与理由） |
-| `wildarrange adapter install [--target codex|cursor|kimi|all] [--mode local|npx] [--package @alivewavelab/wildarrange]` | 安装宿主 adapter |
+| `wildarrange adapter install [--target codex|cursor|kimi|all] [--mode local|npx] [--package @alivewavelab/wildarrange]` | 安装宿主 adapter；外置治理模式只在 runtimeRoot 生成用户插件包 |
+| `wildarrange adapter activate --target cursor [--user-root <path>]` | 显式合并 Cursor 用户级 Hook；先备份且不写客户项目 |
 | `wildarrange adapter uninstall [--target codex|cursor|kimi|all]` | 卸载宿主 adapter |
 | `wildarrange adapter restore --backup <backupId>` | 恢复 adapter 备份 |
 | `wildarrange injection show --point before_review [--agent BaiZe] [--task T001] [--text "..."] [--stage plan]` | 查看注入点解析结果 |
-| `wildarrange hook run [--from hook.json] [--format text|json]` | 运行宿主生命周期 Hook |
+| `wildarrange hook run [--from hook.json] [--format text|json] [--external-only --adapter-digest <sha256>]` | 运行宿主生命周期 Hook；外置 Adapter 只处理已连接项目 |
 | `wildarrange workflow --from <plan.json>` | 从计划跑完整 workflow |
 | `wildarrange workflow --sample` | 跑样例 workflow |
 | `wildarrange parallel run [--max-agents 2] [--task T001,T002] [--agent ZhuRong] [--adapter codex|cursor] [--isolation run-dir|git-worktree] [--coordinate] [--command "..."]` | 跑并行子 Agent |

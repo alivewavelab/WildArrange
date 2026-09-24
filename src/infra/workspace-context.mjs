@@ -9,7 +9,7 @@
 //   → bindWildArrangeRuntimeRoot。未连接项目保持 legacy 单根兼容。
 // =============================================================================
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { cp, lstat, mkdir, readFile, readdir, readlink, realpath, rename, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -186,10 +186,12 @@ export async function migrateLegacyWorkspace(projectRoot, options = {}) {
 
 /** 解析项目当前三根；没有外部连接时保持 legacy 单根模式。 */
 export async function resolveWorkspaceContext(projectRoot, options = {}) {
-  const project = await canonicalExistingDirectory(projectRoot, "project root");
-  const identity = await resolveProjectIdentity(project);
+  const requestedRoot = await canonicalExistingDirectory(projectRoot, "project root");
   const stateHome = path.resolve(options.stateHome || defaultWildArrangeStateHome(options.env));
   const registryPath = path.join(stateHome, "registry.json");
+  const registry = await readWorkspaceRegistry(registryPath);
+  const project = await resolveWorkspaceProjectRoot(requestedRoot, registry);
+  const identity = await resolveProjectIdentity(project);
 
   if (options.legacy === true) {
     const runtimeRoot = path.join(project, ".wildarrange");
@@ -205,7 +207,6 @@ export async function resolveWorkspaceContext(projectRoot, options = {}) {
     }, null, registryPath, "legacy"));
   }
 
-  const registry = await readWorkspaceRegistry(registryPath);
   const entry = registry.projects[identity.projectId];
   if (!entry) {
     const runtimeRoot = path.join(project, ".wildarrange");
@@ -230,9 +231,30 @@ export async function resolveWorkspaceContext(projectRoot, options = {}) {
   return bindWorkspaceContext(workspaceContext({ ...entry, projectRoot: project }, governance.contract, registryPath, "external"));
 }
 
+/**
+ * Hook 可能从项目子目录启动。Git 项目统一回到当前 worktree 顶层；非 Git
+ * 项目只接受 registry 中已登记且包含当前目录的最长根，避免全局 Hook 猜项目。
+ */
+async function resolveWorkspaceProjectRoot(requestedRoot, registry) {
+  const registered = Object.values(registry.projects || {})
+    .map((entry) => entry?.projectRoot)
+    .filter((value) => typeof value === "string" && pathIsInside(value, requestedRoot))
+    .sort((left, right) => right.length - left.length)[0];
+  if (registered) return canonicalExistingDirectory(registered, "project root");
+
+  const topLevel = await runCommandFile("git", ["-C", requestedRoot, "rev-parse", "--show-toplevel"], requestedRoot, 15_000);
+  if (topLevel.exitCode === 0 && topLevel.stdout.trim()) {
+    const identity = await resolveProjectIdentity(requestedRoot);
+    if (registry.projects?.[identity.projectId]) {
+      return canonicalExistingDirectory(topLevel.stdout.trim(), "project root");
+    }
+  }
+  return requestedRoot;
+}
+
 /** 绑定完整工作区上下文，供规则扫描与长寿命宿主读取。 */
 export function bindWorkspaceContext(context) {
-  const projectRoot = path.resolve(context.projectRoot);
+  const projectRoot = workspaceRootKey(context.projectRoot);
   bindWildArrangeRuntimeRoot(projectRoot, context.runtimeRoot);
   BOUND_CONTEXTS.set(projectRoot, context);
   return context;
@@ -240,12 +262,32 @@ export function bindWorkspaceContext(context) {
 
 /** 返回当前进程已绑定的工作区上下文。 */
 export function getBoundWorkspaceContext(projectRoot) {
-  return BOUND_CONTEXTS.get(path.resolve(projectRoot)) || null;
+  return BOUND_CONTEXTS.get(workspaceRootKey(projectRoot)) || null;
+}
+
+/** 解析任务唯一可写仓库根；治理任务在未连接时 fail-closed。 */
+export function resolveTaskRepositoryRoot(projectRoot, task = {}) {
+  const context = getBoundWorkspaceContext(projectRoot);
+  const target = task.repositoryTarget || "project";
+  if (target === "project") return context?.projectRoot || path.resolve(projectRoot);
+  if (target === "governance" && context?.mode === "external" && context.governanceRoot) {
+    return context.governanceRoot;
+  }
+  throw new Error(`task ${task.id || "unknown"} targets governance repository but no external governance workspace is bound`);
 }
 
 /** 清除完整上下文绑定；runtime-store 的路径绑定由其独立测试接口清理。 */
 export function clearWorkspaceContext(projectRoot) {
-  return BOUND_CONTEXTS.delete(path.resolve(projectRoot));
+  return BOUND_CONTEXTS.delete(workspaceRootKey(projectRoot));
+}
+
+function workspaceRootKey(rootDir) {
+  const absolute = path.resolve(rootDir);
+  try {
+    return normalizeForComparison(realpathSync.native(absolute));
+  } catch {
+    return normalizeForComparison(absolute);
+  }
 }
 
 /** 使用 Git common-dir（否则项目 realpath）生成本机项目身份。 */

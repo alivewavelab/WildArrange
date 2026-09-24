@@ -53,9 +53,9 @@ device identity
 
 并行 admission 在应用子 Agent 结果前绑定主线与任务分支基线。在 gate 之前及完成之前，它会再次检查 task ownership、当前工作区祖先和变更归属，并拒绝未归因于子 Agent 结果或已接受 handoff 的候选路径。gate 与 acceptance proof 全部通过后，使用临时 index 创建只含本任务路径、以任务分支 HEAD 为父的 delivery commit；有 remote 时普通 push 到该 task branch（非 force），无 remote 时更新本地 task branch/worktree。acceptance proof 随后补齐该 SHA，checkpoint 绑定相同 SHA。两种交付都会把共享 checkout 按 pre-image 回滚到干净状态，`main` 不移动。远端任务分支移动、本地基线过期或无归属脏路径时，仅回滚本 run 的文件并返回 `revalidation_required`。一旦已知 task-branch push 成功，之后任何本地失败或 ownership/任务分支历史异常都会使 claim 与 intent 处于 `recovery_required`；禁止回滚已推送成果或释放 ownership。进入 `main` 另走持续更新的 PR、自动检查、独立验收和人类 merge 批准；development、staging、production 是部署环境，不默认映射为长期分支。
 
-线性 `run` 与单步 `node execute/checkpoint` 在 Git 项目中也使用独立任务 worktree，位置与 branch/base/delivery SHA 保存在任务的 `delivery_workspace`。执行与 gate 读取任务 worktree 中的项目文件；任务台账、配置、契约批准记录及验收证据通过 `runtime-store` 写入当前绑定的运行态根：legacy 项目为项目内 `.wildarrange/`，外置项目为本机状态目录。依赖任务从上游交付 SHA 开始；多个互不包含的上游分支需要显式 integration task。无文件变化记录 `no_change` 并绑定现有 SHA，不创建空 commit。非 Git 项目保留本地文件协议，不自动初始化 Git。
+线性 `run` 与单步 `node execute/checkpoint` 在 Git 项目中也使用独立任务 worktree，位置与 branch/base/delivery SHA 保存在任务的 `delivery_workspace`。执行与 gate 读取任务 worktree 中的文件；任务台账、配置、契约批准记录及验收证据通过 `runtime-store` 写入当前绑定的运行态根：legacy 项目为项目内 `.wildarrange/`，外置项目为本机状态目录。外置任务的 `repositoryTarget` 只能是 `project` 或 `governance`，每张任务只在对应仓库建立 branch/worktree；跨仓依赖必须拆分并最终由 `integration accept` 绑定项目 SHA、治理 SHA 与该治理 commit 内的 verification registry 摘要。治理任务只走线性交付；并行 admission 与跨设备 handoff 目前仍是项目仓库专属入口，遇到治理任务 fail-closed，禁止回落到客户 checkout。依赖任务从同仓上游交付 SHA 开始；多个互不包含的上游分支需要显式 integration task。无文件变化记录 `no_change` 并绑定现有 SHA，不创建空 commit。非 Git 项目保留本地文件协议，不自动初始化 Git。
 
-外置控制面使用 `projectRoot + governanceRoot + runtimeRoot` 三根上下文。`projectRoot` 只持产品代码、产品测试和客户自己的文档；`governanceRoot` 版本化政策与 verification registry；`runtimeRoot` 保存唯一 task ledger、锁、原始报告、备份、Prompt Pack 与 Adapter 生成物。三根不得互相嵌套，映射写入项目外的本机 registry。同一 Git common-dir 的 linked worktree 共用 `projectId` 与 runtime，但每次命令保留当前 worktree 为 `projectRoot`。外置 policy 与项目原有规则只叠加、不复制；治理 Git 有未提交改动时，新计划导入 fail-closed。
+外置控制面使用 `projectRoot + governanceRoot + runtimeRoot` 三根上下文。`projectRoot` 只持产品代码、产品测试和客户自己的文档；`governanceRoot` 版本化政策与 verification registry；`runtimeRoot` 保存唯一 task ledger、锁、原始报告、备份、Prompt Pack、双 SHA 验收收据与 Adapter 生成物。三根不得互相嵌套，映射写入项目外的本机 registry。同一 Git common-dir 的 linked worktree 共用 `projectId` 与 runtime，但每次命令保留当前 worktree 为 `projectRoot`。外置 policy 与项目原有规则只叠加、不复制；治理 Git 有未提交改动时，新计划导入 fail-closed。外置 Adapter bridge 只处理本机 registry 已连接的工作目录，无关项目不创建状态；`doctor` 只把当前 activationId 的真实生命周期 ledger 回执视为 `execution_observed`。
 
 命令超时只有确认进程终止后才可进入普通失败重试；Windows 进程树终止失败返回 `terminationFailed` / `recoveryRequired` 和 PID。编排保留 `verifying` 与所有权，停止后续 gate，要求确认残留进程已停止后恢复，不能把超时当作已安全回滚。
 
@@ -110,6 +110,7 @@ AGENTS.md                         # mandatory reading routes
 - `src/infra/runtime-store.mjs`：运行时路径、时间/ID、目录创建、JSON 原子写、持久化 task-status 枚举与 hash 原语。
 - `src/infra/workspace-context.mjs`：项目、独立治理仓库与本机运行态三根解析；本机 registry、Git common-dir 身份、治理合同/verification registry 校验、非覆盖治理骨架初始化与 legacy 事务迁移的唯一 owner。
 - `src/interface/project-connection.mjs`：`project init-governance/attach/show` 与外置迁移的 CLI 投影；不拥有路径或迁移规则。
+- `src/interface/external-adapters.mjs`：在外置 runtime 生成 Codex 本地 marketplace/plugin、Cursor 用户 Hook bundle 与 Kimi 用户 plugin；Cursor 显式激活负责备份和合并用户配置，所有宿主都以真实生命周期回执而非文件存在证明激活。
 - `src/infra/file-lock.mjs`：`.wildarrange/team/tasks.lock` 与 `.wildarrange/ledger.lock` 背后的共享文件锁原语。stale 锁自愈：owner pid 已死则立即 stale；空/不可解析 owner 文件在短 mtime 宽限后 stale。锁超时可诊断——错误给出当前 owner 标签、pid、pid 存活、获取时间与等待预算，便于粘贴给 AI 立即看出谁持锁。
 - `src/infra/task-state-lock.mjs`：全局任务状态锁（`.wildarrange/team/tasks.lock`），`file-lock.mjs` 的路径/默认参数封装。所有调用方在其上串行，为线性 run 与并行 admission 提供工作区级互斥。`transactWithLedger` 是非完成路径「先 appendLedger 后 persist」固定顺序的统一原语；锁方向全仓固定为任务状态锁（外）→ ledger 锁（内）。
 - `src/infra/agent-registry.mjs`：固定长期 Agent 白名单、读写角色集、旧别名、显示名、归一化与 command-worker 资格。
@@ -127,6 +128,7 @@ AGENTS.md                         # mandatory reading routes
 - `src/interface/cursor-adapter.mjs`：Cursor `.cursor/hooks.json` 配置、项目感知 Hook bridge（camelCase 事件/工具映射、`permission`/`additional_context`/`followup_message` 输出协议）与 Cursor 安装/readme 说明的纯渲染。Write/Delete/Edit/Shell 的 `preToolUse` 与集成终端命令的 `beforeShellExecution` 为 fail-closed；bridge 将任何非显式 allow 决策视为 deny。
 - `src/interface/hook-bridge-core.mjs`：两类 Hook bridge 共享的项目发现、CLI 子进程启动、stdout/stderr 收集与 JSON 解析模板。Cursor 显式传入 25 秒第二保险并由本地 `failHook` 实施 fail-closed；Kimi 显式不配置自毁定时器，保持宿主 timeout 后 fail-open 的合同，二者输出协议仍由各 adapter 自己翻译。
 - `src/orchestration/change-governance.mjs`：转向提案、review blocker、ChangeRequest 复核与显式 accept/reject 决议。
+- `src/infra/repository-binding.mjs`：任务 acceptance proof 的双仓基线校验，以及不修改任一仓库的项目 SHA + 治理 SHA integration acceptance receipt。
 - `src/infra/failure-analysis.mjs`：失败原因分类、重试提示与可行动失败摘要。
 - `src/capabilities/acceptance-proof.mjs`：checkpoint 证明链，在完成前校验 worker、verifier、success criteria、scope、review 与 review 通道；还拒绝 worker 与 verify 命令全为 trivial 且无 writable_paths 的 no-op 任务，并失败于 `verify_commands` 全 trivial 的任务（`verify_not_trivial`——trivial 验证证明不了任何事）。第二硬底线是 `review_not_tautological`：review gate 没有本轮实际成功执行的独立信号时，任务不能到 `completed`；`infra/gate-arming.mjs` 的 `hasRealReviewLane` 只用于配置预检，最终 proof 还检查执行结果，因为同义反复的 review 证明不了任何事。`config init --armed` 写入 armed 质量 gate 的 config（blocking commentChecker + lspDiagnostics 命令槽），为底线提供命令级入门。
 - `src/ai/routing.mjs`：完整 `routeRequest` 流（路由请求持久化、语义 shadow 治理、可选 LLM 第二意见）。
@@ -303,6 +305,8 @@ SQL/数据库字段首版仍需人工声明精确结构及验证引用，Tauri �
 review gate 是宿主中立的。从 CLI 运行，可含确定性通道、配置的 `review_commands`、配置的 `standards_commands`、可选 LSP/typecheck 命令、AST/结构命令、hashline anchor 检查、注释检查与可选 OpenAI 兼容 LLM review。BaiZe 是唯一独立 review Agent；目标/证据、bug/风险与怀疑式验收视角作为 review Skill 或模式选择。
 
 ## Adapter 模型
+
+以下项目内文件模型只适用于 legacy 模式。外置模式由 `src/interface/external-adapters.mjs` 把三宿主 bundle 写到 `runtimeRoot/adapters/external`：Cursor 可经 `adapter activate --target cursor` 备份并合并用户级 Hook；Codex 与 Kimi 由用户在插件界面显式安装和信任。生成/配置不代表激活，只有 bridge 携带当前 activationId 真实运行并进入 hash 链 ledger 后，doctor 才显示 `execution_observed`。bridge 在调用治理运行时前按 cwd 识别已连接项目，未连接工作区静默退出。
 
 Codex 收到 `.codex/hooks.json`。这是真实的项目本地 Codex hook 入口，在项目 `.codex/` 层与 hook 定义经 `/hooks` 信任后变为 hard enforcement。
 

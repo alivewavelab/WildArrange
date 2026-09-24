@@ -44,6 +44,10 @@ import { projectDecisions, projectDecisionStats } from "../src/interface/decisio
 import { projectTimeline } from "../src/interface/timeline.mjs";
 import { COMMAND_REGISTRY, renderCommandsMarkdown, renderHelp } from "../src/interface/cli-help.mjs";
 import { adapterCliPrefix, installAdapter, restoreAdapterBackup, uninstallAdapter } from "../src/interface/adapters.mjs";
+import {
+  activateExternalCursorAdapter,
+  installExternalAdapters,
+} from "../src/interface/external-adapters.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
 import {
   acceptTaskHandoff,
@@ -84,6 +88,7 @@ import {
 } from "../src/orchestration/task-board.mjs";
 import { archiveTeamTaskWithBackup } from "../src/orchestration/task-archive.mjs";
 import { approvePlan, importPlan, loadPlanApproval } from "../src/orchestration/plan-state.mjs";
+import { writeIntegrationAcceptance } from "../src/infra/repository-binding.mjs";
 import { statusReport, writeWorkflowSummary } from "../src/orchestration/status.mjs";
 import { createSamplePlan, runWorkflow } from "../src/orchestration/workflow.mjs";
 import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtime.mjs";
@@ -292,6 +297,25 @@ async function main() {
   const workspace = await showProjectConnection(requestedProjectRoot, { legacy: Boolean(legacyControlRoot) });
   const rootDir = workspace.projectRoot;
 
+  // --- 项目/治理双仓集成验收 ---
+  // 仅在运行态写不可变收据，不 checkout、merge 或改写任一仓库。
+  if (command === "integration") {
+    const subcommand = args._[1];
+    if (subcommand !== "accept") throw new Error("wildarrange integration requires accept");
+    const projectSha = strArg(args, "project-sha");
+    const governanceSha = strArg(args, "governance-sha");
+    if (!projectSha || !governanceSha) {
+      throw new Error("wildarrange integration accept requires --project-sha <40-char-sha> --governance-sha <40-char-sha>");
+    }
+    console.log(JSON.stringify(await writeIntegrationAcceptance(rootDir, {
+      projectSha,
+      governanceSha,
+      id: strArg(args, "id"),
+      reason: strArg(args, "reason"),
+    }), null, 2));
+    return;
+  }
+
   // --- 初始化与配置 ---
   // §3.4：init 创建 .wildarrange 运行时；--sample/--project-docs 为可选附加步骤，不阻断 init 本身。
   if (command === "init") {
@@ -359,12 +383,27 @@ async function main() {
     const subcommand = args._[1];
     if (subcommand === "install") {
       if (workspace.mode === "external") {
-        throw new Error("project-local adapter installation is disabled in external governance mode; external host activation is required");
+        console.log(JSON.stringify(await installExternalAdapters(rootDir, workspace, {
+          target: strArg(args, "target") || "all",
+          mode: strArg(args, "mode") || "local",
+          packageName: strArg(args, "package") || DEFAULT_PACKAGE_NAME,
+          localCliPath: path.resolve(process.argv[1]),
+        }), null, 2));
+        return;
       }
       console.log(JSON.stringify(await installAdapter(rootDir, {
         target: strArg(args, "target") || "all",
         mode: strArg(args, "mode") || "local",
         packageName: strArg(args, "package") || DEFAULT_PACKAGE_NAME,
+      }), null, 2));
+      return;
+    }
+    if (subcommand === "activate") {
+      if (workspace.mode !== "external") throw new Error("adapter activate is only available for attached external governance projects");
+      const target = strArg(args, "target");
+      if (target !== "cursor") throw new Error("adapter activate currently supports --target cursor; Codex and Kimi require explicit installation and trust in their plugin UI");
+      console.log(JSON.stringify(await activateExternalCursorAdapter(rootDir, workspace, {
+        userRoot: strArg(args, "user-root"),
       }), null, 2));
       return;
     }
@@ -381,7 +420,7 @@ async function main() {
       }), null, 2));
       return;
     }
-    throw new Error("wildarrange adapter requires install, uninstall, or restore");
+    throw new Error("wildarrange adapter requires install, activate, uninstall, or restore");
   }
 
   // --- 多设备协调 ---
@@ -489,11 +528,21 @@ async function main() {
   if (command === "hook") {
     const subcommand = args._[1];
     if (subcommand === "run") {
+      if (args["external-only"] === true && workspace.mode !== "external") {
+        const inactive = { kind: "wildarrange_hook_inactive", inactive: true, reason: "project is not attached to external governance" };
+        if (args.format === "json") console.log(JSON.stringify(inactive));
+        return;
+      }
       const payload = strArg(args, "from")
         ? await readJson(path.resolve(rootDir, args.from))
         : JSON.parse(await readAllStdin());
       const hostAdapter = strArg(args, "host") || String(process.env.WILDARRANGE_HOST_ADAPTER || "");
       if (hostAdapter) payload.host_adapter = hostAdapter;
+      const adapterDigest = strArg(args, "adapter-digest");
+      if (workspace.mode === "external" && args["external-only"] === true) {
+        if (!adapterDigest) throw new Error("external host hook requires --adapter-digest");
+        payload.hook_config_digest = adapterDigest;
+      }
       const hasAdapterMode = strArg(args, "adapter-mode") !== undefined;
       const adapterMode = hasAdapterMode ? String(args["adapter-mode"]) : "local";
       const adapterPackage = strArg(args, "adapter-package") || DEFAULT_PACKAGE_NAME;
@@ -510,7 +559,7 @@ async function main() {
       payload.cli_command_prefix = cliCommandPrefix;
       payload[TRUSTED_CLI_COMMAND_PREFIX] = cliCommandPrefix;
       // §3.4：Codex 宿主附加 hooks.json 摘要，供 suspicion-review 检测 Hook 配置被篡改。
-      if (hostAdapter === "codex") {
+      if (hostAdapter === "codex" && workspace.mode !== "external") {
         const hookConfig = await readFile(path.join(rootDir, ".codex", "hooks.json"), "utf8");
         payload.hook_config_digest = hashContent(hookConfig);
       }

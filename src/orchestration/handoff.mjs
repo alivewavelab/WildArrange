@@ -76,6 +76,7 @@ async function prepareTaskHandoffUnlocked(rootDir, options = {}) {
   const device = await ensureDeviceIdentity(rootDir);
   const taskState = await requireTaskState(rootDir);
   const task = requireTask(taskState, options.taskId);
+  assertProjectRepositoryTask(task, "handoff prepare");
   if (task.status !== "in_progress" && task.status !== "verifying") {
     throw new Error(`task ${task.id} cannot be handed off from status ${task.status}`);
   }
@@ -196,6 +197,7 @@ async function pushTaskHandoffUnlocked(rootDir, options = {}) {
   }
   const taskState = await requireTaskState(rootDir);
   const task = requireTask(taskState, options.taskId);
+  assertProjectRepositoryTask(task, "handoff push");
   const [workingPaths, committedPaths] = await Promise.all([
     listWorkingTreeChanges(rootDir),
     listTreeChanges(rootDir, record.previousRemoteHeadSha, "HEAD"),
@@ -293,6 +295,7 @@ async function acceptTaskHandoffUnlocked(rootDir, options = {}) {
   const branch = taskBranchName(config.gitCoordination, planId, options.taskId);
   const checkpointSha = await fetchRemoteBranch(rootDir, context.remote, branch);
   const offer = parseCoordinationPacket(await readCommitMessage(rootDir, checkpointSha));
+  assertProjectRepositoryTask(offer.task, "handoff accept");
   // §3.4：远端已是 accept commit 时走 resume 路径，补本地状态而不重复 push。
   if (offer.kind === "handoff_accept") {
     if (offer.planId !== planId || offer.task?.id !== options.taskId) {
@@ -454,6 +457,7 @@ async function takeoverTaskOwnershipUnlocked(rootDir, options = {}) {
   const branch = taskBranchName(config.gitCoordination, options.planId, options.taskId);
   const previousSha = await fetchRemoteBranch(rootDir, context.remote, branch);
   const previousPacket = parseCoordinationPacket(await readCommitMessage(rootDir, previousSha));
+  assertProjectRepositoryTask(previousPacket.task, "handoff takeover");
   const expectedDeviceId = String(options.expectedDeviceId || options.expectedDevice);
   // §3.4：本设备已 push takeover 但本地 persist 中断时，按 packet 幂等恢复 accepted 状态。
   if (previousPacket.kind === "task_takeover"
@@ -602,6 +606,13 @@ function requireTask(taskState, taskId) {
   const task = taskState.tasks.find((candidate) => candidate.id === taskId);
   if (!task) throw new Error(`unknown task: ${taskId}`);
   return task;
+}
+
+/** 远端 handoff 协议仍只拥有项目仓库；治理仓任务必须留在线性本机交付链。 */
+function assertProjectRepositoryTask(task, operation) {
+  if (task?.repositoryTarget === "governance") {
+    throw new Error(`${operation} does not support governance repository tasks; use the linear wildarrange run delivery path`);
+  }
 }
 
 /** 返回 coordination/handoffs 下某任务的 handoff JSON 路径。 */
