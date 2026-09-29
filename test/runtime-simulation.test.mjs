@@ -6,23 +6,21 @@
 // =============================================================================
 
 import assert from "node:assert/strict";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
 import { runNextTask } from "../src/orchestration/linear-runtime.mjs";
 import { statusReport, writeWorkflowSummary } from "../src/orchestration/status.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withTempDir, installDocumentReviewerFixture, initializeGitFixture, nodeEval, routeRequest } from "./helpers/runtime-fixtures.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { installDocumentReviewerFixture, nodeEval, routeRequest } from "./helpers/runtime-fixtures.mjs";
 
 test("simulation greenfield project runs from product planning to completed web app", async () => {
-  await withTempDir(async (dir) => {
-    await writeFile(path.join(dir, "AGENTS.md"), "# Project Rules\n\nUser-visible web work needs verifier evidence.\n");
-    await initRuntime(dir);
-    await installDocumentReviewerFixture(dir);
+  await withExternalProject(async ({ projectRoot, root, governanceRoot }) => {
+    await installDocumentReviewerFixture(projectRoot, governanceRoot);
 
-    const route = await routeRequest(dir, {
+    const route = await routeRequest(projectRoot, {
       text: "从零做一个网页版提醒事项 App，一期 MVP 要有清单流程、空状态、验收标准和失败恢复。",
     });
     assert.equal(route.route, "plan");
@@ -31,7 +29,7 @@ test("simulation greenfield project runs from product planning to completed web 
     assert.ok(route.planSkills.some((skill) => skill.name === "design-acceptance"));
     assert.ok(route.planSkills.some((skill) => skill.name === "review-ux-interaction"));
 
-    const planPath = path.join(dir, "greenfield-plan.json");
+    const planPath = path.join(root, "greenfield-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Greenfield reminders web app",
       objective: "从产品澄清到可验证 Web 提醒事项 App 完成闭环。",
@@ -112,10 +110,10 @@ test("simulation greenfield project runs from product planning to completed web 
           subject: "验收提醒事项 App 的核心体验",
           description: "验证空状态、添加流程、错误反馈和测试证据都存在。",
           blockedBy: ["T002"],
-          writable_paths: [".wildarrange/artifacts/**"],
+          writable_paths: ["artifacts/**"],
           worker_command: nodeEval(`
             const fs = require("fs");
-            fs.mkdirSync(".wildarrange/artifacts", { recursive: true });
+            fs.mkdirSync("artifacts", { recursive: true });
             const html = fs.readFileSync("index.html", "utf8");
             const app = fs.readFileSync("src/app.js", "utf8");
             const test = fs.readFileSync("src/app.test.js", "utf8");
@@ -125,16 +123,16 @@ test("simulation greenfield project runs from product planning to completed web 
               app.includes("请输入提醒事项") ? "PASS error feedback" : "FAIL error feedback",
               test.includes("交付方案") ? "PASS add flow" : "FAIL add flow"
             ].join("\\n");
-            fs.writeFileSync(".wildarrange/artifacts/reminders-qa.md", report);
+            fs.writeFileSync("artifacts/reminders-qa.md", report);
           `),
           verify_commands: [
             nodeEval(`
               const fs = require("fs");
-              const report = fs.readFileSync(".wildarrange/artifacts/reminders-qa.md", "utf8");
+              const report = fs.readFileSync("artifacts/reminders-qa.md", "utf8");
               if (report.includes("FAIL") || !report.includes("PASS empty state")) process.exit(1);
             `),
           ],
-          review_commands: [nodeEval("const fs=require('fs');const lines=fs.readFileSync('.wildarrange/artifacts/reminders-qa.md','utf8').split(/\\r?\\n/);if(lines.filter((line)=>line.startsWith('PASS ')).length!==3||lines.some((line)=>line.startsWith('FAIL ')))process.exit(1)")],
+          review_commands: [nodeEval("const fs=require('fs');const lines=fs.readFileSync('artifacts/reminders-qa.md','utf8').split(/\\r?\\n/);if(lines.filter((line)=>line.startsWith('PASS ')).length!==3||lines.some((line)=>line.startsWith('FAIL ')))process.exit(1)")],
         },
         {
           id: "T004",
@@ -158,41 +156,34 @@ test("simulation greenfield project runs from product planning to completed web 
               if (!summary.includes("Brief") || !summary.includes("QA report")) process.exit(1);
             `),
           ],
-          review_commands: [nodeEval("const fs=require('fs');const summary=fs.readFileSync('doc/reports/reminders-summary.md','utf8');if(!summary.includes('No direct coding')||!fs.existsSync('.wildarrange/artifacts/reminders-qa.md'))process.exit(1)")],
+          review_commands: [nodeEval("const fs=require('fs');const summary=fs.readFileSync('doc/reports/reminders-summary.md','utf8');if(!summary.includes('No direct coding')||!fs.existsSync('artifacts/reminders-qa.md'))process.exit(1)")],
         },
       ],
     }, null, 2));
 
-    await importPlan(dir, planPath);
-    const first = await runNextTask(dir);
+    await importPlan(projectRoot, planPath);
+    const first = await runNextTask(projectRoot);
     assert.equal(first.status, "completed");
-    const second = await runNextTask(dir);
+    const second = await runNextTask(projectRoot);
     assert.equal(second.status, "completed");
-    const third = await runNextTask(dir);
+    const third = await runNextTask(projectRoot);
     assert.equal(third.status, "completed");
-    const fourth = await runNextTask(dir);
+    const fourth = await runNextTask(projectRoot);
     assert.equal(fourth.status, "completed");
 
-    const status = await statusReport(dir);
+    const status = await statusReport(projectRoot);
     assert.equal(status.total, 4);
     assert.equal(status.completed, 4);
-    assert.match(await readFile(path.join(dir, "index.html"), "utf8"), /提醒事项/);
-    assert.match(await readFile(resolveWildArrangePath(dir, "reports", "workflow-summary.md"), "utf8"), /Status: PASS/);
-  });
+    assert.match(await readFile(path.join(fourth.task.delivery_workspace.workDir, "index.html"), "utf8"), /提醒事项/);
+    assert.match(await readFile(resolveWildArrangePath(projectRoot, "reports", "workflow-summary.md"), "utf8"), /Status: PASS/);
+  }, { projectFiles: { "AGENTS.md": "# Project Rules\n\nUser-visible web work needs verifier evidence.\n" } });
 });
 
 test("simulation existing project handles large feature addition through planning and gates", async () => {
-  await withTempDir(async (dir) => {
-    await mkdir(path.join(dir, "src"), { recursive: true });
-    await mkdir(path.join(dir, "test"), { recursive: true });
-    await writeFile(path.join(dir, "AGENTS.md"), "# Existing Project Rules\n\nLarge features require scope and regression evidence.\n");
-    await writeFile(path.join(dir, "src", "app.cjs"), "function listItems(items) { return items; }\nmodule.exports = { listItems };\n");
-    await writeFile(path.join(dir, "test", "app.test.cjs"), "const { listItems } = require('../src/app.cjs');\nif (listItems([1]).length !== 1) process.exit(1);\n");
-    await installDocumentReviewerFixture(dir);
-    await initializeGitFixture(dir);
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot, root, governanceRoot }) => {
+    await installDocumentReviewerFixture(projectRoot, governanceRoot);
 
-    const route = await routeRequest(dir, {
+    const route = await routeRequest(projectRoot, {
       text: "已有项目新增一个提醒分组大功能，要处理权限、状态流程、回归验收和范围取舍。",
     });
     assert.equal(route.route, "plan");
@@ -200,7 +191,7 @@ test("simulation existing project handles large feature addition through plannin
     assert.ok(route.planSkills.some((skill) => skill.name === "design-acceptance"));
     assert.ok(route.planSkills.some((skill) => skill.name === "review-scope-tradeoff"));
 
-    const planPath = path.join(dir, "existing-feature-plan.json");
+    const planPath = path.join(root, "existing-feature-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Existing project reminder groups",
       objective: "在已有项目里新增提醒分组能力，并保留既有列表行为。",
@@ -265,13 +256,13 @@ test("simulation existing project handles large feature addition through plannin
           subject: "验收提醒分组的回归和边界证据",
           description: "验证既有 listItems 回归、新增 groupReminder happy path 和错误路径。",
           blockedBy: ["T002"],
-          writable_paths: [".wildarrange/artifacts/**"],
+          writable_paths: ["artifacts/**"],
           worker_command: nodeEval(`
             const fs = require("fs");
-            fs.mkdirSync(".wildarrange/artifacts", { recursive: true });
+            fs.mkdirSync("artifacts", { recursive: true });
             const source = fs.readFileSync("src/app.cjs", "utf8");
             const tests = fs.readFileSync("test/app.test.cjs", "utf8");
-            fs.writeFileSync(".wildarrange/artifacts/reminder-groups-qa.md", [
+            fs.writeFileSync("artifacts/reminder-groups-qa.md", [
               "# Reminder Groups QA",
               source.includes("listItems") ? "PASS existing behavior" : "FAIL existing behavior",
               source.includes("groupReminder") ? "PASS new behavior" : "FAIL new behavior",
@@ -281,11 +272,11 @@ test("simulation existing project handles large feature addition through plannin
           verify_commands: [
             nodeEval(`
               const fs = require("fs");
-              const report = fs.readFileSync(".wildarrange/artifacts/reminder-groups-qa.md", "utf8");
+              const report = fs.readFileSync("artifacts/reminder-groups-qa.md", "utf8");
               if (report.includes("FAIL") || !report.includes("PASS existing behavior")) process.exit(1);
             `),
           ],
-          review_commands: [nodeEval("const fs=require('fs');const report=fs.readFileSync('.wildarrange/artifacts/reminder-groups-qa.md','utf8');if((report.match(/PASS /g)||[]).length!==3||report.includes('FAIL '))process.exit(1)")],
+          review_commands: [nodeEval("const fs=require('fs');const report=fs.readFileSync('artifacts/reminder-groups-qa.md','utf8');if((report.match(/PASS /g)||[]).length!==3||report.includes('FAIL '))process.exit(1)")],
         },
         {
           id: "T004",
@@ -315,19 +306,25 @@ test("simulation existing project handles large feature addition through plannin
       ],
     }, null, 2));
 
-    await importPlan(dir, planPath);
-    assert.equal((await runNextTask(dir)).status, "completed");
-    const implemented = await runNextTask(dir);
+    await importPlan(projectRoot, planPath);
+    assert.equal((await runNextTask(projectRoot)).status, "completed");
+    const implemented = await runNextTask(projectRoot);
     assert.equal(implemented.status, "completed");
     assert.equal(implemented.scopeResult.status, "pass");
     assert.equal(implemented.reviewResult.pass, true);
-    assert.equal((await runNextTask(dir)).status, "completed");
-    assert.equal((await runNextTask(dir)).status, "completed");
+    assert.equal((await runNextTask(projectRoot)).status, "completed");
+    assert.equal((await runNextTask(projectRoot)).status, "completed");
 
-    await writeWorkflowSummary(dir, { reason: "existing_feature_simulation" });
-    const status = await statusReport(dir);
+    await writeWorkflowSummary(projectRoot, { reason: "existing_feature_simulation" });
+    const status = await statusReport(projectRoot);
     assert.equal(status.completed, 4);
     assert.match(await readFile(path.join(implemented.task.delivery_workspace.workDir, "src", "app.cjs"), "utf8"), /groupReminder/);
-    assert.match(await readFile(resolveWildArrangePath(dir, "reports", "workflow-summary.md"), "utf8"), /Status: PASS/);
+    assert.match(await readFile(resolveWildArrangePath(projectRoot, "reports", "workflow-summary.md"), "utf8"), /Status: PASS/);
+  }, {
+    projectFiles: {
+      "AGENTS.md": "# Existing Project Rules\n\nLarge features require scope and regression evidence.\n",
+      "src/app.cjs": "function listItems(items) { return items; }\nmodule.exports = { listItems };\n",
+      "test/app.test.cjs": "const { listItems } = require('../src/app.cjs');\nif (listItems([1]).length !== 1) process.exit(1);\n",
+    },
   });
 });

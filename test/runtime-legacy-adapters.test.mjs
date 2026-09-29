@@ -2,18 +2,35 @@
 // 文件名称：runtime-legacy-adapters.test.mjs
 // 所属模块：test
 // 作用说明：
-//   legacy 单根模式专属：项目内 adapter 安装/备份恢复及其 CLI 事实（外置化后随 legacy 一并删除）。
+//   legacy 单根模式专属用例：项目内 adapter 安装/备份恢复及其 CLI 事实、workflow --sample（样例计划把产物写进项目内 .wildarrange/）、doctor 健康路径（外置 worktree 被误判漂移，见回报）。外置化后随 legacy 删除或改写。
 // =============================================================================
 
 import assert from "node:assert/strict";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { installAdapter, restoreAdapterBackup, uninstallAdapter } from "../src/interface/adapters.mjs";
+import { runDoctor } from "../src/interface/doctor.mjs";
+import { runWorkflow } from "../src/orchestration/workflow.mjs";
+import { resumeReport } from "../src/ai/context.mjs";
 import { runCommand } from "../src/infra/command-runner.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
-import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withTempDir } from "./helpers/runtime-fixtures.mjs";
+import { hashContent, readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { writeRuntimeStateBackup } from "../src/infra/security.mjs";
+import { runInjectionHook } from "./helpers/runtime-fixtures.mjs";
+
+// legacy 单根模式：项目即运行态根，不连接任何治理仓；本文件随 legacy 一并删除。
+async function withTempDir(fn) {
+  const baseDir = path.join(os.tmpdir(), "wildarrange-tests");
+  await mkdir(baseDir, { recursive: true });
+  const dir = await mkdtemp(path.join(baseDir, "wildarrange-linear-"));
+  try {
+    await fn(dir);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
 
 test("adapter install writes slash commands for cursor and codex", async () => {
   await withTempDir(async (dir) => {
@@ -275,5 +292,71 @@ test("legacy bridge-only backup restores its generated npx CLI fact", async () =
     const contextMd = await readFile(resolveWildArrangePath(dir, "snapshots", "context.md"), "utf8");
     assert.ok(contextMd.includes(`${installed.cliPrefix} resume`));
     assert.doesNotMatch(contextMd, /node \.\/bin\/wildarrange\.mjs/);
+  });
+});
+
+test("workflow runs sample plan end to end and writes resumable state", async () => {
+  await withTempDir(async (dir) => {
+    const result = await runWorkflow(dir, { sample: true });
+    assert.equal(result.ok, true);
+    assert.equal(result.summaryPath, ".wildarrange/reports/workflow-summary.md");
+    assert.equal(result.status.completed, 1);
+    assert.equal(result.status.pending, 0);
+
+    const resume = await resumeReport(dir);
+    assert.equal(resume.latestSnapshot.stage, "workflow_finished");
+    assert.equal(resume.nextAction, "no runnable task");
+
+    const summary = await readJson(resolveWildArrangePath(dir, "reports", "workflow-summary.json"));
+    assert.equal(summary.ok, true);
+    assert.equal(summary.tasks[0].status, "completed");
+    assert.match(await readFile(resolveWildArrangePath(dir, "reports", "workflow-summary.md"), "utf8"), /Status: PASS/);
+    assert.match(await readFile(resolveWildArrangePath(dir, "reports", "workflow-summary.md"), "utf8"), /Task Breakdown/);
+  });
+});
+
+test("doctor passes on a healthy runtime and flags hand-edited completion", async () => {
+  await withTempDir(async (dir) => {
+    await initRuntime(dir);
+    const workflow = await runWorkflow(dir, { sample: true });
+    assert.equal(workflow.ok, true);
+    await installAdapter(dir, { target: "codex", mode: "local" });
+    await runInjectionHook(dir, {
+      hook_event_name: "UserPromptSubmit",
+      session_id: "doctor-healthy-session",
+      cwd: dir,
+      prompt: "检查当前健康状态",
+      host_adapter: "codex",
+      hook_config_digest: hashContent(await readFile(path.join(dir, ".codex", "hooks.json"), "utf8")),
+    });
+    await writeRuntimeStateBackup(dir, { reason: "doctor-baseline" });
+
+    const healthy = await runDoctor(dir);
+    assert.equal(healthy.ok, true, JSON.stringify(healthy.findings, null, 2));
+    assert.equal(healthy.errorCount, 0);
+    assert.ok(healthy.sections.completionAudit.checkedCompleted >= 1);
+    assert.equal(healthy.sections.ledgerBackupCrossCheck.prefixIntact, true);
+
+    const tasksPath = resolveWildArrangePath(dir, "team", "tasks.json");
+    const state = await readJson(tasksPath);
+    state.tasks.push({
+      id: "T999",
+      subject: "手改的假完成任务",
+      status: "completed",
+      attempts: 0,
+      maxAttempts: 3,
+      blockedBy: [],
+      writable_paths: [],
+      worker_command: null,
+      verify_commands: ["true"],
+      review_commands: ["node --version"],
+      evidence: [],
+    });
+    await writeFile(tasksPath, JSON.stringify(state, null, 2), "utf8");
+
+    const flagged = await runDoctor(dir);
+    assert.equal(flagged.ok, false);
+    const messages = flagged.findings.map((finding) => finding.message).join("\n");
+    assert.match(messages, /T999 is completed but has no checkpoint file/);
   });
 });

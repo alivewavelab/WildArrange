@@ -18,21 +18,21 @@ import { listPromptPack, renderPromptPackEntry } from "../src/infra/prompt-pack.
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { loadWildArrangeConfig } from "../src/infra/runtime-config.mjs";
 import { hashContent, readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withTempDir, writeMinimalPromptPack } from "./helpers/runtime-fixtures.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { writeMinimalPromptPack, writePolicyConfig } from "./helpers/runtime-fixtures.mjs";
 
 test("init creates durable runtime state", async () => {
-  await withTempDir(async (dir) => {
-    const work = await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot }) => {
+    const work = await initRuntime(projectRoot);
     assert.equal(work.stage, "initialized");
-    assert.equal(await readJson(resolveWildArrangePath(dir, "agents.json"), null), null);
-    assert.equal(await readJson(resolveWildArrangePath(dir, "categories.json"), null), null);
+    assert.equal(await readJson(resolveWildArrangePath(projectRoot, "agents.json"), null), null);
+    assert.equal(await readJson(resolveWildArrangePath(projectRoot, "categories.json"), null), null);
   });
 });
 
 test("init installs wildarrange-linear prompt, skill, and tool contracts", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const pack = await listPromptPack(dir);
+  await withExternalProject(async ({ projectRoot }) => {
+    const pack = await listPromptPack(projectRoot);
     assert.equal(pack.name, "wildarrange-linear");
     assert.deepEqual(
       pack.agents.sort(),
@@ -52,19 +52,19 @@ test("init installs wildarrange-linear prompt, skill, and tool contracts", async
     assert.equal(pack.routes, "routes.json");
     assert.ok(pack.skills.includes("wildarrange-injection-runtime"));
 
-    const jiuweiPrompt = await renderPromptPackEntry(dir, { agent: "Jiuwei" });
+    const jiuweiPrompt = await renderPromptPackEntry(projectRoot, { agent: "Jiuwei" });
     assert.match(jiuweiPrompt, /verifier/);
 
-    const reviewSkill = await renderPromptPackEntry(dir, { skill: "review-work" });
+    const reviewSkill = await renderPromptPackEntry(projectRoot, { skill: "review-work" });
     assert.match(reviewSkill, /目标验证器/);
 
-    const toolContract = JSON.parse(await renderPromptPackEntry(dir, { tools: true }));
+    const toolContract = JSON.parse(await renderPromptPackEntry(projectRoot, { tools: true }));
     assert.equal(toolContract.runtime, "wildarrange-linear");
     // 合同由命令注册表生成：每条真实 CLI 命令恰好对应一个工具，不再有手写的虚构工具名。
     assert.deepEqual(toolContract.tools.map((tool) => tool.command), COMMAND_REGISTRY.map((entry) => `wildarrange ${entry.usage}`));
     assert.ok(toolContract.tools.some((tool) => tool.name === "wildarrange_run"));
 
-    const routeTable = JSON.parse(await renderPromptPackEntry(dir, { routes: true }));
+    const routeTable = JSON.parse(await renderPromptPackEntry(projectRoot, { routes: true }));
     assert.equal(routeTable.version, 1);
     assert.ok(routeTable.intents.some((intent) => intent.name === "execute"));
     assert.ok(routeTable.planSkillBundles.some((skill) => skill.name === "review-product-intent"));
@@ -73,8 +73,8 @@ test("init installs wildarrange-linear prompt, skill, and tool contracts", async
 });
 
 test("config controls models and injection point mounts", async () => {
-  await withTempDir(async (dir) => {
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
+  await withExternalProject(async ({ projectRoot, governanceRoot }) => {
+    await writePolicyConfig(governanceRoot, JSON.stringify({
       agents: {
         BaiZe: { provider: "host", model: "host-default", reasoning: "xhigh" },
       },
@@ -88,26 +88,25 @@ test("config controls models and injection point mounts", async () => {
         },
       },
     }, null, 2));
-    await writeFile(path.join(dir, "CLAUDE.md"), "# Local Rules\n\nUse real verification.\n");
-    await initRuntime(dir);
+    await writeFile(path.join(projectRoot, "CLAUDE.md"), "# Local Rules\n\nUse real verification.\n");
+    await initRuntime(projectRoot);
 
-    const loaded = await loadWildArrangeConfig(dir);
-    assert.equal(loaded.sourcePath, "wildarrange.config.json");
+    const loaded = await loadWildArrangeConfig(projectRoot);
+    assert.equal(path.resolve(projectRoot, loaded.sourcePath), path.join(governanceRoot, "policy", "wildarrange.config.json"));
     assert.equal(loaded.config.agents.BaiZe.reasoning, "xhigh");
 
-    const injection = await resolveInjectionPoint(dir, "before_review", { agent: "BaiZe", taskId: "T001" });
+    const injection = await resolveInjectionPoint(projectRoot, "before_review", { agent: "BaiZe", taskId: "T001" });
     assert.deepEqual(injection.tools, ["review_gate", "wildarrange_evidence_record"]);
     assert.equal(injection.markdown[0].path, "CLAUDE.md");
     assert.ok(injection.markdown[0].content.includes("Use real verification"));
     assert.ok(injection.skills.some((skill) => skill.name === "review-work"));
     assert.ok(injection.skills.some((skill) => skill.name === "wildarrange-injection-runtime"));
-  });
+  }, { init: false });
 });
 
 test("LuWu governance injection mounts the declared read-only tools and Skills", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const injection = await resolveInjectionPoint(dir, "repository_governance", { agent: "LuWu" });
+  await withExternalProject(async ({ projectRoot }) => {
+    const injection = await resolveInjectionPoint(projectRoot, "repository_governance", { agent: "LuWu" });
     assert.deepEqual(injection.tools, [
       "repository_governance_audit",
       "wildarrange_rules_collect",
@@ -121,10 +120,10 @@ test("LuWu governance injection mounts the declared read-only tools and Skills",
 });
 
 test("injection budgets load activated skills beyond legacy six thousand chars", async () => {
-  await withTempDir(async (dir) => {
+  await withExternalProject(async ({ projectRoot, governanceRoot }) => {
     const skillBody = `# 重型 Skill\n\n${"长流程内容。".repeat(1_200)}\n\n末尾校验：完整加载\n`;
-    const packDir = await writeMinimalPromptPack(dir, { "heavy-flow": skillBody });
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
+    const packDir = await writeMinimalPromptPack(projectRoot, { "heavy-flow": skillBody });
+    await writePolicyConfig(governanceRoot, JSON.stringify({
       injectionPoints: {
         before_execute: {
           enabled: true,
@@ -135,22 +134,22 @@ test("injection budgets load activated skills beyond legacy six thousand chars",
         },
       },
     }, null, 2));
-    await initRuntime(dir, { promptPackDir: packDir });
+    await initRuntime(projectRoot, { promptPackDir: packDir });
 
-    const injection = await resolveInjectionPoint(dir, "before_execute", { taskId: "T001" });
+    const injection = await resolveInjectionPoint(projectRoot, "before_execute", { taskId: "T001" });
     const skill = injection.skills[0];
     assert.ok(skill.chars > 6_000);
     assert.equal(skill.truncated, false);
     assert.equal(skill.budgetChars, 80_000);
     assert.match(skill.content, /末尾校验：完整加载/);
-  });
+  }, { init: false });
 });
 
 test("injection budgets expose explicit truncation metadata", async () => {
-  await withTempDir(async (dir) => {
+  await withExternalProject(async ({ projectRoot, governanceRoot }) => {
     const skillBody = `# 超重工作流\n\n${"需要按阶段执行的长步骤。".repeat(2_000)}\n\n末尾不应进入注入\n`;
-    const packDir = await writeMinimalPromptPack(dir, { "heavy-flow": skillBody });
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
+    const packDir = await writeMinimalPromptPack(projectRoot, { "heavy-flow": skillBody });
+    await writePolicyConfig(governanceRoot, JSON.stringify({
       contextBudgets: {
         points: {
           before_execute: { skillMaxChars: 3_000 },
@@ -166,23 +165,23 @@ test("injection budgets expose explicit truncation metadata", async () => {
         },
       },
     }, null, 2));
-    await initRuntime(dir, { promptPackDir: packDir });
+    await initRuntime(projectRoot, { promptPackDir: packDir });
 
-    const injection = await resolveInjectionPoint(dir, "before_execute", { taskId: "T001" });
+    const injection = await resolveInjectionPoint(projectRoot, "before_execute", { taskId: "T001" });
     const skill = injection.skills[0];
     assert.equal(skill.truncated, true);
     assert.equal(skill.budgetChars, 3_000);
     assert.ok(skill.content.length <= 3_000);
     assert.match(skill.content, /上下文已截断/);
     assert.doesNotMatch(skill.content, /末尾不应进入注入/);
-  });
+  }, { init: false });
 });
 
 test("Prompt Pack Skill loading rejects realpath escapes and hash tampering", async () => {
-  await withTempDir(async (dir) => {
+  await withExternalProject(async ({ projectRoot, root, governanceRoot }) => {
     const skillBody = "# Bound workflow\n\nDO_NOT_LOAD_FROM_OUTSIDE_PACK\n";
-    const packDir = await writeMinimalPromptPack(dir, { "bound-flow": skillBody });
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
+    const packDir = await writeMinimalPromptPack(projectRoot, { "bound-flow": skillBody });
+    await writePolicyConfig(governanceRoot, JSON.stringify({
       injectionPoints: {
         before_execute: {
           enabled: true,
@@ -192,37 +191,37 @@ test("Prompt Pack Skill loading rejects realpath escapes and hash tampering", as
         },
       },
     }, null, 2));
-    await initRuntime(dir, { promptPackDir: packDir });
+    await initRuntime(projectRoot, { promptPackDir: packDir });
 
-    const registeredFile = resolveWildArrangePath(dir, "prompt-pack", "installed", "skills", "bound-flow.md");
-    const outsideFile = path.join(dir, "outside-pack-skill.md");
+    const registeredFile = resolveWildArrangePath(projectRoot, "prompt-pack", "installed", "skills", "bound-flow.md");
+    const outsideFile = path.join(projectRoot, "outside-pack-skill.md");
     await writeFile(outsideFile, skillBody);
     await rm(registeredFile);
     await symlink(outsideFile, registeredFile);
 
-    const escaped = await resolveInjectionPoint(dir, "before_execute", { taskId: "T001" });
+    const escaped = await resolveInjectionPoint(projectRoot, "before_execute", { taskId: "T001" });
     assert.equal(escaped.skills.some((skill) => skill.name === "bound-flow"), false);
     assert.ok(escaped.skillSelection.missing.some(
       (item) => item.name === "bound-flow" && item.reason === "integrity_failed" && /escapes installed pack root/.test(item.detail),
     ));
-    await assert.rejects(renderPromptPackEntry(dir, { skill: "bound-flow" }), /escapes installed pack root/);
+    await assert.rejects(renderPromptPackEntry(projectRoot, { skill: "bound-flow" }), /escapes installed pack root/);
 
     await rm(registeredFile);
     await writeFile(registeredFile, skillBody);
-    const registryPath = resolveWildArrangePath(dir, "prompt-pack.json");
+    const registryPath = resolveWildArrangePath(projectRoot, "prompt-pack.json");
     const registry = await readJson(registryPath);
     const originalHash = registry.skills["bound-flow"].sha256;
     registry.skills["bound-flow"].sha256 = "0".repeat(64);
     await writeFile(registryPath, JSON.stringify(registry, null, 2));
 
-    const tampered = await resolveInjectionPoint(dir, "before_execute", { taskId: "T001" });
+    const tampered = await resolveInjectionPoint(projectRoot, "before_execute", { taskId: "T001" });
     assert.equal(tampered.skills.some((skill) => skill.name === "bound-flow"), false);
     assert.ok(tampered.skillSelection.missing.some(
       (item) => item.name === "bound-flow" && item.reason === "integrity_failed" && /changed after install/.test(item.detail),
     ));
-    await assert.rejects(renderPromptPackEntry(dir, { skill: "bound-flow" }), /changed after install/);
+    await assert.rejects(renderPromptPackEntry(projectRoot, { skill: "bound-flow" }), /changed after install/);
 
-    const externalPack = path.join(dir, "attacker-pack");
+    const externalPack = path.join(projectRoot, "attacker-pack");
     await mkdir(path.join(externalPack, "skills"), { recursive: true });
     const malicious = "# malicious\n\nREAD_OUTSIDE_RUNTIME_ROOT\n";
     await writeFile(path.join(externalPack, "skills", "bound-flow.md"), malicious);
@@ -232,8 +231,8 @@ test("Prompt Pack Skill loading rejects realpath escapes and hash tampering", as
     registry.skills["bound-flow"].path = "skills/bound-flow.md";
     registry.skills["bound-flow"].sha256 = hashContent(malicious);
     await writeFile(registryPath, JSON.stringify(registry, null, 2));
-    await assert.rejects(renderPromptPackEntry(dir, { skill: "bound-flow" }), /changed after install/);
-    await assert.rejects(matchSkills(dir, { text: "bound workflow" }), /changed after install/);
+    await assert.rejects(renderPromptPackEntry(projectRoot, { skill: "bound-flow" }), /changed after install/);
+    await assert.rejects(matchSkills(projectRoot, { text: "bound workflow" }), /changed after install/);
     assert.notEqual(originalHash, registry.skills["bound-flow"].sha256);
 
     const sourceManifestPath = path.join(packDir, "manifest.json");
@@ -241,7 +240,7 @@ test("Prompt Pack Skill loading rejects realpath escapes and hash tampering", as
     sourceManifest.routes = "routes.json";
     await writeFile(path.join(packDir, "routes.json"), JSON.stringify({ intents: [] }));
     await writeFile(sourceManifestPath, JSON.stringify(sourceManifest, null, 2));
-    await initRuntime(dir, { promptPackDir: packDir });
+    await initRuntime(projectRoot, { promptPackDir: packDir });
     const maliciousRoutes = JSON.stringify({
       intents: [{ name: "attacker", signals: ["bound"], skills: ["bound-flow"] }],
     });
@@ -253,14 +252,13 @@ test("Prompt Pack Skill loading rejects realpath escapes and hash tampering", as
     routeRegistry.routes.path = "routes.json";
     routeRegistry.routes.sha256 = hashContent(maliciousRoutes);
     await writeFile(registryPath, JSON.stringify(routeRegistry, null, 2));
-    await assert.rejects(matchSkills(dir, { text: "bound workflow" }), /entry changed after install: routes/);
-  });
+    await assert.rejects(matchSkills(projectRoot, { text: "bound workflow" }), /entry changed after install: routes/);
+  }, { init: false });
 });
 
 test("default GPT-family agents are delegated to the host provider", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const { config } = await loadWildArrangeConfig(dir);
+  await withExternalProject(async ({ projectRoot }) => {
+    const { config } = await loadWildArrangeConfig(projectRoot);
     assert.equal(config.modelProviders.host.type, "host");
     assert.equal(config.agents.Jiuwei.provider, "host");
     assert.equal(config.agents.BaiZe.provider, "host");
@@ -275,15 +273,15 @@ test("default GPT-family agents are delegated to the host provider", async () =>
 });
 
 test("Jiuwei prompt injection reports explicit truncation at the configured prompt budget", async () => {
-  await withTempDir(async (dir) => {
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
+  await withExternalProject(async ({ projectRoot, governanceRoot }) => {
+    await writePolicyConfig(governanceRoot, JSON.stringify({
       contextBudgets: {
         prompt: { maxChars: 600 },
       },
     }, null, 2));
-    await initRuntime(dir);
+    await initRuntime(projectRoot);
 
-    const context = await buildAgentContext(dir, {
+    const context = await buildAgentContext(projectRoot, {
       agent: "Jiuwei",
       injectionPoint: "session_start",
     });
@@ -291,5 +289,5 @@ test("Jiuwei prompt injection reports explicit truncation at the configured prom
     assert.equal(context.agentPrompt.budgetChars, 600);
     assert.ok(context.agentPrompt.loadedChars <= 600);
     assert.match(context.agentPrompt.content, /Agent Prompt 已截断/);
-  });
+  }, { init: false });
 });

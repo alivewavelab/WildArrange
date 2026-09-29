@@ -38,7 +38,8 @@ async function gitInit(cwd) {
 /**
  * 创建已连接的外置三根项目并执行回调。
  * @param {(roots: {root: string, projectRoot: string, governanceRoot: string, stateHome: string}) => Promise<void>} fn
- * @param {{ policy?: string, projectFiles?: Record<string, string>, init?: boolean }} [options]
+ * @param {{ policy?: string, projectFiles?: Record<string, string>, init?: boolean, projectGit?: boolean }} [options]
+ *   projectGit:false 让产品项目不是 Git 仓（只写 projectFiles、不建提交），用于验证非 Git 项目的 manifest 范围回落；默认 true。
  */
 export async function withExternalProject(fn, options = {}) {
   const baseDir = path.join(process.cwd(), ".tmp");
@@ -51,12 +52,12 @@ export async function withExternalProject(fn, options = {}) {
   process.env.WILDARRANGE_STATE_HOME = stateHome;
   try {
     await mkdir(projectRoot, { recursive: true });
-    await gitInit(projectRoot);
+    if (options.projectGit !== false) await gitInit(projectRoot);
     for (const [relativePath, content] of Object.entries(options.projectFiles || { "README.md": "# Fixture project\n" })) {
       await mkdir(path.dirname(path.join(projectRoot, relativePath)), { recursive: true });
       await writeFile(path.join(projectRoot, relativePath), content, "utf8");
     }
-    await gitCommitAll(projectRoot, "fixture baseline");
+    if (options.projectGit !== false) await gitCommitAll(projectRoot, "fixture baseline");
 
     await initializeGovernanceRepository(projectRoot, { governanceRoot, repository: "https://example.test/product.git", defaultBranch: "main" });
     await writeFile(path.join(governanceRoot, "policy", "AGENTS.md"), options.policy || "# Fixture policy\n\n- Keep changes inside writable paths.\n", "utf8");

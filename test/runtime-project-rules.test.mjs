@@ -14,15 +14,15 @@ import { buildAgentContext } from "../src/ai/context.mjs";
 import { scanProjectRules } from "../src/infra/rule-scanner.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withTempDir } from "./helpers/runtime-fixtures.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 test("project rules and agent context collect matching local governance", async () => {
-  await withTempDir(async (dir) => {
-    await writeFile(path.join(dir, "AGENTS.md"), "# AGENTS\n\n必须运行真实测试。\n");
-    await mkdir(path.join(dir, "src"), { recursive: true });
-    await writeFile(path.join(dir, "src", "AGENTS.md"), "# Source Rules\n\nsrc 内修改必须遵守本目录职责。\n");
-    await mkdir(path.join(dir, ".cursor", "rules"), { recursive: true });
-    await writeFile(path.join(dir, ".cursor", "rules", "frontend.md"), [
+  await withExternalProject(async ({ projectRoot, root }) => {
+    await writeFile(path.join(projectRoot, "AGENTS.md"), "# AGENTS\n\n必须运行真实测试。\n");
+    await mkdir(path.join(projectRoot, "src"), { recursive: true });
+    await writeFile(path.join(projectRoot, "src", "AGENTS.md"), "# Source Rules\n\nsrc 内修改必须遵守本目录职责。\n");
+    await mkdir(path.join(projectRoot, ".cursor", "rules"), { recursive: true });
+    await writeFile(path.join(projectRoot, ".cursor", "rules", "frontend.md"), [
       "---",
       "description: Frontend rule",
       "globs: [\"src/**\"]",
@@ -31,8 +31,7 @@ test("project rules and agent context collect matching local governance", async 
       "UI 变更必须浏览器验收。",
       "",
     ].join("\n"));
-    await initRuntime(dir);
-    const planPath = path.join(dir, "rules-plan.json");
+    const planPath = path.join(root, "rules-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Rules context",
       tasks: [{
@@ -44,34 +43,35 @@ test("project rules and agent context collect matching local governance", async 
         review_commands: ["node --version"],
       }],
     }));
-    await importPlan(dir, planPath);
+    await importPlan(projectRoot, planPath);
 
-    const rules = await scanProjectRules(dir, { targetPaths: ["src/app.js"] });
-    assert.equal(rules.total, 3);
-    assert.equal(rules.matched, 3);
+    const rules = await scanProjectRules(projectRoot, { targetPaths: ["src/app.js"] });
+    // 3 条项目内规则 + 治理仓 policy/AGENTS.md（外置模式固定存在）。
+    assert.equal(rules.total, 4);
+    assert.equal(rules.matched, 4);
+    assert.equal(rules.governancePolicyRules, 1);
     assert.ok(rules.rules.some((rule) => rule.path === "AGENTS.md"));
     assert.ok(rules.rules.some((rule) => rule.path === "src/AGENTS.md" && rule.source === "directory_agents"));
     assert.ok(rules.rules.some((rule) => rule.path === ".cursor/rules/frontend.md"));
-    assert.match(await readFile(resolveWildArrangePath(dir, "rules", "context.md"), "utf8"), /UI 变更必须浏览器验收/);
+    assert.match(await readFile(resolveWildArrangePath(projectRoot, "rules", "context.md"), "utf8"), /UI 变更必须浏览器验收/);
 
-    const context = await buildAgentContext(dir, { agent: "BaiZe", taskId: "T001" });
+    const context = await buildAgentContext(projectRoot, { agent: "BaiZe", taskId: "T001" });
     assert.equal(context.agent, "BaiZe");
     assert.equal(context.task.id, "T001");
-    assert.equal(context.projectRules.matched, 3);
-    assert.match(await readFile(resolveWildArrangePath(dir, "context-agents", "BaiZe-T001.md"), "utf8"), /WildArrange Agent Context/);
+    assert.equal(context.projectRules.matched, 4);
+    assert.match(await readFile(resolveWildArrangePath(projectRoot, "context-agents", "BaiZe-T001.md"), "utf8"), /WildArrange Agent Context/);
   });
 });
 
 test("project rules parse CRLF frontmatter", async () => {
-  await withTempDir(async (dir) => {
-    await mkdir(path.join(dir, ".cursor", "rules"), { recursive: true });
+  await withExternalProject(async ({ projectRoot }) => {
+    await mkdir(path.join(projectRoot, ".cursor", "rules"), { recursive: true });
     await writeFile(
-      path.join(dir, ".cursor", "rules", "windows.md"),
+      path.join(projectRoot, ".cursor", "rules", "windows.md"),
       "---\r\ndescription: CRLF rule\r\nglobs: [\"src/**\"]\r\nalwaysApply: false\r\n---\r\nCRLF 正文规则。\r\n",
     );
-    await initRuntime(dir);
 
-    const rules = await scanProjectRules(dir, { targetPaths: ["src/app.js"] });
+    const rules = await scanProjectRules(projectRoot, { targetPaths: ["src/app.js"] });
     const rule = rules.rules.find((entry) => entry.path === ".cursor/rules/windows.md");
     assert.ok(rule);
     assert.equal(rule.description, "CRLF rule");
@@ -83,9 +83,9 @@ test("project rules parse CRLF frontmatter", async () => {
 });
 
 test("project rules read a task worktree but persist runtime facts to the control root", async () => {
-  await withTempDir(async (dir) => {
-    const controlRoot = path.join(dir, "control");
-    const executionRoot = path.join(dir, "task-worktree");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const controlRoot = path.join(projectRoot, "control");
+    const executionRoot = path.join(projectRoot, "task-worktree");
     await mkdir(controlRoot, { recursive: true });
     await mkdir(path.join(executionRoot, "src"), { recursive: true });
     await writeFile(path.join(executionRoot, "AGENTS.md"), "# Task worktree rules\n\nRun the real verifier.\n");

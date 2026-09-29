@@ -9,63 +9,59 @@ import assert from "node:assert/strict";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { installAdapter } from "../src/interface/adapters.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
 import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtime.mjs";
-import { createSamplePlan } from "../src/orchestration/workflow.mjs";
 import { statusReport } from "../src/orchestration/status.mjs";
 import { continuationDirective } from "../src/ai/context.mjs";
-import { runCommand } from "../src/infra/command-runner.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withTempDir, nodeEval } from "./helpers/runtime-fixtures.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { nodeEval, installExternalTestAdapter, createSmokePlan } from "./helpers/runtime-fixtures.mjs";
 
 test("continuation directive reports runnable work across sessions", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const adapter = await installAdapter(dir, { target: "codex", mode: "npx", packageName: "wildarrange" });
-    const samplePath = await createSamplePlan(dir);
-    await importPlan(dir, samplePath);
-    const directive = await continuationDirective(dir, { sessionId: "codex-a", source: "test" });
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const adapter = await installExternalTestAdapter(projectRoot);
+    const samplePath = await createSmokePlan(root);
+    await importPlan(projectRoot, samplePath);
+    const directive = await continuationDirective(projectRoot, { sessionId: "codex-a", source: "test" });
     assert.equal(directive.shouldContinue, true);
     assert.equal(directive.reason, "runnable_task");
     assert.equal(directive.nextCommand, `${adapter.cliPrefix} run`);
-    assert.match(await readFile(resolveWildArrangePath(dir, "sessions", "continuation.md"), "utf8"), /Should continue: yes/);
+    assert.match(await readFile(resolveWildArrangePath(projectRoot, "sessions", "continuation.md"), "utf8"), /Should continue: yes/);
   });
 });
 
 test("linear loop runs worker, verifies, checkpoints, and records ledger", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const samplePath = await createSamplePlan(dir);
-    const plan = await importPlan(dir, samplePath);
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const samplePath = await createSmokePlan(root);
+    const plan = await importPlan(projectRoot, samplePath);
 
-    const result = await runNextTask(dir);
+    const result = await runNextTask(projectRoot);
     assert.equal(result.status, "completed");
     assert.equal(result.task.id, "T001");
 
-    const report = await statusReport(dir);
+    const report = await statusReport(projectRoot);
     assert.equal(report.planId, plan.id);
     assert.equal(report.completed, 1);
     assert.equal(report.pending, 0);
 
-    const artifact = await readFile(path.join(dir, ".wildarrange", "artifacts", "linear-smoke.txt"), "utf8");
+    // 外置项目是 Git 仓：产物在任务 worktree，主工作区不被 worker 直接改动。
+    const artifact = await readFile(path.join(result.task.delivery_workspace.workDir, "artifacts", "linear-smoke.txt"), "utf8");
     assert.equal(artifact.trim(), "ok");
 
-    const checkpoint = await readJson(resolveWildArrangePath(dir, "checkpoints", plan.id, "T001.json"));
+    const checkpoint = await readJson(resolveWildArrangePath(projectRoot, "checkpoints", plan.id, "T001.json"));
     assert.equal(checkpoint.taskId, "T001");
     assert.equal(checkpoint.scopeResult.status, "pass");
     assert.equal(checkpoint.reviewResult.pass, true);
 
-    const acceptanceProof = await readJson(resolveWildArrangePath(dir, "reports", "acceptance", plan.id, "T001.json"));
+    const acceptanceProof = await readJson(resolveWildArrangePath(projectRoot, "reports", "acceptance", plan.id, "T001.json"));
     assert.equal(acceptanceProof.pass, true);
     assert.ok(acceptanceProof.checks.every((check) => check.status === "pass"));
 
-    const reviewReport = await readJson(resolveWildArrangePath(dir, "reports", "reviews", plan.id, "T001.json"));
+    const reviewReport = await readJson(resolveWildArrangePath(projectRoot, "reports", "reviews", plan.id, "T001.json"));
     assert.equal(reviewReport.status, "pass");
     assert.ok(reviewReport.lanes.some((lane) => lane.name === "goal_compliance"));
 
-    const ledger = await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8");
+    const ledger = await readFile(resolveWildArrangePath(projectRoot, "ledger.jsonl"), "utf8");
     assert.match(ledger, /task_verified/);
     assert.match(ledger, /review_gate_completed/);
     assert.match(ledger, /snapshot_written/);
@@ -73,50 +69,50 @@ test("linear loop runs worker, verifies, checkpoints, and records ledger", async
 });
 
 test("linear loop honors blockedBy dependencies in order", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "dependency-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "dependency-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Dependency order",
       tasks: [
         {
           id: "T001",
           subject: "Write first artifact",
-          worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('.wildarrange/artifacts',{recursive:true}); fs.writeFileSync('.wildarrange/artifacts/first.txt','first')\"",
-          verify_commands: ["node -e \"const fs=require('fs'); if(fs.readFileSync('.wildarrange/artifacts/first.txt','utf8')!=='first') process.exit(1)\""],
-          review_commands: [nodeEval("const fs=require('fs');const stat=fs.statSync('.wildarrange/artifacts/first.txt');if(!stat.isFile()||stat.size!==5)process.exit(1)")],
+          writable_paths: ["artifacts/**"],
+          worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('artifacts',{recursive:true}); fs.writeFileSync('artifacts/first.txt','first')\"",
+          verify_commands: ["node -e \"const fs=require('fs'); if(fs.readFileSync('artifacts/first.txt','utf8')!=='first') process.exit(1)\""],
+          review_commands: [nodeEval("const fs=require('fs');const stat=fs.statSync('artifacts/first.txt');if(!stat.isFile()||stat.size!==5)process.exit(1)")],
         },
         {
           id: "T002",
           subject: "Write second artifact after first",
           blockedBy: ["T001"],
-          worker_command: "node -e \"const fs=require('fs'); fs.writeFileSync('.wildarrange/artifacts/second.txt',fs.readFileSync('.wildarrange/artifacts/first.txt','utf8')+'+second')\"",
-          verify_commands: ["node -e \"const fs=require('fs'); if(fs.readFileSync('.wildarrange/artifacts/second.txt','utf8')!=='first+second') process.exit(1)\""],
-          review_commands: [nodeEval("const fs=require('fs');const value=fs.readFileSync('.wildarrange/artifacts/second.txt','utf8');if(!value.startsWith('first+')||value.split('+').length!==2)process.exit(1)")],
+          writable_paths: ["artifacts/**"],
+          worker_command: "node -e \"const fs=require('fs'); fs.writeFileSync('artifacts/second.txt',fs.readFileSync('artifacts/first.txt','utf8')+'+second')\"",
+          verify_commands: ["node -e \"const fs=require('fs'); if(fs.readFileSync('artifacts/second.txt','utf8')!=='first+second') process.exit(1)\""],
+          review_commands: [nodeEval("const fs=require('fs');const value=fs.readFileSync('artifacts/second.txt','utf8');if(!value.startsWith('first+')||value.split('+').length!==2)process.exit(1)")],
         },
       ],
     }));
-    await importPlan(dir, planPath);
+    await importPlan(projectRoot, planPath);
 
-    const first = await runNextTask(dir);
+    const first = await runNextTask(projectRoot);
     assert.equal(first.status, "completed");
     assert.equal(first.task.id, "T001");
-    let state = await readJson(resolveWildArrangePath(dir, "team", "tasks.json"));
+    let state = await readJson(resolveWildArrangePath(projectRoot, "team", "tasks.json"));
     assert.equal(state.tasks[1].status, "pending");
 
-    const second = await runNextTask(dir);
-    assert.equal(second.status, "completed");
+    const second = await runNextTask(projectRoot);
+    assert.equal(second.status, "completed", JSON.stringify({f:second.task?.last_failure, v: second.verifyResult?.results, w: second.workerResult}));
     assert.equal(second.task.id, "T002");
-    state = await readJson(resolveWildArrangePath(dir, "team", "tasks.json"));
+    state = await readJson(resolveWildArrangePath(projectRoot, "team", "tasks.json"));
     assert.equal(state.tasks[0].status, "completed");
     assert.equal(state.tasks[1].status, "completed");
   });
 });
 
 test("verifier failure returns task to pending until max attempts", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "bad-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "bad-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Fail once",
       tasks: [{
@@ -128,28 +124,28 @@ test("verifier failure returns task to pending until max attempts", async () => 
         maxAttempts: 2,
       }],
     }));
-    await importPlan(dir, planPath);
+    await importPlan(projectRoot, planPath);
 
-    const first = await runNextTask(dir);
+    const first = await runNextTask(projectRoot);
     assert.equal(first.status, "retry");
-    let state = await readJson(resolveWildArrangePath(dir, "team", "tasks.json"));
+    let state = await readJson(resolveWildArrangePath(projectRoot, "team", "tasks.json"));
     assert.equal(state.tasks[0].status, "pending");
 
-    const second = await runNextTask(dir);
+    const second = await runNextTask(projectRoot);
     assert.equal(second.status, "failed");
-    state = await readJson(resolveWildArrangePath(dir, "team", "tasks.json"));
+    state = await readJson(resolveWildArrangePath(projectRoot, "team", "tasks.json"));
     assert.equal(state.tasks[0].status, "failed");
     assert.equal(state.tasks[0].last_failure.reason, "verifier_failed");
     assert.match(state.tasks[0].last_failure.retryHint, /FAILED:/);
     assert.match(state.tasks[0].last_failure.retryHint, /DO NOT: 不要降低或删除 verify_commands/);
 
-    const reportMd = await readFile(resolveWildArrangePath(dir, "reports", "failures", state.planId, "T001.md"), "utf8");
+    const reportMd = await readFile(resolveWildArrangePath(projectRoot, "reports", "failures", state.planId, "T001.md"), "utf8");
     assert.match(reportMd, /# Task Failure/);
     assert.match(reportMd, /verifier_failed/);
 
-    const retry = await runWorkflowNode(dir, "retry", { taskId: "T001" });
+    const retry = await runWorkflowNode(projectRoot, "retry", { taskId: "T001" });
     assert.equal(retry.status, "pending");
-    state = await readJson(resolveWildArrangePath(dir, "team", "tasks.json"));
+    state = await readJson(resolveWildArrangePath(projectRoot, "team", "tasks.json"));
     assert.equal(state.tasks[0].status, "pending");
     assert.equal(state.tasks[0].manual_retry_count, 1);
     assert.equal(state.tasks[0].maxAttempts, 3);
@@ -157,9 +153,8 @@ test("verifier failure returns task to pending until max attempts", async () => 
 });
 
 test("acceptance proof rejects no-op tasks with trivial worker and verifier", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "noop-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "noop-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Noop guard",
       tasks: [{
@@ -167,12 +162,12 @@ test("acceptance proof rejects no-op tasks with trivial worker and verifier", as
         subject: "看似完成实则什么都没做",
         worker_command: "node -e \"process.exit(0)\"",
         verify_commands: ["node -e \"process.exit(0)\""],
-        review_commands: [nodeEval("const fs=require('fs');const state=JSON.parse(fs.readFileSync('.wildarrange/team/tasks.json','utf8'));const task=state.tasks.find((entry)=>entry.id==='T001');if(fs.existsSync('src')||!task||!task.worker_command.includes('process.exit(0)'))process.exit(1)")],
+        review_commands: [nodeEval(`const fs=require('fs');const state=JSON.parse(fs.readFileSync(${JSON.stringify(resolveWildArrangePath(projectRoot, "team", "tasks.json"))},'utf8'));const task=state.tasks.find((entry)=>entry.id==='T001');if(fs.existsSync('src')||!task||!task.worker_command.includes('process.exit(0)'))process.exit(1)`)],
       }],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importPlan(projectRoot, planPath);
 
-    const result = await runNextTask(dir);
+    const result = await runNextTask(projectRoot);
     assert.notEqual(result.task.status, "completed");
     assert.equal(result.task.last_failure.reason, "acceptance_proof_failed");
     assert.ok(result.acceptanceProof.checks.some((check) => check.name === "not_noop_task" && check.status === "fail"));
@@ -180,47 +175,34 @@ test("acceptance proof rejects no-op tasks with trivial worker and verifier", as
 });
 
 test("worker execution records a pre-execute workspace snapshot in a git repo", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    for (const command of [
-      "git init",
-      "git config user.email wildarrange@test.local",
-      "git config user.name wildarrange-test",
-      "git add -A",
-      "git commit -m init --no-gpg-sign",
-    ]) {
-      const result = await runCommand(command, dir);
-      assert.equal(result.exitCode, 0, `${command}: ${result.stderr}`);
-    }
-
-    const planPath = path.join(dir, "snapshot-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "snapshot-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Snapshot before execute",
       tasks: [{
         id: "T001",
         subject: "写一个工件文件",
-        writable_paths: [".wildarrange/artifacts/**", "src/**"],
+        writable_paths: ["artifacts/**", "src/**"],
         worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/out.txt','snapshot')\"",
         verify_commands: ["node -e \"const fs=require('fs'); process.exit(fs.readFileSync('src/out.txt','utf8')==='snapshot'?0:1)\""],
         review_commands: [nodeEval("const fs=require('fs');const stat=fs.statSync('src/out.txt');if(!stat.isFile()||stat.size!==8)process.exit(1)")],
       }],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importPlan(projectRoot, planPath);
 
-    const result = await runNextTask(dir);
+    const result = await runNextTask(projectRoot);
     assert.equal(result.status, "completed");
     const snapshotEvidence = result.task.evidence.find((entry) => entry.kind === "workspace_snapshot");
     assert.ok(snapshotEvidence);
     assert.equal(snapshotEvidence.available, true);
     assert.ok(snapshotEvidence.headCommit);
-    assert.match(await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8"), /pre_execute_snapshot/);
+    assert.match(await readFile(resolveWildArrangePath(projectRoot, "ledger.jsonl"), "utf8"), /pre_execute_snapshot/);
   });
 });
 
 test("linear command workers reject read-only long-lived task owners", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "read-only-worker-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "read-only-worker-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Read-only owner must not execute",
       tasks: [{
@@ -232,10 +214,10 @@ test("linear command workers reject read-only long-lived task owners", async () 
         verify_commands: ["node --version"],
       }],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importPlan(projectRoot, planPath);
 
-    await assert.rejects(() => runNextTask(dir), /agent BaiZe is read-only and cannot enter a command worker/);
-    await assert.rejects(() => runWorkflowNode(dir, "execute", { taskId: "T001" }), /agent BaiZe is read-only and cannot enter a command worker/);
-    await assert.rejects(readFile(path.join(dir, "src", "forbidden.js"), "utf8"), /ENOENT/);
+    await assert.rejects(() => runNextTask(projectRoot), /agent BaiZe is read-only and cannot enter a command worker/);
+    await assert.rejects(() => runWorkflowNode(projectRoot, "execute", { taskId: "T001" }), /agent BaiZe is read-only and cannot enter a command worker/);
+    await assert.rejects(readFile(path.join(projectRoot, "src", "forbidden.js"), "utf8"), /ENOENT/);
   });
 });

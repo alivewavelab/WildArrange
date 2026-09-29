@@ -16,12 +16,12 @@ import { dashboardData } from "../src/orchestration/status.mjs";
 import { runCommand } from "../src/infra/command-runner.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withTempDir, nodeEval } from "./helpers/runtime-fixtures.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { nodeEval, writePolicyConfig } from "./helpers/runtime-fixtures.mjs";
 
 test("parallel agents run task packets concurrently and publish results", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "parallel-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "parallel-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Parallel smoke",
       tasks: [
@@ -30,21 +30,21 @@ test("parallel agents run task packets concurrently and publish results", async 
           subject: "Parallel research one",
           verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
           review_commands: ["node --version"],
-          writable_paths: [".wildarrange/artifacts/one.txt"],
+          writable_paths: ["artifacts/one.txt"],
         },
         {
           id: "T002",
           subject: "Parallel research two",
           verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
           review_commands: ["node --version"],
-          writable_paths: [".wildarrange/artifacts/two.txt"],
+          writable_paths: ["artifacts/two.txt"],
         },
       ],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importPlan(projectRoot, planPath);
 
     const command = "node -e \"const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'parallel done'}));\" {outputJson}";
-    const batch = await runParallelAgents(dir, {
+    const batch = await runParallelAgents(projectRoot, {
       maxAgents: 2,
       agent: "ZhuRong",
       command,
@@ -56,34 +56,33 @@ test("parallel agents run task packets concurrently and publish results", async 
     assert.ok(batch.results.every((result) => result.lifecycle.status === "awaiting_user_acceptance"));
     assert.ok(batch.results.every((result) => result.result.summary === "parallel done"));
 
-    const messages = await listTeamMessages(dir, { agent: "Jiuwei" });
+    const messages = await listTeamMessages(projectRoot, { agent: "Jiuwei" });
     assert.equal(messages.length, 2);
     assert.ok(messages.every((message) => message.summary.includes("parallel result")));
 
-    const runs = await listParallelAgentRuns(dir);
+    const runs = await listParallelAgentRuns(projectRoot);
     assert.equal(runs.runs.length, 1);
     assert.equal(runs.runs[0].results.length, 2);
 
-    const status = await parallelAgentStatus(dir, { runId: batch.runId });
+    const status = await parallelAgentStatus(projectRoot, { runId: batch.runId });
     assert.equal(status.runCount, 1);
     assert.equal(status.runs[0].summary.awaiting_user_acceptance, 2);
     assert.ok(status.runs[0].results.every((result) => result.lifecycle.status === "awaiting_user_acceptance"));
 
-    const closed = await closeParallelAgentRun(dir, { runId: batch.runId, taskId: "T001", reason: "user_accepted" });
+    const closed = await closeParallelAgentRun(projectRoot, { runId: batch.runId, taskId: "T001", reason: "user_accepted" });
     assert.deepEqual(closed.closed, ["T001"]);
-    const afterClose = await parallelAgentStatus(dir, { runId: batch.runId });
+    const afterClose = await parallelAgentStatus(projectRoot, { runId: batch.runId });
     const closedTask = afterClose.runs[0].results.find((result) => result.taskId === "T001");
     assert.equal(closedTask.lifecycle.status, "closed");
     assert.equal(closedTask.lifecycle.closeReason, "user_accepted");
-    assert.match(await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8"), /parallel_agents_completed/);
-    assert.match(await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8"), /parallel_agent_run_closed/);
+    assert.match(await readFile(resolveWildArrangePath(projectRoot, "ledger.jsonl"), "utf8"), /parallel_agents_completed/);
+    assert.match(await readFile(resolveWildArrangePath(projectRoot, "ledger.jsonl"), "utf8"), /parallel_agent_run_closed/);
   });
 });
 
 test("read-only long-lived Agents cannot enter the parallel command worker", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "parallel-readonly-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "parallel-readonly-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Read-only Agent boundary",
       tasks: [{
@@ -94,26 +93,25 @@ test("read-only long-lived Agents cannot enter the parallel command worker", asy
         writable_paths: [],
       }],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importPlan(projectRoot, planPath);
 
     for (const agent of ["DiJiang", "BaiZe", "LuWu"]) {
-      const markerPath = path.join(dir, `${agent}.wrote`);
+      const markerPath = path.join(projectRoot, `${agent}.wrote`);
       const command = nodeEval(`require("fs").writeFileSync(${JSON.stringify(markerPath)}, "forbidden")`);
       await assert.rejects(
-        runParallelAgents(dir, { taskIds: ["T001"], agent, command }),
+        runParallelAgents(projectRoot, { taskIds: ["T001"], agent, command }),
         new RegExp(`agent ${agent} is read-only`),
       );
       await assert.rejects(readFile(markerPath, "utf8"), /ENOENT/);
     }
-    const ledger = await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8");
+    const ledger = await readFile(resolveWildArrangePath(projectRoot, "ledger.jsonl"), "utf8");
     assert.doesNotMatch(ledger, /parallel_agents_started/);
   });
 });
 
 test("parallel explicit task selection cannot bypass blockedBy", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "parallel-blocked-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "parallel-blocked-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Parallel dependency boundary",
       tasks: [
@@ -134,24 +132,23 @@ test("parallel explicit task selection cannot bypass blockedBy", async () => {
         },
       ],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importPlan(projectRoot, planPath);
 
-    const markerPath = path.join(dir, "blocked-task-ran.txt");
+    const markerPath = path.join(projectRoot, "blocked-task-ran.txt");
     const command = nodeEval(`require("fs").writeFileSync(${JSON.stringify(markerPath)}, "should not run")`);
     await assert.rejects(
-      runParallelAgents(dir, { taskIds: ["T002"], agent: "ZhuRong", command }),
+      runParallelAgents(projectRoot, { taskIds: ["T002"], agent: "ZhuRong", command }),
       /task T002 blocked by T001/,
     );
     await assert.rejects(readFile(markerPath, "utf8"), /ENOENT/);
-    const runs = await listParallelAgentRuns(dir);
+    const runs = await listParallelAgentRuns(projectRoot);
     assert.equal(runs.runs.length, 0);
   });
 });
 
 test("parallel agents without a runner command are marked skipped", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "parallel-skipped-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "parallel-skipped-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Parallel skipped",
       tasks: [{
@@ -159,12 +156,12 @@ test("parallel agents without a runner command are marked skipped", async () => 
         subject: "Prepare packet only",
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
-        writable_paths: [".wildarrange/artifacts/one.txt"],
+        writable_paths: ["artifacts/one.txt"],
       }],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importPlan(projectRoot, planPath);
 
-    const batch = await runParallelAgents(dir, { maxAgents: 1 });
+    const batch = await runParallelAgents(projectRoot, { maxAgents: 1 });
     assert.equal(batch.status, "skipped");
     assert.equal(batch.results[0].status, "skipped");
     assert.equal(batch.results[0].pass, false);
@@ -173,18 +170,18 @@ test("parallel agents without a runner command are marked skipped", async () => 
 });
 
 test("parallel agents can use configured adapter command templates", async () => {
-  await withTempDir(async (dir) => {
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
+  await withExternalProject(async ({ projectRoot, root, governanceRoot }) => {
+    await writePolicyConfig(governanceRoot, JSON.stringify({
       parallelAgents: {
         spawnAdapters: {
           codex: {
-            command: "node -e \"const fs=require('fs'); const packet=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); fs.writeFileSync(process.argv[2], JSON.stringify({summary:'adapter '+packet.agent, files:[{path:'.wildarrange/artifacts/adapter.txt', content:packet.task.id}]}));\" {taskJson} {outputJson}",
+            command: "node -e \"const fs=require('fs'); const packet=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); fs.writeFileSync(process.argv[2], JSON.stringify({summary:'adapter '+packet.agent, files:[{path:'artifacts/adapter.txt', content:packet.task.id}]}));\" {taskJson} {outputJson}",
           },
         },
       },
     }, null, 2));
-    await initRuntime(dir);
-    const planPath = path.join(dir, "adapter-plan.json");
+    await initRuntime(projectRoot);
+    const planPath = path.join(root, "adapter-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Adapter spawn",
       tasks: [{
@@ -192,12 +189,12 @@ test("parallel agents can use configured adapter command templates", async () =>
         subject: "Use adapter command",
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
-        writable_paths: [".wildarrange/artifacts/adapter.txt"],
+        writable_paths: ["artifacts/adapter.txt"],
       }],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importPlan(projectRoot, planPath);
 
-    const batch = await runParallelAgents(dir, {
+    const batch = await runParallelAgents(projectRoot, {
       taskIds: ["T001"],
       agent: "ZhuRong",
       adapter: "codex",
@@ -206,14 +203,13 @@ test("parallel agents can use configured adapter command templates", async () =>
     assert.equal(batch.status, "completed");
     assert.equal(batch.results[0].adapter, "codex");
     assert.equal(batch.results[0].spawnSource, "adapter");
-    assert.equal(batch.results[0].result.files[0].path, ".wildarrange/artifacts/adapter.txt");
-  });
+    assert.equal(batch.results[0].result.files[0].path, "artifacts/adapter.txt");
+  }, { init: false });
 });
 
 test("parallel admission applies child artifacts only after gates pass", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "parallel-admit-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "parallel-admit-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Parallel admission",
       tasks: [
@@ -226,18 +222,18 @@ test("parallel admission applies child artifacts only after gates pass", async (
         },
       ],
     }, null, 2));
-    const plan = await importPlan(dir, planPath);
+    const plan = await importPlan(projectRoot, planPath);
 
     const command = [
       nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
-    const batch = await runParallelAgents(dir, {
+    const batch = await runParallelAgents(projectRoot, {
       taskIds: ["T001"],
       agent: "ZhuRong",
       command,
     });
-    const admitted = await admitParallelAgentResult(dir, {
+    const admitted = await admitParallelAgentResult(projectRoot, {
       runId: batch.runId,
       taskId: "T001",
     });
@@ -245,10 +241,12 @@ test("parallel admission applies child artifacts only after gates pass", async (
     assert.equal(admitted.status, "completed", JSON.stringify(admitted, null, 2));
     assert.equal(admitted.acceptanceProof.pass, true);
     assert.deepEqual(admitted.appliedPaths, ["src/parallel.txt"]);
-    assert.equal(await readFile(path.join(dir, "src", "parallel.txt"), "utf8"), "ok\n");
-    const releasedResult = await readJson(resolveWildArrangePath(dir, "agent-runs", batch.runId, "T001", "result.json"));
+    // 外置模式下项目是 Git 仓：产物落在任务 worktree，主工作区保持不动。
+    assert.equal(await readFile(path.join(admitted.task.delivery_workspace.workDir, "src", "parallel.txt"), "utf8"), "ok\n");
+    await assert.rejects(readFile(path.join(projectRoot, "src", "parallel.txt"), "utf8"), /ENOENT/);
+    const releasedResult = await readJson(resolveWildArrangePath(projectRoot, "agent-runs", batch.runId, "T001", "result.json"));
     assert.equal(releasedResult.lifecycle.status, "released");
-    const checkpoint = await readJson(resolveWildArrangePath(dir, "checkpoints", plan.id, "T001.json"));
+    const checkpoint = await readJson(resolveWildArrangePath(projectRoot, "checkpoints", plan.id, "T001.json"));
     assert.equal(checkpoint.taskId, "T001");
     assert.equal(checkpoint.verifyResult.pass, true);
     assert.equal(checkpoint.scopeResult.status, "pass");
@@ -257,9 +255,8 @@ test("parallel admission applies child artifacts only after gates pass", async (
 });
 
 test("parallel admission rolls back child artifacts when gates fail", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "parallel-rollback-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "parallel-rollback-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Parallel admission rollback",
       tasks: [{
@@ -270,44 +267,46 @@ test("parallel admission rolls back child artifacts when gates fail", async () =
         writable_paths: ["src/**"],
       }],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importPlan(projectRoot, planPath);
 
     const command = [
       nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'bad artifact', files:[{path:'src/parallel.txt', content:'bad\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
-    const batch = await runParallelAgents(dir, {
+    const batch = await runParallelAgents(projectRoot, {
       taskIds: ["T001"],
       agent: "ZhuRong",
       command,
     });
-    const admitted = await admitParallelAgentResult(dir, {
+    const admitted = await admitParallelAgentResult(projectRoot, {
       runId: batch.runId,
       taskId: "T001",
     });
 
     assert.equal(admitted.status, "retry");
     assert.equal(admitted.rollback.status, "rolled_back");
-    await assert.rejects(readFile(path.join(dir, "src", "parallel.txt"), "utf8"), /ENOENT/);
-    const result = await readJson(resolveWildArrangePath(dir, "agent-runs", batch.runId, "T001", "result.json"));
+    await assert.rejects(readFile(path.join(projectRoot, "src", "parallel.txt"), "utf8"), /ENOENT/);
+    // 回滚必须同时清掉任务 worktree 里的子产物。
+    assert.ok(batch.results[0].workDir, "the run must expose the task worktree");
+    await assert.rejects(readFile(path.join(path.resolve(projectRoot, batch.results[0].workDir), "src", "parallel.txt"), "utf8"), /ENOENT/);
+    const result = await readJson(resolveWildArrangePath(projectRoot, "agent-runs", batch.runId, "T001", "result.json"));
     assert.equal(result.lifecycle.status, "awaiting_revision");
     assert.equal(result.lifecycle.rollback.status, "rolled_back");
-    assert.match(await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8"), /parallel_agent_admission_rolled_back/);
+    assert.match(await readFile(resolveWildArrangePath(projectRoot, "ledger.jsonl"), "utf8"), /parallel_agent_admission_rolled_back/);
   });
 });
 
 test("parallel agents can isolate edits in git worktrees and admit patches", async () => {
-  await withTempDir(async (dir) => {
-    await runCommand("git init", dir);
-    await runCommand("git config user.email test@example.com", dir);
-    await runCommand("git config user.name 'WildArrange Test'", dir);
-    await writeFile(path.join(dir, "README.md"), "root\n");
-    await runCommand("git add README.md", dir);
-    await runCommand("git commit -m initial", dir);
-    const mainBefore = (await runCommand("git rev-parse HEAD", dir)).stdout.trim();
+  await withExternalProject(async ({ projectRoot, root }) => {
+    await runCommand("git init", projectRoot);
+    await runCommand("git config user.email test@example.com", projectRoot);
+    await runCommand("git config user.name 'WildArrange Test'", projectRoot);
+    await writeFile(path.join(projectRoot, "README.md"), "root\n");
+    await runCommand("git add README.md", projectRoot);
+    await runCommand("git commit -m initial", projectRoot);
+    const mainBefore = (await runCommand("git rev-parse HEAD", projectRoot)).stdout.trim();
 
-    await initRuntime(dir);
-    const planPath = resolveWildArrangePath(dir, "artifacts", "worktree-plan.json");
+    const planPath = resolveWildArrangePath(projectRoot, "artifacts", "worktree-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Worktree admission",
       tasks: [{
@@ -318,13 +317,13 @@ test("parallel agents can isolate edits in git worktrees and admit patches", asy
         writable_paths: ["src/**"],
       }],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importPlan(projectRoot, planPath);
 
     const command = [
       nodeEval("const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/worktree.txt','ok\\n'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'worktree patch ready'}));"),
       "{outputJson}",
     ].join(" ");
-    const batch = await runParallelAgents(dir, {
+    const batch = await runParallelAgents(projectRoot, {
       taskIds: ["T001"],
       agent: "ZhuRong",
       isolation: "git-worktree",
@@ -335,31 +334,30 @@ test("parallel agents can isolate edits in git worktrees and admit patches", asy
     assert.equal(batch.results[0].isolation, "git-worktree");
     assert.equal(batch.results[0].worktreeAvailable, true);
     assert.deepEqual(batch.results[0].patch.changedPaths, ["src/worktree.txt"]);
-    const dashboard = await dashboardData(dir);
+    const dashboard = await dashboardData(projectRoot);
     assert.equal(dashboard.activeWorkspaces.length, 1);
     assert.equal(dashboard.activeWorkspaces[0].taskId, "T001");
     assert.equal(dashboard.activeWorkspaces[0].workDir, batch.results[0].workDir);
     assert.match(dashboard.activeWorkspaces[0].branch, /^wildarrange\/task\/.+\/T001$/);
 
-    const admitted = await admitParallelAgentResult(dir, {
+    const admitted = await admitParallelAgentResult(projectRoot, {
       runId: batch.runId,
       taskId: "T001",
     });
 
     assert.equal(admitted.status, "completed", JSON.stringify(admitted, null, 2));
     assert.deepEqual(admitted.appliedPaths, ["src/worktree.txt"]);
-    await assert.rejects(readFile(path.join(dir, "src", "worktree.txt"), "utf8"), /ENOENT/);
-    assert.equal((await runCommand("git rev-parse HEAD", dir)).stdout.trim(), mainBefore);
-    const taskWorktree = path.resolve(dir, batch.results[0].workDir);
+    await assert.rejects(readFile(path.join(projectRoot, "src", "worktree.txt"), "utf8"), /ENOENT/);
+    assert.equal((await runCommand("git rev-parse HEAD", projectRoot)).stdout.trim(), mainBefore);
+    const taskWorktree = path.resolve(projectRoot, batch.results[0].workDir);
     assert.equal((await readFile(path.join(taskWorktree, "src", "worktree.txt"), "utf8")).replaceAll("\r\n", "\n"), "ok\n");
     assert.equal((await runCommand("git status --short", taskWorktree)).stdout.trim(), "");
   });
 });
 
 test("parallel admission rejects artifacts outside writable paths", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "parallel-admit-deny-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "parallel-admit-deny-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Parallel admission deny",
       tasks: [
@@ -372,22 +370,22 @@ test("parallel admission rejects artifacts outside writable paths", async () => 
         },
       ],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importPlan(projectRoot, planPath);
 
     const command = [
       nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'bad artifact', files:[{path:'docs/leak.md', content:'nope\\n'}]}));"),
       "{outputJson}",
     ].join(" ");
-    const batch = await runParallelAgents(dir, {
+    const batch = await runParallelAgents(projectRoot, {
       taskIds: ["T001"],
       agent: "ZhuRong",
       command,
     });
 
     await assert.rejects(
-      admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" }),
+      admitParallelAgentResult(projectRoot, { runId: batch.runId, taskId: "T001" }),
       /parallel admission denied/,
     );
-    await assert.rejects(readFile(path.join(dir, "docs", "leak.md"), "utf8"), /ENOENT/);
+    await assert.rejects(readFile(path.join(projectRoot, "docs", "leak.md"), "utf8"), /ENOENT/);
   });
 });

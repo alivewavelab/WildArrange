@@ -11,13 +11,12 @@ import path from "node:path";
 import test from "node:test";
 import { startDashboardServer } from "../src/interface/dashboard.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
-import { withTempDir, withDashboard, fetchJson, postJson } from "./helpers/runtime-fixtures.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withDashboard, fetchJson, postJson } from "./helpers/runtime-fixtures.mjs";
 
 test("dashboard API drives task, inbox, and summary operations without bypassing gates", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "dashboard-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "dashboard-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Dashboard workflow",
       tasks: [
@@ -38,9 +37,9 @@ test("dashboard API drives task, inbox, and summary operations without bypassing
         },
       ],
     }));
-    await importPlan(dir, planPath);
+    await importPlan(projectRoot, planPath);
 
-    await withDashboard(dir, async (baseUrl) => {
+    await withDashboard(projectRoot, async (baseUrl) => {
       const authHeaders = { authorization: "Bearer dashboard-token" };
       const state = await fetchJson(`${baseUrl}/api/state`);
       assert.equal(state.response.status, 200);
@@ -144,14 +143,13 @@ test("dashboard API drives task, inbox, and summary operations without bypassing
 });
 
 test("dashboard requires a token for non-loopback hosts and enforces API auth", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot }) => {
     assert.throws(
-      () => startDashboardServer(dir, { host: "0.0.0.0", port: 0 }),
+      () => startDashboardServer(projectRoot, { host: "0.0.0.0", port: 0 }),
       /requires --token or WILDARRANGE_DASHBOARD_TOKEN/,
     );
 
-    const server = await startDashboardServer(dir, { host: "127.0.0.1", port: 0, token: "secret-token" });
+    const server = await startDashboardServer(projectRoot, { host: "127.0.0.1", port: 0, token: "secret-token" });
     try {
       const address = server.address();
       const port = typeof address === "object" && address ? address.port : null;

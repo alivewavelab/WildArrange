@@ -10,9 +10,8 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { importPlan, validatePlanGraph } from "../src/orchestration/plan-state.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withTempDir } from "./helpers/runtime-fixtures.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 test("plan graph validation rejects invalid task dependencies", () => {
   assert.doesNotThrow(() => validatePlanGraph({
@@ -59,9 +58,8 @@ test("plan graph validation rejects invalid task dependencies", () => {
 });
 
 test("plan import rejects unsafe task Skill names before persisting", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "unsafe-skill-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "unsafe-skill-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Unsafe Skill",
       objective: "Reject traversal",
@@ -75,15 +73,14 @@ test("plan import rejects unsafe task Skill names before persisting", async () =
       }],
     }, null, 2));
 
-    await assert.rejects(importPlan(dir, planPath), /invalid skill name/);
-    assert.equal(await readJson(resolveWildArrangePath(dir, "team", "tasks.json"), null), null);
+    await assert.rejects(importPlan(projectRoot, planPath), /invalid skill name/);
+    assert.equal(await readJson(resolveWildArrangePath(projectRoot, "team", "tasks.json"), null), null);
   });
 });
 
 test("plan import rejects unknown blockedBy before writing task state", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "bad-dependency-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "bad-dependency-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Bad dependency",
       tasks: [{
@@ -95,16 +92,15 @@ test("plan import rejects unknown blockedBy before writing task state", async ()
       }],
     }));
 
-    await assert.rejects(() => importPlan(dir, planPath), /unknown task/);
-    const state = await readJson(resolveWildArrangePath(dir, "team", "tasks.json"), null);
+    await assert.rejects(() => importPlan(projectRoot, planPath), /unknown task/);
+    const state = await readJson(resolveWildArrangePath(projectRoot, "team", "tasks.json"), null);
     assert.equal(state, null);
   });
 });
 
 test("plan import never persists a requested completed status", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "forged-completion-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "forged-completion-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Forged completion",
       objective: "A plan file claiming its work is already done",
@@ -117,21 +113,20 @@ test("plan import never persists a requested completed status", async () => {
       }],
     }, null, 2));
 
-    const plan = await importPlan(dir, planPath);
+    const plan = await importPlan(projectRoot, planPath);
     assert.equal(plan.tasks[0].status, "needs_user_decision");
-    const ledger = await readJson(resolveWildArrangePath(dir, "team", "tasks.json"));
+    const ledger = await readJson(resolveWildArrangePath(projectRoot, "team", "tasks.json"));
     assert.equal(ledger.tasks.length, 1);
     assert.equal(ledger.tasks[0].status, "needs_user_decision");
     assert.equal(ledger.tasks[0].history.at(-1).status, "needs_user_decision");
-    const persistedPlan = await readJson(resolveWildArrangePath(dir, "plans", `${plan.id}.json`));
+    const persistedPlan = await readJson(resolveWildArrangePath(projectRoot, "plans", `${plan.id}.json`));
     assert.equal(persistedPlan.tasks[0].status, "needs_user_decision");
   });
 });
 
 test("plan import rejects high-risk product plans that are under-split", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "lazy-product-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "lazy-product-plan.json");
     await writeFile(planPath, JSON.stringify({
       id: "plan_content_to_interactive_tools",
       title: "内容转互动工具产品 MVP",
@@ -159,16 +154,15 @@ test("plan import rejects high-risk product plans that are under-split", async (
       ],
     }, null, 2));
 
-    await assert.rejects(() => importPlan(dir, planPath), /requires at least 4 tasks/);
-    const state = await readJson(resolveWildArrangePath(dir, "team", "tasks.json"), null);
+    await assert.rejects(() => importPlan(projectRoot, planPath), /requires at least 4 tasks/);
+    const state = await readJson(resolveWildArrangePath(projectRoot, "team", "tasks.json"), null);
     assert.equal(state, null);
   });
 });
 
 test("plan import persists route decisions and fills missing task category and skills", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "route-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "route-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Visual work",
       tasks: [{
@@ -182,8 +176,8 @@ test("plan import persists route decisions and fills missing task category and s
       }],
     }));
 
-    await importPlan(dir, planPath);
-    const state = await readJson(resolveWildArrangePath(dir, "team", "tasks.json"));
+    await importPlan(projectRoot, planPath);
+    const state = await readJson(resolveWildArrangePath(projectRoot, "team", "tasks.json"));
     const task = state.tasks[0];
 
     assert.equal(task.category, "visual-engineering");
@@ -192,15 +186,14 @@ test("plan import persists route decisions and fills missing task category and s
     assert.ok(task.skills.includes("frontend-ui-ux"));
     assert.ok(task.skills.includes("visual-qa"));
 
-    const ledger = await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8");
+    const ledger = await readFile(resolveWildArrangePath(projectRoot, "ledger.jsonl"), "utf8");
     assert.match(ledger, /plan_routed/);
   });
 });
 
 test("plan import preserves explicit category while recording route decision", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "explicit-category-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "explicit-category-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Explicit quick work",
       tasks: [{
@@ -214,8 +207,8 @@ test("plan import preserves explicit category while recording route decision", a
       }],
     }));
 
-    await importPlan(dir, planPath);
-    const state = await readJson(resolveWildArrangePath(dir, "team", "tasks.json"));
+    await importPlan(projectRoot, planPath);
+    const state = await readJson(resolveWildArrangePath(projectRoot, "team", "tasks.json"));
     const task = state.tasks[0];
 
     assert.equal(task.category, "quick");
@@ -226,9 +219,8 @@ test("plan import preserves explicit category while recording route decision", a
 });
 
 test("plan import applies default gates and scope to every task", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "defaults-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "defaults-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Default gates",
       defaults: {
@@ -245,8 +237,8 @@ test("plan import applies default gates and scope to every task", async () => {
       }],
     }));
 
-    await importPlan(dir, planPath);
-    const state = await readJson(resolveWildArrangePath(dir, "team", "tasks.json"));
+    await importPlan(projectRoot, planPath);
+    const state = await readJson(resolveWildArrangePath(projectRoot, "team", "tasks.json"));
     const task = state.tasks[0];
     assert.deepEqual(task.verify_commands, ["node -e \"if(!process.version)process.exit(1)\""]);
     assert.deepEqual(task.review_commands, ["node -e \"if(!process.version)process.exit(1)\""]);
@@ -257,9 +249,8 @@ test("plan import applies default gates and scope to every task", async () => {
 });
 
 test("plan import warns about possible no-op tasks", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "noop-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "noop-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "No-op warning",
       tasks: [{
@@ -271,8 +262,8 @@ test("plan import warns about possible no-op tasks", async () => {
       }],
     }));
 
-    await importPlan(dir, planPath);
-    const state = await readJson(resolveWildArrangePath(dir, "team", "tasks.json"));
+    await importPlan(projectRoot, planPath);
+    const state = await readJson(resolveWildArrangePath(projectRoot, "team", "tasks.json"));
     assert.equal(state.tasks[0].governanceWarnings[0].code, "possible_noop_task");
   });
 });

@@ -14,14 +14,13 @@ import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtim
 import { recordTaskEvidence } from "../src/orchestration/task-board.mjs";
 import { recordReviewBlocker, resolveReviewBlocker, steerWorkflow } from "../src/orchestration/change-governance.mjs";
 import { attentionReport, dashboardData, statusReport } from "../src/orchestration/status.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withTempDir, nodeEval } from "./helpers/runtime-fixtures.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { nodeEval } from "./helpers/runtime-fixtures.mjs";
 
 test("success criteria evidence is recorded and required by checkpoint", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "criteria-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "criteria-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Criteria evidence",
       tasks: [{
@@ -36,9 +35,9 @@ test("success criteria evidence is recorded and required by checkpoint", async (
         ],
       }],
     }));
-    await importPlan(dir, planPath);
+    await importPlan(projectRoot, planPath);
 
-    const recorded = await recordTaskEvidence(dir, {
+    const recorded = await recordTaskEvidence(projectRoot, {
       taskId: "T001",
       criterionId: "C001",
       status: "pass",
@@ -46,16 +45,15 @@ test("success criteria evidence is recorded and required by checkpoint", async (
     });
     assert.equal(recorded.criterion.status, "pass");
 
-    const result = await runNextTask(dir);
+    const result = await runNextTask(projectRoot);
     assert.equal(result.status, "completed", JSON.stringify(result, null, 2));
     assert.equal(result.task.successCriteria[0].status, "pass");
   });
 });
 
 test("unbound success criteria are not auto-passed by verifier", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "criteria-unbound-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "criteria-unbound-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Unbound criteria evidence",
       tasks: [{
@@ -69,9 +67,9 @@ test("unbound success criteria are not auto-passed by verifier", async () => {
         ],
       }],
     }));
-    await importPlan(dir, planPath);
+    await importPlan(projectRoot, planPath);
 
-    const result = await runNextTask(dir);
+    const result = await runNextTask(projectRoot);
     assert.equal(result.status, "failed");
     assert.equal(result.task.successCriteria[0].status, "pending");
     assert.equal(result.task.last_failure.reason, "criteria_failed");
@@ -79,10 +77,9 @@ test("unbound success criteria are not auto-passed by verifier", async () => {
 });
 
 test("success criteria can be auto-passed only with explicit verifier command refs", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot, root }) => {
     const verifyCommand = nodeEval("const fs=require('fs');if(fs.readFileSync('src/bound-criteria.txt','utf8')!=='bound criterion')process.exit(1)");
-    const planPath = path.join(dir, "criteria-bound-plan.json");
+    const planPath = path.join(root, "criteria-bound-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Bound criteria evidence",
       tasks: [{
@@ -97,9 +94,9 @@ test("success criteria can be auto-passed only with explicit verifier command re
         ],
       }],
     }));
-    await importPlan(dir, planPath);
+    await importPlan(projectRoot, planPath);
 
-    const result = await runNextTask(dir);
+    const result = await runNextTask(projectRoot);
     assert.equal(result.status, "completed");
     assert.equal(result.task.successCriteria[0].status, "pass");
     assert.match(result.task.successCriteria[0].evidence[0].evidence, /explicitly bound/);
@@ -107,9 +104,8 @@ test("success criteria can be auto-passed only with explicit verifier command re
 });
 
 test("steering safely adds tasks and rejects weakening proposals", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "steer-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "steer-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Steer workflow",
       tasks: [{
@@ -120,9 +116,9 @@ test("steering safely adds tasks and rejects weakening proposals", async () => {
         review_commands: ["node --version"],
       }],
     }));
-    await importPlan(dir, planPath);
+    await importPlan(projectRoot, planPath);
 
-    const rejected = await steerWorkflow(dir, {
+    const rejected = await steerWorkflow(projectRoot, {
       kind: "revise_acceptance",
       targetTaskId: "T001",
       evidence: "skip tests to complete faster",
@@ -133,7 +129,7 @@ test("steering safely adds tasks and rejects weakening proposals", async () => {
     assert.equal(rejected.accepted, false);
     assert.ok(rejected.audit.invariant.rejectedReasons.includes("weakened completion"));
 
-    const emptyVerifier = await steerWorkflow(dir, {
+    const emptyVerifier = await steerWorkflow(projectRoot, {
       kind: "revise_acceptance",
       targetTaskId: "T001",
       evidence: "Verifier removal was proposed by mistake.",
@@ -144,7 +140,7 @@ test("steering safely adds tasks and rejects weakening proposals", async () => {
     assert.equal(emptyVerifier.accepted, false);
     assert.ok(emptyVerifier.audit.invariant.rejectedReasons.includes("verify_commands cannot be empty"));
 
-    const removedVerifier = await steerWorkflow(dir, {
+    const removedVerifier = await steerWorkflow(projectRoot, {
       kind: "revise_acceptance",
       targetTaskId: "T001",
       evidence: "Use a different command instead.",
@@ -155,7 +151,7 @@ test("steering safely adds tasks and rejects weakening proposals", async () => {
     assert.equal(removedVerifier.accepted, false);
     assert.ok(removedVerifier.audit.invariant.rejectedReasons.some((reason) => reason.includes("verify_commands cannot remove existing gate command")));
 
-    const accepted = await steerWorkflow(dir, {
+    const accepted = await steerWorkflow(projectRoot, {
       kind: "add_task",
       source: "test",
       evidence: "User added a follow-up task with explicit verifier.",
@@ -171,7 +167,7 @@ test("steering safely adds tasks and rejects weakening proposals", async () => {
     assert.equal(accepted.accepted, true);
     assert.equal(accepted.taskState.tasks.length, 2);
 
-    const incompleteReorder = await steerWorkflow(dir, {
+    const incompleteReorder = await steerWorkflow(projectRoot, {
       kind: "reorder_pending",
       source: "test",
       evidence: "Only moving one pending task should be rejected.",
@@ -180,14 +176,13 @@ test("steering safely adds tasks and rejects weakening proposals", async () => {
     });
     assert.equal(incompleteReorder.accepted, false);
     assert.ok(incompleteReorder.audit.invariant.rejectedReasons.some((reason) => reason.includes("must include every pending task exactly once")));
-    assert.match(await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8"), /steering_applied/);
+    assert.match(await readFile(resolveWildArrangePath(projectRoot, "ledger.jsonl"), "utf8"), /steering_applied/);
   });
 });
 
 test("empty verifier commands cannot complete even if task state is corrupted", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "empty-verifier-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "empty-verifier-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Empty verifier guard",
       tasks: [{
@@ -198,14 +193,14 @@ test("empty verifier commands cannot complete even if task state is corrupted", 
         review_commands: ["node --version"],
       }],
     }));
-    await importPlan(dir, planPath);
+    await importPlan(projectRoot, planPath);
 
-    const taskStatePath = resolveWildArrangePath(dir, "team", "tasks.json");
+    const taskStatePath = resolveWildArrangePath(projectRoot, "team", "tasks.json");
     const taskState = await readJson(taskStatePath);
     taskState.tasks[0].verify_commands = [];
     await writeFile(taskStatePath, JSON.stringify(taskState, null, 2));
 
-    const result = await runNextTask(dir);
+    const result = await runNextTask(projectRoot);
     assert.equal(result.status, "retry");
     assert.equal(result.verifyResult.pass, false);
     assert.match(result.verifyResult.results[0].stderr, /verify_commands must contain at least one command/);
@@ -215,9 +210,8 @@ test("empty verifier commands cannot complete even if task state is corrupted", 
 });
 
 test("review blockers create a resolution task without completing the blocked task", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "blocker-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "blocker-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Review blocker",
       tasks: [{
@@ -228,11 +222,11 @@ test("review blockers create a resolution task without completing the blocked ta
         review_commands: ["node --version"],
       }],
     }));
-    await importPlan(dir, planPath);
-    await runWorkflowNode(dir, "execute", { taskId: "T001" });
-    await runWorkflowNode(dir, "verify", { taskId: "T001" });
+    await importPlan(projectRoot, planPath);
+    await runWorkflowNode(projectRoot, "execute", { taskId: "T001" });
+    await runWorkflowNode(projectRoot, "verify", { taskId: "T001" });
 
-    const blocked = await recordReviewBlocker(dir, {
+    const blocked = await recordReviewBlocker(projectRoot, {
       taskId: "T001",
       title: "Resolve missing browser verification",
       objective: "Run browser-level evidence before final checkpoint.",
@@ -244,16 +238,15 @@ test("review blockers create a resolution task without completing the blocked ta
     });
     assert.equal(blocked.blockedTask.status, "review_blocked");
     assert.equal(blocked.resolutionTask.reviewBlockerFor, "T001");
-    const status = await statusReport(dir);
+    const status = await statusReport(projectRoot);
     assert.equal(status.review_blocked, 1);
-    assert.match(await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8"), /review_blocker_recorded/);
+    assert.match(await readFile(resolveWildArrangePath(projectRoot, "ledger.jsonl"), "utf8"), /review_blocker_recorded/);
   });
 });
 
 test("review blocker resolution returns the blocked task to pending only after the resolution task completes", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "blocker-resolve-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "blocker-resolve-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Review blocker resolution",
       tasks: [{
@@ -264,11 +257,11 @@ test("review blocker resolution returns the blocked task to pending only after t
         review_commands: ["node --version"],
       }],
     }));
-    await importPlan(dir, planPath);
-    await runWorkflowNode(dir, "execute", { taskId: "T001" });
-    await runWorkflowNode(dir, "verify", { taskId: "T001" });
+    await importPlan(projectRoot, planPath);
+    await runWorkflowNode(projectRoot, "execute", { taskId: "T001" });
+    await runWorkflowNode(projectRoot, "verify", { taskId: "T001" });
 
-    const blocked = await recordReviewBlocker(dir, {
+    const blocked = await recordReviewBlocker(projectRoot, {
       taskId: "T001",
       evidence: "BaiZe final review found missing browser evidence.",
       rationale: "The blocker must be resolved as a separate task.",
@@ -279,9 +272,9 @@ test("review blocker resolution returns the blocked task to pending only after t
     });
     assert.equal(blocked.blockedTask.status, "review_blocked");
 
-    const taskStatePath = resolveWildArrangePath(dir, "team", "tasks.json");
+    const taskStatePath = resolveWildArrangePath(projectRoot, "team", "tasks.json");
     await assert.rejects(
-      () => resolveReviewBlocker(dir, {
+      () => resolveReviewBlocker(projectRoot, {
         taskId: "T001",
         evidence: "Premature unblock attempt without a finished resolution task.",
         rationale: "This must be rejected while the resolution task is still pending.",
@@ -291,11 +284,11 @@ test("review blocker resolution returns the blocked task to pending only after t
     let persisted = await readJson(taskStatePath);
     assert.equal(persisted.tasks.find((task) => task.id === "T001").status, "review_blocked");
 
-    const completed = await runNextTask(dir);
+    const completed = await runNextTask(projectRoot);
     assert.equal(completed.status, "completed", JSON.stringify({ status: completed.status, task: completed.task?.id, failure: completed.task?.last_failure }));
     assert.equal(completed.task.id, blocked.resolutionTask.id);
 
-    const resolved = await resolveReviewBlocker(dir, {
+    const resolved = await resolveReviewBlocker(projectRoot, {
       taskId: "T001",
       evidence: `Resolution task ${blocked.resolutionTask.id} finished with a passing verifier.`,
       rationale: "The blocked task re-enters the delivery pipeline for a fresh run.",
@@ -305,14 +298,13 @@ test("review blocker resolution returns the blocked task to pending only after t
     const unblocked = persisted.tasks.find((task) => task.id === "T001");
     assert.equal(unblocked.status, "pending");
     assert.ok(unblocked.reviewBlocker.resolvedAt);
-    assert.match(await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8"), /review_blocker_resolved/);
+    assert.match(await readFile(resolveWildArrangePath(projectRoot, "ledger.jsonl"), "utf8"), /review_blocker_resolved/);
   });
 });
 
 test("steering mark_blocked rejects completed or verifying targets", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "mark-blocked-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "mark-blocked-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Mark blocked guard",
       tasks: [{
@@ -330,18 +322,18 @@ test("steering mark_blocked rejects completed or verifying targets", async () =>
         review_commands: ["node --version"],
       }],
     }));
-    await importPlan(dir, planPath);
-    const completed = await runNextTask(dir);
+    await importPlan(projectRoot, planPath);
+    const completed = await runNextTask(projectRoot);
     assert.equal(completed.status, "completed", JSON.stringify({ status: completed.status, task: completed.task?.id, failure: completed.task?.last_failure }));
     assert.equal(completed.task.id, "T001");
 
-    const taskStatePath = resolveWildArrangePath(dir, "team", "tasks.json");
+    const taskStatePath = resolveWildArrangePath(projectRoot, "team", "tasks.json");
     const taskState = await readJson(taskStatePath);
     taskState.tasks.find((task) => task.id === "T002").status = "verifying";
     await writeFile(taskStatePath, JSON.stringify(taskState, null, 2));
 
     for (const targetTaskId of ["T001", "T002"]) {
-      const result = await steerWorkflow(dir, {
+      const result = await steerWorkflow(projectRoot, {
         kind: "mark_blocked",
         targetTaskId,
         evidence: "Worker reported an unresolved dependency.",
@@ -358,9 +350,8 @@ test("steering mark_blocked rejects completed or verifying targets", async () =>
 });
 
 test("attention report aggregates decisions waiting on the user", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "attention-plan.json");
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "attention-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Attention drill",
       tasks: [{
@@ -372,10 +363,10 @@ test("attention report aggregates decisions waiting on the user", async () => {
         review_commands: ["node --version"],
       }],
     }, null, 2));
-    await importPlan(dir, planPath);
-    await runWorkflowNode(dir, "execute", { taskId: "T001" });
-    await runWorkflowNode(dir, "verify", { taskId: "T001" });
-    await recordReviewBlocker(dir, {
+    await importPlan(projectRoot, planPath);
+    await runWorkflowNode(projectRoot, "execute", { taskId: "T001" });
+    await runWorkflowNode(projectRoot, "verify", { taskId: "T001" });
+    await recordReviewBlocker(projectRoot, {
       taskId: "T001",
       title: "评审发现证据不足",
       objective: "补齐边界条件证据后再回到主任务。",
@@ -386,11 +377,11 @@ test("attention report aggregates decisions waiting on the user", async () => {
       review_commands: ["node --version"],
     });
 
-    const attention = await attentionReport(dir);
+    const attention = await attentionReport(projectRoot);
     assert.ok(attention.total >= 1);
     assert.ok(attention.needsUserDecision.some((task) => task.id === "T001" && task.status === "review_blocked"));
 
-    const data = await dashboardData(dir);
+    const data = await dashboardData(projectRoot);
     assert.ok(data.attention);
     assert.equal(data.attention.kind, "attention_report");
   });
