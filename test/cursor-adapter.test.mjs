@@ -28,6 +28,7 @@ import { importPlan } from "../src/orchestration/plan-state.mjs";
 const BRIDGE_RELATIVE_PATH = path.join(".cursor", "hooks", "wildarrange-hook-bridge.mjs");
 const LOCAL_CLI_PREFIX = `node "${path.join(process.cwd(), "bin", "wildarrange.mjs")}"`;
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 legacy Cursor adapter 安装与 hook bridge（.cursor、.wildarrange）
 test("Cursor adapter generates project hooks.json with fail-closed preToolUse", async () => {
   await withTempDir(async (dir) => {
     const report = await installAdapter(dir, { target: "cursor", mode: "local" });
@@ -60,6 +61,7 @@ test("Cursor adapter generates project hooks.json with fail-closed preToolUse", 
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 legacy Cursor adapter 安装与 hook bridge（.cursor、.wildarrange）
 test("Cursor Hook bridge denies writes from unrelated projects without creating .wildarrange", async () => {
   await withTempDir(async (wildArrangeDir) => {
     await installAdapter(wildArrangeDir, { target: "cursor", mode: "local" });
@@ -90,6 +92,7 @@ test("Cursor Hook bridge denies writes from unrelated projects without creating 
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 legacy Cursor adapter 安装与 hook bridge（.cursor、.wildarrange）
 test("Cursor Hook bridge denies writes from git worktrees without WildArrange markers", async () => {
   await withTempDir(async (wildArrangeDir) => {
     await installAdapter(wildArrangeDir, { target: "cursor", mode: "local" });
@@ -110,6 +113,7 @@ test("Cursor Hook bridge denies writes from git worktrees without WildArrange ma
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 legacy Cursor adapter 安装与 hook bridge（.cursor、.wildarrange）
 test("Cursor Hook bridge keeps task-worktree sessions on the installed control root", async () => {
   await withTempDir(async (controlRoot) => {
     await installAdapter(controlRoot, { target: "cursor", mode: "local" });
@@ -144,6 +148,7 @@ test("Cursor Hook bridge keeps task-worktree sessions on the installed control r
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 legacy Cursor adapter 安装与 hook bridge（.cursor、.wildarrange）
 test("Cursor Hook bridge maps preToolUse deny/allow to the Cursor permission protocol", async () => {
   await withTempDir(async (dir) => {
     await installAdapter(dir, { target: "cursor", mode: "local" });
@@ -201,6 +206,7 @@ test("Cursor Hook bridge maps preToolUse deny/allow to the Cursor permission pro
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 legacy Cursor adapter 安装与 hook bridge（.cursor、.wildarrange）
 test("Cursor beforeShellExecution gates integrated terminal commands like Bash", async () => {
   await withTempDir(async (dir) => {
     await installAdapter(dir, { target: "cursor", mode: "local" });
@@ -232,6 +238,7 @@ test("Cursor beforeShellExecution gates integrated terminal commands like Bash",
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 legacy Cursor adapter 安装与 hook bridge（.cursor、.wildarrange）
 test("Cursor bridge is fail-closed when the governance CLI fails or answers garbage", async () => {
   await withTempDir(async (dir) => {
     await installAdapter(dir, { target: "cursor", mode: "local" });
@@ -292,6 +299,7 @@ test("Cursor bridge is fail-closed when the governance CLI fails or answers garb
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 legacy Cursor adapter 安装与 hook bridge（.cursor、.wildarrange）
 test("Cursor subagentStop also converts unfinished work into a followup_message", async () => {
   await withTempDir(async (dir) => {
     await installAdapter(dir, { target: "cursor", mode: "local" });
@@ -309,6 +317,7 @@ test("Cursor subagentStop also converts unfinished work into a followup_message"
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 legacy Cursor adapter 安装与 hook bridge（.cursor、.wildarrange）
 test("Cursor Hook bridge injects sessionStart context via additional_context", async () => {
   await withTempDir(async (dir) => {
     await installAdapter(dir, { target: "cursor", mode: "local" });
@@ -326,6 +335,7 @@ test("Cursor Hook bridge injects sessionStart context via additional_context", a
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 legacy Cursor adapter 安装与 hook bridge（.cursor、.wildarrange）
 test("Cursor stop Hook converts unfinished work into a followup_message", async () => {
   await withTempDir(async (dir) => {
     await installAdapter(dir, { target: "cursor", mode: "local" });
@@ -346,6 +356,7 @@ test("Cursor stop Hook converts unfinished work into a followup_message", async 
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 legacy Cursor adapter 安装与 hook bridge（.cursor、.wildarrange）
 test("Cursor Hook bridge reports malformed payloads as hook errors", async () => {
   await withTempDir(async (dir) => {
     await installAdapter(dir, { target: "cursor", mode: "local" });
@@ -356,6 +367,7 @@ test("Cursor Hook bridge reports malformed payloads as hook errors", async () =>
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 legacy Cursor adapter 安装与 hook bridge（.cursor、.wildarrange）
 test("Cursor uninstall removes project hooks and bridge", async () => {
   await withTempDir(async (dir) => {
     await installAdapter(dir, { target: "cursor", mode: "local" });

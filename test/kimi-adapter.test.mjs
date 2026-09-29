@@ -27,6 +27,7 @@ import { importPlan } from "../src/orchestration/plan-state.mjs";
 
 const LOCAL_CLI_PREFIX = `node "${path.join(process.cwd(), "bin", "wildarrange.mjs")}"`;
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 legacy Kimi adapter 安装与 hook bridge（.wildarrange/adapters、.agents）
 test("Kimi adapter generates a native plugin and shared project Skills", async () => {
   await withTempDir(async (dir) => {
     const report = await installAdapter(dir, {
@@ -59,6 +60,7 @@ test("Kimi adapter generates a native plugin and shared project Skills", async (
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 legacy Kimi adapter 安装与 hook bridge（.wildarrange/adapters、.agents）
 test("invalid adapter targets fail before creating runtime state", async () => {
   await withTempDir(async (dir) => {
     await assert.rejects(
@@ -69,6 +71,7 @@ test("invalid adapter targets fail before creating runtime state", async () => {
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 legacy Kimi adapter 安装与 hook bridge（.wildarrange/adapters、.agents）
 test("Kimi Hook bridge ignores unrelated projects without creating .wildarrange", async () => {
   await withTempDir(async (wildArrangeDir) => {
     await installAdapter(wildArrangeDir, { target: "kimi", mode: "local" });
@@ -90,6 +93,7 @@ test("Kimi Hook bridge ignores unrelated projects without creating .wildarrange"
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 legacy Kimi adapter 安装与 hook bridge（.wildarrange/adapters、.agents）
 test("Kimi Hook bridge injects prompts and enforces scoped Edit calls", async () => {
   await withTempDir(async (dir) => {
     await installAdapter(dir, { target: "kimi", mode: "local" });
@@ -250,6 +254,7 @@ test("Kimi Hook bridge injects prompts and enforces scoped Edit calls", async ()
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 legacy Kimi adapter 安装与 hook bridge（.wildarrange/adapters、.agents）
 test("Kimi Hook bridge reports malformed payloads as hook errors", async () => {
   await withTempDir(async (dir) => {
     await installAdapter(dir, { target: "kimi", mode: "local" });
@@ -260,6 +265,7 @@ test("Kimi Hook bridge reports malformed payloads as hook errors", async () => {
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 legacy Kimi adapter 安装与 hook bridge（.wildarrange/adapters、.agents）
 test("Kimi Stop Hook converts unfinished work into a continuation block", async () => {
   await withTempDir(async (dir) => {
     await installAdapter(dir, { target: "kimi", mode: "local" });
@@ -291,6 +297,7 @@ test("Kimi Stop Hook converts unfinished work into a continuation block", async 
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 legacy Kimi adapter 安装与 hook bridge（.wildarrange/adapters、.agents）
 test("Kimi uninstall keeps shared Skills while Codex remains and restores plugin backups", async () => {
   await withTempDir(async (dir) => {
     await installAdapter(dir, { target: "all", mode: "local" });

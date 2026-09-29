@@ -18,10 +18,12 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 const execFileAsync = promisify(execFile);
 const CLI_PATH = path.join(process.cwd(), "bin", "wildarrange.mjs");
 
+/** legacy 单根模式夹具，仅供标注 legacy 的用例使用。 */
 async function withTempProjectDir(fn) {
   const baseDir = path.join(process.cwd(), ".tmp");
   await mkdir(baseDir, { recursive: true });
@@ -146,6 +148,7 @@ test("cli smoke: bin/wildarrange.mjs loads without module resolution errors", as
   assert.doesNotMatch(result.stderr, /SyntaxError/);
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 adapter 安装 / 未连接回落 / --control-root。
 test("cli smoke: init creates a runtime in a fresh project directory", async () => {
   await withTempProjectDir(async (dir) => {
     const result = await runCli(["init"], dir);
@@ -156,17 +159,15 @@ test("cli smoke: init creates a runtime in a fresh project directory", async () 
 });
 
 test("cli smoke: status runs against an initialized project", async () => {
-  await withTempProjectDir(async (dir) => {
-    const init = await runCli(["init"], dir);
-    assert.equal(init.code, 0, `init failed.\nstderr: ${init.stderr}`);
-
-    const result = await runCli(["status"], dir);
+  await withExternalProject(async ({ projectRoot: dir, stateHome }) => {
+    const result = await runCli(["status"], dir, { env: { WILDARRANGE_STATE_HOME: stateHome } });
     assert.equal(result.code, 0, `status failed.\nstderr: ${result.stderr}`);
     const parsed = JSON.parse(result.stdout);
     assert.equal(typeof parsed.total, "number");
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 adapter 安装 / 未连接回落 / --control-root。
 test("cli smoke: doctor rejects an initialized project whose Codex Hook is not configured", async () => {
   await withTempProjectDir(async (dir) => {
     const init = await runCli(["init"], dir);
@@ -180,6 +181,7 @@ test("cli smoke: doctor rejects an initialized project whose Codex Hook is not c
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 adapter 安装 / 未连接回落 / --control-root。
 test("cli smoke: Codex hook execution binds host and current config digest before doctor passes it", async () => {
   await withTempProjectDir(async (dir) => {
     assert.equal((await runCli(["init"], dir)).code, 0);
@@ -214,6 +216,7 @@ test("cli smoke: Codex hook execution binds host and current config digest befor
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 adapter 安装 / 未连接回落 / --control-root。
 test("cli smoke: Codex hook uses its installed control root from a task worktree", async () => {
   await withTempProjectDir(async (controlRoot) => {
     assert.equal((await runCli(["init"], controlRoot)).code, 0);
@@ -239,6 +242,7 @@ test("cli smoke: Codex hook uses its installed control root from a task worktree
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 adapter 安装 / 未连接回落 / --control-root。
 test("cli smoke: npx adapter metadata keeps injected commands on the npx package prefix", async () => {
   await withTempProjectDir(async (dir) => {
     assert.equal((await runCli(["init"], dir)).code, 0);
@@ -273,6 +277,7 @@ test("cli smoke: npx adapter metadata keeps injected commands on the npx package
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 adapter 安装 / 未连接回落 / --control-root。
 test("cli smoke: custom npx adapter metadata authorizes its exact read-only command", async () => {
   await withTempProjectDir(async (dir) => {
     const packageName = "@example/wildarrange-fork";
@@ -299,6 +304,7 @@ test("cli smoke: custom npx adapter metadata authorizes its exact read-only comm
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 adapter 安装 / 未连接回落 / --control-root。
 test("cli smoke: restored live adapter remains the CLI fact across resume and hook execution", async () => {
   await withTempProjectDir(async (dir) => {
     const packageA = "@example/wildarrange-a";
@@ -342,6 +348,7 @@ test("cli smoke: restored live adapter remains the CLI fact across resume and ho
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 adapter 安装 / 未连接回落 / --control-root。
 test("cli smoke: adapter install rejects unsafe package metadata in every mode before generating files", async () => {
   await withTempProjectDir(async (dir) => {
     for (const [mode, packageName] of [
@@ -362,6 +369,7 @@ test("cli smoke: adapter install rejects unsafe package metadata in every mode b
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 adapter 安装 / 未连接回落 / --control-root。
 test("cli smoke: a local target without bin imports a string-array verifier plan through the injected absolute prefix", async () => {
   await withTempProjectDir(async (dir) => {
     assert.equal((await runCli(["init"], dir)).code, 0);
@@ -432,6 +440,7 @@ test("cli smoke: a local target without bin imports a string-array verifier plan
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：sample 计划写项目内 .wildarrange/artifacts，外置 Git 交付无法承接。
 test("cli smoke: workflow treats a bare --maxSteps flag as the default step budget", async () => {
   await withTempProjectDir(async (dir) => {
     assert.equal((await runCli(["init"], dir)).code, 0);
@@ -451,11 +460,8 @@ test("cli smoke: workflow treats a bare --maxSteps flag as the default step budg
 });
 
 test("cli smoke: governance audit writes a deterministic report", async () => {
-  await withTempProjectDir(async (dir) => {
-    const init = await runCli(["init"], dir);
-    assert.equal(init.code, 0, `init failed.\nstderr: ${init.stderr}`);
-
-    const result = await runCli(["governance", "audit", "--force"], dir);
+  await withExternalProject(async ({ projectRoot: dir, stateHome }) => {
+    const result = await runCli(["governance", "audit", "--force"], dir, { env: { WILDARRANGE_STATE_HOME: stateHome } });
     assert.equal(result.code, 0, `governance audit failed.\nstderr: ${result.stderr}`);
     const parsed = JSON.parse(result.stdout);
     assert.equal(parsed.kind, "repository_governance");
@@ -464,15 +470,14 @@ test("cli smoke: governance audit writes a deterministic report", async () => {
 });
 
 test("cli smoke: adoption start auto-provisions a usable Dashboard token", async () => {
-  await withTempProjectDir(async (dir) => {
-    const init = await runCli(["init"], dir);
-    assert.equal(init.code, 0, `init failed.\nstderr: ${init.stderr}`);
+  await withExternalProject(async ({ projectRoot: dir, stateHome }) => {
     await writeFile(path.join(dir, "package.json"), JSON.stringify({ name: "legacy", scripts: { test: "node --version" } }, null, 2));
     await mkdir(path.join(dir, "test"), { recursive: true });
     await writeFile(path.join(dir, "test", "smoke.test.mjs"), "export const ok = true;\n");
 
     const child = spawn(process.execPath, [CLI_PATH, "adoption", "start", "--port", "0"], {
       cwd: dir,
+      env: { ...process.env, WILDARRANGE_STATE_HOME: stateHome },
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });

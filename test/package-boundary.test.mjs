@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const NPM_EXECUTABLE = process.platform === "win32" ? process.execPath : "npm";
@@ -186,14 +187,16 @@ test("packed package installs offline and public CLI completes a minimal smoke r
     const help = execFileSync(process.execPath, [installedCli, "--help"], { cwd: installDir, encoding: "utf8" });
     assert.match(help, /WildArrange linear runtime/);
 
-    const initialized = JSON.parse(
-      execFileSync(process.execPath, [installedCli, "init"], { cwd: installDir, encoding: "utf8" }),
-    );
-    assert.equal(initialized.ok, true);
-    const status = JSON.parse(
-      execFileSync(process.execPath, [installedCli, "status"], { cwd: installDir, encoding: "utf8" }),
-    );
-    assert.equal(status.work?.status, "idle");
-    assert.equal(status.total, 0);
+    // 外置治理是唯一模式：用夹具的已连接三根项目（不预先 init）驱动已安装的公开 CLI。
+    await withExternalProject(async ({ projectRoot, stateHome }) => {
+      const cliOptions = { cwd: projectRoot, encoding: "utf8", env: { ...process.env, WILDARRANGE_STATE_HOME: stateHome } };
+      const initialized = JSON.parse(execFileSync(process.execPath, [installedCli, "init"], cliOptions));
+      assert.equal(initialized.ok, true);
+      assert.equal(initialized.workspaceMode, "external");
+      assert.equal(existsSync(path.join(projectRoot, ".wildarrange")), false, "external init must not write the project repository");
+      const status = JSON.parse(execFileSync(process.execPath, [installedCli, "status"], cliOptions));
+      assert.equal(status.work?.status, "idle");
+      assert.equal(status.total, 0);
+    }, { init: false });
   });
 });

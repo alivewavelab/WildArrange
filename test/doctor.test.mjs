@@ -24,10 +24,10 @@ import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { hashContent, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 import { generateVerificationArtifacts } from "../src/capabilities/verification-governance.mjs";
 import { runInjectionHook } from "../src/ai/hooks.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 test("doctor keeps reporting when one check crashes on corrupted state", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     // 人为损坏 tasks.json：completionAudit 检查会抛错，其余检查必须照常。
     const tasksPath = resolveWildArrangePath(dir, "team", "tasks.json");
     await writeFile(tasksPath, "{corrupted json", "utf8");
@@ -52,8 +52,7 @@ test("doctor keeps reporting when one check crashes on corrupted state", async (
 });
 
 test("doctor is diagnostic-only and never appends to the hash-chained ledger", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     const ledgerPath = resolveWildArrangePath(dir, "ledger.jsonl");
     const before = existsSync(ledgerPath) ? await readFile(ledgerPath, "utf8") : "";
 
@@ -64,14 +63,29 @@ test("doctor is diagnostic-only and never appends to the hash-chained ledger", a
   });
 });
 
-test("doctor surfaces unarmed gates and missing adapter hooks instead of burying them", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    // initRuntime 写的是默认配置：质量门全关、adapter 启用但未安装。
+test("doctor surfaces unarmed gates and an unprepared external adapter instead of burying them", async () => {
+  await withExternalProject(async ({ projectRoot: dir }) => {
+    // 夹具写的是默认配置：质量门全关、外置 adapter 尚未生成。
     const report = await runDoctor(dir);
 
     assert.equal(report.sections.gateArming.armed, false);
     assert.ok(report.findings.some((finding) => finding.section === "gate_arming" && finding.code === "quality_gates_not_required"));
+
+    assert.equal(report.sections.adapters.mode, "external");
+    assert.equal(report.sections.adapters.status, "error");
+    assert.equal(report.ok, false);
+    assert.ok(report.findings.some((finding) => finding.section === "adapters" && finding.code === "external_adapter_not_prepared"));
+
+    const markdown = await readFile(resolveWildArrangePath(dir, "reports", "doctor.md"), "utf8");
+    assert.match(markdown, /Gate arming: NOT ARMED/);
+  });
+});
+
+// legacy 专属（下一步随 legacy 模式删除）：项目内 .cursor/.codex 安装与检查。
+test("legacy doctor surfaces missing project-local adapter hooks", async () => {
+  await withLegacyDir(async (dir) => {
+    await initRuntime(dir);
+    const report = await runDoctor(dir);
 
     const cursor = report.sections.adapters.targets.find((target) => target.target === "cursor");
     assert.equal(cursor.configured, false);
@@ -81,14 +95,12 @@ test("doctor surfaces unarmed gates and missing adapter hooks instead of burying
     assert.ok(report.findings.some((finding) => finding.section === "adapters" && finding.message.includes(".cursor/hooks.json")));
 
     const markdown = await readFile(resolveWildArrangePath(dir, "reports", "doctor.md"), "utf8");
-    assert.match(markdown, /Gate arming: NOT ARMED/);
     assert.match(markdown, /cursor:NOT CONFIGURED/);
   });
 });
 
 test("doctor yellow-lights a changed runner after adoption artifacts exist", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     const locator = {
       registryPath: "docs/verification-registry.json",
       bootstrapPath: "docs/verification-bootstrap.json",
@@ -98,9 +110,6 @@ test("doctor yellow-lights a changed runner after adoption artifacts exist", asy
     await writeFile(path.join(dir, "package.json"), JSON.stringify({
       name: "legacy",
       scripts: { test: "node --version" },
-    }, null, 2));
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
-      verificationGovernance: locator,
     }, null, 2));
     const cards = [{
       id: "card_001_loc",
@@ -130,8 +139,9 @@ test("doctor yellow-lights a changed runner after adoption artifacts exist", asy
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 .cursor/.codex hook 安装与激活证据。
 test("doctor adapter check passes once hooks are installed and flags stale rule paths", async () => {
-  await withTempDir(async (dir) => {
+  await withLegacyDir(async (dir) => {
     await initRuntime(dir);
     const { mkdir } = await import("node:fs/promises");
     await mkdir(path.join(dir, ".cursor", "hooks"), { recursive: true });
@@ -163,8 +173,9 @@ test("doctor adapter check passes once hooks are installed and flags stale rule 
   });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：项目内 .cursor/.codex hook 安装与激活证据。
 test("doctor only accepts hash-chained Codex activation evidence bound to the current hook config", async () => {
-  await withTempDir(async (dir) => {
+  await withLegacyDir(async (dir) => {
     await initRuntime(dir);
     await mkdir(path.join(dir, ".codex"), { recursive: true });
     const hooksPath = path.join(dir, ".codex", "hooks.json");
@@ -211,8 +222,7 @@ test("doctor only accepts hash-chained Codex activation evidence bound to the cu
 });
 
 test("config init --armed writes an armed config that passes the gate arming floor", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     const { writeDefaultWildArrangeConfig } = await import("../src/infra/runtime-config.mjs");
     const { evaluateGateArming } = await import("../src/infra/gate-arming.mjs");
     const written = await writeDefaultWildArrangeConfig(dir, { root: true, force: true, armed: true });
@@ -224,8 +234,7 @@ test("config init --armed writes an armed config that passes the gate arming flo
 });
 
 test("doctor scopes completion evidence by plan when two plans reuse T001", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await writeTwoPlanSameTaskLedger(dir);
     await appendLedger(dir, {
       type: "node_checkpoint_completed",
@@ -245,8 +254,7 @@ test("doctor scopes completion evidence by plan when two plans reuse T001", asyn
 });
 
 test("doctor rejects an unscoped legacy completion event when T001 belongs to two plans", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await writeTwoPlanSameTaskLedger(dir);
     await appendLedger(dir, {
       type: "node_checkpoint_completed",
@@ -267,8 +275,7 @@ test("doctor rejects an unscoped legacy completion event when T001 belongs to tw
 });
 
 test("doctor never assigns an archived Plan's unscoped completion event to a new same-id task", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     const task = {
       id: "T001",
       planId: "plan-new",
@@ -305,8 +312,7 @@ test("doctor never assigns an archived Plan's unscoped completion event to a new
 });
 
 test("doctor rejects a completed task whose acceptance proof says false", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     const task = {
       id: "T001",
       planId: "proof-plan",
@@ -380,7 +386,8 @@ async function writeTwoPlanSameTaskLedger(dir) {
   }
 }
 
-async function withTempDir(fn) {
+/** legacy 单根模式夹具：仅供上面标注 legacy 的用例使用。 */
+async function withLegacyDir(fn) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "wildarrange-doctor-"));
   try {
     return await fn(dir);

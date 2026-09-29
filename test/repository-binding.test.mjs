@@ -1,24 +1,15 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { buildAcceptanceProof } from "../src/capabilities/acceptance-proof.mjs";
 import { runCommandFile } from "../src/infra/command-runner.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
-import { clearWildArrangeRuntimeRoot } from "../src/infra/runtime-store.mjs";
-import {
-  attachGovernanceRepository,
-  clearWorkspaceContext,
-  loadGovernanceVerificationDefaults,
-} from "../src/infra/workspace-context.mjs";
-import { buildRegistryFromCards } from "../src/infra/verification-registry.mjs";
+import { getBoundWorkspaceContext, loadGovernanceVerificationDefaults } from "../src/infra/workspace-context.mjs";
 import { ensureLinearDeliveryWorkspace } from "../src/orchestration/linear-delivery.mjs";
 import { resolveTaskBranchTarget } from "../src/orchestration/task-branch.mjs";
-import {
-  inspectTaskRepositoryBinding,
-  writeIntegrationAcceptance,
-} from "../src/infra/repository-binding.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { inspectTaskRepositoryBinding, writeIntegrationAcceptance } from "../src/infra/repository-binding.mjs";
 
 async function git(root, args) {
   const result = await runCommandFile("git", ["-C", root, ...args], root, 15_000);
@@ -26,46 +17,13 @@ async function git(root, args) {
   return result.stdout.trim();
 }
 
-async function initializeRepository(root, files, message) {
-  await mkdir(root, { recursive: true });
-  for (const [relativePath, content] of Object.entries(files)) {
-    const target = path.join(root, relativePath);
-    await mkdir(path.dirname(target), { recursive: true });
-    await writeFile(target, content);
-  }
-  await git(root, ["init", "-b", "main"]);
-  await git(root, ["config", "user.email", "wildarrange-test@example.invalid"]);
-  await git(root, ["config", "user.name", "WildArrange Test"]);
-  await git(root, ["add", "."]);
-  await git(root, ["commit", "-m", message]);
-}
-
+/** 外置三根夹具 + 治理仓已提交的验证注册表与已绑定的工作区上下文。 */
 async function withExternalRepositories(fn) {
-  const tempRoot = await mkdtemp(path.join(process.cwd(), ".tmp", "repository-binding-"));
-  const projectRoot = path.join(tempRoot, "project");
-  const governanceRoot = path.join(tempRoot, "governance");
-  const stateHome = path.join(tempRoot, "state-home");
-  const registry = buildRegistryFromCards([]);
-  await initializeRepository(projectRoot, { "README.md": "project baseline\n" }, "project baseline");
-  await initializeRepository(governanceRoot, {
-    "wildarrange-governance.json": JSON.stringify({
-      schemaVersion: 1,
-      project: { repository: "https://example.invalid/product.git", defaultBranch: "main" },
-      policyRoot: "policy",
-      verificationRegistry: "verification/registry.json",
-    }, null, 2),
-    "policy/AGENTS.md": "# Governance policy\n",
-    "verification/registry.json": JSON.stringify(registry, null, 2),
-  }, "governance baseline");
-  const context = await attachGovernanceRepository(projectRoot, { governanceRoot, stateHome });
-  await initRuntime(projectRoot);
-  try {
-    await fn({ tempRoot, projectRoot, governanceRoot, context, registry });
-  } finally {
-    clearWorkspaceContext(projectRoot);
-    clearWildArrangeRuntimeRoot(projectRoot);
-    await rm(tempRoot, { recursive: true, force: true });
-  }
+  await withExternalProject(async ({ projectRoot, governanceRoot }) => {
+    const registry = JSON.parse(await readFile(path.join(governanceRoot, "verification", "registry.json"), "utf8"));
+    const context = getBoundWorkspaceContext(projectRoot);
+    await fn({ projectRoot, governanceRoot, context, registry });
+  });
 }
 
 test("governance-target task claims and creates its isolated worktree from the governance repository", async () => {

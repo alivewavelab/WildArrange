@@ -18,6 +18,7 @@ import path from 'node:path';
 import { buildPlanDraftDirective } from '../src/ai/routing.mjs';
 import { preToolUseGuard } from '../src/ai/pre-tool-guard.mjs';
 
+// legacy 专属（下一步随 legacy 模式删除）：legacy --control-root 与项目内 .wildarrange/plan-drafts
 test('task worktree plan imports use the control root and remain pre-plan-allowed', async () => {
   const controlRoot = path.join(os.tmpdir(), 'wildarrange-control-root');
   const executionRoot = path.join(controlRoot, 'task-worktree');
@@ -30,6 +31,7 @@ test('task worktree plan imports use the control root and remain pre-plan-allowe
   assert.equal(guard.code, 'no_file_target');
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：legacy --control-root 与项目内 .wildarrange/plan-drafts
 test('pre-plan shell commands with a foreign control root are denied', async () => {
   const controlRoot = path.join(os.tmpdir(), 'wildarrange-control-root');
   const executionRoot = path.join(controlRoot, 'task-worktree');

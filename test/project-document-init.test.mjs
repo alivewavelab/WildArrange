@@ -26,6 +26,7 @@ async function withProject(t) {
   return rootDir;
 }
 
+// legacy 专属（下一步随 legacy 模式删除）：legacy init --project-docs 项目文档脚手架（外置模式不写客户仓库）
 test("project document init creates the minimum set and waits for human confirmation", async (t) => {
   const rootDir = await withProject(t);
   const result = await initProjectDocuments(rootDir);
@@ -54,6 +55,7 @@ test("project document init creates the minimum set and waits for human confirma
   await assert.rejects(readFile(path.join(rootDir, "doc", "architecture.md"), "utf8"), { code: "ENOENT" });
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：legacy init --project-docs 项目文档脚手架（外置模式不写客户仓库）
 test("project document init preserves existing files instead of merging or overwriting", async (t) => {
   const rootDir = await withProject(t);
   await writeFile(path.join(rootDir, "AGENTS.md"), "# existing project rules\n", "utf8");
@@ -72,6 +74,7 @@ test("project document init preserves existing files instead of merging or overw
   assert.equal(await readFile(path.join(rootDir, "AGENTS.md"), "utf8"), "# existing project rules\n");
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：legacy init --project-docs 项目文档脚手架（外置模式不写客户仓库）
 test("architecture template is created only when explicitly requested", async (t) => {
   const rootDir = await withProject(t);
   const result = await initProjectDocuments(rootDir, { architecture: true });
@@ -81,6 +84,7 @@ test("architecture template is created only when explicitly requested", async (t
   assert.match(await readFile(path.join(rootDir, "doc", "architecture.md"), "utf8"), /待设计审查与人工确认/);
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：legacy init --project-docs 项目文档脚手架（外置模式不写客户仓库）
 test("existing architecture is preserved and still routed to design review", async t => {
   const rootDir = await withProject(t);
   await initProjectDocuments(rootDir, { architecture: true });
@@ -94,6 +98,7 @@ test("existing architecture is preserved and still routed to design review", asy
   assert.equal(result.architectureDesign.templateIsApproval, false);
 });
 
+// legacy 专属（下一步随 legacy 模式删除）：legacy init --project-docs 项目文档脚手架（外置模式不写客户仓库）
 test("architecture design review is loadable through initialization, routing and installed Skill", async t => {
   const rootDir = await withProject(t);
   const { renderPromptPackEntry } = await import("../src/infra/prompt-pack.mjs");
