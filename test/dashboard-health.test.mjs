@@ -11,20 +11,16 @@
 // =============================================================================
 
 import assert from "node:assert/strict";
-import { appendFile, mkdtemp, rm } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
+import { appendFile } from "node:fs/promises";
 import test from "node:test";
 
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 import { writeConfigBaseline } from "../src/infra/security.mjs";
 import { dashboardData } from "../src/orchestration/status.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 test("dashboard health reports real config baseline and ledger checks", async () => {
-  const rootDir = await mkdtemp(path.join(os.tmpdir(), "wildarrange-dashboard-health-"));
-  try {
-    await initRuntime(rootDir);
+  await withExternalProject(async ({ projectRoot: rootDir }) => {
     const initial = await dashboardData(rootDir);
     assert.equal(initial.health.configBaseline.status, "unchecked");
     assert.match(initial.health.configBaseline.nextAction, /config baseline/);
@@ -39,7 +35,5 @@ test("dashboard health reports real config baseline and ledger checks", async ()
     assert.equal(tampered.health.ledger.status, "fail");
     assert.match(tampered.health.ledger.nextAction, /ledger verify/);
     assert.ok(tampered.health.ledger.result.failures.length > 0);
-  } finally {
-    await rm(rootDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
-  }
+  });
 });

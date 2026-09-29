@@ -12,25 +12,18 @@
 // =============================================================================
 
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
 import { startDashboardServer } from "../src/interface/dashboard.mjs";
 import { runInjectionHook } from "../src/ai/hooks.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 async function withTempDir(fn) {
-  const baseDir = path.join(process.cwd(), ".tmp");
-  await mkdir(baseDir, { recursive: true });
-  const dir = await mkdtemp(path.join(baseDir, "wildarrange-panels-"));
-  try {
-    await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+  await withExternalProject(({ projectRoot }) => fn(projectRoot));
 }
 
 async function withDashboard(dir, fn, options = {}) {
@@ -67,7 +60,6 @@ async function importPassingPlan(dir) {
 
 test("decisions and ops panels serve read-only view models", async () => {
   await withTempDir(async (dir) => {
-    await initRuntime(dir);
     await importPassingPlan(dir);
     await runInjectionHook(dir, {
       hook_event_name: "PreToolUse",
@@ -142,7 +134,6 @@ test("decisions and ops panels serve read-only view models", async () => {
 
 test("panels tolerate a corrupted decisions.jsonl without 500", async () => {
   await withTempDir(async (dir) => {
-    await initRuntime(dir);
     await importPassingPlan(dir);
     await writeFile(resolveWildArrangePath(dir, "decisions.jsonl"), '{"gate":"verify"\nnot-json\n', "utf8");
 
@@ -157,7 +148,6 @@ test("panels tolerate a corrupted decisions.jsonl without 500", async () => {
 
 test("route review panel links full prompt, route result, tool activity, and human review", async () => {
   await withTempDir(async (dir) => {
-    await initRuntime(dir);
     await runInjectionHook(dir, {
       hook_event_name: "UserPromptSubmit",
       prompt: "新增一个登录页面，并检查手机端体验",

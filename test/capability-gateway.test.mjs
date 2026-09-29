@@ -12,27 +12,31 @@
 // =============================================================================
 
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
 import * as gateway from "../src/capabilities/gateway.mjs";
 import { invokeCapability, listRegisteredCapabilities } from "../src/capabilities/gateway.mjs";
+import { admitParallelAgentResult, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
 import { runDeliveryPipeline } from "../src/orchestration/delivery-pipeline.mjs";
 import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
-import { runCommand } from "../src/infra/command-runner.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
-import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { readJson, resolveTaskAcceptancePath, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 async function withTempDir(fn) {
-  const baseDir = path.join(process.cwd(), ".tmp");
-  await mkdir(baseDir, { recursive: true });
-  const dir = await mkdtemp(path.join(baseDir, "wildarrange-gateway-"));
-  try {
-    await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+  await withExternalProject(({ projectRoot }) => fn(projectRoot));
+}
+
+/** 生成把指定文件写入 {outputJson} 结果信封的 worker 命令。 */
+function workerResultCommand(filePath, content) {
+  const encodedPath = Buffer.from(filePath, "utf8").toString("base64");
+  const encodedContent = Buffer.from(content, "utf8").toString("base64");
+  return [
+    "node -e",
+    JSON.stringify(`const fs=require('fs');const d=(v)=>Buffer.from(v,'base64').toString('utf8');fs.writeFileSync(process.argv[1],JSON.stringify({summary:'ready',files:[{path:d('${encodedPath}'),content:d('${encodedContent}')}]}));`),
+    "{outputJson}",
+  ].join(" ");
 }
 
 function nodeEval(source) {
@@ -178,29 +182,26 @@ test("gateway: a throwing capability is caught and reported as a fail envelope, 
 
 test("delivery pipeline: runs verify -> scope -> review -> acceptance-proof -> checkpoint and completes", async () => {
   await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    await mkdir(path.join(dir, "src"), { recursive: true });
-    await writeFile(path.join(dir, "src", "review-marker.txt"), "reviewed\n");
+    // 外置项目是 Git 仓，交付必须经隔离 worktree 与 delivery commit；用真实 run -> admit 走完整流水线。
     const plan = await importSingleTaskPlan(dir, { verifyCommand: nodeEval("if(!process.version)process.exit(1)") });
+    const batch = await runParallelAgents(dir, {
+      taskIds: ["T001"],
+      agent: "ZhuRong",
+      command: workerResultCommand("src/review-marker.txt", "reviewed\n"),
+      isolation: "git-worktree",
+    });
+    const result = await admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" });
+
+    assert.equal(result.status, "completed", JSON.stringify(result));
     const taskState = await loadTaskState(dir);
     const task = taskState.tasks.find((candidate) => candidate.id === "T001");
+    assert.equal(task.status, "completed");
+    assert.equal(task.delivery?.status, "committed_local");
+    assert.match(task.delivery?.integrationSha || "", /^[0-9a-f]{40}$/, "delivery commit must be recorded");
 
-    const result = await runDeliveryPipeline(dir, plan.id, task, {
-      changedPaths: ["src/review-marker.txt"],
-      initialEvidence: {
-        workerResult: { kind: "worker", command: null, exitCode: 0, stdout: "", stderr: "" },
-      },
-    });
-
-    assert.equal(result.status, "completed");
-    assert.equal(result.steps.length, 5);
-    assert.deepEqual(result.steps.map((step) => step.capability), ["verify", "scope", "review", "acceptance-proof", "checkpoint"]);
-    assert.ok(result.steps.every((step) => step.status === "pass"), JSON.stringify(result.steps.map((s) => [s.capability, s.status])));
-    assert.equal(typeof result.totalDurationMs, "number");
-    assert.match(result.summary, /验证/);
-    assert.match(result.summary, /存档/);
-    assert.match(result.summary, /总耗时/);
-
+    const proof = await readJson(resolveTaskAcceptancePath(dir, plan.id, "T001", "json"));
+    assert.equal(proof.pass, true);
+    assert.equal(proof.checks.find((check) => check.name === "dual_repository_binding")?.status, "pass");
     const checkpoint = await readJson(resolveWildArrangePath(dir, "checkpoints", plan.id, "T001.json"));
     assert.equal(checkpoint.taskId, "T001");
   });
@@ -208,8 +209,6 @@ test("delivery pipeline: runs verify -> scope -> review -> acceptance-proof -> c
 
 test("delivery pipeline: stops before acceptance-proof/checkpoint when verify fails, and reports which gates failed", async () => {
   await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    assert.equal((await runCommand("git init", dir)).exitCode, 0);
     const plan = await importSingleTaskPlan(dir, { verifyCommand: nodeEval("process.exit(1)") });
     const taskState = await loadTaskState(dir);
     const task = taskState.tasks.find((candidate) => candidate.id === "T001");
