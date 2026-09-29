@@ -23,9 +23,9 @@
 | `wildarrange config baseline [--reason "..."]` | 写入 config hash 基线 |
 | `wildarrange config verify` | 校验 config 基线 |
 | `wildarrange adapter install [--target codex|cursor|kimi|all] [--mode local|npx] [--package @alivewavelab/wildarrange]` | 安装宿主 adapter；外置治理模式只在 runtimeRoot 生成用户插件包 |
-| `wildarrange adapter activate --target cursor [--user-root <path>]` | 显式合并 Cursor 用户级 Hook；先备份且不写客户项目 |
-| `wildarrange adapter uninstall [--target codex|cursor|kimi|all]` | 卸载宿主 adapter |
-| `wildarrange adapter restore --backup <backupId>` | 恢复 adapter 备份 |
+| `wildarrange adapter activate [--target cursor|codex|all] [--user-root <path>]` | 显式写入用户级配置：Cursor Hook 与指针规则、Codex AGENTS.md 指针段；先备份且不写客户项目 |
+| `wildarrange adapter uninstall [--target codex|cursor|kimi|all]` | 卸载宿主 adapter；外置模式移除用户级条目与指针并删除 runtime 插件包 |
+| `wildarrange adapter restore --backup <backupId>` | 恢复 adapter 备份；外置模式还原到该次 activate 之前的用户级文件 |
 | `wildarrange injection show --point before_review [--agent BaiZe] [--task T001] [--text "..."] [--stage plan]` | 查看注入点解析结果 |
 | `wildarrange hook run [--from hook.json] [--format text|json] [--external-only --adapter-digest <sha256>]` | 运行宿主生命周期 Hook；外置 Adapter 只处理已连接项目 |
 | `wildarrange workflow --from <plan.json>` | 从计划跑完整 workflow |

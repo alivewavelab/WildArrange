@@ -82,11 +82,11 @@ npx wildarrange project show
 
 ```bash
 npx wildarrange adapter install --target all --mode local
-npx wildarrange adapter activate --target cursor
+npx wildarrange adapter activate --target all   # Cursor Hook + 用户级指针规则；也可 --target cursor / codex
 npx wildarrange doctor
 ```
 
-Cursor 的 `activate` 会备份并合并用户级 `~/.cursor/hooks.json`，只替换 WildArrange 自己的条目。Codex 与 Kimi 仍要求按 `adapter install` 返回的 `nextActions` 在各自插件界面显式安装、审查和信任。文件已生成或用户配置已写入都不等于激活；只有与当前 `activationId` 匹配的真实生命周期回执出现后，`doctor` 才报告 `execution_observed`。Bridge 会先识别工作目录，未连接项目静默退出且不创建状态。
+`adapter activate` 是显式的用户级写入，普通命令不会触发：`--target cursor` 备份并合并用户级 `~/.cursor/hooks.json`（只替换 WildArrange 自己的条目），并写入 `~/.cursor/rules/wildarrange.mdc`（alwaysApply 的一句话指针：本机项目若已连接 WildArrange，先运行 `wildarrange status`）；`--target codex` 在 `~/.codex/AGENTS.md` 追加带 `<!-- wildarrange:begin/end -->` 标记的同样指针段。写前都会备份，重复执行幂等，客户项目里不写任何文件。`adapter uninstall` 会移除这些用户级条目、指针并删除 runtime 中的插件包；`adapter restore --backup <backupId>` 把用户级文件恢复到该次 activate 之前。`doctor` 会比对安装时记录的 Hook 配置 digest，插件 `hooks.json` 或用户 Cursor 条目被改动/删除时报 `external_adapter_config_modified`。Codex 与 Kimi 仍要求按 `adapter install` 返回的 `nextActions` 在各自插件界面显式安装、审查和信任。文件已生成或用户配置已写入都不等于激活；只有与当前 `activationId` 匹配的真实生命周期回执出现后，`doctor` 才报告 `execution_observed`。Bridge 先只读本机 registry 判断工作目录（含项目子目录与任务 worktree）是否属于已连接项目：未连接项目、或 WildArrange 自身安装损坏时一律放行，不会阻断无关项目；已连接项目上子进程失败才按宿主策略处理（Cursor 写操作 fail-closed，Codex/Kimi fail-open），子进程有超时保险。Kimi 的 Stop 会把未完成任务拉回续跑。
 
 每张计划任务可声明 `"repositoryTarget": "project"`（默认）或 `"governance"`。一个任务只能写一个仓库；治理任务从治理仓库自己的 branch/worktree 走线性 `wildarrange run` 交付，跨仓依赖必须拆成两张任务。当前并行 admission 仍只拥有项目仓库，遇到治理任务会明确拒绝，不会回落写客户仓库。两个交付都完成后，用完整 SHA 写不修改任一仓库的集成验收收据：
 

@@ -48,7 +48,7 @@ export async function preToolUseGuard(rootDir, input = {}, options = {}) {
   const event = normalizeHookEvent(input.hook_event_name || input.event || input.name);
   if (event !== "PreToolUse") throw new Error("preToolUseGuard requires PreToolUse input");
   const toolName = String(input.tool_name || input.toolName || "");
-  const targetPaths = extractPreToolTargetPaths(input, options.executionRoot || rootDir);
+  const targetPaths = extractPreToolTargetPaths(input, options.executionRoot || rootDir, options.cwd);
   const toolInput = input.tool_input || input.toolInput;
   const isApplyPatchTool = /^(?:functions\.)?apply_patch$/i.test(toolName);
   const isShellTool = /^(Bash|bash|exec_command|functions\.exec_command)$/.test(toolName);
@@ -336,30 +336,32 @@ export function normalizeHookTaskId(input) {
 /**
  * 从 Hook 输入（含 apply_patch、tool_response）递归提取项目相对路径列表。
  * @param {object} input Hook 载荷
- * @param {string} rootDir 执行根目录
+ * @param {string} rootDir 执行根目录（相对路径的计算基准，通常是 Git toplevel）
+ * @param {string} [baseDir] 相对路径的解析起点（宿主 cwd，可为 rootDir 的子目录）；缺省等于 rootDir
  * @returns {string[]} 去重后的相对路径
  */
-export function extractHookTargetPaths(input, rootDir) {
+export function extractHookTargetPaths(input, rootDir, baseDir = rootDir) {
   const values = [];
   collectPathLikeValues(input.tool_input || input.toolInput, values);
   collectApplyPatchTargetPaths(input, values);
   collectPathLikeValues(input.tool_response || input.toolResponse, values);
   collectPathLikeValues(input.paths || input.targetPaths, values, true);
-  return uniqueStrings(values.map((value) => normalizeHookTargetPath(value, rootDir)).filter(Boolean));
+  return uniqueStrings(values.map((value) => normalizeHookTargetPath(value, rootDir, baseDir)).filter(Boolean));
 }
 
 /**
  * PreToolUse 专用路径提取；apply_patch 只解析 patch 头，避免误读 tool_response。
  * @param {object} input Hook 载荷
  * @param {string} rootDir 执行根目录
+ * @param {string} [baseDir] 相对路径的解析起点；缺省等于 rootDir
  * @returns {string[]} 去重后的相对路径
  */
-export function extractPreToolTargetPaths(input, rootDir) {
+export function extractPreToolTargetPaths(input, rootDir, baseDir = rootDir) {
   const toolName = String(input.tool_name || input.toolName || "");
-  if (!/^(?:functions\.)?apply_patch$/i.test(toolName)) return extractHookTargetPaths(input, rootDir);
+  if (!/^(?:functions\.)?apply_patch$/i.test(toolName)) return extractHookTargetPaths(input, rootDir, baseDir);
   const values = [];
   collectApplyPatchTargetPaths(input, values);
-  return uniqueStrings(values.map((value) => normalizeHookTargetPath(value, rootDir)).filter(Boolean));
+  return uniqueStrings(values.map((value) => normalizeHookTargetPath(value, rootDir, baseDir)).filter(Boolean));
 }
 
 /** 从 apply_patch 工具输入解析目标文件路径，兼容 native 与 git unified diff 格式。 */
@@ -553,8 +555,8 @@ async function denyFeatureDesignToolUse(rootDir, options) {
 }
 
 /** 将绝对/相对路径规范为相对 rootDir 的路径，经 realpath 解析防 symlink 逃逸。 */
-function normalizeHookTargetPath(value, rootDir) {
-  const absoluteTarget = path.isAbsolute(value) ? value : path.resolve(rootDir, value);
+function normalizeHookTargetPath(value, rootDir, baseDir = rootDir) {
+  const absoluteTarget = path.isAbsolute(value) ? value : path.resolve(baseDir, value);
   const runtimeRelative = path.relative(canonicalizePotentialPath(resolveWildArrangePath(rootDir)), canonicalizePotentialPath(absoluteTarget)).replaceAll("\\", "/");
   if (/^plan-drafts\/[A-Za-z0-9_.-]+\.json$/.test(runtimeRelative)) return ".wildarrange/" + runtimeRelative;
   const relative = path.relative(

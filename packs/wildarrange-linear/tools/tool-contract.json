@@ -110,18 +110,18 @@
     },
     {
       "name": "wildarrange_adapter_activate",
-      "command": "wildarrange adapter activate --target cursor [--user-root <path>]",
-      "purpose": "显式合并 Cursor 用户级 Hook；先备份且不写客户项目"
+      "command": "wildarrange adapter activate [--target cursor|codex|all] [--user-root <path>]",
+      "purpose": "显式写入用户级配置：Cursor Hook 与指针规则、Codex AGENTS.md 指针段；先备份且不写客户项目"
     },
     {
       "name": "wildarrange_adapter_uninstall",
       "command": "wildarrange adapter uninstall [--target codex|cursor|kimi|all]",
-      "purpose": "卸载宿主 adapter"
+      "purpose": "卸载宿主 adapter；外置模式移除用户级条目与指针并删除 runtime 插件包"
     },
     {
       "name": "wildarrange_adapter_restore",
       "command": "wildarrange adapter restore --backup <backupId>",
-      "purpose": "恢复 adapter 备份"
+      "purpose": "恢复 adapter 备份；外置模式还原到该次 activate 之前的用户级文件"
     },
     {
       "name": "wildarrange_injection_show",

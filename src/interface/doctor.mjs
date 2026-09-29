@@ -41,7 +41,7 @@ import { evaluateRegistryFreshness } from "../infra/verification-registry.mjs";
 import { projectDecisionStats } from "./decisions.mjs";
 import { checkCompletionIntegrity } from "./doctor-completion.mjs";
 import { getBoundWorkspaceContext } from "../infra/workspace-context.mjs";
-import { loadExternalAdapterReport } from "./external-adapters.mjs";
+import { inspectExternalAdapterIntegrity, loadExternalAdapterReport } from "./external-adapters.mjs";
 
 // 诊断与门控分离：每个检查独立 try/catch，单项崩溃只把自己的分项标红，
 // 其余分项照常输出；doctor 不再写 hash 链 ledger（诊断不该抢门控的锁）。
@@ -338,8 +338,18 @@ async function checkAdapters(rootDir, findings) {
           nextAction: (prepared.nextActions || []).join("；"),
         });
       }
+      // 回执在但 Hook 配置文件/用户级条目已被改动或删除时，不能继续当作已激活。
+      const integrity = prepared ? await inspectExternalAdapterIntegrity(target, prepared) : { status: "not_prepared", issues: [] };
+      if (integrity.status === "modified") {
+        addFinding(findings, "error", "adapters", `${target} 外置 Adapter 的 Hook 配置与安装时的 digest 不一致：${integrity.issues.map((issue) => `${issue.file}（${issue.problem}）`).join("；")}`, {
+          target,
+          code: "external_adapter_config_modified",
+          nextAction: `重新运行 wildarrange adapter install --target ${target}${target === "cursor" ? " 与 adapter activate --target cursor" : ""}`,
+        });
+      }
       targets.push({
         target,
+        integrity: integrity.status,
         configured: Boolean(prepared),
         prepared: Boolean(prepared),
         activation: activation.status,

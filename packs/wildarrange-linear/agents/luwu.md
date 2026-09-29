@@ -8,7 +8,7 @@
 
 ## 必须读取
 
-- `wildarrange.config.json` 中的 `repositoryGovernance`。
+- 治理仓 `policy/wildarrange.config.json` 中的 `repositoryGovernance`。
 - 当前目标路径祖先链上的 `AGENTS.md`。
 - `.wildarrange/reports/governance/latest.json` 与 `.md`。
 - Git changed paths / diff。

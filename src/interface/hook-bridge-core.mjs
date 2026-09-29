@@ -22,10 +22,14 @@ import path from "node:path";
 
 /**
  * 生成 bridge 内调用 wildarrange hook run 并解析 JSON stdout 的代码块。
- * @param {{ hostAdapter: string, controlRoot: string, timeoutMs?: number|null }} options
+ * @param {{ hostAdapter: string, controlRoot?: string, cliArgsSource?: string, timeoutMs?: number|null }} options
+ *   cliArgsSource 是 bridge 内求值为参数数组的 JS 表达式（外置模式用它传 --project-root 等）；缺省走 legacy --control-root。
  * @returns {string}
  */
-export function renderHookBridgeExecution({ hostAdapter, controlRoot, timeoutMs = null }) {
+export function renderHookBridgeExecution({ hostAdapter, controlRoot, cliArgsSource, timeoutMs = null }) {
+  const trailingArgs = cliArgsSource
+    ? `...${cliArgsSource},`
+    : `"--control-root", ${JSON.stringify(path.resolve(controlRoot))},`;
   // Cursor 要求 fail-closed：子进程挂死时 SIGKILL 并走 failHook；Kimi 传 null 则不生成定时器。
   const timeoutBlock = Number.isInteger(timeoutMs) && timeoutMs > 0
     ? `const childTimer = setTimeout(() => {
@@ -39,7 +43,7 @@ const child = spawn(invocation.command, [
   "hook", "run", "--format", "json",
   "--adapter-mode", cliSpec.kind,
   "--adapter-package", cliSpec.packageName,
-  "--control-root", ${JSON.stringify(path.resolve(controlRoot))},
+  ${trailingArgs}
 ], {
   cwd: projectDir,
   stdio: ["pipe", "pipe", "pipe"],
@@ -71,6 +75,66 @@ try {
   result = JSON.parse(stdout);
 } catch {
   failHook("WildArrange bridge received invalid hook output.");
+}`;
+}
+
+/** 生成 bridge 内 resolveCliInvocation 源码：local 走当前 node + CLI 路径，npx 走包名。 */
+export function renderCliInvocationUtility() {
+  return `/** 将 hook bridge 配置解析为可 spawn 的 CLI 命令与参数。 */
+function resolveCliInvocation(spec) {
+  if (spec.kind === "local") {
+    return { command: process.execPath, args: [spec.cliPath] };
+  }
+  return {
+    command: process.platform === "win32" ? "npx.cmd" : "npx",
+    args: ["-y", spec.packageName],
+  };
+}`;
+}
+
+/**
+ * 生成外置 bridge 的"是否受治理项目"判断源码：只读 WILDARRANGE_STATE_HOME/registry.json，
+ * 按 cwd 落在已注册项目根/运行态根内，或 Git common-dir 身份命中来判定；
+ * 任何读取失败都视为未连接（放行），用户级 Hook 不得因本机状态损坏波及无关项目。
+ */
+export function renderGovernedProjectCheck() {
+  return `function defaultStateHome() {
+  const env = process.env;
+  if (typeof env.WILDARRANGE_STATE_HOME === "string" && env.WILDARRANGE_STATE_HOME.trim()) return path.resolve(env.WILDARRANGE_STATE_HOME);
+  if (process.platform === "win32") return path.join(env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "WildArrange");
+  if (process.platform === "darwin") return path.join(os.homedir(), "Library", "Application Support", "WildArrange");
+  return path.join(env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state"), "wildarrange");
+}
+
+function comparable(value) {
+  let resolved = path.resolve(value);
+  try { resolved = realpathSync.native(resolved); } catch { /* 路径不存在时按原样比较 */ }
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+function isInside(root, candidate) {
+  const base = comparable(root);
+  const target = comparable(candidate);
+  return target === base || target.startsWith(base + path.sep);
+}
+
+/** 只读 registry 判断 dir 是否属于已连接的外置治理项目。 */
+function isGovernedProject(dir) {
+  let registry;
+  try { registry = JSON.parse(readFileSync(path.join(defaultStateHome(), "registry.json"), "utf8")); } catch { return false; }
+  const entries = registry && typeof registry.projects === "object" && registry.projects ? registry.projects : {};
+  const list = Object.entries(entries);
+  if (list.length === 0) return false;
+  for (const [, entry] of list) {
+    if (typeof entry?.projectRoot === "string" && isInside(entry.projectRoot, dir)) return true;
+    if (typeof entry?.runtimeRoot === "string" && isInside(entry.runtimeRoot, dir)) return true;
+  }
+  const git = spawnSync("git", ["-C", dir, "rev-parse", "--git-common-dir"], { encoding: "utf8", timeout: 5000, windowsHide: true });
+  if (git.status !== 0 || !git.stdout.trim()) return false;
+  const raw = git.stdout.trim();
+  const commonDir = comparable(path.isAbsolute(raw) ? raw : path.resolve(dir, raw));
+  const id = "project_" + createHash("sha256").update(commonDir).digest("hex").slice(0, 24);
+  return Object.prototype.hasOwnProperty.call(entries, id);
 }`;
 }
 
@@ -107,14 +171,5 @@ function isRegularFile(filePath) {
   }
 }
 
-/** 将 hook bridge 配置解析为可 spawn 的 CLI 命令与参数。 */
-function resolveCliInvocation(spec) {
-  if (spec.kind === "local") {
-    return { command: process.execPath, args: [spec.cliPath] };
-  }
-  return {
-    command: process.platform === "win32" ? "npx.cmd" : "npx",
-    args: ["-y", spec.packageName],
-  };
-}`;
+${renderCliInvocationUtility()}`;
 }

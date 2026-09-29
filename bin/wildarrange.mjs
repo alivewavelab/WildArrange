@@ -45,8 +45,11 @@ import { projectTimeline } from "../src/interface/timeline.mjs";
 import { COMMAND_REGISTRY, renderCommandsMarkdown, renderHelp } from "../src/interface/cli-help.mjs";
 import { adapterCliPrefix, installAdapter, restoreAdapterBackup, uninstallAdapter } from "../src/interface/adapters.mjs";
 import {
+  activateExternalCodexAdapter,
   activateExternalCursorAdapter,
   installExternalAdapters,
+  restoreExternalAdapterBackup,
+  uninstallExternalAdapters,
 } from "../src/interface/external-adapters.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
 import {
@@ -382,24 +385,27 @@ async function main() {
     }
     if (subcommand === "activate") {
       if (workspace.mode !== "external") throw new Error("adapter activate is only available for attached external governance projects");
-      const target = strArg(args, "target");
-      if (target !== "cursor") throw new Error("adapter activate currently supports --target cursor; Codex and Kimi require explicit installation and trust in their plugin UI");
-      console.log(JSON.stringify(await activateExternalCursorAdapter(rootDir, workspace, {
-        userRoot: strArg(args, "user-root"),
-      }), null, 2));
+      const target = strArg(args, "target") || "all";
+      if (!["all", "cursor", "codex"].includes(target)) throw new Error("adapter activate supports --target cursor, codex, or all; Kimi requires /plugins install in its own UI");
+      const userRoot = strArg(args, "user-root");
+      console.log(JSON.stringify({
+        kind: "wildarrange_external_activation",
+        ...(target !== "codex" ? { cursor: await activateExternalCursorAdapter(rootDir, workspace, { userRoot }) } : {}),
+        ...(target !== "cursor" ? { codex: await activateExternalCodexAdapter(rootDir, workspace, { userRoot }) } : {}),
+      }, null, 2));
       return;
     }
     if (subcommand === "uninstall") {
-      console.log(JSON.stringify(await uninstallAdapter(rootDir, {
-        target: strArg(args, "target") || "all",
-      }), null, 2));
+      console.log(JSON.stringify(workspace.mode === "external"
+        ? await uninstallExternalAdapters(rootDir, workspace, { target: strArg(args, "target") || "all" })
+        : await uninstallAdapter(rootDir, { target: strArg(args, "target") || "all" }), null, 2));
       return;
     }
     if (subcommand === "restore") {
       if (!strArg(args, "backup")) throw new Error("wildarrange adapter restore requires --backup <backupId>");
-      console.log(JSON.stringify(await restoreAdapterBackup(rootDir, {
-        backupId: args.backup,
-      }), null, 2));
+      console.log(JSON.stringify(workspace.mode === "external"
+        ? await restoreExternalAdapterBackup(rootDir, workspace, { backupId: args.backup })
+        : await restoreAdapterBackup(rootDir, { backupId: args.backup }), null, 2));
       return;
     }
     throw new Error("wildarrange adapter requires install, activate, uninstall, or restore");
