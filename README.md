@@ -455,6 +455,8 @@ node ./bin/wildarrange.mjs adoption recover
 
 `adoption start` 只读扫描测试、Gate、Runner、Hook 和历史档案，打开 Dashboard 逐卡批准；未传 `--token` 时会自动生成本次专用随机口令并注入当前标签页。只执行获批项；带验证命令、归档、合并或关键配置的卡片必须逐张批准。Registry 等待用户自行 commit A，随后生成 Bootstrap 与可直接用浏览器打开的 Inventory HTML，再等待 commit B。Inventory 同时内嵌机器可读记录，展示当前真源、历史档案、暂缓确认和本次变更；V1 不执行物理删除，因此删除墓碑只保留为未来兼容视图。三个目标名称若已被老项目文件、目录或链接占用，流程会暂停并指出冲突，绝不静默覆盖。获批 archive 默认移入项目可提交的 `docs/verification-archive/`（没有 `docs/` 时用 `verification-archive/`），不会放进 `.wildarrange/`。一旦已有卡片改变项目文件，就不能用“取消会话”冒充恢复；应完成两次 Git 锚定，或在 `recovery_required` 时运行 `adoption recover`。`doctor` / `status` 的 `registryFreshness` 过期只亮黄灯，不阻断日常 run。没有 `approve` / `apply` / `delete` CLI。
 
+外置接管扫描和验证仍使用业务仓库；locator 配置、Registry、Bootstrap、Inventory 写入治理仓库。Registry 使用治理合同的 `verificationRegistry` 路径，Bootstrap 和 Inventory 放在其同级目录；commit A/B 在治理仓库完成。若另有已批准的业务文件改动，它们须在业务仓库单独提交，系统分别核对两仓内容。初始化生成且摘要完整的空 Registry 可在 locator 获批后填充，原始内容保存在运行态 `adoption/artifact-preimages/`；非空、摘要异常或生成期间已变化的内容仍报冲突。
+
 Dashboard（`serve`）包含全项目工单总账、路由复盘台、决策面板、运维面板与验证接管页。工单总账直接读取 `.wildarrange/team/tasks.json`，展示全部 Plan、工单类型、优先级、关联任务与状态历史。路由复盘台按日期展示用户原文、结构化路由结果、命中信号、语义第二意见及同会话后续工具摘要，并可人工标记正确/规则错/个案错；工具参数中的常见密钥字段会脱敏。IDE `Stop` Hook 会主动更新中文日报 `.wildarrange/reports/routing/latest.md`（同日归档为 `YYYY-MM-DD.md`），先给结论，再列全部判断和工具明细。复盘只写 annotation，不自动修改 `routes.json`。
 
 `run` 结束时的门决策汇总按 `reporting.verbosity` 分级：默认 `verbose` 在 stderr 输出本次任务每个门的三行投影（框架初期让人能审判每一条门决策）；信任建立后可改为 `normal`（一行结果）或 `quiet`（只输出 JSON）。stdout 的机器可读 JSON 在任何级别下都不变。
@@ -725,6 +727,8 @@ Worker 之后的既有 Review 增加独立职责审计：R1 符合批准方案�
 先将配置补丁保存到 .wildarrange/plan-drafts/review-setup.json，执行 wildarrange review configure --from .wildarrange/plan-drafts/review-setup.json 预览，用户确认后再加 --apply。用 review checklist --task T001 查看清单，已批准后用 readiness --task T001 检查开工依赖。配置依赖缺失可先保存，但业务 Worker 不会启动，不消耗重试次数。
 
 Worker 读取 WILDARRANGE_EXECUTION_CONTEXT 的完整任务 Skill；探测器读取 WILDARRANGE_READINESS_PACKET，Reviewer 读取 WILDARRANGE_REVIEW_PACKET。探测返回 ready、原 challenge、loadedSkills；Reviewer 按包内协议返回带 inputDigest 的 PASS/RETURN/INCONCLUSIVE 与准确源码证据。请连接真实服务，固定回显不是独立审核。握手通过不等于功能交付。
+
+外置模式先用 `project show` 确认三根。草稿实际保存到 `runtimeRoot/plan-drafts/`，`review configure --from .wildarrange/plan-drafts/review-setup.json` 会将逻辑路径解析到该运行态；也支持该草稿的绝对路径。正式配置保存到治理仓库 `<policyRoot>/wildarrange.config.json`，之后优先读取它；尚无正式配置时沿用运行态配置。业务仓库不新增这些治理文件。
 
 旧项目扫描用 adoption inventory，登记继续使用 adoption 的逐卡批准流程。Registry.fixtures 只保存夹具位置与消费者；旧计划来源保存在 task.request.evidenceRefs，事实读写仍属于唯一 owner。登记完成与实际迁移完成分别报告，历史“已完成”必须重新验证才成为当前完成。存量无职责声明且无项目步骤的兼容任务返回 legacy_not_checked，不能宣传为通过新开工检查。
 

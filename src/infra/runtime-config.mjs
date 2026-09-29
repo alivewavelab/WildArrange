@@ -13,10 +13,12 @@ import path from "node:path";
 import { normalizeAgentKey } from "./agent-registry.mjs";
 import { DEFAULT_RUNTIME_NAME, DEFAULT_WILDARRANGE_CONFIG } from "./default-config.mjs";
 import { appendLedger } from "./ledger.mjs";
+import { assertRealpathInsideRoot, resolveInboundPath } from "./recovery-transaction.mjs";
 import {
   ensureWildArrangeDirs,
   readJson,
   resolveWildArrangePath,
+  resolveGovernancePaths,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 
@@ -41,7 +43,7 @@ export const DEFAULT_CLI_COMMAND = "wildarrange";
  * loadWildArrangeConfig：本模块对外异步 API。
  */
 export async function loadWildArrangeConfig(rootDir) {
-  const rootConfigPath = path.join(rootDir, WILDARRANGE_CONFIG_FILE);
+  const rootConfigPath = await governanceConfigPath(rootDir);
   const runtimeConfigPath = resolveWildArrangePath(rootDir, "config.json");
   const rootConfig = await readJson(rootConfigPath, null);
   const runtimeConfig = await readJson(runtimeConfigPath, null);
@@ -61,7 +63,7 @@ export async function loadWildArrangeConfig(rootDir) {
  */
 export async function migrateRuntimeConfigState(rootDir) {
   await ensureWildArrangeDirs(rootDir);
-  const rootConfigPath = path.join(rootDir, WILDARRANGE_CONFIG_FILE);
+  const rootConfigPath = await governanceConfigPath(rootDir);
   const runtimeConfigPath = resolveWildArrangePath(rootDir, "config.json");
   const rootConfig = await readJson(rootConfigPath, null);
   const runtimeConfig = await readJson(runtimeConfigPath, null);
@@ -79,7 +81,7 @@ export async function migrateRuntimeConfigState(rootDir) {
   }
   return {
     kind: "runtime_config_migration",
-    sourcePath: rootConfig ? WILDARRANGE_CONFIG_FILE : runtimeConfig ? ".wildarrange/config.json" : "default",
+    sourcePath: rootConfig ? path.relative(rootDir, rootConfigPath) : runtimeConfig ? ".wildarrange/config.json" : "default",
     runtimeConfigPath: path.relative(rootDir, runtimeConfigPath),
     removedProjections,
   };
@@ -90,7 +92,7 @@ export async function migrateRuntimeConfigState(rootDir) {
  */
 export async function writeDefaultWildArrangeConfig(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
-  const targetPath = options.root === true ? path.join(rootDir, WILDARRANGE_CONFIG_FILE) : resolveWildArrangePath(rootDir, "config.json");
+  const targetPath = options.root === true ? await governanceConfigPath(rootDir) : resolveWildArrangePath(rootDir, "config.json");
   if (!options.force && existsSync(targetPath)) {
     return { path: path.relative(rootDir, targetPath), created: false, config: await readJson(targetPath) };
   }
@@ -273,10 +275,20 @@ export async function updateProjectGovernanceConfig(rootDir, patch, options = {}
   if (patch.executionReadiness && Object.keys(patch.executionReadiness).some(key => !["workerProbe", "researchProbe", "researchSkills", "timeoutMs"].includes(key))) throw new Error("unknown executionReadiness field");
   const current = await loadWildArrangeConfig(rootDir);
   const config = normalizeRuntimeConfig(deepMerge(current.config, patch));
+  const target = await governanceConfigPath(rootDir);
+  const configPath = path.relative(rootDir, target);
   if (options.apply === true) {
-    await writeJsonAtomic(path.join(rootDir, WILDARRANGE_CONFIG_FILE), config);
-    await appendLedger(rootDir, { type: "project_governance_configured", configPath: WILDARRANGE_CONFIG_FILE });
+    await writeJsonAtomic(target, config);
+    await appendLedger(rootDir, { type: "project_governance_configured", configPath });
   }
-  return { config, applied: options.apply === true, configPath: WILDARRANGE_CONFIG_FILE };
+  return { config, applied: options.apply === true, configPath };
 }
 
+
+/** 配置读写使用同一经过 realpath 校验的正式路径。 */
+async function governanceConfigPath(rootDir) {
+  const governance = resolveGovernancePaths(rootDir);
+  const target = resolveInboundPath(governance.rootDir, governance.configPath);
+  await assertRealpathInsideRoot(governance.rootDir, target, governance.configPath);
+  return target;
+}

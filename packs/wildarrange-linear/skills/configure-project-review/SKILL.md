@@ -20,7 +20,7 @@ description: 配置项目自己的独立审查步骤、规范文档、必需 Ski
 
 ## 步骤三：预览并应用
 
-将仅含 review、executionReadiness 的配置补丁保存为 .wildarrange/plan-drafts/review-setup.json。运行：
+将仅含 review、executionReadiness 的配置补丁保存为 .wildarrange/plan-drafts/review-setup.json。外置模式先读 project show，实际文件写到 runtimeRoot/plan-drafts/review-setup.json，下面 --from 的逻辑路径保持不变；应用后正式配置位于治理仓库 <policyRoot>/wildarrange.config.json。不要在业务仓库创建 .wildarrange 目录。运行：
 
 ~~~bash
 wildarrange review configure --from .wildarrange/plan-drafts/review-setup.json

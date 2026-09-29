@@ -16,7 +16,7 @@ import path from "node:path";
 import { runCommand } from "../infra/command-runner.mjs";
 import { evaluateCommandSafety } from "../infra/command-safety.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
-import { nowIso, readJson, writeJsonAtomic, writeTextAtomic } from "../infra/runtime-store.mjs";
+import { hashContent, resolveGovernancePaths, resolveWildArrangePath, nowIso, readJson, writeJsonAtomic, writeTextAtomic } from "../infra/runtime-store.mjs";
 import {
   adoptionTransactionDir,
   assertRealpathInsideRoot,
@@ -69,8 +69,9 @@ export async function scanVerificationGovernance(rootDir, options = {}) {
  * 在 recovery 事务中应用单张验证差异卡：patch → verify → 提交或回滚。
  * @param {object} options card、sessionId、expectedFingerprint、config
  */
-export async function applyVerificationCard(rootDir, options = {}) {
+export async function applyVerificationCard(projectRoot, options = {}) {
   const card = options.card;
+  const rootDir = card?.repositoryTarget === "governance" ? resolveGovernancePaths(projectRoot).rootDir : projectRoot;
   if (!card?.id) throw new Error("apply-card requires card.id");
   if (options.expectedFingerprint && options.expectedFingerprint !== card.fingerprint && options.expectedFingerprint !== fingerprintCard(card)) {
     const error = new Error("card fingerprint stale");
@@ -78,7 +79,7 @@ export async function applyVerificationCard(rootDir, options = {}) {
     throw error;
   }
   const sessionId = options.sessionId;
-  const txnDir = adoptionTransactionDir(rootDir, sessionId, card.id);
+  const txnDir = adoptionTransactionDir(projectRoot, sessionId, card.id);
   const stagingDir = path.join(txnDir, "preimage");
   const manifestPath = path.join(txnDir, "manifest.json");
   const existing = await readRecoveryManifest(manifestPath);
@@ -105,13 +106,14 @@ export async function applyVerificationCard(rootDir, options = {}) {
       paths,
       preimage,
     });
+  manifest.repositoryTarget = card.repositoryTarget || "project";
   await writeRecoveryManifest(manifestPath, manifest);
 
   try {
     if (card.action !== "defer" && card.status !== "rejected") {
-      await applyPatch(rootDir, card);
+      await applyPatch(rootDir, card, card.asset === "config_locator" ? (await loadWildArrangeConfig(projectRoot)).config : undefined);
     }
-    const verifyResults = await runApprovedCommands(rootDir, card.verify || [], options.config);
+    const verifyResults = await runApprovedCommands(projectRoot, card.verify || [], options.config);
     if (verifyResults.some((item) => item.exitCode !== 0)) {
       throw Object.assign(new Error("approved verifier failed"), { code: "verify_failed", verifyResults });
     }
@@ -119,6 +121,7 @@ export async function applyVerificationCard(rootDir, options = {}) {
     for (const relativePath of paths) {
       postimage.push({
         path: relativePath,
+        repositoryTarget: card.repositoryTarget || "project",
         digest: await digestPath(path.join(rootDir, relativePath)),
         gitDigest: await gitComparablePathDigest(path.join(rootDir, relativePath)),
       });
@@ -173,39 +176,44 @@ export async function applyVerificationCard(rootDir, options = {}) {
  */
 export async function generateVerificationArtifacts(rootDir, options = {}) {
   const cards = options.cards || [];
+  const governance = resolveGovernancePaths(rootDir);
+  const artifactRoot = governance.rootDir;
   const locator = options.locator || readLocator((await loadWildArrangeConfig(rootDir)).config);
   if (!locator.registryPath) throw new Error("generate-artifacts requires an approved locator");
   const phase = options.phase || "registry";
   const written = [];
   if (phase === "registry" || phase === "all") {
     const plannedRegistry = buildRegistryFromCards(cards, { locator });
-    const [preparedRegistry] = await prepareArtifactWrites(rootDir, [{
+    const [preparedRegistry] = await prepareArtifactWrites(artifactRoot, [{
       relativePath: locator.registryPath,
       value: plannedRegistry,
       kind: "registry",
+      replaceEmptyRegistry: options.writeLocator === true && locator.registryPath === governance.registryPath,
+      preimageRoot: resolveWildArrangePath(rootDir, "adoption", "artifact-preimages"),
     }]);
     await commitPreparedArtifact(preparedRegistry);
     const registry = preparedRegistry.value;
     written.push({ path: locator.registryPath, digest: registry.digest, kind: "registry", reused: preparedRegistry.reused });
     if (options.writeLocator === true) {
       await mergeLocator(rootDir, locator);
-      written.push({ path: "wildarrange.config.json", kind: "locator" });
+      written.push({ path: governance.configPath, kind: "locator" });
     }
     return { kind: "verification_governance_generate", phase: "registry", written, registry };
   }
   if (phase === "handoff") {
-    const registry = options.registry || await readJson(path.join(rootDir, locator.registryPath), null);
+    const registry = options.registry || await readJson(path.join(artifactRoot, locator.registryPath), null);
     if (!registry) throw new Error("registry missing; commit A must exist before generating Bootstrap/Inventory");
     const plannedBootstrap = buildBootstrap({
       baselineRef: options.baselineRef,
       registryDigest: registry.digest || digestCanonical(registry),
       locator,
     });
-    const declared = declaredInputPaths(registry, locator);
+    const declared = declaredInputPaths(registry, locator, [], governance);
     const declaredFingerprint = await computeDeclaredInputFingerprint(rootDir, declared, {
       exclude: [locator.inventoryPath, locator.bootstrapPath],
+      governance,
     });
-    const [preparedBootstrap] = await prepareArtifactWrites(rootDir, [{
+    const [preparedBootstrap] = await prepareArtifactWrites(artifactRoot, [{
       relativePath: locator.bootstrapPath,
       value: plannedBootstrap,
       kind: "bootstrap",
@@ -218,11 +226,11 @@ export async function generateVerificationArtifacts(rootDir, options = {}) {
       universeFingerprint: options.universeFingerprint,
       declaredInputFingerprint: declaredFingerprint,
       cards,
-      projectContext: await readGitInventoryContext(rootDir, options.baselineRef, {
-        exclude: [locator.bootstrapPath, locator.inventoryPath],
+      projectContext: await readGitInventoryContext(rootDir, artifactRoot === rootDir ? options.baselineRef : null, {
+        exclude: artifactRoot === rootDir ? [locator.bootstrapPath, locator.inventoryPath] : [],
       }),
     });
-    const [preparedInventory] = await prepareArtifactWrites(rootDir, [{
+    const [preparedInventory] = await prepareArtifactWrites(artifactRoot, [{
       relativePath: locator.inventoryPath,
       value: plannedInventory,
       kind: "inventory",
@@ -274,12 +282,12 @@ function affectedPaths(card) {
 // --- Patch 应用 ---
 
 /** 按 patch.kind 应用 json_merge、write_text、archive_move 等变更。 */
-async function applyPatch(rootDir, card) {
+async function applyPatch(rootDir, card, baseConfig) {
   const patch = card.patch;
   if (!patch) return;
   if (patch.kind === "json_merge") {
     const absolutePath = resolveInboundPath(rootDir, patch.path);
-    const current = await readJson(absolutePath, {});
+    const current = baseConfig || await readJson(absolutePath, {});
     await writeJsonAtomic(absolutePath, deepMerge(current, patch.value || {}));
     return;
   }
@@ -381,12 +389,19 @@ async function prepareArtifactWrites(rootDir, artifacts) {
     if (info.isSymbolicLink()) throw artifactConflict(artifact.relativePath, "目标是符号链接");
     if (!info.isFile()) throw artifactConflict(artifact.relativePath, "目标不是普通文件");
     let existing;
+    let text;
     try {
-      const text = await readFile(absolutePath, "utf8");
+      text = await readFile(absolutePath, "utf8");
       existing = artifact.kind === "inventory" ? parseVerificationInventory(text) : JSON.parse(text);
       if (!existing) throw new Error("missing embedded inventory record");
     } catch {
       throw artifactConflict(artifact.relativePath, "目标是已有文件且不是可复用的治理产物");
+    }
+    const { digest: existingDigest, ...existingBody } = existing;
+    if (artifact.replaceEmptyRegistry && sameArtifactMeaning(existing, buildRegistryFromCards([]))
+      && existingDigest === digestCanonical(existingBody)) {
+      prepared.push({ ...artifact, absolutePath, previousText: text, reused: false });
+      continue;
     }
     if (!sameArtifactMeaning(existing, artifact.value)) {
       throw artifactConflict(artifact.relativePath, "目标已有不同内容");
@@ -396,14 +411,22 @@ async function prepareArtifactWrites(rootDir, artifacts) {
   return prepared;
 }
 
-/** 非 reused 制品原子写入；写入前再次确认目标仍为 ENOENT。 */
+/** 制品原子写入；复核目标仍缺失，或仍为已备份的初始化空 Registry。 */
 async function commitPreparedArtifact(prepared) {
   if (prepared.reused) return;
-  try {
-    await lstat(prepared.absolutePath);
-    throw artifactConflict(prepared.relativePath, "目标在生成期间被占用");
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
+  if (prepared.previousText !== undefined) {
+    const info = await lstat(prepared.absolutePath);
+    if (!info.isFile() || info.isSymbolicLink() || await readFile(prepared.absolutePath, "utf8") !== prepared.previousText) {
+      throw artifactConflict(prepared.relativePath, "初始化 Registry 在生成期间已变化");
+    }
+    await writeTextAtomic(path.join(prepared.preimageRoot, hashContent(prepared.previousText) + ".json"), prepared.previousText);
+  } else {
+    try {
+      await lstat(prepared.absolutePath);
+      throw artifactConflict(prepared.relativePath, "目标在生成期间被占用");
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
   }
   if (prepared.serialized !== undefined) {
     await writeTextAtomic(prepared.absolutePath, prepared.serialized);
@@ -437,8 +460,10 @@ function artifactConflict(relativePath, reason) {
 
 /** 将 approved locator 合并写入 wildarrange.config.json。 */
 async function mergeLocator(rootDir, locator) {
-  const configPath = path.join(rootDir, "wildarrange.config.json");
-  const current = await readJson(configPath, {});
+  const governance = resolveGovernancePaths(rootDir);
+  const configPath = resolveInboundPath(governance.rootDir, governance.configPath);
+  await assertRealpathInsideRoot(governance.rootDir, configPath, governance.configPath);
+  const current = (await loadWildArrangeConfig(rootDir)).config;
   await writeJsonAtomic(configPath, {
     ...current,
     verificationGovernance: locator,

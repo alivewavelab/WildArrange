@@ -73,16 +73,16 @@ export function resolveWildArrangeRoot(rootDir) {
   // the caller's relative/absolute shape. Several evidence contracts rely on
   // `resolveWildArrangePath(".", ...)` returning `.wildarrange/...`, not a cwd-
   // absolute path. External bindings always return their validated absolute root.
-  return RUNTIME_ROOTS.get(projectRoot) || path.join(rootDir, WILDARRANGE_DIR);
+  return RUNTIME_ROOTS.get(projectRoot)?.runtimeRoot || path.join(rootDir, WILDARRANGE_DIR);
 }
 
 /**
  * 为当前进程绑定外置运行态根。调用方必须先完成 realpath/边界验证。
  */
-export function bindWildArrangeRuntimeRoot(projectRoot, runtimeRoot) {
+export function bindWildArrangeRuntimeRoot(projectRoot, runtimeRoot, governance = null) {
   const project = runtimeRootKey(projectRoot);
   const runtime = path.resolve(runtimeRoot);
-  RUNTIME_ROOTS.set(project, runtime);
+  RUNTIME_ROOTS.set(project, { runtimeRoot: runtime, governance });
   return runtime;
 }
 
@@ -91,6 +91,12 @@ export function bindWildArrangeRuntimeRoot(projectRoot, runtimeRoot) {
  */
 export function clearWildArrangeRuntimeRoot(projectRoot) {
   return RUNTIME_ROOTS.delete(runtimeRootKey(projectRoot));
+}
+
+/** 返回已验证的治理路径投影；无外置连接时维持业务仓库内路径。 */
+export function resolveGovernancePaths(rootDir) {
+  return RUNTIME_ROOTS.get(runtimeRootKey(rootDir))?.governance
+    || { rootDir, configPath: "wildarrange.config.json", registryPath: null };
 }
 
 function runtimeRootKey(rootDir) {

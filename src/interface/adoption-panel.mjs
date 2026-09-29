@@ -30,7 +30,7 @@ import {
 } from "../orchestration/adoption.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { evaluateRegistryFreshness, readLocator, readVerificationInventory } from "../infra/verification-registry.mjs";
-import { readJson } from "../infra/runtime-store.mjs";
+import { readJson, resolveGovernancePaths } from "../infra/runtime-store.mjs";
 import { SAFE_ID, readJsonBody, sendJson } from "./http-utils.mjs";
 
 // --- 面板 UI 常量与内嵌片段 ---
@@ -278,9 +278,9 @@ export const ADOPTION_SCRIPT = `
         }).join("");
         const heading = actionName(card.action) + " · " + statusName(card.status) + (sensitive ? " · 需要单独确认" : "");
         if (unknown && (card.action === "merge" || card.action === "delete" || card.action === "archive")) {
-          article.innerHTML = '<div class="approval-item-head"><div><span class="badge warn">证据不足</span><h3>' + esc(plain.title) + '</h3><p class="muted"><code>' + esc(card.path || card.id) + '</code> · ' + esc(heading) + '</p></div></div><p>现在还没查清它是否仍被使用，所以系统只保留原样，不允许归档、合并或删除。</p><div class="approval-item-details">' + details + '</div>';
+          article.innerHTML = '<div class="approval-item-head"><div><span class="badge warn">证据不足</span><h3>' + esc(plain.title) + '</h3><p class="muted"><code>' + esc((card.repositoryTarget === "governance" ? "治理仓库 / " : "") + (card.path || card.id)) + '</code> · ' + esc(heading) + '</p></div></div><p>现在还没查清它是否仍被使用，所以系统只保留原样，不允许归档、合并或删除。</p><div class="approval-item-details">' + details + '</div>';
         } else {
-          article.innerHTML = '<div class="approval-item-head"><div><span class="badge">' + esc(actionName(card.action)) + '</span><h3>' + esc(plain.title) + '</h3><p class="muted"><code>' + esc(card.path || card.id) + '</code> · ' + esc(statusName(card.status) + (sensitive ? " · 需要单独确认" : "")) + '</p></div>' + (actions.length ? '<div class="form-row">' + actions.join("") + '</div>' : '') + '</div><div class="approval-item-details">' + details + '</div>';
+          article.innerHTML = '<div class="approval-item-head"><div><span class="badge">' + esc(actionName(card.action)) + '</span><h3>' + esc(plain.title) + '</h3><p class="muted"><code>' + esc((card.repositoryTarget === "governance" ? "治理仓库 / " : "") + (card.path || card.id)) + '</code> · ' + esc(statusName(card.status) + (sensitive ? " · 需要单独确认" : "")) + '</p></div>' + (actions.length ? '<div class="form-row">' + actions.join("") + '</div>' : '') + '</div><div class="approval-item-details">' + details + '</div>';
         }
         return article;
     }
@@ -486,10 +486,11 @@ export async function buildGovernanceFileIndex(rootDir) {
   const files = await listProjectFiles(rootDir);
   const configResult = await loadWildArrangeConfig(rootDir).catch(() => ({ config: {} }));
   const locator = readLocator(configResult.config);
+  const governance = resolveGovernancePaths(rootDir);
   const freshness = await evaluateRegistryFreshness(rootDir, { config: configResult.config });
-  const registry = locator.registryPath ? await readJson(path.join(rootDir, locator.registryPath), null) : null;
-  const bootstrap = locator.bootstrapPath ? await readJson(path.join(rootDir, locator.bootstrapPath), null) : null;
-  const inventory = locator.inventoryPath ? await readVerificationInventory(path.join(rootDir, locator.inventoryPath), null) : null;
+  const registry = locator.registryPath ? await readJson(path.join(governance.rootDir, locator.registryPath), null) : null;
+  const bootstrap = locator.bootstrapPath ? await readJson(path.join(governance.rootDir, locator.bootstrapPath), null) : null;
+  const inventory = locator.inventoryPath ? await readVerificationInventory(path.join(governance.rootDir, locator.inventoryPath), null) : null;
   const values = { registry, bootstrap, inventory };
   const ledgers = GOVERNANCE_LEDGERS.map((ledger) => {
     const value = values[ledger.id];
@@ -498,7 +499,7 @@ export async function buildGovernanceFileIndex(rootDir) {
       label: ledger.label,
       title: ledger.title,
       description: ledger.description,
-      path: locator[ledger.locatorKey] || null,
+      path: locator[ledger.locatorKey] ? (governance.registryPath ? "governance/" : "") + locator[ledger.locatorKey] : null,
       exists: Boolean(value),
       stale: Boolean(value) && freshness.stale === true,
       summary: governanceLedgerSummary(ledger.id, value),
@@ -563,8 +564,17 @@ function governanceGroupFor(relativePath) {
 
 /** 只读读取治理文件预览；校验分组归属、路径逃逸与 512KB 体积上限。 */
 async function readGovernancePreview(rootDir, requestedPath) {
-  const relative = String(requestedPath || "").replaceAll("\\", "/");
-  if (!governanceGroupFor(relative)) throw Object.assign(new Error("该文件不属于项目治理范围"), { code: "invalid_path" });
+  let relative = String(requestedPath || "").replaceAll("\\", "/");
+  const governance = resolveGovernancePaths(rootDir);
+  let externalArtifact = false;
+  if (governance.registryPath && relative.startsWith("governance/")) {
+    const locator = readLocator((await loadWildArrangeConfig(rootDir)).config);
+    relative = relative.slice("governance/".length);
+    externalArtifact = [locator.registryPath, locator.bootstrapPath, locator.inventoryPath].includes(relative);
+    if (!externalArtifact) throw Object.assign(new Error("未登记的治理文件"), { code: "invalid_path" });
+    rootDir = governance.rootDir;
+  }
+  if (!externalArtifact && !governanceGroupFor(relative)) throw Object.assign(new Error("该文件不属于项目治理范围"), { code: "invalid_path" });
   const root = path.resolve(rootDir);
   const absolute = path.resolve(root, relative);
   // 符号链接解析前：拒绝 .. 或绝对路径逃出项目根。

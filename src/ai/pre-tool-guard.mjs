@@ -19,6 +19,7 @@ import {
   loadWildArrangeConfig,
 } from "../infra/runtime-config.mjs";
 import {
+  resolveWildArrangePath,
   nowIso,
   readJson,
 } from "../infra/runtime-store.mjs";
@@ -554,6 +555,8 @@ async function denyFeatureDesignToolUse(rootDir, options) {
 /** 将绝对/相对路径规范为相对 rootDir 的路径，经 realpath 解析防 symlink 逃逸。 */
 function normalizeHookTargetPath(value, rootDir) {
   const absoluteTarget = path.isAbsolute(value) ? value : path.resolve(rootDir, value);
+  const runtimeRelative = path.relative(canonicalizePotentialPath(resolveWildArrangePath(rootDir)), canonicalizePotentialPath(absoluteTarget)).replaceAll("\\", "/");
+  if (/^plan-drafts\/[A-Za-z0-9_.-]+\.json$/.test(runtimeRelative)) return ".wildarrange/" + runtimeRelative;
   const relative = path.relative(
     canonicalizePotentialPath(rootDir),
     canonicalizePotentialPath(absoluteTarget),

@@ -255,7 +255,11 @@ async function resolveWorkspaceProjectRoot(requestedRoot, registry) {
 /** 绑定完整工作区上下文，供规则扫描与长寿命宿主读取。 */
 export function bindWorkspaceContext(context) {
   const projectRoot = workspaceRootKey(context.projectRoot);
-  bindWildArrangeRuntimeRoot(projectRoot, context.runtimeRoot);
+  bindWildArrangeRuntimeRoot(projectRoot, context.runtimeRoot, context.mode === "external" ? {
+    rootDir: context.governanceRoot,
+    configPath: path.posix.join(context.governanceContract.policyRoot, "wildarrange.config.json"),
+    registryPath: context.governanceContract.verificationRegistry,
+  } : null);
   BOUND_CONTEXTS.set(projectRoot, context);
   return context;
 }

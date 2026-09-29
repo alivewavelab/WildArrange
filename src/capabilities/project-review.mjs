@@ -12,9 +12,10 @@
 //   · 缺了它会怎样？项目规范与文档一致性无法被机器绑定到任务完成。
 // =============================================================================
 
-import { realpath } from "node:fs/promises";
+import { lstat, realpath } from "node:fs/promises";
 import path from "node:path";
-import { readJson } from "../infra/runtime-store.mjs";
+import { readJson, resolveWildArrangePath } from "../infra/runtime-store.mjs";
+import { assertRealpathInsideRoot } from "../infra/recovery-transaction.mjs";
 import { updateProjectGovernanceConfig } from "../infra/runtime-config.mjs";
 import { loadMarkdownAttachment, loadSkillAttachment } from "../infra/context-attachments.mjs";
 import { pathAllowed } from "../infra/path-match.mjs";
@@ -236,10 +237,15 @@ export function hasAcceptedProjectReview(config, task, scope, receipt) {
  * @returns {Promise<object>} applied、configPath、checklist 等
  */
 export async function configureProjectReview(rootDir, draftPath, options = {}) {
-  const root = await realpath(rootDir);
-  const file = await realpath(path.resolve(root, draftPath));
-  const relative = path.relative(root, file).replaceAll("\\", "/");
-  if (!/^\.wildarrange\/plan-drafts\/[^/]+\.json$/.test(relative)) throw new Error("setup draft must be a regular JSON file under .wildarrange/plan-drafts");
+  const draftRoot = resolveWildArrangePath(rootDir, "plan-drafts");
+  await assertRealpathInsideRoot(resolveWildArrangePath(rootDir), draftRoot, "plan-drafts");
+  const drafts = await realpath(draftRoot);
+  const logical = String(draftPath).replaceAll("\\", "/");
+  const requested = /^\.wildarrange\/plan-drafts\/[^/]+\.json$/.test(logical)
+    ? path.join(drafts, path.posix.basename(logical)) : path.resolve(rootDir, draftPath);
+  const file = await realpath(requested);
+  const relative = path.relative(drafts, file).replaceAll("\\", "/");
+  if (!/^[A-Za-z0-9_.-]+\.json$/.test(relative) || !(await lstat(requested)).isFile()) throw new Error("setup draft must be a regular JSON file under .wildarrange/plan-drafts");
   const patch = await readJson(file);
   const preview = await updateProjectGovernanceConfig(rootDir, patch);
   const checklist = await prepareProjectReview(rootDir, { writable_paths: ["**"] }, preview.config);
