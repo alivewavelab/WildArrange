@@ -13,28 +13,16 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
 import { importPlan } from "../src/orchestration/plan-state.mjs";
-import { runCommand } from "../src/infra/command-runner.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
-import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { resolveGovernancePaths, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { gitCommitAll, withExternalProject } from "./helpers/external-fixture.mjs";
 
 const CLI_PATH = path.resolve(process.cwd(), "bin", "wildarrange.mjs");
-
-async function withTempDir(fn) {
-  const baseDir = path.join(os.tmpdir(), "wildarrange-tests");
-  await mkdir(baseDir, { recursive: true });
-  const dir = await mkdtemp(path.join(baseDir, "wildarrange-verbosity-"));
-  try {
-    await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
 
 function passingTask(id) {
   return {
@@ -54,26 +42,26 @@ async function importPlanWith(dir, fileName, title, tasks) {
   await importPlan(dir, planPath);
 }
 
-async function commitInitialGitBaseline(dir) {
-  await writeFile(path.join(dir, ".gitignore"), ".wildarrange/\n");
-  for (const command of ["git config user.email test@example.com", "git config user.name WildArrange-Test", "git add .gitignore", "git commit -m initial"]) {
-    const result = await runCommand(command, dir);
-    assert.equal(result.exitCode, 0, result.stderr);
-  }
+/** 治理配置写入外置治理仓并提交，使其成为受信任的当前配置。 */
+async function writeGovernanceConfig(dir, governanceRoot, config) {
+  const governance = resolveGovernancePaths(dir);
+  await writeFile(path.join(governance.rootDir, governance.configPath), JSON.stringify(config, null, 2));
+  await gitCommitAll(governanceRoot, "verbosity config");
 }
 
-function runCli(dir) {
-  return spawnSync(process.execPath, [CLI_PATH, "run", "--root", dir], { cwd: dir, encoding: "utf8" });
+function runCli(dir, stateHome) {
+  return spawnSync(process.execPath, [CLI_PATH, "run", "--root", dir], {
+    cwd: dir,
+    encoding: "utf8",
+    env: { ...process.env, WILDARRANGE_STATE_HOME: stateHome },
+  });
 }
 
 test("default verbose prints the per-gate decision summary on stderr, JSON on stdout", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    await runCommand("git init", dir);
-    await commitInitialGitBaseline(dir);
+  await withExternalProject(async ({ projectRoot: dir, governanceRoot, stateHome }) => {
     await importPlanWith(dir, "verbosity-plan.json", "Verbosity", [passingTask("T001")]);
 
-    const run = runCli(dir);
+    const run = runCli(dir, stateHome);
     assert.equal(run.status, 0, run.stderr);
     const result = JSON.parse(run.stdout);
     assert.equal(result.status, "completed");
@@ -84,21 +72,18 @@ test("default verbose prints the per-gate decision summary on stderr, JSON on st
 });
 
 test("quiet prints no gate summary; normal prints exactly one line", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    await runCommand("git init", dir);
-    await commitInitialGitBaseline(dir);
+  await withExternalProject(async ({ projectRoot: dir, governanceRoot, stateHome }) => {
+    // 治理配置须先提交再导入计划：计划绑定导入时的治理仓 SHA，之后再改会使双仓绑定失效。
+    await writeGovernanceConfig(dir, governanceRoot, { reporting: { verbosity: "quiet" } });
     await importPlanWith(dir, "verbosity-plan.json", "Verbosity", [passingTask("T001")]);
-
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({ reporting: { verbosity: "quiet" } }, null, 2));
-    const quiet = runCli(dir);
+    const quiet = runCli(dir, stateHome);
     assert.equal(quiet.status, 0, quiet.stderr);
     assert.equal(JSON.parse(quiet.stdout).status, "completed");
     assert.ok(!quiet.stderr.includes("门决策汇总"), "quiet 不得输出门汇总");
 
+    await writeGovernanceConfig(dir, governanceRoot, { reporting: { verbosity: "normal" } });
     await importPlanWith(dir, "verbosity-plan-2.json", "Verbosity 2", [passingTask("T002")]);
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({ reporting: { verbosity: "normal" } }, null, 2));
-    const normal = runCli(dir);
+    const normal = runCli(dir, stateHome);
     assert.equal(normal.status, 0, normal.stderr);
     assert.match(normal.stderr, /\[run\] T002 -> completed/);
     assert.ok(!normal.stderr.includes("门决策汇总"), "normal 只输出一行");
@@ -106,12 +91,10 @@ test("quiet prints no gate summary; normal prints exactly one line", async () =>
 });
 
 test("invalid reporting.verbosity is rejected with a clear error", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    await runCommand("git init", dir);
+  await withExternalProject(async ({ projectRoot: dir, governanceRoot, stateHome }) => {
     await importPlanWith(dir, "verbosity-plan.json", "Verbosity", [passingTask("T001")]);
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({ reporting: { verbosity: "chatty" } }, null, 2));
-    const run = runCli(dir);
+    await writeGovernanceConfig(dir, governanceRoot, { reporting: { verbosity: "chatty" } });
+    const run = runCli(dir, stateHome);
     assert.notEqual(run.status, 0);
     assert.match(run.stderr, /reporting\.verbosity must be verbose, normal, or quiet/);
   });

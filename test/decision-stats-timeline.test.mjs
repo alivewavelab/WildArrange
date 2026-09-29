@@ -13,7 +13,7 @@
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
@@ -23,22 +23,11 @@ import { projectDecisionStats } from "../src/interface/decisions.mjs";
 import { projectTimeline } from "../src/interface/timeline.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
 import { appendAnnotation } from "../src/infra/annotation-log.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 const execFileAsync = promisify(execFile);
 const WILDARRANGE_BIN = path.resolve(import.meta.dirname, "..", "bin", "wildarrange.mjs");
-
-async function withTempDir(fn) {
-  const baseDir = path.join(process.cwd(), ".tmp");
-  await mkdir(baseDir, { recursive: true });
-  const dir = await mkdtemp(path.join(baseDir, "wildarrange-stats-"));
-  try {
-    await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
 
 async function importPassingPlan(dir) {
   const planPath = resolveWildArrangePath(dir, "artifacts", "stats-plan.json");
@@ -70,8 +59,7 @@ async function denyOnce(dir, target, taskId) {
 }
 
 test("decision stats count gates, rules and never-fired gates without any LLM", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await importPassingPlan(dir);
     await denyOnce(dir, "docs/a.md");
     await denyOnce(dir, "docs/b.md");
@@ -92,8 +80,7 @@ test("decision stats count gates, rules and never-fired gates without any LLM", 
 });
 
 test("decision stats join annotations by rule x category", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await importPassingPlan(dir);
     await denyOnce(dir, "docs/a.md");
     const { readDecisions } = await import("../src/infra/decision-log.mjs");
@@ -111,8 +98,7 @@ test("decision stats join annotations by rule x category", async () => {
 });
 
 test("timeline merges ledger, decisions and annotations in reverse order with filters", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await importPassingPlan(dir);
     await denyOnce(dir, "docs/a.md", "T001");
     const { readDecisions } = await import("../src/infra/decision-log.mjs");
@@ -162,20 +148,19 @@ test("timeline merges ledger, decisions and annotations in reverse order with fi
 });
 
 test("decisions stats and timeline CLI both work", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir, stateHome }) => {
     await importPassingPlan(dir);
     await denyOnce(dir, "docs/a.md");
 
-    const stats = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "decisions", "stats", "--root", dir], { cwd: dir });
+    const stats = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "decisions", "stats", "--root", dir], { cwd: dir, env: { ...process.env, WILDARRANGE_STATE_HOME: stateHome } });
     const parsed = JSON.parse(stats.stdout);
     assert.equal(parsed.kind, "wildarrange_decision_stats");
     assert.ok(parsed.gates.some((gate) => gate.gate === "pre_tool_use"));
 
-    const timeline = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "timeline", "--root", dir, "--limit", "10"], { cwd: dir });
+    const timeline = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "timeline", "--root", dir, "--limit", "10"], { cwd: dir, env: { ...process.env, WILDARRANGE_STATE_HOME: stateHome } });
     assert.match(timeline.stdout, /时间线：共/);
 
-    const timelineJson = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "timeline", "--root", dir, "--format", "json"], { cwd: dir });
+    const timelineJson = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "timeline", "--root", dir, "--format", "json"], { cwd: dir, env: { ...process.env, WILDARRANGE_STATE_HOME: stateHome } });
     assert.equal(JSON.parse(timelineJson.stdout).kind, "wildarrange_timeline");
   });
 });

@@ -13,11 +13,12 @@
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 
+import { runNextTask } from "../src/orchestration/linear-runtime.mjs";
 import { runDeliveryPipeline } from "../src/orchestration/delivery-pipeline.mjs";
 import { runInjectionHook } from "../src/ai/hooks.mjs";
 import { routeRequest } from "../src/ai/routing.mjs";
@@ -25,23 +26,11 @@ import { projectDecisions } from "../src/interface/decisions.mjs";
 import { readDecisions } from "../src/infra/decision-log.mjs";
 import { admitParallelAgentResult, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
 import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
-import { runCommand } from "../src/infra/command-runner.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { readJson, resolveTaskCheckpointPath, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { gitCommitAll, withExternalProject } from "./helpers/external-fixture.mjs";
 
 const execFileAsync = promisify(execFile);
 const WILDARRANGE_BIN = path.resolve(import.meta.dirname, "..", "bin", "wildarrange.mjs");
-
-async function withTempDir(fn) {
-  const baseDir = path.join(process.cwd(), ".tmp");
-  await mkdir(baseDir, { recursive: true });
-  const dir = await mkdtemp(path.join(baseDir, "wildarrange-decisions-"));
-  try {
-    await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
 
 function nodeEval(source) {
   return `node -e ${JSON.stringify(source.replace(/\s*\n\s*/g, " ").trim())}`;
@@ -50,7 +39,9 @@ function nodeEval(source) {
 async function importPassingPlan(dir) {
   await mkdir(path.join(dir, "src"), { recursive: true });
   await writeFile(path.join(dir, "src", "decision-fixture.txt"), "checked\n", "utf8");
-  // 计划文件放在 .wildarrange/artifacts 下：放在仓库根会被 scope 门当作
+  // 外置 Git 交付要求干净基线：验证夹具先提交，task worktree 才能看到它。
+  await gitCommitAll(dir, "decision fixture");
+  // 计划文件放在运行态 artifacts 下：放在仓库根会被 scope 门当作
   // writable_paths 之外的无归属改动而拦截。
   const planPath = resolveWildArrangePath(dir, "artifacts", "decisions-plan.json");
   await writeFile(planPath, JSON.stringify({
@@ -70,17 +61,10 @@ async function importPassingPlan(dir) {
 }
 
 test("delivery pipeline emits one decision record per gate plus a pipeline outcome", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const plan = await importPassingPlan(dir);
-    const taskState = await loadTaskState(dir);
-    const task = taskState.tasks.find((candidate) => candidate.id === "T001");
-
-    const result = await runDeliveryPipeline(dir, plan.id, task, {
-      initialEvidence: {
-        workerResult: { kind: "worker", command: task.worker_command, exitCode: 0, stdout: "fixture prepared", stderr: "" },
-      },
-    });
+  await withExternalProject(async ({ projectRoot: dir }) => {
+    await importPassingPlan(dir);
+    // 外置项目必为 Git 仓，交付要求 task worktree 与 delivery commit：走线性 runtime 而非裸 pipeline。
+    const result = await runNextTask(dir);
     assert.equal(result.status, "completed", JSON.stringify(result, null, 2));
 
     const { records, skippedLines } = await readDecisions(dir);
@@ -102,8 +86,7 @@ test("delivery pipeline emits one decision record per gate plus a pipeline outco
 });
 
 test("contract governance prep failure becomes fail evidence and a blocked outcome instead of a raw throw", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     const plan = await importPassingPlan(dir);
     // 初始化空契约注册表，让契约扫描本身 pass，注入点稳定在 JSON.parse。
     await mkdir(path.join(dir, "tooling", "contracts"), { recursive: true });
@@ -138,8 +121,7 @@ test("contract governance prep failure becomes fail evidence and a blocked outco
 });
 
 test("delivery target mismatch becomes fail evidence and a blocked outcome instead of a raw throw", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await mkdir(path.join(dir, "src"), { recursive: true });
     await writeFile(path.join(dir, "src", "decision-fixture.txt"), "checked\n", "utf8");
     // writable_paths 额外覆盖契约注册表：注册表放在 tooling/contracts 下，
@@ -192,8 +174,7 @@ test("delivery target mismatch becomes fail evidence and a blocked outcome inste
 });
 
 test("pre-tool-use hook emits a deny decision with the rule it hit", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await importPassingPlan(dir);
 
     const result = await runInjectionHook(dir, {
@@ -217,8 +198,7 @@ test("pre-tool-use hook emits a deny decision with the rule it hit", async () =>
 });
 
 test("routing emits a route decision record", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     const result = await routeRequest(dir, { text: "继续上一个任务" });
     const { records } = await readDecisions(dir);
     const record = records.find((candidate) => candidate.gate === "routing");
@@ -230,8 +210,7 @@ test("routing emits a route decision record", async () => {
 });
 
 test("parallel admission emits an admission decision carrying the runId", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await importPassingPlan(dir);
 
     const command = [
@@ -256,7 +235,7 @@ test("parallel admission emits an admission decision carrying the runId", async 
 });
 
 test("projection renders three lines per record and degrades past corrupt lines", async () => {
-  await withTempDir(async (dir) => {
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await mkdir(resolveWildArrangePath(dir), { recursive: true });
     const good = [
       { ts: "2026-08-04T01:00:00.000Z", gate: "pre_tool_use", decision: "deny", code: "out_of_scope", reason: "planned scope violation for task T001: docs/x.md", summary: "Edit docs/x.md -> deny", evidencePath: ".wildarrange/sessions/hooks/s-PreToolUse.json", taskId: "T001" },
@@ -285,7 +264,7 @@ test("projection renders three lines per record and degrades past corrupt lines"
 });
 
 test("readDecisions streams from the tail and marks truncated instead of loading the whole file", async () => {
-  await withTempDir(async (dir) => {
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await mkdir(resolveWildArrangePath(dir), { recursive: true });
     const logPath = resolveWildArrangePath(dir, "decisions.jsonl");
     // 2000 条记录约 300KB，远超 64KB 读块，必须触发尾部窗口。
@@ -312,7 +291,7 @@ test("readDecisions streams from the tail and marks truncated instead of loading
 });
 
 test("readDecisions preserves UTF-8 characters split across a read chunk", async () => {
-  await withTempDir(async (dir) => {
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await mkdir(resolveWildArrangePath(dir), { recursive: true });
     const summary = "中".repeat(23_000);
     await writeFile(resolveWildArrangePath(dir, "decisions.jsonl"), `${JSON.stringify({ gate: "routing", decision: "recover", summary })}\n`, "utf8");
@@ -326,7 +305,7 @@ test("readDecisions preserves UTF-8 characters split across a read chunk", async
 });
 
 test("readDecisions marks truncated when limit stops inside the current read chunk", async () => {
-  await withTempDir(async (dir) => {
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await mkdir(resolveWildArrangePath(dir), { recursive: true });
     const lines = Array.from({ length: 10 }, (_, index) => JSON.stringify({ gate: "routing", decision: "recover", summary: `record ${index}` }));
     await writeFile(resolveWildArrangePath(dir, "decisions.jsonl"), `${lines.join("\n")}\n`, "utf8");
@@ -339,7 +318,7 @@ test("readDecisions marks truncated when limit stops inside the current read chu
 });
 
 test("appendDecision heals a mid-line external truncation instead of gluing onto the partial line", async () => {
-  await withTempDir(async (dir) => {
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await mkdir(resolveWildArrangePath(dir), { recursive: true });
     const logPath = resolveWildArrangePath(dir, "decisions.jsonl");
     await writeFile(logPath, `${JSON.stringify({ gate: "routing", decision: "recover", summary: "complete" })}\n{"gate":"routing","deci`, "utf8");
@@ -355,9 +334,7 @@ test("appendDecision heals a mid-line external truncation instead of gluing onto
 });
 
 test("gate FAIL decisions carry the rule they hit (code/reason), and decision order matches gate execution order", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    assert.equal((await runCommand("git init", dir)).exitCode, 0);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     const planPath = resolveWildArrangePath(dir, "artifacts", "fail-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Failing verify",
@@ -404,16 +381,9 @@ test("gate FAIL decisions carry the rule they hit (code/reason), and decision or
 });
 
 test("completed pipeline emits gate decisions in execution order ending with the pipeline outcome", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const plan = await importPassingPlan(dir);
-    const taskState = await loadTaskState(dir);
-    const task = taskState.tasks.find((candidate) => candidate.id === "T001");
-    const result = await runDeliveryPipeline(dir, plan.id, task, {
-      initialEvidence: {
-        workerResult: { kind: "worker", command: task.worker_command, exitCode: 0, stdout: "fixture prepared", stderr: "" },
-      },
-    });
+  await withExternalProject(async ({ projectRoot: dir }) => {
+    await importPassingPlan(dir);
+    const result = await runNextTask(dir);
     assert.equal(result.status, "completed", JSON.stringify(result, null, 2));
     const { records } = await readDecisions(dir);
     const order = records.map((record) => record.gate);
@@ -425,7 +395,7 @@ test("completed pipeline emits gate decisions in execution order ending with the
 });
 
 test("projection filters by annotatable and since", async () => {
-  await withTempDir(async (dir) => {
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await mkdir(resolveWildArrangePath(dir), { recursive: true });
     const logPath = resolveWildArrangePath(dir, "decisions.jsonl");
     const entries = [
@@ -446,18 +416,18 @@ test("projection filters by annotatable and since", async () => {
 });
 
 test("wildarrange decisions CLI prints the projection and the json format", async () => {
-  await withTempDir(async (dir) => {
+  await withExternalProject(async ({ projectRoot: dir, stateHome }) => {
     await mkdir(resolveWildArrangePath(dir), { recursive: true });
     await writeFile(
       resolveWildArrangePath(dir, "decisions.jsonl"),
       `${JSON.stringify({ ts: "2026-08-04T02:00:00.000Z", gate: "routing", decision: "recover", code: "quick", reason: "intent=resume", summary: "继续" })}\n`,
       "utf8",
     );
-    const text = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "decisions"], { cwd: dir });
+    const text = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "decisions"], { cwd: dir, env: { ...process.env, WILDARRANGE_STATE_HOME: stateHome } });
     assert.match(text.stdout, /routing\s+RECOVER/);
     assert.match(text.stdout, /发生了什么: 继续/);
 
-    const json = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "decisions", "--format", "json"], { cwd: dir });
+    const json = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "decisions", "--format", "json"], { cwd: dir, env: { ...process.env, WILDARRANGE_STATE_HOME: stateHome } });
     const projection = JSON.parse(json.stdout);
     assert.equal(projection.kind, "wildarrange_decisions_projection");
     assert.equal(projection.records.length, 1);
