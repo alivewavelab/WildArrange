@@ -27,18 +27,18 @@ import {
   readContractRegistry,
   scanContractGovernanceUniverse,
 } from "../src/infra/contract-governance.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { writeRuntimeContextSnapshot } from "../src/infra/runtime-snapshot.mjs";
 import { admitParallelAgentResult, cleanupParallelAgentRun, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
 import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { claimTeamTask, getTeamTask, persistTaskState } from "../src/orchestration/task-board.mjs";
 import { findRunnableTask, isTaskRunnable } from "../src/infra/task-predicates.mjs";
+import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 const execFileAsync = promisify(execFile);
 
 test("plan reimport refuses to replace an active task claim", async () => {
-  await withTempDir(async (rootDir) => {
-    await initRuntime(rootDir);
+  await withExternalProject(async ({ projectRoot: rootDir }) => {
     const planPath = await writePlan(rootDir);
     await importPlan(rootDir, planPath);
     await claimTeamTask(rootDir, { taskId: "T001", owner: "ZhuRong" });
@@ -57,8 +57,7 @@ test("plan reimport refuses to replace an active task claim", async () => {
 });
 
 test("a claimed pending task is not runnable until the claim is released", async () => {
-  await withTempDir(async (rootDir) => {
-    await initRuntime(rootDir);
+  await withExternalProject(async ({ projectRoot: rootDir }) => {
     await importPlan(rootDir, await writePlan(rootDir));
 
     const claimState = await loadTaskState(rootDir);
@@ -112,15 +111,8 @@ test("a claimed pending task is not runnable until the claim is released", async
 });
 
 test("parallel cleanup retains an awaiting-acceptance dirty worktree", async () => {
-  await withTempDir(async (rootDir) => {
-    await writeFile(path.join(rootDir, ".gitignore"), ".wildarrange/\n", "utf8");
-    await git(rootDir, "init", "-b", "main");
-    await git(rootDir, "config", "user.name", "State Safety Test");
-    await git(rootDir, "config", "user.email", "state-safety@example.invalid");
+  await withExternalProject(async ({ projectRoot: rootDir }) => {
     const planPath = await writePlan(rootDir);
-    await git(rootDir, "add", ".");
-    await git(rootDir, "commit", "-m", "fixture baseline");
-    await initRuntime(rootDir);
     await importPlan(rootDir, planPath);
 
     const run = await runParallelAgents(rootDir, {
@@ -142,11 +134,9 @@ test("parallel cleanup retains an awaiting-acceptance dirty worktree", async () 
 });
 
 test("parallel cleanup waits for main containment and rejects an unmerged worktree HEAD", async () => {
-  await withTempDir(async (rootDir) => {
-    await writeFile(path.join(rootDir, ".gitignore"), ".wildarrange/\n", "utf8");
-    await writeFile(path.join(rootDir, "verify.cjs"), "require('node:assert/strict').equal(require('node:fs').readFileSync('result.txt','utf8'),'done')\n", "utf8");
-    await writeFile(path.join(rootDir, "review.cjs"), "const fs=require('node:fs');require('node:assert/strict').equal(fs.statSync('result.txt').size,4)\n", "utf8");
-    const planPath = path.join(rootDir, "cleanup-plan.json");
+  await withExternalProject(async ({ projectRoot: rootDir }) => {
+    const planPath = resolveWildArrangePath(rootDir, "artifacts", "cleanup-plan.json");
+    await mkdir(path.dirname(planPath), { recursive: true });
     await writeFile(planPath, JSON.stringify({
       id: "cleanup-plan",
       title: "Cleanup after main containment",
@@ -159,12 +149,6 @@ test("parallel cleanup waits for main containment and rejects an unmerged worktr
         writable_paths: ["result.txt"],
       }],
     }, null, 2), "utf8");
-    await git(rootDir, "init", "-b", "main");
-    await git(rootDir, "config", "user.name", "State Safety Test");
-    await git(rootDir, "config", "user.email", "state-safety@example.invalid");
-    await git(rootDir, "add", ".");
-    await git(rootDir, "commit", "-m", "fixture baseline");
-    await initRuntime(rootDir);
     await importPlan(rootDir, planPath);
     const run = await runParallelAgents(rootDir, {
       taskIds: ["T001"],
@@ -177,7 +161,7 @@ test("parallel cleanup waits for main containment and rejects an unmerged worktr
     const deliverySha = admitted.task.delivery.integrationSha;
     const worktreeDir = path.resolve(rootDir, run.results[0].workDir);
 
-    const nextPlanPath = path.join(rootDir, ".wildarrange", "artifacts", "next-plan.json");
+    const nextPlanPath = resolveWildArrangePath(rootDir, "artifacts", "next-plan.json");
     await writeFile(nextPlanPath, JSON.stringify({
       id: "next-plan",
       title: "Next plan after completed delivery",
@@ -207,11 +191,17 @@ test("parallel cleanup waits for main containment and rejects an unmerged worktr
     const cleaned = await cleanupParallelAgentRun(rootDir, { runId: run.runId });
     assert.equal(cleaned.cleaned[0].status, "cleaned");
     await assert.rejects(readFile(path.join(worktreeDir, "post-delivery.txt"), "utf8"), /ENOENT/);
+  }, {
+    projectFiles: {
+      "README.md": "# Fixture project\n",
+      "verify.cjs": "require('node:assert/strict').equal(require('node:fs').readFileSync('result.txt','utf8'),'done')\n",
+      "review.cjs": "const fs=require('node:fs');require('node:assert/strict').equal(fs.statSync('result.txt').size,4)\n",
+    },
   });
 });
 
 test("concurrent contract approvals retain both independent cards", async () => {
-  await withTempDir(async (rootDir) => {
+  await withExternalProject(async ({ projectRoot: rootDir }) => {
     const sourceDir = path.join(rootDir, "client", "src-tauri", "src");
     await mkdir(sourceDir, { recursive: true });
     await writeFile(path.join(sourceDir, "lib.rs"), [
@@ -271,7 +261,9 @@ test("Windows timeout reports recovery required when tree termination fails", {
 });
 
 async function writePlan(rootDir, taskId = "T001") {
-  const planPath = path.join(rootDir, "plan.json");
+  // 计划文件放在运行时 artifacts 下，避免弄脏产品仓基线。
+  const planPath = resolveWildArrangePath(rootDir, "artifacts", "plan.json");
+  await mkdir(path.dirname(planPath), { recursive: true });
   await writeFile(planPath, JSON.stringify({
     id: "state-safety-plan",
     title: "State safety regression",

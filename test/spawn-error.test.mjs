@@ -12,26 +12,15 @@
 // =============================================================================
 
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
 import { runCommand } from "../src/infra/command-runner.mjs";
 import { runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-
-async function withTempDir(fn) {
-  const baseDir = path.join(process.cwd(), ".tmp");
-  await mkdir(baseDir, { recursive: true });
-  const dir = await mkdtemp(path.join(baseDir, "wildarrange-spawn-"));
-  try {
-    await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 test("runCommand resolves a 127 result when the spawn itself fails (bad cwd)", async () => {
   const missing = path.join(process.cwd(), ".tmp", `no-such-dir-${Date.now()}`);
@@ -42,8 +31,7 @@ test("runCommand resolves a 127 result when the spawn itself fails (bad cwd)", a
 });
 
 test("a crashing runner fails only its own task; the rest of the batch still lands", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     const planPath = resolveWildArrangePath(dir, "artifacts", "spawn-error-plan.json");
     await mkdir(path.dirname(planPath), { recursive: true });
     await writeFile(planPath, JSON.stringify({
@@ -69,9 +57,9 @@ test("a crashing runner fails only its own task; the rest of the batch still lan
     }, null, 2));
     await importPlan(dir, planPath);
 
-    // T002 的 runner 在自己的工作目录里造出一个与 agent-result.json 同名的
-    // 目录，让结果读取/落盘必然抛错——模拟 runner 中途崩溃的未预期异常。
-    const sabotage = "node -e \"require('node:fs').mkdirSync('agent-result.json')\"";
+    // T002 的 runner 在任务 run 目录（git-worktree 的上一级）里造出一个与
+    // agent-result.json 同名的目录，让结果读取/落盘必然抛错——模拟 runner 中途崩溃的未预期异常。
+    const sabotage = "node -e \"require('node:fs').mkdirSync('../agent-result.json')\"";
     const batch = await runParallelAgents(dir, {
       command: "node -e \"process.exit(0)\"",
       taskIds: ["T001"],

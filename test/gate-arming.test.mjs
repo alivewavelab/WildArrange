@@ -12,16 +12,15 @@
 // =============================================================================
 
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { buildAcceptanceProof } from "../src/capabilities/acceptance-proof.mjs";
 import { evaluateGateArming } from "../src/infra/gate-arming.mjs";
 import { DEFAULT_WILDARRANGE_CONFIG } from "../src/infra/default-config.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
 import { statusReport } from "../src/orchestration/status.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 const UNARMED_CONFIG = structuredClone(DEFAULT_WILDARRANGE_CONFIG);
 
@@ -144,8 +143,7 @@ test("acceptance proof fails when every verify command is trivial", async () => 
 });
 
 test("status report carries the persistent unarmed-gates yellow lamp", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     const planPath = path.join(dir, "plan.json");
     await writeFile(planPath, JSON.stringify({
       id: "plan-arming",
@@ -161,11 +159,3 @@ test("status report carries the persistent unarmed-gates yellow lamp", async () 
   });
 });
 
-async function withTempDir(fn) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "wildarrange-gate-arming-"));
-  try {
-    return await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}

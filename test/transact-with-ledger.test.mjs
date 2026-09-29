@@ -13,32 +13,20 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { appendLedgerOnce, readVerifiedLedgerEntries, verifyLedger } from "../src/infra/ledger.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 import { transactWithLedger } from "../src/infra/task-state-lock.mjs";
 import { persistPostIntegrationRecovery } from "../src/orchestration/admission-recovery.mjs";
 import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { claimTeamTask } from "../src/orchestration/task-board.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 // ARC-003 顺序回归：非完成路径统一为「先 appendLedger 后 persist」。
 // 账本失败 -> 实际状态不得改变（无账状态不得出现）；
 // persist 失败 -> 账本必须已有记录（可审计）。
-
-async function withTempDir(fn) {
-  const baseDir = path.join(os.tmpdir(), "wildarrange-tests");
-  await mkdir(baseDir, { recursive: true });
-  const dir = await mkdtemp(path.join(baseDir, "wildarrange-transact-"));
-  try {
-    await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
 
 async function writeJson(filePath, value) {
   await mkdir(path.dirname(filePath), { recursive: true });
@@ -75,8 +63,7 @@ async function importProbePlan(dir) {
 }
 
 test("transactWithLedger: ledger outage aborts before persist and leaves no state residue", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await sabotageLedger(dir);
     let persistCalled = false;
     const markerPath = resolveWildArrangePath(dir, "team", "persist-marker.json");
@@ -97,8 +84,7 @@ test("transactWithLedger: ledger outage aborts before persist and leaves no stat
 });
 
 test("transactWithLedger: persist failure keeps the ledger entry auditable", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await assert.rejects(
       () => transactWithLedger(dir, { type: "transact_probe_persist_failure" }, async () => {
         throw new Error("persist boom");
@@ -112,8 +98,7 @@ test("transactWithLedger: persist failure keeps the ledger entry auditable", asy
 });
 
 test("claimTeamTask: ledger outage never leaves an unaudited in_progress state", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await importProbePlan(dir);
 
     await sabotageLedger(dir);
@@ -129,8 +114,7 @@ test("claimTeamTask: ledger outage never leaves an unaudited in_progress state",
 });
 
 test("claimTeamTask: persist failure leaves the claim event in the ledger and state untouched", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await importProbePlan(dir);
     // persistTaskState re-reads the plan mirror; removing it fails the persist
     // step after the ledger append.
@@ -144,8 +128,7 @@ test("claimTeamTask: persist failure leaves the claim event in the ledger and st
 });
 
 test("importPlan: persist failure leaves plan_imported in the ledger without committing state", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     // Block the canonical plan write: a directory occupying the target path
     // makes the atomic rename fail inside the persist step.
     await mkdir(resolveWildArrangePath(dir, "plans", "plan_persist_probe.json"), { recursive: true });
@@ -178,8 +161,7 @@ test("importPlan: persist failure leaves plan_imported in the ledger without com
 test("persistPostIntegrationRecovery: ledger outage leaves the authoritative state unchanged", async () => {
   // 顺序回归：该路径过去先 persist 后 appendLedger，账本故障会留下无审计的
   // recovery 状态；现在必须先入账本。
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await importProbePlan(dir);
     const taskState = await loadTaskState(dir);
     const task = taskState.tasks[0];
@@ -206,8 +188,7 @@ test("persistPostIntegrationRecovery: ledger outage leaves the authoritative sta
 });
 
 test("appendLedgerOnce: concurrent dedupe+append stays atomic and records exactly one entry", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     const event = {
       type: "remote_task_claimed",
       planId: "plan_ledger_order",
