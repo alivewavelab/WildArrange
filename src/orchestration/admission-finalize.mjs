@@ -11,7 +11,7 @@
 // =============================================================================
 import { nowIso } from "../infra/runtime-store.mjs";
 import { transactWithLedger } from "../infra/task-state-lock.mjs";
-import { commitIsAncestor } from "../infra/git-coordination.mjs";
+import { readGitHead } from "../infra/git-diff.mjs";
 import { buildFailureSummary } from "../infra/failure-analysis.mjs";
 import { writeFailureReport, writeReviewReport } from "../infra/task-reports.mjs";
 import {
@@ -29,16 +29,21 @@ import { persistRollbackFailureRecovery } from "./admission-projection.mjs";
 import {
   collectIntegrationCandidatePaths,
   readIntegrationIntent,
-  verifyAdmissionFences,
 } from "./integration.mjs";
 import { loadTaskState } from "./plan-state.mjs";
 import { persistTaskState } from "./task-board.mjs";
+
+/** 当前共享 checkout 的 HEAD；读取失败时回退任务记录的基线。 */
+async function currentHeadSha(rootDir, task) {
+  const head = await readGitHead(rootDir);
+  return head.available ? head.sha : task.coordination?.baseSha;
+}
 
 /**
  * Phase 3：经 delivery-pipeline 跑 gate 并完成或回滚；在调用方锁内运行，禁止二次加锁。
  * 非 completed 时须先回滚工作区再释放 claim，避免后继 run 被旧 rollback 覆盖。
  */
-export async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, changedPaths, runId, rollbackPlan, integrationGuard, deliveryWorktreeDir, deliveryFromWorktree }) {
+export async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResult, changedPaths, runId, rollbackPlan, deliveryWorktreeDir, deliveryFromWorktree }) {
   const taskState = await loadTaskState(rootDir);
   if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
   const task = taskState.tasks.find((candidate) => candidate.id === taskId);
@@ -50,66 +55,16 @@ export async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResul
     throw new Error(`task ${taskId} admission claim is ${task.admission_claim ? `held by run ${task.admission_claim.runId}` : "no longer held"}; refusing to finalize on behalf of run ${runId}`);
   }
   const integrationIntent = await readIntegrationIntent(rootDir, runId, taskId);
-  const initialFence = await verifyAdmissionFences(rootDir, taskId, integrationGuard, integrationIntent);
-  const durableDeliveryExists = ["pushed", "push_outcome_unknown", "committed_local"].includes(integrationIntent?.status)
-    || Boolean(integrationIntent?.integrationSha
-      && integrationGuard?.expectedSha
-      && await commitIsAncestor(rootDir, integrationIntent.integrationSha, integrationGuard.expectedSha));
-  if (!initialFence.pass) {
-    // §3.4：delivery 已 durable 时围栏失败走 post-integration recovery，禁止回滚已 push 成果。
-    if (durableDeliveryExists) {
-      return persistPostIntegrationRecovery(rootDir, taskState, task, {
-        runId,
-        integrationCommit: {
-          ...integrationIntent,
-          pushed: true,
-          reason: integrationIntent?.status === "push_outcome_unknown"
-            ? "integration_push_outcome_unknown"
-            : initialFence.reason,
-          fenceReason: initialFence.reason,
-        },
-        summary: `integration ${integrationIntent.integrationSha} was already pushed, but recovery fence failed: ${initialFence.reason}`,
-        verifyResult: task.last_verify_result || null,
-        scopeResult: task.last_scope_result || null,
-        reviewResult: task.last_review_result || null,
-        acceptanceProof: null,
-      });
-    }
-    const rollback = await rollbackAdmissionChanges(rootDir, rollbackPlan);
-    if (rollback.status !== "rolled_back") {
-      // §3.4：revalidation 回滚失败须 retain owner 与 rollback plan，禁止释放脏 checkout。
-      return persistRollbackFailureRecovery(rootDir, taskState, task, {
-        rollback,
-        reason: "admission_rollback_failed",
-        summary: `parallel admission revalidation failed and workspace rollback did not complete: ${rollback.error || rollback.reason || "unknown error"}`,
-        retryHint: `任务所有权和 rollback plan 已保留；修复文件系统问题后，用同一 run ${runId} 重新 admit`,
-      });
-    }
-    return persistAdmissionRevalidation(rootDir, taskState, task, {
-      fence: initialFence,
-      runId,
-      rollback,
-      acceptanceProof: null,
-      verifyResult: null,
-      scopeResult: null,
-      reviewResult: null,
-      removeRollbackPlan: () => removePersistedRollbackPlan(rootDir, runId, taskId),
-    });
-  }
-  const localGitDelivery = task.coordination?.localGit === true;
-  const deliveryChangedPaths = integrationIntent && initialFence.remoteContainsPriorIntegration
+  const gitDelivery = task.coordination?.localGit === true;
+  // 已有 durable intent 时沿用其路径清单（工作区可能已回滚）；否则以当前 HEAD 为基线，
+  // 收集共享 checkout 中尚未提交的变更，主线自身的前进不算本 run 的改动。
+  const deliveryChangedPaths = integrationIntent
     ? integrationIntent.changedPaths || changedPaths
-    : integrationGuard?.active || localGitDelivery
-      ? await collectIntegrationCandidatePaths(
-          rootDir,
-          integrationGuard?.expectedSha || task.coordination?.remoteHeadSha,
-        )
-    : changedPaths;
-  const authoritativePaths = new Set([
-    ...(changedPaths || []),
-    ...(task.coordination?.handoffChangedPaths || []),
-  ]);
-  const unattributedPaths = integrationGuard?.active || localGitDelivery
+    : gitDelivery
+      ? await collectIntegrationCandidatePaths(rootDir, await currentHeadSha(rootDir, task))
+      : changedPaths;
+  const authoritativePaths = new Set(changedPaths || []);
+  const unattributedPaths = gitDelivery
     ? deliveryChangedPaths.filter((filePath) => !authoritativePaths.has(filePath))
     : [];
   if (unattributedPaths.length > 0) {
@@ -120,15 +75,13 @@ export async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResul
         rollback,
         reason: "admission_rollback_failed",
         summary: `unattributed workspace changes were found and rollback failed: ${unattributedPaths.join(", ")}`,
-        retryHint: `任务所有权和 rollback plan 已保留；修复工作区后，用同一 run ${runId} 重新 admit`,
+        retryHint: `任务 claim 和 rollback plan 已保留；修复工作区后，用同一 run ${runId} 重新 admit`,
       });
     }
     return persistAdmissionRevalidation(rootDir, taskState, task, {
       fence: {
         pass: false,
         reason: "workspace_contains_unattributed_changes",
-        expectedSha: integrationGuard.expectedSha,
-        actualSha: integrationGuard.expectedSha,
         unattributedPaths,
       },
       runId,
@@ -147,10 +100,8 @@ export async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResul
     initialEvidence: { workerResult },
     changedPaths: deliveryChangedPaths,
     runId,
-    preCompletionGate: () => verifyAdmissionFences(rootDir, taskId, integrationGuard, integrationIntent),
     delivery: {
       runId,
-      integrationGuard,
       deliveryWorktreeDir,
       deliveryFromWorktree,
     },
@@ -227,7 +178,7 @@ export async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResul
         runId,
         workDir: deliveryWorktreeDir,
         branch: task.delivery?.branch || task.delivery?.worktreeSync?.branch || task.coordination?.branch || null,
-        baseSha: task.delivery?.expectedSha || integrationGuard?.expectedSha || null,
+        baseSha: task.delivery?.expectedSha || task.coordination?.baseSha || null,
         deliverySha: task.delivery?.integrationSha || task.delivery?.commitSha || task.delivery?.actualSha || null,
       };
     }
@@ -351,9 +302,7 @@ export async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResul
   }
 
   if (pipelineResult.status === "revalidation_required") {
-    const fence = pipelineResult.evidence.integrationCommit?.pass === false
-      ? pipelineResult.evidence.integrationCommit
-      : pipelineResult.evidence.integrationGuard || {};
+    const fence = pipelineResult.evidence.integrationCommit || {};
     return persistAdmissionRevalidation(rootDir, taskState, task, {
       fence,
       runId,

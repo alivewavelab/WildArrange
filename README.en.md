@@ -88,7 +88,7 @@ npx wildarrange doctor
 
 Cursor activation backs up and merges the user-level `~/.cursor/hooks.json`, replacing only WildArrange-managed entries. Codex and Kimi still require explicit installation, review, and trust through the `nextActions` returned by `adapter install`. Generated files or configured user hooks are not activation proof: `doctor` reports `execution_observed` only after a real lifecycle receipt matches the current `activationId`. The bridge first identifies the working directory; unattached projects exit without creating state.
 
-Each plan task may declare `"repositoryTarget": "project"` (default) or `"governance"`. One task can write only one repository. Governance tasks use their own governance branch/worktree through the linear `wildarrange run` path, and cross-repository work must be split into separate tasks. Parallel admission and cross-device handoff still own only the project repository; they reject governance tasks instead of falling back to the customer checkout. After both deliveries exist, bind their full SHAs in an integration receipt that modifies neither repository:
+Each plan task may declare `"repositoryTarget": "project"` (default) or `"governance"`. One task can write only one repository. Governance tasks use their own governance branch/worktree through the linear `wildarrange run` path, and cross-repository work must be split into separate tasks. Parallel admission still owns only the project repository; they reject governance tasks instead of falling back to the customer checkout. After both deliveries exist, bind their full SHAs in an integration receipt that modifies neither repository:
 
 ```bash
 npx wildarrange integration accept \
@@ -188,42 +188,11 @@ The Kimi Code plugin is installed at user scope. After upgrading, refresh it so 
 /reload
 ```
 
-### Runtime State and Device Boundaries
+### Runtime State and Git Delivery
 
-npm and Git synchronize the program and committed configuration, while `.wildarrange/` remains local runtime state on each device. WildArrange uses the existing Git remote as a handoff cabinet by default: one remote write owner per task, with cross-device continuation carried by a checkpoint commit containing a task packet and ledger hash.
+npm and Git synchronize the program and committed configuration, while `.wildarrange/` remains local runtime state on each device. WildArrange does not coordinate multiple devices or users through the remote: when several people work, each uses their own branch, and the only constraint is that **two writable tasks may not develop on the same branch**.
 
-Register a stable identity once on every device. The name is descriptive; handoff authorization uses the returned `deviceId`:
-
-```bash
-npx wildarrange device register --name macbook
-npx wildarrange device status
-npx wildarrange coordination status
-```
-
-Claim and hand off a task:
-
-```bash
-# Source device: copy the target device's UUID into --to-device-id
-npx wildarrange coordination claim --task T001 --owner ZhuRong
-npx wildarrange handoff prepare --task T001 \
-  --to-device-id <target-device-uuid> --to-device-name mac-mini
-npx wildarrange handoff push --task T001
-
-# Target device: its deviceId must match the handoff target
-npx wildarrange device register --name mac-mini
-npx wildarrange handoff accept --plan <planId> --task T001
-```
-
-`prepare` includes both working-tree changes and local commits not yet present on the remote task branch, then builds a temporary Git tree containing only project files inside `writable_paths`; `.wildarrange/` is never handed off and the current index is untouched. Before `push`, WildArrange compares the current tree with the prepare-time fingerprint and requires a fresh prepare if editing continued. Push is always non-force and retry-safe through remote-SHA reconciliation and audit backfill. `accept` verifies the remote packet, target device UUID, and clean local tree before taking ownership; a same-name device cannot impersonate the target. After acceptance, execute, verify, scope, review, checkpoint, admission, and the monolithic `run` completion fence all fail closed on the old device.
-
-Takeover is only for a confirmed abandoned owner and requires both the expected device and an evidence-bearing reason:
-
-```bash
-npx wildarrange handoff takeover --plan <planId> --task T001 \
-  --expected-device-id <old-device-uuid> --reason "source device is offline and writes were manually stopped"
-```
-
-WildArrange never expires ownership from a local clock and never force-pushes. One writable task maps to one owner, one isolated worktree, and one task branch. Execution starts from a clean commit baseline and may not carry dirty paths other than the current task result and explicitly attributed handoff paths. Only after all gates and the acceptance proof pass does WildArrange create a delivery commit containing this task's paths: with a remote it pushes normally to the task's remote branch; in a Git repository without a remote it retains the commit on the local task branch/worktree. Both paths bind checkpoint and acceptance proof to the same commit SHA and restore the shared checkout to a clean state. A task-branch push never moves `main`. One task normally keeps updating one Draft PR, and shared main changes only after a human approves and merges it on the hosting platform. Once a task-branch push is known to have succeeded, later checkpoint or audit failure cannot trigger rollback; the same run must reconcile or remain `recovery_required`.
+One writable task maps to one isolated worktree and one task branch (`wildarrange/task/<planId>/<taskId>`). Execution starts from a clean commit baseline and may not carry dirty paths other than the current task result. If the target branch is already occupied by another writable task or worktree, the task refuses to start and names the occupant. Only after all gates and the acceptance proof pass does WildArrange create a delivery commit containing this task's paths: with a remote it pushes normally (never force) to the task's own remote branch; in a Git repository without a remote it retains the commit on the local task branch/worktree. Both paths bind checkpoint and acceptance proof to the same commit SHA and restore the shared checkout to a clean state. A task-branch push never moves `main`. One task normally keeps updating one Draft PR, and shared main changes only after a human approves and merges it on the hosting platform. Once a task-branch push is known to have succeeded, later checkpoint or audit failure cannot trigger rollback; the same run must reconcile or remain `recovery_required`.
 
 If a process was forcibly terminated and `parallel status` shows an empty run while a task is still claimed, confirm that the process is gone and run:
 
@@ -233,33 +202,22 @@ npx wildarrange parallel close --run <runId> --reason "confirmed process termina
 
 The command scans task state by `runId` and releases a ghost `parallel_run_claim` even when the run has no result entries.
 
-### Git Coordination Strength
+### Git Delivery Configuration
 
 Configure the built-in behavior in `wildarrange.config.json`:
 
 ```json
 {
-  "gitCoordination": {
-    "mode": "guarded",
+  "gitDelivery": {
     "remote": "origin",
     "integrationBranch": "auto",
     "taskBranchPrefix": "wildarrange/task",
-    "requireWorktreeForParallelWrites": true,
-    "requireVerificationBeforeHandoff": false,
-    "requireCleanHandoff": true,
-    "requireTakeoverReason": true
+    "requireWorktreeForParallelWrites": true
   }
 }
 ```
 
-| Mode | Behavior |
-|---|---|
-| `off` | Disable Git coordination and keep the original single-device flow. |
-| `manual` | Only explicit `coordination` / `handoff` commands use the remote; `parallel run --coordinate` enables it for one run. |
-| `guarded` (default) | Claim remotely when a remote exists; without one, use a local task branch. Both Git paths isolate writable agents in worktrees and create delivery commits. |
-| `strict` | Refuse execution unless the Git repository, remote, worktree, and pre-handoff verification are available. |
-
-You may tune automatic activation, local fallback, and pre-handoff verification. In every mode except `off`, these floors cannot be disabled: one writer per task, no force push, pushed-commit handoff, revalidation after task-branch movement, explicit evidence-bearing takeover, and no automatic merge or business-code push to `main`.
+`remote` is used for ordinary pushes of task branches; `integrationBranch` decides whether a delivery commit is already contained in the mainline before a worktree is cleaned up; `taskBranchPrefix` limits automatic pushes to task branches under that prefix; `requireWorktreeForParallelWrites` isolates writable parallel agents in worktrees. Whatever the configuration, these floors cannot be disabled: one task per branch, no force push, revalidation after task-branch baseline changes, and no automatic merge or business-code push to `main`.
 
 ### Developing This Repository
 
@@ -371,7 +329,7 @@ A healthy Kimi Hook can deny out-of-scope Write/Edit calls and clearly destructi
 
 ## Minimal Multi-Agent Loop
 
-Command-based child agents can run concurrently. In default `guarded` mode, writable agents automatically receive independent Git worktrees whenever the project is a Git repository with a baseline commit; the remote only determines whether the delivery commit is pushed automatically. In `manual/off`, `parallelAgents.isolation` remains in control:
+Command-based child agents can run concurrently. Writable agents automatically receive independent Git worktrees whenever the project is a Git repository with a baseline commit; the remote only determines whether the delivery commit is pushed automatically. With `gitDelivery.requireWorktreeForParallelWrites` set to `false`, `parallelAgents.isolation` remains in control:
 
 ```bash
 node ./bin/wildarrange.mjs parallel run --max-agents 2 --task T001,T002 --agent ZhuRong --command "..."

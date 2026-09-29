@@ -40,7 +40,6 @@ async function withGitFixture(fn, options = {}) {
     await writeFile(path.join(root, "worker.cjs"), "const fs=require('fs');const p='result.txt';const n=fs.existsSync(p)?Number(fs.readFileSync(p,'utf8'))+1:1;fs.writeFileSync(p,String(n));");
     await writeFile(path.join(root, "check.cjs"), "require('node:assert/strict').equal(require('node:fs').readFileSync('result.txt','utf8'),'1');");
     await writeFile(path.join(root, "review.cjs"), "const fs=require('node:fs');const assert=require('node:assert/strict');assert.equal(fs.statSync('result.txt').size,1);assert(!fs.existsSync('unexpected.txt'));\n");
-    await writeFile(path.join(root, "wildarrange.config.json"), JSON.stringify({ gitCoordination: { mode: "guarded" } }));
     await runCommand("git add .", root);
     const commit = await runCommand("git commit -m baseline", root);
     assert.equal(commit.exitCode, 0, commit.stderr);

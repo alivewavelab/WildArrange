@@ -28,32 +28,29 @@ bin/wildarrange.mjs
 
 WildArrange 恰好有五个长期 Agent：Jiuwei（编排与线性交付）、DiJiang（计划）、ZhuRong（实现）、BaiZe（独立复核）、LuWu（只读仓库治理）。manifest、根 config 与确定性路由结果在机器层强制这一白名单。Router 是唯一系统节点，不是第六个 Agent。CangJie 是可选的内部 ArchivistRouter/语义 shadow profile，不能进入长期 manifest 或确定性路由。产品意图、用户旅程、验收设计、UX 复核、范围权衡、领域调研、代码检查、外部调研、风险复核与怀疑式验收，均以 Skill 形式挂载到上述长期角色上。
 
-## 仅 Git 的多设备协调
+## Git 交付
 
-跨设备状态通过现有 Git remote 协调，而非中心服务。`.wildarrange/` 保持本地；共享的持久事实是 `wildarrange/task/<planId>/<taskId>` 上不可变的协调 commit。
+不做多设备/多用户远端协调。`.wildarrange/` 保持本地；每个可写任务独占一个 worktree 和一个 `wildarrange/task/<planId>/<taskId>` 分支。同一分支已被另一个可写任务或 worktree 占用时拒绝启动（`prepareAgentWorktree` 返回带 `occupied` 标记的明确原因）。
 
 ```text
-device identity
-  -> unique remote claim commit
-  -> one writable owner + one isolated worktree + one task branch
-  -> handoff offer commit + non-force push
-  -> target-device UUID accept commit
-  -> admission binds clean main/task-branch baselines
-  -> ownership + local-base + task-branch revalidation
+task branch target (local, from clean commit base)
+  -> one writable task + one isolated worktree + one task branch
+  -> admission binds task-branch baseline
+  -> baseline + change-attribution revalidation
   -> acceptance proof
-  -> delivery commit + non-force task-branch push
+  -> delivery commit + non-force task-branch push (when a remote exists)
   -> acceptance proof/checkpoint bind delivery SHA
   -> Draft PR -> human approve/merge -> main
   -> prove clean -> remove worktree -> remove local branch
 ```
 
-`gitCoordination.mode` 可选 `off`、`manual`、`guarded`（默认）或 `strict`。`guarded` 在有 remote 时启用远端 ownership；无 remote 但存在 Git 基线时降级为本地 task branch。两种 Git 路径都强制 worktree 隔离并生成 delivery commit。`strict` 强制 Git、remote、worktree 隔离、干净 handoff 与 handoff 前验证。任何启用配置都不得允许双写 owner、两个可写 worktree 共用一个 branch、force push、基于时钟的自动 takeover、未 push 的跨设备 handoff，或用 checkpoint/admission 自动合入共享 `main`。
+`gitDelivery` 只保留 `remote`、`integrationBranch`（清理 worktree 时判断是否已并入主线）、`taskBranchPrefix` 与 `requireWorktreeForParallelWrites`。有 Git 基线时始终强制 worktree 隔离并生成 delivery commit；有 remote 时普通非强制 push 到该 task branch，无 remote 时只更新本地 task branch。任何配置都不得允许两个可写 worktree 共用一个 branch、force push，或用 checkpoint/admission 自动合入共享 `main`。
 
-协调 commit 用 `git commit-tree` 构建。handoff 准备使用临时 index，包含工作区变更与尚未出现在远端 task 分支上的本地已提交变更，且限于 `writable_paths` 允许的路径；`.wildarrange/` 始终排除，开发者当前 index 不被触碰。准备的 tree SHA 会持久化，并在 push 前立即重算，因此 `prepare` 与 `push` 之间的编辑需要重新 prepare。packet 为带 SHA-256 digest（在 commit trailer 中）的 base64url JSON；接受方设备在发布普通 fast-forward acceptance commit 前验证 digest、目标设备 UUID、当前 remote HEAD 与干净工作区。push、accept、takeover 重试能识别自身已发布的 packet，并回填本地 task/audit 状态。
+delivery commit 用 `git commit-tree` 与临时 index 构建，只含本任务 `writable_paths` 内、已归属的路径，`.wildarrange/` 始终排除，开发者当前 index 不被触碰。
 
-并行 admission 在应用子 Agent 结果前绑定主线与任务分支基线。在 gate 之前及完成之前，它会再次检查 task ownership、当前工作区祖先和变更归属，并拒绝未归因于子 Agent 结果或已接受 handoff 的候选路径。gate 与 acceptance proof 全部通过后，使用临时 index 创建只含本任务路径、以任务分支 HEAD 为父的 delivery commit；有 remote 时普通 push 到该 task branch（非 force），无 remote 时更新本地 task branch/worktree。acceptance proof 随后补齐该 SHA，checkpoint 绑定相同 SHA。两种交付都会把共享 checkout 按 pre-image 回滚到干净状态，`main` 不移动。远端任务分支移动、本地基线过期或无归属脏路径时，仅回滚本 run 的文件并返回 `revalidation_required`。一旦已知 task-branch push 成功，之后任何本地失败或 ownership/任务分支历史异常都会使 claim 与 intent 处于 `recovery_required`；禁止回滚已推送成果或释放 ownership。进入 `main` 另走持续更新的 PR、自动检查、独立验收和人类 merge 批准；development、staging、production 是部署环境，不默认映射为长期分支。
+并行 admission 在应用子 Agent 结果前绑定任务分支基线。完成之前它会再次检查任务分支基线与变更归属，并拒绝未归因于本 run 结果的候选路径。gate 与 acceptance proof 全部通过后，使用临时 index 创建只含本任务路径、以任务分支 HEAD 为父的 delivery commit；有 remote 时普通 push 到该 task branch（非 force），无 remote 时更新本地 task branch/worktree。acceptance proof 随后补齐该 SHA，checkpoint 绑定相同 SHA。两种交付都会把共享 checkout 按 pre-image 回滚到干净状态，`main` 不移动。任务分支基线变化或无归属脏路径时，仅回滚本 run 的文件并返回 `revalidation_required`。一旦已知 task-branch push 成功，之后任何本地失败或任务分支历史异常都会使 claim 与 intent 处于 `recovery_required`；禁止回滚已推送成果或释放 claim。进入 `main` 另走持续更新的 PR、自动检查、独立验收和人类 merge 批准；development、staging、production 是部署环境，不默认映射为长期分支。
 
-线性 `run` 与单步 `node execute/checkpoint` 在 Git 项目中也使用独立任务 worktree，位置与 branch/base/delivery SHA 保存在任务的 `delivery_workspace`。执行与 gate 读取任务 worktree 中的文件；任务台账、配置、契约批准记录及验收证据通过 `runtime-store` 写入当前绑定的运行态根：legacy 项目为项目内 `.wildarrange/`，外置项目为本机状态目录。外置任务的 `repositoryTarget` 只能是 `project` 或 `governance`，每张任务只在对应仓库建立 branch/worktree；跨仓依赖必须拆分并最终由 `integration accept` 绑定项目 SHA、治理 SHA 与该治理 commit 内的 verification registry 摘要。治理任务只走线性交付；并行 admission 与跨设备 handoff 目前仍是项目仓库专属入口，遇到治理任务 fail-closed，禁止回落到客户 checkout。依赖任务从同仓上游交付 SHA 开始；多个互不包含的上游分支需要显式 integration task。无文件变化记录 `no_change` 并绑定现有 SHA，不创建空 commit。非 Git 项目保留本地文件协议，不自动初始化 Git。
+线性 `run` 与单步 `node execute/checkpoint` 在 Git 项目中也使用独立任务 worktree，位置与 branch/base/delivery SHA 保存在任务的 `delivery_workspace`。执行与 gate 读取任务 worktree 中的文件；任务台账、配置、契约批准记录及验收证据通过 `runtime-store` 写入当前绑定的运行态根：legacy 项目为项目内 `.wildarrange/`，外置项目为本机状态目录。外置任务的 `repositoryTarget` 只能是 `project` 或 `governance`，每张任务只在对应仓库建立 branch/worktree；跨仓依赖必须拆分并最终由 `integration accept` 绑定项目 SHA、治理 SHA 与该治理 commit 内的 verification registry 摘要。治理任务只走线性交付；并行 admission 目前仍是项目仓库专属入口，遇到治理任务 fail-closed，禁止回落到客户 checkout。依赖任务从同仓上游交付 SHA 开始；多个互不包含的上游分支需要显式 integration task。无文件变化记录 `no_change` 并绑定现有 SHA，不创建空 commit。非 Git 项目保留本地文件协议，不自动初始化 Git。
 
 外置控制面使用 `projectRoot + governanceRoot + runtimeRoot` 三根上下文。`projectRoot` 只持产品代码、产品测试和客户自己的文档；`governanceRoot` 版本化政策与 verification registry；`runtimeRoot` 保存唯一 task ledger、锁、原始报告、备份、Prompt Pack、双 SHA 验收收据与 Adapter 生成物。三根不得互相嵌套，映射写入项目外的本机 registry。同一 Git common-dir 的 linked worktree 共用 `projectId` 与 runtime，但每次命令保留当前 worktree 为 `projectRoot`。外置 policy 与项目原有规则只叠加、不复制；治理 Git 有未提交改动时，新计划导入 fail-closed。外置 Adapter bridge 只处理本机 registry 已连接的工作目录，无关项目不创建状态；`doctor` 只把当前 activationId 的真实生命周期 ledger 回执视为 `execution_observed`。
 
@@ -114,7 +111,7 @@ AGENTS.md                         # mandatory reading routes
 - `src/infra/file-lock.mjs`：`.wildarrange/team/tasks.lock` 与 `.wildarrange/ledger.lock` 背后的共享文件锁原语。stale 锁自愈：owner pid 已死则立即 stale；空/不可解析 owner 文件在短 mtime 宽限后 stale。锁超时可诊断——错误给出当前 owner 标签、pid、pid 存活、获取时间与等待预算，便于粘贴给 AI 立即看出谁持锁。
 - `src/infra/task-state-lock.mjs`：全局任务状态锁（`.wildarrange/team/tasks.lock`），`file-lock.mjs` 的路径/默认参数封装。所有调用方在其上串行，为线性 run 与并行 admission 提供工作区级互斥。`transactWithLedger` 是非完成路径「先 appendLedger 后 persist」固定顺序的统一原语；锁方向全仓固定为任务状态锁（外）→ ledger 锁（内）。
 - `src/infra/agent-registry.mjs`：固定长期 Agent 白名单、读写角色集、旧别名、显示名、归一化与 command-worker 资格。
-- `src/infra/runtime-config.mjs`：分层根/运行时 config 加载、归一化、深合并与不可削弱的 strict Git 协调标志；默认配置数据在 `default-config.mjs`。
+- `src/infra/runtime-config.mjs`：分层根/运行时 config 加载、归一化与深合并（含 `gitDelivery`）；默认配置数据在 `default-config.mjs`。
 - `src/infra/default-config.mjs`：`DEFAULT_WILDARRANGE_CONFIG` 默认配置数据与 `DEFAULT_RUNTIME_NAME` 的纯数据 owner，不含加载/归一化逻辑。
 - `src/infra/runtime-snapshot.mjs`：运行时 snapshot 持久化与 resume-context JSON/Markdown 渲染的唯一确定性 owner。`src/ai/context.mjs::writeContextSnapshot` 是其薄 public 包装，非第二套实现。
 - `src/infra/runtime-snapshot.mjs::ensureTaskPacket`：已获准任务首次开工的历史基线与证据路径索引 owner。`runtime-store.mjs::resolveTaskPacketPath` 校验 `<planId>/<taskId>`；`.wildarrange/task-packets/` 不是当前任务状态或新批准记录，Worker 不能因其存在获得额外写权限。
@@ -154,7 +151,7 @@ AGENTS.md                         # mandatory reading routes
 
 ### 交付、交接与契约变更的唯一职责
 
-`delivery-pipeline.mjs` 根据项目 `.git`、task worktree、已有交付和远端协调事实判定是否必须生成 delivery commit；入口遗漏参数或传 `deliveryRequired: false` 不会解除要求。真实非 Git 项目继续使用文件协议。线性与 admission 的 commit 操作在同一完成段执行；admission 的当前 run 优先于旧线性 worktree，并须匹配持久 claim。PR 合入 `main` 与生产部署仍分别需要人类授权。
+`delivery-pipeline.mjs` 根据项目 `.git`、task worktree 与已有交付事实判定是否必须生成 delivery commit；入口遗漏参数或传 `deliveryRequired: false` 不会解除要求。真实非 Git 项目继续使用文件协议。线性与 admission 的 commit 操作在同一完成段执行；admission 的当前 run 优先于旧线性 worktree，并须匹配持久 claim。PR 合入 `main` 与生产部署仍分别需要人类授权。
 
 `feature-design.mjs` 唯一推进需求确认与计划绑定；`host-runtime.mjs` 在公开 CLI Hook/route 入口先推进业务状态，再调用只读 AI 渲染器。`runtime-snapshot.mjs` 只读取事实并写交接摘要/历史快照。新会话 Hook 注入当前摘要路径、下一步及待决策说明；历史快照用来追溯，不会覆盖当前任务台账。直接调用 AI 路由不再隐式确认需求。
 
@@ -183,20 +180,19 @@ SQL/数据库字段首版仍需人工声明精确结构及验证引用，Tauri �
 
 计划批准 gate：当 `planApproval.required` 为 true，`importPlan` 将计划标为 `awaiting_plan_approval`，`runNextTask` 在 `approvePlan`（CLI `plan approve` / slash `/wildarrange-approve`）记录批准前拒绝启动任务。默认关闭，线性循环不受影响除非显式开启。
 - `src/orchestration/workflow.mjs`：workflow 入口、样例计划生成与计划模板复制。
-- `src/orchestration/linear-runtime.mjs`：连续 `runNextTask` 的任务选择、claim、worker 执行与 delivery pipeline 编排；每个 gate 调用经 `capabilities/gateway.mjs` 的 `invokeCapability`。分步 execute/verify/scope/review/checkpoint/retry 节点由 `src/orchestration/linear-workflow.mjs` 持有；失败状态、恢复状态与 ownership 二次验权由 `src/orchestration/linear-recovery.mjs` 持有。worker 前工作区快照由 `src/orchestration/linear-task-support.mjs` 统一记录。delivery worktree 段（持久 worktree 基线核对、durable intent 对账、依赖 delivery SHA 裁决与 worktree 创建）在 `src/orchestration/linear-delivery.mjs`。
+- `src/orchestration/linear-runtime.mjs`：连续 `runNextTask` 的任务选择、claim、worker 执行与 delivery pipeline 编排；每个 gate 调用经 `capabilities/gateway.mjs` 的 `invokeCapability`。分步 execute/verify/scope/review/checkpoint/retry 节点由 `src/orchestration/linear-workflow.mjs` 持有；失败状态与恢复状态由 `src/orchestration/linear-recovery.mjs` 持有。worker 前工作区快照由 `src/orchestration/linear-task-support.mjs` 统一记录。delivery worktree 段（持久 worktree 基线核对、durable intent 对账、依赖 delivery SHA 裁决与 worktree 创建）在 `src/orchestration/linear-delivery.mjs`。
 - `src/orchestration/delivery-pipeline.mjs`：线性运行时与并行 Agent admission（完整 pipeline）及单步 `node checkpoint` workflow（经 `runCompletionSegment` + `collectGateEvidenceFromTask`）共用的 verify -> scope -> review -> acceptance-proof -> checkpoint 序列，因此增删重排 gate 只有一处。`shouldFailDeliveryAttempt` 统一判断失败/重试，`commitTaskCompletionState` 只统一 ledger -> wisdom -> digest -> canonical `tasks.json` 的完成提交顺序；各调用方继续提供自己的 ledger 事件、digest reason 与提交后动作。checkpoint 写失败返回 `checkpoint_failed` 而非 `completed`——调用方将任务回 `pending` 并写 `checkpoint_write_failed` ledger 条目；完成严格需要 durable checkpoint。Gate 证据绑定执行轮次：每次新 worker run 清空 `last_*` gate 字段；`collectGateEvidenceFromTask` 只接受 append-only 证据链中最新 worker 条目之后的 gate 证据，checkpoint 失败轮次的 passing 证据不能借给后续未验证轮次。完成事务可幂等恢复：若在 completion ledger 事件之后、canonical `tasks.json` 保存之前中断，`run` 检测任务卡在 `verifying` 并用 checkpoint-node 逻辑裁决（全新全 pass 证据则幂等完成；否则回 `pending`）；`in_progress` 任务故意不动（可能正当 claim）；持有 `admission_claim` 的 `verifying` 任务 likewise 留给并行 admission owner（`run` 报告 `blocked` 与 resume 提示而非劫持进行中事务）。completed 任务必须有的产物（wisdom 行、memory digest）在事务**内**写入——completion ledger 事件之后、canonical persist 之前——失败则任务保持可恢复而非无产物完成；提交后便利（snapshot、workflow summary）经 `runPostCompletionSideEffects` best-effort，失败转为 `completion_side_effect_failed` ledger 事件与结果上 `sideEffectWarnings` 条目，而非 un-complete 任务。
 - `src/orchestration/plan-state.mjs`：计划归一化、图校验、计划导入、路由 enrichment、任务状态加载与计划批准状态（`loadPlanApproval` / `approvePlan`）；外置模式把治理 verification registry 的三类命令只增不减地合入计划，并在唯一 task ledger 固化 registry digest 与双仓 revision。
 - `src/orchestration/task-board.mjs`：全项目工单总账编排；新功能、Bug、验收纠错和维护任务共享 Task 模型。信息不足时先写 `draft`，补齐 writable paths、success criteria 与 verify commands 后经 `task ready` 转为 `pending`。负责跨 Plan list/get、claim、证据记录、单文件状态持久化、outbox 与 durable 消息板；同一 Task 内 verifier 失败只追加 attempt/history，不制造新工单。旧 ledger 迁移由 `src/orchestration/task-migration.mjs` 单独持有。
 - `src/infra/task-state-store.mjs`：读取 `.wildarrange/team/tasks.json` 的全项目 ledger，兼容旧 `{planId,tasks}` 格式，并向执行链投影 active Plan 的原有 `{planId,tasks}` 视图。未来 schema version fail-closed；旧 completed 不继承当前完成资格，而是投影为 `needs_user_decision` 等待重新验收。每个全局引用使用 `<planId>:<taskId>`，所以不同 Plan 可继续使用局部编号 `T001`。
 - `src/infra/agent-spawn.mjs`：Codex/Cursor/自定义 command adapter 的宿主中立子 Agent spawn 命令渲染。
 - `src/infra/git-worktree.mjs`：Git worktree 隔离、patch 提取、patch 路径解析、patch admission helper，以及每次 worker run 前基于 `git stash create` 的 pre-execute 工作区 snapshot。
-- `src/infra/git-coordination.mjs`：设备安全的 remote 检查、metadata/delivery commit、普通 push/fetch、task 分支切换、working/tree-diff 检查、祖先检查与 branch-SHA guard 的参数数组 Git 原语。不决定 task 状态，也不提供自动 merge 到 `main` 的原语。
-- `src/orchestration/remote-ownership.mjs`：稳定设备登记、模式解析、唯一 remote claim packet、ownership 校验与协调状态。
-- `src/orchestration/handoff.mjs`：UUID 绑定的 `prepare -> push -> accept` 与显式带证据 takeover。将接受任务恢复到本地 `.wildarrange/` 状态，remote commit 仍是跨设备权威；push/accept 重试协调 remote 状态并恢复缺失的本地 audit 记录。
-- `src/orchestration/integration.mjs`：admission 使用的任务交付 fence 与 commit 事务：owner/base/task-branch 重校验、durable delivery intent、临时 index commit 创建、有 remote 时 task branch 普通 push、无 remote 时本地 task branch 更新，以及同 run 对账；不写共享 `main`。
-- `src/orchestration/admission-recovery.mjs`：回滚计划的持久化/加载/移除、补丁是否已应用的 argv Git 检查、文件/patch 回滚，以及 delivery 前 revalidation 与 delivery 后 recovery 的持久化策略。仅在安全回滚后释放 ownership；已知 delivery 到达远端 task branch 的 run 永不回滚或释放。
-- `src/orchestration/parallel-runtime.mjs`：基于 command 的子 Agent 批跑、run-dir 或 Git worktree 隔离、skipped-run 检测、结果收集、team 消息发布与 agent-run index；执行与 spawn 是本文件的唯一职责。`src/orchestration/parallel-run-lifecycle.mjs` 单独持有 status、close、release 与 cleanup 等运行生命周期操作。默认 `guarded` 协调激活时，可写 run 自动用 worktree 并在 spawn 前每 task 持久化一个 `parallel_run_claim`。创建 run 前拒绝只读长期身份 DiJiang、BaiZe、LuWu；仅 Jiuwei 与 ZhuRong 可作为长期 Agent 进入 command worker，隔离的 ephemeral command agent 仍支持非保留名。run 在 agent 启动前预注册到 `index.json`（加 `running` 批 JSON），每次 index 读将 orphan run 目录收编回 index，磁盘上的结果不会对 `parallel status` 永久不可见。`src/orchestration/parallel-run-index.mjs` 单独持有 index 锁、注册、结果摘要和孤儿 run 收编；parallel runtime 只负责编排 agent 生命周期。admission 事务本身在 `src/orchestration/admission.mjs`，在此 re-export。
-- `src/orchestration/admission.mjs`：并行 Agent admission 事务（claim -> apply -> gates -> acceptance proof -> task-branch delivery commit/push -> checkpoint -> shared-checkout rollback，或失败 rollback），经共享 `delivery-pipeline` gating。结果读取、候选文件/补丁路径归一化与实际变更收集由 `src/orchestration/admission-inputs.mjs` 持有；claim 状态裁决、ownership 检查和启动账本由 `src/orchestration/admission-claim.mjs` 持有；apply 后的门禁、交付、回滚和完成落账由 `src/orchestration/admission-finalize.mjs` 持有，事务模块只负责串联已确认的 claim 与两个阶段。Admission 是 claim-first 且持久化 ownership：status 裁决、writable-paths 预检、task claim 与 `parallel_agent_admission_started` ledger 事件均在写任何工作区文件**之前**于 task-state lock 下发生，claim 本身持久化在 task 上（`admission_claim = { runId, phase }`）。apply 与 gate 在**同一次**全局锁连续持有下运行——工作区变更与评判它的 gate 是单一临界区，两个 admission（同 task 或不同 task、路径是否重叠）与并发线性 `run` 都不能在 gate run 之间交错工作区写。第一次文件写之前，pre-image rollback plan 持久化到 `agent-runs/<runId>/<taskId>.rollback-plan.json`；reclaim 以该 plan 为权威。delivery 前重校验 task owner、guarded 基线、本地祖先与 task branch HEAD；仅全 pass 结果生成 delivery commit，有 remote 时再 non-force push。push 前拒绝时先回滚本 run，成功 push 后则禁止撤销远端成果；checkpoint 成功后也要把共享 checkout 恢复为干净基线，交付文件只留在 task branch/worktree。claim 与 rollback plan 仅在完成对账或安全回滚后释放；失败则 task 保持 `verifying`、ownership 留在同 run并返回 `recovery_required`。第二 run 不能 admit 已 claim task；同 run 重试跳过重复 apply，按 durable delivery intent 对账至完成。进入 `main` 不属于 admission，必须另走 PR 和人类 merge。
+- `src/infra/git-coordination.mjs`：Git 交付原语（参数数组调用）：交付环境探测、delivery commit、普通 push/fetch、working/tree-diff 检查、祖先检查与 task branch 命名。不决定 task 状态，也不提供自动 merge 到 `main` 的原语。
+- `src/orchestration/task-branch.mjs`：任务启动时解析 task branch 交付目标（分支名、基线 SHA、可选 push 远端），只读本机 Git 状态。
+- `src/orchestration/integration.mjs`：admission 与线性使用的任务交付 commit 事务：durable delivery intent、临时 index commit 创建、有 remote 时 task branch 普通 push、无 remote 时本地 task branch 更新，以及同 run 对账；不写共享 `main`。
+- `src/orchestration/admission-recovery.mjs`：回滚计划的持久化/加载/移除、补丁是否已应用的 argv Git 检查、文件/patch 回滚，以及 delivery 前 revalidation 与 delivery 后 recovery 的持久化策略。仅在安全回滚后释放 claim；已知 delivery 到达远端 task branch 的 run 永不回滚或释放。
+- `src/orchestration/parallel-runtime.mjs`：基于 command 的子 Agent 批跑、run-dir 或 Git worktree 隔离、skipped-run 检测、结果收集、team 消息发布与 agent-run index；执行与 spawn 是本文件的唯一职责。`src/orchestration/parallel-run-lifecycle.mjs` 单独持有 status、close、release 与 cleanup 等运行生命周期操作。有 Git 基线时，可写 run 自动用 worktree 并在 spawn 前每 task 持久化一个 `parallel_run_claim`。创建 run 前拒绝只读长期身份 DiJiang、BaiZe、LuWu；仅 Jiuwei 与 ZhuRong 可作为长期 Agent 进入 command worker，隔离的 ephemeral command agent 仍支持非保留名。run 在 agent 启动前预注册到 `index.json`（加 `running` 批 JSON），每次 index 读将 orphan run 目录收编回 index，磁盘上的结果不会对 `parallel status` 永久不可见。`src/orchestration/parallel-run-index.mjs` 单独持有 index 锁、注册、结果摘要和孤儿 run 收编；parallel runtime 只负责编排 agent 生命周期。admission 事务本身在 `src/orchestration/admission.mjs`，在此 re-export。
+- `src/orchestration/admission.mjs`：并行 Agent admission 事务（claim -> apply -> gates -> acceptance proof -> task-branch delivery commit/push -> checkpoint -> shared-checkout rollback，或失败 rollback），经共享 `delivery-pipeline` gating。结果读取、候选文件/补丁路径归一化与实际变更收集由 `src/orchestration/admission-inputs.mjs` 持有；claim 状态裁决、claim 互斥检查和启动账本由 `src/orchestration/admission-claim.mjs` 持有；apply 后的门禁、交付、回滚和完成落账由 `src/orchestration/admission-finalize.mjs` 持有，事务模块只负责串联已确认的 claim 与两个阶段。Admission 是 claim-first 且持久化 ownership：status 裁决、writable-paths 预检、task claim 与 `parallel_agent_admission_started` ledger 事件均在写任何工作区文件**之前**于 task-state lock 下发生，claim 本身持久化在 task 上（`admission_claim = { runId, phase }`）。apply 与 gate 在**同一次**全局锁连续持有下运行——工作区变更与评判它的 gate 是单一临界区，两个 admission（同 task 或不同 task、路径是否重叠）与并发线性 `run` 都不能在 gate run 之间交错工作区写。第一次文件写之前，pre-image rollback plan 持久化到 `agent-runs/<runId>/<taskId>.rollback-plan.json`；reclaim 以该 plan 为权威。delivery 前重校验 task branch 基线、当前工作目录基线与变更归属；仅全 pass 结果生成 delivery commit，有 remote 时再 non-force push。push 前拒绝时先回滚本 run，成功 push 后则禁止撤销远端成果；checkpoint 成功后也要把共享 checkout 恢复为干净基线，交付文件只留在 task branch/worktree。claim 与 rollback plan 仅在完成对账或安全回滚后释放；失败则 task 保持 `verifying`、ownership 留在同 run并返回 `recovery_required`。第二 run 不能 admit 已 claim task；同 run 重试跳过重复 apply，按 durable delivery intent 对账至完成。进入 `main` 不属于 admission，必须另走 PR 和人类 merge。
 - `src/capabilities/gateway.mjs`：静态 capability 注册表 + 统一结果信封（`capability`/`status`/`evidence`/`sideEffect`/`duration_ms`/`cost`/`error`）；`orchestration/` 与 `ai/` 到达 `capabilities/verify.mjs`、`scope-guard.mjs`、`checkpoint.mjs`、`worker.mjs`、`review-gate.mjs`、`acceptance-proof.mjs` 的唯一门。
 
 ### Admission 状态机表
@@ -208,7 +204,7 @@ SQL/数据库字段首版仍需人工声明精确结构及验证引用，Tauri �
 | `completed` | 全部 gate + acceptance proof + delivery commit +（有 remote 时）task-branch push + checkpoint 通过 | `completed` | 清理共享 checkout，释放 admission claim，保留 task branch/worktree | 进入 PR/人工验收，尚不代表已进入 `main` |
 | `retry` | pipeline 某门 FAIL（verify/scope/review 等）且工作区已安全回滚 | 回 `pending` | 释放 | 修正后重新 `parallel admit` 或重跑子 Agent |
 | `apply_failed` | 应用子 Agent 文件失败且回滚成功 | 原状态 | 释放 | 检查 patch/冲突后重试 |
-| `revalidation_required` | gate 期间 owner/SHA 变化、基线落后或存在无归属改动；已安全回滚 | 原状态 | 释放 | fetch 后重试 admission |
+| `revalidation_required` | gate 期间 task branch 基线变化或存在无归属改动；已安全回滚 | 原状态 | 释放 | 确认基线后重试 admission |
 | `recovery_required` | 回滚失败，或 task-branch push 已成功但本地后续步骤失败 | `verifying`（保留） | **保留**（含 rollback plan / delivery intent） | 同 run 恢复对账；禁止其他 run 进入 |
 | `skipped` | 无可回滚计划等前置不满足 | 原状态 | 不变 | 按 reason 处理 |
 
@@ -331,7 +327,7 @@ adapter 安装还生成一组 command，用户不必开终端做常见操作。�
 
 计划导入门要求语义生成计划的每张可执行任务显式填写 `task.owner`，且只能是具备 command-worker 资格的 Jiuwei 或 ZhuRong；缺失、只读 Agent 或非法值在任何任务状态落盘前拒绝。DiJiang、BaiZe、LuWu 仍通过计划、复核、治理阶段参与，不承担 `worker_command`。语义生成计划无条件进入 `awaiting_plan_approval`，用户明确执行 `plan approve` 后才能运行。为兼容既有手工计划，未标记 `host_semantic` 的旧计划仍允许缺省 owner 回落到 Jiuwei；线性执行入口仍会拒绝只读 Agent 进入 command worker。
 
-`task.owner` 是负责人单一事实源：执行前 Agent 上下文、任务领取、Git 协调与并行运行均读取它。路由的 `primaryAgent` 只负责生成阶段的建议和审计，不会在执行阶段暗中覆盖 owner。尚无活动任务或计划仍待审批时，PreToolUse 只额外放行 `.wildarrange/plan-drafts/*.json`；任意 Shell 默认拒绝，仅精确放行 WildArrange 的初始化、计划导入/批准和少量只读命令。批准后，草稿目录恢复普通 `writable_paths` 门禁。
+`task.owner` 是负责人单一事实源：执行前 Agent 上下文、任务领取、Git 交付与并行运行均读取它。路由的 `primaryAgent` 只负责生成阶段的建议和审计，不会在执行阶段暗中覆盖 owner。尚无活动任务或计划仍待审批时，PreToolUse 只额外放行 `.wildarrange/plan-drafts/*.json`；任意 Shell 默认拒绝，仅精确放行 WildArrange 的初始化、计划导入/批准和少量只读命令。批准后，草稿目录恢复普通 `writable_paths` 门禁。
 
 adapter 安装与卸载始终备份被覆盖或删除的文件，含生成的 slash command。`adapter restore --backup <backupId>` 将一备份目录恢复到原项目路径。
 
@@ -447,15 +443,13 @@ adapter 专用行为属于 `src/interface/adapters.mjs`、`src/interface/kimi-ad
 | `src/orchestration/host-runtime.mjs`                          | 宿主事件的业务前置编排；CLI 显式组合 AI 渲染入口，不添加反向 import |
 | `src/orchestration/contract-governance.mjs`                    | 批准契约范围、计划外变更申请/决定/等待与登记更新编排，复用现有 ChangeRequest |
 | `src/orchestration/linear-runtime.mjs`                        | 连续 runNextTask 编排与 route 入口，经 gateway 调用能力         |
-| `src/orchestration/linear-recovery.mjs`                       | 线性任务失败状态、恢复状态与 ownership 二次验权；只写 ledger-first 事实，不调度 worker |
+| `src/orchestration/linear-recovery.mjs`                       | 线性任务失败状态与恢复状态；只写 ledger-first 事实，不调度 worker |
 | `src/orchestration/linear-delivery.mjs`                       | 线性任务 delivery worktree 编排：持久 worktree 基线核对、durable intent 对账、依赖 delivery SHA 裁决与 worktree 创建 |
 | `src/orchestration/parallel-runtime.mjs`                      | 命令型子 Agent 并行执行、隔离结果、runner 崩溃逐任务容错、中断对账（incompleteTasks）与 `parallel retry` partial 重试 |`n| `src/orchestration/parallel-run-lifecycle.mjs`              | 并行 run 的 status、close、claim release、worktree cleanup 与 cleanup fence；只维护运行生命周期事实 |
 | `src/orchestration/parallel-run-index.mjs`                     | 并行 run 的 index.json 锁、注册、结果摘要与孤儿 run 收编；只维护运行索引事实 |
-| `src/orchestration/remote-ownership.mjs`                      | 设备登记、远端任务 claim、单写 owner 校验与协调状态 |
-| `src/orchestration/handoff.mjs`                               | 跨设备 prepare/push/accept 与显式 takeover |
 | `src/orchestration/admission.mjs`                             | 并行 admission 事务：claim → apply → gates → commit/rollback；回滚失败保持 ownership，全程持全局任务锁 |
 | `src/orchestration/admission-inputs.mjs`                    | admission 结果读取、候选文件/补丁路径归一化与实际变更收集；不推进事务状态 |
-| `src/orchestration/admission-claim.mjs`                     | admission 第一阶段：状态裁决、ownership 检查、claim 持久化与启动账本；不触碰业务文件 |
+| `src/orchestration/admission-claim.mjs`                     | admission 第一阶段：状态裁决、claim 互斥检查、claim 持久化与启动账本；不触碰业务文件 |
 | `src/orchestration/admission-finalize.mjs`                  | admission 完成阶段：门禁、交付、回滚与完成落账；不负责 claim 或直接 apply |
 | `src/orchestration/linear-workflow.mjs`                    | 分步 workflow 节点：execute、verify、scope、review、checkpoint、retry |
 | `src/orchestration/linear-task-support.mjs`                | 线性 worker 前工作区快照事实采集；不推进任务状态或运行质量门 |
@@ -463,7 +457,8 @@ adapter 专用行为属于 `src/interface/adapters.mjs`、`src/interface/kimi-ad
 | `src/orchestration/admission-projection.mjs`                  | admission 结果投影：claim 阶段推进与回滚失败恢复落盘、agent-run lifecycle 写回、decisions.jsonl 决策投影 |
 | `src/orchestration/admission-recovery.mjs`                    | admission 回滚计划、补丁恢复、revalidation / 已集成恢复状态落盘，禁止已 push 成果回滚 |
 | `src/orchestration/delivery-pipeline.mjs`                     | 按任务/工作区事实确定交付要求及强制完成终点，复用 integration Git 事务；统一 gate 与完成提交顺序 |
-| `src/orchestration/integration.mjs`                           | admission 交付事务：owner/base/task-branch 三重 fence、delivery commit、task branch 普通 push 与故障对账；不得自动合入 `main` |
+| `src/orchestration/task-branch.mjs`                           | 任务启动时解析 task branch 目标（分支名/基线/可选远端） |
+| `src/orchestration/integration.mjs`                           | 交付事务：delivery commit、task branch 普通 push 与故障对账；不得自动合入 `main` |
 | `src/orchestration/task-board.mjs`                            | 全项目工单总账、draft/ready、任务 claim/证据/持久化与消息板 |
 | `src/orchestration/task-archive.mjs`                          | 归档编排：先写 `pre-task-archive:<taskId>` 运行态备份，再交 task-board 精确归档删除（backupId 串联 recovery package） |
 | `src/orchestration/change-governance.mjs`                     | 任务变更治理、Review Blocker、ChangeRequest 单一记录与决定持久化；契约请求复用记录 |
@@ -502,7 +497,7 @@ adapter 专用行为属于 `src/interface/adapters.mjs`、`src/interface/kimi-ad
 | `src/infra/task-state-lock.mjs`                               | 全局任务状态锁（file-lock 原语的路径与默认参数封装）；`transactWithLedger` 固定「先 appendLedger 后 persist」顺序 |
 | `src/infra/text-utils.mjs`                                    | 字符串集合小工具（uniqueStrings）单一 owner |
 | `src/infra/agent-registry.mjs`                                | 固定 Agent 白名单、别名、显示名与 command-worker 资格 |
-| `src/infra/runtime-config.mjs`                                | 配置加载、合并/归一化（含 reporting.verbosity 汇报分级）与 strict 安全底线 |
+| `src/infra/runtime-config.mjs`                                | 配置加载、合并/归一化（含 reporting.verbosity 汇报分级与 gitDelivery） |
 | `src/infra/default-config.mjs`                                | `DEFAULT_WILDARRANGE_CONFIG` 默认配置数据与 `DEFAULT_RUNTIME_NAME` 纯数据 owner |
 | `src/infra/runtime-snapshot.mjs`                              | 运行态 snapshot 与恢复上下文的确定性文件读取/渲染 owner |
 | `src/infra/prompt-pack.mjs`                                   | Prompt Pack 安装后物化到固定运行时根，统一校验路径/realpath/hash 后读取 |
@@ -525,7 +520,7 @@ adapter 专用行为属于 `src/interface/adapters.mjs`、`src/interface/kimi-ad
 | `src/infra/llm-provider.mjs`                                   | OpenAI-compatible LLM provider 与可选 LLM review |
 | `src/infra/agent-spawn.mjs`                                    | Codex / Cursor / 自定义命令型子 Agent spawn 模板渲染       |
 | `src/infra/git-worktree.mjs`                                   | Git worktree 隔离、patch 提取与 patch admission        |
-| `src/infra/git-coordination.mjs`                               | 设备安全的 Git remote/commit/push/fetch 与集成 SHA 乐观锁原语 |
+| `src/infra/git-coordination.mjs`                               | Git 交付原语：delivery commit、普通 push/fetch、基线与祖先检查 |
 | `src/infra/git-diff.mjs`                                       | git 读原语（`readGitHead`/`readGitTopLevel`）、git diff / changed-paths 收集与 manifest 变更分类     |
 | `src/infra/path-match.mjs`                                     | 路径归一化、项目根边界断言与 glob/精确/目录匹配（`pathAllowed`）           |
 | `src/infra/route-table.mjs`                                    | 确定性路由表加载（含 overrides）与信号匹配单一实现（`loadRoutesConfig`/`resolveRouteDecision`/`matchSignals`），无 LLM；`resolveRouteDecision` 限只读用途 |

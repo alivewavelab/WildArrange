@@ -21,14 +21,6 @@
 | `wildarrange config show` | 查看生效配置 |
 | `wildarrange config baseline [--reason "..."]` | 写入 config hash 基线 |
 | `wildarrange config verify` | 校验 config 基线 |
-| `wildarrange device register [--name macbook] [--force]` | 登记当前设备 |
-| `wildarrange device status` | 查看设备登记状态 |
-| `wildarrange coordination status` | 查看 Git 协调状态 |
-| `wildarrange coordination claim --task T001 [--owner ZhuRong]` | 显式远端领取任务 |
-| `wildarrange handoff prepare --task T001 --to-device-id <uuid> [--to-device-name mac-mini] [--to-owner ZhuRong]` | 准备跨设备交接 |
-| `wildarrange handoff push --task T001` | 推送跨设备交接 |
-| `wildarrange handoff accept --task T001 [--plan P20260731]` | 接受跨设备交接 |
-| `wildarrange handoff takeover --plan P20260731 --task T001 --expected-device-id <uuid> --reason "owner offline"` | 显式接管（记录预期旧设备与理由） |
 | `wildarrange adapter install [--target codex|cursor|kimi|all] [--mode local|npx] [--package @alivewavelab/wildarrange]` | 安装宿主 adapter；外置治理模式只在 runtimeRoot 生成用户插件包 |
 | `wildarrange adapter activate --target cursor [--user-root <path>]` | 显式合并 Cursor 用户级 Hook；先备份且不写客户项目 |
 | `wildarrange adapter uninstall [--target codex|cursor|kimi|all]` | 卸载宿主 adapter |
@@ -37,7 +29,7 @@
 | `wildarrange hook run [--from hook.json] [--format text|json] [--external-only --adapter-digest <sha256>]` | 运行宿主生命周期 Hook；外置 Adapter 只处理已连接项目 |
 | `wildarrange workflow --from <plan.json>` | 从计划跑完整 workflow |
 | `wildarrange workflow --sample` | 跑样例 workflow |
-| `wildarrange parallel run [--max-agents 2] [--task T001,T002] [--agent ZhuRong] [--adapter codex|cursor] [--isolation run-dir|git-worktree] [--coordinate] [--command "..."]` | 跑并行子 Agent |
+| `wildarrange parallel run [--max-agents 2] [--task T001,T002] [--agent ZhuRong] [--adapter codex|cursor] [--isolation run-dir|git-worktree] [--command "..."]` | 跑并行子 Agent |
 | `wildarrange parallel admit --run <runId> --task T001` | 合入子 Agent 成果（admission 事务） |
 | `wildarrange parallel list` | 列出并行 run |
 | `wildarrange parallel status [--run <runId>]` | 查看并行运行记录与批次对账 |

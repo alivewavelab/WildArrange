@@ -60,6 +60,21 @@ export async function prepareAgentWorktree(rootDir, taskRunDir, options = {}) {
       reason: existing.error,
     };
   }
+  if (branchName) {
+    // 一个 task branch 只能属于一个可写任务：已被任何 worktree 检出或已存在时拒绝启动。
+    const occupied = await inspectTaskBranchOccupation(rootDir, branchName);
+    if (occupied) {
+      return {
+        isolation: "git-worktree",
+        workDir: taskRunDir,
+        available: false,
+        occupied: true,
+        reason: occupied.worktree
+          ? `task branch ${branchName} is already checked out by another worktree (${occupied.worktree}); two writable tasks cannot share one branch`
+          : `task branch ${branchName} already exists and belongs to an earlier task run; two writable tasks cannot share one branch`,
+      };
+    }
+  }
   const addArgs = branchName
     ? ["-C", rootDir, "worktree", "add", "-b", branchName, worktreeDir, startPoint]
     : ["-C", rootDir, "worktree", "add", "--detach", worktreeDir, startPoint];
@@ -80,6 +95,22 @@ export async function prepareAgentWorktree(rootDir, taskRunDir, options = {}) {
     startPoint,
     reason: null,
   };
+}
+
+/**
+ * 检查 task branch 是否已被占用：返回占用它的 worktree 路径、仅分支存在时返回空路径，未占用返回 null。
+ */
+async function inspectTaskBranchOccupation(rootDir, branchName) {
+  const list = await runCommandFile("git", ["-C", rootDir, "worktree", "list", "--porcelain"], rootDir, 30_000);
+  if (list.exitCode === 0) {
+    let currentPath = null;
+    for (const line of list.stdout.split(/\r?\n/)) {
+      if (line.startsWith("worktree ")) currentPath = line.slice("worktree ".length);
+      else if (line === `branch refs/heads/${branchName}`) return { worktree: currentPath };
+    }
+  }
+  const exists = await runCommandFile("git", ["-C", rootDir, "show-ref", "--verify", "--quiet", `refs/heads/${branchName}`], rootDir, 30_000);
+  return exists.exitCode === 0 ? { worktree: null } : null;
 }
 
 /**

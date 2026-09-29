@@ -3,7 +3,7 @@
 // 所属模块：orchestration
 // 作用说明：
 //   线性任务 Git 交付工作区：为单任务准备或复用隔离 worktree、分支与基线 SHA；
-//   处理依赖交付 SHA 与远端 coordination 的对齐。
+//   处理依赖交付 SHA 与 task branch 起点的对齐。
 //
 // 【运行原理速读】
 //   可以把它想成「给线性 worker 一块专属施工场地」：
@@ -15,7 +15,7 @@
 //     复用已有 worktree 或 capture 基线 → 解析依赖 SHA → prepareAgentWorktree。
 //
 //   · 缺了它会怎样？
-//     Git 协调开启时无法在正确 task branch 上提交 delivery commit。
+//     无法在独占的 task branch 上提交 delivery commit。
 // =============================================================================
 import { lstat } from "node:fs/promises";
 import path from "node:path";
@@ -68,28 +68,16 @@ export async function ensureLinearDeliveryWorkspace(rootDir, planId, task, tasks
   if (!baseline.headCommit) throw new Error("cannot establish linear Git delivery baseline: Git repository has no initial commit");
 
   const dependencySha = await resolveDependencyDeliverySha(repositoryRoot, task, tasks);
-  const remoteHeadSha = task.coordination?.remoteHeadSha || null;
-  if (task.coordination?.localGit !== true && remoteHeadSha && dependencySha
-    && !(await commitIsAncestor(repositoryRoot, dependencySha, remoteHeadSha))) {
-    throw new Error(`task ${task.id} task branch does not contain dependency delivery ${dependencySha}; create an integration task first`);
-  }
-  const startPoint = task.coordination?.localGit === true && dependencySha
-    ? dependencySha
-    : remoteHeadSha || dependencySha || baseline.headCommit;
-  if (dependencySha && task.coordination?.localGit === true) {
-    task.coordination = { ...task.coordination, baseSha: dependencySha, remoteHeadSha: dependencySha };
-  }
+  const startPoint = dependencySha || task.coordination?.baseSha || baseline.headCommit;
   const { config } = await loadWildArrangeConfig(rootDir);
-  const branch = task.coordination?.branch || taskBranchName(config.gitCoordination, planId, task.id);
-  if (["disabled", "manual"].includes(task.coordination?.status)) {
-    task.coordination = {
-      ...task.coordination,
-      localGit: true,
-      branch,
-      baseSha: startPoint,
-      remoteHeadSha: startPoint,
-    };
-  }
+  const branch = task.coordination?.branch || taskBranchName(config.gitDelivery, planId, task.id);
+  task.coordination = {
+    ...task.coordination,
+    status: "local",
+    localGit: true,
+    branch,
+    baseSha: startPoint,
+  };
   const safePlan = String(planId).replace(/[^A-Za-z0-9._-]/g, "_");
   const safeTask = String(task.id).replace(/[^A-Za-z0-9._-]/g, "_");
   const runId = `linear-${safePlan}-${safeTask}`;

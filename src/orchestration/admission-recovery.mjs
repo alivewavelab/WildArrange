@@ -166,7 +166,7 @@ export async function rollbackAdmissionChanges(rootDir, rollbackPlan) {
 }
 
 /**
- * 集成基线或 ownership 围栏失败：任务回 pending，审计入账本后持久化 revalidation_required。
+ * task branch 基线变化或工作区含无归属改动：任务回 pending，审计入账本后持久化 revalidation_required。
  */
 export async function persistAdmissionRevalidation(rootDir, taskState, task, options) {
   const fence = options.fence || {};
@@ -174,17 +174,11 @@ export async function persistAdmissionRevalidation(rootDir, taskState, task, opt
   task.admission_claim = null;
   task.last_failure = {
     at: nowIso(),
-    reason: fence.reason || "integration_head_changed",
-    summary: fence.reason === "task_ownership_changed"
-      ? `remote task ownership changed: ${fence.ownership?.error || "unknown owner fence failure"}`
-      : fence.reason === "integration_base_not_present_in_workspace"
-        ? `current workspace does not contain guarded integration base ${fence.expectedSha || "missing"}`
-        : fence.reason === "workspace_contains_unattributed_changes"
-          ? `workspace contains changes not attributed to this run: ${(fence.unattributedPaths || []).join(", ")}`
-          : `remote integration branch changed from ${fence.expectedSha || "missing"} to ${fence.actualSha || "missing"}`,
-    retryHint: fence.reason === "task_ownership_changed"
-      ? "停止旧设备写入；只能由当前远端 owner 重新生成结果并执行 admission"
-      : "先获取远端集成分支，把任务成果重新应用到最新主线，再从 verify 开始重跑全部 gates",
+    reason: fence.reason || "task_branch_head_changed",
+    summary: fence.reason === "workspace_contains_unattributed_changes"
+      ? `workspace contains changes not attributed to this run: ${(fence.unattributedPaths || []).join(", ")}`
+      : `task branch delivery needs revalidation: ${fence.reason || "task_branch_head_changed"} (expected ${fence.expectedSha || fence.expectedHead || "unknown"}, actual ${fence.actualSha || fence.actualHead || "unknown"})`,
+    retryHint: "清理无归属改动或确认 task branch 基线后，把任务成果重新应用到该 task branch，再从 verify 开始重跑全部 gates",
   };
   task.updatedAt = nowIso();
   await writeFailureReport(rootDir, taskState.planId, task);
@@ -194,8 +188,8 @@ export async function persistAdmissionRevalidation(rootDir, taskState, task, opt
     planId: taskState.planId,
     taskId: task.id,
     runId: options.runId,
-    expectedSha: fence.expectedSha || null,
-    actualSha: fence.actualSha || null,
+    expectedSha: fence.expectedSha || fence.expectedHead || null,
+    actualSha: fence.actualSha || fence.actualHead || null,
     reason: fence.reason || null,
   }, () => persistTaskState(rootDir, taskState));
   if (typeof options.removeRollbackPlan === "function") {

@@ -50,12 +50,6 @@ import {
 } from "../src/interface/external-adapters.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
 import {
-  acceptTaskHandoff,
-  prepareTaskHandoff,
-  pushTaskHandoff,
-  takeoverTaskOwnership,
-} from "../src/orchestration/handoff.mjs";
-import {
   admitParallelAgentResult,
   cleanupParallelAgentRun,
   closeParallelAgentRun,
@@ -64,10 +58,6 @@ import {
   retryParallelAgentRun,
   runParallelAgents,
 } from "../src/orchestration/parallel-runtime.mjs";
-import {
-  coordinationStatus,
-  registerCoordinationDevice,
-} from "../src/orchestration/remote-ownership.mjs";
 import {
   listChangeRequests,
   recordReviewBlocker,
@@ -423,87 +413,6 @@ async function main() {
     throw new Error("wildarrange adapter requires install, activate, uninstall, or restore");
   }
 
-  // --- 多设备协调 ---
-  // §3.4：device 登记本机 UUID 与名称，供 handoff/coordination 识别设备身份。
-  if (command === "device") {
-    const subcommand = args._[1];
-    if (subcommand === "register") {
-      console.log(JSON.stringify(await registerCoordinationDevice(rootDir, {
-        name: strArg(args, "name"),
-        force: Boolean(args.force),
-      }), null, 2));
-      return;
-    }
-    if (subcommand === "status") {
-      console.log(JSON.stringify((await coordinationStatus(rootDir)).device, null, 2));
-      return;
-    }
-    throw new Error("wildarrange device requires register or status");
-  }
-
-  // §3.4：coordination 查看 Git 协调状态或 force 领取远端任务 owner。
-  if (command === "coordination") {
-    const subcommand = args._[1];
-    if (subcommand === "status") {
-      console.log(JSON.stringify(await coordinationStatus(rootDir), null, 2));
-      return;
-    }
-    if (subcommand === "claim") {
-      if (!strArg(args, "task")) throw new Error("wildarrange coordination claim requires --task <taskId>");
-      console.log(JSON.stringify(await claimTeamTask(rootDir, {
-        taskId: args.task,
-        owner: strArg(args, "owner"),
-        forceCoordination: true,
-      }), null, 2));
-      return;
-    }
-    throw new Error("wildarrange coordination requires status or claim");
-  }
-
-  // --- 任务交接 ---
-  // §3.4：handoff 跨设备 prepare→push→accept 链路；takeover 为 owner 离线时的显式接管。
-  if (command === "handoff") {
-    const subcommand = args._[1];
-    if (subcommand === "prepare") {
-      if (!strArg(args, "task")) throw new Error("wildarrange handoff prepare requires --task <taskId>");
-      if (!strArg(args, "to-device-id")) throw new Error("wildarrange handoff prepare requires --to-device-id <uuid>");
-      console.log(JSON.stringify(await prepareTaskHandoff(rootDir, {
-        taskId: args.task,
-        toDeviceId: args["to-device-id"],
-        toDeviceName: strArg(args, "to-device-name"),
-        toOwner: strArg(args, "to-owner"),
-      }), null, 2));
-      return;
-    }
-    if (subcommand === "push") {
-      if (!strArg(args, "task")) throw new Error("wildarrange handoff push requires --task <taskId>");
-      console.log(JSON.stringify(await pushTaskHandoff(rootDir, { taskId: args.task }), null, 2));
-      return;
-    }
-    if (subcommand === "accept") {
-      if (!strArg(args, "task")) throw new Error("wildarrange handoff accept requires --task <taskId>");
-      console.log(JSON.stringify(await acceptTaskHandoff(rootDir, {
-        taskId: args.task,
-        planId: strArg(args, "plan"),
-      }), null, 2));
-      return;
-    }
-    if (subcommand === "takeover") {
-      if (!strArg(args, "plan")) throw new Error("wildarrange handoff takeover requires --plan <planId>");
-      if (!strArg(args, "task")) throw new Error("wildarrange handoff takeover requires --task <taskId>");
-      if (!strArg(args, "expected-device-id")) throw new Error("wildarrange handoff takeover requires --expected-device-id <uuid>");
-      console.log(JSON.stringify(await takeoverTaskOwnership(rootDir, {
-        planId: args.plan,
-        taskId: args.task,
-        expectedDeviceId: args["expected-device-id"],
-        owner: strArg(args, "owner"),
-        reason: args.reason,
-      }), null, 2));
-      return;
-    }
-    throw new Error("wildarrange handoff requires prepare, push, accept, or takeover");
-  }
-
   // --- 注入点预览 ---
   // §3.4：injection show 只读预览 Prompt 注入解析结果，不写入 ledger 也不触发 Hook。
   if (command === "injection") {
@@ -656,7 +565,6 @@ async function main() {
         isolation: strArg(args, "isolation"),
         command: strArg(args, "command"),
         timeoutMs: strArg(args, "timeout") ? Number(args.timeout) : undefined,
-        coordinate: Boolean(args.coordinate),
       }), null, 2));
       return;
     }
@@ -1106,7 +1014,6 @@ async function main() {
       console.log(JSON.stringify(await claimTeamTask(rootDir, {
         taskId: strArg(args, "task"),
         owner: strArg(args, "owner"),
-        forceCoordination: Boolean(args.coordinate),
       }), null, 2));
       return;
     }

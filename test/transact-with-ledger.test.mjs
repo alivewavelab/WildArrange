@@ -114,7 +114,6 @@ test("transactWithLedger: persist failure keeps the ledger entry auditable", asy
 test("claimTeamTask: ledger outage never leaves an unaudited in_progress state", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    await writeJson(path.join(dir, "wildarrange.config.json"), { gitCoordination: { mode: "off" } });
     await importProbePlan(dir);
 
     await sabotageLedger(dir);
@@ -132,7 +131,6 @@ test("claimTeamTask: ledger outage never leaves an unaudited in_progress state",
 test("claimTeamTask: persist failure leaves the claim event in the ledger and state untouched", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    await writeJson(path.join(dir, "wildarrange.config.json"), { gitCoordination: { mode: "off" } });
     await importProbePlan(dir);
     // persistTaskState re-reads the plan mirror; removing it fails the persist
     // step after the ledger append.
@@ -182,7 +180,6 @@ test("persistPostIntegrationRecovery: ledger outage leaves the authoritative sta
   // recovery 状态；现在必须先入账本。
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    await writeJson(path.join(dir, "wildarrange.config.json"), { gitCoordination: { mode: "off" } });
     await importProbePlan(dir);
     const taskState = await loadTaskState(dir);
     const task = taskState.tasks[0];

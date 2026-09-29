@@ -2,8 +2,8 @@
 // 文件名称：integration.mjs
 // 所属模块：orchestration
 // 作用说明：
-//   Git 交付集成：admission/线性完成前的 ownership 围栏、integration intent、
-//   候选路径收集与 task branch delivery commit 生成/推送。
+//   Git 交付集成：integration intent、候选路径收集与 task branch
+//   delivery commit 生成/普通 push。
 //
 // 【运行原理速读】
 //   可以把它想成「把任务成果安全写进 Git 历史」：
@@ -12,10 +12,10 @@
 //     delivery-pipeline 的 runCompletionSegment 与 admission 前置复核。
 //
 //   · 做了什么？
-//     验 owner/基线 → 写 intent → commit/push task branch → 绑定 integrationSha。
+//     验基线 → 写 intent → commit/push task branch → 绑定 integrationSha。
 //
 //   · 约束？
-//     push 成功后故障不得回滚；intent 是 checkpoint 前 durable 交付意图来源。
+//     push 成功后故障不得回滚；intent 是 checkpoint 前 durable 交付意图来源；只做普通非强制 push。
 // =============================================================================
 import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
@@ -29,7 +29,6 @@ import {
   commitIsAncestor,
   createTaskDeliveryCommit,
   createTaskCheckpointCommit,
-  ensureDeviceIdentity,
   fetchRemoteBranch,
   listTreeChanges,
   listWorkingTreeChanges,
@@ -37,16 +36,8 @@ import {
   pushTaskDeliveryCommit,
   remoteBranchHead,
   synchronizeTaskWorktreeToDelivery,
-  verifyIntegrationGuard,
 } from "../infra/git-coordination.mjs";
 import { readVerifiedLedgerEntries } from "../infra/ledger.mjs";
-import { loadTaskState } from "./plan-state.mjs";
-import {
-  assertCurrentTaskOwnership,
-  buildCoordinationPacket,
-  renderCoordinationCommitMessage,
-  taskContract,
-} from "./remote-ownership.mjs";
 
 // --- 围栏与 intent ---
 
@@ -64,25 +55,6 @@ export async function readIntegrationIntent(rootDir, runId, taskId) {
   return readJson(integrationIntentPath(rootDir, runId, taskId), null);
 }
 
-/** 断言当前 ownership；已 push 的 delivery intent 可恢复性通过围栏。 */
-export async function assertTaskOrDeliveredOwnership(rootDir, planId, task) {
-  try {
-    return await assertCurrentTaskOwnership(rootDir, task);
-  } catch (originalError) {
-    // §3.4：ownership 丢失但 intent 已 push 时，用 delivery intent 围栏恢复性放行 proof/checkpoint。
-    const workspace = task?.delivery_workspace;
-    const intent = workspace?.runId ? await readIntegrationIntent(rootDir, workspace.runId, task.id) : null;
-    const coordination = task?.coordination;
-    if (!intent || intent.planId !== planId || intent.taskId !== task.id || intent.runId !== workspace.runId
-      || intent.expectedSha !== workspace.baseSha || intent.remote !== coordination?.remote
-      || intent.branch !== workspace.branch || intent.branch !== coordination?.branch
-      || !["pushed", "push_outcome_unknown"].includes(intent.status)) throw originalError;
-    const fences = await verifyAdmissionFences(rootDir, task.id, null, intent);
-    if (fences.pass !== true) throw originalError;
-    return { ...fences.ownership, recoveredFromDeliveryIntent: true };
-  }
-}
-
 /** 收集相对 baseSha 的工作区与已提交变更路径（排除 .wildarrange）。 */
 export async function collectIntegrationCandidatePaths(rootDir, baseSha) {
   const [workingPaths, committedPaths] = await Promise.all([
@@ -94,122 +66,29 @@ export async function collectIntegrationCandidatePaths(rootDir, baseSha) {
     .sort();
 }
 
-/** 复核 admission 前 owner、集成基线与工作区归属围栏。 */
-export async function verifyAdmissionFences(rootDir, taskId, integrationGuard, recoveryIntent = null) {
-  const state = await loadTaskState(rootDir);
-  const task = state?.tasks.find((candidate) => candidate.id === taskId);
-  if (recoveryIntent?.integrationSha
-    && recoveryIntent?.remote
-    && recoveryIntent?.branch
-    && ["pushed", "push_outcome_unknown"].includes(recoveryIntent.status)) {
-    const device = await ensureDeviceIdentity(rootDir);
-    const coordination = task?.coordination;
-    const delivery = await inspectRemoteCommitContainment(
-      rootDir,
-      recoveryIntent.remote,
-      recoveryIntent.branch,
-      recoveryIntent.integrationSha,
-    );
-    const ownership = {
-      pass: Boolean(coordination
-        && ["claimed", "accepted"].includes(coordination.status)
-        && coordination.deviceId === device.deviceId
-        && delivery.actualSha === recoveryIntent.integrationSha),
-      active: true,
-      deviceId: device.deviceId,
-      remoteHeadSha: delivery.actualSha,
-    };
-    return {
-      pass: ownership.pass === true && delivery.contains === true,
-      reason: delivery.contains !== true
-        ? "delivered_commit_not_on_remote_task_branch"
-        : ownership.pass === true
-          ? null
-          : "task_ownership_changed",
-      ownership,
-      integration: null,
-      delivery,
-      remoteContainsPriorIntegration: delivery.contains === true,
-      workspaceContainsExpected: true,
-      expectedSha: recoveryIntent.integrationSha,
-      actualSha: delivery.actualSha,
-    };
-  }
-  let ownership;
-  try {
-    ownership = await assertCurrentTaskOwnership(rootDir, task);
-  } catch (error) {
-    return {
-      pass: false,
-      reason: "task_ownership_changed",
-      ownership: { pass: false, error: error instanceof Error ? error.message : String(error) },
-      integration: null,
-      expectedSha: integrationGuard?.expectedSha || null,
-      actualSha: null,
-    };
-  }
-  const integration = await verifyIntegrationGuard(rootDir, integrationGuard);
-  const remoteContainsPriorIntegration = integration.pass === true
-    && recoveryIntent?.integrationSha
-    && integrationGuard?.expectedSha
-    ? await commitIsAncestor(rootDir, recoveryIntent.integrationSha, integrationGuard.expectedSha)
-    : false;
-  const workspaceBaseSha = recoveryIntent
-    && (recoveryIntent.integrationSha === integrationGuard?.expectedSha || remoteContainsPriorIntegration)
-    ? recoveryIntent.expectedSha
-    : integrationGuard?.expectedSha;
-  const workspaceContainsExpected = integration.pass === true && integrationGuard?.active
-    ? await commitIsAncestor(rootDir, workspaceBaseSha, "HEAD")
-    : true;
-  return {
-    pass: ownership.pass === true && integration.pass === true && workspaceContainsExpected,
-    reason: integration.pass !== true
-      ? "integration_head_changed"
-      : workspaceContainsExpected
-        ? null
-        : "integration_base_not_present_in_workspace",
-    ownership,
-    integration,
-    remoteContainsPriorIntegration,
-    workspaceContainsExpected,
-    expectedSha: integration.expectedSha || null,
-    actualSha: integration.actualSha || null,
-  };
-}
-
 // --- delivery commit ---
 
-/** 生成本地 delivery commit 并可 push 到任务独占 task branch。 */
+/**
+ * 生成 delivery commit；配置了远端时再普通 push 到任务独占 task branch，
+ * 无远端时只做本地 commit。
+ */
 export async function integrateAdmissionCommit(rootDir, options) {
   const coordination = options.task?.coordination;
-  const localDeliveryTarget = coordination?.localGit === true
-    && coordination.branch
-    && coordination.remoteHeadSha
+  const deliveryTarget = coordination?.localGit === true && coordination.branch && coordination.baseSha
     ? {
+        remote: coordination.remote || null,
         branch: coordination.branch,
-        expectedSha: coordination.remoteHeadSha,
+        expectedSha: coordination.baseSha,
       }
     : null;
-  if (localDeliveryTarget) {
-    return integrateLocalAdmissionCommit(rootDir, options, localDeliveryTarget);
-  }
-  const deliveryTarget = coordination && ["claimed", "accepted"].includes(coordination.status)
-    ? {
-        active: true,
-        remote: coordination.remote,
-        branch: coordination.branch,
-        expectedSha: coordination.remoteHeadSha,
-      }
-    : null;
-  if (!deliveryTarget?.remote || !deliveryTarget?.branch || !deliveryTarget?.expectedSha) {
-    if (options.integrationGuard?.active !== true
-      && (!coordination || ["disabled", "manual", "degraded"].includes(coordination.status))) {
+  if (!deliveryTarget) {
+    if (!coordination || coordination.status === "degraded") {
       return {
         pass: true,
         active: false,
         pushed: false,
         status: "local_degraded",
-        reason: coordination?.reason || "task coordination metadata is unavailable",
+        reason: coordination?.reason || "task branch metadata is unavailable",
         commitSha: null,
         integrationSha: null,
       };
@@ -219,8 +98,11 @@ export async function integrateAdmissionCommit(rootDir, options) {
       active: false,
       pushed: false,
       reason: "task_branch_delivery_unavailable",
-      error: "a claimed remote task branch is required before admission can complete",
+      error: "a task branch with a base commit is required before admission can complete",
     };
+  }
+  if (!deliveryTarget.remote) {
+    return integrateLocalAdmissionCommit(rootDir, options, deliveryTarget);
   }
   const intentPath = integrationIntentPath(rootDir, options.runId, options.taskId);
   let intent = await readJson(intentPath, null);
@@ -235,34 +117,9 @@ export async function integrateAdmissionCommit(rootDir, options) {
       actualSha: await remoteBranchHead(rootDir, deliveryTarget.remote, deliveryTarget.branch),
     };
   }
-  const fences = await verifyAdmissionFences(rootDir, options.taskId, options.integrationGuard, intent);
   const durablePushRisk = ["pushed", "push_outcome_unknown"].includes(intent?.status);
-  if (!fences.pass) {
-    return {
-      ...fences,
-      active: true,
-      pushed: durablePushRisk,
-      pushOutcome: intent?.pushOutcome || (intent?.status === "pushed" ? "confirmed" : null),
-      reason: intent?.status === "push_outcome_unknown"
-        ? "integration_push_outcome_unknown"
-        : fences.reason,
-      fenceReason: fences.reason,
-    };
-  }
   if (!intent) {
-    const device = await ensureDeviceIdentity(rootDir);
-    const packet = buildCoordinationPacket("task_delivery", {
-      planId: options.planId,
-      task: taskContract(options.task),
-      runId: options.runId,
-      device,
-      taskBranch: options.task.coordination?.branch || null,
-      taskRemoteHeadSha: options.task.coordination?.remoteHeadSha || null,
-      deliveryBranch: deliveryTarget.branch,
-      expectedMainSha: options.integrationGuard.expectedSha,
-      changedPaths: options.changedPaths || [],
-    });
-    const message = renderCoordinationCommitMessage(`deliver ${options.planId}/${options.taskId}`, packet);
+    const message = renderDeliveryCommitMessage(options);
     let integrationSha;
     if (options.deliveryWorktreeDir && options.deliveryFromWorktree) {
       const deliveryCommit = await createTaskDeliveryCommit(options.deliveryWorktreeDir, {
@@ -297,12 +154,31 @@ export async function integrateAdmissionCommit(rootDir, options) {
       remote: deliveryTarget.remote,
       branch: deliveryTarget.branch,
       expectedSha: deliveryTarget.expectedSha,
-      expectedMainSha: options.integrationGuard.expectedSha,
       integrationSha,
       changedPaths: options.changedPaths || [],
       preparedAt: nowIso(),
     };
     await writeJsonAtomic(intentPath, intent);
+  }
+
+  if (durablePushRisk) {
+    // 已 push（或结果未知）的 intent 必须先读回远端；远端不可达时保留 intent，禁止回滚或重推。
+    const readBack = await inspectRemoteCommitContainment(rootDir, intent.remote, intent.branch, intent.integrationSha);
+    if (readBack.error) {
+      return {
+        pass: false,
+        active: true,
+        pushed: true,
+        pushOutcome: intent.pushOutcome || (intent.status === "pushed" ? "confirmed" : null),
+        reason: intent.status === "push_outcome_unknown"
+          ? "integration_push_outcome_unknown"
+          : "delivered_commit_not_on_remote_task_branch",
+        expectedSha: intent.expectedSha,
+        actualSha: null,
+        integrationSha: intent.integrationSha,
+        containmentError: readBack.error,
+      };
+    }
   }
 
   let actualSha = await remoteBranchHead(rootDir, intent.remote, intent.branch);
@@ -322,14 +198,16 @@ export async function integrateAdmissionCommit(rootDir, options) {
       integrationSha: intent.integrationSha,
     };
   }
-  if (actualSha !== intent.expectedSha && !remoteContainsIntegration) {
+  // 远端 task branch 尚不存在（首次 push）或仍停在基线是正常起点；
+  // 出现其他内容说明该分支已被别的写入占用，拒绝覆盖。
+  if (actualSha && actualSha !== intent.expectedSha && !remoteContainsIntegration) {
     return {
       pass: false,
       active: true,
       pushed: durablePushRisk,
       reason: durablePushRisk
         ? "integrated_commit_not_on_remote_branch"
-        : "integration_head_changed",
+        : "task_branch_remote_occupied",
       expectedSha: intent.expectedSha,
       actualSha,
       integrationSha: intent.integrationSha,
@@ -398,7 +276,7 @@ export async function integrateAdmissionCommit(rootDir, options) {
           pass: false,
           active: true,
           // The transport failed after a push attempt and read-back could
-          // §3.4：push 结果未知时保留 intent 与 ownership，禁止回滚可能已在远端的 commit。
+          // §3.4：push 结果未知时保留 intent，禁止回滚可能已在远端的 commit。
           pushed: true,
           pushOutcome: "unknown",
           reason: "integration_push_outcome_unknown",
@@ -517,15 +395,6 @@ export async function integrateAdmissionCommit(rootDir, options) {
 
 /** 无 remote 时在本地 task worktree 生成本地 delivery commit。 */
 async function integrateLocalAdmissionCommit(rootDir, options, deliveryTarget) {
-  if (options.integrationGuard?.active === true) {
-    return {
-      pass: false,
-      active: true,
-      local: true,
-      pushed: false,
-      reason: "local_delivery_conflicts_with_remote_guard",
-    };
-  }
   if (!options.deliveryWorktreeDir) {
     return {
       pass: false,
@@ -555,20 +424,7 @@ async function integrateLocalAdmissionCommit(rootDir, options, deliveryTarget) {
   }
 
   if (!intent) {
-    const device = await ensureDeviceIdentity(rootDir);
-    const packet = buildCoordinationPacket("task_delivery", {
-      planId: options.planId,
-      task: taskContract(options.task),
-      runId: options.runId,
-      device,
-      taskBranch: deliveryTarget.branch,
-      taskRemoteHeadSha: null,
-      deliveryBranch: deliveryTarget.branch,
-      expectedMainSha: deliveryTarget.expectedSha,
-      changedPaths: options.changedPaths || [],
-      deliveryMode: "local_git",
-    });
-    const message = renderCoordinationCommitMessage(`deliver ${options.planId}/${options.taskId}`, packet);
+    const message = renderDeliveryCommitMessage(options);
     let integrationSha;
     if (options.deliveryFromWorktree) {
       const deliveryCommit = await createTaskDeliveryCommit(options.deliveryWorktreeDir, {
@@ -603,7 +459,6 @@ async function integrateLocalAdmissionCommit(rootDir, options, deliveryTarget) {
       remote: null,
       branch: deliveryTarget.branch,
       expectedSha: deliveryTarget.expectedSha,
-      expectedMainSha: deliveryTarget.expectedSha,
       integrationSha,
       changedPaths: options.changedPaths || [],
       preparedAt: nowIso(),
@@ -673,6 +528,16 @@ async function integrateLocalAdmissionCommit(rootDir, options, deliveryTarget) {
     worktreeSync,
     intentPath: path.relative(rootDir, intentPath),
   };
+}
+
+/** 渲染 delivery commit message：只带计划/任务/run 标识，不含设备或 owner 信息。 */
+function renderDeliveryCommitMessage(options) {
+  return [
+    `wildarrange: deliver ${options.planId}/${options.taskId}`,
+    "",
+    `WildArrange-Task: ${options.planId}/${options.taskId}`,
+    `WildArrange-Run: ${options.runId}`,
+  ].join("\n");
 }
 
 /** 检查远端 branch 是否包含指定 integration commit。 */

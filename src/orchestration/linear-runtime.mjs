@@ -41,7 +41,7 @@ import { writeWorkflowSummary } from "./status.mjs";
 import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
 import { persistTaskState, writeOutbox } from "./task-board.mjs";
 import { findRunnableTask } from "../infra/task-predicates.mjs";
-import { coordinateTaskClaim } from "./remote-ownership.mjs";
+import { resolveTaskBranchTarget } from "./task-branch.mjs";
 import { assertCommandWorkerAgent } from "../infra/agent-registry.mjs";
 import { assertContractWorkspaceAvailable } from "./integration.mjs";
 import { ensureLinearDeliveryWorkspace } from "./linear-delivery.mjs";
@@ -50,7 +50,6 @@ import {
   persistCheckpointWriteFailure,
   persistCommandRecoveryRequired,
   persistRevalidationRequired,
-  taskOwnershipGate,
 } from "./linear-recovery.mjs";
 import { recordPreExecuteSnapshot } from "./linear-task-support.mjs";
 import { checkpointTaskNodeWithinLock } from "./linear-workflow.mjs";
@@ -166,10 +165,9 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   await ensureTaskPacket(rootDir, taskState.planId, task);
   options = { ...options, executionContextPath: readiness?.contextPath };
   task.owner = assertCommandWorkerAgent(task.owner || "Jiuwei");
-  task.coordination = await coordinateTaskClaim(rootDir, {
+  task.coordination = await resolveTaskBranchTarget(rootDir, {
     planId: taskState.planId,
     task,
-    owner: task.owner,
   });
   const deliveryWorkspace = await ensureLinearDeliveryWorkspace(rootDir, taskState.planId, task, taskState.tasks);
   task.status = "in_progress";
@@ -226,7 +224,6 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
     unavailableReason: beforeChanged.available ? afterChanged.reason : beforeChanged.reason,
     executionRoot,
     runId: deliveryWorkspace?.runId,
-    preCompletionGate: () => taskOwnershipGate(rootDir, task.id),
   });
   const verifyResult = pipelineResult.evidence.verifyResult;
   const scopeResult = pipelineResult.evidence.scopeResult;
@@ -271,10 +268,10 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
 
   if (pipelineResult.status === "revalidation_required") {
     await persistRevalidationRequired(rootDir, taskState, task, {
-      integrationGuard: pipelineResult.evidence.integrationGuard,
-      summaryFallback: "remote task ownership changed before completion",
-      retryHint: "旧设备必须停止写入；由当前远端 owner 继续任务并重新运行全部质量门",
-      ledgerEvent: { type: "task_completion_revalidation_required", planId: taskState.planId, taskId: task.id, reason: "task_ownership_changed" },
+      integrationGate: pipelineResult.evidence.integrationCommit,
+      summaryFallback: "task branch baseline changed before completion",
+      retryHint: "确认 task branch 基线与工作区归属后，重新运行全部质量门",
+      ledgerEvent: { type: "task_completion_revalidation_required", planId: taskState.planId, taskId: task.id, reason: pipelineResult.evidence.integrationCommit?.reason || "task_branch_revalidation_required" },
     });
     return { status: "revalidation_required", task, workerResult, verifyResult, scopeResult, reviewResult, acceptanceProof };
   }

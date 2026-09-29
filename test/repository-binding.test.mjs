@@ -14,7 +14,7 @@ import {
 } from "../src/infra/workspace-context.mjs";
 import { buildRegistryFromCards } from "../src/infra/verification-registry.mjs";
 import { ensureLinearDeliveryWorkspace } from "../src/orchestration/linear-delivery.mjs";
-import { coordinateTaskClaim, taskContract } from "../src/orchestration/remote-ownership.mjs";
+import { resolveTaskBranchTarget } from "../src/orchestration/task-branch.mjs";
 import {
   inspectTaskRepositoryBinding,
   writeIntegrationAcceptance,
@@ -81,7 +81,7 @@ test("governance-target task claims and creates its isolated worktree from the g
         governanceRevision: binding.governanceRevision,
       },
     };
-    task.coordination = await coordinateTaskClaim(projectRoot, { planId: "P-DUAL", task });
+    task.coordination = await resolveTaskBranchTarget(projectRoot, { planId: "P-DUAL", task });
     assert.equal(task.coordination.repositoryTarget, "governance");
     assert.equal(task.coordination.baseSha, await git(governanceRoot, ["rev-parse", "HEAD"]));
 
@@ -177,22 +177,4 @@ test("acceptance proof exposes the dual-repository binding as a mandatory check"
     },
   });
   assert.equal(passing.checks.find((check) => check.name === "dual_repository_binding").status, "pass");
-});
-
-test("handoff task contract preserves the external repository target and imported binding", () => {
-  const binding = {
-    registryDigest: "registry-digest",
-    projectRevision: { sha: "a".repeat(40) },
-    governanceRevision: { sha: "b".repeat(40) },
-  };
-  const contract = taskContract({
-    id: "T-PROJECT",
-    subject: "Project delivery",
-    repositoryTarget: "project",
-    governance_binding: binding,
-    internalOnly: "not serialized",
-  });
-  assert.equal(contract.repositoryTarget, "project");
-  assert.deepEqual(contract.governance_binding, binding);
-  assert.equal(contract.internalOnly, undefined);
 });

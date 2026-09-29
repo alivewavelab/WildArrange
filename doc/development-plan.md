@@ -44,7 +44,7 @@
 - 加入后台 task/session 管理器。`DONE: run index, lifecycle status, awaiting_user_acceptance retention, explicit close/release commands; host-private long-lived process control remains adapter work`
 - 加入 worktree 隔离与 merge admission。`DONE: Git worktree isolation, patch extraction, writable_paths check, patch apply, verifier/scope/review/acceptance-proof/checkpoint admission, failed admission rollback`
 - 轻量子 Agent 结果在 user/mainline acceptance 前保持开放。`DONE: successful child results enter awaiting_user_acceptance and release after admission`
-- Git 多设备协调（`guarded`/`strict`、handoff、integration SHA fence、admission-recovery）。`DONE`
+- Git 交付（task branch 独占、delivery commit、普通非强制 push、admission-recovery）。`DONE: multi-device/remote-ownership coordination was removed; multi-user work relies on one branch per writable task`
 - 加入 Skill MCP 支持。`PARTIAL: skill/tool contracts are installable and matchable; external MCP server lifecycle remains adapter work`
 - 加入项目 Agent Pack 支持，用于 GameYo 等垂直生产工作流：项目定义的阶段 worker、阶段循环、必需输出、可写路径与 gate 绑定；ProducerAgent 与治理 gate 仍由 WildArrange 拥有。`TODO`
 - tmux/cmux 可视化仅在后台 Agent 跑通之后。`DEFERRED: not required for publishable CLI loop`
