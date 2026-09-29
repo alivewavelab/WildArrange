@@ -31,11 +31,13 @@ node ./bin/wildarrange.mjs adoption recover
 8. `recovery_required` 时运行 `recover`；Dashboard 的“对账”按钮也会进入恢复。只有 preimage 恢复成功后才释放维护锁。
 9. 完成后用 `doctor` 或 `status` 查看 `registryFreshness` 黄灯；过期只提醒，不阻断日常 run。
 
+外置接管扫描和验证仍使用业务仓库；locator 配置、Registry、Bootstrap、Inventory 写入治理仓库。Registry 使用治理合同的 `verificationRegistry` 路径，Bootstrap 和 Inventory 放在其同级目录；commit A/B 在治理仓库完成。若另有已批准的业务文件改动，它们须在业务仓库单独提交，系统分别核对两仓内容。初始化生成且摘要完整的空 Registry 可在 locator 获批后填充，原始内容保存在运行态 `adoption/artifact-preimages/`；非空、摘要异常或生成期间已变化的内容仍报冲突。
+
 ## 完成协议
 
 - 会话状态为 `finalized`，或用户在尚未修改业务文件前明确取消。
 - 三文件路径来自已批准 locator，不使用 Gamecopilot 专属目录。
-- 三个目标名称被已有文件、目录或链接占用时必须暂停并解释冲突，不得覆盖或自行改名。
+- 三个目标名称被已有文件、目录或链接占用时必须暂停并解释冲突，不得覆盖或自行改名；仅允许上述初始化空 Registry 的受控填充。
 - 一旦存在已生效改动，禁止用“取消会话”冒充恢复；应完成 Git 锚定，或在恢复态执行 `recover`。
 - Hook 不得改成静默全仓扫描。
 

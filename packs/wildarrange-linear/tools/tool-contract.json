@@ -1529,7 +1529,7 @@
       "layer": "project_governance",
       "status": "implemented",
       "command": "node ./bin/wildarrange.mjs review configure --from .wildarrange/plan-drafts/setup.json [--apply]",
-      "purpose": "预览项目 Review 清单及能力配置；显式 apply 只修改治理配置，不启动 Worker。",
+      "purpose": "预览项目 Review 清单及能力配置；显式 apply 只修改治理配置，不启动 Worker。external 模式将 .wildarrange/plan-drafts 逻辑路径解析到 runtimeRoot/plan-drafts，正式配置写治理仓库 <policyRoot>/wildarrange.config.json。",
       "reads": [
         "wildarrange.config.json",
         ".wildarrange/**",

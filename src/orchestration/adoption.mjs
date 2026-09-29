@@ -28,6 +28,7 @@ import {
   nowIso,
   readJson,
   resolveWildArrangePath,
+  resolveGovernancePaths,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
@@ -222,13 +223,14 @@ export async function recoverAdoption(rootDir, options = {}) {
     if (session.status !== "recovery_required" || !recovery) {
       throw adoptionError("recovery_not_required", `session status ${session.status} does not require recovery`);
     }
+    const recoveryRoot = recovery.txn.repositoryTarget === "governance" ? resolveGovernancePaths(rootDir).rootDir : rootDir;
     const transactionDir = adoptionTransactionDir(rootDir, session.sessionId, recovery.cardId);
     try {
       const restored = await restorePreimages(
-        rootDir,
+        recoveryRoot,
         path.join(transactionDir, "preimage"),
         recovery.txn.preimage || [],
-        { denyPrefixes: [path.join(rootDir, ".git")] },
+        { denyPrefixes: [path.join(recoveryRoot, ".git")] },
       );
       const manifest = {
         ...recovery.txn,
@@ -274,6 +276,7 @@ export async function reconcileAdoption(rootDir, options = {}) {
 
 /** 锁内对账 adoption 会话与 Git/artifact 锚点，修复中断状态。 */
 async function reconcileAdoptionUnlocked(rootDir, options = {}) {
+  const governanceRoot = resolveGovernancePaths(rootDir).rootDir;
   const session = await loadSession(rootDir, options.sessionId);
   if (!session) return { session: null, status: "idle" };
   const files = await readSessionFiles(rootDir, session.sessionId);
@@ -317,16 +320,16 @@ async function reconcileAdoptionUnlocked(rootDir, options = {}) {
   if (session.status === "awaiting_registry_commit") {
     const locator = files.session.locator || session.locator || suggestedLocator(files.cards);
     await rememberArtifactDigests(rootDir, session, locator);
-    const head = await readGitHead(rootDir);
+    const head = await readGitHead(governanceRoot);
     const registryMatch = await gitBlobDigestEqualsIfAvailable(
-      rootDir,
+      governanceRoot,
       locator.registryPath,
       head.sha,
       session.registryDigest,
     );
-    const locatorPath = session.locatorFile || "wildarrange.config.json";
+    const locatorPath = session.locatorFile || resolveGovernancePaths(rootDir).configPath;
     const locatorMatch = await gitBlobDigestEqualsIfAvailable(
-      rootDir,
+      governanceRoot,
       locatorPath,
       head.sha,
       session.locatorDigest,
@@ -347,7 +350,7 @@ async function reconcileAdoptionUnlocked(rootDir, options = {}) {
         session.baselineRef = head.sha;
         session.status = "awaiting_final_commit";
         await captureWrittenArtifactDigests(rootDir, session, locator);
-        session.nextAction = "用户自行 commit Bootstrap 与 Inventory（commit B）后运行 adoption resume";
+        session.nextAction = `在 ${governanceRoot} 提交 Bootstrap 与 Inventory（commit B）后运行 adoption resume`;
         await writeSessionFiles(rootDir, session, files);
       } else {
         session.status = "awaiting_registry_commit";
@@ -371,21 +374,21 @@ async function reconcileAdoptionUnlocked(rootDir, options = {}) {
   if (session.status === "awaiting_final_commit") {
     const locator = files.session.locator || session.locator || suggestedLocator(files.cards);
     await rememberArtifactDigests(rootDir, session, locator);
-    const head = await readGitHead(rootDir);
+    const head = await readGitHead(governanceRoot);
     const bootstrapMatch = await gitBlobDigestEqualsIfAvailable(
-      rootDir,
+      governanceRoot,
       locator.bootstrapPath,
       head.sha,
       session.bootstrapDigest,
     );
     const inventoryMatch = await gitBlobDigestEqualsIfAvailable(
-      rootDir,
+      governanceRoot,
       locator.inventoryPath,
       head.sha,
       session.inventoryDigest,
     );
     const inventory = files.inventory || (locator.inventoryPath
-      ? await readVerificationInventory(path.join(rootDir, locator.inventoryPath), null)
+      ? await readVerificationInventory(path.join(resolveGovernancePaths(rootDir).rootDir, locator.inventoryPath), null)
       : null);
     const inventoryDigestOk = inventoryDigestSelfConsistent(inventory);
     const effectsMatch = await appliedEffectsMatchHead(rootDir, session, head.sha);
@@ -633,7 +636,7 @@ async function concludeAfterCard(rootDir, session, files) {
   await captureWrittenArtifactDigests(rootDir, session, locator);
   await refreshLocatorAppliedEffect(rootDir, session);
   session.status = "awaiting_registry_commit";
-  session.nextAction = "用户自行 commit Registry 与 locator（commit A），然后运行 adoption resume";
+  session.nextAction = `在 ${resolveGovernancePaths(rootDir).rootDir} 提交 Registry 与 locator（commit A）；已批准的业务改动在业务仓库单独提交，然后运行 adoption resume`;
   await writeSessionFiles(rootDir, session, files);
   await clearMaintenanceMarker(rootDir);
   return { ok: true, session, generated: generated.evidence };
@@ -667,7 +670,7 @@ export async function loadAdoptionViewModel(rootDir, options = {}) {
   const configResult = await loadWildArrangeConfig(rootDir).catch(() => ({ config: {} }));
   const locator = readLocator(configResult.config);
   const inventory = locator.inventoryPath
-    ? await readVerificationInventory(path.join(rootDir, locator.inventoryPath), null)
+    ? await readVerificationInventory(path.join(resolveGovernancePaths(rootDir).rootDir, locator.inventoryPath), null)
     : null;
   return {
     ...status,
@@ -751,7 +754,7 @@ async function readSessionFiles(rootDir, sessionId) {
   const approvals = (await readJson(path.join(dir, "approvals.json"), { approvals: {} })).approvals || {};
   const scan = await readJson(path.join(dir, "scan.json"), null);
   const inventory = session?.locator?.inventoryPath
-    ? await readVerificationInventory(path.join(rootDir, session.locator.inventoryPath), null)
+    ? await readVerificationInventory(path.join(resolveGovernancePaths(rootDir).rootDir, session.locator.inventoryPath), null)
     : null;
   const transactions = {};
   let txnEntries = [];
@@ -837,7 +840,7 @@ function snapshotsMatch(expected, actual) {
 /** 计算项目内相对路径文件的 UTF-8 内容哈希。 */
 async function fileUtf8Digest(rootDir, relativePath) {
   if (!relativePath) return null;
-  const absolutePath = path.join(rootDir, relativePath);
+  const absolutePath = path.join(resolveGovernancePaths(rootDir).rootDir, relativePath);
   if (!existsSync(absolutePath)) return null;
   try {
     return digestGitComparableContent(await readFile(absolutePath));
@@ -860,7 +863,7 @@ async function captureWrittenArtifactDigests(rootDir, session, locator = {}) {
   if (bootstrapDigest) session.bootstrapDigest = bootstrapDigest;
   const inventoryDigest = await fileUtf8Digest(rootDir, locator.inventoryPath);
   if (inventoryDigest) session.inventoryDigest = inventoryDigest;
-  const locatorFile = session.locatorFile || "wildarrange.config.json";
+  const locatorFile = session.locatorFile || resolveGovernancePaths(rootDir).configPath;
   const locatorDigest = await fileUtf8Digest(rootDir, locatorFile);
   if (locatorDigest) {
     session.locatorDigest = locatorDigest;
@@ -883,7 +886,7 @@ async function rememberArtifactDigests(rootDir, session, locator = {}) {
     if (digest) session.inventoryDigest = digest;
   }
   if (!session.locatorDigest) {
-    const locatorFile = session.locatorFile || "wildarrange.config.json";
+    const locatorFile = session.locatorFile || resolveGovernancePaths(rootDir).configPath;
     const digest = await fileUtf8Digest(rootDir, locatorFile);
     if (digest) {
       session.locatorDigest = digest;
@@ -896,6 +899,7 @@ async function rememberArtifactDigests(rootDir, session, locator = {}) {
 function recordAppliedEffect(session, cardId, postimage = []) {
   const paths = (postimage || []).map((item) => ({
     path: item.path,
+    repositoryTarget: item.repositoryTarget || "project",
     digest: item.gitDigest || item.digest,
     presence: item.digest === "missing" ? "absent" : "present",
   }));
@@ -905,12 +909,12 @@ function recordAppliedEffect(session, cardId, postimage = []) {
 
 /** 按当前 HEAD 刷新 locator 对应 appliedEffect。 */
 async function refreshLocatorAppliedEffect(rootDir, session) {
-  const locatorFile = session.locatorFile || "wildarrange.config.json";
+  const locatorFile = session.locatorFile || resolveGovernancePaths(rootDir).configPath;
   const digest = session.locatorDigest || await fileUtf8Digest(rootDir, locatorFile);
   if (!digest) return;
   for (const effect of session.appliedEffects || []) {
     for (const entry of effect.paths || []) {
-      if (normalizeAdoptionPath(entry.path) === normalizeAdoptionPath(locatorFile)) {
+      if ((entry.repositoryTarget === "governance" || resolveGovernancePaths(rootDir).rootDir === rootDir) && normalizeAdoptionPath(entry.path) === normalizeAdoptionPath(locatorFile)) {
         entry.digest = digest;
         entry.presence = "present";
       }
@@ -921,14 +925,17 @@ async function refreshLocatorAppliedEffect(rootDir, session) {
 /** 校验 appliedEffects 是否与给定 HEAD 一致。 */
 async function appliedEffectsMatchHead(rootDir, session, headSha) {
   if (!headSha) return false;
+  const projectHead = resolveGovernancePaths(rootDir).rootDir === rootDir ? headSha : (await readGitHead(rootDir)).sha;
   for (const effect of session.appliedEffects || []) {
     for (const entry of effect.paths || []) {
       if (!entry?.path) continue;
+      const targetRoot = entry.repositoryTarget === "governance" ? resolveGovernancePaths(rootDir).rootDir : rootDir;
+      const targetHead = entry.repositoryTarget === "governance" ? headSha : projectHead;
       if (entry.presence === "absent") {
-        if (await gitTreeContains(rootDir, entry.path, headSha)) return false;
+        if (await gitTreeContains(targetRoot, entry.path, targetHead)) return false;
         continue;
       }
-      const match = await gitBlobDigestEqualsIfAvailable(rootDir, entry.path, headSha, entry.digest);
+      const match = await gitBlobDigestEqualsIfAvailable(targetRoot, entry.path, targetHead, entry.digest);
       if (match !== true) return false;
     }
   }

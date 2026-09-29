@@ -19,7 +19,7 @@ import { runCommandFile } from "./command-runner.mjs";
 import { readGitHead } from "./git-diff.mjs";
 import { normalizeRelativePath } from "./path-match.mjs";
 import { loadWildArrangeConfig } from "./runtime-config.mjs";
-import { hashContent, nowIso, readJson } from "./runtime-store.mjs";
+import { hashContent, nowIso, readJson, resolveGovernancePaths } from "./runtime-store.mjs";
 import { fingerprintCard, stableStringify } from "./verification-cards.mjs";
 
 /**
@@ -257,7 +257,9 @@ export async function computeDeclaredInputFingerprint(rootDir, relativePaths, op
   for (const relativePath of [...new Set(relativePaths || [])].sort()) {
     const normalized = normalizeRelativePath(relativePath);
     if (exclude.has(normalized)) continue;
-    const absolutePath = path.join(rootDir, normalized);
+    const governance = options.governance;
+    const inputRoot = governance && [governance.configPath, governance.registryPath].includes(normalized) ? governance.rootDir : rootDir;
+    const absolutePath = path.join(inputRoot, normalized);
     if (!existsSync(absolutePath)) {
       fingerprints.push({ path: normalized, digest: "missing" });
       continue;
@@ -270,11 +272,11 @@ export async function computeDeclaredInputFingerprint(rootDir, relativePaths, op
 /**
  * declaredInputPaths：本模块对外API。
  */
-export function declaredInputPaths(registry, locator, extra = []) {
+export function declaredInputPaths(registry, locator, extra = [], governance = {}) {
   const paths = [
     locator?.registryPath,
     "package.json",
-    "wildarrange.config.json",
+    governance.configPath || "wildarrange.config.json",
     ...extra,
     ...(registry?.runtimeGates || []).map((item) => item.path),
     ...(registry?.hostHooks || []).map((item) => item.path),
@@ -330,9 +332,10 @@ export async function evaluateRegistryFreshness(rootDir, options = {}) {
       nextAction: "需要时运行 wildarrange adoption start",
     };
   }
-  const registry = await readJson(path.join(rootDir, locator.registryPath), null);
-  const bootstrap = await readJson(path.join(rootDir, locator.bootstrapPath), null);
-  const inventory = await readVerificationInventory(path.join(rootDir, locator.inventoryPath), null);
+  const governance = resolveGovernancePaths(rootDir);
+  const registry = await readJson(path.join(governance.rootDir, locator.registryPath), null);
+  const bootstrap = await readJson(path.join(governance.rootDir, locator.bootstrapPath), null);
+  const inventory = await readVerificationInventory(path.join(governance.rootDir, locator.inventoryPath), null);
   if (!registry || !bootstrap || !inventory) {
     return {
       kind: "registry_freshness",
@@ -356,9 +359,10 @@ export async function evaluateRegistryFreshness(rootDir, options = {}) {
       locator,
     };
   }
-  const declared = declaredInputPaths(registry, locator, options.extraDeclaredInputs || []);
+  const declared = declaredInputPaths(registry, locator, options.extraDeclaredInputs || [], governance);
   const currentDeclared = await computeDeclaredInputFingerprint(rootDir, declared, {
     exclude: [locator.inventoryPath, locator.bootstrapPath],
+    governance,
   });
   const expectedDeclared = inventory.declaredInputFingerprint || options.expectedDeclaredFingerprint;
   if (expectedDeclared && expectedDeclared !== currentDeclared) {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import {
@@ -263,5 +263,140 @@ test("workspace context: linked Git worktrees share project identity and runtime
     assert.equal(linked.projectId, attached.projectId);
     assert.equal(linked.runtimeRoot, attached.runtimeRoot);
     assert.equal(linked.projectRoot, linkedRoot);
+  });
+});
+
+test("external onboarding: setup drafts use runtime and configuration belongs to governance", async () => {
+  await withWorkspace(async ({ projectRoot, governanceRoot, stateHome }) => {
+    const { configureProjectReview } = await import("../src/capabilities/project-review.mjs");
+    const { loadWildArrangeConfig } = await import("../src/infra/runtime-config.mjs");
+    const context = await attachGovernanceRepository(projectRoot, { governanceRoot, stateHome });
+    await initRuntime(projectRoot);
+    const drafts = path.join(context.runtimeRoot, "plan-drafts");
+    await mkdir(drafts, { recursive: true });
+    const draft = path.join(drafts, "setup.json");
+    const { preToolUseGuard } = await import("../src/ai/pre-tool-guard.mjs");
+    const guard = file => preToolUseGuard(projectRoot, { hook_event_name: "PreToolUse", tool_name: "Write", tool_input: { file_path: file } });
+    assert.equal((await guard(draft)).code, "plan_draft_write");
+    assert.equal((await guard(path.join(context.runtimeRoot, "config.json"))).decision, "deny");
+    assert.equal((await guard(path.join(governanceRoot, "policy/wildarrange.config.json"))).decision, "deny");
+    await writeFile(draft, JSON.stringify({ executionReadiness: { timeoutMs: 4321 } }));
+    const configPath = path.join(governanceRoot, "policy/wildarrange.config.json");
+    const preview = await configureProjectReview(projectRoot, ".wildarrange/plan-drafts/setup.json");
+    assert.equal(preview.applied, false);
+    const cliPreview = await runCommandFile(process.execPath, [path.join(process.cwd(), "bin/wildarrange.mjs"),
+      "review", "configure", "--from", ".wildarrange/plan-drafts/setup.json"], projectRoot, 15_000,
+      { env: { WILDARRANGE_STATE_HOME: stateHome } });
+    assert.equal(cliPreview.exitCode, 0, cliPreview.stderr);
+    assert.equal(JSON.parse(cliPreview.stdout).applied, false);
+    assert.equal(existsSync(configPath), false);
+    assert.equal((await configureProjectReview(projectRoot, draft, { apply: true })).applied, true);
+    assert.equal((await loadWildArrangeConfig(projectRoot)).config.executionReadiness.timeoutMs, 4321);
+    assert.equal(existsSync(path.join(projectRoot, "wildarrange.config.json")), false);
+    assert.equal(existsSync(path.join(projectRoot, ".wildarrange")), false);
+    await writeFile(path.join(projectRoot, "outside.json"), "{}");
+    await assert.rejects(configureProjectReview(projectRoot, "outside.json"), /plan-drafts/);
+    await rm(drafts, { recursive: true });
+    const outside = path.join(stateHome, "outside");
+    await mkdir(outside);
+    await writeFile(path.join(outside, "setup.json"), "{}");
+    await symlink(outside, drafts, process.platform === "win32" ? "junction" : "dir");
+    assert.equal((await guard(draft)).decision, "deny");
+    await assert.rejects(configureProjectReview(projectRoot, ".wildarrange/plan-drafts/setup.json"), /escapes/);
+  });
+});
+
+test("external onboarding: commit A and B belong to governance while source freshness belongs to product", async () => {
+  await withWorkspace(async ({ projectRoot, governanceRoot, stateHome }) => {
+    const { startAdoption, decideAdoptionCard, applyApprovedCards, resumeAdoption } = await import("../src/orchestration/adoption.mjs");
+    const { evaluateRegistryFreshness, readVerificationInventory } = await import("../src/infra/verification-registry.mjs");
+    const git = async (root, args) => {
+      const result = await runCommandFile("git", ["-C", root, ...args], root, 15_000);
+      assert.equal(result.exitCode, 0, result.stderr || result.stdout);
+      return result.stdout.trim();
+    };
+    await mkdir(path.join(projectRoot, "test"), { recursive: true });
+    await writeFile(path.join(projectRoot, "test/ok.test.mjs"), "export const ok = 1;");
+    await writeFile(path.join(projectRoot, "package.json"), JSON.stringify({ name: "product", scripts: { test: "node --test test/ok.test.mjs" } }));
+    await initializeGovernanceRepository(projectRoot, { governanceRoot, repository: "https://example.test/product.git" });
+    for (const root of [projectRoot, governanceRoot]) {
+      for (const args of [["init"], ["config", "user.email", "wa@example.test"], ["config", "user.name", "WA"], ["add", "."], ["commit", "-m", "baseline"]]) await git(root, args);
+    }
+    const initialRegistry = await readFile(path.join(governanceRoot, "verification/registry.json"), "utf8");
+    const productHead = await git(projectRoot, ["rev-parse", "HEAD"]);
+    await attachGovernanceRepository(projectRoot, { governanceRoot, stateHome });
+    await initRuntime(projectRoot);
+    const started = await startAdoption(projectRoot, { serve: false });
+    assert.equal(started.ok, true);
+    const locator = started.cards.find(card => card.asset === "config_locator");
+    const command = started.cards.find(card => card.patch?.kind === "registry_plan_default");
+    assert.ok(command, "scan must discover business package script");
+    assert.equal(locator.path, "policy/wildarrange.config.json");
+    assert.equal(locator.patch.value.verificationGovernance.registryPath, "verification/registry.json");
+    for (const card of started.cards) {
+      await decideAdoptionCard(projectRoot, { sessionId: started.session.sessionId, cardId: card.id, fingerprint: card.fingerprint,
+        decision: [locator.id, command.id].includes(card.id) ? "approved" : "deferred" });
+    }
+    for (const card of [locator, command]) {
+      const applied = await applyApprovedCards(projectRoot, { sessionId: started.session.sessionId, cardId: card.id });
+      assert.equal(applied.ok, true, JSON.stringify(applied));
+    }
+    const preimageRoot = resolveWildArrangePath(projectRoot, "adoption/artifact-preimages");
+    const preimages = await readdir(preimageRoot);
+    assert.equal(preimages.length, 1);
+    assert.equal(await readFile(path.join(preimageRoot, preimages[0]), "utf8"), initialRegistry);
+    let resumed = await resumeAdoption(projectRoot, { serve: false });
+    assert.equal(resumed.session.status, "awaiting_registry_commit", "old governance HEAD cannot satisfy commit A");
+    await git(governanceRoot, ["add", "."]);
+    await git(governanceRoot, ["commit", "-m", "commit A"]);
+    const commitA = await git(governanceRoot, ["rev-parse", "HEAD"]);
+    resumed = await resumeAdoption(projectRoot, { serve: false });
+    assert.equal(resumed.session.status, "awaiting_final_commit", JSON.stringify(resumed.session));
+    assert.equal(resumed.session.baselineRef, commitA);
+    const inventory = await readVerificationInventory(path.join(governanceRoot, resumed.session.locator.inventoryPath));
+    assert.equal(inventory.projectContext.headSha, productHead);
+    await git(governanceRoot, ["add", "."]);
+    await git(governanceRoot, ["commit", "-m", "commit B"]);
+    resumed = await resumeAdoption(projectRoot, { serve: false });
+    assert.equal(resumed.session.status, "finalized", JSON.stringify(resumed.session));
+    assert.equal(await git(projectRoot, ["rev-parse", "HEAD"]), productHead);
+    assert.equal(await git(projectRoot, ["status", "--porcelain"]), "");
+    assert.equal((await evaluateRegistryFreshness(projectRoot)).status, "fresh");
+    const { buildGovernanceFileIndex, tryHandleAdoptionApi } = await import("../src/interface/adoption-panel.mjs");
+    const index = await buildGovernanceFileIndex(projectRoot);
+    assert.equal(index.ledgers.every(item => item.exists && item.path.startsWith("governance/")), true);
+    const response = { writeHead(code) { this.code = code; }, end(body) { this.body = JSON.parse(body); } };
+    await tryHandleAdoptionApi({ method: "GET" }, response, new URL("http://localhost/api/adoption/file?path=governance/verification/registry.json"), projectRoot);
+    assert.equal(response.code, 200);
+    assert.equal(JSON.parse(response.body.file.content).kind, "verification_registry");
+    await tryHandleAdoptionApi({ method: "GET" }, response, new URL("http://localhost/api/adoption/file?path=governance/../package.json"), projectRoot);
+    assert.notEqual(response.code, 200);
+    const { generateVerificationArtifacts } = await import("../src/capabilities/verification-governance.mjs");
+    const registryPath = path.join(governanceRoot, "verification/registry.json");
+    const registryBytes = await readFile(registryPath, "utf8");
+    await assert.rejects(generateVerificationArtifacts(projectRoot, { cards: [], locator: resumed.session.locator, writeLocator: true }), /冲突/);
+    assert.equal(await readFile(registryPath, "utf8"), registryBytes);
+    await writeFile(path.join(projectRoot, "package.json"), '{"name":"changed"}');
+    assert.equal((await evaluateRegistryFreshness(projectRoot)).status, "declared_input_drift");
+  });
+});
+
+test("external onboarding: failed locator verifier restores governance and runs in product cwd", async () => {
+  await withWorkspace(async ({ projectRoot, governanceRoot, stateHome }) => {
+    const { applyVerificationCard } = await import("../src/capabilities/verification-governance.mjs");
+    await attachGovernanceRepository(projectRoot, { governanceRoot, stateHome });
+    await initRuntime(projectRoot);
+    await writeFile(path.join(projectRoot, "verify.mjs"), 'console.log("PRODUCT_CWD");process.exit(1);');
+    const original = '{"executionReadiness":{"timeoutMs":4321}}';
+    const configPath = path.join(governanceRoot, "policy/wildarrange.config.json");
+    await writeFile(configPath, original);
+    await assert.rejects(applyVerificationCard(projectRoot, {
+      sessionId: "adopt_rollback", card: { id: "locator", action: "adopt", asset: "config_locator",
+        repositoryTarget: "governance", path: "policy/wildarrange.config.json",
+        patch: { kind: "json_merge", path: "policy/wildarrange.config.json", value: { verificationGovernance: { registryPath: "verification/registry.json" } } },
+        verify: ["node verify.mjs"] },
+    }), error => error.recovered === true && error.verifyResults[0].stdout.includes("PRODUCT_CWD"));
+    assert.equal(await readFile(configPath, "utf8"), original);
+    assert.equal(existsSync(path.join(projectRoot, "policy")), false);
   });
 });

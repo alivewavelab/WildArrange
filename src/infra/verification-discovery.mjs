@@ -18,7 +18,7 @@ import { extractImportSpecifiers } from "./dependency-graph.mjs";
 import { collectGitChangedPaths } from "./git-diff.mjs";
 import { normalizeRelativePath, pathMatchesPattern } from "./path-match.mjs";
 import { loadWildArrangeConfig } from "./runtime-config.mjs";
-import { hashContent } from "./runtime-store.mjs";
+import { hashContent, resolveGovernancePaths } from "./runtime-store.mjs";
 import {
   buildAdoptionCards,
   CARD_SCHEMA_VERSION,
@@ -105,10 +105,19 @@ export async function scanVerificationUniverse(rootDir, options = {}) {
   const { config } = await loadWildArrangeConfig(rootDir).catch(() => ({ config: {} }));
   const fileSet = new Set(files.map((file) => file.path));
   const assets = classifyAssets({ files, packageFacts, textIndex, importIndex, config });
+  const governance = resolveGovernancePaths(rootDir);
+  const configuredLocator = config.verificationGovernance || {};
+  const externalLocator = governance.registryPath ? {
+    registryPath: governance.registryPath,
+    bootstrapPath: configuredLocator.bootstrapPath || path.posix.join(path.posix.dirname(governance.registryPath), "bootstrap.json"),
+    inventoryPath: configuredLocator.inventoryPath || path.posix.join(path.posix.dirname(governance.registryPath), "inventory.html"),
+    archiveRoot: configuredLocator.archiveRoot || "docs/verification-archive",
+  } : null;
   const cards = buildAdoptionCards(assets, {
     packageFacts,
     config,
-    suggestedLocator: options.suggestedLocator,
+    suggestedLocator: externalLocator || options.suggestedLocator,
+    configPath: externalLocator ? governance.configPath : undefined,
     textIndex,
     files,
     fileSet,
@@ -135,7 +144,8 @@ export async function scanVerificationUniverse(rootDir, options = {}) {
  */
 // --- 卡片实时快照 ---
 export async function captureCardLiveSnapshot(rootDir, card) {
-  const targetDigest = await digestRelativeFile(rootDir, card?.path);
+  const targetRoot = card?.repositoryTarget === "governance" ? resolveGovernancePaths(rootDir).rootDir : rootDir;
+  const targetDigest = await digestRelativeFile(targetRoot, card?.path);
   const dependencyDigests = {};
   for (const rel of await collectLiveSnapshotPaths(rootDir, card)) {
     dependencyDigests[rel] = await digestRelativeFile(rootDir, rel);
