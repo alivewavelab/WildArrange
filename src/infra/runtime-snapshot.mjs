@@ -24,6 +24,7 @@ import {
   writeTextAtomic,
 } from "./runtime-store.mjs";
 import { inspectCompletedTaskEvidence, loadTaskState } from "./task-state-store.mjs";
+import { findRunnableTask } from "./task-predicates.mjs";
 
 /**
  * writeSnapshot：本模块对外异步 API。
@@ -127,7 +128,7 @@ export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
   const status = buildStatusReport(work, taskState, changes, completionIntegrity);
   const ledgerIntegrity = await verifyLedger(rootDir);
   const awaitingPlanApproval = isCurrentPlanAwaitingApproval(work, taskState);
-  const nextTask = taskState && !awaitingPlanApproval ? findRunnableTaskForContext(taskState.tasks || []) : null;
+  const nextTask = taskState && !awaitingPlanApproval ? findRunnableTask(taskState.tasks || []) : null;
   const cliCommandPrefix = await resolveRuntimeCliCommandPrefix(rootDir, {
     preferredPrefix: options.cliCommandPrefix,
     fallbackCliPath: options.fallbackCliPath,
@@ -193,14 +194,6 @@ function buildStatusReport(work, taskState, changes, completionIntegrity) {
     needs_user_decision: counts.needs_user_decision || 0,
     openChanges,
   };
-}
-
-/**
- * 查找 RunnableTaskForContext 匹配项。
- */
-function findRunnableTaskForContext(tasks) {
-  const completed = new Set(tasks.filter((task) => task.status === "completed").map((task) => task.id));
-  return tasks.find((task) => task.status === "pending" && (task.blockedBy || []).every((id) => completed.has(id))) || null;
 }
 
 /**

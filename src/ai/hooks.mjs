@@ -92,7 +92,6 @@ export async function runInjectionHook(rootDir, input = {}) {
     facts.digest = await writeMemoryDigest(controlRoot, {
       reason: "session_start",
       stage: "resume",
-      route: facts.route,
     }).catch((error) => ({ error: error.message }));
   } else if (event === "UserPromptSubmit") {
     // §3.4：用户提交 → 路由决策、计划草稿指令与 Archivist 记忆摄入。

@@ -17,6 +17,7 @@ import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { COMMAND_REGISTRY } from "../src/interface/cli-help.mjs";
 
 import { startDashboardServer } from "../src/interface/dashboard.mjs";
 import { installAdapter, restoreAdapterBackup, uninstallAdapter } from "../src/interface/adapters.mjs";
@@ -268,14 +269,9 @@ test("init installs wildarrange-linear prompt, skill, and tool contracts", async
 
     const toolContract = JSON.parse(await renderPromptPackEntry(dir, { tools: true }));
     assert.equal(toolContract.runtime, "wildarrange-linear");
-    assert.ok(toolContract.tools.some((tool) => tool.name === "wildarrange_run_next"));
-    assert.ok(toolContract.tools.some((tool) => tool.name === "scope_guard"));
-    assert.ok(toolContract.tools.some((tool) => tool.name === "ast_grep_search"));
-    assert.ok(toolContract.tools.some((tool) => tool.name === "team_send_message"));
-    assert.ok(toolContract.tools.some((tool) => tool.name === "repository_governance_audit"));
-    assert.ok(toolContract.tools.some((tool) => tool.status === "host-provided"));
-    assert.ok(toolContract.tools.every((tool) => tool.status !== "contract-only"));
-    assert.ok(toolContract.tools.every((tool) => !String(tool.command || "").includes(" | node")));
+    // 合同由命令注册表生成：每条真实 CLI 命令恰好对应一个工具，不再有手写的虚构工具名。
+    assert.deepEqual(toolContract.tools.map((tool) => tool.command), COMMAND_REGISTRY.map((entry) => `wildarrange ${entry.usage}`));
+    assert.ok(toolContract.tools.some((tool) => tool.name === "wildarrange_run"));
 
     const routeTable = JSON.parse(await renderPromptPackEntry(dir, { routes: true }));
     assert.equal(routeTable.version, 1);

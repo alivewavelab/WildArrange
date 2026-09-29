@@ -43,13 +43,8 @@ import { inspectGitCoordination } from "../infra/git-coordination.mjs";
 import { runCommand } from "../infra/command-runner.mjs";
 import { normalizeProposedFilesOrEmpty } from "./admission.mjs";
 import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
-import {
-  findRunnableTask,
-  isTaskRunnable,
-  persistTaskState,
-  sendTeamMessage,
-  unresolvedTaskBlockers,
-} from "./task-board.mjs";
+import { persistTaskState, sendTeamMessage } from "./task-board.mjs";
+import { findRunnableTask, isTaskRunnable, unresolvedTaskBlockers } from "../infra/task-predicates.mjs";
 import { assertCurrentTaskOwnership, coordinateTaskClaim } from "./remote-ownership.mjs";
 import {
   appendRunIndex,

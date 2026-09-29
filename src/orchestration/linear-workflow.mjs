@@ -25,7 +25,8 @@ import {
   collectGateEvidenceFromTask,
 } from "./delivery-pipeline.mjs";
 import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
-import { findRunnableTask, persistTaskState, writeOutbox } from "./task-board.mjs";
+import { persistTaskState, writeOutbox } from "./task-board.mjs";
+import { findRunnableTask } from "../infra/task-predicates.mjs";
 import { assertCurrentTaskOwnership, coordinateTaskClaim } from "./remote-ownership.mjs";
 import { assertCommandWorkerAgent } from "../infra/agent-registry.mjs";
 import { assertTaskOrDeliveredOwnership, assertContractWorkspaceAvailable } from "./integration.mjs";

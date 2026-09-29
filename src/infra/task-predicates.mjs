@@ -2,8 +2,8 @@
 // 文件名称：task-predicates.mjs
 // 所属模块：infra
 // 作用说明：
-//   纯函数任务形态谓词（无 I/O），判断任务是否可能为 no-op 或命令是否 trivial。
-//   供 acceptance-proof 拦截空转任务，doctor 标记可疑 trivial 完成。
+//   纯函数任务谓词（无 I/O）：任务是否可运行（唯一口径，运行时与上下文快照共用）、
+//   是否可能为 no-op、命令是否 trivial。
 //
 // 【运行原理速读】
 //   可以把它想成「任务是否在做真活的体检规则」：
@@ -53,3 +53,27 @@ function trivialCommand(command) {
   return /^node -e ["']process\.exit\(0\);?["']$/.test(normalized);
 }
 
+
+/** 列出尚未 completed 的前置任务 id；台账中不存在的前置视为已解除。 */
+export function unresolvedTaskBlockers(task, tasks) {
+  return (task.blockedBy || []).filter((blockerId) => {
+    const blocker = tasks.find((candidate) => candidate.id === blockerId);
+    return blocker && blocker.status !== "completed";
+  });
+}
+
+/** 在任务列表中找第一条 isTaskRunnable 的任务。 */
+export function findRunnableTask(tasks) {
+  return tasks.find((task) => isTaskRunnable(task, tasks)) || null;
+}
+
+/** 判断任务是否 pending 且依赖已 completed。 */
+export function isTaskRunnable(task, tasks) {
+  // A pending task holding a parallel run or admission claim is owned by that
+  // run; both claims are released (set to null) when the run closes or the
+  // admission settles, which makes the task runnable again.
+  return task?.status === "pending"
+    && !task.parallel_run_claim?.runId
+    && !task.admission_claim?.runId
+    && unresolvedTaskBlockers(task, tasks).length === 0;
+}

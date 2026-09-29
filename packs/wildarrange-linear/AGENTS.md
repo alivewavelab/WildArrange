@@ -21,7 +21,7 @@
 - 商业发布包只能包含 WildArrange 自著内容；不得包含受限第三方源码、prompt 原文或近似改写。
 - 新增或重命名 Agent/Skill 时，同步更新 manifest、routes、默认配置和对应测试。
 - 项目初始化模板只允许补建缺失文件；不得覆盖、合并或猜测已有项目规范。
-- CLI 能力变化时同步更新 `tool-contract.json`，避免 Agent 使用不存在或过期的命令。
+- `tools/tool-contract.json` 由 `node tooling/generate-tool-contract.mjs` 从 `src/interface/cli-help.mjs` 的命令注册表生成，不要手改；CLI 命令变化后重新生成（`test/cli-help.test.mjs` 会校验同步）。
 - 发布工具合同不得含 `contract-only` 或把多个状态变更用 shell 管道拼成一条命令；宿主已有的只读工具明确标为 `host-provided`，未实现/roadmap 能力不进入 M1 合同。
 - Skill 全文只在匹配后按需挂载；稳定总纲保持短，细节下沉到具体 Skill。
 - 路由建议必须保留 deterministic 证据；语义模型不能无审计覆盖路由表。

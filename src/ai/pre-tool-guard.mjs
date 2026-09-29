@@ -27,7 +27,7 @@ import { appendLedger } from "../infra/ledger.mjs";
 import { normalizeRelativePath, pathAllowed } from "../infra/path-match.mjs";
 import { uniqueStrings } from "../infra/text-utils.mjs";
 import { loadTaskState } from "../infra/task-state-store.mjs";
-import { findRunnableTask } from "../orchestration/task-board.mjs";
+import { findRunnableTask } from "../infra/task-predicates.mjs";
 import { loadPlanApproval } from "../orchestration/plan-state.mjs";
 import { compileCommandSafetyPatterns, evaluateCommandSafety } from "../infra/command-safety.mjs";
 import { loadActiveFeatureDesignGate } from "../orchestration/feature-design.mjs";

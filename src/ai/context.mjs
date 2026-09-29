@@ -39,7 +39,8 @@ import { uniqueStrings } from "../infra/text-utils.mjs";
 import { defaultInjectionPointForAgent, resolveInjectionPoint } from "./injection.mjs";
 import { loadTaskState } from "../infra/task-state-store.mjs";
 import { scanProjectRules } from "../infra/rule-scanner.mjs";
-import { findRunnableTask, normalizeAgentName } from "../orchestration/task-board.mjs";
+import { normalizeAgentName } from "../orchestration/task-board.mjs";
+import { findRunnableTask } from "../infra/task-predicates.mjs";
 import { statusReport } from "../orchestration/status.mjs";
 
 // --- Agent 上下文构建 ---

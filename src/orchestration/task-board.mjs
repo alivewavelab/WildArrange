@@ -44,6 +44,7 @@ import {
 } from "../infra/agent-registry.mjs";
 import { transactWithLedger, withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
+import { findRunnableTask, unresolvedTaskBlockers } from "../infra/task-predicates.mjs";
 import {
   prepareArchiveRecoveryPackage,
   updateArchiveRecoveryPackage,
@@ -189,13 +190,6 @@ async function claimTeamTaskUnlocked(rootDir, options = {}) {
   return { planId: taskState.planId, task };
 }
 
-/** 返回尚未 completed 的 blockedBy 依赖 taskId 列表。 */
-export function unresolvedTaskBlockers(task, tasks) {
-  return (task.blockedBy || []).filter((blockerId) => {
-    const blocker = tasks.find((candidate) => candidate.id === blockerId);
-    return blocker && blocker.status !== "completed";
-  });
-}
 
 /** 创建 draft 团队任务并写入 taskState。 */
 export async function createTeamTask(rootDir, rawTask) {
@@ -273,22 +267,6 @@ export async function readyTeamTask(rootDir, options = {}) {
 }
 
 // ---  runnable 与持久化 ---
-
-/** 在任务列表中找第一条 isTaskRunnable 的任务。 */
-export function findRunnableTask(tasks) {
-  return tasks.find((task) => isTaskRunnable(task, tasks)) || null;
-}
-
-/** 判断任务是否 pending 且依赖已 completed。 */
-export function isTaskRunnable(task, tasks) {
-  // A pending task holding a parallel run or admission claim is owned by that
-  // run; both claims are released (set to null) when the run closes or the
-  // admission settles, which makes the task runnable again.
-  return task?.status === "pending"
-    && !task.parallel_run_claim?.runId
-    && !task.admission_claim?.runId
-    && unresolvedTaskBlockers(task, tasks).length === 0;
-}
 
 /** 持久化权威 taskState 并刷新 tasks.md 等派生产物。 */
 export async function persistTaskState(rootDir, taskState) {

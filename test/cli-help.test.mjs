@@ -18,7 +18,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 
-import { COMMAND_REGISTRY, CORE_COMMANDS, renderCommandsMarkdown, renderHelp } from "../src/interface/cli-help.mjs";
+import { COMMAND_REGISTRY, CORE_COMMANDS, renderCommandsMarkdown, renderHelp, renderToolContract } from "../src/interface/cli-help.mjs";
 
 const execFileAsync = promisify(execFile);
 const WILDARRANGE_BIN = path.resolve(import.meta.dirname, "..", "bin", "wildarrange.mjs");
@@ -153,4 +153,9 @@ test("command registry and bin dispatch are pinned to each other in both directi
       }
     }
   }
+});
+
+test("prompt pack tool contract is generated from the command registry", async () => {
+  const committed = await readFile(path.join(ROOT, "packs", "wildarrange-linear", "tools", "tool-contract.json"), "utf8");
+  assert.equal(committed, renderToolContract(), "运行 node tooling/generate-tool-contract.mjs 重新生成");
 });

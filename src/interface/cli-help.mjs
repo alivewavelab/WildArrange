@@ -209,3 +209,25 @@ export function renderCommandsMarkdown() {
     "",
   ].join("\n");
 }
+
+/**
+ * 从 COMMAND_REGISTRY 生成 Prompt Pack 的 Agent 工具合同（tools/tool-contract.json）。
+ * 与 --help 同源，避免手写合同漂移；由 tooling/generate-tool-contract.mjs 落盘。
+ * @returns {string}
+ */
+export function renderToolContract() {
+  const seen = new Map();
+  const tools = COMMAND_REGISTRY.map((entry) => {
+    const words = entry.usage.split(/\s+/);
+    const firstArg = words.findIndex((word) => /^[-<[\"]/.test(word));
+    const commandWords = firstArg === -1 ? words : words.slice(0, firstArg);
+    let name = `wildarrange_${commandWords.join("_").replace(/-/g, "_")}`;
+    if (seen.has(name)) {
+      const flag = words.find((word) => word.startsWith("--"))?.replace(/^--/, "").replace(/-/g, "_");
+      name = flag ? `${name}_${flag}` : `${name}_${seen.get(name) + 1}`;
+    }
+    seen.set(name, (seen.get(name) || 0) + 1);
+    return { name, command: `wildarrange ${entry.usage}`, purpose: entry.desc };
+  });
+  return `${JSON.stringify({ version: 2, runtime: "wildarrange-linear", generatedFrom: "src/interface/cli-help.mjs", tools }, null, 2)}\n`;
+}

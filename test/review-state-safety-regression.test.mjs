@@ -28,9 +28,11 @@ import {
   scanContractGovernanceUniverse,
 } from "../src/infra/contract-governance.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
+import { writeRuntimeContextSnapshot } from "../src/infra/runtime-snapshot.mjs";
 import { admitParallelAgentResult, cleanupParallelAgentRun, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
 import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
-import { claimTeamTask, findRunnableTask, getTeamTask, isTaskRunnable, persistTaskState } from "../src/orchestration/task-board.mjs";
+import { claimTeamTask, getTeamTask, persistTaskState } from "../src/orchestration/task-board.mjs";
+import { findRunnableTask, isTaskRunnable } from "../src/infra/task-predicates.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -89,6 +91,8 @@ test("a claimed pending task is not runnable until the claim is released", async
     const admittedTasks = (await loadTaskState(rootDir)).tasks;
     assert.equal(isTaskRunnable(admittedTasks[0], admittedTasks), false);
     assert.equal(findRunnableTask(admittedTasks), null);
+    // Resume guidance must agree with the runtime: a claimed task is not "next".
+    assert.equal((await writeRuntimeContextSnapshot(rootDir, { reason: "claimed" })).nextTask, null);
     await assert.rejects(
       claimTeamTask(rootDir, { owner: "ZhuRong" }),
       /no runnable task available to claim/,
@@ -100,6 +104,7 @@ test("a claimed pending task is not runnable until the claim is released", async
 
     const releasedTasks = (await loadTaskState(rootDir)).tasks;
     assert.equal(isTaskRunnable(releasedTasks[0], releasedTasks), true);
+    assert.equal((await writeRuntimeContextSnapshot(rootDir, { reason: "released" })).nextTask?.id, "T001");
     const claimed = await claimTeamTask(rootDir, { owner: "ZhuRong" });
     assert.equal(claimed.task.id, "T001");
     assert.equal(claimed.task.status, "in_progress");
