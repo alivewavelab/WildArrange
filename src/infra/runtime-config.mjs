@@ -72,7 +72,7 @@ export async function writeDefaultWildArrangeConfig(rootDir, options = {}) {
  * （无需任何外部工具即可构成独立复核信号与 required 质量门）。默认配置故意不武装
  * （黄灯提醒），--armed 是给「我知道自己在做什么」的显式入口。
  */
-function buildArmedConfig() {
+export function buildArmedConfig() {
   return {
     ...DEFAULT_WILDARRANGE_CONFIG,
     qualityGates: {

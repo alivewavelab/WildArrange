@@ -44,10 +44,13 @@ export async function resolveInjectionPoint(rootDir, name, variables = {}, optio
   const point = config.injectionPoints?.[name] || { enabled: false, tools: [], markdown: [], skills: [] };
   const budgets = resolvePointBudgets(config.contextBudgets, name, point.contextBudgets);
   const markdown = [];
+  const markdownMissing = [];
   for (const rawPath of point.markdown || []) {
     const resolved = expandTemplate(rawPath, variables);
     const loaded = await loadMarkdownAttachment(rootDir, resolved, budgets.markdownMaxChars);
+    // 缺失的挂载文件必须显式列出，不能静默丢失（外置模式路径映射错误曾因此被掩盖）
     if (loaded) markdown.push(loaded);
+    else markdownMissing.push({ path: resolved, reason: "not_found" });
   }
   const taskSkills = await resolveTaskBoundSkills(rootDir, name, variables, options);
   const selection = await selectPointSkills(rootDir, config, point, {
@@ -80,6 +83,7 @@ export async function resolveInjectionPoint(rootDir, name, variables = {}, optio
     budgets,
     tools: point.tools || [],
     markdown,
+    markdownMissing,
     skills,
     skillSelection: { ...selection.report, missing: missingSkills },
     rules: point.rules || {},

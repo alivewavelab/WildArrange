@@ -156,6 +156,17 @@ test("workspace context: governance verification defaults are additive and bound
       { id: "review-1", path: "package.json", status: "approved", action: "adopt", patch: { kind: "registry_plan_default", field: "review_commands", command: "node --version" } },
     ]);
     await writeFile(path.join(governanceRoot, "verification", "registry.json"), JSON.stringify(registry, null, 2));
+    // 计划导入要求治理仓有 Git HEAD 且干净（无 HEAD 时 fail-fast）
+    for (const args of [
+      ["init"],
+      ["config", "user.email", "wildarrange-test@example.test"],
+      ["config", "user.name", "WildArrange Test"],
+      ["add", "."],
+      ["commit", "-m", "governance baseline"],
+    ]) {
+      const result = await runCommandFile("git", ["-C", governanceRoot, ...args], governanceRoot, 15_000);
+      assert.equal(result.exitCode, 0, result.stderr);
+    }
     await attachGovernanceRepository(projectRoot, { governanceRoot, stateHome });
     await initRuntime(projectRoot);
     const binding = await loadGovernanceVerificationDefaults(projectRoot);

@@ -15,9 +15,9 @@ export async function attachProjectConnection(projectRoot, options = {}) {
   return attachGovernanceRepository(projectRoot, options);
 }
 
-/** 创建独立治理仓库最小骨架；不触碰项目、不自动执行 Git。 */
+/** 创建独立治理仓库：最小骨架 + 默认武装的治理配置 + Git 初始提交；不触碰客户项目。 */
 export async function initializeProjectGovernance(projectRoot, options = {}) {
-  return initializeGovernanceRepository(projectRoot, options);
+  return initializeGovernanceRepository(projectRoot, { scaffoldConfig: true, initGit: true, ...options });
 }
 
 /** 查询并绑定项目当前工作区上下文。 */

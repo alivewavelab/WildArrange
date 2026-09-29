@@ -11,6 +11,7 @@ import { lstat, mkdir, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { runCommandFile } from "./command-runner.mjs";
 import { readGitHead, readGitTopLevel } from "./git-diff.mjs";
+import { resolveWildArrangePath } from "./runtime-store.mjs";
 import { uniqueStrings } from "./text-utils.mjs";
 
 /**
@@ -225,7 +226,9 @@ export async function applyAgentPatch(rootDir, patch, options = {}) {
   if (!patch || typeof patch !== "string" || patch.trim().length === 0) {
     throw new Error("parallel admission patch is empty");
   }
-  const patchPath = path.join(rootDir, ".wildarrange", "agent-runs", `admit-${Date.now()}-${process.pid}.patch`);
+  // 外置模式下运行态根在项目之外，补丁文件必须走运行态根解析并保证目录存在
+  const patchPath = resolveWildArrangePath(rootDir, "agent-runs", `admit-${Date.now()}-${process.pid}.patch`);
+  await mkdir(path.dirname(patchPath), { recursive: true });
   await writeFile(patchPath, patch, "utf8");
   const check = await runCommandFile("git", ["-C", rootDir, "apply", "--check", "--whitespace=nowarn", patchPath], rootDir, options.timeoutMs);
   if (check.exitCode !== 0) {

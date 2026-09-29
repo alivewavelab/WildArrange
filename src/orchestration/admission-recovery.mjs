@@ -95,7 +95,8 @@ export async function removePersistedRollbackPlan(rootDir, runId, taskId) {
 
 /** 检测 patch 是否已在工作区应用过（git apply --reverse --check）。 */
 export async function patchAlreadyApplied(rootDir, patch) {
-  const patchPath = path.join(rootDir, ".wildarrange", "agent-runs", `recheck-${Date.now()}-${process.pid}.patch`);
+  const patchPath = resolveWildArrangePath(rootDir, "agent-runs", `recheck-${Date.now()}-${process.pid}.patch`);
+  await mkdir(path.dirname(patchPath), { recursive: true });
   await writeFile(patchPath, patch, "utf8");
   try {
     const reverseCheck = await runCommandFile("git", ["-C", rootDir, "apply", "--reverse", "--check", "--whitespace=nowarn", patchPath], rootDir, 30_000);
@@ -145,7 +146,8 @@ export async function rollbackAdmissionChanges(rootDir, rollbackPlan) {
         }
       }
     } else if (rollbackPlan.mode === "patch") {
-      const patchPath = path.join(rootDir, ".wildarrange", "agent-runs", `rollback-${Date.now()}-${process.pid}.patch`);
+      const patchPath = resolveWildArrangePath(rootDir, "agent-runs", `rollback-${Date.now()}-${process.pid}.patch`);
+      await mkdir(path.dirname(patchPath), { recursive: true });
       await writeFile(patchPath, rollbackPlan.patch, "utf8");
       try {
         const reverse = await runCommandFile("git", ["-C", rootDir, "apply", "--reverse", "--whitespace=nowarn", patchPath], rootDir, 30_000);

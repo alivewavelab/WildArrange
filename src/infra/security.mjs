@@ -10,7 +10,7 @@
 import { existsSync } from "node:fs";
 import { copyFile, cp, lstat, mkdir, readFile, readdir, rm, stat, unlink } from "node:fs/promises";
 import path from "node:path";
-import { WILDARRANGE_CONFIG_FILE } from "./runtime-config.mjs";
+import { runCommandFile } from "./command-runner.mjs";
 import { appendLedger } from "./ledger.mjs";
 import { normalizeRelativePath } from "./path-match.mjs";
 import {
@@ -26,6 +26,7 @@ import {
   nowIso,
   readJson,
   resolveWildArrangePath,
+  resolveGovernancePaths,
   resolveWildArrangeRoot,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
@@ -44,7 +45,8 @@ const BACKUP_STATE_FILES = [
   { scope: "runtime", segments: ["snapshots", "context.json"] },
   { scope: "runtime", segments: ["snapshots", "context.md"] },
   { scope: "runtime", segments: ["security", "config-baseline.json"] },
-  { scope: "project", segments: [WILDARRANGE_CONFIG_FILE] },
+  // 治理配置：内置在项目根，外置在治理仓；真实路径由 resolveGovernancePaths 决定
+  { scope: "governance-config" },
   { scope: "runtime", segments: ["config.json"] },
 ];
 /** doctor 运行时完整性检查的最低必备状态文件。 */
@@ -63,6 +65,7 @@ export async function writeConfigBaseline(rootDir, options = {}) {
     at: nowIso(),
     reason: options.reason || "manual",
     files: await collectConfigFingerprints(rootDir),
+    governance: await inspectGovernanceRepository(rootDir),
   };
   const baselinePath = resolveWildArrangePath(rootDir, ...CONFIG_BASELINE_PATH);
   await writeJsonAtomic(baselinePath, baseline);
@@ -121,6 +124,8 @@ export async function verifyConfigBaseline(rootDir) {
     baselineReason: baseline.reason,
     files: currentFiles,
     failures,
+    governance: await inspectGovernanceRepository(rootDir),
+    baselineGovernance: baseline.governance || null,
   };
 }
 
@@ -135,21 +140,23 @@ export async function writeRuntimeStateBackup(rootDir, options = {}) {
   await mkdir(backupDir, { recursive: true });
   const files = [];
   for (const descriptor of BACKUP_STATE_FILES) {
-    const sourcePath = descriptor.scope === "runtime"
-      ? resolveWildArrangePath(rootDir, ...descriptor.segments)
-      : path.join(rootDir, ...descriptor.segments);
-    const relativePath = descriptor.scope === "runtime"
-      ? normalizeRelativePath(path.join(".wildarrange", ...descriptor.segments))
-      : normalizeRelativePath(path.join(...descriptor.segments));
+    const governanceConfig = descriptor.scope === "governance-config" ? describeGovernanceConfig(rootDir) : null;
+    const sourcePath = governanceConfig
+      ? governanceConfig.absolutePath
+      : resolveWildArrangePath(rootDir, ...descriptor.segments);
+    const relativePath = governanceConfig
+      ? governanceConfig.backupPath
+      : normalizeRelativePath(path.join(".wildarrange", ...descriptor.segments));
+    const scope = governanceConfig?.external ? { scope: "governance" } : {};
     if (!existsSync(sourcePath)) {
-      files.push({ path: relativePath, status: "missing" });
+      files.push({ path: relativePath, status: "missing", ...scope });
       continue;
     }
     const targetPath = path.join(backupDir, relativePath);
     await mkdir(path.dirname(targetPath), { recursive: true });
     await copyFile(sourcePath, targetPath);
     const fileStat = await stat(sourcePath);
-    files.push({ path: relativePath, status: "copied", bytes: fileStat.size });
+    files.push({ path: relativePath, status: "copied", bytes: fileStat.size, ...scope });
   }
   const manifest = {
     kind: "runtime_state_backup",
@@ -303,7 +310,7 @@ export async function restoreRuntimeStateBackup(rootDir, options = {}) {
   // §3.4 回滚安全：损坏 manifest 必须在写 pre-restore 备份或动 live state 前 fail-closed。
   for (const file of manifest.files || []) {
     resolveManifestRelativePath(backupDir, file.path, "backup source");
-    resolveRestoreTarget(rootDir, file.path);
+    if (file.scope !== "governance") resolveRestoreTarget(rootDir, file.path);
   }
 
   // 恢复前先给当前状态留底，恢复错了还能再退回来
@@ -312,6 +319,11 @@ export async function restoreRuntimeStateBackup(rootDir, options = {}) {
   const restored = [];
   const skipped = [];
   for (const file of manifest.files || []) {
+    if (file.scope === "governance") {
+      // 治理仓是版本化仓库，配置副本仅供取证；恢复走治理仓自己的 Git，不由运行态备份回写
+      skipped.push({ path: file.path, reason: "governance_repository_managed" });
+      continue;
+    }
     if (file.status !== "copied") {
       skipped.push({ path: file.path, reason: "not_in_backup" });
       continue;
@@ -557,8 +569,9 @@ export async function verifyRuntimeState(rootDir) {
  * 收集 wildarrange.config 与运行时 config 的 SHA256 指纹。
  */
 async function collectConfigFingerprints(rootDir) {
+  const governanceConfig = describeGovernanceConfig(rootDir);
   const candidates = [
-    { path: path.join(rootDir, WILDARRANGE_CONFIG_FILE), logicalPath: WILDARRANGE_CONFIG_FILE },
+    { path: governanceConfig.absolutePath, logicalPath: governanceConfig.logicalPath },
     { path: resolveWildArrangePath(rootDir, "config.json"), logicalPath: ".wildarrange/config.json" },
   ];
   const files = [];
@@ -573,4 +586,35 @@ async function collectConfigFingerprints(rootDir) {
     });
   }
   return files;
+}
+
+/**
+ * 定位治理配置的真实文件：内置模式在项目根，外置模式在治理仓（policy/wildarrange.config.json）。
+ */
+function describeGovernanceConfig(rootDir) {
+  const governance = resolveGovernancePaths(rootDir);
+  const external = path.resolve(governance.rootDir) !== path.resolve(rootDir);
+  const relativePath = normalizeRelativePath(governance.configPath);
+  return {
+    external,
+    absolutePath: path.resolve(governance.rootDir, governance.configPath),
+    logicalPath: external ? `governance:${relativePath}` : relativePath,
+    backupPath: external ? `governance/${relativePath}` : relativePath,
+  };
+}
+
+/**
+ * 读取外置治理仓的 HEAD 与工作区是否干净；内置模式返回 null。
+ * 治理仓工作树里未提交的配置改动会被 Hook 立即采用，必须能被体检看到。
+ */
+export async function inspectGovernanceRepository(rootDir) {
+  const governance = resolveGovernancePaths(rootDir);
+  if (path.resolve(governance.rootDir) === path.resolve(rootDir)) return null;
+  const head = await runCommandFile("git", ["-C", governance.rootDir, "rev-parse", "HEAD"], governance.rootDir, 15_000);
+  const status = await runCommandFile("git", ["-C", governance.rootDir, "status", "--porcelain"], governance.rootDir, 15_000);
+  return {
+    root: governance.rootDir,
+    head: head.exitCode === 0 ? head.stdout.trim() : null,
+    clean: status.exitCode === 0 ? status.stdout.trim().length === 0 : null,
+  };
 }

@@ -9,7 +9,7 @@
 // =============================================================================
 import { mkdir, readFile, readdir, realpath, rename, rm } from "node:fs/promises";
 import path from "node:path";
-import { hashContent, nowIso, readJson, writeJsonAtomic } from "./runtime-store.mjs";
+import { hashContent, nowIso, readJson, resolveGovernancePaths, resolveWildArrangePath, writeJsonAtomic } from "./runtime-store.mjs";
 import { loadWildArrangeConfig } from "./runtime-config.mjs";
 import { extractImportSpecifiers, maskSource } from "./dependency-graph.mjs";
 import { withFileLock } from "./file-lock.mjs";
@@ -33,15 +33,22 @@ const CONTRACT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9:._/-]{0,199}$/;
  * contractGovernancePaths：本模块对外API。
  */
 export function contractGovernancePaths(rootDir) {
-  const runtimeRoot = path.join(rootDir, ".wildarrange", "contracts");
+  // 运行态目录走运行态根；外置模式下台账与总图归治理仓，客户项目零写入
+  const runtimeRoot = resolveWildArrangePath(rootDir, "contracts");
+  const governanceRoot = resolveGovernancePaths(rootDir).rootDir;
+  const external = path.resolve(governanceRoot) !== path.resolve(rootDir);
   return {
-    registry: path.join(rootDir, "tooling", "contracts", "contract-registry.json"),
+    registry: external
+      ? path.join(governanceRoot, "contracts", "contract-registry.json")
+      : path.join(rootDir, "tooling", "contracts", "contract-registry.json"),
     runtimeRoot,
     currentScan: path.join(runtimeRoot, "current-scan.json"),
     cards: path.join(runtimeRoot, "cards"),
     archiveCards: path.join(runtimeRoot, "archive", "cards"),
     archiveSnapshots: path.join(runtimeRoot, "archive", "snapshots"),
-    html: path.join(rootDir, "docs", "contracts", "contract-map.html"),
+    html: external
+      ? path.join(governanceRoot, "contracts", "contract-map.html")
+      : path.join(rootDir, "docs", "contracts", "contract-map.html"),
   };
 }
 

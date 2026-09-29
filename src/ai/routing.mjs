@@ -16,6 +16,7 @@ import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
 import { emitDecision } from "../infra/decision-log.mjs";
 import { initRuntime } from "../infra/runtime-bootstrap.mjs";
+import { resolveWildArrangePath } from "../infra/runtime-store.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { loadActiveFeatureDesignGate } from "../orchestration/feature-design.mjs";
 import { loadRoutesConfig, resolveRouteDecision, uniqueStrings } from "../infra/route-table.mjs";
@@ -40,8 +41,11 @@ export function buildPlanDraftDirective(routeResult, options = {}) {
   const controlRoot = typeof options.controlRoot === "string" ? path.resolve(options.controlRoot) : null;
   const executionRoot = typeof options.executionRoot === "string" ? path.resolve(options.executionRoot) : controlRoot;
   const crossRoot = Boolean(controlRoot && executionRoot && controlRoot !== executionRoot);
-  const draftPath = crossRoot
-    ? path.join(controlRoot, ".wildarrange", "plan-drafts", `${sessionId}-plan.json`)
+  // 外置模式下运行态根在项目之外：相对路径会在客户项目里凭空建出 .wildarrange/，必须给绝对路径
+  const runtimeDraftPath = controlRoot ? resolveWildArrangePath(controlRoot, "plan-drafts", `${sessionId}-plan.json`) : null;
+  const externalRuntime = Boolean(runtimeDraftPath && path.relative(controlRoot, runtimeDraftPath).startsWith(".."));
+  const draftPath = crossRoot || externalRuntime
+    ? runtimeDraftPath
     : `.wildarrange/plan-drafts/${sessionId}-plan.json`;
   return {
     status: "host_generation_required",

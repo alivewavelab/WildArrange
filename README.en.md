@@ -48,7 +48,16 @@ Role prompts live under `packs/wildarrange-linear/agents/`, and Skills live unde
 
 Use three-root mode when the customer repository must remain clean: the customer repository owns product code and product tests, a separate governance repository owns policy and the verification registry, and local state owns the ledger, locks, reports, backups, and installed Prompt Pack. WildArrange does not generate `AGENTS.md`, `.wildarrange/`, or adapter files in the customer project.
 
-Run this from the customer project root:
+Fastest path: from the customer project root, initialize the governance repository, attach it, initialize the runtime, and generate host adapter bundles in one step:
+
+```bash
+npx wildarrange setup \
+  --governance-root ../my-project-governance \
+  --repository https://github.com/example/my-project.git \
+  --target all
+```
+
+`--repository` defaults to the project's `origin` remote; `--target` is `codex|cursor|kimi|all` (default all). The command ends with the remaining in-host manual steps (Codex/Kimi install and trust, Cursor activation). To go step by step, use the commands below:
 
 ```bash
 npx wildarrange project init-governance \
@@ -57,7 +66,7 @@ npx wildarrange project init-governance \
   --default-branch main
 ```
 
-This creates only missing files under the governance root: `wildarrange-governance.json`, `policy/AGENTS.md`, `verification/registry.json`, and empty responsibility directories. It never overwrites existing files and does not run `git init`, commit, or push. Complete the policy, initialize and commit the governance repository, then connect it from the customer project:
+This creates only missing files under the governance root: `wildarrange-governance.json`, `policy/AGENTS.md`, `policy/wildarrange.config.json` (quality gates armed by default), `verification/registry.json`, and empty responsibility directories. It never overwrites existing files; if the governance root is not a Git repository it runs `git init` and makes an initial commit (skipped when it already is one), and never pushes. A policy that still contains `[待确认]` placeholders is not injected into agents and `doctor` warns about it. Complete the policy, commit the governance repository, then connect it from the customer project:
 
 ```bash
 npx wildarrange project attach --governance-root ../my-project-governance

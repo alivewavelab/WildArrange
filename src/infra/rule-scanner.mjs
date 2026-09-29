@@ -86,9 +86,21 @@ export async function scanProjectRules(rootDir, options = {}) {
   return result;
 }
 
+/** init-governance 脚手架留下的待人工确认占位标记；含此标记的政策不是真实规则。 */
+export const POLICY_PLACEHOLDER = "[待确认]";
+
+/** 列出治理仓 policy 中仍含占位标记的文件（相对治理仓根），供 doctor 告警。 */
+export async function listPlaceholderPolicyFiles(rootDir) {
+  const workspace = getBoundWorkspaceContext(rootDir);
+  if (workspace?.mode !== "external" || !workspace.governanceContract?.policyPath) return [];
+  const rules = await readRuleDir(workspace.governanceRoot, workspace.governanceContract.policyPath, "governance_policy");
+  return rules.filter((rule) => rule.placeholder).map((rule) => rule.path);
+}
+
 /** 读取治理仓库 policy 根下全部 Markdown；路径加 governance/ 前缀避免与项目规则混淆。 */
 async function readGovernancePolicyRules(governanceRoot, policyRoot) {
-  const rules = await readRuleDir(governanceRoot, policyRoot, "governance_policy");
+  // 仍含占位标记的政策不注入：把未确认的模板当作真实规则会误导 Agent
+  const rules = (await readRuleDir(governanceRoot, policyRoot, "governance_policy")).filter((rule) => !rule.placeholder);
   return rules.map((rule) => ({
     ...rule,
     path: normalizeRelativePath(path.join("governance", rule.path)),
@@ -182,6 +194,7 @@ async function readRuleFile(rootDir, absolutePath, sourceName) {
     alwaysApply: Boolean(parsed.frontmatter.alwaysApply) || (parsed.frontmatter.alwaysApply === undefined && parsed.frontmatter.globs === undefined),
     chars: parsed.body.length,
     content: truncateForSummary(parsed.body.trim(), 4_000),
+    ...(content.includes(POLICY_PLACEHOLDER) ? { placeholder: true } : {}),
   };
 }
 

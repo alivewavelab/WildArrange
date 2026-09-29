@@ -107,6 +107,7 @@ AGENTS.md                         # mandatory reading routes
 - `src/infra/runtime-store.mjs`：运行时路径、时间/ID、目录创建、JSON 原子写、持久化 task-status 枚举与 hash 原语。
 - `src/infra/workspace-context.mjs`：项目、独立治理仓库与本机运行态三根解析；本机 registry、Git common-dir 身份、治理合同/verification registry 校验、非覆盖治理骨架初始化与 legacy 事务迁移的唯一 owner。
 - `src/interface/project-connection.mjs`：`project init-governance/attach/show` 与外置迁移的 CLI 投影；不拥有路径或迁移规则。
+- `src/interface/project-setup.mjs`：`setup` 一步式外置接入，只按序组合 init-governance（含 Git 初始提交与默认武装配置）、attach、`initRuntime` 与外置 adapter install，不拥有任何路径或治理规则。
 - `src/interface/external-adapters.mjs`：在外置 runtime 生成 Codex 本地 marketplace/plugin、Cursor 用户 Hook bundle 与 Kimi 用户 plugin；Cursor 显式激活负责备份和合并用户配置，所有宿主都以真实生命周期回执而非文件存在证明激活。
 - `src/infra/file-lock.mjs`：`.wildarrange/team/tasks.lock` 与 `.wildarrange/ledger.lock` 背后的共享文件锁原语。stale 锁自愈：owner pid 已死则立即 stale；空/不可解析 owner 文件在短 mtime 宽限后 stale。锁超时可诊断——错误给出当前 owner 标签、pid、pid 存活、获取时间与等待预算，便于粘贴给 AI 立即看出谁持锁。
 - `src/infra/task-state-lock.mjs`：全局任务状态锁（`.wildarrange/team/tasks.lock`），`file-lock.mjs` 的路径/默认参数封装。所有调用方在其上串行，为线性 run 与并行 admission 提供工作区级互斥。`transactWithLedger` 是非完成路径「先 appendLedger 后 persist」固定顺序的统一原语；锁方向全仓固定为任务状态锁（外）→ ledger 锁（内）。
@@ -414,6 +415,7 @@ adapter 专用行为属于 `src/interface/adapters.mjs`、`src/interface/kimi-ad
 | `src/interface/cli-help.mjs` | CLI 命令注册表单一事实源：core 六命令分层 help、`docs commands` Markdown 物化 |
 | `src/interface/project-init.mjs` | 显式、非覆盖式补建项目治理文档，并返回需要人类确认的清单 |
 | `src/interface/project-connection.mjs` | 独立治理仓库初始化、连接、查询与 legacy 外置迁移的 CLI 视图；不复制 Infra 规则 |
+| `src/interface/project-setup.mjs` | `setup` 一步式外置治理接入：按序组合治理仓初始化、attach、运行态初始化与外置 adapter 包生成 |
 | **orchestration/**（工作流顺序、重试、gate 编排，只依赖 ai、capabilities、infra） |  |
 | `src/orchestration/AGENTS.md`                                | 编排、事务、恢复与完成状态不变量 |
 | `src/orchestration/plan-state.mjs`                            | 计划导入、批准、校验与任务状态加载；feature design 状态委托唯一 owner |

@@ -29,7 +29,8 @@ export const CORE_COMMANDS = ["init", "plan", "run", "status", "decisions", "doc
  * 新命令须先登记再于 bin/wildarrange.mjs 实现；governance audit 以 --help --all 校验真实性。
  */
 export const COMMAND_REGISTRY = [
-  { usage: "project init-governance --governance-root <path> --repository <git-url> [--default-branch main]", desc: "在项目外创建不覆盖已有文件的治理仓库骨架；不自动操作 Git" },
+  { usage: "setup --governance-root <path> [--repository <git-url>] [--target codex|cursor|kimi|all] [--default-branch main]", desc: "一步接入外置治理：创建治理仓（含 Git 初始提交与默认武装配置）→ attach → init → 生成宿主 Adapter 包；客户项目零写入" },
+  { usage: "project init-governance --governance-root <path> --repository <git-url> [--default-branch main]", desc: "在项目外创建不覆盖已有文件的治理仓库骨架与默认武装配置；非 Git 目录自动 git init 并提交初始 commit" },
   { usage: "project attach --governance-root <path> [--project-root <path>] [--runtime-root <path>]", desc: "把客户项目连接到独立治理仓库；映射写入项目外部状态目录" },
   { usage: "project show [--project-root <path>]", desc: "查看项目、治理仓库和运行态三根连接" },
   { usage: "integration accept --project-sha <40-char-sha> --governance-sha <40-char-sha> [--id <id>] [--reason \"...\"]", desc: "校验两个仓库的提交与治理注册表，并在项目外运行态写双 SHA 集成验收收据" },

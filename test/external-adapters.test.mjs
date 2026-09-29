@@ -183,6 +183,7 @@ async function withExternalWorkspace(callback) {
     await initializeGovernanceRepository(projectRoot, {
       governanceRoot,
       repository: "https://example.test/customer/project.git",
+      initGit: true,
     });
     const workspace = await attachGovernanceRepository(projectRoot, {
       governanceRoot,

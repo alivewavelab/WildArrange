@@ -2,7 +2,8 @@
 
 | 命令 | 说明 |
 | ---- | ---- |
-| `wildarrange project init-governance --governance-root <path> --repository <git-url> [--default-branch main]` | 在项目外创建不覆盖已有文件的治理仓库骨架；不自动操作 Git |
+| `wildarrange setup --governance-root <path> [--repository <git-url>] [--target codex|cursor|kimi|all] [--default-branch main]` | 一步接入外置治理：创建治理仓（含 Git 初始提交与默认武装配置）→ attach → init → 生成宿主 Adapter 包；客户项目零写入 |
+| `wildarrange project init-governance --governance-root <path> --repository <git-url> [--default-branch main]` | 在项目外创建不覆盖已有文件的治理仓库骨架与默认武装配置；非 Git 目录自动 git init 并提交初始 commit |
 | `wildarrange project attach --governance-root <path> [--project-root <path>] [--runtime-root <path>]` | 把客户项目连接到独立治理仓库；映射写入项目外部状态目录 |
 | `wildarrange project show [--project-root <path>]` | 查看项目、治理仓库和运行态三根连接 |
 | `wildarrange integration accept --project-sha <40-char-sha> --governance-sha <40-char-sha> [--id <id>] [--reason "..."]` | 校验两个仓库的提交与治理注册表，并在项目外运行态写双 SHA 集成验收收据 |

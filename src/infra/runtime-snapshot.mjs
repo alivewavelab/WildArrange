@@ -74,7 +74,7 @@ export async function ensureTaskPacket(rootDir, planId, task) {
     await writeJsonAtomic(baselinePath, {
       kind: "task_start_baseline", planId, taskId: task.id, at: nowIso(),
       note: "Historical start snapshot only; live task state is team/tasks.json.",
-      task: Object.fromEntries(["subject", "owner", "category", "writable_paths", "success_criteria", "verify_commands", "responsibilityChanges", "contractChanges", "request"]
+      task: Object.fromEntries(["subject", "owner", "category", "writable_paths", "successCriteria", "verify_commands", "responsibilityChanges", "contractChanges", "request"]
         .filter(key => task[key] !== undefined).map(key => [key, task[key]])),
       approval: work?.activePlanId === planId ? work.planApproval || null : null,
     });
@@ -242,9 +242,12 @@ export async function resolveRuntimeCliCommandPrefix(rootDir, options = {}) {
   if (preferred) return preferred;
   const artifactPrefix = await readInstalledHookCliCommandPrefix(rootDir);
   if (artifactPrefix) return artifactPrefix;
-  const report = await readJson(resolveWildArrangePath(rootDir, "adapters", "install-report.json"), null);
-  const reportPrefix = normalizeRuntimeCliCommandPrefix(rootDir, report?.cliPrefix);
-  if (reportPrefix) return reportPrefix;
+  // 内置模式的 install report 在 adapters/，外置模式在 adapters/external/
+  for (const segments of [["adapters", "install-report.json"], ["adapters", "external", "install-report.json"]]) {
+    const report = await readJson(resolveWildArrangePath(rootDir, ...segments), null);
+    const reportPrefix = normalizeRuntimeCliCommandPrefix(rootDir, report?.cliPrefix);
+    if (reportPrefix) return reportPrefix;
+  }
   if (options.fallbackCliPath) {
     const fallbackPrefix = normalizeRuntimeCliCommandPrefix(rootDir, `node "${path.resolve(options.fallbackCliPath)}"`);
     if (fallbackPrefix) return fallbackPrefix;

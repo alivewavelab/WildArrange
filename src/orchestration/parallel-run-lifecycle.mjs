@@ -11,6 +11,7 @@ import {
   nowIso,
   readJson,
   resolveWildArrangePath,
+  resolveWildArrangeRoot,
 } from "../infra/runtime-store.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { loadTaskLedger } from "../infra/task-state-store.mjs";
@@ -124,7 +125,7 @@ export async function cleanupParallelAgentRun(rootDir, options = {}) {
       const result = await readJson(resultPath, null);
       if (!result || result.isolation !== "git-worktree" || result.worktreeAvailable !== true) continue;
       const worktreeDir = path.resolve(rootDir, result.workDir || "");
-      assertPathInsideRoot(rootDir, worktreeDir, result.workDir, "parallel worktree");
+      assertPathInsideRoot(resolveWildArrangeRoot(rootDir), worktreeDir, result.workDir, "parallel worktree");
       const task = (taskLedger?.tasks || []).find((candidate) => candidate.planId === runPlanId && candidate.id === entry.taskId) || null;
       const cleanupFence = await inspectParallelCleanupFence(worktreeDir, entry, task, gitContext, runPlanId);
       if (!cleanupFence.pass) {
