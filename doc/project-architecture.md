@@ -1,6 +1,6 @@
 # WildArrange 项目架构
 
-> 可复用的五区规则见 [five-zone-decoupling-guidelines.md](./five-zone-decoupling-guidelines.md)。重构历史与交接说明见 [2026-07-21-five-zone-refactor-handoff.md](./2026-07-21-five-zone-refactor-handoff.md)。
+> 可复用的五区规则见 [five-zone-decoupling-guidelines.md](./five-zone-decoupling-guidelines.md)。
 
 ## 运行时形态
 
@@ -415,7 +415,6 @@ adapter 专用行为属于 `src/interface/adapters.mjs`、`src/interface/kimi-ad
 | [doc/five-zone-decoupling-guidelines.md](../doc/five-zone-decoupling-guidelines.md) | 可复制到其他项目的五区受控解耦准则、实施顺序与 Review 清单 |
 | [doc/low-code-project-governance.md](../doc/low-code-project-governance.md) | 低代码开发者 + AI 维护的通用掌控手册、测试纪律与 L0–L3 成熟度 |
 | [doc/development-plan.md](../doc/development-plan.md)         | P0 / P1 / P2 路线                               |
-| [doc/2026-07-21-five-zone-refactor-handoff.md](../doc/2026-07-21-five-zone-refactor-handoff.md) | 五区解耦重构总结与交接（六个 Phase、关键决策、已知遗留、改 X 去哪改速查） |
 | `bin/AGENTS.md`                                             | CLI 参数、路由、帮助文本和退出码的局部约束 |
 | `doc/AGENTS.md`                                             | README / 架构 / 可复用准则 / HTML 方案的文档分层 |
 | `packs/wildarrange-linear/AGENTS.md`                        | Agent、Skill、路由、工具合同与项目初始化模板的发布边界 |
