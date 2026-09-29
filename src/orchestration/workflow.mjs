@@ -71,11 +71,11 @@ export async function runWorkflow(rootDir, options = {}) {
  */
 export async function createSamplePlan(rootDir, targetPath = resolveWildArrangePath(rootDir, "plans", "sample-plan.json")) {
   await ensureWildArrangeDirs(rootDir);
-  const workerScript = nodeEvalCommand("const fs=require('fs'); fs.mkdirSync('.wildarrange/artifacts',{recursive:true}); fs.writeFileSync('.wildarrange/artifacts/linear-smoke.txt','ok\\n')");
-  const verifyScript = nodeEvalCommand("const fs=require('fs'); const v=fs.readFileSync('.wildarrange/artifacts/linear-smoke.txt','utf8').trim(); if(v!=='ok') process.exit(1)");
+  const workerScript = nodeEvalCommand("const fs=require('fs'); fs.mkdirSync('wildarrange-sample',{recursive:true}); fs.writeFileSync('wildarrange-sample/linear-smoke.txt','ok\\n')");
+  const verifyScript = nodeEvalCommand("const fs=require('fs'); const v=fs.readFileSync('wildarrange-sample/linear-smoke.txt','utf8').trim(); if(v!=='ok') process.exit(1)");
   // review_not_tautological 是验收硬地板：样例计划必须自带真实复核信号，
   // 否则 workflow --sample（README 快速上手路径）会在 proof 处被拦下。
-  const reviewScript = nodeEvalCommand("const fs=require('fs'); const v=fs.readFileSync('.wildarrange/artifacts/linear-smoke.txt','utf8'); if(!v.includes('ok')) { console.error('review: artifact content mismatch'); process.exit(1); }");
+  const reviewScript = nodeEvalCommand("const fs=require('fs'); const v=fs.readFileSync('wildarrange-sample/linear-smoke.txt','utf8'); if(!v.includes('ok')) { console.error('review: artifact content mismatch'); process.exit(1); }");
   const sample = {
     title: "M1 linear loop smoke",
     objective: "Prove Jiuwei can run one worker task and verify it before checkpoint.",
@@ -85,7 +85,7 @@ export async function createSamplePlan(rootDir, targetPath = resolveWildArrangeP
         subject: "Write smoke artifact",
         description: "Worker writes a small artifact; verifier checks exact content.",
         category: "quick",
-        writable_paths: [".wildarrange/artifacts/linear-smoke.txt"],
+        writable_paths: ["wildarrange-sample/linear-smoke.txt"],
         worker_command: workerScript,
         verify_commands: [verifyScript],
         review_commands: [reviewScript],

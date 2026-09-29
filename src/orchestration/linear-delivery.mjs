@@ -21,6 +21,7 @@ import { lstat } from "node:fs/promises";
 import path from "node:path";
 import { resolveWildArrangePath } from "../infra/runtime-store.mjs";
 import { captureWorkspaceSnapshot, prepareAgentWorktree } from "../infra/git-worktree.mjs";
+import { releaseSupersededRunWorktree } from "./parallel-run-lifecycle.mjs";
 import { commitIsAncestor, inspectTaskWorktreeBaseline, taskBranchName } from "../infra/git-coordination.mjs";
 import { readIntegrationIntent } from "./integration.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
@@ -82,6 +83,7 @@ export async function ensureLinearDeliveryWorkspace(rootDir, planId, task, tasks
   const safeTask = String(task.id).replace(/[^A-Za-z0-9._-]/g, "_");
   const runId = `linear-${safePlan}-${safeTask}`;
   const runDir = resolveWildArrangePath(rootDir, "linear-runs", safePlan, safeTask);
+  await releaseSupersededRunWorktree(rootDir, task);
   const prepared = await prepareAgentWorktree(repositoryRoot, runDir, {
     isolation: "git-worktree",
     branchName: branch,

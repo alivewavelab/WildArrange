@@ -29,12 +29,6 @@ import { withExternalProject } from "./helpers/external-fixture.mjs";
 const CLI_PATH = path.resolve(process.cwd(), "bin", "wildarrange.mjs");
 
 async function importTwoTaskPlan(dir) {
-  // 本文件测的是中断对账与部分重试，不是 worktree 隔离：项目是 Git 仓时默认强制
-  // git-worktree，失败任务的旧 worktree 仍占用 task 分支，重试会被分支互斥拒绝。
-  // 这里显式放宽为 run-dir 隔离，把对账逻辑与隔离策略解耦。
-  await writeFile(resolveWildArrangePath(dir, "config.json"), JSON.stringify({
-    gitDelivery: { requireWorktreeForParallelWrites: false },
-  }), "utf8");
   const planPath = resolveWildArrangePath(dir, "artifacts", "retry-plan.json");
   await mkdir(path.dirname(planPath), { recursive: true });
   await writeFile(planPath, JSON.stringify({

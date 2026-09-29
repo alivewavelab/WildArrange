@@ -13,7 +13,7 @@
 
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import {
@@ -36,7 +36,6 @@ import {
   writeRecoveryManifest,
 } from "../src/infra/recovery-transaction.mjs";
 import { runCommandFile } from "../src/infra/command-runner.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { hashContent, readJson, resolveWildArrangePath, writeJsonAtomic } from "../src/infra/runtime-store.mjs";
 import { fingerprintCard } from "../src/infra/verification-cards.mjs";
 import { digestCanonical, gitBlobDigestEquals, readVerificationInventory } from "../src/infra/verification-registry.mjs";
@@ -51,19 +50,6 @@ async function git(dir, args) {
   const result = await runCommandFile("git", ["-C", dir, ...args], dir, 15_000);
   assert.equal(result.exitCode, 0, result.stderr || result.stdout || args.join(" "));
   return result;
-}
-
-// legacy 单根夹具：仅供依赖 legacy 语义的用例使用（删除 legacy 单根模式时一并处理）。
-async function withLegacyTempDir(fn) {
-  const baseDir = path.join(process.cwd(), ".tmp");
-  await mkdir(baseDir, { recursive: true });
-  const dir = await mkdtemp(path.join(baseDir, "wildarrange-adoption-legacy-"));
-  try {
-    await initRuntime(dir);
-    await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
 }
 
 async function seedProject(dir) {
@@ -982,18 +968,15 @@ test("cards that execute verifier commands cannot be batch-approved", async () =
   });
 });
 
-// legacy 语义：崩溃注入依赖 options.suggestedLocator，外置模式下该选项被治理合同的登记册位置取代，扫描不会读到它。
+// 外置模式下 suggestedLocator 被治理合同取代，故障经显式的 options.scanHook 注入（仅测试使用）。
 test("scan crash settles the session to needs_review instead of stuck scanning", async () => {
-  await withLegacyTempDir(async (dir) => {
+  await withTempDir(async (dir) => {
     await seedProject(dir);
     const scanBoom = new Error("scan exploded");
     Object.defineProperty(scanBoom, "code", {
       get() { throw new Error("error metadata unreadable"); },
     });
-    const options = { serve: false };
-    Object.defineProperty(options, "suggestedLocator", {
-      get() { throw scanBoom; },
-    });
+    const options = { serve: false, scanHook() { throw scanBoom; } };
     const crashed = await startAdoption(dir, options);
     assert.equal(crashed.ok, false);
     assert.equal(crashed.session.status, "needs_review");

@@ -18,18 +18,26 @@
 //   · 缺了它会怎样？
 //     「标记 completed 但无证据」或账本/镜像分叉无法在一键体检中被发现。
 // =============================================================================
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
   readJson,
   resolveWildArrangePath,
+  resolveWildArrangeRoot,
 } from "../infra/runtime-store.mjs";
 import { readVerifiedLedgerEntries } from "../infra/ledger.mjs";
 import { isPossibleNoopTask, isTrivialCommand } from "../infra/task-predicates.mjs";
 import { inspectCompletedTaskEvidence, loadTaskLedger, taskRef } from "../infra/task-state-store.mjs";
 import { normalizeRelativePath } from "../infra/path-match.mjs";
 import { inspectTaskWorktreeBaseline } from "../infra/git-coordination.mjs";
+
+/** candidate 是否位于 dir 之内（含自身）；两侧尽量取 realpath，避免符号链接误判。 */
+function isInsideDir(dir, candidate) {
+  const real = (value) => { try { return realpathSync.native(value); } catch { return path.resolve(value); } };
+  const relative = path.relative(real(dir), real(candidate));
+  return !relative.startsWith("..") && !path.isAbsolute(relative);
+}
 
 /** 视为「任务完成」的 ledger 事件类型，用于孤儿完成事件与证据链对账。 */
 const COMPLETION_LEDGER_EVENT_TYPES = new Set([
@@ -121,6 +129,7 @@ export async function checkCompletionIntegrity(rootDir, findings) {
   let deliveryWorktreesChecked = 0;
   let deliveryWorktreeDrifts = 0;
   const projectRoot = path.resolve(rootDir);
+  const runtimeRoot = path.resolve(resolveWildArrangeRoot(rootDir));
   for (const task of completedTasks) {
     const workDir = task.delivery_workspace?.workDir;
     if (!workDir) continue;
@@ -130,7 +139,8 @@ export async function checkCompletionIntegrity(rootDir, findings) {
     const planId = task.planId || taskLedger.activePlanId;
     const ref = taskRef(planId, task.id);
     const relativeWorkDir = path.relative(projectRoot, absoluteWorkDir);
-    const outsideProject = relativeWorkDir.startsWith("..") || path.isAbsolute(relativeWorkDir);
+    // 合法位置：项目内，或本项目 runtimeRoot 下（外置治理的任务 worktree 建在 runtimeRoot）。
+    const outsideProject = !isInsideDir(projectRoot, absoluteWorkDir) && !isInsideDir(runtimeRoot, absoluteWorkDir);
     let actual;
     try {
       actual = outsideProject

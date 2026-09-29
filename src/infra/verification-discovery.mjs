@@ -92,6 +92,8 @@ export function hasDynamicCodeHint(text) {
  */
 // --- 验证宇宙扫描 ---
 export async function scanVerificationUniverse(rootDir, options = {}) {
+  // 显式故障注入点：仅供测试模拟扫描崩溃；生产调用方不传。
+  if (typeof options.scanHook === "function") await options.scanHook(rootDir);
   const files = await listCandidateFiles(rootDir);
   const packageFacts = await collectPackageFacts(rootDir, files);
   const textIndex = await collectTextIndex(rootDir, files);
