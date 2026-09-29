@@ -14,7 +14,7 @@ import { DEFAULT_PACKAGE_NAME } from "../infra/runtime-config.mjs";
 import { nowIso, readJson, resolveWildArrangePath, writeJsonAtomic } from "../infra/runtime-store.mjs";
 import { adapterCliPrefix, buildSlashCommands } from "./adapters.mjs";
 
-export const EXTERNAL_ADAPTER_VERSION = 1;
+export const EXTERNAL_ADAPTER_VERSION = 2;
 export const EXTERNAL_CODEX_PLUGIN_NAME = "wildarrange-governance";
 export const EXTERNAL_KIMI_PLUGIN_NAME = "wildarrange-governance";
 export const EXTERNAL_CURSOR_BRIDGE_NAME = "wildarrange-external-hook-bridge.mjs";
@@ -365,6 +365,12 @@ if (HOST === "cursor") {
 }
 if (HOST === "kimi") {
   if (typeof result.output === "string") process.stdout.write(result.output);
+  process.exit(0);
+}
+if (event === "Stop" || event === "SubagentStop") {
+  if (result.continuation?.required === true) {
+    emit({ decision: "block", reason: result.continuation.nextCommand || result.continuation.reason || "WildArrange requires continuation." });
+  } else emit({});
   process.exit(0);
 }
 if (typeof result.output === "string") process.stdout.write(result.output);

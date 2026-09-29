@@ -21,6 +21,7 @@ import {
   installExternalAdapters,
 } from "../src/interface/external-adapters.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
+import { importPlan } from "../src/orchestration/plan-state.mjs";
 
 test("external adapters generate all host bundles without writing customer repository files", async () => {
   await withExternalWorkspace(async ({ projectRoot, runtimeRoot, workspace }) => {
@@ -118,6 +119,53 @@ test("external host bridges ignore unrelated projects and record lifecycle recei
       assert.equal(targets.find((entry) => entry.target === host)?.activation, "execution_observed");
     }
     assert.equal(existsSync(path.join(projectRoot, ".wildarrange")), false);
+  });
+});
+
+test("external Codex Stop hooks return JSON and continue unfinished work", async () => {
+  await withExternalWorkspace(async ({ projectRoot, runtimeRoot, stateHome, workspace }) => {
+    await initRuntime(projectRoot);
+    const report = await installExternalAdapters(projectRoot, workspace, {
+      target: "codex",
+      mode: "local",
+      localCliPath: path.join(process.cwd(), "bin", "wildarrange.mjs"),
+    });
+    const bridgePath = report.targets.codex.bridgePath;
+    const idle = await runBridge(bridgePath, {
+      hook_event_name: "Stop", session_id: "codex-idle", cwd: projectRoot,
+    }, stateHome);
+    assert.equal(idle.exitCode, 0, idle.stderr);
+    assert.deepEqual(JSON.parse(idle.stdout), {});
+
+    const planPath = path.join(projectRoot, "plan.json");
+    await writeFile(planPath, JSON.stringify({
+      id: "codex-stop-plan",
+      title: "Codex Stop continuation",
+      tasks: [{
+        id: "T001",
+        subject: "Create result",
+        owner: "ZhuRong",
+        writable_paths: ["result.txt"],
+        worker_command: "node -e \"require('fs').writeFileSync('result.txt','done')\"",
+        verify_commands: ["node -e \"if(!require('fs').existsSync('result.txt')) process.exit(1)\""],
+      }],
+    }));
+    await importPlan(projectRoot, planPath);
+
+    for (const event of ["Stop", "SubagentStop"]) {
+      const sessionId = `codex-${event.toLowerCase()}`;
+      const unfinished = await runBridge(bridgePath, {
+        hook_event_name: event, session_id: sessionId, cwd: projectRoot,
+      }, stateHome);
+      assert.equal(unfinished.exitCode, 0, unfinished.stderr);
+      const output = JSON.parse(unfinished.stdout);
+      assert.equal(output.decision, "block");
+      assert.match(output.reason, /wildarrange\.mjs.*run/);
+      const evidence = JSON.parse(await readFile(path.join(runtimeRoot, "sessions", "hooks", `${sessionId}-Stop.json`), "utf8"));
+      assert.equal(evidence.continuation.required, true);
+    }
+    const continuation = JSON.parse(await readFile(path.join(runtimeRoot, "sessions", "continuation.json"), "utf8"));
+    assert.equal(continuation.shouldContinue, true);
   });
 });
 
