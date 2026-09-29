@@ -48,7 +48,16 @@ WildArrange 只保留 5 个长期 Agent。确定性 Router 是系统节点，不
 
 需要让客户代码仓库保持纯净时，使用三根模式：客户项目仓库保存产品代码与产品测试，独立治理仓库保存政策和验证注册表，本机状态目录保存 ledger、锁、报告、备份与 Prompt Pack。WildArrange 不会向客户项目生成 `AGENTS.md`、`.wildarrange/` 或 Adapter 文件。
 
-先在客户项目根执行：
+最快路径：在客户项目根一步完成治理仓初始化、连接、运行态初始化与宿主 Adapter 包生成：
+
+```bash
+npx wildarrange setup \
+  --governance-root ../my-project-governance \
+  --repository https://github.com/example/my-project.git \
+  --target all
+```
+
+`--repository` 省略时取项目 `origin` 远端；`--target` 可选 `codex|cursor|kimi|all`（默认 all）。命令结束会列出剩余的宿主内手工步骤（Codex/Kimi 安装与信任、Cursor 激活）。想分步执行时使用下面的命令：
 
 ```bash
 npx wildarrange project init-governance \
@@ -57,7 +66,7 @@ npx wildarrange project init-governance \
   --default-branch main
 ```
 
-该命令只在治理目录创建缺失的 `wildarrange-governance.json`、`policy/AGENTS.md`、`verification/registry.json` 和空职责目录；不覆盖已有文件，也不自动 `git init`、commit 或 push。人工补齐政策后，把治理仓库初始化并提交，再回到客户项目连接：
+该命令只在治理目录创建缺失的 `wildarrange-governance.json`、`policy/AGENTS.md`、`policy/wildarrange.config.json`（默认武装质量门）、`verification/registry.json` 和空职责目录，不覆盖已有文件；治理目录不是 Git 仓库时会自动 `git init` 并提交初始 commit（已是 Git 仓库则跳过），从不 push。`policy/AGENTS.md` 里仍含 `[待确认]` 的政策不会注入给 Agent，`doctor` 会告警。人工补齐政策并提交治理仓库后，回到客户项目连接：
 
 ```bash
 npx wildarrange project attach --governance-root ../my-project-governance

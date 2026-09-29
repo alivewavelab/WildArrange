@@ -54,6 +54,7 @@ export async function installExternalAdapters(projectRoot, workspace, options = 
     runtimeRoot: workspace.runtimeRoot,
     mode,
     packageName,
+    cliPrefix,
     activationVerified: false,
     targets: { ...(previous?.targets || {}), ...targets },
   };

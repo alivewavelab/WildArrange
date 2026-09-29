@@ -8,7 +8,8 @@
 | 场景                | 命令                                                               |
 | ----------------- | ---------------------------------------------------------------- |
 | 初始化运行时            | `node ./bin/wildarrange.mjs init`                                      |
-| 创建独立治理仓库骨架    | `node ./bin/wildarrange.mjs project init-governance --governance-root <path> --repository <git-url>`（只创建缺失文件，不操作 Git） |
+| 一步接入外置治理        | `node ./bin/wildarrange.mjs setup --governance-root <path> [--repository <git-url>] [--target codex\|cursor\|kimi\|all]`（init-governance → attach → init → adapter install，客户项目零写入） |
+| 创建独立治理仓库骨架    | `node ./bin/wildarrange.mjs project init-governance --governance-root <path> --repository <git-url>`（只创建缺失文件，含默认武装的治理配置；非 Git 目录自动 git init 并初始提交） |
 | 连接独立治理仓库        | `node ./bin/wildarrange.mjs project attach --governance-root <path>` |
 | 查看三根连接            | `node ./bin/wildarrange.mjs project show` |
 | 写入双仓集成验收收据    | `node ./bin/wildarrange.mjs integration accept --project-sha <40-char-sha> --governance-sha <40-char-sha> --reason "..."`（只写外置运行态） |

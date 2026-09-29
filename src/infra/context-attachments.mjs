@@ -9,7 +9,7 @@
 // =============================================================================
 import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
-import { readJson, resolveWildArrangePath, hashContent } from "./runtime-store.mjs";
+import { readJson, resolveWildArrangePath, resolveWildArrangeRoot, hashContent } from "./runtime-store.mjs";
 import { assertPathInsideRoot, normalizeRelativePath } from "./path-match.mjs";
 import { renderPromptPackEntry } from "./prompt-pack.mjs";
 
@@ -18,8 +18,14 @@ import { renderPromptPackEntry } from "./prompt-pack.mjs";
  */
 export async function loadMarkdownAttachment(rootDir, relativePath, maxChars) {
   if (!relativePath || path.isAbsolute(relativePath) || relativePath.includes("..")) return null;
-  const filePath = path.join(rootDir, relativePath);
-  const root = await realpath(rootDir);
+  // `.wildarrange/` 是运行态逻辑前缀：外置模式映射到运行态根并以其为边界；其余按项目根。
+  const runtimePrefix = ".wildarrange/";
+  const normalized = normalizeRelativePath(relativePath);
+  const isRuntimePath = normalized.startsWith(runtimePrefix);
+  const baseRoot = isRuntimePath ? resolveWildArrangeRoot(rootDir) : rootDir;
+  const filePath = isRuntimePath ? path.join(baseRoot, normalized.slice(runtimePrefix.length)) : path.join(rootDir, relativePath);
+  let root;
+  try { root = await realpath(baseRoot); } catch (error) { if (error.code === "ENOENT") return null; throw error; }
   let resolved;
   try { resolved = await realpath(filePath); } catch (error) { if (error.code === "ENOENT") return null; throw error; }
   assertPathInsideRoot(root, resolved, relativePath);

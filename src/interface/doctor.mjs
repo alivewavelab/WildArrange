@@ -27,11 +27,13 @@ import {
   ensureWildArrangeDirs,
   nowIso,
   readJson,
+  resolveGovernancePaths,
   resolveWildArrangePath,
   writeJsonAtomic,
   hashContent,
 } from "../infra/runtime-store.mjs";
 import { readVerifiedLedgerEntries, verifyLedger } from "../infra/ledger.mjs";
+import { POLICY_PLACEHOLDER, listPlaceholderPolicyFiles } from "../infra/rule-scanner.mjs";
 import { loadTaskState } from "../infra/task-state-store.mjs";
 import { listRuntimeStateBackups, verifyConfigBaseline, verifyRuntimeState } from "../infra/security.mjs";
 import { evaluateGateArming } from "../infra/gate-arming.mjs";
@@ -111,7 +113,8 @@ async function checkConfigStructure(rootDir, findings) {
   const knownTopLevelKeys = new Set(Object.keys(DEFAULT_WILDARRANGE_CONFIG));
   const knownInjectionPoints = new Set(Object.keys(DEFAULT_WILDARRANGE_CONFIG.injectionPoints));
   const rawConfigs = [
-    await readJson(path.join(rootDir, "wildarrange.config.json"), null),
+    // 治理配置的真实位置：内置在项目根，外置在治理仓
+    await readJson(path.resolve(resolveGovernancePaths(rootDir).rootDir, resolveGovernancePaths(rootDir).configPath), null),
     await readJson(resolveWildArrangePath(rootDir, "config.json"), null),
   ].filter(Boolean);
 
@@ -162,6 +165,11 @@ async function checkConfigStructure(rootDir, findings) {
     }
   } else {
     addFinding(findings, "warn", "config", "prompt pack registry missing; run `wildarrange init` to install it");
+  }
+
+  // 治理仓政策仍含 [待确认] 占位：不会注入给 Agent，等于没有政策，必须让人看到
+  for (const policyFile of await listPlaceholderPolicyFiles(rootDir)) {
+    addFinding(findings, "warn", "config", `governance policy ${policyFile} still contains ${POLICY_PLACEHOLDER} placeholders; it is not injected into agents until a human fills it in and commits it`, { code: "governance_policy_placeholder", path: policyFile });
   }
 
   return {
@@ -255,6 +263,10 @@ async function checkConfigBaseline(rootDir, findings) {
       addFinding(findings, "error", "config_baseline", `config drift detected on ${failure.path}: ${failure.reason}`, { path: failure.path, reason: failure.reason });
     }
   }
+  // 治理仓工作区里未提交的配置改动会被 Hook 立即采用，但不在基线内：必须显式告警
+  if (result.governance?.clean === false) {
+    addFinding(findings, "warn", "config_baseline", "governance repository has uncommitted changes; hooks already use them but they are not reviewed or baselined; commit them, then run `wildarrange config baseline`", { code: "governance_repository_dirty" });
+  }
   return { status: result.status, failureCount: (result.failures || []).length };
 }
 
@@ -301,23 +313,25 @@ async function checkAdapters(rootDir, findings) {
   const kimiEnabled = config.adapters?.kimi?.enabled === true;
   if (workspace?.mode === "external") {
     const installReport = await loadExternalAdapterReport(rootDir);
+    // 以 install-report 里实际生成过的宿主为准：没装的宿主不是缺陷，不能报 error
+    const installedTargets = Object.keys(installReport?.targets || {});
     const enabledTargets = [
       ["cursor", cursorEnabled],
       ["codex", codexEnabled],
       ["kimi", kimiEnabled],
-    ].filter(([, enabled]) => enabled).map(([target]) => target);
+    ].filter(([target, enabled]) => enabled && installedTargets.includes(target)).map(([target]) => target);
+    if (installedTargets.length === 0) {
+      addFinding(findings, "error", "adapters", "外置治理已连接，但尚未生成任何宿主的零项目文件 Adapter 包，Hook 不会生效", {
+        code: "external_adapter_not_prepared",
+        nextAction: "运行 wildarrange adapter install --target codex|cursor|kimi|all",
+      });
+    }
     for (const target of enabledTargets) {
       const prepared = installReport?.targets?.[target] || null;
       const activation = prepared?.activationId
         ? await inspectExternalHookExecution(rootDir, target, prepared.activationId)
         : { status: "not_prepared", lastObservedAt: null, lastEvent: null, sessionId: null };
-      if (!prepared) {
-        addFinding(findings, "error", "adapters", `外置治理已连接，但 ${target} 的零项目文件 Adapter 包尚未生成`, {
-          target,
-          code: "external_adapter_not_prepared",
-          nextAction: `运行 wildarrange adapter install --target ${target}`,
-        });
-      } else if (activation.status !== "execution_observed") {
+      if (activation.status !== "execution_observed") {
         addFinding(findings, "error", "adapters", `${target} 外置 Adapter 已生成，但尚无宿主真实生命周期回执；不能认定治理已激活`, {
           target,
           code: "external_adapter_activation_unverified",
@@ -336,13 +350,15 @@ async function checkAdapters(rootDir, findings) {
       });
     }
     return {
-      status: enabledTargets.length === 0
+      status: installedTargets.length === 0
+        ? "error"
+        : enabledTargets.length === 0
         ? "skipped"
         : (targets.every((entry) => entry.activation === "execution_observed") ? "ok" : "error"),
       mode: "external",
       reason: enabledTargets.length > 0
         ? (targets.every((entry) => entry.activation === "execution_observed") ? "all enabled external adapters observed" : "external adapter lifecycle receipt missing")
-        : "no host adapters enabled",
+        : (installedTargets.length === 0 ? "no external adapter installed" : "no installed host adapters enabled"),
       targets,
       staleRules: [],
     };

@@ -6,7 +6,7 @@
 
 - Dashboard HTTP API 与安全边界。
 - Codex、Cursor、Kimi Code adapter 的生成、安装、卸载、恢复和说明。
-- 显式项目初始化时，决定补建哪些治理文档并保持已有文件不被覆盖。
+- `setup` 初始化治理仓：只补建缺失文件，不覆盖已有政策。
 - `doctor` 等面向用户的诊断汇总。
 - 输入解析、输出渲染和宿主协议翻译。
 
@@ -34,5 +34,5 @@
 
 - 更新对应 adapter / dashboard / doctor 测试。
 - 用户命令变化同步更新 `README.md`、`README.en.md` 和 CLI help。
-- 项目文档初始化变化必须覆盖最小集合、可选架构文档和重复运行不覆盖。
+- 治理仓初始化变化必须覆盖最小集合、重复运行不覆盖。
 - Kimi 变更至少覆盖 plugin 生成、Hook bridge、非目标项目静默退出和卸载恢复。

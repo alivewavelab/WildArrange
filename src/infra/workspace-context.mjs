@@ -14,6 +14,7 @@ import { mkdir, realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { runCommandFile } from "./command-runner.mjs";
+import { buildArmedConfig } from "./runtime-config.mjs";
 import { buildRegistryFromCards, digestCanonical } from "./verification-registry.mjs";
 import {
   bindWildArrangeRuntimeRoot,
@@ -26,7 +27,11 @@ const WORKSPACE_REGISTRY_VERSION = 1;
 const GOVERNANCE_CONTRACT_FILE = "wildarrange-governance.json";
 const BOUND_CONTEXTS = new Map();
 
-/** 在独立目录创建最小治理仓库骨架；只创建缺失文件，不初始化或操作 Git。 */
+/**
+ * 在独立目录创建最小治理仓库骨架；只创建缺失文件，不覆盖已有政策。
+ * options.scaffoldConfig：额外生成 policy/wildarrange.config.json（默认武装质量门）。
+ * options.initGit：治理目录还不是 Git 仓时 git init 并提交初始 commit（已是 Git 仓则跳过）。
+ */
 export async function initializeGovernanceRepository(projectRoot, options = {}) {
   const project = await canonicalExistingDirectory(projectRoot, "project root");
   const governanceRoot = path.resolve(requiredText(options.governanceRoot, "governance root"));
@@ -55,6 +60,10 @@ export async function initializeGovernanceRepository(projectRoot, options = {}) 
       path: path.join(governanceRoot, "verification", "registry.json"),
       value: `${JSON.stringify(buildRegistryFromCards([]), null, 2)}\n`,
     },
+    ...(options.scaffoldConfig === true ? [{
+      path: path.join(governanceRoot, "policy", "wildarrange.config.json"),
+      value: `${JSON.stringify(buildArmedConfig(), null, 2)}\n`,
+    }] : []),
   ];
   const created = [];
   const preserved = [];
@@ -67,14 +76,36 @@ export async function initializeGovernanceRepository(projectRoot, options = {}) 
       preserved.push(path.relative(governanceRoot, target.path).split(path.sep).join("/"));
     }
   }
+  const git = options.initGit === true ? await ensureGovernanceGitRepository(governanceRoot, options.defaultBranch) : null;
   return {
     kind: "governance_repository_initialized",
     governanceRoot,
     created,
     preserved,
-    gitInitialized: false,
+    gitInitialized: git?.initialized === true,
+    ...(git ? { git } : {}),
     attached: false,
   };
+}
+
+/** 治理目录不是 Git 仓时 git init 并提交初始 commit；已是 Git 仓则不动它。 */
+async function ensureGovernanceGitRepository(governanceRoot, defaultBranch) {
+  if (existsSync(path.join(governanceRoot, ".git"))) return { initialized: false, skipped: "already_a_git_repository" };
+  const run = async (args) => {
+    const result = await runCommandFile("git", ["-C", governanceRoot, ...args], governanceRoot, 30_000);
+    if (result.exitCode !== 0) throw new Error(`git ${args[0]} failed in governance repository: ${result.stderr || result.stdout}`);
+    return result.stdout.trim();
+  };
+  await run(["init", "-q", "-b", defaultBranch || "main"]);
+  await run(["add", "-A"]);
+  // 用户没配 Git 身份时用产品占位身份，避免初始提交在新机器上失败
+  const identity = [];
+  for (const [key, fallback] of [["user.name", "WildArrange"], ["user.email", "wildarrange@localhost"]]) {
+    const configured = await runCommandFile("git", ["-C", governanceRoot, "config", key], governanceRoot, 15_000);
+    if (configured.exitCode !== 0 || !configured.stdout.trim()) identity.push("-c", `${key}=${fallback}`);
+  }
+  await run([...identity, "commit", "-q", "-m", "chore: initialize WildArrange governance repository"]);
+  return { initialized: true, head: await run(["rev-parse", "HEAD"]) };
 }
 
 /** 返回平台默认的 WildArrange 本机状态目录。 */
@@ -289,7 +320,11 @@ export async function loadGovernanceVerificationDefaults(projectRoot) {
     inspectGitRevision(context.projectRoot),
     inspectGitRevision(context.governanceRoot),
   ]);
-  if (governanceRevision.available && governanceRevision.clean !== true) {
+  if (!governanceRevision.available) {
+    // 治理仓没有 Git HEAD 时，双仓绑定要到验收末端才失败并白耗一次尝试；这里提前拦截并给出下一步
+    throw new Error(`external governance repository has no Git HEAD (${context.governanceRoot}); run \`git -C "${context.governanceRoot}" init && git -C "${context.governanceRoot}" add -A && git -C "${context.governanceRoot}" commit -m init\`, then import the plan again`);
+  }
+  if (governanceRevision.clean !== true) {
     throw new Error("external governance repository has uncommitted changes; commit or revert them before importing a project plan");
   }
   return {

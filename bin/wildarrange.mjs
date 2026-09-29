@@ -129,6 +129,7 @@ import {
   projectConnectionView,
   showProjectConnection,
 } from "../src/interface/project-connection.mjs";
+import { setupExternalGovernance } from "../src/interface/project-setup.mjs";
 
 // --- CLI 参数解析 ---
 
@@ -262,6 +263,22 @@ async function main() {
     throw new Error("wildarrange project requires init-governance, attach, or show");
   }
 
+  // --- 一步式外置治理接入：init-governance → attach → init → adapter install ---
+  if (command === "setup") {
+    const governanceRoot = strArg(args, "governance-root");
+    if (!governanceRoot) throw new Error("wildarrange setup requires --governance-root <path> [--repository <git-url>] [--target codex|cursor|kimi|all]");
+    console.log(JSON.stringify(await setupExternalGovernance(requestedProjectRoot, {
+      governanceRoot,
+      repository: strArg(args, "repository"),
+      defaultBranch: strArg(args, "default-branch"),
+      target: strArg(args, "target") || "all",
+      mode: strArg(args, "mode") || "local",
+      packageName: strArg(args, "package") || DEFAULT_PACKAGE_NAME,
+      localCliPath: path.resolve(process.argv[1]),
+    }), null, 2));
+    return;
+  }
+
   const workspace = await showProjectConnection(requestedProjectRoot, { legacy: Boolean(legacyControlRoot) });
   const rootDir = workspace.projectRoot;
 
@@ -314,9 +331,6 @@ async function main() {
   if (command === "config") {
     const subcommand = args._[1];
     if (subcommand === "init") {
-      if (workspace.mode === "external" && args.root === true) {
-        throw new Error("external governance mode does not write wildarrange.config.json into the project repository");
-      }
       await initRuntime(rootDir);
       console.log(JSON.stringify(await writeDefaultWildArrangeConfig(rootDir, {
         root: Boolean(args.root),

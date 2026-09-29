@@ -25,6 +25,7 @@ import {
   nowIso,
   readJson,
   resolveWildArrangePath,
+  resolveWildArrangeRoot,
 } from "../infra/runtime-store.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
@@ -317,7 +318,8 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
     const deliveryWorktreeDir = result.isolation === "git-worktree" && result.worktreeAvailable === true && result.workDir
       ? path.resolve(rootDir, result.workDir)
       : null;
-    if (deliveryWorktreeDir) assertPathInsideRoot(rootDir, deliveryWorktreeDir, result.workDir);
+    // 任务 worktree 落在运行态根内（外置模式下在项目之外）
+    if (deliveryWorktreeDir) assertPathInsideRoot(resolveWildArrangeRoot(rootDir), deliveryWorktreeDir, result.workDir);
     const finalized = await finalizeAdmissionWithinLock(rootDir, options.taskId, {
       workerResult: claim.workerResult,
       changedPaths: appliedPaths,

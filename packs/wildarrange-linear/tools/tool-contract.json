@@ -4,9 +4,14 @@
   "generatedFrom": "src/interface/cli-help.mjs",
   "tools": [
     {
+      "name": "wildarrange_setup",
+      "command": "wildarrange setup --governance-root <path> [--repository <git-url>] [--target codex|cursor|kimi|all] [--default-branch main]",
+      "purpose": "一步接入外置治理：创建治理仓（含 Git 初始提交与默认武装配置）→ attach → init → 生成宿主 Adapter 包；客户项目零写入"
+    },
+    {
       "name": "wildarrange_project_init_governance",
       "command": "wildarrange project init-governance --governance-root <path> --repository <git-url> [--default-branch main]",
-      "purpose": "在项目外创建不覆盖已有文件的治理仓库骨架；不自动操作 Git"
+      "purpose": "在项目外创建不覆盖已有文件的治理仓库骨架与默认武装配置；非 Git 目录自动 git init 并提交初始 commit"
     },
     {
       "name": "wildarrange_project_attach",
