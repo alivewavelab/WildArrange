@@ -13,12 +13,6 @@
 | 查看三根连接            | `node ./bin/wildarrange.mjs project show` |
 | 写入双仓集成验收收据    | `node ./bin/wildarrange.mjs integration accept --project-sha <40-char-sha> --governance-sha <40-char-sha> --reason "..."`（只写外置运行态） |
 | 生成默认配置            | `node ./bin/wildarrange.mjs config init --root`（`--armed` 直接武装质量门） |
-| 登记当前设备            | `node ./bin/wildarrange.mjs device register --name macbook`             |
-| 查看 Git 协调状态       | `node ./bin/wildarrange.mjs coordination status`                        |
-| 显式远端领取任务        | `node ./bin/wildarrange.mjs coordination claim --task T001 --owner ZhuRong` |
-| 准备跨设备交接          | `node ./bin/wildarrange.mjs handoff prepare --task T001 --to-device-id <uuid> --to-device-name mac-mini` |
-| 推送跨设备交接          | `node ./bin/wildarrange.mjs handoff push --task T001`                    |
-| 接受跨设备交接          | `node ./bin/wildarrange.mjs handoff accept --plan <planId> --task T001`  |
 | 安装 adapter        | `node ./bin/wildarrange.mjs adapter install --target all --mode local` |
 | 激活外置 Cursor Hook | `node ./bin/wildarrange.mjs adapter activate --target cursor`（备份并合并用户级配置，不写客户项目） |
 | 卸载 adapter        | `node ./bin/wildarrange.mjs adapter uninstall --target all`            |

@@ -27,16 +27,15 @@ import {
 import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
 import { persistTaskState, writeOutbox } from "./task-board.mjs";
 import { findRunnableTask } from "../infra/task-predicates.mjs";
-import { assertCurrentTaskOwnership, coordinateTaskClaim } from "./remote-ownership.mjs";
+import { resolveTaskBranchTarget } from "./task-branch.mjs";
 import { assertCommandWorkerAgent } from "../infra/agent-registry.mjs";
-import { assertTaskOrDeliveredOwnership, assertContractWorkspaceAvailable } from "./integration.mjs";
+import { assertContractWorkspaceAvailable } from "./integration.mjs";
 import { ensureLinearDeliveryWorkspace } from "./linear-delivery.mjs";
 import {
   persistAcceptanceProofFailure,
   persistCheckpointWriteFailure,
   persistCommandRecoveryRequired,
   persistRevalidationRequired,
-  taskOwnershipGate,
 } from "./linear-recovery.mjs";
 import { recordPreExecuteSnapshot } from "./linear-task-support.mjs";
 
@@ -100,10 +99,9 @@ async function executeTaskNodeUnlocked(rootDir, options = {}) {
   options = { ...options, executionContextPath: readiness?.contextPath };
   task.owner = assertCommandWorkerAgent(task.owner || "Jiuwei");
   if (task.status === "pending") {
-    task.coordination = await coordinateTaskClaim(rootDir, {
+    task.coordination = await resolveTaskBranchTarget(rootDir, {
       planId: taskState.planId,
       task,
-      owner: task.owner,
     });
     task.status = "in_progress";
     task.attempts += 1;
@@ -115,8 +113,6 @@ async function executeTaskNodeUnlocked(rootDir, options = {}) {
       attempt: task.attempts,
     }, () => persistTaskState(rootDir, taskState));
     await writeSnapshot(rootDir, "node_execute_started", { planId: taskState.planId, taskId: task.id });
-  } else {
-    await assertCurrentTaskOwnership(rootDir, task);
   }
 
   const deliveryWorkspace = await ensureLinearDeliveryWorkspace(rootDir, taskState.planId, task, taskState.tasks);
@@ -180,7 +176,6 @@ async function verifyTaskNodeUnlocked(rootDir, options = {}) {
   const taskState = await loadTaskState(rootDir);
   if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["verifying", "in_progress"]);
-  await assertCurrentTaskOwnership(rootDir, task);
   const deliveryWorkspace = await ensureLinearDeliveryWorkspace(rootDir, taskState.planId, task, taskState.tasks);
 
   task.status = "verifying";
@@ -227,7 +222,6 @@ async function scopeTaskNodeUnlocked(rootDir, options = {}) {
   const taskState = await loadTaskState(rootDir);
   if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["verifying", "in_progress", "pending"]);
-  await assertCurrentTaskOwnership(rootDir, task);
   const deliveryWorkspace = await ensureLinearDeliveryWorkspace(rootDir, taskState.planId, task, taskState.tasks);
   const executionPaths = [...task.evidence].reverse().find((entry) => entry.kind === "execution_paths");
   const scopeEnvelope = await invokeCapability("scope", {
@@ -267,7 +261,6 @@ async function reviewTaskNodeUnlocked(rootDir, options = {}) {
   const taskState = await loadTaskState(rootDir);
   if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["verifying", "in_progress"]);
-  await assertCurrentTaskOwnership(rootDir, task);
   const deliveryWorkspace = await ensureLinearDeliveryWorkspace(rootDir, taskState.planId, task, taskState.tasks);
   const workerResult = [...task.evidence].reverse().find((entry) => entry.kind === "worker");
   const verifyResult = task.last_verify_result || [...task.evidence].reverse().find((entry) => entry.kind === "verifier");
@@ -330,7 +323,6 @@ export async function checkpointTaskNodeWithinLock(rootDir, options = {}) {
   const taskState = await loadTaskState(rootDir);
   if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
   const task = resolveNodeTask(taskState.tasks, options.taskId, ["verifying", "in_progress"]);
-  await assertTaskOrDeliveredOwnership(rootDir, taskState.planId, task);
   if (task.last_failure?.reason === "command_termination_failed" && options.force !== true) {
     return { status: "recovery_required", task, commandEvidence: task.last_failure.commandEvidence || null };
   }
@@ -359,7 +351,6 @@ export async function checkpointTaskNodeWithinLock(rootDir, options = {}) {
         unavailableReason: current.reason,
         executionRoot: deliveryWorkspace?.workDir || rootDir,
         runId: deliveryWorkspace?.runId,
-        preCompletionGate: () => taskOwnershipGate(rootDir, task.id),
       });
       verifyResult = pipeline.evidence.verifyResult;
       scopeResult = pipeline.evidence.scopeResult;
@@ -419,9 +410,9 @@ export async function checkpointTaskNodeWithinLock(rootDir, options = {}) {
     }
     if (completion.status === "revalidation_required") {
       await persistRevalidationRequired(rootDir, taskState, task, {
-        integrationGuard: completion.integrationGate,
-        summaryFallback: "remote task ownership changed before checkpoint",
-        retryHint: "旧设备必须停止写入；由当前远端 owner 重新运行质量门与 checkpoint",
+        integrationGate: completion.integrationGate,
+        summaryFallback: "task branch baseline changed before checkpoint",
+        retryHint: "确认 task branch 基线与工作区归属后，重新运行质量门与 checkpoint",
         ledgerEvent: { type: "node_checkpoint_revalidation_required", planId: taskState.planId, taskId: task.id },
       });
       return { status: "revalidation_required", task, verifyResult, scopeResult, reviewResult, acceptanceProof };

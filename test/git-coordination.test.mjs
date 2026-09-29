@@ -2,13 +2,13 @@
 // 文件名称：git-coordination.test.mjs
 // 所属模块：test
 // 作用说明：
-//   验证 Git 协作：handoff 准备/推送/接管、parallel/linear 与 worktree、
-//   remote ownership 登记与 claim、memory digest、integration guard、delivery commit。
-//   不测：真实远程 push 或 GitHub PR 集成。
+//   验证单机 Git 交付：task branch 独占（同一分支不得被两个可写任务占用）、
+//   delivery commit 只含本任务路径、普通 push 不移动 main、脏基线与越界文件拒绝、
+//   parallel/linear worktree、memory digest。不测：GitHub PR 集成。
 //
 // 【运行原理速读】
-//   在临时 git 仓库初始化 runtime，执行 claim/handoff/worktree 序列，
-//   断言 HEAD、changed paths 与 coordination 状态一致。
+//   在临时 git 仓库初始化 runtime，执行 claim/worktree/admission 序列，
+//   断言 HEAD、changed paths 与 task.coordination 状态一致。
 // =============================================================================
 
 import assert from "node:assert/strict";
@@ -19,22 +19,12 @@ import path from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 
-import {
-  acceptTaskHandoff,
-  prepareTaskHandoff,
-  pushTaskHandoff,
-  takeoverTaskOwnership,
-} from "../src/orchestration/handoff.mjs";
 import { admitParallelAgentResult, closeParallelAgentRun, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
-import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtime.mjs";
+import { runNextTask } from "../src/orchestration/linear-runtime.mjs";
 import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { claimTeamTask, persistTaskState } from "../src/orchestration/task-board.mjs";
-import {
-  assertCurrentTaskOwnership,
-  coordinateTaskClaim,
-  coordinationStatus,
-  registerCoordinationDevice,
-} from "../src/orchestration/remote-ownership.mjs";
+import { ensureLinearDeliveryWorkspace } from "../src/orchestration/linear-delivery.mjs";
+import { resolveTaskBranchTarget } from "../src/orchestration/task-branch.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
 import { collectGitChangedPaths, readGitHead, readGitTopLevel } from "../src/infra/git-diff.mjs";
@@ -43,13 +33,11 @@ import { prepareAgentWorktree } from "../src/infra/git-worktree.mjs";
 import { loadWildArrangeConfig } from "../src/infra/runtime-config.mjs";
 import { readJson } from "../src/infra/runtime-store.mjs";
 import {
-  captureIntegrationGuard,
   createTaskDeliveryCommit,
   inspectTaskWorktreeBaseline,
   pushTaskDeliveryCommit,
   pushCommit,
   synchronizeTaskWorktreeToDelivery,
-  verifyIntegrationGuard,
 } from "../src/infra/git-coordination.mjs";
 import {
   integrateAdmissionCommit,
@@ -190,220 +178,9 @@ test("git changed-path probe uses argv safely and excludes .wildarrange", async 
   });
 });
 
-test("git coordination defaults to guarded and strict mode restores mandatory safety flags", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const defaults = await loadWildArrangeConfig(dir);
-    assert.equal(defaults.config.gitCoordination.mode, "guarded");
-    assert.equal(defaults.config.gitCoordination.requireWorktreeForParallelWrites, true);
-
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
-      gitCoordination: { mode: "guarded", requireTakeoverReason: false },
-    }), "utf8");
-    const guarded = await loadWildArrangeConfig(dir);
-    assert.equal(guarded.config.gitCoordination.requireTakeoverReason, true);
-
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
-      gitCoordination: {
-        mode: "strict",
-        requireWorktreeForParallelWrites: false,
-        requireVerificationBeforeHandoff: false,
-        requireCleanHandoff: false,
-        requireTakeoverReason: false,
-      },
-    }), "utf8");
-    const strict = await loadWildArrangeConfig(dir);
-    assert.equal(strict.config.gitCoordination.mode, "strict");
-    assert.equal(strict.config.gitCoordination.requireWorktreeForParallelWrites, true);
-    assert.equal(strict.config.gitCoordination.requireVerificationBeforeHandoff, true);
-    assert.equal(strict.config.gitCoordination.requireCleanHandoff, true);
-    assert.equal(strict.config.gitCoordination.requireTakeoverReason, true);
-  });
-});
-
-test("off and manual modes do not claim remotely unless manual is explicitly forced", async () => {
+test("writable parallel agents get a worktree and one local run claim per task", async () => {
   await withRemoteClones(async ({ cloneA }) => {
-    await initializeTaskRuntime(cloneA, "device-a");
-    const state = await loadTaskState(cloneA);
-    const task = state.tasks[0];
-
-    await writeFile(path.join(cloneA, "wildarrange.config.json"), JSON.stringify({
-      gitCoordination: { mode: "off" },
-    }), "utf8");
-    const disabled = await coordinateTaskClaim(cloneA, {
-      planId: state.planId,
-      task,
-      owner: "ZhuRong",
-    });
-    assert.equal(disabled.status, "disabled");
-
-    await writeFile(path.join(cloneA, "wildarrange.config.json"), JSON.stringify({
-      gitCoordination: { mode: "manual" },
-    }), "utf8");
-    const manual = await coordinateTaskClaim(cloneA, {
-      planId: state.planId,
-      task,
-      owner: "ZhuRong",
-    });
-    assert.equal(manual.status, "manual");
-    const forced = await coordinateTaskClaim(cloneA, {
-      planId: state.planId,
-      task,
-      owner: "ZhuRong",
-      force: true,
-    });
-    assert.equal(forced.status, "claimed");
-  });
-});
-
-test("adversarial round 1: concurrent device claims produce exactly one remote write owner", async () => {
-  await withRemoteClones(async ({ cloneA, cloneB }) => {
-    await initializeTaskRuntime(cloneA, "device-a");
-    await initializeTaskRuntime(cloneB, "device-b");
-
-    const outcomes = await Promise.allSettled([
-      claimTeamTask(cloneA, { taskId: "T001", owner: "ZhuRong" }),
-      claimTeamTask(cloneB, { taskId: "T001", owner: "ZhuRong" }),
-    ]);
-    assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 1);
-    assert.equal(outcomes.filter((outcome) => outcome.status === "rejected").length, 1);
-    const winner = outcomes.find((outcome) => outcome.status === "fulfilled").value;
-    assert.equal(winner.task.coordination.status, "claimed");
-    assert.match(winner.task.coordination.branch, /^wildarrange\/task\/P-GIT\/T001$/);
-    assert.match(
-      outcomes.find((outcome) => outcome.status === "rejected").reason.message,
-      /already claimed|claim lost/i,
-    );
-  });
-});
-
-test("handoff commit transfers the task and makes the previous device fail closed", async () => {
-  await withRemoteClones(async ({ cloneA, cloneB }) => {
-    await initializeTaskRuntime(cloneA, "device-a");
-    const deviceB = await initializeTaskRuntime(cloneB, "device-b");
-    const claimed = await claimTeamTask(cloneA, { taskId: "T001", owner: "ZhuRong" });
-    await mkdir(path.join(cloneA, "src"), { recursive: true });
-    await writeFile(path.join(cloneA, "src", "task.txt"), "handoff payload\n", "utf8");
-    await writeFile(path.join(cloneA, ".wildarrange", "tracked-runtime.json"), "{\"local\":true}\n", "utf8");
-    await git(cloneA, ["add", "src/task.txt"]);
-    await git(cloneA, ["add", "-f", ".wildarrange/tracked-runtime.json"]);
-    await git(cloneA, ["-c", "user.name=Device A", "-c", "user.email=a@example.invalid", "commit", "-m", "committed task payload"]);
-
-    const prepared = await prepareTaskHandoff(cloneA, {
-      taskId: "T001",
-      toDeviceId: deviceB.deviceId,
-      toDeviceName: "device-b",
-    });
-    assert.equal(prepared.status, "prepared");
-    assert.deepEqual(prepared.changedPaths, ["src/task.txt"]);
-    assert.equal(prepared.omittedPaths.includes(".wildarrange/tracked-runtime.json"), false);
-    assert.deepEqual(prepared.runtimePathsExcluded, [".wildarrange/tracked-runtime.json"]);
-    await git(cloneA, ["push", "origin", `${prepared.checkpointSha}:refs/heads/${prepared.branch}`]);
-    const pushed = await pushTaskHandoff(cloneA, { taskId: "T001" });
-    assert.equal(pushed.status, "pushed");
-    assert.equal(pushed.reconciled, true);
-    const pushedAgain = await pushTaskHandoff(cloneA, { taskId: "T001" });
-    assert.equal(pushedAgain.status, "pushed");
-    assert.equal(pushedAgain.reconciled, true);
-    const pushEvents = (await readLedger(cloneA)).filter(
-      (entry) => entry.type === "task_handoff_pushed" && entry.taskId === "T001",
-    );
-    assert.equal(pushEvents.length, 1);
-    await assert.rejects(
-      () => assertCurrentTaskOwnership(cloneA, claimed.task),
-      /remote ownership changed|not writable/i,
-    );
-
-    const accepted = await acceptTaskHandoff(cloneB, { planId: "P-GIT", taskId: "T001" });
-    assert.equal(accepted.status, "accepted");
-    assert.equal(accepted.task.coordination.deviceName, "device-b");
-    assert.equal(accepted.task.coordination.remoteHeadSha, accepted.acceptSha);
-    assert.equal((await readFile(path.join(cloneB, "src", "task.txt"), "utf8")).replaceAll("\r\n", "\n"), "handoff payload\n");
-    await assert.rejects(
-      readFile(path.join(cloneB, ".wildarrange", "tracked-runtime.json"), "utf8"),
-      /ENOENT/,
-    );
-
-    const stateB = await loadTaskState(cloneB);
-    assert.equal(stateB.tasks[0].status, "in_progress");
-    assert.equal(stateB.tasks[0].coordination.deviceName, "device-b");
-    const resumedAccept = await acceptTaskHandoff(cloneB, { planId: "P-GIT", taskId: "T001" });
-    assert.equal(resumedAccept.resumed, true);
-    assert.equal(resumedAccept.acceptSha, accepted.acceptSha);
-    const handoffRecord = await readJson(path.join(cloneB, ".wildarrange", "coordination", "handoffs", "T001.json"), null);
-    assert.equal(handoffRecord.status, "accepted");
-    const acceptedEvents = (await readLedger(cloneB)).filter(
-      (entry) => entry.type === "task_handoff_accepted" && entry.taskId === "T001",
-    );
-    assert.equal(acceptedEvents.length, 1);
-    await assert.rejects(
-      async () => assertCurrentTaskOwnership(cloneA, (await loadTaskState(cloneA)).tasks[0]),
-      /not writable|remote ownership changed/i,
-    );
-    await assert.rejects(
-      () => runWorkflowNode(cloneA, "verify", { taskId: "T001" }),
-      /not writable|remote ownership changed/i,
-    );
-    await assert.rejects(
-      () => runWorkflowNode(cloneA, "scope", { taskId: "T001" }),
-      /not writable|remote ownership changed/i,
-    );
-    await assert.rejects(
-      () => runWorkflowNode(cloneA, "review", { taskId: "T001" }),
-      /not writable|remote ownership changed/i,
-    );
-    await assert.rejects(
-      () => runWorkflowNode(cloneA, "checkpoint", { taskId: "T001" }),
-      /not writable|remote ownership changed/i,
-    );
-  });
-});
-
-test("old device cannot admit a retained child result after handoff", async () => {
-  await withRemoteClones(async ({ cloneA, cloneB }) => {
-    await initializeTaskRuntime(cloneA, "device-a");
-    const deviceB = await initializeTaskRuntime(cloneB, "device-b");
-    const command = resultCommand("src/stale.txt", "stale\n");
-    const batch = await runParallelAgents(cloneA, { taskIds: ["T001"], agent: "ZhuRong", command });
-    await claimTeamTask(cloneA, { taskId: "T001", owner: "ZhuRong" });
-    await prepareTaskHandoff(cloneA, {
-      taskId: "T001",
-      toDeviceId: deviceB.deviceId,
-      toDeviceName: "device-b",
-    });
-    await pushTaskHandoff(cloneA, { taskId: "T001" });
-    await acceptTaskHandoff(cloneB, { planId: "P-GIT", taskId: "T001" });
-
-    await assert.rejects(
-      () => admitParallelAgentResult(cloneA, { runId: batch.runId, taskId: "T001" }),
-      /not writable|remote ownership changed/i,
-    );
-    await assert.rejects(readFile(path.join(cloneA, "src", "stale.txt"), "utf8"), /ENOENT/);
-  });
-});
-
-test("handoff push refuses source changes made after prepare", async () => {
-  await withRemoteClones(async ({ cloneA, cloneB }) => {
-    await initializeTaskRuntime(cloneA, "device-a");
-    const deviceB = await initializeTaskRuntime(cloneB, "device-b");
-    await claimTeamTask(cloneA, { taskId: "T001", owner: "ZhuRong" });
-    await mkdir(path.join(cloneA, "src"), { recursive: true });
-    await writeFile(path.join(cloneA, "src", "task.txt"), "prepared\n", "utf8");
-    await prepareTaskHandoff(cloneA, {
-      taskId: "T001",
-      toDeviceId: deviceB.deviceId,
-    });
-    await writeFile(path.join(cloneA, "src", "task.txt"), "changed after prepare\n", "utf8");
-    await assert.rejects(
-      () => pushTaskHandoff(cloneA, { taskId: "T001" }),
-      /workspace changed after prepare/i,
-    );
-  });
-});
-
-test("guarded mode gives writable parallel agents a worktree and one local run owner", async () => {
-  await withRemoteClones(async ({ cloneA }) => {
-    await initializeTaskRuntime(cloneA, "device-a");
+    await initializeTaskRuntime(cloneA);
     const command = resultCommand("src/task.txt", "ok\n");
     const outcomes = await Promise.allSettled([
       runParallelAgents(cloneA, { taskIds: ["T001"], agent: "ZhuRong", command }),
@@ -421,7 +198,7 @@ test("guarded mode gives writable parallel agents a worktree and one local run o
   });
 });
 
-test("guarded mode without a remote still delivers to a clean local task branch worktree", async () => {
+test("without a remote, delivery still commits to a clean local task branch worktree", async () => {
   await withTempDir(async (repo) => {
     await git(repo, ["init", "--initial-branch=main"]);
     await writeFile(path.join(repo, ".gitignore"), ".wildarrange/\n", "utf8");
@@ -429,7 +206,7 @@ test("guarded mode without a remote still delivers to a clean local task branch 
     await git(repo, ["add", ".gitignore", "README.md"]);
     await git(repo, ["-c", "user.name=Seed", "-c", "user.email=seed@example.invalid", "commit", "-m", "initial"]);
     const mainBefore = (await git(repo, ["rev-parse", "main"])).trim();
-    await initializeTaskRuntime(repo, "local-device");
+    await initializeTaskRuntime(repo);
 
     const batch = await runParallelAgents(repo, {
       taskIds: ["T001"],
@@ -451,7 +228,7 @@ test("guarded mode without a remote still delivers to a clean local task branch 
 
     const state = await loadTaskState(repo);
     const task = state.tasks[0];
-    assert.equal(task.coordination.status, "degraded");
+    assert.equal(task.coordination.status, "local");
     assert.equal(task.coordination.localGit, true);
     assert.equal(task.coordination.branch, "wildarrange/task/P-GIT/T001");
     const localTaskHead = (await git(repo, ["rev-parse", task.coordination.branch])).trim();
@@ -489,7 +266,7 @@ test("local task delivery resumes the same commit after checkpoint failure", asy
     await git(repo, ["add", ".gitignore", "README.md"]);
     await git(repo, ["-c", "user.name=Seed", "-c", "user.email=seed@example.invalid", "commit", "-m", "initial"]);
     const mainBefore = (await git(repo, ["rev-parse", "main"])).trim();
-    await initializeTaskRuntime(repo, "local-device");
+    await initializeTaskRuntime(repo);
     const batch = await runParallelAgents(repo, {
       taskIds: ["T001"],
       agent: "ZhuRong",
@@ -517,7 +294,7 @@ test("local task delivery resumes the same commit after checkpoint failure", asy
   });
 });
 
-test("missing task coordination degrades explicitly when no integration guard is active", async () => {
+test("missing task branch metadata degrades explicitly for a non-Git task", async () => {
   await withTempDir(async (rootDir) => {
     await initRuntime(rootDir);
     const result = await integrateAdmissionCommit(rootDir, {
@@ -526,82 +303,16 @@ test("missing task coordination degrades explicitly when no integration guard is
       task: { id: "T001" },
       runId: "agent_run_missing_coordination",
       changedPaths: [],
-      integrationGuard: { active: false, reason: "project is not a Git repository" },
     });
     assert.equal(result.pass, true);
     assert.equal(result.status, "local_degraded");
-    assert.equal(result.reason, "task coordination metadata is unavailable");
-  });
-});
-
-test("adversarial round 2: integration guard rejects a stale remote main SHA", async () => {
-  await withRemoteClones(async ({ cloneA, cloneB }) => {
-    await initRuntime(cloneA);
-    const { config } = await loadWildArrangeConfig(cloneA);
-    const guard = await captureIntegrationGuard(cloneA, config.gitCoordination);
-    assert.equal(guard.active, true);
-
-    await writeFile(path.join(cloneB, "remote-change.txt"), "changed elsewhere\n", "utf8");
-    await git(cloneB, ["add", "remote-change.txt"]);
-    await git(cloneB, ["-c", "user.name=Device B", "-c", "user.email=b@example.invalid", "commit", "-m", "remote change"]);
-    await git(cloneB, ["push", "origin", "main"]);
-
-    const verified = await verifyIntegrationGuard(cloneA, guard);
-    assert.equal(verified.pass, false);
-    assert.equal(verified.expectedSha, guard.expectedSha);
-    assert.notEqual(verified.actualSha, guard.expectedSha);
-  });
-});
-
-test("adversarial round 2 integration: admission rolls back before checkpoint when remote main changes during gates", async () => {
-  await withRemoteClones(async ({ cloneA, cloneB }) => {
-    await initRuntime(cloneA);
-    await registerCoordinationDevice(cloneA, { name: "device-a", force: true });
-    const advanceScript = path.join(cloneA, ".wildarrange", "artifacts", "advance-remote.cjs");
-    await mkdir(path.dirname(advanceScript), { recursive: true });
-    await writeFile(advanceScript, [
-      "const { execFileSync } = require('node:child_process');",
-      "const { writeFileSync } = require('node:fs');",
-      "const path = require('node:path');",
-      `const other = ${JSON.stringify(cloneB)};`,
-      "writeFileSync(path.join(other, 'remote-race.txt'), 'race\\n');",
-      "execFileSync('git', ['-C', other, 'add', 'remote-race.txt']);",
-      "execFileSync('git', ['-C', other, '-c', 'user.name=Device B', '-c', 'user.email=b@example.invalid', 'commit', '-m', 'integration race']);",
-      "execFileSync('git', ['-C', other, 'push', 'origin', 'main']);",
-    ].join("\n"), "utf8");
-    const planPath = path.join(cloneA, ".wildarrange", "artifacts", "admission-race-plan.json");
-    await writeFile(planPath, JSON.stringify({
-      id: "P-RACE",
-      title: "Admission remote race",
-      objective: "A stale integration result must never checkpoint.",
-      tasks: [{
-        id: "T001",
-        subject: "Race remote main",
-        writable_paths: ["src/**"],
-        verify_commands: [`node ${JSON.stringify(advanceScript)}`],
-        review_commands: ["node -e \"require('node:assert/strict').equal(require('node:fs').readFileSync('src/admit.txt','utf8'),'ok\\n')\""],
-      }],
-    }, null, 2), "utf8");
-    await importPlan(cloneA, planPath);
-    const command = resultCommand("src/admit.txt", "ok\n");
-    const batch = await runParallelAgents(cloneA, { taskIds: ["T001"], agent: "ZhuRong", command });
-    const admitted = await admitParallelAgentResult(cloneA, { runId: batch.runId, taskId: "T001" });
-    assert.equal(admitted.status, "revalidation_required");
-    assert.equal(admitted.rollback.status, "rolled_back");
-    await assert.rejects(readFile(path.join(cloneA, "src", "admit.txt"), "utf8"), /ENOENT/);
-    await assert.rejects(
-      readFile(path.join(cloneA, ".wildarrange", "checkpoints", "P-RACE", "T001.json"), "utf8"),
-      /ENOENT/,
-    );
-    const state = await loadTaskState(cloneA);
-    assert.equal(state.tasks[0].status, "pending");
-    assert.equal(state.tasks[0].last_failure.reason, "integration_head_changed");
+    assert.equal(result.reason, "task branch metadata is unavailable");
   });
 });
 
 test("successful admission pushes a delivery commit to the task branch and leaves main unchanged", async () => {
   await withRemoteClones(async ({ remote, cloneA }) => {
-    await initializeTaskRuntime(cloneA, "device-a");
+    await initializeTaskRuntime(cloneA);
     const before = (await git(remote, ["rev-parse", "main"])).trim();
     const batch = await runParallelAgents(cloneA, {
       taskIds: ["T001"],
@@ -636,10 +347,8 @@ test("successful admission pushes a delivery commit to the task branch and leave
 
 test("lost task-branch push response reconciles when the remote task branch advanced to a descendant", async () => {
   await withRemoteClones(async ({ remote, cloneA, cloneB }) => {
-    await initializeTaskRuntime(cloneA, "device-a");
+    await initializeTaskRuntime(cloneA);
     const claimed = await claimTeamTask(cloneA, { taskId: "T001", owner: "ZhuRong" });
-    const { config } = await loadWildArrangeConfig(cloneA);
-    const integrationGuard = await captureIntegrationGuard(cloneA, config.gitCoordination, { force: true });
     await mkdir(path.join(cloneA, "src"), { recursive: true });
     await writeFile(path.join(cloneA, "src", "lost-response.txt"), "integrated\n", "utf8");
 
@@ -651,7 +360,6 @@ test("lost task-branch push response reconciles when the remote task branch adva
       task: claimed.task,
       runId: "agent_run_lost_push_response",
       changedPaths: ["src/lost-response.txt"],
-      integrationGuard,
       pushCommitFn: async (rootDir, pushOptions) => {
         const pushed = await pushCommit(rootDir, pushOptions);
         assert.equal(pushed.ok, true);
@@ -683,10 +391,8 @@ test("lost task-branch push response reconciles when the remote task branch adva
 
 test("unknown integration push outcome stays durable and forbids rollback across an offline retry", async () => {
   await withRemoteClones(async ({ dir, remote, cloneA }) => {
-    await initializeTaskRuntime(cloneA, "device-a");
+    await initializeTaskRuntime(cloneA);
     const claimed = await claimTeamTask(cloneA, { taskId: "T001", owner: "ZhuRong" });
-    const { config } = await loadWildArrangeConfig(cloneA);
-    const integrationGuard = await captureIntegrationGuard(cloneA, config.gitCoordination, { force: true });
     await mkdir(path.join(cloneA, "src"), { recursive: true });
     await writeFile(path.join(cloneA, "src", "unknown-push.txt"), "keep until resolved\n", "utf8");
     const runId = "agent_run_unknown_push";
@@ -696,7 +402,6 @@ test("unknown integration push outcome stays durable and forbids rollback across
       task: claimed.task,
       runId,
       changedPaths: ["src/unknown-push.txt"],
-      integrationGuard,
     };
     const unreachableRemote = path.join(dir, "temporarily-unreachable.git");
 
@@ -721,7 +426,7 @@ test("unknown integration push outcome stays durable and forbids rollback across
     const second = await integrateAdmissionCommit(cloneA, {
       ...options,
       pushCommitFn: async () => {
-        assert.fail("an unresolved push must not be retried while its fences are unreachable");
+        assert.fail("an unresolved push must not be retried while the remote is unreachable");
       },
     });
     assert.equal(second.reason, "integration_push_outcome_unknown");
@@ -734,7 +439,7 @@ test("unknown integration push outcome stays durable and forbids rollback across
 
 test("admission rejects unrelated dirty files even when they are inside writable_paths", async () => {
   await withRemoteClones(async ({ remote, cloneA }) => {
-    await initializeTaskRuntime(cloneA, "device-a");
+    await initializeTaskRuntime(cloneA);
     await mkdir(path.join(cloneA, "src"), { recursive: true });
     await writeFile(path.join(cloneA, "src", "unrelated.txt"), "do not publish\n", "utf8");
     const before = (await git(remote, ["rev-parse", "main"])).trim();
@@ -753,9 +458,9 @@ test("admission rejects unrelated dirty files even when they are inside writable
   });
 });
 
-test("checkpoint failure after task-branch delivery keeps ownership and resumes without a second push", async () => {
+test("checkpoint failure after task-branch delivery keeps the claim and resumes without a second push", async () => {
   await withRemoteClones(async ({ remote, cloneA, cloneB }) => {
-    await initializeTaskRuntime(cloneA, "device-a");
+    await initializeTaskRuntime(cloneA);
     const batch = await runParallelAgents(cloneA, {
       taskIds: ["T001"],
       agent: "ZhuRong",
@@ -792,7 +497,6 @@ test("checkpoint failure after task-branch delivery keeps ownership and resumes 
 test("linear remote delivery resumes the pushed commit after checkpoint failure without rerunning worker", async () => {
   await withRemoteClones(async ({ remote, cloneA }) => {
     await initRuntime(cloneA);
-    await registerCoordinationDevice(cloneA, { name: "device-a", force: true });
     const planId = "P-LINEAR-REMOTE";
     await importPlanDefinition(cloneA, {
       id: planId,
@@ -841,30 +545,9 @@ test("linear remote delivery resumes the pushed commit after checkpoint failure 
   });
 });
 
-test("pushed integration is never rolled back when task ownership changes before recovery", async () => {
-  await withRemoteClones(async ({ cloneA, cloneB }) => {
-    const deviceA = await initializeTaskRuntime(cloneA, "device-a");
-    await initializeTaskRuntime(cloneB, "device-b");
-    const { batch } = await createCheckpointFailureAfterIntegration(cloneA, "src/owned-recovery.txt");
-    await takeoverTaskOwnership(cloneB, {
-      planId: "P-GIT",
-      taskId: "T001",
-      expectedDeviceId: deviceA.deviceId,
-      reason: "adversarial transfer after remote integration",
-    });
-    const retried = await admitParallelAgentResult(cloneA, { runId: batch.runId, taskId: "T001" });
-    assert.equal(retried.status, "recovery_required");
-    assert.equal(retried.rollback.status, "not_attempted");
-    assert.equal(await readFile(path.join(cloneA, "src", "owned-recovery.txt"), "utf8"), "recover\n");
-    const state = await loadTaskState(cloneA);
-    assert.equal(state.tasks[0].status, "verifying");
-    assert.equal(state.tasks[0].admission_claim.runId, batch.runId);
-  });
-});
-
 test("pushed task delivery is never silently re-pushed or rolled back after task-branch history rewrite", async () => {
   await withRemoteClones(async ({ remote, cloneA, cloneB }) => {
-    await initializeTaskRuntime(cloneA, "device-a");
+    await initializeTaskRuntime(cloneA);
     const before = (await git(remote, ["rev-parse", "main"])).trim();
     const { batch, integratedSha } = await createCheckpointFailureAfterIntegration(cloneA, "src/rewrite-recovery.txt");
     const intent = await readIntegrationIntent(cloneA, batch.runId, "T001");
@@ -881,212 +564,9 @@ test("pushed task delivery is never silently re-pushed or rolled back after task
   });
 });
 
-test("admission refuses a stale local base even when remote main was stable during gates", async () => {
-  await withRemoteClones(async ({ cloneA, cloneB }) => {
-    await initializeTaskRuntime(cloneA, "device-a");
-    const batch = await runParallelAgents(cloneA, {
-      taskIds: ["T001"],
-      agent: "ZhuRong",
-      command: resultCommand("src/stale-base.txt", "stale base\n"),
-    });
-    await writeFile(path.join(cloneB, "advanced-before-admit.txt"), "new main\n", "utf8");
-    await git(cloneB, ["add", "advanced-before-admit.txt"]);
-    await git(cloneB, ["-c", "user.name=Device B", "-c", "user.email=b@example.invalid", "commit", "-m", "advance before admission"]);
-    await git(cloneB, ["push", "origin", "main"]);
-
-    const admitted = await admitParallelAgentResult(cloneA, { runId: batch.runId, taskId: "T001" });
-    assert.equal(admitted.status, "revalidation_required");
-    assert.equal(admitted.task.last_failure.reason, "integration_base_not_present_in_workspace");
-    assert.equal(admitted.rollback.status, "rolled_back");
-    await assert.rejects(readFile(path.join(cloneA, "src", "stale-base.txt"), "utf8"), /ENOENT/);
-  });
-});
-
-test("two devices deliver different task branches concurrently without moving main", async () => {
-  await withRemoteClones(async ({ remote, cloneA, cloneB }) => {
-    await initializeTaskRuntime(cloneA, "device-a", ["T001", "T002"]);
-    await initializeTaskRuntime(cloneB, "device-b", ["T001", "T002"]);
-    const mainBefore = (await git(remote, ["rev-parse", "main"])).trim();
-    const [batchA, batchB] = await Promise.all([
-      runParallelAgents(cloneA, {
-        taskIds: ["T001"],
-        agent: "ZhuRong",
-        command: resultCommand("src/from-a.txt", "a\n"),
-      }),
-      runParallelAgents(cloneB, {
-        taskIds: ["T002"],
-        agent: "ZhuRong",
-        command: resultCommand("src/from-b.txt", "b\n"),
-      }),
-    ]);
-    const outcomes = await Promise.all([
-      admitParallelAgentResult(cloneA, { runId: batchA.runId, taskId: "T001" }),
-      admitParallelAgentResult(cloneB, { runId: batchB.runId, taskId: "T002" }),
-    ]);
-    assert.equal(outcomes.filter((result) => result.status === "completed").length, 2);
-    assert.equal(outcomes.filter((result) => result.status === "revalidation_required").length, 0);
-    assert.equal((await git(remote, ["rev-parse", "main"])).trim(), mainBefore);
-    const intentA = await readIntegrationIntent(cloneA, batchA.runId, "T001");
-    const intentB = await readIntegrationIntent(cloneB, batchB.runId, "T002");
-    assert.equal(await git(remote, ["show", `${intentA.branch}:src/from-a.txt`]), "a\n");
-    assert.equal(await git(remote, ["show", `${intentB.branch}:src/from-b.txt`]), "b\n");
-  });
-});
-
-test("a device with the same display name cannot accept a handoff addressed to another UUID", async () => {
-  await withRemoteClones(async ({ dir, remote, cloneA, cloneB }) => {
-    await initializeTaskRuntime(cloneA, "device-a");
-    const target = await initializeTaskRuntime(cloneB, "shared-name");
-    const impostorDir = path.join(dir, "device-impostor");
-    await git(dir, ["clone", remote, impostorDir]);
-    const impostor = await initializeTaskRuntime(impostorDir, "shared-name");
-    assert.notEqual(impostor.deviceId, target.deviceId);
-
-    await claimTeamTask(cloneA, { taskId: "T001", owner: "ZhuRong" });
-    await prepareTaskHandoff(cloneA, {
-      taskId: "T001",
-      toDeviceId: target.deviceId,
-      toDeviceName: "shared-name",
-    });
-    await pushTaskHandoff(cloneA, { taskId: "T001" });
-    await assert.rejects(
-      () => acceptTaskHandoff(impostorDir, { planId: "P-GIT", taskId: "T001" }),
-      /targets deviceId/i,
-    );
-    const accepted = await acceptTaskHandoff(cloneB, { planId: "P-GIT", taskId: "T001" });
-    assert.equal(accepted.device.deviceId, target.deviceId);
-  });
-});
-
-test("takeover is idempotently recoverable by the same device and old expected UUID", async () => {
-  await withRemoteClones(async ({ cloneA, cloneB }) => {
-    const deviceA = await initializeTaskRuntime(cloneA, "device-a");
-    await initializeTaskRuntime(cloneB, "device-b");
-    await claimTeamTask(cloneA, { taskId: "T001", owner: "ZhuRong" });
-    const first = await takeoverTaskOwnership(cloneB, {
-      planId: "P-GIT",
-      taskId: "T001",
-      expectedDeviceId: deviceA.deviceId,
-      reason: "test confirmed old device stopped",
-    });
-    assert.equal(first.status, "accepted");
-    const resumed = await takeoverTaskOwnership(cloneB, {
-      planId: "P-GIT",
-      taskId: "T001",
-      expectedDeviceId: deviceA.deviceId,
-      reason: "test confirmed old device stopped",
-    });
-    assert.equal(resumed.resumed, true);
-    assert.equal(resumed.takeoverSha, first.takeoverSha);
-    const events = (await readLedger(cloneB)).filter(
-      (entry) => entry.type === "task_ownership_taken_over" && entry.taskId === "T001",
-    );
-    assert.equal(events.length, 1);
-  });
-});
-
-test("monolithic linear run cannot complete after another device takes ownership mid-worker", async () => {
-  await withRemoteClones(async ({ cloneA, cloneB }) => {
-    const deviceA = await initializeTaskRuntime(cloneA, "device-a");
-    await initializeTaskRuntime(cloneB, "device-b");
-    const plan = {
-      id: "P-LINEAR-RACE",
-      title: "Linear ownership race",
-      objective: "Old device must not checkpoint.",
-      tasks: [{
-        id: "T001",
-        subject: "Long worker",
-        worker_command: "node -e \"setTimeout(()=>{require('fs').mkdirSync('src',{recursive:true});require('fs').writeFileSync('src/old-linear.txt','old\\\\n')},700)\"",
-        writable_paths: ["src/**"],
-        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
-        review_commands: ["node -e \"require('node:assert/strict').ok(require('node:fs').existsSync('src/old-linear.txt'))\""],
-      }],
-    };
-    await importPlanDefinition(cloneA, plan);
-    await importPlanDefinition(cloneB, plan);
-
-    const running = runNextTask(cloneA);
-    await waitForRemoteTaskBranch(cloneB, "wildarrange/task/P-LINEAR-RACE/T001");
-    await takeoverTaskOwnership(cloneB, {
-      planId: "P-LINEAR-RACE",
-      taskId: "T001",
-      expectedDeviceId: deviceA.deviceId,
-      reason: "adversarial ownership transfer during worker",
-    });
-    const result = await running;
-    assert.equal(result.status, "revalidation_required");
-    await assert.rejects(
-      readFile(path.join(cloneA, ".wildarrange", "checkpoints", "P-LINEAR-RACE", "T001.json"), "utf8"),
-      /ENOENT/,
-    );
-    const stateA = await loadTaskState(cloneA);
-    assert.equal(stateA.tasks[0].status, "pending");
-    assert.equal(stateA.tasks[0].coordination.status, "stale");
-  });
-});
-
-test("strict mode rejects a missing configured integration branch", async () => {
-  await withRemoteClones(async ({ cloneA }) => {
-    await initRuntime(cloneA);
-    await writeFile(path.join(cloneA, "wildarrange.config.json"), JSON.stringify({
-      gitCoordination: { mode: "strict", integrationBranch: "does-not-exist" },
-    }), "utf8");
-    const { config } = await loadWildArrangeConfig(cloneA);
-    await assert.rejects(
-      () => captureIntegrationGuard(cloneA, config.gitCoordination),
-      /strict mode.*does not exist/i,
-    );
-  });
-});
-
-test("a remote claim without local task persistence is reconciled by the same device", async () => {
-  await withRemoteClones(async ({ cloneA }) => {
-    await initializeTaskRuntime(cloneA, "device-a");
-    const initialState = await loadTaskState(cloneA);
-    const remoteOnly = await coordinateTaskClaim(cloneA, {
-      planId: initialState.planId,
-      task: initialState.tasks[0],
-      owner: "ZhuRong",
-    });
-    assert.equal(remoteOnly.status, "claimed");
-
-    const claimed = await claimTeamTask(cloneA, { taskId: "T001", owner: "ZhuRong" });
-    assert.equal(claimed.task.coordination.reconciled, true);
-    assert.equal(claimed.task.coordination.remoteHeadSha, remoteOnly.remoteHeadSha);
-  });
-});
-
-test("multi-task partial remote claim failure remains visible and locally recoverable", async () => {
-  await withRemoteClones(async ({ cloneA, cloneB }) => {
-    await initializeTaskRuntime(cloneA, "device-a", ["T001", "T002"]);
-    await initializeTaskRuntime(cloneB, "device-b", ["T001", "T002"]);
-    await claimTeamTask(cloneB, { taskId: "T002", owner: "ZhuRong" });
-
-    await assert.rejects(
-      () => runParallelAgents(cloneA, {
-        taskIds: ["T001", "T002"],
-        agent: "ZhuRong",
-        command: resultCommand("src/{taskId}.txt", "ok\n"),
-      }),
-      /already claimed|claim lost/i,
-    );
-    const stateA = await loadTaskState(cloneA);
-    const taskA = stateA.tasks.find((task) => task.id === "T001");
-    assert.equal(taskA.coordination.status, "claimed");
-    assert.equal(taskA.parallel_run_claim, null);
-    const batchFiles = (await readdir(path.join(cloneA, ".wildarrange", "agent-runs")))
-      .filter((name) => name.endsWith(".json") && name !== "index.json");
-    const batches = await Promise.all(batchFiles.map((name) =>
-      readJson(path.join(cloneA, ".wildarrange", "agent-runs", name), null)));
-    assert.equal(batches.some((batch) => batch?.status === "claim_failed"), true);
-    const recovered = await claimTeamTask(cloneA, { taskId: "T001", owner: "ZhuRong" });
-    assert.equal(recovered.task.coordination.remoteHeadSha, taskA.coordination.remoteHeadSha);
-  });
-});
-
 test("parallel close releases a crash-orphaned claim even when the run has no results", async () => {
   await withRemoteClones(async ({ cloneA }) => {
-    await initializeTaskRuntime(cloneA, "device-a");
+    await initializeTaskRuntime(cloneA);
     const state = await loadTaskState(cloneA);
     state.tasks[0].parallel_run_claim = {
       runId: "agent_run_crashed",
@@ -1116,38 +596,14 @@ test("parallel close releases a crash-orphaned claim even when the run has no re
   });
 });
 
-test("device and coordination CLI commands expose the stable UUID and active mode", async () => {
-  await withRemoteClones(async ({ cloneA }) => {
-    await initRuntime(cloneA);
-    const binPath = path.resolve("bin/wildarrange.mjs");
-    const registered = JSON.parse((await execFileAsync(
-      process.execPath,
-      [binPath, "device", "register", "--name", "cli-device", "--force"],
-      { cwd: cloneA, encoding: "utf8" },
-    )).stdout);
-    assert.match(registered.deviceId, /^[0-9a-f-]{36}$/i);
-    const status = JSON.parse((await execFileAsync(
-      process.execPath,
-      [binPath, "coordination", "status"],
-      { cwd: cloneA, encoding: "utf8" },
-    )).stdout);
-    assert.equal(status.mode, "guarded");
-    assert.equal(status.device.deviceId, registered.deviceId);
-    assert.equal(status.git.active, true);
-    const direct = await coordinationStatus(cloneA);
-    assert.equal(direct.device.deviceId, registered.deviceId);
-  });
-});
-
-async function initializeTaskRuntime(rootDir, deviceName, taskIds = ["T001"]) {
+async function initializeTaskRuntime(rootDir, taskIds = ["T001"]) {
   await initRuntime(rootDir);
-  const device = await registerCoordinationDevice(rootDir, { name: deviceName, force: true });
   const planPath = path.join(rootDir, ".wildarrange", "artifacts", "coordination-plan.json");
   await mkdir(path.dirname(planPath), { recursive: true });
   await writeFile(planPath, JSON.stringify({
     id: "P-GIT",
-    title: "Git coordination",
-    objective: "Only one device writes a task and handoff is durable.",
+    title: "Git delivery",
+    objective: "One writable task owns one task branch and delivers it durably.",
     tasks: taskIds.map((taskId) => ({
       id: taskId,
       subject: `Coordinate task ${taskId}`,
@@ -1157,7 +613,6 @@ async function initializeTaskRuntime(rootDir, deviceName, taskIds = ["T001"]) {
     })),
   }, null, 2), "utf8");
   await importPlan(rootDir, planPath);
-  return device;
 }
 
 async function importPlanDefinition(rootDir, plan) {
@@ -1197,15 +652,6 @@ async function replaceDirectoryWithBlockingFile(dirPath) {
 async function restoreBlockedDirectory(dirPath) {
   await rm(dirPath, { force: true });
   await mkdir(dirPath, { recursive: true });
-}
-
-async function waitForRemoteTaskBranch(rootDir, branch) {
-  for (let attempt = 0; attempt < 80; attempt += 1) {
-    const output = await git(rootDir, ["ls-remote", "--heads", "origin", `refs/heads/${branch}`]);
-    if (output.trim()) return;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error(`timed out waiting for remote task branch ${branch}`);
 }
 
 function resultCommand(filePath, content) {
@@ -1292,10 +738,116 @@ async function git(cwd, args) {
 }
 
 async function withTempDir(fn) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "wildarrange-git-coordination-"));
+  const dir = await mkdtemp(path.join(os.tmpdir(), "wildarrange-git-delivery-"));
   try {
     await fn(dir);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 }
+
+test("one task branch cannot be checked out by two writable worktrees", async () => {
+  await withRemoteClones(async ({ dir, cloneA }) => {
+    const head = (await git(cloneA, ["rev-parse", "HEAD"])).trim();
+    const branch = "wildarrange/task/P-GIT/T001";
+    const first = await prepareAgentWorktree(cloneA, path.join(dir, "first-run"), {
+      isolation: "git-worktree",
+      branchName: branch,
+      startPoint: head,
+    });
+    assert.equal(first.available, true);
+
+    const second = await prepareAgentWorktree(cloneA, path.join(dir, "second-run"), {
+      isolation: "git-worktree",
+      branchName: branch,
+      startPoint: head,
+    });
+    assert.equal(second.available, false);
+    assert.equal(second.occupied, true);
+    assert.match(second.reason, /already checked out by another worktree/);
+    assert.match(second.reason, /two writable tasks cannot share one branch/);
+    await assert.rejects(readFile(path.join(dir, "second-run", "worktree", "README.md"), "utf8"), /ENOENT/);
+
+    // 分支仍存在但 worktree 已移走时，同样拒绝复用，避免接手别的任务留下的分支。
+    await git(cloneA, ["worktree", "remove", "--force", first.workDir]);
+    const third = await prepareAgentWorktree(cloneA, path.join(dir, "third-run"), {
+      isolation: "git-worktree",
+      branchName: branch,
+      startPoint: head,
+    });
+    assert.equal(third.available, false);
+    assert.equal(third.occupied, true);
+    assert.match(third.reason, /already exists/);
+  });
+});
+
+test("a parallel run refuses to start when a linear worktree already holds the task branch", async () => {
+  await withRemoteClones(async ({ cloneA }) => {
+    await initializeTaskRuntime(cloneA);
+    const state = await loadTaskState(cloneA);
+    const task = state.tasks[0];
+    task.coordination = await resolveTaskBranchTarget(cloneA, { planId: state.planId, task });
+    const workspace = await ensureLinearDeliveryWorkspace(cloneA, state.planId, task, state.tasks);
+    assert.equal(workspace.branch, "wildarrange/task/P-GIT/T001");
+    await persistTaskState(cloneA, state);
+
+    const batch = await runParallelAgents(cloneA, {
+      taskIds: ["T001"],
+      agent: "ZhuRong",
+      command: resultCommand("src/second-writer.txt", "second writer\n"),
+    });
+    assert.equal(batch.results[0].pass, false);
+    assert.equal(batch.results[0].worktreeAvailable, false);
+    assert.match(batch.results[0].worktreeReason, /already checked out by another worktree/);
+    assert.match(batch.results[0].stderr, /two writable tasks cannot share one branch/);
+    await assert.rejects(readFile(path.join(cloneA, "src", "second-writer.txt"), "utf8"), /ENOENT/);
+  });
+});
+
+test("task branch push is ordinary: never outside the task prefix and never over a diverged branch", async () => {
+  await withRemoteClones(async ({ dir, remote, cloneA, cloneB }) => {
+    const head = (await git(cloneA, ["rev-parse", "HEAD"])).trim();
+    const branch = "wildarrange/task/P-GIT/T001";
+    const worktree = await prepareAgentWorktree(cloneA, path.join(dir, "push-run"), {
+      isolation: "git-worktree",
+      branchName: branch,
+      startPoint: head,
+    });
+    await writeFile(path.join(worktree.workDir, "mine.txt"), "mine\n", "utf8");
+    const delivery = await createTaskDeliveryCommit(worktree.workDir, {
+      expectedHead: head,
+      expectedBranch: branch,
+      changedPaths: ["mine.txt"],
+    });
+    await assert.rejects(
+      () => pushTaskDeliveryCommit(worktree.workDir, { remote, branch: "main", commitSha: delivery.commitSha }),
+      /refusing automatic push outside task branch prefix/,
+    );
+
+    // 别处已在同名分支上写入不同历史：普通 push 必须被 Git 拒绝，远端保持原样。
+    await writeFile(path.join(cloneB, "theirs.txt"), "theirs\n", "utf8");
+    await git(cloneB, ["add", "theirs.txt"]);
+    await git(cloneB, ["-c", "user.name=Other", "-c", "user.email=o@example.invalid", "commit", "-m", "other history"]);
+    await git(cloneB, ["push", "origin", `HEAD:refs/heads/${branch}`]);
+    const theirs = (await git(remote, ["rev-parse", branch])).trim();
+    const rejected = await pushTaskDeliveryCommit(worktree.workDir, { remote, branch, commitSha: delivery.commitSha });
+    assert.equal(rejected.pass, false);
+    assert.equal(rejected.status, "push_failed");
+    assert.equal((await git(remote, ["rev-parse", branch])).trim(), theirs);
+    assert.equal((await git(remote, ["rev-parse", "main"])).trim(), head);
+  });
+});
+
+test("removed multi-device commands are no longer part of the CLI", async () => {
+  await withRemoteClones(async ({ cloneA }) => {
+    await initRuntime(cloneA);
+    const binPath = path.resolve("bin/wildarrange.mjs");
+    for (const args of [["device", "status"], ["coordination", "status"], ["handoff", "prepare"]]) {
+      await assert.rejects(
+        () => execFileAsync(process.execPath, [binPath, ...args], { cwd: cloneA, encoding: "utf8" }),
+        (error) => error.code !== 0,
+        args.join(" "),
+      );
+    }
+  });
+});

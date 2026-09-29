@@ -19,7 +19,7 @@ import { persistTaskState } from "./task-board.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { updateAgentRunLifecycle } from "./admission-projection.mjs";
 import { listParallelAgentRuns } from "./parallel-run-index.mjs";
-import { inspectGitCoordination, commitIsAncestor } from "../infra/git-coordination.mjs";
+import { inspectGitDelivery, commitIsAncestor } from "../infra/git-coordination.mjs";
 import { readGitHead } from "../infra/git-diff.mjs";
 import { runCommandFile } from "../infra/command-runner.mjs";
 import { assertPathInsideRoot } from "../infra/path-match.mjs";
@@ -114,7 +114,7 @@ export async function cleanupParallelAgentRun(rootDir, options = {}) {
   const status = await parallelAgentStatus(rootDir, { runId: options.runId });
   const taskLedger = await loadTaskLedger(rootDir);
   const { config } = await loadWildArrangeConfig(rootDir);
-  const gitContext = await inspectGitCoordination(rootDir, config.gitCoordination || {}).catch(() => null);
+  const gitContext = await inspectGitDelivery(rootDir, config.gitDelivery || {}).catch(() => null);
   const cleaned = [];
   for (const run of status.runs || []) {
     const batch = await readJson(resolveWildArrangePath(rootDir, "agent-runs", `${run.runId}.json`), null);
@@ -164,12 +164,11 @@ async function inspectParallelCleanupFence(worktreeDir, entry, task, gitContext,
     return { pass: false, reason: "task_identity_unavailable", details: { planId: runPlanId, taskId: entry.taskId } };
   }
   if (["in_progress", "verifying", "recovery_required"].includes(task.status)
-    || task.parallel_run_claim
-    || (task.status !== "completed" && ["claimed", "accepted"].includes(task.coordination?.status))) {
+    || task.parallel_run_claim) {
     return {
       pass: false,
       reason: "task_ownership_requires_retention",
-      details: { taskStatus: task.status, parallelRunClaim: task.parallel_run_claim || null, coordination: task.coordination || null },
+      details: { taskStatus: task.status, parallelRunClaim: task.parallel_run_claim || null },
     };
   }
   const worktreeStatus = await runCommandFile("git", ["-C", worktreeDir, "status", "--porcelain"], worktreeDir, 30_000);

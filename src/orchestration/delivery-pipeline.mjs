@@ -20,7 +20,7 @@
 import { invokeCapability, capabilityModule, capabilityErrorEnvelope } from "../capabilities/gateway.mjs";
 import { lstat } from "node:fs/promises";
 import path from "node:path";
-import { assertTaskOrDeliveredOwnership, integrateAdmissionCommit } from "./integration.mjs";
+import { integrateAdmissionCommit } from "./integration.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
 import { emitDecision } from "../infra/decision-log.mjs";
 import { buildErrorProtocol } from "../infra/error-protocol.mjs";
@@ -171,14 +171,6 @@ export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
     return finish("blocked");
   }
 
-  if (typeof options.preCompletionGate === "function") {
-    const completionGate = await options.preCompletionGate();
-    evidence.integrationGuard = completionGate;
-    if (completionGate?.pass !== true) {
-      return finish("revalidation_required");
-    }
-  }
-
   const completion = await runCompletionSegment(rootDir, planId, task, evidence, {
     delivery: options.delivery,
     executionRoot: options.executionRoot,
@@ -319,7 +311,7 @@ async function emitGateDecision(rootDir, planId, task, envelope, runId = null) {
 /** 为 pipeline 总账决策生成人类可读 reason 摘要。 */
 function pipelineOutcomeReason(status, results, criteria) {
   if (status === "completed") return "全部 gate 通过，checkpoint 已落盘";
-  if (status === "revalidation_required") return "集成基线在 gate 期间变化或存在无归属改动";
+  if (status === "revalidation_required") return "task branch 基线在 gate 期间变化或存在无归属改动";
   const failedStep = results.find((result) => result.status !== "pass");
   if (failedStep) return `${STEP_LABELS[failedStep.capability] || failedStep.capability}门未通过`;
   if (criteria && criteria.pass === false) return "successCriteria 未全部满足";
@@ -356,15 +348,15 @@ async function runCompletionSegment(rootDir, planId, task, evidence, options = {
   evidence.acceptanceProof = proofEnvelope.evidence;
   let integrationGate = null;
   if (delivery.required) {
-    // integration owns the owner/base/remote-intent fences for both paths.
-    // A second linear-only assertion would reject a recovered admission push.
+    // integration 持有 task branch 基线、归属路径与 push intent 的复核；
+    // 线性与 admission 两条路径共用，避免各自再加一层断言。
     integrationGate = await integrateAdmissionCommit(rootDir, {
       ...delivery.target, planId, task, taskId: task.id,
       changedPaths: evidence.scopeResult?.changedPaths || [],
     });
     evidence.integrationCommit = integrationGate;
     evidence.deliveryPending = false;
-    // §3.4：integration 围栏失败只回滚本 run 路径，已 push 的 delivery 由 integration 层保留 intent。
+    // §3.4：integration 复核失败只回滚本 run 路径，已 push 的 delivery 由 integration 层保留 intent。
     if (integrationGate?.pass !== true) {
       await emitGateDecision(rootDir, planId, task, proofEnvelope, options.runId);
       return { status: "revalidation_required", proofEnvelope, integrationGate, checkpointEnvelope: null };
@@ -389,8 +381,6 @@ async function runCompletionSegment(rootDir, planId, task, evidence, options = {
     if (task.delivery_workspace?.runId === delivery.target.runId && integrationGate.pass === true) {
       task.delivery_workspace.deliverySha = integrationGate.integrationSha || integrationGate.commitSha || integrationGate.actualSha;
     }
-  } else {
-    await assertTaskOrDeliveredOwnership(rootDir, planId, task);
   }
   await emitGateDecision(rootDir, planId, task, proofEnvelope, options.runId);
   const checkpointEnvelope = await invokeCapability("checkpoint", { rootDir, planId, task, evidence });
@@ -405,14 +395,13 @@ async function runCompletionSegment(rootDir, planId, task, evidence, options = {
 async function resolveDeliveryFacts(rootDir, task, options) {
   const workspace = task.delivery_workspace;
   const target = options.delivery || (workspace?.workDir && workspace?.runId && workspace?.baseSha
-    ? { runId: workspace.runId, integrationGuard: { active: false, expectedSha: workspace.baseSha },
-        deliveryWorktreeDir: workspace.workDir, deliveryFromWorktree: true }
+    ? { runId: workspace.runId, deliveryWorktreeDir: workspace.workDir, deliveryFromWorktree: true }
     : null);
   if (options.delivery && task.admission_claim?.runId !== options.delivery.runId) {
     throw new Error("delivery target does not match the current admission claim");
   }
   const roots = new Set([rootDir, options.executionRoot, workspace?.workDir, target?.deliveryWorktreeDir].filter(Boolean));
-  let required = Boolean(workspace || task.coordination?.localGit || task.coordination?.remote || target?.integrationGuard?.active);
+  let required = Boolean(workspace || task.coordination?.localGit);
   for (const root of roots) {
     try { await lstat(path.join(root, ".git")); required = true; }
     catch (error) { if (error.code !== "ENOENT") throw error; }

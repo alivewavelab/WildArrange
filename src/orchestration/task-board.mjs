@@ -55,7 +55,7 @@ import {
   validatePlanGraph,
   writeTasksMarkdown,
 } from "./plan-state.mjs";
-import { coordinateTaskClaim } from "./remote-ownership.mjs";
+import { resolveTaskBranchTarget } from "./task-branch.mjs";
 
 // --- 查询 ---
 
@@ -144,7 +144,7 @@ export async function recordTaskEvidence(rootDir, options = {}) {
 
 // --- claim 与创建 ---
 
-/** claim 任务供 worker 执行，含 coordination claim 与 blockedBy 检查。 */
+/** claim 任务供 worker 执行，含 task branch 目标解析与 blockedBy 检查。 */
 export async function claimTeamTask(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `team-task-claim:${options.taskId || "next"}`, () => claimTeamTaskUnlocked(rootDir, options));
 }
@@ -163,11 +163,9 @@ async function claimTeamTaskUnlocked(rootDir, options = {}) {
   if (blockers.length > 0) throw new Error(`task ${task.id} blocked by ${blockers.join(",")}`);
 
   const owner = normalizeAgentName(options.owner || task.owner || DEFAULT_EXECUTOR_AGENT);
-  const coordination = await coordinateTaskClaim(rootDir, {
+  const coordination = await resolveTaskBranchTarget(rootDir, {
     planId: taskState.planId,
     task,
-    owner,
-    force: options.forceCoordination === true,
   });
   task.status = "in_progress";
   task.owner = owner;

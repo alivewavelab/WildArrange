@@ -81,15 +81,11 @@
       "skills": []
     }
   },
-  "gitCoordination": {
-    "mode": "guarded",
+  "gitDelivery": {
     "remote": "origin",
     "integrationBranch": "auto",
     "taskBranchPrefix": "wildarrange/task",
-    "requireWorktreeForParallelWrites": true,
-    "requireVerificationBeforeHandoff": false,
-    "requireCleanHandoff": true,
-    "requireTakeoverReason": true
+    "requireWorktreeForParallelWrites": true
   },
   "parallelAgents": {
     "enabled": true,

@@ -2,7 +2,7 @@
 // 文件名称：admission-claim.mjs
 // 所属模块：orchestration
 // 作用说明：
-//   并行 admission 的第一阶段：状态裁决、ownership 检查、claim 持久化与启动账本。
+//   并行 admission 的第一阶段：状态裁决、claim 互斥检查、claim 持久化与启动账本。
 //   不触碰业务文件，不执行 verifier/review，也不负责 delivery/rollback。
 //
 // 【运行原理速读】
@@ -15,7 +15,6 @@ import { assertContractWorkspaceAvailable } from "./integration.mjs";
 import { loadTaskState } from "./plan-state.mjs";
 import { readChangeRequest } from "./change-governance.mjs";
 import { persistTaskState } from "./task-board.mjs";
-import { assertCurrentTaskOwnership } from "./remote-ownership.mjs";
 import { pathAllowed } from "../infra/path-match.mjs";
 
 /**
@@ -64,14 +63,6 @@ export async function claimAdmission(rootDir, options, { result, files, proposed
       // §3.4：持久 claim 是事务权威；非 owner run 拒绝进入，崩溃须原 run 续跑。
       throw new Error(`task ${options.taskId} is currently claimed by parallel admission run ${task.admission_claim.runId} (phase: ${task.admission_claim.phase}); refusing run ${options.runId}. 若那次 admission 已崩溃，用原 run 重新 admit 即可续跑`);
     }
-    // A finalizing run may already have pushed its integration commit. Let
-    // the same run reach the durable intent reconciliation path even when
-    // task ownership changed; that path never rolls back a known push.
-    // An applying run has not reached that safety point and must still own
-    // the task before it may touch files again.
-    if (task.admission_claim.phase !== "finalizing") {
-      await assertCurrentTaskOwnership(rootDir, task);
-    }
     const priorWorker = [...(task.evidence || [])].reverse().find(
       (entry) => entry?.kind === "worker" && entry.source === "parallel_agent_admission" && entry.runId === options.runId,
     );
@@ -97,7 +88,6 @@ export async function claimAdmission(rootDir, options, { result, files, proposed
       writablePaths: task.writable_paths || [],
     };
   }
-  await assertCurrentTaskOwnership(rootDir, task);
   if (!["pending", "in_progress", "verifying"].includes(task.status)) {
     // §3.4：非法 status 不得进入 apply，避免在终态任务上留下半写 evidence。
     throw new Error(`task ${options.taskId} status ${task.status} cannot admit parallel result`);

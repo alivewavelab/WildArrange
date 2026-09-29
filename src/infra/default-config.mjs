@@ -41,16 +41,12 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
     BaiZe: { role: "independent_reviewer", provider: "host", model: "host-default", reasoning: "xhigh", skills: [] },
     LuWu: { role: "repository_steward", provider: "host", model: "host-default", reasoning: "high", skills: [] },
   },
-  // Git 多 Agent 写协调：mode off|manual|guarded|strict；strict 不可单独削弱子开关
-  gitCoordination: {
-    mode: "guarded", // off=禁用；manual=仅显式请求；guarded=有 guard；strict=最严
-    remote: "origin", // 远端名，用于 fetch/push 与 integration guard
-    integrationBranch: "auto", // auto 时解析 remote HEAD；否则固定分支名
+  // Git 交付：每个可写任务独占 worktree 与 task branch；只做普通非强制 push
+  gitDelivery: {
+    remote: "origin", // 远端名，用于 task branch 的普通 push
+    integrationBranch: "auto", // auto 时解析 remote HEAD；否则固定分支名（worktree 清理时判断是否已并入）
     taskBranchPrefix: "wildarrange/task", // 自动 push 仅允许此前缀下的任务分支
     requireWorktreeForParallelWrites: true, // 并行写必须隔离 worktree
-    requireVerificationBeforeHandoff: false, // true 时 handoff 前须 verify PASS
-    requireCleanHandoff: true, // handoff 前工作区须干净（不含 .wildarrange 运行时）
-    requireTakeoverReason: true, // 接管任务须留 immutable 原因（normalize 不可关）
   },
   // 并行 spawn 子 Agent：隔离目录、超时与 adapter 命令模板占位
   parallelAgents: {

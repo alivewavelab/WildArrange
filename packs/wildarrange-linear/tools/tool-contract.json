@@ -99,46 +99,6 @@
       "purpose": "校验 config 基线"
     },
     {
-      "name": "wildarrange_device_register",
-      "command": "wildarrange device register [--name macbook] [--force]",
-      "purpose": "登记当前设备"
-    },
-    {
-      "name": "wildarrange_device_status",
-      "command": "wildarrange device status",
-      "purpose": "查看设备登记状态"
-    },
-    {
-      "name": "wildarrange_coordination_status",
-      "command": "wildarrange coordination status",
-      "purpose": "查看 Git 协调状态"
-    },
-    {
-      "name": "wildarrange_coordination_claim",
-      "command": "wildarrange coordination claim --task T001 [--owner ZhuRong]",
-      "purpose": "显式远端领取任务"
-    },
-    {
-      "name": "wildarrange_handoff_prepare",
-      "command": "wildarrange handoff prepare --task T001 --to-device-id <uuid> [--to-device-name mac-mini] [--to-owner ZhuRong]",
-      "purpose": "准备跨设备交接"
-    },
-    {
-      "name": "wildarrange_handoff_push",
-      "command": "wildarrange handoff push --task T001",
-      "purpose": "推送跨设备交接"
-    },
-    {
-      "name": "wildarrange_handoff_accept",
-      "command": "wildarrange handoff accept --task T001 [--plan P20260731]",
-      "purpose": "接受跨设备交接"
-    },
-    {
-      "name": "wildarrange_handoff_takeover",
-      "command": "wildarrange handoff takeover --plan P20260731 --task T001 --expected-device-id <uuid> --reason \"owner offline\"",
-      "purpose": "显式接管（记录预期旧设备与理由）"
-    },
-    {
       "name": "wildarrange_adapter_install",
       "command": "wildarrange adapter install [--target codex|cursor|kimi|all] [--mode local|npx] [--package @alivewavelab/wildarrange]",
       "purpose": "安装宿主 adapter；外置治理模式只在 runtimeRoot 生成用户插件包"
@@ -180,7 +140,7 @@
     },
     {
       "name": "wildarrange_parallel_run",
-      "command": "wildarrange parallel run [--max-agents 2] [--task T001,T002] [--agent ZhuRong] [--adapter codex|cursor] [--isolation run-dir|git-worktree] [--coordinate] [--command \"...\"]",
+      "command": "wildarrange parallel run [--max-agents 2] [--task T001,T002] [--agent ZhuRong] [--adapter codex|cursor] [--isolation run-dir|git-worktree] [--command \"...\"]",
       "purpose": "跑并行子 Agent"
     },
     {

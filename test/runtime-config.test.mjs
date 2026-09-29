@@ -40,7 +40,7 @@ test("repo root config carries every key the example config documents", async ()
     "agents.ZhuRong.skills",
     "agents.BaiZe.skills",
     "agents.LuWu.skills",
-    "gitCoordination",
+    "gitDelivery",
     "parallelAgents.retainUntilUserAcceptance",
     "parallelAgents.defaultAdapter",
     "parallelAgents.spawnAdapters",
@@ -61,7 +61,8 @@ test("repo root config carries every key the example config documents", async ()
 
   const { config, sourcePath } = await loadWildArrangeConfig(REPO_ROOT);
   assert.equal(sourcePath, "wildarrange.config.json");
-  assert.equal(config.gitCoordination.mode, "guarded");
+  assert.equal(config.gitDelivery.requireWorktreeForParallelWrites, true);
+  assert.equal("gitCoordination" in config, false);
   assert.deepEqual(config.review.steps, []);
 });
 
@@ -71,7 +72,7 @@ test("config loading falls back to built-in defaults when no config file exists"
     const { config, sourcePath } = await loadWildArrangeConfig(dir);
     assert.equal(sourcePath, "default");
     assert.equal(config.runtime, DEFAULT_RUNTIME_NAME);
-    assert.deepEqual(config.gitCoordination, DEFAULT_WILDARRANGE_CONFIG.gitCoordination);
+    assert.deepEqual(config.gitDelivery, DEFAULT_WILDARRANGE_CONFIG.gitDelivery);
     assert.deepEqual(config.skillMatcher, DEFAULT_WILDARRANGE_CONFIG.skillMatcher);
     assert.deepEqual(config.contextBudgets, DEFAULT_WILDARRANGE_CONFIG.contextBudgets);
     assert.deepEqual(config.executionReadiness, DEFAULT_WILDARRANGE_CONFIG.executionReadiness);
@@ -86,6 +87,24 @@ test("legacy runtime name literal normalizes to the default runtime", async () =
     await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({ runtime: "wildarrange-linear" }), "utf8");
     const { config } = await loadWildArrangeConfig(dir);
     assert.equal(config.runtime, DEFAULT_RUNTIME_NAME);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("gitDelivery keeps only single-machine delivery keys", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "wildarrange-runtime-config-"));
+  try {
+    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
+      gitDelivery: { remote: " upstream ", taskBranchPrefix: "/wa/task/", requireWorktreeForParallelWrites: false, mode: "strict", requireTakeoverReason: true },
+    }), "utf8");
+    const { config } = await loadWildArrangeConfig(dir);
+    assert.deepEqual(config.gitDelivery, {
+      remote: "upstream",
+      integrationBranch: "auto",
+      taskBranchPrefix: "wa/task",
+      requireWorktreeForParallelWrites: false,
+    });
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

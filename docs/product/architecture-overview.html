@@ -297,7 +297,6 @@
   <button class="tab" type="button" data-view="overall" aria-pressed="true">全局框架</button>
   <button class="tab" type="button" data-view="job-linear" aria-pressed="false">线性完成任务</button>
   <button class="tab" type="button" data-view="job-parallel" aria-pressed="false">并行成果合入</button>
-  <button class="tab" type="button" data-view="job-handoff" aria-pressed="false">跨设备接力</button>
 </div>
 
 <div class="legend">
@@ -358,12 +357,6 @@
   <div class="job-shell">
     <header class="job-header"><h2>并行成果合入</h2><p>子 Agent 在隔离目录工作；成果必须经过 admission 事务与同一套质量门，成功提交或成功回滚后才释放所有权。</p></header>
     <div class="flow n5"><div role="button" tabindex="0" class="node" data-k="cli"><b>1. 发起并行运行</b><small>CLI 接收 parallel run</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="orchestration"><b>2. 创建隔离执行</b><small>为子 Agent 分配独立结果目录</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="capabilities"><b>3. 产出候选成果</b><small>Worker 只能提交待验收结果</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="orchestration"><b>4. Admission 合入</b><small>锁定基线，过门，提交或回滚</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="infra"><b>5. 留下可恢复记录</b><small>Git、ownership 与 ledger 对账</small></div></div>
-  </div>
-</section>
-<section class="view" data-panel="job-handoff">
-  <div class="job-shell">
-    <header class="job-header"><h2>跨设备接力</h2><p>设备之间交接的不是一句“你继续”，而是远端已 push 的 commit、明确 owner 和绑定的集成基线 SHA。</p></header>
-    <div class="flow n5"><div role="button" tabindex="0" class="node" data-k="cli"><b>1. 准备交接</b><small>CLI 接收 claim / handoff 命令</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="orchestration"><b>2. 绑定任务所有权</b><small>记录设备、任务和预期接收方</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="infra"><b>3. 普通 Push 交接</b><small>Git 协调保存 commit 与基线</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="orchestration"><b>4. 接收方重新校验</b><small>检查 owner、SHA、候选树和质量门</small></div><div class="arr" aria-hidden="true"><svg><use href="#arr-to"/></svg></div><div role="button" tabindex="0" class="node" data-k="infra"><b>5. 集成并对账</b><small>Push 集成 commit 后才 Checkpoint</small></div></div>
   </div>
 </section>
 
@@ -1134,21 +1127,9 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "interface"
             },
             {
-              "t": "handoff.mjs",
-              "io": "handoff.mjs",
-              "p": "src/orchestration/handoff.mjs",
-              "m": "orchestration"
-            },
-            {
               "t": "parallel-runtime.mjs",
               "io": "parallel-runtime.mjs",
               "p": "src/orchestration/parallel-runtime.mjs",
-              "m": "orchestration"
-            },
-            {
-              "t": "remote-ownership.mjs",
-              "io": "remote-ownership.mjs",
-              "p": "src/orchestration/remote-ownership.mjs",
               "m": "orchestration"
             },
             {
@@ -1418,21 +1399,9 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "interface"
             },
             {
-              "t": "handoff.mjs",
-              "io": "handoff.mjs",
-              "p": "src/orchestration/handoff.mjs",
-              "m": "orchestration"
-            },
-            {
               "t": "parallel-runtime.mjs",
               "io": "parallel-runtime.mjs",
               "p": "src/orchestration/parallel-runtime.mjs",
-              "m": "orchestration"
-            },
-            {
-              "t": "remote-ownership.mjs",
-              "io": "remote-ownership.mjs",
-              "p": "src/orchestration/remote-ownership.mjs",
               "m": "orchestration"
             },
             {
@@ -2195,9 +2164,9 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "p": "src/orchestration/task-board.mjs"
             },
             {
-              "t": "src-orchestration-remote-ownership-mjs",
-              "io": "remote-ownership.mjs",
-              "p": "src/orchestration/remote-ownership.mjs"
+              "t": "src-orchestration-task-branch-mjs",
+              "io": "task-branch.mjs",
+              "p": "src/orchestration/task-branch.mjs"
             },
             {
               "t": "src-orchestration-integration-mjs",
@@ -2281,6 +2250,12 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "capabilities"
             },
             {
+              "t": "task-predicates.mjs",
+              "io": "task-predicates.mjs",
+              "p": "src/infra/task-predicates.mjs",
+              "m": "infra"
+            },
+            {
               "t": "agent-registry.mjs",
               "io": "agent-registry.mjs",
               "p": "src/infra/agent-registry.mjs",
@@ -2310,9 +2285,9 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "p": "src/orchestration/task-board.mjs"
             },
             {
-              "t": "src-orchestration-remote-ownership-mjs",
-              "io": "remote-ownership.mjs",
-              "p": "src/orchestration/remote-ownership.mjs"
+              "t": "src-orchestration-task-branch-mjs",
+              "io": "task-branch.mjs",
+              "p": "src/orchestration/task-branch.mjs"
             },
             {
               "t": "src-orchestration-parallel-run-index-mjs",
@@ -2391,6 +2366,12 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "io": "command-runner.mjs",
               "p": "src/infra/command-runner.mjs",
               "m": "infra"
+            },
+            {
+              "t": "task-predicates.mjs",
+              "io": "task-predicates.mjs",
+              "p": "src/infra/task-predicates.mjs",
+              "m": "infra"
             }
           ]
         },
@@ -2450,12 +2431,6 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "infra"
             },
             {
-              "t": "runtime-config.mjs",
-              "io": "runtime-config.mjs",
-              "p": "src/infra/runtime-config.mjs",
-              "m": "infra"
-            },
-            {
               "t": "task-state-lock.mjs",
               "io": "task-state-lock.mjs",
               "p": "src/infra/task-state-lock.mjs",
@@ -2465,12 +2440,6 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "t": "runtime-snapshot.mjs",
               "io": "runtime-snapshot.mjs",
               "p": "src/infra/runtime-snapshot.mjs",
-              "m": "infra"
-            },
-            {
-              "t": "git-coordination.mjs",
-              "io": "git-coordination.mjs",
-              "p": "src/infra/git-coordination.mjs",
               "m": "infra"
             },
             {
@@ -2611,9 +2580,9 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "p": "src/orchestration/task-board.mjs"
             },
             {
-              "t": "src-orchestration-remote-ownership-mjs",
-              "io": "remote-ownership.mjs",
-              "p": "src/orchestration/remote-ownership.mjs"
+              "t": "src-orchestration-task-branch-mjs",
+              "io": "task-branch.mjs",
+              "p": "src/orchestration/task-branch.mjs"
             },
             {
               "t": "src-orchestration-integration-mjs",
@@ -2697,6 +2666,12 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "capabilities"
             },
             {
+              "t": "task-predicates.mjs",
+              "io": "task-predicates.mjs",
+              "p": "src/infra/task-predicates.mjs",
+              "m": "infra"
+            },
+            {
               "t": "agent-registry.mjs",
               "io": "agent-registry.mjs",
               "p": "src/infra/agent-registry.mjs",
@@ -2726,9 +2701,9 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "p": "src/orchestration/task-board.mjs"
             },
             {
-              "t": "src-orchestration-remote-ownership-mjs",
-              "io": "remote-ownership.mjs",
-              "p": "src/orchestration/remote-ownership.mjs"
+              "t": "src-orchestration-task-branch-mjs",
+              "io": "task-branch.mjs",
+              "p": "src/orchestration/task-branch.mjs"
             },
             {
               "t": "src-orchestration-parallel-run-index-mjs",
@@ -2807,6 +2782,12 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "io": "command-runner.mjs",
               "p": "src/infra/command-runner.mjs",
               "m": "infra"
+            },
+            {
+              "t": "task-predicates.mjs",
+              "io": "task-predicates.mjs",
+              "p": "src/infra/task-predicates.mjs",
+              "m": "infra"
             }
           ]
         },
@@ -2866,12 +2847,6 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "infra"
             },
             {
-              "t": "runtime-config.mjs",
-              "io": "runtime-config.mjs",
-              "p": "src/infra/runtime-config.mjs",
-              "m": "infra"
-            },
-            {
               "t": "task-state-lock.mjs",
               "io": "task-state-lock.mjs",
               "p": "src/infra/task-state-lock.mjs",
@@ -2884,83 +2859,10 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "infra"
             },
             {
-              "t": "git-coordination.mjs",
-              "io": "git-coordination.mjs",
-              "p": "src/infra/git-coordination.mjs",
-              "m": "infra"
-            },
-            {
               "t": "git-worktree.mjs",
               "io": "git-worktree.mjs",
               "p": "src/infra/git-worktree.mjs",
               "m": "infra"
-            },
-            {
-              "t": "path-match.mjs",
-              "io": "path-match.mjs",
-              "p": "src/infra/path-match.mjs",
-              "m": "infra"
-            }
-          ]
-        },
-        {
-          "id": "src-orchestration-handoff-mjs",
-          "p": "src/orchestration/handoff.mjs",
-          "r": "handoff.mjs",
-          "io": "prepareTaskHandoff(rootDir, options = {) → 导出；pushTaskHandoff(rootDir, options = {) → 导出",
-          "to": [
-            {
-              "t": "src-orchestration-plan-state-mjs",
-              "io": "plan-state.mjs",
-              "p": "src/orchestration/plan-state.mjs"
-            },
-            {
-              "t": "src-orchestration-task-board-mjs",
-              "io": "task-board.mjs",
-              "p": "src/orchestration/task-board.mjs"
-            },
-            {
-              "t": "src-orchestration-remote-ownership-mjs",
-              "io": "remote-ownership.mjs",
-              "p": "src/orchestration/remote-ownership.mjs"
-            }
-          ],
-          "extTo": [
-            {
-              "t": "ledger.mjs",
-              "io": "ledger.mjs",
-              "p": "src/infra/ledger.mjs",
-              "m": "infra"
-            },
-            {
-              "t": "runtime-store.mjs",
-              "io": "runtime-store.mjs",
-              "p": "src/infra/runtime-store.mjs",
-              "m": "infra"
-            },
-            {
-              "t": "runtime-config.mjs",
-              "io": "runtime-config.mjs",
-              "p": "src/infra/runtime-config.mjs",
-              "m": "infra"
-            },
-            {
-              "t": "task-state-lock.mjs",
-              "io": "task-state-lock.mjs",
-              "p": "src/infra/task-state-lock.mjs",
-              "m": "infra"
-            },
-            {
-              "t": "git-coordination.mjs",
-              "io": "git-coordination.mjs",
-              "p": "src/infra/git-coordination.mjs",
-              "m": "infra"
-            },
-            {
-              "t": "gateway.mjs",
-              "io": "gateway.mjs",
-              "p": "src/capabilities/gateway.mjs",
-              "m": "capabilities"
             },
             {
               "t": "path-match.mjs",
@@ -3425,6 +3327,12 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "io": "task-board.mjs",
               "p": "src/orchestration/task-board.mjs",
               "m": "orchestration"
+            },
+            {
+              "t": "task-predicates.mjs",
+              "io": "task-predicates.mjs",
+              "p": "src/infra/task-predicates.mjs",
+              "m": "infra"
             },
             {
               "t": "status.mjs",
@@ -4171,7 +4079,7 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
           "id": "src-infra-git-coordination-mjs",
           "p": "src/infra/git-coordination.mjs",
           "r": "git-coordination.mjs",
-          "io": "ensureDeviceIdentity(rootDir, options = {) → 导出；inspectGitCoordination(rootDir, config = {}) → 导出",
+          "io": "inspectGitDelivery(rootDir, config = {}) → 导出；gitHead(rootDir) → 导出",
           "to": [
             {
               "t": "src-infra-command-runner-mjs",
@@ -4182,11 +4090,6 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "t": "src-infra-git-diff-mjs",
               "io": "git-diff.mjs",
               "p": "src/infra/git-diff.mjs"
-            },
-            {
-              "t": "src-infra-runtime-store-mjs",
-              "io": "runtime-store.mjs",
-              "p": "src/infra/runtime-store.mjs"
             }
           ]
         },
@@ -4276,7 +4179,6 @@ const D = {
     { id: "linear", p: "src/orchestration/linear-runtime.mjs", r: "线性任务主循环", io: "任务状态 → 下一步动作", to: [{ t: "plan", io: "读取任务状态" }, { t: "delivery", io: "工作完成声明进入交付流水线" }] },
     { id: "parallel", p: "src/orchestration/parallel-runtime.mjs", r: "隔离运行命令型子智能体", io: "并行任务 → 候选成果", to: [{ t: "admission", io: "把候选结果送去合入" }] },
     { id: "admission", p: "src/orchestration/admission.mjs", r: "成果合入或安全回滚事务", io: "候选树与基线 → 集成结果", to: [{ t: "delivery", io: "候选成果 → 同一质量门" }] },
-    { id: "handoff", p: "src/orchestration/handoff.mjs", r: "跨设备准备、推送与接收", io: "任务负责人和提交记录 → 可接力交接", to: [{ t: "plan", io: "绑定任务状态" }] },
     { id: "delivery", p: "src/orchestration/delivery-pipeline.mjs", r: "统一交付门顺序", io: "任务成果 → 验收证明或失败", extTo: [{ t: "gateway.mjs", p: "src/capabilities/gateway.mjs", m: "原子能力层", io: "通过统一网关调用能力" }] }
   ] },
   "ai": { name: "AI（策略与语境）", plain: "做路由、上下文注入和 Skill 匹配", role: "AI 决策与建议", inn: "请求与清洗上下文", out: "路由或注入", status: "已通", files: [
@@ -4317,7 +4219,7 @@ const D = {
     { id: "store", p: "src/infra/runtime-store.mjs", r: "路径、原子写与 hash 原语", io: "运行时数据 → 原子文件" },
     { id: "ledger", p: "src/infra/ledger.mjs", r: "hash 链证据账本", io: "事件 → 可校验条目", to: [{ t: "store", io: "条目 → 原子落盘" }] },
     { id: "command", p: "src/infra/command-runner.mjs", r: "受控子进程执行", io: "命令与超时 → 截断结果" },
-    { id: "git", p: "src/infra/git-coordination.mjs", r: "远端领取、拉取与推送原语", io: "负责人和版本指纹 → 版本协调结果" },
+    { id: "git", p: "src/infra/git-coordination.mjs", r: "任务分支交付 commit 与普通推送原语", io: "任务路径与基线 SHA → delivery commit 或推送结果" },
     { id: "security", p: "src/infra/security.mjs", r: "关键状态备份与完整性检查", io: "运行态文件 → 校验或恢复结果", to: [{ t: "ledger", io: "恢复事件 → 账本" }, { t: "store", io: "关键状态 → 原子读写" }] }
   ] }
 };

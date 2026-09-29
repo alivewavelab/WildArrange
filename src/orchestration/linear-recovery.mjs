@@ -2,7 +2,7 @@
 // 文件名称：linear-recovery.mjs
 // 所属模块：orchestration
 // 作用说明：
-//   线性任务的失败状态、恢复状态与 ownership 二次验权。
+//   线性任务的失败状态与恢复状态。
 //   只负责把既定结果写入 ledger-first 的任务状态；不调度 worker，
 //   不决定 gate 顺序，也不直接实现 capability。
 //
@@ -17,8 +17,6 @@ import { buildFailureSummary } from "../infra/failure-analysis.mjs";
 import { writeFailureReport } from "../infra/task-reports.mjs";
 import { shouldFailDeliveryAttempt } from "./delivery-pipeline.mjs";
 import { persistTaskState } from "./task-board.mjs";
-import { loadTaskState } from "./plan-state.mjs";
-import { assertTaskOrDeliveredOwnership } from "./integration.mjs";
 
 /** 命令终止未确认时持久化 recovery_required 状态。 */
 export async function persistCommandRecoveryRequired(rootDir, taskState, task, commandEvidence, result = {}) {
@@ -41,18 +39,13 @@ export async function persistCommandRecoveryRequired(rootDir, taskState, task, c
   return { status: "recovery_required", task, ...result };
 }
 
-/** 集成基线变化时持久化 revalidation_required。 */
-export async function persistRevalidationRequired(rootDir, taskState, task, { integrationGuard, summaryFallback, retryHint, ledgerEvent }) {
+/** task branch 基线变化或存在无归属改动时持久化 revalidation_required。 */
+export async function persistRevalidationRequired(rootDir, taskState, task, { integrationGate, summaryFallback, retryHint, ledgerEvent }) {
   task.status = "pending";
-  task.coordination = {
-    ...task.coordination,
-    status: "stale",
-    staleReason: integrationGuard?.reason || "task_ownership_changed",
-  };
   task.last_failure = {
     at: nowIso(),
-    reason: "task_ownership_changed",
-    summary: integrationGuard?.error || summaryFallback,
+    reason: integrationGate?.reason || "task_branch_revalidation_required",
+    summary: integrationGate?.error || summaryFallback,
     retryHint,
   };
   task.updatedAt = nowIso();
@@ -107,20 +100,4 @@ export async function persistAcceptanceProofFailure(rootDir, taskState, task, { 
     nextStatus: task.status,
     reason: task.last_failure.reason,
   }, () => persistTaskState(rootDir, taskState));
-}
-
-/** Git 协调开启时校验当前设备仍持有任务写 ownership。 */
-export async function taskOwnershipGate(rootDir, taskId) {
-  const state = await loadTaskState(rootDir);
-  const task = state?.tasks.find((candidate) => candidate.id === taskId);
-  try {
-    const ownership = await assertTaskOrDeliveredOwnership(rootDir, state?.planId, task);
-    return { pass: true, ownership };
-  } catch (error) {
-    return {
-      pass: false,
-      reason: "task_ownership_changed",
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
 }

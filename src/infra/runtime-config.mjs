@@ -103,7 +103,7 @@ function normalizeRuntimeConfig(config) {
   delete normalized.dynamicAgents;
   delete normalized.promptVariants;
   normalized.agents = normalizeAgentMap(normalized.agents);
-  normalized.gitCoordination = normalizeGitCoordination(normalized.gitCoordination);
+  normalized.gitDelivery = normalizeGitDelivery(normalized.gitDelivery);
   if (Array.isArray(normalized.review?.llm?.agents)) {
     normalized.review = {
       ...normalized.review,
@@ -122,36 +122,16 @@ function normalizeRuntimeConfig(config) {
 }
 
 /**
- * 归一化 GitCoordination 输入为稳定形态。
+ * 归一化 gitDelivery 输入为稳定形态。
  */
-function normalizeGitCoordination(value) {
+function normalizeGitDelivery(value) {
   const input = isPlainObject(value) ? value : {};
-  const mode = String(input.mode || "guarded").trim().toLowerCase();
-  if (!["off", "manual", "guarded", "strict"].includes(mode)) {
-    throw new Error(`gitCoordination.mode must be off, manual, guarded, or strict; received ${input.mode}`);
-  }
-  const normalized = {
-    ...input,
-    mode,
+  return {
     remote: nonEmptyConfigString(input.remote, "origin"),
     integrationBranch: nonEmptyConfigString(input.integrationBranch, "auto"),
     taskBranchPrefix: nonEmptyConfigString(input.taskBranchPrefix, "wildarrange/task").replace(/^\/+|\/+$/g, ""),
     requireWorktreeForParallelWrites: input.requireWorktreeForParallelWrites !== false,
-    requireVerificationBeforeHandoff: input.requireVerificationBeforeHandoff === true,
-    requireCleanHandoff: input.requireCleanHandoff !== false,
-    // Takeover evidence is an immutable floor whenever this config exists;
-    // keep the explicit field visible, but never normalize it to false.
-    requireTakeoverReason: true,
   };
-  // strict is a profile, not a collection of individually weakenable flags.
-  if (mode === "strict") {
-    // strict 是固定 profile：子开关在此一并强制为 true，不可通过配置单独放宽
-    normalized.requireWorktreeForParallelWrites = true;
-    normalized.requireVerificationBeforeHandoff = true;
-    normalized.requireCleanHandoff = true;
-    normalized.requireTakeoverReason = true;
-  }
-  return normalized;
 }
 
 /**
