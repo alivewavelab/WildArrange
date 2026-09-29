@@ -17,7 +17,7 @@ init -> plan -> task-worktree -> worker -> verifier -> delivery-commit -> task-b
 - 先还原运行秩序：计划与执行分离、worker 不自证完成、独立验证、失败返工、证据入账。
 - 不把任何宿主专属工具硬塞进 core（例如特定 editor plugin hooks、tmux layout）。
 - Codex / Cursor / Kimi Code 适配放在 runtime adapter 层；核心状态机必须是产品中立的本地文件协议。
-- Kimi Code 项目接入复用根 `AGENTS.md` 与 `.agents/skills/`；生命周期能力通过用户明确安装的 Kimi plugin 转发，不得由项目 CLI 静默改写用户级 `~/.kimi-code/config.toml`。
+- Kimi Code 通过用户显式安装的外置 plugin 接入；项目 CLI 不得静默改写用户级 `~/.kimi-code/config.toml`。
 - Kimi Hook 为 fail-open：PreToolUse 可在 Hook 正常运行时阻断，但 Hook 崩溃或超时默认放行；不得把它宣传为唯一安全边界，最终完成仍必须经过 verifier / scope / review / successCriteria / acceptance proof / checkpoint。
 - LLM review 通过 OpenAI-compatible provider 配置化接入；默认关闭，无 key 时不阻断线性状态机。
 - 第一版不启动常驻多 Agent 集群；多 Agent 先以命令型子 Agent 的隔离运行目录跑通 spawn / collect / message / admission 闭环。
@@ -40,7 +40,7 @@ init -> plan -> task-worktree -> worker -> verifier -> delivery-commit -> task-b
 ## 工程约束
 
 - 使用 Node.js ESM，无外部 npm 依赖，保证 Codex / Cursor / Kimi Code / 普通终端都能直接运行。
-- 所有运行时状态写入 `.wildarrange/`。
+- 运行形态只有外置治理：项目仓只放产品代码与项目自有规则；治理政策与 verification registry 版本化在独立治理仓；运行态写入项目外的 runtimeRoot，WildArrange 不向客户项目写任何文件。外置模式的 Hook 拦截、规则注入、质量门与防篡改能力必须与原内置模式等效，并由测试覆盖。
 - 计划、任务、回执、验证结果必须同时具备机器可读 JSON 和人工可读摘要。
 - worker 的 DoneClaim 不能直接让任务完成；必须有 verifier PASS。
 - verifier FAIL 时任务回到 `pending`，并把失败证据写入 ledger。

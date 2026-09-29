@@ -7,7 +7,7 @@
 //   不负责具体路由表或范围校验实现，分别委托 routing.mjs 与 pre-tool-guard.mjs。
 //
 // 【运行原理速读】
-//   · 何时触发？ bin/wildarrange.mjs hook run 或 Cursor hooks.json 回调。
+//   · 何时触发？ bin/wildarrange.mjs hook run（由外置宿主 bridge 调用）。
 //   · 做了什么？ ① 按事件分支收集 route/scope 等 facts ② resolveInjectionPoint
 //     ③ renderHookInjectionMarkdown ④ 写 sessions/hooks 报告与 emitDecision。
 //   · 与谁协作？ injection、routing、context、pre-tool-guard、hook-render、capabilities。

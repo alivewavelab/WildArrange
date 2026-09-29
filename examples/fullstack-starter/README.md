@@ -17,65 +17,33 @@ fullstack-starter/
 │   ├── frontend.md        # 前端规范空架子（globs 命中前端路径/后缀才注入）
 │   ├── backend.md         # 后端规范空架子
 │   └── database.md        # 数据库/迁移规范空架子
-├── wildarrange.config.json      # 一份精简、可直接跑通的配置（真正生效的文件）
+├── wildarrange.config.json      # 一份精简、可直接跑通的配置（复制到治理仓 policy/ 下生效）
 └── plan.example.json      # 前后端各一个真实可跑通的最小任务
 ```
 
 ## 怎么用（把模板搬进你的项目）
 
-1. 把本目录的文件复制到你**项目根目录**（`AGENTS.md`、`.cursor/`、`wildarrange.config.json`、`plan.example.json`）。
-2. 先在你的项目中安装 WildArrange，再按宿主安装适配器：
+1. 把 `AGENTS.md`、`.cursor/`（项目自有规则）、`plan.example.json` 复制到你**项目根目录**；把 `wildarrange.config.json` 复制为**治理仓库**的 `policy/wildarrange.config.json`（WildArrange 只读取这一份配置）。
+2. 在你的项目中安装 WildArrange 并一步接入外置治理（不会向项目写入任何文件）：
 
    ```bash
    npm install --save-dev @alivewavelab/wildarrange
+   npx wildarrange setup --governance-root ../my-project-governance --mode local
    ```
 
-   然后二选一：
+   `--target cursor|codex|kimi|all` 可选择宿主（默认 all）。宿主内的手工步骤（Cursor `adapter activate --target cursor`、Codex `/hooks` 审查并 trust、Kimi `/plugins install`）见命令输出的 `nextActions`。装完可直接用 `/wildarrange-config`、`/wildarrange-doctor`、`/wildarrange-plan`、`/wildarrange-run`。
 
-   **Cursor：**
-   ```bash
-   npx wildarrange init
-   npx wildarrange adapter install --target cursor --mode local
-   ```
-   装完在 Cursor 聊天里可直接用 `/wildarrange-config`、`/wildarrange-doctor`、`/wildarrange-plan`、`/wildarrange-run`。
+   > 只有在 WildArrange 源码仓库内开发运行时，才把 `npx wildarrange` 换成 `node ./bin/wildarrange.mjs`。
 
-   **Codex：**
-   ```bash
-   npx wildarrange init
-   npx wildarrange adapter install --target codex --mode local
-   ```
-   适配器会写 `.codex/hooks.json`（在 Codex 里执行 `/hooks` review 并 trust 后成为硬拦截）和 `.agents/skills/wildarrange-*/SKILL.md`。用 `/skills` 或 `$wildarrange-doctor` 触发。
-
-   > 两端都要：`--target all`。只有在 WildArrange 源码仓库内开发运行时，才把 `npx wildarrange` 换成 `node ./bin/wildarrange.mjs`。
-
-3. 先跑通一次冒烟（见下"自检清单"），确认架子是通的，再开始填规范。
-
-## 先跑通一次（自检清单）
-
-按顺序做，每一步都应通过；任一步失败就停下来看它报的原因：
-
-- [ ] 1. 导入示例计划：`npx wildarrange plan --from plan.example.json`（应报 `taskCount: 2`）
-- [ ] 2. 跑第一个任务：`npx wildarrange run`（前端任务，走完 worker→verify→scope→review→验收→checkpoint）
-- [ ] 3. 再跑一次：`npx wildarrange run`（后端任务）
-- [ ] 4. 再跑一次：`npx wildarrange run`（应返回 `status: complete`，无剩余任务）
-- [ ] 5. 确认产物：`src/frontend/hello.js` 与 `src/backend/health.js` 已生成
-- [ ] 6. 体检：`npx wildarrange doctor`（或 `/wildarrange-doctor`），应无严重异常
-- [ ] 7. 校验配置：`npx wildarrange config verify`
-
-跑通后，删掉 `plan.example.json` 里的示例任务，换成你真实的任务即可。
-
-## 填规范的顺序建议
-
-1. **`AGENTS.md`**：先填红线和命令表（install/dev/test/lint/typecheck）。
-2. **`.cursor/rules/*.md`**：把 `globs` 改成你项目真实的前后端路径/后缀，再填每条规范。
+3. **`.cursor/rules/*.md`**：把 `globs` 改成你项目真实的前后端路径/后缀，再填每条规范。
    - 验证命中：`npx wildarrange rules collect --target src/frontend/anyfile.tsx`，看命中的规范是否符合预期（改前端只应命中前端规范）。
-3. **`wildarrange.config.json`**：需要时再按下面的"完整配置详解"逐块开启（如接入 typecheck 门、LLM 复核）。
+4. **治理仓 `policy/wildarrange.config.json`**：需要时再按下面的"完整配置详解"逐块开启（如接入 typecheck 门、LLM 复核）。
 
 ---
 
 ## 完整配置详解（带注释的最佳示例）
 
-> `wildarrange.config.json` 是纯 JSON，**不能写注释**。所以下面这份带注释的"完整结构"仅作讲解参考；本目录里真正生效的 `wildarrange.config.json` 是它的一个精简、非阻断子集，保证首次就能跑通。你只需要把想开启的块，去掉注释后并入自己的 `wildarrange.config.json` 即可（配置会与默认值深合并，只写你要改的块就行）。
+> `wildarrange.config.json` 是纯 JSON，**不能写注释**。所以下面这份带注释的"完整结构"仅作讲解参考；本目录里的 `wildarrange.config.json` 是它的一个精简、非阻断子集，保证首次就能跑通。你只需要把想开启的块，去掉注释后并入自己的 `wildarrange.config.json` 即可（配置会与默认值深合并，只写你要改的块就行）。
 
 ```jsonc
 {

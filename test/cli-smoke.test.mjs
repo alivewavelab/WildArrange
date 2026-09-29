@@ -52,6 +52,35 @@ async function runCli(args, cwd, options = {}) {
   }
 }
 
+test("cli smoke: an unconnected project fails with a setup hint, writes nothing, and keeps read-only commands working", async () => {
+  await withTempProjectDir(async (dir) => {
+    const env = { WILDARRANGE_STATE_HOME: `${dir}-state` };
+    for (const args of [["status"], ["init"], ["doctor"], ["config", "init"], ["adapter", "install"]]) {
+      const result = await runCli(args, dir, { env });
+      assert.notEqual(result.code, 0, args.join(" "));
+      assert.match(result.stderr, /project_not_connected/);
+      assert.match(result.stderr, /wildarrange setup --governance-root/);
+    }
+    assert.equal(existsSync(path.join(dir, ".wildarrange")), false, "no runtime is created inside the project");
+    const shown = await runCli(["project", "show"], dir, { env });
+    assert.equal(shown.code, 0, shown.stderr);
+    assert.equal(JSON.parse(shown.stdout).attached, false);
+    const help = await runCli(["--help"], dir, { env });
+    assert.equal(help.code, 0, help.stderr);
+    const hook = await runCliWithInput(["hook", "run", "--format", "json"], dir, { hook_event_name: "PreToolUse", session_id: "s", tool_name: "Write", tool_input: { file_path: "a.js" } }, env);
+    assert.equal(hook.code, 0, hook.stderr);
+    assert.equal(JSON.parse(hook.stdout).inactive, true);
+  });
+});
+
+test("cli smoke: the legacy --control-root option no longer selects a project", async () => {
+  await withTempProjectDir(async (dir) => {
+    const result = await runCli(["status", "--control-root", dir], dir, { env: { WILDARRANGE_STATE_HOME: `${dir}-state` } });
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /project_not_connected/);
+  });
+});
+
 test("cli smoke: attached external governance keeps init out of the project repository", async () => {
   await withTempProjectDir(async (dir) => {
     const governanceRoot = path.join(path.dirname(dir), `${path.basename(dir)}-governance`);
@@ -113,9 +142,10 @@ test("cli smoke: attached external governance keeps init out of the project repo
   });
 });
 
-async function runCliWithInput(args, cwd, input) {
+async function runCliWithInput(args, cwd, input, env = {}) {
   const child = spawn(process.execPath, [CLI_PATH, ...args], {
     cwd,
+    env: { ...process.env, ...env },
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   });
