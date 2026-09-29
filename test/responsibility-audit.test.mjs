@@ -11,29 +11,58 @@
 //   跑 runResponsibilityAudit/runReviewGate 断言 verdict 与 evidence 绑定。
 // =============================================================================
 
-import { resolveTaskAcceptancePath } from "../src/infra/runtime-store.mjs";
+import { resolveTaskAcceptancePath, resolveTaskCheckpointPath, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { gitCommitAll, withExternalProject } from "./helpers/external-fixture.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, writeFile, rm, readFile } from "node:fs/promises";
-import os from "node:os";
+import { writeFile, readFile } from "node:fs/promises";
 import path from "node:path";
 import { normalizeResponsibilityChanges, RESPONSIBILITY_RULES } from "../src/infra/responsibility-contract.mjs";
 import { collectResponsibilityEvidence } from "../src/infra/responsibility-evidence.mjs";
 import { runResponsibilityAudit, validateResponsibilityVerdict } from "../src/capabilities/responsibility-audit.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { importPlan, approvePlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { runReviewGate } from "../src/capabilities/review-gate.mjs";
 
 const changes = () => [{ script: "router.mjs", additions: "Select config", responsibilityBefore: "Route requests", responsibilityAfter: "Route requests by version", facts: [{ name: "gameId/buildId", ownerBefore: "records.mjs", ownerAfter: "records.mjs", access: "records.readGame()" }] }];
 const verdict = () => ({ decision: "PASS", checks: Object.keys(RESPONSIBILITY_RULES).map((rule) => ({ rule, decision: "PASS", reason: "Reviewed source and approved declaration" })), findings: [] });
-async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), "wa-responsibility-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  await initRuntime(root);
-  await writeFile(path.join(root, "router.mjs"), "export const route = () => 'config';\n");
-  await writeFile(path.join(root, "records.mjs"), "export const readGame = () => ({ gameId: 'g', buildId: 'b' });\n");
-  const planPath = path.join(root, ".wildarrange", "probe-plan.json");
-  const raw = { title: "Responsibility check", generated_by: "host_semantic", tasks: [{ id: "T001", subject: "Adjust routing", owner: "ZhuRong", writable_paths: ["router.mjs"], worker_command: "node implement.mjs", verify_commands: ["node validate.mjs"], responsibilityChanges: changes() }] };
+/** 项目仓之外的临时目录：reviewer 脚本与计划文件放这里，保持项目工作区基线干净。 */
+function auxDir(root) {
+  return path.dirname(root);
+}
+/** 打开外置三根项目并随测试结束（t.after）释放。 */
+async function openProject(t, options) {
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  let ready;
+  const started = new Promise((resolve) => { ready = resolve; });
+  const finished = withExternalProject(async (roots) => { ready(roots); await held; }, options);
+  finished.catch((error) => ready(Promise.reject(error)));
+  t.after(async () => { release(); await finished; });
+  return started;
+}
+/** 写入 reviewer 脚本并返回指向它的 review 配置。 */
+async function writeReviewer(root, answer, name = "reviewer.cjs", { probe = false } = {}) {
+  const file = path.join(auxDir(root), name);
+  // probe：同一脚本兼作执行就绪握手（readiness packet 没有 source 字段）
+  const packetEnv = probe ? "process.env.WILDARRANGE_READINESS_PACKET||process.env.WILDARRANGE_REVIEW_PACKET" : "process.env.WILDARRANGE_REVIEW_PACKET";
+  const probeBranch = probe ? "if(packet.kind==='execution_readiness_probe'){console.log(JSON.stringify({ready:true,challenge:packet.challenge,loadedSkills:packet.requiredSkills.map(s=>s.name)}));process.exit(0);}" : "";
+  await writeFile(file, `const fs=require('node:fs');const packet=JSON.parse(fs.readFileSync(${packetEnv},'utf8'));${probeBranch}if(!packet.source.files.some(f=>f.path==='records.mjs'))process.exit(1);console.log(${JSON.stringify(JSON.stringify(answer))});`);
+  const command = `node "${file}"`;
+  return { ...(probe ? { executionReadiness: { workerProbe: command } } : {}), review: { responsibility: { command } } };
+}
+// options.reviewerAnswer：把 reviewer 配置提交进治理仓后再导入计划；options.taskOverrides：覆盖计划任务字段。
+async function fixture(t, options = {}) {
+  const { projectRoot: root, governanceRoot } = await openProject(t, { projectFiles: {
+    "README.md": "# Fixture project\n",
+    "router.mjs": "export const route = () => 'config';\n",
+    "records.mjs": "export const readGame = () => ({ gameId: 'g', buildId: 'b' });\n",
+  } });
+  if (options.reviewerAnswer) {
+    await writeFile(path.join(governanceRoot, "policy", "wildarrange.config.json"), JSON.stringify(await writeReviewer(root, options.reviewerAnswer, "reviewer.cjs", { probe: true })));
+    await gitCommitAll(governanceRoot, "responsibility reviewer config");
+  }
+  const planPath = path.join(auxDir(root), "probe-plan.json");
+  const raw = { title: "Responsibility check", generated_by: "host_semantic", tasks: [{ id: "T001", subject: "Adjust routing", owner: "ZhuRong", writable_paths: ["router.mjs"], worker_command: "node implement.mjs", verify_commands: ["node validate.mjs"], responsibilityChanges: changes(), ...options.taskOverrides }] };
   await writeFile(planPath, JSON.stringify(raw));
   await importPlan(root, planPath);
   await approvePlan(root);
@@ -42,9 +71,7 @@ async function fixture(t) {
   return { root, task, scope, raw, planPath };
 }
 async function reviewer(root, answer) {
-  const file = path.join(root, ".wildarrange", "reviewer.cjs");
-  await writeFile(file, `const fs=require('node:fs');const packet=JSON.parse(fs.readFileSync(process.env.WILDARRANGE_REVIEW_PACKET,'utf8'));if(!packet.source.files.some(f=>f.path==='records.mjs'))process.exit(1);console.log(${JSON.stringify(JSON.stringify(answer))});`);
-  return { review: { responsibility: { command: `node "${file}"` } } };
+  return writeReviewer(root, answer);
 }
 
 test("responsibility declaration rejects absent fields, duplicate scripts and out-of-scope targets", () => {
@@ -58,9 +85,9 @@ test("new host plans require declarations before writing formal task state", asy
   const { root, raw, planPath } = await fixture(t);
   delete raw.tasks[0].responsibilityChanges;
   await writeFile(planPath, JSON.stringify(raw));
-  const before = await readFile(path.join(root, ".wildarrange", "team", "tasks.json"), "utf8");
+  const before = await readFile(resolveWildArrangePath(root, "team", "tasks.json"), "utf8");
   await assert.rejects(importPlan(root, planPath), /requires responsibilityChanges/);
-  assert.equal(await readFile(path.join(root, ".wildarrange", "team", "tasks.json"), "utf8"), before);
+  assert.equal(await readFile(resolveWildArrangePath(root, "team", "tasks.json"), "utf8"), before);
 });
 
 test("audit requires a real reviewer and rejects post-approval declaration changes", async (t) => {
@@ -135,7 +162,7 @@ test("responsibility rejection prevents acceptance proof and checkpoint even whe
   assert.equal(result.status, "blocked");
   assert.equal(result.steps.find((s) => s.capability === "verify").status, "pass");
   assert.deepEqual(result.steps.map((s) => s.capability), ["verify", "scope", "review"]);
-  await assert.rejects(readFile(path.join(root, ".wildarrange", "checkpoints", task.planId, "T001.json")), /ENOENT/);
+  await assert.rejects(readFile(resolveTaskCheckpointPath(root, task.planId, "T001")), /ENOENT/);
 });
 
 test("revising responsibilities uses existing steering and returns to human approval", async (t) => {
@@ -160,7 +187,7 @@ test("public-style import cannot omit host marker to avoid declarations", async 
 
 test("reviewer changes to source invalidate the verdict", async (t) => {
   const { root, task, scope } = await fixture(t);
-  const file = path.join(root, ".wildarrange", "mutating-reviewer.cjs");
+  const file = path.join(auxDir(root), "mutating-reviewer.cjs");
   await writeFile(file, `require('node:fs').appendFileSync('router.mjs','// changed during review\\n'); console.log(${JSON.stringify(JSON.stringify(verdict()))});`);
   const result = await runResponsibilityAudit(root, task, scope, { review: { responsibility: { command: `node "${file}"` } } });
   assert.equal(result.pass, false);
@@ -193,13 +220,18 @@ test("old Review PASS cannot replace the new responsibility audit receipt", asyn
 });
 
 test("independent responsibility PASS is sufficient as the substantive review lane", async (t) => {
-  const { root, task } = await fixture(t);
-  const config = await reviewer(root, verdict());
-  await writeFile(path.join(root, "wildarrange.config.json"), JSON.stringify(config));
-  task.verify_commands = ["node -e \"require('node:assert/strict').ok(require('node:fs').existsSync('router.mjs'))\""];
-  task.successCriteria = [{ id: "C001", title: "Router exists", expectedEvidence: "File exists", status: "pending", evidence: [], verifierCommandRefs: [0] }];
-  const result = await runDeliveryPipeline(root, task.planId, task, { changedPaths: ["router.mjs"], initialEvidence: { workerResult: { kind: "worker", exitCode: 0, stdout: "", stderr: "" } } });
+  // 外置项目是 Git 仓，交付必须经隔离 worktree 与 delivery commit，因此走真实 linear 运行。
+  const { root, task } = await fixture(t, {
+    reviewerAnswer: verdict(),
+    taskOverrides: {
+      worker_command: "node -e \"require('node:fs').writeFileSync('router.mjs', 'export const route = () => \\'versioned\\';\\n')\"",
+      verify_commands: ["node -e \"require('node:assert/strict').ok(require('node:fs').existsSync('router.mjs'))\""],
+      successCriteria: [{ id: "C001", title: "Router exists", expectedEvidence: "File exists", status: "pending", evidence: [], verifierCommandRefs: [0] }],
+    },
+  });
+  const result = await runNextTask(root);
   assert.equal(result.status, "completed", JSON.stringify(result));
+  assert.equal(result.reviewResult.responsibilityAudit.pass, true);
   const proof = JSON.parse(await readFile(resolveTaskAcceptancePath(root, task.planId, "T001"), "utf8"));
   assert.equal(proof.pass, true);
 });

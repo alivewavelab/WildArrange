@@ -17,16 +17,11 @@ import path from "node:path";
 import test from "node:test";
 import { DANGEROUS_ACTIONS, fingerprintCard } from "../src/infra/verification-cards.mjs";
 import { captureCardLiveSnapshot, hasDynamicCodeHint, scanVerificationUniverse } from "../src/infra/verification-discovery.mjs";
+import { resolveGovernancePaths } from "../src/infra/runtime-store.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 async function withTempDir(fn) {
-  const baseDir = path.join(process.cwd(), ".tmp");
-  await mkdir(baseDir, { recursive: true });
-  const dir = await mkdtemp(path.join(baseDir, "wildarrange-discovery-"));
-  try {
-    await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+  await withExternalProject(({ projectRoot, governanceRoot }) => fn(projectRoot, governanceRoot));
 }
 
 async function writeFixture(dir) {
@@ -125,12 +120,15 @@ test("discovery: cards answer the user-visible questions", async () => {
     assert.ok(cards.some((card) => card.asset === "config_locator"));
     assert.ok(cards.some((card) => card.asset === "behavior_suite"));
     const locator = cards.find((card) => card.asset === "config_locator")?.patch?.value?.verificationGovernance;
-    assert.match(locator?.inventoryPath || "", /verification-inventory\.html$/);
+    // 外置模式：登记册位置由治理合同决定，Bootstrap/Inventory 与其同目录。
+    const { registryPath } = resolveGovernancePaths(dir);
+    assert.equal(locator?.registryPath, registryPath);
+    assert.equal(locator?.inventoryPath, path.posix.join(path.posix.dirname(registryPath), "inventory.html"));
   });
 });
 
 test("discovery: an existing locator remains the source of truth on later scans", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, governanceRoot) => {
     await writeFixture(dir);
     const existing = {
       registryPath: "governance/registry.json",
@@ -138,10 +136,11 @@ test("discovery: an existing locator remains the source of truth on later scans"
       inventoryPath: "governance/inventory.html",
       archiveRoot: "governance/archive",
     };
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({ verificationGovernance: existing }, null, 2));
+    await writeFile(path.join(governanceRoot, "policy", "wildarrange.config.json"), JSON.stringify({ verificationGovernance: existing }, null, 2));
     const { cards } = await scanVerificationUniverse(dir);
     const locator = cards.find((card) => card.asset === "config_locator")?.patch?.value?.verificationGovernance;
-    assert.deepEqual(locator, existing);
+    // 已配置的 Bootstrap/Inventory/archive 位置保持真源；登记册位置固定取治理合同。
+    assert.deepEqual(locator, { ...existing, registryPath: resolveGovernancePaths(dir).registryPath });
   });
 });
 

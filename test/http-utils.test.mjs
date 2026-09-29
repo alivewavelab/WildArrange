@@ -13,15 +13,14 @@
 
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import http from "node:http";
-import path from "node:path";
 import { Readable } from "node:stream";
 import test from "node:test";
 
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
+import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 import { startDashboardServer } from "../src/interface/dashboard.mjs";
 import { readJsonBody } from "../src/interface/http-utils.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 function fakeRequest(chunks) {
   return Readable.from(chunks);
@@ -44,13 +43,10 @@ test("readJsonBody rejects bad JSON with invalid_json and oversize with payload_
 });
 
 test("dashboard panels answer bad JSON bodies with a consistent 400", async () => {
-  const baseDir = path.join(process.cwd(), ".tmp");
-  await mkdir(baseDir, { recursive: true });
-  const dir = await mkdtemp(path.join(baseDir, "wildarrange-http-utils-"));
   const token = "http-utils-token";
+  await withExternalProject(async ({ projectRoot: dir }) => {
   let server;
   try {
-    await initRuntime(dir);
     server = await startDashboardServer(dir, { host: "127.0.0.1", port: 0, token });
     const base = `http://127.0.0.1:${server.address().port}`;
     const postBadJson = (pathname) => new Promise((resolve, reject) => {
@@ -81,10 +77,10 @@ test("dashboard panels answer bad JSON bodies with a consistent 400", async () =
     assert.equal(adoptionApi.json.ok, false);
     assert.equal(adoptionApi.json.code, "invalid_json");
 
-    assert.equal(existsSync(path.join(dir, ".wildarrange", "team", "tasks.json")), false,
+    assert.equal(existsSync(resolveWildArrangePath(dir, "team", "tasks.json")), false,
       "rejected bodies must not persist any task state");
   } finally {
     server?.close();
-    await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
+  });
 });

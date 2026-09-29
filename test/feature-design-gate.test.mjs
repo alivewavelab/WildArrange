@@ -15,8 +15,7 @@
 import { runHostHook, runHostRoute } from "../src/orchestration/host-runtime.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { buildPlanDraftDirective, routeRequest as classifyRoute } from "../src/ai/routing.mjs";
@@ -24,18 +23,17 @@ import { runInjectionHook as renderHook } from "../src/ai/hooks.mjs";
 import { preToolUseGuard } from "../src/ai/pre-tool-guard.mjs";
 import { importPlan, loadPlanApproval } from "../src/orchestration/plan-state.mjs";
 import { loadActiveFeatureDesignGate } from "../src/orchestration/feature-design.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
+import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 test("AI routing does not own feature confirmation while the public host entry does", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "wa-feature-owner-"));
-  try {
-    await initRuntime(root);
+  await withExternalProject(async ({ projectRoot: root }) => {
     const input = { text: "新增一个从游戏详情页启动游戏的功能", sessionId: "owner-test" };
     await classifyRoute(root, input);
     assert.equal(await loadActiveFeatureDesignGate(root, input.sessionId), null);
     await runHostRoute(root, input, classifyRoute);
     assert.equal((await loadActiveFeatureDesignGate(root, input.sessionId)).status, "awaiting_feature_confirmation");
-  } finally { await rm(root, { recursive: true, force: true }); }
+  });
 });
 
 test("an explicit draft-only request writes a draft without forcing formal import", async () => {
@@ -46,8 +44,7 @@ test("an explicit draft-only request writes a draft without forcing formal impor
   assert.equal(directive.draftOnly, true);
   assert.equal(directive.nextCommand, null);
 
-  const rootDir = await mkdtemp(path.join(os.tmpdir(), "wildarrange-draft-only-"));
-  try {
+  await withExternalProject(async ({ projectRoot: rootDir }) => {
     const hook = await runInjectionHook(rootDir, {
       hook_event_name: "UserPromptSubmit",
       session_id: "draft-only",
@@ -56,9 +53,7 @@ test("an explicit draft-only request writes a draft without forcing formal impor
     });
     assert.match(hook.output, /用户明确只要草稿：写完即停止/);
     assert.doesNotMatch(hook.output, /写完草稿后执行：/);
-  } finally {
-    await rm(rootDir, { recursive: true, force: true });
-  }
+  });
 });
 
 test("dependency import constraints do not suppress formal plan import", () => {
@@ -81,11 +76,10 @@ test("dependency import constraints do not suppress formal plan import", () => {
 });
 
 test("feature design confirmation and complete plan cannot be bypassed across turns", async () => {
-  const rootDir = await mkdtemp(path.join(os.tmpdir(), "wildarrange-feature-gate-"));
   const sessionId = "feature-gate-session";
-  try {
-    await initRuntime(rootDir);
-    const oldPlanPath = path.join(rootDir, "old-plan.json");
+  await withExternalProject(async ({ root, projectRoot: rootDir }) => {
+    // 计划文件放在项目仓之外，避免污染项目工作区基线
+    const oldPlanPath = path.join(root, "old-plan.json");
     await writeFile(oldPlanPath, JSON.stringify({
       title: "Existing maintenance plan",
       tasks: [{
@@ -139,7 +133,8 @@ test("feature design confirmation and complete plan cannot be bypassed across tu
     const directive = buildPlanDraftDirective(confirmed, { sessionId, prompt: "确认" });
     assert.equal(directive.featureDesignRef, confirmed.featureDesign.id);
 
-    const planPath = path.join(rootDir, ".wildarrange", "plan-drafts", "feature-gate-plan.json");
+    const planPath = resolveWildArrangePath(rootDir, "plan-drafts", "feature-gate-plan.json");
+    await mkdir(path.dirname(planPath), { recursive: true });
     const plan = {
       generated_by: "host_semantic",
       feature_design_ref: confirmed.featureDesign.id,
@@ -168,7 +163,7 @@ test("feature design confirmation and complete plan cannot be bypassed across tu
       hook_event_name: "PreToolUse",
       session_id: sessionId,
       tool_name: "Bash",
-      tool_input: { command: "node ./bin/wildarrange.mjs plan --from .wildarrange/plan-drafts/feature-gate-plan.json" },
+      tool_input: { command: `node ./bin/wildarrange.mjs plan --from "${planPath}"` },
     });
     assert.equal(matchingImport.decision, "allow");
 
@@ -186,15 +181,12 @@ test("feature design confirmation and complete plan cannot be bypassed across tu
     });
     assert.equal(blockedBeforeApproval.decision, "deny");
     assert.equal(blockedBeforeApproval.code, "awaiting_plan_approval_shell");
-  } finally {
-    await rm(rootDir, { recursive: true, force: true });
-  }
+  });
 });
 
 test("UserPromptSubmit keeps later start commands inside the feature design gate", async () => {
-  const rootDir = await mkdtemp(path.join(os.tmpdir(), "wildarrange-feature-hook-"));
   const sessionId = "feature-hook-session";
-  try {
+  await withExternalProject(async ({ projectRoot: rootDir }) => {
     const first = await runInjectionHook(rootDir, {
       hook_event_name: "UserPromptSubmit",
       session_id: sessionId,
@@ -223,14 +215,11 @@ test("UserPromptSubmit keeps later start commands inside the feature design gate
     assert.match(confirmed.output, /完整 Plan 门（禁止绕过）/);
     assert.match(confirmed.output, /feature_design_ref/);
     assert.match(confirmed.output, /生成计划草稿（必须执行）/);
-  } finally {
-    await rm(rootDir, { recursive: true, force: true });
-  }
+  });
 });
 
 test("ordinary architecture planning does not mount the feature clarification skill", async () => {
-  const rootDir = await mkdtemp(path.join(os.tmpdir(), "wildarrange-architecture-hook-"));
-  try {
+  await withExternalProject(async ({ projectRoot: rootDir }) => {
     const result = await runInjectionHook(rootDir, {
       hook_event_name: "UserPromptSubmit",
       session_id: "architecture-plan-session",
@@ -239,9 +228,7 @@ test("ordinary architecture planning does not mount the feature clarification sk
     });
     assert.doesNotMatch(result.output, /### clarify-feature-design/);
     assert.doesNotMatch(result.output, /功能设计确认门（禁止绕过）/);
-  } finally {
-    await rm(rootDir, { recursive: true, force: true });
-  }
+  });
 });
 
 function routeRequest(root, input) { return runHostRoute(root, input, classifyRoute); }
