@@ -51,7 +51,7 @@ import {
   listParallelAgentRuns,
   registerRunIndexEntry,
 } from "./parallel-run-index.mjs";
-import { clearParallelRunClaims } from "./parallel-run-lifecycle.mjs";
+import { clearParallelRunClaims, releaseSupersededRunWorktree } from "./parallel-run-lifecycle.mjs";
 
 export { listParallelAgentRuns };
 export { parallelAgentStatus, closeParallelAgentRun, cleanupParallelAgentRun } from "./parallel-run-lifecycle.mjs";
@@ -388,6 +388,7 @@ async function runOneAgentInner(rootDir, runDir, runId, task, options) {
   await mkdir(taskRunDir, { recursive: true });
   const config = options.config || (await loadWildArrangeConfig(rootDir)).config;
   const isolation = options.defaultIsolation || options.isolation || task.isolation || config.parallelAgents?.isolation || "run-dir";
+  if (isolation === "git-worktree") await releaseSupersededRunWorktree(rootDir, task);
   const worktree = await prepareAgentWorktree(rootDir, taskRunDir, {
     isolation,
     branchName: task.coordination?.branch || null,

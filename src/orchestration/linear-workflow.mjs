@@ -326,13 +326,14 @@ export async function checkpointTaskNodeWithinLock(rootDir, options = {}) {
   if (task.last_failure?.reason === "command_termination_failed" && options.force !== true) {
     return { status: "recovery_required", task, commandEvidence: task.last_failure.commandEvidence || null };
   }
-  const deliveryWorkspace = await ensureLinearDeliveryWorkspace(rootDir, taskState.planId, task, taskState.tasks);
   // A verifying task holding an admission_claim belongs to an in-flight (or
   // crash-resumable) parallel admission; the single-step checkpoint must not
   // complete it on that run's behalf (cross-review P1, round 6, 2026-07-21).
   if (task.admission_claim?.runId) {
     throw new Error(`task ${task.id} is claimed by parallel admission run ${task.admission_claim.runId}; 用同一 run 重新 admit 续跑，单步 checkpoint 不接管进行中的 admission`);
   }
+  // 先拒绝再建 worktree：claim 期间任务分支被 admission 的 run worktree 占用，此处不得有任何 worktree 副作用。
+  const deliveryWorkspace = await ensureLinearDeliveryWorkspace(rootDir, taskState.planId, task, taskState.tasks);
   const workerResult = [...task.evidence].reverse().find((entry) => entry.kind === "worker");
   // Gate outcomes are read back via the pipeline's own step list, so the
   // single-step workflow cannot complete a task while skipping a gate that

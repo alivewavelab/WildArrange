@@ -19,6 +19,7 @@ import {
   loadWildArrangeConfig,
 } from "../infra/runtime-config.mjs";
 import {
+  resolveRuntimeInputPath,
   resolveWildArrangePath,
   nowIso,
   readJson,
@@ -498,7 +499,7 @@ async function isMatchingFeaturePlanImport(rootDir, command, gateId, cliCommandP
   const match = args?.match(/^plan\s+--from\s+(?:"([^"]+\.json)"|'([^']+\.json)'|([^\s]+\.json))$/i);
   const rawPath = match?.[1] || match?.[2] || match?.[3];
   if (!rawPath) return false;
-  const planPath = path.isAbsolute(rawPath) ? rawPath : path.resolve(rootDir, rawPath);
+  const planPath = path.isAbsolute(rawPath) ? rawPath : resolveRuntimeInputPath(rootDir, rawPath);
   const plan = await readJson(planPath, null).catch(() => null);
   return plan?.feature_design_ref === gateId;
 }

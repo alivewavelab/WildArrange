@@ -72,13 +72,6 @@ async function gitShow(cwd, sha, filePath) {
   return result.stdout;
 }
 
-/** Git 项目里并行 run 的 worktree 独占 task branch；人工释放后线性流程才能接手同一任务。 */
-async function releaseRunTaskBranch(dir, batch) {
-  const branch = (await loadTaskState(dir)).tasks[0].coordination.branch;
-  assert.equal((await runCommandFile("git", ["worktree", "remove", "--force", path.resolve(dir, batch.results[0].workDir)], dir)).exitCode, 0);
-  assert.equal((await runCommandFile("git", ["branch", "-D", branch], dir)).exitCode, 0);
-}
-
 function nodeEval(source) {
   const encoded = Buffer.from(source.replace(/\s*\n\s*/g, " ").trim(), "utf8").toString("base64");
   return `node -e "eval(Buffer.from('${encoded}','base64').toString())"`;
@@ -710,8 +703,6 @@ test("adversarial: a run whose admission failed earlier cannot fake-resume a tas
     const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
     const failed = await admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" });
     assert.notEqual(failed.status, "completed", "sanity: run R's admission must fail its gates");
-
-    await releaseRunTaskBranch(dir, batch);
 
     // The task is then completed through the linear flow, NOT by run R.
     const completed = await runNextTask(dir);
@@ -1426,7 +1417,6 @@ test("adversarial: parallel admission refuses a task completed by other means BE
       null,
       "closing the run must release its parallel_run_claim",
     );
-    await releaseRunTaskBranch(dir, batch);
     const completed = await runNextTask(dir);
     assert.equal(completed.status, "completed");
     const deliveredPath = path.join(completed.task.delivery_workspace.workDir, "src", "parallel.txt");

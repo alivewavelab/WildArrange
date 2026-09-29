@@ -99,9 +99,29 @@ export async function prepareAgentWorktree(rootDir, taskRunDir, options = {}) {
 }
 
 /**
+ * 释放一个 run worktree 对任务分支的占用：移除 worktree 并删除分支。
+ * 仅当分支相对 startPoint 没有任何提交时才执行（分支上有提交即交付产物，绝不删除）；
+ * worktree 内未提交的改动已在 run 结束时收集成 patch/result 证据。调用方负责判定该 run 已可丢弃。
+ * @returns {Promise<{released: boolean, reason?: string}>}
+ */
+export async function releaseAgentWorktree(rootDir, { workDir, branch, startPoint }) {
+  if (!workDir || !branch || !startPoint) return { released: false, reason: "worktree_identity_unknown" };
+  const ahead = await runCommandFile("git", ["-C", rootDir, "rev-list", "--count", `${startPoint}..refs/heads/${branch}`], rootDir, 30_000);
+  if (ahead.exitCode !== 0 || ahead.stdout.trim() !== "0") return { released: false, reason: "branch_has_commits" };
+  const remove = await runCommandFile("git", ["-C", rootDir, "worktree", "remove", "--force", workDir], rootDir, 30_000);
+  if (remove.exitCode !== 0 && !/is not a working tree|No such file/i.test(remove.stderr || remove.stdout || "")) {
+    return { released: false, reason: `worktree_remove_failed: ${remove.stderr || remove.stdout}` };
+  }
+  await runCommandFile("git", ["-C", rootDir, "worktree", "prune"], rootDir, 30_000);
+  const drop = await runCommandFile("git", ["-C", rootDir, "branch", "-D", branch], rootDir, 30_000);
+  if (drop.exitCode !== 0) return { released: false, reason: `branch_delete_failed: ${drop.stderr || drop.stdout}` };
+  return { released: true };
+}
+
+/**
  * 检查 task branch 是否已被占用：返回占用它的 worktree 路径、仅分支存在时返回空路径，未占用返回 null。
  */
-async function inspectTaskBranchOccupation(rootDir, branchName) {
+export async function inspectTaskBranchOccupation(rootDir, branchName) {
   const list = await runCommandFile("git", ["-C", rootDir, "worktree", "list", "--porcelain"], rootDir, 30_000);
   if (list.exitCode === 0) {
     let currentPath = null;

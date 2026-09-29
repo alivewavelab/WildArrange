@@ -100,6 +100,9 @@ export async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResul
     initialEvidence: { workerResult },
     changedPaths: deliveryChangedPaths,
     runId,
+    // 已有 durable intent 说明交付提交已落在任务分支、共享 checkout 已回滚：
+    // 成果只存在于任务 delivery worktree，gate 必须在那里重跑，否则 verify 读不到产物。
+    executionRoot: integrationIntent && deliveryWorktreeDir ? deliveryWorktreeDir : undefined,
     delivery: {
       runId,
       deliveryWorktreeDir,
