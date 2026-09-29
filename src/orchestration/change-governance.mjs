@@ -161,9 +161,7 @@ export async function reviewChangeRequest(rootDir, id) {
   if (changeRequest.status !== "open") reasons.push(`change request is ${changeRequest.status}`);
   if (!changeRequest.evidence || !changeRequest.rationale) reasons.push("missing evidence or rationale");
   if (changeRequest.invariants?.autoApply !== false) reasons.push("autoApply invariant must be false");
-  // 兼容 requiresLeadReview 重命名前写入的旧 invariant 键，保持字面量可检索。
-  const legacyLeadReviewKey = "requiresSisyphusReview";
-  if (changeRequest.invariants?.requiresLeadReview !== true && changeRequest.invariants?.[legacyLeadReviewKey] !== true) {
+  if (changeRequest.invariants?.requiresLeadReview !== true) {
     reasons.push("requiresLeadReview invariant must be true");
   }
   if (changeRequest.invariants?.mustNotWeakenVerification !== true) reasons.push("mustNotWeakenVerification invariant must be true");
@@ -543,8 +541,6 @@ export async function writeChangeRequest(rootDir, planId, task, scopeResult, sou
 
 /** 将 ChangeRequest 渲染为 Markdown 报告正文。 */
 export function renderChangeRequestMarkdown(changeRequest) {
-  // 兼容 requiresLeadReview 重命名前写入的旧 invariant 键，保持字面量可检索。
-  const legacyLeadReviewKey = "requiresSisyphusReview";
   return `# ChangeRequest ${changeRequest.id}
 
 | Field | Value |
@@ -593,7 +589,7 @@ ${changeRequest.proposedActions.map((action) => `- ${action}`).join("\n")}
 ## Invariants
 
 - autoApply: ${changeRequest.invariants.autoApply}
-- requiresLeadReview: ${changeRequest.invariants.requiresLeadReview ?? changeRequest.invariants[legacyLeadReviewKey]}
+- requiresLeadReview: ${changeRequest.invariants.requiresLeadReview}
 - mustNotWeakenVerification: ${changeRequest.invariants.mustNotWeakenVerification}
 `;
 }

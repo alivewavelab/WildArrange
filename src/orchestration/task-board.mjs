@@ -23,11 +23,8 @@ import {
   STATE_VERSION,
   createWorkId,
   ensureWildArrangeDirs,
-  legacyTaskEvidenceStem,
   nowIso,
   readJson,
-  resolveLegacyTaskAcceptancePath,
-  resolveLegacyTaskCheckpointPath,
   resolveWildArrangePath,
   resolveTaskAcceptancePath,
   resolveTaskCheckpointPath,
@@ -59,7 +56,6 @@ import {
   writeTasksMarkdown,
 } from "./plan-state.mjs";
 import { coordinateTaskClaim } from "./remote-ownership.mjs";
-export { migrateTaskLedgerState } from "./task-migration.mjs";
 
 // --- 查询 ---
 
@@ -337,7 +333,7 @@ export async function persistTaskState(rootDir, taskState) {
   await writeJsonAtomic(resolveWildArrangePath(rootDir, "team", "tasks.json"), nextLedger);
 }
 
-// --- 迁移与归档 ---
+// --- 归档 ---
 
 /** 归档任务证据并删除 taskState 条目（需 backupId）。 */
 export async function archiveAndDeleteTeamTask(rootDir, options = {}) {
@@ -346,26 +342,7 @@ export async function archiveAndDeleteTeamTask(rootDir, options = {}) {
     if (!ledger) throw new Error("no task ledger found");
     validateLedgerTaskIdentities(ledger);
     if (options.planId) assertSafeStateId(options.planId, "planId");
-    let task = resolveLedgerTask(ledger, options.taskId, options.planId);
-    let archiveSource = "canonical_task_ledger";
-    let legacyPlan = null;
-    if (!task && options.planId) {
-      const planIsIndexed = ledger.activePlanId === options.planId
-        || (ledger.plans || []).some((plan) => plan.id === options.planId)
-        || ledger.tasks.some((candidate) => candidate.planId === options.planId);
-      if (!planIsIndexed) {
-        legacyPlan = await readJson(resolveWildArrangePath(rootDir, "plans", `${options.planId}.json`), null);
-        const matches = (legacyPlan?.tasks || []).filter((candidate) => candidate.id === options.taskId);
-        if (matches.length === 1) {
-          task = {
-            ...matches[0],
-            planId: options.planId,
-            ref: `${options.planId}:${options.taskId}`,
-          };
-          archiveSource = "unindexed_legacy_plan";
-        }
-      }
-    }
+    const task = resolveLedgerTask(ledger, options.taskId, options.planId);
     if (!task) throw new Error(`unknown task: ${options.taskId}`);
     assertSafeStateId(task.planId, "task planId");
     assertSafeStateId(task.id, "task id");
@@ -378,12 +355,7 @@ export async function archiveAndDeleteTeamTask(rootDir, options = {}) {
     const at = nowIso();
     const remainingTasks = ledger.tasks.filter((candidate) =>
       candidate.planId !== task.planId || candidate.id !== task.id);
-    const remainingLegacyTasks = archiveSource === "unindexed_legacy_plan"
-      ? (legacyPlan?.tasks || []).filter((candidate) => candidate.id !== task.id)
-      : [];
-    const planHasTasks = archiveSource === "unindexed_legacy_plan"
-      ? remainingLegacyTasks.length > 0
-      : remainingTasks.some((candidate) => candidate.planId === task.planId);
+    const planHasTasks = remainingTasks.some((candidate) => candidate.planId === task.planId);
     const remainingPlans = (ledger.plans || [])
       .filter((plan) => plan.id !== task.planId || planHasTasks)
       .map((plan) => plan.id === task.planId
@@ -423,51 +395,22 @@ export async function archiveAndDeleteTeamTask(rootDir, options = {}) {
       resolveTaskAcceptancePath(rootDir, task.planId, task.id, "json"),
       resolveTaskAcceptancePath(rootDir, task.planId, task.id, "md"),
     ];
-    const evidenceTasks = [
-      ...ledger.tasks,
-      ...(archiveSource === "unindexed_legacy_plan"
-        ? (legacyPlan?.tasks || []).map((candidate) => ({ ...candidate, planId: task.planId }))
-        : []),
-    ];
-    const targetLegacyStem = legacyTaskEvidenceStem(task.planId, task.id);
-    const legacyStemCollides = evidenceTasks.some((candidate) =>
-      (candidate.planId !== task.planId || candidate.id !== task.id)
-      && legacyTaskEvidenceStem(candidate.planId, candidate.id) === targetLegacyStem);
-    const legacyCheckpointPath = resolveLegacyTaskCheckpointPath(rootDir, task.planId, task.id);
-    const legacyAcceptanceJsonPath = resolveLegacyTaskAcceptancePath(rootDir, task.planId, task.id, "json");
-    const legacyAcceptanceMdPath = resolveLegacyTaskAcceptancePath(rootDir, task.planId, task.id, "md");
-    const legacyCheckpoint = await readJson(legacyCheckpointPath, null);
-    const legacyAcceptance = await readJson(legacyAcceptanceJsonPath, null);
-    if (!legacyStemCollides || evidenceBelongsToTask(legacyCheckpoint, task)) {
-      purgeCandidates.push(legacyCheckpointPath);
-    }
-    if (!legacyStemCollides || evidenceBelongsToTask(legacyAcceptance, task)) {
-      purgeCandidates.push(legacyAcceptanceJsonPath, legacyAcceptanceMdPath);
-    }
     const outboxDir = resolveWildArrangePath(rootDir, "team", "outbox");
     try {
       const outboxEntries = await readdir(outboxDir, { withFileTypes: true });
-      const duplicateTaskIdRemains = remainingTasks.some((candidate) => candidate.id === task.id);
       for (const entry of outboxEntries) {
         if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
         const claimPath = path.join(outboxDir, entry.name);
         const claim = await readJson(claimPath, null);
-        const exactClaim = claim?.taskRef === task.ref;
-        const unambiguousLegacyClaim = !claim?.taskRef
-          && claim?.taskId === task.id
-          && !duplicateTaskIdRemains;
-        if (exactClaim || unambiguousLegacyClaim) purgeCandidates.push(claimPath);
+        if (claim?.taskRef === task.ref) purgeCandidates.push(claimPath);
       }
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
     }
     if (!planHasTasks) purgeCandidates.push(resolveWildArrangePath(rootDir, "plans", `${task.planId}.json`));
-    const tasksRemainingInSource = archiveSource === "unindexed_legacy_plan"
-      ? remainingLegacyTasks
-      : remainingTasks;
     for (const writablePath of task.writable_paths || []) {
       if (typeof writablePath !== "string" || /[*?\[\]]/.test(writablePath)) continue;
-      const sharedByRemainingTask = tasksRemainingInSource.some((candidate) =>
+      const sharedByRemainingTask = remainingTasks.some((candidate) =>
         (candidate.writable_paths || []).includes(writablePath));
       if (sharedByRemainingTask) continue;
       const absolutePath = path.resolve(rootDir, writablePath);
@@ -480,9 +423,7 @@ export async function archiveAndDeleteTeamTask(rootDir, options = {}) {
     const nextTargetPlan = planHasTasks
       ? {
         ...(targetPlan || remainingPlans.find((plan) => plan.id === task.planId) || { id: task.planId }),
-        tasks: archiveSource === "unindexed_legacy_plan"
-          ? remainingLegacyTasks
-          : remainingTasks.filter((candidate) => candidate.planId === task.planId),
+        tasks: remainingTasks.filter((candidate) => candidate.planId === task.planId),
         updatedAt: at,
       }
       : null;
@@ -528,7 +469,6 @@ export async function archiveAndDeleteTeamTask(rootDir, options = {}) {
       previousStatus: task.status,
       reason,
       backupId,
-      archiveSource,
     });
 
     const projectionPaths = [canonicalPath, tasksMarkdownPath];
@@ -582,7 +522,6 @@ export async function archiveAndDeleteTeamTask(rootDir, options = {}) {
         previousStatus: task.status,
         reason,
         backupId,
-        archiveSource,
         deletedPaths: deleted,
       });
     } catch (error) {
@@ -624,7 +563,6 @@ export async function archiveAndDeleteTeamTask(rootDir, options = {}) {
       taskRef: task.ref,
       previousStatus: task.status,
       backupId,
-      archiveSource,
       activePlanId,
       deletedPaths: deleted,
     };
@@ -680,11 +618,6 @@ function collapseNestedPaths(paths) {
     .sort((left, right) => left.length - right.length);
   return normalized.filter((candidate, index) => !normalized.slice(0, index).some((parent) =>
     candidate.startsWith(`${parent}${path.sep}`)));
-}
-
-/** 判断 evidence 条目是否归属指定 task。 */
-function evidenceBelongsToTask(evidence, task) {
-  return evidence?.planId === task.planId && evidence?.taskId === task.id;
 }
 
 /** 捕获单文件 admission 回滚用 preimage。 */

@@ -92,8 +92,6 @@
 | `wildarrange test [--zone interface|orchestration|ai|capabilities|infra] [changed-file...]` | 分区/影响面最小测试集 |
 | `wildarrange docs commands [--write]` | 从命令注册表生成命令文档（单一事实源） |
 | `wildarrange state backup [--reason "..."]` | 备份运行态关键文件 |
-| `wildarrange state migrate` | 备份后迁移运行态任务总账与旧投影；不改根 wildarrange.config.json |
-| `wildarrange state migrate --to external --governance-root <path> [--runtime-root <path>] [--dry-run]` | 校验并复制旧运行态，摘要一致后才连接独立治理仓库；保留项目内源目录 |
 | `wildarrange state verify` | 校验运行态关键文件 |
 | `wildarrange state list` | 列出运行态备份 |
 | `wildarrange state restore --backup <backupId>` | 恢复运行态备份 |

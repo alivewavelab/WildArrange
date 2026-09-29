@@ -7,7 +7,6 @@
 import {
   attachGovernanceRepository,
   initializeGovernanceRepository,
-  migrateLegacyWorkspace,
   resolveWorkspaceContext,
 } from "../infra/workspace-context.mjs";
 
@@ -24,11 +23,6 @@ export async function initializeProjectGovernance(projectRoot, options = {}) {
 /** 查询并绑定项目当前工作区上下文。 */
 export async function showProjectConnection(projectRoot, options = {}) {
   return resolveWorkspaceContext(projectRoot, options);
-}
-
-/** 校验并迁移旧项目内运行态，成功后才切换外部 registry。 */
-export async function migrateProjectConnection(projectRoot, options = {}) {
-  return migrateLegacyWorkspace(projectRoot, options);
 }
 
 /** 返回适合 CLI JSON 输出的无策略投影。 */

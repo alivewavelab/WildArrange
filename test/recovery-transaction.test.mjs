@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
+import { appendLedger } from "../src/infra/ledger.mjs";
 import {
   prepareArchiveRecoveryPackage,
   updateArchiveRecoveryPackage,
@@ -192,7 +193,7 @@ test("recovery-transaction: adoption manifest kind is distinct from archive", ()
 test("archive recovery public API remains field-equivalent", async () => {
   await withTempDir(async (dir) => {
     await mkdir(path.join(dir, ".wildarrange", "team"), { recursive: true });
-    await writeFile(path.join(dir, ".wildarrange", "ledger.jsonl"), "{}\n");
+    await appendLedger(dir, { type: "archive_equivalence_seed" });
     await writeFile(path.join(dir, ".wildarrange", "work.json"), "{}\n");
     await writeFile(path.join(dir, "keep.txt"), "keep\n");
     const backup = await writeRuntimeStateBackup(dir, { reason: "archive-equiv" });

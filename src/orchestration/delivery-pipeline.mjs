@@ -349,7 +349,6 @@ export async function runCompletionSegment(rootDir, planId, task, evidence, opti
   evidence.deliveryPending = delivery.required && Boolean(delivery.target);
   // Entry flags cannot waive Git delivery. Missing targets fail the proof,
   // rather than making an unversioned task look like a non-Git task.
-  evidence.deliveryBaseline = null;
   evidence.integrationCommit = null;
   let proofEnvelope = await invokeCapability("acceptance-proof", { rootDir, planId, task, evidence });
   if (proofEnvelope.status !== "pass") {
@@ -366,7 +365,6 @@ export async function runCompletionSegment(rootDir, planId, task, evidence, opti
       changedPaths: evidence.scopeResult?.changedPaths || [],
     });
     evidence.integrationCommit = integrationGate;
-    evidence.deliveryBaseline = integrationGate;
     evidence.deliveryPending = false;
     // §3.4：integration 围栏失败只回滚本 run 路径，已 push 的 delivery 由 integration 层保留 intent。
     if (integrationGate?.pass !== true) {

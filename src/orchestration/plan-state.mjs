@@ -69,9 +69,9 @@ export function normalizePlan(rawPlan) {
     id: rawPlan.id || createWorkId("plan"),
     title: rawPlan.title,
     objective: rawPlan.objective || rawPlan.title,
-    generated_by: normalizeOptionalText(rawPlan.generated_by ?? rawPlan.generatedBy, "plan.generated_by"),
-    feature_design_ref: normalizeOptionalText(rawPlan.feature_design_ref ?? rawPlan.featureDesignRef, "plan.feature_design_ref"),
-    request_summary: normalizeOptionalText(rawPlan.request_summary ?? rawPlan.requestSummary, "plan.request_summary"),
+    generated_by: normalizeOptionalText(rawPlan.generated_by, "plan.generated_by"),
+    feature_design_ref: normalizeOptionalText(rawPlan.feature_design_ref, "plan.feature_design_ref"),
+    request_summary: normalizeOptionalText(rawPlan.request_summary, "plan.request_summary"),
     defaults,
     createdAt: rawPlan.createdAt || nowIso(),
     updatedAt: nowIso(),
@@ -85,10 +85,10 @@ export function normalizePlan(rawPlan) {
 function normalizePlanDefaults(rawPlan) {
   const rawDefaults = rawPlan.defaults && typeof rawPlan.defaults === "object" ? rawPlan.defaults : {};
   const defaults = {
-    verify_commands: normalizeStringArray(rawDefaults.verify_commands ?? rawDefaults.verifyCommands ?? rawPlan.verify_commands ?? rawPlan.verifyCommands ?? [], "defaults.verify_commands"),
-    review_commands: normalizeStringArray(rawDefaults.review_commands ?? rawDefaults.reviewCommands ?? rawPlan.review_commands ?? rawPlan.reviewCommands ?? [], "defaults.review_commands"),
-    standards_commands: normalizeStringArray(rawDefaults.standards_commands ?? rawDefaults.standardsCommands ?? rawPlan.standards_commands ?? rawPlan.standardsCommands ?? [], "defaults.standards_commands"),
-    writable_paths: normalizeStringArray(rawDefaults.writable_paths ?? rawDefaults.writablePaths ?? rawPlan.writable_paths ?? rawPlan.writablePaths ?? [], "defaults.writable_paths"),
+    verify_commands: normalizeStringArray(rawDefaults.verify_commands ?? rawPlan.verify_commands ?? [], "defaults.verify_commands"),
+    review_commands: normalizeStringArray(rawDefaults.review_commands ?? rawPlan.review_commands ?? [], "defaults.review_commands"),
+    standards_commands: normalizeStringArray(rawDefaults.standards_commands ?? rawPlan.standards_commands ?? [], "defaults.standards_commands"),
+    writable_paths: normalizeStringArray(rawDefaults.writable_paths ?? rawPlan.writable_paths ?? [], "defaults.writable_paths"),
     skills: normalizeSkillArray(rawDefaults.skills ?? rawPlan.skills ?? [], "defaults.skills"),
   };
   return defaults;
@@ -123,7 +123,7 @@ export function normalizeTask(task, index, defaults = {}, options = {}) {
   const subject = task.subject || task.title;
   if (!subject) throw new Error(`task ${id} subject is required`);
 
-  const taskVerifyCommands = normalizeStringArray(task.verify_commands ?? task.verifyCommands ?? [], `task ${id} verify_commands`);
+  const taskVerifyCommands = normalizeStringArray(task.verify_commands ?? [], `task ${id} verify_commands`);
   const verifyCommands = uniqueStrings([...(defaults.verify_commands || []), ...taskVerifyCommands]);
   const requestedStatus = task.status || (options.defaultDraftWhenIncomplete === true && verifyCommands.length === 0 ? "draft" : "pending");
   if (verifyCommands.length === 0 && requestedStatus !== "draft") {
@@ -132,25 +132,25 @@ export function normalizeTask(task, index, defaults = {}, options = {}) {
   // Imported/requested "completed" is never trusted: only the delivery pipeline
   // may persist a terminal completed state after the proof chain passes.
   const status = requestedStatus === "completed" ? "needs_user_decision" : validateStatus(requestedStatus);
-  const taskReviewCommands = normalizeStringArray(task.review_commands ?? task.reviewCommands ?? [], `task ${id} review_commands`);
+  const taskReviewCommands = normalizeStringArray(task.review_commands ?? [], `task ${id} review_commands`);
   const reviewCommands = uniqueStrings([...(defaults.review_commands || []), ...taskReviewCommands]);
-  const taskStandardsCommands = normalizeStringArray(task.standards_commands ?? task.standardsCommands ?? [], `task ${id} standards_commands`);
+  const taskStandardsCommands = normalizeStringArray(task.standards_commands ?? [], `task ${id} standards_commands`);
   const standardsCommands = uniqueStrings([...(defaults.standards_commands || []), ...taskStandardsCommands]);
-  const taskWritablePaths = normalizeStringArray(task.writable_paths ?? task.writablePaths ?? [], `task ${id} writable_paths`);
+  const taskWritablePaths = normalizeStringArray(task.writable_paths ?? [], `task ${id} writable_paths`);
   const writablePaths = uniqueStrings([...(defaults.writable_paths || []), ...taskWritablePaths]);
   const taskSkills = normalizeSkillArray(task.skills ?? [], `task ${id} skills`);
-  const successCriteria = normalizeSuccessCriteria(task.successCriteria ?? task.success_criteria, id, subject, verifyCommands);
-  const governanceWarnings = detectTaskGovernanceWarnings({ workerCommand: task.worker_command || task.workerCommand || null, verifyCommands, writablePaths });
-  const workType = normalizeWorkType(task.workType ?? task.work_type ?? inferWorkType(`${subject}\n${task.description || ""}`));
+  const successCriteria = normalizeSuccessCriteria(task.successCriteria, id, subject, verifyCommands);
+  const governanceWarnings = detectTaskGovernanceWarnings({ workerCommand: task.worker_command || null, verifyCommands, writablePaths });
+  const workType = normalizeWorkType(task.workType ?? inferWorkType(`${subject}\n${task.description || ""}`));
   const source = normalizeTaskSource(task.source || options.defaultSource || "imported");
   const priority = normalizeTaskPriority(task.priority || "P1");
-  const parentTaskRef = normalizeOptionalText(task.parentTaskRef ?? task.parent_task_ref, `task ${id} parentTaskRef`);
+  const parentTaskRef = normalizeOptionalText(task.parentTaskRef, `task ${id} parentTaskRef`);
   const request = normalizeTaskRequest(task.request, subject, source);
   const createdAt = task.createdAt || nowIso();
   const explicitOwner = normalizeOptionalText(task.owner, `task ${id} owner`);
   const owner = normalizeTaskOwner(explicitOwner || DEFAULT_EXECUTOR_AGENT, id);
-  const repositoryTarget = normalizeRepositoryTarget(task.repositoryTarget ?? task.repository_target ?? task.repository ?? "project", id);
-  const contractChanges = normalizeContractChanges(task.contractChanges ?? task.contract_changes, id, owner);
+  const repositoryTarget = normalizeRepositoryTarget(task.repositoryTarget ?? "project", id);
+  const contractChanges = normalizeContractChanges(task.contractChanges, id, owner);
   const skills = uniqueStrings([
     ...(defaults.skills || []),
     ...taskSkills,
@@ -176,7 +176,7 @@ export function normalizeTask(task, index, defaults = {}, options = {}) {
     maxAttempts: Number.isInteger(task.maxAttempts) ? task.maxAttempts : 3,
     blockedBy: normalizeStringArray(task.blockedBy ?? [], `task ${id} blockedBy`),
     writable_paths: writablePaths,
-    worker_command: task.worker_command || task.workerCommand || null,
+    worker_command: task.worker_command || null,
     verify_commands: verifyCommands,
     review_commands: reviewCommands,
     standards_commands: standardsCommands,
@@ -267,7 +267,7 @@ function normalizeTaskRequest(value, subject, source) {
   return {
     summary: typeof value.summary === "string" && value.summary.trim() ? value.summary.trim() : subject,
     source: normalizeTaskSource(value.source || source),
-    evidenceRefs: normalizeStringArray(value.evidenceRefs ?? value.evidence_refs ?? [], "task request evidenceRefs"),
+    evidenceRefs: normalizeStringArray(value.evidenceRefs ?? [], "task request evidenceRefs"),
   };
 }
 
@@ -354,7 +354,7 @@ export function normalizeSuccessCriteria(value, taskId, subject, verifyCommands)
         : "verifier/review evidence proves this criterion",
       status,
       evidence: Array.isArray(criterion.evidence) ? criterion.evidence : [],
-      verifierCommandRefs: normalizeVerifierCommandRefs(criterion.verifierCommandRefs ?? criterion.verifier_command_refs, verifyCommands, `task ${taskId} criterion ${id}`),
+      verifierCommandRefs: normalizeVerifierCommandRefs(criterion.verifierCommandRefs, verifyCommands, `task ${taskId} criterion ${id}`),
       lastUpdatedAt: criterion.lastUpdatedAt || null,
     };
   });

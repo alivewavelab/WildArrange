@@ -92,7 +92,7 @@ async function adaptAcceptanceProof(ctx) {
   return { status: raw.pass ? "pass" : "fail", evidence: raw, sideEffect: "state_written" };
 }
 
-/** 写入 checkpoint 快照；deliveryBaseline 可来自 integrationCommit 别名。 */
+/** 写入 checkpoint 快照；delivery 基线取自 evidence.integrationCommit。 */
 async function adaptCheckpoint(ctx) {
   await writeCheckpoint(
     ctx.rootDir,
@@ -101,7 +101,7 @@ async function adaptCheckpoint(ctx) {
     ctx.evidence?.verifyResult,
     ctx.evidence?.scopeResult,
     ctx.evidence?.reviewResult,
-    ctx.evidence?.deliveryBaseline || ctx.evidence?.integrationCommit || null,
+    ctx.evidence?.integrationCommit || null,
   );
   return { status: "pass", evidence: null, sideEffect: "state_written" };
 }

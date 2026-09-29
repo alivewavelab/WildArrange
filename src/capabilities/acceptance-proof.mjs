@@ -112,7 +112,7 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
   const criteria = criteriaStatus(task);
   const verifyCommands = Array.isArray(task.verify_commands) ? task.verify_commands : [];
   const reviewLanes = Array.isArray(reviewResult?.lanes) ? reviewResult.lanes : [];
-  const deliveryBaseline = summarizeDeliveryBaseline(evidence.deliveryBaseline || evidence.integrationCommit);
+  const deliveryBaseline = summarizeDeliveryBaseline(evidence.integrationCommit);
   const executedReview = hasExecutedIndependentReview(reviewResult, config, task);
 
   const checks = [

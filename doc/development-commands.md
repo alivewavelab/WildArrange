@@ -53,8 +53,6 @@
 | 查看决策投影 | `node ./bin/wildarrange.mjs decisions --limit 20` |
 | 分区/影响面测试 | `node ./bin/wildarrange.mjs test --zone infra` |
 | 备份运行态关键文件      | `node ./bin/wildarrange.mjs state backup --reason before-risky-agent`   |
-| 迁移旧运行态           | `node ./bin/wildarrange.mjs state migrate`（自动先备份；旧 completed 无当前 proof 时回到待决策） |
-| 外置旧运行态           | `node ./bin/wildarrange.mjs state migrate --to external --governance-root <path> [--dry-run]`（源目录保留，registry 最后切换） |
 | 归档并删除旧任务        | `node ./bin/wildarrange.mjs task archive --task T001 [--plan <planId>] --delete --reason "obsolete"` |
 | 校验运行态关键文件      | `node ./bin/wildarrange.mjs state verify`                               |
 | 列出运行态备份        | `node ./bin/wildarrange.mjs state list`                                 |

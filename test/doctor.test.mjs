@@ -146,7 +146,6 @@ test("doctor adapter check passes once hooks are installed and flags stale rule 
     // 换机残留：规则里指向不存在绝对路径的命令会静默失效。
     await mkdir(path.join(dir, ".cursor", "rules"), { recursive: true });
     await writeFile(path.join(dir, ".cursor", "rules", "stale.mdc"), "run `node \"/Users/ghost/nonexistent/bin/wildarrange.mjs\" hook run`\n", "utf8");
-    await writeFile(path.join(dir, ".cursor", "rules", ["wildarrange", "flow.mdc"].join("")), "alwaysApply: true\n", "utf8");
 
     const report = await runDoctor(dir);
     const cursor = report.sections.adapters.targets.find((target) => target.target === "cursor");
@@ -160,9 +159,7 @@ test("doctor adapter check passes once hooks are installed and flags stale rule 
     assert.match(activationFinding.nextAction, /设置 > Hooks/);
     assert.match(activationFinding.nextAction, /Codex CLI 请执行 \/hooks/);
     assert.equal(report.sections.adapters.staleRules.length, 1);
-    assert.deepEqual(report.sections.adapters.legacyManagedRules, [{ path: ".cursor/rules/wildarrangeflow.mdc" }]);
     assert.ok(report.findings.some((finding) => finding.message.includes("/Users/ghost/nonexistent")));
-    assert.ok(report.findings.some((finding) => finding.message.includes("legacy managed Cursor rule")));
   });
 });
 

@@ -88,19 +88,19 @@ test("tail hash cache makes repeat appends O(1) and detects truncation", async (
   });
 });
 
-test("legacy ledgers without any hash chain still accept appends", async () => {
+test("ledgers containing unhashed lines refuse appends", async () => {
   await withTempDir(async (dir) => {
-    // 不调 initRuntime：它自己会追加一条带 hash 的 runtime_initialized，
-    // 这里要模拟的是 hash 链启用前的纯 legacy 账本。
     const ledgerPath = resolveWildArrangePath(dir, "ledger.jsonl");
     await mkdir(path.dirname(ledgerPath), { recursive: true });
-    await writeFile(ledgerPath, `${JSON.stringify({ id: "evt-legacy", type: "legacy_event" })}\n`, "utf8");
+    await writeFile(ledgerPath, `${JSON.stringify({ id: "evt-unhashed", type: "unhashed_event" })}\n`, "utf8");
 
-    const entry = await appendLedger(dir, { type: "new_event" });
-    assert.equal(entry.prevHash, null);
-    const content = await readFile(ledgerPath, "utf8");
-    assert.match(content, /legacy_event/);
-    assert.match(content, /new_event/);
+    await assert.rejects(
+      appendLedger(dir, { type: "new_event" }),
+      (error) => {
+        assert.equal(error.protocol.code, "ledger_tail_unhashed");
+        return true;
+      },
+    );
   });
 });
 

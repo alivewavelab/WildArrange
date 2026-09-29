@@ -2,13 +2,13 @@
 // 文件名称：state-migration.test.mjs
 // 所属模块：test
 // 作用说明：
-//   验证状态迁移：legacy agent 别名、未来 schema 拒绝、legacy completed fail-closed、
-//   根 config 权威覆盖 runtime 键、migrate 投影与 task ledger、无 proof chain 的 completed 拒绝。
+//   验证状态持久化：未来 schema 拒绝、根 config 权威覆盖 runtime 键、
+//   无 proof chain 的 completed 拒绝、归档删除与备份恢复。
 //   不测：在线零停机升级或远程 sync。
 //
 // 【运行原理速读】
-//   写入 legacy tasks/config fixture，调用 migrate* / statusReport，
-//   断言归一化字段与 doctor/status 拒绝原因。
+//   写入 tasks/config fixture，调用 archive / restore / statusReport，
+//   断言 doctor/status 拒绝原因与恢复结果。
 // =============================================================================
 
 import test from "node:test";
@@ -16,20 +16,16 @@ import assert from "node:assert/strict";
 import { access, appendFile, chmod, lstat, mkdtemp, mkdir, readFile, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import {
-  loadWildArrangeConfig,
-  migrateRuntimeConfigState,
-} from "../src/infra/runtime-config.mjs";
+import { loadWildArrangeConfig } from "../src/infra/runtime-config.mjs";
 import {
   restoreRuntimeStateBackup,
   writeRuntimeStateBackup,
 } from "../src/infra/security.mjs";
 import { loadTaskLedger } from "../src/infra/task-state-store.mjs";
-import { normalizeAgentKey } from "../src/infra/agent-registry.mjs";
 import { appendLedger } from "../src/infra/ledger.mjs";
 import { writeRuntimeContextSnapshot } from "../src/infra/runtime-snapshot.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
-import { archiveAndDeleteTeamTask, migrateTaskLedgerState } from "../src/orchestration/task-board.mjs";
+import { archiveAndDeleteTeamTask } from "../src/orchestration/task-board.mjs";
 import { statusReport, writeWorkflowSummary } from "../src/orchestration/status.mjs";
 
 async function withTempDir(run) {
@@ -52,7 +48,7 @@ function legacyTask(status = "completed") {
     subject: "Legacy task",
     description: "Old task state",
     status,
-    owner: "Atlas",
+    owner: "Jiuwei",
     attempts: 1,
     blockedBy: [],
     writable_paths: ["src/output.txt"],
@@ -65,21 +61,6 @@ function legacyTask(status = "completed") {
   };
 }
 
-test("legacy agent aliases stay plain literals mapping to long-lived agents", () => {
-  // 回归：AGENT_ALIASES 字面量化后映射关系不变。
-  assert.equal(normalizeAgentKey("Sisyphus"), "Jiuwei");
-  assert.equal(normalizeAgentKey("Sisyphus-junior"), "LuWu");
-  assert.equal(normalizeAgentKey("sisyphus_junior"), "LuWu");
-  assert.equal(normalizeAgentKey("Atlas"), "Jiuwei");
-  assert.equal(normalizeAgentKey("Hephaestus"), "ZhuRong");
-  assert.equal(normalizeAgentKey("Prometheus"), "DiJiang");
-  assert.equal(normalizeAgentKey("Oracle"), "BaiZe");
-  assert.equal(normalizeAgentKey("Librarian"), "BaiZe");
-  assert.equal(normalizeAgentKey("Explore"), "BaiZe");
-  assert.equal(normalizeAgentKey("Metis"), "BaiZe");
-  assert.equal(normalizeAgentKey("Momus"), "BaiZe");
-});
-
 test("task ledger rejects future schema versions", async () => {
   await withTempDir(async (dir) => {
     await writeJson(path.join(dir, ".wildarrange", "team", "tasks.json"), {
@@ -89,22 +70,6 @@ test("task ledger rejects future schema versions", async () => {
       tasks: [],
     });
     await assert.rejects(() => loadTaskLedger(dir), /newer than supported version/);
-  });
-});
-
-test("legacy completed tasks fail closed and normalize their owner", async () => {
-  await withTempDir(async (dir) => {
-    await writeJson(path.join(dir, ".wildarrange", "team", "tasks.json"), {
-      version: 1,
-      planId: "P1",
-      tasks: [legacyTask()],
-      updatedAt: "2026-06-10T00:01:00.000Z",
-    });
-    const ledger = await loadTaskLedger(dir);
-    assert.equal(ledger.kind, "task_ledger");
-    assert.equal(ledger.tasks[0].owner, "Jiuwei");
-    assert.equal(ledger.tasks[0].status, "needs_user_decision");
-    assert.equal(ledger.tasks[0].completionRevalidation.required, true);
   });
 });
 
@@ -122,54 +87,6 @@ test("root config is authoritative over stale runtime-only keys", async () => {
     assert.equal(loaded.config.runtime, "wildarrange-linear");
     assert.equal(loaded.config.reporting.verbosity, "normal");
     assert.equal(loaded.config.legacyOnly, undefined);
-  });
-});
-
-test("state migration rewrites active config projections and canonical task ledger", async () => {
-  await withTempDir(async (dir) => {
-    await writeJson(path.join(dir, "wildarrange.config.json"), {
-      reporting: { verbosity: "quiet" },
-    });
-    await writeJson(path.join(dir, ".wildarrange", "config.json"), {
-      runtime: "wildarrange-linear",
-      legacyOnly: true,
-      dynamicAgents: { quick: { provider: "legacy" } },
-      promptVariants: { host: "legacy prompt bias" },
-    });
-    await writeJson(path.join(dir, ".wildarrange", "agents.json"), { version: 1, agents: { Atlas: {} } });
-    await writeJson(path.join(dir, ".wildarrange", "categories.json"), { version: 1, categories: { quick: {} } });
-    await writeJson(path.join(dir, ".wildarrange", "team", "tasks.json"), {
-      version: 1,
-      planId: "P1",
-      tasks: [legacyTask()],
-      updatedAt: "2026-06-10T00:01:00.000Z",
-    });
-    await writeJson(path.join(dir, ".wildarrange", "plans", "P1.json"), {
-      id: "P1",
-      title: "Legacy plan",
-      objective: "Migrate safely",
-      tasks: [legacyTask()],
-    });
-
-    const config = await migrateRuntimeConfigState(dir);
-    const tasks = await migrateTaskLedgerState(dir);
-
-    assert.equal(config.sourcePath, "wildarrange.config.json");
-    assert.equal(tasks.revalidationRequired, 1);
-    const persisted = JSON.parse(await readFile(path.join(dir, ".wildarrange", "team", "tasks.json"), "utf8"));
-    assert.equal(persisted.kind, "task_ledger");
-    assert.equal(persisted.activePlanId, "P1");
-    assert.equal(persisted.tasks[0].owner, "Jiuwei");
-    assert.equal(persisted.tasks[0].status, "needs_user_decision");
-    assert.ok(persisted.tasks[0].completionRevalidation.migratedAt);
-    const runtimeConfig = JSON.parse(await readFile(path.join(dir, ".wildarrange", "config.json"), "utf8"));
-    assert.equal(runtimeConfig.runtime, "wildarrange-linear");
-    assert.equal(runtimeConfig.legacyOnly, undefined);
-    assert.equal(runtimeConfig.dynamicAgents, undefined);
-    assert.equal(runtimeConfig.promptVariants, undefined);
-    assert.deepEqual(config.removedProjections.sort(), [".wildarrange/agents.json", ".wildarrange/categories.json"]);
-    await assert.rejects(readFile(path.join(dir, ".wildarrange", "agents.json"), "utf8"), /ENOENT/);
-    await assert.rejects(readFile(path.join(dir, ".wildarrange", "categories.json"), "utf8"), /ENOENT/);
   });
 });
 
@@ -325,8 +242,7 @@ test("archive delete leaves a ledger tombstone and removes only the target task 
       owner: "Jiuwei",
       planId: "P1",
       ref: "P1:T001",
-      history: [{ at: "2026-08-24T00:00:00.000Z", event: "legacy_imported" }],
-      completionRevalidation: { required: true, previousStatus: "completed", migratedAt: "2026-08-24T00:00:00.000Z" },
+      history: [{ at: "2026-08-24T00:00:00.000Z", event: "created" }],
       writable_paths: [".wildarrange/artifacts/linear-smoke.txt", "src/**"],
     };
     await writeJson(path.join(dir, ".wildarrange", "team", "tasks.json"), {
@@ -344,11 +260,10 @@ test("archive delete leaves a ledger tombstone and removes only the target task 
       stage: "planned",
       planApproval: { required: true, status: "approved", planId: "P1" },
     });
-    await writeJson(path.join(dir, ".wildarrange", "checkpoints", "P1-T001.json"), { planId: "P1", taskId: "T001" });
-    await writeJson(path.join(dir, ".wildarrange", "checkpoints", "P2-T001.json"), { planId: "P2", taskId: "T001" });
+    await writeJson(path.join(dir, ".wildarrange", "checkpoints", "P1", "T001.json"), { planId: "P1", taskId: "T001" });
+    await writeJson(path.join(dir, ".wildarrange", "checkpoints", "P2", "T001.json"), { planId: "P2", taskId: "T001" });
     await mkdir(path.join(dir, ".wildarrange", "artifacts"), { recursive: true });
     await writeFile(path.join(dir, ".wildarrange", "artifacts", "linear-smoke.txt"), "ok\n", "utf8");
-    await writeJson(path.join(dir, ".wildarrange", "team", "outbox", "T001-legacy.json"), { taskId: "T001", summary: "legacy done-claim" });
     await writeJson(path.join(dir, ".wildarrange", "team", "outbox", "T001-current.json"), { taskId: "T001", taskRef: "P1:T001", planId: "P1" });
     await writeJson(path.join(dir, ".wildarrange", "team", "outbox", "T002-keep.json"), { taskId: "T002", taskRef: "P2:T002", planId: "P2" });
 
@@ -369,56 +284,16 @@ test("archive delete leaves a ledger tombstone and removes only the target task 
     assert.equal(work.status, "idle");
     assert.equal(work.planApproval, null);
     await assert.rejects(access(path.join(dir, ".wildarrange", "plans", "P1.json")), /ENOENT/);
-    await assert.rejects(access(path.join(dir, ".wildarrange", "checkpoints", "P1-T001.json")), /ENOENT/);
+    await assert.rejects(access(path.join(dir, ".wildarrange", "checkpoints", "P1", "T001.json")), /ENOENT/);
     await assert.rejects(access(path.join(dir, ".wildarrange", "artifacts", "linear-smoke.txt")), /ENOENT/);
-    await assert.rejects(access(path.join(dir, ".wildarrange", "team", "outbox", "T001-legacy.json")), /ENOENT/);
     await assert.rejects(access(path.join(dir, ".wildarrange", "team", "outbox", "T001-current.json")), /ENOENT/);
     await access(path.join(dir, ".wildarrange", "team", "outbox", "T002-keep.json"));
-    assert.ok(result.deletedPaths.includes(".wildarrange/team/outbox/T001-legacy.json"));
     assert.ok(result.deletedPaths.includes(".wildarrange/team/outbox/T001-current.json"));
-    await access(path.join(dir, ".wildarrange", "checkpoints", "P2-T001.json"));
+    await access(path.join(dir, ".wildarrange", "checkpoints", "P2", "T001.json"));
     const audit = await readFile(path.join(dir, ".wildarrange", "ledger.jsonl"), "utf8");
     assert.match(audit, /team_task_archive_requested/);
     assert.match(audit, /team_task_archived_deleted/);
     assert.match(audit, new RegExp(backup.backupId));
-  });
-});
-
-test("archive delete can purge an explicit unindexed legacy plan without touching canonical tasks", async () => {
-  await withTempDir(async (dir) => {
-    await writeJson(path.join(dir, ".wildarrange", "team", "tasks.json"), {
-      version: 1,
-      kind: "task_ledger",
-      planId: null,
-      activePlanId: null,
-      plans: [],
-      tasks: [],
-    });
-    await writeJson(path.join(dir, ".wildarrange", "plans", "OLD.json"), {
-      id: "OLD",
-      tasks: [{ ...legacyTask("completed"), planId: undefined }],
-    });
-    await writeJson(path.join(dir, ".wildarrange", "checkpoints", "OLD-T001.json"), {
-      planId: "OLD",
-      taskId: "T001",
-    });
-
-    const backup = await writeRuntimeStateBackup(dir, { reason: "before_legacy_archive" });
-    const result = await archiveAndDeleteTeamTask(dir, {
-      taskId: "T001",
-      planId: "OLD",
-      reason: "purge_unindexed_legacy_plan",
-      backupId: backup.backupId,
-    });
-
-    assert.equal(result.status, "deleted");
-    assert.equal(result.archiveSource, "unindexed_legacy_plan");
-    await assert.rejects(access(path.join(dir, ".wildarrange", "plans", "OLD.json")), /ENOENT/);
-    await assert.rejects(access(path.join(dir, ".wildarrange", "checkpoints", "OLD-T001.json")), /ENOENT/);
-    const ledger = JSON.parse(await readFile(path.join(dir, ".wildarrange", "team", "tasks.json"), "utf8"));
-    assert.deepEqual(ledger.tasks, []);
-    assert.deepEqual(ledger.plans, []);
-    assert.match(await readFile(path.join(dir, ".wildarrange", "ledger.jsonl"), "utf8"), /unindexed_legacy_plan/);
   });
 });
 
@@ -451,7 +326,7 @@ test("archive delete preserves ambiguous legacy DoneClaims when another Plan reu
   });
 });
 
-test("archive delete rejects unsafe plan ids before resolving legacy plan paths", async () => {
+test("archive delete rejects unsafe plan ids before resolving plan paths", async () => {
   await withTempDir(async (dir) => {
     await writeJson(path.join(dir, ".wildarrange", "team", "tasks.json"), {
       version: 1,
@@ -510,7 +385,7 @@ test("archive delete fails before canonical mutation when an unrelated DoneClaim
       tasks: [task],
     });
     await writeJson(path.join(dir, ".wildarrange", "plans", "P1.json"), { id: "P1", title: "Current", tasks: [task] });
-    await writeJson(path.join(dir, ".wildarrange", "checkpoints", "P1-T001.json"), { taskId: "T001" });
+    await writeJson(path.join(dir, ".wildarrange", "checkpoints", "P1", "T001.json"), { taskId: "T001" });
     const corruptClaimPath = path.join(dir, ".wildarrange", "team", "outbox", "T999-corrupt.json");
     await mkdir(path.dirname(corruptClaimPath), { recursive: true });
     await writeFile(corruptClaimPath, "{not-json", "utf8");
@@ -524,7 +399,7 @@ test("archive delete fails before canonical mutation when an unrelated DoneClaim
     assert.deepEqual(ledger.tasks.map((candidate) => candidate.ref), ["P1:T001"]);
     const plan = JSON.parse(await readFile(path.join(dir, ".wildarrange", "plans", "P1.json"), "utf8"));
     assert.deepEqual(plan.tasks.map((candidate) => candidate.ref), ["P1:T001"]);
-    await access(path.join(dir, ".wildarrange", "checkpoints", "P1-T001.json"));
+    await access(path.join(dir, ".wildarrange", "checkpoints", "P1", "T001.json"));
   });
 });
 
@@ -545,7 +420,7 @@ test("archive delete rolls back staged files and Plan mirror when tasks markdown
       title: "Current",
       tasks: [removed, kept],
     });
-    const checkpointPath = path.join(dir, ".wildarrange", "checkpoints", "P1-T001.json");
+    const checkpointPath = path.join(dir, ".wildarrange", "checkpoints", "P1", "T001.json");
     await writeJson(checkpointPath, { taskId: "T001" });
     const lockedMarkdown = path.join(dir, "locked-tasks.md");
     await writeFile(lockedMarkdown, "original markdown\n", "utf8");
@@ -720,49 +595,6 @@ test("archive delete fails closed on duplicate or corrupted canonical task ident
   });
 });
 
-test("archive delete removes only one task from a multi-task unindexed legacy Plan", async () => {
-  await withTempDir(async (dir) => {
-    const first = { ...legacyTask("completed"), writable_paths: [".wildarrange/artifacts/shared-legacy"] };
-    const second = {
-      ...legacyTask("pending"),
-      id: "T002",
-      subject: "Keep legacy task",
-      writable_paths: [".wildarrange/artifacts/shared-legacy"],
-    };
-    await writeJson(path.join(dir, ".wildarrange", "team", "tasks.json"), {
-      version: 1,
-      kind: "task_ledger",
-      planId: null,
-      activePlanId: null,
-      plans: [],
-      tasks: [],
-    });
-    await writeJson(path.join(dir, ".wildarrange", "plans", "OLD.json"), {
-      id: "OLD",
-      title: "Legacy pair",
-      tasks: [first, second],
-    });
-    await writeJson(path.join(dir, ".wildarrange", "checkpoints", "OLD-T001.json"), { taskId: "T001" });
-    await writeJson(path.join(dir, ".wildarrange", "checkpoints", "OLD-T002.json"), { taskId: "T002" });
-    const sharedArtifact = path.join(dir, ".wildarrange", "artifacts", "shared-legacy", "keep.txt");
-    await mkdir(path.dirname(sharedArtifact), { recursive: true });
-    await writeFile(sharedArtifact, "shared\n", "utf8");
-
-    const result = await archiveAndDeleteTeamTask(dir, {
-      taskId: "T001",
-      planId: "OLD",
-      reason: "precise_legacy_cleanup",
-    });
-
-    assert.equal(result.archiveSource, "unindexed_legacy_plan");
-    const plan = JSON.parse(await readFile(path.join(dir, ".wildarrange", "plans", "OLD.json"), "utf8"));
-    assert.deepEqual(plan.tasks.map((task) => task.id), ["T002"]);
-    await assert.rejects(access(path.join(dir, ".wildarrange", "checkpoints", "OLD-T001.json")), /ENOENT/);
-    await access(path.join(dir, ".wildarrange", "checkpoints", "OLD-T002.json"));
-    assert.equal(await readFile(sharedArtifact, "utf8"), "shared\n");
-  });
-});
-
 test("state restore recovers the exact Plan, proof, DoneClaim, and artifact archive package", async () => {
   await withTempDir(async (dir) => {
     const task = {
@@ -782,9 +614,9 @@ test("state restore recovers the exact Plan, proof, DoneClaim, and artifact arch
     });
     await writeJson(path.join(dir, ".wildarrange", "plans", "P1.json"), { id: "P1", title: "Recover", tasks: [task] });
     await writeJson(path.join(dir, ".wildarrange", "work.json"), { activePlanId: "P1", status: "ready", stage: "planned" });
-    const checkpointPath = path.join(dir, ".wildarrange", "checkpoints", "P1-T001.json");
-    const acceptanceJsonPath = path.join(dir, ".wildarrange", "reports", "acceptance", "P1-T001.json");
-    const acceptanceMarkdownPath = path.join(dir, ".wildarrange", "reports", "acceptance", "P1-T001.md");
+    const checkpointPath = path.join(dir, ".wildarrange", "checkpoints", "P1", "T001.json");
+    const acceptanceJsonPath = path.join(dir, ".wildarrange", "reports", "acceptance", "P1", "T001.json");
+    const acceptanceMarkdownPath = path.join(dir, ".wildarrange", "reports", "acceptance", "P1", "T001.md");
     const outboxPath = path.join(dir, ".wildarrange", "team", "outbox", "T001-current.json");
     const artifactPath = path.join(dir, ".wildarrange", "artifacts", "P1-T001", "nested", "result.json");
     await writeJson(checkpointPath, { taskRef: "P1:T001", checkpoint: true });
@@ -818,9 +650,9 @@ test("state restore recovers the exact Plan, proof, DoneClaim, and artifact arch
     const restored = await restoreRuntimeStateBackup(dir, { backupId: backup.backupId });
     for (const expectedPath of [
       ".wildarrange/plans/P1.json",
-      ".wildarrange/checkpoints/P1-T001.json",
-      ".wildarrange/reports/acceptance/P1-T001.json",
-      ".wildarrange/reports/acceptance/P1-T001.md",
+      ".wildarrange/checkpoints/P1/T001.json",
+      ".wildarrange/reports/acceptance/P1/T001.json",
+      ".wildarrange/reports/acceptance/P1/T001.md",
       ".wildarrange/team/outbox/T001-current.json",
       ".wildarrange/artifacts/P1-T001",
     ]) {
@@ -891,79 +723,6 @@ test("state restore downgrades a forged completed task whose proof chain fails a
     assert.ok(forged.history.some((entry) => entry.event === "restore_completion_requires_revalidation"
       && entry.from === "completed" && entry.to === "needs_user_decision"));
     assert.match(await readFile(path.join(dir, ".wildarrange", "ledger.jsonl"), "utf8"), /"downgradedCompletedCount":1/);
-  });
-});
-
-test("archive keeps a colliding legacy evidence file owned by another hyphenated Plan identity", async () => {
-  await withTempDir(async (dir) => {
-    const archived = {
-      ...legacyTask("pending"),
-      id: "hotfix-T001",
-      owner: "Jiuwei",
-      planId: "P1",
-      ref: "P1:hotfix-T001",
-      history: [{ at: "2026-08-25T00:00:00.000Z", event: "created", status: "pending" }],
-    };
-    const retained = {
-      ...legacyTask("completed"),
-      owner: "Jiuwei",
-      planId: "P1-hotfix",
-      ref: "P1-hotfix:T001",
-      history: [{ at: "2026-08-25T00:00:00.000Z", event: "completed", status: "completed" }],
-    };
-    await writeJson(path.join(dir, ".wildarrange", "team", "tasks.json"), {
-      version: 1,
-      kind: "task_ledger",
-      planId: "P1-hotfix",
-      activePlanId: "P1-hotfix",
-      plans: [
-        { id: "P1", title: "Archive", taskIds: ["hotfix-T001"] },
-        { id: "P1-hotfix", title: "Retain", taskIds: ["T001"] },
-      ],
-      tasks: [archived, retained],
-    });
-    await writeJson(path.join(dir, ".wildarrange", "plans", "P1.json"), { id: "P1", tasks: [archived] });
-    await writeJson(path.join(dir, ".wildarrange", "plans", "P1-hotfix.json"), { id: "P1-hotfix", tasks: [retained] });
-    await writeJson(path.join(dir, ".wildarrange", "work.json"), {
-      activePlanId: "P1-hotfix",
-      status: "complete",
-      stage: "completed",
-    });
-    const legacyCheckpoint = path.join(dir, ".wildarrange", "checkpoints", "P1-hotfix-T001.json");
-    const legacyAcceptance = path.join(dir, ".wildarrange", "reports", "acceptance", "P1-hotfix-T001.json");
-    await writeJson(legacyCheckpoint, {
-      planId: "P1-hotfix",
-      taskId: "T001",
-      verifyResult: { pass: true },
-      scopeResult: { status: "pass" },
-      reviewResult: { pass: true },
-    });
-    await writeJson(legacyAcceptance, {
-      kind: "acceptance_proof",
-      planId: "P1-hotfix",
-      taskId: "T001",
-      pass: true,
-    });
-    await appendLedger(dir, {
-      type: "node_checkpoint_completed",
-      planId: "P1-hotfix",
-      taskId: "T001",
-    });
-
-    const result = await archiveAndDeleteTeamTask(dir, {
-      taskId: "hotfix-T001",
-      planId: "P1",
-      reason: "hyphen_collision_regression",
-    });
-
-    assert.ok(!result.deletedPaths.includes(".wildarrange/checkpoints/P1-hotfix-T001.json"));
-    await access(legacyCheckpoint);
-    await access(legacyAcceptance);
-    const ledger = JSON.parse(await readFile(path.join(dir, ".wildarrange", "team", "tasks.json"), "utf8"));
-    assert.deepEqual(ledger.tasks.map((task) => task.ref), ["P1-hotfix:T001"]);
-    const status = await statusReport(dir);
-    assert.equal(status.completed, 1);
-    assert.equal(status.invalidCompleted, 0);
   });
 });
 

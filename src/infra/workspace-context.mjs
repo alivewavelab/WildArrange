@@ -8,13 +8,12 @@
 //   project identity → external registry → validated three-root context
 //   → bindWildArrangeRuntimeRoot。未连接项目保持 legacy 单根兼容。
 // =============================================================================
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
-import { cp, lstat, mkdir, readFile, readdir, readlink, realpath, rename, rm } from "node:fs/promises";
+import { mkdir, realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { runCommandFile } from "./command-runner.mjs";
-import { verifyLedger } from "./ledger.mjs";
 import { buildRegistryFromCards, digestCanonical } from "./verification-registry.mjs";
 import {
   bindWildArrangeRuntimeRoot,
@@ -122,66 +121,9 @@ export async function loadGovernanceContract(governanceRoot) {
 export async function attachGovernanceRepository(projectRoot, options = {}) {
   const candidate = await prepareExternalConnection(projectRoot, options);
   if (existsSync(path.join(candidate.project, ".wildarrange"))) {
-    throw new Error("legacy .wildarrange state exists; run `wildarrange state migrate --to external --governance-root <path>` so state is verified before attachment");
+    throw new Error("project-local .wildarrange runtime state exists; attach requires a project without local runtime state");
   }
   return commitExternalConnection(candidate);
-}
-
-/**
- * 把 legacy 项目运行态事务式迁移到项目外部。源目录只读保留；目标摘要校验
- * 通过后才写 registry，因此失败不会改变权威运行态。
- */
-export async function migrateLegacyWorkspace(projectRoot, options = {}) {
-  const candidate = await prepareExternalConnection(projectRoot, options);
-  const sourceRoot = path.join(candidate.project, ".wildarrange");
-  const sourceStat = await lstat(sourceRoot).catch((error) => error?.code === "ENOENT" ? null : Promise.reject(error));
-  if (!sourceStat?.isDirectory() || sourceStat.isSymbolicLink()) {
-    throw new Error(`legacy runtime directory is missing or unsafe: ${sourceRoot}`);
-  }
-  if (!existsSync(path.join(sourceRoot, "work.json")) || !existsSync(path.join(sourceRoot, "ledger.jsonl"))) {
-    throw new Error("legacy runtime must contain work.json and ledger.jsonl before migration");
-  }
-
-  bindWildArrangeRuntimeRoot(candidate.project, sourceRoot);
-  const ledger = await verifyLedger(candidate.project);
-  if (!ledger.ok) throw new Error(`legacy ledger verification failed: ${JSON.stringify(ledger.failures)}`);
-  const work = JSON.parse(await readFile(path.join(sourceRoot, "work.json"), "utf8"));
-  if (!work || typeof work !== "object" || Array.isArray(work)) throw new Error("legacy work.json is invalid");
-  const sourceManifest = await collectTreeManifest(sourceRoot);
-  const plan = {
-    kind: "external_runtime_migration",
-    status: options.dryRun === true ? "planned" : "migrated",
-    dryRun: options.dryRun === true,
-    sourceRoot,
-    runtimeRoot: candidate.runtimeRoot,
-    governanceRoot: candidate.governance.root,
-    registryPath: candidate.registryPath,
-    files: sourceManifest.filter((entry) => entry.type === "file").length,
-    entries: sourceManifest.length,
-    sourcePreserved: true,
-  };
-  if (options.dryRun === true) return plan;
-  if (existsSync(candidate.runtimeRoot)) throw new Error(`external runtime target already exists: ${candidate.runtimeRoot}`);
-
-  const stagingRoot = `${candidate.runtimeRoot}.migration-${randomUUID()}`;
-  let committedRuntime = false;
-  try {
-    await mkdir(path.dirname(stagingRoot), { recursive: true });
-    await cp(sourceRoot, stagingRoot, { recursive: true, force: false, errorOnExist: true, verbatimSymlinks: true });
-    const sourceAfterCopy = await collectTreeManifest(sourceRoot);
-    const targetManifest = await collectTreeManifest(stagingRoot);
-    if (!sameManifest(sourceManifest, sourceAfterCopy)) throw new Error("legacy runtime changed while migration was copying; retry after writers stop");
-    if (!sameManifest(sourceManifest, targetManifest)) throw new Error("external runtime copy digest mismatch");
-    await rename(stagingRoot, candidate.runtimeRoot);
-    committedRuntime = true;
-    const context = await commitExternalConnection(candidate);
-    return { ...plan, context: workspaceContextView(context) };
-  } catch (error) {
-    await rm(stagingRoot, { recursive: true, force: true }).catch(() => undefined);
-    if (committedRuntime) await rm(candidate.runtimeRoot, { recursive: true, force: true }).catch(() => undefined);
-    bindWildArrangeRuntimeRoot(candidate.project, sourceRoot);
-    throw error;
-  }
 }
 
 /** 解析项目当前三根；没有外部连接时保持 legacy 单根模式。 */
@@ -399,36 +341,6 @@ async function commitExternalConnection(candidate) {
   await mkdir(candidate.stateHome, { recursive: true });
   await writeJsonAtomic(candidate.registryPath, registry);
   return bindWorkspaceContext(workspaceContext(entry, candidate.governance.contract, candidate.registryPath, "external"));
-}
-
-async function collectTreeManifest(rootDir) {
-  const entries = [];
-  async function visit(currentDir, relativeDir = "") {
-    const names = await readdir(currentDir);
-    names.sort((left, right) => left.localeCompare(right));
-    for (const name of names) {
-      const absolute = path.join(currentDir, name);
-      const relative = path.posix.join(relativeDir.split(path.sep).join("/"), name);
-      const entryStat = await lstat(absolute);
-      if (entryStat.isSymbolicLink()) {
-        entries.push({ path: relative, type: "symlink", target: await readlink(absolute) });
-      } else if (entryStat.isDirectory()) {
-        entries.push({ path: relative, type: "directory" });
-        await visit(absolute, relative);
-      } else if (entryStat.isFile()) {
-        const content = await readFile(absolute);
-        entries.push({ path: relative, type: "file", bytes: entryStat.size, sha256: createHash("sha256").update(content).digest("hex") });
-      } else {
-        throw new Error(`unsupported legacy runtime entry: ${absolute}`);
-      }
-    }
-  }
-  await visit(rootDir);
-  return entries;
-}
-
-function sameManifest(left, right) {
-  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function workspaceContextView(context) {

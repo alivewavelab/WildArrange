@@ -36,7 +36,6 @@ import { loadTaskState } from "../infra/task-state-store.mjs";
 import { listRuntimeStateBackups, verifyConfigBaseline, verifyRuntimeState } from "../infra/security.mjs";
 import { evaluateGateArming } from "../infra/gate-arming.mjs";
 import { evaluateRegistryFreshness } from "../infra/verification-registry.mjs";
-import { normalizeRelativePath } from "../infra/path-match.mjs";
 import { projectDecisionStats } from "./decisions.mjs";
 import { checkCompletionIntegrity } from "./doctor-completion.mjs";
 import { getBoundWorkspaceContext } from "../infra/workspace-context.mjs";
@@ -184,7 +183,7 @@ async function checkLedgerIntegrity(rootDir, findings) {
       addFinding(findings, "error", "ledger", `ledger line ${failure.line} failed verification: ${failure.reason}`, { line: failure.line, reason: failure.reason });
     }
   }
-  return { ok: result.ok, checked: result.checked, legacy: result.legacy, failureCount: result.failures.length };
+  return { ok: result.ok, checked: result.checked, failureCount: result.failures.length };
 }
 
 // --- Ledger 与备份交叉对账 ---
@@ -346,7 +345,6 @@ async function checkAdapters(rootDir, findings) {
         : "no host adapters enabled",
       targets,
       staleRules: [],
-      legacyManagedRules: [],
     };
   }
 
@@ -397,7 +395,6 @@ async function checkAdapters(rootDir, findings) {
   // 残留）会静默失效——注入给每个 Agent 的治理规则指向一条跑不通的路径。
   const rulesDir = path.join(rootDir, ".cursor", "rules");
   const staleRules = [];
-  const legacyManagedRules = [];
   if (existsSync(rulesDir)) {
     const { readdir } = await import("node:fs/promises");
     for (const entry of await readdir(rulesDir)) {
@@ -411,25 +408,12 @@ async function checkAdapters(rootDir, findings) {
   for (const stale of staleRules) {
     addFinding(findings, "warn", "adapters", `${stale.file} 引用了不存在的路径 ${stale.missingPath}（规则会静默失效）`, { target: "cursor", nextAction: "修正为相对路径或当前机器的有效路径" });
   }
-  // 旧版受管规则文件名（已退役），仍存在于 rules 目录时提示重新安装。
-  const legacyCursorRule = path.join(rulesDir, "wildarrangeflow.mdc");
-  if (existsSync(legacyCursorRule)) {
-    const relativePath = normalizeRelativePath(path.relative(rootDir, legacyCursorRule));
-    legacyManagedRules.push({ path: relativePath });
-    addFinding(findings, "warn", "adapters", `legacy managed Cursor rule ${relativePath} is still active and may be injected alongside wildarrange.mdc`, {
-      target: "cursor",
-      path: relativePath,
-      nextAction: "node ./bin/wildarrange.mjs adapter install --target cursor",
-    });
-  }
-
   const unconfigured = targets.filter((target) => !target.configured).length;
   const activationUnverified = targets.filter((target) => target.target === "codex" && target.activation !== "execution_observed").length;
   return {
-    status: activationUnverified > 0 ? "error" : (unconfigured > 0 || staleRules.length > 0 || legacyManagedRules.length > 0 ? "warn" : "ok"),
+    status: activationUnverified > 0 ? "error" : (unconfigured > 0 || staleRules.length > 0 ? "warn" : "ok"),
     targets,
     staleRules,
-    legacyManagedRules,
   };
 }
 
@@ -552,7 +536,7 @@ function renderDoctorMarkdown(report) {
   lines.push(`- Gate arming: ${sectionValue(report.sections.gateArming, (s) => s.armed ? "armed" : `NOT ARMED (${s.issueCount} issue(s))`)}`);
   lines.push(`- Adapters: ${sectionValue(report.sections.adapters, (s) => s.status === "skipped" ? `skipped (${s.reason})` : `${(s.targets || []).map(renderAdapterTarget).join(", ") || "none enabled"}${(s.staleRules || []).length ? `, stale rules: ${s.staleRules.length}` : ""}`)}`);
   lines.push(`- Completed tasks audited: ${sectionValue(report.sections.completionAudit, (s) => s.checkedCompleted)}`);
-  lines.push(`- Ledger entries checked: ${sectionValue(report.sections.ledger, (s) => `${s.checked} (legacy: ${s.legacy})`)}`);
+  lines.push(`- Ledger entries checked: ${sectionValue(report.sections.ledger, (s) => s.checked)}`);
   lines.push(`- Ledger vs backup: ${sectionValue(report.sections.ledgerBackupCrossCheck, (s) => s.checked ? `${s.backupId}: ${s.prefixIntact ? "history intact" : "HISTORY DIVERGED"}` : `not checked (${s.reason})`)}`);
   lines.push(`- Config baseline: ${sectionValue(report.sections.configBaseline, (s) => s.status)}`);
   lines.push(`- Runtime state: ${sectionValue(report.sections.runtimeState, (s) => s.status)}`);

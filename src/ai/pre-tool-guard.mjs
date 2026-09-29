@@ -498,7 +498,7 @@ async function isMatchingFeaturePlanImport(rootDir, command, gateId, cliCommandP
   if (!rawPath) return false;
   const planPath = path.isAbsolute(rawPath) ? rawPath : path.resolve(rootDir, rawPath);
   const plan = await readJson(planPath, null).catch(() => null);
-  return plan?.feature_design_ref === gateId || plan?.featureDesignRef === gateId;
+  return plan?.feature_design_ref === gateId;
 }
 
 /** 剥离并校验 --control-root 选项，值与当前控制根不一致则拒绝解析。 */

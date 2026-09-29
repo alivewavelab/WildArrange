@@ -79,7 +79,6 @@ export async function verifyLedger(rootDir) {
     kind: "ledger_verification",
     ok: walk.failures.length === 0,
     checked: walk.checked,
-    legacy: walk.legacy,
     failures: walk.failures,
   };
 }
@@ -104,19 +103,17 @@ async function walkLedger(rootDir) {
     content = await readFile(ledgerPath, "utf8");
   } catch (error) {
     if (error?.code === "ENOENT") {
-      return { checked: 0, legacy: 0, failures: [], entries: [] };
+      return { checked: 0, failures: [], entries: [] };
     }
     throw error;
   }
   const failures = [];
   const entries = [];
   let previousHash = null;
-  let chainStarted = false;
   // 一旦出现坏行或校验失败，链的可信度即告破产：后续条目即使自洽
   // （伪造者可以用 prevHash:null 重启一条自洽链）也不得再标 verified。
   let chainBroken = false;
   let checked = 0;
-  let legacy = 0;
   const lines = content.split(/\r?\n/).filter(Boolean);
   for (let index = 0; index < lines.length; index += 1) {
     const lineNumber = index + 1;
@@ -130,19 +127,12 @@ async function walkLedger(rootDir) {
       continue;
     }
     if (!entry.hash) {
-      // 兼容 hash 链启用前的历史条目；一旦链已开始，后续无 hash 行视为篡改
-      if (chainStarted) {
-        failures.push({ line: lineNumber, reason: "unhashed_entry_after_chain_start" });
-        entries.push({ entry, line: lineNumber, verified: false });
-        chainBroken = true;
-        continue;
-      }
-      legacy += 1;
-      previousHash = entry.prevHash || null;
+      // 所有条目都必须带 hash；无 hash 行视为篡改。
+      failures.push({ line: lineNumber, reason: "unhashed_entry" });
       entries.push({ entry, line: lineNumber, verified: false });
+      chainBroken = true;
       continue;
     }
-    chainStarted = true;
     checked += 1;
     let verified = !chainBroken;
     if ((entry.prevHash || null) !== previousHash) {
@@ -158,7 +148,7 @@ async function walkLedger(rootDir) {
     entries.push({ entry, line: lineNumber, verified });
     previousHash = entry.hash;
   }
-  return { checked, legacy, failures, entries };
+  return { checked, failures, entries };
 }
 
 /**
@@ -239,11 +229,11 @@ async function readLedgerLastHash(ledgerPath) {
       lastHashIndex = index;
     }
   }
-  if (lastHashIndex >= 0 && lastHashIndex < lines.length - 1) {
+  if (lastHashIndex < lines.length - 1) {
     throw wildarrangeError({
       code: "ledger_tail_unhashed",
       module: "infra/ledger.mjs",
-      message: `ledger.jsonl has ${lines.length - 1 - lastHashIndex} unhashed line(s) after the hash chain started; refusing to append`,
+      message: `ledger.jsonl has ${lines.length - 1 - lastHashIndex} unhashed line(s) at the ledger tail; refusing to append`,
       nextAction: "运行 node ./bin/wildarrange.mjs ledger verify 确认篡改范围；恢复备份后再继续",
     });
   }

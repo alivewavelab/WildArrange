@@ -11,9 +11,6 @@
  * `.wildarrange/team/tasks.json` is the single project-wide task ledger. Runtime
  * consumers still need an active-plan projection, so this infra owner exposes
  * both views without making capabilities depend on orchestration.
- *
- * Legacy files used `{ planId, tasks }`. They are normalized in memory and are
- * migrated the next time orchestration persists/imports a plan.
  */
 import { stat } from "node:fs/promises";
 import path from "node:path";
@@ -21,8 +18,6 @@ import path from "node:path";
 import {
   STATE_VERSION,
   readJson,
-  resolveLegacyTaskAcceptancePath,
-  resolveLegacyTaskCheckpointPath,
   resolveTaskAcceptancePath,
   resolveTaskCheckpointPath,
   resolveWildArrangePath,
@@ -139,13 +134,7 @@ async function readTaskEvidenceJson(rootDir, kind, planId, taskId) {
   const canonicalPath = kind === "checkpoint"
     ? resolveTaskCheckpointPath(rootDir, planId, taskId)
     : resolveTaskAcceptancePath(rootDir, planId, taskId, "json");
-  const canonical = await readJson(canonicalPath, null);
-  if (canonical) return canonical;
-  const legacyPath = kind === "checkpoint"
-    ? resolveLegacyTaskCheckpointPath(rootDir, planId, taskId)
-    : resolveLegacyTaskAcceptancePath(rootDir, planId, taskId, "json");
-  const legacy = await readJson(legacyPath, null);
-  return legacy?.planId === planId && legacy?.taskId === taskId ? legacy : null;
+  return readJson(canonicalPath, null);
 }
 
 /**
@@ -186,10 +175,9 @@ function hasGitDeliveryEvidence(delivery) {
  */
 export function normalizeTaskLedger(raw) {
   assertSupportedTaskLedger(raw);
-  const activePlanId = raw.activePlanId || raw.planId || null;
-  const legacyLedger = raw.kind !== "task_ledger" || !raw.activePlanId;
+  const activePlanId = raw.activePlanId || null;
   const tasks = Array.isArray(raw.tasks)
-    ? raw.tasks.map((task) => normalizeStoredTask(task, activePlanId, raw.updatedAt, legacyLedger))
+    ? raw.tasks.map((task) => normalizeStoredTask(task, activePlanId))
     : [];
   const plans = Array.isArray(raw.plans) ? raw.plans.map((plan) => ({ ...plan })) : inferPlans(tasks, activePlanId);
   return {
@@ -229,52 +217,11 @@ function assertSupportedTaskLedger(raw) {
 /**
  * 归一化 StoredTask 输入为稳定形态。
  */
-function normalizeStoredTask(task, activePlanId, fallbackAt, legacyLedger) {
+function normalizeStoredTask(task, activePlanId) {
   const planId = task.planId || activePlanId;
-  const legacyTask = legacyLedger || !task.planId || !task.ref || !Array.isArray(task.history);
-  let normalized = withTaskIdentity(task, planId);
+  const normalized = withTaskIdentity(task, planId);
   const owner = normalizeAgentKey(normalized.owner);
-  if (owner) normalized = { ...normalized, owner };
-  normalized = withLegacyTrace(normalized, fallbackAt);
-  if (legacyTask && normalized.status === "completed") {
-    const at = normalized.updatedAt || fallbackAt || null;
-    normalized = {
-      ...normalized,
-      status: "needs_user_decision",
-      completionRevalidation: {
-        required: true,
-        reason: "legacy_completed_without_current_proof_chain",
-        previousStatus: "completed",
-        detectedAt: at,
-      },
-      history: [
-        ...(normalized.history || []),
-        {
-          at,
-          event: "legacy_completion_requires_revalidation",
-          from: "completed",
-          to: "needs_user_decision",
-        },
-      ],
-    };
-  }
-  return normalized;
-}
-
-/**
- * withLegacyTrace 内部辅助。
- */
-function withLegacyTrace(task, fallbackAt) {
-  if (Array.isArray(task.history) && task.history.length > 0) return task;
-  return {
-    ...task,
-    history: [{
-      at: task.createdAt || fallbackAt || null,
-      event: "legacy_imported",
-      status: task.status || null,
-      source: task.source || "imported",
-    }],
-  };
+  return owner ? { ...normalized, owner } : normalized;
 }
 
 /**

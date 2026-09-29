@@ -8,10 +8,9 @@
 //   loadWildArrangeConfig → deepMerge default-config → 返回 sourcePath。
 // =============================================================================
 import { existsSync } from "node:fs";
-import { unlink } from "node:fs/promises";
 import path from "node:path";
 import { normalizeAgentKey } from "./agent-registry.mjs";
-import { DEFAULT_RUNTIME_NAME, DEFAULT_WILDARRANGE_CONFIG } from "./default-config.mjs";
+import { DEFAULT_WILDARRANGE_CONFIG } from "./default-config.mjs";
 import { appendLedger } from "./ledger.mjs";
 import { assertRealpathInsideRoot, resolveInboundPath } from "./recovery-transaction.mjs";
 import {
@@ -55,35 +54,6 @@ export async function loadWildArrangeConfig(rootDir) {
   return {
     config: normalizeRuntimeConfig(deepMerge(DEFAULT_WILDARRANGE_CONFIG, selectedConfig)),
     sourcePath: sourcePath ? path.relative(rootDir, sourcePath) : "default",
-  };
-}
-
-/**
- * migrateRuntimeConfigState：本模块对外异步 API。
- */
-export async function migrateRuntimeConfigState(rootDir) {
-  await ensureWildArrangeDirs(rootDir);
-  const rootConfigPath = await governanceConfigPath(rootDir);
-  const runtimeConfigPath = resolveWildArrangePath(rootDir, "config.json");
-  const rootConfig = await readJson(rootConfigPath, null);
-  const runtimeConfig = await readJson(runtimeConfigPath, null);
-  const source = rootConfig || runtimeConfig || {};
-  const config = normalizeRuntimeConfig(deepMerge(DEFAULT_WILDARRANGE_CONFIG, source));
-  await writeJsonAtomic(runtimeConfigPath, config);
-  const removedProjections = [];
-  for (const name of ["agents.json", "categories.json"]) {
-    try {
-      await unlink(resolveWildArrangePath(rootDir, name));
-      removedProjections.push(`.wildarrange/${name}`);
-    } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
-    }
-  }
-  return {
-    kind: "runtime_config_migration",
-    sourcePath: rootConfig ? path.relative(rootDir, rootConfigPath) : runtimeConfig ? ".wildarrange/config.json" : "default",
-    runtimeConfigPath: path.relative(rootDir, runtimeConfigPath),
-    removedProjections,
   };
 }
 
@@ -144,8 +114,6 @@ function normalizeRuntimeConfig(config) {
   if (!isPlainObject(normalized.review) || !Array.isArray(normalized.review.steps)) throw new Error("review.steps must be an array");
   delete normalized.dynamicAgents;
   delete normalized.promptVariants;
-  // 兼容历史写法：旧配置中的 runtime 名字面量即默认 runtime。
-  if (normalized.runtime === "wildarrange-linear") normalized.runtime = DEFAULT_RUNTIME_NAME;
   normalized.agents = normalizeAgentMap(normalized.agents);
   normalized.gitCoordination = normalizeGitCoordination(normalized.gitCoordination);
   if (Array.isArray(normalized.review?.llm?.agents)) {

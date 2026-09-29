@@ -120,8 +120,6 @@ export const COMMAND_REGISTRY = [
   { usage: "test [--zone interface|orchestration|ai|capabilities|infra] [changed-file...]", desc: "分区/影响面最小测试集" },
   { usage: "docs commands [--write]", desc: "从命令注册表生成命令文档（单一事实源）" },
   { usage: "state backup [--reason \"...\"]", desc: "备份运行态关键文件" },
-  { usage: "state migrate", desc: "备份后迁移运行态任务总账与旧投影；不改根 wildarrange.config.json" },
-  { usage: "state migrate --to external --governance-root <path> [--runtime-root <path>] [--dry-run]", desc: "校验并复制旧运行态，摘要一致后才连接独立治理仓库；保留项目内源目录" },
   { usage: "state verify", desc: "校验运行态关键文件" },
   { usage: "state list", desc: "列出运行态备份" },
   { usage: "state restore --backup <backupId>", desc: "恢复运行态备份" },

@@ -97,13 +97,11 @@ export async function checkCompletionIntegrity(rootDir, findings) {
   for (const task of tasks) {
     if (task.completionRevalidation?.required !== true) continue;
     revalidationRequired += 1;
-    const migrated = Boolean(task.completionRevalidation.migratedAt);
-    addFinding(findings, migrated ? "warn" : "error", "completion_audit", `task ${task.ref || taskRef(task.planId, task.id)} was marked completed by legacy state but lacks the current proof chain; ${migrated ? "migration safely moved it to needs_user_decision" : "run state migrate, then revalidate it through the normal delivery pipeline"}`, {
+    addFinding(findings, "error", "completion_audit", `task ${task.ref || taskRef(task.planId, task.id)} was completed without the current proof chain and awaits revalidation; revalidate it through the normal delivery pipeline`, {
       planId: task.planId,
       taskId: task.id,
       taskRef: task.ref || taskRef(task.planId, task.id),
       previousStatus: task.completionRevalidation.previousStatus,
-      migratedAt: task.completionRevalidation.migratedAt || null,
     });
   }
   for (const task of completedTasks) {
