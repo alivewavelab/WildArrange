@@ -43,38 +43,11 @@ export const LONG_LIVED_AGENTS = Object.freeze(["Jiuwei", "DiJiang", "ZhuRong", 
  * COMMAND_WORKER_AGENTS：本模块对外导出常量或符号。
  */
 export const COMMAND_WORKER_AGENTS = Object.freeze(["Jiuwei", "ZhuRong"]);
-/** 只读长期 Agent，禁止作为命令 worker。 */
-/**
- * READ_ONLY_LONG_LIVED_AGENTS：本模块对外导出常量或符号。
- */
-export const READ_ONLY_LONG_LIVED_AGENTS = Object.freeze(["DiJiang", "BaiZe", "LuWu"]);
-/** READ_ONLY_LONG_LIVED_AGENTS 的 Set 视图，供 O(1) worker 校验。 */
-const READ_ONLY_LONG_LIVED_AGENT_SET = new Set(READ_ONLY_LONG_LIVED_AGENTS);
-/** 旧版宿主配置里的历史 Agent 名，映射到当前长期 Agent 白名单。 */
-/**
- * AGENT_ALIASES：本模块对外导出常量或符号。
- */
-export const AGENT_ALIASES = {
-  Sisyphus: "Jiuwei",
-  "Sisyphus-junior": "LuWu",
-  sisyphus_junior: "LuWu",
-  Atlas: "Jiuwei",
-  Hephaestus: "ZhuRong",
-  Prometheus: "DiJiang",
-  Oracle: "BaiZe",
-  Librarian: "BaiZe",
-  Explore: "BaiZe",
-  Metis: "BaiZe",
-  Momus: "BaiZe",
-  YingLong: "Jiuwei",
-  LuanNiao: "BaiZe",
-  QiongQi: "BaiZe",
-  Kui: "BaiZe",
-  Taotie: "BaiZe",
-};
+/** 只读长期 Agent 的 Set，禁止作为命令 worker。 */
+const READ_ONLY_LONG_LIVED_AGENT_SET = new Set(["DiJiang", "BaiZe", "LuWu"]);
 
 /**
- * 规范化 Agent 标识：去空白、消毒字符并应用别名表。
+ * 规范化 Agent 标识：去空白并消毒字符。
  * @param {unknown} value 原始 Agent 名
  * @returns {string|null} 规范化后的名称，无效输入返回 null
  */
@@ -83,7 +56,7 @@ export function normalizeAgentKey(value) {
   const trimmed = value.trim();
   if (!trimmed) return null;
   const sanitized = trimmed.replace(/[^\w.-]/g, "_");
-  return AGENT_ALIASES[sanitized] || AGENT_ALIASES[trimmed] || sanitized;
+  return sanitized;
 }
 
 /**

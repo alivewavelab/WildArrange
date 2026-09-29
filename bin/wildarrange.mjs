@@ -81,7 +81,6 @@ import {
   getTeamTask,
   listTeamMessages,
   listTeamTasks,
-  migrateTaskLedgerState,
   readyTeamTask,
   recordTaskEvidence,
   sendTeamMessage,
@@ -129,7 +128,6 @@ import { resolveRuntimeCliCommandPrefix } from "../src/infra/runtime-snapshot.mj
 import {
   DEFAULT_PACKAGE_NAME,
   loadWildArrangeConfig,
-  migrateRuntimeConfigState,
   writeDefaultWildArrangeConfig,
 } from "../src/infra/runtime-config.mjs";
 import { readJson } from "../src/infra/runtime-store.mjs";
@@ -145,7 +143,6 @@ import { initProjectDocuments } from "../src/interface/project-init.mjs";
 import {
   attachProjectConnection,
   initializeProjectGovernance,
-  migrateProjectConnection,
   projectConnectionView,
   showProjectConnection,
 } from "../src/interface/project-connection.mjs";
@@ -280,18 +277,6 @@ async function main() {
       return;
     }
     throw new Error("wildarrange project requires init-governance, attach, or show");
-  }
-
-  if (command === "state" && args._[1] === "migrate" && strArg(args, "to") === "external") {
-    const governanceRoot = strArg(args, "governance-root");
-    if (!governanceRoot) throw new Error("external state migration requires --governance-root <path>");
-    const result = await migrateProjectConnection(requestedProjectRoot, {
-      governanceRoot: path.resolve(governanceRoot),
-      runtimeRoot: strArg(args, "runtime-root") ? path.resolve(String(args["runtime-root"])) : undefined,
-      dryRun: args["dry-run"] === true,
-    });
-    console.log(JSON.stringify(result, null, 2));
-    return;
   }
 
   const workspace = await showProjectConnection(requestedProjectRoot, { legacy: Boolean(legacyControlRoot) });
@@ -1303,7 +1288,7 @@ async function main() {
     throw new Error("wildarrange ledger requires verify");
   }
 
-  // §3.4：state 备份/校验/恢复/迁移 .wildarrange 关键文件；migrate 自动先写 pre-state-migrate 备份。
+  // §3.4：state 备份/校验/恢复 .wildarrange 关键文件。
   if (command === "state") {
     const subcommand = args._[1];
     if (subcommand === "backup") {
@@ -1328,21 +1313,7 @@ async function main() {
       console.log(JSON.stringify(await restoreRuntimeStateBackup(rootDir, { backupId: args.backup }), null, 2));
       return;
     }
-    if (subcommand === "migrate") {
-      // §3.4：migrate 前先写 pre-state-migrate 备份，失败则不会动 live state。
-      const backup = await writeRuntimeStateBackup(rootDir, { reason: "pre-state-migrate" });
-      const config = await migrateRuntimeConfigState(rootDir);
-      const tasks = await migrateTaskLedgerState(rootDir);
-      console.log(JSON.stringify({
-        kind: "runtime_state_migration",
-        status: "migrated",
-        backupId: backup.backupId,
-        config,
-        tasks,
-      }, null, 2));
-      return;
-    }
-    throw new Error("wildarrange state requires backup, verify, list, restore, or migrate");
+    throw new Error("wildarrange state requires backup, verify, list, or restore");
   }
 
   // --- 体检与门禁 ---

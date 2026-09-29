@@ -110,7 +110,7 @@ function runtimeRootKey(rootDir) {
 }
 
 // §3.4 证据路径：planId 与 taskId 均允许连字符，必须用目录分段而非单 `-` 拼接，
-// 否则 stem 碰撞；legacy 扁平路径仅用于 guarded 兼容读取。
+// 否则 stem 碰撞。
 /**
  * resolveTaskPacketPath：本模块对外API。
  */
@@ -131,15 +131,6 @@ export function resolveTaskCheckpointPath(rootDir, planId, taskId) {
 }
 
 /**
- * resolveLegacyTaskCheckpointPath：本模块对外API。
- */
-export function resolveLegacyTaskCheckpointPath(rootDir, planId, taskId) {
-  assertEvidenceSegment(planId, "planId");
-  assertEvidenceSegment(taskId, "taskId");
-  return resolveWildArrangePath(rootDir, "checkpoints", `${planId}-${taskId}.json`);
-}
-
-/**
  * resolveTaskAcceptancePath：本模块对外API。
  */
 export function resolveTaskAcceptancePath(rootDir, planId, taskId, extension = "json") {
@@ -147,16 +138,6 @@ export function resolveTaskAcceptancePath(rootDir, planId, taskId, extension = "
   assertEvidenceSegment(taskId, "taskId");
   assertEvidenceExtension(extension);
   return resolveWildArrangePath(rootDir, "reports", "acceptance", planId, `${taskId}.${extension}`);
-}
-
-/**
- * resolveLegacyTaskAcceptancePath：本模块对外API。
- */
-export function resolveLegacyTaskAcceptancePath(rootDir, planId, taskId, extension = "json") {
-  assertEvidenceSegment(planId, "planId");
-  assertEvidenceSegment(taskId, "taskId");
-  assertEvidenceExtension(extension);
-  return resolveWildArrangePath(rootDir, "reports", "acceptance", `${planId}-${taskId}.${extension}`);
 }
 
 /**
@@ -170,15 +151,6 @@ export function resolveTaskReportPath(rootDir, reportKind, planId, taskId, exten
   assertEvidenceSegment(taskId, "taskId");
   assertEvidenceExtension(extension);
   return resolveWildArrangePath(rootDir, "reports", reportKind, planId, `${taskId}.${extension}`);
-}
-
-/**
- * legacyTaskEvidenceStem：本模块对外API。
- */
-export function legacyTaskEvidenceStem(planId, taskId) {
-  assertEvidenceSegment(planId, "planId");
-  assertEvidenceSegment(taskId, "taskId");
-  return `${planId}-${taskId}`;
 }
 
 /**

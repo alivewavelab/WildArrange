@@ -65,16 +65,7 @@ npx wildarrange init
 npx wildarrange project show
 ```
 
-若客户项目已经有 `.wildarrange/`，`project attach` 会拒绝直接切换。先预演，再迁移：
-
-```bash
-npx wildarrange state migrate --to external \
-  --governance-root ../my-project-governance --dry-run
-npx wildarrange state migrate --to external \
-  --governance-root ../my-project-governance
-```
-
-迁移会先校验 ledger，再复制并逐项比对摘要，最后才写项目外 registry；旧 `.wildarrange/` 始终保留，不自动删除。之后 `state verify`、`state backup` 和 `state restore` 都操作外置运行态，但备份清单继续使用兼容的 `.wildarrange/...` 逻辑路径。
+若客户项目已经有 `.wildarrange/`，`project attach` 会拒绝连接。连接后 `state verify`、`state backup` 和 `state restore` 都操作外置运行态。
 
 计划导入时，治理仓库 `verification/registry.json` 的 `planDefaults.verify_commands`、`standards_commands` 和 `review_commands` 只会叠加，项目计划不能删减；registry 摘要与项目/治理 revision 会写入唯一 task ledger。若治理仓库是 Git 仓库且存在未提交改动，计划导入会拒绝，防止功能 Agent 偷改门槛后立即自证。
 
@@ -408,7 +399,6 @@ node ./bin/wildarrange.mjs parallel admit --run <runId> --task T001
 node ./bin/wildarrange.mjs config baseline --reason reviewed
 node ./bin/wildarrange.mjs config verify
 node ./bin/wildarrange.mjs state backup --reason before-risky-agent
-node ./bin/wildarrange.mjs state migrate
 node ./bin/wildarrange.mjs state verify
 node ./bin/wildarrange.mjs state list
 node ./bin/wildarrange.mjs state restore --backup <backupId>

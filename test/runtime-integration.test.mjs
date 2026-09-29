@@ -600,36 +600,6 @@ test("default GPT-family agents are delegated to the host provider", async () =>
   });
 });
 
-test("legacy agent names resolve to WildArrange agent keys", async () => {
-  await withTempDir(async (dir) => {
-    const legacyExecutor = ["At", "las"].join("");
-    const legacyReviewer = ["Mo", "mus"].join("");
-    const legacyLead = ["Sisy", "phus"].join("");
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
-      agents: {
-        [legacyExecutor]: { provider: "host", model: "legacy-executor" },
-        [legacyReviewer]: { provider: "host", model: "legacy-reviewer" },
-      },
-      review: {
-        llm: { enabled: false, agents: [legacyReviewer] },
-      },
-    }, null, 2));
-    await initRuntime(dir);
-
-    const { config } = await loadWildArrangeConfig(dir);
-    assert.equal(config.agents.Jiuwei.model, "legacy-executor");
-    assert.equal(config.agents.BaiZe.model, "legacy-reviewer");
-    assert.deepEqual(config.review.llm.agents, ["BaiZe"]);
-
-    const message = await sendTeamMessage(dir, { from: legacyLead, to: legacyExecutor, body: "legacy route" });
-    assert.equal(message.from, "Jiuwei");
-    assert.equal(message.to, "Jiuwei");
-
-    const legacyPrompt = await renderPromptPackEntry(dir, { agent: legacyExecutor });
-    assert.match(legacyPrompt, /Jiuwei/);
-  });
-});
-
 test("hook adapter emits WildArrange runtime injection for user prompt", async () => {
   await withTempDir(async (dir) => {
     await writeFile(path.join(dir, "AGENTS.md"), "# Project Rules\n\nAlways verify behavior.\n");
@@ -1352,9 +1322,6 @@ test("adapter install writes slash commands for cursor and codex", async () => {
 
 test("adapter install writes codex hooks and cursor rules", async () => {
   await withTempDir(async (dir) => {
-    const legacyCursorRule = path.join(dir, ".cursor", "rules", ["wildarrange", "flow.mdc"].join(""));
-    await mkdir(path.dirname(legacyCursorRule), { recursive: true });
-    await writeFile(legacyCursorRule, "legacy alwaysApply rule\n", "utf8");
     const report = await installAdapter(dir, { target: "all", mode: "npx", packageName: "wildarrange" });
     assert.equal(report.mode, "npx");
     assert.equal(report.result, "files_generated");
@@ -1362,10 +1329,6 @@ test("adapter install writes codex hooks and cursor rules", async () => {
     assert.ok(report.outputs.some((output) => output.path === ".codex/hooks.json" && output.enforcement === "hard-after-trust"));
     assert.ok(report.outputs.some((output) => output.path === ".wildarrange/adapters/codex/hooks.json"));
     assert.ok(report.outputs.some((output) => output.path === ".cursor/rules/wildarrange.mdc"));
-    const retiredLegacyRule = report.outputs.find((output) => output.path === ".cursor/rules/wildarrangeflow.mdc" && output.status === "legacy-removed");
-    assert.ok(retiredLegacyRule?.backup);
-    assert.equal(await readFile(path.join(dir, retiredLegacyRule.backup), "utf8"), "legacy alwaysApply rule\n");
-    await assert.rejects(readFile(legacyCursorRule, "utf8"), /ENOENT/);
 
     const codexHooks = await readJson(path.join(dir, ".codex", "hooks.json"));
     assert.equal(codexHooks.hooks.PostToolUse?.[0]?.matcher, undefined, "Codex PostToolUse 应覆盖全部工具活动");
@@ -1577,7 +1540,7 @@ test("team-lite sends and lists durable inbox messages", async () => {
     await initRuntime(dir);
     const message = await sendTeamMessage(dir, {
       from: "Jiuwei",
-      to: "YingLong",
+      to: "Jiuwei",
       body: "Continue T001 after verifier passes.",
       summary: "continue T001",
     });
@@ -1586,7 +1549,7 @@ test("team-lite sends and lists durable inbox messages", async () => {
     assert.equal(message.status, "unread");
     assert.match(message.inboxPath, /^\.wildarrange\/team\/inbox\/Jiuwei\/msg_.+\.json$/);
 
-    const jiuweiInbox = await listTeamMessages(dir, { agent: "YingLong" });
+    const jiuweiInbox = await listTeamMessages(dir, { agent: "Jiuwei" });
     assert.equal(jiuweiInbox.length, 1);
     assert.equal(jiuweiInbox[0].id, message.id);
     assert.equal(jiuweiInbox[0].body, "Continue T001 after verifier passes.");
@@ -2470,7 +2433,7 @@ test("project rules and agent context collect matching local governance", async 
     assert.ok(rules.rules.some((rule) => rule.path === ".cursor/rules/frontend.md"));
     assert.match(await readFile(resolveWildArrangePath(dir, "rules", "context.md"), "utf8"), /UI 变更必须浏览器验收/);
 
-    const context = await buildAgentContext(dir, { agent: "QiongQi", taskId: "T001" });
+    const context = await buildAgentContext(dir, { agent: "BaiZe", taskId: "T001" });
     assert.equal(context.agent, "BaiZe");
     assert.equal(context.task.id, "T001");
     assert.equal(context.projectRules.matched, 3);
@@ -3669,27 +3632,6 @@ test("task ledger keeps tasks across plans in one canonical file", async () => {
   });
 });
 
-test("legacy task-board files receive an explicit migration trace", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    await writeFile(resolveWildArrangePath(dir, "team", "tasks.json"), JSON.stringify({
-      version: 1,
-      planId: "legacy_plan",
-      updatedAt: "2026-08-24T00:00:00.000Z",
-      tasks: [{ id: "T001", subject: "Legacy task", status: "completed" }],
-    }));
-
-    const listed = await listTeamTasks(dir, { all: true });
-    assert.equal(listed.tasks[0].ref, "legacy_plan:T001");
-    assert.equal(listed.tasks[0].status, "needs_user_decision");
-    assert.equal(listed.tasks[0].completionRevalidation.required, true);
-    assert.deepEqual(listed.tasks[0].history.map((entry) => entry.event), [
-      "legacy_imported",
-      "legacy_completion_requires_revalidation",
-    ]);
-  });
-});
-
 test("task intake creates a traceable draft before any plan and readies it after validation details", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
@@ -3757,9 +3699,9 @@ test("team task claim respects blockers and does not bypass execution gates", as
     }));
     await importPlan(dir, planPath);
 
-    await assert.rejects(() => claimTeamTask(dir, { taskId: "T002", owner: "YingLong" }), /blocked by T001/);
+    await assert.rejects(() => claimTeamTask(dir, { taskId: "T002", owner: "Jiuwei" }), /blocked by T001/);
 
-    const claimed = await claimTeamTask(dir, { taskId: "T001", owner: "YingLong" });
+    const claimed = await claimTeamTask(dir, { taskId: "T001", owner: "Jiuwei" });
     assert.equal(claimed.task.status, "in_progress");
     assert.equal(claimed.task.owner, "Jiuwei");
     assert.ok(claimed.task.claimedAt);
@@ -3776,7 +3718,7 @@ test("team task claim respects blockers and does not bypass execution gates", as
     const checkpointed = await runWorkflowNode(dir, "checkpoint", { taskId: "T001" });
     assert.equal(checkpointed.status, "completed");
 
-    const secondClaim = await claimTeamTask(dir, { taskId: "T002", owner: "YingLong" });
+    const secondClaim = await claimTeamTask(dir, { taskId: "T002", owner: "Jiuwei" });
     assert.equal(secondClaim.task.status, "in_progress");
     assert.match(await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8"), /team_task_claimed/);
   });
@@ -4392,11 +4334,11 @@ test("dashboard API drives task, inbox, and summary operations without bypassing
       });
       assert.equal(crossSite.response.status, 403);
 
-      const blockedClaim = await postJson(`${baseUrl}/api/tasks/claim`, { taskId: "T002", owner: "YingLong" }, { headers: authHeaders });
+      const blockedClaim = await postJson(`${baseUrl}/api/tasks/claim`, { taskId: "T002", owner: "Jiuwei" }, { headers: authHeaders });
       assert.equal(blockedClaim.response.status, 500);
       assert.match(blockedClaim.body.error, /blocked by T001/);
 
-      const claimed = await postJson(`${baseUrl}/api/tasks/claim`, { taskId: "T001", owner: "YingLong" }, { headers: authHeaders });
+      const claimed = await postJson(`${baseUrl}/api/tasks/claim`, { taskId: "T001", owner: "Jiuwei" }, { headers: authHeaders });
       assert.equal(claimed.response.status, 200);
       assert.equal(claimed.body.result.task.status, "in_progress");
       assert.equal(claimed.body.result.task.owner, "Jiuwei");
@@ -4408,18 +4350,18 @@ test("dashboard API drives task, inbox, and summary operations without bypassing
       const badTaskPath = await fetchJson(`${baseUrl}/api/tasks/%E0%A4%A`);
       assert.equal(badTaskPath.response.status, 400);
 
-      const badClaim = await postJson(`${baseUrl}/api/tasks/claim`, { taskId: "../T001", owner: "YingLong" }, { headers: authHeaders });
+      const badClaim = await postJson(`${baseUrl}/api/tasks/claim`, { taskId: "../T001", owner: "Jiuwei" }, { headers: authHeaders });
       assert.equal(badClaim.response.status, 400);
 
       const message = await postJson(`${baseUrl}/api/team/send`, {
         from: "Jiuwei",
-        to: "YingLong",
+        to: "Jiuwei",
         body: "Continue T001 from dashboard.",
       }, { headers: authHeaders });
       assert.equal(message.response.status, 200);
       assert.equal(message.body.result.to, "Jiuwei");
 
-      const inbox = await fetchJson(`${baseUrl}/api/team/inbox?agent=YingLong`);
+      const inbox = await fetchJson(`${baseUrl}/api/team/inbox?agent=Jiuwei`);
       assert.equal(inbox.response.status, 200);
       assert.equal(inbox.body.result.length, 1);
       assert.equal(inbox.body.result[0].body, "Continue T001 from dashboard.");
@@ -4761,7 +4703,7 @@ test("doctor passes on a healthy runtime and flags hand-edited completion", asyn
     const flagged = await runDoctor(dir);
     assert.equal(flagged.ok, false);
     const messages = flagged.findings.map((finding) => finding.message).join("\n");
-    assert.match(messages, /T999 was marked completed by legacy state but lacks the current proof chain/);
+    assert.match(messages, /T999 is completed but has no checkpoint file/);
   });
 });
 
@@ -5087,7 +5029,7 @@ test("adversarial round 2: completion forgery attempts are caught by gates and d
     await writeFile(ledgerPath, `${currentLedger}${JSON.stringify({ type: "task_verified", taskId: "T002", forged: true })}\n`, "utf8");
     const ledgerCheck = await verifyLedger(dir);
     assert.equal(ledgerCheck.ok, false);
-    assert.ok(ledgerCheck.failures.some((failure) => failure.reason === "unhashed_entry_after_chain_start"));
+    assert.ok(ledgerCheck.failures.some((failure) => failure.reason === "unhashed_entry"));
 
     // 攻击 4：手改台账 + 伪造 checkpoint 文件 -> doctor 仍能从 acceptance proof 与 ledger 对账抓出
     const forgedState = await readJson(resolveWildArrangePath(dir, "team", "tasks.json"));

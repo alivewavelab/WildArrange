@@ -20,7 +20,7 @@ export async function inspectTaskRepositoryBinding(rootDir, task, evidence = {})
   }
   const current = await loadGovernanceVerificationDefaults(rootDir);
   const target = task.repositoryTarget || "project";
-  const delivery = evidence.integrationCommit || evidence.deliveryBaseline || null;
+  const delivery = evidence.integrationCommit || null;
   const deliverySha = delivery?.commitSha || delivery?.integrationSha || delivery?.actualSha || null;
   const pending = evidence.deliveryPending === true && !deliverySha;
   const projectSha = target === "project" ? deliverySha : current.projectRevision.sha;

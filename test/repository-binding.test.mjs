@@ -104,7 +104,7 @@ test("governance-target task claims and creates its isolated worktree from the g
     await git(workspace.workDir, ["commit", "-m", "update governance quality policy"]);
     const governanceDeliverySha = await git(workspace.workDir, ["rev-parse", "HEAD"]);
     const delivered = await inspectTaskRepositoryBinding(projectRoot, task, {
-      deliveryBaseline: { commitSha: governanceDeliverySha },
+      integrationCommit: { commitSha: governanceDeliverySha },
     });
     assert.equal(delivered.pass, true);
     assert.equal(delivered.governanceSha, governanceDeliverySha);
@@ -114,7 +114,7 @@ test("governance-target task claims and creates its isolated worktree from the g
     await git(projectRoot, ["add", "README.md"]);
     await git(projectRoot, ["commit", "-m", "advance project independently"]);
     const drifted = await inspectTaskRepositoryBinding(projectRoot, task, {
-      deliveryBaseline: { commitSha: governanceDeliverySha },
+      integrationCommit: { commitSha: governanceDeliverySha },
     });
     assert.equal(drifted.pass, false);
     assert.equal(drifted.checks.projectFrozen, false);

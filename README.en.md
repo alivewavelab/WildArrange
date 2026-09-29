@@ -65,16 +65,7 @@ npx wildarrange init
 npx wildarrange project show
 ```
 
-If the customer project already contains `.wildarrange/`, direct attachment is rejected. Preview and then migrate it:
-
-```bash
-npx wildarrange state migrate --to external \
-  --governance-root ../my-project-governance --dry-run
-npx wildarrange state migrate --to external \
-  --governance-root ../my-project-governance
-```
-
-Migration verifies the ledger, copies the tree, compares every digest, and writes the external registry last. The old `.wildarrange/` directory is preserved. `state verify`, `state backup`, and `state restore` then operate on external state while manifests keep compatible `.wildarrange/...` logical paths.
+If the customer project already contains `.wildarrange/`, `project attach` rejects the connection. After attaching, `state verify`, `state backup`, and `state restore` operate on the external runtime state.
 
 On plan import, `planDefaults.verify_commands`, `standards_commands`, and `review_commands` from the governance repository's `verification/registry.json` are additive and cannot be removed by the project plan. Its digest and both project/governance revisions are stored in the single task ledger. If the governance root is a Git repository with uncommitted changes, plan import fails closed.
 
@@ -419,7 +410,6 @@ node ./bin/wildarrange.mjs parallel admit --run <runId> --task T001
 node ./bin/wildarrange.mjs config baseline --reason reviewed
 node ./bin/wildarrange.mjs config verify
 node ./bin/wildarrange.mjs state backup --reason before-risky-agent
-node ./bin/wildarrange.mjs state migrate
 node ./bin/wildarrange.mjs state verify
 node ./bin/wildarrange.mjs state list
 node ./bin/wildarrange.mjs state restore --backup <backupId>

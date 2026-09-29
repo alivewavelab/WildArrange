@@ -9,7 +9,6 @@ import {
   loadGovernanceContract,
   loadGovernanceVerificationDefaults,
   initializeGovernanceRepository,
-  migrateLegacyWorkspace,
   resolveWorkspaceContext,
 } from "../src/infra/workspace-context.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
@@ -138,42 +137,15 @@ test("workspace context: governance contract paths cannot escape the repository"
   });
 });
 
-test("workspace context: legacy runtime is copied and verified before registry switches", async () => {
+test("workspace context: attach rejects a project that already has local runtime state", async () => {
   await withWorkspace(async ({ projectRoot, governanceRoot, stateHome }) => {
     await resolveWorkspaceContext(projectRoot, { stateHome, legacy: true });
     await initRuntime(projectRoot);
-    const sourceWork = await readFile(path.join(projectRoot, ".wildarrange", "work.json"), "utf8");
-
     await assert.rejects(
       attachGovernanceRepository(projectRoot, { governanceRoot, stateHome }),
-      /state migrate --to external/,
-    );
-    const dryRun = await migrateLegacyWorkspace(projectRoot, { governanceRoot, stateHome, dryRun: true });
-    assert.equal(dryRun.status, "planned");
-    assert.equal(existsSync(path.join(stateHome, "registry.json")), false);
-
-    const migrated = await migrateLegacyWorkspace(projectRoot, { governanceRoot, stateHome });
-    assert.equal(migrated.status, "migrated");
-    assert.equal(migrated.sourcePreserved, true);
-    assert.equal(await readFile(path.join(migrated.context.runtimeRoot, "work.json"), "utf8"), sourceWork);
-    assert.equal(await readFile(path.join(projectRoot, ".wildarrange", "work.json"), "utf8"), sourceWork);
-    const resolved = await resolveWorkspaceContext(projectRoot, { stateHome });
-    assert.equal(resolved.mode, "external");
-    assert.equal(resolveWildArrangePath(projectRoot, "work.json"), migrated.context.runtimeRoot + path.sep + "work.json");
-  });
-});
-
-test("workspace context: corrupted legacy ledger cannot switch registry", async () => {
-  await withWorkspace(async ({ projectRoot, governanceRoot, stateHome }) => {
-    await resolveWorkspaceContext(projectRoot, { stateHome, legacy: true });
-    await initRuntime(projectRoot);
-    await writeFile(path.join(projectRoot, ".wildarrange", "ledger.jsonl"), "{broken-json}\n", { flag: "a" });
-    await assert.rejects(
-      migrateLegacyWorkspace(projectRoot, { governanceRoot, stateHome }),
-      /ledger verification failed/,
+      /project-local \.wildarrange runtime state exists/,
     );
     assert.equal(existsSync(path.join(stateHome, "registry.json")), false);
-    assert.equal(existsSync(path.join(projectRoot, ".wildarrange", "work.json")), true);
   });
 });
 

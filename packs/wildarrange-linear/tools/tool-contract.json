@@ -454,16 +454,6 @@
       "purpose": "备份运行态关键文件"
     },
     {
-      "name": "wildarrange_state_migrate",
-      "command": "wildarrange state migrate",
-      "purpose": "备份后迁移运行态任务总账与旧投影；不改根 wildarrange.config.json"
-    },
-    {
-      "name": "wildarrange_state_migrate_to",
-      "command": "wildarrange state migrate --to external --governance-root <path> [--runtime-root <path>] [--dry-run]",
-      "purpose": "校验并复制旧运行态，摘要一致后才连接独立治理仓库；保留项目内源目录"
-    },
-    {
       "name": "wildarrange_state_verify",
       "command": "wildarrange state verify",
       "purpose": "校验运行态关键文件"

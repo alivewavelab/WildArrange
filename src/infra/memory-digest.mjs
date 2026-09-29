@@ -16,7 +16,6 @@ import {
   ensureWildArrangeDirs,
   nowIso,
   readJson,
-  resolveLegacyTaskCheckpointPath,
   resolveWildArrangePath,
   resolveTaskCheckpointPath,
   writeJsonAtomic,
@@ -201,9 +200,7 @@ function artifactRefs(planId, task, checkpoint) {
  */
 async function readTaskCheckpoint(rootDir, planId, taskId) {
   const current = await readJson(resolveTaskCheckpointPath(rootDir, planId, taskId), null);
-  if (current?.planId === planId && current?.taskId === taskId) return current;
-  const legacy = await readJson(resolveLegacyTaskCheckpointPath(rootDir, planId, taskId), null);
-  return legacy?.planId === planId && legacy?.taskId === taskId ? legacy : null;
+  return current?.planId === planId && current?.taskId === taskId ? current : null;
 }
 
 /**
