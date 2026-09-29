@@ -37,7 +37,7 @@ import { extractComments } from "../infra/repository-layout.mjs";
 
 /**
  * 运行完整 review gate，返回 kind=review_gate 的多 lane 结果。
- * @param {string} rootDir 控制根
+ * @param {string} rootDir 项目根
  * @param {object} task 任务对象
  * @param {object} [evidence] 已有 worker/verify/scope 等 evidence
  * @param {object} [options] executionRoot 覆盖工作目录
@@ -54,12 +54,12 @@ export async function runReviewGate(rootDir, task, evidence = {}, options = {}) 
   const criteria = criteriaStatus(task);
   const rulesContext = await scanProjectRules(executionRoot, {
     targetPaths: uniqueStrings([...(task.writable_paths || []), ...((scopeResult?.changedPaths) || [])]),
-    controlRoot: rootDir,
+    projectRoot: rootDir,
   });
   const extraPatterns = compileCommandSafetyPatterns(config);
   const reviewCommandResults = [];
   const standardsCommandResults = [];
-  const contractGovernance = evidence.contractGovernance || await runContractGovernanceReview(options.executionRoot || rootDir, task, evidence, { controlRoot: rootDir });
+  const contractGovernance = evidence.contractGovernance || await runContractGovernanceReview(options.executionRoot || rootDir, task, evidence, { projectRoot: rootDir });
 
   for (const command of task.review_commands || []) {
     // §3.4：echo/node --version 等空转命令跳过，不得作为独立 review 证据。

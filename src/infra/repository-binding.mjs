@@ -13,7 +13,7 @@ import { getBoundWorkspaceContext, loadGovernanceVerificationDefaults } from "./
 /** 为任务 acceptance proof 生成当前双仓绑定；交付 commit 创建前允许 pending。 */
 export async function inspectTaskRepositoryBinding(rootDir, task, evidence = {}) {
   const context = getBoundWorkspaceContext(rootDir);
-  if (!context || context.mode !== "external") return null;
+  if (!context) return null;
   const imported = task.governance_binding;
   if (!imported?.projectRevision || !imported?.governanceRevision) {
     return bindingFailure("plan has no imported dual-repository binding");
@@ -55,7 +55,7 @@ export async function inspectTaskRepositoryBinding(rootDir, task, evidence = {})
 /** 写入不修改任一仓库的 integration acceptance receipt。 */
 export async function writeIntegrationAcceptance(rootDir, options = {}) {
   const context = getBoundWorkspaceContext(rootDir);
-  if (!context || context.mode !== "external") throw new Error("integration acceptance requires an attached external governance workspace");
+  if (!context) throw new Error("integration acceptance requires an attached governance workspace");
   const projectSha = requiredSha(options.projectSha, "project SHA");
   const governanceSha = requiredSha(options.governanceSha, "governance SHA");
   if (!(await commitExists(context.projectRoot, projectSha))) throw new Error(`project commit is unavailable: ${projectSha}`);

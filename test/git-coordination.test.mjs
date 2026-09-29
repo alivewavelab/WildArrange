@@ -249,34 +249,6 @@ test("without a remote, delivery still commits to a clean local task branch work
   });
 });
 
-// [legacy] doctor 的 delivery_worktree_state_drift 只在交付 worktree 位于项目内（legacy 单根）时
-// 才能读到 changedPaths；外置模式 worktree 在 runtimeRoot 下，doctor 会把它判为「outside the project」
-// （src/interface/doctor-completion.mjs），属产品缺陷，需先在 src 修复后迁移。
-test("[legacy] doctor detects delivery worktree drift after local admission", async () => {
-  await withTempDir(async (repo) => {
-    await git(repo, ["init", "--initial-branch=main"]);
-    await writeFile(path.join(repo, ".gitignore"), ".wildarrange/\n", "utf8");
-    await writeFile(path.join(repo, "README.md"), "local seed\n", "utf8");
-    await git(repo, ["add", ".gitignore", "README.md"]);
-    await git(repo, ["-c", "user.name=Seed", "-c", "user.email=seed@example.invalid", "commit", "-m", "initial"]);
-    await initRuntime(repo);
-    await initializeTaskRuntime(repo);
-    const batch = await runParallelAgents(repo, {
-      taskIds: ["T001"],
-      agent: "ZhuRong",
-      command: resultCommand("src/local-only.txt", "local delivery\n"),
-    });
-    const admitted = await admitParallelAgentResult(repo, { runId: batch.runId, taskId: "T001" });
-    assert.equal(admitted.status, "completed", JSON.stringify(admitted, null, 2));
-    const task = (await loadTaskState(repo)).tasks[0];
-    await writeFile(path.join(task.delivery_workspace.workDir, "README.md"), "drift after admission\n");
-    const doctor = await runDoctor(repo);
-    const finding = doctor.findings.find((entry) => entry.code === "delivery_worktree_state_drift" && entry.taskId === "T001");
-    assert.ok(finding, JSON.stringify(doctor.findings, null, 2));
-    assert.deepEqual(finding.changedPaths, ["README.md"]);
-  });
-});
-
 test("local task delivery resumes the same commit after checkpoint failure", async () => {
   await withExternalProject(async ({ projectRoot: repo }) => {
     const mainBefore = (await git(repo, ["rev-parse", "main"])).trim();

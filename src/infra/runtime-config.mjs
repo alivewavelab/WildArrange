@@ -16,15 +16,10 @@ import { assertRealpathInsideRoot, resolveInboundPath } from "./recovery-transac
 import {
   ensureWildArrangeDirs,
   readJson,
-  resolveWildArrangePath,
   resolveGovernancePaths,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 
-/**
- * WILDARRANGE_CONFIG_FILE：本模块对外API。
- */
-export const WILDARRANGE_CONFIG_FILE = "wildarrange.config.json";
 /**
  * 产品显示名称常量。
  */
@@ -34,36 +29,30 @@ export const PRODUCT_NAME = "WildArrange";
  */
 export const DEFAULT_PACKAGE_NAME = "@alivewavelab/wildarrange";
 /**
- * loadWildArrangeConfig：本模块对外异步 API。
+ * loadWildArrangeConfig：读取治理仓 policy/wildarrange.config.json 并与内置默认值合并；
+ * 文件缺失时只使用 default-config。这是唯一的配置来源。
  */
 export async function loadWildArrangeConfig(rootDir) {
-  const rootConfigPath = await governanceConfigPath(rootDir);
-  const runtimeConfigPath = resolveWildArrangePath(rootDir, "config.json");
-  const rootConfig = await readJson(rootConfigPath, null);
-  const runtimeConfig = await readJson(runtimeConfigPath, null);
-  const sourcePath = rootConfig ? rootConfigPath : runtimeConfig ? runtimeConfigPath : null;
-  // A checked-in root config is authoritative. The runtime copy used to be
-  // treated as a hidden lower layer, which allowed removed legacy keys to
-  // reappear whenever the root stopped overriding them.
-  const selectedConfig = rootConfig || runtimeConfig || {};
+  const configPath = await governanceConfigPath(rootDir);
+  const stored = await readJson(configPath, null);
   return {
-    config: normalizeRuntimeConfig(deepMerge(DEFAULT_WILDARRANGE_CONFIG, selectedConfig)),
-    sourcePath: sourcePath ? path.relative(rootDir, sourcePath) : "default",
+    config: normalizeRuntimeConfig(deepMerge(DEFAULT_WILDARRANGE_CONFIG, stored || {})),
+    sourcePath: stored ? path.relative(rootDir, configPath) : "default",
   };
 }
 
 /**
- * writeDefaultWildArrangeConfig：本模块对外异步 API。
+ * writeDefaultWildArrangeConfig：在治理仓 policy/ 下写入默认（或 --armed）配置。
  */
 export async function writeDefaultWildArrangeConfig(rootDir, options = {}) {
-  await ensureWildArrangeDirs(rootDir);
-  const targetPath = options.root === true ? await governanceConfigPath(rootDir) : resolveWildArrangePath(rootDir, "config.json");
+  const targetPath = await governanceConfigPath(rootDir);
   if (!options.force && existsSync(targetPath)) {
     return { path: path.relative(rootDir, targetPath), created: false, config: await readJson(targetPath) };
   }
+  await ensureWildArrangeDirs(rootDir);
   const config = options.armed === true ? buildArmedConfig() : DEFAULT_WILDARRANGE_CONFIG;
   await writeJsonAtomic(targetPath, config);
-  await appendLedger(rootDir, { type: "config_written", configPath: path.relative(rootDir, targetPath), root: options.root === true, armed: options.armed === true });
+  await appendLedger(rootDir, { type: "config_written", configPath: path.relative(rootDir, targetPath), armed: options.armed === true });
   return { path: path.relative(rootDir, targetPath), created: true, config };
 }
 

@@ -52,18 +52,18 @@ import { renderHookInjectionMarkdown, renderPreToolUseHookOutput } from "./hook-
 
 /**
  * 执行一次完整的 Hook 注入流程：收集 facts、解析注入点、渲染 output 并持久化。
- * @param {string} rootDir 控制根目录（.wildarrange 所在项目根）
+ * @param {string} rootDir 项目根目录（.wildarrange 所在项目根）
  * @param {object} input 宿主 Hook 载荷（hook_event_name、prompt、tool_name 等）
  * @returns {Promise<object>} kind=wildarrange_hook_injection 的结果对象
  */
 export async function runInjectionHook(rootDir, input = {}) {
-  const controlRoot = rootDir;
-  const hookCwd = input.cwd && typeof input.cwd === "string" ? input.cwd : controlRoot;
+  const projectRoot = rootDir;
+  const hookCwd = input.cwd && typeof input.cwd === "string" ? input.cwd : projectRoot;
   // 外置治理下宿主可能从项目子目录或任务 worktree 启动：规则与目标路径以 Git toplevel 为准，
   // 相对路径仍从宿主 cwd 解析。
-  const workspace = getBoundWorkspaceContext(controlRoot);
-  const executionRoot = workspace?.mode === "external" ? await resolveExecutionRoot(workspace, hookCwd) : hookCwd;
-  await initRuntime(controlRoot);
+  const workspace = getBoundWorkspaceContext(projectRoot);
+  const executionRoot = workspace ? await resolveExecutionRoot(workspace, hookCwd) : hookCwd;
+  await initRuntime(projectRoot);
   const event = normalizeHookEvent(input.hook_event_name || input.event || input.name);
   const pointName = injectionPointForHookEvent(event);
   const sessionId = normalizeHookSessionId(input);
@@ -72,15 +72,15 @@ export async function runInjectionHook(rootDir, input = {}) {
   const cliCommandPrefix = normalizeHookCliCommandPrefix(input[TRUSTED_CLI_COMMAND_PREFIX]);
   const taskId = normalizeHookTaskId(input);
   const targetPaths = event === "PreToolUse"
-    ? extractPreToolTargetPaths(input, executionRoot, hookCwd)
-    : event === "PostToolUse" ? extractHookTargetPaths(input, executionRoot, hookCwd) : [];
+    ? extractPreToolTargetPaths(input, executionRoot, hookCwd, projectRoot)
+    : event === "PostToolUse" ? extractHookTargetPaths(input, executionRoot, hookCwd, projectRoot) : [];
   const facts = {};
 
   if (event === "SessionStart") {
     // §3.4：会话启动 → 恢复报告、规则扫描与 Lead 上下文。
-    facts.resume = await resumeReport(controlRoot, { sessionId, source: "hook:session_start", cliCommandPrefix });
-    facts.rules = await scanProjectRules(executionRoot, { controlRoot });
-    facts.agentContext = await buildAgentContext(controlRoot, {
+    facts.resume = await resumeReport(projectRoot, { sessionId, source: "hook:session_start", cliCommandPrefix });
+    facts.rules = await scanProjectRules(executionRoot, { projectRoot });
+    facts.agentContext = await buildAgentContext(projectRoot, {
       executionRoot,
       agent: DEFAULT_LEAD_AGENT,
       taskId,
@@ -88,43 +88,43 @@ export async function runInjectionHook(rootDir, input = {}) {
     }).catch((error) => ({ error: error.message }));
   } else if (event === "UserPromptSubmit") {
     // §3.4：用户提交 → 路由决策与计划草稿指令。
-    facts.route = input.prompt ? await routeRequest(controlRoot, { text: input.prompt, sessionId }) : null;
+    facts.route = input.prompt ? await routeRequest(projectRoot, { text: input.prompt, sessionId }) : null;
     facts.planDraft = buildPlanDraftDirective(facts.route, {
       sessionId,
       prompt: input.prompt,
-      controlRoot,
+      projectRoot,
       executionRoot,
     });
-    facts.rules = await scanProjectRules(executionRoot, { controlRoot });
+    facts.rules = await scanProjectRules(executionRoot, { projectRoot });
   } else if (event === "PreToolUse") {
     // §3.4：工具调用前 → 范围预检；有任务时重建 before_execute 上下文。
     facts.targetPaths = targetPaths;
-    facts.rules = await scanProjectRules(executionRoot, { controlRoot, targetPaths });
-    facts.preflight = await preToolUseGuard(controlRoot, input, { executionRoot, cwd: hookCwd });
+    facts.rules = await scanProjectRules(executionRoot, { projectRoot, targetPaths });
+    facts.preflight = await preToolUseGuard(projectRoot, input, { executionRoot, cwd: hookCwd });
     const executionTaskId = facts.preflight?.taskId || taskId;
     if (executionTaskId) {
-      facts.agentContext = await buildAgentContext(controlRoot, {
+      facts.agentContext = await buildAgentContext(projectRoot, {
         executionRoot,
         taskId: executionTaskId,
-        planId: await currentPlanId(controlRoot),
+        planId: await currentPlanId(projectRoot),
         injectionPoint: "before_execute",
       }).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
     }
   } else if (event === "PostToolUse") {
     // §3.4：工具完成后 → 结果门评估与可选 scope 快检，不阻断 Hook 输出。
     facts.targetPaths = targetPaths;
-    facts.rules = await scanProjectRules(executionRoot, { controlRoot, targetPaths });
+    facts.rules = await scanProjectRules(executionRoot, { projectRoot, targetPaths });
     facts.resultGate = evaluateHookResultGate(input);
     if (taskId) {
-      facts.scope = await invokeCapability("scope", { rootDir: controlRoot, task: { id: taskId } })
+      facts.scope = await invokeCapability("scope", { rootDir: projectRoot, task: { id: taskId } })
         .then((envelope) => envelope.evidence)
         .catch((error) => ({ status: "inconclusive", reason: error.message }));
     }
   } else if (event === "PostCompact") {
     // §3.4：上下文压缩后 → 重建 resume/规则/Lead 上下文，补偿丢失的对话面。
-    facts.resume = await resumeReport(controlRoot, { sessionId, source: "hook:post_compact", cliCommandPrefix });
-    facts.rules = await scanProjectRules(executionRoot, { controlRoot });
-    facts.agentContext = await buildAgentContext(controlRoot, {
+    facts.resume = await resumeReport(projectRoot, { sessionId, source: "hook:post_compact", cliCommandPrefix });
+    facts.rules = await scanProjectRules(executionRoot, { projectRoot });
+    facts.agentContext = await buildAgentContext(projectRoot, {
       executionRoot,
       agent: DEFAULT_LEAD_AGENT,
       taskId,
@@ -132,21 +132,21 @@ export async function runInjectionHook(rootDir, input = {}) {
     }).catch((error) => ({ error: error.message }));
   } else if (event === "Stop") {
     // §3.4：会话结束 → 续跑指令，供宿主决定是否自动 resume。
-    facts.continuation = await continuationDirective(controlRoot, { sessionId, source: "hook:stop", cliCommandPrefix });
+    facts.continuation = await continuationDirective(projectRoot, { sessionId, source: "hook:stop", cliCommandPrefix });
   }
 
   // 通用推送：在有"对话面"的事件里，把待人决策的事项主动注入，指示宿主 AI 直接问开发者。
   if (["SessionStart", "UserPromptSubmit", "PostCompact", "Stop"].includes(event)) {
-    facts.attention = await attentionReport(controlRoot).catch(() => null);
+    facts.attention = await attentionReport(projectRoot).catch(() => null);
   }
 
   const effectiveTaskId = taskId || facts.preflight?.taskId || "";
   const variables = {
     agent: facts.agentContext?.agent || input.agent || defaultAgentForHookEvent(event),
     taskId: effectiveTaskId,
-    planId: await currentPlanId(controlRoot),
+    planId: await currentPlanId(projectRoot),
   };
-  const injectionPoint = await resolveInjectionPoint(controlRoot, pointName, variables, {
+  const injectionPoint = await resolveInjectionPoint(projectRoot, pointName, variables, {
     text: injectionTextForHookEvent(event, input, facts),
     stage: injectionStageForHookEvent(event, facts),
     routeSkills: facts.route?.skills || [],
@@ -181,10 +181,10 @@ export async function runInjectionHook(rootDir, input = {}) {
   };
   const safeSessionId = sanitizeFileSegment(sessionId || "session");
   const safeEvent = sanitizeFileSegment(event);
-  const outputPath = resolveWildArrangePath(controlRoot, "sessions", "hooks", `${safeSessionId}-${safeEvent}.json`);
-  result.reportJsonPath = path.relative(controlRoot, outputPath);
+  const outputPath = resolveWildArrangePath(projectRoot, "sessions", "hooks", `${safeSessionId}-${safeEvent}.json`);
+  result.reportJsonPath = path.relative(projectRoot, outputPath);
   await writeJsonAtomic(outputPath, result);
-  await appendLedger(controlRoot, {
+  await appendLedger(projectRoot, {
     type: "hook_injection_run",
     event,
     pointName,
@@ -199,7 +199,7 @@ export async function runInjectionHook(rootDir, input = {}) {
   // 异步审查 Agent 复盘。best-effort，不反噬 hook 主流程。
   if (result.decision) {
     try {
-      await emitDecision(controlRoot, {
+      await emitDecision(projectRoot, {
         gate: pointName,
         decision: result.decision,
         code: hookDecisionCode(facts.preflight, facts.resultGate),

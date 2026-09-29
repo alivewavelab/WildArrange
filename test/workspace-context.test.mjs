@@ -37,17 +37,6 @@ async function withWorkspace(fn) {
   }
 }
 
-// legacy 专属（下一步随 legacy 模式删除）：未连接项目的 legacy 运行态回落
-test("workspace context: unattached projects preserve legacy runtime semantics", async () => {
-  await withWorkspace(async ({ projectRoot, stateHome }) => {
-    const context = await resolveWorkspaceContext(projectRoot, { stateHome });
-    assert.equal(context.mode, "legacy");
-    assert.equal(context.attached, false);
-    assert.equal(context.runtimeRoot, path.join(projectRoot, ".wildarrange"));
-    assert.equal(resolveWildArrangePath(projectRoot, "team", "tasks.json"), path.join(projectRoot, ".wildarrange", "team", "tasks.json"));
-  });
-});
-
 test("workspace context: governance scaffold writes only the external root and preserves existing policy", async () => {
   await withWorkspace(async ({ root, projectRoot }) => {
     const governanceRoot = path.join(root, "scaffolded-governance");
@@ -56,7 +45,7 @@ test("workspace context: governance scaffold writes only the external root and p
       repository: "https://example.test/scaffolded.git",
       defaultBranch: "main",
     });
-    assert.deepEqual(initialized.created.sort(), ["policy/AGENTS.md", "verification/registry.json", "wildarrange-governance.json"].sort());
+    assert.deepEqual(initialized.created.sort(), ["policy/AGENTS.md", "policy/code-and-interface-conventions.md", "policy/testing-and-acceptance.md", "verification/registry.json", "wildarrange-governance.json"].sort());
     assert.equal(existsSync(path.join(projectRoot, ".wildarrange")), false);
     await writeFile(path.join(governanceRoot, "policy", "AGENTS.md"), "# Human policy\n");
     const repeated = await initializeGovernanceRepository(projectRoot, { governanceRoot, repository: "https://example.test/scaffolded.git" });
@@ -69,7 +58,7 @@ test("workspace context: external governance policy is loaded without copying it
   await withWorkspace(async ({ projectRoot, governanceRoot, stateHome }) => {
     await writeFile(path.join(governanceRoot, "policy", "AGENTS.md"), "# External policy\n\nGOVERNANCE_POLICY_PROBE\n");
     const context = await attachGovernanceRepository(projectRoot, { governanceRoot, stateHome });
-    const rules = await scanProjectRules(projectRoot, { controlRoot: projectRoot });
+    const rules = await scanProjectRules(projectRoot, { projectRoot });
     assert.equal(rules.governanceRoot, governanceRoot);
     assert.equal(rules.governancePolicyRules, 1);
     assert.ok(rules.rules.some((rule) => rule.source === "governance_policy" && rule.path === "governance/policy/AGENTS.md"));
@@ -82,14 +71,12 @@ test("workspace context: external governance policy is loaded without copying it
 test("workspace context: attach keeps runtime and governance outside the project", async () => {
   await withWorkspace(async ({ projectRoot, governanceRoot, stateHome }) => {
     const attached = await attachGovernanceRepository(projectRoot, { governanceRoot, stateHome });
-    assert.equal(attached.mode, "external");
     assert.equal(attached.governanceRoot, governanceRoot);
     assert.equal(existsSync(path.join(projectRoot, ".wildarrange")), false);
     assert.equal(resolveWildArrangePath(projectRoot, "team", "tasks.json"), path.join(attached.runtimeRoot, "team", "tasks.json"));
 
     clearWildArrangeRuntimeRoot(projectRoot);
     const resolved = await resolveWorkspaceContext(projectRoot, { stateHome });
-    assert.equal(resolved.mode, "external");
     assert.equal(resolved.runtimeRoot, attached.runtimeRoot);
     const registry = JSON.parse(await readFile(path.join(stateHome, "registry.json"), "utf8"));
     assert.equal(registry.projects[attached.projectId].governanceRoot, governanceRoot);
@@ -126,19 +113,6 @@ test("workspace context: governance contract paths cannot escape the repository"
       verificationRegistry: "verification/registry.json",
     }));
     await assert.rejects(loadGovernanceContract(governanceRoot), /policyRoot escapes/);
-  });
-});
-
-// legacy 专属（下一步随 legacy 模式删除）：legacy 项目内 .wildarrange 状态阻止 attach（legacy->external 拒绝）
-test("workspace context: attach rejects a project that already has local runtime state", async () => {
-  await withWorkspace(async ({ projectRoot, governanceRoot, stateHome }) => {
-    await resolveWorkspaceContext(projectRoot, { stateHome, legacy: true });
-    await initRuntime(projectRoot);
-    await assert.rejects(
-      attachGovernanceRepository(projectRoot, { governanceRoot, stateHome }),
-      /project-local \.wildarrange runtime state exists/,
-    );
-    assert.equal(existsSync(path.join(stateHome, "registry.json")), false);
   });
 });
 

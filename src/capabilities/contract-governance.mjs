@@ -53,7 +53,7 @@ export async function applyContractGovernanceCard(rootDir, options = {}) {
  * @param {string} rootDir 执行根
  * @param {object} task 含 contractChanges
  * @param {object} [evidence] scopeResult 等
- * @param {object} [options] controlRoot
+ * @param {object} [options] projectRoot
  * @returns {Promise<object>} kind=contract_governance_review
  */
 export async function runContractGovernanceReview(rootDir, task, evidence = {}, options = {}) {
@@ -168,9 +168,9 @@ async function applyContractCardDecisionUnlocked(rootDir, options = {}) {
  * @returns {Promise<object>} status 为 pass|fail|warn，含 findings 与 scan
  */
 export async function inspectContractTask(rootDir, task, evidence = {}, options = {}) {
-  const controlRoot = options.controlRoot || rootDir;
+  const projectRoot = options.projectRoot || rootDir;
   const declarations = Array.isArray(task?.contractChanges?.items) ? task.contractChanges.items : [];
-  const scan = await scanContractGovernanceUniverse(rootDir, { declarations, controlRoot });
+  const scan = await scanContractGovernanceUniverse(rootDir, { declarations, projectRoot });
   const changedPaths = new Set((evidence.scopeResult?.changedPaths || []).map(normalizeSlash));
   const touchedCards = scan.cards.filter((card) => cardTouchesPaths(card, changedPaths));
   const findings = [];
@@ -186,10 +186,10 @@ export async function inspectContractTask(rootDir, task, evidence = {}, options 
       findings.push({ code: "contract_compatibility_missing", contractId: item.contractId || null });
     }
     if (action === "remove") {
-      const approval = await inspectApprovalRef(controlRoot, item);
+      const approval = await inspectApprovalRef(projectRoot, item);
       if (!approval.pass) findings.push({ code: "contract_destructive_approval_missing", contractId: item.contractId || null, reason: approval.reason });
     }
-    const referenceFindings = await inspectContractReferences(controlRoot, item);
+    const referenceFindings = await inspectContractReferences(projectRoot, item);
     findings.push(...referenceFindings.map((finding) => ({ ...finding, contractId: item.contractId || null })));
   }
   const touchedManualRequired = scan.coverage.manualRequired.filter((item) => changedPaths.has(normalizeSlash(item.sourcePath)) && !declarationCoversSource(declarations, item.sourcePath));

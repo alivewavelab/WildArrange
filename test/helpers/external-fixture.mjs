@@ -7,7 +7,7 @@
 //   测试不依赖开发者本机的 WildArrange 状态。
 // =============================================================================
 
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { runCommandFile } from "../../src/infra/command-runner.mjs";
@@ -60,6 +60,10 @@ export async function withExternalProject(fn, options = {}) {
     if (options.projectGit !== false) await gitCommitAll(projectRoot, "fixture baseline");
 
     await initializeGovernanceRepository(projectRoot, { governanceRoot, repository: "https://example.test/product.git", defaultBranch: "main" });
+    // init-governance 会补建其它政策模板（含 [待确认] 占位）；夹具只保留一份可控的 AGENTS.md。
+    for (const name of await readdir(path.join(governanceRoot, "policy"))) {
+      if (name !== "AGENTS.md") await rm(path.join(governanceRoot, "policy", name), { force: true });
+    }
     await writeFile(path.join(governanceRoot, "policy", "AGENTS.md"), options.policy || "# Fixture policy\n\n- Keep changes inside writable paths.\n", "utf8");
     await gitInit(governanceRoot);
     await gitCommitAll(governanceRoot, "fixture governance");

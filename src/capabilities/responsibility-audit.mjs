@@ -21,14 +21,14 @@ import { nowIso, readJson, resolveWildArrangePath, resolveTaskReportPath } from 
 
 /**
  * 运行完整职责审计流程；legacy 无 declaration 时返回 NOT_AUDITED。
- * @param {string} controlRoot ledger 与配置根
+ * @param {string} projectRoot ledger 与配置根
  * @param {string} executionRoot 源码 evidence 收集根
  */
-export async function runResponsibilityAudit(controlRoot, task, scopeResult, config, executionRoot = controlRoot) {
+export async function runResponsibilityAudit(projectRoot, task, scopeResult, config, executionRoot = projectRoot) {
   const base = { kind: "responsibility_audit", at: nowIso(), reviewer: "BaiZe" };
   const blocked = (reason) => ({ ...base, pass: false, decision: "RETURN", summary: reason, findings: [] });
   try {
-    const entries = await readVerifiedLedgerEntries(controlRoot);
+    const entries = await readVerifiedLedgerEntries(projectRoot);
     const imported = [...entries].reverse().find((e) => e.type === "plan_imported" && e.planId === task.planId);
     const changes = normalizeResponsibilityChanges(task.responsibilityChanges, task.writable_paths);
     if (!changes) {
@@ -36,7 +36,7 @@ export async function runResponsibilityAudit(controlRoot, task, scopeResult, con
       if (imported?.responsibilityAuditRequired) return blocked("R1: task is missing approved responsibilityChanges");
       return { ...base, pass: false, decision: "NOT_AUDITED", legacy: true, summary: "Legacy task has no responsibility declaration; no responsibility audit was performed", findings: [] };
     }
-    const work = await readJson(resolveWildArrangePath(controlRoot, "work.json"), null);
+    const work = await readJson(resolveWildArrangePath(projectRoot, "work.json"), null);
     if (work?.activePlanId !== task.planId || work?.planApproval?.status !== "approved") return blocked("R1: current plan still awaits human approval");
     const approved = [...entries].reverse().find((e) => e.type === "plan_approved" && e.planId === task.planId);
     const digest = responsibilityDigest(changes);
@@ -48,7 +48,7 @@ export async function runResponsibilityAudit(controlRoot, task, scopeResult, con
     const settings = config.review?.responsibility || {};
     const budget = Number.isInteger(settings.maxEvidenceChars) && settings.maxEvidenceChars > 0 ? settings.maxEvidenceChars : 500000;
     const source = await collectResponsibilityEvidence(executionRoot, changes, scopeResult.changedPaths, budget);
-    const reviewSkill = await loadSkillAttachment(controlRoot, "review-work", budget);
+    const reviewSkill = await loadSkillAttachment(projectRoot, "review-work", budget);
     if (!reviewSkill || reviewSkill.truncated) return blocked("Required review-work Skill is missing or truncated");
     const packet = {
       requiredSkills: [reviewSkill],
@@ -56,7 +56,7 @@ export async function runResponsibilityAudit(controlRoot, task, scopeResult, con
       instruction: RESPONSIBILITY_REVIEW_INSTRUCTIONS,
     };
     if (JSON.stringify(packet).length > budget) return blocked("Responsibility review packet exceeds evidence budget");
-    const packetPath = resolveTaskReportPath(controlRoot, "reviews", task.planId, task.id, "json") + ".responsibility-input.json";
+    const packetPath = resolveTaskReportPath(projectRoot, "reviews", task.planId, task.id, "json") + ".responsibility-input.json";
     const response = await executeReviewPacket(executionRoot, packetPath, packet, config, settings);
     if (response.commandRecovery) return { ...blocked("Reviewer termination requires recovery"), commandRecovery: response.commandRecovery };
     const content = response.content;

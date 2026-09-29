@@ -20,7 +20,7 @@ export async function initializeProjectGovernance(projectRoot, options = {}) {
   return initializeGovernanceRepository(projectRoot, { scaffoldConfig: true, initGit: true, ...options });
 }
 
-/** 查询并绑定项目当前工作区上下文。 */
+/** 查询并绑定项目当前工作区上下文；项目尚未连接时返回 null。 */
 export async function showProjectConnection(projectRoot, options = {}) {
   return resolveWorkspaceContext(projectRoot, options);
 }
@@ -28,8 +28,7 @@ export async function showProjectConnection(projectRoot, options = {}) {
 /** 返回适合 CLI JSON 输出的无策略投影。 */
 export function projectConnectionView(context) {
   return {
-    mode: context.mode,
-    attached: context.attached,
+    attached: true,
     projectId: context.projectId,
     governanceId: context.governanceId,
     projectRoot: context.projectRoot,

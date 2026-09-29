@@ -50,8 +50,8 @@
     },
     {
       "name": "wildarrange_init",
-      "command": "wildarrange init [--sample] [--project-docs] [--architecture]",
-      "purpose": "初始化运行时；外置治理项目不写客户仓库，legacy 模式可显式补建项目文档"
+      "command": "wildarrange init [--sample]",
+      "purpose": "在已连接项目的 runtimeRoot 初始化运行态（setup 已包含此步骤）；不写客户仓库"
     },
     {
       "name": "wildarrange_plan",
@@ -85,8 +85,8 @@
     },
     {
       "name": "wildarrange_config_init",
-      "command": "wildarrange config init [--root] [--force] [--armed]",
-      "purpose": "生成默认配置（--armed 直接武装质量门）"
+      "command": "wildarrange config init [--force] [--armed]",
+      "purpose": "在治理仓 policy/ 生成默认配置（--armed 直接武装质量门）"
     },
     {
       "name": "wildarrange_config_show",
@@ -106,7 +106,7 @@
     {
       "name": "wildarrange_adapter_install",
       "command": "wildarrange adapter install [--target codex|cursor|kimi|all] [--mode local|npx] [--package @alivewavelab/wildarrange]",
-      "purpose": "安装宿主 adapter；外置治理模式只在 runtimeRoot 生成用户插件包"
+      "purpose": "在 runtimeRoot 生成宿主外置插件包；--mode 选择 hook 调用 CLI 的前缀（local 当前 bin 路径 / npx 包名）"
     },
     {
       "name": "wildarrange_adapter_activate",
@@ -116,12 +116,12 @@
     {
       "name": "wildarrange_adapter_uninstall",
       "command": "wildarrange adapter uninstall [--target codex|cursor|kimi|all]",
-      "purpose": "卸载宿主 adapter；外置模式移除用户级条目与指针并删除 runtime 插件包"
+      "purpose": "卸载宿主 adapter：移除用户级条目与指针并删除 runtime 插件包"
     },
     {
       "name": "wildarrange_adapter_restore",
       "command": "wildarrange adapter restore --backup <backupId>",
-      "purpose": "恢复 adapter 备份；外置模式还原到该次 activate 之前的用户级文件"
+      "purpose": "恢复 adapter 备份：还原到该次 activate 之前的用户级文件"
     },
     {
       "name": "wildarrange_injection_show",
@@ -130,8 +130,8 @@
     },
     {
       "name": "wildarrange_hook_run",
-      "command": "wildarrange hook run [--from hook.json] [--format text|json] [--external-only --adapter-digest <sha256>]",
-      "purpose": "运行宿主生命周期 Hook；外置 Adapter 只处理已连接项目"
+      "command": "wildarrange hook run [--from hook.json] [--format text|json] --adapter-digest <sha256>",
+      "purpose": "运行宿主生命周期 Hook；只处理已连接项目，未连接项目静默放行"
     },
     {
       "name": "wildarrange_workflow",

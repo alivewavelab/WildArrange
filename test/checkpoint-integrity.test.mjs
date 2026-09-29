@@ -43,20 +43,6 @@ async function withProject(fn) {
   });
 }
 
-/** legacy 单根夹具（项目内 .wildarrange、非 Git）：仅供尚未有外置等价的 [legacy] 用例。 */
-async function withLegacyProject(fn) {
-  const baseDir = path.join(os.tmpdir(), "wildarrange-tests");
-  await mkdir(baseDir, { recursive: true });
-  const dir = await mkdtemp(path.join(baseDir, "wildarrange-ckpt-"));
-  try {
-    await initRuntime(dir);
-    await fn(dir);
-  } finally {
-    await runCommand(`chmod -R u+w ${JSON.stringify(dir)}`, dir, 30_000).catch(() => {});
-    await rm(dir, { recursive: true, force: true });
-  }
-}
-
 async function blockFileWrite(filePath) {
   const blockedPath = process.platform === "win32" ? filePath : path.dirname(filePath);
   await chmod(blockedPath, process.platform === "win32" ? 0o444 : 0o555);
@@ -939,89 +925,6 @@ test("adversarial: duplicate admission calls from one run cannot downgrade a rel
     assert.equal(result.lifecycle?.status, "released", "a stale duplicate must not downgrade the winner's lifecycle");
     const deliverySha = (await loadTaskState(dir)).tasks[0].delivery.integrationSha;
     assert.equal((await gitShow(dir, deliverySha, "src/same.txt")).trim(), "same");
-  });
-});
-
-// [legacy] 非 Git 直接应用路径：外置模式项目必为 Git，finalize 中断后工作区已回滚，续跑无法重跑 verify
-// （task worktree 内有成果但 resume 在项目根重跑 gates，见报告）。删 legacy 前需决定该行为的外置等价测试。
-test("[legacy] adversarial: a crash while finalizing keeps the workspace and resumes with the same run, and nobody else can hijack the claim", async () => {
-  // Cross-review P0 (round 6, 2026-07-21): the try/catch used to cover only
-  // the file-apply phase. A crash inside finalize (review report, ledger,
-  // wisdom, digest, persist) left applied files + a verifying task, and the
-  // "retry" then rollback-deleted the artifact. Now the claim persists at
-  // phase "finalizing": re-admitting the same run skips the apply and re-runs
-  // the gates, while other actors (another run, wildarrange run, the single-step
-  // checkpoint) are all refused for the duration of the claim.
-  await withLegacyProject(async (dir) => {
-    const planPath = resolveWildArrangePath(dir, "artifacts", "finalize-crash-plan.json");
-    await writeFile(planPath, JSON.stringify({
-      title: "Finalize crash resume",
-      tasks: [
-        {
-          id: "T001",
-          subject: "Artifact must survive a finalize crash",
-          verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/artifact.txt','utf8').trim()!=='good') process.exit(1);")],
-          review_commands: [realReviewCommand()],
-          writable_paths: ["src/**"],
-        },
-      ],
-    }, null, 2));
-    await importPlan(dir, planPath);
-
-    const command = [
-      nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact', files:[{path:'src/artifact.txt', content:'good\\n'}]}));"),
-      "{outputJson}",
-    ].join(" ");
-    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
-    const runB = `${batch.runId}-rival`;
-    await cp(resolveWildArrangePath(dir, "agent-runs", batch.runId), resolveWildArrangePath(dir, "agent-runs", runB), { recursive: true });
-
-    // Crash inside finalize: wisdom write fails AFTER the files are applied
-    // and the gates have run.
-    const wisdomPath = resolveWildArrangePath(dir, "wisdom", "verification.md");
-    await writeFile(wisdomPath, "", "utf8");
-    await chmod(wisdomPath, 0o444);
-    try {
-      await assert.rejects(
-        () => admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" }),
-        /interrupted while finalizing/,
-      );
-    } finally {
-      await chmod(wisdomPath, 0o644);
-    }
-
-    // The artifact is KEPT (not rolled back) and the claim is persisted.
-    assert.equal((await readFile(path.join(dir, "src", "artifact.txt"), "utf8")).trim(), "good");
-    const stateDuringClaim = await loadTaskState(dir);
-    assert.equal(stateDuringClaim.tasks[0].status, "verifying");
-    assert.equal(stateDuringClaim.tasks[0].admission_claim?.runId, batch.runId);
-    assert.equal(stateDuringClaim.tasks[0].admission_claim?.phase, "finalizing");
-
-    // Nobody else may take over while the claim is held:
-    const hijackRun = await runNextTask(dir);
-    assert.equal(hijackRun.status, "blocked");
-    assert.equal(hijackRun.blockedBy?.reason, "parallel_admission_in_flight");
-    await assert.rejects(
-      () => runWorkflowNode(dir, "checkpoint", { taskId: "T001" }),
-      /claimed by parallel admission/,
-    );
-    await assert.rejects(
-      () => admitParallelAgentResult(dir, { runId: runB, taskId: "T001" }),
-      /claimed by parallel admission run/,
-    );
-    assert.equal((await readFile(path.join(dir, "src", "artifact.txt"), "utf8")).trim(), "good", "hijack attempts must not disturb the artifact");
-
-    // The SAME run resumes: apply is skipped, gates re-run, completion lands.
-    const resumed = await admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" });
-    assert.equal(resumed.status, "completed");
-    const finalState = await loadTaskState(dir);
-    assert.equal(finalState.tasks[0].status, "completed");
-    assert.equal(finalState.tasks[0].admission_claim, null);
-    assert.match(await readFile(wisdomPath, "utf8"), /T001/, "the resumed completion must write the missed wisdom line");
-    const ledger = await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8");
-    assert.match(ledger, /parallel_agent_admission_reclaimed/);
-    const lifecycle = await readJson(resolveWildArrangePath(dir, "agent-runs", batch.runId, "T001", "result.json"));
-    assert.equal(lifecycle.lifecycle?.status, "released");
   });
 });
 

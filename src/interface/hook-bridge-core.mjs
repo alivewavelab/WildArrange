@@ -2,35 +2,32 @@
 // 文件名称：hook-bridge-core.mjs
 // 所属模块：interface
 // 作用说明：
-//   各宿主 hook bridge 共享的代码生成片段：CLI 子进程执行与项目根解析工具。
+//   各宿主外置 hook bridge 共享的代码生成片段：CLI 子进程执行、受治理项目判断与 CLI 调用解析。
 //   输出为嵌入 bridge 脚本的字符串，非运行时模块。
 //
 // 【运行原理速读】
 //   可以把它想成「bridge 脚本的公共模板库」：
 //
 //   · 谁调用？
-//     cursor-adapter.mjs、kimi-adapter.mjs 在 render*HookBridge 时拼接进生成脚本。
+//     external-adapters.mjs 在 renderExternalHookBridge 时拼接进生成脚本。
 //
 //   · 它做了什么？
 //     ① renderHookBridgeExecution 生成 spawn wildarrange hook run 块（可选超时 SIGKILL）
-//     ② renderHookBridgeUtilities 生成 resolveWildArrangeProject 等辅助函数。
+//     ② renderGovernedProjectCheck / renderCliInvocationUtility 生成项目判断与 CLI 解析函数。
 //
 //   · 为什么单独抽离？
-//     Cursor（fail-closed + 25s 超时）与 Kimi（fail-open、无超时）共用同一 CLI 调用逻辑。
+//     Cursor（fail-closed）与 Codex/Kimi（fail-open）共用同一 CLI 调用逻辑，失败策略由调用方决定。
 // =============================================================================
-import path from "node:path";
 
 /**
  * 生成 bridge 内调用 wildarrange hook run 并解析 JSON stdout 的代码块。
- * @param {{ hostAdapter: string, controlRoot?: string, cliArgsSource?: string, timeoutMs?: number|null }} options
- *   cliArgsSource 是 bridge 内求值为参数数组的 JS 表达式（外置模式用它传 --project-root 等）；缺省走 legacy --control-root。
+ * @param {{ hostAdapter: string, cliArgsSource: string, timeoutMs?: number|null }} options
+ *   cliArgsSource 是 bridge 内求值为参数数组的 JS 表达式（传 --project-root 等）。
  * @returns {string}
  */
-export function renderHookBridgeExecution({ hostAdapter, controlRoot, cliArgsSource, timeoutMs = null }) {
-  const trailingArgs = cliArgsSource
-    ? `...${cliArgsSource},`
-    : `"--control-root", ${JSON.stringify(path.resolve(controlRoot))},`;
-  // Cursor 要求 fail-closed：子进程挂死时 SIGKILL 并走 failHook；Kimi 传 null 则不生成定时器。
+export function renderHookBridgeExecution({ hostAdapter, cliArgsSource, timeoutMs = null }) {
+  const trailingArgs = `...${cliArgsSource},`;
+  // 子进程挂死时 SIGKILL 并走 failHook；timeoutMs 为 null 则不生成定时器。
   const timeoutBlock = Number.isInteger(timeoutMs) && timeoutMs > 0
     ? `const childTimer = setTimeout(() => {
   child.kill("SIGKILL");
@@ -136,40 +133,4 @@ function isGovernedProject(dir) {
   const id = "project_" + createHash("sha256").update(commonDir).digest("hex").slice(0, 24);
   return Object.prototype.hasOwnProperty.call(entries, id);
 }`;
-}
-
-/** 生成 bridge 内 resolveWildArrangeProject、resolveCliInvocation 等工具函数源码。 */
-export function renderHookBridgeUtilities() {
-  return `function resolveWildArrangeProject(cwd) {
-  if (typeof cwd !== "string" || !path.isAbsolute(cwd)) return null;
-  let current;
-  try {
-    current = realpathSync(cwd);
-  } catch {
-    return null;
-  }
-  while (true) {
-    const markers = [
-      path.join(current, ".wildarrange", "config.json"),
-      path.join(current, "wildarrange.config.json"),
-    ];
-    if (markers.some(isRegularFile)) return current;
-    if (existsSync(path.join(current, ".git"))) return null;
-    const parent = path.dirname(current);
-    if (parent === current) return null;
-    current = parent;
-  }
-}
-
-/** 判断路径存在且为普通文件（非目录）。 */
-function isRegularFile(filePath) {
-  if (!existsSync(filePath)) return false;
-  try {
-    return statSync(filePath).isFile();
-  } catch {
-    return false;
-  }
-}
-
-${renderCliInvocationUtility()}`;
 }

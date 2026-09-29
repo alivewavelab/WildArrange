@@ -12,7 +12,6 @@ import test from "node:test";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
 import { buildAgentContext } from "../src/ai/context.mjs";
 import { scanProjectRules } from "../src/infra/rule-scanner.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 import { withExternalProject } from "./helpers/external-fixture.mjs";
 
@@ -82,22 +81,18 @@ test("project rules parse CRLF frontmatter", async () => {
   });
 });
 
-test("project rules read a task worktree but persist runtime facts to the control root", async () => {
-  await withExternalProject(async ({ projectRoot, root }) => {
-    const controlRoot = path.join(projectRoot, "control");
+test("project rules read a task worktree but persist runtime facts to the project's runtime root", async () => {
+  await withExternalProject(async ({ projectRoot }) => {
     const executionRoot = path.join(projectRoot, "task-worktree");
-    await mkdir(controlRoot, { recursive: true });
     await mkdir(path.join(executionRoot, "src"), { recursive: true });
     await writeFile(path.join(executionRoot, "AGENTS.md"), "# Task worktree rules\n\nRun the real verifier.\n");
-    await initRuntime(controlRoot);
 
     const rules = await scanProjectRules(executionRoot, {
-      controlRoot,
+      projectRoot,
       targetPaths: ["src/app.js"],
     });
-    assert.equal(rules.matched, 1);
-    assert.equal(rules.rules[0].path, "AGENTS.md");
-    assert.match(await readFile(resolveWildArrangePath(controlRoot, "rules", "context.md"), "utf8"), /Run the real verifier/);
+    assert.ok(rules.rules.some((rule) => rule.path === "AGENTS.md" && rule.source !== "governance_policy"));
+    assert.match(await readFile(resolveWildArrangePath(projectRoot, "rules", "context.md"), "utf8"), /Run the real verifier/);
     await assert.rejects(stat(path.join(executionRoot, ".wildarrange")), /ENOENT/);
   });
 });

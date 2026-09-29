@@ -47,7 +47,7 @@ import { statusReport } from "../orchestration/status.mjs";
 
 /**
  * 为指定 Agent/任务构建完整上下文包，写入 context-agents/*.json|.md 并记 ledger。
- * @param {string} rootDir 控制根目录
+ * @param {string} rootDir 项目根目录
  * @param {object} options agent、taskId、planId、executionRoot、injectionPoint、role
  * @returns {Promise<object>} kind=wildarrange_agent_context
  */
@@ -62,7 +62,7 @@ export async function buildAgentContext(rootDir, options = {}) {
     ...(task?.writable_paths || []),
     ...(changed.available ? changed.paths : []),
   ].map(normalizeRelativePath));
-  const rules = await scanProjectRules(executionRoot, { controlRoot: rootDir, targetPaths });
+  const rules = await scanProjectRules(executionRoot, { projectRoot: rootDir, targetPaths });
   const agent = normalizeAgentName(options.agent || task?.owner || DEFAULT_EXECUTOR_AGENT) || DEFAULT_EXECUTOR_AGENT;
   const resumeContext = await writeContextSnapshot(rootDir, { reason: `agent-context:${agent}` });
   const role = options.role || roleForAgent(agent);

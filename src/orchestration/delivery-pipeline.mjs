@@ -24,8 +24,7 @@ import { integrateAdmissionCommit } from "./integration.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
 import { emitDecision } from "../infra/decision-log.mjs";
 import { buildErrorProtocol } from "../infra/error-protocol.mjs";
-import { normalizeRelativePath } from "../infra/path-match.mjs";
-import { nowIso, resolveTaskReportPath } from "../infra/runtime-store.mjs";
+import { nowIso } from "../infra/runtime-store.mjs";
 import { applyVerifierEvidenceToCriteria, criteriaStatus } from "../infra/success-criteria.mjs";
 import { appendWisdom } from "../infra/task-reports.mjs";
 import { persistTaskState } from "./task-board.mjs";
@@ -221,7 +220,7 @@ function envelopeEvidencePath(envelope, planId, task) {
   // review 报告由 linear-runtime/admission 在 pipeline 返回后按固定路径写入；
   // 决策记录先给出约定路径，审计者按图索骥即可。
   if (envelope?.capability === "review" && planId && task?.id) {
-    return normalizeRelativePath(resolveTaskReportPath(".", "reviews", planId, task.id, "md"));
+    return path.posix.join(".wildarrange", "reports", "reviews", planId, `${task.id}.md`);
   }
   return null;
 }
