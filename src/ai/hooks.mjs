@@ -28,6 +28,7 @@ import {
 import { appendLedger } from "../infra/ledger.mjs";
 import { emitDecision } from "../infra/decision-log.mjs";
 import { initRuntime } from "../infra/runtime-bootstrap.mjs";
+import { getBoundWorkspaceContext, resolveExecutionRoot } from "../infra/workspace-context.mjs";
 import { invokeCapability } from "../capabilities/gateway.mjs";
 import { resolveInjectionPoint } from "./injection.mjs";
 import { loadTaskState } from "../infra/task-state-store.mjs";
@@ -57,7 +58,11 @@ import { renderHookInjectionMarkdown, renderPreToolUseHookOutput } from "./hook-
  */
 export async function runInjectionHook(rootDir, input = {}) {
   const controlRoot = rootDir;
-  const executionRoot = input.cwd && typeof input.cwd === "string" ? input.cwd : controlRoot;
+  const hookCwd = input.cwd && typeof input.cwd === "string" ? input.cwd : controlRoot;
+  // 外置治理下宿主可能从项目子目录或任务 worktree 启动：规则与目标路径以 Git toplevel 为准，
+  // 相对路径仍从宿主 cwd 解析。
+  const workspace = getBoundWorkspaceContext(controlRoot);
+  const executionRoot = workspace?.mode === "external" ? await resolveExecutionRoot(workspace, hookCwd) : hookCwd;
   await initRuntime(controlRoot);
   const event = normalizeHookEvent(input.hook_event_name || input.event || input.name);
   const pointName = injectionPointForHookEvent(event);
@@ -67,8 +72,8 @@ export async function runInjectionHook(rootDir, input = {}) {
   const cliCommandPrefix = normalizeHookCliCommandPrefix(input[TRUSTED_CLI_COMMAND_PREFIX]);
   const taskId = normalizeHookTaskId(input);
   const targetPaths = event === "PreToolUse"
-    ? extractPreToolTargetPaths(input, executionRoot)
-    : event === "PostToolUse" ? extractHookTargetPaths(input, executionRoot) : [];
+    ? extractPreToolTargetPaths(input, executionRoot, hookCwd)
+    : event === "PostToolUse" ? extractHookTargetPaths(input, executionRoot, hookCwd) : [];
   const facts = {};
 
   if (event === "SessionStart") {
@@ -95,7 +100,7 @@ export async function runInjectionHook(rootDir, input = {}) {
     // §3.4：工具调用前 → 范围预检；有任务时重建 before_execute 上下文。
     facts.targetPaths = targetPaths;
     facts.rules = await scanProjectRules(executionRoot, { controlRoot, targetPaths });
-    facts.preflight = await preToolUseGuard(controlRoot, input, { executionRoot });
+    facts.preflight = await preToolUseGuard(controlRoot, input, { executionRoot, cwd: hookCwd });
     const executionTaskId = facts.preflight?.taskId || taskId;
     if (executionTaskId) {
       facts.agentContext = await buildAgentContext(controlRoot, {

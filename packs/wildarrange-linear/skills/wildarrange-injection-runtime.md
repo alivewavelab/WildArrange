@@ -6,9 +6,10 @@
 
 核心目标不是把治理藏进某个宿主的私有能力，而是让不同宿主按能力分层接入同一套本地协议：
 
-- Codex：adapter 写入项目 `.codex/hooks.json`，并保留 `.wildarrange/adapters/codex/hooks.json` 审计副本；只有在可信项目里通过 `/hooks` review / trust 后，才具备 hard hook 拦截。
-- Cursor：adapter 写入 `.cursor/hooks.json`（含 hook bridge），受信任工作区中 `preToolUse`（Write/Delete/Edit/Shell）与 `beforeShellExecution` **fail-closed 硬拦截**；`.cursor/rules/wildarrange.mdc` 仍是软规则层。宿主拦截只是早期预警，最终完成仍必须过 verifier / scope / review / successCriteria / acceptance proof / checkpoint。
-- Kimi Code：adapter 生成 `.wildarrange/adapters/kimi/plugin/`，用户显式安装后由 Hook bridge 转发宿主事件；复用 `AGENTS.md` 与 `.agents/skills/`，不改用户级配置。Kimi Hook 崩溃或超时时会 fail-open，最终完成仍以 WildArrange gate 为准。
+- Codex：外置 Codex 插件包生成在 runtimeRoot 的 `adapters/external/codex-marketplace/`（`adapter install` 生成，不写客户项目）；用户需在 Codex `/plugins` 中安装并审查、信任插件 Hook 后，才具备 hard hook 拦截。
+- Cursor：`adapter activate --target cursor` 显式把 Hook bridge 合并进用户级 `~/.cursor/hooks.json`（先备份），受信任工作区中 `preToolUse`（Write/Delete/Edit/Shell）与 `beforeShellExecution` **fail-closed 硬拦截**，但只对 registry 已连接的项目生效；用户级 `~/.cursor/rules/wildarrange.mdc` 只是一条指针软规则。宿主拦截只是早期预警，最终完成仍必须过 verifier / scope / review / successCriteria / acceptance proof / checkpoint。
+- Kimi Code：外置 Kimi 插件包生成在 runtimeRoot 的 `adapters/external/kimi/plugin/`，用户在 Kimi 内 `/plugins install` 后由 Hook bridge 转发宿主事件；Hook 崩溃或超时时会 fail-open，最终完成仍以 WildArrange gate 为准。
+- 三个宿主的 bridge 都先判断当前目录是否属于已连接项目；未连接项目一律放行，客户项目里不生成任何治理文件。
 - 普通 CLI：手动运行 `node ./bin/wildarrange.mjs ...`，用文件状态和 gate 命令完成治理闭环。
 
 无论宿主强弱，每个关键节点都应能读取：
@@ -39,11 +40,11 @@ Agent 看到挂载信息时必须先判断：
 
 ## 配置真相源
 
-优先级：
+外置治理布局下配置按以下顺序取用：
 
-1. `wildarrange.config.json`
-2. `.wildarrange/config.json`
-3. runtime 默认配置
+1. 治理仓 `policy/wildarrange.config.json`（版本化；提交治理仓后生效，客户项目根不放配置）。
+2. 本机 runtimeRoot 的 `config.json`（未版本化，仅本机）。
+3. runtime 默认配置。
 
 查看最终配置：
 
@@ -51,11 +52,7 @@ Agent 看到挂载信息时必须先判断：
 node ./bin/wildarrange.mjs config show
 ```
 
-生成可编辑根配置：
-
-```bash
-node ./bin/wildarrange.mjs config init --root
-```
+需要版本化的配置改动时，编辑治理仓 `policy/wildarrange.config.json` 并提交治理仓；不要在客户项目根创建 `wildarrange.config.json`。
 
 ## 注入点
 

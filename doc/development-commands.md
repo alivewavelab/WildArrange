@@ -14,9 +14,9 @@
 | 写入双仓集成验收收据    | `node ./bin/wildarrange.mjs integration accept --project-sha <40-char-sha> --governance-sha <40-char-sha> --reason "..."`（只写外置运行态） |
 | 生成默认配置            | `node ./bin/wildarrange.mjs config init --root`（`--armed` 直接武装质量门） |
 | 安装 adapter        | `node ./bin/wildarrange.mjs adapter install --target all --mode local` |
-| 激活外置 Cursor Hook | `node ./bin/wildarrange.mjs adapter activate --target cursor`（备份并合并用户级配置，不写客户项目） |
-| 卸载 adapter        | `node ./bin/wildarrange.mjs adapter uninstall --target all`            |
-| 恢复 adapter        | `node ./bin/wildarrange.mjs adapter restore --backup <backupId>`       |
+| 激活外置用户级配置 | `node ./bin/wildarrange.mjs adapter activate --target all [--user-root <临时目录>]`（Cursor Hook + 指针规则、Codex `~/.codex/AGENTS.md` 指针段；先备份，不写客户项目） |
+| 卸载 adapter        | `node ./bin/wildarrange.mjs adapter uninstall --target all`（外置：移除用户级条目/指针并删 runtime 插件包） |
+| 恢复 adapter        | `node ./bin/wildarrange.mjs adapter restore --backup <backupId>`（外置：还原到该次 activate 之前） |
 | 导入计划              | `node ./bin/wildarrange.mjs plan --from plan.json`                     |
 | 跑下一个任务            | `node ./bin/wildarrange.mjs run`                                       |
 | 跑 sample workflow | `node ./bin/wildarrange.mjs workflow --sample`                         |

@@ -132,7 +132,11 @@ export async function resolveWorkspaceContext(projectRoot, options = {}) {
   const stateHome = path.resolve(options.stateHome || defaultWildArrangeStateHome(options.env));
   const registryPath = path.join(stateHome, "registry.json");
   const registry = await readWorkspaceRegistry(registryPath);
-  const project = await resolveWorkspaceProjectRoot(requestedRoot, registry);
+  // 任务 worktree 建在 runtimeRoot 之下：此时项目根取注册项目根，不能把 worktree 当项目。
+  const taskWorktreeEntry = findRegisteredRuntimeContaining(registry, requestedRoot);
+  const project = taskWorktreeEntry
+    ? await canonicalExistingDirectory(taskWorktreeEntry.projectRoot, "project root")
+    : await resolveWorkspaceProjectRoot(requestedRoot, registry);
   const identity = await resolveProjectIdentity(project);
 
   if (options.legacy === true) {
@@ -171,6 +175,33 @@ export async function resolveWorkspaceContext(projectRoot, options = {}) {
   // linked worktree 与主 checkout 共用 git common-dir，因此共享 projectId 与
   // runtime；但本次命令的 projectRoot 必须保持当前 worktree，而非首次 attach 路径。
   return bindWorkspaceContext(workspaceContext({ ...entry, projectRoot: project }, governance.contract, registryPath, "external"));
+}
+
+/** 返回 runtimeRoot 包含 candidate 的已注册项目（即 candidate 位于任务 worktree 等运行态子树内）。 */
+function findRegisteredRuntimeContaining(registry, candidate) {
+  return Object.values(registry.projects || {}).find((entry) => {
+    if (typeof entry?.runtimeRoot !== "string" || typeof entry?.projectRoot !== "string") return false;
+    let runtimeRoot = path.resolve(entry.runtimeRoot);
+    try { runtimeRoot = realpathSync.native(runtimeRoot); } catch { /* 运行态尚未创建时按原路径比较 */ }
+    return pathIsInside(runtimeRoot, candidate);
+  }) || null;
+}
+
+/**
+ * 外置 Hook 的执行根：cwd 所在 Git toplevel（项目子目录、任务 worktree、外部 linked worktree），
+ * 非 Git 项目回到已注册项目根；不属于该项目的 cwd 原样返回。
+ */
+export async function resolveExecutionRoot(context, cwd) {
+  const start = path.resolve(cwd);
+  const top = await runCommandFile("git", ["-C", start, "rev-parse", "--show-toplevel"], start, 15_000).catch(() => null);
+  if (top?.exitCode === 0 && top.stdout.trim()) {
+    const toplevel = await realpath(top.stdout.trim()).catch(() => path.resolve(top.stdout.trim()));
+    const sameProject = pathIsInside(context.projectRoot, toplevel)
+      || pathIsInside(context.runtimeRoot, toplevel)
+      || (await resolveProjectIdentity(toplevel).catch(() => null))?.projectId === context.projectId;
+    if (sameProject) return toplevel;
+  }
+  return pathIsInside(context.projectRoot, start) ? context.projectRoot : start;
 }
 
 /**
