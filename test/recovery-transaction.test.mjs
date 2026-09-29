@@ -34,7 +34,8 @@ import {
   resolveInboundPath,
   restorePreimages,
 } from "../src/infra/recovery-transaction.mjs";
-import { readJson } from "../src/infra/runtime-store.mjs";
+import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -191,10 +192,9 @@ test("recovery-transaction: adoption manifest kind is distinct from archive", ()
 });
 
 test("archive recovery public API remains field-equivalent", async () => {
-  await withTempDir(async (dir) => {
-    await mkdir(path.join(dir, ".wildarrange", "team"), { recursive: true });
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await appendLedger(dir, { type: "archive_equivalence_seed" });
-    await writeFile(path.join(dir, ".wildarrange", "work.json"), "{}\n");
+    await writeFile(resolveWildArrangePath(dir, "work.json"), "{}\n");
     await writeFile(path.join(dir, "keep.txt"), "keep\n");
     const backup = await writeRuntimeStateBackup(dir, { reason: "archive-equiv" });
     const prepared = await prepareArchiveRecoveryPackage(dir, {
@@ -219,7 +219,7 @@ test("archive recovery public API remains field-equivalent", async () => {
     assert.equal(updated.transactionId, prepared.transactionId);
     assert.equal(updated.taskRef, "P1:T001");
     assert.ok(updated.stagingPath.includes("archive-staging"));
-    const manifest = await readJson(path.join(dir, ".wildarrange", "backups", prepared.backupId, "manifest.json"));
+    const manifest = await readJson(resolveWildArrangePath(dir, "backups", prepared.backupId, "manifest.json"));
     assert.equal(manifest.kind, "runtime_state_backup");
     assert.equal(manifest.archivePackages.length, 1);
     assert.equal(manifest.archivePackages[0].kind, "task_archive_recovery");

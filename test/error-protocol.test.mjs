@@ -19,13 +19,13 @@ import { spawn } from "node:child_process";
 import test from "node:test";
 import { invokeCapability } from "../src/capabilities/gateway.mjs";
 import { runDeliveryPipeline } from "../src/orchestration/delivery-pipeline.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import {
   buildErrorProtocol,
   errorProtocolOf,
   formatErrorInline,
   wildarrangeError,
 } from "../src/infra/error-protocol.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 const CLI_PATH = path.join(process.cwd(), "bin", "wildarrange.mjs");
 
@@ -70,8 +70,7 @@ test("gateway envelope error carries the protocol for unknown and throwing capab
 });
 
 test("delivery pipeline blocked result carries an inline error protocol pointing at the failing gate", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     const task = {
       id: "T001",
       subject: "failing verify",
@@ -88,8 +87,8 @@ test("delivery pipeline blocked result carries an inline error protocol pointing
 });
 
 test("CLI non-zero exit renders the inline error protocol on stderr", async () => {
-  await withTempDir(async (dir) => {
-    const result = await runCli(dir, ["nonsense-command"]);
+  await withExternalProject(async ({ projectRoot, stateHome }) => {
+    const result = await runCli(projectRoot, ["nonsense-command"], stateHome);
     assert.equal(result.exitCode, 1);
     assert.match(result.stderr, /\[WILDARRANGE-cli_error\] \(bin\/wildarrange\.mjs\)/);
     assert.match(result.stderr, /\| next: /);
@@ -105,12 +104,12 @@ async function withTempDir(fn) {
   }
 }
 
-function runCli(cwd, argv, timeoutMs = 30_000) {
+function runCli(cwd, argv, stateHome, timeoutMs = 30_000) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [CLI_PATH, ...argv], {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env },
+      env: { ...process.env, WILDARRANGE_STATE_HOME: stateHome },
     });
     let stdout = "";
     let stderr = "";

@@ -31,7 +31,8 @@ import { collectGitChangedPaths, readGitHead, readGitTopLevel } from "../src/inf
 import { uniqueStrings } from "../src/infra/text-utils.mjs";
 import { prepareAgentWorktree } from "../src/infra/git-worktree.mjs";
 import { loadWildArrangeConfig } from "../src/infra/runtime-config.mjs";
-import { readJson } from "../src/infra/runtime-store.mjs";
+import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 import {
   createTaskDeliveryCommit,
   inspectTaskWorktreeBaseline,
@@ -199,12 +200,7 @@ test("writable parallel agents get a worktree and one local run claim per task",
 });
 
 test("without a remote, delivery still commits to a clean local task branch worktree", async () => {
-  await withTempDir(async (repo) => {
-    await git(repo, ["init", "--initial-branch=main"]);
-    await writeFile(path.join(repo, ".gitignore"), ".wildarrange/\n", "utf8");
-    await writeFile(path.join(repo, "README.md"), "local seed\n", "utf8");
-    await git(repo, ["add", ".gitignore", "README.md"]);
-    await git(repo, ["-c", "user.name=Seed", "-c", "user.email=seed@example.invalid", "commit", "-m", "initial"]);
+  await withExternalProject(async ({ projectRoot: repo }) => {
     const mainBefore = (await git(repo, ["rev-parse", "main"])).trim();
     await initializeTaskRuntime(repo);
 
@@ -244,12 +240,35 @@ test("without a remote, delivery still commits to a clean local task branch work
     assert.equal(task.delivery_workspace.branch, task.coordination.branch);
     assert.equal(task.delivery_workspace.baseSha, mainBefore);
     assert.equal(task.delivery_workspace.deliverySha, localTaskHead);
-    const proof = await readJson(path.join(repo, ".wildarrange", "reports", "acceptance", "P-GIT", "T001.json"));
-    const checkpoint = await readJson(path.join(repo, ".wildarrange", "checkpoints", "P-GIT", "T001.json"));
+    const proof = await readJson(resolveWildArrangePath(repo, "reports", "acceptance", "P-GIT", "T001.json"));
+    const checkpoint = await readJson(resolveWildArrangePath(repo, "checkpoints", "P-GIT", "T001.json"));
     assert.equal(proof.evidenceRefs.deliveryBaseline.commitSha, localTaskHead);
     assert.equal(proof.evidenceRefs.deliveryBaseline.pushed, false);
     assert.equal(checkpoint.deliveryBaseline.integrationSha, localTaskHead);
 
+  });
+});
+
+// [legacy] doctor 的 delivery_worktree_state_drift 只在交付 worktree 位于项目内（legacy 单根）时
+// 才能读到 changedPaths；外置模式 worktree 在 runtimeRoot 下，doctor 会把它判为「outside the project」
+// （src/interface/doctor-completion.mjs），属产品缺陷，需先在 src 修复后迁移。
+test("[legacy] doctor detects delivery worktree drift after local admission", async () => {
+  await withTempDir(async (repo) => {
+    await git(repo, ["init", "--initial-branch=main"]);
+    await writeFile(path.join(repo, ".gitignore"), ".wildarrange/\n", "utf8");
+    await writeFile(path.join(repo, "README.md"), "local seed\n", "utf8");
+    await git(repo, ["add", ".gitignore", "README.md"]);
+    await git(repo, ["-c", "user.name=Seed", "-c", "user.email=seed@example.invalid", "commit", "-m", "initial"]);
+    await initRuntime(repo);
+    await initializeTaskRuntime(repo);
+    const batch = await runParallelAgents(repo, {
+      taskIds: ["T001"],
+      agent: "ZhuRong",
+      command: resultCommand("src/local-only.txt", "local delivery\n"),
+    });
+    const admitted = await admitParallelAgentResult(repo, { runId: batch.runId, taskId: "T001" });
+    assert.equal(admitted.status, "completed", JSON.stringify(admitted, null, 2));
+    const task = (await loadTaskState(repo)).tasks[0];
     await writeFile(path.join(task.delivery_workspace.workDir, "README.md"), "drift after admission\n");
     const doctor = await runDoctor(repo);
     const finding = doctor.findings.find((entry) => entry.code === "delivery_worktree_state_drift" && entry.taskId === "T001");
@@ -259,12 +278,7 @@ test("without a remote, delivery still commits to a clean local task branch work
 });
 
 test("local task delivery resumes the same commit after checkpoint failure", async () => {
-  await withTempDir(async (repo) => {
-    await git(repo, ["init", "--initial-branch=main"]);
-    await writeFile(path.join(repo, ".gitignore"), ".wildarrange/\n", "utf8");
-    await writeFile(path.join(repo, "README.md"), "local seed\n", "utf8");
-    await git(repo, ["add", ".gitignore", "README.md"]);
-    await git(repo, ["-c", "user.name=Seed", "-c", "user.email=seed@example.invalid", "commit", "-m", "initial"]);
+  await withExternalProject(async ({ projectRoot: repo }) => {
     const mainBefore = (await git(repo, ["rev-parse", "main"])).trim();
     await initializeTaskRuntime(repo);
     const batch = await runParallelAgents(repo, {
@@ -272,7 +286,7 @@ test("local task delivery resumes the same commit after checkpoint failure", asy
       agent: "ZhuRong",
       command: resultCommand("src/local-recovery.txt", "recover locally\n"),
     });
-    const checkpointPlanDir = path.join(repo, ".wildarrange", "checkpoints", "P-GIT");
+    const checkpointPlanDir = resolveWildArrangePath(repo, "checkpoints", "P-GIT");
     await replaceDirectoryWithBlockingFile(checkpointPlanDir);
     let first;
     try {
@@ -295,8 +309,7 @@ test("local task delivery resumes the same commit after checkpoint failure", asy
 });
 
 test("missing task branch metadata degrades explicitly for a non-Git task", async () => {
-  await withTempDir(async (rootDir) => {
-    await initRuntime(rootDir);
+  await withExternalProject(async ({ projectRoot: rootDir }) => {
     const result = await integrateAdmissionCommit(rootDir, {
       planId: "P-LOCAL",
       taskId: "T001",
@@ -325,7 +338,7 @@ test("successful admission pushes a delivery commit to the task branch and leave
     assert.equal(after, before);
     await assert.rejects(readFile(path.join(cloneA, "src", "integrated.txt"), "utf8"), /ENOENT/);
     const intent = await readJson(
-      path.join(cloneA, ".wildarrange", "agent-runs", batch.runId, "T001.integration.json"),
+      resolveWildArrangePath(cloneA, "agent-runs", batch.runId, "T001.integration.json"),
       null,
     );
     assert.equal(intent.status, "pushed");
@@ -338,8 +351,8 @@ test("successful admission pushes a delivery commit to the task branch and leave
     assert.equal(intent.integrationSha, taskBranchHead);
     assert.equal(intent.actualSha, taskBranchHead);
     assert.equal(admitted.integrationCommit.actualSha, taskBranchHead);
-    const proof = await readJson(path.join(cloneA, ".wildarrange", "reports", "acceptance", "P-GIT", "T001.json"));
-    const checkpoint = await readJson(path.join(cloneA, ".wildarrange", "checkpoints", "P-GIT", "T001.json"));
+    const proof = await readJson(resolveWildArrangePath(cloneA, "reports", "acceptance", "P-GIT", "T001.json"));
+    const checkpoint = await readJson(resolveWildArrangePath(cloneA, "checkpoints", "P-GIT", "T001.json"));
     assert.equal(proof.evidenceRefs.deliveryBaseline.commitSha, taskBranchHead);
     assert.equal(checkpoint.deliveryBaseline.integrationSha, taskBranchHead);
   });
@@ -466,7 +479,7 @@ test("checkpoint failure after task-branch delivery keeps the claim and resumes 
       agent: "ZhuRong",
       command: resultCommand("src/recover.txt", "recover\n"),
     });
-    const checkpointPlanDir = path.join(cloneA, ".wildarrange", "checkpoints", "P-GIT");
+    const checkpointPlanDir = resolveWildArrangePath(cloneA, "checkpoints", "P-GIT");
     await replaceDirectoryWithBlockingFile(checkpointPlanDir);
     let first;
     try {
@@ -496,7 +509,6 @@ test("checkpoint failure after task-branch delivery keeps the claim and resumes 
 
 test("linear remote delivery resumes the pushed commit after checkpoint failure without rerunning worker", async () => {
   await withRemoteClones(async ({ remote, cloneA }) => {
-    await initRuntime(cloneA);
     const planId = "P-LINEAR-REMOTE";
     await importPlanDefinition(cloneA, {
       id: planId,
@@ -512,7 +524,7 @@ test("linear remote delivery resumes the pushed commit after checkpoint failure 
       }],
     });
     const mainBefore = (await git(remote, ["rev-parse", "main"])).trim();
-    const checkpointPlanDir = path.join(cloneA, ".wildarrange", "checkpoints", planId);
+    const checkpointPlanDir = resolveWildArrangePath(cloneA, "checkpoints", planId);
     await replaceDirectoryWithBlockingFile(checkpointPlanDir);
     let first;
     try {
@@ -538,8 +550,8 @@ test("linear remote delivery resumes the pushed commit after checkpoint failure 
     assert.equal((await git(remote, ["rev-parse", "main"])).trim(), mainBefore);
     assert.equal(await readFile(path.join(resumed.task.delivery_workspace.workDir, "src", "linear-remote.txt"), "utf8"), "1", "worker must not rerun");
 
-    const proof = await readJson(path.join(cloneA, ".wildarrange", "reports", "acceptance", planId, "T001.json"));
-    const checkpoint = await readJson(path.join(cloneA, ".wildarrange", "checkpoints", planId, "T001.json"));
+    const proof = await readJson(resolveWildArrangePath(cloneA, "reports", "acceptance", planId, "T001.json"));
+    const checkpoint = await readJson(resolveWildArrangePath(cloneA, "checkpoints", planId, "T001.json"));
     assert.equal(proof.evidenceRefs.deliveryBaseline.commitSha, deliverySha);
     assert.equal(checkpoint.deliveryBaseline.integrationSha || checkpoint.deliveryBaseline.commitSha, deliverySha);
   });
@@ -575,7 +587,7 @@ test("parallel close releases a crash-orphaned claim even when the run has no re
     };
     await persistTaskState(cloneA, state);
     await writeFile(
-      path.join(cloneA, ".wildarrange", "agent-runs", "index.json"),
+      resolveWildArrangePath(cloneA, "agent-runs", "index.json"),
       JSON.stringify({
         runs: [{
           runId: "agent_run_crashed",
@@ -597,8 +609,7 @@ test("parallel close releases a crash-orphaned claim even when the run has no re
 });
 
 async function initializeTaskRuntime(rootDir, taskIds = ["T001"]) {
-  await initRuntime(rootDir);
-  const planPath = path.join(rootDir, ".wildarrange", "artifacts", "coordination-plan.json");
+  const planPath = resolveWildArrangePath(rootDir, "artifacts", "coordination-plan.json");
   await mkdir(path.dirname(planPath), { recursive: true });
   await writeFile(planPath, JSON.stringify({
     id: "P-GIT",
@@ -616,7 +627,7 @@ async function initializeTaskRuntime(rootDir, taskIds = ["T001"]) {
 }
 
 async function importPlanDefinition(rootDir, plan) {
-  const planPath = path.join(rootDir, ".wildarrange", "artifacts", `${plan.id}.json`);
+  const planPath = resolveWildArrangePath(rootDir, "artifacts", `${plan.id}.json`);
   await writeFile(planPath, JSON.stringify(plan, null, 2), "utf8");
   await importPlan(rootDir, planPath);
 }
@@ -627,7 +638,7 @@ async function createCheckpointFailureAfterIntegration(rootDir, filePath) {
     agent: "ZhuRong",
     command: resultCommand(filePath, "recover\n"),
   });
-  const checkpointPlanDir = path.join(rootDir, ".wildarrange", "checkpoints", "P-GIT");
+  const checkpointPlanDir = resolveWildArrangePath(rootDir, "checkpoints", "P-GIT");
   await replaceDirectoryWithBlockingFile(checkpointPlanDir);
   let result;
   try {
@@ -637,7 +648,7 @@ async function createCheckpointFailureAfterIntegration(rootDir, filePath) {
   }
   assert.equal(result.status, "recovery_required");
   const intent = await readJson(
-    path.join(rootDir, ".wildarrange", "agent-runs", batch.runId, "T001.integration.json"),
+    resolveWildArrangePath(rootDir, "agent-runs", batch.runId, "T001.integration.json"),
     null,
   );
   assert.equal(intent.status, "pushed");
@@ -675,7 +686,7 @@ function worktreeEditCommand(filePath, content) {
 }
 
 async function readLedger(rootDir) {
-  const raw = await readFile(path.join(rootDir, ".wildarrange", "ledger.jsonl"), "utf8");
+  const raw = await readFile(resolveWildArrangePath(rootDir, "ledger.jsonl"), "utf8");
   return raw.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
 }
 
@@ -710,22 +721,16 @@ test("text-utils uniqueStrings is the single dedupe owner", () => {
   assert.deepEqual(uniqueStrings([]), []);
 });
 
+/** 外置三根夹具：projectRoot 即 device A；再补一个裸远端与 device B 克隆。 */
 async function withRemoteClones(fn) {
-  await withTempDir(async (dir) => {
-    const remote = path.join(dir, "origin.git");
-    const seed = path.join(dir, "seed");
-    const cloneA = path.join(dir, "device-a");
-    const cloneB = path.join(dir, "device-b");
-    await git(dir, ["init", "--bare", "--initial-branch=main", remote]);
-    await git(dir, ["init", "--initial-branch=main", seed]);
-    await writeFile(path.join(seed, "README.md"), "seed\n", "utf8");
-    await git(seed, ["add", "README.md"]);
-    await git(seed, ["-c", "user.name=Seed", "-c", "user.email=seed@example.invalid", "commit", "-m", "initial"]);
-    await git(seed, ["remote", "add", "origin", remote]);
-    await git(seed, ["push", "-u", "origin", "main"]);
-    await git(dir, ["clone", remote, cloneA]);
-    await git(dir, ["clone", remote, cloneB]);
-    await fn({ dir, remote, cloneA, cloneB });
+  await withExternalProject(async ({ root, projectRoot }) => {
+    const remote = path.join(root, "origin.git");
+    const cloneB = path.join(root, "device-b");
+    await git(root, ["init", "--bare", "--initial-branch=main", remote]);
+    await git(projectRoot, ["remote", "add", "origin", remote]);
+    await git(projectRoot, ["push", "-u", "origin", "main"]);
+    await git(root, ["clone", remote, cloneB]);
+    await fn({ dir: root, remote, cloneA: projectRoot, cloneB });
   });
 }
 
@@ -840,7 +845,6 @@ test("task branch push is ordinary: never outside the task prefix and never over
 
 test("removed multi-device commands are no longer part of the CLI", async () => {
   await withRemoteClones(async ({ cloneA }) => {
-    await initRuntime(cloneA);
     const binPath = path.resolve("bin/wildarrange.mjs");
     for (const args of [["device", "status"], ["coordination", "status"], ["handoff", "prepare"]]) {
       await assert.rejects(
