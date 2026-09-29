@@ -22,7 +22,7 @@ import path from "node:path";
 import { renderHookBridgeExecution, renderHookBridgeUtilities } from "./hook-bridge-core.mjs";
 
 /** Cursor hooks.json 的 version 字段。 */
-export const CURSOR_HOOKS_VERSION = 1;
+const CURSOR_HOOKS_VERSION = 1;
 
 /** 相对项目根的 hook bridge 脚本路径。 */
 export const CURSOR_BRIDGE_PATH = ".cursor/hooks/wildarrange-hook-bridge.mjs";

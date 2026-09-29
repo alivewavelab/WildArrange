@@ -14,9 +14,9 @@ import { DEFAULT_PACKAGE_NAME } from "../infra/runtime-config.mjs";
 import { nowIso, readJson, resolveWildArrangePath, writeJsonAtomic } from "../infra/runtime-store.mjs";
 import { adapterCliPrefix, buildSlashCommands } from "./adapters.mjs";
 
-export const EXTERNAL_ADAPTER_VERSION = 2;
-export const EXTERNAL_CODEX_PLUGIN_NAME = "wildarrange-governance";
-export const EXTERNAL_KIMI_PLUGIN_NAME = "wildarrange-governance";
+const EXTERNAL_ADAPTER_VERSION = 2;
+const EXTERNAL_CODEX_PLUGIN_NAME = "wildarrange-governance";
+const EXTERNAL_KIMI_PLUGIN_NAME = "wildarrange-governance";
 export const EXTERNAL_CURSOR_BRIDGE_NAME = "wildarrange-external-hook-bridge.mjs";
 
 const TARGETS = new Set(["all", "codex", "cursor", "kimi"]);

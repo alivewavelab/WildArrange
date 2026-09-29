@@ -92,12 +92,6 @@ import { statusReport, writeWorkflowSummary } from "../src/orchestration/status.
 import { createSamplePlan, runWorkflow } from "../src/orchestration/workflow.mjs";
 import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtime.mjs";
 import {
-  buildArchivistPacket,
-  listArchivistRouteSuggestions,
-  resolveArchivistRouteSuggestion,
-  runArchivistRouter,
-} from "../src/ai/archivist-router.mjs";
-import {
   buildAgentContext,
   continuationDirective,
   resumeReport,
@@ -107,7 +101,6 @@ import { resolveInjectionPoint } from "../src/ai/injection.mjs";
 import { runInjectionHook } from "../src/ai/hooks.mjs";
 import { TRUSTED_CLI_COMMAND_PREFIX } from "../src/ai/pre-tool-guard.mjs";
 import { routeRequest } from "../src/ai/routing.mjs";
-import { runSuspicionReview } from "../src/ai/suspicion-review.mjs";
 import { runRepositoryGovernanceAudit } from "../src/capabilities/repository-governance.mjs";
 import { invokeCapability } from "../src/capabilities/gateway.mjs";
 import { scopeGuard } from "../src/capabilities/scope-guard.mjs";
@@ -543,7 +536,7 @@ async function main() {
       if (!cliCommandPrefix) throw new Error("WildArrange CLI command prefix is unavailable; reinstall the adapter");
       payload.cli_command_prefix = cliCommandPrefix;
       payload[TRUSTED_CLI_COMMAND_PREFIX] = cliCommandPrefix;
-      // §3.4：Codex 宿主附加 hooks.json 摘要，供 suspicion-review 检测 Hook 配置被篡改。
+      // §3.4：Codex 宿主附加 hooks.json 摘要，写入 Hook 报告与 ledger 供审计 Hook 配置是否被篡改。
       if (hostAdapter === "codex" && workspace.mode !== "external") {
         const hookConfig = await readFile(path.join(rootDir, ".codex", "hooks.json"), "utf8");
         payload.hook_config_digest = hashContent(hookConfig);
@@ -695,49 +688,6 @@ async function main() {
     throw new Error("wildarrange parallel requires run, admit, list, status, close, or cleanup");
   }
 
-  // --- 档案员路由 ---
-  // §3.4：archivist 生成/执行档案路由包；suggestions 供人类审核 LLM 路由建议。
-  if (command === "archivist") {
-    const subcommand = args._[1];
-    const turns = strArg(args, "turns")
-      ? await readJson(path.resolve(rootDir, args.turns))
-      : [];
-    const options = {
-      text: strArg(args, "text") || "",
-      stage: strArg(args, "stage"),
-      trigger: strArg(args, "trigger") || "cli",
-      turns,
-      force: Boolean(args.force),
-    };
-    if (subcommand === "packet") {
-      console.log(JSON.stringify(await buildArchivistPacket(rootDir, options), null, 2));
-      return;
-    }
-    if (subcommand === "run") {
-      console.log(JSON.stringify(await runArchivistRouter(rootDir, options), null, 2));
-      return;
-    }
-    if (subcommand === "suggestions") {
-      const action = args._[2];
-      if (action === "list") {
-        console.log(JSON.stringify(await listArchivistRouteSuggestions(rootDir), null, 2));
-        return;
-      }
-      if (action === "resolve") {
-        if (!strArg(args, "id")) throw new Error("wildarrange archivist suggestions resolve requires --id <id>");
-        console.log(JSON.stringify(await resolveArchivistRouteSuggestion(rootDir, {
-          id: args.id,
-          decision: args.decision,
-          evidence: strArg(args, "evidence") || "",
-          rationale: strArg(args, "rationale") || "",
-        }), null, 2));
-        return;
-      }
-      throw new Error("wildarrange archivist suggestions requires list or resolve");
-    }
-    throw new Error("wildarrange archivist requires packet, run, or suggestions");
-  }
-
   // --- 单工作流节点 ---
   // §3.4：node 单步跑 workflow 节点（route/execute/verify/scope/review/checkpoint/retry）。
   if (command === "node") {
@@ -844,17 +794,9 @@ async function main() {
     console.log(JSON.stringify(await invokeCapability("verification-governance-scan", { rootDir }), null, 2));
     return;
   }
-  // §3.4：review suspicious 异步 LLM 审查门决策可疑模式，不阻断当前任务流。
-  if (command === "review" && args._[1] === "suspicious") {
-    const report = await runSuspicionReview(rootDir, {
-      limit: Number.isInteger(Number(args.limit)) && args.limit !== true ? Number(args.limit) : undefined,
-    });
-    console.log(JSON.stringify(report, null, 2));
-    return;
-  }
 
   // --- 人工标注 ---
-  // §3.4：annotate 记录门决策人工标注，供 decisions stats 与路由复盘消费。
+  // §3.4：annotate 记录门决策人工标注，供 decisions stats 与 Dashboard 路由复盘消费。
   if (command === "annotate") {
     const subcommand = args._[1];
     if (subcommand === "list") {

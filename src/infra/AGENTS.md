@@ -6,7 +6,7 @@
 
 - 文件、路径、JSON、锁、配置、快照与持久化原语。
 - 命令执行与高风险命令预检。
-- Git diff/worktree、ledger、安全基线、LLM provider、规则扫描、仓库布局检查与记忆摘要等基础设施。
+- Git diff/worktree、ledger、安全基线、LLM provider、规则扫描、仓库布局检查等基础设施。
 
 ## 不负责
 

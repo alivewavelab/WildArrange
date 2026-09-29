@@ -85,11 +85,7 @@ test("deny decisions are annotatable with an id; deterministic pass stays out of
     assert.ok(deny.id, "decision record carries an id anchor");
     assert.equal(deny.annotatable, true, "拦截必须进标注队列");
 
-    // 纯确定性路由（显式关闭 shadow，防止本机配置了 LLM provider 时
-    // shadow 真跑导致 annotatable=true）不进标注队列。
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
-      routeGovernance: { semanticShadow: { enabled: false } },
-    }, null, 2));
+    // 纯确定性路由命中不进标注队列。
     await routeRequest(dir, { text: "继续上一个任务" });
     const { records } = await readDecisions(dir);
     const routing = records.find((record) => record.gate === "routing");

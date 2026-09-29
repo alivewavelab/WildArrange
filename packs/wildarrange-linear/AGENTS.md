@@ -14,7 +14,6 @@
 ## 硬规则
 
 - 长期 Agent 固定为 Jiuwei、DiJiang、ZhuRong、BaiZe、LuWu；Router 是系统节点，不计入 Agent 编制。
-- Router 是系统节点；CangJie 是可选内部 profile，不是第六长期 Agent。
 - DiJiang、BaiZe、LuWu 不得进入任意 command worker。
 - 阶段只作为路由和匹配上下文，不建立阶段前缀 Skill；产物与门控只使用 `.wildarrange/`、真实 CLI 和 delivery pipeline。
 - 窄职责必须优先建模为 Skill；只有具备独立目标、权限边界和生命周期时才新增 Agent Prompt。

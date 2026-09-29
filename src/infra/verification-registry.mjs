@@ -25,20 +25,20 @@ import { fingerprintCard, stableStringify } from "./verification-cards.mjs";
 /**
  * REGISTRY_SCHEMA_VERSION：本模块对外API。
  */
-export const REGISTRY_SCHEMA_VERSION = 1;
+const REGISTRY_SCHEMA_VERSION = 1;
 /**
  * bootstrap 制品 schema 版本。
  */
-export const BOOTSTRAP_SCHEMA_VERSION = 1;
+const BOOTSTRAP_SCHEMA_VERSION = 1;
 /**
  * inventory 制品 schema 版本。
  */
-export const INVENTORY_SCHEMA_VERSION = 1;
+const INVENTORY_SCHEMA_VERSION = 1;
 
 /**
  * emptyLocator：本模块对外API。
  */
-export function emptyLocator() {
+function emptyLocator() {
   return { registryPath: "", bootstrapPath: "", inventoryPath: "", archiveRoot: "" };
 }
 
@@ -58,7 +58,7 @@ export function readLocator(config = {}) {
 /**
  * locatorConfigured：本模块对外API。
  */
-export function locatorConfigured(locator) {
+function locatorConfigured(locator) {
   return Boolean(locator?.registryPath && locator?.bootstrapPath && locator?.inventoryPath);
 }
 

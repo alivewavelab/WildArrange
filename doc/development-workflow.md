@@ -21,7 +21,7 @@ init -> plan -> task-worktree -> worker -> verifier -> delivery-commit -> task-b
 - Kimi Hook 为 fail-open：PreToolUse 可在 Hook 正常运行时阻断，但 Hook 崩溃或超时默认放行；不得把它宣传为唯一安全边界，最终完成仍必须经过 verifier / scope / review / successCriteria / acceptance proof / checkpoint。
 - LLM review 通过 OpenAI-compatible provider 配置化接入；默认关闭，无 key 时不阻断线性状态机。
 - 第一版不启动常驻多 Agent 集群；多 Agent 先以命令型子 Agent 的隔离运行目录跑通 spawn / collect / message / admission 闭环。
-- 长期 Agent 白名单固定为 Jiuwei、DiJiang、ZhuRong、BaiZe、LuWu；Router 仅为系统节点，CangJie 仅为内部 profile。DiJiang、BaiZe、LuWu 不得进入任意 command worker，临时命令型子 Agent 不能借用这些只读身份。
+- 长期 Agent 白名单固定为 Jiuwei、DiJiang、ZhuRong、BaiZe、LuWu；Router 仅为系统节点。DiJiang、BaiZe、LuWu 不得进入任意 command worker，临时命令型子 Agent 不能借用这些只读身份。
 - 子 Agent 不能直接自证完成；结构化文件成果必须通过 writable_paths、verifier、scope、review、checkpoint 后才能进入 completed。
 - checkpoint 前必须写入 acceptance proof；proof 不通过不得把任务置为 completed。
 - 一个可写任务只能有一个 owner、一个独立 worktree 和一个独立 task branch；两个可写 worktree 不得共享同一分支。开发与 BUG 修复默认从干净 commit 基线创建隔离 worktree；无归属改动优先自动隔离，无法隔离、同文件冲突或所有权不明时才询问开发者。
@@ -34,8 +34,7 @@ init -> plan -> task-worktree -> worker -> verifier -> delivery-commit -> task-b
 - PR 可由系统自动创建或更新为 Draft；Approve 与 Merge 是不同动作。默认由人类批准进入 `main`，生产部署是与 merge 分离的另一项人类授权；development、staging、production 是部署环境，不默认复制为长期 `develop`/`production` 分支。
 - 强耦合改动若不能独立验收，归为一个任务在同一 worktree/branch 联合交付；若可拆分，则使用两个任务、两个 worktree、两个 branch，再由独立 integration task 绑定双方 commit SHA 做联合验收。Integration 自身同样拥有独立 worktree/branch，不能写回原实现 worktree。
 - task 处于等待验收、返工或 `recovery_required` 时保留 branch/worktree。确认 `main` 已包含 delivery commit 后，先证明 worktree 干净并删除 worktree，再删除本地 branch；删除远端 branch 属于远端变更，必须由人类确认。Worktree 不是长期档案。
-- ArchivistRouter 只读取清洗后的结论包，不摄入代码块、raw diff 或完整命令输出；无 LLM key 时必须 fallback，不阻断主线或 hook。
-- 路由必须保留 deterministic 证据；semantic shadow 只能作为第二意见和低置信门控，不得无审计地覆盖路由表。
+- 路由只使用确定性路由表，结果必须保留命中证据。
 - 路由写入任务的 `task.skills` 必须由执行前公开宿主入口真实挂载；项目级 Review 必需 Skill 在审查前经同一安全加载器完整读取，缺失或截断不得放行；未接通的 checkpoint 自动挂载仍不得宣称可用。只允许加载 Prompt Pack manifest 或项目 Skill 根内的已登记文件，并校验安装根、realpath 与 hash，继续受数量和字符预算约束。未知或完整性失败的 Skill 必须显式报告，不能静默加载。
 - 商业发布包不得包含受限第三方源码、prompt 原文或近似改写文本；外部项目只能作为概念参考和对照证据。
 

@@ -37,7 +37,6 @@
 | 查看标注与统计 | `node ./bin/wildarrange.mjs annotate list` / `annotate stats` |
 | 门触发统计审查 | `node ./bin/wildarrange.mjs decisions stats` |
 | 统一时间线 | `node ./bin/wildarrange.mjs timeline [--limit N] [--task T001]` |
-| LLM 可疑判断（异步审查） | `node ./bin/wildarrange.mjs review suspicious` |
 | 全量命令 / 物化命令文档 | `node ./bin/wildarrange.mjs --help --all` / `docs commands --write` |
 | 匹配 Skill          | `node ./bin/wildarrange.mjs skills match --text "..." --stage plan`    |
 | 仓库治理检查           | `node ./bin/wildarrange.mjs governance audit` |

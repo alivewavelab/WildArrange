@@ -93,29 +93,9 @@ test("CODE-006: gateway preserves business error.code from apply-card instead of
 
 test("gateway: listRegisteredCapabilities exposes the static registry", () => {
   const names = listRegisteredCapabilities();
-  for (const expected of ["worker", "verify", "scope", "review", "acceptance-proof", "checkpoint", "command", "command-safety", "repository-governance", "verification-governance-scan", "verification-governance-apply-card", "verification-governance-generate-artifacts"]) {
+  for (const expected of ["worker", "verify", "scope", "review", "acceptance-proof", "checkpoint", "verification-governance-scan", "verification-governance-apply-card", "verification-governance-generate-artifacts"]) {
     assert.ok(names.includes(expected), `expected ${expected} to be registered, got: ${names.join(", ")}`);
   }
-});
-
-test("gateway: command capability returns a unified envelope with duration", async () => {
-  const envelope = await invokeCapability("command", {
-    rootDir: process.cwd(),
-    options: { command: nodeEval("process.exit(0)") },
-  });
-  assert.equal(envelope.capability, "command");
-  assert.equal(envelope.status, "pass");
-  assert.equal(typeof envelope.duration_ms, "number");
-  assert.equal(envelope.sideEffect, "none");
-  assert.equal(envelope.error, null);
-});
-
-test("gateway: command-safety capability blocks a destructive command", async () => {
-  const envelope = await invokeCapability("command-safety", {
-    options: { command: "git clean -fd" },
-  });
-  assert.equal(envelope.status, "fail");
-  assert.equal(envelope.evidence.allowed, false);
 });
 
 test("capabilityErrorEnvelope preserves recovery_required code and evidence", () => {

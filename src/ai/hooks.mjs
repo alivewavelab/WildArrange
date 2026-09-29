@@ -8,7 +8,7 @@
 //
 // 【运行原理速读】
 //   · 何时触发？ bin/wildarrange.mjs hook run 或 Cursor hooks.json 回调。
-//   · 做了什么？ ① 按事件分支收集 route/scope/archivist 等 facts ② resolveInjectionPoint
+//   · 做了什么？ ① 按事件分支收集 route/scope 等 facts ② resolveInjectionPoint
 //     ③ renderHookInjectionMarkdown ④ 写 sessions/hooks 报告与 emitDecision。
 //   · 与谁协作？ injection、routing、context、pre-tool-guard、hook-render、capabilities。
 // =============================================================================
@@ -31,12 +31,10 @@ import { initRuntime } from "../infra/runtime-bootstrap.mjs";
 import { invokeCapability } from "../capabilities/gateway.mjs";
 import { resolveInjectionPoint } from "./injection.mjs";
 import { loadTaskState } from "../infra/task-state-store.mjs";
-import { buildPlanDraftDirective, routeRequest, writeDailyRoutingReview } from "./routing.mjs";
+import { buildPlanDraftDirective, routeRequest } from "./routing.mjs";
 import { scanProjectRules } from "../infra/rule-scanner.mjs";
 import { buildAgentContext, continuationDirective, resumeReport } from "./context.mjs";
-import { runArchivistRouter } from "./archivist-router.mjs";
 import { evaluateHookResultGate } from "../infra/hook-result-gate.mjs";
-import { writeMemoryDigest } from "../infra/memory-digest.mjs";
 import { attentionReport } from "../orchestration/status.mjs";
 import {
   TRUSTED_CLI_COMMAND_PREFIX,
@@ -74,7 +72,7 @@ export async function runInjectionHook(rootDir, input = {}) {
   const facts = {};
 
   if (event === "SessionStart") {
-    // §3.4：会话启动 → 恢复报告、规则扫描、Lead 上下文与记忆 digest。
+    // §3.4：会话启动 → 恢复报告、规则扫描与 Lead 上下文。
     facts.resume = await resumeReport(controlRoot, { sessionId, source: "hook:session_start", cliCommandPrefix });
     facts.rules = await scanProjectRules(executionRoot, { controlRoot });
     facts.agentContext = await buildAgentContext(controlRoot, {
@@ -83,18 +81,8 @@ export async function runInjectionHook(rootDir, input = {}) {
       taskId,
       injectionPoint: pointName,
     }).catch((error) => ({ error: error.message }));
-    facts.archivist = await runArchivistForHook(controlRoot, input, {
-      event,
-      stage: "resume",
-      trigger: "sessionStart",
-      text: facts.resume?.nextAction || "",
-    });
-    facts.digest = await writeMemoryDigest(controlRoot, {
-      reason: "session_start",
-      stage: "resume",
-    }).catch((error) => ({ error: error.message }));
   } else if (event === "UserPromptSubmit") {
-    // §3.4：用户提交 → 路由决策、计划草稿指令与 Archivist 记忆摄入。
+    // §3.4：用户提交 → 路由决策与计划草稿指令。
     facts.route = input.prompt ? await routeRequest(controlRoot, { text: input.prompt, sessionId }) : null;
     facts.planDraft = buildPlanDraftDirective(facts.route, {
       sessionId,
@@ -103,12 +91,6 @@ export async function runInjectionHook(rootDir, input = {}) {
       executionRoot,
     });
     facts.rules = await scanProjectRules(executionRoot, { controlRoot });
-    facts.archivist = await runArchivistForHook(controlRoot, input, {
-      event,
-      stage: stageForRoute(facts.route),
-      trigger: "userPromptSubmit",
-      text: input.prompt || "",
-    });
   } else if (event === "PreToolUse") {
     // §3.4：工具调用前 → 范围预检；有任务时重建 before_execute 上下文。
     facts.targetPaths = targetPaths;
@@ -127,7 +109,7 @@ export async function runInjectionHook(rootDir, input = {}) {
     // §3.4：工具完成后 → 结果门评估与可选 scope 快检，不阻断 Hook 输出。
     facts.targetPaths = targetPaths;
     facts.rules = await scanProjectRules(executionRoot, { controlRoot, targetPaths });
-    facts.resultGate = await evaluateHookResultGate(controlRoot, input);
+    facts.resultGate = evaluateHookResultGate(input);
     if (taskId) {
       facts.scope = await invokeCapability("scope", { rootDir: controlRoot, task: { id: taskId } })
         .then((envelope) => envelope.evidence)
@@ -143,23 +125,9 @@ export async function runInjectionHook(rootDir, input = {}) {
       taskId,
       injectionPoint: pointName,
     }).catch((error) => ({ error: error.message }));
-    facts.archivist = await runArchivistForHook(controlRoot, input, {
-      event,
-      stage: "resume",
-      trigger: "postCompact",
-      text: facts.resume?.nextAction || "",
-    });
-    facts.digest = await writeMemoryDigest(controlRoot, {
-      reason: "post_compact",
-      stage: "resume",
-    }).catch((error) => ({ error: error.message }));
   } else if (event === "Stop") {
-    // §3.4：会话结束 → 续跑指令与日路由审查，供宿主决定是否自动 resume。
+    // §3.4：会话结束 → 续跑指令，供宿主决定是否自动 resume。
     facts.continuation = await continuationDirective(controlRoot, { sessionId, source: "hook:stop", cliCommandPrefix });
-    facts.routingReview = await writeDailyRoutingReview(controlRoot, {
-      trigger: "hook:stop",
-      sessionId,
-    }).catch((error) => ({ status: "warn", reason: error instanceof Error ? error.message : String(error) }));
   }
 
   // 通用推送：在有"对话面"的事件里，把待人决策的事项主动注入，指示宿主 AI 直接问开发者。
@@ -298,26 +266,6 @@ function defaultAgentForHookEvent(event) {
   return DEFAULT_EXECUTOR_AGENT;
 }
 
-/** Hook 侧档案员调用包装：失败时降级为 warn 结果，不阻断注入主流程。 */
-async function runArchivistForHook(rootDir, input, options) {
-  try {
-    return await runArchivistRouter(rootDir, {
-      stage: options.stage,
-      trigger: options.trigger || options.event,
-      text: options.text || "",
-      turns: extractHookTurns(input),
-    });
-  } catch (error) {
-    return {
-      kind: "archivist_router",
-      at: nowIso(),
-      status: "warn",
-      pass: true,
-      reason: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
 /** 为 skill-matcher 提供请求文本；工具类 Hook 无可靠文本则留空走静态挂载。 */
 function injectionTextForHookEvent(event, input, facts) {
   if (event === "UserPromptSubmit") return String(input.prompt || "");
@@ -342,20 +290,6 @@ function stageForRoute(route) {
   if (intent === "resume") return "resume";
   if (intent === "execute") return "execute";
   return "default";
-}
-
-/** 从 Hook 载荷提取对话轮次，兼容 turns/messages/conversation 多种字段名。 */
-function extractHookTurns(input) {
-  const source = input.turns || input.messages || input.conversation || [];
-  if (!Array.isArray(source)) return [];
-  return source.map((turn) => {
-    if (typeof turn === "string") return { role: "unknown", content: turn };
-    if (!turn || typeof turn !== "object") return null;
-    return {
-      role: turn.role || turn.speaker || "unknown",
-      content: turn.content || turn.text || turn.summary || "",
-    };
-  }).filter((turn) => turn && turn.content);
 }
 
 /** 从 Hook 输入或环境变量解析 sessionId，缺失时生成新 ID。 */

@@ -53,7 +53,7 @@ import { loadGovernanceVerificationDefaults } from "../infra/workspace-context.m
 // --- 规范化 ---
 
 /** 规范化计划对象：title、tasks、defaults 等必填与结构约束。 */
-export function normalizePlan(rawPlan) {
+function normalizePlan(rawPlan) {
   if (!rawPlan || typeof rawPlan !== "object") {
     throw new Error("plan must be a JSON object");
   }
@@ -214,7 +214,7 @@ export function validateTaskReady(task) {
 }
 
 /** 单个可写任务只能选择项目仓或治理仓；跨仓修改必须拆成两个任务。 */
-export function normalizeRepositoryTarget(value, taskId = "task") {
+function normalizeRepositoryTarget(value, taskId = "task") {
   if (!["project", "governance"].includes(value)) {
     throw new Error(`task ${taskId} repositoryTarget must be project or governance; split cross-repository work into separate tasks`);
   }
@@ -222,7 +222,7 @@ export function normalizeRepositoryTarget(value, taskId = "task") {
 }
 
 /** 规范化 workType 枚举值。 */
-export function normalizeWorkType(value) {
+function normalizeWorkType(value) {
   if (typeof value !== "string" || !TASK_WORK_TYPES.has(value)) {
     throw new Error(`invalid task workType: ${value}`);
   }
@@ -230,7 +230,7 @@ export function normalizeWorkType(value) {
 }
 
 /** 规范化 task source 枚举值。 */
-export function normalizeTaskSource(value) {
+function normalizeTaskSource(value) {
   if (typeof value !== "string" || !TASK_SOURCES.has(value)) {
     throw new Error(`invalid task source: ${value}`);
   }
@@ -238,7 +238,7 @@ export function normalizeTaskSource(value) {
 }
 
 /** 规范化 task priority 枚举值。 */
-export function normalizeTaskPriority(value) {
+function normalizeTaskPriority(value) {
   const normalized = typeof value === "string" ? value.toUpperCase() : value;
   if (!TASK_PRIORITIES.has(normalized)) throw new Error(`invalid task priority: ${value}`);
   return normalized;
@@ -272,7 +272,7 @@ function normalizeTaskRequest(value, subject, source) {
 }
 
 /** 规范化任务契约变更声明列表。 */
-export function normalizeContractChanges(value, taskId, owner) {
+function normalizeContractChanges(value, taskId, owner) {
   if (value === undefined || value === null) return { declared: false, items: [] };
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`task ${taskId} contractChanges must be an object`);
@@ -421,7 +421,7 @@ function seedDefaultSuccessCriteria(taskId, subject, verifyCommands) {
 }
 
 /** 校验任务 status 是否为允许枚举值。 */
-export function validateStatus(status) {
+function validateStatus(status) {
   if (!TASK_STATUSES.has(status)) {
     throw new Error(`invalid task status: ${status}`);
   }
@@ -591,7 +591,7 @@ function assertPlanImportDoesNotReplaceActiveWork(existingLedger, plan) {
 }
 
 /** 校验语义生成计划的额外质量规则。 */
-export function validateSemanticGeneratedPlan(plan) {
+function validateSemanticGeneratedPlan(plan) {
   if (plan.generated_by !== "host_semantic") return plan;
   const invalidOwners = plan.tasks
     .filter((task) => task.owner_source !== "explicit" || !COMMAND_WORKER_AGENTS.includes(task.owner))
@@ -706,7 +706,7 @@ export async function approvePlan(rootDir, options = {}) {
 // --- 路由 enrichment ---
 
 /** 为计划各任务解析并写入 route_decision。 */
-export async function enrichPlanWithRoutes(rootDir, plan) {
+async function enrichPlanWithRoutes(rootDir, plan) {
   const routes = await loadRoutesConfig(rootDir);
   const planRouteDecision = resolveRouteDecision(routes, `${plan.title}\n${plan.objective}`);
   plan.route_decision = planRouteDecision;
@@ -733,7 +733,7 @@ export async function enrichPlanWithRoutes(rootDir, plan) {
 }
 
 /** 导入质量门禁：noop/trivial 任务等启发式检查。 */
-export function validatePlanImportQuality(plan) {
+function validatePlanImportQuality(plan) {
   const route = plan.route_decision;
   const planText = `${plan.title}\n${plan.objective}\n${plan.tasks.map((task) => `${task.subject}\n${task.description}`).join("\n")}`;
   const productLike = /(产品|用户|体验|页面|网页|工具|上传|视频|pdf|txt|互动|游戏|mvp|流程|多步骤|权限|协作|可视化)/i.test(planText);

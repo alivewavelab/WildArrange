@@ -2,26 +2,18 @@
 // 文件名称：hook-result-gate.mjs
 // 所属模块：infra
 // 作用说明：
-//   PostToolUse 工具结果硬失败检测，block/warn 并写 ledger。
+//   PostToolUse 工具结果硬失败检测：只看结构化字段（非零退出码、ok/success=false、
+//   失败状态、宿主 error 字段），给出 block 建议；不写 ledger，也不扫描输出文本。
 //
 // 【运行原理速读】
-//   flatten 响应 → 非零 exit/显式失败态 → 正则扫描 MCP/shell 失败 → appendLedger。
+//   读取 tool_response → 非零 exit / 显式失败态 → 返回 findings 与 decision。
 // =============================================================================
-import { appendLedger } from "./ledger.mjs";
 import { nowIso } from "./runtime-store.mjs";
 
-/** PostToolUse 工具输出中视为硬失败的正则模式（block 级）。 */
-const HARD_FAILURE_PATTERNS = [
-  { name: "mcp_transport_failure", regex: /\b(mcp|transport|socket|econnreset|econnrefused|timed out|timeout)\b/i },
-  { name: "permission_denied", regex: /\b(permission denied|eperm|eacces|operation not permitted)\b/i },
-  { name: "command_not_found", regex: /\b(command not found|not recognized as an internal|enoent|no such file or directory)\b/i },
-  { name: "shell_failure", regex: /\b(exit code|exited with code|process\.exit|failed|error|exception|could not apply patch|cannot apply patch|unable to apply patch)\b/i },
-];
-
 /**
- * evaluateHookResultGate：本模块对外异步 API。
+ * evaluateHookResultGate：本模块对外 API（纯函数，无落盘）。
  */
-export async function evaluateHookResultGate(rootDir, input = {}) {
+export function evaluateHookResultGate(input = {}) {
   const toolName = String(input.tool_name || input.toolName || "");
   const response = input.tool_response
     ?? input.toolResponse
@@ -30,13 +22,18 @@ export async function evaluateHookResultGate(rootDir, input = {}) {
     ?? input.error
     ?? input.response
     ?? null;
-  const findings = detectToolResultFindings(response, { toolName });
-  const decision = findings.some((finding) => finding.severity === "block")
-    ? "block"
-    : findings.length > 0
-      ? "warn"
-      : "pass";
-  const result = {
+  const findings = detectToolResultFindings(response);
+  // 宿主显式给出 error 字段（如 PostToolUseFailure）即为结构化失败信号。
+  if (input.error != null && input.error !== "") {
+    findings.push({
+      name: "tool_error_reported",
+      severity: "block",
+      evidence: "host reported an error for this tool call",
+      requiredAction: "工具调用已被宿主标记为出错，先处理失败原因再继续。",
+    });
+  }
+  const decision = findings.length > 0 ? "block" : "pass";
+  return {
     kind: "hook_result_gate",
     at: nowIso(),
     decision,
@@ -44,22 +41,11 @@ export async function evaluateHookResultGate(rootDir, input = {}) {
     findings,
     summary: summarizeDecision(decision, findings),
   };
-  await appendLedger(rootDir, {
-    type: "hook_result_gate",
-    decision,
-    toolName,
-    findingCount: findings.length,
-    findingNames: findings.map((finding) => finding.name),
-  });
-  return result;
 }
 
-/**
- * detectToolResultFindings：本模块对外API。
- */
-export function detectToolResultFindings(response, options = {}) {
+/** 从结构化响应字段提取失败发现；不做文本正则扫描。 */
+function detectToolResultFindings(response) {
   const findings = [];
-  const flat = flattenToolResponse(response);
   const exitCode = firstNumericValue(response, ["exitCode", "exit_code", "code", "statusCode", "status_code"]);
   if (Number.isInteger(exitCode) && exitCode !== 0) {
     findings.push({
@@ -89,41 +75,6 @@ export function detectToolResultFindings(response, options = {}) {
     });
   }
 
-  const structuredStderr = collectNamedTextValues(response, "stderr").join("\n");
-  const structuredStderrFailure = /\b(?:mcp|transport|socket|econnreset|econnrefused|timed out|timeout|permission denied|eperm|eacces|operation not permitted)\b/i.test(structuredStderr);
-  const explicitFailureText = /(?:^|\r?\n)\s*(?:(?:output|stderr|message):\s*)?(?:error|failed|failure|exception)(?::|\s|$)/i.test(flat)
-    || /(?:^|\r?\n)\s*(?:(?:output|stderr|message):\s*)?(?:permission denied|command not found|no such file or directory)(?::|\s|$)/i.test(flat)
-    || /\bapply_patch\s*:\s*(?:permission denied|eperm|eacces|operation not permitted)\b/i.test(flat)
-    || /\b(?:could not|cannot|can't|unable to)\s+apply patch\b/i.test(flat)
-    || /\bapply_patch verification failed\b/i.test(flat)
-    || /\bfailed to (?:apply|find|open|write|update|delete)\b/i.test(flat);
-  const structuredSuccess = exitCode === 0
-    || booleanValue(response, ["ok", "success", "passed"]) === true;
-  const strictApplyPatchSuccess = /^\s*(?:Done!|Success\.\s+(?:Updated|Added|Deleted|Applied)(?: the following files)?:?(?:\r?\n[ADM]\s+[^\r\n]+)*)\s*$/i.test(flat);
-  const successfulApplyPatch = /^(?:functions\.)?apply_patch$/i.test(String(options.toolName || ""))
-    && !findings.some((finding) => finding.severity === "block")
-    && !explicitFailureText
-    && !structuredStderrFailure
-    && (structuredSuccess || strictApplyPatchSuccess);
-
-  for (const pattern of HARD_FAILURE_PATTERNS) {
-    // Successful apply_patch output can legitimately echo paths or changed
-    // source containing words such as "error" or "process.exit". Structured
-    // failure fields above remain authoritative; textual scanning must not turn
-    // a confirmed patch success into a false shell_failure warning.
-    if (successfulApplyPatch) continue;
-    const match = flat.match(pattern.regex);
-    if (!match) continue;
-    findings.push({
-      name: pattern.name,
-      severity: pattern.name === "shell_failure"
-        && !explicitFailureText
-        && !flat.match(/\b(stderr|error|failed|exception)\b/i) ? "warn" : "block",
-      evidence: truncate(match.input || flat, 280),
-      requiredAction: "核对工具输出，修复失败根因；如果只是误报，需要记录人工解释。",
-    });
-  }
-
   return dedupeFindings(findings);
 }
 
@@ -133,22 +84,6 @@ export function detectToolResultFindings(response, options = {}) {
 function summarizeDecision(decision, findings) {
   if (decision === "pass") return "tool result has no detected hard failure";
   return `${decision}: ${findings.map((finding) => finding.name).join(", ")}`;
-}
-
-/**
- * flattenToolResponse 内部辅助。
- */
-function flattenToolResponse(value) {
-  if (value == null) return "";
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) return value.map(flattenToolResponse).join("\n");
-  if (typeof value === "object") {
-    return Object.entries(value)
-      .map(([key, nested]) => `${key}: ${flattenToolResponse(nested)}`)
-      .join("\n");
-  }
-  return "";
 }
 
 /**
@@ -176,18 +111,6 @@ function firstStringValue(value, keys) {
 function booleanValue(value, keys) {
   const found = findFirstValue(value, keys);
   return typeof found === "boolean" ? found : null;
-}
-
-/**
- * 收集 NamedTextValues 条目。
- */
-function collectNamedTextValues(value, keyName, output = []) {
-  if (!value || typeof value !== "object") return output;
-  for (const [key, nested] of Object.entries(value)) {
-    if (key === keyName && typeof nested === "string") output.push(nested);
-    else if (nested && typeof nested === "object") collectNamedTextValues(nested, keyName, output);
-  }
-  return output;
 }
 
 /**
@@ -221,12 +144,3 @@ function dedupeFindings(findings) {
   }
   return output;
 }
-
-/**
- * 截断  以控制摘要长度。
- */
-function truncate(value, limit) {
-  const text = String(value || "").replace(/\s+/g, " ").trim();
-  return text.length <= limit ? text : `${text.slice(0, limit - 15)}...[truncated]`;
-}
-

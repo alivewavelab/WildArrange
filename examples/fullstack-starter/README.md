@@ -111,11 +111,8 @@ fullstack-starter/
     ]
   },
 
-  // 质量门。enabled 打开某个门，required 决定失败是否阻断（false=只告警）。
-  // 接入你自己的命令后再打开，比如把 typecheck 挂到 lspDiagnostics。
+  // 质量门。typecheck/lint 等命令请写进任务或计划默认的 standards_commands。
   "qualityGates": {
-    "lspDiagnostics": { "enabled": false, "required": false, "commands": ["npm run typecheck --silent"] },
-    "astStructure":   { "enabled": false, "required": false, "commands": [] },
     // commentChecker 扫 AI 痕迹/占位注释；blockOnFindings=false 时只提示不拦截。
     "commentChecker": { "enabled": true,  "blockOnFindings": false }
   },

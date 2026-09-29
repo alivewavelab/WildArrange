@@ -63,7 +63,7 @@ test("gate arming floor finds no review tautology when there are no active tasks
 
 test("gate arming floor goes green once gates are really armed", async () => {
   const config = structuredClone(DEFAULT_WILDARRANGE_CONFIG);
-  config.qualityGates.lspDiagnostics = { enabled: true, required: true, commands: ["node --check src"], timeoutMs: 1000 };
+  config.qualityGates.commentChecker = { ...config.qualityGates.commentChecker, enabled: true, blockOnFindings: true };
   const result = evaluateGateArming({
     config,
     tasks: [{ id: "T001", status: "pending", verify_commands: ["node --test"], review_commands: ["node ./scripts/review.mjs"] }],

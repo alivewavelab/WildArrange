@@ -1200,12 +1200,6 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "orchestration"
             },
             {
-              "t": "archivist-router.mjs",
-              "io": "archivist-router.mjs",
-              "p": "src/ai/archivist-router.mjs",
-              "m": "ai"
-            },
-            {
               "t": "context.mjs",
               "io": "context.mjs",
               "p": "src/ai/context.mjs",
@@ -1239,12 +1233,6 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "t": "routing.mjs",
               "io": "routing.mjs",
               "p": "src/ai/routing.mjs",
-              "m": "ai"
-            },
-            {
-              "t": "suspicion-review.mjs",
-              "io": "suspicion-review.mjs",
-              "p": "src/ai/suspicion-review.mjs",
               "m": "ai"
             },
             {
@@ -1496,12 +1484,6 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "orchestration"
             },
             {
-              "t": "archivist-router.mjs",
-              "io": "archivist-router.mjs",
-              "p": "src/ai/archivist-router.mjs",
-              "m": "ai"
-            },
-            {
               "t": "context.mjs",
               "io": "context.mjs",
               "p": "src/ai/context.mjs",
@@ -1535,12 +1517,6 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "t": "routing.mjs",
               "io": "routing.mjs",
               "p": "src/ai/routing.mjs",
-              "m": "ai"
-            },
-            {
-              "t": "suspicion-review.mjs",
-              "io": "suspicion-review.mjs",
-              "p": "src/ai/suspicion-review.mjs",
               "m": "ai"
             },
             {
@@ -3042,12 +3018,6 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "infra"
             },
             {
-              "t": "memory-digest.mjs",
-              "io": "memory-digest.mjs",
-              "p": "src/infra/memory-digest.mjs",
-              "m": "infra"
-            },
-            {
               "t": "path-match.mjs",
               "io": "path-match.mjs",
               "p": "src/infra/path-match.mjs",
@@ -3173,11 +3143,6 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "p": "src/ai/context.mjs"
             },
             {
-              "t": "src-ai-archivist-router-mjs",
-              "io": "archivist-router.mjs",
-              "p": "src/ai/archivist-router.mjs"
-            },
-            {
               "t": "src-ai-pre-tool-guard-mjs",
               "io": "pre-tool-guard.mjs",
               "p": "src/ai/pre-tool-guard.mjs"
@@ -3244,54 +3209,10 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "infra"
             },
             {
-              "t": "memory-digest.mjs",
-              "io": "memory-digest.mjs",
-              "p": "src/infra/memory-digest.mjs",
-              "m": "infra"
-            },
-            {
               "t": "status.mjs",
               "io": "status.mjs",
               "p": "src/orchestration/status.mjs",
               "m": "orchestration"
-            }
-          ]
-        },
-        {
-          "id": "src-ai-suspicion-review-mjs",
-          "p": "src/ai/suspicion-review.mjs",
-          "r": "suspicion-review.mjs",
-          "io": "runSuspicionReview(rootDir, { limit = P) → 导出",
-          "extTo": [
-            {
-              "t": "runtime-config.mjs",
-              "io": "runtime-config.mjs",
-              "p": "src/infra/runtime-config.mjs",
-              "m": "infra"
-            },
-            {
-              "t": "runtime-store.mjs",
-              "io": "runtime-store.mjs",
-              "p": "src/infra/runtime-store.mjs",
-              "m": "infra"
-            },
-            {
-              "t": "decision-log.mjs",
-              "io": "decision-log.mjs",
-              "p": "src/infra/decision-log.mjs",
-              "m": "infra"
-            },
-            {
-              "t": "annotation-log.mjs",
-              "io": "annotation-log.mjs",
-              "p": "src/infra/annotation-log.mjs",
-              "m": "infra"
-            },
-            {
-              "t": "llm-provider.mjs",
-              "io": "llm-provider.mjs",
-              "p": "src/infra/llm-provider.mjs",
-              "m": "infra"
             }
           ]
         },
@@ -3535,11 +3456,6 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "p": "src/ai/context.mjs"
             },
             {
-              "t": "src-ai-archivist-router-mjs",
-              "io": "archivist-router.mjs",
-              "p": "src/ai/archivist-router.mjs"
-            },
-            {
               "t": "src-ai-pre-tool-guard-mjs",
               "io": "pre-tool-guard.mjs",
               "p": "src/ai/pre-tool-guard.mjs"
@@ -3603,12 +3519,6 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "t": "hook-result-gate.mjs",
               "io": "hook-result-gate.mjs",
               "p": "src/infra/hook-result-gate.mjs",
-              "m": "infra"
-            },
-            {
-              "t": "memory-digest.mjs",
-              "io": "memory-digest.mjs",
-              "p": "src/infra/memory-digest.mjs",
               "m": "infra"
             },
             {
@@ -3901,12 +3811,8 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "t": "src-capabilities-contract-governance-mjs",
               "io": "contract-governance.mjs",
               "p": "src/capabilities/contract-governance.mjs"
-            },
-            {
-              "t": "src-capabilities-code-intel-mjs",
-              "io": "code-intel.mjs",
-              "p": "src/capabilities/code-intel.mjs"
             }
+
           ],
           "extTo": [
             {
@@ -4373,13 +4279,13 @@ const D = {
     { id: "handoff", p: "src/orchestration/handoff.mjs", r: "跨设备准备、推送与接收", io: "任务负责人和提交记录 → 可接力交接", to: [{ t: "plan", io: "绑定任务状态" }] },
     { id: "delivery", p: "src/orchestration/delivery-pipeline.mjs", r: "统一交付门顺序", io: "任务成果 → 验收证明或失败", extTo: [{ t: "gateway.mjs", p: "src/capabilities/gateway.mjs", m: "原子能力层", io: "通过统一网关调用能力" }] }
   ] },
-  "ai": { name: "AI（策略与语境）", plain: "做路由、上下文注入、Skill 匹配和异步审查", role: "AI 决策与建议", inn: "请求与清洗上下文", out: "路由、注入或审查建议", status: "已通", files: [
+  "ai": { name: "AI（策略与语境）", plain: "做路由、上下文注入和 Skill 匹配", role: "AI 决策与建议", inn: "请求与清洗上下文", out: "路由或注入", status: "已通", files: [
     { id: "dir", p: "src/ai/", r: "AI 策略区全部实现", io: "请求与语境 → 决策建议" },
-    { id: "routing", p: "src/ai/routing.mjs", r: "确定性路由与语义影子", io: "routeRequest(rootDir, input) → 路由决策" },
-    { id: "hooks", p: "src/ai/hooks.mjs", r: "宿主计划生成注入与范围守卫", io: "用户对话或工具事件 → 计划生成指令、放行或阻断" },
-    { id: "suspicion", p: "src/ai/suspicion-review.mjs", r: "对可疑决策做异步复核", io: "runSuspicionReview(rootDir, options) → 审查报告" }
+    { id: "routing", p: "src/ai/routing.mjs", r: "确定性路由", io: "routeRequest(rootDir, input) → 路由决策" },
+    { id: "hooks", p: "src/ai/hooks.mjs", r: "宿主计划生成注入与范围守卫", io: "用户对话或工具事件 → 计划生成指令、放行或阻断" }
+
   ], focusFiles: [
-    { id: "routing", p: "src/ai/routing.mjs", r: "确定性路由与语义影子", io: "请求 → 可审计路由决策" },
+    { id: "routing", p: "src/ai/routing.mjs", r: "确定性路由", io: "请求 → 可审计路由决策" },
     { id: "injection", p: "src/ai/injection.mjs", r: "按预算装载上下文", io: "阶段与规则 → 注入内容" },
     { id: "context", p: "src/ai/context.mjs", r: "构造与恢复智能体上下文", io: "任务状态 → 智能体语境", to: [{ t: "injection", io: "按阶段选择注入位置" }] },
     { id: "hooks", p: "src/ai/hooks.mjs", r: "宿主计划生成与工具范围守卫", io: "对话与工具事件 → 计划草稿指令、Shell 拒绝或范围放行", to: [{ t: "routing", io: "判断是否需要形成计划" }, { t: "context", io: "按 task.owner 恢复任务语境" }, { t: "injection", io: "选择内容注入位置" }], extTo: [{ t: "gateway.mjs", p: "src/capabilities/gateway.mjs", m: "原子能力层", io: "通过网关执行受控动作" }] },

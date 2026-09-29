@@ -18,11 +18,11 @@ import { uniqueStrings } from "./text-utils.mjs";
 /**
  * CONTRACT_SCHEMA_VERSION：本模块对外API。
  */
-export const CONTRACT_SCHEMA_VERSION = 1;
+const CONTRACT_SCHEMA_VERSION = 1;
 /**
  * 契约发现器名称列表（如 tauri-ipc）。
  */
-export const CONTRACT_DISCOVERERS = Object.freeze(["tauri-ipc"]);
+const CONTRACT_DISCOVERERS = Object.freeze(["tauri-ipc"]);
 
 /** 契约扫描 walk 时跳过的目录名。 */
 const SKIP_DIRS = new Set([".git", ".wildarrange", "node_modules", "target", "dist", "build", ".tmp"]);
@@ -61,7 +61,7 @@ export async function readContractRegistry(rootDir) {
 /**
  * emptyContractRegistry：本模块对外API。
  */
-export function emptyContractRegistry() {
+function emptyContractRegistry() {
   return {
     kind: "contract_registry",
     schemaVersion: CONTRACT_SCHEMA_VERSION,
@@ -321,7 +321,7 @@ export function findFrontendInvokes(source, bindingNames = ["invoke"]) {
  * buildContractDiffCards：本模块对外API。
  */
 // --- diff 卡片与合并 ---
-export function buildContractDiffCards(baseline = [], current = [], at = nowIso()) {
+function buildContractDiffCards(baseline = [], current = [], at = nowIso()) {
   const before = new Map(baseline.filter((item) => item.lifecycle !== "retired").map((item) => [item.id, normalizeContract(item)]));
   const after = new Map(current.map((item) => [item.id, normalizeContract(item)]));
   const ids = [...new Set([...before.keys(), ...after.keys()])].sort();

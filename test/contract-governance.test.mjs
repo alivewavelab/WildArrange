@@ -285,7 +285,6 @@ test("contract governance capabilities are statically registered", () => {
   const names = listRegisteredCapabilities();
   assert.ok(names.includes("contract-governance-scan"));
   assert.ok(names.includes("contract-governance-apply-card"));
-  assert.ok(names.includes("contract-governance-generate-artifacts"));
 });
 
 test("contract governance Skill is installed and selected for interface or database changes", async () => {

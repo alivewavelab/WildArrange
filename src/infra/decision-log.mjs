@@ -51,7 +51,7 @@ const ensuredDirs = new Set();
 /**
  * decisionsLogPath：本模块对外API。
  */
-export function decisionsLogPath(rootDir) {
+function decisionsLogPath(rootDir) {
   return resolveWildArrangePath(rootDir, "decisions.jsonl");
 }
 

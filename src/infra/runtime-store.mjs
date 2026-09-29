@@ -21,7 +21,7 @@ const RUNTIME_ROOTS = new Map();
 /**
  * 运行时状态目录名（相对项目根）。
  */
-export const WILDARRANGE_DIR = ".wildarrange";
+const WILDARRANGE_DIR = ".wildarrange";
 /**
  * 运行时 JSON schema 版本号。
  */
@@ -180,11 +180,6 @@ export async function ensureWildArrangeDirs(rootDir) {
     ["changes"],
     ["context-agents"],
     ["agent-runs"],
-    ["memory"],
-    ["memory", "digests"],
-    ["memory", "stage-summaries"],
-    ["routing"],
-    ["routing", "suggestions"],
   ];
 
   for (const dir of dirs) {

@@ -87,7 +87,7 @@ test("command registry and bin dispatch are pinned to each other in both directi
   const binSource = await readFile(WILDARRANGE_BIN, "utf8");
 
   // Leading literal tokens of a usage string, stopping at the first flag or
-  // placeholder: "archivist suggestions resolve --id <id>" → ["archivist", "suggestions", "resolve"].
+  // placeholder: "plan approve --plan <planId>" → ["plan", "approve"].
   const leadingTokens = (usage) => {
     const tokens = [];
     for (const token of usage.split(/\s+/)) {

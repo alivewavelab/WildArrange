@@ -540,7 +540,7 @@ export async function writeChangeRequest(rootDir, planId, task, scopeResult, sou
 }
 
 /** 将 ChangeRequest 渲染为 Markdown 报告正文。 */
-export function renderChangeRequestMarkdown(changeRequest) {
+function renderChangeRequestMarkdown(changeRequest) {
   return `# ChangeRequest ${changeRequest.id}
 
 | Field | Value |
@@ -595,7 +595,7 @@ ${changeRequest.proposedActions.map((action) => `- ${action}`).join("\n")}
 }
 
 /** 刷新 open changes 索引文件供 dashboard 使用。 */
-export async function writeOpenChangesIndex(rootDir) {
+async function writeOpenChangesIndex(rootDir) {
   const changes = await listChangeRequests(rootDir);
   const openChanges = changes.filter((change) => change.status === "open");
   const lines = ["# Open ChangeRequests", ""];

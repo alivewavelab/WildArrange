@@ -454,7 +454,6 @@ export async function checkpointTaskNodeWithinLock(rootDir, options = {}) {
       task,
       verifyResult,
       ledgerEvent: { type: "node_checkpoint_completed", planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult?.status || "missing", reviewStatus: "pass" },
-      digestReason: "task_completed",
     });
     const sideEffectWarnings = await runPostCompletionSideEffects(rootDir, taskState.planId, task, async () => {
       await writeSnapshot(rootDir, "node_checkpoint_completed", { planId: taskState.planId, taskId: task.id });

@@ -215,7 +215,7 @@ function buildActiveWorkspaces(tasks, runs) {
 // --- 账本与注意力 ---
 
 /** 返回跨计划 task ledger 视图（counts、plans、tasks 列表）。 */
-export async function taskLedgerReport(rootDir) {
+async function taskLedgerReport(rootDir) {
   const ledger = await loadTaskLedger(rootDir);
   if (!ledger) {
     return { kind: "task_ledger_view", activePlanId: null, total: 0, counts: {}, typeCounts: {}, plans: [], tasks: [] };

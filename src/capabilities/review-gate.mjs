@@ -3,15 +3,18 @@
 // 所属模块：capabilities
 // 作用说明：
 //   聚合确定性 review lane（职责审计、项目审查、scope、successCriteria、
-//   质量门、契约治理、LLM review 等），产出 review_gate evidence。
+//   注释检查、契约治理、LLM review 等），产出 review_gate evidence。
 //
 // 【运行原理速读】
 //   · 何时执行？verify 与 scope 通过后，acceptance proof 之前。
-//   · 做了什么？review/standards 命令 → quality gates → 独立审计 → 构建 lanes
+//   · 做了什么？review/standards 命令 → 注释检查 → 独立审计 → 构建 lanes
 //     → 可选 LLM review → buildReviewFindingBundle。
 //   · 缺了它会怎样？任务可绕过多维复核直接声称完成。
 // =============================================================================
 
+import { existsSync } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
+import path from "node:path";
 import { runProjectReview } from "./project-review.mjs";
 import { runResponsibilityAudit } from "./responsibility-audit.mjs";
 import { runContractGovernanceReview } from "./contract-governance.mjs";
@@ -27,9 +30,10 @@ import { runLlmReview } from "../infra/llm-provider.mjs";
 import { buildReviewFindingBundle } from "../infra/review-findings.mjs";
 import { scanProjectRules } from "../infra/rule-scanner.mjs";
 import { criteriaStatus } from "../infra/success-criteria.mjs";
-import { runQualityGates } from "./code-intel.mjs";
 import { isTrivialCommand } from "../infra/task-predicates.mjs";
 import { uniqueStrings } from "../infra/text-utils.mjs";
+import { normalizeRelativePath, pathMatchesPattern } from "../infra/path-match.mjs";
+import { extractComments } from "../infra/repository-layout.mjs";
 
 /**
  * 运行完整 review gate，返回 kind=review_gate 的多 lane 结果。
@@ -69,7 +73,7 @@ export async function runReviewGate(rootDir, task, evidence = {}, options = {}) 
   }
 
   const commandRecovery = reviewCommandResults.find(requiresCommandRecovery);
-  // §3.4：review 命令需 recovery 时不再跑 standards/quality，避免并行残留进程。
+  // §3.4：review 命令需 recovery 时不再跑 standards/注释检查，避免并行残留进程。
   if (commandRecovery) return recoveryRequiredReview(commandRecovery, reviewCommandResults, standardsCommandResults, criteria);
 
   for (const command of task.standards_commands || []) {
@@ -85,10 +89,8 @@ export async function runReviewGate(rootDir, task, evidence = {}, options = {}) 
   const standardsRecovery = standardsCommandResults.find(requiresCommandRecovery);
   if (standardsRecovery) return recoveryRequiredReview(standardsRecovery, reviewCommandResults, standardsCommandResults, criteria);
 
-  const qualityResults = await runQualityGates(executionRoot, task, scopeResult, config);
-  if (qualityResults.commandRecovery) {
-    return recoveryRequiredReview(qualityResults.commandRecovery, reviewCommandResults, standardsCommandResults, criteria, qualityResults);
-  }
+  const commentResult = await runCommentCheckerGate(executionRoot, task, scopeResult, config);
+  const qualityResults = { kind: "quality_gates", at: nowIso(), pass: commentResult.pass, commentResult };
 
   const responsibilityAudit = await runResponsibilityAudit(rootDir, task, scopeResult, config, executionRoot);
   if (responsibilityAudit.commandRecovery) return recoveryRequiredReview(responsibilityAudit.commandRecovery, reviewCommandResults, standardsCommandResults, criteria, qualityResults);
@@ -168,33 +170,6 @@ export async function runReviewGate(rootDir, task, evidence = {}, options = {}) 
           ? `${standardsCommandResults.length} standards command(s) passed`
           : commandObservation(standardsCommandResults.find((result) => result.exitCode !== 0) || { exitCode: 1 }),
       fixBy: "按 standards_commands 的失败输出修复项目规范问题，不要删除规范门来制造 PASS。",
-    }),
-    reviewLane("lsp_diagnostics", "BaiZe", qualityResults.lspResult.pass === true, {
-      statusOverride: qualityResults.lspResult.status === "skipped" ? "warn" : undefined,
-      summary: qualityResults.lspResult.status === "skipped"
-        ? qualityResults.lspResult.reason
-        : qualityResults.lspResult.pass
-          ? `${qualityResults.lspResult.results.length} LSP/typecheck command(s) passed`
-          : commandObservation(qualityResults.lspResult.results.find((result) => result.exitCode !== 0) || { exitCode: 1 }),
-      fixBy: "修复 LSP/typecheck 诊断，或在 wildarrange.config.json 中明确关闭该 gate。",
-    }),
-    reviewLane("ast_structure", "BaiZe", qualityResults.astResult.pass === true, {
-      statusOverride: qualityResults.astResult.status === "skipped" ? "warn" : undefined,
-      summary: qualityResults.astResult.status === "skipped"
-        ? qualityResults.astResult.reason
-        : qualityResults.astResult.pass
-          ? `${qualityResults.astResult.results.length} AST/structure command(s) passed`
-          : commandObservation(qualityResults.astResult.results.find((result) => result.exitCode !== 0) || { exitCode: 1 }),
-      fixBy: "修复 ast-grep/结构搜索发现，或在 wildarrange.config.json 中明确关闭该 gate。",
-    }),
-    reviewLane("hashline_anchors", "BaiZe", qualityResults.hashlineResult.pass === true, {
-      statusOverride: qualityResults.hashlineResult.status === "skipped" ? "warn" : undefined,
-      summary: qualityResults.hashlineResult.status === "skipped"
-        ? qualityResults.hashlineResult.reason
-        : qualityResults.hashlineResult.pass
-          ? `${qualityResults.hashlineResult.anchors.length} hashline anchor(s) verified`
-          : `${qualityResults.hashlineResult.findings.length} hashline anchor finding(s): ${qualityResults.hashlineResult.findings.slice(0, 3).map((finding) => `${finding.file}:${finding.line} ${finding.reason}`).join("; ")}`,
-      fixBy: "按最新文件内容刷新 hashline anchor，或重新规划基于稳定语义的改写。",
     }),
     reviewLane("comment_checker", "BaiZe", qualityResults.commentResult.pass === true, {
       statusOverride: qualityResults.commentResult.status === "warn" || qualityResults.commentResult.status === "skipped" ? "warn" : undefined,
@@ -324,4 +299,147 @@ function commandObservation(result) {
 function truncateForSummary(value, limit = 500) {
   if (value.length <= limit) return value;
   return `${value.slice(0, limit - 15)}...[truncated]`;
+}
+
+// --- 注释检查门 ---
+
+/**
+ * 扫描变更/可写路径中的注释，匹配禁用模式与 repository 策略规则。
+ * @param {string} rootDir 项目根
+ * @param {object} task writable_paths 等
+ * @param {object|null} [scopeResult] changedPaths 候选
+ * @param {object} [config] qualityGates.commentChecker 与 repositoryGovernance
+ * @returns {Promise<object>} kind=comment_checker，blockOnFindings 时 findings 导致 fail
+ */
+async function runCommentCheckerGate(rootDir, task, scopeResult = null, config = {}) {
+  const gateConfig = config.qualityGates?.commentChecker || {};
+  if (gateConfig.enabled === false) {
+    return {
+      kind: "comment_checker",
+      at: nowIso(),
+      status: "skipped",
+      pass: true,
+      checkedPaths: [],
+      findings: [],
+      reason: "qualityGates.commentChecker.enabled is false",
+    };
+  }
+
+  const candidatePaths = commentCandidatePaths(task, scopeResult);
+  const findings = [];
+  const checkedPaths = [];
+  for (const filePath of candidatePaths) {
+    const absolutePath = path.join(rootDir, filePath);
+    if (!pathInsideRoot(rootDir, absolutePath) || !isLikelyTextPath(filePath) || !existsSync(absolutePath)) continue;
+    let content = "";
+    try {
+      const fileStat = await stat(absolutePath);
+      if (fileStat.size > (gateConfig.maxFileBytes || 500_000)) continue;
+      content = await readFile(absolutePath, "utf8");
+    } catch {
+      continue;
+    }
+    checkedPaths.push(normalizeRelativePath(filePath));
+    const policyRules = (config.repositoryGovernance?.commentRules || [])
+      .filter((rule) => (rule.globs || []).some((glob) => pathMatchesPattern(filePath, glob)));
+    const configuredPatterns = Array.isArray(gateConfig.patterns) && gateConfig.patterns.length > 0
+      ? gateConfig.patterns
+      : defaultCommentPatternDefinitions();
+    const patterns = commentPatterns([
+      ...configuredPatterns,
+      ...policyRules.flatMap((rule) => (rule.blockedPatterns || []).map((pattern) => ({
+        name: `repository_policy:${pattern}`,
+        pattern,
+      }))),
+    ]);
+    const comments = extractComments(filePath, content);
+    comments.forEach((comment) => {
+      for (const pattern of patterns) {
+        if (!pattern.regex.test(comment.text)) continue;
+        findings.push({
+          file: normalizeRelativePath(filePath),
+          line: comment.line,
+          pattern: pattern.name,
+          text: comment.text.trim().slice(0, 240),
+        });
+      }
+    });
+    for (const rule of policyRules) {
+      for (const requiredPattern of rule.requiredPatterns || []) {
+        const regex = commentPatterns([{ name: `required:${requiredPattern}`, pattern: requiredPattern }])[0]?.regex;
+        if (regex && !comments.some((comment) => regex.test(comment.text))) {
+          findings.push({
+            file: normalizeRelativePath(filePath),
+            line: 1,
+            pattern: `required:${requiredPattern}`,
+            text: "required comment pattern is missing",
+          });
+        }
+      }
+    }
+  }
+
+  const blockOnFindings = gateConfig.blockOnFindings === true;
+  // §3.4：blockOnFindings=false 时仅 warn，不阻断 review gate 整体 pass。
+  const status = findings.length === 0 ? "pass" : blockOnFindings ? "fail" : "warn";
+  return {
+    kind: "comment_checker",
+    at: nowIso(),
+    status,
+    pass: status !== "fail",
+    checkedPaths,
+    findings,
+  };
+}
+
+// --- 注释候选与模式 ---
+
+/** 合并 scope 变更路径与 task.writable_paths（排除 glob）作为注释扫描候选。 */
+function commentCandidatePaths(task, scopeResult) {
+  const paths = [];
+  if (Array.isArray(scopeResult?.changedPaths)) paths.push(...scopeResult.changedPaths);
+  if (Array.isArray(task.writable_paths)) paths.push(...task.writable_paths.filter((item) => !item.includes("*")));
+  return [...new Set(paths.map(normalizeRelativePath))];
+}
+
+/** 将字符串或 { name, pattern, flags? } 转为带 regex 的模式对象。 */
+function commentPatterns(rawPatterns) {
+  const source = Array.isArray(rawPatterns) && rawPatterns.length > 0 ? rawPatterns : defaultCommentPatternDefinitions();
+  return source
+    .map((item) => {
+      if (typeof item === "string") return { name: item, regex: new RegExp(item, normalizeRegexFlags()) };
+      if (!item || typeof item.pattern !== "string") return null;
+      return { name: item.name || item.pattern, regex: new RegExp(item.pattern, normalizeRegexFlags(item.flags)) };
+    })
+    .filter(Boolean);
+}
+
+/** 未配置 patterns 时的默认禁用注释模式（AI 署名、占位符、lorem）。 */
+function defaultCommentPatternDefinitions() {
+  return [
+    { name: "ai_attribution", pattern: "\\b(as an ai|generated by ai|ai generated|chatgpt|claude generated)\\b" },
+    { name: "placeholder_comment", pattern: "\\b(todo|fixme|hack|xxx)\\b" },
+    { name: "lorem_ipsum", pattern: "lorem ipsum" },
+  ];
+}
+
+/** 过滤非法 regex flags 并强制 case-insensitive。 */
+function normalizeRegexFlags(rawFlags = "") {
+  const allowed = new Set(["d", "i", "m", "s", "u"]);
+  const flags = new Set(String(rawFlags).split("").filter((flag) => allowed.has(flag)));
+  flags.add("i");
+  return [...flags].sort().join("");
+}
+
+// --- 路径工具 ---
+
+/** 按扩展名判断是否像可扫描的文本源文件。 */
+function isLikelyTextPath(filePath) {
+  return /\.(cjs|css|html|js|json|jsx|md|mjs|py|rb|rs|sh|ts|tsx|txt|vue|yaml|yml)$/i.test(filePath);
+}
+
+/** 绝对路径解析后是否仍在项目根内（防 .. 与绝对路径逃逸）。 */
+function pathInsideRoot(rootDir, absolutePath) {
+  const relative = path.relative(rootDir, absolutePath);
+  return relative && !relative.startsWith("..") && !path.isAbsolute(relative);
 }

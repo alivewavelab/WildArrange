@@ -140,7 +140,7 @@ export function maskSource(source) {
 /**
  * decodeStringLiteral：本模块对外 API。
  */
-export function decodeStringLiteral(raw) {
+function decodeStringLiteral(raw) {
   const body = raw.slice(1, -1);
   let out = "";
   for (let i = 0; i < body.length; i += 1) {
@@ -278,7 +278,7 @@ export async function buildDependencyEdges(rootDir) {
 /**
  * buildRepoImportGraph：本模块对外异步 API。
  */
-export async function buildRepoImportGraph(rootDir, { dirs = ["src", "bin", "test"] } = {}) {
+async function buildRepoImportGraph(rootDir, { dirs = ["src", "bin", "test"] } = {}) {
   const roots = dirs.map((dir) => path.join(rootDir, dir));
   const files = (await Promise.all(roots.map((dir) => listMjsFiles(dir)))).flat();
   const edges = [];

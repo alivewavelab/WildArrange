@@ -30,7 +30,7 @@ WildArrange keeps five long-lived Agents. The deterministic Router is a system n
 | **BaiZe (Bai Ze)** | The sole independent reviewer; validates goals, evidence, risk, and acceptance without accepting worker self-certification. |
 | **LuWu (Lu Wu)** | Read-only repository steward; checks layered `AGENTS.md`, README parity, naming, file placement, and code-comment policy. |
 
-The system Router classifies requests and selects the primary Agent and Skills. `CangJie` remains an optional internal archivist/semantic-routing profile, not a long-lived Agent.
+The system Router classifies requests and selects the primary Agent and Skills.
 
 Specialist duties are Skills: `review-product-intent`, `map-user-journey`, `design-acceptance`, `review-ux-interaction`, `review-scope-tradeoff`, and `research-domain-benchmark`. `inspect-codebase` and `research-external-docs` absorb code exploration and external research.
 
@@ -424,7 +424,6 @@ node ./bin/wildarrange.mjs annotate --decision <decisionId> --category rule_wron
 node ./bin/wildarrange.mjs annotate stats
 node ./bin/wildarrange.mjs test --zone infra
 node ./bin/wildarrange.mjs docs commands --write
-node ./bin/wildarrange.mjs review suspicious
 ```
 
 `doctor` is a one-command health check: it validates config structure and mounts, reconciles completed tasks across every Plan against checkpoints, acceptance proofs, and `planId:taskId` ledger events, verifies the ledger hash chain, and cross-checks the ledger against the latest backup to detect wholesale rewrites; the `decisionHealth` section adds a periodic health summary (per-gate trigger counts, never-fired gates, corrupt-line and orphan-annotation warnings). The checks are isolated — a crashed check only marks its own section — and doctor is read-only diagnostics that never appends to the ledger. `state migrate` first creates a backup, then migrates the runtime task ledger and removes retired runtime projections; it does not rewrite the root `wildarrange.config.json`. Legacy `completed` tasks without the current proof chain become `needs_user_decision` instead of receiving fabricated proof. `state restore` also creates a pre-restore backup first.
@@ -443,8 +442,6 @@ node ./bin/wildarrange.mjs review suspicious
 
 The CLI is layered: `--help` shows only the core six commands (init / plan / run / status / decisions / doctor) covering the daily loop; the full list lives behind `--help --all`. The single source of truth for the command inventory is the registry in `src/interface/cli-help.mjs`, materialized to `doc/generated/commands.md` via `docs commands --write`; the README command-truthfulness check compares against the full `--help --all` output.
 
-`review suspicious` is the LLM suspicion pass (asynchronous audit, archivist invariants): it sends only a sanitized conclusion packet (ids/gates/rule codes/summaries — never code blocks, raw diffs, or full command output) to the configured external provider, and any returned suspicion must anchor to a decisionId present in the packet (hallucinated ids are dropped and counted). Without a key it falls back deterministically and never blocks. Conclusions land only in `.wildarrange/reports/suspicion.*` — **never in the completion chain, never in config, never on a gate switch**.
-
 Legacy-project verification onboarding is a maintenance flow. It does not enter `task.status` and does not reuse `approvePlan`:
 
 ```text
@@ -458,13 +455,13 @@ node ./bin/wildarrange.mjs adoption recover
 
 External onboarding scans and verifies the product repository, while locator configuration, Registry, Bootstrap and Inventory belong to the governance repository. Registry uses the contract's `verificationRegistry` path; Bootstrap and Inventory are siblings. Commit A/B are made in governance. Any separately approved product changes require their own product commit, and both repositories are checked. Once the locator is approved, onboarding may populate the initialized empty Registry with a valid digest, preserving its original bytes under runtime `adoption/artifact-preimages/`. Nonempty, invalid-digest or concurrently changed content still causes a conflict.
 
-The dashboard (`serve`) includes a work-item ledger, route review console, decision panel, ops panel, and verification adoption view. The route console groups the original request, structured route result, matched signals, semantic second opinion, and subsequent tool summaries by session and date. Reviewers can mark a route confirmed, rule-wrong, or case-wrong; common secret fields in tool inputs are redacted. The IDE `Stop` hook actively refreshes a human-readable daily report at `.wildarrange/reports/routing/latest.md` (also archived as `YYYY-MM-DD.md`), with the conclusion first and full decision/tool details below. Reviews only append annotations and never edit `routes.json` automatically.
+The dashboard (`serve`) includes a work-item ledger, route review console, decision panel, ops panel, and verification adoption view. The route console groups the original request, structured route result, matched signals, and subsequent tool summaries by session and date. Reviewers can mark a route confirmed, rule-wrong, or case-wrong; common secret fields in tool inputs are redacted. Reviews only append annotations and never edit `routes.json` automatically.
 
 The end-of-run gate summary is leveled by `reporting.verbosity`: the default `verbose` prints the per-gate three-line projection to stderr after each `run` (so every gate decision can be judged while the framework is new); once trust builds, set `normal` (one line) or `quiet` (JSON only). The machine-readable stdout JSON never changes across levels.
 
 After an interrupted parallel run, `parallel status --run <runId>` shows `batchStatus` and `incompleteTasks` (claimed tasks with no passing result); `parallel retry --run <runId>` re-runs only the tasks that never passed (reusing the recorded command, overridable with `--command`), skipping tasks already passed, completed, or claimed by another run — the retry is a new run and never rewrites the original run's evidence.
 
-Every `status` output carries a persistent `gateArming` yellow lamp: under default configs (all quality gates off, no independent review signal) it reports "gates not armed" with remediation guidance, so an all-green gate stream that proves nothing cannot be mistaken for a healthy project. The acceptance proof enforces two hard floors: it refuses tasks whose `verify_commands` are all trivial (e.g. `true`), and it refuses tasks whose review gate has no independent signal lane (no `review_commands` / `standards_commands` / `review.llm` / enabled quality gate) — a tautological review proves nothing and must not reach completed. `config init --armed` writes a config with armed quality gates (blocking commentChecker + an lspDiagnostics command slot). `doctor` carries dedicated `gateArming` and `adapters` sections: unarmed gates, enabled adapters whose files are not configured on this machine, a generated Codex Hook without a current execution receipt, and rule files referencing paths that no longer exist all surface in the report. `configured` means files exist; only Codex `execution_observed` proves that the current Hook definition has run at least once.
+Every `status` output carries a persistent `gateArming` yellow lamp: under default configs (all quality gates off, no independent review signal) it reports "gates not armed" with remediation guidance, so an all-green gate stream that proves nothing cannot be mistaken for a healthy project. The acceptance proof enforces two hard floors: it refuses tasks whose `verify_commands` are all trivial (e.g. `true`), and it refuses tasks whose review gate has no independent signal lane (no `review_commands` / `standards_commands` / `review.llm` / enabled quality gate) — a tautological review proves nothing and must not reach completed. `config init --armed` writes a config with armed quality gates (blocking commentChecker). `doctor` carries dedicated `gateArming` and `adapters` sections: unarmed gates, enabled adapters whose files are not configured on this machine, a generated Codex Hook without a current execution receipt, and rule files referencing paths that no longer exist all surface in the report. `configured` means files exist; only Codex `execution_observed` proves that the current Hook definition has run at least once.
 
 `governance audit` is LuWu's read-only inspection. It checks directory-level `AGENTS.md`, Chinese/English README command parity, Prompt Pack registration, naming, and actual code comments, then writes evidence under `.wildarrange/reports/governance/`. With `--changed-only`, only changed files and the related ancestor rules, paired docs, and architecture ledgers are inspected; if Git changes cannot be read, the audit safely falls back to a full scan. LuWu never moves, renames, or deletes project files automatically, and the runtime rejects LuWu, DiJiang, or BaiZe from command workers.
 
@@ -489,27 +486,9 @@ Before every worker run in a Git project, WildArrange records a workspace snapsh
 
 WildArrange preflights shell commands and blocks clearly destructive commands such as deleting `.git/.wildarrange`, recursively deleting project source/test/doc directories, `git reset --hard`, `git clean -fd`, `sudo`, or `curl | sh`. Normal project commands, verifiers, review commands, and child-agent runners continue to run.
 
-## ArchivistRouter
+## Routing
 
-ArchivistRouter is the archivist plus task-router node. It reads conclusions-only packets and strips code blocks, raw diffs, and full command output.
-
-Manual commands:
-
-```bash
-node ./bin/wildarrange.mjs archivist packet --text "build a web TODO app" --stage plan
-node ./bin/wildarrange.mjs archivist run --text "build a web TODO app" --stage plan --force
-```
-
-When `archivistRouter.enabled` is `true`, `SessionStart`, `UserPromptSubmit`, and `PostCompact` hooks trigger ArchivistRouter automatically. Without a DeepSeek key it falls back to deterministic routing and does not block the main flow.
-
-Cross-session memory is written to `.wildarrange/memory/digests/`. Task completion, parallel admission completion, `SessionStart`, and `PostCompact` emit structured digests used to recover progress, decisions, artifacts, implementation notes, and pitfalls.
-
-Routing suggestions remain review-only until explicitly resolved:
-
-```bash
-node ./bin/wildarrange.mjs archivist suggestions list
-node ./bin/wildarrange.mjs archivist suggestions resolve --id <id> --decision accept --evidence "..." --rationale "..."
-```
+Routing uses only the deterministic route table (`routes.json`), and every result keeps its matched signals as evidence. An `execute` request with confidence below 0.5 is downgraded to `plan`, so vague requests do not start work directly.
 
 ## Skill Matching and Task Bindings
 
@@ -575,9 +554,6 @@ x-wildarrange-token: <token>
 | `.wildarrange/snapshots/context.md` | Cross-session resume context |
 | `.wildarrange/adapters/` | Adapter configs, reports, backups |
 | `.wildarrange/agent-runs/` | Child-agent packets, results, and admission records |
-| `.wildarrange/memory/` | ArchivistRouter structured memory |
-| `.wildarrange/memory/digests/` | Cross-session recovery digests |
-| `.wildarrange/routing/suggestions/` | Route keyword suggestions pending review |
 
 ## Configuration
 
@@ -614,25 +590,11 @@ source .env.wildarrange
 
 Deterministic gates work without model APIs. When `review.llm.required` is `false`, a missing external key or a host-managed provider produces a warning rather than blocking the workflow.
 
-LSP/typecheck, AST/structure checks, hashline anchors, and comment checks live in the CLI review gate, not in editor-specific hooks:
+Comment checks live in the CLI review gate, not in editor-specific hooks; put LSP/typecheck or AST/structure commands in the task or plan-default `standards_commands`:
 
 ```json
 {
   "qualityGates": {
-    "lspDiagnostics": {
-      "enabled": true,
-      "commands": ["npm run typecheck"]
-    },
-    "astStructure": {
-      "enabled": true,
-      "commands": ["ast-grep --pattern 'console.log($A)' --lang ts --json src || true"]
-    },
-    "hashlineAnchors": {
-      "enabled": true,
-      "anchors": [
-        { "file": "src/app.ts", "line": 12, "sha256": "<hashLine>" }
-      ]
-    },
     "commentChecker": {
       "enabled": true,
       "blockOnFindings": false
@@ -658,7 +620,7 @@ npm test
 npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache
 ```
 
-Current status: the linear governance loop is implemented and tested; checkpoint writes an acceptance-proof chain first. Optional LLM review, configurable LSP/typecheck diagnostics, AST/structure commands, hashline anchors, and comment checking are available through the CLI review gate. Codex Desktop hooks become hard after they are reviewed, trusted, and enabled under Settings > Hooks; Codex CLI uses `/hooks`. Cursor `preToolUse` / `beforeShellExecution` are fail-closed in trusted workspaces. Multi-agent support includes command-based parallel runs, Codex/Cursor command-template spawn, structured artifact admission, Git worktree patch admission, and retain-until-acceptance. Host-private background process management remains adapter work.
+Current status: the linear governance loop is implemented and tested; checkpoint writes an acceptance-proof chain first. Optional LLM review, `standards_commands` (typecheck/AST and similar), and comment checking are available through the CLI review gate. Codex Desktop hooks become hard after they are reviewed, trusted, and enabled under Settings > Hooks; Codex CLI uses `/hooks`. Cursor `preToolUse` / `beforeShellExecution` are fail-closed in trusted workspaces. Multi-agent support includes command-based parallel runs, Codex/Cursor command-template spawn, structured artifact admission, Git worktree patch admission, and retain-until-acceptance. Host-private background process management remains adapter work.
 
 ## More Docs
 

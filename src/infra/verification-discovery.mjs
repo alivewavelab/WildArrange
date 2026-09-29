@@ -33,11 +33,6 @@ import {
   uniqueConsumers,
 } from "./verification-cards.mjs";
 
-/**
- * EVIDENCE_GRADES：本模块对外API。
- */
-export const EVIDENCE_GRADES = Object.freeze(["direct", "runner", "registered", "clue", "unknown"]);
-
 /** 验证宇宙 walk 时跳过的目录名。 */
 const EXCLUDED_DIR_NAMES = new Set([
   ".git",

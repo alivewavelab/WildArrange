@@ -138,57 +138,6 @@ function appendHookFacts(lines, facts) {
     lines.push(`- 报告：${facts.continuation.reportMdPath}`);
     lines.push("");
   }
-  if (facts.routingReview) {
-    lines.push("## 今日路由复盘", "");
-    if (facts.routingReview.status === "warn" || facts.routingReview.status === "skipped") {
-      lines.push(`- 状态：${facts.routingReview.status}`);
-      lines.push(`- 原因：${facts.routingReview.reason || "(none)"}`);
-    } else {
-      lines.push(`- 今日判断：${facts.routingReview.summary.total} 次`);
-      lines.push(`- 已复盘：${facts.routingReview.summary.reviewed} 次`);
-      lines.push(`- 已发现问题：${facts.routingReview.summary.issues} 次`);
-      lines.push(`- 待人工复盘：${facts.routingReview.summary.unreviewed} 次`);
-      lines.push(`- 人类可读报告：${facts.routingReview.reportMdPath}`);
-      if (facts.routingReview.summary.issues > 0) {
-        lines.push("- 请主动提醒开发者查看问题判断，但不要自动修改路由规则。");
-      }
-    }
-    lines.push("");
-  }
-  if (facts.digest) {
-    lines.push("## 记忆摘要", "");
-    if (facts.digest.error) {
-      lines.push(`- 警告：${facts.digest.error}`);
-    } else {
-      lines.push(`- 报告：${facts.digest.reportMdPath || "(none)"}`);
-      lines.push(`- 原因：${facts.digest.reason || "(unknown)"}`);
-      appendShortList(lines, "进展", facts.digest.progress);
-      appendShortList(lines, "决策", facts.digest.decisions);
-      appendShortList(lines, "产物", facts.digest.artifacts);
-      appendShortList(lines, "风险", facts.digest.pitfalls);
-      appendShortList(lines, "开放问题", facts.digest.openQuestions);
-    }
-    lines.push("");
-  }
-  if (facts.archivist) {
-    lines.push("## 档案路由", "");
-    if (facts.archivist.status === "warn") {
-      lines.push(`- 警告：${facts.archivist.reason || "(none)"}`);
-    } else {
-      const routeDecision = facts.archivist.decision?.routeDecision;
-      lines.push(`- 状态：${facts.archivist.llmStatus || facts.archivist.status || "(unknown)"}`);
-      lines.push(`- 摘要：${facts.archivist.decision?.summary || "(none)"}`);
-      if (routeDecision) {
-        lines.push(`- 建议路由：${routeDecision.route || "(none)"}`);
-        lines.push(`- 置信度：${routeDecision.confidence ?? "(unknown)"}`);
-      }
-      const injection = facts.archivist.decision?.contextInjection || {};
-      appendShortList(lines, "档案进展", injection.progress);
-      appendShortList(lines, "档案风险", injection.pitfalls);
-      appendShortList(lines, "档案开放问题", injection.openQuestions);
-    }
-    lines.push("");
-  }
   if (facts.scope) {
     lines.push("## 范围门", "");
     lines.push(`- 状态：${facts.scope.status}`);
@@ -282,16 +231,6 @@ function appendAttentionReport(lines, attention) {
     lines.push(`- [子 Agent 待验收] run ${item.runId} / 任务 ${item.taskId}（${item.agent}）。请询问开发者是否合入：\`${item.admitHint}\`。`);
   }
   lines.push("");
-}
-
-/** 向 lines 追加最多 3 条的非空短列表项。 */
-function appendShortList(lines, label, items) {
-  const selected = Array.isArray(items) ? items.filter(Boolean).slice(0, 3) : [];
-  if (selected.length === 0) return;
-  lines.push(`- ${label}：`);
-  for (const item of selected) {
-    lines.push(`  - ${item}`);
-  }
 }
 
 // --- 挂载与 Skill 报告 ---

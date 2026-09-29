@@ -252,7 +252,6 @@ export async function finalizeAdmissionWithinLock(rootDir, taskId, { workerResul
         appliedPaths: deliveryChangedPaths || [],
         rollback: deliveryRollback,
       },
-      digestReason: "parallel_admission_completed",
     });
     await removePersistedRollbackPlan(rootDir, runId, taskId);
     return {

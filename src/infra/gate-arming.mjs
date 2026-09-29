@@ -64,7 +64,7 @@ export function evaluateGateArming({ config, tasks = [] } = {}) {
     issues.push({
       code: "quality_gates_not_required",
       message: "qualityGates 没有任何一项 required（含 commentChecker.blockOnFindings），质量门全关",
-      next_action: "在 wildarrange.config.json 中至少把一项质量门设为 required（如 lspDiagnostics 或 commentChecker.blockOnFindings）",
+      next_action: "在 wildarrange.config.json 中至少把一项质量门设为 required（commentChecker.blockOnFindings）",
     });
   }
 
@@ -90,9 +90,6 @@ export function hasRealReviewLane(task, config) {
  */
 function hasEnabledQualityGate(config) {
   const gates = config?.qualityGates || {};
-  if (gates.lspDiagnostics?.enabled === true && (gates.lspDiagnostics.commands || []).length > 0) return true;
-  if (gates.astStructure?.enabled === true && (gates.astStructure.commands || []).length > 0) return true;
-  if (gates.hashlineAnchors?.enabled === true && (gates.hashlineAnchors.anchors || []).length > 0) return true;
   // commentChecker 只有 blockOnFindings 时才构成独立信号；否则它只是 warn。
   if (gates.commentChecker?.enabled === true && gates.commentChecker?.blockOnFindings === true) return true;
   return false;
@@ -103,9 +100,6 @@ function hasEnabledQualityGate(config) {
  */
 function hasRequiredQualityGate(config) {
   const gates = config?.qualityGates || {};
-  if (gates.lspDiagnostics?.enabled === true && gates.lspDiagnostics?.required === true) return true;
-  if (gates.astStructure?.enabled === true && gates.astStructure?.required === true) return true;
-  if (gates.hashlineAnchors?.enabled === true && gates.hashlineAnchors?.required === true) return true;
   if (gates.commentChecker?.enabled === true && gates.commentChecker?.blockOnFindings === true) return true;
   return false;
 }

@@ -145,7 +145,7 @@ function registryEntry(entry) {
 /**
  * loadPromptPackEntries：本模块对外异步 API。
  */
-export async function loadPromptPackEntries(packDir = DEFAULT_PROMPT_PACK_DIR, manifest = null) {
+async function loadPromptPackEntries(packDir = DEFAULT_PROMPT_PACK_DIR, manifest = null) {
   const packManifest = manifest || await readJson(path.join(packDir, "manifest.json"));
   const agents = [];
   for (const [name, relativePath] of Object.entries(packManifest.agents || {})) {

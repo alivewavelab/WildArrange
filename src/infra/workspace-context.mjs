@@ -22,8 +22,8 @@ import {
 } from "./runtime-store.mjs";
 import { writeFile } from "node:fs/promises";
 
-export const WORKSPACE_REGISTRY_VERSION = 1;
-export const GOVERNANCE_CONTRACT_FILE = "wildarrange-governance.json";
+const WORKSPACE_REGISTRY_VERSION = 1;
+const GOVERNANCE_CONTRACT_FILE = "wildarrange-governance.json";
 const BOUND_CONTEXTS = new Map();
 
 /** 在独立目录创建最小治理仓库骨架；只创建缺失文件，不初始化或操作 Git。 */
@@ -78,7 +78,7 @@ export async function initializeGovernanceRepository(projectRoot, options = {}) 
 }
 
 /** 返回平台默认的 WildArrange 本机状态目录。 */
-export function defaultWildArrangeStateHome(env = process.env, platform = process.platform) {
+function defaultWildArrangeStateHome(env = process.env, platform = process.platform) {
   if (typeof env.WILDARRANGE_STATE_HOME === "string" && env.WILDARRANGE_STATE_HOME.trim()) {
     return path.resolve(env.WILDARRANGE_STATE_HOME);
   }
@@ -195,7 +195,7 @@ async function resolveWorkspaceProjectRoot(requestedRoot, registry) {
 }
 
 /** 绑定完整工作区上下文，供规则扫描与长寿命宿主读取。 */
-export function bindWorkspaceContext(context) {
+function bindWorkspaceContext(context) {
   const projectRoot = workspaceRootKey(context.projectRoot);
   bindWildArrangeRuntimeRoot(projectRoot, context.runtimeRoot, context.mode === "external" ? {
     rootDir: context.governanceRoot,
@@ -237,7 +237,7 @@ function workspaceRootKey(rootDir) {
 }
 
 /** 使用 Git common-dir（否则项目 realpath）生成本机项目身份。 */
-export async function resolveProjectIdentity(projectRoot) {
+async function resolveProjectIdentity(projectRoot) {
   const project = await canonicalExistingDirectory(projectRoot, "project root");
   const result = await runCommandFile("git", ["-C", project, "rev-parse", "--git-common-dir"], project, 15_000);
   if (result.exitCode === 0 && result.stdout.trim()) {
@@ -251,7 +251,7 @@ export async function resolveProjectIdentity(projectRoot) {
 }
 
 /** registry 路径及其当前内容，供诊断与测试使用。 */
-export async function readWorkspaceRegistry(registryPath) {
+async function readWorkspaceRegistry(registryPath) {
   const registry = await readJson(registryPath, null);
   if (!registry) return { schemaVersion: WORKSPACE_REGISTRY_VERSION, projects: {} };
   if (registry.schemaVersion !== WORKSPACE_REGISTRY_VERSION || !registry.projects || typeof registry.projects !== "object" || Array.isArray(registry.projects)) {

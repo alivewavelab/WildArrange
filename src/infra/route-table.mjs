@@ -8,11 +8,11 @@
 //   loadRoutesConfig → resolveRouteDecision askGate/intent/domain 合并 → buildRouteResult。
 // =============================================================================
 /**
- * Deterministic route table: loading routes.json (+ reviewed overrides) and
+ * Deterministic route table: loading routes.json and
  * matching request text against it. Pure table lookup with no LLM calls, so
  * it lives in infra — orchestration (plan import enrichment, task board) can
- * use it without depending on the ai zone. The semantic/LLM routing layers
- * (routeRequest, semanticRouteShadow) stay in src/ai/routing.mjs.
+ * use it without depending on the ai zone. The full routing flow
+ * (routeRequest) stays in src/ai/routing.mjs.
  * matchSignals is the single signal-matching implementation: every consumer
  * (this file, ai/skill-matcher.mjs) shares it instead of keeping a private
  * variant, so hit rates cannot drift apart.
@@ -23,10 +23,6 @@ import {
   LONG_LIVED_AGENTS,
   normalizeAgentKey,
 } from "./agent-registry.mjs";
-import {
-  readJson,
-  resolveWildArrangePath,
-} from "./runtime-store.mjs";
 import { renderPromptPackEntry } from "./prompt-pack.mjs";
 import { uniqueStrings } from "./text-utils.mjs";
 
@@ -35,15 +31,13 @@ import { uniqueStrings } from "./text-utils.mjs";
  */
 export async function loadRoutesConfig(rootDir) {
   const routes = JSON.parse(await renderPromptPackEntry(rootDir, { routes: true }));
-  const overrides = await readJson(resolveWildArrangePath(rootDir, "routing", "routes-overrides.json"), null);
-  return applyRouteOverrides(routes, overrides);
+  return routes;
 }
 
 // Read-only contract: resolveRouteDecision is a pure lookup over the routes
 // table — no persistence, no ledger writes, no task-state advances. The
 // authoritative routing of a user request goes through ai/routing.mjs
-// routeRequest, which wraps this with ledger evidence, decision projection
-// and semantic shadow. Orchestration may call resolveRouteDecision only for
+// routeRequest, which wraps this with ledger evidence and decision projection. Orchestration may call resolveRouteDecision only for
 // read/enrichment decisions: plan import enrichment (plan-state.mjs) and
 // feature-design gate detection (feature-design.mjs); this call-site set is
 // pinned in test/dependency-boundary.test.mjs, so adding a new orchestration
@@ -310,29 +304,9 @@ export { uniqueStrings };
 /**
  * higherRisk：本模块对外API。
  */
-export function higherRisk(left = "low", right = "low") {
+function higherRisk(left = "low", right = "low") {
   const order = { low: 1, medium: 2, high: 3 };
   return (order[right] || 1) > (order[left] || 1) ? right : left;
-}
-
-/**
- * 应用 RouteOverrides 变换或覆盖。
- */
-function applyRouteOverrides(routes, overrides) {
-  if (!overrides || !Array.isArray(overrides.patches)) return routes;
-  const next = structuredClone(routes);
-  for (const patch of overrides.patches) {
-    const target = String(patch.target || "");
-    const signals = uniqueStrings(patch.signals || []);
-    if (signals.length === 0) continue;
-    const [collectionName, entryName] = target.split(".");
-    const collection = next[collectionName];
-    if (!Array.isArray(collection) || !entryName) continue;
-    const entry = collection.find((candidate) => candidate.name === entryName);
-    if (!entry) continue;
-    entry.signals = uniqueStrings([...(entry.signals || []), ...signals]);
-  }
-  return next;
 }
 
 /**
