@@ -11,23 +11,23 @@
 | `wildarrange review checklist --task <taskId>` | 解析本任务项目审查清单和必需依据，不启动执行器 |
 | `wildarrange readiness --task <taskId>` | 检查已批准任务必需的执行器、Skill、规范与握手，不启动业务 Worker |
 | `wildarrange adoption inventory` | 只读扫描旧仓库文件与验证资产，供接管 Skill 建立来源映射 |
-| `wildarrange init [--sample] [--project-docs] [--architecture]` | 初始化运行时；外置治理项目不写客户仓库，legacy 模式可显式补建项目文档 |
+| `wildarrange init [--sample]` | 在已连接项目的 runtimeRoot 初始化运行态（setup 已包含此步骤）；不写客户仓库 |
 | `wildarrange plan --from <plan.json>` | 导入含 responsibilityChanges 的计划；等待人工确认职责与事实归属 |
 | `wildarrange plan approve [--plan <planId>]` | 确认待执行计划（语义生成计划或已开启 planApproval） |
 | `wildarrange run` | 跑下一个任务（worker→verifier→scope→review→checkpoint） |
 | `wildarrange status` | 查看状态（含门武装黄灯） |
 | `wildarrange decisions [--limit N] [--task T001] [--gate pre_tool_use] [--annotatable] [--format json]` | 查看门决策记录（每一次拦截/放行；--annotatable 只看可标注队列） |
 | `wildarrange doctor` | 一键体检：配置/完成状态/ledger/备份对账 |
-| `wildarrange config init [--root] [--force] [--armed]` | 生成默认配置（--armed 直接武装质量门） |
+| `wildarrange config init [--force] [--armed]` | 在治理仓 policy/ 生成默认配置（--armed 直接武装质量门） |
 | `wildarrange config show` | 查看生效配置 |
 | `wildarrange config baseline [--reason "..."]` | 写入 config hash 基线 |
 | `wildarrange config verify` | 校验 config 基线 |
-| `wildarrange adapter install [--target codex|cursor|kimi|all] [--mode local|npx] [--package @alivewavelab/wildarrange]` | 安装宿主 adapter；外置治理模式只在 runtimeRoot 生成用户插件包 |
+| `wildarrange adapter install [--target codex|cursor|kimi|all] [--mode local|npx] [--package @alivewavelab/wildarrange]` | 在 runtimeRoot 生成宿主外置插件包；--mode 选择 hook 调用 CLI 的前缀（local 当前 bin 路径 / npx 包名） |
 | `wildarrange adapter activate [--target cursor|codex|all] [--user-root <path>]` | 显式写入用户级配置：Cursor Hook 与指针规则、Codex AGENTS.md 指针段；先备份且不写客户项目 |
-| `wildarrange adapter uninstall [--target codex|cursor|kimi|all]` | 卸载宿主 adapter；外置模式移除用户级条目与指针并删除 runtime 插件包 |
-| `wildarrange adapter restore --backup <backupId>` | 恢复 adapter 备份；外置模式还原到该次 activate 之前的用户级文件 |
+| `wildarrange adapter uninstall [--target codex|cursor|kimi|all]` | 卸载宿主 adapter：移除用户级条目与指针并删除 runtime 插件包 |
+| `wildarrange adapter restore --backup <backupId>` | 恢复 adapter 备份：还原到该次 activate 之前的用户级文件 |
 | `wildarrange injection show --point before_review [--agent BaiZe] [--task T001] [--text "..."] [--stage plan]` | 查看注入点解析结果 |
-| `wildarrange hook run [--from hook.json] [--format text|json] [--external-only --adapter-digest <sha256>]` | 运行宿主生命周期 Hook；外置 Adapter 只处理已连接项目 |
+| `wildarrange hook run [--from hook.json] [--format text|json] --adapter-digest <sha256>` | 运行宿主生命周期 Hook；只处理已连接项目，未连接项目静默放行 |
 | `wildarrange workflow --from <plan.json>` | 从计划跑完整 workflow |
 | `wildarrange workflow --sample` | 跑样例 workflow |
 | `wildarrange parallel run [--max-agents 2] [--task T001,T002] [--agent ZhuRong] [--adapter codex|cursor] [--isolation run-dir|git-worktree] [--command "..."]` | 跑并行子 Agent |

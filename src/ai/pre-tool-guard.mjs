@@ -40,7 +40,7 @@ export const TRUSTED_CLI_COMMAND_PREFIX = Symbol("wildarrange.trustedCliCommandP
 
 /**
  * 对 PreToolUse 工具调用做预检，返回 allow/deny 决策与结构化 code/reason。
- * @param {string} rootDir 控制根目录
+ * @param {string} rootDir 项目根目录
  * @param {object} input 宿主 Hook 载荷（tool_name、tool_input 等）
  * @param {object} options executionRoot 执行根目录
  * @returns {Promise<object>} kind=pre_tool_use_guard
@@ -49,7 +49,7 @@ export async function preToolUseGuard(rootDir, input = {}, options = {}) {
   const event = normalizeHookEvent(input.hook_event_name || input.event || input.name);
   if (event !== "PreToolUse") throw new Error("preToolUseGuard requires PreToolUse input");
   const toolName = String(input.tool_name || input.toolName || "");
-  const targetPaths = extractPreToolTargetPaths(input, options.executionRoot || rootDir, options.cwd);
+  const targetPaths = extractPreToolTargetPaths(input, options.executionRoot || rootDir, options.cwd, rootDir);
   const toolInput = input.tool_input || input.toolInput;
   const isApplyPatchTool = /^(?:functions\.)?apply_patch$/i.test(toolName);
   const isShellTool = /^(Bash|bash|exec_command|functions\.exec_command)$/.test(toolName);
@@ -339,15 +339,16 @@ export function normalizeHookTaskId(input) {
  * @param {object} input Hook 载荷
  * @param {string} rootDir 执行根目录（相对路径的计算基准，通常是 Git toplevel）
  * @param {string} [baseDir] 相对路径的解析起点（宿主 cwd，可为 rootDir 的子目录）；缺省等于 rootDir
+ * @param {string} [projectRoot] 已连接治理的项目根（运行态根由它解析）；缺省等于 rootDir
  * @returns {string[]} 去重后的相对路径
  */
-export function extractHookTargetPaths(input, rootDir, baseDir = rootDir) {
+export function extractHookTargetPaths(input, rootDir, baseDir = rootDir, projectRoot = rootDir) {
   const values = [];
   collectPathLikeValues(input.tool_input || input.toolInput, values);
   collectApplyPatchTargetPaths(input, values);
   collectPathLikeValues(input.tool_response || input.toolResponse, values);
   collectPathLikeValues(input.paths || input.targetPaths, values, true);
-  return uniqueStrings(values.map((value) => normalizeHookTargetPath(value, rootDir, baseDir)).filter(Boolean));
+  return uniqueStrings(values.map((value) => normalizeHookTargetPath(value, rootDir, baseDir, projectRoot)).filter(Boolean));
 }
 
 /**
@@ -355,14 +356,15 @@ export function extractHookTargetPaths(input, rootDir, baseDir = rootDir) {
  * @param {object} input Hook 载荷
  * @param {string} rootDir 执行根目录
  * @param {string} [baseDir] 相对路径的解析起点；缺省等于 rootDir
+ * @param {string} [projectRoot] 已连接治理的项目根；缺省等于 rootDir
  * @returns {string[]} 去重后的相对路径
  */
-export function extractPreToolTargetPaths(input, rootDir, baseDir = rootDir) {
+export function extractPreToolTargetPaths(input, rootDir, baseDir = rootDir, projectRoot = rootDir) {
   const toolName = String(input.tool_name || input.toolName || "");
-  if (!/^(?:functions\.)?apply_patch$/i.test(toolName)) return extractHookTargetPaths(input, rootDir, baseDir);
+  if (!/^(?:functions\.)?apply_patch$/i.test(toolName)) return extractHookTargetPaths(input, rootDir, baseDir, projectRoot);
   const values = [];
   collectApplyPatchTargetPaths(input, values);
-  return uniqueStrings(values.map((value) => normalizeHookTargetPath(value, rootDir, baseDir)).filter(Boolean));
+  return uniqueStrings(values.map((value) => normalizeHookTargetPath(value, rootDir, baseDir, projectRoot)).filter(Boolean));
 }
 
 /** 从 apply_patch 工具输入解析目标文件路径，兼容 native 与 git unified diff 格式。 */
@@ -448,9 +450,9 @@ function isPlanDraftWrite(targetPaths) {
 const READ_ONLY_WILDARRANGE_SHELL_ARGS = /^(?:status|doctor|summary|timeline|decisions|config\s+show|changes\s+list|adoption\s+inventory|review\s+checklist\s+--task\s+[A-Za-z0-9_.-]+|review\s+configure\s+--from\s+\.wildarrange[\\/]plan-drafts[\\/][A-Za-z0-9_.-]+\.json|prompts\s+show\s+--skill\s+[A-Za-z0-9][A-Za-z0-9._-]{0,99}|resume(?:\s+--session\s+[A-Za-z0-9_.-]+)?|continuation\s+check(?:\s+--session\s+[A-Za-z0-9_.-]+)?|help(?:\s+--all)?|--help(?:\s+--all)?)$/i;
 
 /** 无活跃任务或计划待批时，仅允许只读/计划管理类 WildArrange shell 子命令。 */
-function isAllowedPrePlanShellCommand(command, cliCommandPrefix = "", controlRoot = "") {
+function isAllowedPrePlanShellCommand(command, cliCommandPrefix = "", projectRoot = "") {
   if (isReadOnlyGitShellCommand(command)) return true;
-  const args = stripVerifiedControlRootOption(parseWildArrangeShellArgs(command, cliCommandPrefix), controlRoot);
+  const args = stripVerifiedProjectRootOption(parseWildArrangeShellArgs(command, cliCommandPrefix), projectRoot);
   if (!args) return false;
   if (READ_ONLY_WILDARRANGE_SHELL_ARGS.test(args)) return true;
   if (/^review\s+configure\s+--from\s+\.wildarrange[\\/]plan-drafts[\\/][A-Za-z0-9_.-]+\.json\s+--apply$/i.test(args)) return true;
@@ -488,14 +490,14 @@ function parseWildArrangeShellArgs(command, cliCommandPrefix = "") {
 }
 
 /** 判断 shell 命令是否为功能设计门允许的只读 WildArrange 子命令。 */
-function isReadOnlyWildArrangeShellCommand(command, cliCommandPrefix = "", controlRoot = "") {
-  const args = stripVerifiedControlRootOption(parseWildArrangeShellArgs(command, cliCommandPrefix), controlRoot);
+function isReadOnlyWildArrangeShellCommand(command, cliCommandPrefix = "", projectRoot = "") {
+  const args = stripVerifiedProjectRootOption(parseWildArrangeShellArgs(command, cliCommandPrefix), projectRoot);
   return Boolean(args && READ_ONLY_WILDARRANGE_SHELL_ARGS.test(args));
 }
 
 /** 校验 plan --from 导入的 JSON 是否绑定当前功能设计 gateId。 */
 async function isMatchingFeaturePlanImport(rootDir, command, gateId, cliCommandPrefix = "") {
-  const args = stripVerifiedControlRootOption(parseWildArrangeShellArgs(command, cliCommandPrefix), rootDir);
+  const args = stripVerifiedProjectRootOption(parseWildArrangeShellArgs(command, cliCommandPrefix), rootDir);
   const match = args?.match(/^plan\s+--from\s+(?:"([^"]+\.json)"|'([^']+\.json)'|([^\s]+\.json))$/i);
   const rawPath = match?.[1] || match?.[2] || match?.[3];
   if (!rawPath) return false;
@@ -504,23 +506,23 @@ async function isMatchingFeaturePlanImport(rootDir, command, gateId, cliCommandP
   return plan?.feature_design_ref === gateId;
 }
 
-/** 剥离并校验 --control-root 选项，值与当前控制根不一致则拒绝解析。 */
-function stripVerifiedControlRootOption(args, controlRoot) {
+/** 剥离并校验 --project-root 选项，值与当前项目根不一致则拒绝解析。 */
+function stripVerifiedProjectRootOption(args, projectRoot) {
   if (typeof args !== "string") return args;
-  const pattern = /\s+--control-root\s+(?:"([^"]*)"|'([^']*)'|([^\s]+))/gi;
+  const pattern = /\s+--project-root\s+(?:"([^"]*)"|'([^']*)'|([^\s]+))/gi;
   const matches = [...args.matchAll(pattern)];
   if (matches.length === 0) return args;
-  const expected = normalizeControlRootPath(controlRoot);
+  const expected = normalizeProjectRootPath(projectRoot);
   for (const match of matches) {
     const value = match[1] ?? match[2] ?? match[3] ?? "";
-    // 防止通过伪造 --control-root 绕过功能设计门或范围校验
-    if (!expected || normalizeControlRootPath(value) !== expected) return null;
+    // 防止通过伪造 --project-root 绕过功能设计门或范围校验
+    if (!expected || normalizeProjectRootPath(value) !== expected) return null;
   }
   return args.replace(pattern, "").replace(/\s+/g, " ").trim();
 }
 
-/** 规范化控制根路径用于跨平台相等性比较（Windows 忽略大小写）。 */
-function normalizeControlRootPath(value) {
+/** 规范化项目根路径用于跨平台相等性比较（Windows 忽略大小写）。 */
+function normalizeProjectRootPath(value) {
   const normalized = path.resolve(String(value)).replace(/\\/g, "/").replace(/\/+$/, "");
   return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
@@ -556,9 +558,9 @@ async function denyFeatureDesignToolUse(rootDir, options) {
 }
 
 /** 将绝对/相对路径规范为相对 rootDir 的路径，经 realpath 解析防 symlink 逃逸。 */
-function normalizeHookTargetPath(value, rootDir, baseDir = rootDir) {
+function normalizeHookTargetPath(value, rootDir, baseDir = rootDir, projectRoot = rootDir) {
   const absoluteTarget = path.isAbsolute(value) ? value : path.resolve(baseDir, value);
-  const runtimeRelative = path.relative(canonicalizePotentialPath(resolveWildArrangePath(rootDir)), canonicalizePotentialPath(absoluteTarget)).replaceAll("\\", "/");
+  const runtimeRelative = path.relative(canonicalizePotentialPath(resolveWildArrangePath(projectRoot)), canonicalizePotentialPath(absoluteTarget)).replaceAll("\\", "/");
   if (/^plan-drafts\/[A-Za-z0-9_.-]+\.json$/.test(runtimeRelative)) return ".wildarrange/" + runtimeRelative;
   const relative = path.relative(
     canonicalizePotentialPath(rootDir),

@@ -151,7 +151,7 @@ test("external contracts scan keeps the customer project git status clean and la
 
 test("external plan draft directive points at the runtime root and the guard lets the host write it", async () => {
   await withExternalProject(async ({ projectRoot }) => {
-    const directive = buildPlanDraftDirective({ route: "plan", needsPlan: true }, { sessionId: "ext", prompt: "add a feature", controlRoot: projectRoot, executionRoot: projectRoot });
+    const directive = buildPlanDraftDirective({ route: "plan", needsPlan: true }, { sessionId: "ext", prompt: "add a feature", projectRoot, executionRoot: projectRoot });
     assert.equal(directive.draftPath, resolveWildArrangePath(projectRoot, "plan-drafts", "ext-plan.json"));
     assert.ok(path.isAbsolute(directive.draftPath));
     assert.equal(existsSync(path.join(projectRoot, ".wildarrange")), false);
@@ -283,7 +283,6 @@ test("setup wires governance repo, attach, runtime and adapters in one command w
 
     const doctor = await run(["doctor"]);
     const report = JSON.parse(doctor.stdout);
-    assert.equal(report.sections.adapters.mode, "external");
     assert.deepEqual(report.findings.filter((finding) => finding.section === "adapters").map((finding) => finding.target), ["codex"]);
     assert.equal((await git(projectRoot, ["status", "--short"])).trim(), "");
 

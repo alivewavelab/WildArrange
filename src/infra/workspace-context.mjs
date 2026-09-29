@@ -6,13 +6,14 @@
 //
 // 【运行原理速读】
 //   project identity → external registry → validated three-root context
-//   → bindWildArrangeRuntimeRoot。未连接项目保持 legacy 单根兼容。
+//   → bindWildArrangeRuntimeRoot。未连接项目没有运行态，解析结果为 null。
 // =============================================================================
 import { createHash } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
-import { mkdir, realpath } from "node:fs/promises";
+import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { runCommandFile } from "./command-runner.mjs";
 import { buildArmedConfig } from "./runtime-config.mjs";
 import { buildRegistryFromCards, digestCanonical } from "./verification-registry.mjs";
@@ -21,11 +22,17 @@ import {
   readJson,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
-import { writeFile } from "node:fs/promises";
 
 const WORKSPACE_REGISTRY_VERSION = 1;
 const GOVERNANCE_CONTRACT_FILE = "wildarrange-governance.json";
 const BOUND_CONTEXTS = new Map();
+/** 治理仓 policy/ 下补建的政策模板：source 为 linear pack project-init 内文件，target 为 policy 相对路径。 */
+const POLICY_TEMPLATE_DIR = fileURLToPath(new URL("../../packs/wildarrange-linear/project-init/", import.meta.url));
+const POLICY_TEMPLATES = [
+  { source: "AGENTS.template.md", target: "AGENTS.md" },
+  { source: "code-and-interface-conventions.md", target: "code-and-interface-conventions.md" },
+  { source: "testing-and-acceptance.md", target: "testing-and-acceptance.md" },
+];
 
 /**
  * 在独立目录创建最小治理仓库骨架；只创建缺失文件，不覆盖已有政策。
@@ -52,10 +59,10 @@ export async function initializeGovernanceRepository(projectRoot, options = {}) 
         verificationRegistry: "verification/registry.json",
       }, null, 2)}\n`,
     },
-    {
-      path: path.join(governanceRoot, "policy", "AGENTS.md"),
-      value: "# Project governance policy\n\n> Replace the placeholders below, review them with a human, then commit this governance repository before importing project plans.\n\n## Quality policy\n\n- [待确认] Project-specific non-negotiable quality rules.\n\n## Risk boundaries\n\n- [待确认] Risks that require additional verification or human approval.\n",
-    },
+    ...await Promise.all(POLICY_TEMPLATES.map(async (template) => ({
+      path: path.join(governanceRoot, "policy", template.target),
+      value: await readFile(path.join(POLICY_TEMPLATE_DIR, template.source), "utf8"),
+    }))),
     {
       path: path.join(governanceRoot, "verification", "registry.json"),
       value: `${JSON.stringify(buildRegistryFromCards([]), null, 2)}\n`,
@@ -151,13 +158,10 @@ export async function loadGovernanceContract(governanceRoot) {
 /** 将客户项目显式连接到独立治理仓库，并把映射写到项目外部 registry。 */
 export async function attachGovernanceRepository(projectRoot, options = {}) {
   const candidate = await prepareExternalConnection(projectRoot, options);
-  if (existsSync(path.join(candidate.project, ".wildarrange"))) {
-    throw new Error("project-local .wildarrange runtime state exists; attach requires a project without local runtime state");
-  }
   return commitExternalConnection(candidate);
 }
 
-/** 解析项目当前三根；没有外部连接时保持 legacy 单根模式。 */
+/** 解析项目当前三根；项目尚未连接外置治理时返回 null（调用方决定报错或静默）。 */
 export async function resolveWorkspaceContext(projectRoot, options = {}) {
   const requestedRoot = await canonicalExistingDirectory(projectRoot, "project root");
   const stateHome = path.resolve(options.stateHome || defaultWildArrangeStateHome(options.env));
@@ -170,34 +174,8 @@ export async function resolveWorkspaceContext(projectRoot, options = {}) {
     : await resolveWorkspaceProjectRoot(requestedRoot, registry);
   const identity = await resolveProjectIdentity(project);
 
-  if (options.legacy === true) {
-    const runtimeRoot = path.join(project, ".wildarrange");
-    return bindWorkspaceContext(workspaceContext({
-      projectId: identity.projectId,
-      projectRoot: project,
-      projectIdentitySource: identity.source,
-      governanceId: null,
-      governanceRoot: null,
-      runtimeRoot,
-      contractPath: null,
-      attachedAt: null,
-    }, null, registryPath, "legacy"));
-  }
-
   const entry = registry.projects[identity.projectId];
-  if (!entry) {
-    const runtimeRoot = path.join(project, ".wildarrange");
-    return bindWorkspaceContext(workspaceContext({
-      projectId: identity.projectId,
-      projectRoot: project,
-      projectIdentitySource: identity.source,
-      governanceId: null,
-      governanceRoot: null,
-      runtimeRoot,
-      contractPath: null,
-      attachedAt: null,
-    }, null, registryPath, "legacy"));
-  }
+  if (!entry) return null;
 
   const governance = await loadGovernanceContract(entry.governanceRoot);
   assertSeparateRoot(project, governance.root, "governance root");
@@ -205,7 +183,7 @@ export async function resolveWorkspaceContext(projectRoot, options = {}) {
   assertSeparateRoot(governance.root, entry.runtimeRoot, "runtime root");
   // linked worktree 与主 checkout 共用 git common-dir，因此共享 projectId 与
   // runtime；但本次命令的 projectRoot 必须保持当前 worktree，而非首次 attach 路径。
-  return bindWorkspaceContext(workspaceContext({ ...entry, projectRoot: project }, governance.contract, registryPath, "external"));
+  return bindWorkspaceContext(workspaceContext({ ...entry, projectRoot: project }, governance.contract, registryPath));
 }
 
 /** 返回 runtimeRoot 包含 candidate 的已注册项目（即 candidate 位于任务 worktree 等运行态子树内）。 */
@@ -259,11 +237,11 @@ async function resolveWorkspaceProjectRoot(requestedRoot, registry) {
 /** 绑定完整工作区上下文，供规则扫描与长寿命宿主读取。 */
 function bindWorkspaceContext(context) {
   const projectRoot = workspaceRootKey(context.projectRoot);
-  bindWildArrangeRuntimeRoot(projectRoot, context.runtimeRoot, context.mode === "external" ? {
+  bindWildArrangeRuntimeRoot(projectRoot, context.runtimeRoot, {
     rootDir: context.governanceRoot,
     configPath: path.posix.join(context.governanceContract.policyRoot, "wildarrange.config.json"),
     registryPath: context.governanceContract.verificationRegistry,
-  } : null);
+  });
   BOUND_CONTEXTS.set(projectRoot, context);
   return context;
 }
@@ -278,7 +256,7 @@ export function resolveTaskRepositoryRoot(projectRoot, task = {}) {
   const context = getBoundWorkspaceContext(projectRoot);
   const target = task.repositoryTarget || "project";
   if (target === "project") return context?.projectRoot || path.resolve(projectRoot);
-  if (target === "governance" && context?.mode === "external" && context.governanceRoot) {
+  if (target === "governance" && context?.governanceRoot) {
     return context.governanceRoot;
   }
   throw new Error(`task ${task.id || "unknown"} targets governance repository but no external governance workspace is bound`);
@@ -328,7 +306,7 @@ async function readWorkspaceRegistry(registryPath) {
  */
 export async function loadGovernanceVerificationDefaults(projectRoot) {
   const context = getBoundWorkspaceContext(projectRoot);
-  if (!context || context.mode !== "external") return null;
+  if (!context) return null;
   const registryPath = path.resolve(context.governanceRoot, context.governanceContract.verificationRegistry);
   assertPathInside(context.governanceRoot, registryPath, "verificationRegistry");
   const registry = await readJson(registryPath, null);
@@ -406,19 +384,7 @@ async function commitExternalConnection(candidate) {
   registry.projects[candidate.identity.projectId] = entry;
   await mkdir(candidate.stateHome, { recursive: true });
   await writeJsonAtomic(candidate.registryPath, registry);
-  return bindWorkspaceContext(workspaceContext(entry, candidate.governance.contract, candidate.registryPath, "external"));
-}
-
-function workspaceContextView(context) {
-  return {
-    mode: context.mode,
-    projectId: context.projectId,
-    governanceId: context.governanceId,
-    projectRoot: context.projectRoot,
-    governanceRoot: context.governanceRoot,
-    runtimeRoot: context.runtimeRoot,
-    registryPath: context.registryPath,
-  };
+  return bindWorkspaceContext(workspaceContext(entry, candidate.governance.contract, candidate.registryPath));
 }
 
 async function inspectGitRevision(rootDir) {
@@ -441,10 +407,8 @@ async function inspectGitRevision(rootDir) {
   };
 }
 
-function workspaceContext(entry, contract, registryPath, mode) {
+function workspaceContext(entry, contract, registryPath) {
   return {
-    mode,
-    attached: mode === "external",
     projectRoot: entry.projectRoot,
     governanceRoot: entry.governanceRoot,
     runtimeRoot: path.resolve(entry.runtimeRoot),

@@ -22,14 +22,14 @@ import { DEFAULT_EXECUTOR_AGENT, DEFAULT_LEAD_AGENT } from "../infra/agent-regis
 import { DEFAULT_PACKAGE_NAME, PRODUCT_NAME } from "../infra/runtime-config.mjs";
 
 /** 默认 --help 展示的核心六命令（日常主循环）。 */
-export const CORE_COMMANDS = ["init", "plan", "run", "status", "decisions", "doctor"];
+export const CORE_COMMANDS = ["setup", "plan", "run", "status", "decisions", "doctor"];
 
 /**
  * 全部 CLI 子命令的 usage、说明与是否 core 标记。
  * 新命令须先登记再于 bin/wildarrange.mjs 实现；governance audit 以 --help --all 校验真实性。
  */
 export const COMMAND_REGISTRY = [
-  { usage: "setup --governance-root <path> [--repository <git-url>] [--target codex|cursor|kimi|all] [--default-branch main]", desc: "一步接入外置治理：创建治理仓（含 Git 初始提交与默认武装配置）→ attach → init → 生成宿主 Adapter 包；客户项目零写入" },
+  { usage: "setup --governance-root <path> [--repository <git-url>] [--target codex|cursor|kimi|all] [--default-branch main]", desc: "一步接入外置治理：创建治理仓（含 Git 初始提交与默认武装配置）→ attach → init → 生成宿主 Adapter 包；客户项目零写入", core: true },
   { usage: "project init-governance --governance-root <path> --repository <git-url> [--default-branch main]", desc: "在项目外创建不覆盖已有文件的治理仓库骨架与默认武装配置；非 Git 目录自动 git init 并提交初始 commit" },
   { usage: "project attach --governance-root <path> [--project-root <path>] [--runtime-root <path>]", desc: "把客户项目连接到独立治理仓库；映射写入项目外部状态目录" },
   { usage: "project show [--project-root <path>]", desc: "查看项目、治理仓库和运行态三根连接" },
@@ -38,7 +38,7 @@ export const COMMAND_REGISTRY = [
   { usage: "review checklist --task <taskId>", desc: "解析本任务项目审查清单和必需依据，不启动执行器" },
   { usage: "readiness --task <taskId>", desc: "检查已批准任务必需的执行器、Skill、规范与握手，不启动业务 Worker" },
   { usage: "adoption inventory", desc: "只读扫描旧仓库文件与验证资产，供接管 Skill 建立来源映射" },
-  { usage: "init [--sample] [--project-docs] [--architecture]", desc: "初始化运行时；外置治理项目不写客户仓库，legacy 模式可显式补建项目文档", core: true },
+  { usage: "init [--sample]", desc: "在已连接项目的 runtimeRoot 初始化运行态（setup 已包含此步骤）；不写客户仓库" },
   { usage: "plan --from <plan.json>", desc: "导入含 responsibilityChanges 的计划；等待人工确认职责与事实归属", core: true },
   { usage: "plan approve [--plan <planId>]", desc: "确认待执行计划（语义生成计划或已开启 planApproval）" },
   { usage: "run", desc: "跑下一个任务（worker→verifier→scope→review→checkpoint）", core: true },
@@ -46,16 +46,16 @@ export const COMMAND_REGISTRY = [
   { usage: "decisions [--limit N] [--task T001] [--gate pre_tool_use] [--annotatable] [--format json]", desc: "查看门决策记录（每一次拦截/放行；--annotatable 只看可标注队列）", core: true },
   { usage: "doctor", desc: "一键体检：配置/完成状态/ledger/备份对账", core: true },
 
-  { usage: "config init [--root] [--force] [--armed]", desc: "生成默认配置（--armed 直接武装质量门）" },
+  { usage: "config init [--force] [--armed]", desc: "在治理仓 policy/ 生成默认配置（--armed 直接武装质量门）" },
   { usage: "config show", desc: "查看生效配置" },
   { usage: "config baseline [--reason \"...\"]", desc: "写入 config hash 基线" },
   { usage: "config verify", desc: "校验 config 基线" },
-  { usage: `adapter install [--target codex|cursor|kimi|all] [--mode local|npx] [--package ${DEFAULT_PACKAGE_NAME}]`, desc: "安装宿主 adapter；外置治理模式只在 runtimeRoot 生成用户插件包" },
+  { usage: `adapter install [--target codex|cursor|kimi|all] [--mode local|npx] [--package ${DEFAULT_PACKAGE_NAME}]`, desc: "在 runtimeRoot 生成宿主外置插件包；--mode 选择 hook 调用 CLI 的前缀（local 当前 bin 路径 / npx 包名）" },
   { usage: "adapter activate [--target cursor|codex|all] [--user-root <path>]", desc: "显式写入用户级配置：Cursor Hook 与指针规则、Codex AGENTS.md 指针段；先备份且不写客户项目" },
-  { usage: "adapter uninstall [--target codex|cursor|kimi|all]", desc: "卸载宿主 adapter；外置模式移除用户级条目与指针并删除 runtime 插件包" },
-  { usage: "adapter restore --backup <backupId>", desc: "恢复 adapter 备份；外置模式还原到该次 activate 之前的用户级文件" },
+  { usage: "adapter uninstall [--target codex|cursor|kimi|all]", desc: "卸载宿主 adapter：移除用户级条目与指针并删除 runtime 插件包" },
+  { usage: "adapter restore --backup <backupId>", desc: "恢复 adapter 备份：还原到该次 activate 之前的用户级文件" },
   { usage: "injection show --point before_review [--agent BaiZe] [--task T001] [--text \"...\"] [--stage plan]", desc: "查看注入点解析结果" },
-  { usage: "hook run [--from hook.json] [--format text|json] [--external-only --adapter-digest <sha256>]", desc: "运行宿主生命周期 Hook；外置 Adapter 只处理已连接项目" },
+  { usage: "hook run [--from hook.json] [--format text|json] --adapter-digest <sha256>", desc: "运行宿主生命周期 Hook；只处理已连接项目，未连接项目静默放行" },
   { usage: "workflow --from <plan.json>", desc: "从计划跑完整 workflow" },
   { usage: "workflow --sample", desc: "跑样例 workflow" },
   { usage: "parallel run [--max-agents 2] [--task T001,T002] [--agent ZhuRong] [--adapter codex|cursor] [--isolation run-dir|git-worktree] [--command \"...\"]", desc: "跑并行子 Agent" },

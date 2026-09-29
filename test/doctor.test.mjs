@@ -71,31 +71,12 @@ test("doctor surfaces unarmed gates and an unprepared external adapter instead o
     assert.equal(report.sections.gateArming.armed, false);
     assert.ok(report.findings.some((finding) => finding.section === "gate_arming" && finding.code === "quality_gates_not_required"));
 
-    assert.equal(report.sections.adapters.mode, "external");
     assert.equal(report.sections.adapters.status, "error");
     assert.equal(report.ok, false);
     assert.ok(report.findings.some((finding) => finding.section === "adapters" && finding.code === "external_adapter_not_prepared"));
 
     const markdown = await readFile(resolveWildArrangePath(dir, "reports", "doctor.md"), "utf8");
     assert.match(markdown, /Gate arming: NOT ARMED/);
-  });
-});
-
-// legacy 专属（下一步随 legacy 模式删除）：项目内 .cursor/.codex 安装与检查。
-test("legacy doctor surfaces missing project-local adapter hooks", async () => {
-  await withLegacyDir(async (dir) => {
-    await initRuntime(dir);
-    const report = await runDoctor(dir);
-
-    const cursor = report.sections.adapters.targets.find((target) => target.target === "cursor");
-    assert.equal(cursor.configured, false);
-    const codex = report.sections.adapters.targets.find((target) => target.target === "codex");
-    assert.equal(codex.configured, false);
-    assert.equal(report.ok, false);
-    assert.ok(report.findings.some((finding) => finding.section === "adapters" && finding.message.includes(".cursor/hooks.json")));
-
-    const markdown = await readFile(resolveWildArrangePath(dir, "reports", "doctor.md"), "utf8");
-    assert.match(markdown, /cursor:NOT CONFIGURED/);
   });
 });
 
@@ -136,88 +117,6 @@ test("doctor yellow-lights a changed runner after adoption artifacts exist", asy
     assert.equal(drifted.sections.registryFreshness.stale, true);
     assert.equal(drifted.sections.registryFreshness.status, "declared_input_drift");
     assert.ok(drifted.findings.some((finding) => finding.section === "registry_freshness"));
-  });
-});
-
-// legacy 专属（下一步随 legacy 模式删除）：项目内 .cursor/.codex hook 安装与激活证据。
-test("doctor adapter check passes once hooks are installed and flags stale rule paths", async () => {
-  await withLegacyDir(async (dir) => {
-    await initRuntime(dir);
-    const { mkdir } = await import("node:fs/promises");
-    await mkdir(path.join(dir, ".cursor", "hooks"), { recursive: true });
-    await writeFile(path.join(dir, ".cursor", "hooks.json"), JSON.stringify({
-      hooks: { preToolUse: [{ command: "node .cursor/hooks/wildarrange-hook-bridge.mjs", failClosed: true }] },
-    }), "utf8");
-    await writeFile(path.join(dir, ".cursor", "hooks", "wildarrange-hook-bridge.mjs"), "// bridge\n", "utf8");
-    await mkdir(path.join(dir, ".codex"), { recursive: true });
-    await writeFile(path.join(dir, ".codex", "hooks.json"), "{}", "utf8");
-    await mkdir(resolveWildArrangePath(dir, "adapters", "kimi", "plugin", "hooks"), { recursive: true });
-    await writeFile(resolveWildArrangePath(dir, "adapters", "kimi", "plugin", "hooks", "wildarrange-hook-bridge.mjs"), "// bridge\n", "utf8");
-    // 换机残留：规则里指向不存在绝对路径的命令会静默失效。
-    await mkdir(path.join(dir, ".cursor", "rules"), { recursive: true });
-    await writeFile(path.join(dir, ".cursor", "rules", "stale.mdc"), "run `node \"/Users/ghost/nonexistent/bin/wildarrange.mjs\" hook run`\n", "utf8");
-
-    const report = await runDoctor(dir);
-    const cursor = report.sections.adapters.targets.find((target) => target.target === "cursor");
-    assert.equal(cursor.configured, true);
-    const codex = report.sections.adapters.targets.find((target) => target.target === "codex");
-    assert.equal(codex.configured, true);
-    assert.equal(codex.activation, "unverified");
-    assert.equal(report.ok, false);
-    const activationFinding = report.findings.find((finding) => finding.code === "codex_hook_activation_unverified");
-    assert.ok(activationFinding);
-    assert.match(activationFinding.nextAction, /设置 > Hooks/);
-    assert.match(activationFinding.nextAction, /Codex CLI 请执行 \/hooks/);
-    assert.equal(report.sections.adapters.staleRules.length, 1);
-    assert.ok(report.findings.some((finding) => finding.message.includes("/Users/ghost/nonexistent")));
-  });
-});
-
-// legacy 专属（下一步随 legacy 模式删除）：项目内 .cursor/.codex hook 安装与激活证据。
-test("doctor only accepts hash-chained Codex activation evidence bound to the current hook config", async () => {
-  await withLegacyDir(async (dir) => {
-    await initRuntime(dir);
-    await mkdir(path.join(dir, ".codex"), { recursive: true });
-    const hooksPath = path.join(dir, ".codex", "hooks.json");
-    await writeFile(hooksPath, "{}", "utf8");
-
-    // A derivative receipt file alone is not activation evidence; doctor only
-    // trusts a matching, hash-verified ledger event bound to host + config.
-    const receiptsDir = resolveWildArrangePath(dir, "sessions", "hooks");
-    await mkdir(receiptsDir, { recursive: true });
-    await writeFile(path.join(receiptsDir, "forged-UserPromptSubmit.json"), JSON.stringify({
-      kind: "wildarrange_hook_injection",
-      at: new Date(Date.now() + 60_000).toISOString(),
-      event: "UserPromptSubmit",
-      sessionId: "forged-session",
-      hostAdapter: "codex",
-    }), "utf8");
-
-    const stale = await runDoctor(dir);
-    const staleCodex = stale.sections.adapters.targets.find((target) => target.target === "codex");
-    assert.equal(staleCodex.activation, "unverified");
-    assert.equal(stale.ok, false);
-
-    await runInjectionHook(dir, {
-      hook_event_name: "UserPromptSubmit",
-      session_id: "current-session",
-      cwd: dir,
-      prompt: "验证 Hook 已由宿主执行",
-      host_adapter: "codex",
-      hook_config_digest: hashContent(await readFile(hooksPath, "utf8")),
-    });
-    const observed = await runDoctor(dir);
-    const observedCodex = observed.sections.adapters.targets.find((target) => target.target === "codex");
-    assert.equal(observedCodex.activation, "execution_observed");
-    assert.equal(observedCodex.lastEvent, "UserPromptSubmit");
-    assert.equal(observedCodex.sessionId, "current-session");
-    assert.equal(observed.findings.some((finding) => finding.code === "codex_hook_activation_unverified"), false);
-
-    await writeFile(hooksPath, "{\"changed\":true}", "utf8");
-    const changed = await runDoctor(dir);
-    const changedCodex = changed.sections.adapters.targets.find((target) => target.target === "codex");
-    assert.equal(changedCodex.activation, "unverified");
-    assert.equal(changed.ok, false);
   });
 });
 
@@ -386,12 +285,3 @@ async function writeTwoPlanSameTaskLedger(dir) {
   }
 }
 
-/** legacy 单根模式夹具：仅供上面标注 legacy 的用例使用。 */
-async function withLegacyDir(fn) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "wildarrange-doctor-"));
-  try {
-    return await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}

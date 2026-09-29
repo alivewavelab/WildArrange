@@ -83,7 +83,7 @@ function matchesApprovedDeclaration(item, card) {
 /** 经 gateway 对任务执行契约扫描（不写 registry）。 */
 async function scanTask(rootDir, task, executionRoot, evidence) {
   const result = await invokeCapability("contract-governance-scan", { rootDir: executionRoot,
-    options: { write: false, inspectTask: task, evidence, controlRoot: rootDir } });
+    options: { write: false, inspectTask: task, evidence, projectRoot: rootDir } });
   // 网关如实透出 fail/warn 业务状态后，这里只对真正的能力错误抛错；
   // fail/warn 交给 prepareContractReview 按 findings 走变更治理。
   if (result.error) throw new Error(result.error.message || "contract scan failed");

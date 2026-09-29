@@ -2,12 +2,12 @@
 // 文件名称：runtime-config.test.mjs
 // 所属模块：test
 // 作用说明：
-//   验证配置加载：仓库根 config 含 example 全部键、无文件时内置默认、
-//   legacy runtime 名称字面量归一化。
+//   验证配置加载：example 配置只含已知键并可作为治理配置加载、无文件时内置默认、
+//   runtime 名称字面量归一化。
 //   不测：环境变量覆盖矩阵或热重载。
 //
 // 【运行原理速读】
-//   读写 wildarrange.config.json fixture，调用 loadWildArrangeConfig，
+//   读写治理仓 policy/wildarrange.config.json fixture，调用 loadWildArrangeConfig，
 //   断言合并结果与 DEFAULT 键集合一致。
 // =============================================================================
 
@@ -26,45 +26,17 @@ import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-function getPath(value, dottedPath) {
-  return dottedPath.split(".").reduce((current, key) => current?.[key], value);
-}
-
-test("repo root config carries every key the example config documents", async () => {
+test("the example governance config only uses known keys and loads as policy/wildarrange.config.json", async () => {
   const example = JSON.parse(await readFile(path.join(REPO_ROOT, "wildarrange.config.example.json"), "utf8"));
-  const repoConfig = JSON.parse(await readFile(path.join(REPO_ROOT, "wildarrange.config.json"), "utf8"));
-  // 第 2 期整改补齐的键：example 已声明而正式配置曾经缺失，值照抄 example。
-  const requiredPaths = [
-    "adapters.kimi",
-    "agents.Jiuwei.skills",
-    "agents.DiJiang.skills",
-    "agents.ZhuRong.skills",
-    "agents.BaiZe.skills",
-    "agents.LuWu.skills",
-    "gitDelivery",
-    "parallelAgents.retainUntilUserAcceptance",
-    "parallelAgents.defaultAdapter",
-    "parallelAgents.spawnAdapters",
-    "skillMatcher",
-    "contextBudgets",
-    "review.responsibility",
-    "review.steps",
-    "verificationGovernance",
-    "executionReadiness",
-  ];
-  for (const dottedPath of requiredPaths) {
-    assert.deepEqual(
-      getPath(repoConfig, dottedPath),
-      getPath(example, dottedPath),
-      `wildarrange.config.json must carry ${dottedPath} with the example value`,
-    );
-  }
-
-  const { config, sourcePath } = await loadWildArrangeConfig(REPO_ROOT);
-  assert.equal(sourcePath, "wildarrange.config.json");
-  assert.equal(config.gitDelivery.requireWorktreeForParallelWrites, true);
-  assert.equal("gitCoordination" in config, false);
-  assert.deepEqual(config.review.steps, []);
+  const known = new Set(Object.keys(DEFAULT_WILDARRANGE_CONFIG));
+  assert.deepEqual(Object.keys(example).filter((key) => !known.has(key)), []);
+  await withExternalProject(async ({ projectRoot }) => {
+    await writeFile(governanceConfigFile(projectRoot), JSON.stringify(example), "utf8");
+    const { config, sourcePath } = await loadWildArrangeConfig(projectRoot);
+    assert.match(sourcePath, /policy[\\/]wildarrange\.config\.json$/);
+    assert.equal(config.gitDelivery.requireWorktreeForParallelWrites, true);
+    assert.equal("gitCoordination" in config, false);
+  }, { init: false });
 });
 
 test("config loading falls back to built-in defaults when no config file exists", async () => {
@@ -85,7 +57,7 @@ function governanceConfigFile(projectRoot) {
   return path.join(governance.rootDir, governance.configPath);
 }
 
-test("legacy runtime name literal normalizes to the default runtime", async () => {
+test("runtime name literal normalizes to the default runtime", async () => {
   await withExternalProject(async ({ projectRoot }) => {
     await writeFile(governanceConfigFile(projectRoot), JSON.stringify({ runtime: "wildarrange-linear" }), "utf8");
     const { config } = await loadWildArrangeConfig(projectRoot);

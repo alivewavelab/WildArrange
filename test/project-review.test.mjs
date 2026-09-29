@@ -191,20 +191,6 @@ test("setup Hook permits only the exact governance command before a task exists"
   }
 });
 
-// legacy 语义：项目内适配器安装到 .agents/.codex（删除 legacy 单根模式时一并删除）
-test("installed adapters expose setup and onboarding Skills", async t => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "wa-legacy-adapters-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const { initRuntime } = await import("../src/infra/runtime-bootstrap.mjs");
-  await initRuntime(root);
-  const { installAdapter } = await import("../src/interface/adapters.mjs");
-  await installAdapter(root, "codex");
-  const setup = await readFile(path.join(root, ".agents/skills/wildarrange-setup/SKILL.md"), "utf8");
-  const onboard = await readFile(path.join(root, ".agents/skills/wildarrange-onboard/SKILL.md"), "utf8");
-  assert.match(setup, /prompts show --skill configure-project-review/);
-  assert.match(onboard, /prompts show --skill project-onboarding/);
-});
-
 test("changed review documents invalidate an earlier acceptance receipt", async t => {
   const { writeAcceptanceProof } = await import("../src/capabilities/acceptance-proof.mjs");
   const { root, config, task, scope } = await fixture(t);

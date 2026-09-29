@@ -45,9 +45,8 @@ const BACKUP_STATE_FILES = [
   { scope: "runtime", segments: ["snapshots", "context.json"] },
   { scope: "runtime", segments: ["snapshots", "context.md"] },
   { scope: "runtime", segments: ["security", "config-baseline.json"] },
-  // 治理配置：内置在项目根，外置在治理仓；真实路径由 resolveGovernancePaths 决定
+  // 治理配置在治理仓；真实路径由 resolveGovernancePaths 决定
   { scope: "governance-config" },
-  { scope: "runtime", segments: ["config.json"] },
 ];
 /** doctor 运行时完整性检查的最低必备状态文件。 */
 const REQUIRED_STATE_FILES = [
@@ -147,7 +146,7 @@ export async function writeRuntimeStateBackup(rootDir, options = {}) {
     const relativePath = governanceConfig
       ? governanceConfig.backupPath
       : normalizeRelativePath(path.join(".wildarrange", ...descriptor.segments));
-    const scope = governanceConfig?.external ? { scope: "governance" } : {};
+    const scope = governanceConfig ? { scope: "governance" } : {};
     if (!existsSync(sourcePath)) {
       files.push({ path: relativePath, status: "missing", ...scope });
       continue;
@@ -566,13 +565,12 @@ export async function verifyRuntimeState(rootDir) {
 }
 
 /**
- * 收集 wildarrange.config 与运行时 config 的 SHA256 指纹。
+ * 收集治理配置的 SHA256 指纹。
  */
 async function collectConfigFingerprints(rootDir) {
   const governanceConfig = describeGovernanceConfig(rootDir);
   const candidates = [
     { path: governanceConfig.absolutePath, logicalPath: governanceConfig.logicalPath },
-    { path: resolveWildArrangePath(rootDir, "config.json"), logicalPath: ".wildarrange/config.json" },
   ];
   const files = [];
   for (const candidate of candidates) {
@@ -589,27 +587,24 @@ async function collectConfigFingerprints(rootDir) {
 }
 
 /**
- * 定位治理配置的真实文件：内置模式在项目根，外置模式在治理仓（policy/wildarrange.config.json）。
+ * 定位治理配置的真实文件：治理仓 policy/wildarrange.config.json。
  */
 function describeGovernanceConfig(rootDir) {
   const governance = resolveGovernancePaths(rootDir);
-  const external = path.resolve(governance.rootDir) !== path.resolve(rootDir);
   const relativePath = normalizeRelativePath(governance.configPath);
   return {
-    external,
     absolutePath: path.resolve(governance.rootDir, governance.configPath),
-    logicalPath: external ? `governance:${relativePath}` : relativePath,
-    backupPath: external ? `governance/${relativePath}` : relativePath,
+    logicalPath: `governance:${relativePath}`,
+    backupPath: `governance/${relativePath}`,
   };
 }
 
 /**
- * 读取外置治理仓的 HEAD 与工作区是否干净；内置模式返回 null。
+ * 读取治理仓的 HEAD 与工作区是否干净。
  * 治理仓工作树里未提交的配置改动会被 Hook 立即采用，必须能被体检看到。
  */
 export async function inspectGovernanceRepository(rootDir) {
   const governance = resolveGovernancePaths(rootDir);
-  if (path.resolve(governance.rootDir) === path.resolve(rootDir)) return null;
   const head = await runCommandFile("git", ["-C", governance.rootDir, "rev-parse", "HEAD"], governance.rootDir, 15_000);
   const status = await runCommandFile("git", ["-C", governance.rootDir, "status", "--porcelain"], governance.rootDir, 15_000);
   return {

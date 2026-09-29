@@ -86,7 +86,7 @@ export async function scanContractGovernanceUniverse(rootDir, options = {}) {
   if (!CONTRACT_DISCOVERERS.includes(discoverer)) {
     throw contractError("contract_discoverer_unknown", `unknown contract discoverer: ${discoverer}`);
   }
-  const registry = await readContractRegistry(options.controlRoot || rootDir);
+  const registry = await readContractRegistry(options.projectRoot || rootDir);
   const discovered = await discoverTauriIpcContracts(rootDir);
   const declared = normalizeManualDeclarations(options.declarations || []);
   const declaredIds = new Set(declared.map((item) => item.id));

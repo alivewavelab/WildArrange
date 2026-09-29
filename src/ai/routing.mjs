@@ -29,7 +29,7 @@ const LOW_CONFIDENCE_THRESHOLD = 0.5;
 /**
  * 当路由判定需要 Plan 时，生成宿主侧写 plan-draft JSON 的指令块；草稿-only 时不给 plan --from。
  * @param {object|null} routeResult routeRequest 返回值
- * @param {object} options sessionId、prompt、controlRoot、executionRoot
+ * @param {object} options sessionId、prompt、projectRoot、executionRoot
  * @returns {object|null} planDraft 指令或 null
  */
 export function buildPlanDraftDirective(routeResult, options = {}) {
@@ -38,14 +38,12 @@ export function buildPlanDraftDirective(routeResult, options = {}) {
   const sessionId = sanitizeDraftSegment(options.sessionId || "session");
   const prompt = typeof options.prompt === "string" ? options.prompt.trim().slice(0, 4000) : "";
   const draftOnly = isDraftOnlyPlanRequest(prompt);
-  const controlRoot = typeof options.controlRoot === "string" ? path.resolve(options.controlRoot) : null;
-  const executionRoot = typeof options.executionRoot === "string" ? path.resolve(options.executionRoot) : controlRoot;
-  const crossRoot = Boolean(controlRoot && executionRoot && controlRoot !== executionRoot);
-  // 外置模式下运行态根在项目之外：相对路径会在客户项目里凭空建出 .wildarrange/，必须给绝对路径
-  const runtimeDraftPath = controlRoot ? resolveWildArrangePath(controlRoot, "plan-drafts", `${sessionId}-plan.json`) : null;
-  const externalRuntime = Boolean(runtimeDraftPath && path.relative(controlRoot, runtimeDraftPath).startsWith(".."));
-  const draftPath = crossRoot || externalRuntime
-    ? runtimeDraftPath
+  const projectRoot = typeof options.projectRoot === "string" ? path.resolve(options.projectRoot) : null;
+  const executionRoot = typeof options.executionRoot === "string" ? path.resolve(options.executionRoot) : projectRoot;
+  const crossRoot = Boolean(projectRoot && executionRoot && projectRoot !== executionRoot);
+  // 运行态根在项目之外：草稿必须用绝对路径，相对路径会在客户项目里凭空建出目录
+  const draftPath = projectRoot
+    ? resolveWildArrangePath(projectRoot, "plan-drafts", `${sessionId}-plan.json`)
     : `.wildarrange/plan-drafts/${sessionId}-plan.json`;
   return {
     status: "host_generation_required",
@@ -59,7 +57,7 @@ export function buildPlanDraftDirective(routeResult, options = {}) {
       ? routeResult.featureDesign.id
       : null,
     nextCommand: draftOnly ? null : crossRoot
-      ? `node ./bin/wildarrange.mjs plan --from "${draftPath}" --control-root "${controlRoot}"`
+      ? `node ./bin/wildarrange.mjs plan --from "${draftPath}" --project-root "${projectRoot}"`
       : "node ./bin/wildarrange.mjs plan --from <draftPath>",
   };
 }

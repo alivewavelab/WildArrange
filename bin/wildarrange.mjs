@@ -31,7 +31,7 @@ import { generateContractArtifacts } from "../src/interface/contract-view.mjs";
 import { applyContractDecision, proposeContractChange, resolveContractChange } from "../src/orchestration/contract-governance.mjs";
 import { runHostRoute, runHostHook } from "../src/orchestration/host-runtime.mjs";
 import path from "node:path";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { startDashboardServer } from "../src/interface/dashboard.mjs";
 import {
@@ -43,9 +43,9 @@ import {
 import { projectDecisions, projectDecisionStats } from "../src/interface/decisions.mjs";
 import { projectTimeline } from "../src/interface/timeline.mjs";
 import { COMMAND_REGISTRY, renderCommandsMarkdown, renderHelp } from "../src/interface/cli-help.mjs";
-import { adapterCliPrefix, installAdapter, restoreAdapterBackup, uninstallAdapter } from "../src/interface/adapters.mjs";
 import {
   activateExternalCodexAdapter,
+  adapterCliPrefix,
   activateExternalCursorAdapter,
   installExternalAdapters,
   restoreExternalAdapterBackup,
@@ -105,7 +105,7 @@ import {
 import { computeImpact } from "../src/infra/dependency-graph.mjs";
 import { runRepoTests, selectRepoTests } from "../src/infra/test-runner.mjs";
 import { errorProtocolOf, formatErrorInline } from "../src/infra/error-protocol.mjs";
-import { hashContent, resolveRuntimeInputPath } from "../src/infra/runtime-store.mjs";
+import { projectNotConnectedError, resolveRuntimeInputPath } from "../src/infra/runtime-store.mjs";
 import { verifyLedger } from "../src/infra/ledger.mjs";
 import { listPromptPack, renderPromptPackEntry } from "../src/infra/prompt-pack.mjs";
 import { scanProjectRules } from "../src/infra/rule-scanner.mjs";
@@ -125,7 +125,6 @@ import {
   writeConfigBaseline,
   writeRuntimeStateBackup,
 } from "../src/infra/security.mjs";
-import { initProjectDocuments } from "../src/interface/project-init.mjs";
 import {
   attachProjectConnection,
   initializeProjectGovernance,
@@ -199,7 +198,7 @@ function printHelp({ all = false } = {}) {
 
 /**
  * CLI 主入口：解析 command 后路由到各 src/ 模块并输出 JSON。
- * control-root 未指定时使用 process.cwd() 作为项目根。
+ * --project-root 未指定时使用 process.cwd() 作为项目根。
  * 多数子命令成功时隐式 exit 0；门禁/验证类命令在失败时显式置 process.exitCode=2；
  * readiness/test 等按业务语义置 1；未捕获异常由底部 catch 格式化后 exit 1。
  * @returns {Promise<void>}
@@ -208,10 +207,7 @@ function printHelp({ all = false } = {}) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const command = args._[0];
-  const legacyControlRoot = strArg(args, "control-root");
-  const explicitProjectRoot = strArg(args, "project-root");
-  if (legacyControlRoot && explicitProjectRoot) throw new Error("--control-root cannot be combined with --project-root");
-  const requestedProjectRoot = path.resolve(explicitProjectRoot || legacyControlRoot || process.cwd());
+  const requestedProjectRoot = path.resolve(strArg(args, "project-root") || process.cwd());
 
   // --- 帮助与文档 ---
   // §3.4：help 走人类可读 stdout，不输出 JSON 契约；无 command 时同样视为请求帮助。
@@ -259,8 +255,12 @@ async function main() {
       return;
     }
     if (subcommand === "show") {
-      const context = await showProjectConnection(requestedProjectRoot, { legacy: Boolean(legacyControlRoot) });
-      console.log(JSON.stringify(projectConnectionView(context), null, 2));
+      const context = await showProjectConnection(requestedProjectRoot);
+      console.log(JSON.stringify(context ? projectConnectionView(context) : {
+        attached: false,
+        projectRoot: requestedProjectRoot,
+        nextAction: "wildarrange setup --governance-root <path>",
+      }, null, 2));
       return;
     }
     throw new Error("wildarrange project requires init-governance, attach, or show");
@@ -282,7 +282,43 @@ async function main() {
     return;
   }
 
-  const workspace = await showProjectConnection(requestedProjectRoot, { legacy: Boolean(legacyControlRoot) });
+  // --- 仓库静态分析：只读源码依赖图与测试选型，不需要运行态，未连接项目也可用 ---
+  // §3.4：impact 按改动路径反查依赖图影响面，供 scope/review 前评估 blast radius。
+  if (command === "impact") {
+    const changed = args._.slice(1);
+    if (changed.length === 0) throw new Error("wildarrange impact requires at least one changed file path, e.g. wildarrange impact src/infra/ledger.mjs");
+    console.log(JSON.stringify(await computeImpact(requestedProjectRoot, changed), null, 2));
+    return;
+  }
+
+  // --- 仓库测试 ---
+  // §3.4：test 按 --zone 或改动路径选型后跑 test-runner；--zone 与文件参数互斥。
+  if (command === "test") {
+    const positional = args._.slice(1);
+    if (strArg(args, "zone") && positional.length > 0) {
+      throw new Error("wildarrange test: --zone 与文件参数互斥，请只选一种选择方式");
+    }
+    const { tests, selectionNote } = await selectRepoTests(requestedProjectRoot, {
+      zone: strArg(args, "zone"),
+      changedPaths: positional,
+    });
+    console.error(`[wildarrange test] ${selectionNote}`);
+    for (const file of tests) console.error(`[wildarrange test]   ${file}`);
+    // §3.4：exit 码透传 test-runner（失败数/255），非固定 2；选型摘要已在 stderr。
+    process.exitCode = runRepoTests(requestedProjectRoot, tests);
+    return;
+  }
+
+  // 以下命令都需要运行态：项目必须已连接治理仓。Hook 对未连接项目静默放行，避免波及无关项目。
+  const workspace = await showProjectConnection(requestedProjectRoot);
+  if (!workspace) {
+    if (command === "hook" && args._[1] === "run") {
+      const inactive = { kind: "wildarrange_hook_inactive", inactive: true, reason: "project is not connected to WildArrange governance" };
+      if (args.format === "json") console.log(JSON.stringify(inactive));
+      return;
+    }
+    throw projectNotConnectedError(requestedProjectRoot);
+  }
   const rootDir = workspace.projectRoot;
 
   // --- 项目/治理双仓集成验收 ---
@@ -305,16 +341,9 @@ async function main() {
   }
 
   // --- 初始化与配置 ---
-  // §3.4：init 创建 .wildarrange 运行时；--sample/--project-docs 为可选附加步骤，不阻断 init 本身。
+  // §3.4：init 在项目外的 runtimeRoot 创建运行态；--sample 为可选附加步骤，不阻断 init 本身。
   if (command === "init") {
-    if (workspace.mode === "external" && args["project-docs"] === true) {
-      throw new Error("external governance mode does not write project governance documents; store WildArrange policy in the governance repository");
-    }
     await initRuntime(rootDir);
-    // §3.4：--project-docs 为 opt-in；未指定时不生成架构/规范文档，只初始化 .wildarrange。
-    const projectDocuments = args["project-docs"] === true
-      ? await initProjectDocuments(rootDir, { architecture: args.architecture === true })
-      : null;
     let samplePath = null;
     if (args.sample) {
       samplePath = await createSamplePlan(rootDir);
@@ -322,21 +351,18 @@ async function main() {
     console.log(JSON.stringify({
       ok: true,
       runtime: workspace.runtimeRoot,
-      workspaceMode: workspace.mode,
       governanceRoot: workspace.governanceRoot,
       samplePlan: samplePath,
-      projectDocuments,
     }, null, 2));
     return;
   }
 
-  // §3.4：config 管理 wildarrange.config.json 读写与 hash 基线；不涉及任务执行或门禁跑批。
+  // §3.4：config 管理治理仓 policy/wildarrange.config.json 读写与 hash 基线；不涉及任务执行或门禁跑批。
   if (command === "config") {
     const subcommand = args._[1];
     if (subcommand === "init") {
       await initRuntime(rootDir);
       console.log(JSON.stringify(await writeDefaultWildArrangeConfig(rootDir, {
-        root: Boolean(args.root),
         force: Boolean(args.force),
         armed: Boolean(args.armed),
       }), null, 2));
@@ -363,28 +389,19 @@ async function main() {
   }
 
   // --- 宿主适配器 ---
-  // §3.4：adapter 安装/卸载/恢复 Cursor·Codex·Kimi Hook 桥接；local 模式指向当前 bin 路径。
+  // §3.4：adapter 在运行态生成/卸载/恢复 Cursor·Codex·Kimi 外置 Hook 包；local 模式指向当前 bin 路径。
   if (command === "adapter") {
     const subcommand = args._[1];
     if (subcommand === "install") {
-      if (workspace.mode === "external") {
-        console.log(JSON.stringify(await installExternalAdapters(rootDir, workspace, {
-          target: strArg(args, "target") || "all",
-          mode: strArg(args, "mode") || "local",
-          packageName: strArg(args, "package") || DEFAULT_PACKAGE_NAME,
-          localCliPath: path.resolve(process.argv[1]),
-        }), null, 2));
-        return;
-      }
-      console.log(JSON.stringify(await installAdapter(rootDir, {
+      console.log(JSON.stringify(await installExternalAdapters(rootDir, workspace, {
         target: strArg(args, "target") || "all",
         mode: strArg(args, "mode") || "local",
         packageName: strArg(args, "package") || DEFAULT_PACKAGE_NAME,
+        localCliPath: path.resolve(process.argv[1]),
       }), null, 2));
       return;
     }
     if (subcommand === "activate") {
-      if (workspace.mode !== "external") throw new Error("adapter activate is only available for attached external governance projects");
       const target = strArg(args, "target") || "all";
       if (!["all", "cursor", "codex"].includes(target)) throw new Error("adapter activate supports --target cursor, codex, or all; Kimi requires /plugins install in its own UI");
       const userRoot = strArg(args, "user-root");
@@ -396,16 +413,12 @@ async function main() {
       return;
     }
     if (subcommand === "uninstall") {
-      console.log(JSON.stringify(workspace.mode === "external"
-        ? await uninstallExternalAdapters(rootDir, workspace, { target: strArg(args, "target") || "all" })
-        : await uninstallAdapter(rootDir, { target: strArg(args, "target") || "all" }), null, 2));
+      console.log(JSON.stringify(await uninstallExternalAdapters(rootDir, workspace, { target: strArg(args, "target") || "all" }), null, 2));
       return;
     }
     if (subcommand === "restore") {
       if (!strArg(args, "backup")) throw new Error("wildarrange adapter restore requires --backup <backupId>");
-      console.log(JSON.stringify(workspace.mode === "external"
-        ? await restoreExternalAdapterBackup(rootDir, workspace, { backupId: args.backup })
-        : await restoreAdapterBackup(rootDir, { backupId: args.backup }), null, 2));
+      console.log(JSON.stringify(await restoreExternalAdapterBackup(rootDir, workspace, { backupId: args.backup }), null, 2));
       return;
     }
     throw new Error("wildarrange adapter requires install, activate, uninstall, or restore");
@@ -435,21 +448,14 @@ async function main() {
   if (command === "hook") {
     const subcommand = args._[1];
     if (subcommand === "run") {
-      if (args["external-only"] === true && workspace.mode !== "external") {
-        const inactive = { kind: "wildarrange_hook_inactive", inactive: true, reason: "project is not attached to external governance" };
-        if (args.format === "json") console.log(JSON.stringify(inactive));
-        return;
-      }
       const payload = strArg(args, "from")
         ? await readJson(path.resolve(rootDir, args.from))
         : JSON.parse(await readAllStdin());
       const hostAdapter = strArg(args, "host") || String(process.env.WILDARRANGE_HOST_ADAPTER || "");
       if (hostAdapter) payload.host_adapter = hostAdapter;
       const adapterDigest = strArg(args, "adapter-digest");
-      if (workspace.mode === "external" && args["external-only"] === true) {
-        if (!adapterDigest) throw new Error("external host hook requires --adapter-digest");
-        payload.hook_config_digest = adapterDigest;
-      }
+      if (!adapterDigest) throw new Error("host hook requires --adapter-digest");
+      payload.hook_config_digest = adapterDigest;
       const hasAdapterMode = strArg(args, "adapter-mode") !== undefined;
       const adapterMode = hasAdapterMode ? String(args["adapter-mode"]) : "local";
       const adapterPackage = strArg(args, "adapter-package") || DEFAULT_PACKAGE_NAME;
@@ -465,11 +471,6 @@ async function main() {
       if (!cliCommandPrefix) throw new Error("WildArrange CLI command prefix is unavailable; reinstall the adapter");
       payload.cli_command_prefix = cliCommandPrefix;
       payload[TRUSTED_CLI_COMMAND_PREFIX] = cliCommandPrefix;
-      // §3.4：Codex 宿主附加 hooks.json 摘要，写入 Hook 报告与 ledger 供审计 Hook 配置是否被篡改。
-      if (hostAdapter === "codex" && workspace.mode !== "external") {
-        const hookConfig = await readFile(path.join(rootDir, ".codex", "hooks.json"), "utf8");
-        payload.hook_config_digest = hashContent(hookConfig);
-      }
       const result = await runHostHook(rootDir, payload, runInjectionHook);
       // §3.4：默认写 result.output 供 IDE Hook 管道；--format json 才输出完整结构化契约。
       if (args.format === "json") {
@@ -637,14 +638,6 @@ async function main() {
     return;
   }
 
-  // §3.4：impact 按改动路径反查依赖图影响面，供 scope/review 前评估 blast radius。
-  if (command === "impact") {
-    const changed = args._.slice(1);
-    if (changed.length === 0) throw new Error("wildarrange impact requires at least one changed file path, e.g. wildarrange impact src/infra/ledger.mjs");
-    console.log(JSON.stringify(await computeImpact(rootDir, changed), null, 2));
-    return;
-  }
-
   // --- 门决策与时间线 ---
   // §3.4：decisions 投影 ledger 门决策；stats 聚合触发率，默认 text 输出供人类扫读。
   if (command === "decisions") {
@@ -750,24 +743,6 @@ async function main() {
       author: strArg(args, "author"),
     });
     console.log(JSON.stringify({ kind: "wildarrange_annotation", recorded: entry }, null, 2));
-    return;
-  }
-
-  // --- 仓库测试 ---
-  // §3.4：test 按 --zone 或改动路径选型后跑 test-runner；--zone 与文件参数互斥。
-  if (command === "test") {
-    const positional = args._.slice(1);
-    if (strArg(args, "zone") && positional.length > 0) {
-      throw new Error("wildarrange test: --zone 与文件参数互斥，请只选一种选择方式");
-    }
-    const { tests, selectionNote } = await selectRepoTests(rootDir, {
-      zone: strArg(args, "zone"),
-      changedPaths: positional,
-    });
-    console.error(`[wildarrange test] ${selectionNote}`);
-    for (const file of tests) console.error(`[wildarrange test]   ${file}`);
-    // §3.4：exit 码透传 test-runner（失败数/255），非固定 2；选型摘要已在 stderr。
-    process.exitCode = runRepoTests(rootDir, tests);
     return;
   }
 

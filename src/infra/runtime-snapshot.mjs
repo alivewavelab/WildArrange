@@ -235,76 +235,19 @@ function describeNextAction(tasks, runnable, cliCommandPrefix, options = {}) {
 }
 
 /**
- * resolveRuntimeCliCommandPrefix：本模块对外异步 API。
+ * resolveRuntimeCliCommandPrefix：优先使用调用方给定前缀，其次外置 Adapter 安装报告，最后当前进程 CLI 路径。
  */
 export async function resolveRuntimeCliCommandPrefix(rootDir, options = {}) {
   const preferred = normalizeRuntimeCliCommandPrefix(rootDir, options.preferredPrefix);
   if (preferred) return preferred;
-  const artifactPrefix = await readInstalledHookCliCommandPrefix(rootDir);
-  if (artifactPrefix) return artifactPrefix;
-  // 内置模式的 install report 在 adapters/，外置模式在 adapters/external/
-  for (const segments of [["adapters", "install-report.json"], ["adapters", "external", "install-report.json"]]) {
-    const report = await readJson(resolveWildArrangePath(rootDir, ...segments), null);
-    const reportPrefix = normalizeRuntimeCliCommandPrefix(rootDir, report?.cliPrefix);
-    if (reportPrefix) return reportPrefix;
-  }
+  const report = await readJson(resolveWildArrangePath(rootDir, "adapters", "external", "install-report.json"), null);
+  const reportPrefix = normalizeRuntimeCliCommandPrefix(rootDir, report?.cliPrefix);
+  if (reportPrefix) return reportPrefix;
   if (options.fallbackCliPath) {
     const fallbackPrefix = normalizeRuntimeCliCommandPrefix(rootDir, `node "${path.resolve(options.fallbackCliPath)}"`);
     if (fallbackPrefix) return fallbackPrefix;
   }
-  return existsSync(path.join(rootDir, "bin", "wildarrange.mjs")) ? "node ./bin/wildarrange.mjs" : null;
-}
-
-/**
- * 读取 InstalledHookCliCommandPrefix 并返回结构化结果。
- */
-async function readInstalledHookCliCommandPrefix(rootDir) {
-  for (const hookPath of [
-    path.join(rootDir, ".codex", "hooks.json"),
-    resolveWildArrangePath(rootDir, "adapters", "codex", "hooks.json"),
-  ]) {
-    const hooks = await readJson(hookPath, null);
-    for (const command of collectHookCommands(hooks)) {
-      const marker = command.indexOf(" hook run");
-      if (marker < 0) continue;
-      const prefix = normalizeRuntimeCliCommandPrefix(rootDir, command.slice(0, marker));
-      if (prefix) return prefix;
-    }
-  }
-  for (const bridgePath of [
-    path.join(rootDir, ".cursor", "hooks", "wildarrange-hook-bridge.mjs"),
-    resolveWildArrangePath(rootDir, "adapters", "kimi", "plugin", "hooks", "wildarrange-hook-bridge.mjs"),
-  ]) {
-    const source = await readFile(bridgePath, "utf8").catch(() => "");
-    const cliSpecJson = source.match(/^const cliSpec = (\{[^\r\n]+\});$/m)?.[1];
-    if (!cliSpecJson) continue;
-    try {
-      const cliSpec = JSON.parse(cliSpecJson);
-      const candidate = cliSpec.kind === "npx"
-        ? `npx -y ${cliSpec.packageName}`
-        : cliSpec.kind === "local" ? `node "${cliSpec.cliPath}"` : "";
-      const prefix = normalizeRuntimeCliCommandPrefix(rootDir, candidate);
-      if (prefix) return prefix;
-    } catch {
-      // A malformed restored bridge is not an executable CLI fact.
-    }
-  }
   return null;
-}
-
-/**
- * 收集 HookCommands 条目。
- */
-function collectHookCommands(value, output = []) {
-  if (Array.isArray(value)) {
-    for (const item of value) collectHookCommands(item, output);
-  } else if (value && typeof value === "object") {
-    for (const [key, nested] of Object.entries(value)) {
-      if (key === "command" && typeof nested === "string") output.push(nested);
-      else collectHookCommands(nested, output);
-    }
-  }
-  return output;
 }
 
 /**
@@ -319,22 +262,10 @@ function normalizeRuntimeCliCommandPrefix(rootDir, value) {
   const node = prefix.match(/^node(?:\.exe)?\s+(?:"([^"\r\n]+[\\/]wildarrange\.mjs)"|'([^'\r\n]+[\\/]wildarrange\.mjs)'|(\S+[\\/]wildarrange\.mjs))$/i);
   const cliPath = node?.[1] || node?.[2] || node?.[3];
   if (!cliPath) return null;
-  if (/[\\/]_npx[\\/]/i.test(cliPath)) {
-    const packageName = extractNpxPackageNameFromCliPath(cliPath);
-    return packageName ? `npx -y ${packageName}` : null;
-  }
   const absoluteCliPath = path.isAbsolute(cliPath) ? path.resolve(cliPath) : path.resolve(rootDir, cliPath);
   if (!existsSync(absoluteCliPath)) return null;
   if (!path.isAbsolute(cliPath)) return "node ./bin/wildarrange.mjs";
   return `node "${absoluteCliPath}"`;
-}
-
-/**
- * 从内容中提取 NpxPackageNameFromCliPath。
- */
-function extractNpxPackageNameFromCliPath(cliPath) {
-  const normalized = cliPath.replaceAll("\\", "/");
-  return normalized.match(/\/node_modules\/((?:@[A-Za-z0-9][A-Za-z0-9._-]*\/)?[A-Za-z0-9][A-Za-z0-9._-]*)\/bin\/wildarrange\.mjs$/i)?.[1] || null;
 }
 
 /**

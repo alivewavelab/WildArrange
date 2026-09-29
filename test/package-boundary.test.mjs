@@ -192,7 +192,6 @@ test("packed package installs offline and public CLI completes a minimal smoke r
       const cliOptions = { cwd: projectRoot, encoding: "utf8", env: { ...process.env, WILDARRANGE_STATE_HOME: stateHome } };
       const initialized = JSON.parse(execFileSync(process.execPath, [installedCli, "init"], cliOptions));
       assert.equal(initialized.ok, true);
-      assert.equal(initialized.workspaceMode, "external");
       assert.equal(existsSync(path.join(projectRoot, ".wildarrange")), false, "external init must not write the project repository");
       const status = JSON.parse(execFileSync(process.execPath, [installedCli, "status"], cliOptions));
       assert.equal(status.work?.status, "idle");

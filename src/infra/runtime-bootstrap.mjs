@@ -10,7 +10,6 @@
 import { existsSync } from "node:fs";
 import { appendLedger } from "./ledger.mjs";
 import { DEFAULT_PROMPT_PACK_DIR, installPromptPack, isPromptPackCurrent } from "./prompt-pack.mjs";
-import { writeDefaultWildArrangeConfig } from "./runtime-config.mjs";
 import { writeSnapshot } from "./runtime-snapshot.mjs";
 import {
   STATE_VERSION,
@@ -27,7 +26,6 @@ import {
  */
 export async function initRuntime(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
-  const configResult = await writeDefaultWildArrangeConfig(rootDir, { force: options.force });
 
   const workPath = resolveWildArrangePath(rootDir, "work.json");
   let workCreated = false;
@@ -48,8 +46,8 @@ export async function initRuntime(rootDir, options = {}) {
   const promptPackCurrent = options.force ? false : await isPromptPackCurrent(rootDir, promptPackDir);
   if (!promptPackCurrent) await installPromptPack(rootDir, promptPackDir);
 
-  if (options.force || configResult.created || workCreated || !promptPackCurrent) {
-    await appendLedger(rootDir, { type: "runtime_initialized", configPath: configResult.path });
+  if (options.force || workCreated || !promptPackCurrent) {
+    await appendLedger(rootDir, { type: "runtime_initialized" });
     await writeSnapshot(rootDir, "initialized");
   }
   return readJson(workPath);

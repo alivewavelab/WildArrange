@@ -8,10 +8,8 @@
 
 修改项目前必须读取：
 
-- `doc/standards/code-and-interface-conventions.md`
-- `doc/testing-and-acceptance.md`
-- `doc/progress.md`
-- `doc/architecture.md`（存在时）
+- 治理仓 `policy/code-and-interface-conventions.md`
+- 治理仓 `policy/testing-and-acceptance.md`
 - 当前工作目录向上查找到的其他适用 `AGENTS.md`
 
 若规范与可执行配置冲突，先提交证据并由人类确认权威来源，不得自行选边。
@@ -27,6 +25,6 @@
 
 ## 验证与交付
 
-执行 `doc/testing-and-acceptance.md` 中与改动匹配的验证。未经人类明确确认，不得提高测试策略强度或增加新的测试类型、框架和门禁。
+执行 `policy/testing-and-acceptance.md` 中与改动匹配的验证。未经人类明确确认，不得提高测试策略强度或增加新的测试类型、框架和门禁。
 
 Agent 只能提交验证证据并进入待验收状态。交付时必须报告任务编号、影响范围、实际执行命令、结果、未执行检查及剩余风险；检查通过仅表示 `ready for review`。

@@ -17,7 +17,6 @@ import { withExternalProject } from "./helpers/external-fixture.mjs";
 test("external fixture attaches three separate roots and keeps the project free of runtime files", async () => {
   await withExternalProject(async ({ projectRoot, governanceRoot, stateHome }) => {
     const context = await resolveWorkspaceContext(projectRoot);
-    assert.equal(context.mode, "external");
     assert.equal(context.governanceRoot, governanceRoot);
     assert.ok(context.runtimeRoot.startsWith(stateHome), "runtime root lives under the isolated state home");
     assert.ok(resolveWildArrangePath(projectRoot, "team", "tasks.json").startsWith(context.runtimeRoot));

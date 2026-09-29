@@ -24,7 +24,7 @@ import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { proposeContractChange } from "../src/orchestration/contract-governance.mjs";
 import { runNextTask } from "../src/orchestration/linear-runtime.mjs";
 import { runWorkflow } from "../src/orchestration/workflow.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { gitCommitAll, withExternalProject } from "./helpers/external-fixture.mjs";
 
 function nodeEval(source) {
   const encoded = Buffer.from(source, "utf8").toString("base64");
@@ -91,7 +91,7 @@ test("initRuntime is quiet when state and Prompt Pack are unchanged, but reinsta
 });
 
 test("runNextTask reports a throwing gate without dereferencing null evidence", async () => {
-  await withExternalProject(async ({ root, projectRoot: dir }) => {
+  await withExternalProject(async ({ root, projectRoot: dir, governanceRoot }) => {
     const planPath = path.join(root, "gate-error-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Gate error regression",
@@ -99,7 +99,7 @@ test("runNextTask reports a throwing gate without dereferencing null evidence", 
         id: "T001",
         subject: "Corrupt runtime config after worker startup",
         writable_paths: ["src/**"],
-        worker_command: nodeEval(`require('fs').writeFileSync(${JSON.stringify(resolveWildArrangePath(dir, "config.json"))}, '{ broken', 'utf8')`),
+        worker_command: nodeEval(`require('fs').writeFileSync(${JSON.stringify(path.join(governanceRoot, "policy", "wildarrange.config.json"))}, '{ broken', 'utf8')`),
         verify_commands: [nodeEval("process.exit(0)")],
         review_commands: [nodeEval("process.exit(0)")],
       }],
@@ -116,13 +116,9 @@ test("runNextTask reports a throwing gate without dereferencing null evidence", 
 });
 
 test("runWorkflow stops after the first state that requires an external decision", async () => {
-  await withExternalProject(async ({ root, projectRoot: dir }) => {
-    const configPath = resolveWildArrangePath(dir, "config.json");
-    const config = await readJson(configPath);
-    await writeFile(configPath, JSON.stringify({
-      ...config,
-      planApproval: { ...config.planApproval, required: true },
-    }, null, 2), "utf8");
+  await withExternalProject(async ({ root, projectRoot: dir, governanceRoot }) => {
+    await writeFile(path.join(governanceRoot, "policy", "wildarrange.config.json"), JSON.stringify({ planApproval: { required: true } }, null, 2), "utf8");
+    await gitCommitAll(governanceRoot, "require plan approval");
     const planPath = path.join(root, "approval-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Approval wait regression",

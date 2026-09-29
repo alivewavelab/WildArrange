@@ -19,7 +19,7 @@ bin/wildarrange.mjs
        -> src/infra/*
   -> src/infra/*          (runtime store/config/bootstrap, ledger, security, command runner/safety, git, rules, llm, ...)
   -> packs/wildarrange-linear/*
-  -> .wildarrange/*
+  -> runtimeRoot（项目外，逻辑路径 `.wildarrange/*`）
 ```
 
 `src/` 根目录不再承载运行时 `.mjs` 文件。项目尚未形成需要维护的历史 JavaScript API，因此 CLI、测试和模块调用方都直接 import 五区中的真实 owner，不建立兼容 shim 或综合 barrel。
@@ -30,7 +30,7 @@ WildArrange 恰好有五个长期 Agent：Jiuwei（编排与线性交付）、Di
 
 ## Git 交付
 
-不做多设备/多用户远端协调。`.wildarrange/` 保持本地；每个可写任务独占一个 worktree 和一个 `wildarrange/task/<planId>/<taskId>` 分支。同一分支已被另一个可写任务或 worktree 占用时拒绝启动（`prepareAgentWorktree` 返回带 `occupied` 标记的明确原因）。
+不做多设备/多用户远端协调。runtimeRoot 保持本地；每个可写任务独占一个 worktree 和一个 `wildarrange/task/<planId>/<taskId>` 分支。同一分支已被另一个可写任务或 worktree 占用时拒绝启动（`prepareAgentWorktree` 返回带 `occupied` 标记的明确原因）。
 
 ```text
 task branch target (local, from clean commit base)
@@ -105,7 +105,7 @@ AGENTS.md                         # mandatory reading routes
 
 - `bin/wildarrange.mjs`：CLI 路由。
 - `src/infra/runtime-store.mjs`：运行时路径、时间/ID、目录创建、JSON 原子写、持久化 task-status 枚举与 hash 原语。
-- `src/infra/workspace-context.mjs`：项目、独立治理仓库与本机运行态三根解析；本机 registry、Git common-dir 身份、治理合同/verification registry 校验、非覆盖治理骨架初始化与 legacy 事务迁移的唯一 owner。
+- `src/infra/workspace-context.mjs`：项目、独立治理仓库与本机运行态三根解析；本机 registry、Git common-dir 身份、治理合同/verification registry 校验、非覆盖治理骨架初始化（policy/ 模板补建）的唯一 owner。
 - `src/interface/project-connection.mjs`：`project init-governance/attach/show` 与外置迁移的 CLI 投影；不拥有路径或迁移规则。
 - `src/interface/project-setup.mjs`：`setup` 一步式外置接入，只按序组合 init-governance（含 Git 初始提交与默认武装配置）、attach、`initRuntime` 与外置 adapter install，不拥有任何路径或治理规则。
 - `src/interface/external-adapters.mjs`：在外置 runtime 生成 Codex 本地 marketplace/plugin、Cursor 用户 Hook bundle 与 Kimi 用户 plugin；Cursor 显式激活负责备份和合并用户配置，所有宿主都以真实生命周期回执而非文件存在证明激活。
@@ -118,13 +118,9 @@ AGENTS.md                         # mandatory reading routes
 - `src/infra/runtime-snapshot.mjs::ensureTaskPacket`：已获准任务首次开工的历史基线与证据路径索引 owner。`runtime-store.mjs::resolveTaskPacketPath` 校验 `<planId>/<taskId>`；`.wildarrange/task-packets/` 不是当前任务状态或新批准记录，Worker 不能因其存在获得额外写权限。
 - `src/infra/prompt-pack.mjs`：prompt-pack 注册安装、固定运行时副本物化、条目加载、内容 hash、列表与校验渲染。外部/custom pack 先校验 source realpath，再复制到 `.wildarrange/prompt-pack/installed`；运行时 Agent、Skill、routes、tool 与 matcher 全部只从这个固定根读取，不信任 registry 中可修改的根路径字段。
 - `src/infra/runtime-bootstrap.mjs`：跨 config、work、prompt pack、ledger 与 snapshot 的一次性 `initRuntime` 顺序。长期 Agent 配置只保留在权威 config，不再生成无消费者的 `agents.json` / `categories.json` 投影。
-- `src/interface/project-init.mjs`：只在显式 `init --project-docs` 时从发布包模板补建缺失治理文档，使用独占创建保证已有文件不被合并或覆盖，架构模板还需显式 `--architecture`。
 - `src/infra/ledger.mjs`：hash 链 ledger 追加、ledger 校验与校验条目读取。hash 链启动后，无 hash 的追加行报告为篡改；`doctor` 仅接受链校验条目作为完成证据。追加在尾部损坏时 fail-closed（无效 JSON、链启动后的无 hash 尾行、或相对尾缓存的文件缩小会拒绝追加而非静默分叉链）；`.wildarrange/ledger-tail.json` 的 size+hash 缓存使重复追加 O(1)，全扫描为 fallback；`verifyLedger` 仍是唯一权威。`appendLedgerOnce` 在同一把 ledger 锁内原子完成判重+追加，判重只认已校验条目。
 - `src/infra/text-utils.mjs`：字符串集合小工具（`uniqueStrings`）的单一 owner，各分区不得本地复刻。
-- `src/interface/adapters.mjs`：Codex/Cursor/Kimi adapter 安装、卸载、恢复、报告、备份逻辑、Codex `.codex/hooks.json` 生成、Cursor hooks+rule 生成、Kimi plugin 生成与共享 command Skill 生成。
-- `src/interface/kimi-adapter.mjs`：Kimi plugin manifest、项目感知 Hook bridge 与 Kimi 安装/readme 说明的纯渲染。Kimi 专用协议翻译留在此，不进入 workflow core。
-- `src/interface/cursor-adapter.mjs`：Cursor `.cursor/hooks.json` 配置、项目感知 Hook bridge（camelCase 事件/工具映射、`permission`/`additional_context`/`followup_message` 输出协议）与 Cursor 安装/readme 说明的纯渲染。Write/Delete/Edit/Shell 的 `preToolUse` 与集成终端命令的 `beforeShellExecution` 为 fail-closed；bridge 将任何非显式 allow 决策视为 deny。
-- `src/interface/hook-bridge-core.mjs`：两类 Hook bridge 共享的项目发现、CLI 子进程启动、stdout/stderr 收集与 JSON 解析模板。Cursor 显式传入 25 秒第二保险并由本地 `failHook` 实施 fail-closed；Kimi 显式不配置自毁定时器，保持宿主 timeout 后 fail-open 的合同，二者输出协议仍由各 adapter 自己翻译。
+- `src/interface/hook-bridge-core.mjs`：外置 Hook bridge 共享的受治理项目判断、CLI 子进程启动、stdout/stderr 收集与 JSON 解析模板；失败策略与输出协议由 `external-adapters.mjs` 按宿主翻译。
 - `src/orchestration/change-governance.mjs`：转向提案、review blocker、ChangeRequest 复核与显式 accept/reject 决议。
 - `src/infra/repository-binding.mjs`：任务 acceptance proof 的双仓基线校验，以及不修改任一仓库的项目 SHA + 治理 SHA integration acceptance receipt。
 - `src/infra/failure-analysis.mjs`：失败原因分类、重试提示与可行动失败摘要。
@@ -138,7 +134,7 @@ AGENTS.md                         # mandatory reading routes
 - `src/infra/decision-log.mjs`：统一决策记录（`.wildarrange/decisions.jsonl`）。仅在四缝发射——delivery-pipeline gate（verify/scope/review/acceptance-proof/checkpoint + pipeline 结果）、`ai/hooks` pre/post-tool-use 决策、并行 admission 与路由。路由记录额外保留完整 `inputText` 与结构化 `routeResult`；工具 Hook 保留 `toolName`、目标路径和脱敏后的参数摘要，供同 `sessionId` 复盘。派生日志：非 hash 链（ledger 仍是审计权威）、无锁单行追加（行中途外部截断后自愈）、best-effort 发射且从不破坏主流程；读侧跳过并计数损坏或半写行。
 - `src/capabilities/worker.mjs` / `src/capabilities/review-gate.mjs`：worker 执行与 BaiZe 独立 review 通道。风险复核与怀疑式验收是 BaiZe Skill 模式，非独立长期 Agent。
 - `src/infra/command-safety.mjs`：worker、verifier、review 命令、质量 gate 与子 Agent runner 共用的高风险 shell 命令预检；阻断破坏性系统命令与对项目源/测试/文档目录的递归删除。内置模式为不可削弱底线；config 中 `commandSafety.extraPatterns` 追加项目规则（`compileCommandSafetyPatterns` 编译，调用方经 `runCommand` options 传入）。
-- `src/infra/security.mjs`：config hash 基线、config 校验、运行时状态备份、归档精确恢复包、备份列表、一键状态恢复与关键状态校验；manifest 使用稳定 `.wildarrange/...` 逻辑路径，并解析到当前绑定的 legacy 或外置运行态根。
+- `src/infra/security.mjs`：config hash 基线、config 校验、运行时状态备份、归档精确恢复包、备份列表、一键状态恢复与关键状态校验；manifest 使用稳定 `.wildarrange/...` 逻辑路径，并解析到当前绑定的外置运行态根。
 - `src/interface/adoption-panel.mjs`：验证治理接管 Dashboard 卡片、批准/恢复 API 与页面片段；写操作复用 Host/Origin/token/payload 防护。`adoption start/resume` 未显式提供 token 时生成单次随机 token，并通过 URL fragment 放入当前标签页。
 - `src/orchestration/adoption.mjs`：接管会话状态机、维护互斥、逐卡事务、`adoption recover` 和两次 Git 锚定；commit A/B 核对 Git blob 与生成文件内容哈希，并对 Windows 换行规范化，不接受同名路径存在。已生效改动禁止直接取消；恢复成功或普通回滚成功后才释放维护 marker。不进入 `task.status`。
 - `src/capabilities/verification-governance.mjs`：经 gateway 暴露 scan / apply-card / generate-artifacts。archive 只允许项目可提交根（默认 `docs/verification-archive`），禁止 `.wildarrange/` / `.git` / `node_modules`。
@@ -214,7 +210,7 @@ SQL/数据库字段首版仍需人工声明精确结构及验证引用，Tauri �
 - `packs/wildarrange-linear/skills`：skill prompt。
 - `packs/wildarrange-linear/tools/tool-contract.json`：工具合同清单。
 - M1 发布工具合同只登记真实 CLI、运行时内建能力、配置驱动能力和明确的宿主只读工具；不发布 roadmap-only 条目，也不把多条状态变更命令用 shell 管道拼接。路由持久化到 `task.skills` 的 Skill 只在真实接通的 `before_execute` 公开宿主入口作为任务绑定进入统一预算化加载器；`before_review` / `before_checkpoint` 仍使用静态阶段 Skill，不宣称自动消费任务绑定。未知、越界或完整性失败的 Skill 只报告、不注入。
-- `wildarrange.config.json`：项目根权威配置。它存在时不再把 `.wildarrange/config.json` 当隐式底层，避免根配置删除字段后旧键复活。
+- 治理仓 `policy/wildarrange.config.json`：唯一配置（缺失时使用 default-config）；不再读取项目根配置或运行态 `config.json` 副本。
 
 ## 运行时状态
 
@@ -282,22 +278,15 @@ review gate 是宿主中立的。从 CLI 运行，可含确定性通道、配置
 
 ## Adapter 模型
 
-以下项目内文件模型只适用于 legacy 模式。外置模式由 `src/interface/external-adapters.mjs` 把三宿主 bundle 写到 `runtimeRoot/adapters/external`：Cursor 可经 `adapter activate --target cursor` 备份并合并用户级 Hook；Codex 与 Kimi 由用户在插件界面显式安装和信任。生成/配置不代表激活，只有 bridge 携带当前 activationId 真实运行并进入 hash 链 ledger 后，doctor 才显示 `execution_observed`。bridge 在调用治理运行时前按 cwd 识别已连接项目，未连接工作区静默退出。
-
-Codex 收到 `.codex/hooks.json`。这是真实的项目本地 Codex hook 入口，在项目 `.codex/` 层与 hook 定义经 `/hooks` 信任后变为 hard enforcement。
+外置模式是唯一形态：`src/interface/external-adapters.mjs` 把三宿主 bundle 写到 `runtimeRoot/adapters/external`，WildArrange 不向客户项目写任何文件。Cursor 可经 `adapter activate --target cursor` 备份并合并用户级 Hook；Codex 与 Kimi 由用户在插件界面显式安装和信任。生成/配置不代表激活，只有 bridge 携带当前 activationId 真实运行并进入 hash 链 ledger 后，doctor 才显示 `execution_observed`。bridge 在调用治理运行时前按 cwd 识别已连接项目，未连接工作区静默退出。
 
 Codex 主会话身份由 lifecycle hook 自动建立：`SessionStart` 从已安装且 hash 校验通过的 Prompt Pack 读取 Jiuwei Prompt 并注入一次；发生上下文压缩时，`PostCompact` 再注入一次。普通用户消息只做路由和动态上下文匹配，不重复加载完整角色 Prompt。
 
-WildArrange 还将 `.wildarrange/adapters/codex/hooks.json` 写为审计副本。Cursor 收到 `.cursor/hooks.json` 与项目感知 bridge `.cursor/hooks/wildarrange-hook-bridge.mjs`（工作区信任后为 hard enforcement；`preToolUse` fail-closed），`.cursor/rules/wildarrange.mdc` 仍为 soft fallback 层。
+Cursor 的 `preToolUse` 与 `beforeShellExecution` 由 bridge fail-closed；Codex 与 Kimi 的 Hook 在 hook 崩溃与超时时 fail-open，最终安全与完成仍由宿主中立 delivery pipeline 与 checkpoint gate 强制。项目 CLI 永不编辑用户级 `~/.kimi-code/config.toml`；Kimi plugin 由用户显式 `/plugins install` 后 `/reload` 激活。
 
-Kimi 在 `.wildarrange/adapters/kimi/plugin/` 下收到生成的 plugin。项目 CLI 永不编辑用户级 `~/.kimi-code/config.toml`；开发者从项目根启动 Kimi Code，通过 `/plugins install .wildarrange/adapters/kimi/plugin` 显式安装生成的 plugin，并用 `/reload` 激活。相对路径避免 Kimi Code 0.27 将引号字符当作字面路径字符。Kimi plugin 安装是用户 scope，其 Hook bridge 先验证事件 `cwd` 含真实 WildArrange 运行时标记，无关项目不创建文件即退出。Kimi Hook runner 在 hook 崩溃与超时时 fail-open：健康的 `PreToolUse` 可 deny 范围外 Write/Edit/Bash，但最终安全与完成仍由宿主中立 delivery pipeline 与 checkpoint gate 强制。
+adapter 安装还在插件包内生成一组共享 command Skill（`wildarrange-setup`、`-onboard`、`-architecture`、`-config`、`-doctor`、`-refresh`、`-status`、`-plan`、`-approve`、`-run`），三宿主共用同一渲染。`adapter install --mode local|npx` 只决定 Hook 与 Skill 调用 CLI 的前缀（当前 bin 路径或 npx 包名）。
 
-adapter 安装还生成一组 command，用户不必开终端做常见操作。所有面从同一共享 command 集渲染（`wildarrange-config`、`wildarrange-doctor`、`wildarrange-refresh`、`wildarrange-status`、`wildarrange-plan`、`wildarrange-approve`、`wildarrange-run`）：
-
-- Cursor：`.cursor/commands/<name>.md`（纯 Markdown slash command，文件名 = 命令名）。
-- Codex 与 Kimi：`.agents/skills/<name>/SKILL.md`（共享项目 Skill 目录，带 `name`/`description` metadata）。
-
-每个 command 是指示 agent 运行匹配 `wildarrange.mjs` CLI 子命令并报告结果的 prompt；它们是让 agent 跑 CLI 的快捷方式，不是原生按钮。
+每个 command Skill 是指示 agent 运行匹配 `wildarrange.mjs` CLI 子命令并报告结果的 prompt；它们是让 agent 跑 CLI 的快捷方式，不是原生按钮。
 
 ### 对话生成计划与负责人
 
@@ -364,7 +353,7 @@ dashboard 保持 local-first。loopback `GET /api/state` 可无 token 读取做�
 
 WildArrange core 必须保持原创代码。外部 workflow 项目可 inform 概念、节点名与质量 gate，但商业构建不得 ship 复制源码、复制 prompt 文本或限制商业再分发许可的工具实现。
 
-adapter 专用行为属于 `src/interface/adapters.mjs`、`src/interface/kimi-adapter.mjs` 或宿主专用生成文件。core workflow、gate、ledger 与 provider 逻辑必须在没有 Codex/Cursor/Kimi 私有 hook 的情况下运行。
+adapter 专用行为属于 `src/interface/external-adapters.mjs` 或宿主专用生成文件。core workflow、gate、ledger 与 provider 逻辑必须在没有 Codex/Cursor/Kimi 私有 hook 的情况下运行。
 
 ## 维护规则
 
@@ -403,18 +392,14 @@ adapter 专用行为属于 `src/interface/adapters.mjs`、`src/interface/kimi-ad
 | `src/interface/dashboard-view.mjs`                           | Dashboard 整页 HTML/CSS 与浏览器交互渲染，组合现有 panel 片段 |
 | `src/interface/contract-view.mjs`                            | 契约登记与扫描差异的只读 HTML 呈现，不批准或改写正式登记 |
 | `src/interface/adoption-panel.mjs`                           | 验证治理接管 Dashboard 卡片、批准 API 输入校验与页面片段 |
-| `src/interface/adapters.mjs`                                 | Codex / Cursor / Kimi adapter 安装、卸载、恢复、共享 Skill 命令生成 |
-| `src/interface/kimi-adapter.mjs`                             | Kimi plugin manifest、Hook bridge 与安装说明的纯渲染逻辑 |
-| `src/interface/cursor-adapter.mjs` | Cursor `.cursor/hooks.json`、项目感知 Hook bridge（事件/工具名映射与输出协议翻译）与安装说明的纯渲染逻辑；preToolUse 对 Write/Delete/Shell fail-closed |
-| `src/interface/hook-bridge-core.mjs` | Kimi/Cursor bridge 共享的项目发现、CLI 子进程与输出解析渲染；宿主超时和失败策略由调用方显式传入 |
+| `src/interface/hook-bridge-core.mjs` | 外置 bridge 共享的受治理项目判断、CLI 子进程与输出解析渲染；宿主超时和失败策略由调用方显式传入 |
 | `src/interface/doctor.mjs`                                   | 一键体检：各项检查各自独立 try/catch（单项崩只标红本分项），含 gateArming 门武装、adapters 硬拦截安装/陈旧规则、decisionHealth 周期健康摘要；诊断不再写 ledger |
 | `src/interface/doctor-completion.mjs`                        | doctor 的 completionAudit 分项：完成证据完整性复核（checkpoint/acceptance proof/ledger 事件对账、legacy 事件归属、worktree 漂移、派生视图分叉） |
 | `src/interface/decisions.mjs` | `wildarrange decisions` 只读投影：每条决策三行（发生了什么/命中规则/证据），坏行降级；`decisions stats` 确定性统计审查（计数/从未触发的门/标注关联，无 LLM） |
 | `src/interface/timeline.mjs` | `wildarrange timeline`：ledger（仅校验通过条目）+ decisions + annotations 统一倒序时间线投影，只读 |
 | `src/interface/dashboard-panels.mjs` | Dashboard 决策面板 + 运维面板：只读 ViewModel 与渲染片段（防 dashboard.mjs 超拆分线） |
 | `src/interface/cli-help.mjs` | CLI 命令注册表单一事实源：core 六命令分层 help、`docs commands` Markdown 物化 |
-| `src/interface/project-init.mjs` | 显式、非覆盖式补建项目治理文档，并返回需要人类确认的清单 |
-| `src/interface/project-connection.mjs` | 独立治理仓库初始化、连接、查询与 legacy 外置迁移的 CLI 视图；不复制 Infra 规则 |
+| `src/interface/project-connection.mjs` | 独立治理仓库初始化、连接与查询的 CLI 视图；不复制 Infra 规则 |
 | `src/interface/project-setup.mjs` | `setup` 一步式外置治理接入：按序组合治理仓初始化、attach、运行态初始化与外置 adapter 包生成 |
 | **orchestration/**（工作流顺序、重试、gate 编排，只依赖 ai、capabilities、infra） |  |
 | `src/orchestration/AGENTS.md`                                | 编排、事务、恢复与完成状态不变量 |
@@ -468,7 +453,7 @@ adapter 专用行为属于 `src/interface/adapters.mjs`、`src/interface/kimi-ad
 | **infra/**（基础设施，不依赖任何上层区） |  |
 | `src/infra/AGENTS.md`                                        | 最低层依赖、确定性、文件/锁/命令安全约束 |
 | `src/infra/runtime-store.mjs`                                 | 路径、时间/ID、目录、JSON 原子写与 hash 原语 |
-| `src/infra/workspace-context.mjs`                             | 三根上下文、本机 registry、治理合同/verification registry、Git common-dir 身份与 legacy 外置迁移 |
+| `src/infra/workspace-context.mjs`                             | 三根上下文、本机 registry、治理合同/verification registry、Git common-dir 身份 |
 | `src/infra/file-lock.mjs`                                     | 统一文件锁原语：stale 恢复（死 pid 立即、不可解析按 mtime 宽限）与可诊断超时（错误带 owner/pid/存活状态） |
 | `src/infra/task-state-lock.mjs`                               | 全局任务状态锁（file-lock 原语的路径与默认参数封装）；`transactWithLedger` 固定「先 appendLedger 后 persist」顺序 |
 | `src/infra/text-utils.mjs`                                    | 字符串集合小工具（uniqueStrings）单一 owner |
@@ -512,7 +497,7 @@ adapter 专用行为属于 `src/interface/adapters.mjs`、`src/interface/kimi-ad
 | `test/dependency-boundary.test.mjs`                             | 五区依赖方向强制测试，每次 `npm test` 都会跑                |
 | `test/AGENTS.md`                                             | 单元、集成、对抗、包体测试的局部规范 |
 | `test/*.test.mjs`                                              | Node 内置测试                                     |
-| `.wildarrange/`                                                | legacy 运行时逻辑目录；外置模式的同名逻辑路径解析到本机 `runtimeRoot`，客户项目不生成该目录 |
+| `.wildarrange/`                                                | 运行态逻辑路径前缀；解析到本机 `runtimeRoot`，客户项目不生成该目录 |
 
 ## 职责与事实审计的目录归属
 
@@ -536,4 +521,4 @@ configure-project-review 和 project-onboarding 是按需加载的流程 Skill�
 
 ### 设计层架构接入
 
-review-architecture-design 是设计审查流程的唯一规则来源；project-init 返回加载提示，project-onboarding 先进入该环节，adapter 提供 architecture 入口。它审查设计并要求人工确认同一权威文档，不读取源码反推设计、不新增 runtime 架构准入状态、不将模板或 Review PASS 视为人类批准。
+review-architecture-design 是设计审查流程的唯一规则来源；project-onboarding 先进入该环节，adapter 提供 architecture 入口。它审查设计并要求人工确认同一权威文档，不读取源码反推设计、不新增 runtime 架构准入状态、不将模板或 Review PASS 视为人类批准。

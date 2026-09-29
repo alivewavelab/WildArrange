@@ -42,14 +42,14 @@ const PROJECT_RULE_DIRS = [
  * scanProjectRules：本模块对外异步 API。
  */
 export async function scanProjectRules(rootDir, options = {}) {
-  const controlRoot = options.controlRoot || rootDir;
-  await ensureWildArrangeDirs(controlRoot);
-  const { config, sourcePath } = await loadWildArrangeConfig(controlRoot);
+  const projectRoot = options.projectRoot || rootDir;
+  await ensureWildArrangeDirs(projectRoot);
+  const { config, sourcePath } = await loadWildArrangeConfig(projectRoot);
   const ruleConfig = config.ruleInjection || DEFAULT_WILDARRANGE_CONFIG.ruleInjection;
   const targetPaths = normalizeRuleTargetPaths(options.targetPaths || []);
   const allRules = [];
-  const workspace = getBoundWorkspaceContext(controlRoot);
-  if (workspace?.mode === "external" && workspace.governanceContract?.policyPath) {
+  const workspace = getBoundWorkspaceContext(projectRoot);
+  if (workspace?.governanceContract?.policyPath) {
     allRules.push(...await readGovernancePolicyRules(workspace.governanceRoot, workspace.governanceContract.policyPath));
   }
   for (const filePath of ruleConfig.projectSingleFiles || PROJECT_RULE_FILES) {
@@ -72,15 +72,15 @@ export async function scanProjectRules(rootDir, options = {}) {
     configPath: sourcePath,
     targetPaths,
     total: allRules.length,
-    governanceRoot: workspace?.mode === "external" ? workspace.governanceRoot : null,
+    governanceRoot: workspace?.governanceRoot ?? null,
     governancePolicyRules: allRules.filter((rule) => rule.source === "governance_policy").length,
     matched: budgetedRules.length,
     rules: budgetedRules,
   };
-  const jsonPath = resolveWildArrangePath(controlRoot, "rules", "context.json");
-  const mdPath = resolveWildArrangePath(controlRoot, "rules", "context.md");
-  result.reportJsonPath = path.relative(controlRoot, jsonPath);
-  result.reportMdPath = path.relative(controlRoot, mdPath);
+  const jsonPath = resolveWildArrangePath(projectRoot, "rules", "context.json");
+  const mdPath = resolveWildArrangePath(projectRoot, "rules", "context.md");
+  result.reportJsonPath = path.relative(projectRoot, jsonPath);
+  result.reportMdPath = path.relative(projectRoot, mdPath);
   await writeJsonAtomic(jsonPath, result);
   await writeFile(mdPath, renderRulesMarkdown(result), "utf8");
   return result;
@@ -92,7 +92,7 @@ export const POLICY_PLACEHOLDER = "[待确认]";
 /** 列出治理仓 policy 中仍含占位标记的文件（相对治理仓根），供 doctor 告警。 */
 export async function listPlaceholderPolicyFiles(rootDir) {
   const workspace = getBoundWorkspaceContext(rootDir);
-  if (workspace?.mode !== "external" || !workspace.governanceContract?.policyPath) return [];
+  if (!workspace?.governanceContract?.policyPath) return [];
   const rules = await readRuleDir(workspace.governanceRoot, workspace.governanceContract.policyPath, "governance_policy");
   return rules.filter((rule) => rule.placeholder).map((rule) => rule.path);
 }
