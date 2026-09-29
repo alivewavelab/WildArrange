@@ -977,7 +977,7 @@ function mismatchLabels(diagnostics) {
 }
 
 /** 判断 adoption 卡是否触及敏感路径或 merge/delete/archive 动作。 */
-export function isSensitiveAdoptionCard(card) {
+function isSensitiveAdoptionCard(card) {
   return SENSITIVE_ACTIONS.has(card.action)
     || SENSITIVE_PATH_RE.test(card.path || "")
     || (Array.isArray(card.verify) && card.verify.length > 0);

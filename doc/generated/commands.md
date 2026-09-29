@@ -44,10 +44,6 @@
 | `wildarrange parallel close --run <runId> [--task T001] [--reason "..."]` | 关闭保留的子 Agent 结果 |
 | `wildarrange parallel cleanup --run <runId>` | 清理 Git worktree 隔离目录 |
 | `wildarrange parallel retry --run <runId> [--command "..."] [--max-agents N]` | 只重跑未完成任务的局部重试 |
-| `wildarrange archivist packet [--text "..."] [--stage plan] [--turns turns.json]` | 生成档案路由包 |
-| `wildarrange archivist run [--text "..."] [--stage plan] [--turns turns.json] [--force]` | 运行档案路由员 |
-| `wildarrange archivist suggestions list` | 查看路由建议 |
-| `wildarrange archivist suggestions resolve --id <id> --decision accept|reject --evidence "..." --rationale "..."` | 审核路由建议 |
 | `wildarrange node route --text "request"` | 单节点：路由 |
 | `wildarrange node execute [--task T001]` | 单节点：执行 |
 | `wildarrange node verify [--task T001]` | 单节点：验证 |
@@ -88,7 +84,6 @@
 | `wildarrange annotate --decision <decisionId> --category <confirmed|rule_wrong|case_wrong|mislabeled> [--reason "..."] [--author name]` | 标注门决策（只进报告，不改配置） |
 | `wildarrange annotate list [--limit N]` | 列出标注 |
 | `wildarrange annotate stats` | 标注聚合统计 |
-| `wildarrange review suspicious [--limit N]` | LLM 可疑判断异步审查（只进报告，不进完成链） |
 | `wildarrange test [--zone interface|orchestration|ai|capabilities|infra] [changed-file...]` | 分区/影响面最小测试集 |
 | `wildarrange docs commands [--write]` | 从命令注册表生成命令文档（单一事实源） |
 | `wildarrange state backup [--reason "..."]` | 备份运行态关键文件 |

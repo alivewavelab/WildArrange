@@ -40,7 +40,6 @@ test("repo root config carries every key the example config documents", async ()
     "agents.ZhuRong.skills",
     "agents.BaiZe.skills",
     "agents.LuWu.skills",
-    "routeGovernance",
     "gitCoordination",
     "parallelAgents.retainUntilUserAcceptance",
     "parallelAgents.defaultAdapter",
@@ -50,8 +49,6 @@ test("repo root config carries every key the example config documents", async ()
     "review.responsibility",
     "review.steps",
     "verificationGovernance",
-    "qualityGates.astStructure",
-    "qualityGates.hashlineAnchors",
     "executionReadiness",
   ];
   for (const dottedPath of requiredPaths) {

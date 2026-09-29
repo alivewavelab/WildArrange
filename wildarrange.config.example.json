@@ -81,69 +81,6 @@
       "skills": []
     }
   },
-  "archivistRouter": {
-    "enabled": false,
-    "agent": "CangJie",
-    "provider": "deepseek",
-    "model": "deepseek-v4-flash",
-    "triggers": {
-      "sessionStart": true,
-      "gitHeadChanged": true,
-      "lowConfidenceRoute": true,
-      "everyUserPrompts": {
-        "default": 10,
-        "ideate": 5,
-        "plan": 5,
-        "clarify": 5,
-        "execute": 15,
-        "verify": 15,
-        "review": 15,
-        "min": 5,
-        "max": 20
-      },
-      "workflowCheckpoint": true
-    },
-    "memory": {
-      "backend": "structured-files",
-      "root": ".wildarrange/memory",
-      "captureMode": "conclusions-only",
-      "includeCodeBlocks": false,
-      "maxRecentTurns": 10,
-      "recentTurnWindows": {
-        "default": 10,
-        "ideate": 5,
-        "plan": 5,
-        "clarify": 5,
-        "execute": 15,
-        "verify": 15,
-        "review": 15,
-        "max": 20
-      },
-      "maxRoutingPacketChars": 12000,
-      "injectFields": ["progress", "decisions", "artifacts", "implementationNotes", "researchNotes", "pitfalls", "openQuestions"]
-    },
-    "keywordEvolution": {
-      "suggestOnly": true,
-      "autoApplyConfidence": 0.85,
-      "minEvidenceCount": 2,
-      "protectedTargets": ["askGate", "intents.review", "intents.release_git", "intents.change_request"]
-    }
-  },
-  "routeGovernance": {
-    "dailyReview": {
-      "enabled": true,
-      "trigger": "stop",
-      "maxItems": 20
-    },
-    "semanticShadow": {
-      "enabled": true,
-      "agent": "CangJie",
-      "timeoutMs": 30000,
-      "lowConfidenceThreshold": 0.5,
-      "conflictRoute": "plan",
-      "enforceLowConfidence": true
-    }
-  },
   "gitCoordination": {
     "mode": "guarded",
     "remote": "origin",
@@ -263,23 +200,6 @@
     "archiveRoot": ""
   },
   "qualityGates": {
-    "lspDiagnostics": {
-      "enabled": false,
-      "required": false,
-      "commands": [],
-      "timeoutMs": 120000
-    },
-    "astStructure": {
-      "enabled": false,
-      "required": false,
-      "commands": [],
-      "timeoutMs": 120000
-    },
-    "hashlineAnchors": {
-      "enabled": false,
-      "required": false,
-      "anchors": []
-    },
     "commentChecker": {
       "enabled": true,
       "blockOnFindings": false,
@@ -335,8 +255,6 @@
     "mode": "both",
     "maxRuleChars": 12000,
     "maxResultChars": 40000,
-    "dynamicMaxRuleChars": 4000,
-    "dynamicMaxResultChars": 10000,
     "projectSingleFiles": ["AGENTS.md", "CLAUDE.md", "CONTEXT.md", ".github/copilot-instructions.md"],
     "projectRuleDirs": [".claude/rules", ".cursor/rules", ".github/instructions"]
   },
@@ -425,7 +343,7 @@
     "stop": {
       "enabled": true,
       "tools": ["wildarrange_continuation_check", "wildarrange_resume"],
-      "markdown": [".wildarrange/sessions/continuation.md", ".wildarrange/snapshots/context.md", ".wildarrange/reports/routing/latest.md"],
+      "markdown": [".wildarrange/sessions/continuation.md", ".wildarrange/snapshots/context.md"],
       "skills": ["wildarrange-injection-runtime", "start-work", "review-routing-decisions"],
       "rules": {
         "mode": "static"

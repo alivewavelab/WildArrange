@@ -148,7 +148,7 @@ export async function executeReviewPacket(rootDir, packetPath, packet, config, s
  * 校验独立审查者返回的 JSON verdict：digest 匹配、引用行精确、PASS/RETURN 规则。
  * @throws {Error} 引用或决策不符合步骤要求时
  */
-export function validateProjectReviewVerdict(value, packet) {
+function validateProjectReviewVerdict(value, packet) {
   if (value?.stepId !== packet.step.id || value.inputDigest !== packet.inputDigest) throw new Error("review response does not match step and input digest");
   if (!["PASS", "RETURN", "INCONCLUSIVE"].includes(value.decision) || !value.summary?.trim()) throw new Error("invalid review decision or summary");
   if (!Array.isArray(value.evidence) || !Array.isArray(value.findings)) throw new Error("review requires evidence and findings arrays");

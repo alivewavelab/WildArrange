@@ -457,7 +457,7 @@ export function buildSlashCommands(cliPrefix) {
         "   - `injectionPoints`：每个注入点挂哪些 `tools` / `markdown` / `skills` / `rules`。",
         "   - `contextBudgets`：Prompt / Markdown / Skill 的字符预算。",
         "   - `skillMatcher.dynamicInjection`：技能按需挂载的 `enabled` / `maxSkills` / `alwaysMount`。",
-        "   - `qualityGates`：`lspDiagnostics` / `astStructure` / `hashlineAnchors` / `commentChecker`。",
+        "   - `qualityGates`：`commentChecker`。",
         "   - `review.llm`：是否启用 LLM 复核；`required=false` 时无 key 只告警不阻断。",
         "",
         "3. 填写完成后执行校验，并提示可用 `/wildarrange-doctor` 做整体体检：",

@@ -16,10 +16,6 @@ import { normalizeRelativePath } from "./path-match.mjs";
 import { hashContent } from "./runtime-store.mjs";
 
 /**
- * CARD_ACTIONS：本模块对外API。
- */
-export const CARD_ACTIONS = Object.freeze(["adopt", "change", "merge", "archive", "delete", "defer"]);
-/**
  * 需人工确认的危险 adoption 动作集合。
  */
 export const DANGEROUS_ACTIONS = Object.freeze(["archive", "merge", "delete"]);
@@ -72,7 +68,7 @@ export function fingerprintCard(card) {
 /**
  * cardAllowsDangerousAction：本模块对外API。
  */
-export function cardAllowsDangerousAction(card) {
+function cardAllowsDangerousAction(card) {
   const unknown = card.consumers?.some((consumer) => consumer.grade === "unknown") || card.confidence === "unknown";
   return !unknown;
 }

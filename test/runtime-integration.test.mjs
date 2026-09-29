@@ -67,12 +67,6 @@ import {
   continuationDirective,
   resumeReport,
 } from "../src/ai/context.mjs";
-import {
-  buildArchivistPacket,
-  listArchivistRouteSuggestions,
-  resolveArchivistRouteSuggestion,
-  runArchivistRouter,
-} from "../src/ai/archivist-router.mjs";
 import { runInjectionHook as renderHook } from "../src/ai/hooks.mjs";
 import { TRUSTED_CLI_COMMAND_PREFIX, preToolUseGuard } from "../src/ai/pre-tool-guard.mjs";
 import { runHostHook, runHostRoute } from "../src/orchestration/host-runtime.mjs";
@@ -81,7 +75,6 @@ import { resolveInjectionPoint } from "../src/ai/injection.mjs";
 import { routeRequest as classifyRoute } from "../src/ai/routing.mjs";
 const routeRequest = (root, input) => runHostRoute(root, input, classifyRoute);
 const runInjectionHook = (root, input) => runHostHook(root, input, renderHook);
-import { hashLine } from "../src/capabilities/code-intel.mjs";
 import { scopeGuard } from "../src/capabilities/scope-guard.mjs";
 import { compileCommandSafetyPatterns, evaluateCommandSafety } from "../src/infra/command-safety.mjs";
 import { runCommand, runCommandFile } from "../src/infra/command-runner.mjs";
@@ -714,7 +707,6 @@ test("hook rendering rewrites canonical plan, resume, and prompt commands to the
       "",
     ].join("\n"));
     await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
-      routeGovernance: { semanticShadow: { enabled: false } },
       skillMatcher: { dynamicInjection: { enabled: false } },
       injectionPoints: {
         user_prompt_submit: { enabled: true, tools: [], markdown: [], skills: ["command-probe"], rules: {} },
@@ -741,11 +733,6 @@ test("hook rendering rewrites canonical plan, resume, and prompt commands to the
 
 test("Codex session hooks inject and rehydrate the full Jiuwei prompt without repeating it per user prompt", async () => {
   await withTempDir(async (dir) => {
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
-      routeGovernance: {
-        semanticShadow: { enabled: false },
-      },
-    }, null, 2));
     await initRuntime(dir);
 
     const sessionStart = await runInjectionHook(dir, {
@@ -795,39 +782,6 @@ test("Jiuwei prompt injection reports explicit truncation at the configured prom
   });
 });
 
-test("hook adapter triggers ArchivistRouter without blocking user prompt injection", async () => {
-  await withTempDir(async (dir) => {
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
-      modelProviders: {
-        deepseek: { type: "openai-compatible", apiKeyEnv: "WILDARRANGE_TEST_MISSING_DEEPSEEK_KEY", defaultBaseUrl: "https://api.deepseek.com" },
-      },
-      archivistRouter: { enabled: true },
-    }, null, 2));
-    await initRuntime(dir);
-
-    const result = await runInjectionHook(dir, {
-      hook_event_name: "UserPromptSubmit",
-      session_id: "session-archivist",
-      cwd: dir,
-      prompt: "做一个网页版 TODO 工具，先计划再实现。",
-      turns: [
-        { role: "assistant", content: "结论：先确认 MVP。\n```js\nconsole.log('drop me')\n```" },
-        { role: "user", content: "要支持完成和删除。" },
-      ],
-    });
-
-    assert.equal(result.event, "UserPromptSubmit");
-    assert.ok(result.output.length > 0);
-    assert.match(result.output, /## 档案路由/);
-    assert.match(result.output, /状态：fallback/);
-    const archivist = await readJson(resolveWildArrangePath(dir, "memory", "last-archivist-result.json"));
-    assert.equal(archivist.llmStatus, "fallback");
-    assert.equal(archivist.packet.stage, "plan");
-    assert.doesNotMatch(JSON.stringify(archivist.packet), /console\.log/);
-    assert.match(await readFile(resolveWildArrangePath(dir, "memory", "events.jsonl"), "utf8"), /archivist_fallback/);
-  });
-});
-
 test("hook adapter injects dynamic rules after tool use target paths", async () => {
   await withTempDir(async (dir) => {
     await mkdir(path.join(dir, ".cursor", "rules"), { recursive: true });
@@ -861,113 +815,58 @@ test("hook adapter injects dynamic rules after tool use target paths", async () 
   });
 });
 
-test("successful apply_patch output is not misclassified by source text that mentions errors", async () => {
+test("post-tool-use result gate only reads structured failure fields and writes no ledger", async () => {
   await withTempDir(async (dir) => {
     await initRuntime(dir);
-    const result = await renderHook(dir, {
-      hook_event_name: "PostToolUse",
-      session_id: "session-successful-patch",
-      cwd: dir,
-      tool_name: "functions.apply_patch",
-      tool_input: { command: "*** Begin Patch\n*** Add File: src/error-handler.js\n*** End Patch" },
-      tool_response: { exit_code: 0, output: "Success. Updated the following files:\nA src/error-handler.js" },
-    });
-    assert.equal(result.decision, "pass");
-    assert.match(result.output, /决策：pass/);
-    assert.doesNotMatch(result.output, /shell_failure/);
+    const patchInput = { command: "*** Begin Patch\n*** Add File: src/error-handler.js\n*** End Patch" };
 
-    const strictHostSuccess = await renderHook(dir, {
-      hook_event_name: "PostToolUse",
-      session_id: "session-strict-patch-success",
-      cwd: dir,
-      tool_name: "functions.apply_patch",
-      tool_input: { command: "*** Begin Patch\n*** Add File: src/error-handler.js\n*** End Patch" },
-      tool_response: "Success. Updated the following files:\nA src/error-handler.js",
-    });
-    assert.equal(strictHostSuccess.decision, "pass");
-    assert.doesNotMatch(strictHostSuccess.output, /shell_failure/);
-
+    // 输出文本里出现 error/timeout 等词不算失败；只有结构化字段才算。
     for (const toolResponse of [
-      { exit_code: 0, output: "Success. Updated the following files:\nA src/timeout-helper.js\nA src/permission-denied-handler.js" },
+      { exit_code: 0, output: "Success. Updated the following files:\nA src/error-handler.js" },
       { exit_code: "0", output: "Success. Updated the following files:\nA src/timeout-helper.js" },
       "Success. Updated the following files:\nA src/no such file or directory-helper.js",
+      { exit_code: 0, stderr: "EPERM: operation not permitted, open 'src/app.js'" },
     ]) {
-      const noisySuccess = await renderHook(dir, {
+      const noisy = await renderHook(dir, {
         hook_event_name: "PostToolUse",
         session_id: "session-noisy-patch-success",
         cwd: dir,
         tool_name: "functions.apply_patch",
-        tool_input: { command: "*** Begin Patch\n*** Add File: src/timeout-helper.js\n*** End Patch" },
+        tool_input: patchInput,
         tool_response: toolResponse,
       });
-      assert.equal(noisySuccess.decision, "pass");
-      assert.equal(noisySuccess.output.includes("mcp_transport_failure"), false);
-      assert.equal(noisySuccess.output.includes("permission_denied"), false);
-      assert.equal(noisySuccess.output.includes("command_not_found"), false);
+      assert.equal(noisy.decision, "pass");
+      assert.match(noisy.output, /决策：pass/);
     }
-
-    for (const [toolResponse, expectedFinding] of [
-      [{ exit_code: 0, stderr: "EPERM: operation not permitted, open 'src/app.js'" }, "permission_denied"],
-      [{ ok: true, stderr: "EACCES: permission denied, open 'src/app.js'" }, "permission_denied"],
-      [{ exit_code: 0, stderr: "MCP transport error: socket closed" }, "mcp_transport_failure"],
-      [{ exit_code: 0, output: "apply_patch: permission denied" }, "permission_denied"],
-      [{ exit_code: 0, output: "Could not apply patch" }, "shell_failure"],
-    ]) {
-      const structuredFailure = await renderHook(dir, {
-        hook_event_name: "PostToolUse",
-        session_id: "session-structured-patch-failure",
-        cwd: dir,
-        tool_name: "functions.apply_patch",
-        tool_input: { command: "*** Begin Patch\n*** Add File: src/app.js\n*** End Patch" },
-        tool_response: toolResponse,
-      });
-      assert.equal(structuredFailure.decision, "block");
-      assert.match(structuredFailure.output, new RegExp(expectedFinding));
-    }
-
-    const failed = await renderHook(dir, {
-      hook_event_name: "PostToolUse",
-      session_id: "session-failed-patch",
-      cwd: dir,
-      tool_name: "functions.apply_patch",
-      tool_input: { command: "*** Begin Patch\n*** Add File: src/error-handler.js\n*** End Patch" },
-      tool_response: { exit_code: 1, output: "Failed to apply patch" },
-    });
-    assert.equal(failed.decision, "block");
-    assert.match(failed.output, /nonzero_exit_code/);
-
-    const numericStringFailure = await renderHook(dir, {
-      hook_event_name: "PostToolUse",
-      session_id: "session-numeric-string-failure",
-      cwd: dir,
-      tool_name: "functions.apply_patch",
-      tool_input: { command: "*** Begin Patch\n*** Add File: src/error-handler.js\n*** End Patch" },
-      tool_response: { exitCode: "7", output: "" },
-    });
-    assert.equal(numericStringFailure.decision, "block");
-    assert.match(numericStringFailure.output, /nonzero_exit_code/);
 
     for (const toolResponse of [
-      "Done!\nError: Failed to apply patch",
-      { exit_code: 0, output: "Error: Failed to apply patch" },
-      "apply_patch verification failed: Failed to find expected lines in src/app.js",
-      "Could not apply patch: error opening file src/app.js",
-      { exit_code: 0, output: "Could not apply patch: error opening file src/app.js" },
-      { exit_code: null, output: "Failed to apply patch" },
-      { exitCode: " ", output: "Failed to apply patch" },
-      { code: false, output: "Failed to apply patch" },
+      { exit_code: 1, output: "Failed to apply patch" },
+      { exitCode: "7", output: "" },
     ]) {
-      const conflicting = await renderHook(dir, {
+      const failed = await renderHook(dir, {
         hook_event_name: "PostToolUse",
-        session_id: "session-conflicting-patch-result",
+        session_id: "session-failed-patch",
         cwd: dir,
         tool_name: "functions.apply_patch",
-        tool_input: { command: "*** Begin Patch\n*** Add File: src/app.js\n*** End Patch" },
+        tool_input: patchInput,
         tool_response: toolResponse,
       });
-      assert.equal(conflicting.decision, "block");
-      assert.match(conflicting.output, /shell_failure/);
+      assert.equal(failed.decision, "block");
+      assert.match(failed.output, /nonzero_exit_code/);
     }
+
+    const explicit = await renderHook(dir, {
+      hook_event_name: "PostToolUse",
+      session_id: "session-explicit-failure",
+      cwd: dir,
+      tool_name: "exec_command",
+      tool_response: { ok: false },
+    });
+    assert.equal(explicit.decision, "block");
+    assert.match(explicit.output, /explicit_unsuccessful_result/);
+
+    const ledger = await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8");
+    assert.doesNotMatch(ledger, /hook_result_gate/);
   });
 });
 
@@ -990,10 +889,6 @@ test("post-tool-use result gate blocks failed tool evidence", async () => {
     assert.match(result.output, /工具结果门/);
     assert.match(result.output, /决策：block/);
     assert.match(result.output, /nonzero_exit_code/);
-    assert.match(result.output, /command_not_found/);
-
-    const ledger = await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8");
-    assert.match(ledger, /hook_result_gate/);
   });
 });
 
@@ -1972,122 +1867,8 @@ test("parallel admission rejects artifacts outside writable paths", async () => 
   });
 });
 
-test("ArchivistRouter builds conclusions-only packets and fallback memory", async () => {
-  await withTempDir(async (dir) => {
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
-      modelProviders: {
-        deepseek: { type: "openai-compatible", apiKeyEnv: "WILDARRANGE_TEST_MISSING_DEEPSEEK_KEY", defaultBaseUrl: "https://api.deepseek.com" },
-      },
-    }, null, 2));
-    await initRuntime(dir);
-    const packet = await buildArchivistPacket(dir, {
-      stage: "plan",
-      text: "做一个网页版 TODO 工具，先确认 MVP 和验收。",
-      turns: [
-        { role: "assistant", content: "结论：先做清单。\n```js\nconsole.log('secret')\n```\n+ leaked diff line" },
-        { role: "user", content: "补充删除和完成状态。" },
-      ],
-    });
-
-    assert.equal(packet.stage, "plan");
-    assert.equal(packet.turns.length, 2);
-    assert.doesNotMatch(JSON.stringify(packet), /console\.log/);
-    assert.match(JSON.stringify(packet), /code block removed/);
-
-    const result = await runArchivistRouter(dir, {
-      force: true,
-      stage: "plan",
-      text: "做一个网页版 TODO 工具，支持新增、完成、删除。",
-      turns: packet.turns,
-    });
-
-    assert.equal(result.kind, "archivist_router_result");
-    assert.equal(result.llmStatus, "fallback");
-    assert.equal(result.decision.routeDecision.domain, "visual");
-    assert.equal(result.decision.memoryUpdates[0].kind, "archivist_fallback");
-
-    const memoryIndex = await readJson(resolveWildArrangePath(dir, "memory", "index.json"));
-    assert.ok(memoryIndex.keywords.fallback >= 1);
-    assert.match(await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8"), /archivist_router_completed/);
-  });
-});
-
-test("ArchivistRouter route suggestions require review before affecting routing", async () => {
-  await withTempDir(async (dir) => {
-    await withLlmServer((request, response) => {
-      assert.equal(request.url, "/chat/completions");
-      response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({
-        choices: [{
-          message: {
-            content: JSON.stringify({
-              summary: "learned a local routing keyword",
-              routeDecision: { route: "execute", confidence: 0.9 },
-              memoryUpdates: [],
-              contextInjection: { progress: ["route keyword learned"] },
-              keywordSuggestions: [{
-                target: "domains.visual",
-                signals: ["画布测试词"],
-                evidence: "User used this phrase for visual canvas work.",
-                confidence: 0.91,
-              }],
-            }),
-          },
-        }],
-      }));
-    }, async (baseUrl) => {
-      await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
-        modelProviders: {
-          local: { apiKeyEnv: "WILDARRANGE_TEST_ARCHIVIST_KEY", baseUrl },
-        },
-        agents: {
-          CangJie: { provider: "local", model: "archivist-test" },
-        },
-        archivistRouter: { enabled: true, agent: "CangJie" },
-      }, null, 2));
-      process.env.WILDARRANGE_TEST_ARCHIVIST_KEY = "test-key";
-      await initRuntime(dir);
-
-      const before = await routeRequest(dir, { text: "处理画布测试词" });
-      assert.notEqual(before.domain, "visual");
-
-      const result = await runArchivistRouter(dir, {
-        force: true,
-        stage: "plan",
-        text: "画布测试词在本项目里表示视觉画布类工作。",
-      });
-      assert.equal(result.llmStatus, "called");
-
-      const suggestions = await listArchivistRouteSuggestions(dir);
-      assert.equal(suggestions.length, 1);
-      assert.equal(suggestions[0].status, "pending_review");
-
-      const pending = await routeRequest(dir, { text: "处理画布测试词" });
-      assert.notEqual(pending.domain, "visual");
-
-      const resolved = await resolveArchivistRouteSuggestion(dir, {
-        id: suggestions[0].id,
-        decision: "accept",
-        evidence: "Test reviewer accepted the local visual synonym.",
-        rationale: "The phrase is project-specific and low risk.",
-      });
-      assert.equal(resolved.status, "accepted");
-
-      const after = await routeRequest(dir, { text: "处理画布测试词" });
-      assert.equal(after.domain, "visual");
-      assert.equal(after.category, "visual-engineering");
-      assert.match(await readFile(resolveWildArrangePath(dir, "routing", "routes-overrides.json"), "utf8"), /画布测试词/);
-    });
-  });
-});
-
 test("routeRequest maps high-risk domains to the right agents and categories", async () => {
   await withTempDir(async (dir) => {
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
-      routeGovernance: {
-        semanticShadow: { enabled: false },
-      },
-    }, null, 2));
     await initRuntime(dir);
     const visual = await routeRequest(dir, "优化这个页面 CSS 布局和按钮动效");
     assert.equal(visual.domain, "visual");
@@ -2514,7 +2295,6 @@ test("project rules read a task worktree but persist runtime facts to the contro
     assert.equal(rules.matched, 1);
     assert.equal(rules.rules[0].path, "AGENTS.md");
     assert.match(await readFile(resolveWildArrangePath(controlRoot, "rules", "context.md"), "utf8"), /Run the real verifier/);
-    assert.match(await readFile(resolveWildArrangePath(controlRoot, "ledger.jsonl"), "utf8"), /project_rules_scanned/);
     await assert.rejects(stat(path.join(executionRoot, ".wildarrange")), /ENOENT/);
   });
 });
@@ -2898,9 +2678,6 @@ test("linear loop runs worker, verifies, checkpoints, and records ledger", async
     const acceptanceProof = await readJson(resolveWildArrangePath(dir, "reports", "acceptance", plan.id, "T001.json"));
     assert.equal(acceptanceProof.pass, true);
     assert.ok(acceptanceProof.checks.every((check) => check.status === "pass"));
-    const digest = await readJson(resolveWildArrangePath(dir, "memory", "last-digest.json"));
-    assert.equal(digest.reason, "task_completed");
-    assert.equal(digest.task.id, "T001");
 
     const reviewReport = await readJson(resolveWildArrangePath(dir, "reports", "reviews", plan.id, "T001.json"));
     assert.equal(reviewReport.status, "pass");
@@ -3026,25 +2803,6 @@ test("runtime state backup preserves critical files and verify reports missing s
 
     const manifest = await readJson(resolveWildArrangePath(dir, "backups", backup.backupId, "manifest.json"));
     assert.equal(manifest.backupId, backup.backupId);
-  });
-});
-
-test("session hooks inject memory digest summaries", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const samplePath = await createSamplePlan(dir);
-    await importPlan(dir, samplePath);
-    await runNextTask(dir);
-
-    const hook = await runInjectionHook(dir, {
-      hook_event_name: "SessionStart",
-      session_id: "session-memory",
-      cwd: dir,
-    });
-
-    assert.match(hook.output, /## 记忆摘要/);
-    assert.match(hook.output, /原因：session_start/);
-    assert.match(hook.output, /## 档案路由/);
   });
 });
 
@@ -3181,49 +2939,6 @@ test("comment checker object patterns default to case-insensitive matching", asy
     const result = await runNextTask(dir);
     assert.equal(result.status, "failed");
     assert.ok(result.reviewResult.lanes.some((lane) => lane.name === "comment_checker" && lane.status === "fail"));
-  });
-});
-
-test("code intelligence gates block stale hashline and AST findings", async () => {
-  await withTempDir(async (dir) => {
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
-      qualityGates: {
-        astStructure: {
-          enabled: true,
-          required: true,
-          commands: [nodeEval("const fs=require('fs'); if(!fs.readFileSync('src/app.js','utf8').includes('export const ok')) process.exit(1);")],
-        },
-        hashlineAnchors: {
-          enabled: true,
-          required: true,
-        },
-        commentChecker: { enabled: false },
-      },
-    }, null, 2));
-    await initRuntime(dir);
-    await mkdir(path.join(dir, "src"), { recursive: true });
-    const expectedLine = "export const ok = true;";
-    const planPath = path.join(dir, "code-intel-plan.json");
-    await writeFile(planPath, JSON.stringify({
-      title: "Code intelligence gate",
-      tasks: [{
-        id: "T001",
-        subject: "Reject stale anchored edit",
-        writable_paths: ["src/app.js"],
-        worker_command: "node -e \"const fs=require('fs'); fs.writeFileSync('src/app.js','export const ok = false;\\n')\"",
-        verify_commands: ["node -e \"const fs=require('fs'); if(!fs.readFileSync('src/app.js','utf8').includes('export const ok')) process.exit(1)\""],
-        review_commands: ["node --version"],
-        hashline_anchors: [{ file: "src/app.js", line: 1, sha256: hashLine(expectedLine), note: "expected stable export line" }],
-      }],
-    }));
-    await importPlan(dir, planPath);
-
-    const result = await runNextTask(dir);
-    assert.equal(result.status, "failed");
-    assert.equal(result.task.last_failure.reason, "review_gate_failed");
-    assert.ok(result.reviewResult.lanes.some((lane) => lane.name === "ast_structure" && lane.status === "pass"));
-    assert.ok(result.reviewResult.lanes.some((lane) => lane.name === "hashline_anchors" && lane.status === "fail"));
-    assert.ok(result.reviewResult.findings.some((finding) => finding.lane === "hashline_anchors" && finding.validator.status === "validated"));
   });
 });
 

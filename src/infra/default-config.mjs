@@ -41,71 +41,6 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
     BaiZe: { role: "independent_reviewer", provider: "host", model: "host-default", reasoning: "xhigh", skills: [] },
     LuWu: { role: "repository_steward", provider: "host", model: "host-default", reasoning: "high", skills: [] },
   },
-  // 可选「仓颉」路由/记忆子系统；默认关闭，启用后按 trigger 写入结构化记忆
-  archivistRouter: {
-    enabled: false,
-    agent: "CangJie",
-    provider: "deepseek",
-    model: "deepseek-v4-flash",
-    triggers: {
-      sessionStart: true,
-      gitHeadChanged: true,
-      lowConfidenceRoute: true,
-      everyUserPrompts: {
-        default: 10,
-        ideate: 5,
-        plan: 5,
-        clarify: 5,
-        execute: 15,
-        verify: 15,
-        review: 15,
-        min: 5,
-        max: 20,
-      },
-      workflowCheckpoint: true,
-    },
-    memory: {
-      backend: "structured-files",
-      root: ".wildarrange/memory",
-      captureMode: "conclusions-only",
-      includeCodeBlocks: false,
-      maxRecentTurns: 10,
-      recentTurnWindows: {
-        default: 10,
-        ideate: 5,
-        plan: 5,
-        clarify: 5,
-        execute: 15,
-        verify: 15,
-        review: 15,
-        max: 20,
-      },
-      maxRoutingPacketChars: 12000,
-      injectFields: ["progress", "decisions", "artifacts", "implementationNotes", "researchNotes", "pitfalls", "openQuestions"],
-    },
-    keywordEvolution: {
-      suggestOnly: true,
-      autoApplyConfidence: 0.85,
-      minEvidenceCount: 2,
-      protectedTargets: ["askGate", "intents.review", "intents.release_git", "intents.change_request"],
-    },
-  },
-  // 路由决策的日终审查与语义 shadow 低置信度兜底
-  routeGovernance: {
-    dailyReview: {
-      enabled: true,
-      trigger: "stop",
-      maxItems: 20,
-    },
-    semanticShadow: {
-      enabled: true,
-      agent: "CangJie",
-      timeoutMs: 30000,
-      lowConfidenceThreshold: 0.5,
-      conflictRoute: "plan",
-      enforceLowConfidence: true,
-    },
-  },
   // Git 多 Agent 写协调：mode off|manual|guarded|strict；strict 不可单独削弱子开关
   gitCoordination: {
     mode: "guarded", // off=禁用；manual=仅显式请求；guarded=有 guard；strict=最严
@@ -209,25 +144,8 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
     inventoryPath: "",
     archiveRoot: "",
   },
-  // 质量门：lsp/ast/hashline/commentChecker；required=true 时失败阻断交付
+  // 质量门：仅 commentChecker（lsp/ast 类命令请写进 standards_commands）；blockOnFindings=true 时失败阻断交付
   qualityGates: {
-    lspDiagnostics: {
-      enabled: false,
-      required: false,
-      commands: [],
-      timeoutMs: 120000,
-    },
-    astStructure: {
-      enabled: false,
-      required: false,
-      commands: [],
-      timeoutMs: 120000,
-    },
-    hashlineAnchors: {
-      enabled: false,
-      required: false,
-      anchors: [],
-    },
     commentChecker: {
       enabled: true,
       blockOnFindings: false,
@@ -244,8 +162,6 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
     mode: "both",
     maxRuleChars: 12000,
     maxResultChars: 40000,
-    dynamicMaxRuleChars: 4000,
-    dynamicMaxResultChars: 10000,
     projectSingleFiles: ["AGENTS.md", "CLAUDE.md", "CONTEXT.md", ".github/copilot-instructions.md"],
     projectRuleDirs: [".claude/rules", ".cursor/rules", ".github/instructions"],
   },
@@ -346,7 +262,7 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
     stop: {
       enabled: true,
       tools: ["wildarrange_continuation_check", "wildarrange_resume"],
-      markdown: [".wildarrange/sessions/continuation.md", ".wildarrange/snapshots/context.md", ".wildarrange/reports/routing/latest.md"],
+      markdown: [".wildarrange/sessions/continuation.md", ".wildarrange/snapshots/context.md"],
       skills: ["wildarrange-injection-runtime", "start-work", "review-routing-decisions"],
       rules: { mode: "static" },
     },

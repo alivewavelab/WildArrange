@@ -5,7 +5,7 @@
 //   项目 AGENTS/rules 扫描匹配 targetPaths，预算截断后写 context.json。
 //
 // 【运行原理速读】
-//   scanProjectRules → nested AGENTS → applyRuleBudget → ledger 事件。
+//   scanProjectRules → nested AGENTS → applyRuleBudget（不写 ledger）。
 // =============================================================================
 import { existsSync } from "node:fs";
 import { readFile, readdir, writeFile } from "node:fs/promises";
@@ -19,7 +19,6 @@ import {
   resolveWildArrangePath,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
-import { appendLedger } from "./ledger.mjs";
 import { normalizeRelativePath, pathMatchesPattern } from "./path-match.mjs";
 import { uniqueStrings } from "./text-utils.mjs";
 import { getBoundWorkspaceContext } from "./workspace-context.mjs";
@@ -84,7 +83,6 @@ export async function scanProjectRules(rootDir, options = {}) {
   result.reportMdPath = path.relative(controlRoot, mdPath);
   await writeJsonAtomic(jsonPath, result);
   await writeFile(mdPath, renderRulesMarkdown(result), "utf8");
-  await appendLedger(controlRoot, { type: "project_rules_scanned", total: result.total, matched: result.matched, targetPathCount: targetPaths.length });
   return result;
 }
 

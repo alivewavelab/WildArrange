@@ -100,8 +100,7 @@ export async function runLlmReview(rootDir, agentName, task, evidence = {}, opti
  * resolveAgentProvider：本模块对外API。
  */
 export function resolveAgentProvider(config, agentName) {
-  const archivistProfile = config.archivistRouter?.agent === agentName ? config.archivistRouter : null;
-  const agent = config.agents?.[agentName] || archivistProfile;
+  const agent = config.agents?.[agentName];
   if (!agent) return { available: false, reason: `agent ${agentName} is not configured` };
   const providerName = agent.provider;
   const provider = config.modelProviders?.[providerName];

@@ -299,7 +299,6 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
       task,
       verifyResult,
       ledgerEvent: { type: "task_verified", planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult.status, reviewStatus: "pass" },
-      digestReason: "task_completed",
     });
     const sideEffectWarnings = await runPostCompletionSideEffects(rootDir, taskState.planId, task, async () => {
       await writeSnapshot(rootDir, "checkpointed", { planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult.status });

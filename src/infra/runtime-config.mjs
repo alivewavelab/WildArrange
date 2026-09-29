@@ -35,11 +35,6 @@ export const PRODUCT_NAME = "WildArrange";
  */
 export const DEFAULT_PACKAGE_NAME = "@alivewavelab/wildarrange";
 /**
- * CLI 默认命令名。
- */
-export const DEFAULT_CLI_COMMAND = "wildarrange";
-
-/**
  * loadWildArrangeConfig：本模块对外异步 API。
  */
 export async function loadWildArrangeConfig(rootDir) {
@@ -104,8 +99,7 @@ export async function writeDefaultWildArrangeConfig(rootDir, options = {}) {
 
 /**
  * `config init --armed`：写出一份「门已武装」的配置——commentChecker 阻断发现
- * （无需任何外部工具即可构成独立复核信号与 required 质量门），lspDiagnostics
- * 留好命令位等用户填项目真实的 typecheck/test 命令。默认配置故意不武装
+ * （无需任何外部工具即可构成独立复核信号与 required 质量门）。默认配置故意不武装
  * （黄灯提醒），--armed 是给「我知道自己在做什么」的显式入口。
  */
 function buildArmedConfig() {
@@ -113,12 +107,6 @@ function buildArmedConfig() {
     ...DEFAULT_WILDARRANGE_CONFIG,
     qualityGates: {
       ...DEFAULT_WILDARRANGE_CONFIG.qualityGates,
-      lspDiagnostics: {
-        ...DEFAULT_WILDARRANGE_CONFIG.qualityGates?.lspDiagnostics,
-        enabled: true,
-        required: true,
-        commands: ["node --test"],
-      },
       commentChecker: {
         ...DEFAULT_WILDARRANGE_CONFIG.qualityGates?.commentChecker,
         enabled: true,

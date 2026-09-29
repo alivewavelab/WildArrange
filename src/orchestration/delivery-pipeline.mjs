@@ -24,7 +24,6 @@ import { assertTaskOrDeliveredOwnership, integrateAdmissionCommit } from "./inte
 import { appendLedger } from "../infra/ledger.mjs";
 import { emitDecision } from "../infra/decision-log.mjs";
 import { buildErrorProtocol } from "../infra/error-protocol.mjs";
-import { writeMemoryDigest } from "../infra/memory-digest.mjs";
 import { normalizeRelativePath } from "../infra/path-match.mjs";
 import { nowIso, resolveTaskReportPath } from "../infra/runtime-store.mjs";
 import { applyVerifierEvidenceToCriteria, criteriaStatus } from "../infra/success-criteria.mjs";
@@ -50,23 +49,22 @@ export function shouldFailDeliveryAttempt(task, verifyResult, scopeResult, revie
 }
 
 /**
- * 固定顺序提交 completed：账本 → wisdom → digest → persistTaskState。
+ * 固定顺序提交 completed：账本 → wisdom → persistTaskState。
  * @param {string} rootDir 项目根
- * @param {object} options taskState、task、verifyResult、ledgerEvent、digestReason
+ * @param {object} options taskState、task、verifyResult、ledgerEvent
  */
 export async function commitTaskCompletionState(rootDir, options) {
-  const { taskState, task, verifyResult, ledgerEvent, digestReason } = options;
+  const { taskState, task, verifyResult, ledgerEvent } = options;
   task.status = "completed";
   task.updatedAt = nowIso();
   await appendLedger(rootDir, ledgerEvent);
   await appendWisdom(rootDir, task, verifyResult);
-  await writeMemoryDigest(rootDir, { reason: digestReason, stage: "checkpoint", task, taskId: task.id });
   await persistTaskState(rootDir, taskState);
 }
 
 /**
  * 任务已 durable completed 后运行快照/摘要等便利副作用；失败不得反完成，
- * 仅记 completion_side_effect_failed 并返回警告。wisdom/digest 必须在 persist 之前。
+ * 仅记 completion_side_effect_failed 并返回警告。wisdom 必须在 persist 之前。
  */
 export async function runPostCompletionSideEffects(rootDir, planId, task, effects) {
   try {
@@ -334,7 +332,7 @@ function pipelineOutcomeReason(status, results, criteria) {
  * acceptance-proof → integration → checkpoint 共享完成段；仅 status "completed" 可置 completed。
  * 线性单步 checkpoint 与主流水线共用此语义，checkpoint 失败不得静默吞掉。
  */
-export async function runCompletionSegment(rootDir, planId, task, evidence, options = {}) {
+async function runCompletionSegment(rootDir, planId, task, evidence, options = {}) {
   // 交付事实解析在网关之外（含 admission claim 围栏），异常不得无审计穿透：
   // 转成 acceptance-proof fail 信封，由调用方按既有 proof_failed 分支经 finish() 收尾。
   let delivery;

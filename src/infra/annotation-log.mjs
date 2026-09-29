@@ -28,12 +28,12 @@ import { readDecisions } from "./decision-log.mjs";
 /**
  * 标注允许的强制分类枚举。
  */
-export const ANNOTATION_CATEGORIES = ["confirmed", "rule_wrong", "case_wrong", "mislabeled"];
+const ANNOTATION_CATEGORIES = ["confirmed", "rule_wrong", "case_wrong", "mislabeled"];
 
 /**
  * 返回 annotations.jsonl 的绝对路径。
  */
-export function annotationsLogPath(rootDir) {
+function annotationsLogPath(rootDir) {
   return resolveWildArrangePath(rootDir, "annotations.jsonl");
 }
 

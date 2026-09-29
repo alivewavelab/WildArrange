@@ -542,7 +542,7 @@ export async function writeChangeRequest(rootDir, planId, task, scopeResult, sou
 }
 
 /** 将 ChangeRequest 渲染为 Markdown 报告正文。 */
-export function renderChangeRequestMarkdown(changeRequest) {
+function renderChangeRequestMarkdown(changeRequest) {
   // 兼容 requiresLeadReview 重命名前写入的旧 invariant 键，保持字面量可检索。
   const legacyLeadReviewKey = "requiresSisyphusReview";
   return `# ChangeRequest ${changeRequest.id}
@@ -599,7 +599,7 @@ ${changeRequest.proposedActions.map((action) => `- ${action}`).join("\n")}
 }
 
 /** 刷新 open changes 索引文件供 dashboard 使用。 */
-export async function writeOpenChangesIndex(rootDir) {
+async function writeOpenChangesIndex(rootDir) {
   const changes = await listChangeRequests(rootDir);
   const openChanges = changes.filter((change) => change.status === "open");
   const lines = ["# Open ChangeRequests", ""];

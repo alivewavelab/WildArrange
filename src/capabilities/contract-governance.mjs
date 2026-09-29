@@ -49,16 +49,6 @@ export async function applyContractGovernanceCard(rootDir, options = {}) {
 }
 
 /**
- * 读取 registry 与 currentScan，生成契约治理只读视图。
- * @param {string} rootDir 项目根
- * @returns {Promise<object>} kind=contract_governance_view
- */
-export async function generateContractGovernanceArtifacts(rootDir) {
-  const paths = contractGovernancePaths(rootDir);
-  return { kind: "contract_governance_view", registry: await readContractRegistry(rootDir), scan: await readJson(paths.currentScan, null) };
-}
-
-/**
  * 对任务执行契约治理审查，包装为 review gate 可用的 evidence 形态。
  * @param {string} rootDir 执行根
  * @param {object} task 含 contractChanges

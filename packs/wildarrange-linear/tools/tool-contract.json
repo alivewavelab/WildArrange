@@ -214,26 +214,6 @@
       "purpose": "只重跑未完成任务的局部重试"
     },
     {
-      "name": "wildarrange_archivist_packet",
-      "command": "wildarrange archivist packet [--text \"...\"] [--stage plan] [--turns turns.json]",
-      "purpose": "生成档案路由包"
-    },
-    {
-      "name": "wildarrange_archivist_run",
-      "command": "wildarrange archivist run [--text \"...\"] [--stage plan] [--turns turns.json] [--force]",
-      "purpose": "运行档案路由员"
-    },
-    {
-      "name": "wildarrange_archivist_suggestions_list",
-      "command": "wildarrange archivist suggestions list",
-      "purpose": "查看路由建议"
-    },
-    {
-      "name": "wildarrange_archivist_suggestions_resolve",
-      "command": "wildarrange archivist suggestions resolve --id <id> --decision accept|reject --evidence \"...\" --rationale \"...\"",
-      "purpose": "审核路由建议"
-    },
-    {
       "name": "wildarrange_node_route",
       "command": "wildarrange node route --text \"request\"",
       "purpose": "单节点：路由"
@@ -432,11 +412,6 @@
       "name": "wildarrange_annotate_stats",
       "command": "wildarrange annotate stats",
       "purpose": "标注聚合统计"
-    },
-    {
-      "name": "wildarrange_review_suspicious",
-      "command": "wildarrange review suspicious [--limit N]",
-      "purpose": "LLM 可疑判断异步审查（只进报告，不进完成链）"
     },
     {
       "name": "wildarrange_test",

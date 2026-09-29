@@ -161,7 +161,7 @@ export async function writeContextSnapshot(rootDir, options = {}) {
  * @param {object} options sessionId、source
  * @returns {Promise<object>} 更新后的 lineage
  */
-export async function recordRuntimeSession(rootDir, options = {}) {
+async function recordRuntimeSession(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const sessionId = options.sessionId || process.env.WILDARRANGE_SESSION_ID || process.env.CODEX_SESSION_ID || process.env.CURSOR_SESSION_ID || createWorkId("session");
   const source = options.source || "resume";

@@ -4,7 +4,7 @@
 
 ## 负责
 
-- 请求路由、ArchivistRouter 和语义第二意见。
+- 确定性请求路由。
 - Prompt 注入、Skill 匹配与任务绑定。
 - Agent 上下文、会话恢复和生命周期 Hook 策略。
 
@@ -23,9 +23,8 @@
 
 ## 本区不变量
 
-- Deterministic 路由与证据优先；semantic shadow 只能作为低置信门控或第二意见。
+- 路由只使用确定性路由表并保留证据。
 - Router 是确定性系统节点，不是长期 Agent；路由结果只能选择 5 个长期 Agent 和已登记 Skill。
-- ArchivistRouter 只摄入清洗后的结论包，不摄入代码块、raw diff 或完整命令输出。
 - 无 LLM key 时必须 fallback，不阻断主线、Hook 或线性状态机。
 - Hook 崩溃/超时按宿主约定 fail-open 时，最终完成仍由 delivery pipeline 的质量门决定。
 - 动态 Skill 选择只能从配置的上界中做减法，不得通过请求文本加载未授权全文。
@@ -34,6 +33,6 @@
 
 ## 交付证据
 
-- 路由变化同时覆盖 deterministic 结果、fallback、建议审核和低置信场景。
+- 路由变化覆盖命中、未命中与低置信默认场景。
 - Hook 变化覆盖格式错误、非目标项目、越界写入、Stop continuation 和失败放行边界。
 - Prompt / Skill 变化覆盖预算、动态挂载和未匹配项降级为引用。

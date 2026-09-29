@@ -30,7 +30,7 @@ WildArrange 只保留 5 个长期 Agent。确定性 Router 是系统节点，不
 | **BaiZe（白泽）** | 唯一独立复核者；验证目标、证据、风险和验收，不接受 worker 自证。 |
 | **LuWu（陆吾）** | 只读维护仓库秩序；检查分层 `AGENTS.md`、README 同步、命名、文件归属及代码注释规则。 |
 
-系统 Router 负责判断请求属于咨询、计划、执行、验证或恢复，并选择主 Agent 与 Skill。`CangJie` 是可选的内部档案/语义路由配置，不是长期 Agent。
+系统 Router 负责判断请求属于咨询、计划、执行、验证或恢复，并选择主 Agent 与 Skill。
 
 专项职责改为 Skill：`review-product-intent` 检查产品目标，`map-user-journey` 补齐用户旅程，`design-acceptance` 设计可验证验收，`review-ux-interaction` 复核交互状态，`review-scope-tradeoff` 控制范围，`research-domain-benchmark` 做最小必要对标；`inspect-codebase` 与 `research-external-docs` 分别承接代码检索和外部研究。
 
@@ -423,7 +423,6 @@ node ./bin/wildarrange.mjs annotate --decision <decisionId> --category rule_wron
 node ./bin/wildarrange.mjs annotate stats
 node ./bin/wildarrange.mjs test --zone infra
 node ./bin/wildarrange.mjs docs commands --write
-node ./bin/wildarrange.mjs review suspicious
 ```
 
 `doctor` 是一键体检：校验 config 结构与挂载、对账所有 Plan 的已完成任务（checkpoint / acceptance proof / ledger 事件必须以 `planId:taskId` 对齐）、验证 ledger hash 链，并与最近一次备份交叉比对以发现整链重写；`decisionHealth` 分项给出周期健康摘要（各门触发计数、从未触发的门、坏行与孤儿标注预警）。各项检查各自隔离，单项崩溃只标红对应分项；doctor 只读诊断，不写 ledger。`state migrate` 会先自动备份，再迁移运行态任务总账并删除已退役的运行态投影；它不会改写项目根的 `wildarrange.config.json`。没有当前 proof chain 的旧 `completed` 会进入 `needs_user_decision`，不会伪造新验收证据。`state restore` 恢复前也会自动再做一次备份。
@@ -442,8 +441,6 @@ node ./bin/wildarrange.mjs review suspicious
 
 CLI 是分层的：`--help` 默认只显示核心六命令（init / plan / run / status / decisions / doctor），覆盖日常主循环；全部命令见 `--help --all`。命令清单的单一事实源是 `src/interface/cli-help.mjs` 的注册表，`docs commands --write` 把它物化成 `doc/generated/commands.md`；README 命令真实性检查对照的是 `--help --all` 全量输出。
 
-`review suspicious` 是 LLM 可疑判断（异步审查，archivist 不变量）：只把清洗后的结论包（id/门/规则/摘要，绝无代码块、raw diff 或完整命令输出）发给配置的外部 provider，返回的可疑清单必须锚定输入包内的 decisionId（幻觉 id 直接丢弃并计数）；无 key 时确定性 fallback，不阻断任何流程。结论只写入 `.wildarrange/reports/suspicion.*`——**不进完成链、不改配置、不动门开关**。
-
 老项目验证治理接管是独立维护流程，不进入 `task.status`，也不复用 `approvePlan`：
 
 ```text
@@ -457,13 +454,13 @@ node ./bin/wildarrange.mjs adoption recover
 
 外置接管扫描和验证仍使用业务仓库；locator 配置、Registry、Bootstrap、Inventory 写入治理仓库。Registry 使用治理合同的 `verificationRegistry` 路径，Bootstrap 和 Inventory 放在其同级目录；commit A/B 在治理仓库完成。若另有已批准的业务文件改动，它们须在业务仓库单独提交，系统分别核对两仓内容。初始化生成且摘要完整的空 Registry 可在 locator 获批后填充，原始内容保存在运行态 `adoption/artifact-preimages/`；非空、摘要异常或生成期间已变化的内容仍报冲突。
 
-Dashboard（`serve`）包含全项目工单总账、路由复盘台、决策面板、运维面板与验证接管页。工单总账直接读取 `.wildarrange/team/tasks.json`，展示全部 Plan、工单类型、优先级、关联任务与状态历史。路由复盘台按日期展示用户原文、结构化路由结果、命中信号、语义第二意见及同会话后续工具摘要，并可人工标记正确/规则错/个案错；工具参数中的常见密钥字段会脱敏。IDE `Stop` Hook 会主动更新中文日报 `.wildarrange/reports/routing/latest.md`（同日归档为 `YYYY-MM-DD.md`），先给结论，再列全部判断和工具明细。复盘只写 annotation，不自动修改 `routes.json`。
+Dashboard（`serve`）包含全项目工单总账、路由复盘台、决策面板、运维面板与验证接管页。工单总账直接读取 `.wildarrange/team/tasks.json`，展示全部 Plan、工单类型、优先级、关联任务与状态历史。路由复盘台按日期展示用户原文、结构化路由结果、命中信号及同会话后续工具摘要，并可人工标记正确/规则错/个案错；工具参数中的常见密钥字段会脱敏。复盘只写 annotation，不自动修改 `routes.json`。
 
 `run` 结束时的门决策汇总按 `reporting.verbosity` 分级：默认 `verbose` 在 stderr 输出本次任务每个门的三行投影（框架初期让人能审判每一条门决策）；信任建立后可改为 `normal`（一行结果）或 `quiet`（只输出 JSON）。stdout 的机器可读 JSON 在任何级别下都不变。
 
 并行运行中断后，`parallel status --run <runId>` 会显示 `batchStatus` 与 `incompleteTasks`（有头无尾的任务）；`parallel retry --run <runId>` 只重跑未通过的任务（复用原命令，可用 `--command` 覆盖），已通过/已完成/被其他 run 持有的任务跳过并说明，重试是新的 run，不改写原 run 证据。
 
-`status` 输出顶部常驻 `gateArming` 黄灯：默认配置下质量门全关、review 门没有独立信号时会显示「门未武装」及修复指引，避免对着一条全绿但不证明任何东西的门流误判项目健康。验收证明（acceptance proof）有两条硬地板：拒绝 `verify_commands` 全是 trivial 命令（如 `true`）的任务；拒绝 review 门没有任何独立信号 lane（无 `review_commands` / `standards_commands` / `review.llm` / 已启用质量门）的任务——同义反复的复核不证明任何东西，不得进入 completed。`config init --armed` 可以直接生成一份武装了质量门（commentChecker 阻断 + lspDiagnostics 命令位）的配置。`doctor` 有独立的 `gateArming` 与 `adapters` 分项：门未武装、已启用 adapter 但本机没生成 hooks、Codex Hook 已生成却没有当前配置的真实执行回执、规则文件里残留指向不存在路径的命令，都会在体检报告里摆到台面上。Adapter 使用 `configured` 表示文件已生成；只有 Codex 显示 `execution_observed` 才表示当前 Hook 配置至少真实运行过一次。
+`status` 输出顶部常驻 `gateArming` 黄灯：默认配置下质量门全关、review 门没有独立信号时会显示「门未武装」及修复指引，避免对着一条全绿但不证明任何东西的门流误判项目健康。验收证明（acceptance proof）有两条硬地板：拒绝 `verify_commands` 全是 trivial 命令（如 `true`）的任务；拒绝 review 门没有任何独立信号 lane（无 `review_commands` / `standards_commands` / `review.llm` / 已启用质量门）的任务——同义反复的复核不证明任何东西，不得进入 completed。`config init --armed` 可以直接生成一份武装了质量门（commentChecker 阻断）的配置。`doctor` 有独立的 `gateArming` 与 `adapters` 分项：门未武装、已启用 adapter 但本机没生成 hooks、Codex Hook 已生成却没有当前配置的真实执行回执、规则文件里残留指向不存在路径的命令，都会在体检报告里摆到台面上。Adapter 使用 `configured` 表示文件已生成；只有 Codex 显示 `execution_observed` 才表示当前 Hook 配置至少真实运行过一次。
 
 `governance audit` 是 LuWu 的只读巡检：检查目录级 `AGENTS.md`、README 中英文命令对等、Prompt Pack 登记、命名和真实代码注释，报告写入 `.wildarrange/reports/governance/`。只看当前改动可加 `--changed-only`，它只触发变更文件及相关祖先规则/成对文档/架构台账；Git 变更不可读取时会安全回退为全量扫描。LuWu 不会自动移动、重命名或删除项目文件，运行时也会拒绝 LuWu、DiJiang、BaiZe 进入 command worker。
 
@@ -501,29 +498,9 @@ node ./bin/wildarrange.mjs parallel run --task T001 --isolation git-worktree --c
 node ./bin/wildarrange.mjs parallel admit --run <runId> --task T001
 ```
 
-## ArchivistRouter
+## 路由
 
-ArchivistRouter 是“档案员 + 任务路由”节点。它只读取清洗后的结论包，不摄入代码块、raw diff 或完整命令输出。
-
-手动运行：
-
-```bash
-node ./bin/wildarrange.mjs archivist packet --text "做一个网页版 TODO 工具" --stage plan
-node ./bin/wildarrange.mjs archivist run --text "做一个网页版 TODO 工具" --stage plan --force
-```
-
-当 `archivistRouter.enabled` 为 `true` 时，`SessionStart`、`UserPromptSubmit`、`PostCompact` hook 会自动触发 ArchivistRouter。没有 DeepSeek key 时会走 deterministic fallback，不阻断主流程。
-
-路由采用双层策略：确定性关键词路由永远保留证据；如果配置了 `CangJie` provider，`routeGovernance.semanticShadow` 会给出语义第二意见。低置信或冲突的 `execute` 请求会降级为 `plan` / `ask`，避免模糊需求直接开工。
-
-ArchivistRouter 的关键词学习不会直接改路由。建议先进入 `.wildarrange/routing/suggestions/`，审核后才写入 `.wildarrange/routing/routes-overrides.json`：
-
-```bash
-node ./bin/wildarrange.mjs archivist suggestions list
-node ./bin/wildarrange.mjs archivist suggestions resolve --id <id> --decision accept --evidence "..." --rationale "..."
-```
-
-跨会话记忆会写入 `.wildarrange/memory/digests/`。任务完成、并行 admission 完成、`SessionStart` 和 `PostCompact` 会生成结构化 digest，用于恢复进展、决策、成果物、实现结论和踩坑记录。
+路由只使用确定性路由表（`routes.json`），结果保留命中信号作为证据。置信度低于 0.5 的 `execute` 请求会降级为 `plan`，避免模糊需求直接开工。
 
 ## Skill 匹配与任务绑定
 
@@ -589,9 +566,6 @@ x-wildarrange-token: <token>
 | `.wildarrange/snapshots/context.md` | 跨会话恢复上下文 |
 | `.wildarrange/adapters/` | adapter 配置、报告与备份 |
 | `.wildarrange/agent-runs/` | 子 Agent 运行包、结果与 admission 记录 |
-| `.wildarrange/memory/` | ArchivistRouter 结构化记忆 |
-| `.wildarrange/memory/digests/` | 跨会话恢复 digest |
-| `.wildarrange/routing/suggestions/` | 待审核的路由关键词建议 |
 
 ## 配置
 
@@ -628,25 +602,11 @@ source .env.wildarrange
 
 确定性 gate 不依赖模型 API。当 `review.llm.required` 为 `false` 时，缺少外部 key 或 host provider 只会告警，不会阻断线性状态机。
 
-LSP / 类型检查、AST 结构检查、hashline anchor 与注释检查走 CLI review gate，而非编辑器专属 hook：
+注释检查走 CLI review gate，而非编辑器专属 hook；LSP / 类型检查、AST 结构检查等命令请写进任务或计划默认的 `standards_commands`：
 
 ```json
 {
   "qualityGates": {
-    "lspDiagnostics": {
-      "enabled": true,
-      "commands": ["npm run typecheck"]
-    },
-    "astStructure": {
-      "enabled": true,
-      "commands": ["ast-grep --pattern 'console.log($A)' --lang ts --json src || true"]
-    },
-    "hashlineAnchors": {
-      "enabled": true,
-      "anchors": [
-        { "file": "src/app.ts", "line": 12, "sha256": "<hashLine>" }
-      ]
-    },
     "commentChecker": {
       "enabled": true,
       "blockOnFindings": false
@@ -672,7 +632,7 @@ npm test
 npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache
 ```
 
-当前状态：线性治理闭环已实现并通过测试；checkpoint 前会生成验收证明链，显式 `successCriteria` 只有绑定具体 verifier 命令或人工证据后才会通过。Codex adapter 已能写入项目 `.codex/hooks.json`，桌面版在设置 > Hooks 中审查、信任并启用后具备 hard hook 拦截，Codex CLI 则使用 `/hooks`；Cursor adapter 已能写入项目 `.cursor/hooks.json`，受信任工作区中 `preToolUse` 与 `beforeShellExecution` 硬拦截且 fail-closed。跨会话 digest 与 ArchivistRouter 会进入 hook 注入块；ledger 具备 hash 链校验；多 Agent 已具备命令型并行、Codex/Cursor 命令模板 spawn、结构化文件 admission、Git worktree patch admission、验收前保留与 admission 后释放。
+当前状态：线性治理闭环已实现并通过测试；checkpoint 前会生成验收证明链，显式 `successCriteria` 只有绑定具体 verifier 命令或人工证据后才会通过。Codex adapter 已能写入项目 `.codex/hooks.json`，桌面版在设置 > Hooks 中审查、信任并启用后具备 hard hook 拦截，Codex CLI 则使用 `/hooks`；Cursor adapter 已能写入项目 `.cursor/hooks.json`，受信任工作区中 `preToolUse` 与 `beforeShellExecution` 硬拦截且 fail-closed。ledger 具备 hash 链校验；多 Agent 已具备命令型并行、Codex/Cursor 命令模板 spawn、结构化文件 admission、Git worktree patch admission、验收前保留与 admission 后释放。
 
 ## 更多文档
 

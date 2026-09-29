@@ -23,7 +23,6 @@
 // =============================================================================
 
 import { checkExecutionReadiness } from "./execution-readiness.mjs";
-import { runCommand } from "../infra/command-runner.mjs";
 import { buildErrorProtocol, wildarrangeError } from "../infra/error-protocol.mjs";
 import { runVerifier } from "./verify.mjs";
 import { scopeGuard } from "./scope-guard.mjs";
@@ -31,7 +30,6 @@ import { writeCheckpoint } from "./checkpoint.mjs";
 import { runWorker } from "./worker.mjs";
 import { runReviewGate } from "./review-gate.mjs";
 import { writeAcceptanceProof } from "./acceptance-proof.mjs";
-import { runRepositoryGovernanceAudit } from "./repository-governance.mjs";
 import {
   applyVerificationCard,
   generateVerificationArtifacts,
@@ -39,10 +37,8 @@ import {
 } from "./verification-governance.mjs";
 import {
   applyContractGovernanceCard,
-  generateContractGovernanceArtifacts,
   scanContractGovernance,
 } from "./contract-governance.mjs";
-import { evaluateCommandSafety } from "../infra/command-safety.mjs";
 
 /** 将 runVerifier 结果映射为 gateway 统一 status/evidence 形态。 */
 async function adaptVerify(ctx) {
@@ -80,12 +76,6 @@ async function adaptContractApplyCard(ctx) {
   return { status: new Set(["approved", "rejected"]).has(raw.status) ? "pass" : "fail", evidence: raw, sideEffect: "files_changed" };
 }
 
-/** 契约治理只读视图生成，无 sideEffect。 */
-async function adaptContractGenerate(ctx) {
-  const raw = await generateContractGovernanceArtifacts(ctx.rootDir, ctx.options || {});
-  return { status: "pass", evidence: raw, sideEffect: "none" };
-}
-
 /** acceptance proof 的 pass 由 buildAcceptanceProof 全项 checks 决定。 */
 async function adaptAcceptanceProof(ctx) {
   const raw = await writeAcceptanceProof(ctx.rootDir, ctx.planId, ctx.task, ctx.evidence || {}, ctx.options || {});
@@ -116,26 +106,6 @@ async function adaptWorker(ctx) {
   };
 }
 
-/** 透传 infra runCommand，供 gateway command 能力调用。 */
-async function adaptCommand(ctx) {
-  const { command, cwd, timeoutMs, ...rest } = ctx.options || {};
-  const raw = await runCommand(command, cwd || ctx.rootDir, timeoutMs, rest);
-  return { status: raw.exitCode === 0 ? "pass" : "fail", evidence: raw, sideEffect: "none" };
-}
-
-/** 纯评估命令安全性，不执行命令。 */
-async function adaptCommandSafety(ctx) {
-  const { command, ...rest } = ctx.options || {};
-  const raw = evaluateCommandSafety(command, rest);
-  return { status: raw.allowed ? "pass" : "fail", evidence: raw, sideEffect: "none" };
-}
-
-/** 仓库治理审计；status 直接来自 inspect 结果。 */
-async function adaptRepositoryGovernance(ctx) {
-  const raw = await runRepositoryGovernanceAudit(ctx.rootDir, ctx.options || {});
-  return { status: raw.status, evidence: raw, sideEffect: "state_written" };
-}
-
 /** 验证宇宙扫描，只读 sideEffect。 */
 async function adaptVerificationScan(ctx) {
   const raw = await scanVerificationGovernance(ctx.rootDir, ctx.options || {});
@@ -160,9 +130,7 @@ async function adaptVerificationGenerate(ctx) {
  *
  * 键含义速查：
  * - execution-readiness / worker / verify / scope / review / acceptance-proof / checkpoint：交付质量门链
- * - command / command-safety：命令执行与安全评估（infra 适配）
- * - repository-governance：仓库布局与命名审计
- * - verification-governance-* / contract-governance-*：验证与契约治理 scan/apply/generate 三件套
+ * - verification-governance-* / contract-governance-*：验证与契约治理（验证含 scan/apply/generate，契约含 scan/apply）
  */
 const CAPABILITIES = {
   "execution-readiness": { handler: async (ctx) => { const evidence = await checkExecutionReadiness(ctx.rootDir, ctx.task, ctx.options); return { status: evidence.pass ? "pass" : "fail", evidence, sideEffect: "state_written" }; }, owner: "capabilities/execution-readiness.mjs" },
@@ -172,15 +140,11 @@ const CAPABILITIES = {
   review: { handler: adaptReview, owner: "capabilities/review-gate.mjs" },
   "acceptance-proof": { handler: adaptAcceptanceProof, owner: "capabilities/acceptance-proof.mjs" },
   checkpoint: { handler: adaptCheckpoint, owner: "capabilities/checkpoint.mjs" },
-  command: { handler: adaptCommand, owner: "infra/command-runner.mjs" },
-  "command-safety": { handler: adaptCommandSafety, owner: "infra/command-safety.mjs" },
-  "repository-governance": { handler: adaptRepositoryGovernance, owner: "capabilities/repository-governance.mjs" },
   "verification-governance-scan": { handler: adaptVerificationScan, owner: "capabilities/verification-governance.mjs" },
   "verification-governance-apply-card": { handler: adaptVerificationApplyCard, owner: "capabilities/verification-governance.mjs" },
   "verification-governance-generate-artifacts": { handler: adaptVerificationGenerate, owner: "capabilities/verification-governance.mjs" },
   "contract-governance-scan": { handler: adaptContractScan, owner: "capabilities/contract-governance.mjs" },
   "contract-governance-apply-card": { handler: adaptContractApplyCard, owner: "capabilities/contract-governance.mjs" },
-  "contract-governance-generate-artifacts": { handler: adaptContractGenerate, owner: "capabilities/contract-governance.mjs" },
 };
 
 /** 返回已注册能力名称列表。 */
