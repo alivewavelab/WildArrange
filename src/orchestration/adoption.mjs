@@ -41,13 +41,12 @@ import {
   writeRecoveryManifest,
   writeMaintenanceMarker,
 } from "../infra/recovery-transaction.mjs";
-import { fingerprintCard } from "../infra/verification-cards.mjs";
-import { captureCardLiveSnapshot } from "../infra/verification-discovery.mjs";
 import * as verificationRegistry from "../infra/verification-registry.mjs";
 import {
   digestCanonical,
   digestGitComparableContent,
   evaluateRegistryFreshness,
+  fingerprintCard,
   gitTreeContains,
   readLocator,
   readVerificationInventory,
@@ -801,7 +800,9 @@ function findTransaction(transactions, status) {
 
 /** 捕获 Dashboard 批准卡片的实时指纹快照。 */
 async function captureLiveApprovalSnapshot(rootDir, card) {
-  const snapshot = await captureCardLiveSnapshot(rootDir, card);
+  const envelope = await invokeCapability("verification-governance-card-snapshot", { rootDir, options: { card } });
+  if (envelope.error) throw new Error(envelope.error.message || "verification card snapshot failed");
+  const snapshot = envelope.evidence;
   return {
     ...snapshot,
     headSha: await captureProjectHeadSha(rootDir),

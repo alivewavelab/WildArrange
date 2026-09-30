@@ -1,19 +1,17 @@
 // =============================================================================
 // 文件名称：verification-cards.mjs
-// 所属模块：infra
+// 所属模块：capabilities
 // 作用说明：
-//   验证卡片 UI/CLI 投影：human-readable 验证状态与下一步。
+//   验证资产 adoption 卡构造：adopt/merge/archive/delete 等动作的裁决与危险动作降级。
+//   纯函数，只读扫描事实，不访问文件系统或 Git。
 //
 // 【运行原理速读】
-//   buildVerificationCards → 聚合 gate 结果 → markdown/html 片段。
+//   discovery 的资产分类 → buildAdoptionCards → 带指纹的卡片列表。
 // =============================================================================
-/**
- * Adoption card construction for discovered verification assets.
- * Pure builders over scan facts; no filesystem or Git access.
- */
 import path from "node:path";
-import { normalizeRelativePath } from "./path-match.mjs";
-import { hashContent } from "./runtime-store.mjs";
+import { normalizeRelativePath } from "../infra/path-match.mjs";
+import { hashContent } from "../infra/runtime-store.mjs";
+import { fingerprintCard } from "../infra/verification-registry.mjs";
 
 /**
  * 需人工确认的危险 adoption 动作集合。
@@ -58,27 +56,11 @@ export const TEST_SCRIPT_RE = /^(test|verify|coverage|spec)([:_-]|$)/i;
 const DYNAMIC_HINT_RE = /\bimport\s*\(|\beval\s*\(|\bnew Function\b|\brequire\s*\(\s*[^'"`]/;
 
 /**
- * fingerprintCard：本模块对外API。
- */
-// --- 卡片指纹与危险动作 ---
-export function fingerprintCard(card) {
-  return hashContent(stableStringify(cardFingerprintPayload(card)));
-}
-
-/**
  * cardAllowsDangerousAction：本模块对外API。
  */
 function cardAllowsDangerousAction(card) {
   const unknown = card.consumers?.some((consumer) => consumer.grade === "unknown") || card.confidence === "unknown";
   return !unknown;
-}
-
-/**
- * cardFingerprintPayload：本模块对外API。
- */
-export function cardFingerprintPayload(card) {
-  const { status: _status, ...rest } = card;
-  return rest;
 }
 
 /**
@@ -88,7 +70,6 @@ export function cardFingerprintPayload(card) {
 export function buildAdoptionCards(assets, options = {}) {
   const cards = [];
   const packageFacts = options.packageFacts || { scripts: [], packages: [] };
-  const existingCommands = collectExistingCommands(options.config);
   const locator = options.suggestedLocator || configuredLocator(options.config) || suggestLocator(assets);
   const usedPaths = new Set();
   const textIndex = options.textIndex || { registered: [], clues: [] };
@@ -96,7 +77,6 @@ export function buildAdoptionCards(assets, options = {}) {
   const fileSet = options.fileSet || new Set(files.map((file) => file.path || file));
   const cardContext = {
     packageFacts,
-    existingCommands,
     textIndex,
     files,
     fileSet,
@@ -107,17 +87,17 @@ export function buildAdoptionCards(assets, options = {}) {
     cards.push(makeCard({
       action: "adopt",
       asset: "config_locator",
-      path: options.configPath || "wildarrange.config.json",
-      ...(options.configPath ? { repositoryTarget: "governance" } : {}),
+      path: options.configPath,
+      repositoryTarget: "governance",
       owner: "verification-governance",
       purpose: "记录 Registry / Bootstrap / Inventory 三个正式文件的逻辑定位",
-      consumers: [{ grade: "registered", by: options.configPath || "wildarrange.config.json", evidence: "optional verificationGovernance locator" }],
+      consumers: [{ grade: "registered", by: options.configPath, evidence: "optional verificationGovernance locator" }],
       evidence: ["locator is configuration, not a gate"],
       confidence: "high",
       reason: "扫描建议正式文件落点，需用户批准后才写入 locator，init 不会静默创建三文件",
       afterState: `verificationGovernance.registryPath=${locator.registryPath}`,
       maxConsequence: "只增加三个路径标签，不改变现有质量门",
-      patch: { kind: "json_merge", path: options.configPath || "wildarrange.config.json", value: { verificationGovernance: locator } },
+      patch: { kind: "json_merge", path: options.configPath, value: { verificationGovernance: locator } },
       verify: [],
       rollback: "删除或还原 verificationGovernance 段",
       mappingLoss: null,
@@ -194,15 +174,13 @@ export function buildAdoptionCards(assets, options = {}) {
  * 为指定资产构造 verification card。
  */
 function cardForAsset(asset, ctx = {}) {
-  const { packageFacts, existingCommands } = ctx;
+  const { packageFacts } = ctx;
   const consumers = asset.consumers;
   const confidence = asset.confidence;
   if (asset.kind === "behavior_suite") {
     const command = inferCommand(asset.path, packageFacts, TEST_SCRIPT_RE) || `node --test ${asset.path}`;
-    const exact = existingCommands.verify.includes(command);
-    const similar = existingCommands.verify.find((item) => normalizeCommand(item) === normalizeCommand(command));
     return makeCard({
-      action: exact ? "defer" : "adopt",
+      action: "adopt",
       asset: asset.kind,
       path: asset.path,
       owner: "planDefaults.verify_commands",
@@ -210,13 +188,13 @@ function cardForAsset(asset, ctx = {}) {
       consumers,
       evidence: asset.evidence,
       confidence,
-      reason: exact ? "已与现有 verify_commands 精确同义" : "扫描到可复用的行为测试入口",
+      reason: "扫描到可复用的行为测试入口",
       afterState: `Registry.planDefaults.verify_commands 增加 ${command}`,
       maxConsequence: "未来计划会跑这条命令；命令失败会挡住完成链",
-      patch: exact ? null : { kind: "registry_plan_default", field: "verify_commands", command, sourcePath: asset.path },
+      patch: { kind: "registry_plan_default", field: "verify_commands", command, sourcePath: asset.path },
       verify: [command],
       rollback: "从 Registry planDefaults.verify_commands 移除该命令",
-      mappingLoss: !exact && similar ? `近似已有命令 ${similar}` : null,
+      mappingLoss: null,
     });
   }
   if (asset.kind === "static_check") {
@@ -240,28 +218,22 @@ function cardForAsset(asset, ctx = {}) {
         mappingLoss: "缺少精确命令",
       });
     }
-    const exactGate = existingCommands.qualityGates.includes(command);
-    const exactStandard = existingCommands.standards.includes(command);
     return makeCard({
-      action: exactStandard ? "defer" : "adopt",
+      action: "adopt",
       asset: asset.kind,
       path: asset.path,
-      owner: exactGate ? "qualityGates" : "planDefaults.standards_commands",
+      owner: "planDefaults.standards_commands",
       purpose: "静态工程检查",
       consumers,
       evidence: asset.evidence,
       confidence,
-      reason: exactGate
-        ? "与现有 qualityGates 精确同义，另出配置卡才会改门"
-        : "映射到 standards_commands；近似映射会标明 mappingLoss",
+      reason: "映射到 standards_commands；近似映射会标明 mappingLoss",
       afterState: `Registry.planDefaults.standards_commands 增加 ${command}`,
       maxConsequence: "未来计划的 standards lane 会执行该命令",
-      patch: exactStandard ? null : { kind: "registry_plan_default", field: "standards_commands", command, sourcePath: asset.path },
+      patch: { kind: "registry_plan_default", field: "standards_commands", command, sourcePath: asset.path },
       verify: [command],
       rollback: "从 Registry 移除该 standards 命令",
-      mappingLoss: !exactStandard && !exactGate && existingCommands.standards.length > 0
-        ? "未与现有 qualityGates 精确同义，不自动改门"
-        : null,
+      mappingLoss: null,
     });
   }
   if (asset.kind === "independent_review") {
@@ -281,7 +253,7 @@ function cardForAsset(asset, ctx = {}) {
       patch: { kind: "registry_plan_default", field: "review_commands", command, sourcePath: asset.path },
       verify: [command],
       rollback: "从 Registry 移除该 review 命令",
-      mappingLoss: existingCommands.verify.includes(command) ? "与 verify 同义，Skill 必须拒绝写进完成链" : null,
+      mappingLoss: null,
     });
   }
   if (asset.kind === "test_fixture") {
@@ -539,22 +511,6 @@ function inferCommand(relativePath, packageFacts, nameRe) {
 }
 
 /**
- * 收集 ExistingCommands 条目。
- */
-function collectExistingCommands(config = {}) {
-  const qualityGates = [];
-  for (const gate of Object.values(config.qualityGates || {})) {
-    for (const command of gate?.commands || []) qualityGates.push(command);
-  }
-  return {
-    verify: [],
-    standards: [],
-    review: [],
-    qualityGates,
-  };
-}
-
-/**
  * 将 EquivalentScripts 按等价关系分组。
  */
 function groupEquivalentScripts(scripts) {
@@ -653,15 +609,3 @@ export function indexTextByPath(textIndex = {}) {
 function normalizeCommand(command) {
   return String(command || "").trim().replace(/\s+/g, " ");
 }
-
-/**
- * stableStringify：本模块对外API。
- */
-export function stableStringify(value) {
-  if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
