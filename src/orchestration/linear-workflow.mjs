@@ -2,7 +2,7 @@
 // 文件名称：linear-workflow.mjs
 // 所属模块：orchestration
 // 作用说明：
-//   分步 workflow node：execute、verify、scope、review、checkpoint、retry。
+//   分步 workflow node：execute、checkpoint、retry（verify/scope/review 只经完整 pipeline 运行）。
 //   只负责显式节点的状态推进；连续 run 的任务选择与 worker 全周期在 linear-runtime.mjs。
 // =============================================================================
 import { appendLedger } from "../infra/ledger.mjs";
@@ -10,50 +10,27 @@ import { ensureWildArrangeDirs, nowIso } from "../infra/runtime-store.mjs";
 import { transactWithLedger, withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { ensureTaskPacket, writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { readChangeRequest, writeChangeRequest } from "./change-governance.mjs";
-import { prepareContractReview } from "./contract-governance.mjs";
 import { buildFailureSummary } from "../infra/failure-analysis.mjs";
-import { writeFailureReport, writeReviewReport } from "../infra/task-reports.mjs";
 import { buildChangedPathDiffEvidence, changedPathsIntroducedByTask, collectGitChangedPaths } from "../infra/git-diff.mjs";
-import { applyVerifierEvidenceToCriteria, criteriaStatus } from "../infra/success-criteria.mjs";
+import { criteriaStatus } from "../infra/success-criteria.mjs";
 import { invokeCapability } from "../capabilities/gateway.mjs";
 import { normalizeRelativePath } from "../infra/path-match.mjs";
-import {
-  commitTaskCompletionState,
-  runDeliveryPipeline,
-  runPostCompletionSideEffects,
-  shouldFailDeliveryAttempt,
-  collectGateEvidenceFromTask,
-} from "./delivery-pipeline.mjs";
+import { runDeliveryPipeline, shouldFailDeliveryAttempt } from "./delivery-pipeline.mjs";
 import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
 import { persistTaskState, writeOutbox } from "./task-board.mjs";
 import { findRunnableTask } from "../infra/task-predicates.mjs";
 import { resolveTaskBranchTarget } from "./task-branch.mjs";
 import { assertCommandWorkerAgent } from "../infra/agent-registry.mjs";
 import { assertContractWorkspaceAvailable } from "./integration.mjs";
-import { ensureLinearDeliveryWorkspace } from "./linear-delivery.mjs";
-import {
-  persistAcceptanceProofFailure,
-  persistCheckpointWriteFailure,
-  persistCommandRecoveryRequired,
-  persistRevalidationRequired,
-} from "./linear-recovery.mjs";
-import { recordPreExecuteSnapshot } from "./linear-task-support.mjs";
+import { ensureLinearDeliveryWorkspace, recordPreExecuteSnapshot } from "./linear-delivery.mjs";
+import { DEFAULT_RECOVERY_HINTS, applyPipelineOutcome, persistCommandRecovery, persistTaskFailure, recordGateEvidence } from "./task-recovery.mjs";
 
 // --- 分步 workflow node ---
 
-/** 分步 workflow 入口：execute/verify/scope/review/checkpoint/retry。 */
+/** 分步 workflow 入口：execute/checkpoint/retry。 */
 export async function runLinearWorkflowNode(rootDir, nodeName, options = {}) {
   if (nodeName === "execute") {
     return executeTaskNode(rootDir, options);
-  }
-  if (nodeName === "verify") {
-    return verifyTaskNode(rootDir, options);
-  }
-  if (nodeName === "scope") {
-    return scopeTaskNode(rootDir, options);
-  }
-  if (nodeName === "review") {
-    return reviewTaskNode(rootDir, options);
   }
   if (nodeName === "checkpoint") {
     return checkpointTaskNode(rootDir, options);
@@ -160,164 +137,33 @@ async function executeTaskNodeUnlocked(rootDir, options = {}) {
   await writeOutbox(rootDir, task, workerResult);
   await writeSnapshot(rootDir, "node_execute_completed", { planId: taskState.planId, taskId: task.id, exitCode: workerResult.exitCode });
   if (workerResult?.recoveryRequired === true || workerResult?.terminationFailed === true) {
-    return persistCommandRecoveryRequired(rootDir, taskState, task, workerResult);
+    return persistCommandRecovery(rootDir, taskState, task, workerResult, {
+      event: { type: NODE_EVENTS.commandRecovery },
+      retryHint: DEFAULT_RECOVERY_HINTS.commandRecovery,
+    });
   }
   return { status: "executed", task, workerResult };
 }
 
-/** 仅运行 verify gate（verify node）。 */
-export async function verifyTaskNode(rootDir, options = {}) {
-  return withTaskStateLock(rootDir, `node-verify:${options.taskId || "next"}`, () => verifyTaskNodeUnlocked(rootDir, options));
-}
-
-/** 锁内单独运行 verify gate 节点。 */
-async function verifyTaskNodeUnlocked(rootDir, options = {}) {
-  await ensureWildArrangeDirs(rootDir);
-  const taskState = await loadTaskState(rootDir);
-  if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
-  const task = resolveNodeTask(taskState.tasks, options.taskId, ["verifying", "in_progress"]);
-  const deliveryWorkspace = await ensureLinearDeliveryWorkspace(rootDir, taskState.planId, task, taskState.tasks);
-
-  task.status = "verifying";
-  const verifyEnvelope = await invokeCapability("verify", { rootDir, task, options: { executionRoot: deliveryWorkspace?.workDir || rootDir } });
-  const verifyResult = verifyEnvelope.evidence;
-  task.evidence.push(verifyResult);
-  task.last_verify_result = verifyResult;
-  const criterionEvidence = applyVerifierEvidenceToCriteria(task, verifyResult);
-  if (!verifyResult.pass) {
-    task.status = shouldFailDeliveryAttempt(task, verifyResult) ? "failed" : "pending";
-    task.last_failure = buildFailureSummary(task, {
-      workerResult: [...task.evidence].reverse().find((entry) => entry.kind === "worker") || { exitCode: 0 },
-      verifyResult,
-      scopeResult: task.last_scope_result || { status: "inconclusive" },
-      nextStatus: task.status,
-    });
-  }
-  task.updatedAt = nowIso();
-  if (!verifyResult.pass) {
-    await writeFailureReport(rootDir, taskState.planId, task);
-  }
-  await transactWithLedger(rootDir, {
-    type: "node_verify_completed",
-    planId: taskState.planId,
-    taskId: task.id,
-    pass: verifyResult.pass,
-    criterionEvidenceCount: criterionEvidence.length,
-  }, () => persistTaskState(rootDir, taskState));
-  if (!verifyResult.pass) {
-    await appendLedger(rootDir, { type: "node_verify_failed", planId: taskState.planId, taskId: task.id, reason: task.last_failure.reason });
-  }
-  await writeSnapshot(rootDir, "node_verify_completed", { planId: taskState.planId, taskId: task.id, pass: verifyResult.pass });
-  return { status: verifyResult.pass ? "verified" : task.status === "failed" ? "failed" : "verify_failed", task, verifyResult };
-}
-
-/** 仅运行 scope gate（scope node）。 */
-export async function scopeTaskNode(rootDir, options = {}) {
-  return withTaskStateLock(rootDir, `node-scope:${options.taskId || "next"}`, () => scopeTaskNodeUnlocked(rootDir, options));
-}
-
-/** 锁内单独运行 scope gate 节点。 */
-async function scopeTaskNodeUnlocked(rootDir, options = {}) {
-  await ensureWildArrangeDirs(rootDir);
-  const taskState = await loadTaskState(rootDir);
-  if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
-  const task = resolveNodeTask(taskState.tasks, options.taskId, ["verifying", "in_progress", "pending"]);
-  const deliveryWorkspace = await ensureLinearDeliveryWorkspace(rootDir, taskState.planId, task, taskState.tasks);
-  const executionPaths = [...task.evidence].reverse().find((entry) => entry.kind === "execution_paths");
-  const scopeEnvelope = await invokeCapability("scope", {
-    rootDir,
-    task,
-    options: {
-      changedPaths: executionPaths?.afterAvailable === true ? executionPaths.introducedPaths : undefined,
-      unavailableReason: executionPaths?.unavailableReason,
-      executionRoot: deliveryWorkspace?.workDir || rootDir,
-    },
-  });
-  const scopeResult = scopeEnvelope.evidence;
-  task.evidence.push({ kind: "scope_guard", at: nowIso(), ...scopeResult });
-  task.last_scope_result = scopeResult;
-  if (scopeResult.status === "fail") {
-    task.last_change_request = await writeChangeRequest(rootDir, taskState.planId, task, scopeResult, "node_scope");
-  }
-  task.updatedAt = nowIso();
-  await transactWithLedger(rootDir, {
-    type: "node_scope_completed",
-    planId: taskState.planId,
-    taskId: task.id,
-    status: scopeResult.status,
-  }, () => persistTaskState(rootDir, taskState));
-  await writeSnapshot(rootDir, "node_scope_completed", { planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult.status });
-  return { status: scopeResult.status, task, scopeResult };
-}
-
-/** 仅运行 review gate（review node）。 */
-export async function reviewTaskNode(rootDir, options = {}) {
-  return withTaskStateLock(rootDir, `node-review:${options.taskId || "next"}`, () => reviewTaskNodeUnlocked(rootDir, options));
-}
-
-/** 锁内单独运行 review gate 节点。 */
-async function reviewTaskNodeUnlocked(rootDir, options = {}) {
-  await ensureWildArrangeDirs(rootDir);
-  const taskState = await loadTaskState(rootDir);
-  if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
-  const task = resolveNodeTask(taskState.tasks, options.taskId, ["verifying", "in_progress"]);
-  const deliveryWorkspace = await ensureLinearDeliveryWorkspace(rootDir, taskState.planId, task, taskState.tasks);
-  const workerResult = [...task.evidence].reverse().find((entry) => entry.kind === "worker");
-  const verifyResult = task.last_verify_result || [...task.evidence].reverse().find((entry) => entry.kind === "verifier");
-  const scopeResult = task.last_scope_result || [...task.evidence].reverse().find((entry) => entry.kind === "scope_guard");
-  const contractGovernance = await prepareContractReview(rootDir, taskState.planId, task, deliveryWorkspace?.workDir || rootDir, { workerResult, verifyResult, scopeResult });
-  const reviewEnvelope = await invokeCapability("review", {
-    rootDir,
-    task,
-    evidence: { workerResult, verifyResult, scopeResult, contractGovernance },
-    options: { executionRoot: deliveryWorkspace?.workDir || rootDir },
-  });
-  const reviewResult = reviewEnvelope.evidence;
-
-  task.status = "verifying";
-  task.evidence.push(reviewResult);
-  task.last_review_result = reviewResult;
-  task.updatedAt = nowIso();
-  await writeReviewReport(rootDir, taskState.planId, task, reviewResult);
-
-  if (contractGovernance.changeRequest) {
-    task.status = "needs_user_decision";
-    await transactWithLedger(rootDir, {
-      type: "node_review_awaiting_user_decision",
-      planId: taskState.planId,
-      taskId: task.id,
-      changeRequestId: contractGovernance.changeRequest.id || null,
-    }, () => persistTaskState(rootDir, taskState));
-    return { status: "awaiting_user_decision", task, changeRequest: contractGovernance.changeRequest, reviewResult };
-  }
-  if (!reviewResult.pass) {
-    task.status = "failed";
-    task.last_failure = buildFailureSummary(task, {
-      workerResult: workerResult || { exitCode: 1 },
-      verifyResult: verifyResult || { pass: false },
-      scopeResult: scopeResult || { status: "inconclusive" },
-      reviewResult,
-      nextStatus: task.status,
-    });
-    await writeFailureReport(rootDir, taskState.planId, task);
-  }
-
-  await transactWithLedger(rootDir, {
-    type: reviewResult.pass ? "node_review_passed" : "node_review_failed",
-    planId: taskState.planId,
-    taskId: task.id,
-    failedLaneCount: reviewResult.lanes.filter((lane) => lane.status === "fail").length,
-  }, () => persistTaskState(rootDir, taskState));
-  await writeSnapshot(rootDir, "node_review_completed", { planId: taskState.planId, taskId: task.id, pass: reviewResult.pass });
-  return { status: reviewResult.pass ? "reviewed" : "review_failed", task, reviewResult };
-}
-
-/** 运行 completion 段：acceptance-proof + checkpoint（checkpoint node）。 */
+/** 运行 completion 段：完整 delivery pipeline + acceptance-proof + checkpoint（checkpoint node）。 */
 export async function checkpointTaskNode(rootDir, options = {}) {
   return withTaskStateLock(rootDir, `node-checkpoint:${options.taskId || "next"}`, () => checkpointTaskNodeWithinLock(rootDir, options));
 }
 
-/** 锁内收集 gate 证据并运行 completion 段。 */
+/** 单步 checkpoint 各 pipeline 分支的 ledger 事件类型。 */
+const NODE_EVENTS = {
+  awaiting: "node_checkpoint_awaiting_user_decision",
+  revalidation: "node_checkpoint_revalidation_required",
+  completed: "node_checkpoint_completed",
+  rejected: "node_checkpoint_rejected",
+  proofFailed: "acceptance_proof_failed",
+  commandRecovery: "command_recovery_required",
+};
+
+/**
+ * 锁内对 worker 已成功的任务重跑完整 delivery pipeline 并落盘结果。
+ * gate 证据总是由 pipeline 现场重新产生，不复用任何旧一轮的 verify/scope/review 结果。
+ */
 export async function checkpointTaskNodeWithinLock(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const taskState = await loadTaskState(rootDir);
@@ -335,148 +181,46 @@ export async function checkpointTaskNodeWithinLock(rootDir, options = {}) {
   // 先拒绝再建 worktree：claim 期间任务分支被 admission 的 run worktree 占用，此处不得有任何 worktree 副作用。
   const deliveryWorkspace = await ensureLinearDeliveryWorkspace(rootDir, taskState.planId, task, taskState.tasks);
   const workerResult = [...task.evidence].reverse().find((entry) => entry.kind === "worker");
-  // Gate outcomes are read back via the pipeline's own step list, so the
-  // single-step workflow cannot complete a task while skipping a gate that
-  // the shared delivery pipeline would have run.
-  const { evidence: gateEvidence, failedSteps } = collectGateEvidenceFromTask(task);
-  let { verifyResult, scopeResult, reviewResult } = gateEvidence;
-  let criteria = criteriaStatus(task);
 
-  if (workerResult?.exitCode === 0 && ((criteria.pass && failedSteps.length === 0) || task.contractDecisionRef)) {
-    let completion;
-    {
-      const current = deliveryWorkspace ? await collectGitChangedPaths(deliveryWorkspace.workDir) : { available: false, reason: "not_git" };
-      const pipeline = await runDeliveryPipeline(rootDir, taskState.planId, task, {
-        initialEvidence: { workerResult },
-        changedPaths: current.available ? current.paths : task.last_scope_result?.changedPaths,
-        unavailableReason: current.reason,
-        executionRoot: deliveryWorkspace?.workDir || rootDir,
-        runId: deliveryWorkspace?.runId,
-      });
-      verifyResult = pipeline.evidence.verifyResult;
-      scopeResult = pipeline.evidence.scopeResult;
-      reviewResult = pipeline.evidence.reviewResult;
-      criteria = pipeline.criteria;
-      if (pipeline.evidence.integrationCommit) task.delivery = pipeline.evidence.integrationCommit;
-      task.evidence.push(verifyResult, { kind: "scope_guard", at: nowIso(), ...scopeResult }, reviewResult);
-      task.last_verify_result = verifyResult;
-      task.last_scope_result = scopeResult;
-      task.last_review_result = reviewResult;
-      completion = {
-        status: pipeline.status,
-        proofEnvelope: { evidence: pipeline.evidence.acceptanceProof },
-        checkpointEnvelope: pipeline.steps.find((step) => step.capability === "checkpoint") || null,
-        integrationGate: pipeline.evidence.integrationCommit,
-      };
-      if (pipeline.status === "awaiting_user_decision") {
-        await transactWithLedger(rootDir, {
-          type: "node_checkpoint_awaiting_user_decision",
-          planId: taskState.planId,
-          taskId: task.id,
-          changeRequestId: pipeline.changeRequest?.id || null,
-        }, () => persistTaskState(rootDir, taskState));
-        return { status: "awaiting_user_decision", task, changeRequest: pipeline.changeRequest, verifyResult, scopeResult, reviewResult };
-      }
-      if (pipeline.status === "recovery_required") {
-        return persistCommandRecoveryRequired(rootDir, taskState, task, pipeline.evidence.commandRecovery, {
-          workerResult, verifyResult, scopeResult, reviewResult,
-        });
-      }
-    }
-    const acceptanceProof = completion.proofEnvelope.evidence;
-    if (completion.status === "proof_failed") {
-      // acceptanceProof can be null when the proof capability threw (the
-      // gateway converts throws into fail envelopes with null evidence).
-      const failedChecks = (acceptanceProof?.checks || []).filter((check) => check.status === "fail").map((check) => check.name).join(", ");
-      await persistAcceptanceProofFailure(rootDir, taskState, task, {
-        workerResult,
-        verifyResult,
-        scopeResult,
-        reviewResult,
-        criteria,
-        failureSummary: `acceptance proof failed: ${failedChecks || completion.proofEnvelope.error?.message || "acceptance proof capability failed"}`,
-      });
-      return { status: task.status === "failed" ? "failed" : "retry", task, verifyResult, scopeResult, reviewResult, acceptanceProof };
-    }
-    if (completion.status === "checkpoint_failed") {
-      await persistCheckpointWriteFailure(rootDir, taskState, task, {
-        workerResult,
-        verifyResult,
-        scopeResult,
-        reviewResult,
-        criteria,
-        checkpointError: completion.checkpointEnvelope?.error?.message,
-      });
-      return { status: task.status === "verifying" ? "recovery_required" : "retry", task, verifyResult, scopeResult, reviewResult, acceptanceProof };
-    }
-    if (completion.status === "revalidation_required") {
-      await persistRevalidationRequired(rootDir, taskState, task, {
-        integrationGate: completion.integrationGate,
-        summaryFallback: "task branch baseline changed before checkpoint",
-        retryHint: "确认 task branch 基线与工作区归属后，重新运行质量门与 checkpoint",
-        ledgerEvent: { type: "node_checkpoint_revalidation_required", planId: taskState.planId, taskId: task.id },
-      });
-      return { status: "revalidation_required", task, verifyResult, scopeResult, reviewResult, acceptanceProof };
-    }
-    if (completion.status !== "completed") {
-      task.status = task.delivery?.integrationSha || task.delivery?.commitSha ? "verifying" : (shouldFailDeliveryAttempt(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending");
-      task.last_failure = buildFailureSummary(task, { workerResult, verifyResult, scopeResult, reviewResult, criteriaResult: criteria, nextStatus: task.status });
-      if (task.status === "verifying") {
-        task.last_failure.reason = "delivery_revalidation_failed";
-        task.last_failure.retryHint = "保留同一 delivery commit 与 owner；修复 gate 后显式重跑 checkpoint，不重新执行 worker。";
-      }
-      task.updatedAt = nowIso();
-      await writeFailureReport(rootDir, taskState.planId, task);
-      await transactWithLedger(rootDir, {
-        type: "node_checkpoint_rejected",
-        planId: taskState.planId,
-        taskId: task.id,
-        nextStatus: task.status,
-        reason: task.last_failure.reason,
-      }, () => persistTaskState(rootDir, taskState));
-      return { status: task.status === "verifying" ? "recovery_required" : task.status === "failed" ? "failed" : "retry", task, verifyResult, scopeResult, reviewResult, acceptanceProof };
-    }
-    // Checkpoint durably written — only now may the task become completed.
-    // Ledger event first, then wisdom/digest (inside the transaction: a
-    // failure leaves the task in verifying for recovery re-adjudication),
-    // canonical tasks.json last (commit point); snapshot is post-commit and
-    // best-effort. See the same ordering rationale in runNextTaskUnlocked.
-    await commitTaskCompletionState(rootDir, {
-      taskState,
-      task,
-      verifyResult,
-      ledgerEvent: { type: "node_checkpoint_completed", planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult?.status || "missing", reviewStatus: "pass" },
+  if (workerResult?.exitCode === 0) {
+    const executionPaths = [...task.evidence].reverse().find((entry) => entry.kind === "execution_paths");
+    const current = deliveryWorkspace ? await collectGitChangedPaths(deliveryWorkspace.workDir) : { available: false, reason: "not_git" };
+    const pipeline = await runDeliveryPipeline(rootDir, taskState.planId, task, {
+      initialEvidence: { workerResult },
+      changedPaths: current.available ? current.paths : (executionPaths?.afterAvailable === true ? executionPaths.introducedPaths : undefined),
+      unavailableReason: current.reason,
+      executionRoot: deliveryWorkspace?.workDir || rootDir,
+      runId: deliveryWorkspace?.runId,
     });
-    const sideEffectWarnings = await runPostCompletionSideEffects(rootDir, taskState.planId, task, async () => {
-      await writeSnapshot(rootDir, "node_checkpoint_completed", { planId: taskState.planId, taskId: task.id });
+    await recordGateEvidence(rootDir, taskState.planId, task, pipeline);
+    if (pipeline.evidence.integrationCommit) task.delivery = pipeline.evidence.integrationCommit;
+    return applyPipelineOutcome(rootDir, taskState, task, pipeline, {
+      workerResult,
+      events: NODE_EVENTS,
+      hints: DEFAULT_RECOVERY_HINTS,
+      changeRequestSource: "checkpoint",
+      keepCommittedDelivery: true,
+      afterCompleted: () => writeSnapshot(rootDir, "node_checkpoint_completed", { planId: taskState.planId, taskId: task.id }),
     });
-    return { status: "completed", task, verifyResult, scopeResult, reviewResult, acceptanceProof, sideEffectWarnings };
   }
 
-  task.status = shouldFailDeliveryAttempt(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
-  if (scopeResult?.status === "fail" && !task.last_change_request) {
-    task.last_change_request = await writeChangeRequest(rootDir, taskState.planId, task, scopeResult, "checkpoint");
-  }
-  task.last_failure = buildFailureSummary(task, {
+  // worker 缺失或失败：不进入 gates，按 worker_failed 记失败。
+  const nextStatus = shouldFailDeliveryAttempt(task, task.last_verify_result, task.last_scope_result, task.last_review_result) ? "failed" : "pending";
+  const failure = buildFailureSummary(task, {
     workerResult: workerResult || { exitCode: 1 },
-    verifyResult: verifyResult || { pass: false },
-    scopeResult: scopeResult || { status: "inconclusive" },
-    reviewResult: reviewResult || { pass: false, lanes: [{ name: "review_gate", status: "fail", summary: "review gate has not passed" }] },
-    criteriaResult: criteria,
-    nextStatus: task.status,
+    verifyResult: task.last_verify_result || { pass: false },
+    scopeResult: task.last_scope_result || { status: "inconclusive" },
+    reviewResult: task.last_review_result || { pass: false, lanes: [{ name: "review_gate", status: "fail", summary: "review gate has not passed" }] },
+    criteriaResult: criteriaStatus(task),
+    nextStatus,
   });
-  task.updatedAt = nowIso();
-  await writeFailureReport(rootDir, taskState.planId, task);
-  await transactWithLedger(rootDir, {
-    type: "node_checkpoint_rejected",
-    planId: taskState.planId,
-    taskId: task.id,
-    nextStatus: task.status,
-    reason: task.last_failure.reason,
-    retryHint: task.last_failure.retryHint,
-  }, () => persistTaskState(rootDir, taskState));
-  await writeSnapshot(rootDir, "node_checkpoint_rejected", { planId: taskState.planId, taskId: task.id, nextStatus: task.status });
-  return { status: task.status === "failed" ? "failed" : "retry", task, verifyResult, scopeResult, reviewResult };
+  await persistTaskFailure(rootDir, taskState, task, {
+    status: nextStatus,
+    failure,
+    event: { type: NODE_EVENTS.rejected, nextStatus, reason: failure.reason, retryHint: failure.retryHint },
+    snapshot: NODE_EVENTS.rejected,
+  });
+  return { status: task.status === "failed" ? "failed" : "retry", task };
 }
 
 /** 失败任务重试：重置状态并重新进入 execute 流程（retry node）。 */

@@ -59,7 +59,7 @@ test("linear loop runs worker, verifies, checkpoints, and records ledger", async
 
     const reviewReport = await readJson(resolveWildArrangePath(projectRoot, "reports", "reviews", plan.id, "T001.json"));
     assert.equal(reviewReport.status, "pass");
-    assert.ok(reviewReport.lanes.some((lane) => lane.name === "goal_compliance"));
+    assert.ok(reviewReport.lanes.some((lane) => lane.name === "project_standards"));
 
     const ledger = await readFile(resolveWildArrangePath(projectRoot, "ledger.jsonl"), "utf8");
     assert.match(ledger, /task_verified/);

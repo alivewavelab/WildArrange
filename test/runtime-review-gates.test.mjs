@@ -181,32 +181,6 @@ test("review gate failure blocks checkpoint and writes actionable failure report
   });
 });
 
-test("review gate fails when verifier evidence is missing", async () => {
-  await withExternalProject(async ({ projectRoot, root }) => {
-    const planPath = path.join(root, "review-missing-evidence-plan.json");
-    await writeFile(planPath, JSON.stringify({
-      title: "Missing evidence review",
-      tasks: [{
-        id: "T001",
-        subject: "Do not review without verifier evidence",
-        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
-        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
-        review_commands: ["node --version"],
-      }],
-    }));
-    const plan = await importPlan(projectRoot, planPath);
-
-    await runWorkflowNode(projectRoot, "execute", { taskId: "T001" });
-    const reviewed = await runWorkflowNode(projectRoot, "review", { taskId: "T001" });
-    assert.equal(reviewed.status, "review_failed");
-    assert.ok(reviewed.reviewResult.lanes.some((lane) => lane.name === "evidence_integrity" && lane.status === "fail"));
-
-    const reviewReport = await readJson(resolveWildArrangePath(projectRoot, "reports", "reviews", plan.id, "T001.json"));
-    assert.equal(reviewReport.status, "fail");
-    assert.ok(reviewReport.lanes.some((lane) => lane.name === "evidence_integrity" && /verifyResult/.test(lane.summary)));
-  });
-});
-
 test("standards command failure blocks checkpoint through review gate", async () => {
   await withExternalProject(async ({ projectRoot, root }) => {
     const planPath = path.join(root, "standards-fail-plan.json");
@@ -239,28 +213,27 @@ test("standards command failure blocks checkpoint through review gate", async ()
   });
 });
 
-test("checkpoint node rejects tasks before review gate passes", async () => {
+test("checkpoint node rejects tasks whose review gate does not pass", async () => {
   await withExternalProject(async ({ projectRoot, root }) => {
     const planPath = path.join(root, "missing-review-plan.json");
     await writeFile(planPath, JSON.stringify({
-      title: "Missing review",
+      title: "Failing review",
       tasks: [{
         id: "T001",
-        subject: "Need review before checkpoint",
+        subject: "Need passing review before checkpoint",
         worker_command: "node -e \"if(!process.version)process.exit(1)\"",
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
-        review_commands: ["node --version"],
+        review_commands: ["node -e \"process.exit(5)\""],
+        maxAttempts: 2,
       }],
     }));
-    await importPlan(projectRoot, planPath);
+    const plan = await importPlan(projectRoot, planPath);
 
     await runWorkflowNode(projectRoot, "execute", { taskId: "T001" });
-    await runWorkflowNode(projectRoot, "verify", { taskId: "T001" });
-    await runWorkflowNode(projectRoot, "scope", { taskId: "T001" });
-
     const checkpointed = await runWorkflowNode(projectRoot, "checkpoint", { taskId: "T001" });
-    assert.equal(checkpointed.status, "retry");
-    assert.equal(checkpointed.task.status, "pending");
+    assert.notEqual(checkpointed.status, "completed");
+    assert.notEqual(checkpointed.task.status, "completed");
     assert.equal(checkpointed.task.last_failure.reason, "review_gate_failed");
+    await assert.rejects(() => readJson(resolveWildArrangePath(projectRoot, "checkpoints", plan.id, "T001.json")));
   });
 });

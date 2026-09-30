@@ -224,7 +224,6 @@ test("review blockers create a resolution task without completing the blocked ta
     }));
     await importPlan(projectRoot, planPath);
     await runWorkflowNode(projectRoot, "execute", { taskId: "T001" });
-    await runWorkflowNode(projectRoot, "verify", { taskId: "T001" });
 
     const blocked = await recordReviewBlocker(projectRoot, {
       taskId: "T001",
@@ -259,7 +258,6 @@ test("review blocker resolution returns the blocked task to pending only after t
     }));
     await importPlan(projectRoot, planPath);
     await runWorkflowNode(projectRoot, "execute", { taskId: "T001" });
-    await runWorkflowNode(projectRoot, "verify", { taskId: "T001" });
 
     const blocked = await recordReviewBlocker(projectRoot, {
       taskId: "T001",
@@ -365,7 +363,6 @@ test("attention report aggregates decisions waiting on the user", async () => {
     }, null, 2));
     await importPlan(projectRoot, planPath);
     await runWorkflowNode(projectRoot, "execute", { taskId: "T001" });
-    await runWorkflowNode(projectRoot, "verify", { taskId: "T001" });
     await recordReviewBlocker(projectRoot, {
       taskId: "T001",
       title: "评审发现证据不足",

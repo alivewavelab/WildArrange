@@ -204,9 +204,6 @@ test("team task claim respects blockers and does not bypass execution gates", as
     const executed = await runWorkflowNode(projectRoot, "execute", { taskId: "T001" });
     assert.equal(executed.status, "executed");
     assert.equal(executed.task.status, "verifying");
-    await runWorkflowNode(projectRoot, "verify", { taskId: "T001" });
-    await runWorkflowNode(projectRoot, "scope", { taskId: "T001" });
-    await runWorkflowNode(projectRoot, "review", { taskId: "T001" });
     const checkpointed = await runWorkflowNode(projectRoot, "checkpoint", { taskId: "T001" });
     assert.equal(checkpointed.status, "completed");
 

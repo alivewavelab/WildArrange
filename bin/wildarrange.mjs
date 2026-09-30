@@ -618,10 +618,10 @@ async function main() {
   }
 
   // --- 单工作流节点 ---
-  // §3.4：node 单步跑 workflow 节点（route/execute/verify/scope/review/checkpoint/retry）。
+  // §3.4：node 单步跑 workflow 节点（route/execute/checkpoint/retry）。
   if (command === "node") {
     const nodeName = args._[1];
-    if (!nodeName) throw new Error("wildarrange node requires route, execute, verify, scope, review, checkpoint, or retry");
+    if (!nodeName) throw new Error("wildarrange node requires route, execute, checkpoint, or retry");
     // §3.4：--task/--text 裸标志（无值）视为 undefined，由 runWorkflowNode 按节点默认行为处理。
     const result = await runWorkflowNode(rootDir, nodeName, {
       taskId: args.task === true ? undefined : args.task,

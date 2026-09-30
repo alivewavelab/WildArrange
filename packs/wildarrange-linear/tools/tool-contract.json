@@ -189,21 +189,6 @@
       "purpose": "单节点：执行"
     },
     {
-      "name": "wildarrange_node_verify",
-      "command": "wildarrange node verify [--task T001]",
-      "purpose": "单节点：验证"
-    },
-    {
-      "name": "wildarrange_node_scope",
-      "command": "wildarrange node scope [--task T001]",
-      "purpose": "单节点：范围检查"
-    },
-    {
-      "name": "wildarrange_node_review",
-      "command": "wildarrange node review [--task T001]",
-      "purpose": "单节点：复核"
-    },
-    {
       "name": "wildarrange_node_checkpoint",
       "command": "wildarrange node checkpoint [--task T001]",
       "purpose": "单节点：checkpoint"

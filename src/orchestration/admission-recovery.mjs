@@ -2,8 +2,8 @@
 // 文件名称：admission-recovery.mjs
 // 所属模块：orchestration
 // 作用说明：
-//   并行 admission 失败与恢复：回滚计划持久化、工作区还原、revalidation 与
-//   post-integration recovery 状态投影。均在 admission 任务锁内调用，不二次加锁。
+//   并行 admission 失败与恢复：回滚计划持久化、工作区还原与 apply 失败记账。
+//   均在 admission 任务锁内调用，不二次加锁；失败状态统一经 task-recovery.mjs 落盘。
 //
 // 【运行原理速读】
 //   可以把它想成「admission 出事后的急救箱」：
@@ -28,10 +28,8 @@ import {
   resolveWildArrangePath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
-import { transactWithLedger } from "../infra/task-state-lock.mjs";
-import { writeFailureReport } from "../infra/task-reports.mjs";
-import { persistTaskState } from "./task-board.mjs";
 import { loadTaskState } from "./plan-state.mjs";
+import { persistTaskFailure } from "./task-recovery.mjs";
 
 /**
  * 在 admission 任务锁内记录 apply 失败：按回滚结果更新任务状态与账本。
@@ -43,28 +41,27 @@ export async function recordApplyFailureWithinLock(rootDir, taskId, { runId, err
   const task = taskState.tasks.find((candidate) => candidate.id === taskId);
   if (!task || task.status !== "verifying") return;
   const rolledBack = rollback?.status === "rolled_back";
-  task.status = rolledBack ? "pending" : "verifying";
   if (rolledBack) task.admission_claim = null;
-  task.last_failure = {
-    at: nowIso(),
-    reason: rolledBack ? "admission_apply_failed" : "admission_rollback_failed",
-    summary: rolledBack
-      ? `parallel admission failed while applying files: ${error.message}`
-      : `parallel admission apply failed and workspace rollback did not complete: ${rollback?.error || error.message}`,
-    retryHint: rolledBack
-      ? "工作区已回滚到 admission 前的内容，修复失败原因后重新 admit 即可"
-      : `工作区回滚失败；任务所有权和 rollback plan 已保留。修复文件系统问题后，用同一 run 重新 admit。涉及路径：${(rollback?.paths || []).join(", ") || "unknown"}`,
-  };
-  task.updatedAt = nowIso();
-  await appendLedger(rootDir, {
-    type: "parallel_agent_admission_apply_failed",
-    runId: runId || null,
-    taskId,
-    error: error.message,
-    rollback: rollback?.status || null,
-    rollbackPaths: rollback?.paths || [],
+  await persistTaskFailure(rootDir, taskState, task, {
+    status: rolledBack ? "pending" : "verifying",
+    failure: {
+      reason: rolledBack ? "admission_apply_failed" : "admission_rollback_failed",
+      summary: rolledBack
+        ? `parallel admission failed while applying files: ${error.message}`
+        : `parallel admission apply failed and workspace rollback did not complete: ${rollback?.error || error.message}`,
+      retryHint: rolledBack
+        ? "工作区已回滚到 admission 前的内容，修复失败原因后重新 admit 即可"
+        : `工作区回滚失败；任务所有权和 rollback plan 已保留。修复文件系统问题后，用同一 run 重新 admit。涉及路径：${(rollback?.paths || []).join(", ") || "unknown"}`,
+    },
+    event: {
+      type: "parallel_agent_admission_apply_failed",
+      runId: runId || null,
+      error: error.message,
+      rollback: rollback?.status || null,
+      rollbackPaths: rollback?.paths || [],
+    },
+    report: false,
   });
-  await persistTaskState(rootDir, taskState);
 }
 
 /** 返回 agent-runs 下某 run/task 持久化回滚计划的 JSON 路径。 */
@@ -165,92 +162,4 @@ export async function rollbackAdmissionChanges(rootDir, rollbackPlan) {
     await appendLedger(rootDir, { type: "parallel_agent_admission_rollback_failed", mode: rollbackPlan.mode, paths: rollbackPlan.paths || [], error: summary });
     return { status: "rollback_failed", mode: rollbackPlan.mode, paths: rollbackPlan.paths || [], error: summary };
   }
-}
-
-/**
- * task branch 基线变化或工作区含无归属改动：任务回 pending，审计入账本后持久化 revalidation_required。
- */
-export async function persistAdmissionRevalidation(rootDir, taskState, task, options) {
-  const fence = options.fence || {};
-  task.status = "pending";
-  task.admission_claim = null;
-  task.last_failure = {
-    at: nowIso(),
-    reason: fence.reason || "task_branch_head_changed",
-    summary: fence.reason === "workspace_contains_unattributed_changes"
-      ? `workspace contains changes not attributed to this run: ${(fence.unattributedPaths || []).join(", ")}`
-      : `task branch delivery needs revalidation: ${fence.reason || "task_branch_head_changed"} (expected ${fence.expectedSha || fence.expectedHead || "unknown"}, actual ${fence.actualSha || fence.actualHead || "unknown"})`,
-    retryHint: "清理无归属改动或确认 task branch 基线后，把任务成果重新应用到该 task branch，再从 verify 开始重跑全部 gates",
-  };
-  task.updatedAt = nowIso();
-  await writeFailureReport(rootDir, taskState.planId, task);
-  // 审计先行：revalidation 事件入账本后才提交回退状态（ARC-003）。
-  await transactWithLedger(rootDir, {
-    type: "parallel_admission_revalidation_required",
-    planId: taskState.planId,
-    taskId: task.id,
-    runId: options.runId,
-    expectedSha: fence.expectedSha || fence.expectedHead || null,
-    actualSha: fence.actualSha || fence.actualHead || null,
-    reason: fence.reason || null,
-  }, () => persistTaskState(rootDir, taskState));
-  if (typeof options.removeRollbackPlan === "function") {
-    await options.removeRollbackPlan();
-  }
-  return {
-    status: "revalidation_required",
-    planId: taskState.planId,
-    task,
-    acceptanceProof: options.acceptanceProof,
-    verifyResult: options.verifyResult,
-    scopeResult: options.scopeResult,
-    reviewResult: options.reviewResult,
-    rollback: options.rollback,
-  };
-}
-
-/**
- * 集成或 checkpoint 后需人工恢复：保持 verifying，禁止回滚已推送/已本地 commit 的交付。
- */
-export async function persistPostIntegrationRecovery(rootDir, taskState, task, options) {
-  const localDelivery = options.integrationCommit?.local === true
-    || options.integrationCommit?.status === "committed_local";
-  task.status = "verifying";
-  task.last_failure = {
-    at: nowIso(),
-    reason: options.checkpointFailed
-      ? "checkpoint_failed_after_integration"
-      : "post_integration_recovery_required",
-    summary: options.summary,
-    retryHint: localDelivery
-      ? `本地任务分支已经生成 delivery commit；禁止释放或换 run。确认本地任务 worktree 后，用同一 run ${options.runId} 恢复`
-      : `远端代码已经集成或曾经集成；禁止回滚、释放或换 run。确认远端历史后，用同一 run ${options.runId} 恢复`,
-  };
-  task.updatedAt = nowIso();
-  await writeFailureReport(rootDir, taskState.planId, task);
-  // 审计先行：recovery 事件入账本后才提交 recovery_required 状态（ARC-003），
-  // 崩溃窗口不再留下无审计的状态变更。
-  await transactWithLedger(rootDir, {
-    type: options.checkpointFailed
-      ? "checkpoint_write_failed_after_integration"
-      : "post_integration_recovery_required",
-    planId: taskState.planId,
-    taskId: task.id,
-    runId: options.runId,
-    integrationSha: options.integrationCommit?.integrationSha || null,
-    error: options.error || options.integrationCommit?.reason || null,
-  }, () => persistTaskState(rootDir, taskState));
-  return {
-    status: "recovery_required",
-    planId: taskState.planId,
-    task,
-    acceptanceProof: options.acceptanceProof,
-    verifyResult: options.verifyResult,
-    scopeResult: options.scopeResult,
-    reviewResult: options.reviewResult,
-    rollback: {
-      status: "not_attempted",
-      reason: localDelivery ? "local_delivery_already_committed" : "remote_integration_already_pushed",
-    },
-  };
 }

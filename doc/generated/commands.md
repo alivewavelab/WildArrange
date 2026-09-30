@@ -39,9 +39,6 @@
 | `wildarrange parallel retry --run <runId> [--command "..."] [--max-agents N]` | 只重跑未完成任务的局部重试 |
 | `wildarrange node route --text "request"` | 单节点：路由 |
 | `wildarrange node execute [--task T001]` | 单节点：执行 |
-| `wildarrange node verify [--task T001]` | 单节点：验证 |
-| `wildarrange node scope [--task T001]` | 单节点：范围检查 |
-| `wildarrange node review [--task T001]` | 单节点：复核 |
 | `wildarrange node checkpoint [--task T001]` | 单节点：checkpoint |
 | `wildarrange node retry [--task T001]` | 单节点：重试 |
 | `wildarrange resume [--session <id>]` | 恢复会话上下文 |
