@@ -18,11 +18,11 @@ import { runDoctor } from "../src/interface/doctor.mjs";
 import {
   activateCodexAdapter,
   activateCursorAdapter,
-  CURSOR_BRIDGE_NAME,
   installAdapters,
   restoreAdapterBackup,
   uninstallAdapters,
 } from "../src/interface/adapters.mjs";
+import { CURSOR_BRIDGE_NAME } from "../src/interface/adapter-bundles.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
 import { withExternalProject } from "./helpers/external-fixture.mjs";
 
