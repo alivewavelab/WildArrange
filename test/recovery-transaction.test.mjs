@@ -16,11 +16,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 import path from "node:path";
 import test from "node:test";
 import { appendLedger } from "../src/infra/ledger.mjs";
-import {
-  prepareArchiveRecoveryPackage,
-  updateArchiveRecoveryPackage,
-  writeRuntimeStateBackup,
-} from "../src/infra/security.mjs";
+import { prepareArchiveRecoveryPackage, updateArchiveRecoveryPackage, writeRuntimeStateBackup } from "../src/infra/state-backup.mjs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import {

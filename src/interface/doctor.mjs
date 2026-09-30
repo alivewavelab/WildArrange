@@ -34,7 +34,9 @@ import {
 import { readVerifiedLedgerEntries, verifyLedger } from "../infra/ledger.mjs";
 import { POLICY_PLACEHOLDER, listPlaceholderPolicyFiles } from "../infra/rule-scanner.mjs";
 import { loadTaskState } from "../infra/task-state-store.mjs";
-import { listRuntimeStateBackups, verifyConfigBaseline, verifyRuntimeState } from "../infra/security.mjs";
+import { listRuntimeStateBackups } from "../infra/state-backup.mjs";
+import { verifyConfigBaseline } from "../infra/config-baseline.mjs";
+import { verifyRuntimeState } from "../infra/runtime-integrity.mjs";
 import { evaluateGateArming } from "../infra/gate-arming.mjs";
 import { evaluateRegistryFreshness } from "../infra/verification-registry.mjs";
 import { projectDecisionStats } from "./decisions.mjs";

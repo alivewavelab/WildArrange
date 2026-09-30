@@ -42,10 +42,7 @@ import {
 import { transactWithLedger, withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { findRunnableTask, unresolvedTaskBlockers } from "../infra/task-predicates.mjs";
-import {
-  prepareArchiveRecoveryPackage,
-  updateArchiveRecoveryPackage,
-} from "../infra/security.mjs";
+import { prepareArchiveRecoveryPackage, updateArchiveRecoveryPackage } from "../infra/state-backup.mjs";
 import { loadRoutesConfig } from "../infra/route-table.mjs";
 import {
   enrichTaskWithRouteDecision,

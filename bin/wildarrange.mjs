@@ -117,14 +117,9 @@ import {
   writeDefaultWildArrangeConfig,
 } from "../src/infra/runtime-config.mjs";
 import { readJson } from "../src/infra/runtime-store.mjs";
-import {
-  listRuntimeStateBackups,
-  restoreRuntimeStateBackup,
-  verifyConfigBaseline,
-  verifyRuntimeState,
-  writeConfigBaseline,
-  writeRuntimeStateBackup,
-} from "../src/infra/security.mjs";
+import { listRuntimeStateBackups, restoreRuntimeStateBackup, writeRuntimeStateBackup } from "../src/infra/state-backup.mjs";
+import { verifyConfigBaseline, writeConfigBaseline } from "../src/infra/config-baseline.mjs";
+import { verifyRuntimeState } from "../src/infra/runtime-integrity.mjs";
 import {
   attachProjectConnection,
   initializeProjectGovernance,
