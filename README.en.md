@@ -16,9 +16,9 @@ The key rule is simple: a worker can claim work is done, but only gates can comp
 
 The core runtime is host-neutral. Codex, Cursor, and Kimi adapters improve injection and recovery, but the workflow can run through CLI commands alone.
 
-There are only five design principles: **separate planning from execution → workers never self-certify → independent verification → rework on failure → evidence goes on the record**. All runtime state lives in a local runtime directory outside the project (logical path `.wildarrange/`); customer projects receive zero writes and nothing is tied to a particular editor. Internals and invariants are in [doc/project-architecture.md](./doc/project-architecture.md).
+There are only five design principles: **separate planning from execution → workers never self-certify → independent verification → rework on failure → evidence goes on the record**. All runtime state lives in a local runtime directory outside the project (the `runtimeRoot` printed by `wildarrange project show`; below, `runtime:<path>` names a file inside it); customer projects receive zero writes and nothing is tied to a particular editor. Internals and invariants are in [doc/project-architecture.md](./doc/project-architecture.md).
 
-**New here?** Open [doc/plans/2026-08-04-beginner-handbook.html](./doc/plans/2026-08-04-beginner-handbook.html) (Chinese beginner guide: deploy → insert your requirements at each step → judge every gate; covers Cursor / Codex / Kimi). Full command list: `node ./bin/wildarrange.mjs --help --all` or [doc/generated/commands.md](./doc/generated/commands.md).
+**New here?** Connect your project with [Install, Move Between Devices, and Upgrade](#install-move-between-devices-and-upgrade), then run your first task with [Minimal Workflow](#minimal-workflow). Full command list: `node ./bin/wildarrange.mjs --help --all` or [doc/generated/commands.md](./doc/generated/commands.md).
 
 ## Agent Responsibilities
 
@@ -48,7 +48,7 @@ Role prompts live under `packs/wildarrange-linear/agents/`, and Skills live unde
 
 ### Connect a Project: `wildarrange setup` (the only runtime shape)
 
-WildArrange has a single runtime shape, three-root mode: the customer repository owns product code and product tests, a separate governance repository owns policy, `policy/wildarrange.config.json` (the only config file) and the verification registry, and local state owns the ledger, locks, reports, backups, and installed Prompt Pack. WildArrange does not generate `AGENTS.md`, `.wildarrange/`, or adapter files in the customer project.
+WildArrange has a single runtime shape, three-root mode: the customer repository owns product code and product tests, a separate governance repository owns policy, `policy/wildarrange.config.json` (the only config file) and the verification registry, and local state owns the ledger, locks, reports, backups, and installed Prompt Pack. WildArrange does not generate `AGENTS.md`, runtime files, or adapter files in the customer project.
 
 Fastest path: from the customer project root, initialize the governance repository, attach it, initialize the runtime, and generate host adapter bundles in one step:
 
@@ -130,7 +130,7 @@ Commit `package.json` and `package-lock.json`, so teammates and CI installing wi
 
 `setup` and `project init-governance` create missing policy templates under the governance repository's `policy/` (`AGENTS.md`, code and interface conventions, testing and acceptance rules). Existing files are always preserved, never merged or overwritten, and WildArrange writes no documents into the customer project. Every `[待确认]` placeholder must be confirmed or removed by a human, especially the test strategy, standard commands, production/test entry points, and module boundaries.
 
-The runtime task ledger (`team/tasks.json` in the runtime state, logical path `.wildarrange/team/tasks.json`) remains the single work-item ledger; the Dashboard is only an entry point and view, so do not maintain a second Markdown task table or a ClickUp source of truth.
+The runtime task ledger `runtime:team/tasks.json` remains the single work-item ledger; the Dashboard is only an entry point and view, so do not maintain a second Markdown task table or a ClickUp source of truth.
 
 ### Install on Another Device
 
@@ -179,7 +179,7 @@ First `/plugins remove` the old plugin, then `/plugins install` the path returne
 
 ### Runtime State and Git Delivery
 
-npm and Git synchronize the program and committed configuration, while the runtime state (logical path `.wildarrange/`) remains local to each device. WildArrange does not coordinate multiple devices or users through the remote: when several people work, each uses their own branch, and the only constraint is that **two writable tasks may not develop on the same branch**.
+npm and Git synchronize the program and committed configuration, while the runtime directory remains local to each device. WildArrange does not coordinate multiple devices or users through the remote: when several people work, each uses their own branch, and the only constraint is that **two writable tasks may not develop on the same branch**.
 
 One writable task maps to one isolated worktree and one task branch (`wildarrange/task/<planId>/<taskId>`). Execution starts from a clean commit baseline and may not carry dirty paths other than the current task result. If the target branch is already occupied by another writable task or worktree, the task refuses to start and names the occupant. Only after all gates and the acceptance proof pass does WildArrange create a delivery commit containing this task's paths: with a remote it pushes normally (never force) to the task's own remote branch; in a Git repository without a remote it retains the commit on the local task branch/worktree. Both paths bind checkpoint and acceptance proof to the same commit SHA and restore the shared checkout to a clean state. A task-branch push never moves `main`. One task normally keeps updating one Draft PR, and shared main changes only after a human approves and merges it on the hosting platform. Once a task-branch push is known to have succeeded, later checkpoint or audit failure cannot trigger rollback; the same run must reconcile or remain `recovery_required`.
 
@@ -231,10 +231,10 @@ Create `plan.json`:
       "id": "T001",
       "subject": "Write smoke artifact",
       "owner": "ZhuRong",
-      "writable_paths": [".wildarrange/artifacts/smoke.txt"],
-      "worker_command": "node -e \"const fs=require('fs'); fs.mkdirSync('.wildarrange/artifacts',{recursive:true}); fs.writeFileSync('.wildarrange/artifacts/smoke.txt','ok\\n')\"",
-      "verify_commands": ["node -e \"const fs=require('fs'); if(fs.readFileSync('.wildarrange/artifacts/smoke.txt','utf8').trim()!=='ok') process.exit(1)\""],
-      "review_commands": ["node -e \"const fs=require('fs'); if(!fs.readFileSync('.wildarrange/artifacts/smoke.txt','utf8').includes('ok')) process.exit(1)\""]
+      "writable_paths": ["artifacts/smoke.txt"],
+      "worker_command": "node -e \"const fs=require('fs'); fs.mkdirSync('artifacts',{recursive:true}); fs.writeFileSync('artifacts/smoke.txt','ok\\n')\"",
+      "verify_commands": ["node -e \"const fs=require('fs'); if(fs.readFileSync('artifacts/smoke.txt','utf8').trim()!=='ok') process.exit(1)\""],
+      "review_commands": ["node -e \"const fs=require('fs'); if(!fs.readFileSync('artifacts/smoke.txt','utf8').includes('ok')) process.exit(1)\""]
     }
   ]
 }
@@ -253,9 +253,9 @@ node ./bin/wildarrange.mjs status
 node ./bin/wildarrange.mjs summary
 ```
 
-With an adapter installed in Codex, Cursor, or Kimi Code, describe the feature or bug in the host conversation. When the `UserPromptSubmit` route requires a plan, the host model is instructed to create `.wildarrange/plan-drafts/<session>-plan.json` from the conversation semantics instead of asking the user to hand-author the format. The file must include `generated_by: "host_semantic"` and an explicit `task.owner` on every executable task. That owner must be a command worker: Jiuwei or ZhuRong. Every task must also provide a real, non-trivial `worker_command` that WildArrange runs inside the isolated task worktree to change `writable_paths`; placeholders such as `node --version` and `process.exit(0)` are rejected before import. DiJiang, BaiZe, and LuWu participate through planning, review, and governance stages rather than executing `worker_command`. WildArrange validates the owner and Worker contract and always requires `plan approve` for a host-generated plan. Execution hooks, task claims, and parallel runs then read that same `task.owner`; there is no second assignee record.
+With an adapter installed in Codex, Cursor, or Kimi Code, describe the feature or bug in the host conversation. When the `UserPromptSubmit` route requires a plan, the host model is instructed to write the plan draft to the absolute path the Hook provides, `runtime:plan-drafts/<session>-plan.json` (never inside the project), from the conversation semantics instead of asking the user to hand-author the format. The file must include `generated_by: "host_semantic"` and an explicit `task.owner` on every executable task. That owner must be a command worker: Jiuwei or ZhuRong. Every task must also provide a real, non-trivial `worker_command` that WildArrange runs inside the isolated task worktree to change `writable_paths`; placeholders such as `node --version` and `process.exit(0)` are rejected before import. DiJiang, BaiZe, and LuWu participate through planning, review, and governance stages rather than executing `worker_command`. WildArrange validates the owner and Worker contract and always requires `plan approve` for a host-generated plan. Execution hooks, task claims, and parallel runs then read that same `task.owner`; there is no second assignee record.
 
-While a plan awaits approval, the user can still edit `.wildarrange/plan-drafts/*.json` and re-import it. Other file writes and arbitrary Shell commands are denied; only exact plan-management and read-only WildArrange commands are allowed. After approval, the draft directory returns to ordinary task `writable_paths` enforcement.
+While a plan awaits approval, the user can still edit `runtime:plan-drafts/*.json` and re-import it. Other file writes and arbitrary Shell commands are denied; only exact plan-management and read-only WildArrange commands are allowed. After approval, the draft directory returns to ordinary task `writable_paths` enforcement.
 
 Manually authored or externally generated `plan.json` files still work with `plan --from`. Missing owners fall back to Jiuwei, but new plans should always declare an owner explicitly.
 
@@ -267,7 +267,7 @@ node ./bin/wildarrange.mjs workflow --sample
 
 ### Project-wide Work-item Ledger
 
-Features, standalone bugs, post-completion acceptance corrections, and maintenance work all use the Task model and persist in `.wildarrange/team/tasks.json`. Plans only group tasks; cross-plan references use `<planId>:<taskId>`. A request with incomplete verification details can be captured as a non-runnable `draft`:
+Features, standalone bugs, post-completion acceptance corrections, and maintenance work all use the Task model and persist in `runtime:team/tasks.json`. Plans only group tasks; cross-plan references use `<planId>:<taskId>`. A request with incomplete verification details can be captured as a non-runnable `draft`:
 
 ```bash
 node ./bin/wildarrange.mjs task create --title "Fix login failure" --type bug --priority P0
@@ -326,7 +326,7 @@ A task reaches `completed` only after every gate below passes. Order: worker (ou
 | Worker exit code | System | `worker_command` must exit 0, which is only a claim of completion |
 | Independent verification | System verifier | `verify_commands` exist and all exit 0 |
 | Scope guard | System | Every changed path falls inside `writable_paths` (realpath-checked); a violation opens a ChangeRequest for human review |
-| Review gate | BaiZe + on-demand Review Skills / quality gates | Main lane PASS and no high/critical security finding; `review_commands`, `standards_commands`, LSP/AST/hashline/comment checks, and optional LLM review are judged together |
+| Review gate | BaiZe + on-demand Review Skills / quality gates | Main lane PASS and no high/critical security finding; `review_commands`, `standards_commands`, comment checks, and optional LLM review are judged together |
 | Acceptance criteria | System | `successCriteria` pass with independent evidence, never a copy of the verifier |
 | Acceptance proof | System | Re-checks the evidence chain and rejects no-op work, trivial verify (`verify_not_trivial`), and tautological review (`review_not_tautological`) |
 
@@ -334,9 +334,9 @@ A task reaches `completed` only after every gate below passes. Order: worker (ou
 
 Recovery from a bad change rests on these layers of evidence:
 
-- **Hash-chained ledger `.wildarrange/ledger.jsonl`**: every step appends an event; a rewritten line, broken chain, or unhashed inserted line is reported by `ledger verify`, and `doctor` accepts only verified events as completion evidence.
+- **Hash-chained ledger `runtime:ledger.jsonl`**: every step appends an event; a rewritten line, broken chain, or unhashed inserted line is reported by `ledger verify`, and `doctor` accepts only verified events as completion evidence.
 - **Pre-execution workspace snapshot**: see "Defensive Checks" below.
-- **Resume snapshot `.wildarrange/snapshots/context.md`**: records progress for resumption.
+- **Resume snapshot `runtime:snapshots/context.md`**: records progress for resumption.
 - **Backups and one-command restore**: `state backup` / `state restore`; restore first creates another backup.
 - **Consistency check `doctor`**: reconciles completed tasks against checkpoints, acceptance proofs, and ledger events, verifies the hash chain, and cross-checks the latest backup.
 
@@ -471,11 +471,11 @@ node ./bin/wildarrange.mjs docs commands --write
 
 `doctor` is a one-command health check: it validates config structure and mounts, reconciles completed tasks across every Plan against checkpoints, acceptance proofs, and `planId:taskId` ledger events, verifies the ledger hash chain, and cross-checks the ledger against the latest backup to detect wholesale rewrites; the `decisionHealth` section adds a periodic health summary (per-gate trigger counts, never-fired gates, corrupt-line and orphan-annotation warnings). The checks are isolated — a crashed check only marks its own section — and doctor is read-only diagnostics that never appends to the ledger. `state restore` also creates a pre-restore backup first.
 
-`task archive ... --delete` requires explicit deletion confirmation and first creates a runtime backup; `in_progress` and `verifying` tasks cannot be archived. Plan and Task IDs must be safe single-segment identifiers, canonical `planId:id` identities must be unique, and an explicit `--plan` must match exactly rather than falling back to another Plan. Deletion is a rollback-capable transaction that commits the canonical task ledger last. It removes only the target Task, an emptied Plan, its checkpoint / acceptance reports, that task's outbox DoneClaims, and exact non-glob artifacts under `.wildarrange/artifacts/` that are not shared by another task. The exact deletion set is added to the backup's recovery package, so `state restore --backup <backupId>` can recover the Plan, proofs, DoneClaims, and artifacts after an interruption or rollback request. Emptying the active Plan leaves the runtime `idle`; another Plan is never activated implicitly. Historical ledger entries and backups are never deleted with an archived task.
+`task archive ... --delete` requires explicit deletion confirmation and first creates a runtime backup; `in_progress` and `verifying` tasks cannot be archived. Plan and Task IDs must be safe single-segment identifiers, canonical `planId:id` identities must be unique, and an explicit `--plan` must match exactly rather than falling back to another Plan. Deletion is a rollback-capable transaction that commits the canonical task ledger last. It removes only the target Task, an emptied Plan, its checkpoint / acceptance reports, that task's outbox DoneClaims, and exact non-glob artifacts under `runtime:artifacts/` that are not shared by another task. The exact deletion set is added to the backup's recovery package, so `state restore --backup <backupId>` can recover the Plan, proofs, DoneClaims, and artifacts after an interruption or rollback request. Emptying the active Plan leaves the runtime `idle`; another Plan is never activated implicitly. Historical ledger entries and backups are never deleted with an archived task.
 
 `impact` is change impact analysis: it lists which files import a changed file directly or transitively, plus the tests that should run (always including the five-zone boundary test), so an AI edit can machine-prove "nothing else was touched".
 
-`decisions` is the decision projection: every allow/deny across the four seams — the delivery-pipeline gates, PreToolUse/PostToolUse interception, admission, and routing — is appended to `.wildarrange/decisions.jsonl` (a derived, droppable, truncatable log outside the hash chain). The command renders each record as three lines — what happened, which rule fired, where the evidence lives — so humans and asynchronous review agents can audit every decision. Supports `--task` / `--gate` filters and `--format json`. The reader streams backwards from the file tail, so `--limit` bounds real memory usage; after long runs you can simply `truncate -s 0 .wildarrange/decisions.jsonl` (truncate to zero, not to a half line — even then the writer self-heals with a newline and the reader skips the bad line).
+`decisions` is the decision projection: every allow/deny across the four seams — the delivery-pipeline gates, PreToolUse/PostToolUse interception, admission, and routing — is appended to `runtime:decisions.jsonl` (a derived, droppable, truncatable log outside the hash chain). The command renders each record as three lines — what happened, which rule fired, where the evidence lives — so humans and asynchronous review agents can audit every decision. Supports `--task` / `--gate` filters and `--format json`. The reader streams backwards from the file tail, so `--limit` bounds real memory usage; after long runs you can simply `truncate -s 0 .wildarrange/decisions.jsonl` (truncate to zero, not to a half line — even then the writer self-heals with a newline and the reader skips the bad line).
 
 `test` is zoned test selection: `--zone <zone>` runs the tests that import the zone plus naming-paired tests plus the always-on boundary test; with file arguments it runs the impact-derived list; with no arguments it runs everything. The exit code passes through from `node --test`, so you run exactly what your change touches without memorizing the test matrix.
 
@@ -494,7 +494,7 @@ node ./bin/wildarrange.mjs adoption resume
 node ./bin/wildarrange.mjs adoption recover
 ```
 
-`adoption start` scans test, gate, runner, hook, and archive assets read-only, then opens the Dashboard for per-card approval. When `--token` is omitted, the CLI creates a random token for this Dashboard session and injects it into the current tab. Only approved cards are applied; cards containing verifier commands, archives, merges, or critical configuration changes require individual approval. Registry waits for the user's commit A; WildArrange then generates Bootstrap and a browser-readable Inventory HTML and waits for commit B. The Inventory embeds its machine-readable record and shows current sources, historical archives, deferred decisions, and the applied change log. V1 does not perform physical deletion, so deletion tombstones remain a forward-compatible empty view. If an old-project file, directory, or link already occupies any of the three target names, onboarding pauses with the conflicting path and never overwrites it silently. Approved archives move into the project-commitable `docs/verification-archive/` directory (`verification-archive/` when `docs/` is absent), never into `.wildarrange/`. Once a card has changed project files, cancelling the session cannot pretend to restore them; finish the two Git anchors, or run `adoption recover` when the session is `recovery_required`. `doctor` / `status` show `registryFreshness` as a yellow lamp only and do not block daily runs. There is no `approve` / `apply` / `delete` CLI.
+`adoption start` scans test, gate, runner, hook, and archive assets read-only, then opens the Dashboard for per-card approval. When `--token` is omitted, the CLI creates a random token for this Dashboard session and injects it into the current tab. Only approved cards are applied; cards containing verifier commands, archives, merges, or critical configuration changes require individual approval. Registry waits for the user's commit A; WildArrange then generates Bootstrap and a browser-readable Inventory HTML and waits for commit B. The Inventory embeds its machine-readable record and shows current sources, historical archives, deferred decisions, and the applied change log. V1 does not perform physical deletion, so deletion tombstones remain a forward-compatible empty view. If an old-project file, directory, or link already occupies any of the three target names, onboarding pauses with the conflicting path and never overwrites it silently. Approved archives move into the project-commitable `docs/verification-archive/` directory (`verification-archive/` when `docs/` is absent), never into `runtime:`. Once a card has changed project files, cancelling the session cannot pretend to restore them; finish the two Git anchors, or run `adoption recover` when the session is `recovery_required`. `doctor` / `status` show `registryFreshness` as a yellow lamp only and do not block daily runs. There is no `approve` / `apply` / `delete` CLI.
 
 External onboarding scans and verifies the product repository, while locator configuration, Registry, Bootstrap and Inventory belong to the governance repository. Registry uses the contract's `verificationRegistry` path; Bootstrap and Inventory are siblings. Commit A/B are made in governance. Any separately approved product changes require their own product commit, and both repositories are checked. Once the locator is approved, onboarding may populate the initialized empty Registry with a valid digest, preserving its original bytes under runtime `adoption/artifact-preimages/`. Nonempty, invalid-digest or concurrently changed content still causes a conflict.
 
@@ -506,7 +506,7 @@ After an interrupted parallel run, `parallel status --run <runId>` shows `batchS
 
 Every `status` output carries a persistent `gateArming` yellow lamp: under default configs (all quality gates off, no independent review signal) it reports "gates not armed" with remediation guidance, so an all-green gate stream that proves nothing cannot be mistaken for a healthy project. The acceptance proof enforces two hard floors: it refuses tasks whose `verify_commands` are all trivial (e.g. `true`), and it refuses tasks whose review gate has no independent signal lane (no `review_commands` / `standards_commands` / `review.llm` / enabled quality gate) — a tautological review proves nothing and must not reach completed. `config init --armed` writes a config with armed quality gates (blocking commentChecker). `doctor` carries dedicated `gateArming` and `adapters` sections: unarmed gates, enabled adapters whose files are not configured on this machine, a generated Codex Hook without a current execution receipt, and rule files referencing paths that no longer exist all surface in the report. `configured` means files exist; only Codex `execution_observed` proves that the current Hook definition has run at least once.
 
-`governance audit` is LuWu's read-only inspection. It checks directory-level `AGENTS.md`, Chinese/English README command parity, Prompt Pack registration, naming, and actual code comments, then writes evidence under `.wildarrange/reports/governance/`. With `--changed-only`, only changed files and the related ancestor rules, paired docs, and architecture ledgers are inspected; if Git changes cannot be read, the audit safely falls back to a full scan. LuWu never moves, renames, or deletes project files automatically, and the runtime rejects LuWu, DiJiang, or BaiZe from command workers.
+`governance audit` is LuWu's read-only inspection. It checks directory-level `AGENTS.md`, Chinese/English README command parity, Prompt Pack registration, naming, and actual code comments, then writes evidence under `runtime:reports/governance/`. With `--changed-only`, only changed files and the related ancestor rules, paired docs, and architecture ledgers are inspected; if Git changes cannot be read, the audit safely falls back to a full scan. LuWu never moves, renames, or deletes project files automatically, and the runtime rejects LuWu, DiJiang, or BaiZe from command workers.
 
 The first contract-governance discoverer reconciles Tauri Rust commands, handler registration, and frontend `invoke` calls. SQL embedded in Rust source is reported for manual declaration rather than claimed as scanned. Every diff card requires an explicit developer decision, while LuWu consumes the evidence inside the existing review step instead of creating a parallel gate:
 
@@ -527,7 +527,7 @@ node ./bin/wildarrange.mjs contracts resolve --id <id> --decision accept --expec
 
 Before every worker run in a Git project, WildArrange records a workspace snapshot (`git stash create`); the snapshot hash and restore command are stored in task evidence and the ledger, so broken changes can be recovered with `git stash apply <hash>`.
 
-WildArrange preflights shell commands and blocks clearly destructive commands such as deleting `.git/.wildarrange`, recursively deleting project source/test/doc directories, `git reset --hard`, `git clean -fd`, `sudo`, or `curl | sh`. Normal project commands, verifiers, review commands, and child-agent runners continue to run.
+WildArrange preflights shell commands and blocks clearly destructive commands such as deleting `.git`, recursively deleting project source/test/doc directories, `git reset --hard`, `git clean -fd`, `sudo`, or `curl | sh`. Normal project commands, verifiers, review commands, and child-agent runners continue to run.
 
 ## Routing
 
@@ -580,7 +580,7 @@ Matching uses the paths this task will change (`writable_paths` plus the paths G
 node ./bin/wildarrange.mjs rules collect --target src/app.js
 ```
 
-Matched rules are written to `.wildarrange/rules/context.md` and `context.json`, and over-budget content is explicitly marked truncated. Control-plane documents such as `AGENTS.md` and `CLAUDE.md` are read-only by default; the workflow never edits them. To avoid starting from scratch, copy `examples/fullstack-starter/` (annotated global red lines, three `globs` rule files for frontend/backend/database, a runnable `plan.example.json`, and a block-by-block config walkthrough) and follow its README checklist to get a first run passing.
+Matched rules are written to `runtime:rules/context.md` and `context.json`, and over-budget content is explicitly marked truncated. Control-plane documents such as `AGENTS.md` and `CLAUDE.md` are read-only by default; the workflow never edits them. To avoid starting from scratch, copy `examples/fullstack-starter/` (annotated global red lines, three `globs` rule files for frontend/backend/database, a runnable `plan.example.json`, and a block-by-block config walkthrough) and follow its README checklist to get a first run passing.
 
 ## Dashboard
 
@@ -616,16 +616,16 @@ x-wildarrange-token: <token>
 
 | Path | Purpose |
 |---|---|
-| `.wildarrange/team/tasks.json` | Single project-wide work-item ledger: Tasks, types, links, status, and compact history across all Plans |
-| `.wildarrange/ledger.jsonl` | Hash-chained append-only event ledger; verify with `node ./bin/wildarrange.mjs ledger verify` |
-| `.wildarrange/security/config-baseline.json` | Config hash baseline; verify with `node ./bin/wildarrange.mjs config verify` |
-| `.wildarrange/backups/` | Runtime critical-file backups created by `state backup` |
-| `.wildarrange/checkpoints/` | Completed task checkpoints |
-| `.wildarrange/reports/` | Workflow, review, and failure reports |
-| `.wildarrange/reports/acceptance/` | Acceptance proof chain before checkpoint |
-| `.wildarrange/snapshots/context.md` | Cross-session resume context |
-| `.wildarrange/adapters/` | Adapter configs, reports, backups |
-| `.wildarrange/agent-runs/` | Child-agent packets, results, and admission records |
+| `runtime:team/tasks.json` | Single project-wide work-item ledger: Tasks, types, links, status, and compact history across all Plans |
+| `runtime:ledger.jsonl` | Hash-chained append-only event ledger; verify with `node ./bin/wildarrange.mjs ledger verify` |
+| `runtime:security/config-baseline.json` | Config hash baseline; verify with `node ./bin/wildarrange.mjs config verify` |
+| `runtime:backups/` | Runtime critical-file backups created by `state backup` |
+| `runtime:checkpoints/` | Completed task checkpoints |
+| `runtime:reports/` | Workflow, review, and failure reports |
+| `runtime:reports/acceptance/` | Acceptance proof chain before checkpoint |
+| `runtime:snapshots/context.md` | Cross-session resume context |
+| `runtime:adapters/` | Adapter configs, reports, backups |
+| `runtime:agent-runs/` | Child-agent packets, results, and admission records |
 
 ## Configuration
 
@@ -671,7 +671,7 @@ Config block reference:
 | `injectionPoints` | Which `tools` / `markdown` / `skills` / `rules` each injection point mounts |
 | `contextBudgets` | Character budgets for Prompt / Markdown / Skill; over budget is marked `truncated` |
 | `skillMatcher.dynamicInjection` | On-demand Skill mounting: `enabled` / `maxSkills` / `alwaysMount` |
-| `qualityGates` | LSP/typecheck, AST structure checks, hashline anchors, comment checks |
+| `qualityGates` | Comment checks (`commentChecker`); put typecheck, lint, and similar commands in `standards_commands` |
 | `review.llm` | Whether to enable LLM review; with `required=false` a missing key only warns |
 | `commandSafety.extraPatterns` | Adds project-specific blocks on top of the built-in high-risk patterns (below) |
 | `planApproval.required` | When on, manually imported plans also need `plan approve` before `run` |
@@ -701,7 +701,7 @@ Agent config example (the simplest setup keeps all five long-lived Agents on `pr
 
 `config init` writes an editable default config, and `config show` prints the effective one.
 
-Comment checks live in the CLI review gate, not in editor-specific hooks; put LSP/typecheck or AST/structure commands in the task or plan-default `standards_commands`:
+Comment checks live in the CLI review gate, not in editor-specific hooks; put typecheck, lint, or structure-check commands in the task or plan-default `standards_commands`:
 
 ```json
 {
@@ -786,11 +786,11 @@ After adapter installation, use /wildarrange-setup to configure required Worker,
 
 Store project policy in the governance repository's policy/wildarrange.config.json: review.steps and executionReadiness. Task business fields remain separate. Each ordered review step has id, title, appliesTo, requirement, required, documents, skills and an optional command. Required failures return evidence with file, line, exact text and required fix; optional failures warn. Project steps do not replace R1–R5 responsibility auditing.
 
-Write a patch to .wildarrange/plan-drafts/review-setup.json, preview with wildarrange review configure --from .wildarrange/plan-drafts/review-setup.json, then add --apply after the user approves that configuration. Inspect review checklist --task T001; after plan approval, run readiness --task T001. Missing dependencies block Workers before an attempt is consumed. Incomplete configuration can be saved for repair.
+Use `project show` to get runtimeRoot, write a patch to `<runtimeRoot>/plan-drafts/review-setup.json`, preview with `wildarrange review configure --from "<runtimeRoot>/plan-drafts/review-setup.json"`, then add --apply after the user approves that configuration. Inspect review checklist --task T001; after plan approval, run readiness --task T001. Missing dependencies block Workers before an attempt is consumed. Incomplete configuration can be saved for repair.
 
 Workers receive full Skill context through WILDARRANGE_EXECUTION_CONTEXT. Probes read WILDARRANGE_READINESS_PACKET; reviewers read WILDARRANGE_REVIEW_PACKET. Probes return ready, the current challenge and loadedSkills. Reviewers return PASS/RETURN/INCONCLUSIVE with the inputDigest and exact source evidence according to the packet protocol. Connect real services; a fixed response is not independent review. A successful handshake is not delivery.
 
-In external mode, use `project show` to identify the three roots. Store drafts under `runtimeRoot/plan-drafts/`; `review configure --from .wildarrange/plan-drafts/review-setup.json` resolves that logical path into the runtime. The CLI also accepts the draft's absolute path. Applied configuration lives at `<policyRoot>/wildarrange.config.json` in the governance repository and becomes authoritative; runtime configuration remains the fallback until then. These governance files are not created in the product repository.
+`review configure --from` only accepts drafts under the runtime `plan-drafts/` directory; pass the absolute path. Applied configuration lives at `<policyRoot>/wildarrange.config.json` in the governance repository; until it exists, built-in defaults apply. These governance files are not created in the product repository.
 
 Use adoption inventory for discovery and the existing per-card adoption approval flow for registration. Registry.fixtures references original fixture locations and consumers, never copied business values. Legacy plan provenance goes in task.request.evidenceRefs; facts retain one read/write owner. Registration and verified migration are separate milestones. Historical completion claims require fresh verification. Legacy tasks with neither responsibility declarations nor project steps report legacy_not_checked, not a successful readiness check.
 
@@ -798,6 +798,6 @@ Architecture design: project-document initialization returns a next-Skill hint. 
 
 ### Task evidence packets and long-term documentation review
 
-After readiness passes for an approved task and before its Worker starts, WildArrange creates `.wildarrange/task-packets/<planId>/<taskId>/`. `baseline.json` freezes the first-start task scope and approval projection; `README.md` links to the existing readiness, review, failure, acceptance, and checkpoint reports; `research.md` indexes source references declared at the start. Retries preserve the original baseline. A listed report is evidence only after it exists. `.wildarrange/team/tasks.json` remains the live task authority. Research results must be written to a task-approved `writable_paths` entry and cited in acceptance evidence; the packet does not expand Worker permissions.
+After readiness passes for an approved task and before its Worker starts, WildArrange creates `runtime:task-packets/<planId>/<taskId>/`. `baseline.json` freezes the first-start task scope and approval projection; `README.md` links to the existing readiness, review, failure, acceptance, and checkpoint reports; `research.md` indexes source references declared at the start. Retries preserve the original baseline. A listed report is evidence only after it exists. `runtime:team/tasks.json` remains the live task authority. Research results must be written to a task-approved `writable_paths` entry and cited in acceptance evidence; the packet does not expand Worker permissions.
 
 The Worker context explains the documentation boundary. When a task changes root Markdown or long-term Markdown/HTML files under `doc/` or `docs/` (excluding task-history directories such as `plans/` and `reports/`), an independent reviewer also checks that they describe current behavior, structure, use, and limitations. Task timelines, raw logs, and unlanded proposals belong in task evidence; current facts have one authoritative source (verified translations may mirror it); obsolete designs are marked historical. The reviewer must cite each changed document and return exact source lines, reasons, and fixes for violations. A failed review prevents checkpoint.

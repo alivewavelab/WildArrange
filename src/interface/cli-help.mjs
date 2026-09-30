@@ -29,7 +29,7 @@ export const CORE_COMMANDS = ["setup", "plan", "run", "status", "decisions", "do
  * 新命令须先登记再于 bin/wildarrange.mjs 实现；governance audit 以 --help --all 校验真实性。
  */
 export const COMMAND_REGISTRY = [
-  { usage: "setup --governance-root <path> [--repository <git-url>] [--target codex|cursor|kimi|all] [--default-branch main]", desc: "一步接入外置治理：创建治理仓（含 Git 初始提交与默认武装配置）→ attach → init → 生成宿主 Adapter 包；客户项目零写入", core: true },
+  { usage: "setup --governance-root <path> [--repository <git-url>] [--target codex|cursor|kimi|all] [--mode local|npx] [--package @alivewavelab/wildarrange] [--default-branch main]", desc: "一步接入外置治理：创建治理仓（含 Git 初始提交与默认武装配置）→ attach → init → 生成宿主 Adapter 包；客户项目零写入", core: true },
   { usage: "project init-governance --governance-root <path> --repository <git-url> [--default-branch main]", desc: "在项目外创建不覆盖已有文件的治理仓库骨架与默认武装配置；非 Git 目录自动 git init 并提交初始 commit" },
   { usage: "project attach --governance-root <path> [--project-root <path>] [--runtime-root <path>]", desc: "把客户项目连接到独立治理仓库；映射写入项目外部状态目录" },
   { usage: "project show [--project-root <path>]", desc: "查看项目、治理仓库和运行态三根连接" },
@@ -98,6 +98,7 @@ export const COMMAND_REGISTRY = [
   { usage: "changes resolve --id CR-xxxx --decision accept|reject --evidence \"...\" --rationale \"...\" [--apply-scope]", desc: "裁决 ChangeRequest" },
   { usage: "ledger verify", desc: "校验 ledger hash 链" },
   { usage: "impact <changed-file...>", desc: "改动影响面分析（反向依赖闭包）" },
+  { usage: "test [--zone interface|orchestration|ai|capabilities|infra] [changed-file...]", desc: "按分区或改动路径选出受影响的测试并运行" },
   { usage: "decisions stats", desc: "门触发统计：计数/从未触发的门/标注关联" },
   { usage: "timeline [--limit N] [--task T001] [--source ledger|decision|annotation] [--format json]", desc: "ledger+决策+标注统一时间线" },
   { usage: "annotate --decision <decisionId> --category <confirmed|rule_wrong|case_wrong|mislabeled> [--reason \"...\"] [--author name]", desc: "标注门决策（只进报告，不改配置）" },

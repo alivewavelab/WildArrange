@@ -2,7 +2,7 @@
 
 | 命令 | 说明 |
 | ---- | ---- |
-| `wildarrange setup --governance-root <path> [--repository <git-url>] [--target codex|cursor|kimi|all] [--default-branch main]` | 一步接入外置治理：创建治理仓（含 Git 初始提交与默认武装配置）→ attach → init → 生成宿主 Adapter 包；客户项目零写入 |
+| `wildarrange setup --governance-root <path> [--repository <git-url>] [--target codex|cursor|kimi|all] [--mode local|npx] [--package @alivewavelab/wildarrange] [--default-branch main]` | 一步接入外置治理：创建治理仓（含 Git 初始提交与默认武装配置）→ attach → init → 生成宿主 Adapter 包；客户项目零写入 |
 | `wildarrange project init-governance --governance-root <path> --repository <git-url> [--default-branch main]` | 在项目外创建不覆盖已有文件的治理仓库骨架与默认武装配置；非 Git 目录自动 git init 并提交初始 commit |
 | `wildarrange project attach --governance-root <path> [--project-root <path>] [--runtime-root <path>]` | 把客户项目连接到独立治理仓库；映射写入项目外部状态目录 |
 | `wildarrange project show [--project-root <path>]` | 查看项目、治理仓库和运行态三根连接 |
@@ -70,6 +70,7 @@
 | `wildarrange changes resolve --id CR-xxxx --decision accept|reject --evidence "..." --rationale "..." [--apply-scope]` | 裁决 ChangeRequest |
 | `wildarrange ledger verify` | 校验 ledger hash 链 |
 | `wildarrange impact <changed-file...>` | 改动影响面分析（反向依赖闭包） |
+| `wildarrange test [--zone interface|orchestration|ai|capabilities|infra] [changed-file...]` | 按分区或改动路径选出受影响的测试并运行 |
 | `wildarrange decisions stats` | 门触发统计：计数/从未触发的门/标注关联 |
 | `wildarrange timeline [--limit N] [--task T001] [--source ledger|decision|annotation] [--format json]` | ledger+决策+标注统一时间线 |
 | `wildarrange annotate --decision <decisionId> --category <confirmed|rule_wrong|case_wrong|mislabeled> [--reason "..."] [--author name]` | 标注门决策（只进报告，不改配置） |
