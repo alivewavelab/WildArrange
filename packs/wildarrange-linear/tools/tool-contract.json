@@ -50,7 +50,7 @@
     },
     {
       "name": "wildarrange_init",
-      "command": "wildarrange init [--sample]",
+      "command": "wildarrange init",
       "purpose": "在已连接项目的 runtimeRoot 初始化运行态（setup 已包含此步骤）；不写客户仓库"
     },
     {
@@ -61,7 +61,7 @@
     {
       "name": "wildarrange_plan_approve",
       "command": "wildarrange plan approve [--plan <planId>]",
-      "purpose": "确认待执行计划（语义生成计划或已开启 planApproval）"
+      "purpose": "人工确认已导入的计划或新增的职责声明后放行执行"
     },
     {
       "name": "wildarrange_run",
@@ -135,13 +135,8 @@
     },
     {
       "name": "wildarrange_workflow",
-      "command": "wildarrange workflow --from <plan.json>",
-      "purpose": "从计划跑完整 workflow"
-    },
-    {
-      "name": "wildarrange_workflow_sample",
-      "command": "wildarrange workflow --sample",
-      "purpose": "跑样例 workflow"
+      "command": "wildarrange workflow [--from <plan.json>] [--maxSteps N]",
+      "purpose": "连续推进已批准的计划，直到完成、阻塞或需要人工决定；带 --from 时先导入并停在等待 plan approve"
     },
     {
       "name": "wildarrange_parallel_run",

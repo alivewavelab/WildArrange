@@ -27,7 +27,12 @@ export const RESPONSIBILITY_RULES = Object.freeze({
  */
 export function normalizeResponsibilityChanges(value, writablePaths = []) {
   if (value == null) return null;
-  if (!Array.isArray(value) || value.length === 0) throw new Error("responsibilityChanges must be a non-empty array");
+  if (!Array.isArray(value)) throw new Error("responsibilityChanges must be an array");
+  // 空数组 = 明确声明「本任务不改任何文件」，只允许用于没有可写范围的只读任务
+  if (value.length === 0) {
+    if (writablePaths.length > 0) throw new Error("responsibilityChanges must be a non-empty array when the task has writable_paths");
+    return [];
+  }
   const seen = new Set();
   return value.map((item) => {
     if (!item || typeof item !== "object") throw new Error("responsibilityChanges entry must be an object");

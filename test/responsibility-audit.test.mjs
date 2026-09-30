@@ -52,7 +52,8 @@ async function writeReviewer(root, answer, name = "reviewer.cjs", { probe = fals
 }
 // options.reviewerAnswer：把 reviewer 配置提交进治理仓后再导入计划；options.taskOverrides：覆盖计划任务字段。
 async function fixture(t, options = {}) {
-  const { projectRoot: root, governanceRoot } = await openProject(t, { projectFiles: {
+  // 本文件自己配置审查者（或刻意不配）来测审计本身，不装夹具默认审查者
+  const { projectRoot: root, governanceRoot } = await openProject(t, { reviewer: false, projectFiles: {
     "README.md": "# Fixture project\n",
     "router.mjs": "export const route = () => 'config';\n",
     "records.mjs": "export const readGame = () => ({ gameId: 'g', buildId: 'b' });\n",

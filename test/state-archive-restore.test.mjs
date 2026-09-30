@@ -24,7 +24,7 @@ import { writeRuntimeContextSnapshot } from "../src/infra/runtime-snapshot.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
 import { archiveAndDeleteTeamTask } from "../src/orchestration/task-archive.mjs";
 import { statusReport, writeWorkflowSummary } from "../src/orchestration/status.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare } from "./helpers/external-fixture.mjs";
 
 async function writeJson(filePath, value) {
   await mkdir(path.dirname(filePath), { recursive: true });
@@ -46,6 +46,7 @@ function legacyTask(status = "completed") {
     attempts: 1,
     blockedBy: [],
     writable_paths: ["src/output.txt"],
+    responsibilityChanges: declare("src/output.txt"),
     verify_commands: ["node --test"],
     review_commands: [],
     standards_commands: [],

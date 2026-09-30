@@ -10,14 +10,17 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { admitParallelAgentResult, closeParallelAgentRun, listParallelAgentRuns, parallelAgentStatus, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
-import { importPlan } from "../src/orchestration/plan-state.mjs";
+
 import { listTeamMessages } from "../src/orchestration/team-messages.mjs";
 import { dashboardData } from "../src/orchestration/status.mjs";
 import { runCommand } from "../src/infra/command-runner.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
 import { nodeEval, writePolicyConfig } from "./helpers/runtime-fixtures.mjs";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_RESPONSIBILITY = declare("src/one.js", "src/parallel.txt", "src/two.js", "src/worktree.txt");
 
 test("parallel agents run task packets concurrently and publish results", async () => {
   await withExternalProject(async ({ projectRoot, root }) => {
@@ -31,6 +34,7 @@ test("parallel agents run task packets concurrently and publish results", async 
           verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
           review_commands: ["node --version"],
           writable_paths: ["artifacts/one.txt"],
+          responsibilityChanges: declare("artifacts/one.txt"),
         },
         {
           id: "T002",
@@ -38,10 +42,11 @@ test("parallel agents run task packets concurrently and publish results", async 
           verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
           review_commands: ["node --version"],
           writable_paths: ["artifacts/two.txt"],
+          responsibilityChanges: declare("artifacts/two.txt"),
         },
       ],
     }, null, 2));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const command = "node -e \"const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'parallel done'}));\" {outputJson}";
     const batch = await runParallelAgents(projectRoot, {
@@ -91,9 +96,10 @@ test("read-only long-lived Agents cannot enter the parallel command worker", asy
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
         writable_paths: [],
+        responsibilityChanges: declare(),
       }],
     }, null, 2));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     for (const agent of ["DiJiang", "BaiZe", "LuWu"]) {
       const markerPath = path.join(projectRoot, `${agent}.wrote`);
@@ -121,6 +127,7 @@ test("parallel explicit task selection cannot bypass blockedBy", async () => {
           verify_commands: ["node --version"],
           review_commands: ["node --version"],
           writable_paths: ["src/one.js"],
+          responsibilityChanges: declare("src/one.js"),
         },
         {
           id: "T002",
@@ -129,10 +136,11 @@ test("parallel explicit task selection cannot bypass blockedBy", async () => {
           verify_commands: ["node --version"],
           review_commands: ["node --version"],
           writable_paths: ["src/two.js"],
+          responsibilityChanges: declare("src/two.js"),
         },
       ],
     }, null, 2));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const markerPath = path.join(projectRoot, "blocked-task-ran.txt");
     const command = nodeEval(`require("fs").writeFileSync(${JSON.stringify(markerPath)}, "should not run")`);
@@ -146,7 +154,7 @@ test("parallel explicit task selection cannot bypass blockedBy", async () => {
   });
 });
 
-test("parallel agents without a runner command are marked skipped", async () => {
+test("parallel agents without a runner command are blocked before any run starts", async () => {
   await withExternalProject(async ({ projectRoot, root }) => {
     const planPath = path.join(root, "parallel-skipped-plan.json");
     await writeFile(planPath, JSON.stringify({
@@ -157,15 +165,15 @@ test("parallel agents without a runner command are marked skipped", async () => 
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
         writable_paths: ["artifacts/one.txt"],
+        responsibilityChanges: declare("artifacts/one.txt"),
       }],
     }, null, 2));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const batch = await runParallelAgents(projectRoot, { maxAgents: 1 });
-    assert.equal(batch.status, "skipped");
-    assert.equal(batch.results[0].status, "skipped");
-    assert.equal(batch.results[0].pass, false);
-    assert.equal(batch.results[0].lifecycle.status, "skipped");
+    assert.equal(batch.status, "readiness_blocked");
+    assert.equal(batch.runId, null);
+    assert.ok(batch.readiness.issues.some((issue) => /real worker_command/.test(issue)), JSON.stringify(batch.readiness.issues));
   });
 });
 
@@ -190,9 +198,10 @@ test("parallel agents can use configured adapter command templates", async () =>
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
         writable_paths: ["artifacts/adapter.txt"],
+        responsibilityChanges: declare("artifacts/adapter.txt"),
       }],
     }, null, 2));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const batch = await runParallelAgents(projectRoot, {
       taskIds: ["T001"],
@@ -218,11 +227,11 @@ test("parallel admission applies child artifacts only after gates pass", async (
           subject: "Admit child artifact",
           verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/parallel.txt','utf8').trim()!=='ok') process.exit(1);")],
           review_commands: [nodeEval("const fs=require('fs');const value=fs.readFileSync('src/parallel.txt','utf8');if(value.split(/\\r?\\n/).filter(Boolean).length!==1||value.trim()!=='ok')process.exit(1)")],
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         },
       ],
     }, null, 2));
-    const plan = await importPlan(projectRoot, planPath);
+    const plan = await importApprovedPlan(projectRoot, planPath);
 
     const command = [
       nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
@@ -264,10 +273,10 @@ test("parallel admission rolls back child artifacts when gates fail", async () =
         subject: "Reject bad child artifact",
         verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/parallel.txt','utf8').trim()!=='ok') process.exit(1);")],
         review_commands: ["node --version"],
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
       }],
     }, null, 2));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const command = [
       nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'bad artifact', files:[{path:'src/parallel.txt', content:'bad\\n'}]}));"),
@@ -314,10 +323,10 @@ test("parallel agents can isolate edits in git worktrees and admit patches", asy
         subject: "Admit worktree patch",
         verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/worktree.txt','utf8').trim()!=='ok') process.exit(1);")],
         review_commands: [nodeEval("const fs=require('fs');const value=fs.readFileSync('src/worktree.txt','utf8');if(value.includes('\\0')||value.trim()!=='ok')process.exit(1)")],
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
       }],
     }, null, 2));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const command = [
       nodeEval("const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/worktree.txt','ok\\n'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'worktree patch ready'}));"),
@@ -366,11 +375,11 @@ test("parallel admission rejects artifacts outside writable paths", async () => 
           subject: "Reject leaked artifact",
           verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
           review_commands: ["node --version"],
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         },
       ],
     }, null, 2));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const command = [
       nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'bad artifact', files:[{path:'docs/leak.md', content:'nope\\n'}]}));"),

@@ -20,11 +20,10 @@ import test from "node:test";
 
 import { runInjectionHook } from "../src/ai/hooks.mjs";
 import { routeRequest } from "../src/ai/routing.mjs";
-import { importPlan } from "../src/orchestration/plan-state.mjs";
 import { readDecisions } from "../src/infra/decision-log.mjs";
 import { annotationStats, appendAnnotation, readAnnotations } from "../src/infra/annotation-log.mjs";
 import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { declare, importApprovedPlan, withExternalProject } from "./helpers/external-fixture.mjs";
 
 const execFileAsync = promisify(execFile);
 const WILDARRANGE_BIN = path.resolve(import.meta.dirname, "..", "bin", "wildarrange.mjs");
@@ -40,11 +39,12 @@ async function importPassingPlan(dir) {
         title: "annotated task",
         owner: "ZhuRong",
         writable_paths: ["src/**"],
+        responsibilityChanges: declare("src/app.js"),
         verify_commands: ["node -e \"process.exit(0)\""],
       },
     ],
   }, null, 2));
-  await importPlan(dir, planPath);
+  await importApprovedPlan(dir, planPath);
 }
 
 async function denyDecision(dir, target = "docs/out-of-scope.md") {

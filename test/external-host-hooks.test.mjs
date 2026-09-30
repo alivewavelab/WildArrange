@@ -23,8 +23,8 @@ import {
   uninstallAdapters,
 } from "../src/interface/adapters.mjs";
 import { CURSOR_BRIDGE_NAME } from "../src/interface/adapter-bundles.mjs";
-import { importPlan } from "../src/orchestration/plan-state.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+
+import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
 
 const CLI_PATH = path.join(process.cwd(), "bin", "wildarrange.mjs");
 
@@ -42,11 +42,12 @@ async function prepareScopedProject({ projectRoot, stateHome }, { importTask = t
         subject: "Write result",
         owner: "ZhuRong",
         writable_paths: ["src/result.js"],
+        responsibilityChanges: declare("src/result.js"),
         worker_command: "node -e \"1\"",
         verify_commands: ["node -e \"1\""],
       }],
     }));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
   }
   return { workspace, report };
 }

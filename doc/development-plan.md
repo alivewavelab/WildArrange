@@ -4,7 +4,6 @@
 
 ## 下一步
 
-- 计划确认后后补的任务（`task create --from`、review blocker 整改单、`steer` 加单）也必须带职责声明并经人确认，删除「无声明跳过职责审计」分支。`TODO`
 - 路由写入的 `task.skills` 进入执行前预算化加载器。`PARTIAL: before_execute 已接通；review/checkpoint 尚未接通`
 
 ## 多 Agent 运行时

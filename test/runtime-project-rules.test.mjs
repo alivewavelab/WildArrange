@@ -9,11 +9,14 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { importPlan } from "../src/orchestration/plan-state.mjs";
+
 import { buildAgentContext } from "../src/ai/context.mjs";
 import { scanProjectRules } from "../src/infra/rule-scanner.mjs";
 import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_RESPONSIBILITY = declare("src/AGENTS.md", "src/app.js");
 
 test("project rules and agent context collect matching local governance", async () => {
   await withExternalProject(async ({ projectRoot, root }) => {
@@ -36,13 +39,13 @@ test("project rules and agent context collect matching local governance", async 
       tasks: [{
         id: "T001",
         subject: "Implement src app",
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         worker_command: "node -e \"if(!process.version)process.exit(1)\"",
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
       }],
     }));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const rules = await scanProjectRules(projectRoot, { targetPaths: ["src/app.js"] });
     // 3 条项目内规则 + 治理仓 policy/AGENTS.md（外置模式固定存在）。

@@ -588,6 +588,7 @@ test("apply rejects pending cards with zero business writes", async () => {
     assert.ok(locatorCard);
     const registryPath = locatorRegistryPath(locatorCard);
     const registryBefore = await readFile(path.join(gov, registryPath), "utf8");
+    const configBefore = await readFile(path.join(gov, "policy", "wildarrange.config.json"), "utf8");
     const result = await applyApprovedCards(dir, {
       sessionId: started.session.sessionId,
       cardId: locatorCard.id,
@@ -597,9 +598,9 @@ test("apply rejects pending cards with zero business writes", async () => {
     assert.ok(Array.isArray(result.pending));
     assert.ok(result.pending.length > 0);
     assert.match(String(result.nextAction || ""), /先判完/);
-    // 外置治理仓自带空登记册：未批准时它必须保持原样，locator 配置文件也不得出现
+    // 外置治理仓自带空登记册：未批准时登记册与治理配置都必须保持原样
     assert.equal(await readFile(path.join(gov, registryPath), "utf8"), registryBefore);
-    assert.equal(existsSync(path.join(gov, "policy", "wildarrange.config.json")), false);
+    assert.equal(await readFile(path.join(gov, "policy", "wildarrange.config.json"), "utf8"), configBefore);
     assert.equal(await readMaintenanceMarker(dir), null);
     assert.equal(await readFile(path.join(dir, "business.txt"), "utf8"), "keep\n");
   });

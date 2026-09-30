@@ -49,7 +49,7 @@ test("config loading falls back to built-in defaults when no config file exists"
     assert.deepEqual(config.skillMatcher, DEFAULT_WILDARRANGE_CONFIG.skillMatcher);
     assert.deepEqual(config.contextBudgets, DEFAULT_WILDARRANGE_CONFIG.contextBudgets);
     assert.deepEqual(config.executionReadiness, DEFAULT_WILDARRANGE_CONFIG.executionReadiness);
-  }, { init: false });
+  }, { init: false, reviewer: false });
 });
 
 /** 外置治理配置文件的绝对路径（治理仓内）。 */

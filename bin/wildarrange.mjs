@@ -81,7 +81,7 @@ import { archiveTeamTaskWithBackup } from "../src/orchestration/task-archive.mjs
 import { approvePlan, importPlan, loadPlanApproval } from "../src/orchestration/plan-state.mjs";
 import { writeIntegrationAcceptance } from "../src/infra/repository-binding.mjs";
 import { statusReport, writeWorkflowSummary } from "../src/orchestration/status.mjs";
-import { createSamplePlan, runWorkflow } from "../src/orchestration/workflow.mjs";
+import { runWorkflow } from "../src/orchestration/workflow.mjs";
 import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtime.mjs";
 import {
   buildAgentContext,
@@ -323,18 +323,13 @@ async function main() {
   }
 
   // --- 初始化与配置 ---
-  // §3.4：init 在项目外的 runtimeRoot 创建运行态；--sample 为可选附加步骤，不阻断 init 本身。
+  // §3.4：init 在项目外的 runtimeRoot 创建运行态。
   if (command === "init") {
     await initRuntime(rootDir);
-    let samplePath = null;
-    if (args.sample) {
-      samplePath = await createSamplePlan(rootDir);
-    }
     console.log(JSON.stringify({
       ok: true,
       runtime: workspace.runtimeRoot,
       governanceRoot: workspace.governanceRoot,
-      samplePlan: samplePath,
     }, null, 2));
     return;
   }
@@ -471,7 +466,7 @@ async function main() {
     // §3.4：import 与 approve 互斥入口；缺 --from 时提示走 approve 子命令而非静默读默认文件。
     if (!args.from) throw new Error("wildarrange plan requires --from <plan.json>（或 wildarrange plan approve 确认已导入计划）");
     await initRuntime(rootDir);
-    const plan = await importPlan(rootDir, path.resolve(rootDir, args.from), { requireResponsibility: true });
+    const plan = await importPlan(rootDir, path.resolve(rootDir, args.from));
     const approval = await loadPlanApproval(rootDir);
     console.log(JSON.stringify({
       ok: true,
@@ -511,10 +506,8 @@ async function main() {
 
   // --- 工作流批量推进 ---
   if (command === "workflow") {
-    if (!args.from && !args.sample) throw new Error("wildarrange workflow requires --from <plan.json> or --sample");
     const result = await runWorkflow(rootDir, {
-      planPath: args.from ? path.resolve(rootDir, args.from) : null,
-      sample: Boolean(args.sample),
+      planPath: strArg(args, "from") ? path.resolve(rootDir, args.from) : null,
       maxSteps: Number.isInteger(Number(args.maxSteps)) && args.maxSteps !== true ? Number(args.maxSteps) : undefined,
     });
     console.log(JSON.stringify(result, null, 2));

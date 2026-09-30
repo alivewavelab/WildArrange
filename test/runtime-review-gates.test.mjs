@@ -9,11 +9,11 @@ import assert from "node:assert/strict";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { importPlan } from "../src/orchestration/plan-state.mjs";
+
 import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtime.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
 import { withLlmServer, nodeEval, writePolicyConfig } from "./helpers/runtime-fixtures.mjs";
 
 test("LLM review gate uses OpenAI-compatible provider when configured", async () => {
@@ -55,12 +55,13 @@ test("LLM review gate uses OpenAI-compatible provider when configured", async ()
           id: "T001",
           subject: "Write reviewed artifact",
           writable_paths: ["artifacts/llm.txt"],
+          responsibilityChanges: declare("artifacts/llm.txt"),
           worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('artifacts',{recursive:true}); fs.writeFileSync('artifacts/llm.txt','ok')\"",
           verify_commands: ["node -e \"const fs=require('fs'); if(fs.readFileSync('artifacts/llm.txt','utf8')!=='ok') process.exit(1)\""],
           review_commands: [nodeEval("const fs=require('fs');const stat=fs.statSync('artifacts/llm.txt');if(!stat.isFile()||stat.size!==2)process.exit(1)")],
         }],
       }));
-      const plan = await importPlan(projectRoot, planPath);
+      const plan = await importApprovedPlan(projectRoot, planPath);
 
       const result = await runNextTask(projectRoot);
       assert.equal(result.status, "completed");
@@ -92,13 +93,14 @@ test("comment checker can block checkpoint when configured", async () => {
         id: "T001",
         subject: "Write source without placeholder comments",
         writable_paths: ["src/app.js"],
+        responsibilityChanges: declare("src/app.js"),
         worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/app.js','// TODO remove placeholder\\nexport const ok = true;\\n')\"",
         verify_commands: ["node -e \"const fs=require('fs'); if(!fs.readFileSync('src/app.js','utf8').includes('ok')) process.exit(1)\""],
         review_commands: ["node --version"],
         maxAttempts: 2,
       }],
     }));
-    const plan = await importPlan(projectRoot, planPath);
+    const plan = await importApprovedPlan(projectRoot, planPath);
 
     const result = await runNextTask(projectRoot);
     assert.equal(result.status, "failed");
@@ -137,12 +139,13 @@ test("comment checker object patterns default to case-insensitive matching", asy
         id: "T001",
         subject: "Block uppercase placeholder comments",
         writable_paths: ["src/app.js"],
+        responsibilityChanges: declare("src/app.js"),
         worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/app.js','// TODO uppercase placeholder\\nexport const ok = true;\\n')\"",
         verify_commands: ["node -e \"const fs=require('fs'); if(!fs.readFileSync('src/app.js','utf8').includes('ok')) process.exit(1)\""],
         review_commands: ["node --version"],
       }],
     }));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const result = await runNextTask(projectRoot);
     assert.equal(result.status, "failed");
@@ -158,13 +161,14 @@ test("review gate failure blocks checkpoint and writes actionable failure report
       tasks: [{
         id: "T001",
         subject: "Pass verifier but fail review command",
+        writable_paths: ["src/app.js"], responsibilityChanges: declare("src/app.js"),
         worker_command: "node -e \"if(!process.version)process.exit(1)\"",
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node -e \"console.error('review says no'); process.exit(4)\""],
         maxAttempts: 2,
       }],
     }));
-    const plan = await importPlan(projectRoot, planPath);
+    const plan = await importApprovedPlan(projectRoot, planPath);
 
     const result = await runNextTask(projectRoot);
     assert.equal(result.status, "failed");
@@ -192,13 +196,14 @@ test("standards command failure blocks checkpoint through review gate", async ()
       tasks: [{
         id: "T001",
         subject: "Pass verifier but fail standards",
+        writable_paths: ["src/app.js"], responsibilityChanges: declare("src/app.js"),
         worker_command: "node -e \"if(!process.version)process.exit(1)\"",
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
         maxAttempts: 2,
       }],
     }));
-    const plan = await importPlan(projectRoot, planPath);
+    const plan = await importApprovedPlan(projectRoot, planPath);
 
     const result = await runNextTask(projectRoot);
     assert.equal(result.status, "failed");
@@ -221,13 +226,14 @@ test("checkpoint node rejects tasks whose review gate does not pass", async () =
       tasks: [{
         id: "T001",
         subject: "Need passing review before checkpoint",
+        writable_paths: ["src/app.js"], responsibilityChanges: declare("src/app.js"),
         worker_command: "node -e \"if(!process.version)process.exit(1)\"",
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node -e \"process.exit(5)\""],
         maxAttempts: 2,
       }],
     }));
-    const plan = await importPlan(projectRoot, planPath);
+    const plan = await importApprovedPlan(projectRoot, planPath);
 
     await runWorkflowNode(projectRoot, "execute", { taskId: "T001" });
     const checkpointed = await runWorkflowNode(projectRoot, "checkpoint", { taskId: "T001" });

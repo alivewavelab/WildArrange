@@ -9,13 +9,13 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { approvePlan, importPlan } from "../src/orchestration/plan-state.mjs";
+import { approvePlan } from "../src/orchestration/plan-state.mjs";
 import { runInjectionHook as renderHook } from "../src/ai/hooks.mjs";
 import { TRUSTED_CLI_COMMAND_PREFIX, preToolUseGuard } from "../src/ai/pre-tool-guard.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 import { runCommandFile } from "../src/infra/command-runner.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
 import { runInjectionHook, writePolicyConfig, createSmokePlan } from "./helpers/runtime-fixtures.mjs";
 
 test("hook adapter emits WildArrange runtime injection for user prompt", async () => {
@@ -56,7 +56,7 @@ test("hook sessions in task worktrees keep governance facts in the control root"
     assert.equal(added.exitCode, 0, added.stderr);
     await writeFile(path.join(executionRoot, "AGENTS.md"), "# Task Worktree Rules\n\nWORKTREE_RULE_PROBE\n");
     const samplePath = await createSmokePlan(root);
-    await importPlan(projectRoot, samplePath);
+    await importApprovedPlan(projectRoot, samplePath);
     await approvePlan(projectRoot);
 
     const session = await runInjectionHook(projectRoot, {
@@ -273,12 +273,13 @@ test("pre-tool-use guard denies out-of-scope file writes before they land", asyn
         id: "T001",
         subject: "Edit app",
         writable_paths: ["src/app.js"],
+        responsibilityChanges: declare("src/app.js"),
         worker_command: "node -e \"if(!process.version)process.exit(1)\"",
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
       }],
     }, null, 2));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const guard = await preToolUseGuard(projectRoot, {
       hook_event_name: "PreToolUse",

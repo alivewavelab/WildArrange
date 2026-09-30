@@ -9,14 +9,14 @@ import assert from "node:assert/strict";
 import { mkdir, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { importPlan } from "../src/orchestration/plan-state.mjs";
+
 import { buildAgentContext } from "../src/ai/context.mjs";
 import { matchSkills } from "../src/ai/skill-matcher.mjs";
 import { resolveInjectionPoint } from "../src/ai/injection.mjs";
 import { runCommand } from "../src/infra/command-runner.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { loadWildArrangeConfig } from "../src/infra/runtime-config.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
 import { writeMinimalPromptPack, nodeEval, runInjectionHook, writePolicyConfig } from "./helpers/runtime-fixtures.mjs";
 
 test("skill matcher provides explainable loading hints", async () => {
@@ -49,11 +49,12 @@ test("task-bound Skills mount through the public execution hook and budgeted loa
         owner: "ZhuRong",
         skills: ["publish", "missing-task-skill", "debugging", "refactor", "programming"],
         writable_paths: ["receipt.txt"],
+        responsibilityChanges: declare("receipt.txt"),
         worker_command: nodeEval("require('fs').writeFileSync('receipt.txt', 'ok\\n')"),
         verify_commands: [nodeEval("if (require('fs').readFileSync('receipt.txt', 'utf8').trim() !== 'ok') process.exit(1)")],
       }],
     }, null, 2));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const delivery = await buildAgentContext(projectRoot, {
       agent: "ZhuRong",

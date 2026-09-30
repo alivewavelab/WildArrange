@@ -130,9 +130,6 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
   reporting: {
     verbosity: "verbose",
   },
-  planApproval: {
-    required: false, // true 时计划须人类批准后才能 execute
-  },
   // 验证制品 registry/bootstrap/inventory 路径；空串表示用默认推导路径
   verificationGovernance: {
     registryPath: "",

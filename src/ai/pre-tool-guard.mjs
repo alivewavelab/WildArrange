@@ -461,7 +461,7 @@ function isAllowedPrePlanShellCommand(command, cliCommandPrefix = "", projectRoo
   if (!args) return false;
   if (READ_ONLY_WILDARRANGE_SHELL_ARGS.test(args)) return true;
   if (isRuntimeReviewConfigure(args, projectRoot, true)) return true;
-  if (/^init(?:\s+--sample)?$/i.test(args)) return true;
+  if (/^init$/i.test(args)) return true;
   if (/^plan\s+approve(?:\s+--plan\s+[A-Za-z0-9_.-]+)?$/i.test(args)) return true;
   return /^plan\s+--from\s+(?:"[A-Za-z0-9_./\\:~ -]+\.json"|'[A-Za-z0-9_./\\:~ -]+\.json'|[A-Za-z0-9_./\\:~ -]+\.json)$/i.test(args);
 }

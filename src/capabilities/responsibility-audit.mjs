@@ -20,7 +20,7 @@ import { readVerifiedLedgerEntries } from "../infra/ledger.mjs";
 import { nowIso, readJson, resolveWildArrangePath, resolveTaskReportPath } from "../infra/runtime-store.mjs";
 
 /**
- * 运行完整职责审计流程；legacy 无 declaration 时返回 NOT_AUDITED。
+ * 运行完整职责审计流程；缺少已批准的职责声明直接退回。
  * @param {string} projectRoot ledger 与配置根
  * @param {string} executionRoot 源码 evidence 收集根
  */
@@ -29,13 +29,8 @@ export async function runResponsibilityAudit(projectRoot, task, scopeResult, con
   const blocked = (reason) => ({ ...base, pass: false, decision: "RETURN", summary: reason, findings: [] });
   try {
     const entries = await readVerifiedLedgerEntries(projectRoot);
-    const imported = [...entries].reverse().find((e) => e.type === "plan_imported" && e.planId === task.planId);
     const changes = normalizeResponsibilityChanges(task.responsibilityChanges, task.writable_paths);
-    if (!changes) {
-      // §3.4：新计划要求职责声明时无 declaration 直接 blocked；旧任务标 NOT_AUDITED。
-      if (imported?.responsibilityAuditRequired) return blocked("R1: task is missing approved responsibilityChanges");
-      return { ...base, pass: false, decision: "NOT_AUDITED", legacy: true, summary: "Legacy task has no responsibility declaration; no responsibility audit was performed", findings: [] };
-    }
+    if (!changes) return blocked("R1: task is missing approved responsibilityChanges");
     const work = await readJson(resolveWildArrangePath(projectRoot, "work.json"), null);
     if (work?.activePlanId !== task.planId || work?.planApproval?.status !== "approved") return blocked("R1: current plan still awaits human approval");
     const approved = [...entries].reverse().find((e) => e.type === "plan_approved" && e.planId === task.planId);

@@ -232,6 +232,7 @@ Create `plan.json`:
       "subject": "Write smoke artifact",
       "owner": "ZhuRong",
       "writable_paths": ["artifacts/smoke.txt"],
+      "responsibilityChanges": [{ "script": "artifacts/smoke.txt", "additions": "Add a smoke artifact", "responsibilityBefore": "Absent", "responsibilityAfter": "Record one verifiable smoke result", "facts": [] }],
       "worker_command": "node -e \"const fs=require('fs'); fs.mkdirSync('artifacts',{recursive:true}); fs.writeFileSync('artifacts/smoke.txt','ok\\n')\"",
       "verify_commands": ["node -e \"const fs=require('fs'); if(fs.readFileSync('artifacts/smoke.txt','utf8').trim()!=='ok') process.exit(1)\""],
       "review_commands": ["node -e \"const fs=require('fs'); if(!fs.readFileSync('artifacts/smoke.txt','utf8').includes('ok')) process.exit(1)\""]
@@ -244,30 +245,25 @@ Create `plan.json`:
 
 Plan import protects existing work: reimport cannot overwrite tasks in the same Plan that are executing, verifying, recovering, holding a task claim, or already completed. After the old Plan completes, a new Plan can be imported while retaining the previous tasks and delivery records.
 
-Run it:
+Run it (every imported plan needs human approval; the readiness check requires a Worker handshake `executionReadiness.workerProbe` and a responsibility reviewer `review.responsibility.command`, configured with `/wildarrange-setup`):
 
 ```bash
 node ./bin/wildarrange.mjs plan --from plan.json
+node ./bin/wildarrange.mjs plan approve
 node ./bin/wildarrange.mjs run
 node ./bin/wildarrange.mjs status
 node ./bin/wildarrange.mjs summary
 ```
 
-With an adapter installed in Codex, Cursor, or Kimi Code, describe the feature or bug in the host conversation. When the `UserPromptSubmit` route requires a plan, the host model is instructed to write the plan draft to the absolute path the Hook provides, `runtime:plan-drafts/<session>-plan.json` (never inside the project), from the conversation semantics instead of asking the user to hand-author the format. The file must include `generated_by: "host_semantic"` and an explicit `task.owner` on every executable task. That owner must be a command worker: Jiuwei or ZhuRong. Every task must also provide a real, non-trivial `worker_command` that WildArrange runs inside the isolated task worktree to change `writable_paths`; placeholders such as `node --version` and `process.exit(0)` are rejected before import. DiJiang, BaiZe, and LuWu participate through planning, review, and governance stages rather than executing `worker_command`. WildArrange validates the owner and Worker contract and always requires `plan approve` for a host-generated plan. Execution hooks, task claims, and parallel runs then read that same `task.owner`; there is no second assignee record.
+With an adapter installed in Codex, Cursor, or Kimi Code, describe the feature or bug in the host conversation. When the `UserPromptSubmit` route requires a plan, the host model is instructed to write the plan draft to the absolute path the Hook provides, `runtime:plan-drafts/<session>-plan.json` (never inside the project), from the conversation semantics instead of asking the user to hand-author the format. The file must include `generated_by: "host_semantic"` and an explicit `task.owner` on every executable task. That owner must be a command worker: Jiuwei or ZhuRong. Every task must also provide a real, non-trivial `worker_command` that WildArrange runs inside the isolated task worktree to change `writable_paths`; placeholders such as `node --version` and `process.exit(0)` are rejected before import. DiJiang, BaiZe, and LuWu participate through planning, review, and governance stages rather than executing `worker_command`. WildArrange validates the owner and Worker contract and waits for `plan approve`. Execution hooks, task claims, and parallel runs then read that same `task.owner`; there is no second assignee record.
 
 While a plan awaits approval, the user can still edit `runtime:plan-drafts/*.json` and re-import it. Other file writes and arbitrary Shell commands are denied; only exact plan-management and read-only WildArrange commands are allowed. After approval, the draft directory returns to ordinary task `writable_paths` enforcement.
 
-Manually authored or externally generated `plan.json` files still work with `plan --from`. Missing owners fall back to Jiuwei, but new plans should always declare an owner explicitly.
-
-Or run the built-in sample:
-
-```bash
-node ./bin/wildarrange.mjs workflow --sample
-```
+Manually authored or externally generated `plan.json` files still work with `plan --from`; they also need responsibility declarations and approval. Missing owners fall back to Jiuwei, but new plans should always declare an owner explicitly.
 
 ### Project-wide Work-item Ledger
 
-Features, standalone bugs, post-completion acceptance corrections, and maintenance work all use the Task model and persist in `runtime:team/tasks.json`. Plans only group tasks; cross-plan references use `<planId>:<taskId>`. A request with incomplete verification details can be captured as a non-runnable `draft`:
+Features, standalone bugs, post-completion acceptance corrections, and maintenance work all use the Task model and persist in `runtime:team/tasks.json`. Plans only group tasks; cross-plan references use `<planId>:<taskId>`. A request without verification commands or responsibility declarations yet can be captured as a non-runnable `draft`; `task ready` must add `responsibilityChanges`, after which the plan returns to approval:
 
 ```bash
 node ./bin/wildarrange.mjs task create --title "Fix login failure" --type bug --priority P0
@@ -299,9 +295,9 @@ The plan is the entry point of the whole pipeline. Common task fields:
 
 A top-level `defaults` block adds default `verify_commands` / `review_commands` / `standards_commands` / `writable_paths` to every task. For `responsibilityChanges`, see "Responsibility and fact ownership audit" at the end.
 
-Import validates layer by layer: `title` is required; every task needs `subject` and at least one `verify_commands`; `successCriteria` must be well formed and `verifierCommandRefs` must point at real verify commands; task IDs must be unique and `blockedBy` references must exist without cycles; a plan that matches product keywords and is routed as high risk needs at least 4 tasks including a verification/review task. A no-op task (no `writable_paths`, empty `worker_command`, and `verify_commands` that are only `true` / `process.exit(0)`) gets a `possible_noop_task` warning and is hard-blocked at acceptance.
+Import validates layer by layer: `title` is required; every task needs `subject` and at least one `verify_commands`; `successCriteria` must be well formed and `verifierCommandRefs` must point at real verify commands; task IDs must be unique and `blockedBy` references must exist without cycles; a plan that matches product keywords and is routed as high risk needs at least 4 tasks including a verification/review task. Every executable task must carry `responsibilityChanges`; a read-only task (empty `writable_paths`) declares no file changes with an explicit empty array `[]`. A no-op task (no `writable_paths`, empty `worker_command`, and `verify_commands` that are only `true` / `process.exit(0)`) gets a `possible_noop_task` warning and is hard-blocked at the readiness check and at acceptance.
 
-Plan approval gate: a plan with `generated_by: "host_semantic"` always enters `awaiting_plan_approval`; a manual plan does so when `planApproval.required=true`. `run` then refuses to execute until `plan approve` (or `/wildarrange-approve` in chat, where the AI restates the plan before asking you to confirm).
+Plan approval gate: every imported plan enters `awaiting_plan_approval`; adding or changing responsibility declarations after approval (`task create` / `task ready`, review-blocker resolution tasks, `steer` additions or revisions) also returns the plan to approval. `run` then refuses to execute until `plan approve` (or `/wildarrange-approve` in chat, where the AI restates the plan before asking you to confirm).
 
 ### Retrying After a Scope Block
 
@@ -550,7 +546,7 @@ Skills persisted in `task.skills` are mounted before execution through the PreTo
 ### Human decision channel and safety switches
 
 - **Generic push (no external IM binding)**: all pending human decisions — plan awaiting approval, out-of-scope ChangeRequests, failed tasks, child agents awaiting acceptance — are injected into the host AI context by hooks (SessionStart / UserPromptSubmit / PostCompact / Stop), instructing the AI to proactively surface them to the developer with options. `attentionReport` is the source of truth; `status` / dashboard can also pull it.
-- **Plan approval gate**: a host-generated plan with `generated_by: "host_semantic"` always enters `awaiting_plan_approval`; an ordinary manual plan does so when `planApproval.required=true`. `run` refuses to execute until the developer runs `plan approve` (or `/wildarrange-approve` in chat).
+- **Plan approval gate**: every imported plan, and every responsibility declaration added or changed after approval, enters `awaiting_plan_approval`. `run` refuses to execute until the developer runs `plan approve` (or `/wildarrange-approve` in chat).
 - **Externalized command safety**: built-in high-risk command patterns are a floor that cannot be disabled; `commandSafety.extraPatterns` lets you add project-specific dangerous-command blocks (`{ id, pattern, flags, reason }`) without code changes.
 
 ## Custom Prompts, Skills, and Rules
@@ -674,7 +670,6 @@ Config block reference:
 | `qualityGates` | Comment checks (`commentChecker`); put typecheck, lint, and similar commands in `standards_commands` |
 | `review.llm` | Whether to enable LLM review; with `required=false` a missing key only warns |
 | `commandSafety.extraPatterns` | Adds project-specific blocks on top of the built-in high-risk patterns (below) |
-| `planApproval.required` | When on, manually imported plans also need `plan approve` before `run` |
 
 Agent config example (the simplest setup keeps all five long-lived Agents on `provider: "host"`; validate with `/wildarrange-config` or `config verify`):
 
@@ -745,7 +740,7 @@ The authoritative list is `node ./bin/wildarrange.mjs --help --all` (same source
 | Import / approve a plan | `node ./bin/wildarrange.mjs plan --from plan.json` / `plan approve` |
 | Run the next task | `node ./bin/wildarrange.mjs run` |
 | Single-step node | `node ./bin/wildarrange.mjs node execute --task T001` (also `node checkpoint` / `node retry` / `node route`) |
-| Run the built-in sample | `node ./bin/wildarrange.mjs workflow --sample` |
+| Keep advancing an approved plan | `node ./bin/wildarrange.mjs workflow` (`--from <plan.json>` only imports and stops at approval) |
 | Status / summary | `node ./bin/wildarrange.mjs status` / `summary` |
 | Parallel child agents | `node ./bin/wildarrange.mjs parallel run --max-agents 2 --command "..."` |
 | Admit / retry / close | `parallel admit --run <runId> --task <id>` / `parallel retry --run <runId>` / `parallel close --run <runId>` |
@@ -770,15 +765,15 @@ The authoritative list is `node ./bin/wildarrange.mjs --help --all` (same source
 
 ## Responsibility and fact ownership audit
 
-Every task imported through public `plan --from` or `workflow --from` requires `responsibilityChanges`: an array of `{script, additions, responsibilityBefore, responsibilityAfter, facts}`. Each fact has `{name, ownerBefore, ownerAfter, access}`. Use exact relative script paths, an empty facts array when no business facts are involved, and null for the absent side of a new/deleted fact. The planning agent supplies the declaration; the human confirms the displayed change. Dashboard and task summaries expose it, and resume preserves the same task fields.
+Every executable task (plan import, `task ready`, review-blocker resolution tasks, `steer` additions) requires `responsibilityChanges`: an array of `{script, additions, responsibilityBefore, responsibilityAfter, facts}`. Each fact has `{name, ownerBefore, ownerAfter, access}`. Use exact relative script paths, an empty facts array when no business facts are involved, and null for the absent side of a new/deleted fact. The planning agent supplies the declaration; the human confirms the displayed change. Dashboard and task summaries expose it, and resume preserves the same task fields.
 
 The existing Review now audits R1 approved responsibility scope, R2 separation of independent responsibilities, R3 one authoritative fact maintainer, R4 access through the owning script, and R5 no duplicated business implementation. It supplies full target/owner scripts, project source and Git diff, not only added lines. File length alone is not a rejection reason. Reviewer decisions remain semantic judgments; matching source citations does not prove the judgment is correct.
 
 Configure a real independent read-only reviewer using `review.responsibility.command`. The command reads the JSON packet at environment variable `WILDARRANGE_REVIEW_PACKET` and prints only `{decision:"PASS|RETURN", checks:[{rule:"R1",decision:"PASS|RETURN",reason:"..."}], findings:[{rule:"R3",file:"src/example.mjs",line:12,evidence:"exact source line",reason:"...",requiredFix:"..."}]}`. Cover R1–R5 exactly once; every RETURN rule requires a source-backed finding. Do not use a worker self-claim or constant PASS command. Alternatively, enable the existing `review.llm` and configure BaiZe's OpenAI-compatible provider. No CLI, credential or user-level configuration is installed automatically.
 
-Missing reviewers, malformed replies, incomplete evidence, and source changes during review block completion. Evidence is never silently truncated; `review.responsibility.maxEvidenceChars` defaults to 500000. Declaration changes use existing `steer` / `revise_acceptance` with `responsibilityChanges` and reopen human plan approval. Approved declaration fingerprints use the existing ledger. Historical tasks without declarations are explicitly NOT_AUDITED, not certified; the low-level programmatic import API retains legacy compatibility, so integrations must pass `{requireResponsibility:true}`. The public CLI cannot disable this requirement.
+Missing reviewers, malformed replies, incomplete evidence, and source changes during review block completion. Evidence is never silently truncated; `review.responsibility.maxEvidenceChars` defaults to 500000. Declaration changes use existing `steer` / `revise_acceptance` with `responsibilityChanges` and reopen human plan approval. Approved declaration fingerprints use the existing ledger. No task skips the responsibility audit: a task without an approved declaration is returned, and no entry point can disable this requirement.
 
-Adding a task or readying a draft with changed responsibility declarations reopens human approval before linear, stepwise, or parallel execution. The built-in `workflow --sample` only diagnoses the runtime using a fixed artifact; it remains NOT_AUDITED and is not responsibility-audit certification.
+Tasks added after approval must also be declared and confirmed: `task create` without declarations stays draft; the `review-blockers record` blocker JSON must carry the resolution task's `responsibilityChanges`, and once that task completes, `review-blockers resolve --task <blocked task> --evidence ... --rationale ...` returns the blocked task to pending; `steer` additions and splits must carry declarations. An accepted scope change (a ChangeRequest that widens `writable_paths`) never fabricates declarations; submit covering declarations with `revise_acceptance` and approve again. Whenever declarations change, linear, stepwise, and parallel execution all wait for approval.
 
 ## Project onboarding and review
 
@@ -792,7 +787,7 @@ Workers receive full Skill context through WILDARRANGE_EXECUTION_CONTEXT. Probes
 
 `review configure --from` only accepts drafts under the runtime `plan-drafts/` directory; pass the absolute path. Applied configuration lives at `<policyRoot>/wildarrange.config.json` in the governance repository; until it exists, built-in defaults apply. These governance files are not created in the product repository.
 
-Use adoption inventory for discovery and the existing per-card adoption approval flow for registration. Registry.fixtures references original fixture locations and consumers, never copied business values. Legacy plan provenance goes in task.request.evidenceRefs; facts retain one read/write owner. Registration and verified migration are separate milestones. Historical completion claims require fresh verification. Legacy tasks with neither responsibility declarations nor project steps report legacy_not_checked, not a successful readiness check.
+Use adoption inventory for discovery and the existing per-card adoption approval flow for registration. Registry.fixtures references original fixture locations and consumers, never copied business values. Legacy plan provenance goes in task.request.evidenceRefs; facts retain one read/write owner. Registration and verified migration are separate milestones. Historical completion claims require fresh verification.
 
 Architecture design: project-document initialization returns a next-Skill hint. Invoke `/wildarrange-architecture` or request an “architecture design review”. Review existing designs for responsibilities, dependencies, fact ownership, flows and necessary complexity; propose a minimal design when none exists. A passing review still needs explicit human confirmation of that version, keeping one authoritative document. This is a host-executed Skill, not an automatic dialog, overwrite or diagram-to-code compliance gate.
 

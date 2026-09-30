@@ -9,14 +9,18 @@ import assert from "node:assert/strict";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { importPlan } from "../src/orchestration/plan-state.mjs";
+
 import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtime.mjs";
 import { claimTeamTask, createTeamTask, getTeamTask, listTeamTasks, readyTeamTask } from "../src/orchestration/task-board.mjs";
 import { listTeamMessages, sendTeamMessage } from "../src/orchestration/team-messages.mjs";
 import { statusReport } from "../src/orchestration/status.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { approvePlan } from "../src/orchestration/plan-state.mjs";
+import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
 import { nodeEval } from "./helpers/runtime-fixtures.mjs";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_RESPONSIBILITY = declare("src/claimed.txt", "src/task-output.txt");
 
 test("team-lite sends and lists durable inbox messages", async () => {
   await withExternalProject(async ({ projectRoot }) => {
@@ -57,14 +61,16 @@ test("team task create appends a routed task and preserves dependency gates", as
       tasks: [{
         id: "T001",
         subject: "First task",
+        responsibilityChanges: declare("src/task-output.txt"),
         worker_command: nodeEval("const fs=require('fs');fs.mkdirSync('src',{recursive:true});fs.writeFileSync('src/task-output.txt','first task')"),
       }],
     }));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const created = await createTeamTask(projectRoot, {
       id: "T002",
       subject: "实现追加任务按钮",
+      responsibilityChanges: declare("src/task-output.txt"),
       description: "新增一个 UI 按钮任务",
       blockedBy: ["T001"],
       worker_command: nodeEval("const fs=require('fs');fs.writeFileSync('src/task-output.txt','second task')"),
@@ -79,12 +85,30 @@ test("team task create appends a routed task and preserves dependency gates", as
     assert.match(await readFile(resolveWildArrangePath(projectRoot, "team", "tasks.md"), "utf8"), /T002\. 实现追加任务按钮/);
     assert.match(await readFile(resolveWildArrangePath(projectRoot, "ledger.jsonl"), "utf8"), /team_task_created/);
 
+    // 后补单带来新的职责声明：计划回到待批准，人确认后才继续执行
+    assert.equal((await runNextTask(projectRoot)).status, "awaiting_plan_approval");
+    await approvePlan(projectRoot);
     const first = await runNextTask(projectRoot);
     assert.equal(first.task.id, "T001");
     const second = await runNextTask(projectRoot);
     assert.equal(second.task.id, "T002");
     const status = await statusReport(projectRoot);
     assert.equal(status.completed, 2);
+  });
+});
+
+test("adding a declared task while another task is in progress waits for approval without breaking the resume snapshot", async () => {
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "in-progress-plan.json");
+    const task = (id) => ({ id, subject: `task ${id}`, writable_paths: ["src/app.js"], responsibilityChanges: declare("src/app.js"),
+      worker_command: nodeEval("require('fs').writeFileSync('src/app.js','ok')"), verify_commands: ["node -e \"if(!process.version)process.exit(1)\""] });
+    await writeFile(planPath, JSON.stringify({ title: "In progress", tasks: [task("T001")] }));
+    await importApprovedPlan(projectRoot, planPath);
+    await claimTeamTask(projectRoot, { taskId: "T001", owner: "Jiuwei" });
+
+    await createTeamTask(projectRoot, { ...task("T002"), blockedBy: ["T001"] });
+    const snapshot = await readFile(resolveWildArrangePath(projectRoot, "snapshots", "context.md"), "utf8");
+    assert.match(snapshot, /await user approval/);
   });
 });
 
@@ -101,13 +125,13 @@ test("task ledger keeps tasks across plans in one canonical file", async () => {
         tasks: [{
           id: "T001",
           subject,
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
           worker_command: "node -e \"if(!process.version)process.exit(1)\"",
           verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
           review_commands: ["node --version"],
         }],
       }));
-      await importPlan(projectRoot, planPath);
+      await importApprovedPlan(projectRoot, planPath);
     }
 
     const canonical = await readJson(resolveWildArrangePath(projectRoot, "team", "tasks.json"));
@@ -142,15 +166,16 @@ test("task intake creates a traceable draft before any plan and readies it after
     assert.equal(created.task.history[0].event, "created");
     assert.equal((await runNextTask(projectRoot)).status, "blocked");
 
+    // 只补验证命令不够：没有职责声明的任务只能留在 draft
     await assert.rejects(() => readyTeamTask(projectRoot, {
       taskId: "T001",
       patch: { verify_commands: ["node --version"] },
-    }), /writable_paths/);
+    }), /requires responsibilityChanges/);
 
     const readied = await readyTeamTask(projectRoot, {
       taskId: "T001",
       patch: {
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         verify_commands: ["node --version"],
         review_commands: ["node --version"],
       },
@@ -175,6 +200,7 @@ test("team task claim respects blockers and does not bypass execution gates", as
         {
           id: "T001",
           subject: "Claimable task",
+          responsibilityChanges: declare("src/claimed.txt"),
           worker_command: nodeEval("const fs=require('fs');fs.mkdirSync('src',{recursive:true});fs.writeFileSync('src/claimed.txt','claimed by owner')"),
           verify_commands: [nodeEval("const fs=require('fs');if(fs.readFileSync('src/claimed.txt','utf8')!=='claimed by owner')process.exit(1)")],
           review_commands: [nodeEval("const fs=require('fs');const stat=fs.statSync('src/claimed.txt');if(!stat.isFile()||stat.size!==16)process.exit(1)")],
@@ -182,6 +208,7 @@ test("team task claim respects blockers and does not bypass execution gates", as
         {
           id: "T002",
           subject: "Blocked task",
+          responsibilityChanges: declare("src/app.js"),
           blockedBy: ["T001"],
           worker_command: "node -e \"if(!process.version)process.exit(1)\"",
           verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
@@ -189,7 +216,7 @@ test("team task claim respects blockers and does not bypass execution gates", as
         },
       ],
     }));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     await assert.rejects(() => claimTeamTask(projectRoot, { taskId: "T002", owner: "Jiuwei" }), /blocked by T001/);
 

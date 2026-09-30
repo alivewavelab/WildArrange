@@ -23,14 +23,17 @@ import { persistTaskState } from "../src/orchestration/task-board.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
 import { admitParallelAgentResult, closeParallelAgentRun, parallelAgentStatus, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
 import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtime.mjs";
-import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
+import { loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { ensureLinearDeliveryWorkspace } from "../src/orchestration/linear-delivery.mjs";
 import { resolveTaskBranchTarget } from "../src/orchestration/task-branch.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { runCommand, runCommandFile } from "../src/infra/command-runner.mjs";
 import { appendLedger } from "../src/infra/ledger.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_RESPONSIBILITY = declare("src/a.txt", "src/data.txt", "src/locked/leak.txt", "src/locked/leak.txt/blocker.txt", "src/one.txt", "src/out.txt", "src/parallel.txt", "src/result.txt", "src/same.txt", "src/shared.txt", "src/sub/b.txt");
 
 /** 外置三根夹具；结束前撤销只读破坏，保证即使断言中途失败也能清理整棵树。 */
 async function withProject(fn) {
@@ -89,11 +92,11 @@ async function importPassingPlan(dir, planFileName = "ckpt-plan.json") {
         worker_command: nodeEval("const fs=require('fs');fs.mkdirSync('src',{recursive:true});fs.writeFileSync('src/result.txt','ok')"),
         verify_commands: [nodeEval("require('node:assert/strict').equal(require('node:fs').readFileSync('src/result.txt','utf8'),'ok')")],
         review_commands: [realReviewCommand()],
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
       },
     ],
   }, null, 2));
-  return importPlan(dir, planPath);
+  return importApprovedPlan(dir, planPath);
 }
 
 test("adversarial: delivery pipeline reports checkpoint_failed instead of completed when the checkpoint write fails", async () => {
@@ -230,11 +233,11 @@ test("adversarial: a new execute round cannot complete against the previous roun
           worker_command: nodeEval(`const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/out.txt', fs.readFileSync(${JSON.stringify(ctrlPath)},'utf8'));`),
           verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/out.txt','utf8').trim()!=='ok') process.exit(1);")],
           review_commands: [realReviewCommand()],
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         },
       ],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importApprovedPlan(dir, planPath);
 
     // Round 1: all gates pass, checkpoint write fails, task returns to pending.
     await runWorkflowNode(dir, "execute", { taskId: "T001" });
@@ -338,11 +341,11 @@ test("adversarial: parallel admission never reaches completed/released when the 
           subject: "Admit child artifact",
           verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/parallel.txt','utf8').trim()!=='ok') process.exit(1);")],
           review_commands: [realReviewCommand()],
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         },
       ],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importApprovedPlan(dir, planPath);
 
     const command = [
       nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
@@ -414,11 +417,11 @@ test("adversarial: parallel admission does not release the child result when the
           subject: "Admit child artifact",
           verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/parallel.txt','utf8').trim()!=='ok') process.exit(1);")],
           review_commands: [realReviewCommand()],
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         },
       ],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importApprovedPlan(dir, planPath);
 
     const command = [
       nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
@@ -515,10 +518,10 @@ test("adversarial: an interrupted verifying task with a bad artifact is sent bac
         worker_command: nodeEval(`const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/out.txt', fs.readFileSync(${JSON.stringify(ctrlPath)},'utf8'));`),
         verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/out.txt','utf8').trim()!=='ok') process.exit(1);")],
         review_commands: [realReviewCommand()],
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
       }],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importApprovedPlan(dir, planPath);
 
     // Only execute ran; the worker produced a bad artifact and the gates never ran this round.
     await runWorkflowNode(dir, "execute", { taskId: "T001" });
@@ -551,11 +554,11 @@ test("adversarial: parallel admission resumes idempotently after a lifecycle wri
           subject: "Admit child artifact",
           verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/parallel.txt','utf8').trim()!=='ok') process.exit(1);")],
           review_commands: [realReviewCommand()],
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         },
       ],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importApprovedPlan(dir, planPath);
 
     const command = [
       nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
@@ -609,11 +612,11 @@ test("adversarial: a mid-apply failure rolls the workspace back and releases the
           subject: "Two files, second one fails to write",
           verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/a.txt','utf8').trim()!=='A'||fs.readFileSync('src/sub/b.txt','utf8').trim()!=='B') process.exit(1);")],
           review_commands: [realReviewCommand()],
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         },
       ],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importApprovedPlan(dir, planPath);
 
     const command = [
       nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'two files', files:[{path:'src/a.txt', content:'A\\n'},{path:'src/sub/b.txt', content:'B\\n'}]}));"),
@@ -670,11 +673,11 @@ test("adversarial: a run whose admission failed earlier cannot fake-resume a tas
           worker_command: nodeEval("const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/out.txt','linear\\n');"),
           verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/out.txt','utf8').trim()!=='linear') process.exit(1);")],
           review_commands: [realReviewCommand()],
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         },
       ],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importApprovedPlan(dir, planPath);
 
     // Run R proposes content that fails verify: its admission is rejected
     // and rolled back, but it leaves admission evidence with its runId.
@@ -796,11 +799,11 @@ test("adversarial: a run missing from index.json is rediscovered instead of stay
           subject: "Admit child artifact",
           verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/parallel.txt','utf8').trim()!=='ok') process.exit(1);")],
           review_commands: [realReviewCommand()],
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         },
       ],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importApprovedPlan(dir, planPath);
 
     const command = [
       nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'ok\\n'}]}));"),
@@ -839,11 +842,11 @@ test("adversarial: two runs admitting the same task concurrently produce exactly
           subject: "One task, two claimants",
           verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/one.txt','utf8').trim()!=='one') process.exit(1);")],
           review_commands: [realReviewCommand()],
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         },
       ],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importApprovedPlan(dir, planPath);
 
     const command = [
       nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'one', files:[{path:'src/one.txt', content:'one\\n'}]}));"),
@@ -893,11 +896,11 @@ test("adversarial: duplicate admission calls from one run cannot downgrade a rel
           subject: "Duplicate clicks remain idempotent",
           verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/same.txt','utf8').trim()!=='same') process.exit(1);")],
           review_commands: [realReviewCommand()],
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         },
       ],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importApprovedPlan(dir, planPath);
     const command = [
       nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'same', files:[{path:'src/same.txt', content:'same\\n'}]}));"),
       "{outputJson}",
@@ -933,11 +936,11 @@ test("adversarial: two tasks with overlapping paths admit concurrently without d
     await writeFile(planPath, JSON.stringify({
       title: "Overlapping writable paths",
       tasks: [
-        { id: "T001", subject: "writes alpha", verify_commands: [stableVerify("alpha")], review_commands: [realReviewCommand()], writable_paths: ["src/**"] },
-        { id: "T002", subject: "writes beta", verify_commands: [stableVerify("beta")], review_commands: [realReviewCommand()], writable_paths: ["src/**"] },
+        { id: "T001", subject: "writes alpha", verify_commands: [stableVerify("alpha")], review_commands: [realReviewCommand()], writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY },
+        { id: "T002", subject: "writes beta", verify_commands: [stableVerify("beta")], review_commands: [realReviewCommand()], writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY },
       ],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importApprovedPlan(dir, planPath);
 
     const command = [
       nodeEval("const fs=require('fs'); const t=process.argv[2]; fs.writeFileSync(process.argv[1], JSON.stringify({summary:t, files:[{path:'src/shared.txt', content:(t==='T001'?'alpha':'beta')+'\\n'}]}));"),
@@ -976,12 +979,12 @@ test("adversarial: a linear run and a parallel admission writing the same file d
           worker_command: nodeEval("const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/shared.txt','linear\\n');"),
           verify_commands: [stableVerify("linear")],
           review_commands: [realReviewCommand()],
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         },
-        { id: "T002", subject: "parallel task writes parallel", verify_commands: [stableVerify("parallel")], review_commands: [realReviewCommand()], writable_paths: ["src/**"] },
+        { id: "T002", subject: "parallel task writes parallel", verify_commands: [stableVerify("parallel")], review_commands: [realReviewCommand()], writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY },
       ],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importApprovedPlan(dir, planPath);
 
     const command = [
       nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'parallel', files:[{path:'src/shared.txt', content:'parallel\\n'}]}));"),
@@ -1016,11 +1019,11 @@ test("adversarial: a failing admission's rollback can never clobber a successor'
           subject: "Content must be good",
           verify_commands: [nodeEval("const fs=require('fs'); const c=fs.readFileSync('src/out.txt','utf8'); if(c.trim()!=='good') process.exit(1); setTimeout(()=>process.exit(0),300);")],
           review_commands: [realReviewCommand()],
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         },
       ],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importApprovedPlan(dir, planPath);
 
     const command = [
       nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'bad', files:[{path:'src/out.txt', content:'bad\\n'}]}));"),
@@ -1073,11 +1076,11 @@ test("adversarial: an applying-phase crash cannot lose the original file content
           subject: "Gates will reject the child content",
           verify_commands: [nodeEval("process.exit(1)")],
           review_commands: [realReviewCommand()],
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         },
       ],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importApprovedPlan(dir, planPath);
 
     const command = [
       nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'mutates data', files:[{path:'src/data.txt', content:'after\\n'}]}));"),
@@ -1137,11 +1140,11 @@ test("adversarial: rollback failure keeps ownership until the same run recovers 
           subject: "Reject a new file after replacing it with a non-empty directory",
           verify_commands: [nodeEval("const fs=require('fs'); fs.unlinkSync('src/locked/leak.txt'); fs.mkdirSync('src/locked/leak.txt'); fs.writeFileSync('src/locked/leak.txt/blocker.txt','occupied'); process.exit(1)")],
           review_commands: [realReviewCommand()],
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         },
       ],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importApprovedPlan(dir, planPath);
 
     const command = [
       nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'adds rejected file', files:[{path:'src/locked/leak.txt', content:'after\\n'}]}));"),
@@ -1189,11 +1192,11 @@ test("adversarial: missing rollback authority fails closed and cannot be hijacke
           subject: "Never release an unrecoverable workspace",
           verify_commands: [nodeEval("process.exit(1)")],
           review_commands: [realReviewCommand()],
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         },
       ],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importApprovedPlan(dir, planPath);
     const command = [
       nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'changes data', files:[{path:'src/data.txt', content:'after\\n'}]}));"),
       "{outputJson}",
@@ -1289,11 +1292,11 @@ test("adversarial: parallel admission refuses a task completed by other means BE
           worker_command: nodeEval("const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/parallel.txt','linear\\n');"),
           verify_commands: [nodeEval("if(!process.version)process.exit(1)")],
           review_commands: [realReviewCommand()],
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         },
       ],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importApprovedPlan(dir, planPath);
 
     const command = [
       nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'artifact ready', files:[{path:'src/parallel.txt', content:'from child agent\\n'}]}));"),

@@ -32,8 +32,11 @@ import {
 } from "../src/capabilities/contract-discovery.mjs";
 import { listRegisteredCapabilities } from "../src/capabilities/gateway.mjs";
 import { normalizeTask } from "../src/orchestration/task-normalize.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare } from "./helpers/external-fixture.mjs";
 import { matchSkills } from "../src/ai/skill-matcher.mjs";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const CLIENT_RESPONSIBILITY = declare("client/src-tauri/src/lib.rs", "client/src/game.ts");
 
 const execFileAsync = promisify(execFile);
 const cliPath = path.resolve("bin/wildarrange.mjs");
@@ -278,7 +281,7 @@ test("task normalization preserves contractChanges and binds the governance Skil
     subject: "新增启动命令",
     owner: "ZhuRong",
     verify_commands: ["node --test test/example.test.mjs"],
-    writable_paths: ["client/"],
+    writable_paths: ["client/"], responsibilityChanges: CLIENT_RESPONSIBILITY,
     contractChanges: {
       declared: true,
       items: [{ contractId: "tauri:launch_game", kind: "tauri_command", action: "add", summary: "启动游戏" }],

@@ -8,6 +8,9 @@
       "description": "Worker 在 src/frontend 下写一个文件；verifier 检查文件内容包含约定标记。用于验证前端路径命中前端规范。",
       "category": "quick",
       "writable_paths": ["src/frontend/**"],
+      "responsibilityChanges": [
+        { "script": "src/frontend/hello.js", "additions": "新增冒烟产物", "responsibilityBefore": "前端没有这个产物", "responsibilityAfter": "导出 HELLO 标记，供流水线冒烟验证前端路径", "facts": [] }
+      ],
       "worker_command": "node -e \"const fs=require('fs'); fs.mkdirSync('src/frontend',{recursive:true}); fs.writeFileSync('src/frontend/hello.js','export const HELLO = 42;\\n')\"",
       "verify_commands": [
         "node -e \"const fs=require('fs'); const s=fs.readFileSync('src/frontend/hello.js','utf8'); if(!s.includes('HELLO')) process.exit(1)\""
@@ -32,6 +35,9 @@
       "category": "quick",
       "blockedBy": ["T001"],
       "writable_paths": ["src/backend/**"],
+      "responsibilityChanges": [
+        { "script": "src/backend/health.js", "additions": "新增冒烟产物", "responsibilityBefore": "后端没有这个产物", "responsibilityAfter": "导出 HEALTH 标记，供流水线冒烟验证后端路径", "facts": [] }
+      ],
       "worker_command": "node -e \"const fs=require('fs'); fs.mkdirSync('src/backend',{recursive:true}); fs.writeFileSync('src/backend/health.js','module.exports.HEALTH = 200;\\n')\"",
       "verify_commands": [
         "node -e \"const fs=require('fs'); const s=fs.readFileSync('src/backend/health.js','utf8'); if(!s.includes('HEALTH')) process.exit(1)\""

@@ -25,7 +25,7 @@ import {
   formatErrorInline,
   wildarrangeError,
 } from "../src/infra/error-protocol.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare } from "./helpers/external-fixture.mjs";
 
 const CLI_PATH = path.join(process.cwd(), "bin", "wildarrange.mjs");
 
@@ -75,6 +75,7 @@ test("delivery pipeline blocked result carries an inline error protocol pointing
       id: "T001",
       subject: "failing verify",
       writable_paths: ["src/app.js"],
+      responsibilityChanges: declare("src/app.js"),
       verify_commands: ["node -e \"process.exit(1)\""],
     };
     const result = await runDeliveryPipeline(dir, "P-test", task);

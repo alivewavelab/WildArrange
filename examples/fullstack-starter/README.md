@@ -69,9 +69,6 @@ fullstack-starter/
     }
   },
 
-  // 计划确认门。true 时导入的计划要开发者确认（/wildarrange-approve 或 plan approve）后才能 run。默认 false。
-  "planApproval": { "required": false },
-
   // 命令安全：内置高危正则不可关闭；这里只“加”项目专属危险命令拦截。
   "commandSafety": {
     "extraPatterns": [

@@ -24,7 +24,7 @@ import { preToolUseGuard } from "../src/ai/pre-tool-guard.mjs";
 import { importPlan, loadPlanApproval } from "../src/orchestration/plan-state.mjs";
 import { loadActiveFeatureDesignGate } from "../src/orchestration/feature-design.mjs";
 import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
 
 test("AI routing does not own feature confirmation while the public host entry does", async () => {
   await withExternalProject(async ({ projectRoot: root }) => {
@@ -95,11 +95,12 @@ test("feature design confirmation and complete plan cannot be bypassed across tu
         subject: "Maintain existing behavior",
         owner: "Jiuwei",
         writable_paths: ["src/old.js"],
+        responsibilityChanges: declare("src/old.js"),
         worker_command: "node --version",
         verify_commands: ["node --version"],
       }],
     }), "utf8");
-    await importPlan(rootDir, oldPlanPath);
+    await importApprovedPlan(rootDir, oldPlanPath);
 
     const first = await routeRequest(rootDir, {
       text: "新增一个从游戏详情页启动游戏的功能，开始做吧",

@@ -11,9 +11,9 @@
 | `wildarrange review checklist --task <taskId>` | 解析本任务项目审查清单和必需依据，不启动执行器 |
 | `wildarrange readiness --task <taskId>` | 检查已批准任务必需的执行器、Skill、规范与握手，不启动业务 Worker |
 | `wildarrange adoption inventory` | 只读扫描旧仓库文件与验证资产，供接管 Skill 建立来源映射 |
-| `wildarrange init [--sample]` | 在已连接项目的 runtimeRoot 初始化运行态（setup 已包含此步骤）；不写客户仓库 |
+| `wildarrange init` | 在已连接项目的 runtimeRoot 初始化运行态（setup 已包含此步骤）；不写客户仓库 |
 | `wildarrange plan --from <plan.json>` | 导入含 responsibilityChanges 的计划；等待人工确认职责与事实归属 |
-| `wildarrange plan approve [--plan <planId>]` | 确认待执行计划（语义生成计划或已开启 planApproval） |
+| `wildarrange plan approve [--plan <planId>]` | 人工确认已导入的计划或新增的职责声明后放行执行 |
 | `wildarrange run` | 跑下一个任务（worker→verifier→scope→review→checkpoint） |
 | `wildarrange status` | 查看状态（含门武装黄灯） |
 | `wildarrange decisions [--limit N] [--task T001] [--gate pre_tool_use] [--annotatable] [--format json]` | 查看门决策记录（每一次拦截/放行；--annotatable 只看可标注队列） |
@@ -28,8 +28,7 @@
 | `wildarrange adapter restore --backup <backupId>` | 恢复 adapter 备份：还原到该次 activate 之前的用户级文件 |
 | `wildarrange injection show --point before_review [--agent BaiZe] [--task T001] [--text "..."] [--stage plan]` | 查看注入点解析结果 |
 | `wildarrange hook run [--from hook.json] [--format text|json] --adapter-digest <sha256>` | 运行宿主生命周期 Hook；只处理已连接项目，未连接项目静默放行 |
-| `wildarrange workflow --from <plan.json>` | 从计划跑完整 workflow |
-| `wildarrange workflow --sample` | 跑样例 workflow |
+| `wildarrange workflow [--from <plan.json>] [--maxSteps N]` | 连续推进已批准的计划，直到完成、阻塞或需要人工决定；带 --from 时先导入并停在等待 plan approve |
 | `wildarrange parallel run [--max-agents 2] [--task T001,T002] [--agent ZhuRong] [--adapter codex|cursor] [--isolation run-dir|git-worktree] [--command "..."]` | 跑并行子 Agent |
 | `wildarrange parallel admit --run <runId> --task T001` | 合入子 Agent 成果（admission 事务） |
 | `wildarrange parallel list` | 列出并行 run |

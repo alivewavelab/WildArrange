@@ -230,6 +230,7 @@ node ./bin/wildarrange.mjs setup --governance-root ../wildarrange-governance --r
       "subject": "Write smoke artifact",
       "owner": "ZhuRong",
       "writable_paths": ["artifacts/smoke.txt"],
+      "responsibilityChanges": [{ "script": "artifacts/smoke.txt", "additions": "新增冒烟产物", "responsibilityBefore": "不存在", "responsibilityAfter": "记录一次可验证的冒烟结果", "facts": [] }],
       "worker_command": "node -e \"const fs=require('fs'); fs.mkdirSync('artifacts',{recursive:true}); fs.writeFileSync('artifacts/smoke.txt','ok\\n')\"",
       "verify_commands": ["node -e \"const fs=require('fs'); if(fs.readFileSync('artifacts/smoke.txt','utf8').trim()!=='ok') process.exit(1)\""],
       "review_commands": ["node -e \"const fs=require('fs'); if(!fs.readFileSync('artifacts/smoke.txt','utf8').includes('ok')) process.exit(1)\""]
@@ -242,30 +243,25 @@ node ./bin/wildarrange.mjs setup --governance-root ../wildarrange-governance --r
 
 计划导入会保护已有成果：同一 Plan 中仍在执行、验证、恢复、持有任务 claim 或已经完成的任务不能被重新导入覆盖。已完成旧 Plan 后可以导入新的 Plan，旧任务及其交付记录继续保留。
 
-运行：
+运行（每个导入的计划都要人工确认；开工检查要求先用 `/wildarrange-setup` 配好 Worker 握手 `executionReadiness.workerProbe` 与职责审查者 `review.responsibility.command`）：
 
 ```bash
 node ./bin/wildarrange.mjs plan --from plan.json
+node ./bin/wildarrange.mjs plan approve
 node ./bin/wildarrange.mjs run
 node ./bin/wildarrange.mjs status
 node ./bin/wildarrange.mjs summary
 ```
 
-在已安装 adapter 的 Codex / Cursor / Kimi Code 中，直接描述一个需要开发的需求或 Bug 即可。`UserPromptSubmit` 路由判断需要计划时，会要求当前宿主大模型根据对话语义把计划草稿写到 Hook 给出的绝对路径 `runtime:plan-drafts/<session>-plan.json`（不写进项目），而不是让用户手写格式。生成文件必须带 `generated_by: "host_semantic"`，并为每张可执行任务明确填写 `task.owner`；owner 只能是具备 command-worker 资格的 Jiuwei 或 ZhuRong。每张任务还必须提供真实、非空转的 `worker_command`，由 WildArrange 在隔离任务 worktree 中执行并产出 `writable_paths` 内的改动；`node --version`、`process.exit(0)` 等占位命令不能导入。DiJiang、BaiZe、LuWu 分别通过计划、复核和治理阶段参与，不执行 `worker_command`。WildArrange 导入时校验 owner 与 Worker 合同，且无论全局开关如何都强制等待用户 `plan approve`。执行 Hook、任务领取和并行运行随后读取同一个 `task.owner`，不会再另建一套实际负责人。
+在已安装 adapter 的 Codex / Cursor / Kimi Code 中，直接描述一个需要开发的需求或 Bug 即可。`UserPromptSubmit` 路由判断需要计划时，会要求当前宿主大模型根据对话语义把计划草稿写到 Hook 给出的绝对路径 `runtime:plan-drafts/<session>-plan.json`（不写进项目），而不是让用户手写格式。生成文件必须带 `generated_by: "host_semantic"`，并为每张可执行任务明确填写 `task.owner`；owner 只能是具备 command-worker 资格的 Jiuwei 或 ZhuRong。每张任务还必须提供真实、非空转的 `worker_command`，由 WildArrange 在隔离任务 worktree 中执行并产出 `writable_paths` 内的改动；`node --version`、`process.exit(0)` 等占位命令不能导入。DiJiang、BaiZe、LuWu 分别通过计划、复核和治理阶段参与，不执行 `worker_command`。WildArrange 导入时校验 owner 与 Worker 合同，并等待用户 `plan approve`。执行 Hook、任务领取和并行运行随后读取同一个 `task.owner`，不会再另建一套实际负责人。
 
 计划待确认期间，用户仍可修改 `runtime:plan-drafts/*.json` 并重新导入；其它文件写入和任意 Shell 默认阻断，只放行精确匹配的计划管理与只读命令。批准后，草稿目录重新受当前工单的 `writable_paths` 限制。
 
-手工编写或外部生成的 `plan.json` 仍可直接使用 `plan --from` 导入。缺省 owner 会回落到 Jiuwei；但新计划应始终显式填写 owner。
-
-或直接跑内置样例：
-
-```bash
-node ./bin/wildarrange.mjs workflow --sample
-```
+手工编写或外部生成的 `plan.json` 仍可直接使用 `plan --from` 导入，同样需要职责声明并等待确认。缺省 owner 会回落到 Jiuwei；但新计划应始终显式填写 owner。
 
 ### 工单总账
 
-新功能、独立 Bug、已完成任务的验收纠错和维护工作都使用同一个 Task 模型，并落盘到 `runtime:team/tasks.json`。Plan 只负责分组；跨 Plan 引用使用 `<planId>:<taskId>`。验证信息还没准备好时可以先建 `draft` 留底，draft 不能执行：
+新功能、独立 Bug、已完成任务的验收纠错和维护工作都使用同一个 Task 模型，并落盘到 `runtime:team/tasks.json`。Plan 只负责分组；跨 Plan 引用使用 `<planId>:<taskId>`。验证命令或职责声明还没准备好时可以先建 `draft` 留底，draft 不能执行；`task ready` 转为可执行时必须补齐 `responsibilityChanges`，随后计划回到待确认：
 
 ```bash
 node ./bin/wildarrange.mjs task create --title "修复登录失败" --type bug --priority P0
@@ -297,9 +293,9 @@ node ./bin/wildarrange.mjs task ready --task T001 --from task-details.json
 
 顶层还可写 `defaults`（对所有任务叠加的默认 `verify_commands` / `review_commands` / `standards_commands` / `writable_paths` 等）。`responsibilityChanges` 见文末「职责与事实审计」。
 
-导入时逐层校验：`title` 必填；每个任务有 `subject` 与至少一条 `verify_commands`；`successCriteria` 结构合法且 `verifierCommandRefs` 指向真实存在的验证命令；任务 ID 不重复、`blockedBy` 引用存在且无环；命中产品类关键词且路由判为高风险的计划必须至少 4 个任务并包含验证/复核类任务。没有 `writable_paths`、`worker_command` 为空且 `verify_commands` 只是 `true` / `process.exit(0)` 的空转任务会被标记 `possible_noop_task`，并在验收阶段被硬拦。
+导入时逐层校验：`title` 必填；每个任务有 `subject` 与至少一条 `verify_commands`；`successCriteria` 结构合法且 `verifierCommandRefs` 指向真实存在的验证命令；任务 ID 不重复、`blockedBy` 引用存在且无环；命中产品类关键词且路由判为高风险的计划必须至少 4 个任务并包含验证/复核类任务。每张可执行任务都必须带 `responsibilityChanges`；只读任务（`writable_paths` 为空）用空数组 `[]` 明确声明不改文件。没有 `writable_paths`、`worker_command` 为空且 `verify_commands` 只是 `true` / `process.exit(0)` 的空转任务会被标记 `possible_noop_task`，并在开工检查与验收阶段被硬拦。
 
-计划确认门：带 `generated_by: "host_semantic"` 的计划始终进入 `awaiting_plan_approval`；手工计划在 `planApproval.required=true` 时进入。此时 `run` 会拒绝执行，直到 `plan approve`（或对话里用 `/wildarrange-approve`，AI 会先复述计划再请你确认）。
+计划确认门：每个导入的计划都进入 `awaiting_plan_approval`；计划确认后再新增或改动职责声明（`task create` / `task ready`、review blocker 整改单、`steer` 加单或改声明）也会让计划回到待确认。此时 `run` 会拒绝执行，直到 `plan approve`（或对话里用 `/wildarrange-approve`，AI 会先复述计划再请你确认）。
 
 ### 范围越界被挡住后重试
 
@@ -550,7 +546,7 @@ node ./bin/wildarrange.mjs skills match --text "做一个网页版提醒事项 A
 ### 人工决策通道与安全开关
 
 - **通用推送（不绑任何外部 IM）**：所有"待人决策"的事项——计划待确认、改动越界的 ChangeRequest、失败任务、子 Agent 待验收——由 hook 在 SessionStart / UserPromptSubmit / PostCompact / Stop 时注入宿主 AI 上下文，要求 AI 主动向开发者复述并给出选项。`attentionReport` 是这份待办的真相源，`status` / dashboard 也能拉取。
-- **计划确认门**：带 `generated_by: "host_semantic"` 的语义生成计划始终进入 `awaiting_plan_approval`；普通手工计划则在 `planApproval.required=true` 时进入。`run` 拒绝执行，直到开发者 `plan approve`（或对话里用 `/wildarrange-approve`）。
+- **计划确认门**：每个导入的计划、以及确认后新增或改动的职责声明，都进入 `awaiting_plan_approval`。`run` 拒绝执行，直到开发者 `plan approve`（或对话里用 `/wildarrange-approve`）。
 - **命令安全外置**：内置高危命令正则是不可关闭的底线；`commandSafety.extraPatterns` 允许在其之上追加项目专属危险命令拦截（`{ id, pattern, flags, reason }`），无需改代码。
 
 ## 自定义 Prompt、技能与规范
@@ -674,7 +670,6 @@ source .env.wildarrange
 | `qualityGates` | 注释检查（`commentChecker`）；类型检查、lint 等写进 `standards_commands` |
 | `review.llm` | 是否启用 LLM 复核；`required=false` 时无 key 只告警不阻断 |
 | `commandSafety.extraPatterns` | 在内置高危命令正则之上追加项目专属拦截（见下） |
-| `planApproval.required` | 打开后，手工导入的计划也必须 `plan approve` 才能 `run` |
 
 Agent 配置示例（5 个长期 Agent 全部使用 `provider: "host"` 最省事；`/wildarrange-config` 或 `config verify` 校验）：
 
@@ -745,7 +740,7 @@ npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache
 | 导入 / 确认计划 | `node ./bin/wildarrange.mjs plan --from plan.json` / `plan approve` |
 | 跑下一个任务 | `node ./bin/wildarrange.mjs run` |
 | 单步节点 | `node ./bin/wildarrange.mjs node execute --task T001`（另有 `node checkpoint` / `node retry` / `node route`） |
-| 跑内置样例 | `node ./bin/wildarrange.mjs workflow --sample` |
+| 连续推进已确认的计划 | `node ./bin/wildarrange.mjs workflow`（`--from <plan.json>` 只导入并停在待确认） |
 | 看状态 / 总结 | `node ./bin/wildarrange.mjs status` / `summary` |
 | 并行子 Agent | `node ./bin/wildarrange.mjs parallel run --max-agents 2 --command "..."` |
 | 合入 / 重试 / 关闭 | `parallel admit --run <runId> --task <id>` / `parallel retry --run <runId>` / `parallel close --run <runId>` |
@@ -770,7 +765,7 @@ npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache
 
 ## 职责与事实审计
 
-公开 `plan --from` / `workflow --from` 导入的每张任务增加 `responsibilityChanges`。由计划 Agent 填写，人工确认；不是让用户编写技术设计。每项包含 `script`（精确目标脚本）、`additions`、`responsibilityBefore`、`responsibilityAfter`、`facts`。每项事实包含 `name`、`ownerBefore`、`ownerAfter`、`access`；无事实填空数组，新增/删除事实的不存在一侧填 `null`。任务摘要和 Dashboard 展示这些内容，恢复快照保留同一任务字段。
+每张可执行任务（计划导入、`task ready`、review blocker 整改单、`steer` 加单）都必须带 `responsibilityChanges`。由计划 Agent 填写，人工确认；不是让用户编写技术设计。每项包含 `script`（精确目标脚本）、`additions`、`responsibilityBefore`、`responsibilityAfter`、`facts`。每项事实包含 `name`、`ownerBefore`、`ownerAfter`、`access`；无事实填空数组，新增/删除事实的不存在一侧填 `null`。任务摘要和 Dashboard 展示这些内容，恢复快照保留同一任务字段。
 
 ```json
 {
@@ -797,9 +792,9 @@ Worker 之后的既有 Review 增加独立职责审计：R1 符合批准方案�
 
 审查协议：`{ "decision": "PASS|RETURN", "checks": [{ "rule": "R1", "decision": "PASS|RETURN", "reason": "..." }], "findings": [{ "rule": "R3", "file": "src/example.mjs", "line": 12, "evidence": "该行源码原文", "reason": "...", "requiredFix": "..." }] }`。checks 必须恰好覆盖 R1–R5；每条 RETURN 有对应 finding。缺少执行器、证据超预算、响应格式错误、审查期间代码变化都不能通过 Review。`review.responsibility.maxEvidenceChars` 默认 500000；超限明确阻止审计，不截断后放行。
 
-职责变化通过现有 `steer` 的 `revise_acceptance` 提交 `responsibilityChanges`；原任务保持 pending，计划重新等待人工批准。批准指纹进入现有 ledger，不增加第二个事实台账。旧持久任务没有声明时显示 NOT_AUDITED 警告，不能说已通过新审计；旧底层程序化导入 API 保留兼容模式，集成方应传 `{ requireResponsibility: true }`。公开 CLI 没有关闭此校验的开关。
+职责变化通过现有 `steer` 的 `revise_acceptance` 提交 `responsibilityChanges`；原任务保持 pending，计划重新等待人工批准。批准指纹进入现有 ledger，不增加第二个事实台账。没有「跳过职责审计」的任务：缺少已批准声明的任务一律退回，任何入口都没有关闭此校验的开关。
 
-新增任务或将草稿转为可执行任务时，只要职责声明发生变化，就重新等待人工批准；整链运行、分步执行、并行启动都不得抢跑。内置 `workflow --sample` 仅为固定运行时产物的诊断演示，保留 NOT_AUDITED 标记，不构成职责审计通过证明。
+计划确认后补进来的任务同样要声明并经人确认：`task create` 缺声明时只能停在 draft；`review-blockers record` 的 blocker JSON 必须带整改单的 `responsibilityChanges`，整改单完成后用 `review-blockers resolve --task <原任务> --evidence ... --rationale ...` 放回原任务；`steer` 加单或拆单必须带声明。人工接受的范围变更（ChangeRequest 扩大 `writable_paths`）不会自动生成声明，需用 `revise_acceptance` 补交覆盖新路径的声明并重新确认。只要职责声明发生变化，整链运行、分步执行、并行启动都不得抢跑。
 
 ## 项目接管与项目审查
 
@@ -813,7 +808,7 @@ Worker 读取 WILDARRANGE_EXECUTION_CONTEXT 的完整任务 Skill；探测器读
 
 `review configure --from` 只接受运行态 `plan-drafts/` 下的草稿，请传绝对路径。正式配置保存到治理仓库 `<policyRoot>/wildarrange.config.json`；尚无正式配置时使用内置默认值。业务仓库不新增这些治理文件。
 
-旧项目扫描用 adoption inventory，登记继续使用 adoption 的逐卡批准流程。Registry.fixtures 只保存夹具位置与消费者；旧计划来源保存在 task.request.evidenceRefs，事实读写仍属于唯一 owner。登记完成与实际迁移完成分别报告，历史“已完成”必须重新验证才成为当前完成。存量无职责声明且无项目步骤的兼容任务返回 legacy_not_checked，不能宣传为通过新开工检查。
+旧项目扫描用 adoption inventory，登记继续使用 adoption 的逐卡批准流程。Registry.fixtures 只保存夹具位置与消费者；旧计划来源保存在 task.request.evidenceRefs，事实读写仍属于唯一 owner。登记完成与实际迁移完成分别报告，历史“已完成”必须重新验证才成为当前完成。
 
 架构设计环节：初始化项目文档后会返回下一步 Skill 提示；也可主动运行 `/wildarrange-architecture`，或说“审查旧架构图”。已有设计按职责、依赖、事实归属、流程、必要复杂度五项审查，无设计则按需求提出最小方案。通过后仍须人工确认具体版本，沿用一个权威文档。此环节由宿主执行 Skill，不会自动弹窗、修改旧设计或建立图与代码一致性门禁。
 

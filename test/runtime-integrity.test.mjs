@@ -10,9 +10,8 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { runDoctor } from "../src/interface/doctor.mjs";
-import { importPlan } from "../src/orchestration/plan-state.mjs";
+
 import { runNextTask } from "../src/orchestration/linear-runtime.mjs";
-import { createSamplePlan } from "../src/orchestration/workflow.mjs";
 import { compileCommandSafetyPatterns, evaluateCommandSafety } from "../src/infra/command-safety.mjs";
 import { runCommand, runCommandFile } from "../src/infra/command-runner.mjs";
 import { appendLedger, verifyLedger } from "../src/infra/ledger.mjs";
@@ -20,8 +19,11 @@ import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs
 import { listRuntimeStateBackups, restoreRuntimeStateBackup, writeRuntimeStateBackup } from "../src/infra/state-backup.mjs";
 import { verifyConfigBaseline, writeConfigBaseline } from "../src/infra/config-baseline.mjs";
 import { verifyRuntimeState } from "../src/infra/runtime-integrity.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
-import { nodeEval, writePolicyConfig } from "./helpers/runtime-fixtures.mjs";
+import { withExternalProject, importApprovedPlan, declare } from "./helpers/external-fixture.mjs";
+import { createSmokePlan, nodeEval, writePolicyConfig } from "./helpers/runtime-fixtures.mjs";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_RESPONSIBILITY = declare("src/app.js");
 
 function processIsAlive(pid) {
   try {
@@ -124,9 +126,9 @@ test("config baseline detects quality gate configuration changes", async () => {
 });
 
 test("runtime state backup preserves critical files and verify reports missing state", async () => {
-  await withExternalProject(async ({ projectRoot }) => {
-    const samplePath = await createSamplePlan(projectRoot);
-    await importPlan(projectRoot, samplePath);
+  await withExternalProject(async ({ root, projectRoot }) => {
+    const samplePath = await createSmokePlan(root);
+    await importApprovedPlan(projectRoot, samplePath);
     let verification = await verifyRuntimeState(projectRoot);
     assert.equal(verification.ok, true);
 
@@ -175,12 +177,12 @@ test("state restore recovers runtime files from a backup and keeps a pre-restore
       tasks: [{
         id: "T001",
         subject: "占位任务",
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
       }],
     }, null, 2));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const backup = await writeRuntimeStateBackup(projectRoot, { reason: "before-corruption" });
     const tasksPath = resolveWildArrangePath(projectRoot, "team", "tasks.json");
@@ -228,7 +230,7 @@ test("adversarial round 2: completion forgery attempts are caught by gates and d
         {
           id: "T001",
           subject: "试图删除源代码目录",
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
           worker_command: "rm -rf src",
           verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
           review_commands: ["node --version"],
@@ -236,14 +238,14 @@ test("adversarial round 2: completion forgery attempts are caught by gates and d
         {
           id: "T002",
           subject: "试图越界写文件",
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
           worker_command: "node -e \"const fs=require('fs'); fs.writeFileSync('secrets.txt','leak')\"",
           verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
           review_commands: ["node --version"],
         },
       ],
     }, null, 2));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     // 攻击 1：worker 命令直接删源代码目录 -> command safety 先拦
     const first = await runNextTask(projectRoot);

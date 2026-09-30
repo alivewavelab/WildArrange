@@ -122,7 +122,7 @@ export function buildSlashCommands(cliPrefix) {
         "生成的 JSON 顶层必须写 `generated_by: \"host_semantic\"`、`title`、`objective`、`tasks`；如果路由返回 `featureDesign.id`，还必须原样写入 `feature_design_ref`，否则功能计划不能导入。每张任务必须写 `id`、`subject`、`description`、`owner`、`writable_paths`、`worker_command`、`verify_commands`、`successCriteria`。`worker_command` 必须是宿主可执行的真实实现命令，并在 WildArrange 准备的隔离任务 worktree 中产生 `writable_paths` 内的改动；不能用 `node --version`、`process.exit(0)`、`true` 等占位。`verify_commands` 必须是非空的命令字符串数组，不能写成对象数组。每条 successCriteria 是对象，至少写 `title` 与 `expectedEvidence`；能由验证命令证明时，`verifierCommandRefs` 填从 0 开始的命令索引数组，或填与 `verify_commands` 中完全一致的命令字符串数组。",
         "可执行工单的 `owner` 必须是 Jiuwei 或 ZhuRong：实现任务通常交给 ZhuRong，必要的流程执行交给 Jiuwei。DiJiang、BaiZe、LuWu 是只读长期 Agent，分别通过计划、独立复核和仓库治理阶段参与，不能成为 command worker。不要留空，也不要用执行阶段的默认值代替。",
         "",
-        "写入草稿后执行导入命令。若用户明确只要求生成草稿或明确说不要导入，写完即停止，不得执行下面的导入命令。正式导入的语义生成计划会自动进入待确认状态，即使全局 `planApproval.required` 没有打开也不能直接 run：",
+        "写入草稿后执行导入命令。若用户明确只要求生成草稿或明确说不要导入，写完即停止，不得执行下面的导入命令。正式导入的计划都会进入待确认状态，不能直接 run：",
         "",
         fence([`${cliPrefix} plan --from "<草稿绝对路径>"`]),
         "",
@@ -132,9 +132,9 @@ export function buildSlashCommands(cliPrefix) {
     {
       name: `${SLASH_COMMAND_PREFIX}-approve`,
       title: `${PRODUCT_NAME} 确认计划`,
-      description: "向开发者展示已导入计划摘要，得到明确确认后放行执行（planApproval.required 时的人工确认门）。",
+      description: "向开发者展示已导入计划或新增职责声明的摘要，得到明确确认后放行执行（人工确认门）。",
       body: [
-        "语义生成的计划始终需要开发者确认；手工计划在 `planApproval.required` 打开时也需要确认。请这样做：",
+        "每个导入的计划、以及计划确认后新增或改动职责声明的任务（后补单、整改单、steer 加单），都需要开发者确认。请这样做：",
         "",
         "1. 先展示当前计划摘要（任务数、每个任务的目标与 writable_paths）：",
         "",

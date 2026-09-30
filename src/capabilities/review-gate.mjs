@@ -102,7 +102,6 @@ export async function runReviewGate(rootDir, task, evidence = {}, options = {}) 
       fixBy: "按照本项项目规范和证据整改，不得删除必需审查项。",
     })),
     reviewLane("responsibility_audit", "BaiZe", responsibilityAudit.pass, {
-      statusOverride: responsibilityAudit.legacy ? "warn" : undefined,
       summary: responsibilityAudit.summary,
       fixBy: "按 R1-R5、代码位置和证据整改后重新审计；职责方案改变须先确认。缺少审计执行器时配置独立审查者。",
     }),

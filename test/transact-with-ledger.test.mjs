@@ -20,9 +20,12 @@ import { appendLedgerOnce, readVerifiedLedgerEntries, verifyLedger } from "../sr
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 import { transactWithLedger } from "../src/infra/task-state-lock.mjs";
 import { persistTaskFailure } from "../src/orchestration/task-recovery.mjs";
-import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
+import { loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { claimTeamTask } from "../src/orchestration/task-board.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, importApprovedPlan, declare } from "./helpers/external-fixture.mjs";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_RESPONSIBILITY = declare("src/app.js");
 
 // ARC-003 顺序回归：非完成路径统一为「先 appendLedger 后 persist」。
 // 账本失败 -> 实际状态不得改变（无账状态不得出现）；
@@ -55,11 +58,11 @@ async function importProbePlan(dir) {
         id: "T001",
         subject: "Probe task",
         verify_commands: ["node -e \"process.exit(0)\""],
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
       },
     ],
   });
-  return importPlan(dir, planPath);
+  return importApprovedPlan(dir, planPath);
 }
 
 test("transactWithLedger: ledger outage aborts before persist and leaves no state residue", async () => {
@@ -144,12 +147,12 @@ test("importPlan: persist failure leaves plan_imported in the ledger without com
           id: "T001",
           subject: "Probe task",
           verify_commands: ["node -e \"process.exit(0)\""],
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         },
       ],
     });
 
-    await assert.rejects(() => importPlan(dir, planPath));
+    await assert.rejects(() => importApprovedPlan(dir, planPath));
     assert.match(await ledgerText(dir), /plan_imported/, "import must be auditable even though persist failed");
     assert.equal(
       await readJson(resolveWildArrangePath(dir, "team", "tasks.json"), null),

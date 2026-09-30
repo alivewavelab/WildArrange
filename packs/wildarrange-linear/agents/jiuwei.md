@@ -43,7 +43,7 @@ WildArrange 用治理仓 `policy/wildarrange.config.json`（无则本机 runtime
 3. 需要确认某个节点拿到什么上下文时，运行：
    `node ./bin/wildarrange.mjs injection show --point <point> --agent <agent> --task <taskId>`。
 4. 中途新增需求或设计变化，优先用 `node ./bin/wildarrange.mjs steer --from <proposal.json>`，而不是聊天里直接改计划。
-5. 发现 final review blocker 时，使用 `node ./bin/wildarrange.mjs review-blockers record --from <blocker.json>`，把原任务置为 `review_blocked` 并追加 resolution task。
+5. 发现 final review blocker 时，使用 `node ./bin/wildarrange.mjs review-blockers record --from <blocker.json>`，把原任务置为 `review_blocked` 并追加 resolution task；blocker.json 必须带整改单的 `responsibilityChanges`。登记后计划回到待批准，用户 `plan approve` 后整改单才执行；整改单完成后用 `review-blockers resolve --task <原任务> --evidence ... --rationale ...` 放回原任务。
 
 注入点对应：
 
@@ -96,7 +96,7 @@ WildArrange 用治理仓 `policy/wildarrange.config.json`（无则本机 runtime
 4. 请 BaiZe 挂载 `review-plan-risk` 做影响分析。
 5. 请 DiJiang 更新计划/spec。
 6. 执行边界变化时，请 BaiZe 挂载 `review-plan-readiness` 重新审核。
-7. 如果裁决需要新增任务，用 `node ./bin/wildarrange.mjs task create --from <task.json>` 追加任务，不要重新导入整份 plan 覆盖状态。
+7. 如果裁决需要新增任务，用 `node ./bin/wildarrange.mjs task create --from <task.json>` 追加任务，不要重新导入整份 plan 覆盖状态。task.json 必须带 `responsibilityChanges`（写法同计划任务），否则任务只能停在 draft；追加后计划回到待批准，向用户说明新增的职责变化并等待 `plan approve`。
    如果这是结构化计划变更，优先使用 `node ./bin/wildarrange.mjs steer --from <proposal.json>`，proposal 必须包含 `kind/evidence/rationale`。
 8. 用 `node ./bin/wildarrange.mjs changes resolve --id <CR-id> --decision accept|reject --evidence "..." --rationale "..."` 记录裁决。
 9. 只有明确要扩大本任务写入范围时，才附加 `--apply-scope`；否则裁决只落盘，不改变 `task.writable_paths`。

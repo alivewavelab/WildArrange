@@ -18,9 +18,15 @@ import test from "node:test";
 
 import { runCommand } from "../src/infra/command-runner.mjs";
 import { runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
-import { importPlan } from "../src/orchestration/plan-state.mjs";
+
 import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, importApprovedPlan, declare } from "./helpers/external-fixture.mjs";
+
+/** 夹具 Worker：写入已声明的 src/app.js，开工检查不接受空转命令。 */
+const WRITE_APP_WORKER = "node -e \"require('node:fs').mkdirSync('src',{recursive:true});require('node:fs').writeFileSync('src/app.js','ok')\"";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_RESPONSIBILITY = declare("src/app.js");
 
 test("runCommand resolves a 127 result when the spawn itself fails (bad cwd)", async () => {
   const missing = path.join(process.cwd(), ".tmp", `no-such-dir-${Date.now()}`);
@@ -43,25 +49,25 @@ test("a crashing runner fails only its own task; the rest of the batch still lan
           id: "T001",
           title: "healthy task",
           owner: "ZhuRong",
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
           verify_commands: ["node -e \"process.exit(0)\""],
         },
         {
           id: "T002",
           title: "sabotaged task",
           owner: "ZhuRong",
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
           verify_commands: ["node -e \"process.exit(0)\""],
         },
       ],
     }, null, 2));
-    await importPlan(dir, planPath);
+    await importApprovedPlan(dir, planPath);
 
     // T002 的 runner 在任务 run 目录（git-worktree 的上一级）里造出一个与
     // agent-result.json 同名的目录，让结果读取/落盘必然抛错——模拟 runner 中途崩溃的未预期异常。
     const sabotage = "node -e \"require('node:fs').mkdirSync('../agent-result.json')\"";
     const batch = await runParallelAgents(dir, {
-      command: "node -e \"process.exit(0)\"",
+      command: WRITE_APP_WORKER,
       taskIds: ["T001"],
       maxAgents: 1,
     });

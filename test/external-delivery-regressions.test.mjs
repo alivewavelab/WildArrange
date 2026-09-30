@@ -22,9 +22,13 @@ import { runDoctor } from "../src/interface/doctor.mjs";
 import { runWorkflow } from "../src/orchestration/workflow.mjs";
 import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtime.mjs";
 import { admitParallelAgentResult, closeParallelAgentRun, retryParallelAgentRun, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
-import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
+import { loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { persistTaskState } from "../src/orchestration/task-board.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
+import { createSmokePlan } from "./helpers/runtime-fixtures.mjs";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_RESPONSIBILITY = declare("src/a.txt", "src/artifact.txt", "src/feature.js", "src/linear.txt", "src/one.txt", "src/parallel.txt", "src/retry.txt", "src/two.txt");
 
 function routeRequest(root, input) { return runHostRoute(root, input, classifyRoute); }
 
@@ -59,12 +63,12 @@ async function importSrcPlan(projectRoot, taskIds = ["T001"], planId = "P-EXT") 
     tasks: taskIds.map((id) => ({
       id,
       subject: `Task ${id}`,
-      writable_paths: ["src/**"],
+      writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
       verify_commands: [NODE_OK],
       review_commands: [REVIEW_SRC],
     })),
   }, null, 2), "utf8");
-  await importPlan(projectRoot, planPath);
+  await importApprovedPlan(projectRoot, planPath);
 }
 
 // ---------------------------------------------------------------------------
@@ -106,10 +110,10 @@ test("a crash while finalizing keeps the workspace and resumes in the delivery w
         subject: "Artifact must survive a finalize crash",
         verify_commands: ["node -e \"const fs=require('fs');if(fs.readFileSync('src/artifact.txt','utf8').trim()!=='good')process.exit(1)\""],
         review_commands: [REVIEW_SRC],
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
       }],
     }, null, 2), "utf8");
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const batch = await runParallelAgents(projectRoot, { taskIds: ["T001"], agent: "ZhuRong", command: resultCommand("src/artifact.txt", "good\n") });
     const runB = `${batch.runId}-rival`;
@@ -190,10 +194,10 @@ test("closing a parallel run releases its task branch so a linear run can take t
         worker_command: "node -e \"const fs=require('fs');fs.mkdirSync('src',{recursive:true});fs.writeFileSync('src/linear.txt','ok')\"",
         verify_commands: ["node -e \"require('node:fs').readFileSync('src/linear.txt','utf8')\""],
         review_commands: [REVIEW_SRC],
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
       }],
     }, null, 2), "utf8");
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
     const batch = await runParallelAgents(projectRoot, { taskIds: ["T001"], agent: "ZhuRong", command: resultCommand("src/parallel.txt", "p\n") });
     assert.equal(batch.results[0].pass, true);
     await closeParallelAgentRun(projectRoot, { runId: batch.runId });
@@ -222,15 +226,16 @@ test("two different tasks still cannot hold the same task branch", async () => {
 // ---------------------------------------------------------------------------
 // 4. workflow --sample 在外置 Git 交付下必须能完成
 // ---------------------------------------------------------------------------
-test("workflow --sample completes under external Git delivery", async () => {
-  await withExternalProject(async ({ projectRoot }) => {
-    const result = await runWorkflow(projectRoot, { sample: true });
+test("workflow completes an approved plan under external Git delivery", async () => {
+  await withExternalProject(async ({ root, projectRoot }) => {
+    await importApprovedPlan(projectRoot, await createSmokePlan(root));
+    const result = await runWorkflow(projectRoot);
     assert.equal(result.ok, true, JSON.stringify(result.results.map((r) => r.status)));
     assert.equal(result.status.completed, 1);
     const task = (await loadTaskState(projectRoot)).tasks[0];
     assert.equal(task.status, "completed");
     const sha = task.delivery.integrationSha || task.delivery.commitSha;
-    assert.equal((await git(projectRoot, ["show", `${sha}:wildarrange-sample/linear-smoke.txt`])).trim(), "ok");
+    assert.equal((await git(projectRoot, ["show", `${sha}:artifacts/linear-smoke.txt`])).trim(), "ok");
     assert.equal((await git(projectRoot, ["status", "--short"])).trim(), "", "共享 checkout 不被样例弄脏");
   });
 });

@@ -18,9 +18,12 @@ import test from "node:test";
 
 import { startDashboardServer } from "../src/interface/dashboard.mjs";
 import { runInjectionHook } from "../src/ai/hooks.mjs";
-import { importPlan } from "../src/orchestration/plan-state.mjs";
+
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_RESPONSIBILITY = declare("src/login.mjs");
 
 async function withTempDir(fn) {
   await withExternalProject(({ projectRoot }) => fn(projectRoot));
@@ -50,12 +53,12 @@ async function importPassingPlan(dir) {
         id: "T001",
         title: "panel task",
         owner: "ZhuRong",
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         verify_commands: ["node -e \"process.exit(0)\""],
       },
     ],
   }, null, 2));
-  await importPlan(dir, planPath);
+  await importApprovedPlan(dir, planPath);
 }
 
 test("decisions and ops panels serve read-only view models", async () => {

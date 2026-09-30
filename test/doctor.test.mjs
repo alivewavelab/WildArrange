@@ -24,7 +24,7 @@ import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { hashContent, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 import { generateVerificationArtifacts } from "../src/capabilities/verification-governance.mjs";
 import { runInjectionHook } from "../src/ai/hooks.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare } from "./helpers/external-fixture.mjs";
 
 test("doctor keeps reporting when one check crashes on corrupted state", async () => {
   await withExternalProject(async ({ projectRoot: dir }) => {
@@ -215,6 +215,7 @@ test("doctor rejects a completed task whose acceptance proof says false", async 
       verify_commands: ["node verify.cjs"],
       review_commands: ["node review.cjs"],
       writable_paths: ["result.txt"],
+      responsibilityChanges: declare("result.txt"),
       evidence: [],
       history: [],
     };

@@ -9,16 +9,21 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { importPlan } from "../src/orchestration/plan-state.mjs";
+
 import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtime.mjs";
+import { approvePlan } from "../src/orchestration/plan-state.mjs";
+import { steerWorkflow } from "../src/orchestration/plan-steering.mjs";
 import { listChangeRequests, resolveChangeRequest, reviewChangeRequest } from "../src/orchestration/change-governance.mjs";
 import { statusReport } from "../src/orchestration/status.mjs";
 import { scopeGuard } from "../src/capabilities/scope-guard.mjs";
 import { classifyManifestPathChanges } from "../src/infra/git-diff.mjs";
 import { pathAllowed } from "../src/infra/path-match.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
-import { installDocumentReviewerFixture, nodeEval } from "./helpers/runtime-fixtures.mjs";
+import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
+import { nodeEval } from "./helpers/runtime-fixtures.mjs";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_RESPONSIBILITY = declare("src/added.js", "src/deleted.js", "src/example.mjs", "src/index.js", "src/index.js.map", "src/infra/example.mjs", "src/modified.js", "src/ok.js", "src/same.js");
 
 test("runNextTask fails when automatic scope guard finds out-of-scope worker changes", async () => {
   await withExternalProject(async ({ projectRoot }) => {
@@ -29,13 +34,13 @@ test("runNextTask fails when automatic scope guard finds out-of-scope worker cha
       tasks: [{
         id: "T001",
         subject: "Only src allowed",
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('docs',{recursive:true}); fs.writeFileSync('docs/leak.md','bad')\"",
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
       }],
     }));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const result = await runNextTask(projectRoot);
     assert.equal(result.status, "failed");
@@ -75,13 +80,13 @@ test("non-git projects use file manifest scope fallback before checkpoint", asyn
       tasks: [{
         id: "T001",
         subject: "Only src allowed without git",
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('docs',{recursive:true}); fs.writeFileSync('docs/leak.md','bad')\"",
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
       }],
     }));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const result = await runNextTask(projectRoot);
     assert.equal(result.status, "failed");
@@ -93,7 +98,6 @@ test("non-git projects use file manifest scope fallback before checkpoint", asyn
 
 test("accepted change request can explicitly apply scope and reopen retry", async () => {
   await withExternalProject(async ({ projectRoot, governanceRoot }) => {
-    await installDocumentReviewerFixture(projectRoot, governanceRoot);
 
     const planPath = resolveWildArrangePath(projectRoot, "artifacts", "accepted-change-plan.json");
     await writeFile(planPath, JSON.stringify({
@@ -101,13 +105,13 @@ test("accepted change request can explicitly apply scope and reopen retry", asyn
       tasks: [{
         id: "T001",
         subject: "Allow docs only after review",
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('docs',{recursive:true}); fs.writeFileSync('docs/leak.md','accepted')\"",
         verify_commands: ["node -e \"const fs=require('fs'); if(fs.readFileSync('docs/leak.md','utf8')!=='accepted') process.exit(1)\""],
         review_commands: [nodeEval("const fs=require('fs');const stat=fs.statSync('docs/leak.md');if(!stat.isFile()||stat.size!==8)process.exit(1)")],
       }],
     }));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const failed = await runNextTask(projectRoot);
     assert.equal(failed.status, "failed");
@@ -131,8 +135,20 @@ test("accepted change request can explicitly apply scope and reopen retry", asyn
     const retry = await runWorkflowNode(projectRoot, "retry", { taskId: "T001" });
     assert.equal(retry.status, "pending");
 
+    // 扩大范围不会自动编造职责声明：必须补交覆盖新路径的声明，并重新经人批准
+    const revised = await steerWorkflow(projectRoot, {
+      kind: "revise_acceptance",
+      targetTaskId: "T001",
+      evidence: "Accepted change request widened scope to docs/leak.md",
+      rationale: "Declare the responsibility of the newly allowed document",
+      responsibilityChanges: declare("docs/leak.md"),
+    });
+    assert.equal(revised.accepted, true);
+    assert.equal((await runNextTask(projectRoot)).status, "awaiting_plan_approval");
+    await approvePlan(projectRoot);
+
     const completed = await runNextTask(projectRoot);
-    assert.equal(completed.status, "completed");
+    assert.equal(completed.status, "completed", JSON.stringify(completed.task?.last_failure?.observed || completed.status));
     assert.equal(completed.scopeResult.status, "pass");
 
     const changes = await listChangeRequests(projectRoot);
@@ -152,12 +168,12 @@ test("scope guard checks git changed paths against task writable paths", async (
       tasks: [{
         id: "T001",
         subject: "Only touch src",
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
       }],
     }));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
 
     await mkdir(path.join(projectRoot, "src"), { recursive: true });
@@ -192,12 +208,13 @@ test("scope guard rejects symlink realpaths that escape the project", async () =
         id: "T001",
         subject: "Reject symlink escape",
         writable_paths: ["allowed-link.txt"],
+        responsibilityChanges: declare("allowed-link.txt"),
         worker_command: "node -e \"if(!process.version)process.exit(1)\"",
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
       }],
     }));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const result = await scopeGuard(projectRoot, { taskId: "T001", changedPaths: ["allowed-link.txt"] });
     assert.equal(result.status, "fail");

@@ -20,9 +20,9 @@ import * as gateway from "../src/capabilities/gateway.mjs";
 import { invokeCapability, listRegisteredCapabilities } from "../src/capabilities/gateway.mjs";
 import { admitParallelAgentResult, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
 import { runDeliveryPipeline } from "../src/orchestration/delivery-pipeline.mjs";
-import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
+import { loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { readJson, resolveTaskAcceptancePath, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { declare, importApprovedPlan, withExternalProject } from "./helpers/external-fixture.mjs";
 
 async function withTempDir(fn) {
   await withExternalProject(({ projectRoot }) => fn(projectRoot));
@@ -58,11 +58,12 @@ async function importSingleTaskPlan(dir, { verifyCommand, writablePaths = ["src/
           verify_commands: [verifyCommand],
           review_commands: [reviewCommand],
           writable_paths: writablePaths,
+          responsibilityChanges: declare("src/review-marker.txt"),
         },
       ],
     }, null, 2),
   );
-  return importPlan(dir, planPath);
+  return importApprovedPlan(dir, planPath);
 }
 
 test("gateway: invokeCapability rejects unknown capability names", async () => {

@@ -34,8 +34,11 @@ import { restoreRuntimeStateBackup, writeRuntimeStateBackup } from "../src/infra
 import { verifyConfigBaseline, writeConfigBaseline } from "../src/infra/config-baseline.mjs";
 import { resolveInjectionPoint } from "../src/ai/injection.mjs";
 import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { importPlan } from "../src/orchestration/plan-state.mjs";
-import { gitCommitAll, withExternalProject } from "./helpers/external-fixture.mjs";
+
+import { gitCommitAll, withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_RESPONSIBILITY = declare("src/ext.txt");
 
 async function git(cwd, args) {
   const result = await runCommandFile("git", args, cwd);
@@ -63,12 +66,12 @@ test("external parallel run -> admit works without touching the project runtime 
       tasks: [{
         id: "T001",
         subject: "Admit child artifact",
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node -e \"if(!process.version)process.exit(1)\""],
       }],
     }, null, 2), "utf8");
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
     const batch = await runParallelAgents(projectRoot, {
       taskIds: ["T001"],
       agent: "ZhuRong",
@@ -198,7 +201,7 @@ test("external config init --root writes the governance config, not the project"
     assert.equal(existsSync(path.join(governanceRoot, "policy", "wildarrange.config.json")), true);
     assert.equal(existsSync(path.join(projectRoot, "wildarrange.config.json")), false);
     assert.equal((await git(projectRoot, ["status", "--short"])).trim(), "");
-  });
+  }, { reviewer: false });
 });
 
 test("plan import fails fast when the governance repository has no Git HEAD", async () => {
@@ -207,9 +210,9 @@ test("plan import fails fast when the governance repository has no Git HEAD", as
     const planPath = path.join(root, "plan.json");
     await writeFile(planPath, JSON.stringify({
       id: "P-NOGIT", title: "t", objective: "o",
-      tasks: [{ id: "T001", subject: "s", writable_paths: ["src/**"], verify_commands: ["node --version"], review_commands: ["node --version"] }],
+      tasks: [{ id: "T001", subject: "s", writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY, verify_commands: ["node --version"], review_commands: ["node --version"] }],
     }), "utf8");
-    await assert.rejects(() => importPlan(projectRoot, planPath), /no Git HEAD[\s\S]*git -C .* init/);
+    await assert.rejects(() => importApprovedPlan(projectRoot, planPath), /no Git HEAD[\s\S]*git -C .* init/);
   });
 });
 
@@ -245,7 +248,7 @@ test("doctor only judges hosts that the install report actually generated", asyn
 
 test("task start baseline keeps successCriteria under its real key", async () => {
   await withExternalProject(async ({ projectRoot }) => {
-    const task = { id: "T001", subject: "s", writable_paths: ["src/**"], verify_commands: ["node --version"], successCriteria: [{ title: "works", expectedEvidence: "exit 0" }] };
+    const task = { id: "T001", subject: "s", writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY, verify_commands: ["node --version"], successCriteria: [{ title: "works", expectedEvidence: "exit 0" }] };
     await ensureTaskPacket(projectRoot, "P-BASE", task);
     const baseline = JSON.parse(await readFile(resolveWildArrangePath(projectRoot, "task-packets", "P-BASE", "T001", "baseline.json"), "utf8"));
     assert.deepEqual(baseline.task.successCriteria, task.successCriteria);
