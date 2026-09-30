@@ -531,7 +531,7 @@ x-wildarrange-token: <token>
 
 `"provider": "host"` 的 Agent 交给宿主工具处理：Codex 侧由 Codex 选模型，Cursor 侧走 adapter 默认模型，**不需要** WildArrange 自备 OpenAI API key。
 
-外部 provider 使用 OpenAI 兼容 HTTP 配置，详见 `wildarrange.config.example.json`。环境变量模板见 `.env.wildarrange.example`：
+外部 provider 使用 OpenAI 兼容 HTTP 配置，最小示例见 `wildarrange.config.example.json`，未列出的键取 `src/infra/default-config.mjs` 的内置默认值。环境变量模板见 `.env.wildarrange.example`：
 
 ```bash
 # 复制后填入真实值，勿提交密钥

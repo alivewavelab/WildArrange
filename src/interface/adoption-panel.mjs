@@ -20,8 +20,8 @@
 // =============================================================================
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
+import { applyApprovedCards } from "../orchestration/adoption-apply.mjs";
 import {
-  applyApprovedCards,
   cancelAdoption,
   decideAdoptionCard,
   loadAdoptionViewModel,

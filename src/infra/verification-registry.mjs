@@ -20,7 +20,6 @@ import { readGitHead } from "./git-diff.mjs";
 import { normalizeRelativePath } from "./path-match.mjs";
 import { loadWildArrangeConfig } from "./runtime-config.mjs";
 import { hashContent, nowIso, readJson, resolveGovernancePaths } from "./runtime-store.mjs";
-import { fingerprintCard, stableStringify } from "./verification-cards.mjs";
 
 /**
  * REGISTRY_SCHEMA_VERSION：本模块对外API。
@@ -60,6 +59,33 @@ export function readLocator(config = {}) {
  */
 function locatorConfigured(locator) {
   return Boolean(locator?.registryPath && locator?.bootstrapPath && locator?.inventoryPath);
+}
+
+// --- 稳定序列化与卡片指纹 ---
+/**
+ * 卡片内容指纹（忽略 status 字段）。
+ */
+export function fingerprintCard(card) {
+  return hashContent(stableStringify(cardFingerprintPayload(card)));
+}
+
+/**
+ * 卡片指纹载荷：去掉随决定变化的 status。
+ */
+export function cardFingerprintPayload(card) {
+  const { status: _status, ...rest } = card;
+  return rest;
+}
+
+/**
+ * 键排序稳定序列化，供各类 digest 复用。
+ */
+export function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 /**
@@ -276,7 +302,7 @@ export function declaredInputPaths(registry, locator, extra = [], governance = {
   const paths = [
     locator?.registryPath,
     "package.json",
-    governance.configPath || "wildarrange.config.json",
+    governance.configPath,
     ...extra,
     ...(registry?.runtimeGates || []).map((item) => item.path),
     ...(registry?.hostHooks || []).map((item) => item.path),

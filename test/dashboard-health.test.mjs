@@ -15,7 +15,7 @@ import { appendFile } from "node:fs/promises";
 import test from "node:test";
 
 import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { writeConfigBaseline } from "../src/infra/security.mjs";
+import { writeConfigBaseline } from "../src/infra/config-baseline.mjs";
 import { dashboardData } from "../src/orchestration/status.mjs";
 import { withExternalProject } from "./helpers/external-fixture.mjs";
 

@@ -149,7 +149,7 @@ test("shared Review fails when responsibility audit is unavailable", async (t) =
   assert.match(result.findings.find((f) => f.lane === "responsibility_audit").evidence, /unavailable/);
 });
 import { runDeliveryPipeline } from "../src/orchestration/delivery-pipeline.mjs";
-import { steerWorkflow } from "../src/orchestration/change-governance.mjs";
+import { steerWorkflow } from "../src/orchestration/plan-steering.mjs";
 import { loadPlanApproval } from "../src/orchestration/plan-state.mjs";
 
 test("responsibility rejection prevents acceptance proof and checkpoint even when verifier passes", async (t) => {

@@ -35,6 +35,7 @@ import {
   generateVerificationArtifacts,
   scanVerificationGovernance,
 } from "./verification-governance.mjs";
+import { captureCardLiveSnapshot } from "./verification-discovery.mjs";
 import {
   applyContractGovernanceCard,
   scanContractGovernance,
@@ -118,6 +119,12 @@ async function adaptVerificationApplyCard(ctx) {
   return { status: raw.status === "committed" ? "pass" : "fail", evidence: raw, sideEffect: "files_changed" };
 }
 
+/** 卡片实时快照（目标文件与依赖 digest），只读。 */
+async function adaptVerificationCardSnapshot(ctx) {
+  const raw = await captureCardLiveSnapshot(ctx.rootDir, ctx.options?.card);
+  return { status: "pass", evidence: raw, sideEffect: "none" };
+}
+
 /** 生成 verification registry/bootstrap/inventory 制品。 */
 async function adaptVerificationGenerate(ctx) {
   const raw = await generateVerificationArtifacts(ctx.rootDir, ctx.options || {});
@@ -142,6 +149,7 @@ const CAPABILITIES = {
   checkpoint: { handler: adaptCheckpoint, owner: "capabilities/checkpoint.mjs" },
   "verification-governance-scan": { handler: adaptVerificationScan, owner: "capabilities/verification-governance.mjs" },
   "verification-governance-apply-card": { handler: adaptVerificationApplyCard, owner: "capabilities/verification-governance.mjs" },
+  "verification-governance-card-snapshot": { handler: adaptVerificationCardSnapshot, owner: "capabilities/verification-discovery.mjs" },
   "verification-governance-generate-artifacts": { handler: adaptVerificationGenerate, owner: "capabilities/verification-governance.mjs" },
   "contract-governance-scan": { handler: adaptContractScan, owner: "capabilities/contract-governance.mjs" },
   "contract-governance-apply-card": { handler: adaptContractApplyCard, owner: "capabilities/contract-governance.mjs" },

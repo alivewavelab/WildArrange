@@ -15,8 +15,9 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { DANGEROUS_ACTIONS, fingerprintCard } from "../src/infra/verification-cards.mjs";
-import { captureCardLiveSnapshot, hasDynamicCodeHint, scanVerificationUniverse } from "../src/infra/verification-discovery.mjs";
+import { fingerprintCard } from "../src/infra/verification-registry.mjs";
+import { DANGEROUS_ACTIONS } from "../src/capabilities/verification-cards.mjs";
+import { captureCardLiveSnapshot, hasDynamicCodeHint, scanVerificationUniverse } from "../src/capabilities/verification-discovery.mjs";
 import { resolveGovernancePaths } from "../src/infra/runtime-store.mjs";
 import { withExternalProject } from "./helpers/external-fixture.mjs";
 

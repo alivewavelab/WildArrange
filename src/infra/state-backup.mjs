@@ -1,28 +1,18 @@
 // =============================================================================
-// 文件名称：security.mjs
+// 文件名称：state-backup.mjs
 // 所属模块：infra
 // 作用说明：
-//   路径/命令/secret 扫描与 trust boundary 断言。
-//
-// 【运行原理速读】
-//   evaluateSecurity → pattern 匹配 → block/warn 结构化 findings。
+//   运行态状态备份与恢复：一键备份、归档精确恢复包、备份列表、restore 后重验已完成任务。
 // =============================================================================
 import { existsSync } from "node:fs";
-import { copyFile, cp, lstat, mkdir, readFile, readdir, rm, stat, unlink } from "node:fs/promises";
+import { copyFile, cp, lstat, mkdir, readdir, rm, stat, unlink } from "node:fs/promises";
 import path from "node:path";
-import { runCommandFile } from "./command-runner.mjs";
 import { appendLedger } from "./ledger.mjs";
 import { normalizeRelativePath } from "./path-match.mjs";
-import {
-  assertSafeId,
-  copyEntry,
-  resolveInboundPath,
-  resolveRelativeInside,
-} from "./recovery-transaction.mjs";
+import { assertSafeId, copyEntry, resolveInboundPath, resolveRelativeInside } from "./recovery-transaction.mjs";
 import {
   createWorkId,
   ensureWildArrangeDirs,
-  hashContent,
   nowIso,
   readJson,
   resolveWildArrangePath,
@@ -31,9 +21,8 @@ import {
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 import { inspectCompletedTaskEvidence, normalizeTaskLedger } from "./task-state-store.mjs";
+import { describeGovernanceConfig } from "./config-baseline.mjs";
 
-/** 配置完整性基线文件在 .wildarrange 下的相对路径段。 */
-const CONFIG_BASELINE_PATH = ["security", "config-baseline.json"];
 /** state restore 备份清单：须与 ledger 尾 hash 缓存同进同出。 */
 const BACKUP_STATE_FILES = [
   { scope: "runtime", segments: ["ledger.jsonl"] },
@@ -48,90 +37,10 @@ const BACKUP_STATE_FILES = [
   // 治理配置在治理仓；真实路径由 resolveGovernancePaths 决定
   { scope: "governance-config" },
 ];
-/** doctor 运行时完整性检查的最低必备状态文件。 */
-const REQUIRED_STATE_FILES = [
-  ["ledger.jsonl"],
-  ["work.json"],
-];
-
-/**
- * writeConfigBaseline：本模块对外异步 API。
- */
-export async function writeConfigBaseline(rootDir, options = {}) {
-  await ensureWildArrangeDirs(rootDir);
-  const baseline = {
-    kind: "config_baseline",
-    at: nowIso(),
-    reason: options.reason || "manual",
-    files: await collectConfigFingerprints(rootDir),
-    governance: await inspectGovernanceRepository(rootDir),
-  };
-  const baselinePath = resolveWildArrangePath(rootDir, ...CONFIG_BASELINE_PATH);
-  await writeJsonAtomic(baselinePath, baseline);
-  await appendLedger(rootDir, {
-    type: "config_baseline_written",
-    reason: baseline.reason,
-    fileCount: baseline.files.length,
-    baselinePath: normalizeRelativePath(path.relative(rootDir, baselinePath)),
-  });
-  return baseline;
-}
-
-/**
- * verifyConfigBaseline：本模块对外异步 API。
- */
-// --- 配置基线 ---
-export async function verifyConfigBaseline(rootDir) {
-  await ensureWildArrangeDirs(rootDir);
-  const baselinePath = resolveWildArrangePath(rootDir, ...CONFIG_BASELINE_PATH);
-  const baseline = await readJson(baselinePath, null);
-  const currentFiles = await collectConfigFingerprints(rootDir);
-  if (!baseline) {
-    return {
-      kind: "config_integrity",
-      ok: false,
-      status: "missing_baseline",
-      message: "No config baseline found. Run `node ./bin/wildarrange.mjs config baseline` after reviewing config.",
-      files: currentFiles,
-      failures: [],
-    };
-  }
-
-  const expected = new Map((baseline.files || []).map((file) => [file.path, file]));
-  const current = new Map(currentFiles.map((file) => [file.path, file]));
-  const failures = [];
-  for (const [filePath, expectedFile] of expected.entries()) {
-    const currentFile = current.get(filePath);
-    if (!currentFile) {
-      failures.push({ path: filePath, reason: "missing_now" });
-      continue;
-    }
-    if (expectedFile.hash !== currentFile.hash) {
-      failures.push({ path: filePath, reason: "hash_mismatch", expected: expectedFile.hash, actual: currentFile.hash });
-    }
-  }
-  for (const [filePath] of current.entries()) {
-    // 基线未登记的新配置文件也视为完整性失败（防静默扩面）
-    if (!expected.has(filePath)) failures.push({ path: filePath, reason: "new_config_file" });
-  }
-
-  return {
-    kind: "config_integrity",
-    ok: failures.length === 0,
-    status: failures.length === 0 ? "pass" : "fail",
-    baselineAt: baseline.at,
-    baselineReason: baseline.reason,
-    files: currentFiles,
-    failures,
-    governance: await inspectGovernanceRepository(rootDir),
-    baselineGovernance: baseline.governance || null,
-  };
-}
 
 /**
  * writeRuntimeStateBackup：本模块对外异步 API。
  */
-// --- 运行时备份 ---
 export async function writeRuntimeStateBackup(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const backupId = createWorkId("backup");
@@ -177,7 +86,6 @@ export async function writeRuntimeStateBackup(rootDir, options = {}) {
 /**
  * prepareArchiveRecoveryPackage：本模块对外异步 API。
  */
-// --- 归档恢复包 ---
 export async function prepareArchiveRecoveryPackage(rootDir, options = {}) {
   let backupId = options.backupId;
   if (!backupId) {
@@ -261,7 +169,6 @@ export async function updateArchiveRecoveryPackage(rootDir, options = {}) {
 /**
  * listRuntimeStateBackups：本模块对外异步 API。
  */
-// --- 备份列表与恢复 ---
 export async function listRuntimeStateBackups(rootDir) {
   const backupsDir = resolveWildArrangePath(rootDir, "backups");
   let entries = [];
@@ -516,100 +423,4 @@ function pathInside(rootDir, candidate) {
  */
 async function copyBackupEntry(sourcePath, backupDir, relativePath) {
   return copyEntry(sourcePath, backupDir, relativePath);
-}
-
-/**
- * verifyRuntimeState：本模块对外异步 API。
- */
-// --- 运行时完整性校验 ---
-export async function verifyRuntimeState(rootDir) {
-  const files = [];
-  for (const segments of REQUIRED_STATE_FILES) {
-    const filePath = resolveWildArrangePath(rootDir, ...segments);
-    const relativePath = normalizeRelativePath(path.join(".wildarrange", ...segments));
-    if (!existsSync(filePath)) {
-      files.push({ path: relativePath, status: "missing" });
-      continue;
-    }
-    const fileStat = await stat(filePath);
-    files.push({ path: relativePath, status: "present", bytes: fileStat.size });
-  }
-  const work = await readJson(resolveWildArrangePath(rootDir, "work.json"), null);
-  const tasksPath = resolveWildArrangePath(rootDir, "team", "tasks.json");
-  if (work?.activePlanId) {
-    if (!existsSync(tasksPath)) {
-      files.push({ path: ".wildarrange/team/tasks.json", status: "missing" });
-    } else {
-      const fileStat = await stat(tasksPath);
-      files.push({ path: ".wildarrange/team/tasks.json", status: "present", bytes: fileStat.size });
-    }
-  } else {
-    // 无 active plan 时不强制 tasks.json 存在；有 plan 则上面已标 missing
-    files.push({
-      path: ".wildarrange/team/tasks.json",
-      status: existsSync(tasksPath) ? "present" : "not_required",
-      reason: "no active plan",
-    });
-  }
-  const failures = files.filter((file) => file.status === "missing").map((file) => ({
-    path: file.path,
-    reason: file.status,
-  }));
-  return {
-    kind: "runtime_state_integrity",
-    ok: failures.length === 0,
-    status: failures.length === 0 ? "pass" : "fail",
-    files,
-    failures,
-  };
-}
-
-/**
- * 收集治理配置的 SHA256 指纹。
- */
-async function collectConfigFingerprints(rootDir) {
-  const governanceConfig = describeGovernanceConfig(rootDir);
-  const candidates = [
-    { path: governanceConfig.absolutePath, logicalPath: governanceConfig.logicalPath },
-  ];
-  const files = [];
-  for (const candidate of candidates) {
-    const filePath = candidate.path;
-    if (!existsSync(filePath)) continue;
-    const content = await readFile(filePath, "utf8");
-    files.push({
-      path: candidate.logicalPath,
-      hash: hashContent(content),
-      bytes: Buffer.byteLength(content),
-    });
-  }
-  return files;
-}
-
-/**
- * 定位治理配置的真实文件：治理仓 policy/wildarrange.config.json。
- */
-function describeGovernanceConfig(rootDir) {
-  const governance = resolveGovernancePaths(rootDir);
-  const relativePath = normalizeRelativePath(governance.configPath);
-  return {
-    absolutePath: path.resolve(governance.rootDir, governance.configPath),
-    logicalPath: `governance:${relativePath}`,
-    backupPath: `governance/${relativePath}`,
-  };
-}
-
-/**
- * 读取治理仓的 HEAD 与工作区是否干净。
- * 治理仓工作树里未提交的配置改动会被 Hook 立即采用，必须能被体检看到。
- */
-export async function inspectGovernanceRepository(rootDir) {
-  const governance = resolveGovernancePaths(rootDir);
-  const head = await runCommandFile("git", ["-C", governance.rootDir, "rev-parse", "HEAD"], governance.rootDir, 15_000);
-  const status = await runCommandFile("git", ["-C", governance.rootDir, "status", "--porcelain"], governance.rootDir, 15_000);
-  return {
-    root: governance.rootDir,
-    head: head.exitCode === 0 ? head.stdout.trim() : null,
-    clean: status.exitCode === 0 ? status.stdout.trim().length === 0 : null,
-  };
 }

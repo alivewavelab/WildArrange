@@ -29,7 +29,8 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 test("the example governance config only uses known keys and loads as policy/wildarrange.config.json", async () => {
   const example = JSON.parse(await readFile(path.join(REPO_ROOT, "wildarrange.config.example.json"), "utf8"));
   const known = new Set(Object.keys(DEFAULT_WILDARRANGE_CONFIG));
-  assert.deepEqual(Object.keys(example).filter((key) => !known.has(key)), []);
+  // $comment 是示例里的说明字段；其余键必须是已知配置键，未列出的键取内置默认值
+  assert.deepEqual(Object.keys(example).filter((key) => key !== "$comment" && !known.has(key)), []);
   await withExternalProject(async ({ projectRoot }) => {
     await writeFile(governanceConfigFile(projectRoot), JSON.stringify(example), "utf8");
     const { config, sourcePath } = await loadWildArrangeConfig(projectRoot);

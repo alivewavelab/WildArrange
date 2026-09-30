@@ -63,11 +63,11 @@ import {
 } from "../src/orchestration/parallel-runtime.mjs";
 import {
   listChangeRequests,
-  recordReviewBlocker,
   resolveChangeRequest,
   reviewChangeRequest,
-  steerWorkflow,
 } from "../src/orchestration/change-governance.mjs";
+import { recordReviewBlocker } from "../src/orchestration/review-blocker.mjs";
+import { steerWorkflow } from "../src/orchestration/plan-steering.mjs";
 import {
   claimTeamTask,
   createTeamTask,
@@ -116,14 +116,9 @@ import {
   writeDefaultWildArrangeConfig,
 } from "../src/infra/runtime-config.mjs";
 import { readJson } from "../src/infra/runtime-store.mjs";
-import {
-  listRuntimeStateBackups,
-  restoreRuntimeStateBackup,
-  verifyConfigBaseline,
-  verifyRuntimeState,
-  writeConfigBaseline,
-  writeRuntimeStateBackup,
-} from "../src/infra/security.mjs";
+import { listRuntimeStateBackups, restoreRuntimeStateBackup, writeRuntimeStateBackup } from "../src/infra/state-backup.mjs";
+import { verifyConfigBaseline, writeConfigBaseline } from "../src/infra/config-baseline.mjs";
+import { verifyRuntimeState } from "../src/infra/runtime-integrity.mjs";
 import { attachGovernanceRepository, resolveWorkspaceContext } from "../src/infra/workspace-context.mjs";
 import {
   initializeProjectGovernance,
@@ -794,7 +789,7 @@ async function main() {
       const declarations = Array.isArray(source) ? source : source?.items || [];
       const result = await invokeCapability("contract-governance-scan", {
         rootDir,
-        options: { declarations, discoverer: "tauri-ipc" },
+        options: { declarations },
       });
       console.log(JSON.stringify(result, null, 2));
       // §3.4：契约扫描未 pass 置 exit 2；stdout 仍输出完整 evidence 供修复。

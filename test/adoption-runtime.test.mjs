@@ -16,8 +16,8 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
+import { applyApprovedCards } from "../src/orchestration/adoption-apply.mjs";
 import {
-  applyApprovedCards,
   cancelAdoption,
   decideAdoptionCard,
   loadAdoptionViewModel,
@@ -37,8 +37,7 @@ import {
 } from "../src/infra/recovery-transaction.mjs";
 import { runCommandFile } from "../src/infra/command-runner.mjs";
 import { hashContent, readJson, resolveWildArrangePath, writeJsonAtomic } from "../src/infra/runtime-store.mjs";
-import { fingerprintCard } from "../src/infra/verification-cards.mjs";
-import { digestCanonical, gitBlobDigestEquals, readVerificationInventory } from "../src/infra/verification-registry.mjs";
+import { digestCanonical, fingerprintCard, gitBlobDigestEquals, readVerificationInventory } from "../src/infra/verification-registry.mjs";
 import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 // 外置模式：项目根放业务文件，登记册等治理产物落在治理仓（第二个参数 gov）。

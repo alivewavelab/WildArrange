@@ -11,7 +11,7 @@
 //   断言 parser 输出、registry 更新与 review 门禁决策。
 // =============================================================================
 
-import { applyContractCardDecision, inspectContractTask } from "../src/capabilities/contract-governance.mjs";
+import { applyContractCardDecision, inspectContractTask, scanContractGovernanceUniverse } from "../src/capabilities/contract-governance.mjs";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { readFile, readdir, writeFile } from "node:fs/promises";
@@ -21,14 +21,15 @@ import { promisify } from "node:util";
 
 import {
   contractGovernancePaths,
+  persistContractScan,
+  readContractRegistry,
+} from "../src/infra/contract-governance.mjs";
+import {
   discoverTauriIpcContracts,
   findFrontendInvokes,
   findRegisteredCommands,
   findTauriCommands,
-  persistContractScan,
-  readContractRegistry,
-  scanContractGovernanceUniverse,
-} from "../src/infra/contract-governance.mjs";
+} from "../src/capabilities/contract-discovery.mjs";
 import { listRegisteredCapabilities } from "../src/capabilities/gateway.mjs";
 import { normalizeTask } from "../src/orchestration/plan-state.mjs";
 import { withExternalProject } from "./helpers/external-fixture.mjs";

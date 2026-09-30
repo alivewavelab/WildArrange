@@ -17,7 +17,9 @@ import { compileCommandSafetyPatterns, evaluateCommandSafety } from "../src/infr
 import { runCommand, runCommandFile } from "../src/infra/command-runner.mjs";
 import { appendLedger, verifyLedger } from "../src/infra/ledger.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { listRuntimeStateBackups, restoreRuntimeStateBackup, verifyConfigBaseline, verifyRuntimeState, writeConfigBaseline, writeRuntimeStateBackup } from "../src/infra/security.mjs";
+import { listRuntimeStateBackups, restoreRuntimeStateBackup, writeRuntimeStateBackup } from "../src/infra/state-backup.mjs";
+import { verifyConfigBaseline, writeConfigBaseline } from "../src/infra/config-baseline.mjs";
+import { verifyRuntimeState } from "../src/infra/runtime-integrity.mjs";
 import { withExternalProject } from "./helpers/external-fixture.mjs";
 import { nodeEval, writePolicyConfig } from "./helpers/runtime-fixtures.mjs";
 

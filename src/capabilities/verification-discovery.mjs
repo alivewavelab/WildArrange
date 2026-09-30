@@ -1,32 +1,29 @@
 // =============================================================================
 // 文件名称：verification-discovery.mjs
-// 所属模块：infra
+// 所属模块：capabilities
 // 作用说明：
-//   从 package.json/CI 等发现 verify/review 命令候选。
+//   只读扫描仓库内的验证资产（测试/静态检查/复核脚本/夹具/文档线索），
+//   分类并给出消费者证据，再交 verification-cards 构造 adoption 卡。
+//   绝不执行被发现的命令，也不写业务文件。
 //
 // 【运行原理速读】
-//   discoverVerificationCommands → 打分排序 → 去重输出。
+//   listCandidateFiles → package/text/import 索引 → classifyAssets → buildAdoptionCards。
 // =============================================================================
-/**
- * Deterministic read-only discovery of verification assets and consumer evidence.
- * Never executes discovered commands and never writes business files.
- */
 import { existsSync } from "node:fs";
 import { lstat, readdir, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
-import { extractImportSpecifiers } from "./dependency-graph.mjs";
-import { collectGitChangedPaths } from "./git-diff.mjs";
-import { normalizeRelativePath, pathMatchesPattern } from "./path-match.mjs";
-import { loadWildArrangeConfig } from "./runtime-config.mjs";
-import { hashContent, resolveGovernancePaths } from "./runtime-store.mjs";
+import { extractImportSpecifiers } from "../infra/dependency-graph.mjs";
+import { collectGitChangedPaths } from "../infra/git-diff.mjs";
+import { normalizeRelativePath, pathMatchesPattern } from "../infra/path-match.mjs";
+import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
+import { hashContent, resolveGovernancePaths } from "../infra/runtime-store.mjs";
+import { cardFingerprintPayload, stableStringify } from "../infra/verification-registry.mjs";
 import {
   buildAdoptionCards,
   CARD_SCHEMA_VERSION,
-  cardFingerprintPayload,
   indexTextByPath,
   isCurrentSourceOfTruth,
   REVIEW_SCRIPT_RE,
-  stableStringify,
   STATIC_SCRIPT_RE,
   SUCCESSOR_MARKER_RE,
   TEST_SCRIPT_RE,
@@ -114,7 +111,7 @@ export async function scanVerificationUniverse(rootDir, options = {}) {
     packageFacts,
     config,
     suggestedLocator: externalLocator || options.suggestedLocator,
-    configPath: externalLocator ? governance.configPath : undefined,
+    configPath: governance.configPath,
     textIndex,
     files,
     fileSet,

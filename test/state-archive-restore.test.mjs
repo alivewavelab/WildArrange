@@ -17,10 +17,7 @@ import { access, appendFile, chmod, lstat, mkdir, readFile, readdir, readlink, s
 import path from "node:path";
 import { resolveGovernancePaths, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 import { loadWildArrangeConfig } from "../src/infra/runtime-config.mjs";
-import {
-  restoreRuntimeStateBackup,
-  writeRuntimeStateBackup,
-} from "../src/infra/security.mjs";
+import { restoreRuntimeStateBackup, writeRuntimeStateBackup } from "../src/infra/state-backup.mjs";
 import { loadTaskLedger } from "../src/infra/task-state-store.mjs";
 import { appendLedger } from "../src/infra/ledger.mjs";
 import { writeRuntimeContextSnapshot } from "../src/infra/runtime-snapshot.mjs";

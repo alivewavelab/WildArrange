@@ -1145,6 +1145,18 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "orchestration"
             },
             {
+              "t": "review-blocker.mjs",
+              "io": "review-blocker.mjs",
+              "p": "src/orchestration/review-blocker.mjs",
+              "m": "orchestration"
+            },
+            {
+              "t": "plan-steering.mjs",
+              "io": "plan-steering.mjs",
+              "p": "src/orchestration/plan-steering.mjs",
+              "m": "orchestration"
+            },
+            {
               "t": "task-board.mjs",
               "io": "task-board.mjs",
               "p": "src/orchestration/task-board.mjs",
@@ -1301,9 +1313,21 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "infra"
             },
             {
-              "t": "security.mjs",
-              "io": "security.mjs",
-              "p": "src/infra/security.mjs",
+              "t": "state-backup.mjs",
+              "io": "state-backup.mjs",
+              "p": "src/infra/state-backup.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "config-baseline.mjs",
+              "io": "config-baseline.mjs",
+              "p": "src/infra/config-baseline.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-integrity.mjs",
+              "io": "runtime-integrity.mjs",
+              "p": "src/infra/runtime-integrity.mjs",
               "m": "infra"
             },
             {
@@ -1417,6 +1441,18 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "orchestration"
             },
             {
+              "t": "review-blocker.mjs",
+              "io": "review-blocker.mjs",
+              "p": "src/orchestration/review-blocker.mjs",
+              "m": "orchestration"
+            },
+            {
+              "t": "plan-steering.mjs",
+              "io": "plan-steering.mjs",
+              "p": "src/orchestration/plan-steering.mjs",
+              "m": "orchestration"
+            },
+            {
               "t": "task-board.mjs",
               "io": "task-board.mjs",
               "p": "src/orchestration/task-board.mjs",
@@ -1573,9 +1609,21 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "infra"
             },
             {
-              "t": "security.mjs",
-              "io": "security.mjs",
-              "p": "src/infra/security.mjs",
+              "t": "state-backup.mjs",
+              "io": "state-backup.mjs",
+              "p": "src/infra/state-backup.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "config-baseline.mjs",
+              "io": "config-baseline.mjs",
+              "p": "src/infra/config-baseline.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-integrity.mjs",
+              "io": "runtime-integrity.mjs",
+              "p": "src/infra/runtime-integrity.mjs",
               "m": "infra"
             },
             {
@@ -1882,9 +1930,21 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "infra"
             },
             {
-              "t": "security.mjs",
-              "io": "security.mjs",
-              "p": "src/infra/security.mjs",
+              "t": "state-backup.mjs",
+              "io": "state-backup.mjs",
+              "p": "src/infra/state-backup.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "config-baseline.mjs",
+              "io": "config-baseline.mjs",
+              "p": "src/infra/config-baseline.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-integrity.mjs",
+              "io": "runtime-integrity.mjs",
+              "p": "src/infra/runtime-integrity.mjs",
               "m": "infra"
             },
             {
@@ -3378,6 +3438,11 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "p": "src/capabilities/verification-governance.mjs"
             },
             {
+              "t": "-capabilities-verification-discovery-mjs",
+              "io": "verification-discovery.mjs",
+              "p": "src/capabilities/verification-discovery.mjs"
+            },
+            {
               "t": "src-capabilities-contract-governance-mjs",
               "io": "contract-governance.mjs",
               "p": "src/capabilities/contract-governance.mjs"
@@ -3437,6 +3502,11 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "t": "capabilities-verification-governance-mjs",
               "io": "verification-governance.mjs",
               "p": "src/capabilities/verification-governance.mjs"
+            },
+            {
+              "t": "-capabilities-verification-discovery-mjs",
+              "io": "verification-discovery.mjs",
+              "p": "src/capabilities/verification-discovery.mjs"
             },
             {
               "t": "src-capabilities-contract-governance-mjs",
@@ -3613,9 +3683,9 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "infra"
             },
             {
-              "t": "repository-layout.mjs",
-              "io": "repository-layout.mjs",
-              "p": "src/infra/repository-layout.mjs",
+              "t": "comment-lexer.mjs",
+              "io": "comment-lexer.mjs",
+              "p": "src/infra/comment-lexer.mjs",
               "m": "infra"
             }
           ]
@@ -3624,18 +3694,37 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
           "id": "src-capabilities-contract-governance-mjs",
           "p": "src/capabilities/contract-governance.mjs",
           "r": "contract-governance.mjs",
-          "io": "scanContractGovernance(rootDir, options = {) → 导出；applyContractGovernanceCard(rootDir, options = {) → 导出",
-          "extTo": [
+          "io": "scanContractGovernanceUniverse(rootDir, options = {) → 导出；applyApprovedCard(registry, card) → 导出",
+          "to": [
             {
-              "t": "contract-governance.mjs",
-              "io": "contract-governance.mjs",
-              "p": "src/infra/contract-governance.mjs",
-              "m": "infra"
-            },
+              "t": "src-capabilities-contract-discovery-mjs",
+              "io": "contract-discovery.mjs",
+              "p": "src/capabilities/contract-discovery.mjs"
+            }
+          ],
+          "extTo": [
             {
               "t": "runtime-store.mjs",
               "io": "runtime-store.mjs",
               "p": "src/infra/runtime-store.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "runtime-config.mjs",
+              "io": "runtime-config.mjs",
+              "p": "src/infra/runtime-config.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "text-utils.mjs",
+              "io": "text-utils.mjs",
+              "p": "src/infra/text-utils.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "contract-governance.mjs",
+              "io": "contract-governance.mjs",
+              "p": "src/infra/contract-governance.mjs",
               "m": "infra"
             }
           ]
@@ -3810,24 +3899,9 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "p": "src/infra/runtime-store.mjs"
             },
             {
-              "t": "src-infra-runtime-config-mjs",
-              "io": "runtime-config.mjs",
-              "p": "src/infra/runtime-config.mjs"
-            },
-            {
-              "t": "src-infra-dependency-graph-mjs",
-              "io": "dependency-graph.mjs",
-              "p": "src/infra/dependency-graph.mjs"
-            },
-            {
               "t": "src-infra-file-lock-mjs",
               "io": "file-lock.mjs",
               "p": "src/infra/file-lock.mjs"
-            },
-            {
-              "t": "src-infra-text-utils-mjs",
-              "io": "text-utils.mjs",
-              "p": "src/infra/text-utils.mjs"
             }
           ]
         },
@@ -3927,16 +4001,11 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
           ]
         },
         {
-          "id": "src-infra-security-mjs",
-          "p": "src/infra/security.mjs",
-          "r": "security.mjs",
-          "io": "writeConfigBaseline(rootDir, options = {) → 导出；verifyConfigBaseline(rootDir) → 导出",
+          "id": "src-infra-state-backup-mjs",
+          "p": "src/infra/state-backup.mjs",
+          "r": "state-backup.mjs",
+          "io": "writeRuntimeStateBackup(rootDir, options = {) → 导出；prepareArchiveRecoveryPackage(rootDir, options = {) → 导出",
           "to": [
-            {
-              "t": "src-infra-command-runner-mjs",
-              "io": "command-runner.mjs",
-              "p": "src/infra/command-runner.mjs"
-            },
             {
               "t": "src-infra-ledger-mjs",
               "io": "ledger.mjs",
@@ -3961,6 +4030,11 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "t": "src-infra-task-state-store-mjs",
               "io": "task-state-store.mjs",
               "p": "src/infra/task-state-store.mjs"
+            },
+            {
+              "t": "src-infra-config-baseline-mjs",
+              "io": "config-baseline.mjs",
+              "p": "src/infra/config-baseline.mjs"
             }
           ]
         }
@@ -3993,7 +4067,7 @@ const D = {
   ], focusFiles: [
     { id: "dashboard", p: "src/interface/dashboard.mjs", r: "本地面板与安全网络边界", io: "网络请求 → 状态与操作结果", extTo: [{ t: "linear-runtime.mjs", p: "src/orchestration/linear-runtime.mjs", m: "流程编排层", io: "请求运行下一项任务" }] },
     { id: "adapters", p: "src/interface/adapters.mjs", r: "外置宿主适配包生成与激活", io: "安装选项 → runtimeRoot 内的 Codex/Cursor/Kimi 插件包", extTo: [{ t: "runtime-store.mjs", p: "src/infra/runtime-store.mjs", m: "可信基础设施层", io: "解析运行态根" }] },
-    { id: "doctor", p: "src/interface/doctor.mjs", r: "一键体检与下一步建议", io: "项目状态 → 分项诊断", extTo: [{ t: "security.mjs", p: "src/infra/security.mjs", m: "可信基础设施层", io: "检查关键状态是否完整" }] },
+    { id: "doctor", p: "src/interface/doctor.mjs", r: "一键体检与下一步建议", io: "项目状态 → 分项诊断", extTo: [{ t: "state-backup.mjs", p: "src/infra/state-backup.mjs", m: "可信基础设施层", io: "检查关键状态是否完整" }] },
     { id: "decisions", p: "src/interface/decisions.mjs", r: "只读决策投影", io: "决策日志 → 人话审查视图", extTo: [{ t: "decision-log.mjs", p: "src/infra/decision-log.mjs", m: "可信基础设施层", io: "读取可信决策记录" }] }
   ] },
   "orchestration": { name: "Orchestration（流程编排）", plain: "把计划按顺序推进，失败返工，通过后才提交", role: "顺序、重试、事务与门编排", inn: "计划与任务状态", out: "下一步动作或集成结果", status: "已通", files: [
@@ -4050,7 +4124,7 @@ const D = {
     { id: "ledger", p: "src/infra/ledger.mjs", r: "hash 链证据账本", io: "事件 → 可校验条目", to: [{ t: "store", io: "条目 → 原子落盘" }] },
     { id: "command", p: "src/infra/command-runner.mjs", r: "受控子进程执行", io: "命令与超时 → 截断结果" },
     { id: "git", p: "src/infra/git-coordination.mjs", r: "任务分支交付 commit 与普通推送原语", io: "任务路径与基线 SHA → delivery commit 或推送结果" },
-    { id: "security", p: "src/infra/security.mjs", r: "关键状态备份与完整性检查", io: "运行态文件 → 校验或恢复结果", to: [{ t: "ledger", io: "恢复事件 → 账本" }, { t: "store", io: "关键状态 → 原子读写" }] }
+    { id: "security", p: "src/infra/state-backup.mjs", r: "关键状态备份与完整性检查", io: "运行态文件 → 校验或恢复结果", to: [{ t: "ledger", io: "恢复事件 → 账本" }, { t: "store", io: "关键状态 → 原子读写" }] }
   ] }
 };
 

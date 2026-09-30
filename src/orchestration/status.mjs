@@ -26,7 +26,7 @@ import {
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
 import { appendLedger, verifyLedger } from "../infra/ledger.mjs";
-import { verifyConfigBaseline } from "../infra/security.mjs";
+import { verifyConfigBaseline } from "../infra/config-baseline.mjs";
 import { evaluateGateArming } from "../infra/gate-arming.mjs";
 import { normalizeRelativePath } from "../infra/path-match.mjs";
 import { inspectCompletedTaskEvidence, loadTaskLedger } from "../infra/task-state-store.mjs";

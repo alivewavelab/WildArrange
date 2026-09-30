@@ -12,7 +12,7 @@
 //   调用 importPlan/isTaskRunnable/cleanupParallelAgentRun 断言状态不变式。
 // =============================================================================
 
-import { applyContractCardDecision, inspectContractTask } from "../src/capabilities/contract-governance.mjs";
+import { applyContractCardDecision, inspectContractTask, scanContractGovernanceUniverse } from "../src/capabilities/contract-governance.mjs";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -25,7 +25,6 @@ import { runCommand } from "../src/infra/command-runner.mjs";
 import {
   persistContractScan,
   readContractRegistry,
-  scanContractGovernanceUniverse,
 } from "../src/infra/contract-governance.mjs";
 import { writeRuntimeContextSnapshot } from "../src/infra/runtime-snapshot.mjs";
 import { admitParallelAgentResult, cleanupParallelAgentRun, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
