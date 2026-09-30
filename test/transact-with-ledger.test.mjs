@@ -116,11 +116,14 @@ test("claimTeamTask: ledger outage never leaves an unaudited in_progress state",
 test("claimTeamTask: persist failure leaves the claim event in the ledger and state untouched", async () => {
   await withExternalProject(async ({ projectRoot: dir }) => {
     await importProbePlan(dir);
-    // persistTaskState re-reads the plan mirror; removing it fails the persist
-    // step after the ledger append.
-    await rm(resolveWildArrangePath(dir, "plans", "plan_ledger_order.json"));
+    // Make the persist step fail after the ledger append: a directory in the
+    // place of tasks.md makes the derived-view write throw before the
+    // canonical tasks.json commit.
+    const tasksMarkdownPath = resolveWildArrangePath(dir, "team", "tasks.md");
+    await rm(tasksMarkdownPath, { force: true });
+    await mkdir(tasksMarkdownPath, { recursive: true });
 
-    await assert.rejects(() => claimTeamTask(dir, { taskId: "T001" }), /ENOENT/);
+    await assert.rejects(() => claimTeamTask(dir, { taskId: "T001" }), /EISDIR|EPERM|EACCES/);
     assert.match(await ledgerText(dir), /team_task_claimed/, "claim must be auditable even though persist failed");
     const state = await loadTaskState(dir);
     assert.equal(state.tasks[0].status, "pending", "tasks.json must not be half-mutated");

@@ -25,7 +25,7 @@ import { loadTaskLedger } from "../src/infra/task-state-store.mjs";
 import { appendLedger } from "../src/infra/ledger.mjs";
 import { writeRuntimeContextSnapshot } from "../src/infra/runtime-snapshot.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
-import { archiveAndDeleteTeamTask } from "../src/orchestration/task-board.mjs";
+import { archiveAndDeleteTeamTask } from "../src/orchestration/task-archive.mjs";
 import { statusReport, writeWorkflowSummary } from "../src/orchestration/status.mjs";
 import { withExternalProject } from "./helpers/external-fixture.mjs";
 
@@ -396,8 +396,7 @@ test("archive delete fails before canonical mutation when an unrelated DoneClaim
 
     const ledger = JSON.parse(await readFile(resolveWildArrangePath(dir, "team", "tasks.json"), "utf8"));
     assert.deepEqual(ledger.tasks.map((candidate) => candidate.ref), ["P1:T001"]);
-    const plan = JSON.parse(await readFile(resolveWildArrangePath(dir, "plans", "P1.json"), "utf8"));
-    assert.deepEqual(plan.tasks.map((candidate) => candidate.ref), ["P1:T001"]);
+    assert.deepEqual(ledger.plans.find((plan) => plan.id === "P1").taskIds, ["T001"]);
     await access(resolveWildArrangePath(dir, "checkpoints", "P1", "T001.json"));
   });
 });
@@ -434,8 +433,8 @@ test("archive delete rolls back staged files and Plan mirror when tasks markdown
 
     const ledger = JSON.parse(await readFile(resolveWildArrangePath(dir, "team", "tasks.json"), "utf8"));
     assert.deepEqual(ledger.tasks.map((task) => task.ref), ["P1:T001", "P1:T002"]);
-    const plan = JSON.parse(await readFile(resolveWildArrangePath(dir, "plans", "P1.json"), "utf8"));
-    assert.deepEqual(plan.tasks.map((task) => task.ref), ["P1:T001", "P1:T002"]);
+    assert.deepEqual(ledger.plans.find((plan) => plan.id === "P1").taskIds, ["T001", "T002"]);
+    await access(resolveWildArrangePath(dir, "plans", "P1.json"));
     await access(checkpointPath);
     assert.equal(await readFile(lockedMarkdown, "utf8"), "original markdown\n");
     const backupIds = await readdir(resolveWildArrangePath(dir, "backups"));
@@ -473,8 +472,9 @@ test("archive delete synchronizes a non-active Plan mirror and leaves active tas
     const result = await archiveAndDeleteTeamTask(dir, { taskId: "T001", planId: "P2", reason: "background_cleanup" });
 
     assert.equal(result.activePlanId, "P1");
-    const background = JSON.parse(await readFile(resolveWildArrangePath(dir, "plans", "P2.json"), "utf8"));
-    assert.deepEqual(background.tasks.map((task) => task.ref), ["P2:T002"]);
+    const ledger = JSON.parse(await readFile(resolveWildArrangePath(dir, "team", "tasks.json"), "utf8"));
+    assert.deepEqual(ledger.plans.find((plan) => plan.id === "P2").taskIds, ["T002"]);
+    assert.deepEqual(ledger.tasks.filter((task) => task.planId === "P2").map((task) => task.ref), ["P2:T002"]);
     const markdown = await readFile(resolveWildArrangePath(dir, "team", "tasks.md"), "utf8");
     assert.match(markdown, /Active task/);
     assert.doesNotMatch(markdown, /Keep in background|Remove from background/);

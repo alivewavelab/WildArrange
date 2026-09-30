@@ -30,11 +30,10 @@ import {
   claimTeamTask,
   createTeamTask,
   getTeamTask,
-  listTeamMessages,
   listTeamTasks,
   readyTeamTask,
-  sendTeamMessage,
 } from "../orchestration/task-board.mjs";
+import { listTeamMessages, sendTeamMessage } from "../orchestration/team-messages.mjs";
 import { dashboardData, writeWorkflowSummary } from "../orchestration/status.mjs";
 import { runNextTask, runWorkflowNode } from "../orchestration/linear-runtime.mjs";
 import {

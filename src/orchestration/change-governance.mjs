@@ -33,13 +33,13 @@ import {
 import { transactWithLedger, withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { uniqueStrings } from "../infra/text-utils.mjs";
+import { loadTaskState } from "./plan-state.mjs";
 import {
-  loadTaskState,
   normalizeStringArray,
   normalizeSuccessCriteria,
   normalizeTask,
   validatePlanGraph,
-} from "./plan-state.mjs";
+} from "./task-normalize.mjs";
 import { persistTaskState } from "./task-board.mjs";
 
 // --- 计划 steering ---

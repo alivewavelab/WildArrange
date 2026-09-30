@@ -38,7 +38,13 @@ export async function loadTaskLedger(rootDir) {
  * loadTaskState：本模块对外异步 API。
  */
 export async function loadTaskState(rootDir, options = {}) {
-  const ledger = await loadTaskLedger(rootDir);
+  return taskStateFromLedger(await loadTaskLedger(rootDir), options);
+}
+
+/**
+ * 从已加载的总账投影出指定（默认 active）计划的 taskState；调用方已持有总账时避免重复读盘。
+ */
+export function taskStateFromLedger(ledger, options = {}) {
   if (!ledger) return null;
   const planId = options.planId || ledger.activePlanId || ledger.planId || null;
   if (!planId) return null;
@@ -49,6 +55,38 @@ export async function loadTaskState(rootDir, options = {}) {
     governance_binding: plan?.governance_binding || null,
     tasks: ledger.tasks.filter((task) => task.planId === planId),
     updatedAt: ledger.updatedAt,
+  };
+}
+
+/**
+ * 用 tasks 替换总账中某个计划的全部任务，并同步该计划的索引条目（总账是任务状态唯一可写处）。
+ * 索引条目在已有条目上覆盖 title/objective/governance_binding（plan 中显式给出时）与 taskIds；
+ * activate 为 true 时把该计划设为 active。返回新总账，不写盘。
+ */
+export function replacePlanTasks(ledger, plan, tasks, { at, activate = false } = {}) {
+  const previous = (ledger?.plans || []).find((candidate) => candidate.id === plan.id) || null;
+  const entry = {
+    ...previous,
+    id: plan.id,
+    title: plan.title ?? previous?.title,
+    objective: plan.objective ?? previous?.objective,
+    governance_binding: Object.hasOwn(plan, "governance_binding")
+      ? plan.governance_binding
+      : previous?.governance_binding ?? null,
+    taskIds: tasks.map((task) => task.id),
+    createdAt: previous?.createdAt || plan.createdAt || at,
+    updatedAt: at,
+  };
+  const activePlanId = activate ? plan.id : ledger?.activePlanId || plan.id;
+  return {
+    version: STATE_VERSION,
+    kind: "task_ledger",
+    planId: activePlanId,
+    activePlanId,
+    plans: [...(ledger?.plans || []).filter((candidate) => candidate.id !== plan.id), entry],
+    tasks: [...(ledger?.tasks || []).filter((task) => task.planId !== plan.id), ...tasks],
+    createdAt: ledger?.createdAt || at,
+    updatedAt: at,
   };
 }
 
@@ -179,7 +217,7 @@ export function normalizeTaskLedger(raw) {
   const tasks = Array.isArray(raw.tasks)
     ? raw.tasks.map((task) => normalizeStoredTask(task, activePlanId))
     : [];
-  const plans = Array.isArray(raw.plans) ? raw.plans.map((plan) => ({ ...plan })) : inferPlans(tasks, activePlanId);
+  const plans = Array.isArray(raw.plans) ? raw.plans.map((plan) => ({ ...plan })) : [];
   return {
     version: STATE_VERSION,
     kind: "task_ledger",
@@ -243,16 +281,18 @@ export function withTaskIdentity(task, planId) {
   };
 }
 
-/**
- * 从上下文推断 Plans。
- */
-function inferPlans(tasks, activePlanId) {
-  const ids = [...new Set(tasks.map((task) => task.planId).filter(Boolean))];
-  if (activePlanId && !ids.includes(activePlanId)) ids.push(activePlanId);
-  return ids.map((id) => ({
-    id,
-    title: id,
-    objective: "",
-    taskIds: tasks.filter((task) => task.planId === id).map((task) => task.id),
-  }));
+/** 在总账中按 taskId（或 ref）/planId 解析唯一任务；有歧义返回 null。 */
+export function resolveLedgerTask(ledger, taskId, planId) {
+  if (!taskId) return null;
+  if (planId) {
+    const matches = ledger.tasks.filter((task) =>
+      task.planId === planId && (task.id === taskId || task.ref === taskId));
+    return matches.length === 1 ? matches[0] : null;
+  }
+  const byRef = ledger.tasks.find((task) => task.ref === taskId);
+  if (byRef) return byRef;
+  const activeMatch = ledger.tasks.find((task) => task.planId === ledger.activePlanId && task.id === taskId);
+  if (activeMatch) return activeMatch;
+  const matches = ledger.tasks.filter((task) => task.id === taskId);
+  return matches.length === 1 ? matches[0] : null;
 }

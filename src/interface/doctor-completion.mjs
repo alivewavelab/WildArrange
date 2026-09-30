@@ -13,7 +13,7 @@
 //
 //   · 它做了什么？
 //     ① 校验 checkpoint/acceptance_proof/ledger 完成事件 ② 检测孤儿完成事件
-//     ③ 对比 plan JSON、tasks.md 与 canonical tasks.json ④ 检查 delivery worktree 漂移。
+//     ③ 对比 tasks.md 与 canonical tasks.json ④ 检查 delivery worktree 漂移。
 //
 //   · 缺了它会怎样？
 //     「标记 completed 但无证据」或账本/镜像分叉无法在一键体检中被发现。
@@ -22,7 +22,6 @@ import { existsSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
-  readJson,
   resolveWildArrangePath,
   resolveWildArrangeRoot,
 } from "../infra/runtime-store.mjs";
@@ -198,24 +197,10 @@ export async function checkCompletionIntegrity(rootDir, findings) {
     addFinding(findings, "warn", "completion_audit", `task ${entry.taskId} completed but a post-completion side effect failed (${entry.error || "unknown error"}); the snapshot/summary for that completion may be missing`, { taskId: entry.taskId });
   }
 
-  // 3) 派生视图（plan JSON / tasks.md）与 canonical tasks.json 的状态分叉。
+  // 3) 派生视图（tasks.md）与 canonical tasks.json 的状态分叉。
   const canonicalStatus = new Map(tasks.map((task) => [taskRef(task.planId || taskLedger.activePlanId, task.id), task.status]));
   let derivedDivergences = 0;
   const planIds = [...new Set(tasks.map((task) => task.planId).filter(Boolean))];
-  for (const planId of planIds) {
-    const planPath = resolveWildArrangePath(rootDir, "plans", `${planId}.json`);
-    if (existsSync(planPath)) {
-      const plan = await readJson(planPath);
-      for (const planTask of plan?.tasks || []) {
-        const ref = taskRef(planId, planTask.id);
-        const canonical = canonicalStatus.get(ref);
-        if (canonical && planTask.status !== canonical) {
-          derivedDivergences += 1;
-          addFinding(findings, "warn", "completion_audit", `task ${ref} status diverges between canonical tasks.json (${canonical}) and plan JSON (${planTask.status}); tasks.json is authoritative — the plan mirror was written by an interrupted transaction`, { planId, taskId: planTask.id, taskRef: ref, canonical, planStatus: planTask.status });
-        }
-      }
-    }
-  }
   const markdownPath = resolveWildArrangePath(rootDir, "team", "tasks.md");
   if (existsSync(markdownPath)) {
     const markdownStatus = parseTasksMarkdownStatuses(await readFile(markdownPath, "utf8"));

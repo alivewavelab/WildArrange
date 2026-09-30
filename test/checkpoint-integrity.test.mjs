@@ -470,19 +470,15 @@ test("adversarial: an interrupted completion transaction is visible to doctor an
     await runWorkflowNode(dir, "scope", { taskId: "T001" });
     await runWorkflowNode(dir, "review", { taskId: "T001" });
 
-    // Read-only plans dir: acceptance proof, checkpoint and the completion
-    // ledger event all succeed, tasks.md (a derived view) gets rewritten as
-    // completed, but the plan-mirror write fails mid-persist — the canonical
-    // tasks.json save is never reached. This is the exact divergence window
-    // from the round-4 cross-review.
-    const { planId } = await loadTaskState(dir);
-    const planMirrorPath = resolveWildArrangePath(dir, "plans", `${planId}.json`);
-    const restorePlanMirror = await blockFileWrite(planMirrorPath);
-    try {
-      await assert.rejects(() => runWorkflowNode(dir, "checkpoint", { taskId: "T001" }), /EACCES|EPERM|permission denied/i);
-    } finally {
-      await restorePlanMirror();
-    }
+    // Simulate the crash window: acceptance proof, checkpoint, the completion
+    // ledger event and the derived tasks.md (rewritten as completed) all land,
+    // but the canonical tasks.json commit never happens — restore its
+    // pre-completion bytes. This is the exact divergence window from the
+    // round-4 cross-review.
+    const canonicalLedgerPath = resolveWildArrangePath(dir, "team", "tasks.json");
+    const preCompletionLedger = await readFile(canonicalLedgerPath, "utf8");
+    await runWorkflowNode(dir, "checkpoint", { taskId: "T001" });
+    await writeFile(canonicalLedgerPath, preCompletionLedger, "utf8");
 
     const interrupted = await loadTaskState(dir);
     assert.equal(interrupted.tasks[0].status, "verifying", "canonical state must stay pre-completion");

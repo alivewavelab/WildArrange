@@ -19,6 +19,7 @@
 //     模板字符串内的 JS 不能含反引号与 ${}（除模板插值）；token 存 sessionStorage。
 // =============================================================================
 import { PRODUCT_NAME } from "../infra/runtime-config.mjs";
+import { WORKFLOW_STAGES } from "../infra/task-predicates.mjs";
 import {
   PANELS_SCRIPT,
   renderPanelsHtml,
@@ -41,6 +42,8 @@ export function renderDashboardHtml(projectName = PRODUCT_NAME) {
     .replaceAll("<", "\\u003c")
     .replaceAll("\u2028", "\\u2028")
     .replaceAll("\u2029", "\\u2029");
+  // 状态→阶段映射的唯一来源在 infra/task-predicates；页面脚本只渲染，不自带副本。
+  const workflowStagesScriptValue = JSON.stringify(WORKFLOW_STAGES).replaceAll("<", "\\u003c");
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -382,12 +385,7 @@ ${ADOPTION_VIEW_HTML}
       if (/feature|新增|功能|implement|plan/.test(text)) return "feature";
       return "maintenance";
     };
-    const WORKFLOW_STAGES = [
-      { id:"not-started", label:"未开始", statuses:["draft", "pending"] },
-      { id:"developing", label:"开发中", statuses:["in_progress"] },
-      { id:"accepting", label:"验收中", statuses:["verifying", "review_blocked", "needs_user_decision", "failed"] },
-      { id:"passed", label:"已通过", statuses:["completed"] },
-    ];
+    const WORKFLOW_STAGES = ${workflowStagesScriptValue};
     let latestTaskLedger = { tasks: [], plans: [], counts: {}, typeCounts: {} };
     let activeWorkspacesByTask = new Map();
     let latestRunData = null;
