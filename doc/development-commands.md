@@ -20,7 +20,7 @@
 | 恢复 adapter        | `node ./bin/wildarrange.mjs adapter restore --backup <backupId>`（外置：还原到该次 activate 之前） |
 | 导入计划              | `node ./bin/wildarrange.mjs plan --from plan.json`                     |
 | 跑下一个任务            | `node ./bin/wildarrange.mjs run`                                       |
-| 跑 sample workflow | `node ./bin/wildarrange.mjs workflow --sample`                         |
+| 连续推进已确认计划 | `node ./bin/wildarrange.mjs workflow`（`--from <plan.json>` 只导入并停在待确认） |
 | 跑并行子 Agent       | `node ./bin/wildarrange.mjs parallel run --max-agents 2 --command "..."` |
 | 用 worktree 跑子 Agent | `node ./bin/wildarrange.mjs parallel run --task T001 --isolation git-worktree --command "..."` |
 | 合入子 Agent 成果     | `node ./bin/wildarrange.mjs parallel admit --run <runId> --task T001`     |
