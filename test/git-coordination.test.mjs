@@ -160,7 +160,7 @@ test("task delivery records no_change without manufacturing an empty commit", as
   });
 });
 
-test("git changed-path probe uses argv safely and excludes .wildarrange", async () => {
+test("git changed-path probe uses argv safely and reports a project .wildarrange directory", async () => {
   await withTempDir(async (dir) => {
     const repo = path.join(dir, "repo with spaces");
     await mkdir(repo, { recursive: true });
@@ -175,7 +175,7 @@ test("git changed-path probe uses argv safely and excludes .wildarrange", async 
 
     const changed = await collectGitChangedPaths(repo);
     assert.equal(changed.available, true);
-    assert.deepEqual(changed.paths, ["new file.txt", "tracked.txt"]);
+    assert.deepEqual(changed.paths, [".wildarrange/runtime.json", "new file.txt", "tracked.txt"]);
   });
 });
 

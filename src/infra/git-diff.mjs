@@ -27,7 +27,7 @@ import { normalizeRelativePath } from "./path-match.mjs";
 export async function collectGitDiff(rootDir) {
   const gitDir = path.join(rootDir, ".git");
   if (!existsSync(gitDir)) return "";
-  const result = await runCommandFile("git", ["-C", rootDir, "diff", "--", ".", ":!.wildarrange"], rootDir, 30_000);
+  const result = await runCommandFile("git", ["-C", rootDir, "diff", "--", "."], rootDir, 30_000);
   return result.exitCode === 0 ? result.stdout : "";
 }
 
@@ -64,9 +64,9 @@ export async function collectGitChangedPaths(rootDir) {
   }
 
   const [unstaged, staged, untracked] = await Promise.all([
-    runCommandFile("git", ["-C", rootDir, "diff", "--name-only", "-z", "--", ".", ":!.wildarrange"], rootDir, 30_000),
-    runCommandFile("git", ["-C", rootDir, "diff", "--name-only", "-z", "--cached", "--", ".", ":!.wildarrange"], rootDir, 30_000),
-    runCommandFile("git", ["-C", rootDir, "ls-files", "--others", "--exclude-standard", "-z", "--", ".", ":!.wildarrange"], rootDir, 30_000),
+    runCommandFile("git", ["-C", rootDir, "diff", "--name-only", "-z", "--", "."], rootDir, 30_000),
+    runCommandFile("git", ["-C", rootDir, "diff", "--name-only", "-z", "--cached", "--", "."], rootDir, 30_000),
+    runCommandFile("git", ["-C", rootDir, "ls-files", "--others", "--exclude-standard", "-z", "--", "."], rootDir, 30_000),
   ]);
   if ([staged, unstaged, untracked].some(gitProbeFailed)) {
     return {
@@ -263,7 +263,7 @@ export function classifyManifestPathChanges(beforeFingerprints = {}, afterFinger
 }
 
 /** file manifest 递归 walk 时跳过的目录名。 */
-const FILE_MANIFEST_SKIP_DIRS = new Set([".git", ".wildarrange", "node_modules"]);
+const FILE_MANIFEST_SKIP_DIRS = new Set([".git", "node_modules"]);
 
 /**
  * 收集 FileManifest 条目。

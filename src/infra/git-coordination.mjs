@@ -82,7 +82,7 @@ export async function inspectTaskWorktreeBaseline(rootDir) {
     return { available: false, clean: false, reason: "Git repository has no baseline commit", changedPaths: [] };
   }
   const branch = await runGit(rootDir, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
-  const changedPaths = await listWorkingTreeChanges(rootDir, { includeRuntimePaths: true });
+  const changedPaths = await listWorkingTreeChanges(rootDir);
   return {
     available: true,
     clean: changedPaths.length === 0,
@@ -349,7 +349,7 @@ export async function commitIsAncestor(rootDir, ancestorSha, descendantRef = "HE
 /**
  * listWorkingTreeChanges：本模块对外异步 API。
  */
-export async function listWorkingTreeChanges(rootDir, options = {}) {
+export async function listWorkingTreeChanges(rootDir) {
   const groups = await Promise.all([
     runGit(rootDir, ["diff", "--name-only", "-z", "--"]),
     runGit(rootDir, ["diff", "--cached", "--name-only", "-z", "--"]),
@@ -359,9 +359,7 @@ export async function listWorkingTreeChanges(rootDir, options = {}) {
     if (!result.ok) throw new Error(`cannot inspect Git working tree: ${result.stderr || result.stdout}`);
   }
   const paths = [...new Set(groups.flatMap((result) => result.stdout.split("\0").filter(Boolean)))].sort();
-  return options.includeRuntimePaths === true
-    ? paths
-    : paths.filter((filePath) => filePath !== ".wildarrange" && !filePath.startsWith(".wildarrange/"));
+  return paths;
 }
 
 /**
@@ -457,12 +455,12 @@ function safeRefSegment(value) {
 }
 
 /**
- * 去重并排序 Git 路径，排除 .wildarrange 运行时目录。
+ * 去重并排序 Git 路径。
  */
 function uniqueGitPaths(values) {
   return [...new Set(values
     .map((value) => String(value || "").replaceAll("\\", "/").replace(/^\.\//, ""))
-    .filter((value) => value && value !== ".wildarrange" && !value.startsWith(".wildarrange/")))]
+    .filter(Boolean))]
     .sort();
 }
 

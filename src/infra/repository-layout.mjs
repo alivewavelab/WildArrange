@@ -17,7 +17,7 @@ import { normalizeRelativePath, pathMatchesPattern } from "./path-match.mjs";
 import { extractComments } from "./comment-lexer.mjs";
 
 /** 布局扫描默认忽略的目录名。 */
-const DEFAULT_IGNORED = new Set([".git", ".wildarrange", "node_modules", "coverage"]);
+const DEFAULT_IGNORED = new Set([".git", "node_modules", "coverage"]);
 
 const execFileAsync = promisify(execFile);
 

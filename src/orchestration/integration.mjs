@@ -61,9 +61,7 @@ export async function collectIntegrationCandidatePaths(rootDir, baseSha) {
     listWorkingTreeChanges(rootDir),
     listTreeChanges(rootDir, baseSha, "HEAD"),
   ]);
-  return [...new Set([...workingPaths, ...committedPaths])]
-    .filter((filePath) => filePath !== ".wildarrange" && !filePath.startsWith(".wildarrange/"))
-    .sort();
+  return [...new Set([...workingPaths, ...committedPaths])].sort();
 }
 
 // --- delivery commit ---

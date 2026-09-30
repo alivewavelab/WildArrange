@@ -41,7 +41,7 @@ const strings = (value, label) => {
 const DOCUMENT_TRUTH_ID = "document-current-truth";
 /** 判断路径是否为需 D1-D3 约束的长期文档（排除 plans/reports 等）。 */
 const isLongTermDocument = name => {
-  if (typeof name !== "string" || name.startsWith(".wildarrange/")) return false;
+  if (typeof name !== "string") return false;
   if (/(^|\/)(?:verification-archive|node_modules|vendor|plans|reports|research|evidence)\//i.test(name)) return false;
   return /^[^/]+\.mdx?$/i.test(name)
     || /^(?:doc|docs)\/.+\.(?:md|mdx|html)$/i.test(name);

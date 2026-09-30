@@ -169,7 +169,7 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
     documentationPairs: [],
     documentationRequirements: [],
     architectureLedgers: [],
-    ignoredPaths: [".git", ".wildarrange", "node_modules", "coverage"],
+    ignoredPaths: [".git", "node_modules", "coverage"],
     naming: {
       directories: "kebab-case",
       sourceFiles: "kebab-case.mjs",

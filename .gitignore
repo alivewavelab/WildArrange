@@ -1,11 +1,6 @@
 .DS_Store
-.cursor/*
-!.cursor/hooks.json
-!.cursor/hooks/
+.cursor/
 .tmp/
-.wildarrange/
-.archive/
-.backups/
 node_modules/
 npm-debug.log*
 .pnpm-store/
