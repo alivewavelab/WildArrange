@@ -106,9 +106,11 @@ AGENTS.md                         # mandatory reading routes
 - `bin/wildarrange.mjs`：CLI 路由。
 - `src/infra/runtime-store.mjs`：运行时路径、时间/ID、目录创建、JSON 原子写、持久化 task-status 枚举与 hash 原语。
 - `src/infra/workspace-context.mjs`：项目、独立治理仓库与本机运行态三根解析；本机 registry、Git common-dir 身份、治理合同/verification registry 校验、非覆盖治理骨架初始化（policy/ 模板补建）的唯一 owner。
-- `src/interface/project-connection.mjs`：`project init-governance/attach/show` 与外置迁移的 CLI 投影；不拥有路径或迁移规则。
-- `src/interface/project-setup.mjs`：`setup` 一步式外置接入，只按序组合 init-governance（含 Git 初始提交与默认武装配置）、attach、`initRuntime` 与外置 adapter install，不拥有任何路径或治理规则。
-- `src/interface/external-adapters.mjs`：在外置 runtime 生成 Codex 本地 marketplace/plugin、Cursor 用户 Hook bundle 与 Kimi 用户 plugin；Cursor 显式激活负责备份和合并用户配置，所有宿主都以真实生命周期回执而非文件存在证明激活。
+- `src/interface/project-setup.mjs`：`setup` 一步式外置接入，只按序组合 init-governance（含 Git 初始提交与默认武装配置）、attach、`initRuntime` 与 adapter install；同时提供 `project init-governance` 默认值封装与 `project attach/show` 的 JSON 视图。不拥有任何路径或治理规则；`project attach/show` 由 bin 直接调用 `infra/workspace-context.mjs`。
+- `src/interface/hook-entry.mjs`：`hook run` 的载荷信任与 digest 决策（强制 `--adapter-digest`、CLI 命令前缀只取自当前进程 CLI 或已安装 adapter，绝不信任 payload 内嵌值），随后进入 `host-runtime.mjs`；bin 只读取载荷与输出。
+- `src/interface/dashboard-entry.mjs`：`serve` 与 `adoption start/resume` 共用的 Dashboard 监听参数解析（默认 `127.0.0.1:8765`、adoption 自动 token）与 approvals 深链拼装。
+- `src/interface/task-input.mjs`：`task create` 的命令行标志到任务对象的适配与 CLI 默认值，不做状态或校验。
+- `src/interface/adapters.mjs`：在外置 runtime 生成 Codex 本地 marketplace/plugin、Cursor 用户 Hook bundle 与 Kimi 用户 plugin；Cursor 显式激活负责备份和合并用户配置，所有宿主都以真实生命周期回执而非文件存在证明激活。
 - `src/infra/file-lock.mjs`：`.wildarrange/team/tasks.lock` 与 `.wildarrange/ledger.lock` 背后的共享文件锁原语。stale 锁自愈：owner pid 已死则立即 stale；空/不可解析 owner 文件在短 mtime 宽限后 stale。锁超时可诊断——错误给出当前 owner 标签、pid、pid 存活、获取时间与等待预算，便于粘贴给 AI 立即看出谁持锁。
 - `src/infra/task-state-lock.mjs`：全局任务状态锁（`.wildarrange/team/tasks.lock`），`file-lock.mjs` 的路径/默认参数封装。所有调用方在其上串行，为线性 run 与并行 admission 提供工作区级互斥。`transactWithLedger` 是非完成路径「先 appendLedger 后 persist」固定顺序的统一原语；锁方向全仓固定为任务状态锁（外）→ ledger 锁（内）。
 - `src/infra/agent-registry.mjs`：固定长期 Agent 白名单、读写角色集、旧别名、显示名、归一化与 command-worker 资格。
@@ -120,7 +122,6 @@ AGENTS.md                         # mandatory reading routes
 - `src/infra/runtime-bootstrap.mjs`：跨 config、work、prompt pack、ledger 与 snapshot 的一次性 `initRuntime` 顺序。长期 Agent 配置只保留在权威 config，不再生成无消费者的 `agents.json` / `categories.json` 投影。
 - `src/infra/ledger.mjs`：hash 链 ledger 追加、ledger 校验与校验条目读取。hash 链启动后，无 hash 的追加行报告为篡改；`doctor` 仅接受链校验条目作为完成证据。追加在尾部损坏时 fail-closed（无效 JSON、链启动后的无 hash 尾行、或相对尾缓存的文件缩小会拒绝追加而非静默分叉链）；`.wildarrange/ledger-tail.json` 的 size+hash 缓存使重复追加 O(1)，全扫描为 fallback；`verifyLedger` 仍是唯一权威。`appendLedgerOnce` 在同一把 ledger 锁内原子完成判重+追加，判重只认已校验条目。
 - `src/infra/text-utils.mjs`：字符串集合小工具（`uniqueStrings`）的单一 owner，各分区不得本地复刻。
-- `src/interface/hook-bridge-core.mjs`：外置 Hook bridge 共享的受治理项目判断、CLI 子进程启动、stdout/stderr 收集与 JSON 解析模板；失败策略与输出协议由 `external-adapters.mjs` 按宿主翻译。
 - `src/orchestration/change-governance.mjs`：转向提案、review blocker、ChangeRequest 复核与显式 accept/reject 决议。
 - `src/infra/repository-binding.mjs`：任务 acceptance proof 的双仓基线校验，以及不修改任一仓库的项目 SHA + 治理 SHA integration acceptance receipt。
 - `src/infra/failure-analysis.mjs`：失败原因分类、重试提示与可行动失败摘要。
@@ -161,7 +162,7 @@ AGENTS.md                         # mandatory reading routes
 线性命令 worker 在持锁的 Loop 内不能再调用加锁的 `contracts propose`。应向 stdout 输出一行 `WILDARRANGE_CONTRACT_CHANGE=<proposal JSON>` 并退出，编排层接收后暂停；主 Agent 在 Loop 外可用 `contracts propose --task <id> --from <proposal.json>`。并行子 Agent 尚未产出文件时，由主 Agent 收集提案并调用 `propose`，不制造空成果去调用 admission。JSON 必含 `reason`、`impact`、`alternatives`、`recommendation`、非空 `items`。`contracts resolve` 必须给当前请求指纹和人类决定理由，不得以普通 `changes resolve` 绕过契约批准。
 
 SQL/数据库字段首版仍需人工声明精确结构及验证引用，Tauri 发现器不会证明 SQL 迁移正确；`coverage.manualRequired` / `unknown` 持续公开未知项，人工元数据不能抹掉静态扫描未证明的字段。Hook 是向宿主提供说明的增强入口，并非不可绕过的人类身份认证服务；最终推进由持久任务状态和质量门约束。
-- `src/interface/doctor.mjs`：一致性 doctor，审计 config 结构/mounts、将全局 task ledger 中所有 Plan 的 completed 任务与 checkpoint/acceptance proof/ledger 事件按 `<planId>:<taskId>` 对账、校验 ledger hash 链、ledger 与最新备份交叉检查，并展示最新仓库治理状态。`registryFreshness` 是独立容错黄灯分项。旧完成事件缺 planId 时只在 taskId 全局唯一时兼容；无法唯一归属就报告 ambiguous，不猜。专用 `gateArming` 与 `adapters` 段展示未武装 gate（黄灯不再埋在 `status` JSON 里）、已启用但未配置的 adapter 文件，以及 Codex 当前 Hook 配置是否已有真实执行证据。`adapter install` 只生成文件并记 `adapter_files_generated`；Codex 仅在 hash 链校验通过的 `hook_injection_run` 同时绑定 `hostAdapter=codex` 与当前 `.codex/hooks.json` SHA-256 时显示 `execution_observed`，否则报 `codex_hook_activation_unverified` 并使 doctor 失败。`configured` 只表示文件存在，不代表宿主已经加载。`.cursor/` 不随每次 clone 传播——`.gitignore` 对 `.cursor/hooks.json` 与 `.cursor/hooks/` 例外以便 hard enforcement 可提交，doctor 验证各机器实际拥有；doctor 也报告引用已不存在绝对路径的规则文件（机器/用户名变更后 stale）。诊断与 gating 隔离：各项检查独立 try/catch（崩溃仅标红本段 `check_failed`，其余仍报告），doctor 从不追加 hash 链 ledger。还检查反向：orphan completion 事件（未 completed 任务已有链校验 completion ledger 事件——中断的完成事务，带 `wildarrange run` 恢复提示）、完成后副作用失败（snapshot/summary 在 commit 后写不出的 `completion_side_effect_failed` ledger 事件），以及 canonical/derived 分歧（各 Plan mirror JSON 或 active `tasks.md` 与权威 `team/tasks.json` 不一致）。
+- `src/interface/doctor.mjs`：一致性 doctor，审计 config 结构/mounts、将全局 task ledger 中所有 Plan 的 completed 任务与 checkpoint/acceptance proof/ledger 事件按 `<planId>:<taskId>` 对账、校验 ledger hash 链、ledger 与最新备份交叉检查，并展示最新仓库治理状态。`registryFreshness` 是独立容错黄灯分项。无 planId 的完成事件不计为任何任务的完成证据。专用 `gateArming` 与 `adapters` 段展示未武装 gate（黄灯不再埋在 `status` JSON 里）、已启用但未配置的 adapter 文件，以及 Codex 当前 Hook 配置是否已有真实执行证据。`adapter install` 只生成文件并记 `adapter_files_generated`；Codex 仅在 hash 链校验通过的 `hook_injection_run` 同时绑定 `hostAdapter=codex` 与当前 `.codex/hooks.json` SHA-256 时显示 `execution_observed`，否则报 `codex_hook_activation_unverified` 并使 doctor 失败。`configured` 只表示文件存在，不代表宿主已经加载。`.cursor/` 不随每次 clone 传播——`.gitignore` 对 `.cursor/hooks.json` 与 `.cursor/hooks/` 例外以便 hard enforcement 可提交，doctor 验证各机器实际拥有；doctor 也报告引用已不存在绝对路径的规则文件（机器/用户名变更后 stale）。诊断与 gating 隔离：各项检查独立 try/catch（崩溃仅标红本段 `check_failed`，其余仍报告），doctor 从不追加 hash 链 ledger。还检查反向：orphan completion 事件（未 completed 任务已有链校验 completion ledger 事件——中断的完成事务，带 `wildarrange run` 恢复提示）、完成后副作用失败（snapshot/summary 在 commit 后写不出的 `completion_side_effect_failed` ledger 事件），以及 canonical/derived 分歧（各 Plan mirror JSON 或 active `tasks.md` 与权威 `team/tasks.json` 不一致）。
 - `src/infra/repository-layout.mjs` / `src/capabilities/repository-governance.mjs`：LuWu 只读仓库审计。确定性检查覆盖目录级 `AGENTS.md`、双语 README 命令与安全标记对等、真实 CLI `--help`、固定五 Agent 白名单、prompt-pack 注册、命名、文件放置策略与实际注释 token（含 JavaScript 模板表达式）；capability 经 gateway 写 JSON/Markdown 证据。`--changed-only` 将检查范围限于变更文件及相关结构不变量；Git 变更发现不可用时才全扫描 fallback。
 - `src/ai/injection.mjs`：注入点解析与 markdown/skill 附件加载；把 `agents.<name>.skills` 作为该 Agent 的固定能力上界，安全读取 `.agents/skills/<name>/SKILL.md` 或 Prompt Pack Skill。固定绑定始终挂载，动态 Skill 仍按请求匹配和数量上限做减法；缺失项显式报告，路径穿越与越界软链接拒绝加载。
 - `src/ai/skill-matcher.mjs`：stage/route/agent/keyword Skill 匹配与可解释加载提示；路由信号命中复用 `infra/route-table.mjs` 的 `matchSignals` 单一实现；不维护脱离 Agent Prompt 的模型偏置旋钮。
@@ -278,7 +279,7 @@ review gate 是宿主中立的。从 CLI 运行，可含确定性通道、配置
 
 ## Adapter 模型
 
-外置模式是唯一形态：`src/interface/external-adapters.mjs` 把三宿主 bundle 写到 `runtimeRoot/adapters/external`，WildArrange 不向客户项目写任何文件。Cursor 可经 `adapter activate --target cursor` 备份并合并用户级 Hook；Codex 与 Kimi 由用户在插件界面显式安装和信任。生成/配置不代表激活，只有 bridge 携带当前 activationId 真实运行并进入 hash 链 ledger 后，doctor 才显示 `execution_observed`。bridge 在调用治理运行时前按 cwd 识别已连接项目，未连接工作区静默退出。
+外置模式是唯一形态：`src/interface/adapters.mjs` 把三宿主 bundle 写到 `runtimeRoot/adapters/external`，WildArrange 不向客户项目写任何文件。Cursor 可经 `adapter activate --target cursor` 备份并合并用户级 Hook；Codex 与 Kimi 由用户在插件界面显式安装和信任。生成/配置不代表激活，只有 bridge 携带当前 activationId 真实运行并进入 hash 链 ledger 后，doctor 才显示 `execution_observed`。bridge 在调用治理运行时前按 cwd 识别已连接项目，未连接工作区静默退出。
 
 Codex 主会话身份由 lifecycle hook 自动建立：`SessionStart` 从已安装且 hash 校验通过的 Prompt Pack 读取 Jiuwei Prompt 并注入一次；发生上下文压缩时，`PostCompact` 再注入一次。普通用户消息只做路由和动态上下文匹配，不重复加载完整角色 Prompt。
 
@@ -353,7 +354,7 @@ dashboard 保持 local-first。loopback `GET /api/state` 可无 token 读取做�
 
 WildArrange core 必须保持原创代码。外部 workflow 项目可 inform 概念、节点名与质量 gate，但商业构建不得 ship 复制源码、复制 prompt 文本或限制商业再分发许可的工具实现。
 
-adapter 专用行为属于 `src/interface/external-adapters.mjs` 或宿主专用生成文件。core workflow、gate、ledger 与 provider 逻辑必须在没有 Codex/Cursor/Kimi 私有 hook 的情况下运行。
+adapter 专用行为属于 `src/interface/adapters.mjs` 或宿主专用生成文件。core workflow、gate、ledger 与 provider 逻辑必须在没有 Codex/Cursor/Kimi 私有 hook 的情况下运行。
 
 ## 维护规则
 
@@ -392,15 +393,16 @@ adapter 专用行为属于 `src/interface/external-adapters.mjs` 或宿主专用
 | `src/interface/dashboard-view.mjs`                           | Dashboard 整页 HTML/CSS 与浏览器交互渲染，组合现有 panel 片段 |
 | `src/interface/contract-view.mjs`                            | 契约登记与扫描差异的只读 HTML 呈现，不批准或改写正式登记 |
 | `src/interface/adoption-panel.mjs`                           | 验证治理接管 Dashboard 卡片、批准 API 输入校验与页面片段 |
-| `src/interface/hook-bridge-core.mjs` | 外置 bridge 共享的受治理项目判断、CLI 子进程与输出解析渲染；宿主超时和失败策略由调用方显式传入 |
 | `src/interface/doctor.mjs`                                   | 一键体检：各项检查各自独立 try/catch（单项崩只标红本分项），含 gateArming 门武装、adapters 硬拦截安装/陈旧规则、decisionHealth 周期健康摘要；诊断不再写 ledger |
-| `src/interface/doctor-completion.mjs`                        | doctor 的 completionAudit 分项：完成证据完整性复核（checkpoint/acceptance proof/ledger 事件对账、legacy 事件归属、worktree 漂移、派生视图分叉） |
+| `src/interface/doctor-completion.mjs`                        | doctor 的 completionAudit 分项：完成证据完整性复核（checkpoint/acceptance proof/ledger 事件对账、worktree 漂移、派生视图分叉） |
 | `src/interface/decisions.mjs` | `wildarrange decisions` 只读投影：每条决策三行（发生了什么/命中规则/证据），坏行降级；`decisions stats` 确定性统计审查（计数/从未触发的门/标注关联，无 LLM） |
 | `src/interface/timeline.mjs` | `wildarrange timeline`：ledger（仅校验通过条目）+ decisions + annotations 统一倒序时间线投影，只读 |
 | `src/interface/dashboard-panels.mjs` | Dashboard 决策面板 + 运维面板：只读 ViewModel 与渲染片段（防 dashboard.mjs 超拆分线） |
 | `src/interface/cli-help.mjs` | CLI 命令注册表单一事实源：core 六命令分层 help、`docs commands` Markdown 物化 |
-| `src/interface/project-connection.mjs` | 独立治理仓库初始化、连接与查询的 CLI 视图；不复制 Infra 规则 |
-| `src/interface/project-setup.mjs` | `setup` 一步式外置治理接入：按序组合治理仓初始化、attach、运行态初始化与外置 adapter 包生成 |
+| `src/interface/hook-entry.mjs` | `hook run` 载荷信任与 digest 决策；CLI 前缀只取自当前进程/已安装 adapter |
+| `src/interface/dashboard-entry.mjs` | `serve`/`adoption` 共用的 Dashboard 监听参数与深链拼装 |
+| `src/interface/task-input.mjs` | `task create` 命令行标志到任务对象的适配 |
+| `src/interface/project-setup.mjs` | `setup` 一步式外置治理接入（治理仓初始化、attach、运行态初始化、adapter 包生成）及 `project` 命令的默认值与 JSON 视图 |
 | **orchestration/**（工作流顺序、重试、gate 编排，只依赖 ai、capabilities、infra） |  |
 | `src/orchestration/AGENTS.md`                                | 编排、事务、恢复与完成状态不变量 |
 | `src/orchestration/plan-state.mjs`                            | 计划导入、批准、校验与任务状态加载；feature design 状态委托唯一 owner |

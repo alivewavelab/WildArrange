@@ -1,5 +1,5 @@
 // =============================================================================
-// 文件名称：external-adapters.mjs
+// 文件名称：adapters.mjs
 // 所属模块：interface
 // 作用说明：
 //   为外置治理模式生成用户级宿主 Adapter 包，并显式激活 Cursor 用户 Hook。
@@ -13,15 +13,14 @@ import path from "node:path";
 import { PROJECT_DIR } from "../infra/prompt-pack.mjs";
 import { DEFAULT_PACKAGE_NAME, PRODUCT_NAME } from "../infra/runtime-config.mjs";
 import { nowIso, readJson, resolveWildArrangePath, writeJsonAtomic } from "../infra/runtime-store.mjs";
-import { renderCliInvocationUtility, renderGovernedProjectCheck, renderHookBridgeExecution } from "./hook-bridge-core.mjs";
 
-const EXTERNAL_ADAPTER_VERSION = 2;
-const EXTERNAL_CODEX_PLUGIN_NAME = "wildarrange-governance";
-const EXTERNAL_KIMI_PLUGIN_NAME = "wildarrange-governance";
-export const EXTERNAL_CURSOR_BRIDGE_NAME = "wildarrange-external-hook-bridge.mjs";
+const ADAPTER_VERSION = 2;
+const CODEX_PLUGIN_NAME = "wildarrange-governance";
+const KIMI_PLUGIN_NAME = "wildarrange-governance";
+export const CURSOR_BRIDGE_NAME = "wildarrange-external-hook-bridge.mjs";
 
 /** bridge 子进程超时：须小于宿主 Hook 最短 timeout（15s），保证 bridge 先于宿主自行收尾。 */
-const EXTERNAL_HOOK_TIMEOUT_MS = 14_000;
+const HOOK_TIMEOUT_MS = 14_000;
 
 const CURSOR_RULE_NAME = "wildarrange.mdc";
 const POINTER_BEGIN = "<!-- wildarrange:begin -->";
@@ -199,8 +198,8 @@ export function buildSlashCommands(cliPrefix) {
 
 
 /** 在外部 runtime 生成三宿主安装包；只生成，不把文件存在冒充为宿主激活。 */
-export async function installExternalAdapters(projectRoot, workspace, options = {}) {
-  assertExternalWorkspace(workspace);
+export async function installAdapters(projectRoot, workspace, options = {}) {
+  assertWorkspace(workspace);
   const target = options.target || "all";
   if (!TARGETS.has(target)) throw new Error("external adapter target must be all, codex, cursor, or kimi");
   const mode = options.mode || "local";
@@ -215,7 +214,7 @@ export async function installExternalAdapters(projectRoot, workspace, options = 
     // 用户级插件可能服务多个已连接项目；activationId 绑定宿主桥版本与 CLI，
     // 不绑定某个 projectId。项目归属由各自 runtime ledger 隔离。
     const activationId = adapterActivationId(host, { mode, packageName, localCliPath });
-    const bridge = renderExternalHookBridge({ host, mode, packageName, localCliPath, activationId, hookTimeoutMs: options.hookTimeoutMs });
+    const bridge = renderHookBridge({ host, mode, packageName, localCliPath, activationId, hookTimeoutMs: options.hookTimeoutMs });
     if (host === "codex") targets.codex = await writeCodexBundle(externalRoot, bridge, activationId, cliPrefix);
     if (host === "cursor") targets.cursor = await writeCursorBundle(externalRoot, bridge, activationId, cliPrefix);
     if (host === "kimi") targets.kimi = await writeKimiBundle(externalRoot, bridge, activationId, cliPrefix);
@@ -245,15 +244,15 @@ export async function installExternalAdapters(projectRoot, workspace, options = 
 }
 
 /** 显式合并 Cursor 用户级 Hook 并写入用户级指针规则；先备份，只替换 WildArrange 自己的条目。 */
-export async function activateExternalCursorAdapter(projectRoot, workspace, options = {}) {
-  assertExternalWorkspace(workspace);
+export async function activateCursorAdapter(projectRoot, workspace, options = {}) {
+  assertWorkspace(workspace);
   const { externalRoot, reportPath, report } = await loadReport(workspace);
   const cursor = report?.targets?.cursor;
   if (!cursor) throw new Error("external Cursor adapter bundle is missing; run adapter install --target cursor first");
   const userRoot = path.resolve(options.userRoot || os.homedir());
   const cursorRoot = path.join(userRoot, ".cursor");
   const hooksPath = path.join(cursorRoot, "hooks.json");
-  const bridgePath = path.join(cursorRoot, "hooks", EXTERNAL_CURSOR_BRIDGE_NAME);
+  const bridgePath = path.join(cursorRoot, "hooks", CURSOR_BRIDGE_NAME);
   const rulePath = path.join(cursorRoot, "rules", CURSOR_RULE_NAME);
   const sourceBridge = path.resolve(cursor.bridgePath);
   if (!existsSync(sourceBridge)) throw new Error(`external Cursor bridge is missing: ${sourceBridge}`);
@@ -270,11 +269,11 @@ export async function activateExternalCursorAdapter(projectRoot, workspace, opti
   ]);
   await mkdir(path.dirname(bridgePath), { recursive: true });
   await copyFile(sourceBridge, bridgePath);
-  const managed = buildCursorUserHooks(`node ./hooks/${EXTERNAL_CURSOR_BRIDGE_NAME}`);
+  const managed = buildCursorUserHooks(`node ./hooks/${CURSOR_BRIDGE_NAME}`);
   const hooks = { ...(existing.hooks || {}) };
   for (const [event, additions] of Object.entries(managed.hooks)) {
     const retained = Array.isArray(hooks[event])
-      ? hooks[event].filter((entry) => !String(entry?.command || "").includes(EXTERNAL_CURSOR_BRIDGE_NAME))
+      ? hooks[event].filter((entry) => !String(entry?.command || "").includes(CURSOR_BRIDGE_NAME))
       : [];
     hooks[event] = [...retained, ...additions];
   }
@@ -310,8 +309,8 @@ export async function activateExternalCursorAdapter(projectRoot, workspace, opti
 }
 
 /** 显式在用户级 ~/.codex/AGENTS.md 写入带起止标记的指针段；Codex 插件本身仍需在其界面安装并信任。 */
-export async function activateExternalCodexAdapter(projectRoot, workspace, options = {}) {
-  assertExternalWorkspace(workspace);
+export async function activateCodexAdapter(projectRoot, workspace, options = {}) {
+  assertWorkspace(workspace);
   const { externalRoot, reportPath, report } = await loadReport(workspace);
   const codex = report?.targets?.codex;
   if (!codex) throw new Error("external Codex adapter bundle is missing; run adapter install --target codex first");
@@ -342,8 +341,8 @@ export async function activateExternalCodexAdapter(projectRoot, workspace, optio
 }
 
 /** 卸载外置 Adapter：移除已激活的用户级 Hook 条目与指针，并删除 runtime 中的插件包；备份保留。 */
-export async function uninstallExternalAdapters(projectRoot, workspace, options = {}) {
-  assertExternalWorkspace(workspace);
+export async function uninstallAdapters(projectRoot, workspace, options = {}) {
+  assertWorkspace(workspace);
   const target = options.target || "all";
   if (!TARGETS.has(target)) throw new Error("external adapter target must be all, codex, cursor, or kimi");
   const { externalRoot, reportPath, report } = await loadReport(workspace);
@@ -368,16 +367,16 @@ export async function uninstallExternalAdapters(projectRoot, workspace, options 
     const bundleRoot = path.join(externalRoot, BUNDLE_DIRECTORIES[host]);
     if (existsSync(bundleRoot)) { await rm(bundleRoot, { recursive: true, force: true }); removed.push(bundleRoot); }
     if (report?.targets?.[host]) delete report.targets[host];
-    if (host === "codex") nextActions.push(`在 Codex /plugins 中移除 ${EXTERNAL_CODEX_PLUGIN_NAME}，并执行 codex plugin marketplace remove wildarrange-local`);
-    if (host === "kimi") nextActions.push(`/plugins remove ${EXTERNAL_KIMI_PLUGIN_NAME}`);
+    if (host === "codex") nextActions.push(`在 Codex /plugins 中移除 ${CODEX_PLUGIN_NAME}，并执行 codex plugin marketplace remove wildarrange-local`);
+    if (host === "kimi") nextActions.push(`/plugins remove ${KIMI_PLUGIN_NAME}`);
   }
   if (report) await writeJsonAtomic(reportPath, report);
   return { kind: "wildarrange_external_adapter_uninstall", target, removed, nextActions, backupsKept: path.join(externalRoot, "backups") };
 }
 
 /** 按 activate 时的备份把用户级文件恢复到激活前状态；激活前不存在的文件会被移除。 */
-export async function restoreExternalAdapterBackup(projectRoot, workspace, options = {}) {
-  assertExternalWorkspace(workspace);
+export async function restoreAdapterBackup(projectRoot, workspace, options = {}) {
+  assertWorkspace(workspace);
   const backupId = String(options.backupId || "");
   const { externalRoot, reportPath, report } = await loadReport(workspace);
   const dir = path.join(externalRoot, "backups", backupId);
@@ -404,7 +403,7 @@ export async function restoreExternalAdapterBackup(projectRoot, workspace, optio
  * 比对生成物与用户级配置的当前内容和安装/激活时记录的 digest；返回不一致项。
  * doctor 用它发现"回执还在但 Hook 配置已被改动/删除"。
  */
-export async function inspectExternalAdapterIntegrity(host, entry) {
+export async function inspectAdapterIntegrity(host, entry) {
   const issues = [];
   for (const [file, digest] of Object.entries(entry?.integrity?.files || {})) {
     const actual = await digestFile(file);
@@ -452,7 +451,7 @@ async function removeCursorUserEntries(hooksPath) {
   if (!existing?.hooks) return;
   const hooks = {};
   for (const [event, entries] of Object.entries(existing.hooks)) {
-    const kept = Array.isArray(entries) ? entries.filter((entry) => !String(entry?.command || "").includes(EXTERNAL_CURSOR_BRIDGE_NAME)) : entries;
+    const kept = Array.isArray(entries) ? entries.filter((entry) => !String(entry?.command || "").includes(CURSOR_BRIDGE_NAME)) : entries;
     if (!Array.isArray(kept) || kept.length > 0) hooks[event] = kept;
   }
   await writeJsonAtomic(hooksPath, { ...existing, hooks });
@@ -463,7 +462,7 @@ function managedCursorHooksDigest(userHooks) {
   const managed = {};
   for (const event of Object.keys(userHooks?.hooks || {}).sort()) {
     const entries = Array.isArray(userHooks.hooks[event])
-      ? userHooks.hooks[event].filter((entry) => String(entry?.command || "").includes(EXTERNAL_CURSOR_BRIDGE_NAME))
+      ? userHooks.hooks[event].filter((entry) => String(entry?.command || "").includes(CURSOR_BRIDGE_NAME))
       : [];
     if (entries.length > 0) managed[event] = entries;
   }
@@ -506,18 +505,18 @@ async function digestFiles(paths) {
   return { files };
 }
 
-export async function loadExternalAdapterReport(projectRoot) {
+export async function loadAdapterReport(projectRoot) {
   return readJson(resolveWildArrangePath(projectRoot, "adapters", "external", "install-report.json"), null);
 }
 
 async function writeCodexBundle(externalRoot, bridge, activationId, cliPrefix) {
   const marketplaceRoot = path.join(externalRoot, "codex-marketplace");
-  const pluginRoot = path.join(marketplaceRoot, "plugins", EXTERNAL_CODEX_PLUGIN_NAME);
+  const pluginRoot = path.join(marketplaceRoot, "plugins", CODEX_PLUGIN_NAME);
   const manifestPath = path.join(pluginRoot, ".codex-plugin", "plugin.json");
   const hooksPath = path.join(pluginRoot, "hooks", "hooks.json");
-  const bridgePath = path.join(pluginRoot, "hooks", EXTERNAL_CURSOR_BRIDGE_NAME);
+  const bridgePath = path.join(pluginRoot, "hooks", CURSOR_BRIDGE_NAME);
   await writeJsonAtomic(manifestPath, {
-    name: EXTERNAL_CODEX_PLUGIN_NAME,
+    name: CODEX_PLUGIN_NAME,
     version: "1.0.0",
     description: "Project-selective WildArrange governance hooks without repository files.",
     author: { name: "AliveWaveLab" },
@@ -534,7 +533,7 @@ async function writeCodexBundle(externalRoot, bridge, activationId, cliPrefix) {
       ],
     },
   });
-  await writeJsonAtomic(hooksPath, buildCodexHooksConfig(`node "\${PLUGIN_ROOT}/hooks/${EXTERNAL_CURSOR_BRIDGE_NAME}"`));
+  await writeJsonAtomic(hooksPath, buildCodexHooksConfig(`node "\${PLUGIN_ROOT}/hooks/${CURSOR_BRIDGE_NAME}"`));
   await mkdir(path.dirname(bridgePath), { recursive: true });
   await writeFile(bridgePath, bridge, "utf8");
   await writePluginSkills(pluginRoot, cliPrefix);
@@ -545,8 +544,8 @@ async function writeCodexBundle(externalRoot, bridge, activationId, cliPrefix) {
     name: "wildarrange-local",
     interface: { displayName: "WildArrange Local" },
     plugins: [{
-      name: EXTERNAL_CODEX_PLUGIN_NAME,
-      source: { source: "local", path: `./plugins/${EXTERNAL_CODEX_PLUGIN_NAME}` },
+      name: CODEX_PLUGIN_NAME,
+      source: { source: "local", path: `./plugins/${CODEX_PLUGIN_NAME}` },
       policy: { installation: "AVAILABLE", authentication: "ON_INSTALL" },
       category: "Developer Tools",
     }],
@@ -562,7 +561,7 @@ async function writeCodexBundle(externalRoot, bridge, activationId, cliPrefix) {
     activation: "manual_install_and_trust_required",
     nextActions: [
       `codex plugin marketplace add "${marketplaceRoot}"`,
-      `在 Codex /plugins 中安装 ${EXTERNAL_CODEX_PLUGIN_NAME}`,
+      `在 Codex /plugins 中安装 ${CODEX_PLUGIN_NAME}`,
       "审查并信任插件 Hooks，然后在已连接项目中新开一次会话",
     ],
   };
@@ -570,11 +569,11 @@ async function writeCodexBundle(externalRoot, bridge, activationId, cliPrefix) {
 
 async function writeCursorBundle(externalRoot, bridge, activationId, cliPrefix) {
   const root = path.join(externalRoot, "cursor");
-  const bridgePath = path.join(root, "hooks", EXTERNAL_CURSOR_BRIDGE_NAME);
+  const bridgePath = path.join(root, "hooks", CURSOR_BRIDGE_NAME);
   const hooksPath = path.join(root, "hooks.json");
   await mkdir(path.dirname(bridgePath), { recursive: true });
   await writeFile(bridgePath, bridge, "utf8");
-  await writeJsonAtomic(hooksPath, buildCursorUserHooks(`node ./hooks/${EXTERNAL_CURSOR_BRIDGE_NAME}`));
+  await writeJsonAtomic(hooksPath, buildCursorUserHooks(`node ./hooks/${CURSOR_BRIDGE_NAME}`));
   return {
     status: "bundle_generated",
     activationId,
@@ -589,7 +588,7 @@ async function writeCursorBundle(externalRoot, bridge, activationId, cliPrefix) 
 async function writeKimiBundle(externalRoot, bridge, activationId, cliPrefix) {
   const pluginRoot = path.join(externalRoot, "kimi", "plugin");
   const manifestPath = path.join(pluginRoot, "kimi.plugin.json");
-  const bridgePath = path.join(pluginRoot, "hooks", EXTERNAL_CURSOR_BRIDGE_NAME);
+  const bridgePath = path.join(pluginRoot, "hooks", CURSOR_BRIDGE_NAME);
   await writeJsonAtomic(manifestPath, buildKimiManifest());
   await mkdir(path.dirname(bridgePath), { recursive: true });
   await writeFile(bridgePath, bridge, "utf8");
@@ -658,10 +657,10 @@ function buildCursorUserHooks(command) {
 }
 
 function buildKimiManifest() {
-  const command = `node ./hooks/${EXTERNAL_CURSOR_BRIDGE_NAME}`;
+  const command = `node ./hooks/${CURSOR_BRIDGE_NAME}`;
   const hook = (event, matcher) => ({ event, ...(matcher ? { matcher } : {}), command, timeout: 20 });
   return {
-    name: EXTERNAL_KIMI_PLUGIN_NAME,
+    name: KIMI_PLUGIN_NAME,
     version: "1.0.0",
     description: "Project-selective WildArrange lifecycle governance bridge.",
     skills: "./skills/",
@@ -683,7 +682,7 @@ function buildKimiManifest() {
   };
 }
 
-function renderExternalHookBridge({ host, mode, packageName, localCliPath, activationId, hookTimeoutMs = EXTERNAL_HOOK_TIMEOUT_MS }) {
+function renderHookBridge({ host, mode, packageName, localCliPath, activationId, hookTimeoutMs = HOOK_TIMEOUT_MS }) {
   const cliSpec = mode === "npx"
     ? { kind: "npx", packageName }
     : { kind: "local", cliPath: path.resolve(localCliPath), packageName };
@@ -790,12 +789,130 @@ ${renderCliInvocationUtility()}
 
 function adapterActivationId(host, options) {
   return createHash("sha256")
-    .update(JSON.stringify({ version: EXTERNAL_ADAPTER_VERSION, host, ...options }))
+    .update(JSON.stringify({ version: ADAPTER_VERSION, host, ...options }))
     .digest("hex");
 }
 
-function assertExternalWorkspace(workspace) {
+function assertWorkspace(workspace) {
   if (!workspace) {
     throw new Error("adapter operations require a project connected to WildArrange governance; run `wildarrange setup` first");
   }
+}
+
+// --- bridge 脚本共享片段：输出为嵌入 bridge 的字符串，非运行时代码 ---
+
+/**
+ * 生成 bridge 内调用 wildarrange hook run 并解析 JSON stdout 的代码块。
+ * @param {{ hostAdapter: string, cliArgsSource: string, timeoutMs?: number|null }} options
+ *   cliArgsSource 是 bridge 内求值为参数数组的 JS 表达式（传 --project-root 等）。
+ * @returns {string}
+ */
+function renderHookBridgeExecution({ hostAdapter, cliArgsSource, timeoutMs = null }) {
+  const trailingArgs = `...${cliArgsSource},`;
+  // 子进程挂死时 SIGKILL 并走 failHook；timeoutMs 为 null 则不生成定时器。
+  const timeoutBlock = Number.isInteger(timeoutMs) && timeoutMs > 0
+    ? `const childTimer = setTimeout(() => {
+  child.kill("SIGKILL");
+  failHook("WildArrange hook subprocess timed out.");
+}, ${timeoutMs});`
+    : "const childTimer = null;";
+  return `const invocation = resolveCliInvocation(cliSpec);
+const child = spawn(invocation.command, [
+  ...invocation.args,
+  "hook", "run", "--format", "json",
+  "--adapter-mode", cliSpec.kind,
+  "--adapter-package", cliSpec.packageName,
+  ${trailingArgs}
+], {
+  cwd: projectDir,
+  stdio: ["pipe", "pipe", "pipe"],
+  windowsHide: true,
+  env: { ...process.env, WILDARRANGE_HOST_ADAPTER: ${JSON.stringify(hostAdapter)} },
+});
+
+${timeoutBlock}
+
+let stdout = "";
+let stderr = "";
+child.stdout.setEncoding("utf8");
+child.stderr.setEncoding("utf8");
+child.stdout.on("data", (chunk) => { stdout += chunk; });
+child.stderr.on("data", (chunk) => { stderr += chunk; });
+child.on("error", (error) => failHook(error instanceof Error ? error.message : String(error)));
+child.stdin.end(JSON.stringify(normalizedPayload));
+
+const exitCode = await new Promise((resolve) => child.on("close", (code) => {
+  if (childTimer) clearTimeout(childTimer);
+  resolve(code ?? 1);
+}));
+if (exitCode !== 0) {
+  failHook(stderr.trim() || \`WildArrange hook exited with code \${exitCode}.\`, exitCode);
+}
+
+let result;
+try {
+  result = JSON.parse(stdout);
+} catch {
+  failHook("WildArrange bridge received invalid hook output.");
+}`;
+}
+
+/** 生成 bridge 内 resolveCliInvocation 源码：local 走当前 node + CLI 路径，npx 走包名。 */
+function renderCliInvocationUtility() {
+  return `/** 将 hook bridge 配置解析为可 spawn 的 CLI 命令与参数。 */
+function resolveCliInvocation(spec) {
+  if (spec.kind === "local") {
+    return { command: process.execPath, args: [spec.cliPath] };
+  }
+  return {
+    command: process.platform === "win32" ? "npx.cmd" : "npx",
+    args: ["-y", spec.packageName],
+  };
+}`;
+}
+
+/**
+ * 生成外置 bridge 的"是否受治理项目"判断源码：只读 WILDARRANGE_STATE_HOME/registry.json，
+ * 按 cwd 落在已注册项目根/运行态根内，或 Git common-dir 身份命中来判定；
+ * 任何读取失败都视为未连接（放行），用户级 Hook 不得因本机状态损坏波及无关项目。
+ */
+function renderGovernedProjectCheck() {
+  return `function defaultStateHome() {
+  const env = process.env;
+  if (typeof env.WILDARRANGE_STATE_HOME === "string" && env.WILDARRANGE_STATE_HOME.trim()) return path.resolve(env.WILDARRANGE_STATE_HOME);
+  if (process.platform === "win32") return path.join(env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "WildArrange");
+  if (process.platform === "darwin") return path.join(os.homedir(), "Library", "Application Support", "WildArrange");
+  return path.join(env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state"), "wildarrange");
+}
+
+function comparable(value) {
+  let resolved = path.resolve(value);
+  try { resolved = realpathSync.native(resolved); } catch { /* 路径不存在时按原样比较 */ }
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+function isInside(root, candidate) {
+  const base = comparable(root);
+  const target = comparable(candidate);
+  return target === base || target.startsWith(base + path.sep);
+}
+
+/** 只读 registry 判断 dir 是否属于已连接的外置治理项目。 */
+function isGovernedProject(dir) {
+  let registry;
+  try { registry = JSON.parse(readFileSync(path.join(defaultStateHome(), "registry.json"), "utf8")); } catch { return false; }
+  const entries = registry && typeof registry.projects === "object" && registry.projects ? registry.projects : {};
+  const list = Object.entries(entries);
+  if (list.length === 0) return false;
+  for (const [, entry] of list) {
+    if (typeof entry?.projectRoot === "string" && isInside(entry.projectRoot, dir)) return true;
+    if (typeof entry?.runtimeRoot === "string" && isInside(entry.runtimeRoot, dir)) return true;
+  }
+  const git = spawnSync("git", ["-C", dir, "rev-parse", "--git-common-dir"], { encoding: "utf8", timeout: 5000, windowsHide: true });
+  if (git.status !== 0 || !git.stdout.trim()) return false;
+  const raw = git.stdout.trim();
+  const commonDir = comparable(path.isAbsolute(raw) ? raw : path.resolve(dir, raw));
+  const id = "project_" + createHash("sha256").update(commonDir).digest("hex").slice(0, 24);
+  return Object.prototype.hasOwnProperty.call(entries, id);
+}`;
 }
