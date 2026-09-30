@@ -85,7 +85,7 @@ test("resume writes durable context snapshot and session lineage", async () => {
   });
 });
 
-test("workflow nodes execute, verify, scope, review, and checkpoint independently", async () => {
+test("workflow nodes execute and checkpoint independently", async () => {
   await withExternalProject(async ({ projectRoot, root }) => {
     const planPath = path.join(root, "node-plan.json");
     await writeFile(planPath, JSON.stringify({
@@ -106,18 +106,11 @@ test("workflow nodes execute, verify, scope, review, and checkpoint independentl
     assert.equal(executed.status, "executed");
     assert.equal(executed.task.status, "verifying");
 
-    const verified = await runWorkflowNode(projectRoot, "verify", { taskId: "T001" });
-    assert.equal(verified.status, "verified");
-
-    const scoped = await runWorkflowNode(projectRoot, "scope", { taskId: "T001" });
-    assert.equal(scoped.status, "pass");
-
-    const reviewed = await runWorkflowNode(projectRoot, "review", { taskId: "T001" });
-    assert.equal(reviewed.status, "reviewed");
-    assert.equal(reviewed.reviewResult.pass, true);
-
     const checkpointed = await runWorkflowNode(projectRoot, "checkpoint", { taskId: "T001" });
     assert.equal(checkpointed.status, "completed");
+    assert.equal(checkpointed.verifyResult.pass, true);
+    assert.equal(checkpointed.scopeResult.status, "pass");
+    assert.equal(checkpointed.reviewResult.pass, true);
 
     const state = await readJson(resolveWildArrangePath(projectRoot, "team", "tasks.json"));
     assert.equal(state.tasks[0].status, "completed");
@@ -126,7 +119,7 @@ test("workflow nodes execute, verify, scope, review, and checkpoint independentl
   });
 });
 
-test("workflow verify node returns failed verification to pending for retry", async () => {
+test("workflow checkpoint node returns failed verification to pending for retry", async () => {
   await withExternalProject(async ({ projectRoot, root }) => {
     const planPath = path.join(root, "node-verify-fail-plan.json");
     await writeFile(planPath, JSON.stringify({
@@ -143,10 +136,11 @@ test("workflow verify node returns failed verification to pending for retry", as
     await importPlan(projectRoot, planPath);
 
     await runWorkflowNode(projectRoot, "execute", { taskId: "T001" });
-    const verified = await runWorkflowNode(projectRoot, "verify", { taskId: "T001" });
-    assert.equal(verified.status, "verify_failed");
-    assert.equal(verified.task.status, "pending");
-    assert.equal(verified.task.last_failure.nextStatus, "pending");
+    const rejected = await runWorkflowNode(projectRoot, "checkpoint", { taskId: "T001" });
+    assert.equal(rejected.status, "retry");
+    assert.equal(rejected.task.status, "pending");
+    assert.equal(rejected.task.last_failure.reason, "verifier_failed");
+    assert.equal(rejected.task.last_failure.nextStatus, "pending");
 
     const state = await readJson(resolveWildArrangePath(projectRoot, "team", "tasks.json"));
     assert.equal(state.tasks[0].status, "pending");
@@ -170,24 +164,16 @@ test("workflow node state updates are serialized under the task lock", async () 
     await importPlan(projectRoot, planPath);
 
     await runWorkflowNode(projectRoot, "execute", { taskId: "T001" });
-    await Promise.all([
-      runWorkflowNode(projectRoot, "verify", { taskId: "T001" }),
-      runWorkflowNode(projectRoot, "scope", { taskId: "T001" }),
+    const settled = await Promise.allSettled([
+      runWorkflowNode(projectRoot, "checkpoint", { taskId: "T001" }),
+      runWorkflowNode(projectRoot, "checkpoint", { taskId: "T001" }),
     ]);
+    assert.equal(settled.filter((entry) => entry.status === "fulfilled" && entry.value.status === "completed").length, 1);
+    assert.equal(settled.filter((entry) => entry.status === "rejected").length, 1);
 
     const state = await readJson(resolveWildArrangePath(projectRoot, "team", "tasks.json"));
-    const task = state.tasks[0];
-    assert.equal(task.status, "verifying");
-    assert.equal(task.last_verify_result.pass, true);
-    assert.equal(task.last_scope_result.status, "pass");
-    assert.ok(task.evidence.some((entry) => entry.kind === "verifier"));
-    assert.ok(task.evidence.some((entry) => entry.kind === "scope_guard"));
-
-    const reviewed = await runWorkflowNode(projectRoot, "review", { taskId: "T001" });
-    assert.equal(reviewed.status, "reviewed");
-    assert.equal(reviewed.reviewResult.pass, true);
-
-    const checkpointed = await runWorkflowNode(projectRoot, "checkpoint", { taskId: "T001" });
-    assert.equal(checkpointed.status, "completed");
+    assert.equal(state.tasks[0].status, "completed");
+    const ledger = await readFile(resolveWildArrangePath(projectRoot, "ledger.jsonl"), "utf8");
+    assert.equal(ledger.match(/"type":"node_checkpoint_completed"/g).length, 1, "the task lock must serialize concurrent checkpoints into one completion");
   });
 });

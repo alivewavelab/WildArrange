@@ -605,9 +605,6 @@ ${ADOPTION_VIEW_HTML}
         buttons.push('<button data-node="execute" data-task="' + esc(task.id) + '">Execute</button>');
       }
       if (task.status === "verifying" || task.status === "in_progress") {
-        buttons.push('<button data-node="verify" data-task="' + esc(task.id) + '">Verify</button>');
-        buttons.push('<button data-node="scope" data-task="' + esc(task.id) + '">Scope</button>');
-        buttons.push('<button data-node="review" data-task="' + esc(task.id) + '">Review</button>');
         buttons.push('<button data-node="checkpoint" data-task="' + esc(task.id) + '">Checkpoint</button>');
       }
       return '<div class="actions">' + buttons.join("") + '</div>';

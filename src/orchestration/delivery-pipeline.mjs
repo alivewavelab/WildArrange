@@ -321,7 +321,7 @@ function pipelineOutcomeReason(status, results, criteria) {
 
 /**
  * acceptance-proof → integration → checkpoint 共享完成段；仅 status "completed" 可置 completed。
- * 线性单步 checkpoint 与主流水线共用此语义，checkpoint 失败不得静默吞掉。
+ * acceptance-proof 是唯一完成总闸；checkpoint 失败不得静默吞掉。
  */
 async function runCompletionSegment(rootDir, planId, task, evidence, options = {}) {
   // 交付事实解析在网关之外（含 admission claim 围栏），异常不得无审计穿透：
@@ -408,42 +408,7 @@ async function resolveDeliveryFacts(rootDir, task, options) {
   return { required, target: target?.runId ? target : null };
 }
 
-// --- 证据收集 ---
-
-/**
- * 从 task.evidence 轨迹回读各 gate 结果；单步 workflow 的前置条件与此 GATE_STEPS 对齐。
- * 新鲜度规则：gate 证据必须在最近一次 worker 条目之后，否则属上一轮执行。
- */
-export function collectGateEvidenceFromTask(task) {
-  const specs = {
-    verify: { key: "verifyResult", kind: "verifier", passed: (record) => record?.pass === true },
-    scope: { key: "scopeResult", kind: "scope_guard", passed: (record) => record?.status === "pass" },
-    review: { key: "reviewResult", kind: "review_gate", passed: (record) => record?.pass === true },
-  };
-  const trail = task.evidence || [];
-  const lastWorkerIndex = trail.reduce((found, entry, index) => (entry?.kind === "worker" ? index : found), -1);
-  const evidence = {};
-  const failedSteps = [];
-  for (const stepName of GATE_STEPS) {
-    const spec = specs[stepName];
-    if (!spec) {
-      failedSteps.push(stepName);
-      continue;
-    }
-    let record = null;
-    if (lastWorkerIndex >= 0) {
-      for (let index = trail.length - 1; index > lastWorkerIndex; index -= 1) {
-        if (trail[index]?.kind === spec.kind) {
-          record = trail[index];
-          break;
-        }
-      }
-    }
-    evidence[spec.key] = record;
-    if (!spec.passed(record)) failedSteps.push(stepName);
-  }
-  return { evidence, failedSteps };
-}
+// --- 证据归一 ---
 
 /** 按 gate 名组装 invokeCapability 所需的 ctx 对象。 */
 function buildStepContext(stepName, { rootDir, planId, task, evidence, options }) {

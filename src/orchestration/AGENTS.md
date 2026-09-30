@@ -26,6 +26,7 @@
 
 - `delivery-pipeline.mjs` 是强制质量门顺序的唯一来源。
 - 完成提交的固定顺序由 `commitTaskCompletionState` 统一维护；调用方仍各自提供业务事件和提交后动作。
+- pipeline 结果落盘由 `applyPipelineOutcome` 统一维护；失败与恢复状态统一经 `persistTaskFailure` 写入。
 - Worker 的 DoneClaim 不能直接把任务置为 `completed`。
 - 完成审计先入 ledger，再提交权威 completed 状态。
 - 权威任务状态最后写入；Markdown 和镜像 JSON 只是派生产物。

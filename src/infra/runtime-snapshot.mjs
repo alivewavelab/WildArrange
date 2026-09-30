@@ -226,7 +226,7 @@ function describeNextAction(tasks, runnable, cliCommandPrefix, options = {}) {
   const reason = recovery ? "admission_recovery" : awaitingPlanApproval ? "awaiting_plan_approval" : runnable ? "runnable_task" : active ? "active_task" : failed ? "blocked_or_failed_task" : waiting ? "awaiting_user_decision" : "no_unfinished_work";
   const command = recovery || (task === active && active?.admission_claim)
     ? renderCliCommand(cliCommandPrefix, `parallel admit --run ${task.admission_claim.runId} --task ${task.id}`)
-    : runnable ? renderCliCommand(cliCommandPrefix, "run") : active ? renderCliCommand(cliCommandPrefix, `node verify --task ${task.id}`) : failed ? renderCliCommand(cliCommandPrefix, "status") : null;
+    : runnable ? renderCliCommand(cliCommandPrefix, "run") : active ? renderCliCommand(cliCommandPrefix, `node checkpoint --task ${task.id}`) : failed ? renderCliCommand(cliCommandPrefix, "status") : null;
   const text = recovery ? command ? `recover shared workspace: ${command}` : "reinstall the adapter before shared-workspace recovery"
     : awaitingPlanApproval ? `await user approval for plan ${options.planId}`
     : runnable ? `run task ${task.id}: ${task.subject}` : active ? command ? `resume task ${task.id}: ${command}` : `reinstall the adapter before resuming task ${task.id}`
@@ -417,7 +417,7 @@ function renderContextMarkdown(context) {
       lines.push(`- Approve after user confirmation: \`${renderCliCommand(context.cliCommandPrefix, `plan approve --plan ${context.nextActionDetails.planId}`)}\``);
     } else {
       lines.push(`- Run next task: \`${renderCliCommand(context.cliCommandPrefix, "run")}\``);
-      lines.push(`- Node loop: \`${renderCliCommand(context.cliCommandPrefix, "node execute|verify|scope|review|checkpoint|retry --task <taskId>")}\``);
+      lines.push(`- Node loop: \`${renderCliCommand(context.cliCommandPrefix, "node execute|checkpoint|retry --task <taskId>")}\``);
     }
     lines.push(`- Open changes: \`${renderCliCommand(context.cliCommandPrefix, "changes list")}\``);
   } else {

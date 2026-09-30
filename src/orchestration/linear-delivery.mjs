@@ -3,7 +3,7 @@
 // 所属模块：orchestration
 // 作用说明：
 //   线性任务 Git 交付工作区：为单任务准备或复用隔离 worktree、分支与基线 SHA；
-//   处理依赖交付 SHA 与 task branch 起点的对齐。
+//   处理依赖交付 SHA 与 task branch 起点的对齐；worker 前的工作区 preimage 快照。
 //
 // 【运行原理速读】
 //   可以把它想成「给线性 worker 一块专属施工场地」：
@@ -19,7 +19,8 @@
 // =============================================================================
 import { lstat } from "node:fs/promises";
 import path from "node:path";
-import { resolveWildArrangePath } from "../infra/runtime-store.mjs";
+import { appendLedger } from "../infra/ledger.mjs";
+import { nowIso, resolveWildArrangePath } from "../infra/runtime-store.mjs";
 import { captureWorkspaceSnapshot, prepareAgentWorktree } from "../infra/git-worktree.mjs";
 import { releaseSupersededRunWorktree } from "./parallel-run-lifecycle.mjs";
 import { commitIsAncestor, inspectTaskWorktreeBaseline, taskBranchName } from "../infra/git-coordination.mjs";
@@ -126,4 +127,30 @@ async function resolveDependencyDeliverySha(rootDir, task, tasks) {
     if (containsAll.every(Boolean)) return candidate;
   }
   throw new Error(`task ${task.id} dependencies are on unrelated delivery branches; create an integration task first`);
+}
+
+/** worker 执行前用 git stash 记录工作区 preimage；快照失败不阻断任务执行。 */
+export async function recordPreExecuteSnapshot(rootDir, planId, task, executionRoot = rootDir) {
+  try {
+    const snapshot = await captureWorkspaceSnapshot(executionRoot, { label: `pre-execute ${task.id} attempt ${task.attempts}` });
+    const entry = { ...snapshot, at: nowIso(), taskId: task.id };
+    await appendLedger(rootDir, {
+      type: snapshot.available ? "pre_execute_snapshot" : "pre_execute_snapshot_unavailable",
+      planId,
+      taskId: task.id,
+      headCommit: snapshot.headCommit || null,
+      stashCommit: snapshot.stashCommit || null,
+      reason: snapshot.reason || null,
+    });
+    return entry;
+  } catch (error) {
+    // 快照是兜底手段，不能因为快照失败阻断任务执行本身
+    return {
+      kind: "workspace_snapshot",
+      at: nowIso(),
+      taskId: task.id,
+      available: false,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
 }

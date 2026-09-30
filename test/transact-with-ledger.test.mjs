@@ -19,7 +19,7 @@ import path from "node:path";
 import { appendLedgerOnce, readVerifiedLedgerEntries, verifyLedger } from "../src/infra/ledger.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 import { transactWithLedger } from "../src/infra/task-state-lock.mjs";
-import { persistPostIntegrationRecovery } from "../src/orchestration/admission-recovery.mjs";
+import { persistTaskFailure } from "../src/orchestration/task-recovery.mjs";
 import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { claimTeamTask } from "../src/orchestration/task-board.mjs";
 import { withExternalProject } from "./helpers/external-fixture.mjs";
@@ -158,7 +158,7 @@ test("importPlan: persist failure leaves plan_imported in the ledger without com
   });
 });
 
-test("persistPostIntegrationRecovery: ledger outage leaves the authoritative state unchanged", async () => {
+test("persistTaskFailure: ledger outage leaves the authoritative state unchanged", async () => {
   // 顺序回归：该路径过去先 persist 后 appendLedger，账本故障会留下无审计的
   // recovery 状态；现在必须先入账本。
   await withExternalProject(async ({ projectRoot: dir }) => {
@@ -169,11 +169,10 @@ test("persistPostIntegrationRecovery: ledger outage leaves the authoritative sta
     await sabotageLedger(dir);
     try {
       await assert.rejects(
-        () => persistPostIntegrationRecovery(dir, taskState, task, {
-          runId: "run_probe",
-          summary: "probe recovery",
-          checkpointFailed: false,
-          integrationCommit: { status: "pushed", integrationSha: "abc123" },
+        () => persistTaskFailure(dir, taskState, task, {
+          status: "verifying",
+          failure: { reason: "post_integration_recovery_required", summary: "probe recovery" },
+          event: { type: "post_integration_recovery_required", runId: "run_probe", integrationSha: "abc123" },
         }),
         /EACCES|EPERM|permission denied/i,
       );

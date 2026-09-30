@@ -2,8 +2,8 @@
 // 文件名称：admission-projection.mjs
 // 所属模块：orchestration
 // 作用说明：
-//   Admission 结果投影：事务裁决完成后，将 claim 阶段、回滚失败恢复、
-//   agent-run 生命周期与 decisions.jsonl 写回持久化面。自 admission.mjs 拆分（ARC-002）。
+//   Admission 结果投影：事务裁决完成后，将 claim 阶段、
+//   agent-run 生命周期与 decisions.jsonl 写回持久化面（失败落盘统一走 task-recovery.mjs）。自 admission.mjs 拆分（ARC-002）。
 //
 // 【运行原理速读】
 //   可以把它想成「admission 判完案后的文书工作」：
@@ -17,7 +17,6 @@
 //   · 约束？
 //     WithinLock 助手禁止自行获取任务锁，必须在调用方锁持有期间运行。
 // =============================================================================
-import { appendLedger } from "../infra/ledger.mjs";
 import { transactWithLedger } from "../infra/task-state-lock.mjs";
 import { emitDecision } from "../infra/decision-log.mjs";
 import {
@@ -26,8 +25,6 @@ import {
   resolveWildArrangePath,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
-import { buildFailureSummary } from "../infra/failure-analysis.mjs";
-import { writeFailureReport } from "../infra/task-reports.mjs";
 import { loadTaskState } from "./plan-state.mjs";
 import { persistTaskState } from "./task-board.mjs";
 
@@ -51,49 +48,6 @@ export async function emitAdmissionDecision(rootDir, options, finalized) {
     // admission 是归属决策（非确定性放行）且失败即拦截：全部进标注队列。
     annotatable: true,
   });
-}
-
-/**
- * 回滚未完成时的共享持久化：任务保持 verifying，保留 ownership/claim 与 rollback plan，
- * 返回 recovery_required 而非释放脏工作区。在调用方锁内运行，禁止自行加锁。
- */
-export async function persistRollbackFailureRecovery(rootDir, taskState, task, {
-  rollback,
-  reason,
-  summary,
-  retryHint,
-  failureContext = null,
-  gateResults = {},
-  integrationCommit,
-}) {
-  task.status = "verifying";
-  task.last_failure = failureContext
-    ? buildFailureSummary(task, { ...failureContext, nextStatus: task.status })
-    : { at: nowIso() };
-  task.last_failure.reason = reason;
-  task.last_failure.summary = summary;
-  task.last_failure.retryHint = retryHint;
-  task.updatedAt = nowIso();
-  await writeFailureReport(rootDir, taskState.planId, task);
-  await transactWithLedger(rootDir, {
-    type: "parallel_agent_admission_recovery_required",
-    planId: taskState.planId,
-    taskId: task.id,
-    reason,
-    rollbackStatus: rollback?.status || null,
-  }, () => persistTaskState(rootDir, taskState));
-  const result = {
-    status: "recovery_required",
-    planId: taskState.planId,
-    task,
-    acceptanceProof: gateResults.acceptanceProof || null,
-    verifyResult: gateResults.verifyResult || null,
-    scopeResult: gateResults.scopeResult || null,
-    reviewResult: gateResults.reviewResult || null,
-  };
-  if (integrationCommit !== undefined) result.integrationCommit = integrationCommit;
-  result.rollback = rollback;
-  return result;
 }
 
 /**

@@ -190,9 +190,6 @@ test("adversarial: single-step node checkpoint refuses to complete the task when
     await importPassingPlan(dir);
 
     await runWorkflowNode(dir, "execute", { taskId: "T001" });
-    await runWorkflowNode(dir, "verify", { taskId: "T001" });
-    await runWorkflowNode(dir, "scope", { taskId: "T001" });
-    await runWorkflowNode(dir, "review", { taskId: "T001" });
 
     await sabotageCheckpoints(dir);
     const blocked = await runWorkflowNode(dir, "checkpoint", { taskId: "T001" });
@@ -241,9 +238,6 @@ test("adversarial: a new execute round cannot complete against the previous roun
 
     // Round 1: all gates pass, checkpoint write fails, task returns to pending.
     await runWorkflowNode(dir, "execute", { taskId: "T001" });
-    await runWorkflowNode(dir, "verify", { taskId: "T001" });
-    await runWorkflowNode(dir, "scope", { taskId: "T001" });
-    await runWorkflowNode(dir, "review", { taskId: "T001" });
     await sabotageCheckpoints(dir);
     const firstCheckpoint = await runWorkflowNode(dir, "checkpoint", { taskId: "T001" });
     assert.equal(firstCheckpoint.status, "recovery_required");
@@ -313,9 +307,6 @@ test("adversarial: node checkpoint does not persist completed when the completio
     await importPassingPlan(dir);
 
     await runWorkflowNode(dir, "execute", { taskId: "T001" });
-    await runWorkflowNode(dir, "verify", { taskId: "T001" });
-    await runWorkflowNode(dir, "scope", { taskId: "T001" });
-    await runWorkflowNode(dir, "review", { taskId: "T001" });
 
     await sabotageLedger(dir);
     try {
@@ -404,9 +395,6 @@ test("adversarial: linear runNextTask never yields completed during a ledger out
     // (in_progress persisted, task_started ledger threw). The single-step
     // workflow accepts in_progress, so recovery completes through it.
     await runWorkflowNode(dir, "execute", { taskId: "T001" });
-    await runWorkflowNode(dir, "verify", { taskId: "T001" });
-    await runWorkflowNode(dir, "scope", { taskId: "T001" });
-    await runWorkflowNode(dir, "review", { taskId: "T001" });
     const completed = await runWorkflowNode(dir, "checkpoint", { taskId: "T001" });
     assert.equal(completed.status, "completed");
     const stateAfterRepair = await loadTaskState(dir);
@@ -466,9 +454,6 @@ test("adversarial: an interrupted completion transaction is visible to doctor an
     await importPassingPlan(dir);
 
     await runWorkflowNode(dir, "execute", { taskId: "T001" });
-    await runWorkflowNode(dir, "verify", { taskId: "T001" });
-    await runWorkflowNode(dir, "scope", { taskId: "T001" });
-    await runWorkflowNode(dir, "review", { taskId: "T001" });
 
     // Read-only plans dir: acceptance proof, checkpoint and the completion
     // ledger event all succeed, tasks.md (a derived view) gets rewritten as
@@ -520,22 +505,37 @@ test("adversarial: an interrupted completion transaction is visible to doctor an
 
 test("adversarial: an interrupted verifying task with a bad artifact is sent back to pending by the next run, not completed", async () => {
   // The auto-recovery path must adjudicate, not rubber-stamp: a task stuck
-  // in verifying whose gate evidence does NOT pass for the current round has
-  // to go back to pending (rejected), never straight to completed.
+  // in verifying whose artifact does NOT pass the gates for the current round
+  // has to go back into the retry loop (rejected), never straight to completed.
   await withProject(async (dir) => {
-    await importPassingPlan(dir);
+    const ctrlPath = resolveWildArrangePath(dir, "artifacts", "interrupted-ctrl.txt");
+    await writeFile(ctrlPath, "bad\n");
+    const planPath = resolveWildArrangePath(dir, "artifacts", "interrupted-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Interrupted verifying",
+      tasks: [{
+        id: "T001",
+        subject: "Artifact must match ok",
+        worker_command: nodeEval(`const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/out.txt', fs.readFileSync(${JSON.stringify(ctrlPath)},'utf8'));`),
+        verify_commands: [nodeEval("const fs=require('fs'); if(fs.readFileSync('src/out.txt','utf8').trim()!=='ok') process.exit(1);")],
+        review_commands: [realReviewCommand()],
+        writable_paths: ["src/**"],
+      }],
+    }, null, 2));
+    await importPlan(dir, planPath);
 
-    // Only execute ran; verify/scope/review never happened this round.
+    // Only execute ran; the worker produced a bad artifact and the gates never ran this round.
     await runWorkflowNode(dir, "execute", { taskId: "T001" });
     const stuck = await loadTaskState(dir);
     assert.equal(stuck.tasks[0].status, "verifying");
 
     const adjudicated = await runNextTask(dir);
     assert.equal(adjudicated.resumed, "verifying_task_adjudicated");
-    assert.notEqual(adjudicated.status, "completed", "missing gate evidence must never auto-complete");
+    assert.notEqual(adjudicated.status, "completed", "a bad artifact must never auto-complete");
     const persisted = await loadTaskState(dir);
     assert.notEqual(persisted.tasks[0].status, "completed");
     assert.ok(["pending", "failed"].includes(persisted.tasks[0].status), "the stuck task must be released back into the retry loop");
+    await assert.rejects(() => readJson(resolveWildArrangePath(dir, "checkpoints", persisted.planId, "T001.json")));
   });
 });
 
@@ -729,9 +729,6 @@ test("adversarial: a wisdom write failure keeps the completion recoverable inste
     await importPassingPlan(dir);
 
     await runWorkflowNode(dir, "execute", { taskId: "T001" });
-    await runWorkflowNode(dir, "verify", { taskId: "T001" });
-    await runWorkflowNode(dir, "scope", { taskId: "T001" });
-    await runWorkflowNode(dir, "review", { taskId: "T001" });
 
     const wisdomPath = resolveWildArrangePath(dir, "wisdom", "verification.md");
     await writeFile(wisdomPath, "", "utf8");
@@ -756,9 +753,6 @@ test("adversarial: a post-commit snapshot failure does not un-complete the task 
     await importPassingPlan(dir);
 
     await runWorkflowNode(dir, "execute", { taskId: "T001" });
-    await runWorkflowNode(dir, "verify", { taskId: "T001" });
-    await runWorkflowNode(dir, "scope", { taskId: "T001" });
-    await runWorkflowNode(dir, "review", { taskId: "T001" });
 
     // Freeze the timestamp and occupy the exact dynamic snapshot target.
     // The snapshots directory itself remains healthy, so only the final
