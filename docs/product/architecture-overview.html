@@ -1163,6 +1163,12 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "orchestration"
             },
             {
+              "t": "team-messages.mjs",
+              "io": "team-messages.mjs",
+              "p": "src/orchestration/team-messages.mjs",
+              "m": "orchestration"
+            },
+            {
               "t": "task-archive.mjs",
               "io": "task-archive.mjs",
               "p": "src/orchestration/task-archive.mjs",
@@ -1459,6 +1465,12 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "orchestration"
             },
             {
+              "t": "team-messages.mjs",
+              "io": "team-messages.mjs",
+              "p": "src/orchestration/team-messages.mjs",
+              "m": "orchestration"
+            },
+            {
               "t": "task-archive.mjs",
               "io": "task-archive.mjs",
               "p": "src/orchestration/task-archive.mjs",
@@ -1705,6 +1717,12 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "orchestration"
             },
             {
+              "t": "team-messages.mjs",
+              "io": "team-messages.mjs",
+              "p": "src/orchestration/team-messages.mjs",
+              "m": "orchestration"
+            },
+            {
               "t": "status.mjs",
               "io": "status.mjs",
               "p": "src/orchestration/status.mjs",
@@ -1740,6 +1758,12 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "t": "runtime-config.mjs",
               "io": "runtime-config.mjs",
               "p": "src/infra/runtime-config.mjs",
+              "m": "infra"
+            },
+            {
+              "t": "task-predicates.mjs",
+              "io": "task-predicates.mjs",
+              "p": "src/infra/task-predicates.mjs",
               "m": "infra"
             }
           ]
@@ -1828,6 +1852,12 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "t": "task-board.mjs",
               "io": "task-board.mjs",
               "p": "src/orchestration/task-board.mjs",
+              "m": "orchestration"
+            },
+            {
+              "t": "team-messages.mjs",
+              "io": "team-messages.mjs",
+              "p": "src/orchestration/team-messages.mjs",
               "m": "orchestration"
             },
             {
@@ -2044,6 +2074,11 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "p": "src/orchestration/plan-state.mjs"
             },
             {
+              "t": "src-orchestration-task-normalize-mjs",
+              "io": "task-normalize.mjs",
+              "p": "src/orchestration/task-normalize.mjs"
+            },
+            {
               "t": "src-orchestration-task-board-mjs",
               "io": "task-board.mjs",
               "p": "src/orchestration/task-board.mjs"
@@ -2222,6 +2257,11 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "p": "src/orchestration/task-board.mjs"
             },
             {
+              "t": "src-orchestration-team-messages-mjs",
+              "io": "team-messages.mjs",
+              "p": "src/orchestration/team-messages.mjs"
+            },
+            {
               "t": "src-orchestration-task-branch-mjs",
               "io": "task-branch.mjs",
               "p": "src/orchestration/task-branch.mjs"
@@ -2397,12 +2437,17 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
           "id": "src-orchestration-plan-state-mjs",
           "p": "src/orchestration/plan-state.mjs",
           "r": "plan-state.mjs",
-          "io": "normalizeStringArray(value, label) → 导出；normalizeTask(task, index, default) → 导出",
+          "io": "importPlan(rootDir, planPath, o) → 导出；loadPlanApproval(rootDir) → 导出",
           "to": [
             {
               "t": "src-orchestration-feature-design-mjs",
               "io": "feature-design.mjs",
               "p": "src/orchestration/feature-design.mjs"
+            },
+            {
+              "t": "src-orchestration-task-normalize-mjs",
+              "io": "task-normalize.mjs",
+              "p": "src/orchestration/task-normalize.mjs"
             }
           ],
           "extTo": [
@@ -2619,6 +2664,11 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "t": "src-orchestration-task-board-mjs",
               "io": "task-board.mjs",
               "p": "src/orchestration/task-board.mjs"
+            },
+            {
+              "t": "src-orchestration-team-messages-mjs",
+              "io": "team-messages.mjs",
+              "p": "src/orchestration/team-messages.mjs"
             },
             {
               "t": "src-orchestration-task-branch-mjs",
@@ -3193,12 +3243,6 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "io": "rule-scanner.mjs",
               "p": "src/infra/rule-scanner.mjs",
               "m": "infra"
-            },
-            {
-              "t": "task-board.mjs",
-              "io": "task-board.mjs",
-              "p": "src/orchestration/task-board.mjs",
-              "m": "orchestration"
             },
             {
               "t": "task-predicates.mjs",

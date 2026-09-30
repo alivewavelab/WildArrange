@@ -11,7 +11,8 @@ import path from "node:path";
 import test from "node:test";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
 import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtime.mjs";
-import { claimTeamTask, createTeamTask, getTeamTask, listTeamMessages, listTeamTasks, readyTeamTask, sendTeamMessage } from "../src/orchestration/task-board.mjs";
+import { claimTeamTask, createTeamTask, getTeamTask, listTeamTasks, readyTeamTask } from "../src/orchestration/task-board.mjs";
+import { listTeamMessages, sendTeamMessage } from "../src/orchestration/team-messages.mjs";
 import { statusReport } from "../src/orchestration/status.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 import { withExternalProject } from "./helpers/external-fixture.mjs";
@@ -38,8 +39,7 @@ test("team-lite sends and lists durable inbox messages", async () => {
 
     const allInbox = await listTeamMessages(projectRoot);
     assert.equal(allInbox.length, 1);
-    assert.match(await readFile(resolveWildArrangePath(projectRoot, "team", "messages.md"), "utf8"), /Jiuwei -> Jiuwei: continue T001/);
-    assert.match(await readFile(resolveWildArrangePath(projectRoot, "ledger.jsonl"), "utf8"), /team_message_sent/);
+    assert.match(await readFile(resolveWildArrangePath(projectRoot, "ledger.jsonl"), "utf8"), /team_message_sent.*continue T001/);
   });
 });
 

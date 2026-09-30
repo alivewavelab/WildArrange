@@ -24,7 +24,7 @@ import {
   writeTextAtomic,
 } from "./runtime-store.mjs";
 import { inspectCompletedTaskEvidence, loadTaskState } from "./task-state-store.mjs";
-import { findRunnableTask } from "./task-predicates.mjs";
+import { findRunnableTask, summarizeTaskCounts } from "./task-predicates.mjs";
 
 /**
  * writeSnapshot：本模块对外异步 API。
@@ -173,25 +173,13 @@ export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
  */
 function buildStatusReport(work, taskState, changes, completionIntegrity) {
   const openChanges = changes.filter((change) => change.status === "open").length;
-  if (!taskState) return { work, planId: null, total: 0, completed: 0, invalidCompleted: 0, completionIntegrity, draft: 0, pending: 0, failed: 0, openChanges };
-  const counts = (taskState.tasks || []).reduce((acc, task) => {
-    acc[task.status] = (acc[task.status] || 0) + 1;
-    return acc;
-  }, {});
+  if (!taskState) return { work, planId: null, ...summarizeTaskCounts([]), invalidCompleted: 0, completionIntegrity, openChanges };
   return {
     work,
     planId: taskState.planId,
-    total: taskState.tasks.length,
-    draft: counts.draft || 0,
-    completed: counts.completed || 0,
+    ...summarizeTaskCounts(taskState.tasks || []),
     invalidCompleted: completionIntegrity.invalid.length,
     completionIntegrity,
-    pending: counts.pending || 0,
-    in_progress: counts.in_progress || 0,
-    verifying: counts.verifying || 0,
-    failed: counts.failed || 0,
-    review_blocked: counts.review_blocked || 0,
-    needs_user_decision: counts.needs_user_decision || 0,
     openChanges,
   };
 }

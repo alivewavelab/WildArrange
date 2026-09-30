@@ -23,7 +23,8 @@ import { invokeCapability } from "../capabilities/gateway.mjs";
 import { hashContent } from "../infra/runtime-store.mjs";
 import { readVerifiedLedgerEntries } from "../infra/ledger.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
-import { loadTaskState, normalizeTask } from "./plan-state.mjs";
+import { loadTaskState } from "./plan-state.mjs";
+import { normalizeTask } from "./task-normalize.mjs";
 import { persistTaskState } from "./task-board.mjs";
 import { readChangeRequest, writeContractChangeRequest, recordContractChangeDecision, contractRequestFingerprint } from "./change-governance.mjs";
 

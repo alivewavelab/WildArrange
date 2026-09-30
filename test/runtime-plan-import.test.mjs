@@ -9,7 +9,8 @@ import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { importPlan, validatePlanGraph } from "../src/orchestration/plan-state.mjs";
+import { importPlan } from "../src/orchestration/plan-state.mjs";
+import { validatePlanGraph } from "../src/orchestration/task-normalize.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 import { withExternalProject } from "./helpers/external-fixture.mjs";
 
@@ -119,8 +120,11 @@ test("plan import never persists a requested completed status", async () => {
     assert.equal(ledger.tasks.length, 1);
     assert.equal(ledger.tasks[0].status, "needs_user_decision");
     assert.equal(ledger.tasks[0].history.at(-1).status, "needs_user_decision");
+    // plans/<id>.json 只是不含 tasks 的导入快照；任务状态唯一在 team/tasks.json。
     const persistedPlan = await readJson(resolveWildArrangePath(projectRoot, "plans", `${plan.id}.json`));
-    assert.equal(persistedPlan.tasks[0].status, "needs_user_decision");
+    assert.equal(persistedPlan.tasks, undefined);
+    assert.equal(persistedPlan.title, "Forged completion");
+    assert.deepEqual(ledger.plans.find((entry) => entry.id === plan.id).taskIds, ["T001"]);
   });
 });
 

@@ -367,7 +367,7 @@ node ./bin/wildarrange.mjs docs commands --write
 
 `doctor` 是一键体检：校验 config 结构与挂载、对账所有 Plan 的已完成任务（checkpoint / acceptance proof / ledger 事件必须以 `planId:taskId` 对齐）、验证 ledger hash 链，并与最近一次备份交叉比对以发现整链重写；`decisionHealth` 分项给出周期健康摘要（各门触发计数、从未触发的门、坏行与孤儿标注预警）。各项检查各自隔离，单项崩溃只标红对应分项；doctor 只读诊断，不写 ledger。`state migrate` 会先自动备份，再迁移运行态任务总账并删除已退役的运行态投影；它不会改写项目根的 `wildarrange.config.json`。没有当前 proof chain 的旧 `completed` 会进入 `needs_user_decision`，不会伪造新验收证据。`state restore` 恢复前也会自动再做一次备份。
 
-`task archive ... --delete` 需要显式删除确认，并且会先做运行态备份；`in_progress` / `verifying` 任务不可归档。Plan/Task ID 必须是安全单段标识符，canonical `planId:id` 身份必须唯一，显式 `--plan` 必须精确命中，不能回退到其它 Plan；未索引旧 Plan 也只删除指定 Task。删除采用可回滚事务并最后提交权威任务总账，仅清理目标 Task、空 Plan、对应 checkpoint / acceptance report、该任务的 outbox DoneClaim，以及未被其它任务共用的 `.wildarrange/artifacts/` 精确非 glob 产物。本次精确删除集会写入对应 backup 的 recovery package；进程中断或需要撤销时可执行 `state restore --backup <backupId>` 恢复 Plan、证明、DoneClaim 与 artifact。清空活动 Plan 后系统进入 `idle`，不会自动激活其它 Plan。历史 ledger 与 backups 不随归档删除。
+`task archive ... --delete` 需要显式删除确认，并且会先做运行态备份；`in_progress` / `verifying` 任务不可归档。Plan/Task ID 必须是安全单段标识符，canonical `planId:id` 身份必须唯一，显式 `--plan` 必须精确命中，不能回退到其它 Plan；删除采用可回滚事务并最后提交权威任务总账，仅清理目标 Task、空 Plan、对应 checkpoint / acceptance report、该任务的 outbox DoneClaim，以及未被其它任务共用的 `.wildarrange/artifacts/` 精确非 glob 产物。本次精确删除集会写入对应 backup 的 recovery package；进程中断或需要撤销时可执行 `state restore --backup <backupId>` 恢复 Plan、证明、DoneClaim 与 artifact。清空活动 Plan 后系统进入 `idle`，不会自动激活其它 Plan。历史 ledger 与 backups 不随归档删除。
 
 `impact` 是改动影响分析：列出一个文件被哪些文件直接或间接 import，以及应该跑哪些测试（含常驻的五区边界测试），让 AI 改一处后能机器化证明「没碰别的模块」。
 

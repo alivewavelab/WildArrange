@@ -72,12 +72,11 @@ import {
   claimTeamTask,
   createTeamTask,
   getTeamTask,
-  listTeamMessages,
   listTeamTasks,
   readyTeamTask,
   recordTaskEvidence,
-  sendTeamMessage,
 } from "../src/orchestration/task-board.mjs";
+import { listTeamMessages, sendTeamMessage } from "../src/orchestration/team-messages.mjs";
 import { archiveTeamTaskWithBackup } from "../src/orchestration/task-archive.mjs";
 import { approvePlan, importPlan, loadPlanApproval } from "../src/orchestration/plan-state.mjs";
 import { writeIntegrationAcceptance } from "../src/infra/repository-binding.mjs";

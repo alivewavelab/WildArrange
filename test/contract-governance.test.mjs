@@ -31,7 +31,7 @@ import {
   findTauriCommands,
 } from "../src/capabilities/contract-discovery.mjs";
 import { listRegisteredCapabilities } from "../src/capabilities/gateway.mjs";
-import { normalizeTask } from "../src/orchestration/plan-state.mjs";
+import { normalizeTask } from "../src/orchestration/task-normalize.mjs";
 import { withExternalProject } from "./helpers/external-fixture.mjs";
 import { matchSkills } from "../src/ai/skill-matcher.mjs";
 

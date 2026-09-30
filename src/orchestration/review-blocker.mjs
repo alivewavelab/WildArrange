@@ -7,7 +7,8 @@
 import { ensureWildArrangeDirs, nowIso } from "../infra/runtime-store.mjs";
 import { transactWithLedger, withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
-import { loadTaskState, normalizeTask, validatePlanGraph } from "./plan-state.mjs";
+import { loadTaskState } from "./plan-state.mjs";
+import { normalizeTask, validatePlanGraph } from "./task-normalize.mjs";
 import { persistTaskState } from "./task-board.mjs";
 import { hasWeakeningLanguage } from "./change-governance.mjs";
 

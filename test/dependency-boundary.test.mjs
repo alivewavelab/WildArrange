@@ -171,7 +171,8 @@ test("dependency boundary: orchestration calls resolveRouteDecision only at pinn
   // decision projection) belongs to ai/routing.mjs
   // routeRequest. Naming every orchestration file that mentions the symbol
   // makes a new direct caller a conscious, reviewed decision.
-  const PINNED_CALLERS = ["feature-design.mjs", "plan-state.mjs"];
+  // task-normalize.mjs holds the per-task enrichment split out of plan-state.mjs.
+  const PINNED_CALLERS = ["feature-design.mjs", "plan-state.mjs", "task-normalize.mjs"];
   const files = await listMjsFiles(path.join(SRC_DIR, "orchestration"));
   const callers = [];
   for (const filePath of files) {

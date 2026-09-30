@@ -11,7 +11,7 @@ import path from "node:path";
 import test from "node:test";
 import { admitParallelAgentResult, closeParallelAgentRun, listParallelAgentRuns, parallelAgentStatus, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
-import { listTeamMessages } from "../src/orchestration/task-board.mjs";
+import { listTeamMessages } from "../src/orchestration/team-messages.mjs";
 import { dashboardData } from "../src/orchestration/status.mjs";
 import { runCommand } from "../src/infra/command-runner.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";

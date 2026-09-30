@@ -176,9 +176,9 @@ SQL/数据库字段首版仍需人工声明精确结构及验证引用，Tauri �
 - `src/orchestration/workflow.mjs`：workflow 入口、样例计划生成与计划模板复制。
 - `src/orchestration/linear-runtime.mjs`：连续 `runNextTask` 的任务选择、claim、worker 执行与 delivery pipeline 编排；每个 gate 调用经 `capabilities/gateway.mjs` 的 `invokeCapability`。分步 execute/checkpoint/retry 节点由 `src/orchestration/linear-workflow.mjs` 持有（verify/scope/review 只经完整 pipeline 运行，无单步入口）；pipeline 结果落盘由 `src/orchestration/task-recovery.mjs` 的 `applyPipelineOutcome` 统一维护，全区唯一的失败落盘器是其中的 `persistTaskFailure`。delivery worktree 段（持久 worktree 基线核对、durable intent 对账、依赖 delivery SHA 裁决与 worktree 创建）及 worker 前工作区快照记录在 `src/orchestration/linear-delivery.mjs`。
 - `src/orchestration/delivery-pipeline.mjs`：线性运行时与并行 Agent admission（完整 pipeline）及单步 `node checkpoint` workflow（重跑完整 pipeline）共用的 verify -> scope -> review -> acceptance-proof -> checkpoint 序列，因此增删重排 gate 只有一处。`shouldFailDeliveryAttempt` 统一判断失败/重试，`commitTaskCompletionState` 只统一 ledger -> wisdom -> canonical `tasks.json` 的完成提交顺序；各调用方继续提供自己的 ledger 事件与提交后动作。checkpoint 写失败返回 `checkpoint_failed` 而非 `completed`——调用方将任务回 `pending` 并写 `checkpoint_write_failed` ledger 条目；完成严格需要 durable checkpoint。Gate 证据绑定执行轮次：每次新 worker run 清空 `last_*` gate 字段，`checkpoint` 总是由 pipeline 现场重跑 verify/scope/review，旧一轮的 passing 证据不能借给后续未验证轮次；`acceptance-proof` 是唯一完成总闸，review lanes 不再重复裁决 verify/scope/worker/successCriteria。完成事务可幂等恢复：若在 completion ledger 事件之后、canonical `tasks.json` 保存之前中断，`run` 检测任务卡在 `verifying` 并用 checkpoint-node 逻辑重跑 pipeline 裁决（全部通过则幂等完成；否则回 `pending`/`failed`）；`in_progress` 任务故意不动（可能正当 claim）；持有 `admission_claim` 的 `verifying` 任务 likewise 留给并行 admission owner（`run` 报告 `blocked` 与 resume 提示而非劫持进行中事务）。completed 任务必须有的产物（wisdom 行）在事务**内**写入——completion ledger 事件之后、canonical persist 之前——失败则任务保持可恢复而非无产物完成；提交后便利（snapshot、workflow summary）经 `runPostCompletionSideEffects` best-effort，失败转为 `completion_side_effect_failed` ledger 事件与结果上 `sideEffectWarnings` 条目，而非 un-complete 任务。
-- `src/orchestration/plan-state.mjs`：计划归一化、图校验、计划导入、路由 enrichment、任务状态加载与计划批准状态（`loadPlanApproval` / `approvePlan`）；外置模式把治理 verification registry 的三类命令只增不减地合入计划，并在唯一 task ledger 固化 registry digest 与双仓 revision。
-- `src/orchestration/task-board.mjs`：全项目工单总账编排；新功能、Bug、验收纠错和维护任务共享 Task 模型。信息不足时先写 `draft`，补齐 writable paths、success criteria 与 verify commands 后经 `task ready` 转为 `pending`。负责跨 Plan list/get、claim、证据记录、单文件状态持久化、outbox 与 durable 消息板；同一 Task 内 verifier 失败只追加 attempt/history，不制造新工单。旧 ledger 迁移由 `src/orchestration/task-migration.mjs` 单独持有。
-- `src/infra/task-state-store.mjs`：读取 `.wildarrange/team/tasks.json` 的全项目 ledger，兼容旧 `{planId,tasks}` 格式，并向执行链投影 active Plan 的原有 `{planId,tasks}` 视图。未来 schema version fail-closed；旧 completed 不继承当前完成资格，而是投影为 `needs_user_decision` 等待重新验收。每个全局引用使用 `<planId>:<taskId>`，所以不同 Plan 可继续使用局部编号 `T001`。
+- `src/orchestration/plan-state.mjs`：计划导入事务、路由 enrichment、任务状态加载、计划批准状态（`loadPlanApproval` / `approvePlan`）、`work.json` 计划状态唯一写入口（`updateWorkState`）与 `tasks.md` 派生渲染；任务字段规范化与任务图校验在 `src/orchestration/task-normalize.mjs`；外置模式把治理 verification registry 的三类命令只增不减地合入计划，并在唯一 task ledger 固化 registry digest 与双仓 revision。
+- `src/orchestration/task-board.mjs`：全项目工单总账编排；新功能、Bug、验收纠错和维护任务共享 Task 模型。信息不足时先写 `draft`，补齐 writable paths、success criteria 与 verify commands 后经 `task ready` 转为 `pending`。负责跨 Plan list/get、claim、证据记录、单文件状态持久化与 worker outbox；`team/tasks.json` 是任务状态唯一可写处，`plans/<id>.json` 只是导入时不含 tasks 的计划快照，`tasks.md` 是派生视图；同一 Task 内 verifier 失败只追加 attempt/history，不制造新工单。团队消息由 `src/orchestration/team-messages.mjs`（只写收件人 inbox 与 ledger 审计）持有，归档删除由 `src/orchestration/task-archive.mjs` 持有。
+- `src/infra/task-state-store.mjs`：读取 `.wildarrange/team/tasks.json` 的全项目 ledger，并向执行链投影 active Plan 的 `{planId,tasks}` 视图（`taskStateFromLedger`）；`replacePlanTasks` 是总账计划条目与任务列表的唯一构造点。未来 schema version fail-closed。每个全局引用使用 `<planId>:<taskId>`，所以不同 Plan 可继续使用局部编号 `T001`。
 - `src/infra/agent-spawn.mjs`：Codex/Cursor/自定义 command adapter 的宿主中立子 Agent spawn 命令渲染。
 - `src/infra/git-worktree.mjs`：Git worktree 隔离、patch 提取、patch 路径解析、patch admission helper，以及每次 worker run 前基于 `git stash create` 的 pre-execute 工作区 snapshot。
 - `src/infra/git-coordination.mjs`：Git 交付原语（参数数组调用）：交付环境探测、delivery commit、普通 push/fetch、working/tree-diff 检查、祖先检查与 task branch 命名。不决定 task 状态，也不提供自动 merge 到 `main` 的原语。
@@ -221,7 +221,7 @@ SQL/数据库字段首版仍需人工声明精确结构及验证引用，Tauri �
 - `.wildarrange/annotations.jsonl`：决策记录的人工/复核标注（`confirmed|rule_wrong|case_wrong|mislabeled`）。类别强制；统计按 rule × category 聚合，单条标注不能劫持 rule。硬约束（`test/annotation.test.mjs` 钉死）：标注路径永不写 config、`verify_commands`、路由表或任何 gate 开关——标注告知人，不移动 gate。
 - `.wildarrange/security/config-baseline.json`：已审核 config 指纹。`config verify` 检测 baseline 之后增删改的 config 文件。
 - `.wildarrange/backups`：`state backup` 创建的 ledger、work、tasks、snapshots 与 config baseline 时点副本；归档操作会把本次 Plan/checkpoint/acceptance/DoneClaim/精确 artifact 删除集追加到同一 backup 的 recovery package，并记录 `prepared|committed|rolled_back|recovery_required` 事务状态与 staging 诊断路径。`state migrate` 与 `state restore --backup <id>` 都会先自动创建恢复点。
-- 任务退出活动运行态使用 `task archive --task <id> --delete`：编排层（`src/orchestration/task-archive.mjs`）先备份，再校验 Plan/Task 为安全单段标识符、canonical `planId:id` 身份唯一，并拒绝归档 `in_progress` / `verifying`。显式 `--plan` 必须精确命中，不回退到其它 Plan；未索引旧 Plan 也只删除指定 Task 并保留其它任务。删除使用同卷 staging 与镜像/权威总账回滚事务，权威总账最后提交；随后写完成墓碑并清理目标 Task、空 Plan、精确 checkpoint/acceptance report、该任务的 outbox DoneClaim，以及未被其它任务共用的 `.wildarrange/artifacts/` 精确非 glob 产物。进程中断时 recovery package 保留恢复材料，执行 `state restore --backup <id>` 可恢复整个精确删除集。清空活动 Plan 后进入 `idle`，不会自动激活其它 Plan；下一 Plan 必须显式选择并重新建立批准状态。Ledger 与 backups 不属于归档删除范围。
+- 任务退出活动运行态使用 `task archive --task <id> --delete`：编排层（`src/orchestration/task-archive.mjs`）先备份，再校验 Plan/Task 为安全单段标识符、canonical `planId:id` 身份唯一，并拒绝归档 `in_progress` / `verifying`。显式 `--plan` 必须精确命中，不回退到其它 Plan。删除使用同卷 staging 与派生视图/权威总账回滚事务，权威总账最后提交；随后写完成墓碑并清理目标 Task、空 Plan、精确 checkpoint/acceptance report、该任务的 outbox DoneClaim，以及未被其它任务共用的 `.wildarrange/artifacts/` 精确非 glob 产物。进程中断时 recovery package 保留恢复材料，执行 `state restore --backup <id>` 可恢复整个精确删除集。清空活动 Plan 后进入 `idle`，不会自动激活其它 Plan；下一 Plan 必须显式选择并重新建立批准状态。Ledger 与 backups 不属于归档删除范围。
 - `.wildarrange/reports/doctor.json` / `.wildarrange/reports/doctor.md`：最新 `doctor` 健康报告，覆盖 config mounts、完成对账、ledger 校验、ledger 与备份交叉检查及最新仓库治理摘要。
 - `.wildarrange/reports/governance/latest.json` / `.wildarrange/reports/governance/latest.md`：LuWu 最新确定性仓库审计证据。
 - `.wildarrange/checkpoints`：全部 gate 通过后的 checkpoint JSON。
@@ -405,7 +405,8 @@ adapter 专用行为属于 `src/interface/adapters.mjs` 或宿主专用生成文
 | `src/interface/project-setup.mjs` | `setup` 一步式外置治理接入（治理仓初始化、attach、运行态初始化、adapter 包生成）及 `project` 命令的默认值与 JSON 视图 |
 | **orchestration/**（工作流顺序、重试、gate 编排，只依赖 ai、capabilities、infra） |  |
 | `src/orchestration/AGENTS.md`                                | 编排、事务、恢复与完成状态不变量 |
-| `src/orchestration/plan-state.mjs`                            | 计划导入、批准、校验与任务状态加载；feature design 状态委托唯一 owner |
+| `src/orchestration/plan-state.mjs`                            | 计划导入、批准、`work.json` 计划状态写入与任务状态加载；feature design 状态委托唯一 owner |
+| `src/orchestration/task-normalize.mjs`                        | 任务字段规范化、successCriteria/contractChanges 校验、任务图校验与单任务路由 enrichment（纯函数） |
 | `src/orchestration/feature-design.mjs`                        | 需求确认、计划绑定与 feature design 状态迁移的唯一业务 owner |
 | `src/orchestration/host-runtime.mjs`                          | 宿主事件的业务前置编排；CLI 显式组合 AI 渲染入口，不添加反向 import |
 | `src/orchestration/contract-governance.mjs`                    | 批准契约范围、计划外变更申请/决定/等待与登记更新编排，复用现有 ChangeRequest |
@@ -424,8 +425,9 @@ adapter 专用行为属于 `src/interface/adapters.mjs` 或宿主专用生成文
 | `src/orchestration/delivery-pipeline.mjs`                     | 按任务/工作区事实确定交付要求及强制完成终点，复用 integration Git 事务；统一 gate 与完成提交顺序 |
 | `src/orchestration/task-branch.mjs`                           | 任务启动时解析 task branch 目标（分支名/基线/可选远端） |
 | `src/orchestration/integration.mjs`                           | 交付事务：delivery commit、task branch 普通 push 与故障对账；不得自动合入 `main` |
-| `src/orchestration/task-board.mjs`                            | 全项目工单总账、draft/ready、任务 claim/证据/持久化与消息板 |
-| `src/orchestration/task-archive.mjs`                          | 归档编排：先写 `pre-task-archive:<taskId>` 运行态备份，再交 task-board 精确归档删除（backupId 串联 recovery package） |
+| `src/orchestration/task-board.mjs`                            | 全项目工单总账、draft/ready、任务 claim/证据与 `persistTaskState`（总账唯一写入口） |
+| `src/orchestration/team-messages.mjs`                         | 团队消息：写收件人 inbox 并入 ledger 审计，列出 inbox 历史 |
+| `src/orchestration/task-archive.mjs`                          | 归档删除：先写 `pre-task-archive:<taskId>` 运行态备份，再以 staging + 回滚事务精确归档删除（backupId 串联 recovery package） |
 | `src/orchestration/change-governance.mjs`                     | ChangeRequest 单一记录与决定持久化；scope/契约请求共用 |
 | `src/orchestration/plan-steering.mjs`                         | 计划 steering 提案校验与应用（验收不可弱化） |
 | `src/orchestration/review-blocker.mjs`                        | review blocker 登记与解决 |
@@ -496,8 +498,8 @@ adapter 专用行为属于 `src/interface/adapters.mjs` 或宿主专用生成文
 | `src/infra/route-table.mjs`                                    | 确定性路由表加载（含 overrides）与信号匹配单一实现（`loadRoutesConfig`/`resolveRouteDecision`/`matchSignals`），无 LLM；`resolveRouteDecision` 限只读用途 |
 | `src/infra/failure-analysis.mjs`                                | 失败原因分类、返工提示与失败摘要                              |
 | `src/infra/task-reports.mjs`                                    | wisdom / failure report / review report 落盘      |
-| `src/infra/task-state-store.mjs`                                | 单文件全项目 Task ledger 读取、旧格式兼容与 active Plan 投影 |
-| `src/infra/task-predicates.mjs`                                 | no-op / trivial command 等纯任务形状判断              |
+| `src/infra/task-state-store.mjs`                                | 单文件全项目 Task ledger 读取、active Plan 投影与计划条目/任务列表的唯一构造（`replacePlanTasks`） |
+| `src/infra/task-predicates.mjs`                                 | no-op / trivial command、任务可运行判定、状态计数与看板阶段映射等纯任务谓词 |
 | `src/infra/success-criteria.mjs`                                | 成功判据状态机与 verifier 证据回填                        |
 | `src/infra/rule-scanner.mjs`                                    | 项目规范扫描与规则上下文注入                                |
 | `src/infra/repository-layout.mjs`                                | 目录边界、README 对等、Prompt 清单、命名与注释规则的只读检查 |

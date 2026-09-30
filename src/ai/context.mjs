@@ -19,6 +19,7 @@ import path from "node:path";
 import {
   DEFAULT_EXECUTOR_AGENT,
   DEFAULT_LEAD_AGENT,
+  normalizeAgentKey,
 } from "../infra/agent-registry.mjs";
 import {
   STATE_VERSION,
@@ -39,7 +40,6 @@ import { uniqueStrings } from "../infra/text-utils.mjs";
 import { defaultInjectionPointForAgent, resolveInjectionPoint } from "./injection.mjs";
 import { loadTaskState } from "../infra/task-state-store.mjs";
 import { scanProjectRules } from "../infra/rule-scanner.mjs";
-import { normalizeAgentName } from "../orchestration/task-board.mjs";
 import { findRunnableTask } from "../infra/task-predicates.mjs";
 import { statusReport } from "../orchestration/status.mjs";
 
@@ -63,7 +63,7 @@ export async function buildAgentContext(rootDir, options = {}) {
     ...(changed.available ? changed.paths : []),
   ].map(normalizeRelativePath));
   const rules = await scanProjectRules(executionRoot, { projectRoot: rootDir, targetPaths });
-  const agent = normalizeAgentName(options.agent || task?.owner || DEFAULT_EXECUTOR_AGENT) || DEFAULT_EXECUTOR_AGENT;
+  const agent = normalizeAgentKey(options.agent || task?.owner || DEFAULT_EXECUTOR_AGENT) || DEFAULT_EXECUTOR_AGENT;
   const resumeContext = await writeContextSnapshot(rootDir, { reason: `agent-context:${agent}` });
   const role = options.role || roleForAgent(agent);
   const injectionPointName = options.injectionPoint || defaultInjectionPointForAgent(agent, { taskId: task?.id });
