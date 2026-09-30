@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>整改计划与规范改动</title>
+<style>
+:root{--bg:#fafaf8;--fg:#1d1d1b;--muted:#6b6b66;--card:#fff;--line:#e4e2dc;--p0:#c0392b;--p1:#d9822b;--p2:#2e7dbd;--p3:#6b8e23;--del:#fdecea;--add:#e8f5ec}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#17171a;--fg:#e8e6e1;--muted:#9a978f;--card:#212126;--line:#34343a;--del:#3a2224;--add:#1f3326}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:1180px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:26px;margin:0 0 4px}h2{margin:34px 0 12px;font-size:20px;border-bottom:1px solid var(--line);padding-bottom:6px}
+.muted{color:var(--muted);font-size:13px}
+.box{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--p2);border-radius:8px;padding:12px 16px;margin:12px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-top:5px solid var(--c);border-radius:10px;padding:12px 16px}
+.card h3{margin:0 0 6px;font-size:16px}.card ul{margin:6px 0;padding-left:18px}
+.tag{display:inline-block;font-size:12px;padding:1px 8px;border-radius:10px;color:#fff;background:var(--c);margin-right:6px}
+.flow{display:flex;flex-wrap:wrap;gap:8px}.step{flex:1 1 170px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px}.step b{display:block}
+.done{border-color:var(--p3)}
+table{border-collapse:collapse;width:100%;font-size:13px}th,td{border:1px solid var(--line);padding:6px 8px;vertical-align:top;text-align:left}th{background:var(--card)}
+td.old{background:var(--del)}td.new{background:var(--add)}
+.tw{overflow-x:auto}
+code{font-size:12px;background:rgba(127,127,127,.14);padding:0 3px;border-radius:3px}
+</style>
+</head>
+<body><main>
+<h1>整改计划与规范改动（已执行）</h1>
+<div class="muted">2026-09-29 · 依据 <code>doc/plans/2026-09-29-full-code-review.html</code> 与外置/内置对等调查 · 需要你确认两件事：① 第 3 节规范改动；② 第 4 节一个产品选择</div>
+
+<div class="box" style="border-left-color:var(--p3)"><b>执行结果（2026-09-30）：W0–W6 全部完成</b>，集成分支 <code>refactor/review-integration</code>（<code>807d9a7</code>），尚未 push / 开 PR。<br>
+最终验证：68 个测试文件、558 条用例通过，0 失败，1 条 Windows 专用用例跳过；<code>npm pack --dry-run</code> 正常（204 个文件）。<br>
+与 <code>main</code> 对比：src 35,105 → 29,912 行（-15%，已含外置补齐新增的约 1,400 行）；doc 17,163 → 2,351 行；test 21,112 → 18,606 行；仓库文件 350 → 282 个。<br>
+执行中新发现并修复的外置缺陷 6 项（doctor 误报漂移、合入崩溃恢复 ENOENT、失败 run 占分支、样例 workflow、相对草稿路径、扫描故障注入）。<br>
+遗留：本仓自身治理仓暂不建（用户决定）；<code>adapters.mjs</code> 918 行、<code>adoption-panel</code> 715 行、<code>dashboard-view</code> 705 行略超 700 行线；route-table 移入 ai 与去除 gateway 需改依赖白名单，待另行批准。</div>
+<div class="box"><b>你已拍板：</b>① 不做多设备协调，唯一约束是"两个可写任务不能在同一分支开发"；② 只保留外置治理，但治理效能必须与内置等同；③ 其余 review 建议全部接受。<br>
+<b>调查后的关键调整：</b>外置模式现在<b>还不能直接替代内置</b>——主链路（质量门、Hook 拦截）没问题，但有 4 个会让治理静默失效的缺口。所以顺序改为<b>先补齐外置，再删内置</b>。</div>
+
+<h2>1. 外置模式必须先补齐的缺口（证据已核实）</h2>
+<div class="grid">
+  <div class="card" style="--c:var(--p0)"><span class="tag">P0</span><h3>并行合入在外置下必崩</h3>补丁文件路径写死在项目内 <code>.wildarrange/</code>（<code>git-worktree.mjs:197</code>、<code>admission-recovery.mjs:98,148</code>），实测 ENOENT 且回滚失败。</div>
+  <div class="card" style="--c:var(--p0)"><span class="tag">P0</span><h3>默认注入的上下文文档全部静默丢失</h3>状态快照、任务上下文、审查报告等 Markdown 挂载按项目根解析（<code>context-attachments.mjs:18</code>），外置下 2→0，Agent 看不到当前任务状态。</div>
+  <div class="card" style="--c:var(--p0)"><span class="tag">P0</span><h3>在子目录或任务 worktree 里开会话，Hook 失真或崩溃</h3>子目录启动漏读根 AGENTS.md、合法写入被误拒；在任务 worktree 里直接抛错（<code>workspace-context.mjs:227</code>）。</div>
+  <div class="card" style="--c:var(--p0)"><span class="tag">P0</span><h3>治理配置被改，防篡改校验仍显示通过</h3>指纹只看项目根配置（<code>security.mjs:558</code>），真正生效的治理仓配置不在校验范围。</div>
+  <div class="card" style="--c:var(--p1)"><span class="tag">P1</span><h3>治理效能打折（8 项）</h3><ul>
+    <li>契约扫描、计划草稿仍往客户项目写 <code>.wildarrange/</code></li>
+    <li>治理仓默认不是 Git 仓库，拖到验收最后一步才失败</li>
+    <li>没有治理配置脚手架，配置沦为本机未版本化文件</li>
+    <li>Kimi 的"未完成自动续跑"丢失；Codex 少一个 <code>create_goal</code> 拦截</li>
+    <li>Hook 配置被改无法发现；外置没有卸载/恢复</li>
+    <li><b>Cursor 用户级 Hook 在 WildArrange 安装损坏时会阻断你所有项目的写操作</b></li>
+    <li>宿主不经 Hook 时看不到治理政策（见第 4 节）</li></ul></div>
+  <div class="card" style="--c:var(--p2)"><span class="tag">体验</span><h3>从零上手要 4 条命令 + 手工步骤</h3>内置只要 2 条。补一个 <code>wildarrange setup</code>：建治理仓（含 git init、默认配置）→ 连接项目 → 生成宿主插件，一步完成。另：doctor 对只用一个宿主的人永远报错，需以实际安装的宿主为准。</div>
+</div>
+
+<h2>2. 分批执行路线（每批一个分支 + PR，测试全绿才交付）</h2>
+<div class="flow">
+  <div class="step done"><b>W0 · P0 缺陷 ✅</b>可运行口径统一、工具合同自动生成<br><span class="muted">已提交 <code>fix/review-p0</code> 3ec335c，净 -1021 行</span></div>
+  <div class="step"><b>W1 · 直接删</b>兼容遗留、LLM 旁观者（archivist 等）、死代码、残存文档与 Fable prompt 原文<br><span class="muted">约 -3000 行代码 +1.5 万行文档</span></div>
+  <div class="step"><b>W2 · 删多设备</b>handoff / takeover / remote-ownership / device / coordination；保留"同分支不得两个可写任务"<br><span class="muted">约 -1000~1300 行</span></div>
+  <div class="step"><b>W3 · 外置补齐</b>修第 1 节全部缺口 + <code>setup</code> 一步初始化 + 外置测试夹具<br><span class="muted">约 +300 行，每个缺口配测试</span></div>
+  <div class="step"><b>W4 · 删内置模式</b>删 legacy 单根分支与 <code>--control-root</code>；测试夹具全部切到外置<br><span class="muted">约 -1400 行</span></div>
+  <div class="step"><b>W5 · 结构合并</b>执行主线三处落盘合一、完成门唯一、任务数据单写、配置单源、infra 业务归位、宿主适配器合一<br><span class="muted">约 -1500~2000 行</span></div>
+  <div class="step"><b>W6 · 治理减负与文档</b>去掉总图门禁、拆 5498 行测试、架构文档去重、README 同步</div>
+</div>
+<p class="muted">W1 与 W2 互不依赖，可由子 agent 在独立 worktree 并行；W3→W4 必须串行（先等效、再删除）。每批合入 main 仍由你在 PR 上批准。</p>
+
+<h2>3. 规范改动清单（请确认）</h2>
+<p class="muted">共 9 个文件、约 25 处。原则：只删过时条款或改写为外置等价表述；<b>唯一新增的约束</b>是外置 Hook 的"未连接项目必须放行"（修 P1 爆炸半径）和"外置效能等同"（落实你的决策）。所有安全底线（质量门链、acceptance proof、非强制 push、人类批准合并）原样保留。随各批次落地，不提前改。</p>
+<div class="tw"><table>
+<thead><tr><th>文件</th><th>原文（摘要）</th><th>改为</th><th>原因 / 批次</th></tr></thead>
+<tbody>
+<tr><td rowspan="6"><code>doc/development-workflow.md</code></td><td class="old">所有运行时状态写入 <code>.wildarrange/</code>。</td><td class="new">运行形态只有外置治理：项目仓只放产品代码与项目自有规则；治理政策与 verification registry 版本化在独立治理仓；运行态写入项目外的 runtimeRoot，WildArrange 不向客户项目写任何文件。外置模式的 Hook 拦截、规则注入、质量门与防篡改能力必须与原内置模式等效，并由测试覆盖。</td><td>决策 2 · W4</td></tr>
+<tr><td class="old">Git 多设备协调默认使用 <code>guarded</code>…无 remote 时明确降级…<code>strict</code> 不允许降级。<br>Git 协调只允许普通非强制 push；…跨设备 handoff…takeover 必须显式记录预期旧设备…</td><td class="new">不做多设备/多用户远端协调。Git 只允许普通非强制 push；同一分支已被另一个可写任务或 worktree 占用时拒绝启动。</td><td>决策 1 · W2</td></tr>
+<tr><td class="old">Kimi Code 项目接入复用根 <code>AGENTS.md</code> 与 <code>.agents/skills/</code>；生命周期能力通过用户明确安装的 Kimi plugin 转发…</td><td class="new">Kimi Code 通过用户显式安装的外置 plugin 接入；项目 CLI 不得静默改写用户级 <code>~/.kimi-code/config.toml</code>。</td><td>决策 2 · W4</td></tr>
+<tr><td class="old">…Router 仅为系统节点，CangJie 仅为内部 profile。…</td><td class="new">…Router 仅为系统节点。…（删 CangJie）</td><td>archivist 删除 · W1</td></tr>
+<tr><td class="old">ArchivistRouter 只读取清洗后的结论包…无 LLM key 时必须 fallback…</td><td class="new">（删除整条）</td><td>archivist 删除 · W1</td></tr>
+<tr><td class="old">路由必须保留 deterministic 证据；semantic shadow 只能作为第二意见和低置信门控…</td><td class="new">路由只使用确定性路由表，结果必须保留命中证据。</td><td>semantic shadow 删除 · W1</td></tr>
+<tr><td rowspan="2"><code>doc/code-maintenance.md</code></td><td class="old">产品总图…新分区或新运行时模块必须同步登记 <code>module-file-map.json</code> 并更新总图…<br>总图交互固定为"点模块卡片 → 底部抽屉"…<br>总图门禁豁免…其余改动后运行 <code>npm run check:arch</code>。</td><td class="new">（三条合并为一句）产品总图 <code>docs/product/architecture-overview.html</code> 是参考文档，架构变化时顺手更新，不设门禁。</td><td>治理减负，与依赖边界测试重叠 · W6</td></tr>
+<tr><td class="old">新增运行时能力必须更新 <code>project-architecture.md</code>，包括其「目录约定」中的职责登记。</td><td class="new">不变（W6 只把「主要文件」与「目录约定」的 93 处重复登记合为一处）。</td><td>—</td></tr>
+<tr><td><code>bin/AGENTS.md</code></td><td class="old"><code>handoff prepare</code> 必须使用 <code>--to-device-id</code>…<code>handoff takeover</code> 必须显式要求…CLI 不得提供 force push 或自动过期 owner 的入口。</td><td class="new">CLI 不得提供 force push 入口。</td><td>决策 1 · W2</td></tr>
+<tr><td rowspan="5"><code>src/infra/AGENTS.md</code></td><td class="old">负责：…规则扫描、仓库布局检查与记忆摘要等基础设施。</td><td class="new">…规则扫描、仓库布局检查等基础设施。</td><td>digest 删除 · W1</td></tr>
+<tr><td class="old">…自动 push 只允许写入任务独占的 task branch 或 ownership/handoff 协调引用…</td><td class="new">…自动 push 只允许写入任务独占的 task branch…</td><td>决策 1 · W2</td></tr>
+<tr><td class="old">…<code>.wildarrange/</code> 永远不进入 handoff 工作树变更清单。</td><td class="new">（删后半句）</td><td>决策 1 · W2</td></tr>
+<tr><td class="old">Prompt Pack 运行时读取根固定为 <code>.wildarrange/prompt-pack/installed</code>…</td><td class="new">…固定为 runtimeRoot 下的 <code>prompt-pack/installed</code>…</td><td>决策 2 · W4</td></tr>
+<tr><td class="old">…旧扁平证据只可在 JSON 身份匹配或全账本无同 stem 碰撞时兼容。</td><td class="new">（删除该句）</td><td>兼容遗留 · W1</td></tr>
+<tr><td rowspan="4"><code>src/orchestration/AGENTS.md</code></td><td class="old">…归档删除旧扁平证据前必须检查全账本 legacy stem 碰撞…</td><td class="new">Checkpoint/acceptance 证据按 <code>&lt;planId&gt;/&lt;taskId&gt;</code> 分目录。</td><td>兼容遗留 · W1</td></tr>
+<tr><td class="old">Git 协调开启时，同一任务只能存在一个远端写 owner…handoff 后旧设备必须 fail-closed…</td><td class="new">同一任务只能有一个本地 <code>parallel_run_claim</code>；完成前复核 task branch 基线。</td><td>决策 1 · W2</td></tr>
+<tr><td class="old">Handoff 必须按 <code>prepare → … → target accept</code> 推进；takeover…</td><td class="new">（删除整条）</td><td>决策 1 · W2</td></tr>
+<tr><td class="old">修改 Git 协调时，至少覆盖双设备 claim 竞争、handoff 后旧 owner 被拒绝、…</td><td class="new">修改 Git 交付时，至少覆盖同一分支不得被两个可写任务占用、脏基线不启动、越界文件不进入 commit、task branch push 不改变 main、未经人类批准不能 merge。</td><td>决策 1 · W2</td></tr>
+<tr><td rowspan="3"><code>src/ai/AGENTS.md</code></td><td class="old">负责：请求路由、ArchivistRouter 和语义第二意见。</td><td class="new">负责：确定性请求路由。</td><td>W1</td></tr>
+<tr><td class="old">Deterministic 路由与证据优先；semantic shadow…<br>ArchivistRouter 只摄入清洗后的结论包…</td><td class="new">路由只使用确定性路由表并保留证据。（删 Archivist 条）</td><td>W1</td></tr>
+<tr><td class="old">路由变化同时覆盖 deterministic 结果、fallback、建议审核和低置信场景。</td><td class="new">路由变化覆盖命中、未命中与低置信默认场景。</td><td>W1</td></tr>
+<tr><td rowspan="3"><code>src/interface/AGENTS.md</code></td><td class="old">负责：Codex、Cursor、Kimi Code adapter 的生成、安装、卸载、恢复和说明。<br>显式项目初始化时，决定补建哪些治理文档…</td><td class="new">负责：外置宿主插件的生成、激活、卸载、恢复；<code>setup</code> 初始化治理仓，只补建缺失文件、不覆盖已有政策。</td><td>决策 2 · W3/W4</td></tr>
+<tr><td class="old">Kimi/Cursor bridge 可共享项目发现与 CLI 子进程骨架…</td><td class="new">三个宿主共用一个 bridge 骨架（项目发现、超时、错误处理）；fail-open/fail-closed 与输出协议由各宿主分支显式决定。<b>用户级 Hook 只对 registry 已连接的项目生效；未连接项目或 WildArrange 自身安装损坏时必须放行，不得阻断无关项目。</b></td><td>新增约束，修 P1 爆炸半径 · W3</td></tr>
+<tr><td class="old">项目文档初始化变化必须覆盖最小集合、可选架构文档和重复运行不覆盖。</td><td class="new">治理仓初始化变化必须覆盖最小集合、重复运行不覆盖。</td><td>决策 2 · W3</td></tr>
+<tr><td><code>src/capabilities/AGENTS.md</code></td><td class="old">负责含 code intelligence；gateway 注册名 15 个（含 <code>command</code>、<code>command-safety</code>、<code>repository-governance</code>、<code>contract-governance-generate-artifacts</code>）</td><td class="new">去掉 code intelligence（并入 standards 命令）与 4 个无人调用的注册名</td><td>死代码 · W1</td></tr>
+<tr><td rowspan="3"><code>packs/wildarrange-linear/AGENTS.md</code></td><td class="old">CLI 能力变化时同步更新 <code>tool-contract.json</code>…</td><td class="new"><code>tool-contract.json</code> 由脚本从命令注册表生成，不要手改；测试校验同步。</td><td>W0（已在分支里改，需你追认）</td></tr>
+<tr><td class="old">发布工具合同不得含 <code>contract-only</code>…宿主已有的只读工具标为 <code>host-provided</code>…</td><td class="new">（删除，合同已自动生成）</td><td>W0 追认</td></tr>
+<tr><td class="old">Router 是系统节点；CangJie 是可选内部 profile…<br>…产物与门控只使用 <code>.wildarrange/</code>、真实 CLI…<br><code>project-init/</code>：显式 <code>init --project-docs</code> 使用的模板</td><td class="new">删 CangJie 句；"<code>.wildarrange/</code>"改为"运行态目录"；<code>project-init/</code> 改为治理仓 <code>setup</code> 使用的政策模板</td><td>W1 / W4</td></tr>
+<tr><td rowspan="2"><code>doc/AGENTS.md</code> · <code>test/AGENTS.md</code></td><td class="old">总图 + <code>module-file-map.json</code>：新运行时模块必须登记并跑 <code>npm run check:arch</code>。</td><td class="new">总图是参考文档，不设门禁。</td><td>W6</td></tr>
+<tr><td class="old">时间、并发和端口测试应使用隔离临时目录/端口，不依赖开发者现有 <code>.wildarrange/</code>。</td><td class="new">测试统一用 <code>test/helpers</code> 的外置三根夹具在隔离临时目录搭建，不依赖开发者本机状态。</td><td>W4</td></tr>
+</tbody></table></div>
+<p class="muted">更短的替代：只改决策直接涉及的 4 个文件（development-workflow、bin、infra、orchestration），其余过时条款留着不管。不推荐——过时规则会继续把 Agent 引向已删除的功能。</p>
+
+<h2>4. 需要你选一个：宿主不经 Hook 时，Agent 如何看到治理政策？</h2>
+<div class="grid">
+  <div class="card" style="--c:var(--p3)"><span class="tag">推荐</span><h3>② 用户级"指针"规则</h3>在 <code>~/.cursor/rules/</code> 和 <code>~/.codex/AGENTS.md</code> 写一小段"先运行 wildarrange 读取治理"的指针，显式激活、可备份恢复。客户项目零文件，Hook 失效时也不会完全失明。</div>
+  <div class="card" style="--c:var(--line)"><h3>① 只靠提示</h3>保持现状，由 doctor/status 显著提示"Hook 未生效 = 政策未生效"。最简单，但 Hook 没装好时 Agent 完全看不到政策。</div>
+  <div class="card" style="--c:var(--line)"><h3>③ 项目根放 3 行 AGENTS.md 指针</h3>与原内置模式完全等效，但打破"不向客户项目写文件"。</div>
+</div>
+</main></body></html>
