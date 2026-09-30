@@ -45,7 +45,7 @@ node --test test/package-boundary.test.mjs
 ## 阻断条件
 
 - 测试失败。
-- 真实 pack 清单包含未列入命名白名单的 `doc/plans/` 文件、`.external/`、`.wildarrange/`、`.tmp/`、密钥、临时报告或本机路径。
+- 真实 pack 清单包含未列入命名白名单的 `doc/plans/` 文件、`.external/`、`.tmp/`、密钥、临时报告或本机路径。
 - README 中的安装命令不可执行。
 - 发布包包含受限第三方源码或未确认可商业分发的文本资产。
 - `package.json` 的 `files` 遗漏 README、bin、src、packs、配置样例。

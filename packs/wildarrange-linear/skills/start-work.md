@@ -1,5 +1,7 @@
 # start-work
 
+> 下文 `runtime:` 开头的路径指运行态目录（`wildarrange project show` 输出的 `runtimeRoot`），位于项目之外，不在项目里找。
+
 ## 目的
 
 启动或恢复一个 WildArrange 计划：先读持久状态，再由 Jiuwei 推进。
@@ -8,17 +10,17 @@
 
 必须存在以下任一项：
 
-- `.wildarrange/work.json` 中有 `activePlanId`。
-- `.wildarrange/team/tasks.json` 存在。
+- `runtime:work.json` 中有 `activePlanId`。
+- `runtime:team/tasks.json` 存在。
 - 通过 `wildarrange plan --from` 传入了计划 JSON。
 
 如果没有计划，路由给 DiJiang。
 
 ## 恢复协议
 
-1. 读取 `.wildarrange/work.json`。
-2. 读取 `.wildarrange/team/tasks.json`。
-3. 读取 `.wildarrange/ledger.jsonl`。
+1. 读取 `runtime:work.json`。
+2. 读取 `runtime:team/tasks.json`。
+3. 读取 `runtime:ledger.jsonl`。
 4. 判断状态：
    - 无 tasks -> 需要导入计划。
    - 有 pending runnable task -> Jiuwei run。
@@ -60,4 +62,4 @@ Jiuwei 必须处理完整的 worker -> verifier -> checkpoint/retry。不要绕�
 
 ## 任务证据与文档边界
 
-获准任务通过开工检查后、Worker 启动前，由运行时建立 `.wildarrange/task-packets/<planId>/<taskId>/`。先读其中的 `baseline.json`（第一次开工的历史切片）和 `README.md`（现有门禁报告路径），不要将它们当作当前任务状态；当前状态只读 `.wildarrange/team/tasks.json`。`research.md` 是调研索引模板，实际研究资料需落在任务批准的可写路径并被验收证据引用。长期项目文档只维护当前有效事实，过程记录留在任务证据。
+获准任务通过开工检查后、Worker 启动前，由运行时建立 `runtime:task-packets/<planId>/<taskId>/`。先读其中的 `baseline.json`（第一次开工的历史切片）和 `README.md`（现有门禁报告路径），不要将它们当作当前任务状态；当前状态只读 `runtime:team/tasks.json`。`research.md` 是调研索引模板，实际研究资料需落在任务批准的可写路径并被验收证据引用。长期项目文档只维护当前有效事实，过程记录留在任务证据。

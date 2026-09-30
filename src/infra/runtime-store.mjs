@@ -2,7 +2,7 @@
 // 文件名称：runtime-store.mjs
 // 所属模块：infra
 // 作用说明：
-//   .wildarrange 路径解析、原子 JSON 写入、ID/哈希与时间戳原语。
+//   运行态路径解析、原子 JSON 写入、ID/哈希与时间戳原语。
 //
 // 【运行原理速读】
 //   resolveWildArrangePath → writeJsonAtomic rename → hashContent/createWorkId。
@@ -59,6 +59,20 @@ export function createWorkId(prefix = "work") {
  */
 export function resolveWildArrangePath(rootDir, ...segments) {
   return path.join(resolveWildArrangeRoot(rootDir), ...segments);
+}
+
+/** 运行态逻辑路径前缀：配置、报告与决策里指代运行态文件，不是项目内路径。 */
+export const RUNTIME_LOGICAL_PREFIX = "runtime:";
+
+/** 生成运行态逻辑路径，如 `runtime:team/tasks.json`。 */
+export function runtimeLogicalPath(...segments) {
+  return RUNTIME_LOGICAL_PREFIX + path.posix.join(...segments.map((segment) => String(segment).replaceAll("\\", "/")));
+}
+
+/** 运行态逻辑路径 → 运行态根内的相对段；不是逻辑路径时返回 null。 */
+export function parseRuntimeLogicalPath(value) {
+  if (typeof value !== "string" || !value.startsWith(RUNTIME_LOGICAL_PREFIX)) return null;
+  return value.slice(RUNTIME_LOGICAL_PREFIX.length).replaceAll("\\", "/");
 }
 
 /**

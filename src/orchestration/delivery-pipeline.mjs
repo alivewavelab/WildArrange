@@ -24,7 +24,7 @@ import { integrateAdmissionCommit } from "./integration.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
 import { emitDecision } from "../infra/decision-log.mjs";
 import { buildErrorProtocol } from "../infra/error-protocol.mjs";
-import { nowIso } from "../infra/runtime-store.mjs";
+import { nowIso, runtimeLogicalPath } from "../infra/runtime-store.mjs";
 import { applyVerifierEvidenceToCriteria, criteriaStatus } from "../infra/success-criteria.mjs";
 import { appendWisdom } from "../infra/task-reports.mjs";
 import { persistTaskState } from "./task-board.mjs";
@@ -220,7 +220,7 @@ function envelopeEvidencePath(envelope, planId, task) {
   // review 报告由 linear-runtime/admission 在 pipeline 返回后按固定路径写入；
   // 决策记录先给出约定路径，审计者按图索骥即可。
   if (envelope?.capability === "review" && planId && task?.id) {
-    return path.posix.join(".wildarrange", "reports", "reviews", planId, `${task.id}.md`);
+    return runtimeLogicalPath("reports", "reviews", planId, `${task.id}.md`);
   }
   return null;
 }
@@ -509,7 +509,7 @@ function normalizeStepEvidence(stepName, envelope) {
 
 /** 各 gate 失败时写入 error-protocol 的 nextAction 文案模板。 */
 const GATE_NEXT_ACTIONS = {
-  verify: "查看 .wildarrange 下最新 verify report，修复验证失败后重跑 node ./bin/wildarrange.mjs run",
+  verify: "查看运行态目录（wildarrange project show 的 runtimeRoot）下最新 verify report，修复验证失败后重跑 node ./bin/wildarrange.mjs run",
   scope: "改动超出任务 writable_paths；缩小改动范围或走 ChangeRequest 调整计划",
   review: "查看 review report 处理复核发现后重跑",
   "acceptance-proof": "验收证明未通过：确认 verifier/scope/review 证据齐全且属于最新一轮执行",

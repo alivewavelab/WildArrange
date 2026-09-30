@@ -44,9 +44,8 @@ function nodeEval(source) {
 }
 
 async function importSingleTaskPlan(dir, { verifyCommand, writablePaths = ["src/**"], reviewCommand = nodeEval("require('node:assert/strict').ok(require('node:fs').existsSync('src/review-marker.txt'))") }) {
-  // Written under .wildarrange/artifacts/ (not the project root) so it is excluded
-  // from the scope guard's git diff pathspec (`git diff -- . ':!.wildarrange'`);
-  // otherwise the plan file itself would show up as an "out of scope" change.
+  // Written under the runtime root, not the project, so the plan file itself
+  // never shows up as an "out of scope" project change.
   const planPath = resolveWildArrangePath(dir, "artifacts", "pipeline-plan.json");
   await writeFile(
     planPath,

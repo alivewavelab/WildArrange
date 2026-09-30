@@ -52,7 +52,7 @@ import { renderHookInjectionMarkdown, renderPreToolUseHookOutput } from "./hook-
 
 /**
  * 执行一次完整的 Hook 注入流程：收集 facts、解析注入点、渲染 output 并持久化。
- * @param {string} rootDir 项目根目录（.wildarrange 所在项目根）
+ * @param {string} rootDir 已连接治理的项目根目录
  * @param {object} input 宿主 Hook 载荷（hook_event_name、prompt、tool_name 等）
  * @returns {Promise<object>} kind=wildarrange_hook_injection 的结果对象
  */

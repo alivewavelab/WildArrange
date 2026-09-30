@@ -6,9 +6,7 @@
 // =============================================================================
 import { existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
-import path from "node:path";
-import { normalizeRelativePath } from "./path-match.mjs";
-import { readJson, resolveWildArrangePath } from "./runtime-store.mjs";
+import { readJson, resolveWildArrangePath, runtimeLogicalPath } from "./runtime-store.mjs";
 
 /** doctor 运行时完整性检查的最低必备状态文件。 */
 const REQUIRED_STATE_FILES = [
@@ -23,7 +21,7 @@ export async function verifyRuntimeState(rootDir) {
   const files = [];
   for (const segments of REQUIRED_STATE_FILES) {
     const filePath = resolveWildArrangePath(rootDir, ...segments);
-    const relativePath = normalizeRelativePath(path.join(".wildarrange", ...segments));
+    const relativePath = runtimeLogicalPath(...segments);
     if (!existsSync(filePath)) {
       files.push({ path: relativePath, status: "missing" });
       continue;
@@ -35,15 +33,15 @@ export async function verifyRuntimeState(rootDir) {
   const tasksPath = resolveWildArrangePath(rootDir, "team", "tasks.json");
   if (work?.activePlanId) {
     if (!existsSync(tasksPath)) {
-      files.push({ path: ".wildarrange/team/tasks.json", status: "missing" });
+      files.push({ path: runtimeLogicalPath("team", "tasks.json"), status: "missing" });
     } else {
       const fileStat = await stat(tasksPath);
-      files.push({ path: ".wildarrange/team/tasks.json", status: "present", bytes: fileStat.size });
+      files.push({ path: runtimeLogicalPath("team", "tasks.json"), status: "present", bytes: fileStat.size });
     }
   } else {
     // 无 active plan 时不强制 tasks.json 存在；有 plan 则上面已标 missing
     files.push({
-      path: ".wildarrange/team/tasks.json",
+      path: runtimeLogicalPath("team", "tasks.json"),
       status: existsSync(tasksPath) ? "present" : "not_required",
       reason: "no active plan",
     });

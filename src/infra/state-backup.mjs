@@ -9,7 +9,7 @@ import { copyFile, cp, lstat, mkdir, readdir, rm, stat, unlink } from "node:fs/p
 import path from "node:path";
 import { appendLedger } from "./ledger.mjs";
 import { normalizeRelativePath } from "./path-match.mjs";
-import { assertSafeId, copyEntry, resolveInboundPath, resolveRelativeInside } from "./recovery-transaction.mjs";
+import { assertSafeId, copyEntry, resolveRelativeInside } from "./recovery-transaction.mjs";
 import {
   createWorkId,
   ensureWildArrangeDirs,
@@ -18,10 +18,15 @@ import {
   resolveWildArrangePath,
   resolveGovernancePaths,
   resolveWildArrangeRoot,
+  parseRuntimeLogicalPath,
+  runtimeLogicalPath,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 import { inspectCompletedTaskEvidence, normalizeTaskLedger } from "./task-state-store.mjs";
 import { describeGovernanceConfig } from "./config-baseline.mjs";
+
+/** 备份目录内运行态条目的一级目录名。 */
+const BACKUP_RUNTIME_DIR = "runtime";
 
 /** state restore 备份清单：须与 ledger 尾 hash 缓存同进同出。 */
 const BACKUP_STATE_FILES = [
@@ -54,7 +59,7 @@ export async function writeRuntimeStateBackup(rootDir, options = {}) {
       : resolveWildArrangePath(rootDir, ...descriptor.segments);
     const relativePath = governanceConfig
       ? governanceConfig.backupPath
-      : normalizeRelativePath(path.join(".wildarrange", ...descriptor.segments));
+      : backupRuntimePath(...descriptor.segments);
     const scope = governanceConfig ? { scope: "governance" } : {};
     if (!existsSync(sourcePath)) {
       files.push({ path: relativePath, status: "missing", ...scope });
@@ -122,7 +127,7 @@ export async function prepareArchiveRecoveryPackage(rootDir, options = {}) {
     taskRef: options.taskRef || null,
     status: "prepared",
     preparedAt: nowIso(),
-    stagingPath: path.join(".wildarrange", "archive-staging", transactionId),
+    stagingPath: runtimeLogicalPath("archive-staging", transactionId),
     paths: recoveryPaths,
   };
   const archivePackages = (manifest.archivePackages || [])
@@ -270,7 +275,7 @@ export async function restoreRuntimeStateBackup(rootDir, options = {}) {
 
   // 旧备份没有尾 hash 缓存：ledger 被恢复而缓存未恢复时，删掉现场缓存，
   // 让下一次追加回退到全量扫描，而不是误判 ledger_truncated。
-  if (restored.includes(".wildarrange/ledger.jsonl") && !restored.includes(".wildarrange/ledger-tail.json")) {
+  if (restored.includes(backupRuntimePath("ledger.jsonl")) && !restored.includes(backupRuntimePath("ledger-tail.json"))) {
     await unlink(resolveWildArrangePath(rootDir, "ledger-tail.json")).catch(() => undefined);
   }
 
@@ -355,34 +360,17 @@ function assertSafeBackupId(value, label = "backup id") {
  * 解析归档恢复源路径，禁止指向 backups 目录。
  */
 function resolveBackupSourcePath(rootDir, candidate) {
-  try {
-    const runtimeRoot = resolveWildArrangeRoot(rootDir);
-    const absoluteCandidate = path.isAbsolute(candidate) ? path.resolve(candidate) : null;
-    if (absoluteCandidate && pathInside(runtimeRoot, absoluteCandidate)) {
-      if (pathInside(resolveWildArrangePath(rootDir, "backups"), absoluteCandidate)) {
-        throw new Error("denied runtime backup path");
-      }
-      return absoluteCandidate;
-    }
-    const normalized = normalizeRelativePath(String(candidate));
-    if (normalized === ".wildarrange" || normalized.startsWith(".wildarrange/")) {
-      const suffix = normalized === ".wildarrange" ? [] : normalized.slice(".wildarrange/".length).split("/");
-      const runtimeCandidate = resolveWildArrangePath(rootDir, ...suffix);
-      if (pathInside(resolveWildArrangePath(rootDir, "backups"), runtimeCandidate)) {
-        throw new Error("denied runtime backup path");
-      }
-      return runtimeCandidate;
-    }
-    return resolveInboundPath(rootDir, candidate, {
-      denyPrefixes: [resolveWildArrangePath(rootDir, "backups")],
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.includes("denied")) throw new Error(`archive recovery path cannot include backups: ${candidate}`);
-    if (message.includes("escapes")) throw new Error(`archive recovery path escapes project root: ${candidate}`);
-    if (message.includes("non-empty")) throw new Error("archive recovery path must be a non-empty string");
-    throw error;
-  }
+  if (typeof candidate !== "string" || !candidate) throw new Error("archive recovery path must be a non-empty string");
+  const runtimeRoot = resolveWildArrangeRoot(rootDir);
+  const runtimeRelative = parseRuntimeLogicalPath(candidate);
+  const absolute = runtimeRelative !== null
+    ? resolveRelativeInside(runtimeRoot, runtimeRelative || ".", "archive recovery path")
+    : path.resolve(candidate);
+  // 归档恢复只覆盖运行态：客户项目与治理仓都不由运行态备份回写
+  if (!path.isAbsolute(candidate) && runtimeRelative === null) throw new Error(`archive recovery path must be absolute or runtime:<path>: ${candidate}`);
+  if (!pathInside(runtimeRoot, absolute)) throw new Error(`archive recovery path escapes runtime root: ${candidate}`);
+  if (pathInside(resolveWildArrangePath(rootDir, "backups"), absolute)) throw new Error(`archive recovery path cannot include backups: ${candidate}`);
+  return absolute;
 }
 
 /**
@@ -392,24 +380,26 @@ function resolveManifestRelativePath(parentDir, relativePath, label) {
   return resolveRelativeInside(parentDir, relativePath, label);
 }
 
-/** manifest 中 `.wildarrange/...` 是稳定逻辑路径；实际目标可位于项目外。 */
-function resolveRestoreTarget(rootDir, relativePath) {
-  const normalized = normalizeRelativePath(String(relativePath));
-  if (normalized === ".wildarrange" || normalized.startsWith(".wildarrange/")) {
-    const suffix = normalized === ".wildarrange" ? [] : normalized.slice(".wildarrange/".length).split("/");
-    return resolveWildArrangePath(rootDir, ...suffix);
-  }
-  return resolveManifestRelativePath(rootDir, normalized, "restore target");
+/** 备份目录内运行态条目的位置：`runtime/<运行态相对路径>`，与 `governance/<...>` 对称。 */
+function backupRuntimePath(...segments) {
+  return normalizeRelativePath(path.join(BACKUP_RUNTIME_DIR, ...segments));
 }
 
-/** 把实际运行态路径投影为兼容旧备份的 `.wildarrange/...` 逻辑路径。 */
+/** manifest 中 `runtime/...` 映射回运行态根；其他条目不属于运行态，拒绝恢复（客户项目零写入）。 */
+function resolveRestoreTarget(rootDir, relativePath) {
+  const normalized = normalizeRelativePath(String(relativePath));
+  if (normalized === BACKUP_RUNTIME_DIR || normalized.startsWith(`${BACKUP_RUNTIME_DIR}/`)) {
+    const runtimeRoot = resolveWildArrangeRoot(rootDir);
+    return resolveManifestRelativePath(runtimeRoot, normalized.slice(BACKUP_RUNTIME_DIR.length + 1) || ".", "restore target");
+  }
+  throw new Error(`backup entry is outside the runtime root: ${relativePath}`);
+}
+
+/** 把运行态内的绝对路径投影为备份目录内的 `runtime/...` 位置；运行态外的路径拒绝。 */
 function logicalStatePath(rootDir, absolutePath) {
   const runtimeRoot = resolveWildArrangeRoot(rootDir);
-  if (pathInside(runtimeRoot, absolutePath)) {
-    const relative = normalizeRelativePath(path.relative(runtimeRoot, absolutePath));
-    return relative ? `.wildarrange/${relative}` : ".wildarrange";
-  }
-  return normalizeRelativePath(path.relative(rootDir, absolutePath));
+  if (!pathInside(runtimeRoot, absolutePath)) throw new Error(`archive recovery path escapes runtime root: ${absolutePath}`);
+  return backupRuntimePath(path.relative(runtimeRoot, absolutePath));
 }
 
 function pathInside(rootDir, candidate) {

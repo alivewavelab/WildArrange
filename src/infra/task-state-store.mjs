@@ -8,7 +8,7 @@
 //   loadTaskState → transact 写 → 版本与 planId 校验。
 // =============================================================================
 /**
- * `.wildarrange/team/tasks.json` is the single project-wide task ledger. Runtime
+ * `runtime:team/tasks.json` is the single project-wide task ledger. Runtime
  * consumers still need an active-plan projection, so this infra owner exposes
  * both views without making capabilities depend on orchestration.
  */

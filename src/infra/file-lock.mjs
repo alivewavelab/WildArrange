@@ -2,13 +2,13 @@
 // 文件名称：file-lock.mjs
 // 所属模块：infra
 // 作用说明：
-//   统一 .wildarrange 文件锁：task-state 与 ledger 共用 stale 恢复与可诊断超时。
+//   统一运行态文件锁：task-state 与 ledger 共用 stale 恢复与可诊断超时。
 //
 // 【运行原理速读】
 //   open wx 独占 → 死 pid 或不可解析 mtime 宽限后回收 → withFileLock 包裹回调。
 // =============================================================================
 /**
- * 统一的 .wildarrange 文件锁原语：task-state 锁与 ledger 锁共用。
+ * 统一的运行态文件锁原语：task-state 锁与 ledger 锁共用。
  *
  * - 获取：open("wx") 独占创建，内容三行 `ownerTag\npid\nacquiredAt`；
  * - stale 恢复：owner 不可解析（创建后崩溃）按 mtime 宽限期判 stale；

@@ -132,12 +132,12 @@ test("runtime state backup preserves critical files and verify reports missing s
 
     const backup = await writeRuntimeStateBackup(projectRoot, { reason: "before-risky-agent" });
     assert.equal(backup.kind, "runtime_state_backup");
-    assert.ok(backup.files.some((file) => file.path === ".wildarrange/ledger.jsonl" && file.status === "copied"));
+    assert.ok(backup.files.some((file) => file.path === "runtime/ledger.jsonl" && file.status === "copied"));
 
     await rm(resolveWildArrangePath(projectRoot, "team", "tasks.json"), { force: true });
     verification = await verifyRuntimeState(projectRoot);
     assert.equal(verification.ok, false);
-    assert.ok(verification.failures.some((failure) => failure.path === ".wildarrange/team/tasks.json"));
+    assert.ok(verification.failures.some((failure) => failure.path === "runtime:team/tasks.json"));
 
     const manifest = await readJson(resolveWildArrangePath(projectRoot, "backups", backup.backupId, "manifest.json"));
     assert.equal(manifest.backupId, backup.backupId);
@@ -191,7 +191,7 @@ test("state restore recovers runtime files from a backup and keeps a pre-restore
     assert.ok(backups.some((entry) => entry.backupId === backup.backupId));
 
     const restore = await restoreRuntimeStateBackup(projectRoot, { backupId: backup.backupId });
-    assert.ok(restore.restored.includes(".wildarrange/team/tasks.json"));
+    assert.ok(restore.restored.includes("runtime/team/tasks.json"));
     assert.ok(restore.preRestoreBackupId);
     assert.notEqual(restore.preRestoreBackupId, backup.backupId);
     assert.equal(await readFile(tasksPath, "utf8"), original);

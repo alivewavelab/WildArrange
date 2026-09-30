@@ -306,7 +306,7 @@ test("adversarial round 1: context injection surface resists stuffing and traver
           markdown: [
             "../../../etc/passwd",
             "/etc/hosts",
-            ".wildarrange/context-agents/YingLong-{taskId}.md",
+            "runtime:context-agents/Jiuwei-{taskId}.md",
           ],
           skills: ["always-skill", "s-one", "s-two", "s-three", "s-four", "s-five", "huge-skill"],
           rules: { mode: "dynamic" },

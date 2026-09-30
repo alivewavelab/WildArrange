@@ -356,7 +356,7 @@ export async function recordContractChangeDecision(rootDir, options) {
   return request;
 }
 
-/** 持久化契约 ChangeRequest 到 .wildarrange/changes。 */
+/** 持久化契约 ChangeRequest 到运行态 changes/。 */
 async function persistContractRequest(rootDir, record) {
   await writeJsonAtomic(resolveWildArrangePath(rootDir, "changes", `${record.id}.json`), record);
   await writeFile(resolveWildArrangePath(rootDir, "changes", `${record.id}.md`),

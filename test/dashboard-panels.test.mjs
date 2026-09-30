@@ -83,7 +83,7 @@ test("decisions and ops panels serve read-only view models", async () => {
       assert.equal(ops.kind, "wildarrange_dashboard_ops_panel");
       assert.ok(ops.gateArming, "运维面板必须带门武装状态");
       assert.equal(ops.locks.length, 2, "tasks.lock 与 ledger.lock 都在巡检");
-      assert.ok(ops.files.some((file) => file.path === ".wildarrange/decisions.jsonl"));
+      assert.ok(ops.files.some((file) => file.path === "runtime:decisions.jsonl"));
 
       const page = await fetch(`${base}/`, { cache: "no-store" });
       const html = await page.text();

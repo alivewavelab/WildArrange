@@ -1,13 +1,15 @@
 # review-routing-decisions
 
+> 下文 `runtime:` 开头的路径指运行态目录（`wildarrange project show` 输出的 `runtimeRoot`），位于项目之外，不在项目里找。
+
 ## 用途
 
 复盘指定日期的路由判断，找出重复误判模式并提出最小规则调整建议。
 
 ## 输入
 
-- `.wildarrange/decisions.jsonl` 中 `gate=routing` 的原始请求与结构化路由结果。
-- `.wildarrange/annotations.jsonl` 中人工确认、规则错误与个案错误标注。
+- `runtime:decisions.jsonl` 中 `gate=routing` 的原始请求与结构化路由结果。
+- `runtime:annotations.jsonl` 中人工确认、规则错误与个案错误标注。
 - 同一 `sessionId` 下的工具活动摘要。
 
 ## 工作方式

@@ -176,7 +176,7 @@ export async function applyPipelineOutcome(rootDir, taskState, task, pipeline, c
         ...buildFailureSummary(task, failureContext(nextStatus)),
         reason: "checkpoint_failed",
         summary: `checkpoint write failed: ${checkpointError || "unknown error"}`,
-        retryHint: `checkpoint 写入失败（检查 .wildarrange/checkpoints 目录是否可写），修复后${hints.resume}即可，所有质量门已通过`,
+        retryHint: `checkpoint 写入失败（检查运行态 checkpoints 目录是否可写），修复后${hints.resume}即可，所有质量门已通过`,
       },
       event: { type: "checkpoint_write_failed", ...eventExtra, error: checkpointError || null },
       snapshot: ctx.snapshots === false ? null : "checkpoint_write_failed",

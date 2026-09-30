@@ -88,10 +88,10 @@ test("external session_start mounts default Markdown from the runtime root and r
     await mkdir(path.dirname(snapshot), { recursive: true });
     await writeFile(snapshot, "# External snapshot\n", "utf8");
     const point = await resolveInjectionPoint(projectRoot, "session_start", {});
-    const mounted = point.markdown.find((item) => item.path === ".wildarrange/snapshots/context.md");
+    const mounted = point.markdown.find((item) => item.path === "runtime:snapshots/context.md");
     assert.ok(mounted, JSON.stringify(point.markdown));
     assert.match(mounted.content, /External snapshot/);
-    assert.ok(point.markdownMissing.some((item) => item.path === ".wildarrange/rules/context.md"), "absent default files are listed, not silent");
+    assert.ok(point.markdownMissing.some((item) => item.path === "runtime:rules/context.md"), "absent default files are listed, not silent");
     assert.equal(existsSync(path.join(projectRoot, ".wildarrange")), false);
   });
 });

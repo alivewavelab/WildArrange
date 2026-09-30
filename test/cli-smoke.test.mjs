@@ -8,7 +8,7 @@
 //
 // 【运行原理速读】
 //   在临时项目目录 spawn CLI 子进程，检查退出码、stderr 协议与
-//   .wildarrange 目录及 adapter hook 安装产物。
+//   项目内零写入与 adapter hook 安装产物。
 // =============================================================================
 
 import assert from "node:assert/strict";

@@ -191,12 +191,14 @@ test("archive recovery public API remains field-equivalent", async () => {
   await withExternalProject(async ({ projectRoot: dir }) => {
     await appendLedger(dir, { type: "archive_equivalence_seed" });
     await writeFile(resolveWildArrangePath(dir, "work.json"), "{}\n");
-    await writeFile(path.join(dir, "keep.txt"), "keep\n");
+    const keepPath = resolveWildArrangePath(dir, "artifacts", "keep.txt");
+    await mkdir(path.dirname(keepPath), { recursive: true });
+    await writeFile(keepPath, "keep\n");
     const backup = await writeRuntimeStateBackup(dir, { reason: "archive-equiv" });
     const prepared = await prepareArchiveRecoveryPackage(dir, {
       backupId: backup.backupId,
       taskRef: "P1:T001",
-      paths: ["keep.txt"],
+      paths: [keepPath],
     });
     assert.equal(prepared.backupId, backup.backupId);
     assert.ok(prepared.transactionId);
@@ -220,7 +222,9 @@ test("archive recovery public API remains field-equivalent", async () => {
     assert.equal(manifest.archivePackages.length, 1);
     assert.equal(manifest.archivePackages[0].kind, "task_archive_recovery");
     assert.equal(manifest.archivePackages[0].status, "committed");
-    const digest = await digestPath(path.join(dir, "keep.txt"));
+    assert.deepEqual(prepared.archivePackage.paths, ["runtime/artifacts/keep.txt"]);
+    await assert.rejects(prepareArchiveRecoveryPackage(dir, { backupId: backup.backupId, paths: [path.join(dir, "outside.txt")] }), /escapes runtime root/);
+    const digest = await digestPath(keepPath);
     assert.equal(typeof digest, "string");
     assert.notEqual(digest, "missing");
   });

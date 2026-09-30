@@ -24,7 +24,7 @@
 //     run/plan/workflow 驱动 linear-runtime；guard/doctor 走 capabilities。
 //
 //   · 缺了它会怎样？
-//     无法初始化 .wildarrange、无法跑任务门禁，Hook 也找不到可信 CLI 前缀。
+//     无法初始化运行态、无法跑任务门禁，Hook 也找不到可信 CLI 前缀。
 // =============================================================================
 import { configureProjectReview, prepareProjectReview } from "../src/capabilities/project-review.mjs";
 import { runContractGenerate } from "../src/interface/contract-view.mjs";
@@ -1077,7 +1077,7 @@ async function main() {
     throw new Error("wildarrange ledger requires verify");
   }
 
-  // §3.4：state 备份/校验/恢复 .wildarrange 关键文件。
+  // §3.4：state 备份/校验/恢复运行态关键文件。
   if (command === "state") {
     const subcommand = args._[1];
     if (subcommand === "backup") {

@@ -141,7 +141,7 @@ export async function installExternalTestAdapter(projectRoot, options = {}) {
 
 /**
  * 外置模式下的线性冒烟计划（对应 createSamplePlan，但产物写在项目内普通目录 artifacts/，
- * 不依赖 legacy 的 .wildarrange/ 项目内目录）。返回计划文件路径（位于项目之外的 root）。
+ * 不依赖项目内运行态目录）。返回计划文件路径（位于项目之外的 root）。
  */
 export async function createSmokePlan(root) {
   const planPath = path.join(root, "smoke-plan.json");
