@@ -531,7 +531,7 @@ Binding names may contain letters, numbers, `_`, and `-`. Missing Skills are rep
 
 Agents with `"provider": "host"` are delegated to the installed host tool. In Codex, GPT-family model selection is handled by Codex. In Cursor, the default Cursor model is used by the adapter path. WildArrange does not need an OpenAI API key for those host-managed agents.
 
-External providers use OpenAI-compatible HTTP configuration. See `wildarrange.config.example.json` for the full schema. Use `.env.wildarrange.example` as the environment variable template:
+External providers use OpenAI-compatible HTTP configuration. See `wildarrange.config.example.json` for a minimal example; keys it omits use the built-in defaults in `src/infra/default-config.mjs`. Use `.env.wildarrange.example` as the environment variable template:
 
 ```bash
 # Copy and fill in real values; never commit secrets
