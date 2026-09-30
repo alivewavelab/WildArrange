@@ -4,7 +4,7 @@
 
 > 一句话记住分工：
 > - **编码规范 / 前后端约束** → 放规则文件（`AGENTS.md` + `.cursor/rules/*.md`），按路径 `globs` 命中，按需注入。
-> - **工作流 / 作业指导** → 放 prompt 包的 skills（见主仓库《使用说明书》第 4 节）。
+> - **工作流 / 作业指导** → 放 prompt 包的 skills（见主仓库 README「自定义 Prompt、技能与规范」）。
 > - 你的编码规范放规则文件，**不是 skills**。
 
 ## 目录内容
@@ -101,7 +101,7 @@ fullstack-starter/
   }
 
   // 高级：injectionPoints 可细调每个注入点挂哪些 tools/markdown/skills/rules。
-  // 不确定就别动，用默认；要改先看主仓库《使用说明书》第 7 节。
+  // 不确定就别动，用默认；要改先看主仓库 README「配置」一节。
 }
 ```
 

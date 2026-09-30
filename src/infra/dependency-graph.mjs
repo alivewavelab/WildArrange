@@ -2,7 +2,7 @@
 // 文件名称：dependency-graph.mjs
 // 所属模块：infra
 // 作用说明：
-//   模块依赖图与变更影响测试选择（arch-module-graph 消费）。
+//   模块依赖图与变更影响测试选择。
 //
 // 【运行原理速读】
 //   computeImpact changedPaths → BFS 依赖 → testsToRun 列表。

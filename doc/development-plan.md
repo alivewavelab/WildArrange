@@ -10,7 +10,7 @@
 - adapter 安装/卸载可逆。`DONE`
 - adapter 备份恢复路径明确。`DONE: adapter restore --backup <backupId>`
 - 确定 npm 包名或组织 scope。`DONE: @alivewavelab/wildarrange`
-- 在路由循环中加入 ArchivistRouter 运行时，但不强制 LLM 调用。`DONE: packet/fallback/memory path + trigger scheduler + suggestion review flow`
+- 在路由循环中加入 ArchivistRouter 运行时，但不强制 LLM 调用。`RETIRED: 2026-09，路由只保留确定性路由表，ArchivistRouter 运行时已删除`
 - 为 BaiZe review 通道接入真实 LLM review provider。`DONE: OpenAI-compatible provider path；原 LuanNiao/QiongQi 视角现为 BaiZe Skill`
 - 加入 checkpoint 验收证明链。`DONE: worker/verifier/successCriteria/scope/review proof artifact required before completion`
 - 加入 LSP 诊断门。`DONE: host-neutral CLI command gate`
@@ -21,11 +21,11 @@
 
 ## P1：线性质量
 
-- 用 `deepseek-v4-flash` 实现 ArchivistRouter，覆盖 SessionStart、Git HEAD 变更、低置信路由与周期性 prompt 摘要。`DONE: runtime, manual CLI, hooks, Git HEAD trigger state, and stage-aware prompt windows`
-- 加入本地结构化记忆文件：进度、决策、产物、实现笔记、调研笔记、坑点与上下文注入。`DONE: minimal structured-files backend`
-- 在 `.wildarrange/routing/suggestions` 下加入路由建议产物及 apply/reject 审核流。`DONE: pending suggestions, accept/reject CLI, and reviewed route override layer`
-- 加入语义路由 shadow 与低置信 execute 降级。`DONE: deterministic route keeps evidence; CangJie shadow can force ambiguous execute into plan/ask`
-- 加入 session/task digest 文件，用于误关聊天后的恢复。`DONE: session_start/post_compact/task_completed/parallel_admission_completed digests`
+- 用 `deepseek-v4-flash` 实现 ArchivistRouter，覆盖 SessionStart、Git HEAD 变更、低置信路由与周期性 prompt 摘要。`RETIRED: 2026-09，同上`
+- 加入本地结构化记忆文件：进度、决策、产物、实现笔记、调研笔记、坑点与上下文注入。`RETIRED: 2026-09，跨会话恢复由 resume 快照（.wildarrange/snapshots/context.md）与 hash 链 ledger 承担`
+- 在 `.wildarrange/routing/suggestions` 下加入路由建议产物及 apply/reject 审核流。`RETIRED: 2026-09，随 ArchivistRouter 删除`
+- 加入低置信 execute 降级。`DONE: 确定性路由保留命中信号证据；置信度 < 0.5 的 execute 降级为 plan`（语义路由 shadow 已 `RETIRED: 2026-09`）
+- 加入 session/task digest 文件，用于误关聊天后的恢复。`RETIRED: 2026-09，由 resume 快照与 wildarrange resume 承担`
 - 模型差异由长期 Agent 的 provider/model/reasoning 与宿主 adapter 承担；独立 `promptVariants` 因未进入真实上下文已退役。`RETIRED: 2026-08-25`
 - 加入 `pre-publish-review`、`publish`、`get-unpublished-changes` skill。`DONE: packs/wildarrange-linear/skills/`
 - 加入 skill matcher 与优先级加载。`DONE: stage/route/agent/keyword matcher with explainable scores`
@@ -34,8 +34,8 @@
 - 加入 LuWu 仓库治理能力及 `governance audit`。`DONE`
 - 加入 Kimi Code adapter P0/P1（plugin + fail-open Hook bridge）。`DONE`；宿主私有 spawn 仍为 P2
 - 加入弱代码可维护性面：`decisions` / `timeline` / `annotate`、Cursor hooks fail-closed、gate-arming 黄灯。`DONE`
-- 加入产品架构总图 + `tooling/arch-module-graph` + `npm run check:arch`。`DONE`
-- 仓库有 remote 后加入 CI。`TODO`
+- 加入产品架构总图 + `tooling/arch-module-graph` + `npm run check:arch`。`RETIRED: 2026-09，总图 docs/product/architecture-overview.html 保留为参考文档，门禁与登记工具已删除`
+- 仓库有 remote 后加入 CI。`DONE: .github/workflows/test.yml 在 push/pull_request 运行 npm test`
 - decisions/ledger 日志轮转。`DEFERRED: experience/scale, not a completion-gate blocker`
 
 ## P2：多 Agent 运行时

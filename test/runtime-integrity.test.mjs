@@ -304,6 +304,17 @@ test("command safety allows configured extra patterns to block project-specific 
   const builtin = evaluateCommandSafety("rm -rf /");
   assert.equal(builtin.allowed, false);
 
+  // 环境变量不再是放行后门
+  const previous = process.env.WILDARRANGE_ALLOW_UNSAFE_COMMANDS;
+  process.env.WILDARRANGE_ALLOW_UNSAFE_COMMANDS = "1";
+  try {
+    assert.equal(evaluateCommandSafety("rm -rf /").allowed, false);
+    assert.equal(evaluateCommandSafety("sudo ls", { allowUnsafe: true }).allowed, false);
+  } finally {
+    if (previous === undefined) delete process.env.WILDARRANGE_ALLOW_UNSAFE_COMMANDS;
+    else process.env.WILDARRANGE_ALLOW_UNSAFE_COMMANDS = previous;
+  }
+
   // unrelated command with the extra pattern loaded stays allowed
   const ok = evaluateCommandSafety("npm run build", { extraPatterns });
   assert.equal(ok.allowed, true);

@@ -29,7 +29,7 @@
 - pipeline 结果落盘由 `applyPipelineOutcome` 统一维护；失败与恢复状态统一经 `persistTaskFailure` 写入。
 - Worker 的 DoneClaim 不能直接把任务置为 `completed`。
 - 完成审计先入 ledger，再提交权威 completed 状态。
-- 权威任务状态最后写入；Markdown 和镜像 JSON 只是派生产物。
+- 权威任务状态（team/tasks.json）最后写入；tasks.md 只是派生产物。
 - Admission 必须按 `claim → pre-image → apply → gates → delivery commit/task-branch push 或 rollback → checkpoint → release` 执行；不得自动合入共享 `main`。
 - 回滚失败必须保留 owner、rollback plan 和 `recovery_required`，不能释放脏工作区。
 - `runNextTask().status` 表示下一步动作；持久状态以 `task.status` 为准。
