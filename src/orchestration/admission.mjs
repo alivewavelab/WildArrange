@@ -25,11 +25,10 @@ import {
   nowIso,
   readJson,
   resolveWildArrangePath,
+  resolveWildArrangeRoot,
 } from "../infra/runtime-store.mjs";
-import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
-import { captureIntegrationGuard } from "../infra/git-coordination.mjs";
 import { applyAgentPatch, extractPatchPaths } from "../infra/git-worktree.mjs";
 import { assertPathInsideRoot, pathAllowed } from "../infra/path-match.mjs";
 import { runPostCompletionSideEffects } from "./delivery-pipeline.mjs";
@@ -82,12 +81,6 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
   const proposedPaths = files.length > 0
     ? files.map((file) => file.path)
     : normalizePatchPaths(result.result?.patchPaths || result.result?.changedPaths || extractPatchPaths(result.result?.patch || ""));
-  const { config } = await loadWildArrangeConfig(rootDir);
-  const guardTaskState = await loadTaskState(rootDir);
-  const guardTask = guardTaskState?.tasks.find((candidate) => candidate.id === options.taskId);
-  const integrationGuard = await captureIntegrationGuard(rootDir, config.gitCoordination, {
-    force: ["claimed", "accepted"].includes(guardTask?.coordination?.status),
-  });
 
   // --- claim 阶段 ---
   // Phase 1 — claim. Status adjudication, writable-paths precheck, the task
@@ -148,7 +141,7 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
   // could race a successor's freshly-completed files (cross-review P0 x2,
   // round 7, 2026-07-21).
   const finalized = await withTaskStateLock(rootDir, `parallel-admit-txn:${options.taskId}`, () =>
-    runAdmissionTransaction(rootDir, options, { claim, result, files, proposedPaths, integrationGuard }));
+    runAdmissionTransaction(rootDir, options, { claim, result, files, proposedPaths }));
 
   // For the completed outcome the admission ledger event was already written
   // inside the transaction, BEFORE the canonical completed persist (ledger
@@ -207,7 +200,7 @@ export async function admitParallelAgentResult(rootDir, options = {}) {
  * Phase 2+3：在同一把任务锁内连续 apply 与 gates；崩溃时 claim 保留在 finalizing。
  * @returns {Promise<object>} completed | recovery_required | revalidation_required 等
  */
-async function runAdmissionTransaction(rootDir, options, { claim, result, files, proposedPaths, integrationGuard }) {
+async function runAdmissionTransaction(rootDir, options, { claim, result, files, proposedPaths }) {
   // Phase 1 and this transaction use separate lock holds. A duplicate call
   // from the same run may have captured an older phase while waiting, so the
   // persisted claim is the authority immediately before any workspace I/O.
@@ -325,13 +318,13 @@ async function runAdmissionTransaction(rootDir, options, { claim, result, files,
     const deliveryWorktreeDir = result.isolation === "git-worktree" && result.worktreeAvailable === true && result.workDir
       ? path.resolve(rootDir, result.workDir)
       : null;
-    if (deliveryWorktreeDir) assertPathInsideRoot(rootDir, deliveryWorktreeDir, result.workDir);
+    // 任务 worktree 落在运行态根内（外置模式下在项目之外）
+    if (deliveryWorktreeDir) assertPathInsideRoot(resolveWildArrangeRoot(rootDir), deliveryWorktreeDir, result.workDir);
     const finalized = await finalizeAdmissionWithinLock(rootDir, options.taskId, {
       workerResult: claim.workerResult,
       changedPaths: appliedPaths,
       runId: options.runId,
       rollbackPlan,
-      integrationGuard,
       deliveryWorktreeDir,
       deliveryFromWorktree: deliveryWorktreeDir && files.length === 0 && typeof result.result?.patch === "string",
     });

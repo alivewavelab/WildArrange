@@ -12,25 +12,18 @@
 // =============================================================================
 
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
 import { startDashboardServer } from "../src/interface/dashboard.mjs";
 import { runInjectionHook } from "../src/ai/hooks.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 async function withTempDir(fn) {
-  const baseDir = path.join(process.cwd(), ".tmp");
-  await mkdir(baseDir, { recursive: true });
-  const dir = await mkdtemp(path.join(baseDir, "wildarrange-panels-"));
-  try {
-    await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+  await withExternalProject(({ projectRoot }) => fn(projectRoot));
 }
 
 async function withDashboard(dir, fn, options = {}) {
@@ -67,7 +60,6 @@ async function importPassingPlan(dir) {
 
 test("decisions and ops panels serve read-only view models", async () => {
   await withTempDir(async (dir) => {
-    await initRuntime(dir);
     await importPassingPlan(dir);
     await runInjectionHook(dir, {
       hook_event_name: "PreToolUse",
@@ -142,7 +134,6 @@ test("decisions and ops panels serve read-only view models", async () => {
 
 test("panels tolerate a corrupted decisions.jsonl without 500", async () => {
   await withTempDir(async (dir) => {
-    await initRuntime(dir);
     await importPassingPlan(dir);
     await writeFile(resolveWildArrangePath(dir, "decisions.jsonl"), '{"gate":"verify"\nnot-json\n', "utf8");
 
@@ -157,7 +148,6 @@ test("panels tolerate a corrupted decisions.jsonl without 500", async () => {
 
 test("route review panel links full prompt, route result, tool activity, and human review", async () => {
   await withTempDir(async (dir) => {
-    await initRuntime(dir);
     await runInjectionHook(dir, {
       hook_event_name: "UserPromptSubmit",
       prompt: "新增一个登录页面，并检查手机端体验",
@@ -200,35 +190,6 @@ test("route review panel links full prompt, route result, tool activity, and hum
       const reviewed = await (await fetch(`${base}/api/panels/routes`, { cache: "no-store" })).json();
       assert.equal(reviewed.reviewed, 1);
       assert.equal(reviewed.confirmed, 1);
-
-      const stop = await runInjectionHook(dir, {
-        hook_event_name: "Stop",
-        cwd: dir,
-        session_id: "route-review-session",
-      });
-      assert.match(stop.output, /今日路由复盘/);
-      assert.match(stop.output, /人类可读报告/);
-
-      const report = await readJson(resolveWildArrangePath(dir, "reports", "routing", "latest.json"));
-      assert.equal(report.kind, "wildarrange_daily_routing_review");
-      assert.equal(report.summary.total, 1);
-      assert.equal(report.summary.confirmed, 1);
-      assert.equal(report.summary.toolCalls, 1);
-      assert.equal(report.decisions[0].inputText, "新增一个登录页面，并检查手机端体验");
-      assert.equal(report.decisions[0].tools[0].toolName, "Edit");
-      assert.equal(report.decisions[0].tools[0].input.apiKey, "[REDACTED]");
-
-      const readable = await readFile(resolveWildArrangePath(dir, "reports", "routing", "latest.md"), "utf8");
-      assert.match(readable, /^# WildArrange 路由每日复盘/m);
-      assert.match(readable, /## 一眼结论/);
-      assert.match(readable, /## 全部判断明细/);
-      assert.match(readable, /新增一个登录页面，并检查手机端体验/);
-      assert.match(readable, /后续工具：/);
-      assert.match(readable, /Edit → pass/);
-
-      const withDailyReport = await (await fetch(`${base}/api/panels/routes`, { cache: "no-store" })).json();
-      assert.equal(withDailyReport.dailyReport.summary.toolCalls, 1);
-      assert.match(withDailyReport.dailyReport.path, /\.wildarrange\/reports\/routing\/\d{4}-\d{2}-\d{2}\.md/);
 
       const html = await (await fetch(`${base}/`, { cache: "no-store" })).text();
       assert.match(html, /决策列表/);

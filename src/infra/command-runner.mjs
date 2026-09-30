@@ -62,7 +62,7 @@ export function quoteShellArgument(value, platform = process.platform) {
  */
 function runProcess(file, args, command, cwd, timeoutMs, options) {
   return new Promise((resolve) => {
-    const safety = evaluateCommandSafety(options.safetyCommand || command, { allowUnsafe: options.allowUnsafe === true, extraPatterns: options.extraPatterns });
+    const safety = evaluateCommandSafety(options.safetyCommand || command, { extraPatterns: options.extraPatterns });
     if (!safety.allowed) {
       resolve(blockedCommandResult(command, safety));
       return;

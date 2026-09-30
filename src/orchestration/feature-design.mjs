@@ -46,7 +46,7 @@ export async function advanceFeatureDesign(rootDir, input) {
 /**
  * 为会话创建新的功能设计 gate，状态 awaiting_feature_confirmation。
  */
-export async function beginFeatureDesignGate(rootDir, sessionId, request) {
+async function beginFeatureDesignGate(rootDir, sessionId, request) {
   await ensureWildArrangeDirs(rootDir);
   const at = nowIso();
   const gate = {
@@ -76,7 +76,7 @@ export async function loadActiveFeatureDesignGate(rootDir, sessionId) {
 }
 
 /** 用户确认功能设计，gate 进入 awaiting_plan_import。 */
-export async function confirmFeatureDesignGate(rootDir, gate) {
+async function confirmFeatureDesignGate(rootDir, gate) {
   if (!gate || gate.status !== "awaiting_feature_confirmation") {
     throw new Error("feature design gate is not awaiting confirmation");
   }

@@ -152,7 +152,7 @@ test("dependency boundary: orchestration -> ai stays limited to the pinned edge 
   // the two zones can only be kept in check by naming every edge explicitly.
   // Deterministic route-table reading already lives in infra/route-table.mjs;
   // the only thing orchestration may still ask the ai zone for is the full
-  // routeRequest flow (deterministic + semantic shadow) used by the workflow
+  // routeRequest flow (deterministic table + low-confidence gate) used by the workflow
   // "route" node. Adding a new edge here must be a conscious decision.
   const PINNED_EDGES = new Set(["orchestration/linear-runtime.mjs -> ai/routing.mjs"]);
   const edges = await buildDependencyEdges(process.cwd());
@@ -168,10 +168,11 @@ test("dependency boundary: orchestration calls resolveRouteDecision only at pinn
   // (contract pinned in src/infra/route-table.mjs). Orchestration may use it
   // only for read/enrichment decisions — plan import enrichment and
   // feature-design gate detection. Write-path routing (ledger evidence,
-  // decision projection, semantic shadow) belongs to ai/routing.mjs
+  // decision projection) belongs to ai/routing.mjs
   // routeRequest. Naming every orchestration file that mentions the symbol
   // makes a new direct caller a conscious, reviewed decision.
-  const PINNED_CALLERS = ["feature-design.mjs", "plan-state.mjs"];
+  // task-normalize.mjs holds the per-task enrichment split out of plan-state.mjs.
+  const PINNED_CALLERS = ["feature-design.mjs", "plan-state.mjs", "task-normalize.mjs"];
   const files = await listMjsFiles(path.join(SRC_DIR, "orchestration"));
   const callers = [];
   for (const filePath of files) {

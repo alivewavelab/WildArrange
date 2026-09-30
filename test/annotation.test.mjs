@@ -13,7 +13,7 @@
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
@@ -21,28 +21,13 @@ import test from "node:test";
 import { runInjectionHook } from "../src/ai/hooks.mjs";
 import { routeRequest } from "../src/ai/routing.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { readDecisions } from "../src/infra/decision-log.mjs";
-import {
-  annotationStats,
-  appendAnnotation,
-  readAnnotations,
-} from "../src/infra/annotation-log.mjs";
+import { annotationStats, appendAnnotation, readAnnotations } from "../src/infra/annotation-log.mjs";
 import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 const execFileAsync = promisify(execFile);
 const WILDARRANGE_BIN = path.resolve(import.meta.dirname, "..", "bin", "wildarrange.mjs");
-
-async function withTempDir(fn) {
-  const baseDir = path.join(process.cwd(), ".tmp");
-  await mkdir(baseDir, { recursive: true });
-  const dir = await mkdtemp(path.join(baseDir, "wildarrange-annotate-"));
-  try {
-    await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
 
 async function importPassingPlan(dir) {
   const planPath = resolveWildArrangePath(dir, "artifacts", "annotate-plan.json");
@@ -77,19 +62,14 @@ async function denyDecision(dir, target = "docs/out-of-scope.md") {
 }
 
 test("deny decisions are annotatable with an id; deterministic pass stays out of the queue", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await importPassingPlan(dir);
 
     const deny = await denyDecision(dir);
     assert.ok(deny.id, "decision record carries an id anchor");
     assert.equal(deny.annotatable, true, "拦截必须进标注队列");
 
-    // 纯确定性路由（显式关闭 shadow，防止本机配置了 LLM provider 时
-    // shadow 真跑导致 annotatable=true）不进标注队列。
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
-      routeGovernance: { semanticShadow: { enabled: false } },
-    }, null, 2));
+    // 纯确定性路由命中不进标注队列。
     await routeRequest(dir, { text: "继续上一个任务" });
     const { records } = await readDecisions(dir);
     const routing = records.find((record) => record.gate === "routing");
@@ -98,8 +78,7 @@ test("deny decisions are annotatable with an id; deterministic pass stays out of
 });
 
 test("annotations require a forced category and an existing decision id", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await importPassingPlan(dir);
     const deny = await denyDecision(dir);
 
@@ -129,8 +108,7 @@ test("annotations require a forced category and an existing decision id", async 
 });
 
 test("stats aggregate by rule x category, never by single annotation", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await importPassingPlan(dir);
     const first = await denyDecision(dir, "docs/first.md");
     const second = await denyDecision(dir, "docs/second.md");
@@ -155,8 +133,7 @@ test("stats aggregate by rule x category, never by single annotation", async () 
 });
 
 test("hard constraint: annotation paths never write config, tasks, or gate switches", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await importPassingPlan(dir);
     const deny = await denyDecision(dir);
 
@@ -197,23 +174,22 @@ test("hard constraint: annotation paths never write config, tasks, or gate switc
 });
 
 test("wildarrange annotate CLI records, lists and aggregates annotations", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir, stateHome }) => {
     await importPassingPlan(dir);
     const deny = await denyDecision(dir);
 
     const annotate = await execFileAsync(process.execPath, [
       WILDARRANGE_BIN, "annotate", "--root", dir,
       "--decision", deny.id, "--category", "rule_wrong", "--reason", "太严",
-    ], { cwd: dir });
+    ], { cwd: dir, env: { ...process.env, WILDARRANGE_STATE_HOME: stateHome } });
     const recorded = JSON.parse(annotate.stdout);
     assert.equal(recorded.kind, "wildarrange_annotation");
     assert.equal(recorded.recorded.decisionId, deny.id);
 
-    const list = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "annotate", "list", "--root", dir], { cwd: dir });
+    const list = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "annotate", "list", "--root", dir], { cwd: dir, env: { ...process.env, WILDARRANGE_STATE_HOME: stateHome } });
     assert.equal(JSON.parse(list.stdout).records.length, 1);
 
-    const stats = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "annotate", "stats", "--root", dir], { cwd: dir });
+    const stats = await execFileAsync(process.execPath, [WILDARRANGE_BIN, "annotate", "stats", "--root", dir], { cwd: dir, env: { ...process.env, WILDARRANGE_STATE_HOME: stateHome } });
     const parsed = JSON.parse(stats.stdout);
     assert.equal(parsed.rules[0].rule, "pre_tool_use:out_of_scope");
     assert.equal(parsed.rules[0].rule_wrong, 1);
@@ -221,7 +197,7 @@ test("wildarrange annotate CLI records, lists and aggregates annotations", async
     await assert.rejects(
       execFileAsync(process.execPath, [
         WILDARRANGE_BIN, "annotate", "--root", dir, "--decision", deny.id, "--category", "whatever",
-      ], { cwd: dir }),
+      ], { cwd: dir, env: { ...process.env, WILDARRANGE_STATE_HOME: stateHome } }),
       /强制分类|rule_wrong/,
       "CLI 必须拒绝非法分类",
     );

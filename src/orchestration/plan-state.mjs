@@ -2,8 +2,9 @@
 // 文件名称：plan-state.mjs
 // 所属模块：orchestration
 // 作用说明：
-//   计划与任务状态：计划/任务规范化、图校验、导入、批准、路由 enrichment
-//   与 tasks.md 派生。权威 taskState 的读写在 infra/task-state-store。
+//   计划导入与批准：计划规范化、导入事务、批准、路由 enrichment、work.json
+//   计划状态唯一写入口与 tasks.md 派生。任务字段规范化在 task-normalize；
+//   权威 taskState（team/tasks.json）的读取在 infra/task-state-store。
 //
 // 【运行原理速读】
 //   可以把它想成「计划 JSON 的编译器与入库员」：
@@ -14,19 +15,11 @@
 //   · 做了什么？
 //     normalize → validate → 写 ledger → persist → 可选写 Markdown 镜像。
 // =============================================================================
-import { normalizeResponsibilityChanges, responsibilityDigest, renderResponsibilityChanges } from "../infra/responsibility-contract.mjs";
+import { responsibilityDigest, renderResponsibilityChanges } from "../infra/responsibility-contract.mjs";
 import { writeFile } from "node:fs/promises";
-import {
-  COMMAND_WORKER_AGENTS,
-  DEFAULT_EXECUTOR_AGENT,
-  normalizeAgentKey,
-} from "../infra/agent-registry.mjs";
+import { COMMAND_WORKER_AGENTS } from "../infra/agent-registry.mjs";
 import {
   STATE_VERSION,
-  TASK_PRIORITIES,
-  TASK_SOURCES,
-  TASK_STATUSES,
-  TASK_WORK_TYPES,
   createWorkId,
   hashContent,
   ensureWildArrangeDirs,
@@ -38,6 +31,7 @@ import {
 import {
   loadTaskLedger,
   loadTaskState,
+  replacePlanTasks,
   withTaskIdentity,
 } from "../infra/task-state-store.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
@@ -47,13 +41,21 @@ import { uniqueStrings } from "../infra/text-utils.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { assertFeatureDesignPlanBinding, bindFeatureDesignPlan } from "./feature-design.mjs";
 import { loadRoutesConfig, resolveRouteDecision } from "../infra/route-table.mjs";
-import { isPossibleNoopTask, isTrivialCommand } from "../infra/task-predicates.mjs";
+import { isTrivialCommand } from "../infra/task-predicates.mjs";
 import { loadGovernanceVerificationDefaults } from "../infra/workspace-context.mjs";
+import {
+  enrichTaskWithRouteDecision,
+  normalizeOptionalText,
+  normalizeSkillArray,
+  normalizeStringArray,
+  normalizeTask,
+  validatePlanGraph,
+} from "./task-normalize.mjs";
 
 // --- 规范化 ---
 
 /** 规范化计划对象：title、tasks、defaults 等必填与结构约束。 */
-export function normalizePlan(rawPlan) {
+function normalizePlan(rawPlan) {
   if (!rawPlan || typeof rawPlan !== "object") {
     throw new Error("plan must be a JSON object");
   }
@@ -69,9 +71,9 @@ export function normalizePlan(rawPlan) {
     id: rawPlan.id || createWorkId("plan"),
     title: rawPlan.title,
     objective: rawPlan.objective || rawPlan.title,
-    generated_by: normalizeOptionalText(rawPlan.generated_by ?? rawPlan.generatedBy, "plan.generated_by"),
-    feature_design_ref: normalizeOptionalText(rawPlan.feature_design_ref ?? rawPlan.featureDesignRef, "plan.feature_design_ref"),
-    request_summary: normalizeOptionalText(rawPlan.request_summary ?? rawPlan.requestSummary, "plan.request_summary"),
+    generated_by: normalizeOptionalText(rawPlan.generated_by, "plan.generated_by"),
+    feature_design_ref: normalizeOptionalText(rawPlan.feature_design_ref, "plan.feature_design_ref"),
+    request_summary: normalizeOptionalText(rawPlan.request_summary, "plan.request_summary"),
     defaults,
     createdAt: rawPlan.createdAt || nowIso(),
     updatedAt: nowIso(),
@@ -85,400 +87,13 @@ export function normalizePlan(rawPlan) {
 function normalizePlanDefaults(rawPlan) {
   const rawDefaults = rawPlan.defaults && typeof rawPlan.defaults === "object" ? rawPlan.defaults : {};
   const defaults = {
-    verify_commands: normalizeStringArray(rawDefaults.verify_commands ?? rawDefaults.verifyCommands ?? rawPlan.verify_commands ?? rawPlan.verifyCommands ?? [], "defaults.verify_commands"),
-    review_commands: normalizeStringArray(rawDefaults.review_commands ?? rawDefaults.reviewCommands ?? rawPlan.review_commands ?? rawPlan.reviewCommands ?? [], "defaults.review_commands"),
-    standards_commands: normalizeStringArray(rawDefaults.standards_commands ?? rawDefaults.standardsCommands ?? rawPlan.standards_commands ?? rawPlan.standardsCommands ?? [], "defaults.standards_commands"),
-    writable_paths: normalizeStringArray(rawDefaults.writable_paths ?? rawDefaults.writablePaths ?? rawPlan.writable_paths ?? rawPlan.writablePaths ?? [], "defaults.writable_paths"),
+    verify_commands: normalizeStringArray(rawDefaults.verify_commands ?? rawPlan.verify_commands ?? [], "defaults.verify_commands"),
+    review_commands: normalizeStringArray(rawDefaults.review_commands ?? rawPlan.review_commands ?? [], "defaults.review_commands"),
+    standards_commands: normalizeStringArray(rawDefaults.standards_commands ?? rawPlan.standards_commands ?? [], "defaults.standards_commands"),
+    writable_paths: normalizeStringArray(rawDefaults.writable_paths ?? rawPlan.writable_paths ?? [], "defaults.writable_paths"),
     skills: normalizeSkillArray(rawDefaults.skills ?? rawPlan.skills ?? [], "defaults.skills"),
   };
   return defaults;
-}
-
-/** 规范化字符串数组字段，非法项抛错。 */
-export function normalizeStringArray(value, label) {
-  if (!Array.isArray(value)) throw new Error(`${label} must be an array`);
-  return uniqueStrings(value.map((item) => {
-    if (typeof item !== "string" || item.trim().length === 0) throw new Error(`${label} must contain non-empty strings`);
-    return item.trim();
-  }));
-}
-
-/** 校验并归一化 Skill 名数组为安全单段标识符。 */
-function normalizeSkillArray(value, label) {
-  const skills = normalizeStringArray(value, label);
-  for (const skill of skills) {
-    if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(skill)) {
-      throw new Error(`${label} contains an invalid skill name: ${skill}`);
-    }
-  }
-  return skills;
-}
-
-/** 规范化单条任务：命令、路径、successCriteria、contractChanges 等。 */
-export function normalizeTask(task, index, defaults = {}, options = {}) {
-  if (!task || typeof task !== "object") {
-    throw new Error(`task ${index + 1} must be an object`);
-  }
-  const id = task.id || `T${String(index + 1).padStart(3, "0")}`;
-  const subject = task.subject || task.title;
-  if (!subject) throw new Error(`task ${id} subject is required`);
-
-  const taskVerifyCommands = normalizeStringArray(task.verify_commands ?? task.verifyCommands ?? [], `task ${id} verify_commands`);
-  const verifyCommands = uniqueStrings([...(defaults.verify_commands || []), ...taskVerifyCommands]);
-  const requestedStatus = task.status || (options.defaultDraftWhenIncomplete === true && verifyCommands.length === 0 ? "draft" : "pending");
-  if (verifyCommands.length === 0 && requestedStatus !== "draft") {
-    throw new Error(`task ${id} requires at least one verify command`);
-  }
-  // Imported/requested "completed" is never trusted: only the delivery pipeline
-  // may persist a terminal completed state after the proof chain passes.
-  const status = requestedStatus === "completed" ? "needs_user_decision" : validateStatus(requestedStatus);
-  const taskReviewCommands = normalizeStringArray(task.review_commands ?? task.reviewCommands ?? [], `task ${id} review_commands`);
-  const reviewCommands = uniqueStrings([...(defaults.review_commands || []), ...taskReviewCommands]);
-  const taskStandardsCommands = normalizeStringArray(task.standards_commands ?? task.standardsCommands ?? [], `task ${id} standards_commands`);
-  const standardsCommands = uniqueStrings([...(defaults.standards_commands || []), ...taskStandardsCommands]);
-  const taskWritablePaths = normalizeStringArray(task.writable_paths ?? task.writablePaths ?? [], `task ${id} writable_paths`);
-  const writablePaths = uniqueStrings([...(defaults.writable_paths || []), ...taskWritablePaths]);
-  const taskSkills = normalizeSkillArray(task.skills ?? [], `task ${id} skills`);
-  const successCriteria = normalizeSuccessCriteria(task.successCriteria ?? task.success_criteria, id, subject, verifyCommands);
-  const governanceWarnings = detectTaskGovernanceWarnings({ workerCommand: task.worker_command || task.workerCommand || null, verifyCommands, writablePaths });
-  const workType = normalizeWorkType(task.workType ?? task.work_type ?? inferWorkType(`${subject}\n${task.description || ""}`));
-  const source = normalizeTaskSource(task.source || options.defaultSource || "imported");
-  const priority = normalizeTaskPriority(task.priority || "P1");
-  const parentTaskRef = normalizeOptionalText(task.parentTaskRef ?? task.parent_task_ref, `task ${id} parentTaskRef`);
-  const request = normalizeTaskRequest(task.request, subject, source);
-  const createdAt = task.createdAt || nowIso();
-  const explicitOwner = normalizeOptionalText(task.owner, `task ${id} owner`);
-  const owner = normalizeTaskOwner(explicitOwner || DEFAULT_EXECUTOR_AGENT, id);
-  const repositoryTarget = normalizeRepositoryTarget(task.repositoryTarget ?? task.repository_target ?? task.repository ?? "project", id);
-  const contractChanges = normalizeContractChanges(task.contractChanges ?? task.contract_changes, id, owner);
-  const skills = uniqueStrings([
-    ...(defaults.skills || []),
-    ...taskSkills,
-    ...(contractChanges.declared ? ["contract-governance"] : []),
-  ]);
-
-  return {
-    id,
-    subject,
-    description: task.description || subject,
-    category: task.category || null,
-    category_source: task.category ? "explicit" : "unresolved",
-    workType,
-    source,
-    priority,
-    parentTaskRef,
-    request,
-    status,
-    owner,
-    repositoryTarget,
-    owner_source: explicitOwner ? "explicit" : "default",
-    attempts: Number.isInteger(task.attempts) ? task.attempts : 0,
-    maxAttempts: Number.isInteger(task.maxAttempts) ? task.maxAttempts : 3,
-    blockedBy: normalizeStringArray(task.blockedBy ?? [], `task ${id} blockedBy`),
-    writable_paths: writablePaths,
-    worker_command: task.worker_command || task.workerCommand || null,
-    verify_commands: verifyCommands,
-    review_commands: reviewCommands,
-    standards_commands: standardsCommands,
-    successCriteria,
-    governanceWarnings,
-    skills,
-    route_decision: task.route_decision || null,
-    contractChanges,
-    responsibilityChanges: normalizeResponsibilityChanges(task.responsibilityChanges, writablePaths),
-    evidence: Array.isArray(task.evidence) ? task.evidence : [],
-    history: Array.isArray(task.history) ? task.history : [{ at: createdAt, event: "created", status, source }],
-    createdAt,
-    updatedAt: nowIso(),
-  };
-}
-
-// --- 校验 ---
-
-/** 校验 draft 任务 ready 前必填字段是否齐全。 */
-export function validateTaskReady(task) {
-  if (!task || typeof task !== "object") throw new Error("task is required");
-  if (!Array.isArray(task.verify_commands) || task.verify_commands.length === 0) {
-    throw new Error(`task ${task.id} cannot become pending without verify_commands`);
-  }
-  if (!Array.isArray(task.writable_paths) || task.writable_paths.length === 0) {
-    throw new Error(`task ${task.id} cannot become pending without writable_paths`);
-  }
-  if (!Array.isArray(task.successCriteria) || task.successCriteria.length === 0) {
-    throw new Error(`task ${task.id} cannot become pending without successCriteria`);
-  }
-  if (task.workType === "acceptance_correction" && !task.parentTaskRef) {
-    throw new Error(`task ${task.id} acceptance_correction requires parentTaskRef`);
-  }
-  return task;
-}
-
-/** 单个可写任务只能选择项目仓或治理仓；跨仓修改必须拆成两个任务。 */
-export function normalizeRepositoryTarget(value, taskId = "task") {
-  if (!["project", "governance"].includes(value)) {
-    throw new Error(`task ${taskId} repositoryTarget must be project or governance; split cross-repository work into separate tasks`);
-  }
-  return value;
-}
-
-/** 规范化 workType 枚举值。 */
-export function normalizeWorkType(value) {
-  if (typeof value !== "string" || !TASK_WORK_TYPES.has(value)) {
-    throw new Error(`invalid task workType: ${value}`);
-  }
-  return value;
-}
-
-/** 规范化 task source 枚举值。 */
-export function normalizeTaskSource(value) {
-  if (typeof value !== "string" || !TASK_SOURCES.has(value)) {
-    throw new Error(`invalid task source: ${value}`);
-  }
-  return value;
-}
-
-/** 规范化 task priority 枚举值。 */
-export function normalizeTaskPriority(value) {
-  const normalized = typeof value === "string" ? value.toUpperCase() : value;
-  if (!TASK_PRIORITIES.has(normalized)) throw new Error(`invalid task priority: ${value}`);
-  return normalized;
-}
-
-/** 从 subject/description 推断 workType 分类。 */
-function inferWorkType(text) {
-  if (/(验收.{0,8}(纠错|打回|修正)|acceptance.{0,8}(correction|rework))/i.test(text)) return "acceptance_correction";
-  if (/(bug|缺陷|故障|报错|崩溃|修复)/i.test(text)) return "bug";
-  if (/(新增|新功能|功能|feature|实现)/i.test(text)) return "feature";
-  return "maintenance";
-}
-
-/** 归一化可选文本字段并校验长度。 */
-function normalizeOptionalText(value, label) {
-  if (value === undefined || value === null || value === "") return null;
-  if (typeof value !== "string" || value.trim().length === 0) throw new Error(`${label} must be a non-empty string`);
-  return value.trim();
-}
-
-/** 归一化 task 上的 request 对象结构。 */
-function normalizeTaskRequest(value, subject, source) {
-  if (value === undefined || value === null) return { summary: subject, source, evidenceRefs: [] };
-  if (typeof value === "string") return { summary: value.trim() || subject, source, evidenceRefs: [] };
-  if (typeof value !== "object") throw new Error("task request must be a string or object");
-  return {
-    summary: typeof value.summary === "string" && value.summary.trim() ? value.summary.trim() : subject,
-    source: normalizeTaskSource(value.source || source),
-    evidenceRefs: normalizeStringArray(value.evidenceRefs ?? value.evidence_refs ?? [], "task request evidenceRefs"),
-  };
-}
-
-/** 规范化任务契约变更声明列表。 */
-export function normalizeContractChanges(value, taskId, owner) {
-  if (value === undefined || value === null) return { declared: false, items: [] };
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`task ${taskId} contractChanges must be an object`);
-  }
-  const rawItems = value.items ?? [];
-  if (!Array.isArray(rawItems)) throw new Error(`task ${taskId} contractChanges.items must be an array`);
-  const items = rawItems.map((item, index) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) {
-      throw new Error(`task ${taskId} contractChanges.items[${index}] must be an object`);
-    }
-    const action = String(item.action || "").trim().toLowerCase();
-    if (!new Set(["add", "modify", "deprecate", "remove"]).has(action)) {
-      throw new Error(`task ${taskId} contractChanges.items[${index}].action is invalid`);
-    }
-    const contractId = String(item.contractId ?? item.id ?? "").trim();
-    if (!/^[A-Za-z0-9][A-Za-z0-9:._/-]{0,199}$/.test(contractId)) {
-      throw new Error(`task ${taskId} contractChanges.items[${index}].contractId is invalid`);
-    }
-    const summary = String(item.summary || "").trim();
-    if (!summary) throw new Error(`task ${taskId} contractChanges.items[${index}].summary is required`);
-    return {
-      contractId,
-      kind: String(item.kind || "manual").trim(),
-      action,
-      summary,
-      expected: item.expected && typeof item.expected === "object" && !Array.isArray(item.expected) ? JSON.parse(JSON.stringify(item.expected)) : null,
-      compatibility: String(item.compatibility || "").trim(),
-      migration: String(item.migration || "").trim(),
-      rollback: String(item.rollback || "").trim(),
-      approvalRef: String(item.approvalRef || "").trim(),
-      moduleRef: item.moduleRef ? String(item.moduleRef).trim() : null,
-      ownerRef: item.ownerRef ? String(item.ownerRef).trim() : owner,
-      verificationRefs: normalizeStringArray(item.verificationRefs ?? [], `task ${taskId} contractChanges.items[${index}].verificationRefs`),
-      sourcePaths: normalizeStringArray(item.sourcePaths ?? [], `task ${taskId} contractChanges.items[${index}].sourcePaths`),
-    };
-  });
-  const declared = value.declared === true || items.length > 0;
-  return { declared, items };
-}
-
-/** 归一化 task owner 字符串。 */
-function normalizeTaskOwner(value, taskId) {
-  const normalized = normalizeAgentKey(value);
-  if (!normalized) throw new Error(`task ${taskId} owner must be a non-empty agent name`);
-  return normalized;
-}
-
-/** 检测 worker/verify/writable_paths 治理黄灯。 */
-function detectTaskGovernanceWarnings({ workerCommand, verifyCommands, writablePaths }) {
-  const warnings = [];
-  if (isPossibleNoopTask({ worker_command: workerCommand, verify_commands: verifyCommands, writable_paths: writablePaths })) {
-    warnings.push({
-      code: "possible_noop_task",
-      severity: "warn",
-      message: "worker_command is empty/trivial, verify_commands are trivial, and writable_paths is empty; this task may pass without testing a real change.",
-    });
-  }
-  return warnings;
-}
-
-/** 规范化 successCriteria 并与 verify_commands 索引对齐。 */
-export function normalizeSuccessCriteria(value, taskId, subject, verifyCommands) {
-  if (value === undefined) return seedDefaultSuccessCriteria(taskId, subject, verifyCommands);
-  if (!Array.isArray(value)) throw new Error(`task ${taskId} successCriteria must be an array`);
-  if (value.length === 0) return seedDefaultSuccessCriteria(taskId, subject, verifyCommands);
-  return value.map((criterion, index) => {
-    if (!criterion || typeof criterion !== "object") throw new Error(`task ${taskId} successCriteria[${index}] must be an object`);
-    const id = criterion.id || `C${String(index + 1).padStart(3, "0")}`;
-    const title = criterion.title || criterion.scenario || `${subject} criterion ${index + 1}`;
-    if (typeof title !== "string" || title.trim().length === 0) throw new Error(`task ${taskId} criterion ${id} title is required`);
-    const status = criterion.status || "pending";
-    if (!["pending", "pass", "fail"].includes(status)) throw new Error(`task ${taskId} criterion ${id} status must be pending, pass, or fail`);
-    return {
-      id,
-      title: title.trim(),
-      scenario: typeof criterion.scenario === "string" && criterion.scenario.trim() ? criterion.scenario.trim() : title.trim(),
-      expectedEvidence: typeof criterion.expectedEvidence === "string" && criterion.expectedEvidence.trim()
-        ? criterion.expectedEvidence.trim()
-        : "verifier/review evidence proves this criterion",
-      status,
-      evidence: Array.isArray(criterion.evidence) ? criterion.evidence : [],
-      verifierCommandRefs: normalizeVerifierCommandRefs(criterion.verifierCommandRefs ?? criterion.verifier_command_refs, verifyCommands, `task ${taskId} criterion ${id}`),
-      lastUpdatedAt: criterion.lastUpdatedAt || null,
-    };
-  });
-}
-
-/** 归一化 successCriteria 中的 verifierCommandRefs。 */
-function normalizeVerifierCommandRefs(value, verifyCommands, label) {
-  if (value === undefined || value === null) return [];
-  if (!Array.isArray(value)) throw new Error(`${label} verifierCommandRefs must be an array`);
-  const maxIndex = verifyCommands.length - 1;
-  return uniqueStrings(value.map((item) => {
-    if (Number.isInteger(item)) {
-      if (item < 0 || item > maxIndex) throw new Error(`${label} verifierCommandRefs contains out-of-range index`);
-      return String(item);
-    }
-    if (typeof item !== "string" || item.trim().length === 0) throw new Error(`${label} verifierCommandRefs must contain command strings or indexes`);
-    const trimmed = item.trim();
-    if (/^\d+$/.test(trimmed)) {
-      const index = Number(trimmed);
-      if (index < 0 || index > maxIndex) throw new Error(`${label} verifierCommandRefs contains out-of-range index`);
-      return trimmed;
-    }
-    if (!verifyCommands.includes(trimmed)) throw new Error(`${label} verifierCommandRefs references an unknown verify command`);
-    return trimmed;
-  }));
-}
-
-/** 为新任务生成默认 successCriteria 条目。 */
-function seedDefaultSuccessCriteria(taskId, subject, verifyCommands) {
-  const verifierText = verifyCommands.join(" && ");
-  const verifierCommandRefs = verifyCommands.map((_, index) => String(index));
-  return [
-    {
-      id: "C001",
-      title: "happy path passes",
-      scenario: `${subject} 的主路径行为符合目标。`,
-      expectedEvidence: verifierText || "主路径 verifier evidence",
-      status: "pending",
-      evidence: [],
-      verifierCommandRefs,
-      lastUpdatedAt: null,
-    },
-    {
-      id: "C002",
-      title: "edge conditions considered",
-      scenario: `${subject} 的关键边界条件没有被跳过。`,
-      expectedEvidence: verifierText || "边界条件 verifier evidence",
-      status: "pending",
-      evidence: [],
-      verifierCommandRefs,
-      lastUpdatedAt: null,
-    },
-    {
-      id: "C003",
-      title: "regression guard passes",
-      scenario: `${subject} 不破坏既有关键行为。`,
-      expectedEvidence: verifierText || "回归保护 verifier evidence",
-      status: "pending",
-      evidence: [],
-      verifierCommandRefs,
-      lastUpdatedAt: null,
-    },
-  ];
-}
-
-/** 校验任务 status 是否为允许枚举值。 */
-export function validateStatus(status) {
-  if (!TASK_STATUSES.has(status)) {
-    throw new Error(`invalid task status: ${status}`);
-  }
-  return status;
-}
-
-/** 校验计划任务图：blockedBy 无环、引用存在等。 */
-export function validatePlanGraph(plan) {
-  const ids = new Set();
-  for (const task of plan.tasks) {
-    if (ids.has(task.id)) throw new Error(`duplicate task id: ${task.id}`);
-    ids.add(task.id);
-    if (!Array.isArray(task.blockedBy)) throw new Error(`task ${task.id} blockedBy must be an array`);
-    const blockers = new Set();
-    for (const blocker of task.blockedBy) {
-      if (typeof blocker !== "string" || blocker.trim().length === 0) {
-        throw new Error(`task ${task.id} blockedBy must contain task ids`);
-      }
-      if (blocker === task.id) throw new Error(`task ${task.id} cannot block itself`);
-      if (blockers.has(blocker)) throw new Error(`task ${task.id} has duplicate blocker: ${blocker}`);
-      blockers.add(blocker);
-    }
-  }
-
-  const tasksById = new Map(plan.tasks.map((task) => [task.id, task]));
-  for (const task of plan.tasks) {
-    for (const blocker of task.blockedBy) {
-      if (!ids.has(blocker)) throw new Error(`task ${task.id} blockedBy references unknown task: ${blocker}`);
-      const dependency = tasksById.get(blocker);
-      if ((dependency.repositoryTarget || "project") !== (task.repositoryTarget || "project")) {
-        throw new Error(`task ${task.id} depends on ${blocker} from another repository; split cross-repository work into separate deliveries and bind their SHAs with integration accept`);
-      }
-    }
-  }
-
-  const visiting = new Set();
-  const visited = new Set();
-  const stack = [];
-
-  function visit(taskId) {
-    if (visited.has(taskId)) return;
-    if (visiting.has(taskId)) {
-      const cycleStart = stack.indexOf(taskId);
-      const cycle = [...stack.slice(cycleStart), taskId].join(" -> ");
-      throw new Error(`task dependency cycle detected: ${cycle}`);
-    }
-    visiting.add(taskId);
-    stack.push(taskId);
-    const task = tasksById.get(taskId);
-    for (const blocker of task.blockedBy) visit(blocker);
-    stack.pop();
-    visiting.delete(taskId);
-    visited.add(taskId);
-  }
-
-  for (const task of plan.tasks) visit(task.id);
-  return plan;
 }
 
 // --- 导入与批准 ---
@@ -521,14 +136,12 @@ async function importPlanUnlocked(rootDir, planPath, options) {
   assertPlanImportDoesNotReplaceActiveWork(existingLedger, plan);
   const taskLedger = mergePlanIntoTaskLedger(existingLedger, plan);
   const targetPath = resolveWildArrangePath(rootDir, "plans", `${plan.id}.json`);
+  // plans/<id>.json 只是导入时的只读快照（计划元数据 + defaults，不含 tasks）；
+  // 任务状态只存在于 team/tasks.json。
+  const { tasks: _tasks, ...planSnapshot } = plan;
 
   const { config } = await loadWildArrangeConfig(rootDir);
   const approvalRequired = plan.generated_by === "host_semantic" || plan.tasks.some((task) => task.responsibilityChanges) || config?.planApproval?.required === true;
-  const work = await readJson(resolveWildArrangePath(rootDir, "work.json"), {
-    version: STATE_VERSION,
-    workId: createWorkId(),
-    createdAt: nowIso(),
-  });
   // 审计先行：plan_imported 入账本后才提交 plan/tasks.json/work.json 等实际
   // 状态，与完成路径 commitTaskCompletionState 同一方向（ARC-003）。
   await transactWithLedger(rootDir, {
@@ -539,10 +152,10 @@ async function importPlanUnlocked(rootDir, planPath, options) {
     generatedBy: plan.generated_by,
     approvalRequired,
   }, async () => {
-    await writeJsonAtomic(targetPath, plan);
+    await writeJsonAtomic(targetPath, planSnapshot);
     await writeTasksMarkdown(rootDir, plan);
     await writeJsonAtomic(resolveWildArrangePath(rootDir, "team", "tasks.json"), taskLedger);
-    await writeJsonAtomic(resolveWildArrangePath(rootDir, "work.json"), {
+    await updateWorkState(rootDir, (work) => ({
       ...work,
       stage: "planned",
       activePlanId: plan.id,
@@ -553,8 +166,7 @@ async function importPlanUnlocked(rootDir, planPath, options) {
         planId: plan.id,
         updatedAt: nowIso(),
       },
-      updatedAt: nowIso(),
-    });
+    }));
   });
   await bindFeatureDesignPlan(rootDir, featureDesignGate, plan.id);
   await writeSnapshot(rootDir, "planned", { planId: plan.id });
@@ -567,7 +179,7 @@ function applyGovernanceDefaults(rawPlan, governanceBinding) {
   const rawDefaults = rawPlan.defaults && typeof rawPlan.defaults === "object" ? rawPlan.defaults : {};
   const defaults = { ...rawDefaults };
   for (const field of ["verify_commands", "standards_commands", "review_commands"]) {
-    const projectValues = rawDefaults[field] ?? rawDefaults[field.replace(/_([a-z])/g, (_, char) => char.toUpperCase())] ?? [];
+    const projectValues = rawDefaults[field] ?? [];
     if (!Array.isArray(projectValues)) throw new Error(`defaults.${field} must be an array`);
     defaults[field] = uniqueStrings([...governanceBinding.planDefaults[field], ...projectValues]);
   }
@@ -582,8 +194,7 @@ function assertPlanImportDoesNotReplaceActiveWork(existingLedger, plan) {
     if (!replacedByImport && !switchesAwayFromActivePlan) return false;
     if (replacedByImport && task.status === "completed") return true;
     return ["in_progress", "verifying", "recovery_required"].includes(task.status)
-      || Boolean(task.parallel_run_claim)
-      || (task.status !== "completed" && ["claimed", "accepted"].includes(task.coordination?.status));
+      || Boolean(task.parallel_run_claim);
   });
   if (protectedTasks.length === 0) return;
   const details = protectedTasks.map((task) => `${task.id}:${task.status}`).join(", ");
@@ -591,7 +202,7 @@ function assertPlanImportDoesNotReplaceActiveWork(existingLedger, plan) {
 }
 
 /** 校验语义生成计划的额外质量规则。 */
-export function validateSemanticGeneratedPlan(plan) {
+function validateSemanticGeneratedPlan(plan) {
   if (plan.generated_by !== "host_semantic") return plan;
   const invalidOwners = plan.tasks
     .filter((task) => task.owner_source !== "explicit" || !COMMAND_WORKER_AGENTS.includes(task.owner))
@@ -631,32 +242,7 @@ function mergePlanIntoTaskLedger(existingLedger, plan) {
       ],
     };
   });
-  const tasks = [
-    ...(existingLedger?.tasks || []).filter((task) => task.planId !== plan.id),
-    ...plan.tasks,
-  ];
-  const planEntry = {
-    id: plan.id,
-    title: plan.title,
-    objective: plan.objective,
-    governance_binding: plan.governance_binding || null,
-    taskIds: plan.tasks.map((task) => task.id),
-    createdAt: (existingLedger?.plans || []).find((candidate) => candidate.id === plan.id)?.createdAt || plan.createdAt,
-    updatedAt: at,
-  };
-  return {
-    version: STATE_VERSION,
-    kind: "task_ledger",
-    planId: plan.id,
-    activePlanId: plan.id,
-    plans: [
-      ...(existingLedger?.plans || []).filter((candidate) => candidate.id !== plan.id),
-      planEntry,
-    ],
-    tasks,
-    createdAt: existingLedger?.createdAt || at,
-    updatedAt: at,
-  };
+  return replacePlanTasks(existingLedger, { ...plan, governance_binding: plan.governance_binding || null }, plan.tasks, { at, activate: true });
 }
 
 /** 读取当前计划是否需人类批准及批准状态。 */
@@ -676,8 +262,7 @@ export async function loadPlanApproval(rootDir) {
 /** 人类批准计划：写 plan_approved 账本事件并解除 run 阻塞。 */
 export async function approvePlan(rootDir, options = {}) {
   return withTaskStateLock(rootDir, "approve-plan", async () => {
-    const workPath = resolveWildArrangePath(rootDir, "work.json");
-    const work = await readJson(workPath, null);
+    const work = await readJson(resolveWildArrangePath(rootDir, "work.json"), null);
     if (!work || !work.activePlanId) throw new Error("no imported plan found; run wildarrange plan --from <file>");
     if (options.planId && options.planId !== work.activePlanId) {
       throw new Error(`plan ${options.planId} is not the active plan (${work.activePlanId})`);
@@ -693,20 +278,30 @@ export async function approvePlan(rootDir, options = {}) {
     const state = await loadTaskState(rootDir);
     await transactWithLedger(rootDir, { type: "plan_approved", planId: work.activePlanId, approver: nextApproval.approvedBy,
       responsibilityScopes: Object.fromEntries((state?.tasks || []).map((task) => [task.id, responsibilityDigest(task.responsibilityChanges)])),
-      contractScopes: Object.fromEntries((state?.tasks || []).map((task) => [task.id, hashContent(JSON.stringify(task.contractChanges?.items || []))])) }, () => writeJsonAtomic(workPath, {
-        ...work,
-        status: "ready",
-        planApproval: nextApproval,
-        updatedAt: nowIso(),
-      }));
+      contractScopes: Object.fromEntries((state?.tasks || []).map((task) => [task.id, hashContent(JSON.stringify(task.contractChanges?.items || []))])) },
+      () => updateWorkState(rootDir, (current) => ({ ...current, status: "ready", planApproval: nextApproval }), { createIfMissing: false }));
     return { planId: work.activePlanId, status: "approved", approval: nextApproval };
   });
+}
+
+/**
+ * work.json 计划状态的唯一写入口：读改写并刷新 updatedAt。
+ * mutate 收到当前 work（缺失时按 createIfMissing 决定用初始骨架还是跳过写入），返回新 work。
+ */
+export async function updateWorkState(rootDir, mutate, { createIfMissing = true } = {}) {
+  const workPath = resolveWildArrangePath(rootDir, "work.json");
+  const existing = await readJson(workPath, null);
+  if (!existing && !createIfMissing) return null;
+  const current = existing || { version: STATE_VERSION, workId: createWorkId(), createdAt: nowIso() };
+  const next = { ...mutate(current), updatedAt: nowIso() };
+  await writeJsonAtomic(workPath, next);
+  return next;
 }
 
 // --- 路由 enrichment ---
 
 /** 为计划各任务解析并写入 route_decision。 */
-export async function enrichPlanWithRoutes(rootDir, plan) {
+async function enrichPlanWithRoutes(rootDir, plan) {
   const routes = await loadRoutesConfig(rootDir);
   const planRouteDecision = resolveRouteDecision(routes, `${plan.title}\n${plan.objective}`);
   plan.route_decision = planRouteDecision;
@@ -733,7 +328,7 @@ export async function enrichPlanWithRoutes(rootDir, plan) {
 }
 
 /** 导入质量门禁：noop/trivial 任务等启发式检查。 */
-export function validatePlanImportQuality(plan) {
+function validatePlanImportQuality(plan) {
   const route = plan.route_decision;
   const planText = `${plan.title}\n${plan.objective}\n${plan.tasks.map((task) => `${task.subject}\n${task.description}`).join("\n")}`;
   const productLike = /(产品|用户|体验|页面|网页|工具|上传|视频|pdf|txt|互动|游戏|mvp|流程|多步骤|权限|协作|可视化)/i.test(planText);
@@ -751,17 +346,6 @@ export function validatePlanImportQuality(plan) {
   return plan;
 }
 
-/** 为单任务 enrich route_decision 字段。 */
-export function enrichTaskWithRouteDecision(task, routes) {
-  const routeDecision = resolveRouteDecision(routes, `${task.subject}\n${task.description}`);
-  task.route_decision = routeDecision;
-  if (task.category_source !== "explicit") {
-    task.category = routeDecision.category || "deep";
-    task.category_source = "route";
-  }
-  task.skills = uniqueStrings([...(task.skills || []), ...(routeDecision.skills || [])]);
-  return task;
-}
 
 /** 将计划任务写入派生 tasks.md 镜像（非权威状态）。 */
 export async function writeTasksMarkdown(rootDir, plan) {

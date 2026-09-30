@@ -21,7 +21,7 @@
 import { stat } from "node:fs/promises";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { evaluateGateArming } from "../infra/gate-arming.mjs";
-import { readJson, resolveWildArrangePath } from "../infra/runtime-store.mjs";
+import { resolveWildArrangePath } from "../infra/runtime-store.mjs";
 import { inspectFileLock } from "../infra/file-lock.mjs";
 import { evaluateRegistryFreshness } from "../infra/verification-registry.mjs";
 import { loadTaskState } from "../orchestration/plan-state.mjs";
@@ -35,10 +35,9 @@ const ROUTE_REVIEW_CATEGORIES = ["confirmed", "rule_wrong", "case_wrong"];
 
 /** 按日期聚合 routing 决策及其同 session 的工具链，附带最新人工标注。 */
 export async function buildRouteReviewPanelViewModel(rootDir, { date = localDate(), limit = 100 } = {}) {
-  const [{ records, skippedLines }, annotations, dailyReport] = await Promise.all([
+  const [{ records, skippedLines }, annotations] = await Promise.all([
     readDecisions(rootDir, { filter: (record) => typeof record.ts === "string" && localDate(record.ts) === date }),
     readAnnotations(rootDir),
-    readJson(resolveWildArrangePath(rootDir, "reports", "routing", `${date}.json`), null),
   ]);
   const latestAnnotation = new Map();
   for (const annotation of annotations.records) latestAnnotation.set(annotation.decisionId, annotation);
@@ -90,12 +89,6 @@ export async function buildRouteReviewPanelViewModel(rootDir, { date = localDate
     reviewed: reviewed.length,
     confirmed: reviewed.filter((route) => route.review.category === "confirmed").length,
     issues: reviewed.filter((route) => ["rule_wrong", "case_wrong"].includes(route.review.category)).length,
-    dailyReport: dailyReport?.kind === "wildarrange_daily_routing_review" ? {
-      generatedAt: dailyReport.generatedAt,
-      summary: dailyReport.summary,
-      patterns: dailyReport.patterns || [],
-      path: `.wildarrange/reports/routing/${date}.md`,
-    } : null,
     skippedLines,
     routes: selected,
   };

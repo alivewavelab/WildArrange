@@ -6,7 +6,7 @@
 
 - 文件、路径、JSON、锁、配置、快照与持久化原语。
 - 命令执行与高风险命令预检。
-- Git diff/worktree、ledger、安全基线、LLM provider、规则扫描、仓库布局检查与记忆摘要等基础设施。
+- Git diff/worktree、ledger、安全基线、LLM provider、规则扫描、仓库布局检查等基础设施。
 
 ## 不负责
 
@@ -29,15 +29,15 @@
 - 长期 Agent 固定白名单是机器约束；Prompt manifest、根配置和确定性路由不能仅靠相互引用形成自洽的第六角色。
 - README 命令事实从真实 CLI `--help` 读取，不能扫描源码字符串代替；JavaScript 注释词法检查必须进入模板表达式并跳过字符串/正则正文。
 - Provider 缺失或网络失败不能越权改变确定性质量门结果。
-- Git 协调命令必须使用参数数组调用 Git，不拼接用户输入到 shell；所有远端写入只允许普通 push，禁止提供 force push 原语。自动 push 只允许写入任务独占的 task branch 或 ownership/handoff 协调引用；不得提供自动合入共享 `main` 的原语。
+- Git 协调命令必须使用参数数组调用 Git，不拼接用户输入到 shell；所有远端写入只允许普通 push，禁止提供 force push 原语。自动 push 只允许写入任务独占的 task branch；不得提供自动合入共享 `main` 的原语。
 - 本地 delivery commit 必须使用隔离 index 或等价机制，只收集当前任务已验证且属于 `writable_paths` 的文件，不得污染开发者已有 staging area。更新任务分支前必须以预期 HEAD 做乐观锁复核，提交后证明 task worktree 无残留改动。
 - Worktree 是临时施工目录，不是长期证据。只有确认目标主线包含 delivery commit、worktree 干净且任务不处于等待验收/返工/恢复状态时才可清理；删除 worktree、本地 branch、远端 branch 是三个独立步骤。
-- Git 路径比较必须处理 macOS `/var` 与 `/private/var` 等 realpath 别名；`.wildarrange/` 永远不进入 handoff 工作树变更清单。
+- Git 路径比较必须处理 macOS `/var` 与 `/private/var` 等 realpath 别名。
 - Infra 可以返回事实和证据，不能把“完成任务”作为自己的业务结论。
 - 项目没有 `foundation.mjs` 兼容 shim；五区实现必须直接 import `runtime-store.mjs`、`runtime-config.mjs`、`task-state-lock.mjs`、`runtime-snapshot.mjs`、`prompt-pack.mjs`、`runtime-bootstrap.mjs`、`agent-registry.mjs` 或 `ledger.mjs` 的真实 owner。
-- Prompt Pack 运行时读取根固定为 `.wildarrange/prompt-pack/installed`；外部/custom pack 必须先校验 source realpath 再物化，读取侧不得信任 registry 提供的根路径，所有 Agent/Skill/routes/tool 条目统一校验相对路径、realpath 与安装 hash。
+- Prompt Pack 运行时读取根固定为 runtimeRoot 下的 `prompt-pack/installed`；外部/custom pack 必须先校验 source realpath 再物化，读取侧不得信任 registry 提供的根路径，所有 Agent/Skill/routes/tool 条目统一校验相对路径、realpath 与安装 hash。
 - 归档删除必须把精确删除集加入对应 state backup 的 recovery package；manifest 路径先完整校验，`state restore` 必须能恢复文件、目录与符号链接，不能只恢复 canonical task ledger。
-- Task 证据路径必须使用 `<planId>/<taskId>` 分目录编码；不得把两个都允许连字符的 ID 用单个 `-` 拼成文件名。旧扁平证据只可在 JSON 身份匹配或全账本无同 stem 碰撞时兼容。
+- Task 证据路径必须使用 `<planId>/<taskId>` 分目录编码；不得把两个都允许连字符的 ID 用单个 `-` 拼成文件名。
 - 恢复上下文的确定性文件读取和 Markdown/JSON 渲染只允许存在于 `runtime-snapshot.mjs`；`ai/context.mjs` 可保留公开薄封装，但不得维护第二份渲染实现。
 - `TASK_STATUSES` 本轮作为持久化格式枚举归 `runtime-store.mjs`；若未来迁往 Orchestration，必须单独设计兼容边界，禁止 Infra 反向依赖上层。
 

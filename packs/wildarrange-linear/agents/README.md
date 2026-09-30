@@ -15,6 +15,8 @@
 
 ## 状态与路径映射
 
+下表的 `.wildarrange/` 是运行态根 runtimeRoot 的逻辑前缀，实际目录位于客户项目之外。
+
 | 概念 | WildArrange |
 |---|---|
 | 计划文件 | `.wildarrange/plans/*.json` + `.wildarrange/team/tasks.md` |

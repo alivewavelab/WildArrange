@@ -35,6 +35,6 @@ M1 不运行常驻多 Agent 集群。命令型子 Agent 已可在隔离目录或
 
 ## 当前真相
 
-WildArrange 对外暴露五个长期 Agent：Jiuwei、DiJiang、ZhuRong、BaiZe、LuWu。Router 是确定性系统节点；CangJie 是可选的内部档案员/语义路由 profile。产品、旅程、验收、UX、范围、调研、检查、风险复核与怀疑式验收等职责，以 Skill 形式按需挂载到对应 Agent 上。
+WildArrange 对外暴露五个长期 Agent：Jiuwei、DiJiang、ZhuRong、BaiZe、LuWu。Router 是确定性系统节点。产品、旅程、验收、UX、范围、调研、检查、风险复核与怀疑式验收等职责，以 Skill 形式按需挂载到对应 Agent 上。
 
 BaiZe 是唯一的独立复核者。确定性门仍是权威；可选的 OpenAI 兼容 LLM review 在配置后提供第二意见。

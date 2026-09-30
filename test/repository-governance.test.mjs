@@ -17,19 +17,15 @@ import path from "node:path";
 import test from "node:test";
 
 import { runRepositoryGovernanceAudit } from "../src/capabilities/repository-governance.mjs";
-import { extractComments, inspectRepositoryGovernance } from "../src/infra/repository-layout.mjs";
+import { extractComments } from "../src/infra/comment-lexer.mjs";
+import { inspectRepositoryGovernance } from "../src/infra/repository-layout.mjs";
 import { resolveRouteDecision } from "../src/infra/route-table.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
+import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 async function withTempDir(fn) {
-  const baseDir = path.join(process.cwd(), ".tmp");
-  await mkdir(baseDir, { recursive: true });
-  const dir = await mkdtemp(path.join(baseDir, "wildarrange-governance-"));
-  try {
-    await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+  await withExternalProject(({ projectRoot, governanceRoot }) => fn(projectRoot, governanceRoot));
 }
 
 const policy = {
@@ -90,16 +86,16 @@ test("repository governance detects comments inside JavaScript template expressi
 });
 
 test("repository governance blocks comment violations and writes LuWu evidence", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, governanceRoot) => {
     await seedRepository(dir, "// TODO replace placeholder\nexport const ready = false;\n");
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({ repositoryGovernance: policy }, null, 2));
+    await writeFile(path.join(governanceRoot, "policy", "wildarrange.config.json"), JSON.stringify({ repositoryGovernance: policy }, null, 2));
 
     const report = await runRepositoryGovernanceAudit(dir);
     assert.equal(report.status, "fail");
     assert.ok(report.findings.some((finding) => finding.ruleId === "comment_pattern_blocked" && finding.path === "src/example.mjs"));
     assert.ok(report.proposedChanges.some((change) => change.path === "src/example.mjs" && change.verification.includes("governance audit")));
     assert.deepEqual(report.unresolved, []);
-    assert.match(await readFile(path.join(dir, ".wildarrange", "reports", "governance", "latest.md"), "utf8"), /comment_pattern_blocked/);
+    assert.match(await readFile(resolveWildArrangePath(dir, "reports", "governance", "latest.md"), "utf8"), /comment_pattern_blocked/);
 
     const doctor = await runDoctor(dir);
     assert.equal(doctor.sections.repositoryGovernance.status, "fail");
@@ -180,7 +176,7 @@ test("repository governance rejects unrouted Agents and nonexistent documented C
 });
 
 test("repository governance rejects a self-consistent sixth long-lived Agent", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, governanceRoot) => {
     const packDir = path.join(dir, "packs", "wildarrange-linear");
     await mkdir(path.join(packDir, "agents"), { recursive: true });
     await mkdir(path.join(packDir, "skills"), { recursive: true });
@@ -201,7 +197,7 @@ test("repository governance rejects a self-consistent sixth long-lived Agent", a
       tools: "tools/tool-contract.json",
       routes: "routes.json",
     }));
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({
+    await writeFile(path.join(governanceRoot, "policy", "wildarrange.config.json"), JSON.stringify({
       agents: { Rogue: { role: "rogue", provider: "host", model: "host-default" } },
     }));
 

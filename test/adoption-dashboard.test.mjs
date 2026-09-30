@@ -19,17 +19,10 @@ import test from "node:test";
 import { startDashboardServer } from "../src/interface/dashboard.mjs";
 import { renderDashboardHtml } from "../src/interface/dashboard-view.mjs";
 import { decideAdoptionCard, startAdoption } from "../src/orchestration/adoption.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 async function withTempDir(fn) {
-  const baseDir = path.join(process.cwd(), ".tmp");
-  await mkdir(baseDir, { recursive: true });
-  const dir = await mkdtemp(path.join(baseDir, "wildarrange-adoption-ui-"));
-  try {
-    await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+  await withExternalProject(({ projectRoot }) => fn(projectRoot));
 }
 
 async function listen(dir, options = {}) {
@@ -102,7 +95,6 @@ function request(base, pathname, { method = "GET", token, headers = {}, body } =
 
 test("dashboard adoption GET is available and HTML contains the panel", async () => {
   await withTempDir(async (dir) => {
-    await initRuntime(dir);
     await writeFile(path.join(dir, "README.md"), "# Demo\n", "utf8");
     const { server, base } = await listen(dir);
     try {
@@ -146,7 +138,6 @@ test("dashboard adoption GET is available and HTML contains the panel", async ()
 
 test("dashboard adoption writes require Host/Origin/token and reject bad ids", async () => {
   await withTempDir(async (dir) => {
-    await initRuntime(dir);
     const token = "secret-token";
     const { server, base } = await listen(dir, { token });
     try {
@@ -183,7 +174,6 @@ test("dashboard adoption writes require Host/Origin/token and reject bad ids", a
 
 test("dashboard can approve one card at a time and rejects batched sensitive approval", async () => {
   await withTempDir(async (dir) => {
-    await initRuntime(dir);
     await writeFile(path.join(dir, "package.json"), JSON.stringify({ name: "app", scripts: { test: "node --version" } }, null, 2));
     await mkdir(path.join(dir, "test"), { recursive: true });
     await writeFile(path.join(dir, "test", "a.test.mjs"), "export const a = 1;\n");
@@ -237,7 +227,6 @@ test("dashboard can approve one card at a time and rejects batched sensitive app
 
 test("dashboard apply rejects multiple cardIds with 400 and accepts a single cardId with 200", async () => {
   await withTempDir(async (dir) => {
-    await initRuntime(dir);
     await writeFile(path.join(dir, "package.json"), JSON.stringify({ name: "app", scripts: { test: "node --version" } }, null, 2));
     await mkdir(path.join(dir, "test"), { recursive: true });
     await writeFile(path.join(dir, "test", "a.test.mjs"), "export const a = 1;\n");
@@ -276,7 +265,6 @@ test("dashboard apply rejects multiple cardIds with 400 and accepts a single car
 
 test("dashboard apply rejects pending cards with 409 and 先判完", async () => {
   await withTempDir(async (dir) => {
-    await initRuntime(dir);
     await writeFile(path.join(dir, "package.json"), JSON.stringify({ name: "app", scripts: { test: "node --version" } }, null, 2));
     await mkdir(path.join(dir, "test"), { recursive: true });
     await writeFile(path.join(dir, "test", "a.test.mjs"), "export const a = 1;\n");

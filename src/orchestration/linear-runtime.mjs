@@ -3,7 +3,7 @@
 // 所属模块：orchestration
 // 作用说明：
 //   线性任务运行时：连续 runNextTask 的任务选择、worker 执行与交付流水线。
-//   分步 workflow node 由 linear-workflow.mjs 持有。
+//   分步 workflow node（execute/checkpoint/retry）由 linear-workflow.mjs 持有。
 //
 // 【运行原理速读】
 //   可以把它想成「一次只推进一个任务的流水线司机」：
@@ -25,51 +25,42 @@ import {
 } from "../infra/runtime-store.mjs";
 import { transactWithLedger, withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { ensureTaskPacket, writeSnapshot } from "../infra/runtime-snapshot.mjs";
-import { readChangeRequest, writeChangeRequest } from "./change-governance.mjs";
-import { buildFailureSummary } from "../infra/failure-analysis.mjs";
-import { writeFailureReport, writeReviewReport } from "../infra/task-reports.mjs";
+import { readChangeRequest } from "./change-governance.mjs";
 import { routeRequest } from "../ai/routing.mjs";
 import { buildChangedPathDiffEvidence, changedPathsIntroducedByTask, collectGitChangedPaths } from "../infra/git-diff.mjs";
 import { invokeCapability } from "../capabilities/gateway.mjs";
-import {
-  commitTaskCompletionState,
-  runDeliveryPipeline,
-  runPostCompletionSideEffects,
-  shouldFailDeliveryAttempt,
-} from "./delivery-pipeline.mjs";
+import { runDeliveryPipeline } from "./delivery-pipeline.mjs";
 import { writeWorkflowSummary } from "./status.mjs";
 import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
-import { findRunnableTask, persistTaskState, writeOutbox } from "./task-board.mjs";
-import { coordinateTaskClaim } from "./remote-ownership.mjs";
+import { persistTaskState, writeOutbox } from "./task-board.mjs";
+import { findRunnableTask } from "../infra/task-predicates.mjs";
+import { resolveTaskBranchTarget } from "./task-branch.mjs";
 import { assertCommandWorkerAgent } from "../infra/agent-registry.mjs";
 import { assertContractWorkspaceAvailable } from "./integration.mjs";
-import { ensureLinearDeliveryWorkspace } from "./linear-delivery.mjs";
-import {
-  persistAcceptanceProofFailure,
-  persistCheckpointWriteFailure,
-  persistCommandRecoveryRequired,
-  persistRevalidationRequired,
-  taskOwnershipGate,
-} from "./linear-recovery.mjs";
-import { recordPreExecuteSnapshot } from "./linear-task-support.mjs";
-import { checkpointTaskNodeWithinLock } from "./linear-workflow.mjs";
+import { ensureLinearDeliveryWorkspace, recordPreExecuteSnapshot } from "./linear-delivery.mjs";
+import { DEFAULT_RECOVERY_HINTS, applyPipelineOutcome, persistCommandRecovery, recordGateEvidence } from "./task-recovery.mjs";
 import {
   runLinearWorkflowNode,
   executeTaskNode,
-  verifyTaskNode,
-  scopeTaskNode,
-  reviewTaskNode,
   checkpointTaskNode,
+  checkpointTaskNodeWithinLock,
   retryTaskNode,
 } from "./linear-workflow.mjs";
 
 export {
   executeTaskNode,
-  verifyTaskNode,
-  scopeTaskNode,
-  reviewTaskNode,
   checkpointTaskNode,
   retryTaskNode,
+};
+
+/** 线性 run 各 pipeline 分支的 ledger 事件类型。 */
+const LINEAR_EVENTS = {
+  awaiting: "task_awaiting_user_decision",
+  revalidation: "task_completion_revalidation_required",
+  completed: "task_verified",
+  rejected: "task_rejected",
+  proofFailed: "acceptance_proof_failed",
+  commandRecovery: "command_recovery_required",
 };
 
 /** 分步 workflow 入口；route 保留在 linear-runtime 以维持唯一的 orchestration → ai 边界。 */
@@ -165,10 +156,9 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   await ensureTaskPacket(rootDir, taskState.planId, task);
   options = { ...options, executionContextPath: readiness?.contextPath };
   task.owner = assertCommandWorkerAgent(task.owner || "Jiuwei");
-  task.coordination = await coordinateTaskClaim(rootDir, {
+  task.coordination = await resolveTaskBranchTarget(rootDir, {
     planId: taskState.planId,
     task,
-    owner: task.owner,
   });
   const deliveryWorkspace = await ensureLinearDeliveryWorkspace(rootDir, taskState.planId, task, taskState.tasks);
   task.status = "in_progress";
@@ -211,152 +201,43 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   await writeSnapshot(rootDir, "worker_done", { planId: taskState.planId, taskId: task.id, exitCode: workerResult.exitCode });
 
   if (workerResult?.recoveryRequired === true || workerResult?.terminationFailed === true) {
-    return persistCommandRecoveryRequired(rootDir, taskState, task, workerResult);
+    return persistCommandRecovery(rootDir, taskState, task, workerResult, {
+      event: { type: LINEAR_EVENTS.commandRecovery },
+      retryHint: DEFAULT_RECOVERY_HINTS.commandRecovery,
+    });
   }
 
   // Shared delivery pipeline owns gate order (verify -> scope -> review ->
   // acceptance-proof -> checkpoint); see src/orchestration/delivery-pipeline.mjs.
-  // This function still owns every reporting/ledger side effect itself so
-  // observable behavior (files written, ledger entries, evidence shape)
-  // stays identical to before the pipeline existed.
+  // pipeline 结果到任务状态/失败报告/ledger 的分支统一由 applyPipelineOutcome 维护。
   const pipelineResult = await runDeliveryPipeline(rootDir, taskState.planId, task, {
     initialEvidence: { workerResult },
     changedPaths: deliveryWorkspace ? afterChanged.paths : changedPathsIntroducedByTask(beforeChanged, afterChanged),
     unavailableReason: beforeChanged.available ? afterChanged.reason : beforeChanged.reason,
     executionRoot,
     runId: deliveryWorkspace?.runId,
-    preCompletionGate: () => taskOwnershipGate(rootDir, task.id),
   });
-  const verifyResult = pipelineResult.evidence.verifyResult;
-  const scopeResult = pipelineResult.evidence.scopeResult;
-  const reviewResult = pipelineResult.evidence.reviewResult;
-  const acceptanceProof = pipelineResult.evidence.acceptanceProof || null;
-  const criteria = pipelineResult.criteria;
+  const { verifyResult, reviewResult } = pipelineResult.evidence;
+  await recordGateEvidence(rootDir, taskState.planId, task, pipelineResult);
   if (pipelineResult.evidence.integrationCommit) task.delivery = pipelineResult.evidence.integrationCommit;
 
-  task.evidence.push(verifyResult);
-  task.last_verify_result = verifyResult;
   await writeSnapshot(rootDir, "verified", { planId: taskState.planId, taskId: task.id, pass: verifyResult.pass });
   if (pipelineResult.criterionEvidenceRecorded.length > 0) {
     await appendLedger(rootDir, { type: "criterion_evidence_auto_recorded", planId: taskState.planId, taskId: task.id, count: pipelineResult.criterionEvidenceRecorded.length });
   }
-
-  task.evidence.push({ kind: "scope_guard", at: nowIso(), ...scopeResult });
-  task.last_scope_result = scopeResult;
-  if (scopeResult.status === "fail") {
-    task.last_change_request = await writeChangeRequest(rootDir, taskState.planId, task, scopeResult, "scope_guard");
-  }
-
-  task.evidence.push(reviewResult);
-  task.last_review_result = reviewResult;
-  await writeReviewReport(rootDir, taskState.planId, task, reviewResult);
   await appendLedger(rootDir, { type: "review_gate_completed", planId: taskState.planId, taskId: task.id, pass: reviewResult.pass, failedLaneCount: reviewResult.lanes.filter((lane) => lane.status === "fail").length });
   await writeSnapshot(rootDir, "reviewed", { planId: taskState.planId, taskId: task.id, pass: reviewResult.pass });
 
-  if (pipelineResult.status === "awaiting_user_decision") {
-    await transactWithLedger(rootDir, {
-      type: "task_awaiting_user_decision",
-      planId: taskState.planId,
-      taskId: task.id,
-      changeRequestId: pipelineResult.changeRequest?.id || null,
-    }, () => persistTaskState(rootDir, taskState));
-    return { status: "awaiting_user_decision", task, changeRequest: pipelineResult.changeRequest, verifyResult, scopeResult, reviewResult };
-  }
-  if (pipelineResult.status === "recovery_required") {
-    return persistCommandRecoveryRequired(rootDir, taskState, task, pipelineResult.evidence.commandRecovery, {
-      workerResult, verifyResult, scopeResult, reviewResult,
-    });
-  }
-
-  if (pipelineResult.status === "revalidation_required") {
-    await persistRevalidationRequired(rootDir, taskState, task, {
-      integrationGuard: pipelineResult.evidence.integrationGuard,
-      summaryFallback: "remote task ownership changed before completion",
-      retryHint: "旧设备必须停止写入；由当前远端 owner 继续任务并重新运行全部质量门",
-      ledgerEvent: { type: "task_completion_revalidation_required", planId: taskState.planId, taskId: task.id, reason: "task_ownership_changed" },
-    });
-    return { status: "revalidation_required", task, workerResult, verifyResult, scopeResult, reviewResult, acceptanceProof };
-  }
-
-  if (pipelineResult.status === "completed") {
-    // Completion ledger event BEFORE the canonical state write: tasks.json is
-    // the commit point every consumer reads, so a ledger outage must leave
-    // the task re-runnable (not completed-without-evidence). The reverse
-    // ordering produced completed state with no completion ledger event
-    // (cross-review P0, round 3, 2026-07-21). If the persist below fails
-    // instead, the ledger is one event ahead of state, which the append-only
-    // journal tolerates: the rerun appends a fresh event.
-    // Wisdom and digest sit INSIDE the completion transaction (before the
-    // canonical persist): a failure here leaves the task in verifying, which
-    // the recovery adjudication re-runs — so a completed task can never
-    // permanently miss its wisdom/digest (cross-review P1, round 5,
-    // 2026-07-21). Snapshot and workflow summary are post-commit
-    // conveniences; their failure must not un-complete the task, so they are
-    // best-effort with a ledger warning instead.
-    await commitTaskCompletionState(rootDir, {
-      taskState,
-      task,
-      verifyResult,
-      ledgerEvent: { type: "task_verified", planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult.status, reviewStatus: "pass" },
-      digestReason: "task_completed",
-    });
-    const sideEffectWarnings = await runPostCompletionSideEffects(rootDir, taskState.planId, task, async () => {
-      await writeSnapshot(rootDir, "checkpointed", { planId: taskState.planId, taskId: task.id, scopeStatus: scopeResult.status });
+  return applyPipelineOutcome(rootDir, taskState, task, pipelineResult, {
+    workerResult,
+    events: LINEAR_EVENTS,
+    hints: DEFAULT_RECOVERY_HINTS,
+    changeRequestSource: "scope_guard",
+    afterCompleted: async () => {
+      await writeSnapshot(rootDir, "checkpointed", { planId: taskState.planId, taskId: task.id, scopeStatus: pipelineResult.evidence.scopeResult.status });
       if (taskState.tasks.every((candidate) => candidate.status === "completed")) {
         await writeWorkflowSummary(rootDir, { reason: "all_tasks_completed" });
       }
-    });
-    return { status: "completed", task, workerResult, verifyResult, scopeResult, reviewResult, acceptanceProof, sideEffectWarnings };
-  }
-
-  if (pipelineResult.status === "checkpoint_failed") {
-    await persistCheckpointWriteFailure(rootDir, taskState, task, {
-      workerResult,
-      verifyResult,
-      scopeResult,
-      reviewResult,
-      criteria,
-      checkpointError: pipelineResult.evidence.checkpointError?.message,
-    });
-    return { status: task.status === "verifying" ? "recovery_required" : "retry", task, workerResult, verifyResult, scopeResult, reviewResult, acceptanceProof };
-  }
-
-  if (acceptanceProof) {
-    // Every upstream gate passed, but acceptance-proof itself found a gap.
-    await persistAcceptanceProofFailure(rootDir, taskState, task, {
-      workerResult,
-      verifyResult,
-      scopeResult,
-      reviewResult,
-      criteria,
-      failureSummary: `acceptance proof failed: ${acceptanceProof.checks.filter((check) => check.status === "fail").map((check) => check.name).join(", ")}`,
-    });
-    return { status: task.status === "failed" ? "failed" : "retry", task, workerResult, verifyResult, scopeResult, reviewResult, acceptanceProof };
-  }
-
-  task.status = shouldFailDeliveryAttempt(task, verifyResult, scopeResult, reviewResult) ? "failed" : "pending";
-  if (scopeResult?.status === "fail" && !task.last_change_request) {
-    task.last_change_request = await writeChangeRequest(rootDir, taskState.planId, task, scopeResult, "scope_guard");
-  }
-  task.last_failure = buildFailureSummary(task, {
-    workerResult,
-    verifyResult,
-    scopeResult,
-    reviewResult,
-    criteriaResult: criteria,
-    nextStatus: task.status,
+    },
   });
-  task.updatedAt = nowIso();
-  await writeFailureReport(rootDir, taskState.planId, task);
-  await transactWithLedger(rootDir, {
-    type: "task_rejected",
-    planId: taskState.planId,
-    taskId: task.id,
-    nextStatus: task.status,
-    attempt: task.attempts,
-    reason: task.last_failure.reason,
-    retryHint: task.last_failure.retryHint,
-  }, () => persistTaskState(rootDir, taskState));
-  await writeSnapshot(rootDir, "task_rejected", { planId: taskState.planId, taskId: task.id, nextStatus: task.status });
-  return { status: task.status === "failed" ? "failed" : "retry", task, workerResult, verifyResult, scopeResult, reviewResult };
 }

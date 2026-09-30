@@ -2,10 +2,12 @@
 // 文件名称：git-coordination.mjs
 // 所属模块：infra
 // 作用说明：
-//   多 Agent Git 协调：stash、branch、merge 冲突与 worktree 生命周期。
+//   单机 Git 交付原语：任务 worktree 基线检查、delivery commit（隔离 index、
+//   只含本任务路径）、普通非强制 push 到任务独占 task branch、分支命名。
 //
 // 【运行原理速读】
-//   coordinateGitState → 冲突检测 → ledger 记录 Git 副作用。
+//   inspectTaskWorktreeBaseline → createTaskDeliveryCommit → pushTaskDeliveryCommit。
+//   不做多设备/远端 ownership；同一分支被占用由 git worktree 拒绝并由调用方报错。
 // =============================================================================
 import { randomUUID } from "node:crypto";
 import { realpath, rm } from "node:fs/promises";
@@ -13,79 +15,41 @@ import os from "node:os";
 import path from "node:path";
 import { runCommandFile } from "./command-runner.mjs";
 import { readGitHead, readGitTopLevel } from "./git-diff.mjs";
-import {
-  nowIso,
-  readJson,
-  resolveWildArrangePath,
-  writeJsonAtomic,
-} from "./runtime-store.mjs";
 
 /** 默认本地 git 子命令超时（毫秒）；push/fetch 等长操作单独覆盖。 */
 const GIT_TIMEOUT_MS = 30_000;
 
 /**
- * ensureDeviceIdentity：本模块对外异步 API。
+ * inspectGitDelivery：探测项目根的 Git 交付环境（本地基线、可选远端与主线分支名）。
+ * 未配置远端时仍可本地交付；远端只用于 task branch 的普通 push。
  */
-export async function ensureDeviceIdentity(rootDir, options = {}) {
-  const devicePath = resolveWildArrangePath(rootDir, "device.json");
-  const current = await readJson(devicePath, null);
-  if (current && options.force !== true) return current;
-  const device = {
-    kind: "wildarrange_device",
-    version: 1,
-    deviceId: current?.deviceId || randomUUID(),
-    name: normalizeDeviceName(options.name || current?.name || os.hostname()),
-    registeredAt: current?.registeredAt || nowIso(),
-    updatedAt: nowIso(),
-  };
-  await writeJsonAtomic(devicePath, device);
-  return device;
-}
-
-/**
- * inspectGitCoordination：本模块对外异步 API。
- */
-export async function inspectGitCoordination(rootDir, config = {}) {
-  const mode = config.mode || "guarded";
-  if (mode === "off") {
-    return { enabled: false, active: false, mode, reason: "git coordination is disabled" };
-  }
+export async function inspectGitDelivery(rootDir, config = {}) {
   const topLevelResult = await readGitTopLevel(rootDir);
   if (!topLevelResult.available) {
-    return unavailable(mode, "project is not a Git repository");
+    return unavailable("project is not a Git repository");
   }
   const topLevel = await canonicalPath(topLevelResult.topLevel);
-  // §3.4 Git 边界：项目根必须等于 toplevel realpath，避免在嵌套 worktree 误协调。
+  // 项目根必须等于 toplevel realpath，避免在嵌套 worktree 内误交付。
   if (topLevel !== await canonicalPath(rootDir)) {
-    return unavailable(mode, "project root is not the Git toplevel");
+    return unavailable("project root is not the Git toplevel");
   }
   const headResult = await readGitHead(rootDir);
   if (!headResult.available) {
-    return unavailable(mode, "Git repository has no baseline commit", { topLevel });
+    return unavailable("Git repository has no baseline commit", { topLevel });
   }
-  const head = headResult.sha;
   const remote = config.remote || "origin";
   const remoteResult = await runGit(rootDir, ["remote", "get-url", remote]);
-  if (!remoteResult.ok) {
-    return unavailable(mode, `Git remote ${remote} is not configured`, {
-      topLevel,
-      remote,
-      remoteConfigured: false,
-      localGitAvailable: true,
-      headSha: head,
-    });
-  }
-  const integrationBranch = await resolveIntegrationBranch(rootDir, remote, config.integrationBranch || "auto");
+  const remoteConfigured = remoteResult.ok;
   return {
-    enabled: true,
-    active: true,
-    mode,
-    topLevel,
-    remote,
-    remoteConfigured: true,
+    available: true,
     localGitAvailable: true,
-    integrationBranch,
-    headSha: head,
+    topLevel,
+    remote: remoteConfigured ? remote : null,
+    remoteConfigured,
+    integrationBranch: remoteConfigured
+      ? await resolveIntegrationBranch(rootDir, remote, config.integrationBranch || "auto")
+      : (config.integrationBranch && config.integrationBranch !== "auto" ? config.integrationBranch : "main"),
+    headSha: headResult.sha,
     reason: null,
   };
 }
@@ -98,15 +62,6 @@ export async function gitHead(rootDir) {
   const head = await readGitHead(rootDir);
   if (!head.available) throw new Error(`cannot resolve Git HEAD: ${head.reason}`);
   return head.sha;
-}
-
-/**
- * gitTree：本模块对外异步 API。
- */
-export async function gitTree(rootDir, ref = "HEAD") {
-  const result = await runGit(rootDir, ["rev-parse", `${ref}^{tree}`]);
-  if (!result.ok) throw new Error(`cannot resolve Git tree for ${ref}: ${result.stderr || result.stdout}`);
-  return result.stdout.trim();
 }
 
 /**
@@ -333,45 +288,12 @@ export async function synchronizeTaskWorktreeToDelivery(rootDir, options = {}) {
 /**
  * remoteBranchHead：本模块对外异步 API。
  */
-// --- 远程 claim 与 push ---
+// --- 远端读取与 push ---
 export async function remoteBranchHead(rootDir, remote, branch) {
   const result = await runGit(rootDir, ["ls-remote", "--heads", remote, `refs/heads/${branch}`], { timeoutMs: 60_000 });
   if (!result.ok) throw new Error(`cannot read ${remote}/${branch}: ${result.stderr || result.stdout}`);
   const first = result.stdout.trim().split(/\s+/)[0];
   return /^[0-9a-f]{40,64}$/i.test(first || "") ? first : null;
-}
-
-/**
- * createRemoteClaim：本模块对外异步 API。
- */
-export async function createRemoteClaim(rootDir, options) {
-  const remoteHead = await remoteBranchHead(rootDir, options.remote, options.branch);
-  if (remoteHead) {
-    throw new Error(`task branch ${options.remote}/${options.branch} is already claimed at ${remoteHead}`);
-  }
-  const baseSha = options.baseSha || await gitHead(rootDir);
-  const claimSha = await createMetadataCommit(rootDir, {
-    parentSha: baseSha,
-    message: options.message,
-  });
-  const pushed = await pushCommit(rootDir, {
-    remote: options.remote,
-    branch: options.branch,
-    commitSha: claimSha,
-  });
-  if (!pushed.ok) {
-    throw new Error(`remote task claim lost for ${options.branch}: ${pushed.stderr || pushed.stdout}`);
-  }
-  return { baseSha, claimSha, remoteHeadSha: claimSha };
-}
-
-/**
- * createMetadataCommit：本模块对外异步 API。
- */
-export async function createMetadataCommit(rootDir, options) {
-  const tree = await runGit(rootDir, ["rev-parse", `${options.parentSha}^{tree}`]);
-  if (!tree.ok) throw new Error(`cannot resolve parent tree ${options.parentSha}: ${tree.stderr || tree.stdout}`);
-  return commitTree(rootDir, tree.stdout.trim(), options.parentSha, options.message);
 }
 
 /**
@@ -425,24 +347,6 @@ export async function commitIsAncestor(rootDir, ancestorSha, descendantRef = "HE
 }
 
 /**
- * switchToTaskBranch：本模块对外异步 API。
- */
-export async function switchToTaskBranch(rootDir, branch, commitSha) {
-  const result = await runGit(rootDir, ["switch", "-C", branch, commitSha], { timeoutMs: 60_000 });
-  if (!result.ok) throw new Error(`cannot switch to task branch ${branch}: ${result.stderr || result.stdout}`);
-  return { branch, commitSha };
-}
-
-/**
- * readCommitMessage：本模块对外异步 API。
- */
-export async function readCommitMessage(rootDir, commitSha) {
-  const result = await runGit(rootDir, ["show", "-s", "--format=%B", commitSha]);
-  if (!result.ok) throw new Error(`cannot read commit ${commitSha}: ${result.stderr || result.stdout}`);
-  return result.stdout;
-}
-
-/**
  * listWorkingTreeChanges：本模块对外异步 API。
  */
 export async function listWorkingTreeChanges(rootDir, options = {}) {
@@ -467,66 +371,6 @@ export async function listTreeChanges(rootDir, fromSha, toRef = "HEAD") {
   const result = await runGit(rootDir, ["diff", "--name-only", "-z", fromSha, toRef, "--"]);
   if (!result.ok) throw new Error(`cannot inspect Git tree changes ${fromSha}..${toRef}: ${result.stderr || result.stdout}`);
   return [...new Set(result.stdout.split("\0").filter(Boolean))].sort();
-}
-
-/**
- * assertCleanWorkingTree：本模块对外异步 API。
- */
-export async function assertCleanWorkingTree(rootDir) {
-  const changedPaths = await listWorkingTreeChanges(rootDir);
-  if (changedPaths.length > 0) {
-    throw new Error(`working tree must be clean before accepting handoff: ${changedPaths.join(", ")}`);
-  }
-  return true;
-}
-
-/**
- * captureIntegrationGuard：本模块对外异步 API。
- */
-// --- 集成 guard ---
-export async function captureIntegrationGuard(rootDir, config, options = {}) {
-  if (config?.mode === "manual" && options.force !== true) {
-    return { active: false, mode: "manual", reason: "manual mode did not request an integration guard" };
-  }
-  const context = await inspectGitCoordination(rootDir, config);
-  if (!context.active) return { active: false, mode: context.mode, reason: context.reason };
-  const advertisedSha = await remoteBranchHead(rootDir, context.remote, context.integrationBranch);
-  if (!advertisedSha) {
-    const reason = `remote integration branch ${context.remote}/${context.integrationBranch} does not exist`;
-    // §3.4 strict 模式：远端集成基线不可解析时直接失败，不允许无 guard 交付
-    if (context.mode === "strict") throw new Error(`git coordination strict mode: ${reason}`);
-    return { active: false, mode: context.mode, reason };
-  }
-  // Fetching here is part of the guard: the later temporary-index commit
-  // needs the guarded parent object locally. FETCH_HEAD is deliberately used
-  // so no local branch is moved behind the user's back.
-  const expectedSha = await fetchRemoteBranch(rootDir, context.remote, context.integrationBranch);
-  return {
-    active: true,
-    remote: context.remote,
-    branch: context.integrationBranch,
-    expectedSha,
-    capturedAt: nowIso(),
-  };
-}
-
-/**
- * verifyIntegrationGuard：本模块对外异步 API。
- */
-export async function verifyIntegrationGuard(rootDir, guard) {
-  if (!guard?.active) return { pass: true, active: false, reason: guard?.reason || null };
-  if (!guard.expectedSha) {
-    return { pass: false, active: true, reason: "missing_expected_integration_sha", expectedSha: null, actualSha: null };
-  }
-  const actualSha = await remoteBranchHead(rootDir, guard.remote, guard.branch);
-  return {
-    pass: actualSha === guard.expectedSha,
-    active: true,
-    remote: guard.remote,
-    branch: guard.branch,
-    expectedSha: guard.expectedSha,
-    actualSha,
-  };
 }
 
 /**
@@ -597,11 +441,10 @@ async function runGit(rootDir, args, options = {}) {
 }
 
 /**
- * Git 协调不可用时的结构化返回；strict 模式直接抛错。
+ * Git 不可用时的结构化返回。
  */
-function unavailable(mode, reason, extra = {}) {
-  if (mode === "strict") throw new Error(`git coordination strict mode: ${reason}`);
-  return { enabled: true, active: false, mode, reason, ...extra };
+function unavailable(reason, extra = {}) {
+  return { available: false, localGitAvailable: false, reason, ...extra };
 }
 
 /**
@@ -621,15 +464,6 @@ function uniqueGitPaths(values) {
     .map((value) => String(value || "").replaceAll("\\", "/").replace(/^\.\//, ""))
     .filter((value) => value && value !== ".wildarrange" && !value.startsWith(".wildarrange/")))]
     .sort();
-}
-
-/**
- * 归一化设备名为安全标识符。
- */
-function normalizeDeviceName(value) {
-  const normalized = String(value || "").trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
-  if (!normalized) throw new Error("device name is required");
-  return normalized;
 }
 
 /**

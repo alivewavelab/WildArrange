@@ -8,16 +8,6 @@
     }
   },
   "qualityGates": {
-    "lspDiagnostics": {
-      "enabled": false,
-      "required": false,
-      "commands": []
-    },
-    "astStructure": {
-      "enabled": false,
-      "required": false,
-      "commands": []
-    },
     "commentChecker": {
       "enabled": true,
       "blockOnFindings": true

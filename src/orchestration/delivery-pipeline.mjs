@@ -20,13 +20,11 @@
 import { invokeCapability, capabilityModule, capabilityErrorEnvelope } from "../capabilities/gateway.mjs";
 import { lstat } from "node:fs/promises";
 import path from "node:path";
-import { assertTaskOrDeliveredOwnership, integrateAdmissionCommit } from "./integration.mjs";
+import { integrateAdmissionCommit } from "./integration.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
 import { emitDecision } from "../infra/decision-log.mjs";
 import { buildErrorProtocol } from "../infra/error-protocol.mjs";
-import { writeMemoryDigest } from "../infra/memory-digest.mjs";
-import { normalizeRelativePath } from "../infra/path-match.mjs";
-import { nowIso, resolveTaskReportPath } from "../infra/runtime-store.mjs";
+import { nowIso } from "../infra/runtime-store.mjs";
 import { applyVerifierEvidenceToCriteria, criteriaStatus } from "../infra/success-criteria.mjs";
 import { appendWisdom } from "../infra/task-reports.mjs";
 import { persistTaskState } from "./task-board.mjs";
@@ -50,23 +48,22 @@ export function shouldFailDeliveryAttempt(task, verifyResult, scopeResult, revie
 }
 
 /**
- * 固定顺序提交 completed：账本 → wisdom → digest → persistTaskState。
+ * 固定顺序提交 completed：账本 → wisdom → persistTaskState。
  * @param {string} rootDir 项目根
- * @param {object} options taskState、task、verifyResult、ledgerEvent、digestReason
+ * @param {object} options taskState、task、verifyResult、ledgerEvent
  */
 export async function commitTaskCompletionState(rootDir, options) {
-  const { taskState, task, verifyResult, ledgerEvent, digestReason } = options;
+  const { taskState, task, verifyResult, ledgerEvent } = options;
   task.status = "completed";
   task.updatedAt = nowIso();
   await appendLedger(rootDir, ledgerEvent);
   await appendWisdom(rootDir, task, verifyResult);
-  await writeMemoryDigest(rootDir, { reason: digestReason, stage: "checkpoint", task, taskId: task.id });
   await persistTaskState(rootDir, taskState);
 }
 
 /**
  * 任务已 durable completed 后运行快照/摘要等便利副作用；失败不得反完成，
- * 仅记 completion_side_effect_failed 并返回警告。wisdom/digest 必须在 persist 之前。
+ * 仅记 completion_side_effect_failed 并返回警告。wisdom 必须在 persist 之前。
  */
 export async function runPostCompletionSideEffects(rootDir, planId, task, effects) {
   try {
@@ -173,14 +170,6 @@ export async function runDeliveryPipeline(rootDir, planId, task, options = {}) {
     return finish("blocked");
   }
 
-  if (typeof options.preCompletionGate === "function") {
-    const completionGate = await options.preCompletionGate();
-    evidence.integrationGuard = completionGate;
-    if (completionGate?.pass !== true) {
-      return finish("revalidation_required");
-    }
-  }
-
   const completion = await runCompletionSegment(rootDir, planId, task, evidence, {
     delivery: options.delivery,
     executionRoot: options.executionRoot,
@@ -231,7 +220,7 @@ function envelopeEvidencePath(envelope, planId, task) {
   // review 报告由 linear-runtime/admission 在 pipeline 返回后按固定路径写入；
   // 决策记录先给出约定路径，审计者按图索骥即可。
   if (envelope?.capability === "review" && planId && task?.id) {
-    return normalizeRelativePath(resolveTaskReportPath(".", "reviews", planId, task.id, "md"));
+    return path.posix.join(".wildarrange", "reports", "reviews", planId, `${task.id}.md`);
   }
   return null;
 }
@@ -321,7 +310,7 @@ async function emitGateDecision(rootDir, planId, task, envelope, runId = null) {
 /** 为 pipeline 总账决策生成人类可读 reason 摘要。 */
 function pipelineOutcomeReason(status, results, criteria) {
   if (status === "completed") return "全部 gate 通过，checkpoint 已落盘";
-  if (status === "revalidation_required") return "集成基线在 gate 期间变化或存在无归属改动";
+  if (status === "revalidation_required") return "task branch 基线在 gate 期间变化或存在无归属改动";
   const failedStep = results.find((result) => result.status !== "pass");
   if (failedStep) return `${STEP_LABELS[failedStep.capability] || failedStep.capability}门未通过`;
   if (criteria && criteria.pass === false) return "successCriteria 未全部满足";
@@ -332,9 +321,9 @@ function pipelineOutcomeReason(status, results, criteria) {
 
 /**
  * acceptance-proof → integration → checkpoint 共享完成段；仅 status "completed" 可置 completed。
- * 线性单步 checkpoint 与主流水线共用此语义，checkpoint 失败不得静默吞掉。
+ * acceptance-proof 是唯一完成总闸；checkpoint 失败不得静默吞掉。
  */
-export async function runCompletionSegment(rootDir, planId, task, evidence, options = {}) {
+async function runCompletionSegment(rootDir, planId, task, evidence, options = {}) {
   // 交付事实解析在网关之外（含 admission claim 围栏），异常不得无审计穿透：
   // 转成 acceptance-proof fail 信封，由调用方按既有 proof_failed 分支经 finish() 收尾。
   let delivery;
@@ -349,7 +338,6 @@ export async function runCompletionSegment(rootDir, planId, task, evidence, opti
   evidence.deliveryPending = delivery.required && Boolean(delivery.target);
   // Entry flags cannot waive Git delivery. Missing targets fail the proof,
   // rather than making an unversioned task look like a non-Git task.
-  evidence.deliveryBaseline = null;
   evidence.integrationCommit = null;
   let proofEnvelope = await invokeCapability("acceptance-proof", { rootDir, planId, task, evidence });
   if (proofEnvelope.status !== "pass") {
@@ -359,16 +347,15 @@ export async function runCompletionSegment(rootDir, planId, task, evidence, opti
   evidence.acceptanceProof = proofEnvelope.evidence;
   let integrationGate = null;
   if (delivery.required) {
-    // integration owns the owner/base/remote-intent fences for both paths.
-    // A second linear-only assertion would reject a recovered admission push.
+    // integration 持有 task branch 基线、归属路径与 push intent 的复核；
+    // 线性与 admission 两条路径共用，避免各自再加一层断言。
     integrationGate = await integrateAdmissionCommit(rootDir, {
       ...delivery.target, planId, task, taskId: task.id,
       changedPaths: evidence.scopeResult?.changedPaths || [],
     });
     evidence.integrationCommit = integrationGate;
-    evidence.deliveryBaseline = integrationGate;
     evidence.deliveryPending = false;
-    // §3.4：integration 围栏失败只回滚本 run 路径，已 push 的 delivery 由 integration 层保留 intent。
+    // §3.4：integration 复核失败只回滚本 run 路径，已 push 的 delivery 由 integration 层保留 intent。
     if (integrationGate?.pass !== true) {
       await emitGateDecision(rootDir, planId, task, proofEnvelope, options.runId);
       return { status: "revalidation_required", proofEnvelope, integrationGate, checkpointEnvelope: null };
@@ -393,8 +380,6 @@ export async function runCompletionSegment(rootDir, planId, task, evidence, opti
     if (task.delivery_workspace?.runId === delivery.target.runId && integrationGate.pass === true) {
       task.delivery_workspace.deliverySha = integrationGate.integrationSha || integrationGate.commitSha || integrationGate.actualSha;
     }
-  } else {
-    await assertTaskOrDeliveredOwnership(rootDir, planId, task);
   }
   await emitGateDecision(rootDir, planId, task, proofEnvelope, options.runId);
   const checkpointEnvelope = await invokeCapability("checkpoint", { rootDir, planId, task, evidence });
@@ -409,14 +394,13 @@ export async function runCompletionSegment(rootDir, planId, task, evidence, opti
 async function resolveDeliveryFacts(rootDir, task, options) {
   const workspace = task.delivery_workspace;
   const target = options.delivery || (workspace?.workDir && workspace?.runId && workspace?.baseSha
-    ? { runId: workspace.runId, integrationGuard: { active: false, expectedSha: workspace.baseSha },
-        deliveryWorktreeDir: workspace.workDir, deliveryFromWorktree: true }
+    ? { runId: workspace.runId, deliveryWorktreeDir: workspace.workDir, deliveryFromWorktree: true }
     : null);
   if (options.delivery && task.admission_claim?.runId !== options.delivery.runId) {
     throw new Error("delivery target does not match the current admission claim");
   }
   const roots = new Set([rootDir, options.executionRoot, workspace?.workDir, target?.deliveryWorktreeDir].filter(Boolean));
-  let required = Boolean(workspace || task.coordination?.localGit || task.coordination?.remote || target?.integrationGuard?.active);
+  let required = Boolean(workspace || task.coordination?.localGit);
   for (const root of roots) {
     try { await lstat(path.join(root, ".git")); required = true; }
     catch (error) { if (error.code !== "ENOENT") throw error; }
@@ -424,42 +408,7 @@ async function resolveDeliveryFacts(rootDir, task, options) {
   return { required, target: target?.runId ? target : null };
 }
 
-// --- 证据收集 ---
-
-/**
- * 从 task.evidence 轨迹回读各 gate 结果；单步 workflow 的前置条件与此 GATE_STEPS 对齐。
- * 新鲜度规则：gate 证据必须在最近一次 worker 条目之后，否则属上一轮执行。
- */
-export function collectGateEvidenceFromTask(task) {
-  const specs = {
-    verify: { key: "verifyResult", kind: "verifier", passed: (record) => record?.pass === true },
-    scope: { key: "scopeResult", kind: "scope_guard", passed: (record) => record?.status === "pass" },
-    review: { key: "reviewResult", kind: "review_gate", passed: (record) => record?.pass === true },
-  };
-  const trail = task.evidence || [];
-  const lastWorkerIndex = trail.reduce((found, entry, index) => (entry?.kind === "worker" ? index : found), -1);
-  const evidence = {};
-  const failedSteps = [];
-  for (const stepName of GATE_STEPS) {
-    const spec = specs[stepName];
-    if (!spec) {
-      failedSteps.push(stepName);
-      continue;
-    }
-    let record = null;
-    if (lastWorkerIndex >= 0) {
-      for (let index = trail.length - 1; index > lastWorkerIndex; index -= 1) {
-        if (trail[index]?.kind === spec.kind) {
-          record = trail[index];
-          break;
-        }
-      }
-    }
-    evidence[spec.key] = record;
-    if (!spec.passed(record)) failedSteps.push(stepName);
-  }
-  return { evidence, failedSteps };
-}
+// --- 证据归一 ---
 
 /** 按 gate 名组装 invokeCapability 所需的 ctx 对象。 */
 function buildStepContext(stepName, { rootDir, planId, task, evidence, options }) {

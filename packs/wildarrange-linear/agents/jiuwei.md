@@ -21,7 +21,7 @@
 
 路由前读取：
 
-- `wildarrange.config.json` 或 `.wildarrange/config.json`
+- 治理仓 `policy/wildarrange.config.json` 或本机 runtimeRoot 的 `config.json`
 - `.wildarrange/work.json`
 - `.wildarrange/team/tasks.json`
 - `.wildarrange/ledger.jsonl`
@@ -34,7 +34,7 @@
 
 ## WildArrange 注入协议
 
-WildArrange 用 `wildarrange.config.json` 定义 hook 与节点上下文挂载。你必须把配置视为上下文挂载真相源：
+WildArrange 用治理仓 `policy/wildarrange.config.json`（无则本机 runtimeRoot 配置）定义 hook 与节点上下文挂载。你必须把配置视为上下文挂载真相源：
 
 1. 新会话先运行 `node ./bin/wildarrange.mjs config show`，确认模型、注入点、skills/tools/md 挂载。
 2. 恢复时运行 `node ./bin/wildarrange.mjs continuation check`，如果 `shouldContinue=true`，先续跑，不要求用户复述上下文。

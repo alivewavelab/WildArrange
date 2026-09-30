@@ -11,6 +11,7 @@ import { lstat, mkdir, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { runCommandFile } from "./command-runner.mjs";
 import { readGitHead, readGitTopLevel } from "./git-diff.mjs";
+import { resolveWildArrangePath } from "./runtime-store.mjs";
 import { uniqueStrings } from "./text-utils.mjs";
 
 /**
@@ -60,6 +61,21 @@ export async function prepareAgentWorktree(rootDir, taskRunDir, options = {}) {
       reason: existing.error,
     };
   }
+  if (branchName) {
+    // 一个 task branch 只能属于一个可写任务：已被任何 worktree 检出或已存在时拒绝启动。
+    const occupied = await inspectTaskBranchOccupation(rootDir, branchName);
+    if (occupied) {
+      return {
+        isolation: "git-worktree",
+        workDir: taskRunDir,
+        available: false,
+        occupied: true,
+        reason: occupied.worktree
+          ? `task branch ${branchName} is already checked out by another worktree (${occupied.worktree}); two writable tasks cannot share one branch`
+          : `task branch ${branchName} already exists and belongs to an earlier task run; two writable tasks cannot share one branch`,
+      };
+    }
+  }
   const addArgs = branchName
     ? ["-C", rootDir, "worktree", "add", "-b", branchName, worktreeDir, startPoint]
     : ["-C", rootDir, "worktree", "add", "--detach", worktreeDir, startPoint];
@@ -80,6 +96,42 @@ export async function prepareAgentWorktree(rootDir, taskRunDir, options = {}) {
     startPoint,
     reason: null,
   };
+}
+
+/**
+ * 释放一个 run worktree 对任务分支的占用：移除 worktree 并删除分支。
+ * 仅当分支相对 startPoint 没有任何提交时才执行（分支上有提交即交付产物，绝不删除）；
+ * worktree 内未提交的改动已在 run 结束时收集成 patch/result 证据。调用方负责判定该 run 已可丢弃。
+ * @returns {Promise<{released: boolean, reason?: string}>}
+ */
+export async function releaseAgentWorktree(rootDir, { workDir, branch, startPoint }) {
+  if (!workDir || !branch || !startPoint) return { released: false, reason: "worktree_identity_unknown" };
+  const ahead = await runCommandFile("git", ["-C", rootDir, "rev-list", "--count", `${startPoint}..refs/heads/${branch}`], rootDir, 30_000);
+  if (ahead.exitCode !== 0 || ahead.stdout.trim() !== "0") return { released: false, reason: "branch_has_commits" };
+  const remove = await runCommandFile("git", ["-C", rootDir, "worktree", "remove", "--force", workDir], rootDir, 30_000);
+  if (remove.exitCode !== 0 && !/is not a working tree|No such file/i.test(remove.stderr || remove.stdout || "")) {
+    return { released: false, reason: `worktree_remove_failed: ${remove.stderr || remove.stdout}` };
+  }
+  await runCommandFile("git", ["-C", rootDir, "worktree", "prune"], rootDir, 30_000);
+  const drop = await runCommandFile("git", ["-C", rootDir, "branch", "-D", branch], rootDir, 30_000);
+  if (drop.exitCode !== 0) return { released: false, reason: `branch_delete_failed: ${drop.stderr || drop.stdout}` };
+  return { released: true };
+}
+
+/**
+ * 检查 task branch 是否已被占用：返回占用它的 worktree 路径、仅分支存在时返回空路径，未占用返回 null。
+ */
+export async function inspectTaskBranchOccupation(rootDir, branchName) {
+  const list = await runCommandFile("git", ["-C", rootDir, "worktree", "list", "--porcelain"], rootDir, 30_000);
+  if (list.exitCode === 0) {
+    let currentPath = null;
+    for (const line of list.stdout.split(/\r?\n/)) {
+      if (line.startsWith("worktree ")) currentPath = line.slice("worktree ".length);
+      else if (line === `branch refs/heads/${branchName}`) return { worktree: currentPath };
+    }
+  }
+  const exists = await runCommandFile("git", ["-C", rootDir, "show-ref", "--verify", "--quiet", `refs/heads/${branchName}`], rootDir, 30_000);
+  return exists.exitCode === 0 ? { worktree: null } : null;
 }
 
 /**
@@ -194,7 +246,9 @@ export async function applyAgentPatch(rootDir, patch, options = {}) {
   if (!patch || typeof patch !== "string" || patch.trim().length === 0) {
     throw new Error("parallel admission patch is empty");
   }
-  const patchPath = path.join(rootDir, ".wildarrange", "agent-runs", `admit-${Date.now()}-${process.pid}.patch`);
+  // 外置模式下运行态根在项目之外，补丁文件必须走运行态根解析并保证目录存在
+  const patchPath = resolveWildArrangePath(rootDir, "agent-runs", `admit-${Date.now()}-${process.pid}.patch`);
+  await mkdir(path.dirname(patchPath), { recursive: true });
   await writeFile(patchPath, patch, "utf8");
   const check = await runCommandFile("git", ["-C", rootDir, "apply", "--check", "--whitespace=nowarn", patchPath], rootDir, options.timeoutMs);
   if (check.exitCode !== 0) {

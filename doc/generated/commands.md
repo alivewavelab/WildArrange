@@ -2,7 +2,8 @@
 
 | 命令 | 说明 |
 | ---- | ---- |
-| `wildarrange project init-governance --governance-root <path> --repository <git-url> [--default-branch main]` | 在项目外创建不覆盖已有文件的治理仓库骨架；不自动操作 Git |
+| `wildarrange setup --governance-root <path> [--repository <git-url>] [--target codex|cursor|kimi|all] [--default-branch main]` | 一步接入外置治理：创建治理仓（含 Git 初始提交与默认武装配置）→ attach → init → 生成宿主 Adapter 包；客户项目零写入 |
+| `wildarrange project init-governance --governance-root <path> --repository <git-url> [--default-branch main]` | 在项目外创建不覆盖已有文件的治理仓库骨架与默认武装配置；非 Git 目录自动 git init 并提交初始 commit |
 | `wildarrange project attach --governance-root <path> [--project-root <path>] [--runtime-root <path>]` | 把客户项目连接到独立治理仓库；映射写入项目外部状态目录 |
 | `wildarrange project show [--project-root <path>]` | 查看项目、治理仓库和运行态三根连接 |
 | `wildarrange integration accept --project-sha <40-char-sha> --governance-sha <40-char-sha> [--id <id>] [--reason "..."]` | 校验两个仓库的提交与治理注册表，并在项目外运行态写双 SHA 集成验收收据 |
@@ -10,49 +11,34 @@
 | `wildarrange review checklist --task <taskId>` | 解析本任务项目审查清单和必需依据，不启动执行器 |
 | `wildarrange readiness --task <taskId>` | 检查已批准任务必需的执行器、Skill、规范与握手，不启动业务 Worker |
 | `wildarrange adoption inventory` | 只读扫描旧仓库文件与验证资产，供接管 Skill 建立来源映射 |
-| `wildarrange init [--sample] [--project-docs] [--architecture]` | 初始化运行时；外置治理项目不写客户仓库，legacy 模式可显式补建项目文档 |
+| `wildarrange init [--sample]` | 在已连接项目的 runtimeRoot 初始化运行态（setup 已包含此步骤）；不写客户仓库 |
 | `wildarrange plan --from <plan.json>` | 导入含 responsibilityChanges 的计划；等待人工确认职责与事实归属 |
 | `wildarrange plan approve [--plan <planId>]` | 确认待执行计划（语义生成计划或已开启 planApproval） |
 | `wildarrange run` | 跑下一个任务（worker→verifier→scope→review→checkpoint） |
 | `wildarrange status` | 查看状态（含门武装黄灯） |
 | `wildarrange decisions [--limit N] [--task T001] [--gate pre_tool_use] [--annotatable] [--format json]` | 查看门决策记录（每一次拦截/放行；--annotatable 只看可标注队列） |
 | `wildarrange doctor` | 一键体检：配置/完成状态/ledger/备份对账 |
-| `wildarrange config init [--root] [--force] [--armed]` | 生成默认配置（--armed 直接武装质量门） |
+| `wildarrange config init [--force] [--armed]` | 在治理仓 policy/ 生成默认配置（--armed 直接武装质量门） |
 | `wildarrange config show` | 查看生效配置 |
 | `wildarrange config baseline [--reason "..."]` | 写入 config hash 基线 |
 | `wildarrange config verify` | 校验 config 基线 |
-| `wildarrange device register [--name macbook] [--force]` | 登记当前设备 |
-| `wildarrange device status` | 查看设备登记状态 |
-| `wildarrange coordination status` | 查看 Git 协调状态 |
-| `wildarrange coordination claim --task T001 [--owner ZhuRong]` | 显式远端领取任务 |
-| `wildarrange handoff prepare --task T001 --to-device-id <uuid> [--to-device-name mac-mini] [--to-owner ZhuRong]` | 准备跨设备交接 |
-| `wildarrange handoff push --task T001` | 推送跨设备交接 |
-| `wildarrange handoff accept --task T001 [--plan P20260731]` | 接受跨设备交接 |
-| `wildarrange handoff takeover --plan P20260731 --task T001 --expected-device-id <uuid> --reason "owner offline"` | 显式接管（记录预期旧设备与理由） |
-| `wildarrange adapter install [--target codex|cursor|kimi|all] [--mode local|npx] [--package @alivewavelab/wildarrange]` | 安装宿主 adapter；外置治理模式只在 runtimeRoot 生成用户插件包 |
-| `wildarrange adapter activate --target cursor [--user-root <path>]` | 显式合并 Cursor 用户级 Hook；先备份且不写客户项目 |
-| `wildarrange adapter uninstall [--target codex|cursor|kimi|all]` | 卸载宿主 adapter |
-| `wildarrange adapter restore --backup <backupId>` | 恢复 adapter 备份 |
+| `wildarrange adapter install [--target codex|cursor|kimi|all] [--mode local|npx] [--package @alivewavelab/wildarrange]` | 在 runtimeRoot 生成宿主外置插件包；--mode 选择 hook 调用 CLI 的前缀（local 当前 bin 路径 / npx 包名） |
+| `wildarrange adapter activate [--target cursor|codex|all] [--user-root <path>]` | 显式写入用户级配置：Cursor Hook 与指针规则、Codex AGENTS.md 指针段；先备份且不写客户项目 |
+| `wildarrange adapter uninstall [--target codex|cursor|kimi|all]` | 卸载宿主 adapter：移除用户级条目与指针并删除 runtime 插件包 |
+| `wildarrange adapter restore --backup <backupId>` | 恢复 adapter 备份：还原到该次 activate 之前的用户级文件 |
 | `wildarrange injection show --point before_review [--agent BaiZe] [--task T001] [--text "..."] [--stage plan]` | 查看注入点解析结果 |
-| `wildarrange hook run [--from hook.json] [--format text|json] [--external-only --adapter-digest <sha256>]` | 运行宿主生命周期 Hook；外置 Adapter 只处理已连接项目 |
+| `wildarrange hook run [--from hook.json] [--format text|json] --adapter-digest <sha256>` | 运行宿主生命周期 Hook；只处理已连接项目，未连接项目静默放行 |
 | `wildarrange workflow --from <plan.json>` | 从计划跑完整 workflow |
 | `wildarrange workflow --sample` | 跑样例 workflow |
-| `wildarrange parallel run [--max-agents 2] [--task T001,T002] [--agent ZhuRong] [--adapter codex|cursor] [--isolation run-dir|git-worktree] [--coordinate] [--command "..."]` | 跑并行子 Agent |
+| `wildarrange parallel run [--max-agents 2] [--task T001,T002] [--agent ZhuRong] [--adapter codex|cursor] [--isolation run-dir|git-worktree] [--command "..."]` | 跑并行子 Agent |
 | `wildarrange parallel admit --run <runId> --task T001` | 合入子 Agent 成果（admission 事务） |
 | `wildarrange parallel list` | 列出并行 run |
 | `wildarrange parallel status [--run <runId>]` | 查看并行运行记录与批次对账 |
 | `wildarrange parallel close --run <runId> [--task T001] [--reason "..."]` | 关闭保留的子 Agent 结果 |
 | `wildarrange parallel cleanup --run <runId>` | 清理 Git worktree 隔离目录 |
 | `wildarrange parallel retry --run <runId> [--command "..."] [--max-agents N]` | 只重跑未完成任务的局部重试 |
-| `wildarrange archivist packet [--text "..."] [--stage plan] [--turns turns.json]` | 生成档案路由包 |
-| `wildarrange archivist run [--text "..."] [--stage plan] [--turns turns.json] [--force]` | 运行档案路由员 |
-| `wildarrange archivist suggestions list` | 查看路由建议 |
-| `wildarrange archivist suggestions resolve --id <id> --decision accept|reject --evidence "..." --rationale "..."` | 审核路由建议 |
 | `wildarrange node route --text "request"` | 单节点：路由 |
 | `wildarrange node execute [--task T001]` | 单节点：执行 |
-| `wildarrange node verify [--task T001]` | 单节点：验证 |
-| `wildarrange node scope [--task T001]` | 单节点：范围检查 |
-| `wildarrange node review [--task T001]` | 单节点：复核 |
 | `wildarrange node checkpoint [--task T001]` | 单节点：checkpoint |
 | `wildarrange node retry [--task T001]` | 单节点：重试 |
 | `wildarrange resume [--session <id>]` | 恢复会话上下文 |
@@ -88,12 +74,9 @@
 | `wildarrange annotate --decision <decisionId> --category <confirmed|rule_wrong|case_wrong|mislabeled> [--reason "..."] [--author name]` | 标注门决策（只进报告，不改配置） |
 | `wildarrange annotate list [--limit N]` | 列出标注 |
 | `wildarrange annotate stats` | 标注聚合统计 |
-| `wildarrange review suspicious [--limit N]` | LLM 可疑判断异步审查（只进报告，不进完成链） |
 | `wildarrange test [--zone interface|orchestration|ai|capabilities|infra] [changed-file...]` | 分区/影响面最小测试集 |
 | `wildarrange docs commands [--write]` | 从命令注册表生成命令文档（单一事实源） |
 | `wildarrange state backup [--reason "..."]` | 备份运行态关键文件 |
-| `wildarrange state migrate` | 备份后迁移运行态任务总账与旧投影；不改根 wildarrange.config.json |
-| `wildarrange state migrate --to external --governance-root <path> [--runtime-root <path>] [--dry-run]` | 校验并复制旧运行态，摘要一致后才连接独立治理仓库；保留项目内源目录 |
 | `wildarrange state verify` | 校验运行态关键文件 |
 | `wildarrange state list` | 列出运行态备份 |
 | `wildarrange state restore --backup <backupId>` | 恢复运行态备份 |

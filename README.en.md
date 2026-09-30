@@ -9,14 +9,16 @@ WildArrange is a local governance runtime for Codex, Cursor, and Kimi Code agent
 WildArrange turns a coding request into a gated workflow:
 
 ```text
-init -> plan -> execute -> verify -> scope -> review -> acceptance-proof -> checkpoint -> resume
+setup -> plan -> execute -> verify -> scope -> review -> acceptance-proof -> checkpoint -> resume
 ```
 
 The key rule is simple: a worker can claim work is done, but only gates can complete it.
 
 The core runtime is host-neutral. Codex, Cursor, and Kimi adapters improve injection and recovery, but the workflow can run through CLI commands alone.
 
-**New here?** Open [doc/plans/2026-08-04-beginner-handbook.html](./doc/plans/2026-08-04-beginner-handbook.html) (Chinese beginner guide: deploy → insert your requirements at each step → judge every gate; covers Cursor / Codex / Kimi). Full reference: [使用说明书.md](./使用说明书.md).
+There are only five design principles: **separate planning from execution → workers never self-certify → independent verification → rework on failure → evidence goes on the record**. All runtime state lives in a local runtime directory outside the project (logical path `.wildarrange/`); customer projects receive zero writes and nothing is tied to a particular editor. Internals and invariants are in [doc/project-architecture.md](./doc/project-architecture.md).
+
+**New here?** Open [doc/plans/2026-08-04-beginner-handbook.html](./doc/plans/2026-08-04-beginner-handbook.html) (Chinese beginner guide: deploy → insert your requirements at each step → judge every gate; covers Cursor / Codex / Kimi). Full command list: `node ./bin/wildarrange.mjs --help --all` or [doc/generated/commands.md](./doc/generated/commands.md).
 
 ## Agent Responsibilities
 
@@ -30,7 +32,7 @@ WildArrange keeps five long-lived Agents. The deterministic Router is a system n
 | **BaiZe (Bai Ze)** | The sole independent reviewer; validates goals, evidence, risk, and acceptance without accepting worker self-certification. |
 | **LuWu (Lu Wu)** | Read-only repository steward; checks layered `AGENTS.md`, README parity, naming, file placement, and code-comment policy. |
 
-The system Router classifies requests and selects the primary Agent and Skills. `CangJie` remains an optional internal archivist/semantic-routing profile, not a long-lived Agent.
+The system Router classifies requests and selects the primary Agent and Skills.
 
 Specialist duties are Skills: `review-product-intent`, `map-user-journey`, `design-acceptance`, `review-ux-interaction`, `review-scope-tradeoff`, and `research-domain-benchmark`. `inspect-codebase` and `research-external-docs` absorb code exploration and external research.
 
@@ -44,11 +46,20 @@ Role prompts live under `packs/wildarrange-linear/agents/`, and Skills live unde
 - The public npm package can be installed without signing in. Only maintainers need npm authentication for `npm publish`.
 - Git is required when using Git worktree isolation.
 
-### Separate Governance Repository (Zero Generated Project Files)
+### Connect a Project: `wildarrange setup` (the only runtime shape)
 
-Use three-root mode when the customer repository must remain clean: the customer repository owns product code and product tests, a separate governance repository owns policy and the verification registry, and local state owns the ledger, locks, reports, backups, and installed Prompt Pack. WildArrange does not generate `AGENTS.md`, `.wildarrange/`, or adapter files in the customer project.
+WildArrange has a single runtime shape, three-root mode: the customer repository owns product code and product tests, a separate governance repository owns policy, `policy/wildarrange.config.json` (the only config file) and the verification registry, and local state owns the ledger, locks, reports, backups, and installed Prompt Pack. WildArrange does not generate `AGENTS.md`, `.wildarrange/`, or adapter files in the customer project.
 
-Run this from the customer project root:
+Fastest path: from the customer project root, initialize the governance repository, attach it, initialize the runtime, and generate host adapter bundles in one step:
+
+```bash
+npx wildarrange setup \
+  --governance-root ../my-project-governance \
+  --repository https://github.com/example/my-project.git \
+  --target all
+```
+
+`--repository` defaults to the project's `origin` remote; `--target` is `codex|cursor|kimi|all` (default all). The command ends with the remaining in-host manual steps (Codex/Kimi install and trust, Cursor activation). To go step by step, use the commands below:
 
 ```bash
 npx wildarrange project init-governance \
@@ -57,7 +68,7 @@ npx wildarrange project init-governance \
   --default-branch main
 ```
 
-This creates only missing files under the governance root: `wildarrange-governance.json`, `policy/AGENTS.md`, `verification/registry.json`, and empty responsibility directories. It never overwrites existing files and does not run `git init`, commit, or push. Complete the policy, initialize and commit the governance repository, then connect it from the customer project:
+This creates only missing files under the governance root: `wildarrange-governance.json`, `policy/AGENTS.md`, `policy/code-and-interface-conventions.md`, `policy/testing-and-acceptance.md` (three policy templates), `policy/wildarrange.config.json` (quality gates armed by default), `verification/registry.json`, and empty responsibility directories. It never overwrites existing files; if the governance root is not a Git repository it runs `git init` and makes an initial commit (skipped when it already is one), and never pushes. A policy file under `policy/` that still contains `[待确认]` placeholders is not injected into agents and `doctor` warns about it. Complete the policy, commit the governance repository, then connect it from the customer project:
 
 ```bash
 npx wildarrange project attach --governance-root ../my-project-governance
@@ -65,16 +76,7 @@ npx wildarrange init
 npx wildarrange project show
 ```
 
-If the customer project already contains `.wildarrange/`, direct attachment is rejected. Preview and then migrate it:
-
-```bash
-npx wildarrange state migrate --to external \
-  --governance-root ../my-project-governance --dry-run
-npx wildarrange state migrate --to external \
-  --governance-root ../my-project-governance
-```
-
-Migration verifies the ledger, copies the tree, compares every digest, and writes the external registry last. The old `.wildarrange/` directory is preserved. `state verify`, `state backup`, and `state restore` then operate on external state while manifests keep compatible `.wildarrange/...` logical paths.
+After attaching, `state verify`, `state backup`, and `state restore` operate on the external runtime state.
 
 On plan import, `planDefaults.verify_commands`, `standards_commands`, and `review_commands` from the governance repository's `verification/registry.json` are additive and cannot be removed by the project plan. Its digest and both project/governance revisions are stored in the single task ledger. If the governance root is a Git repository with uncommitted changes, plan import fails closed.
 
@@ -82,13 +84,13 @@ In external mode, zero-project-file adapter bundles are generated under `runtime
 
 ```bash
 npx wildarrange adapter install --target all --mode local
-npx wildarrange adapter activate --target cursor
+npx wildarrange adapter activate --target all   # Cursor hooks + user-level pointer rules; or --target cursor / codex
 npx wildarrange doctor
 ```
 
-Cursor activation backs up and merges the user-level `~/.cursor/hooks.json`, replacing only WildArrange-managed entries. Codex and Kimi still require explicit installation, review, and trust through the `nextActions` returned by `adapter install`. Generated files or configured user hooks are not activation proof: `doctor` reports `execution_observed` only after a real lifecycle receipt matches the current `activationId`. The bridge first identifies the working directory; unattached projects exit without creating state.
+`adapter activate` is an explicit user-level write that no ordinary command triggers. `--target cursor` backs up and merges the user-level `~/.cursor/hooks.json` (replacing only WildArrange-managed entries) and writes `~/.cursor/rules/wildarrange.mdc`, an alwaysApply one-line pointer telling the agent to run `wildarrange status` when the local project is connected. `--target codex` appends the same pointer to `~/.codex/AGENTS.md` inside `<!-- wildarrange:begin/end -->` markers. Everything is backed up first, activation is idempotent, and nothing is written into customer projects. `adapter uninstall` removes those user-level entries and pointers and deletes the runtime plugin bundles; `adapter restore --backup <backupId>` returns the user-level files to their state before that activation. `doctor` compares the Hook configuration digests recorded at install time and reports `external_adapter_config_modified` when a plugin `hooks.json` or a user Cursor entry was changed or removed. Codex and Kimi still require explicit installation, review, and trust through the `nextActions` returned by `adapter install`. Generated files or configured user hooks are not activation proof: `doctor` reports `execution_observed` only after a real lifecycle receipt matches the current `activationId`. The bridge first reads the local registry (read-only) to decide whether the working directory, including project subdirectories and task worktrees, belongs to an attached project. Unattached projects, or a broken WildArrange installation, are always let through so unrelated projects are never blocked; only for an attached project does a failed subprocess follow the host policy (Cursor writes fail closed, Codex/Kimi fail open), and the subprocess has a timeout guard. The Kimi Stop hook pulls unfinished work back into the session.
 
-Each plan task may declare `"repositoryTarget": "project"` (default) or `"governance"`. One task can write only one repository. Governance tasks use their own governance branch/worktree through the linear `wildarrange run` path, and cross-repository work must be split into separate tasks. Parallel admission and cross-device handoff still own only the project repository; they reject governance tasks instead of falling back to the customer checkout. After both deliveries exist, bind their full SHAs in an integration receipt that modifies neither repository:
+Each plan task may declare `"repositoryTarget": "project"` (default) or `"governance"`. One task can write only one repository. Governance tasks use their own governance branch/worktree through the linear `wildarrange run` path, and cross-repository work must be split into separate tasks. Parallel admission still owns only the project repository; they reject governance tasks instead of falling back to the customer checkout. After both deliveries exist, bind their full SHAs in an integration receipt that modifies neither repository:
 
 ```bash
 npx wildarrange integration accept \
@@ -101,63 +103,54 @@ Task acceptance proof binds the imported two-repository baseline and that task's
 
 ### Try It Without Pinning
 
-For a quick trial in the current project:
+For a quick trial (keep the governance repository outside the project):
 
 ```bash
-npx @alivewavelab/wildarrange@latest init
-npx @alivewavelab/wildarrange@latest adapter install --target all
+npx @alivewavelab/wildarrange@latest setup --governance-root ../my-project-governance
 npx @alivewavelab/wildarrange@latest doctor
 ```
 
 This resolves the package through `npx` on each invocation. It is useful for evaluation, but it is not the recommended setup for a long-lived team project.
 
-### Project-Local Installation (Legacy Compatibility Mode)
+### Pinned Installation
 
-Pin WildArrange as a project `devDependency`:
+For long-term use, pin WildArrange as a project `devDependency`:
 
 ```bash
 npm install --save-dev @alivewavelab/wildarrange@latest
-npx wildarrange init
-npx wildarrange adapter install --target all --mode local
+npx wildarrange setup --governance-root ../my-project-governance --mode local
 npx wildarrange doctor
 ```
 
-Commit `package.json` and `package-lock.json`. Teammates and CI can then use `npm ci` to install the same version instead of silently following a newer `latest`.
+Commit `package.json` and `package-lock.json`, so teammates and CI installing with `npm ci` get the same version. `--mode local` makes hooks and Skills call the installed CLI path; `--mode npx` uses the `npx -y <package>` prefix instead.
 
-`adapter install` generates project-scoped integration files for Codex, Cursor, and Kimi Code; generation alone does not prove that the host loaded them. Local runtime outputs such as `.wildarrange/` and `.cursor/` are normally excluded from Git, so regenerate them on each device instead of copying generated files from another machine. In Codex Desktop, review, trust, and enable the current project Hook under Settings > Hooks; in Codex CLI, use `/hooks`. Produce at least one lifecycle-hook receipt. After that, `doctor` should show `codex:configured/execution observed`; `ACTIVATION UNVERIFIED` must not be reported as active governance.
+`setup` / `adapter install` generate external plugin packages: they never write to the customer repository and do not prove that a host loaded anything. Runtime state and generated files live in each device's local state directory, so run it on every device instead of copying another device's output. Codex Desktop additionally requires reviewing, trusting, and enabling the Hook under Settings > Hooks; Codex CLI uses `/hooks`. After at least one lifecycle Hook receipt, `doctor` should show `codex:configured/execution observed`. Never describe governance as effective while it shows `ACTIVATION UNVERIFIED`.
 
-### Initialize Project Governance Documents (Optional)
+### Governance Policy Templates
 
-For a new project, explicitly scaffold the minimum governance documents:
+`setup` and `project init-governance` create missing policy templates under the governance repository's `policy/` (`AGENTS.md`, code and interface conventions, testing and acceptance rules). Existing files are always preserved, never merged or overwritten, and WildArrange writes no documents into the customer project. Every `[待确认]` placeholder must be confirmed or removed by a human, especially the test strategy, standard commands, production/test entry points, and module boundaries.
 
-```bash
-npx wildarrange init --project-docs
-# Add --architecture only after the system boundaries are known.
-```
-
-The command creates only missing files: `AGENTS.md`, code and interface conventions, testing and acceptance rules, and the task-governance entry point. Existing files are preserved without merging or overwriting. `doc/architecture.md` is created only with `--architecture`. A human must resolve or remove every `[待确认]` placeholder, especially the testing strategy, standard commands, production/test entry points, and module boundaries.
-
-WildArrange's `.wildarrange/team/tasks.json` remains the only task ledger. The Dashboard and `doc/progress.md` are entry points and views; do not maintain a second Markdown task table or ClickUp source of truth.
+The runtime task ledger (`team/tasks.json` in the runtime state, logical path `.wildarrange/team/tasks.json`) remains the single work-item ledger; the Dashboard is only an entry point and view, so do not maintain a second Markdown task table or a ClickUp source of truth.
 
 ### Install on Another Device
 
-Clone or update the application repository, then run from its root:
+Clone the customer project and the governance repository, then run from the project root:
 
 ```bash
 git clone <project-repository>
+git clone <governance-repository>
 cd <project-directory>
 npm ci
+npx wildarrange project attach --governance-root ../<governance-directory>
 npx wildarrange init
 npx wildarrange adapter install --target all --mode local
 npx wildarrange doctor
 ```
 
-If the project already exists, start with `git pull` and `npm ci`.
-
-For Kimi Code, start Kimi Code from the project root and explicitly install the generated plugin on every device:
+For Kimi Code, explicitly run the `nextActions` returned by `adapter install` on each device:
 
 ```text
-/plugins install .wildarrange/adapters/kimi/plugin
+/plugins install <path returned by adapter install>
 /reload
 ```
 
@@ -182,48 +175,13 @@ npm view @alivewavelab/wildarrange version
 
 The Kimi Code plugin is installed at user scope. After upgrading, refresh it so the Hook bridge uses the newly generated files:
 
-```text
-/plugins remove wildarrange-adapter
-/plugins install .wildarrange/adapters/kimi/plugin
-/reload
-```
+First `/plugins remove` the old plugin, then `/plugins install` the path returned by `adapter install` and `/reload`.
 
-### Runtime State and Device Boundaries
+### Runtime State and Git Delivery
 
-npm and Git synchronize the program and committed configuration, while `.wildarrange/` remains local runtime state on each device. WildArrange uses the existing Git remote as a handoff cabinet by default: one remote write owner per task, with cross-device continuation carried by a checkpoint commit containing a task packet and ledger hash.
+npm and Git synchronize the program and committed configuration, while the runtime state (logical path `.wildarrange/`) remains local to each device. WildArrange does not coordinate multiple devices or users through the remote: when several people work, each uses their own branch, and the only constraint is that **two writable tasks may not develop on the same branch**.
 
-Register a stable identity once on every device. The name is descriptive; handoff authorization uses the returned `deviceId`:
-
-```bash
-npx wildarrange device register --name macbook
-npx wildarrange device status
-npx wildarrange coordination status
-```
-
-Claim and hand off a task:
-
-```bash
-# Source device: copy the target device's UUID into --to-device-id
-npx wildarrange coordination claim --task T001 --owner ZhuRong
-npx wildarrange handoff prepare --task T001 \
-  --to-device-id <target-device-uuid> --to-device-name mac-mini
-npx wildarrange handoff push --task T001
-
-# Target device: its deviceId must match the handoff target
-npx wildarrange device register --name mac-mini
-npx wildarrange handoff accept --plan <planId> --task T001
-```
-
-`prepare` includes both working-tree changes and local commits not yet present on the remote task branch, then builds a temporary Git tree containing only project files inside `writable_paths`; `.wildarrange/` is never handed off and the current index is untouched. Before `push`, WildArrange compares the current tree with the prepare-time fingerprint and requires a fresh prepare if editing continued. Push is always non-force and retry-safe through remote-SHA reconciliation and audit backfill. `accept` verifies the remote packet, target device UUID, and clean local tree before taking ownership; a same-name device cannot impersonate the target. After acceptance, execute, verify, scope, review, checkpoint, admission, and the monolithic `run` completion fence all fail closed on the old device.
-
-Takeover is only for a confirmed abandoned owner and requires both the expected device and an evidence-bearing reason:
-
-```bash
-npx wildarrange handoff takeover --plan <planId> --task T001 \
-  --expected-device-id <old-device-uuid> --reason "source device is offline and writes were manually stopped"
-```
-
-WildArrange never expires ownership from a local clock and never force-pushes. One writable task maps to one owner, one isolated worktree, and one task branch. Execution starts from a clean commit baseline and may not carry dirty paths other than the current task result and explicitly attributed handoff paths. Only after all gates and the acceptance proof pass does WildArrange create a delivery commit containing this task's paths: with a remote it pushes normally to the task's remote branch; in a Git repository without a remote it retains the commit on the local task branch/worktree. Both paths bind checkpoint and acceptance proof to the same commit SHA and restore the shared checkout to a clean state. A task-branch push never moves `main`. One task normally keeps updating one Draft PR, and shared main changes only after a human approves and merges it on the hosting platform. Once a task-branch push is known to have succeeded, later checkpoint or audit failure cannot trigger rollback; the same run must reconcile or remain `recovery_required`.
+One writable task maps to one isolated worktree and one task branch (`wildarrange/task/<planId>/<taskId>`). Execution starts from a clean commit baseline and may not carry dirty paths other than the current task result. If the target branch is already occupied by another writable task or worktree, the task refuses to start and names the occupant. Only after all gates and the acceptance proof pass does WildArrange create a delivery commit containing this task's paths: with a remote it pushes normally (never force) to the task's own remote branch; in a Git repository without a remote it retains the commit on the local task branch/worktree. Both paths bind checkpoint and acceptance proof to the same commit SHA and restore the shared checkout to a clean state. A task-branch push never moves `main`. One task normally keeps updating one Draft PR, and shared main changes only after a human approves and merges it on the hosting platform. Once a task-branch push is known to have succeeded, later checkpoint or audit failure cannot trigger rollback; the same run must reconcile or remain `recovery_required`.
 
 If a process was forcibly terminated and `parallel status` shows an empty run while a task is still claimed, confirm that the process is gone and run:
 
@@ -233,42 +191,32 @@ npx wildarrange parallel close --run <runId> --reason "confirmed process termina
 
 The command scans task state by `runId` and releases a ghost `parallel_run_claim` even when the run has no result entries.
 
-### Git Coordination Strength
+### Git Delivery Configuration
 
-Configure the built-in behavior in `wildarrange.config.json`:
+Configure the behavior in the governance repository's `policy/wildarrange.config.json` (see `wildarrange.config.example.json` in this repository for an example):
 
 ```json
 {
-  "gitCoordination": {
-    "mode": "guarded",
+  "gitDelivery": {
     "remote": "origin",
     "integrationBranch": "auto",
     "taskBranchPrefix": "wildarrange/task",
-    "requireWorktreeForParallelWrites": true,
-    "requireVerificationBeforeHandoff": false,
-    "requireCleanHandoff": true,
-    "requireTakeoverReason": true
+    "requireWorktreeForParallelWrites": true
   }
 }
 ```
 
-| Mode | Behavior |
-|---|---|
-| `off` | Disable Git coordination and keep the original single-device flow. |
-| `manual` | Only explicit `coordination` / `handoff` commands use the remote; `parallel run --coordinate` enables it for one run. |
-| `guarded` (default) | Claim remotely when a remote exists; without one, use a local task branch. Both Git paths isolate writable agents in worktrees and create delivery commits. |
-| `strict` | Refuse execution unless the Git repository, remote, worktree, and pre-handoff verification are available. |
-
-You may tune automatic activation, local fallback, and pre-handoff verification. In every mode except `off`, these floors cannot be disabled: one writer per task, no force push, pushed-commit handoff, revalidation after task-branch movement, explicit evidence-bearing takeover, and no automatic merge or business-code push to `main`.
+`remote` is used for ordinary pushes of task branches; `integrationBranch` decides whether a delivery commit is already contained in the mainline before a worktree is cleaned up; `taskBranchPrefix` limits automatic pushes to task branches under that prefix; `requireWorktreeForParallelWrites` isolates writable parallel agents in worktrees. Whatever the configuration, these floors cannot be disabled: one task per branch, no force push, revalidation after task-branch baseline changes, and no automatic merge or business-code push to `main`.
 
 ### Developing This Repository
 
 When maintaining WildArrange itself:
 
 ```bash
-node ./bin/wildarrange.mjs init
-node ./bin/wildarrange.mjs adapter install --target all --mode local
+node ./bin/wildarrange.mjs setup --governance-root ../wildarrange-governance --repository <git-url>
 ```
+
+This repository's own governance config lives in its governance repository, not in the repo root.
 
 ## Minimal Workflow
 
@@ -309,7 +257,7 @@ With an adapter installed in Codex, Cursor, or Kimi Code, describe the feature o
 
 While a plan awaits approval, the user can still edit `.wildarrange/plan-drafts/*.json` and re-import it. Other file writes and arbitrary Shell commands are denied; only exact plan-management and read-only WildArrange commands are allowed. After approval, the draft directory returns to ordinary task `writable_paths` enforcement.
 
-Manually authored or externally generated `plan.json` files still work with `plan --from`. Missing owners retain the Jiuwei fallback for legacy compatibility, but new plans should always declare an owner explicitly.
+Manually authored or externally generated `plan.json` files still work with `plan --from`. Missing owners fall back to Jiuwei, but new plans should always declare an owner explicitly.
 
 Or run the built-in sample:
 
@@ -328,6 +276,69 @@ node ./bin/wildarrange.mjs task ready --task T001 --from task-details.json
 ```
 
 A verifier failure inside the same Task adds an attempt and history evidence instead of creating duplicate work items. If a completed Task is rejected during later acceptance, create an `acceptance_correction` Task and link the original with `--parent <planId>:<taskId>`. The Dashboard work-item ledger shows every Plan and filters by type, status, Plan, and search text.
+
+## Plan Fields and Import Validation
+
+The plan is the entry point of the whole pipeline. Common task fields:
+
+| Field | Required | Description |
+|---|---|---|
+| `id` | No | Task ID; generated as `T001`… when omitted |
+| `subject` | **Yes** | Task title (`title` also works) |
+| `description` | No | Task details |
+| `owner` | Required for host_semantic plans | Jiuwei or ZhuRong only; manual plans fall back to Jiuwei |
+| `writable_paths` | Strongly recommended | Path allowlist (globs supported); the scope guard rejects anything outside |
+| `worker_command` | No | The command that actually produces changes |
+| `verify_commands` | **Yes** | At least one; all must exit 0 |
+| `review_commands` / `standards_commands` | No | Independent review / standards checks; optional at import, but without any independent review signal the task cannot complete |
+| `successCriteria` | No | Acceptance criteria; when omitted, three verifier-bound defaults are generated (happy path / edge conditions / regression) |
+| `blockedBy` | No | Prerequisite task IDs forming a DAG (do not use `dependsOn`; it is ignored) |
+| `maxAttempts` | No | Maximum automatic retries, default 3 |
+| `skills` | No | Skills suggested for this task |
+| `repositoryTarget` | No | `project` (default) or `governance` |
+
+A top-level `defaults` block adds default `verify_commands` / `review_commands` / `standards_commands` / `writable_paths` to every task. For `responsibilityChanges`, see "Responsibility and fact ownership audit" at the end.
+
+Import validates layer by layer: `title` is required; every task needs `subject` and at least one `verify_commands`; `successCriteria` must be well formed and `verifierCommandRefs` must point at real verify commands; task IDs must be unique and `blockedBy` references must exist without cycles; a plan that matches product keywords and is routed as high risk needs at least 4 tasks including a verification/review task. A no-op task (no `writable_paths`, empty `worker_command`, and `verify_commands` that are only `true` / `process.exit(0)`) gets a `possible_noop_task` warning and is hard-blocked at acceptance.
+
+Plan approval gate: a plan with `generated_by: "host_semantic"` always enters `awaiting_plan_approval`; a manual plan does so when `planApproval.required=true`. `run` then refuses to execute until `plan approve` (or `/wildarrange-approve` in chat, where the AI restates the plan before asking you to confirm).
+
+### Retrying After a Scope Block
+
+An out-of-scope task opens a ChangeRequest. Review it, clean up the offending paths, then retry the single node:
+
+```bash
+node ./bin/wildarrange.mjs changes list
+node ./bin/wildarrange.mjs changes review --id CR-xxxx
+node ./bin/wildarrange.mjs changes resolve --id CR-xxxx --decision accept --evidence "Scope expansion approved" --rationale "..."
+# After cleaning up paths that are still out of scope
+node ./bin/wildarrange.mjs node retry --task T001
+```
+
+Without an accepted ChangeRequest the result is `change_request_required`; if it was accepted but out-of-scope paths remain, the result is `scope_cleanup_required`. Single-step nodes are only `node route|execute|checkpoint|retry`: verify / scope / review run only inside the full pipeline, and `run` and `node checkpoint` run the acceptance proof before checkpoint automatically.
+
+## Completion Gates and Traceability
+
+A task reaches `completed` only after every gate below passes. Order: worker (outside the pipeline) → `verify → scope → review` (all run even after an earlier failure, to preserve evidence) → joint decision on worker / successCriteria / the three gates → acceptance proof → (in Git projects, a delivery commit first, pushed normally when a remote exists) → checkpoint.
+
+| Gate | Owner | Decision |
+|---|---|---|
+| Worker exit code | System | `worker_command` must exit 0, which is only a claim of completion |
+| Independent verification | System verifier | `verify_commands` exist and all exit 0 |
+| Scope guard | System | Every changed path falls inside `writable_paths` (realpath-checked); a violation opens a ChangeRequest for human review |
+| Review gate | BaiZe + on-demand Review Skills / quality gates | Main lane PASS and no high/critical security finding; `review_commands`, `standards_commands`, LSP/AST/hashline/comment checks, and optional LLM review are judged together |
+| Acceptance criteria | System | `successCriteria` pass with independent evidence, never a copy of the verifier |
+| Acceptance proof | System | Re-checks the evidence chain and rejects no-op work, trivial verify (`verify_not_trivial`), and tautological review (`review_not_tautological`) |
+
+`inconclusive` (Git change data unavailable, evidence missing) never counts as a pass. If any gate fails, the task returns to `pending` or is marked `failed`, with a failure report. The full pipeline definition is in "Gate model" of [doc/project-architecture.md](./doc/project-architecture.md).
+
+Recovery from a bad change rests on these layers of evidence:
+
+- **Hash-chained ledger `.wildarrange/ledger.jsonl`**: every step appends an event; a rewritten line, broken chain, or unhashed inserted line is reported by `ledger verify`, and `doctor` accepts only verified events as completion evidence.
+- **Pre-execution workspace snapshot**: see "Defensive Checks" below.
+- **Resume snapshot `.wildarrange/snapshots/context.md`**: records progress for resumption.
+- **Backups and one-command restore**: `state backup` / `state restore`; restore first creates another backup.
+- **Consistency check `doctor`**: reconciles completed tasks against checkpoints, acceptance proofs, and ledger events, verifies the hash chain, and cross-checks the latest backup.
 
 ## Important API Contract
 
@@ -352,26 +363,49 @@ node ./bin/wildarrange.mjs adapter uninstall --target all
 node ./bin/wildarrange.mjs adapter restore --backup <backupId>
 ```
 
-Install, uninstall, and restore write reports under `.wildarrange/adapters/`. Existing adapter files are backed up before overwrite or removal. `restore` copies files from `.wildarrange/adapters/backups/<backupId>/` back to their original paths.
+Install, uninstall, and restore write reports under the runtime `adapters/external/`; `adapter activate` backs up user-level files before changing them. `restore` copies files from `adapters/backups/<backupId>/` back to their original user-level paths. All three hosts connect only through packages outside the project; nothing is written into the customer project:
 
-- **Codex**: lifecycle hooks are written to `.codex/hooks.json`, with an audit copy at `.wildarrange/adapters/codex/hooks.json`. In Codex Desktop, review, trust, and enable the project Hook under Settings > Hooks; in Codex CLI, use `/hooks`. Codex runs these hard hooks only after that step.
-- **Cursor**: project hooks at `.cursor/hooks.json` (with the `.cursor/hooks/wildarrange-hook-bridge.mjs` bridge) load automatically in a trusted workspace; `preToolUse` (Write/Delete/Edit/Shell) and `beforeShellExecution` (integrated terminal commands) can hard-deny and are fail-closed. `.cursor/rules/wildarrange.mdc` remains as the soft rule layer.
-- **Kimi Code**: a project-specific plugin is generated under `.wildarrange/adapters/kimi/plugin/`, while project instructions and Skills reuse `AGENTS.md` and `.agents/skills/`. WildArrange never silently edits the user-level `~/.kimi-code/config.toml`; start Kimi Code from the project root, run `/plugins install .wildarrange/adapters/kimi/plugin`, then run `/reload`. Do not quote the path because Kimi Code 0.27 treats quote characters as part of the path. Although plugin installation is user-scoped, its bridge exits silently outside WildArrange projects.
+- **Codex**: a local marketplace/plugin is generated under `adapters/external/codex-marketplace/`. In Codex Desktop, review, trust, and enable the plugin Hook under Settings > Hooks; in Codex CLI, use `/hooks`. Codex runs these hard hooks only after that.
+- **Cursor**: `adapter activate --target cursor` backs up and merges the user-level `~/.cursor/hooks.json`; the bridge hard-blocks `preToolUse` (Write/Delete/Edit/Shell) and `beforeShellExecution` fail-closed in a trusted workspace and stays silent for unconnected projects.
+- **Kimi Code**: a user plugin is generated under the runtime `adapters/external/kimi/`. WildArrange never silently edits the user-level `~/.kimi-code/config.toml`; run the `nextActions` from `adapter install` (`/plugins install <path>`, then `/reload`). Do not quote the path: Kimi Code 0.27 treats quotes as path characters. The plugin is a user-level install, but its bridge exits silently in unconnected projects.
 
 For Codex, `SessionStart` automatically injects the complete Jiuwei identity prompt, and `PostCompact` injects it again to restore identity after context compaction. Ordinary `UserPromptSubmit` events do not repeat the prompt. The prompt comes from the installed, hash-verified Prompt Pack, respects `contextBudgets.prompt.maxChars`, and reports truncation explicitly.
 
-`adapter install` also generates shortcuts so you don't have to open a terminal for common operations. `/wildarrange-plan` generates a draft from the current conversation when no path is supplied, and still imports an existing file when a path is supplied. All three surfaces render from one shared command set (`wildarrange-config` / `wildarrange-doctor` / `wildarrange-refresh` / `wildarrange-status` / `wildarrange-plan` / `wildarrange-approve` / `wildarrange-run`):
+`adapter install` also generates shortcut command Skills inside the plugin packages so you don't have to open a terminal for common operations. `/wildarrange-plan` generates a draft from the current conversation when no path is supplied, and still imports an existing file when a path is supplied. All hosts render the same command set (`wildarrange-config` / `wildarrange-doctor` / `wildarrange-refresh` / `wildarrange-status` / `wildarrange-plan` / `wildarrange-approve` / `wildarrange-run`, plus `-setup` / `-onboard` / `-architecture`); they load with each host plugin and create no files in the customer project.
 
-- **Cursor**: `.cursor/commands/<name>.md` (plain-Markdown slash commands; type `/wildarrange-doctor` in chat).
-- **Codex / Kimi Code**: shared `.agents/skills/<name>/SKILL.md` project Skills. Codex can invoke them through `/skills` or `$wildarrange-doctor`; Kimi Code discovers and invokes them through its project Skill mechanism.
+Each command is a prompt that tells the agent to run the matching `wildarrange.mjs` subcommand and report back — a shortcut that lets the agent run the CLI, not a native button. The commands:
 
-Each command is a prompt that tells the agent to run the matching `wildarrange.mjs` subcommand and report back — a shortcut that lets the agent run the CLI, not a native button.
+| Command | Purpose |
+|---|---|
+| `/wildarrange-setup` / `-onboard` / `-architecture` | Read the matching Skill, then guide project configuration, legacy-project onboarding, and architecture design review |
+| `/wildarrange-config` | Generate the governance repository's `policy/wildarrange.config.json`, guide you block by block, then run `config verify` |
+| `/wildarrange-doctor` | One-shot health check: `doctor` + `config verify` + `ledger verify` + `state verify` |
+| `/wildarrange-refresh` | Refresh the runtime after adding or changing Prompts, Skills, or injection points (idempotent; keeps tasks and ledger) |
+| `/wildarrange-status` | Show progress, next steps, failed tasks, and pending decisions |
+| `/wildarrange-plan` | Import and validate `plan.json`; without a path, draft a plan from the current conversation |
+| `/wildarrange-approve` | Show the plan summary and ask you to confirm before execution is unlocked |
+| `/wildarrange-run` | Run the next task through the full gates |
 
 A healthy Kimi Hook can deny out-of-scope Write/Edit calls and clearly destructive Bash commands. Kimi's Hook runner is fail-open on hook crashes and timeouts, so this is an early warning layer rather than the final security boundary. Verifier, scope, review, success criteria, acceptance proof, and checkpoint gates remain authoritative.
 
+### Hook Injection Points
+
+Once an adapter is installed, the host calls `hook run` automatically at key moments; the runtime picks the injection point for the event and assembles the rules, Skills, and state to mount into the context returned to the model. This is passive injection and needs no manual trigger.
+
+| Host event | Injection point | What it does |
+|---|---|---|
+| `SessionStart` | `session_start` | Restores progress, scans rules, builds the Agent context, and injects the Jiuwei identity prompt |
+| `UserPromptSubmit` | `user_prompt_submit` | Routes the request and adds rules; issues the plan-draft directive when a plan is needed |
+| `PreToolUse` | `pre_tool_use` | Pre-checks scope before a tool runs; out-of-plan writes return `permissionDecision=deny` |
+| `PostToolUse` | `post_tool_use` | Refreshes rules for the target file after a tool runs and applies the tool-result and scope checks |
+| `PostCompact` | `post_compact` | Restores working state, rules, and identity after context compaction |
+| `Stop` | `stop` | Produces a continuation directive before the session stops so the next one resumes |
+
+The config also defines orchestration injection points (`before_execute` / `before_review` / `before_checkpoint` / `repository_governance`); see `injectionPoints` in `config show` for the full list. Injected content is tiered with character budgets (Prompt default 12,000, Markdown default 12,000, Skill default 80,000), and anything over budget must be marked `truncated` rather than silently cut.
+
 ## Minimal Multi-Agent Loop
 
-Command-based child agents can run concurrently. In default `guarded` mode, writable agents automatically receive independent Git worktrees whenever the project is a Git repository with a baseline commit; the remote only determines whether the delivery commit is pushed automatically. In `manual/off`, `parallelAgents.isolation` remains in control:
+Command-based child agents can run concurrently. Writable agents automatically receive independent Git worktrees whenever the project is a Git repository with a baseline commit; the remote only determines whether the delivery commit is pushed automatically. With `gitDelivery.requireWorktreeForParallelWrites` set to `false`, `parallelAgents.isolation` remains in control:
 
 ```bash
 node ./bin/wildarrange.mjs parallel run --max-agents 2 --task T001,T002 --agent ZhuRong --command "..."
@@ -419,7 +453,6 @@ node ./bin/wildarrange.mjs parallel admit --run <runId> --task T001
 node ./bin/wildarrange.mjs config baseline --reason reviewed
 node ./bin/wildarrange.mjs config verify
 node ./bin/wildarrange.mjs state backup --reason before-risky-agent
-node ./bin/wildarrange.mjs state migrate
 node ./bin/wildarrange.mjs state verify
 node ./bin/wildarrange.mjs state list
 node ./bin/wildarrange.mjs state restore --backup <backupId>
@@ -434,12 +467,11 @@ node ./bin/wildarrange.mjs annotate --decision <decisionId> --category rule_wron
 node ./bin/wildarrange.mjs annotate stats
 node ./bin/wildarrange.mjs test --zone infra
 node ./bin/wildarrange.mjs docs commands --write
-node ./bin/wildarrange.mjs review suspicious
 ```
 
-`doctor` is a one-command health check: it validates config structure and mounts, reconciles completed tasks across every Plan against checkpoints, acceptance proofs, and `planId:taskId` ledger events, verifies the ledger hash chain, and cross-checks the ledger against the latest backup to detect wholesale rewrites; the `decisionHealth` section adds a periodic health summary (per-gate trigger counts, never-fired gates, corrupt-line and orphan-annotation warnings). The checks are isolated — a crashed check only marks its own section — and doctor is read-only diagnostics that never appends to the ledger. `state migrate` first creates a backup, then migrates the runtime task ledger and removes retired runtime projections; it does not rewrite the root `wildarrange.config.json`. Legacy `completed` tasks without the current proof chain become `needs_user_decision` instead of receiving fabricated proof. `state restore` also creates a pre-restore backup first.
+`doctor` is a one-command health check: it validates config structure and mounts, reconciles completed tasks across every Plan against checkpoints, acceptance proofs, and `planId:taskId` ledger events, verifies the ledger hash chain, and cross-checks the ledger against the latest backup to detect wholesale rewrites; the `decisionHealth` section adds a periodic health summary (per-gate trigger counts, never-fired gates, corrupt-line and orphan-annotation warnings). The checks are isolated — a crashed check only marks its own section — and doctor is read-only diagnostics that never appends to the ledger. `state restore` also creates a pre-restore backup first.
 
-`task archive ... --delete` requires explicit deletion confirmation and first creates a runtime backup; `in_progress` and `verifying` tasks cannot be archived. Plan and Task IDs must be safe single-segment identifiers, canonical `planId:id` identities must be unique, and an explicit `--plan` must match exactly rather than falling back to another Plan. An unindexed legacy Plan also loses only the selected Task. Deletion is a rollback-capable transaction that commits the canonical task ledger last. It removes only the target Task, an emptied Plan, its checkpoint / acceptance reports, that task's outbox DoneClaims, and exact non-glob artifacts under `.wildarrange/artifacts/` that are not shared by another task. The exact deletion set is added to the backup's recovery package, so `state restore --backup <backupId>` can recover the Plan, proofs, DoneClaims, and artifacts after an interruption or rollback request. Emptying the active Plan leaves the runtime `idle`; another Plan is never activated implicitly. Historical ledger entries and backups are never deleted with an archived task.
+`task archive ... --delete` requires explicit deletion confirmation and first creates a runtime backup; `in_progress` and `verifying` tasks cannot be archived. Plan and Task IDs must be safe single-segment identifiers, canonical `planId:id` identities must be unique, and an explicit `--plan` must match exactly rather than falling back to another Plan. Deletion is a rollback-capable transaction that commits the canonical task ledger last. It removes only the target Task, an emptied Plan, its checkpoint / acceptance reports, that task's outbox DoneClaims, and exact non-glob artifacts under `.wildarrange/artifacts/` that are not shared by another task. The exact deletion set is added to the backup's recovery package, so `state restore --backup <backupId>` can recover the Plan, proofs, DoneClaims, and artifacts after an interruption or rollback request. Emptying the active Plan leaves the runtime `idle`; another Plan is never activated implicitly. Historical ledger entries and backups are never deleted with an archived task.
 
 `impact` is change impact analysis: it lists which files import a changed file directly or transitively, plus the tests that should run (always including the five-zone boundary test), so an AI edit can machine-prove "nothing else was touched".
 
@@ -451,9 +483,7 @@ node ./bin/wildarrange.mjs review suspicious
 
 `decisions stats` is the deterministic statistical review (pure code, re-runnable, no LLM): per-gate trigger counts broken down by decision and rule code, the **never-fired gates** (the most direct signal that a gate exists only on paper), and annotation joins. Cold-start outputs counts, never rates. `timeline` merges the ledger (hash-chain-verified entries only), decisions, and annotations into one reverse-chronological feed answering "what happened in this repo recently", with `--task` / `--source` filters.
 
-The CLI is layered: `--help` shows only the core six commands (init / plan / run / status / decisions / doctor) covering the daily loop; the full list lives behind `--help --all`. The single source of truth for the command inventory is the registry in `src/interface/cli-help.mjs`, materialized to `doc/generated/commands.md` via `docs commands --write`; the README command-truthfulness check compares against the full `--help --all` output.
-
-`review suspicious` is the LLM suspicion pass (asynchronous audit, archivist invariants): it sends only a sanitized conclusion packet (ids/gates/rule codes/summaries — never code blocks, raw diffs, or full command output) to the configured external provider, and any returned suspicion must anchor to a decisionId present in the packet (hallucinated ids are dropped and counted). Without a key it falls back deterministically and never blocks. Conclusions land only in `.wildarrange/reports/suspicion.*` — **never in the completion chain, never in config, never on a gate switch**.
+The CLI is layered: `--help` shows only the core six commands (setup / plan / run / status / decisions / doctor) covering the daily loop; the full list lives behind `--help --all`. The single source of truth for the command inventory is the registry in `src/interface/cli-help.mjs`, materialized to `doc/generated/commands.md` via `docs commands --write`; the README command-truthfulness check compares against the full `--help --all` output.
 
 Legacy-project verification onboarding is a maintenance flow. It does not enter `task.status` and does not reuse `approvePlan`:
 
@@ -468,13 +498,13 @@ node ./bin/wildarrange.mjs adoption recover
 
 External onboarding scans and verifies the product repository, while locator configuration, Registry, Bootstrap and Inventory belong to the governance repository. Registry uses the contract's `verificationRegistry` path; Bootstrap and Inventory are siblings. Commit A/B are made in governance. Any separately approved product changes require their own product commit, and both repositories are checked. Once the locator is approved, onboarding may populate the initialized empty Registry with a valid digest, preserving its original bytes under runtime `adoption/artifact-preimages/`. Nonempty, invalid-digest or concurrently changed content still causes a conflict.
 
-The dashboard (`serve`) includes a work-item ledger, route review console, decision panel, ops panel, and verification adoption view. The route console groups the original request, structured route result, matched signals, semantic second opinion, and subsequent tool summaries by session and date. Reviewers can mark a route confirmed, rule-wrong, or case-wrong; common secret fields in tool inputs are redacted. The IDE `Stop` hook actively refreshes a human-readable daily report at `.wildarrange/reports/routing/latest.md` (also archived as `YYYY-MM-DD.md`), with the conclusion first and full decision/tool details below. Reviews only append annotations and never edit `routes.json` automatically.
+The dashboard (`serve`) includes a work-item ledger, route review console, decision panel, ops panel, and verification adoption view. The route console groups the original request, structured route result, matched signals, and subsequent tool summaries by session and date. Reviewers can mark a route confirmed, rule-wrong, or case-wrong; common secret fields in tool inputs are redacted. Reviews only append annotations and never edit `routes.json` automatically.
 
 The end-of-run gate summary is leveled by `reporting.verbosity`: the default `verbose` prints the per-gate three-line projection to stderr after each `run` (so every gate decision can be judged while the framework is new); once trust builds, set `normal` (one line) or `quiet` (JSON only). The machine-readable stdout JSON never changes across levels.
 
 After an interrupted parallel run, `parallel status --run <runId>` shows `batchStatus` and `incompleteTasks` (claimed tasks with no passing result); `parallel retry --run <runId>` re-runs only the tasks that never passed (reusing the recorded command, overridable with `--command`), skipping tasks already passed, completed, or claimed by another run — the retry is a new run and never rewrites the original run's evidence.
 
-Every `status` output carries a persistent `gateArming` yellow lamp: under default configs (all quality gates off, no independent review signal) it reports "gates not armed" with remediation guidance, so an all-green gate stream that proves nothing cannot be mistaken for a healthy project. The acceptance proof enforces two hard floors: it refuses tasks whose `verify_commands` are all trivial (e.g. `true`), and it refuses tasks whose review gate has no independent signal lane (no `review_commands` / `standards_commands` / `review.llm` / enabled quality gate) — a tautological review proves nothing and must not reach completed. `config init --armed` writes a config with armed quality gates (blocking commentChecker + an lspDiagnostics command slot). `doctor` carries dedicated `gateArming` and `adapters` sections: unarmed gates, enabled adapters whose files are not configured on this machine, a generated Codex Hook without a current execution receipt, and rule files referencing paths that no longer exist all surface in the report. `configured` means files exist; only Codex `execution_observed` proves that the current Hook definition has run at least once.
+Every `status` output carries a persistent `gateArming` yellow lamp: under default configs (all quality gates off, no independent review signal) it reports "gates not armed" with remediation guidance, so an all-green gate stream that proves nothing cannot be mistaken for a healthy project. The acceptance proof enforces two hard floors: it refuses tasks whose `verify_commands` are all trivial (e.g. `true`), and it refuses tasks whose review gate has no independent signal lane (no `review_commands` / `standards_commands` / `review.llm` / enabled quality gate) — a tautological review proves nothing and must not reach completed. `config init --armed` writes a config with armed quality gates (blocking commentChecker). `doctor` carries dedicated `gateArming` and `adapters` sections: unarmed gates, enabled adapters whose files are not configured on this machine, a generated Codex Hook without a current execution receipt, and rule files referencing paths that no longer exist all surface in the report. `configured` means files exist; only Codex `execution_observed` proves that the current Hook definition has run at least once.
 
 `governance audit` is LuWu's read-only inspection. It checks directory-level `AGENTS.md`, Chinese/English README command parity, Prompt Pack registration, naming, and actual code comments, then writes evidence under `.wildarrange/reports/governance/`. With `--changed-only`, only changed files and the related ancestor rules, paired docs, and architecture ledgers are inspected; if Git changes cannot be read, the audit safely falls back to a full scan. LuWu never moves, renames, or deletes project files automatically, and the runtime rejects LuWu, DiJiang, or BaiZe from command workers.
 
@@ -499,27 +529,9 @@ Before every worker run in a Git project, WildArrange records a workspace snapsh
 
 WildArrange preflights shell commands and blocks clearly destructive commands such as deleting `.git/.wildarrange`, recursively deleting project source/test/doc directories, `git reset --hard`, `git clean -fd`, `sudo`, or `curl | sh`. Normal project commands, verifiers, review commands, and child-agent runners continue to run.
 
-## ArchivistRouter
+## Routing
 
-ArchivistRouter is the archivist plus task-router node. It reads conclusions-only packets and strips code blocks, raw diffs, and full command output.
-
-Manual commands:
-
-```bash
-node ./bin/wildarrange.mjs archivist packet --text "build a web TODO app" --stage plan
-node ./bin/wildarrange.mjs archivist run --text "build a web TODO app" --stage plan --force
-```
-
-When `archivistRouter.enabled` is `true`, `SessionStart`, `UserPromptSubmit`, and `PostCompact` hooks trigger ArchivistRouter automatically. Without a DeepSeek key it falls back to deterministic routing and does not block the main flow.
-
-Cross-session memory is written to `.wildarrange/memory/digests/`. Task completion, parallel admission completion, `SessionStart`, and `PostCompact` emit structured digests used to recover progress, decisions, artifacts, implementation notes, and pitfalls.
-
-Routing suggestions remain review-only until explicitly resolved:
-
-```bash
-node ./bin/wildarrange.mjs archivist suggestions list
-node ./bin/wildarrange.mjs archivist suggestions resolve --id <id> --decision accept --evidence "..." --rationale "..."
-```
+Routing uses only the deterministic route table (`routes.json`), and every result keeps its matched signals as evidence. An `execute` request with confidence below 0.5 is downgraded to `plan`, so vague requests do not start work directly.
 
 ## Skill Matching and Task Bindings
 
@@ -540,6 +552,35 @@ Skills persisted in `task.skills` are mounted before execution through the PreTo
 - **Generic push (no external IM binding)**: all pending human decisions — plan awaiting approval, out-of-scope ChangeRequests, failed tasks, child agents awaiting acceptance — are injected into the host AI context by hooks (SessionStart / UserPromptSubmit / PostCompact / Stop), instructing the AI to proactively surface them to the developer with options. `attentionReport` is the source of truth; `status` / dashboard can also pull it.
 - **Plan approval gate**: a host-generated plan with `generated_by: "host_semantic"` always enters `awaiting_plan_approval`; an ordinary manual plan does so when `planApproval.required=true`. `run` refuses to execute until the developer runs `plan approve` (or `/wildarrange-approve` in chat).
 - **Externalized command safety**: built-in high-risk command patterns are a floor that cannot be disabled; `commandSafety.extraPatterns` lets you add project-specific dangerous-command blocks (`{ id, pattern, flags, reason }`) without code changes.
+
+## Custom Prompts, Skills, and Rules
+
+### Prompts and Skills
+
+The built-in Prompt Pack lives in `packs/wildarrange-linear/`: `manifest.json` (registers agents / skills / tools / routes), `agents/` (the five long-lived roles), `skills/`, `tools/tool-contract.json`, and `routes.json`. To add a skill, put a Markdown file under `skills/` and register it in the `skills` map of `manifest.json` (for example `"my-skill": "skills/my-skill.md"`). `init` is idempotent: it only recreates missing directories and re-registers the Prompt Pack without touching tasks or the ledger; almost every command and every hook re-registers automatically as well, and you can trigger it explicitly with `/wildarrange-refresh` or `node ./bin/wildarrange.mjs init`. Editing the body of a registered Skill takes effect immediately; the runtime records a hash of every prompt file to detect tampering. To replace the whole pack, copy and edit the directory, then point the programmatic `initRuntime(dir, { promptPackDir })` at it.
+
+To have a Skill mounted at a given injection point, declare it as a candidate list (an upper bound) under `injectionPoints` in the governance repository's `policy/wildarrange.config.json`; the on-demand mounting rules are described in "Skill Matching and Task Bindings" above.
+
+### Rule Documents and Rule Scanning
+
+Coding standards, acceptance requirements, directory conventions, and similar documents enter the workflow through **rule scanning**; workflow and operating guidance belongs in Prompt Pack Skills. The runtime scans `AGENTS.md`, `CLAUDE.md`, `CONTEXT.md`, `.github/copilot-instructions.md`, and rule files under `.claude/rules/`, `.cursor/rules/`, and `.github/instructions/`. Global files such as `AGENTS.md` always match; a rule file applies by path through its frontmatter `globs`, and a rule with no `globs` (or with `alwaysApply`) applies globally:
+
+```markdown
+---
+description: Frontend component rules
+globs: [src/frontend/**, apps/web/**]
+---
+
+Frontend changes must follow the component rules and attach browser acceptance screenshots.
+```
+
+Matching uses the paths this task will change (`writable_paths` plus the paths Git actually reports), not the tab open in your editor, so editing backend code never injects frontend rules. To inspect what a change would match:
+
+```bash
+node ./bin/wildarrange.mjs rules collect --target src/app.js
+```
+
+Matched rules are written to `.wildarrange/rules/context.md` and `context.json`, and over-budget content is explicitly marked truncated. Control-plane documents such as `AGENTS.md` and `CLAUDE.md` are read-only by default; the workflow never edits them. To avoid starting from scratch, copy `examples/fullstack-starter/` (annotated global red lines, three `globs` rule files for frontend/backend/database, a runnable `plan.example.json`, and a block-by-block config walkthrough) and follow its README checklist to get a first run passing.
 
 ## Dashboard
 
@@ -585,13 +626,10 @@ x-wildarrange-token: <token>
 | `.wildarrange/snapshots/context.md` | Cross-session resume context |
 | `.wildarrange/adapters/` | Adapter configs, reports, backups |
 | `.wildarrange/agent-runs/` | Child-agent packets, results, and admission records |
-| `.wildarrange/memory/` | ArchivistRouter structured memory |
-| `.wildarrange/memory/digests/` | Cross-session recovery digests |
-| `.wildarrange/routing/suggestions/` | Route keyword suggestions pending review |
 
 ## Configuration
 
-`wildarrange.config.json` configures agents, model providers, dynamic categories, context budgets, and injection points.
+The governance repository's `policy/wildarrange.config.json` configures agents, model providers, dynamic categories, context budgets, and injection points.
 
 Each long-lived agent can also bind project Skills through `skills`. Put a custom Skill at `.agents/skills/<name>/SKILL.md` and list it on the target agent. The Skill stays available at that agent's injection points and is not inherited by other agents. An external agent CLI can be wrapped by such a Skill while the core remains vendor-neutral:
 
@@ -613,7 +651,7 @@ Binding names may contain letters, numbers, `_`, and `-`. Missing Skills are rep
 
 Agents with `"provider": "host"` are delegated to the installed host tool. In Codex, GPT-family model selection is handled by Codex. In Cursor, the default Cursor model is used by the adapter path. WildArrange does not need an OpenAI API key for those host-managed agents.
 
-External providers use OpenAI-compatible HTTP configuration. See `wildarrange.config.example.json` for the full schema. Use `.env.wildarrange.example` as the environment variable template:
+External providers use OpenAI-compatible HTTP configuration. See `wildarrange.config.example.json` for a minimal example; keys it omits use the built-in defaults in `src/infra/default-config.mjs`. Use `.env.wildarrange.example` as the environment variable template:
 
 ```bash
 # Copy and fill in real values; never commit secrets
@@ -624,25 +662,50 @@ source .env.wildarrange
 
 Deterministic gates work without model APIs. When `review.llm.required` is `false`, a missing external key or a host-managed provider produces a warning rather than blocking the workflow.
 
-LSP/typecheck, AST/structure checks, hashline anchors, and comment checks live in the CLI review gate, not in editor-specific hooks:
+Config block reference:
+
+| Block | Purpose |
+|---|---|
+| `agents` | provider / model / reasoning per long-lived Agent; `skills` pins project Skills |
+| `modelProviders` | Model providers: `host` delegates to the host, external ones use OpenAI-compatible HTTP |
+| `injectionPoints` | Which `tools` / `markdown` / `skills` / `rules` each injection point mounts |
+| `contextBudgets` | Character budgets for Prompt / Markdown / Skill; over budget is marked `truncated` |
+| `skillMatcher.dynamicInjection` | On-demand Skill mounting: `enabled` / `maxSkills` / `alwaysMount` |
+| `qualityGates` | LSP/typecheck, AST structure checks, hashline anchors, comment checks |
+| `review.llm` | Whether to enable LLM review; with `required=false` a missing key only warns |
+| `commandSafety.extraPatterns` | Adds project-specific blocks on top of the built-in high-risk patterns (below) |
+| `planApproval.required` | When on, manually imported plans also need `plan approve` before `run` |
+
+Agent config example (the simplest setup keeps all five long-lived Agents on `provider: "host"`; validate with `/wildarrange-config` or `config verify`):
+
+```json
+{
+  "agents": {
+    "Jiuwei": { "role": "workflow_orchestrator", "provider": "host", "model": "host-default", "reasoning": "high" },
+    "BaiZe":  { "role": "independent_reviewer", "provider": "host", "model": "host-default", "reasoning": "xhigh" }
+  }
+}
+```
+
+`commandSafety.extraPatterns` can only add rules above the built-in floor; matching worker / verify / review commands are blocked (exit code 126). `pattern` is a regex string, `flags` defaults to `i`, and an invalid regex is safely skipped:
+
+```json
+{
+  "commandSafety": {
+    "extraPatterns": [
+      { "id": "no_prod_deploy", "pattern": "deploy\\s+--env\\s+prod", "flags": "i", "reason": "Production deploys must go through the manual process" }
+    ]
+  }
+}
+```
+
+`config init` writes an editable default config, and `config show` prints the effective one.
+
+Comment checks live in the CLI review gate, not in editor-specific hooks; put LSP/typecheck or AST/structure commands in the task or plan-default `standards_commands`:
 
 ```json
 {
   "qualityGates": {
-    "lspDiagnostics": {
-      "enabled": true,
-      "commands": ["npm run typecheck"]
-    },
-    "astStructure": {
-      "enabled": true,
-      "commands": ["ast-grep --pattern 'console.log($A)' --lang ts --json src || true"]
-    },
-    "hashlineAnchors": {
-      "enabled": true,
-      "anchors": [
-        { "file": "src/app.ts", "line": 12, "sha256": "<hashLine>" }
-      ]
-    },
     "commentChecker": {
       "enabled": true,
       "blockOnFindings": false
@@ -668,13 +731,37 @@ npm test
 npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache
 ```
 
-Current status: the linear governance loop is implemented and tested; checkpoint writes an acceptance-proof chain first. Optional LLM review, configurable LSP/typecheck diagnostics, AST/structure commands, hashline anchors, and comment checking are available through the CLI review gate. Codex Desktop hooks become hard after they are reviewed, trusted, and enabled under Settings > Hooks; Codex CLI uses `/hooks`. Cursor `preToolUse` / `beforeShellExecution` are fail-closed in trusted workspaces. Multi-agent support includes command-based parallel runs, Codex/Cursor command-template spawn, structured artifact admission, Git worktree patch admission, and retain-until-acceptance. Host-private background process management remains adapter work.
+Current status: the linear governance loop is implemented and tested; checkpoint writes an acceptance-proof chain first. Optional LLM review, `standards_commands` (typecheck/AST and similar), and comment checking are available through the CLI review gate. Codex Desktop hooks become hard after they are reviewed, trusted, and enabled under Settings > Hooks; Codex CLI uses `/hooks`. Cursor `preToolUse` / `beforeShellExecution` are fail-closed in trusted workspaces. Multi-agent support includes command-based parallel runs, Codex/Cursor command-template spawn, structured artifact admission, Git worktree patch admission, and retain-until-acceptance. Host-private background process management remains adapter work.
+
+## Command Cheat Sheet
+
+The authoritative list is `node ./bin/wildarrange.mjs --help --all` (same source as [doc/generated/commands.md](./doc/generated/commands.md)). Common scenarios:
+
+| Scenario | Command |
+|---|---|
+| Connect external governance in one step | `node ./bin/wildarrange.mjs setup --governance-root <path>` |
+| Generate / show governance config | `node ./bin/wildarrange.mjs config init` (`--armed` arms the quality gates) / `config show` |
+| Install adapters | `node ./bin/wildarrange.mjs adapter install --target all --mode local` |
+| Import / approve a plan | `node ./bin/wildarrange.mjs plan --from plan.json` / `plan approve` |
+| Run the next task | `node ./bin/wildarrange.mjs run` |
+| Single-step node | `node ./bin/wildarrange.mjs node execute --task T001` (also `node checkpoint` / `node retry` / `node route`) |
+| Run the built-in sample | `node ./bin/wildarrange.mjs workflow --sample` |
+| Status / summary | `node ./bin/wildarrange.mjs status` / `summary` |
+| Parallel child agents | `node ./bin/wildarrange.mjs parallel run --max-agents 2 --command "..."` |
+| Admit / retry / close | `parallel admit --run <runId> --task <id>` / `parallel retry --run <runId>` / `parallel close --run <runId>` |
+| Resolve a ChangeRequest | `node ./bin/wildarrange.mjs changes resolve --id CR-xxxx --decision accept --evidence "..."` |
+| Collect matched rules / match Skills | `node ./bin/wildarrange.mjs rules collect --target <path>` / `skills match --text "..." --stage plan` |
+| Decisions / timeline | `node ./bin/wildarrange.mjs decisions --limit 20` / `timeline` |
+| Impact / zoned tests | `node ./bin/wildarrange.mjs impact src/infra/ledger.mjs` / `test --zone infra` |
+| Health / verification | `node ./bin/wildarrange.mjs doctor` / `ledger verify` / `state verify` |
+| Start the Dashboard | `node ./bin/wildarrange.mjs serve --host 127.0.0.1 --port 8765` |
 
 ## More Docs
 
 | Doc | Purpose |
 |---|---|
 | [README.md](./README.md) | Chinese readme |
+| [doc/generated/commands.md](./doc/generated/commands.md) | Full command list generated from the command registry |
 | [CLAUDE.md](./CLAUDE.md) | Agent and developer governance rules |
 | [doc/concept.md](./doc/concept.md) | Product concept and external reference boundary |
 | [doc/project-architecture.md](./doc/project-architecture.md) | Runtime architecture and gate model |
@@ -697,7 +784,7 @@ Adding a task or readying a draft with changed responsibility declarations reope
 
 After adapter installation, use /wildarrange-setup to configure required Worker, Reviewer, research capabilities and project rules; /wildarrange-onboard inventories legacy plans, fact owners, tests and fixtures and migrates them through approved tasks. Read the full Skills with prompts show --skill configure-project-review or project-onboarding. Use the installed wildarrange command or adapter-provided absolute command, not a presumed source checkout.
 
-Store project policy in wildarrange.config.json: review.steps and executionReadiness. Task business fields remain separate. Each ordered review step has id, title, appliesTo, requirement, required, documents, skills and an optional command. Required failures return evidence with file, line, exact text and required fix; optional failures warn. Project steps do not replace R1–R5 responsibility auditing.
+Store project policy in the governance repository's policy/wildarrange.config.json: review.steps and executionReadiness. Task business fields remain separate. Each ordered review step has id, title, appliesTo, requirement, required, documents, skills and an optional command. Required failures return evidence with file, line, exact text and required fix; optional failures warn. Project steps do not replace R1–R5 responsibility auditing.
 
 Write a patch to .wildarrange/plan-drafts/review-setup.json, preview with wildarrange review configure --from .wildarrange/plan-drafts/review-setup.json, then add --apply after the user approves that configuration. Inspect review checklist --task T001; after plan approval, run readiness --task T001. Missing dependencies block Workers before an attempt is consumed. Incomplete configuration can be saved for repair.
 

@@ -5,7 +5,7 @@
 //   项目 AGENTS/rules 扫描匹配 targetPaths，预算截断后写 context.json。
 //
 // 【运行原理速读】
-//   scanProjectRules → nested AGENTS → applyRuleBudget → ledger 事件。
+//   scanProjectRules → nested AGENTS → applyRuleBudget（不写 ledger）。
 // =============================================================================
 import { existsSync } from "node:fs";
 import { readFile, readdir, writeFile } from "node:fs/promises";
@@ -19,7 +19,6 @@ import {
   resolveWildArrangePath,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
-import { appendLedger } from "./ledger.mjs";
 import { normalizeRelativePath, pathMatchesPattern } from "./path-match.mjs";
 import { uniqueStrings } from "./text-utils.mjs";
 import { getBoundWorkspaceContext } from "./workspace-context.mjs";
@@ -43,14 +42,14 @@ const PROJECT_RULE_DIRS = [
  * scanProjectRules：本模块对外异步 API。
  */
 export async function scanProjectRules(rootDir, options = {}) {
-  const controlRoot = options.controlRoot || rootDir;
-  await ensureWildArrangeDirs(controlRoot);
-  const { config, sourcePath } = await loadWildArrangeConfig(controlRoot);
+  const projectRoot = options.projectRoot || rootDir;
+  await ensureWildArrangeDirs(projectRoot);
+  const { config, sourcePath } = await loadWildArrangeConfig(projectRoot);
   const ruleConfig = config.ruleInjection || DEFAULT_WILDARRANGE_CONFIG.ruleInjection;
   const targetPaths = normalizeRuleTargetPaths(options.targetPaths || []);
   const allRules = [];
-  const workspace = getBoundWorkspaceContext(controlRoot);
-  if (workspace?.mode === "external" && workspace.governanceContract?.policyPath) {
+  const workspace = getBoundWorkspaceContext(projectRoot);
+  if (workspace?.governanceContract?.policyPath) {
     allRules.push(...await readGovernancePolicyRules(workspace.governanceRoot, workspace.governanceContract.policyPath));
   }
   for (const filePath of ruleConfig.projectSingleFiles || PROJECT_RULE_FILES) {
@@ -73,24 +72,35 @@ export async function scanProjectRules(rootDir, options = {}) {
     configPath: sourcePath,
     targetPaths,
     total: allRules.length,
-    governanceRoot: workspace?.mode === "external" ? workspace.governanceRoot : null,
+    governanceRoot: workspace?.governanceRoot ?? null,
     governancePolicyRules: allRules.filter((rule) => rule.source === "governance_policy").length,
     matched: budgetedRules.length,
     rules: budgetedRules,
   };
-  const jsonPath = resolveWildArrangePath(controlRoot, "rules", "context.json");
-  const mdPath = resolveWildArrangePath(controlRoot, "rules", "context.md");
-  result.reportJsonPath = path.relative(controlRoot, jsonPath);
-  result.reportMdPath = path.relative(controlRoot, mdPath);
+  const jsonPath = resolveWildArrangePath(projectRoot, "rules", "context.json");
+  const mdPath = resolveWildArrangePath(projectRoot, "rules", "context.md");
+  result.reportJsonPath = path.relative(projectRoot, jsonPath);
+  result.reportMdPath = path.relative(projectRoot, mdPath);
   await writeJsonAtomic(jsonPath, result);
   await writeFile(mdPath, renderRulesMarkdown(result), "utf8");
-  await appendLedger(controlRoot, { type: "project_rules_scanned", total: result.total, matched: result.matched, targetPathCount: targetPaths.length });
   return result;
+}
+
+/** init-governance 脚手架留下的待人工确认占位标记；含此标记的政策不是真实规则。 */
+export const POLICY_PLACEHOLDER = "[待确认]";
+
+/** 列出治理仓 policy 中仍含占位标记的文件（相对治理仓根），供 doctor 告警。 */
+export async function listPlaceholderPolicyFiles(rootDir) {
+  const workspace = getBoundWorkspaceContext(rootDir);
+  if (!workspace?.governanceContract?.policyPath) return [];
+  const rules = await readRuleDir(workspace.governanceRoot, workspace.governanceContract.policyPath, "governance_policy");
+  return rules.filter((rule) => rule.placeholder).map((rule) => rule.path);
 }
 
 /** 读取治理仓库 policy 根下全部 Markdown；路径加 governance/ 前缀避免与项目规则混淆。 */
 async function readGovernancePolicyRules(governanceRoot, policyRoot) {
-  const rules = await readRuleDir(governanceRoot, policyRoot, "governance_policy");
+  // 仍含占位标记的政策不注入：把未确认的模板当作真实规则会误导 Agent
+  const rules = (await readRuleDir(governanceRoot, policyRoot, "governance_policy")).filter((rule) => !rule.placeholder);
   return rules.map((rule) => ({
     ...rule,
     path: normalizeRelativePath(path.join("governance", rule.path)),
@@ -184,6 +194,7 @@ async function readRuleFile(rootDir, absolutePath, sourceName) {
     alwaysApply: Boolean(parsed.frontmatter.alwaysApply) || (parsed.frontmatter.alwaysApply === undefined && parsed.frontmatter.globs === undefined),
     chars: parsed.body.length,
     content: truncateForSummary(parsed.body.trim(), 4_000),
+    ...(content.includes(POLICY_PLACEHOLDER) ? { placeholder: true } : {}),
   };
 }
 

@@ -11,17 +11,14 @@ import { createHash, randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { wildarrangeError } from "./error-protocol.mjs";
 
 /**
- * 项目根到运行态根的进程内绑定。未绑定调用保持 legacy
- * `<projectRoot>/.wildarrange` 语义，供直接 API 与旧项目兼容。
+ * 项目根到运行态根的进程内绑定（外置治理：runtimeRoot 在客户项目之外）。
+ * 未绑定的项目没有运行态，访问时报错并引导 `wildarrange setup`。
  */
 const RUNTIME_ROOTS = new Map();
 
-/**
- * 运行时状态目录名（相对项目根）。
- */
-export const WILDARRANGE_DIR = ".wildarrange";
 /**
  * 运行时 JSON schema 版本号。
  */
@@ -65,15 +62,38 @@ export function resolveWildArrangePath(rootDir, ...segments) {
 }
 
 /**
- * 返回项目当前绑定的运行态根；无绑定时使用项目内 legacy 目录。
+ * 解析 CLI 的输入文件路径：`.wildarrange/plan-drafts/<name>.json` 是运行态虚拟路径，
+ * 映射到 runtimeRoot（与 review configure 一致）；其余路径按项目根解析。
+ */
+export function resolveRuntimeInputPath(rootDir, value) {
+  const logical = String(value).replaceAll("\\", "/");
+  return /^\.wildarrange\/plan-drafts\/[^/]+\.json$/.test(logical)
+    ? resolveWildArrangePath(rootDir, "plan-drafts", path.posix.basename(logical))
+    : path.resolve(rootDir, value);
+}
+
+/**
+ * 返回项目当前绑定的运行态根；项目未连接外置治理时抛出可行动错误。
  */
 export function resolveWildArrangeRoot(rootDir) {
-  const projectRoot = runtimeRootKey(rootDir);
-  // Map lookup uses a canonical absolute key, but the legacy fallback must keep
-  // the caller's relative/absolute shape. Several evidence contracts rely on
-  // `resolveWildArrangePath(".", ...)` returning `.wildarrange/...`, not a cwd-
-  // absolute path. External bindings always return their validated absolute root.
-  return RUNTIME_ROOTS.get(projectRoot)?.runtimeRoot || path.join(rootDir, WILDARRANGE_DIR);
+  return requireRuntimeBinding(rootDir).runtimeRoot;
+}
+
+/** 取得项目的运行态绑定；未连接时引导用户运行 setup，而不是在项目内自动建目录。 */
+function requireRuntimeBinding(rootDir) {
+  const binding = RUNTIME_ROOTS.get(runtimeRootKey(rootDir));
+  if (!binding) throw projectNotConnectedError(rootDir);
+  return binding;
+}
+
+/** 项目未连接治理仓时的统一错误：明确告知原因并引导 setup，不自动创建任何内容。 */
+export function projectNotConnectedError(rootDir) {
+  return wildarrangeError({
+    code: "project_not_connected",
+    module: "infra/runtime-store",
+    message: `project is not connected to WildArrange governance: ${path.resolve(rootDir)}`,
+    nextAction: "wildarrange setup --governance-root <path> [--repository <git-url>]（连接治理仓并生成运行态；不会写入客户项目）",
+  });
 }
 
 /**
@@ -93,10 +113,9 @@ export function clearWildArrangeRuntimeRoot(projectRoot) {
   return RUNTIME_ROOTS.delete(runtimeRootKey(projectRoot));
 }
 
-/** 返回已验证的治理路径投影；无外置连接时维持业务仓库内路径。 */
+/** 返回已验证的治理路径投影（治理仓根、policy 配置与验证注册表相对路径）。 */
 export function resolveGovernancePaths(rootDir) {
-  return RUNTIME_ROOTS.get(runtimeRootKey(rootDir))?.governance
-    || { rootDir, configPath: "wildarrange.config.json", registryPath: null };
+  return requireRuntimeBinding(rootDir).governance;
 }
 
 function runtimeRootKey(rootDir) {
@@ -110,7 +129,7 @@ function runtimeRootKey(rootDir) {
 }
 
 // §3.4 证据路径：planId 与 taskId 均允许连字符，必须用目录分段而非单 `-` 拼接，
-// 否则 stem 碰撞；legacy 扁平路径仅用于 guarded 兼容读取。
+// 否则 stem 碰撞。
 /**
  * resolveTaskPacketPath：本模块对外API。
  */
@@ -131,15 +150,6 @@ export function resolveTaskCheckpointPath(rootDir, planId, taskId) {
 }
 
 /**
- * resolveLegacyTaskCheckpointPath：本模块对外API。
- */
-export function resolveLegacyTaskCheckpointPath(rootDir, planId, taskId) {
-  assertEvidenceSegment(planId, "planId");
-  assertEvidenceSegment(taskId, "taskId");
-  return resolveWildArrangePath(rootDir, "checkpoints", `${planId}-${taskId}.json`);
-}
-
-/**
  * resolveTaskAcceptancePath：本模块对外API。
  */
 export function resolveTaskAcceptancePath(rootDir, planId, taskId, extension = "json") {
@@ -147,16 +157,6 @@ export function resolveTaskAcceptancePath(rootDir, planId, taskId, extension = "
   assertEvidenceSegment(taskId, "taskId");
   assertEvidenceExtension(extension);
   return resolveWildArrangePath(rootDir, "reports", "acceptance", planId, `${taskId}.${extension}`);
-}
-
-/**
- * resolveLegacyTaskAcceptancePath：本模块对外API。
- */
-export function resolveLegacyTaskAcceptancePath(rootDir, planId, taskId, extension = "json") {
-  assertEvidenceSegment(planId, "planId");
-  assertEvidenceSegment(taskId, "taskId");
-  assertEvidenceExtension(extension);
-  return resolveWildArrangePath(rootDir, "reports", "acceptance", `${planId}-${taskId}.${extension}`);
 }
 
 /**
@@ -170,15 +170,6 @@ export function resolveTaskReportPath(rootDir, reportKind, planId, taskId, exten
   assertEvidenceSegment(taskId, "taskId");
   assertEvidenceExtension(extension);
   return resolveWildArrangePath(rootDir, "reports", reportKind, planId, `${taskId}.${extension}`);
-}
-
-/**
- * legacyTaskEvidenceStem：本模块对外API。
- */
-export function legacyTaskEvidenceStem(planId, taskId) {
-  assertEvidenceSegment(planId, "planId");
-  assertEvidenceSegment(taskId, "taskId");
-  return `${planId}-${taskId}`;
 }
 
 /**
@@ -208,11 +199,6 @@ export async function ensureWildArrangeDirs(rootDir) {
     ["changes"],
     ["context-agents"],
     ["agent-runs"],
-    ["memory"],
-    ["memory", "digests"],
-    ["memory", "stage-summaries"],
-    ["routing"],
-    ["routing", "suggestions"],
   ];
 
   for (const dir of dirs) {

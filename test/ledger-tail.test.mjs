@@ -12,17 +12,17 @@
 // =============================================================================
 
 import assert from "node:assert/strict";
-import { appendFile, mkdir, mkdtemp, readFile, rm, stat, truncate, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, stat, truncate, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { appendLedger, readLedgerTailHash, readVerifiedLedgerEntries, verifyLedger } from "../src/infra/ledger.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { hashContent, readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 test("appendLedger is fail-closed when the ledger tail line is corrupted", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await appendLedger(dir, { type: "healthy_event" });
     await appendFile(resolveWildArrangePath(dir, "ledger.jsonl"), "{broken json\n", "utf8");
 
@@ -39,8 +39,7 @@ test("appendLedger is fail-closed when the ledger tail line is corrupted", async
 });
 
 test("appendLedger refuses to extend a chain that has unhashed tail lines", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await appendLedger(dir, { type: "healthy_event" });
     await appendFile(
       resolveWildArrangePath(dir, "ledger.jsonl"),
@@ -59,8 +58,7 @@ test("appendLedger refuses to extend a chain that has unhashed tail lines", asyn
 });
 
 test("tail hash cache makes repeat appends O(1) and detects truncation", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await appendLedger(dir, { type: "event_one" });
     await appendLedger(dir, { type: "event_two" });
 
@@ -88,25 +86,24 @@ test("tail hash cache makes repeat appends O(1) and detects truncation", async (
   });
 });
 
-test("legacy ledgers without any hash chain still accept appends", async () => {
-  await withTempDir(async (dir) => {
-    // 不调 initRuntime：它自己会追加一条带 hash 的 runtime_initialized，
-    // 这里要模拟的是 hash 链启用前的纯 legacy 账本。
+test("ledgers containing unhashed lines refuse appends", async () => {
+  await withExternalProject(async ({ projectRoot: dir }) => {
     const ledgerPath = resolveWildArrangePath(dir, "ledger.jsonl");
     await mkdir(path.dirname(ledgerPath), { recursive: true });
-    await writeFile(ledgerPath, `${JSON.stringify({ id: "evt-legacy", type: "legacy_event" })}\n`, "utf8");
+    await writeFile(ledgerPath, `${JSON.stringify({ id: "evt-unhashed", type: "unhashed_event" })}\n`, "utf8");
 
-    const entry = await appendLedger(dir, { type: "new_event" });
-    assert.equal(entry.prevHash, null);
-    const content = await readFile(ledgerPath, "utf8");
-    assert.match(content, /legacy_event/);
-    assert.match(content, /new_event/);
-  });
+    await assert.rejects(
+      appendLedger(dir, { type: "new_event" }),
+      (error) => {
+        assert.equal(error.protocol.code, "ledger_tail_unhashed");
+        return true;
+      },
+    );
+  }, { init: false });
 });
 
 test("forged self-consistent entries after a broken line never enter the verified chain", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     const legit = await appendLedger(dir, { type: "task_verified", taskId: "T-legit" });
     const ledgerPath = resolveWildArrangePath(dir, "ledger.jsonl");
     await appendFile(ledgerPath, "{broken json line\n", "utf8");
@@ -130,11 +127,3 @@ test("forged self-consistent entries after a broken line never enter the verifie
   });
 });
 
-async function withTempDir(fn) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "wildarrange-ledger-tail-"));
-  try {
-    return await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}

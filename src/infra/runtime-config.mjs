@@ -8,24 +8,18 @@
 //   loadWildArrangeConfig → deepMerge default-config → 返回 sourcePath。
 // =============================================================================
 import { existsSync } from "node:fs";
-import { unlink } from "node:fs/promises";
 import path from "node:path";
 import { normalizeAgentKey } from "./agent-registry.mjs";
-import { DEFAULT_RUNTIME_NAME, DEFAULT_WILDARRANGE_CONFIG } from "./default-config.mjs";
+import { DEFAULT_WILDARRANGE_CONFIG } from "./default-config.mjs";
 import { appendLedger } from "./ledger.mjs";
 import { assertRealpathInsideRoot, resolveInboundPath } from "./recovery-transaction.mjs";
 import {
   ensureWildArrangeDirs,
   readJson,
-  resolveWildArrangePath,
   resolveGovernancePaths,
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 
-/**
- * WILDARRANGE_CONFIG_FILE：本模块对外API。
- */
-export const WILDARRANGE_CONFIG_FILE = "wildarrange.config.json";
 /**
  * 产品显示名称常量。
  */
@@ -35,90 +29,43 @@ export const PRODUCT_NAME = "WildArrange";
  */
 export const DEFAULT_PACKAGE_NAME = "@alivewavelab/wildarrange";
 /**
- * CLI 默认命令名。
- */
-export const DEFAULT_CLI_COMMAND = "wildarrange";
-
-/**
- * loadWildArrangeConfig：本模块对外异步 API。
+ * loadWildArrangeConfig：读取治理仓 policy/wildarrange.config.json 并与内置默认值合并；
+ * 文件缺失时只使用 default-config。这是唯一的配置来源。
  */
 export async function loadWildArrangeConfig(rootDir) {
-  const rootConfigPath = await governanceConfigPath(rootDir);
-  const runtimeConfigPath = resolveWildArrangePath(rootDir, "config.json");
-  const rootConfig = await readJson(rootConfigPath, null);
-  const runtimeConfig = await readJson(runtimeConfigPath, null);
-  const sourcePath = rootConfig ? rootConfigPath : runtimeConfig ? runtimeConfigPath : null;
-  // A checked-in root config is authoritative. The runtime copy used to be
-  // treated as a hidden lower layer, which allowed removed legacy keys to
-  // reappear whenever the root stopped overriding them.
-  const selectedConfig = rootConfig || runtimeConfig || {};
+  const configPath = await governanceConfigPath(rootDir);
+  const stored = await readJson(configPath, null);
   return {
-    config: normalizeRuntimeConfig(deepMerge(DEFAULT_WILDARRANGE_CONFIG, selectedConfig)),
-    sourcePath: sourcePath ? path.relative(rootDir, sourcePath) : "default",
+    config: normalizeRuntimeConfig(deepMerge(DEFAULT_WILDARRANGE_CONFIG, stored || {})),
+    sourcePath: stored ? path.relative(rootDir, configPath) : "default",
   };
 }
 
 /**
- * migrateRuntimeConfigState：本模块对外异步 API。
- */
-export async function migrateRuntimeConfigState(rootDir) {
-  await ensureWildArrangeDirs(rootDir);
-  const rootConfigPath = await governanceConfigPath(rootDir);
-  const runtimeConfigPath = resolveWildArrangePath(rootDir, "config.json");
-  const rootConfig = await readJson(rootConfigPath, null);
-  const runtimeConfig = await readJson(runtimeConfigPath, null);
-  const source = rootConfig || runtimeConfig || {};
-  const config = normalizeRuntimeConfig(deepMerge(DEFAULT_WILDARRANGE_CONFIG, source));
-  await writeJsonAtomic(runtimeConfigPath, config);
-  const removedProjections = [];
-  for (const name of ["agents.json", "categories.json"]) {
-    try {
-      await unlink(resolveWildArrangePath(rootDir, name));
-      removedProjections.push(`.wildarrange/${name}`);
-    } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
-    }
-  }
-  return {
-    kind: "runtime_config_migration",
-    sourcePath: rootConfig ? path.relative(rootDir, rootConfigPath) : runtimeConfig ? ".wildarrange/config.json" : "default",
-    runtimeConfigPath: path.relative(rootDir, runtimeConfigPath),
-    removedProjections,
-  };
-}
-
-/**
- * writeDefaultWildArrangeConfig：本模块对外异步 API。
+ * writeDefaultWildArrangeConfig：在治理仓 policy/ 下写入默认（或 --armed）配置。
  */
 export async function writeDefaultWildArrangeConfig(rootDir, options = {}) {
-  await ensureWildArrangeDirs(rootDir);
-  const targetPath = options.root === true ? await governanceConfigPath(rootDir) : resolveWildArrangePath(rootDir, "config.json");
+  const targetPath = await governanceConfigPath(rootDir);
   if (!options.force && existsSync(targetPath)) {
     return { path: path.relative(rootDir, targetPath), created: false, config: await readJson(targetPath) };
   }
+  await ensureWildArrangeDirs(rootDir);
   const config = options.armed === true ? buildArmedConfig() : DEFAULT_WILDARRANGE_CONFIG;
   await writeJsonAtomic(targetPath, config);
-  await appendLedger(rootDir, { type: "config_written", configPath: path.relative(rootDir, targetPath), root: options.root === true, armed: options.armed === true });
+  await appendLedger(rootDir, { type: "config_written", configPath: path.relative(rootDir, targetPath), armed: options.armed === true });
   return { path: path.relative(rootDir, targetPath), created: true, config };
 }
 
 /**
  * `config init --armed`：写出一份「门已武装」的配置——commentChecker 阻断发现
- * （无需任何外部工具即可构成独立复核信号与 required 质量门），lspDiagnostics
- * 留好命令位等用户填项目真实的 typecheck/test 命令。默认配置故意不武装
+ * （无需任何外部工具即可构成独立复核信号与 required 质量门）。默认配置故意不武装
  * （黄灯提醒），--armed 是给「我知道自己在做什么」的显式入口。
  */
-function buildArmedConfig() {
+export function buildArmedConfig() {
   return {
     ...DEFAULT_WILDARRANGE_CONFIG,
     qualityGates: {
       ...DEFAULT_WILDARRANGE_CONFIG.qualityGates,
-      lspDiagnostics: {
-        ...DEFAULT_WILDARRANGE_CONFIG.qualityGates?.lspDiagnostics,
-        enabled: true,
-        required: true,
-        commands: ["node --test"],
-      },
       commentChecker: {
         ...DEFAULT_WILDARRANGE_CONFIG.qualityGates?.commentChecker,
         enabled: true,
@@ -144,10 +91,8 @@ function normalizeRuntimeConfig(config) {
   if (!isPlainObject(normalized.review) || !Array.isArray(normalized.review.steps)) throw new Error("review.steps must be an array");
   delete normalized.dynamicAgents;
   delete normalized.promptVariants;
-  // 兼容历史写法：旧配置中的 runtime 名字面量即默认 runtime。
-  if (normalized.runtime === "wildarrange-linear") normalized.runtime = DEFAULT_RUNTIME_NAME;
   normalized.agents = normalizeAgentMap(normalized.agents);
-  normalized.gitCoordination = normalizeGitCoordination(normalized.gitCoordination);
+  normalized.gitDelivery = normalizeGitDelivery(normalized.gitDelivery);
   if (Array.isArray(normalized.review?.llm?.agents)) {
     normalized.review = {
       ...normalized.review,
@@ -166,36 +111,16 @@ function normalizeRuntimeConfig(config) {
 }
 
 /**
- * 归一化 GitCoordination 输入为稳定形态。
+ * 归一化 gitDelivery 输入为稳定形态。
  */
-function normalizeGitCoordination(value) {
+function normalizeGitDelivery(value) {
   const input = isPlainObject(value) ? value : {};
-  const mode = String(input.mode || "guarded").trim().toLowerCase();
-  if (!["off", "manual", "guarded", "strict"].includes(mode)) {
-    throw new Error(`gitCoordination.mode must be off, manual, guarded, or strict; received ${input.mode}`);
-  }
-  const normalized = {
-    ...input,
-    mode,
+  return {
     remote: nonEmptyConfigString(input.remote, "origin"),
     integrationBranch: nonEmptyConfigString(input.integrationBranch, "auto"),
     taskBranchPrefix: nonEmptyConfigString(input.taskBranchPrefix, "wildarrange/task").replace(/^\/+|\/+$/g, ""),
     requireWorktreeForParallelWrites: input.requireWorktreeForParallelWrites !== false,
-    requireVerificationBeforeHandoff: input.requireVerificationBeforeHandoff === true,
-    requireCleanHandoff: input.requireCleanHandoff !== false,
-    // Takeover evidence is an immutable floor whenever this config exists;
-    // keep the explicit field visible, but never normalize it to false.
-    requireTakeoverReason: true,
   };
-  // strict is a profile, not a collection of individually weakenable flags.
-  if (mode === "strict") {
-    // strict 是固定 profile：子开关在此一并强制为 true，不可通过配置单独放宽
-    normalized.requireWorktreeForParallelWrites = true;
-    normalized.requireVerificationBeforeHandoff = true;
-    normalized.requireCleanHandoff = true;
-    normalized.requireTakeoverReason = true;
-  }
-  return normalized;
 }
 
 /**

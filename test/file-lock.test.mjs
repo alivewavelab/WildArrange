@@ -12,29 +12,17 @@
 // =============================================================================
 
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import { readFile, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
 import { withFileLock } from "../src/infra/file-lock.mjs";
 import { appendLedger } from "../src/infra/ledger.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-
-async function withTempDir(fn) {
-  const baseDir = path.join(process.cwd(), ".tmp");
-  await mkdir(baseDir, { recursive: true });
-  const dir = await mkdtemp(path.join(baseDir, "wildarrange-lock-"));
-  try {
-    await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 test("ledger append recovers from a dead-pid lock instead of timing out", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     const lockPath = resolveWildArrangePath(dir, "ledger.lock");
     // 三行 owner 格式，pid 999999 已死：必须立即判 stale 回收。
     await writeFile(lockPath, `crashed-writer\n999999\n${Date.now()}\n`, "utf8");
@@ -46,8 +34,7 @@ test("ledger append recovers from a dead-pid lock instead of timing out", async 
 });
 
 test("ledger append recovers from a legacy two-line lock after the mtime grace", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     const lockPath = resolveWildArrangePath(dir, "ledger.lock");
     // 旧格式 `pid\nts` 不可解析；mtime 超过宽限期后按 stale 回收。
     await writeFile(lockPath, `12345\n${Date.now()}\n`, "utf8");
@@ -60,8 +47,7 @@ test("ledger append recovers from a legacy two-line lock after the mtime grace",
 });
 
 test("lock timeout error names the owner, pid, liveness and wait budget", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     const lockPath = resolveWildArrangePath(dir, "team", "tasks.lock");
     // 持锁者是当前进程（pid 存活）：不可判 stale，必须超时且报错带诊断。
     await writeFile(lockPath, `parallel-admit:T001\n${process.pid}\n${Date.now()}\n`, "utf8");
@@ -83,8 +69,7 @@ test("lock timeout error names the owner, pid, liveness and wait budget", async 
 });
 
 test("lock timeout on an unparsable fresh lock explains the stale grace", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     const lockPath = resolveWildArrangePath(dir, "team", "tasks.lock");
     await writeFile(lockPath, "", "utf8"); // 空锁、mtime 新鲜：宽限期内不可回收
 
@@ -96,7 +81,7 @@ test("lock timeout on an unparsable fresh lock explains the stale grace", async 
 });
 
 test("release does not delete a lock that was reclaimed and re-acquired by another owner", async () => {
-  await withTempDir(async (dir) => {
+  await withExternalProject(async ({ projectRoot: dir }) => {
     const lockPath = path.join(dir, "race.lock");
     // 持锁期间锁被 stale 回收并被他人重新获取：内容已换，释放时必须放弃删除。
     const intruderContent = `other-owner\n999999\n${Date.now()}\n`;
@@ -108,7 +93,7 @@ test("release does not delete a lock that was reclaimed and re-acquired by anoth
 });
 
 test("release rechecks the mtime fingerprint even when the content is unchanged", async () => {
-  await withTempDir(async (dir) => {
+  await withExternalProject(async ({ projectRoot: dir }) => {
     const lockPath = path.join(dir, "race-mtime.lock");
     let heldContent;
     await withFileLock(dir, lockPath, "race lock", "first-owner", async () => {
@@ -123,7 +108,7 @@ test("release rechecks the mtime fingerprint even when the content is unchanged"
 });
 
 test("a normal release still removes its own lock", async () => {
-  await withTempDir(async (dir) => {
+  await withExternalProject(async ({ projectRoot: dir }) => {
     const lockPath = path.join(dir, "normal.lock");
     await withFileLock(dir, lockPath, "normal lock", "owner", async () => {});
     await assert.rejects(readFile(lockPath, "utf8"), /ENOENT/, "own lock must be released");

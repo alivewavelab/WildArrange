@@ -12,7 +12,7 @@
 // =============================================================================
 
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import test from "node:test";
@@ -23,21 +23,10 @@ import {
   runParallelAgents,
 } from "../src/orchestration/parallel-runtime.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 const CLI_PATH = path.resolve(process.cwd(), "bin", "wildarrange.mjs");
-
-async function withTempDir(fn) {
-  const baseDir = path.join(process.cwd(), ".tmp");
-  await mkdir(baseDir, { recursive: true });
-  const dir = await mkdtemp(path.join(baseDir, "wildarrange-retry-"));
-  try {
-    await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
 
 async function importTwoTaskPlan(dir) {
   const planPath = resolveWildArrangePath(dir, "artifacts", "retry-plan.json");
@@ -58,8 +47,7 @@ async function importTwoTaskPlan(dir) {
 }
 
 test("status reconciles incomplete tasks and retry re-runs only the failed one", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await importTwoTaskPlan(dir);
 
     // 同一命令按工作目录区分成败：T002 失败、T001 通过。
@@ -97,8 +85,7 @@ test("status reconciles incomplete tasks and retry re-runs only the failed one",
 });
 
 test("parallel retry CLI requeues the incomplete tasks of a run", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir, stateHome }) => {
     await importTwoTaskPlan(dir);
     const batch = await runParallelAgents(dir, {
       command: "node -e \"process.exit(process.cwd().includes('T002') ? 1 : 0)\"",
@@ -111,7 +98,7 @@ test("parallel retry CLI requeues the incomplete tasks of a run", async () => {
       "--root", dir,
       "--run", batch.runId,
       "--command", "node -e \"process.exit(0)\"",
-    ], { cwd: dir, encoding: "utf8" });
+    ], { cwd: dir, encoding: "utf8", env: { ...process.env, WILDARRANGE_STATE_HOME: stateHome } });
     assert.equal(run.status, 0, run.stderr);
     const parsed = JSON.parse(run.stdout);
     assert.equal(parsed.kind, "parallel_agent_retry");

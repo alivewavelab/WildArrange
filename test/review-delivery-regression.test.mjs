@@ -14,8 +14,8 @@
 
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
+import os from "node:os";
 import test from "node:test";
 
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
@@ -28,31 +28,25 @@ import { persistTaskState } from "../src/orchestration/task-board.mjs";
 import { buildChangedPathDiffEvidence, collectGitChangedPaths, changedPathsIntroducedByTask } from "../src/infra/git-diff.mjs";
 import { readJson, resolveTaskAcceptancePath, resolveTaskCheckpointPath, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
-async function withGitFixture(fn, options = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), "wa-delivery-regression-"));
-  try {
-    for (const args of [["init", "-b", "main"], ["config", "user.name", "Delivery Test"], ["config", "user.email", "delivery@example.invalid"]]) {
-      const result = await runCommandFile("git", args, root);
-      assert.equal(result.exitCode, 0, result.stderr);
-    }
-    if (options.ignoreRuntime !== false) await writeFile(path.join(root, ".gitignore"), ".wildarrange/\n");
-    await writeFile(path.join(root, "worker.cjs"), "const fs=require('fs');const p='result.txt';const n=fs.existsSync(p)?Number(fs.readFileSync(p,'utf8'))+1:1;fs.writeFileSync(p,String(n));");
-    await writeFile(path.join(root, "check.cjs"), "require('node:assert/strict').equal(require('node:fs').readFileSync('result.txt','utf8'),'1');");
-    await writeFile(path.join(root, "review.cjs"), "const fs=require('node:fs');const assert=require('node:assert/strict');assert.equal(fs.statSync('result.txt').size,1);assert(!fs.existsSync('unexpected.txt'));\n");
-    await writeFile(path.join(root, "wildarrange.config.json"), JSON.stringify({ gitCoordination: { mode: "guarded" } }));
-    await runCommand("git add .", root);
-    const commit = await runCommand("git commit -m baseline", root);
-    assert.equal(commit.exitCode, 0, commit.stderr);
-    await initRuntime(root);
-    await fn(root);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
+async function withGitFixture(fn) {
+  await withExternalProject(async ({ projectRoot }) => {
+    await fn(projectRoot);
+  }, {
+    projectFiles: {
+      "README.md": "# Fixture project\n",
+      "worker.cjs": "const fs=require('fs');const p='result.txt';const n=fs.existsSync(p)?Number(fs.readFileSync(p,'utf8'))+1:1;fs.writeFileSync(p,String(n));",
+      "check.cjs": "require('node:assert/strict').equal(require('node:fs').readFileSync('result.txt','utf8'),'1');",
+      "review.cjs": "const fs=require('node:fs');const assert=require('node:assert/strict');assert.equal(fs.statSync('result.txt').size,1);assert(!fs.existsSync('unexpected.txt'));\n",
+    },
+  });
 }
 
 async function writePlan(root, tasks) {
-  const planPath = path.join(root, "plan.json");
+  // 计划文件放在运行时 artifacts 下，避免弄脏产品仓基线。
+  const planPath = resolveWildArrangePath(root, "artifacts", "plan.json");
+  await mkdir(path.dirname(planPath), { recursive: true });
   await writeFile(planPath, JSON.stringify({ id: "delivery-regression", title: "Delivery regression", tasks }));
   return importPlan(root, planPath);
 }
@@ -87,7 +81,7 @@ test("shared completion derives mandatory Git delivery when an entry omits or di
   });
 });
 
-test("linear delivery persists runtime facts only in control root and doctor detects later worktree drift", async () => {
+test("linear delivery persists runtime facts only in control root", async () => {
   await withGitFixture(async (root) => {
     await writePlan(root, [realTask()]);
     const completed = await runNextTask(root);
@@ -102,21 +96,9 @@ test("linear delivery persists runtime facts only in control root and doctor det
     assert.equal(diffEvidence.status, "known");
     assert.equal(diffEvidence.changed, true);
     assert.deepEqual(diffEvidence.changedPaths, ["result.txt"]);
-
-    await mkdir(path.join(workDir, ".wildarrange", "rules"), { recursive: true });
-    await writeFile(path.join(workDir, ".wildarrange", "rules", "context.json"), "{}\n");
-    const drifted = await runDoctor(root);
-    const drift = drifted.findings.find((finding) => finding.code === "delivery_worktree_state_drift");
-    assert.ok(drift, JSON.stringify(drifted.findings, null, 2));
-    assert.deepEqual(drift.changedPaths, [".wildarrange/rules/context.json"]);
-
-    await rm(path.join(workDir, ".wildarrange"), { recursive: true, force: true });
-    const removed = await runCommandFile("git", ["worktree", "remove", workDir], root);
-    assert.equal(removed.exitCode, 0, removed.stderr);
-    const afterCleanup = await runDoctor(root);
-    assert.equal(afterCleanup.findings.some((finding) => finding.code === "delivery_worktree_state_drift"), false);
-  }, { ignoreRuntime: false });
+  });
 });
+
 
 test("single-node execute records the same fingerprint-based diff evidence", async () => {
   await withGitFixture(async (root) => {

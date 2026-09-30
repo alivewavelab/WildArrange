@@ -2,406 +2,40 @@
 // 文件名称：adapters.mjs
 // 所属模块：interface
 // 作用说明：
-//   宿主 adapter 的安装、卸载与备份恢复：生成 Codex/Cursor/Kimi hooks、rules、skills 与报告。
-//   只物化项目文件；宿主信任与 hook 实际执行需用户另行激活。
-//
-// 【运行原理速读】
-//   可以把它想成「多宿主治理接入的安装程序」：
-//
-//   · 谁调用？
-//     wildarrange adapter install|uninstall|restore。
-//
-//   · 它做了什么？
-//     ① 备份既有文件 ② 按 target 写入 hooks/bridge/rules/skills/plugin
-//     ③ 写 install-report 与 ledger adapter_files_generated。
-//
-//   · 缺了它会怎样？
-//     IDE 内 Agent 无 hook 硬拦截与 slash 命令入口，只能靠人工跑 CLI。
+//   外置治理模式的 Adapter 编排：生成安装包（包内容见 adapter-bundles.mjs、
+//   bridge 模板见 adapter-bridge-template.mjs）、显式激活 Cursor/Codex 用户级配置、
+//   卸载、恢复备份与完整性检查。所有生成物与备份都留在 runtimeRoot 或用户配置目录，不写客户项目。
 // =============================================================================
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, readdir, stat, unlink, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { PROJECT_DIR } from "../infra/prompt-pack.mjs";
+import { DEFAULT_PACKAGE_NAME } from "../infra/runtime-config.mjs";
+import { nowIso, readJson, resolveWildArrangePath, writeJsonAtomic } from "../infra/runtime-store.mjs";
+import { renderHookBridge } from "./adapter-bridge-template.mjs";
 import {
-  DEFAULT_PACKAGE_NAME,
-  PRODUCT_NAME,
-} from "../infra/runtime-config.mjs";
-import {
-  STATE_VERSION,
-  ensureWildArrangeDirs,
-  nowIso,
-  resolveWildArrangePath,
-  writeJsonAtomic,
-} from "../infra/runtime-store.mjs";
-import { appendLedger } from "../infra/ledger.mjs";
-import { initRuntime } from "../infra/runtime-bootstrap.mjs";
-import { writeRuntimeContextSnapshot } from "../infra/runtime-snapshot.mjs";
-import { assertPathInsideRoot, normalizeRelativePath } from "../infra/path-match.mjs";
-import {
-  KIMI_ADAPTER_PLUGIN_NAME,
-  buildKimiPluginManifest,
-  renderKimiAdapterReadme,
-  renderKimiHookBridge,
-} from "./kimi-adapter.mjs";
-import {
-  CURSOR_BRIDGE_PATH,
-  buildCursorHooksConfig,
-  renderCursorAdapterReadme,
-  renderCursorHookBridge,
-} from "./cursor-adapter.mjs";
+  buildCursorUserHooks,
+  CODEX_PLUGIN_NAME,
+  CURSOR_BRIDGE_NAME,
+  KIMI_PLUGIN_NAME,
+  writeCodexBundle,
+  writeCursorBundle,
+  writeKimiBundle,
+} from "./adapter-bundles.mjs";
 
-/** Codex slash 命令前缀，与 install 写入的 commands 目录名一致。 */
-const SLASH_COMMAND_PREFIX = "wildarrange";
-/** adapter install/uninstall 允许的 target 白名单。 */
-const ADAPTER_TARGETS = new Set(["all", "codex", "cursor", "kimi"]);
+const ADAPTER_VERSION = 2;
 
-// --- Adapter 安装 ---
+const CURSOR_RULE_NAME = "wildarrange.mdc";
+const POINTER_BEGIN = "<!-- wildarrange:begin -->";
+const POINTER_END = "<!-- wildarrange:end -->";
+const POINTER_BLOCK_PATTERN = /\n*<!-- wildarrange:begin -->[\s\S]*?<!-- wildarrange:end -->\n*/;
+const BUNDLE_DIRECTORIES = { codex: "codex-marketplace", cursor: "cursor", kimi: "kimi" };
 
-/**
- * 安装指定 target（all/codex/cursor/kimi）的 adapter 文件并返回安装报告。
- * @param {string} rootDir
- * @param {{ target?: string, mode?: string, packageName?: string, package?: string }} [options]
- * @returns {Promise<object>} install-report 对象
- */
-export async function installAdapter(rootDir, options = {}) {
-  const target = options.target || "all";
-  if (!ADAPTER_TARGETS.has(target)) {
-    // §3.4：非法 target 立即 fail-closed，避免写入部分宿主文件后难以回滚。
-    throw new Error("adapter target must be all, codex, cursor, or kimi");
-  }
-  const mode = options.mode || "local";
-  const packageName = options.packageName || options.package || DEFAULT_PACKAGE_NAME;
-  const hookCommand = adapterHookCommand({ mode, packageName, controlRoot: rootDir });
-  const cliPrefix = adapterCliPrefix({ mode, packageName });
-  await initRuntime(rootDir);
-  const slashCommands = buildSlashCommands(cliPrefix);
-  const outputs = [];
-  const backupId = createAdapterBackupId("install");
-  const reportJsonPath = resolveWildArrangePath(rootDir, "adapters", "install-report.json");
-  const reportMdPath = resolveWildArrangePath(rootDir, "adapters", "install-report.md");
-  const previousInstallReportBackup = await backupExistingAdapterFile(rootDir, reportJsonPath, backupId);
-  const previousInstallReportMdBackup = await backupExistingAdapterFile(rootDir, reportMdPath, backupId);
+const TARGETS = new Set(["all", "codex", "cursor", "kimi"]);
 
-  if (target === "all" || target === "codex") {
-    const codexHooks = buildCodexHooksConfig(`${hookCommand} --host codex`);
-    const codexRuntimePath = path.join(rootDir, ".codex", "hooks.json");
-    const codexRuntimeBackup = await backupExistingAdapterFile(rootDir, codexRuntimePath, backupId);
-    await writeJsonAtomic(codexRuntimePath, codexHooks);
-    outputs.push({
-      target: "codex",
-      path: reportPath(rootDir, codexRuntimePath),
-      status: "generated",
-      backup: codexRuntimeBackup,
-      enforcement: "hard-after-trust",
-      trustAction: "Codex 桌面版：打开设置 > Hooks，审查、信任并启用本项目 Hook；Codex CLI：执行 /hooks。",
-    });
-
-    const codexMirrorPath = resolveWildArrangePath(rootDir, "adapters", "codex", "hooks.json");
-    const codexMirrorBackup = await backupExistingAdapterFile(rootDir, codexMirrorPath, backupId);
-    await writeJsonAtomic(codexMirrorPath, codexHooks);
-    outputs.push({ target: "codex", path: reportPath(rootDir, codexMirrorPath), status: "generated", backup: codexMirrorBackup, enforcement: "audit-copy" });
-
-  }
-
-  if (target === "all" || target === "cursor") {
-    const cursorHooksPath = path.join(rootDir, ".cursor", "hooks.json");
-    const cursorHooksBackup = await backupExistingAdapterFile(rootDir, cursorHooksPath, backupId);
-    await mkdir(path.dirname(cursorHooksPath), { recursive: true });
-    await writeJsonAtomic(cursorHooksPath, buildCursorHooksConfig({ bridgeCommand: `node ${CURSOR_BRIDGE_PATH}` }));
-    outputs.push({
-      target: "cursor",
-      path: reportPath(rootDir, cursorHooksPath),
-      status: "generated",
-      backup: cursorHooksBackup,
-      enforcement: "hard-in-trusted-workspace",
-      trustAction: "在 Cursor 中以受信任工作区（trusted workspace）打开本项目，.cursor/hooks.json 会自动加载生效。",
-    });
-
-    const cursorBridgePath = path.join(rootDir, CURSOR_BRIDGE_PATH);
-    const cursorBridgeBackup = await backupExistingAdapterFile(rootDir, cursorBridgePath, backupId);
-    await mkdir(path.dirname(cursorBridgePath), { recursive: true });
-    await writeFile(cursorBridgePath, renderCursorHookBridge({
-      mode,
-      packageName,
-      localCliPath: path.join(PROJECT_DIR, "bin", "wildarrange.mjs"),
-      controlRoot: rootDir,
-    }), "utf8");
-    outputs.push({ target: "cursor", path: reportPath(rootDir, cursorBridgePath), status: "generated", backup: cursorBridgeBackup, enforcement: "hook-bridge" });
-
-    const cursorDir = path.join(rootDir, ".cursor", "rules");
-    await mkdir(cursorDir, { recursive: true });
-    // 旧版受管规则文件名（已退役），安装时清理。
-    const legacyCursorRulePath = path.join(cursorDir, "wildarrangeflow.mdc");
-    if (existsSync(legacyCursorRulePath)) {
-      const legacyRuleBackup = await backupExistingAdapterFile(rootDir, legacyCursorRulePath, backupId);
-      await unlink(legacyCursorRulePath);
-      outputs.push({
-        target: "cursor",
-        path: reportPath(rootDir, legacyCursorRulePath),
-        status: "legacy-removed",
-        backup: legacyRuleBackup,
-        enforcement: "retired-managed-rule",
-      });
-    }
-    const cursorRulePath = path.join(cursorDir, "wildarrange.mdc");
-    const cursorRuleBackup = await backupExistingAdapterFile(rootDir, cursorRulePath, backupId);
-    await writeFile(cursorRulePath, renderCursorRule({ hookCommand, cliPrefix }), "utf8");
-    const cursorReadmePath = resolveWildArrangePath(rootDir, "adapters", "cursor", "README.md");
-    const cursorReadmeBackup = await backupExistingAdapterFile(rootDir, cursorReadmePath, backupId);
-    await writeFile(cursorReadmePath, renderCursorAdapterReadme({ hookCommand }), "utf8");
-    outputs.push({ target: "cursor", path: reportPath(rootDir, cursorRulePath), status: "generated", backup: cursorRuleBackup, enforcement: "soft" });
-    outputs.push({ target: "cursor", path: reportPath(rootDir, cursorReadmePath), status: "generated", backup: cursorReadmeBackup, enforcement: "documentation" });
-
-    const cursorCommandsDir = path.join(rootDir, ".cursor", "commands");
-    await mkdir(cursorCommandsDir, { recursive: true });
-    for (const command of slashCommands) {
-      const commandPath = path.join(cursorCommandsDir, `${command.name}.md`);
-      const commandBackup = await backupExistingAdapterFile(rootDir, commandPath, backupId);
-      await writeFile(commandPath, renderCursorCommand(command), "utf8");
-      outputs.push({ target: "cursor", path: reportPath(rootDir, commandPath), status: "generated", backup: commandBackup, enforcement: "slash-command" });
-    }
-  }
-
-  if (target === "all" || target === "codex" || target === "kimi") {
-    const skillTarget = target === "all" ? "shared" : target;
-    for (const command of slashCommands) {
-      const skillPath = path.join(rootDir, ".agents", "skills", command.name, "SKILL.md");
-      await mkdir(path.dirname(skillPath), { recursive: true });
-      const skillBackup = await backupExistingAdapterFile(rootDir, skillPath, backupId);
-      await writeFile(skillPath, renderCodexSkill(command), "utf8");
-      outputs.push({ target: skillTarget, path: reportPath(rootDir, skillPath), status: "generated", backup: skillBackup, enforcement: "slash-command" });
-    }
-  }
-
-  if (target === "all" || target === "kimi") {
-    const kimiRoot = resolveWildArrangePath(rootDir, "adapters", "kimi");
-    const pluginRoot = path.join(kimiRoot, "plugin");
-    const manifestPath = path.join(pluginRoot, "kimi.plugin.json");
-    const bridgePath = path.join(pluginRoot, "hooks", "wildarrange-hook-bridge.mjs");
-    const readmePath = path.join(kimiRoot, "README.md");
-    const generated = [
-      {
-        path: manifestPath,
-        content: buildKimiPluginManifest(),
-        json: true,
-        enforcement: "pending-user-install",
-        trustAction: "从项目根启动 Kimi Code，执行 /plugins install .wildarrange/adapters/kimi/plugin，确认后执行 /reload。",
-      },
-      {
-        path: bridgePath,
-        content: renderKimiHookBridge({
-          mode,
-          packageName,
-          localCliPath: path.join(PROJECT_DIR, "bin", "wildarrange.mjs"),
-          controlRoot: rootDir,
-        }),
-        enforcement: "hook-bridge",
-      },
-      {
-        path: readmePath,
-        content: renderKimiAdapterReadme(),
-        enforcement: "documentation",
-      },
-    ];
-    for (const file of generated) {
-      const backup = await backupExistingAdapterFile(rootDir, file.path, backupId);
-      await mkdir(path.dirname(file.path), { recursive: true });
-      if (file.json) await writeJsonAtomic(file.path, file.content);
-      else await writeFile(file.path, file.content, "utf8");
-      outputs.push({
-        target: "kimi",
-        path: reportPath(rootDir, file.path),
-        status: "generated",
-        backup,
-        enforcement: file.enforcement,
-        ...(file.trustAction ? { trustAction: file.trustAction } : {}),
-      });
-    }
-  }
-
-  const report = {
-    kind: "wildarrange_adapter_install",
-    version: STATE_VERSION,
-    at: nowIso(),
-    target,
-    mode,
-    packageName,
-    cliPrefix,
-    hookCommand,
-    backupId,
-    previousInstallReportBackup,
-    previousInstallReportMdBackup,
-    result: "files_generated",
-    activationVerified: false,
-    outputs,
-  };
-  report.reportJsonPath = reportPath(rootDir, reportJsonPath);
-  report.reportMdPath = reportPath(rootDir, reportMdPath);
-  await writeJsonAtomic(reportJsonPath, report);
-  await writeFile(reportMdPath, renderAdapterInstallReport(report), "utf8");
-  await writeRuntimeContextSnapshot(rootDir, { reason: "adapter_install", cliCommandPrefix: cliPrefix });
-  // This command can only materialize project files. Host trust and lifecycle
-  // execution happen later inside Codex/Cursor/Kimi and need separate evidence.
-  await appendLedger(rootDir, { type: "adapter_files_generated", target, mode, packageName, outputCount: outputs.length });
-  return report;
-}
-
-// --- Adapter 卸载 ---
-
-/**
- * 删除已安装的 adapter 文件；删除前复制到 .wildarrange/adapters/backups/。
- * @param {string} rootDir
- * @param {{ target?: string }} [options]
- */
-export async function uninstallAdapter(rootDir, options = {}) {
-  const target = options.target || "all";
-  if (!ADAPTER_TARGETS.has(target)) {
-    throw new Error("adapter target must be all, codex, cursor, or kimi");
-  }
-  await ensureWildArrangeDirs(rootDir);
-
-  const backupId = createAdapterBackupId("uninstall");
-  const slashCommands = buildSlashCommands("");
-  const outputs = [];
-  const candidates = [];
-  if (target === "all" || target === "codex") {
-    candidates.push({ target: "codex", path: path.join(rootDir, ".codex", "hooks.json") });
-    candidates.push({ target: "codex", path: resolveWildArrangePath(rootDir, "adapters", "codex", "hooks.json") });
-  }
-  if (target === "all" || target === "cursor") {
-    candidates.push({ target: "cursor", path: path.join(rootDir, ".cursor", "hooks.json") });
-    candidates.push({ target: "cursor", path: path.join(rootDir, CURSOR_BRIDGE_PATH) });
-    candidates.push({ target: "cursor", path: path.join(rootDir, ".cursor", "rules", "wildarrange.mdc") });
-    // 旧版受管规则文件名（已退役），卸载时一并清理。
-    candidates.push({ target: "cursor", path: path.join(rootDir, ".cursor", "rules", "wildarrangeflow.mdc") });
-    candidates.push({ target: "cursor", path: resolveWildArrangePath(rootDir, "adapters", "cursor", "README.md") });
-    for (const command of slashCommands) {
-      candidates.push({ target: "cursor", path: path.join(rootDir, ".cursor", "commands", `${command.name}.md`) });
-    }
-  }
-  if (target === "all" || target === "kimi") {
-    candidates.push({ target: "kimi", path: resolveWildArrangePath(rootDir, "adapters", "kimi", "plugin", "kimi.plugin.json") });
-    candidates.push({ target: "kimi", path: resolveWildArrangePath(rootDir, "adapters", "kimi", "plugin", "hooks", "wildarrange-hook-bridge.mjs") });
-    candidates.push({ target: "kimi", path: resolveWildArrangePath(rootDir, "adapters", "kimi", "README.md") });
-  }
-  if (target === "all" || target === "codex" || target === "kimi") {
-    // .agents/skills/ 为 Codex 与 Kimi 共享；仅卸载一方时若对方仍启用则保留 skill 文件。
-    const siblingStillUsesSharedSkills = target === "kimi"
-      ? existsSync(path.join(rootDir, ".codex", "hooks.json"))
-      : target === "codex"
-        ? existsSync(resolveWildArrangePath(rootDir, "adapters", "kimi", "plugin", "kimi.plugin.json"))
-        : false;
-    for (const command of slashCommands) {
-      const skillPath = path.join(rootDir, ".agents", "skills", command.name, "SKILL.md");
-      if (siblingStillUsesSharedSkills) {
-        outputs.push({ target: "shared", path: reportPath(rootDir, skillPath), status: "retained-shared" });
-      } else {
-        candidates.push({ target: target === "all" ? "shared" : target, path: skillPath });
-      }
-    }
-  }
-
-  for (const candidate of candidates) {
-    const relativePath = reportPath(rootDir, candidate.path);
-    if (!existsSync(candidate.path)) {
-      outputs.push({ target: candidate.target, path: relativePath, status: "missing" });
-      continue;
-    }
-    const backup = await backupExistingAdapterFile(rootDir, candidate.path, backupId);
-    await unlink(candidate.path);
-    outputs.push({ target: candidate.target, path: relativePath, status: "removed", backup });
-  }
-
-  const report = {
-    kind: "wildarrange_adapter_uninstall",
-    version: STATE_VERSION,
-    at: nowIso(),
-    target,
-    backupId,
-    outputs,
-  };
-  const reportJsonPath = resolveWildArrangePath(rootDir, "adapters", "uninstall-report.json");
-  const reportMdPath = resolveWildArrangePath(rootDir, "adapters", "uninstall-report.md");
-  report.reportJsonPath = reportPath(rootDir, reportJsonPath);
-  report.reportMdPath = reportPath(rootDir, reportMdPath);
-  await writeJsonAtomic(reportJsonPath, report);
-  await writeFile(reportMdPath, renderAdapterUninstallReport(report), "utf8");
-  await appendLedger(rootDir, { type: "adapter_uninstalled", target, outputCount: outputs.length });
-  return report;
-}
-
-// --- 备份恢复 ---
-
-/**
- * 从指定 backupId 目录恢复 adapter 文件到项目根。
- * @param {string} rootDir
- * @param {{ backupId?: string, backup?: string }} [options]
- */
-export async function restoreAdapterBackup(rootDir, options = {}) {
-  await ensureWildArrangeDirs(rootDir);
-  const backupId = options.backupId || options.backup;
-  if (!backupId || typeof backupId !== "string") {
-    throw new Error("adapter restore requires --backup <backupId>");
-  }
-  if (backupId.includes("..") || path.isAbsolute(backupId)) {
-    throw new Error("adapter backup id must be a local backup directory name");
-  }
-  const backupRoot = resolveWildArrangePath(rootDir, "adapters", "backups", backupId);
-  if (!existsSync(backupRoot)) {
-    throw new Error(`adapter backup not found: ${reportPath(rootDir, backupRoot)}`);
-  }
-
-  const files = await listBackupFiles(backupRoot);
-  const outputs = [];
-  for (const relativePath of files) {
-    const sourcePath = path.join(backupRoot, relativePath);
-    const targetPath = path.join(rootDir, relativePath);
-    assertPathInsideRoot(rootDir, targetPath, relativePath, "adapter restore path");
-    const backup = await backupExistingAdapterFile(rootDir, targetPath, createAdapterBackupId("pre-restore"));
-    await mkdir(path.dirname(targetPath), { recursive: true });
-    await copyFile(sourcePath, targetPath);
-    outputs.push({
-      path: normalizeRelativePath(relativePath),
-      status: "restored",
-      backup,
-    });
-  }
-
-  await writeRuntimeContextSnapshot(rootDir, { reason: "adapter_restore" });
-
-  const report = {
-    kind: "wildarrange_adapter_restore",
-    version: STATE_VERSION,
-    at: nowIso(),
-    backupId,
-    outputs,
-  };
-  const reportJsonPath = resolveWildArrangePath(rootDir, "adapters", "restore-report.json");
-  const reportMdPath = resolveWildArrangePath(rootDir, "adapters", "restore-report.md");
-  report.reportJsonPath = reportPath(rootDir, reportJsonPath);
-  report.reportMdPath = reportPath(rootDir, reportMdPath);
-  await writeJsonAtomic(reportJsonPath, report);
-  await writeFile(reportMdPath, renderAdapterRestoreReport(report), "utf8");
-  await appendLedger(rootDir, { type: "adapter_restored", backupId, outputCount: outputs.length });
-  return report;
-}
-
-/** 生成带时间戳的 adapter 备份目录名（install/uninstall/pre-restore 前缀）。 */
-function createAdapterBackupId(prefix) {
-  return `${prefix}-${new Date().toISOString().replace(/[:.]/g, "-")}`;
-}
-
-/** 若目标文件存在则复制到 .wildarrange/adapters/backups/<backupId>/ 并返回备份相对路径。 */
-async function backupExistingAdapterFile(rootDir, filePath, backupId) {
-  if (!existsSync(filePath)) return null;
-  const relativePath = reportPath(rootDir, filePath);
-  const backupPath = resolveWildArrangePath(rootDir, "adapters", "backups", backupId, relativePath);
-  await mkdir(path.dirname(backupPath), { recursive: true });
-  await copyFile(filePath, backupPath);
-  return reportPath(rootDir, backupPath);
-}
-
-// --- CLI 前缀与 Hook 命令 ---
+// --- CLI 前缀 ---
 
 /**
  * 根据 local/npx 模式返回 wildarrange CLI 调用前缀字符串。
@@ -417,315 +51,326 @@ export function adapterCliPrefix({ mode = "local", packageName = DEFAULT_PACKAGE
   return `node "${path.resolve(localCliPath || path.join(PROJECT_DIR, "bin", "wildarrange.mjs"))}"`;
 }
 
-/** 拼接宿主 hook bridge 调用的完整 wildarrange hook run 命令行。 */
-function adapterHookCommand({ mode, packageName, controlRoot }) {
-  return `${adapterCliPrefix({ mode, packageName })} hook run --adapter-mode ${mode} --adapter-package ${JSON.stringify(packageName)} --control-root "${path.resolve(controlRoot)}"`;
+/** 在外部 runtime 生成三宿主安装包；只生成，不把文件存在冒充为宿主激活。 */
+export async function installAdapters(projectRoot, workspace, options = {}) {
+  assertWorkspace(workspace);
+  const target = options.target || "all";
+  if (!TARGETS.has(target)) throw new Error("external adapter target must be all, codex, cursor, or kimi");
+  const mode = options.mode || "local";
+  const packageName = options.packageName || DEFAULT_PACKAGE_NAME;
+  const localCliPath = path.resolve(options.localCliPath || path.join(process.cwd(), "bin", "wildarrange.mjs"));
+  const cliPrefix = adapterCliPrefix({ mode, packageName, localCliPath });
+  const externalRoot = resolveWildArrangePath(workspace.projectRoot, "adapters", "external");
+  await mkdir(externalRoot, { recursive: true });
+  const selected = target === "all" ? ["codex", "cursor", "kimi"] : [target];
+  const targets = {};
+  for (const host of selected) {
+    // 用户级插件可能服务多个已连接项目；activationId 绑定宿主桥版本与 CLI，
+    // 不绑定某个 projectId。项目归属由各自 runtime ledger 隔离。
+    const activationId = adapterActivationId(host, { mode, packageName, localCliPath });
+    const bridge = renderHookBridge({ host, mode, packageName, localCliPath, activationId, hookTimeoutMs: options.hookTimeoutMs });
+    if (host === "codex") targets.codex = await writeCodexBundle(externalRoot, bridge, activationId, cliPrefix);
+    if (host === "cursor") targets.cursor = await writeCursorBundle(externalRoot, bridge, activationId, cliPrefix);
+    if (host === "kimi") targets.kimi = await writeKimiBundle(externalRoot, bridge, activationId, cliPrefix);
+  }
+  const reportPath = path.join(externalRoot, "install-report.json");
+  const previous = await readJson(reportPath, null);
+  for (const [host, entry] of Object.entries(targets)) {
+    // 记录生成物内容 digest，doctor 据此发现 Hook 配置被改；已有的用户级激活记录随重装保留。
+    entry.integrity = await digestFiles([entry.hooksPath, entry.bridgePath, entry.manifestPath, entry.marketplacePath]);
+    if (previous?.targets?.[host]?.user) entry.user = previous.targets[host].user;
+  }
+  const report = {
+    kind: "wildarrange_external_adapter_install",
+    schemaVersion: 1,
+    at: nowIso(),
+    projectId: workspace.projectId,
+    projectRoot: workspace.projectRoot,
+    runtimeRoot: workspace.runtimeRoot,
+    mode,
+    packageName,
+    cliPrefix,
+    activationVerified: false,
+    targets: { ...(previous?.targets || {}), ...targets },
+  };
+  await writeJsonAtomic(reportPath, report);
+  return report;
 }
 
-// --- Slash 命令与宿主 Hook 配置生成 ---
-
-/**
- * 统一的 slash 命令集：Cursor 渲染成 .cursor/commands/<name>.md，
- * Codex/Kimi 渲染成 .agents/skills/<name>/SKILL.md。
- * @param {string} cliPrefix 已解析的 wildarrange CLI 调用前缀
- * @returns {Array<{ name: string, title: string, description: string, body: string }>}
- */
-export function buildSlashCommands(cliPrefix) {
-  const fence = (lines) => ["```bash", ...lines, "```"].join("\n");
-  return [
-    ...[{ suffix: "setup", skill: "configure-project-review", title: "项目审查与执行配置" },
-      { suffix: "onboard", skill: "project-onboarding", title: "旧项目治理接管" },
-      { suffix: "architecture", skill: "review-architecture-design", title: "架构设计审查与确认" }].map(entry => ({
-      name: SLASH_COMMAND_PREFIX + "-" + entry.suffix, title: entry.title, description: entry.title,
-      body: "先运行 " + cliPrefix + " prompts show --skill " + entry.skill + " 读取完整 Skill，再遵循其预览、批准和验收步骤。不能只凭名称执行，不能假定项目拥有工具源码。",
-    })),
-    {
-      name: `${SLASH_COMMAND_PREFIX}-config`,
-      title: `${PRODUCT_NAME} 配置表`,
-      description: "生成并引导填写根配置文件 wildarrange.config.json（agents / providers / injectionPoints / qualityGates 等），填完用 config verify 校验。",
-      body: [
-        `目标：为开发者生成并逐块引导填写根配置文件 \`wildarrange.config.json\`。`,
-        "",
-        "步骤：",
-        `1. 执行下面的命令生成/更新根配置（已存在不会被覆盖，除非加 \`--force\`）：`,
-        "",
-        fence([`${cliPrefix} config init --root`]),
-        "",
-        "2. 打开 `wildarrange.config.json`，按下列检查项逐块引导用户填写，每块用一句话说明作用：",
-        "   - `agents`：各角色用哪个 provider / model / reasoning。",
-        "   - `modelProviders`：`host` 交给宿主；外部模型走 OpenAI 兼容配置，`apiKeyEnv` 填环境变量名而不是密钥本身。",
-        "   - `injectionPoints`：每个注入点挂哪些 `tools` / `markdown` / `skills` / `rules`。",
-        "   - `contextBudgets`：Prompt / Markdown / Skill 的字符预算。",
-        "   - `skillMatcher.dynamicInjection`：技能按需挂载的 `enabled` / `maxSkills` / `alwaysMount`。",
-        "   - `qualityGates`：`lspDiagnostics` / `astStructure` / `hashlineAnchors` / `commentChecker`。",
-        "   - `review.llm`：是否启用 LLM 复核；`required=false` 时无 key 只告警不阻断。",
-        "",
-        "3. 填写完成后执行校验，并提示可用 `/wildarrange-doctor` 做整体体检：",
-        "",
-        fence([`${cliPrefix} config verify`]),
-        "",
-        "不要建议删除或清空 `verify_commands` / `review_commands` / `successCriteria` 来让校验通过。",
-      ].join("\n"),
-    },
-    {
-      name: `${SLASH_COMMAND_PREFIX}-doctor`,
-      title: `${PRODUCT_NAME} 一键体检`,
-      description: "依次运行 doctor / config verify / ledger verify / state verify，汇总运行时健康状况与整改建议。",
-      body: [
-        "在项目根目录依次执行下列命令，然后用中文汇总每一步的结论（通过 / 告警 / 失败），并对失败项给出下一步建议：",
-        "",
-        fence([
-          `${cliPrefix} doctor`,
-          `${cliPrefix} config verify`,
-          `${cliPrefix} ledger verify`,
-          `${cliPrefix} state verify`,
-        ]),
-        "",
-        "要求：不要跳过任何一条命令。如果 doctor 报出未完成任务对账失败、账本 hash 链断裂或配置基线不符，明确指出是哪一项，并说明是否需要 `state restore` 或人工介入。不得为了让结果好看而修改或删除校验命令本身。",
-      ].join("\n"),
-    },
-    {
-      name: `${SLASH_COMMAND_PREFIX}-refresh`,
-      title: `${PRODUCT_NAME} 刷新运行时`,
-      description: "新增或修改 prompt / skill / 注入点配置后，刷新运行时并确认注册结果（幂等，不清空任务与账本）。",
-      body: [
-        "当你新增或修改了 prompt / skill / 注入点配置后，执行下列命令刷新运行时（幂等，不会清空任务或账本）：",
-        "",
-        fence([`${cliPrefix} init`]),
-        "",
-        "然后确认新的 skill 是否已登记，并用中文汇报当前已注册的 agent 与 skill 数量：",
-        "",
-        fence([`${cliPrefix} prompts list`]),
-        "",
-        "若某个 skill 没出现，检查它是否已在 prompt 包的 `manifest.json` 中登记。",
-      ].join("\n"),
-    },
-    {
-      name: `${SLASH_COMMAND_PREFIX}-status`,
-      title: `${PRODUCT_NAME} 状态`,
-      description: "查看当前工作流进度、下一步动作、失败任务与待处理事项。",
-      body: [
-        "执行下列命令并用中文汇总当前进度、下一步动作、失败任务与待处理事项：",
-        "",
-        fence([
-          `${cliPrefix} status`,
-          `${cliPrefix} summary`,
-        ]),
-      ].join("\n"),
-    },
-    {
-      name: `${SLASH_COMMAND_PREFIX}-plan`,
-      title: `${PRODUCT_NAME} 生成或导入计划`,
-      description: "根据当前对话生成待确认计划，或导入已有 plan.json；每张任务必须明确实际负责人 task.owner。",
-      body: [
-        "如果命令后带有计划文件路径（例如 `/wildarrange-plan plan.json`），直接导入并校验：",
-        "",
-        fence([`${cliPrefix} plan --from <计划文件路径>`]),
-        "",
-        "如果用户没有给出路径，不要再向用户索要 plan.json。若请求包含新增功能或新的用户可见行为，先执行 `clarify-feature-design`：直接在当前对话中按编号澄清并展示功能设计确认稿；不要创建 MD/HTML 文件，也不要在开发者明确回复“确认”前生成 plan draft。确认后，再理解当前对话中的目标、约束与质量要求，生成 `.wildarrange/plan-drafts/<session>-plan.json`。",
-        "",
-        "每张任务还必须包含 responsibilityChanges 数组，每项写 script（精确目标脚本）、additions（新增内容）、responsibilityBefore、responsibilityAfter、facts 数组。每项事实写 name、ownerBefore、ownerAfter、access（统一读写入口）；无事实填 facts: []，新事实 ownerBefore 为 null。计划摘要用中文展示职责变化与事实归属，等待用户确认。交付 Review 必须独立审计 R1-R5：符合已批职责、无职责混杂、无重复事实、无绕过入口、无重复实现；缺少执行器或有效证据不得称通过。",
-        "生成的 JSON 顶层必须写 `generated_by: \"host_semantic\"`、`title`、`objective`、`tasks`；如果路由返回 `featureDesign.id`，还必须原样写入 `feature_design_ref`，否则功能计划不能导入。每张任务必须写 `id`、`subject`、`description`、`owner`、`writable_paths`、`worker_command`、`verify_commands`、`successCriteria`。`worker_command` 必须是宿主可执行的真实实现命令，并在 WildArrange 准备的隔离任务 worktree 中产生 `writable_paths` 内的改动；不能用 `node --version`、`process.exit(0)`、`true` 等占位。`verify_commands` 必须是非空的命令字符串数组，不能写成对象数组。每条 successCriteria 是对象，至少写 `title` 与 `expectedEvidence`；能由验证命令证明时，`verifierCommandRefs` 填从 0 开始的命令索引数组，或填与 `verify_commands` 中完全一致的命令字符串数组。",
-        "可执行工单的 `owner` 必须是 Jiuwei 或 ZhuRong：实现任务通常交给 ZhuRong，必要的流程执行交给 Jiuwei。DiJiang、BaiZe、LuWu 是只读长期 Agent，分别通过计划、独立复核和仓库治理阶段参与，不能成为 command worker。不要留空，也不要用执行阶段的默认值代替。",
-        "",
-        "写入草稿后执行导入命令。若用户明确只要求生成草稿或明确说不要导入，写完即停止，不得执行下面的导入命令。正式导入的语义生成计划会自动进入待确认状态，即使全局 `planApproval.required` 没有打开也不能直接 run：",
-        "",
-        fence([`${cliPrefix} plan --from .wildarrange/plan-drafts/<session>-plan.json`]),
-        "",
-        "最后用中文展示计划摘要：任务目标、先后关系、每张任务的 owner、可写范围与验收方式，并明确询问用户是否确认。只有用户明确确认后，才执行 `plan approve`。若校验失败，指出缺哪一项并修订草稿。",
-      ].join("\n"),
-    },
-    {
-      name: `${SLASH_COMMAND_PREFIX}-approve`,
-      title: `${PRODUCT_NAME} 确认计划`,
-      description: "向开发者展示已导入计划摘要，得到明确确认后放行执行（planApproval.required 时的人工确认门）。",
-      body: [
-        "语义生成的计划始终需要开发者确认；手工计划在 `planApproval.required` 打开时也需要确认。请这样做：",
-        "",
-        "1. 先展示当前计划摘要（任务数、每个任务的目标与 writable_paths）：",
-        "",
-        fence([`${cliPrefix} status`]),
-        "",
-        "2. **用中文向开发者复述计划要点，并明确询问：是否确认按此计划执行？** 给出\"确认 / 需要修改\"两个选项，不要替开发者做决定。",
-        "3. 只有开发者明确回复\"确认\"后，才执行放行命令：",
-        "",
-        fence([`${cliPrefix} plan approve`]),
-        "",
-        "4. 若开发者要修改，不要 approve；协助修订 `plan.json` 后重新 `/wildarrange-plan` 导入。",
-      ].join("\n"),
-    },
-    {
-      name: `${SLASH_COMMAND_PREFIX}-run`,
-      title: `${PRODUCT_NAME} 跑下一个任务`,
-      description: "运行下一个可运行任务，自动走 worker→verify→scope→review→验收证明→checkpoint 全部门禁。",
-      body: [
-        "先构建执行前上下文。把输出中 `injectionPoint.skills` 的全文当作当前任务必须遵守的工作流；若 `skillSelection.missing` 非空，先报告并停止，不要在缺少任务 Skill 时盲跑：",
-        "",
-        fence([`${cliPrefix} context build --point before_execute`]),
-        "",
-        "确认任务 Skill 已加载后，再执行下列命令跑下一个可运行任务（会自动走 worker → verify → scope → review → 验收证明 → checkpoint 全部门禁）：",
-        "",
-        fence([`${cliPrefix} run`]),
-        "",
-        "用中文汇报结果：worker 是否退出 0、verifier 是否通过、范围守卫与复核门结论、任务最终状态。注意 worker 退出 0 只是\"声称完成\"，最终以 gate 结论为准。若失败，说明卡在哪个 gate 以及重试建议。",
-      ].join("\n"),
-    },
-  ];
-}
-
-/** 将 slash 命令渲染为 Cursor .cursor/commands/<name>.md 正文。 */
-function renderCursorCommand(command) {
-  return `# ${command.title}\n\n> ${command.description}\n\n${command.body}\n`;
-}
-
-/** 将 slash 命令渲染为 Codex/Kimi .agents/skills/<name>/SKILL.md 正文。 */
-function renderCodexSkill(command) {
-  return `---\nname: ${command.name}\ndescription: ${command.description}\n---\n\n# ${command.title}\n\n${command.body}\n`;
-}
-
-/** 构建 Codex .codex/hooks.json 的 hooks 配置（全生命周期映射到 wildarrange hook run）。 */
-function buildCodexHooksConfig(command) {
-  const hook = (timeout, statusMessage) => ({ type: "command", command, timeout, statusMessage });
+/** 显式合并 Cursor 用户级 Hook 并写入用户级指针规则；先备份，只替换 WildArrange 自己的条目。 */
+export async function activateCursorAdapter(projectRoot, workspace, options = {}) {
+  assertWorkspace(workspace);
+  const { externalRoot, reportPath, report } = await loadReport(workspace);
+  const cursor = report?.targets?.cursor;
+  if (!cursor) throw new Error("external Cursor adapter bundle is missing; run adapter install --target cursor first");
+  const userRoot = path.resolve(options.userRoot || os.homedir());
+  const cursorRoot = path.join(userRoot, ".cursor");
+  const hooksPath = path.join(cursorRoot, "hooks.json");
+  const bridgePath = path.join(cursorRoot, "hooks", CURSOR_BRIDGE_NAME);
+  const rulePath = path.join(cursorRoot, "rules", CURSOR_RULE_NAME);
+  const sourceBridge = path.resolve(cursor.bridgePath);
+  if (!existsSync(sourceBridge)) throw new Error(`external Cursor bridge is missing: ${sourceBridge}`);
+  const existing = await readJson(hooksPath, { version: 1, hooks: {} });
+  if (!existing || typeof existing !== "object" || Array.isArray(existing)
+    || (existing.version !== undefined && existing.version !== 1)
+    || (existing.hooks !== undefined && (typeof existing.hooks !== "object" || Array.isArray(existing.hooks)))) {
+    throw new Error("existing Cursor user hooks.json is invalid; no files were changed");
+  }
+  const backup = await backupUserFiles(externalRoot, "cursor", [
+    { name: "cursor-hooks.json", target: hooksPath },
+    { name: "cursor-bridge.mjs", target: bridgePath },
+    { name: "cursor-rule.mdc", target: rulePath },
+  ]);
+  await mkdir(path.dirname(bridgePath), { recursive: true });
+  await copyFile(sourceBridge, bridgePath);
+  const managed = buildCursorUserHooks(`node ./hooks/${CURSOR_BRIDGE_NAME}`);
+  const hooks = { ...(existing.hooks || {}) };
+  for (const [event, additions] of Object.entries(managed.hooks)) {
+    const retained = Array.isArray(hooks[event])
+      ? hooks[event].filter((entry) => !String(entry?.command || "").includes(CURSOR_BRIDGE_NAME))
+      : [];
+    hooks[event] = [...retained, ...additions];
+  }
+  await mkdir(cursorRoot, { recursive: true });
+  const merged = { ...existing, version: 1, hooks };
+  await writeJsonAtomic(hooksPath, merged);
+  const ruleText = renderCursorPointerRule(cursor.cliPrefix);
+  await mkdir(path.dirname(rulePath), { recursive: true });
+  await writeFile(rulePath, ruleText, "utf8");
+  cursor.user = {
+    userRoot,
+    hooksPath,
+    bridgePath,
+    rulePath,
+    hooksDigest: managedCursorHooksDigest(merged),
+    bridgeDigest: await digestFile(bridgePath),
+    ruleDigest: sha256(ruleText),
+    backupId: backup.backupId,
+    activatedAt: nowIso(),
+  };
+  await writeJsonAtomic(reportPath, report);
   return {
-    hooks: {
-      SessionStart: [{ hooks: [hook(10, `${PRODUCT_NAME}: Loading governance context`)] }],
-      UserPromptSubmit: [{ hooks: [hook(10, `${PRODUCT_NAME}: Routing and loading governance context`)] }],
-      PreToolUse: [{
-        matcher: "^(Bash|apply_patch|functions\\.apply_patch|write|Write|edit|Edit|multi_edit|multiedit|MultiEdit|create_goal|functions\\.create_goal)$",
-        hooks: [hook(10, `${PRODUCT_NAME}: Checking planned scope before tool use`)],
-      }],
-      PostToolUse: [{
-        hooks: [hook(10, `${PRODUCT_NAME}: Recording tool result and matching project rules`)],
-      }],
-      PostCompact: [{
-        matcher: "manual|auto",
-        hooks: [hook(10, `${PRODUCT_NAME}: Rehydrating governance context after compaction`)],
-      }],
-      Stop: [{ hooks: [hook(10, `${PRODUCT_NAME}: Checking continuation state`)] }],
-      SubagentStop: [{ hooks: [hook(10, `${PRODUCT_NAME}: Checking continuation state`)] }],
-    },
+    kind: "wildarrange_external_cursor_activation",
+    status: "configured_waiting_for_lifecycle_receipt",
+    activationId: cursor.activationId,
+    hooksPath,
+    bridgePath,
+    rulePath,
+    backupId: backup.backupId,
+    backupPath: backup.files.find((file) => file.name === "cursor-hooks.json")?.existed ? path.join(backup.dir, "cursor-hooks.json") : null,
+    projectFilesWritten: [],
   };
 }
 
-/** 生成 Cursor alwaysApply 规则 .cursor/rules/wildarrange.mdc 正文。 */
-function renderCursorRule({ hookCommand, cliPrefix }) {
+/** 显式在用户级 ~/.codex/AGENTS.md 写入带起止标记的指针段；Codex 插件本身仍需在其界面安装并信任。 */
+export async function activateCodexAdapter(projectRoot, workspace, options = {}) {
+  assertWorkspace(workspace);
+  const { externalRoot, reportPath, report } = await loadReport(workspace);
+  const codex = report?.targets?.codex;
+  if (!codex) throw new Error("external Codex adapter bundle is missing; run adapter install --target codex first");
+  const userRoot = path.resolve(options.userRoot || os.homedir());
+  const agentsPath = path.join(userRoot, ".codex", "AGENTS.md");
+  const backup = await backupUserFiles(externalRoot, "codex", [{ name: "codex-AGENTS.md", target: agentsPath }]);
+  const current = existsSync(agentsPath) ? await readFile(agentsPath, "utf8") : "";
+  const block = renderCodexPointerBlock(codex.cliPrefix);
+  const base = current.replace(POINTER_BLOCK_PATTERN, "\n").replace(/\s+$/, "");
+  await mkdir(path.dirname(agentsPath), { recursive: true });
+  await writeFile(agentsPath, base ? `${base}\n\n${block}\n` : `${block}\n`, "utf8");
+  codex.user = {
+    userRoot,
+    agentsPath,
+    pointerDigest: sha256(block),
+    backupId: backup.backupId,
+    activatedAt: nowIso(),
+  };
+  await writeJsonAtomic(reportPath, report);
+  return {
+    kind: "wildarrange_external_codex_activation",
+    status: "pointer_written_plugin_install_still_manual",
+    agentsPath,
+    backupId: backup.backupId,
+    nextActions: codex.nextActions,
+    projectFilesWritten: [],
+  };
+}
+
+/** 卸载外置 Adapter：移除已激活的用户级 Hook 条目与指针，并删除 runtime 中的插件包；备份保留。 */
+export async function uninstallAdapters(projectRoot, workspace, options = {}) {
+  assertWorkspace(workspace);
+  const target = options.target || "all";
+  if (!TARGETS.has(target)) throw new Error("external adapter target must be all, codex, cursor, or kimi");
+  const { externalRoot, reportPath, report } = await loadReport(workspace);
+  const selected = target === "all" ? ["codex", "cursor", "kimi"] : [target];
+  const removed = [];
+  const nextActions = [];
+  for (const host of selected) {
+    const entry = report?.targets?.[host];
+    const user = entry?.user;
+    if (host === "cursor" && user) {
+      await removeCursorUserEntries(user.hooksPath);
+      for (const file of [user.bridgePath, user.rulePath]) {
+        if (file && existsSync(file)) { await rm(file, { force: true }); removed.push(file); }
+      }
+    }
+    if (host === "codex" && user?.agentsPath && existsSync(user.agentsPath)) {
+      const stripped = (await readFile(user.agentsPath, "utf8")).replace(POINTER_BLOCK_PATTERN, "\n").replace(/\s+$/, "");
+      if (stripped) await writeFile(user.agentsPath, `${stripped}\n`, "utf8");
+      else await rm(user.agentsPath, { force: true });
+      removed.push(user.agentsPath);
+    }
+    const bundleRoot = path.join(externalRoot, BUNDLE_DIRECTORIES[host]);
+    if (existsSync(bundleRoot)) { await rm(bundleRoot, { recursive: true, force: true }); removed.push(bundleRoot); }
+    if (report?.targets?.[host]) delete report.targets[host];
+    if (host === "codex") nextActions.push(`在 Codex /plugins 中移除 ${CODEX_PLUGIN_NAME}，并执行 codex plugin marketplace remove wildarrange-local`);
+    if (host === "kimi") nextActions.push(`/plugins remove ${KIMI_PLUGIN_NAME}`);
+  }
+  if (report) await writeJsonAtomic(reportPath, report);
+  return { kind: "wildarrange_external_adapter_uninstall", target, removed, nextActions, backupsKept: path.join(externalRoot, "backups") };
+}
+
+/** 按 activate 时的备份把用户级文件恢复到激活前状态；激活前不存在的文件会被移除。 */
+export async function restoreAdapterBackup(projectRoot, workspace, options = {}) {
+  assertWorkspace(workspace);
+  const backupId = String(options.backupId || "");
+  const { externalRoot, reportPath, report } = await loadReport(workspace);
+  const dir = path.join(externalRoot, "backups", backupId);
+  const manifest = /^[A-Za-z0-9_.-]+$/.test(backupId) ? await readJson(path.join(dir, "manifest.json"), null) : null;
+  if (!manifest) throw new Error(`external adapter backup not found: ${backupId || "(empty)"}`);
+  const restored = [];
+  for (const file of manifest.files) {
+    if (file.existed) {
+      await mkdir(path.dirname(file.target), { recursive: true });
+      await copyFile(path.join(dir, file.name), file.target);
+    } else {
+      await rm(file.target, { force: true });
+    }
+    restored.push(file.target);
+  }
+  if (report?.targets?.[manifest.scope]) {
+    delete report.targets[manifest.scope].user;
+    await writeJsonAtomic(reportPath, report);
+  }
+  return { kind: "wildarrange_external_adapter_restore", backupId, scope: manifest.scope, restored };
+}
+
+/**
+ * 比对生成物与用户级配置的当前内容和安装/激活时记录的 digest；返回不一致项。
+ * doctor 用它发现"回执还在但 Hook 配置已被改动/删除"。
+ */
+export async function inspectAdapterIntegrity(host, entry) {
+  const issues = [];
+  for (const [file, digest] of Object.entries(entry?.integrity?.files || {})) {
+    const actual = await digestFile(file);
+    if (actual === null) issues.push({ file, problem: "missing" });
+    else if (actual !== digest) issues.push({ file, problem: "modified" });
+  }
+  const user = entry?.user;
+  if (host === "cursor" && user) {
+    const hooks = await readJson(user.hooksPath, null);
+    if (!hooks || managedCursorHooksDigest(hooks) !== user.hooksDigest) issues.push({ file: user.hooksPath, problem: "managed_entries_changed" });
+    if (await digestFile(user.bridgePath) !== user.bridgeDigest) issues.push({ file: user.bridgePath, problem: "modified_or_missing" });
+    if (await digestFile(user.rulePath) !== user.ruleDigest) issues.push({ file: user.rulePath, problem: "modified_or_missing" });
+  }
+  if (host === "codex" && user?.agentsPath) {
+    const text = existsSync(user.agentsPath) ? await readFile(user.agentsPath, "utf8") : "";
+    const block = text.match(/<!-- wildarrange:begin -->[\s\S]*?<!-- wildarrange:end -->/)?.[0];
+    if (!block || sha256(block) !== user.pointerDigest) issues.push({ file: user.agentsPath, problem: "pointer_changed_or_missing" });
+  }
+  return { status: issues.length === 0 ? "ok" : "modified", issues };
+}
+
+async function loadReport(workspace) {
+  const externalRoot = resolveWildArrangePath(workspace.projectRoot, "adapters", "external");
+  const reportPath = path.join(externalRoot, "install-report.json");
+  return { externalRoot, reportPath, report: await readJson(reportPath, null) };
+}
+
+/** 备份将被 activate 触碰的用户级文件，并写 manifest 记录"激活前是否存在"，供 restore 精确还原。 */
+async function backupUserFiles(externalRoot, scope, files) {
+  const backupId = `activate-${scope}-${new Date().toISOString().replace(/[:.]/g, "-")}-${randomBytes(3).toString("hex")}`;
+  const dir = path.join(externalRoot, "backups", backupId);
+  await mkdir(dir, { recursive: true });
+  const entries = [];
+  for (const file of files) {
+    const existed = existsSync(file.target);
+    if (existed) await copyFile(file.target, path.join(dir, file.name));
+    entries.push({ name: file.name, target: file.target, existed });
+  }
+  await writeJsonAtomic(path.join(dir, "manifest.json"), { kind: "wildarrange_external_adapter_backup", scope, backupId, at: nowIso(), files: entries });
+  return { backupId, dir, files: entries };
+}
+
+async function removeCursorUserEntries(hooksPath) {
+  const existing = hooksPath ? await readJson(hooksPath, null) : null;
+  if (!existing?.hooks) return;
+  const hooks = {};
+  for (const [event, entries] of Object.entries(existing.hooks)) {
+    const kept = Array.isArray(entries) ? entries.filter((entry) => !String(entry?.command || "").includes(CURSOR_BRIDGE_NAME)) : entries;
+    if (!Array.isArray(kept) || kept.length > 0) hooks[event] = kept;
+  }
+  await writeJsonAtomic(hooksPath, { ...existing, hooks });
+}
+
+/** 用户 hooks.json 中 WildArrange 自己条目的 digest；与他人的条目无关。 */
+function managedCursorHooksDigest(userHooks) {
+  const managed = {};
+  for (const event of Object.keys(userHooks?.hooks || {}).sort()) {
+    const entries = Array.isArray(userHooks.hooks[event])
+      ? userHooks.hooks[event].filter((entry) => String(entry?.command || "").includes(CURSOR_BRIDGE_NAME))
+      : [];
+    if (entries.length > 0) managed[event] = entries;
+  }
+  return sha256(JSON.stringify(managed));
+}
+
+function pointerText(cliPrefix) {
+  const command = cliPrefix ? `\`wildarrange status\`（本机 CLI：\`${cliPrefix} status\`）` : "`wildarrange status`";
+  return `本机项目若已连接 WildArrange 外置治理，先运行 ${command} 并读取其治理上下文，再改代码；未连接的项目忽略本条。`;
+}
+
+function renderCursorPointerRule(cliPrefix) {
   return `---
+description: WildArrange governance pointer
 alwaysApply: true
 ---
-# ${PRODUCT_NAME} Governance Runtime
 
-This project uses ${PRODUCT_NAME} for local agent governance.
-
-Required behavior:
-
-- Before planning or implementing, run \`${hookCommand}\` with a \`UserPromptSubmit\` payload when available.
-- Before editing files for a ${PRODUCT_NAME} task, verify task scope with \`${cliPrefix} guard scope --task <taskId>\` or \`${cliPrefix} hook run\` using a \`PreToolUse\` payload.
-- Treat worker completion as a claim only. Completion requires verifier, scope guard, review gate, success criteria evidence, and checkpoint.
-- Do not weaken \`verify_commands\`, \`review_commands\`, \`standards_commands\`, project rules, or \`successCriteria\` to manufacture PASS.
-- At the start and end of each turn, check pending human decisions (run the hook above, or \`${cliPrefix} status\`) and proactively surface them to the developer in chat with clear options — plans awaiting approval, out-of-scope ChangeRequests, failed tasks, child agents awaiting acceptance. Do not decide on the developer's behalf, and do not make the developer dig through the terminal to find them.
-- If Cursor cannot execute lifecycle hooks automatically, run \`${cliPrefix} continuation check\` before stopping a task.
+${pointerText(cliPrefix)}
 `;
 }
 
-// --- 安装/卸载/恢复报告 ---
-
-/** 将 installAdapter 报告对象渲染为 Markdown 供 install-report.md 写入。 */
-function renderAdapterInstallReport(report) {
-  const lines = [
-    `# ${PRODUCT_NAME} Adapter Install Report`,
-    "",
-    `Generated: ${report.at}`,
-    `Target: ${report.target}`,
-    `Mode: ${report.mode}`,
-    `Package: ${report.packageName}`,
-    `CLI prefix: ${report.cliPrefix}`,
-    `Result: ${report.result} (host activation not yet verified)`,
-    "",
-    "## Hook Command",
-    "",
-    "```bash",
-    report.hookCommand,
-    "```",
-    "",
-    "## Outputs",
-    "",
-  ];
-  for (const output of report.outputs) {
-    lines.push(`- ${output.target}: ${output.path} (${output.status}${output.enforcement ? `, enforcement: ${output.enforcement}` : ""}${output.backup ? `, backup: ${output.backup}` : ""})`);
-    if (output.trustAction) lines.push(`  - Trust action: ${output.trustAction}`);
-  }
-  lines.push("");
-  lines.push("## Install Model");
-  lines.push("");
-  lines.push("- Codex project hooks are hard enforcement only after trust and enablement. In Codex Desktop, review and enable the project Hook under Settings > Hooks; in Codex CLI, use `/hooks`.");
-  lines.push("- Cursor project hooks (`.cursor/hooks.json`) are hard enforcement once the project is opened as a trusted workspace; `preToolUse` on Write/Delete/Shell is fail-closed. The `.cursor/rules/wildarrange.mdc` layer remains soft guidance.");
-  lines.push("- Kimi Code reads the shared `.agents/skills/` directly. Its generated plugin becomes active only after `/plugins install <path>` and `/reload`; Kimi Hooks are fail-open on hook crashes/timeouts.");
-  lines.push(`- Recommended user entry: \`npx ${DEFAULT_PACKAGE_NAME}@latest init\` or \`npx ${DEFAULT_PACKAGE_NAME}@latest adapter install\`.`);
-  lines.push(`- Recommended persistent project setup after publish: add \`${DEFAULT_PACKAGE_NAME}\` as a devDependency so hook commands do not require network access.`);
-  return `${lines.join("\n")}\n`;
+function renderCodexPointerBlock(cliPrefix) {
+  return `${POINTER_BEGIN}\n## WildArrange\n\n${pointerText(cliPrefix)}\n${POINTER_END}`;
 }
 
-/** 将 uninstallAdapter 报告对象渲染为 Markdown。 */
-function renderAdapterUninstallReport(report) {
-  const lines = [
-    `# ${PRODUCT_NAME} Adapter Uninstall Report`,
-    "",
-    `Generated: ${report.at}`,
-    `Target: ${report.target}`,
-    `Backup ID: ${report.backupId}`,
-    "",
-    "## Outputs",
-    "",
-  ];
-  for (const output of report.outputs) {
-    lines.push(`- ${output.target}: ${output.path} (${output.status}${output.backup ? `, backup: ${output.backup}` : ""})`);
-  }
-  lines.push("");
-  lines.push("Removed files were copied under `.wildarrange/adapters/backups/` before deletion when they existed.");
-  if (report.target === "all" || report.target === "kimi") {
-    lines.push(`The Kimi-managed plugin copy is user-scoped. Run \`/plugins remove ${KIMI_ADAPTER_PLUGIN_NAME}\` in Kimi Code to remove it.`);
-  }
-  return `${lines.join("\n")}\n`;
+function sha256(text) {
+  return createHash("sha256").update(text).digest("hex");
 }
 
-/** 将 restoreAdapterBackup 报告对象渲染为 Markdown。 */
-function renderAdapterRestoreReport(report) {
-  const lines = [
-    `# ${PRODUCT_NAME} Adapter Restore Report`,
-    "",
-    `Generated: ${report.at}`,
-    `Backup ID: ${report.backupId}`,
-    "",
-    "## Outputs",
-    "",
-  ];
-  for (const output of report.outputs) {
-    lines.push(`- ${output.path} (${output.status}${output.backup ? `, previous file backup: ${output.backup}` : ""})`);
-  }
-  return `${lines.join("\n")}\n`;
+async function digestFile(filePath) {
+  if (!filePath || !existsSync(filePath)) return null;
+  return sha256(await readFile(filePath));
 }
 
-// --- 备份工具 ---
-
-/** 递归列出备份目录下全部文件的相对路径（按字典序排序）。 */
-async function listBackupFiles(rootDir, baseDir = rootDir) {
-  const entries = await readdir(rootDir, { withFileTypes: true });
-  const files = [];
-  for (const entry of entries) {
-    const absolutePath = path.join(rootDir, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...await listBackupFiles(absolutePath, baseDir));
-      continue;
-    }
-    if (!entry.isFile()) continue;
-    const entryStat = await stat(absolutePath);
-    if (!entryStat.isFile()) continue;
-    files.push(path.relative(baseDir, absolutePath));
+async function digestFiles(paths) {
+  const files = {};
+  for (const filePath of paths) {
+    if (filePath) files[filePath] = await digestFile(filePath);
   }
-  return files.sort();
+  return { files };
 }
 
-/** 将绝对路径转为相对项目根的标准化路径，供报告与备份索引使用。 */
-function reportPath(rootDir, filePath) {
-  return normalizeRelativePath(path.relative(rootDir, filePath));
+export async function loadAdapterReport(projectRoot) {
+  return readJson(resolveWildArrangePath(projectRoot, "adapters", "external", "install-report.json"), null);
+}
+
+function adapterActivationId(host, options) {
+  return createHash("sha256")
+    .update(JSON.stringify({ version: ADAPTER_VERSION, host, ...options }))
+    .digest("hex");
+}
+
+function assertWorkspace(workspace) {
+  if (!workspace) {
+    throw new Error("adapter operations require a project connected to WildArrange governance; run `wildarrange setup` first");
+  }
 }

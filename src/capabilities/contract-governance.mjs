@@ -2,24 +2,305 @@
 // 文件名称：contract-governance.mjs
 // 所属模块：capabilities
 // 作用说明：
-//   契约治理能力的薄封装：扫描契约宇宙、审查任务 contractChanges、
-//   应用人类批准的差异卡、生成 registry 视图。重逻辑在 infra 层。
+//   契约治理能力：扫描契约宇宙、生成差异卡、审查任务 contractChanges、
+//   应用人类批准的差异卡（含事务回滚）。registry/锁/路径等存储原语在 infra。
 //
 // 【运行原理速读】
 //   · 何时执行？review gate 的 contract_governance lane；CLI contracts 子命令。
 //   · 做了什么？scan → 比对变更与声明 → apply-card 原子更新 registry。
 //   · 缺了它会怎样？公开契约变更可绕过声明与审批直接合入。
 // =============================================================================
-
-import {
-  persistContractScan,
-  scanContractGovernanceUniverse,
-} from "../infra/contract-governance.mjs";
+import { mkdir, readdir, realpath, rename, rm } from "node:fs/promises";
 import path from "node:path";
-import { mkdir, rename, rm } from "node:fs/promises";
-import { nowIso, readJson, writeJsonAtomic } from "../infra/runtime-store.mjs";
-import { contractGovernancePaths, readContractRegistry, withContractGovernanceLock, requireSafeId, safeCardName, contractError, assertContractReferences, applyApprovedCard, relative, cardTouchesPaths, normalizeSlash, inspectApprovalRef, inspectContractReferences, declarationCoversSource, isContractScanPath } from "../infra/contract-governance.mjs";
+import { hashContent, nowIso, readJson, writeJsonAtomic } from "../infra/runtime-store.mjs";
+import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
+import { uniqueStrings } from "../infra/text-utils.mjs";
+import {
+  CONTRACT_SCHEMA_VERSION,
+  contractError,
+  contractGovernancePaths,
+  contractSourcePaths,
+  normalizeSlash,
+  persistContractScan,
+  readContractRegistry,
+  relative,
+  requireSafeId,
+  safeCardName,
+  withContractGovernanceLock,
+} from "../infra/contract-governance.mjs";
+import { discoverTauriIpcContracts, hasTauriRustRoot, normalizeContract } from "./contract-discovery.mjs";
 
+// --- 扫描、差异卡与批准 ---
+/**
+ * scanContractGovernanceUniverse：本模块对外异步 API。
+ */
+export async function scanContractGovernanceUniverse(rootDir, options = {}) {
+  const discoverer = "tauri-ipc";
+  const registry = await readContractRegistry(options.projectRoot || rootDir);
+  const declared = normalizeManualDeclarations(options.declarations || []);
+  // 无 registry、无声明且无 Rust 侧扫描根时，契约治理未启用：不必每次 review 遍历全仓源码
+  const enabled = registry.updatedAt !== null || registry.contracts.length > 0 || declared.length > 0 || hasTauriRustRoot(rootDir);
+  const discovered = enabled ? await discoverTauriIpcContracts(rootDir) : { contracts: [], scannedRoots: [], scannedFiles: 0, unknown: [], manualRequired: [] };
+  const declaredIds = new Set(declared.map((item) => item.id));
+  const removalIds = new Set(declared.filter((item) => item.declarationAction === "remove").map((item) => item.id));
+  const manual = declared.filter((item) => item.declarationAction !== "remove").map(withoutDeclarationAction);
+  const carriedManual = registry.contracts.filter((item) => item.source?.discoverer === "manual" && item.lifecycle !== "retired" && !declaredIds.has(item.id));
+  const carriedOverlays = registry.contracts.filter((item) => item.source?.manualApproved === true && item.lifecycle !== "retired" && !declaredIds.has(item.id)).map(approvedOverlay);
+  const discoveredContracts = discovered.contracts.filter((item) => !removalIds.has(item.id));
+  const contracts = mergeContracts([...discoveredContracts, ...carriedManual], [...carriedOverlays, ...manual]);
+  const cards = buildContractDiffCards(registry.contracts, contracts, options.at || nowIso());
+  return {
+    kind: "contract_governance_scan",
+    schemaVersion: CONTRACT_SCHEMA_VERSION,
+    at: options.at || nowIso(),
+    discoverer,
+    registryPresent: registry.updatedAt !== null || registry.contracts.length > 0,
+    contracts,
+    observedContracts: discovered.contracts,
+    cards,
+    coverage: {
+      discoverer,
+      scannedRoots: discovered.scannedRoots,
+      scannedFiles: discovered.scannedFiles,
+      discoveredContracts: discovered.contracts.length,
+      manualContracts: declared.length,
+      unknown: discovered.unknown,
+      manualRequired: discovered.manualRequired,
+    },
+  };
+}
+
+/**
+ * buildContractDiffCards：本模块对外API。
+ */
+function buildContractDiffCards(baseline = [], current = [], at = nowIso()) {
+  const before = new Map(baseline.filter((item) => item.lifecycle !== "retired").map((item) => [item.id, normalizeContract(item)]));
+  const after = new Map(current.map((item) => [item.id, normalizeContract(item)]));
+  const ids = [...new Set([...before.keys(), ...after.keys()])].sort();
+  return ids.flatMap((id) => {
+    const oldValue = before.get(id) || null;
+    const newValue = after.get(id) || null;
+    if (oldValue && newValue && contractFingerprint(oldValue) === contractFingerprint(newValue)) return [];
+    const action = !oldValue ? "add" : !newValue ? "remove" : "modify";
+    const fingerprint = hashContent(JSON.stringify({ id, action, oldValue, newValue }));
+    return [{
+      id: `contract-card:${fingerprint.slice(0, 16)}`,
+      contractId: id,
+      action,
+      status: "pending",
+      createdAt: at,
+      fingerprint,
+      baseline: oldValue,
+      candidate: newValue,
+    }];
+  });
+}
+
+/**
+ * 归一化 ManualDeclarations 输入为稳定形态。
+ */
+function normalizeManualDeclarations(items) {
+  return items.map((item, index) => ({ ...normalizeContract({
+    id: requireSafeId(item.contractId || item.id || `manual:${index + 1}`, `declaration ${index + 1} contractId`),
+    kind: item.kind || "manual",
+    name: item.name || item.summary || item.contractId || `manual declaration ${index + 1}`,
+    summary: item.summary || "",
+    compatibility: item.compatibility || "",
+    migration: item.migration || "",
+    rollback: item.rollback || "",
+    verificationRefs: uniqueStrings(item.verificationRefs || []),
+    moduleRef: item.moduleRef || null,
+    ownerRef: item.ownerRef || null,
+    source: { discoverer: "manual", declarations: uniqueStrings(item.sourcePaths || []).map((sourcePath) => ({ path: normalizeSlash(sourcePath) })) },
+    lifecycle: "active",
+    status: "declared",
+    expected: item.expected || null,
+    unknown: [],
+  }), declarationAction: String(item.action || "add").toLowerCase() }));
+}
+
+/**
+ * withoutDeclarationAction 内部辅助。
+ */
+function withoutDeclarationAction(item) {
+  const { declarationAction: _ignored, ...contract } = item;
+  return contract;
+}
+
+/**
+ * approvedOverlay 内部辅助。
+ */
+function approvedOverlay(item) {
+  return {
+    id: item.id,
+    expected: item.expected ?? null,
+    kind: item.kind,
+    name: item.name,
+    summary: item.summary || "",
+    compatibility: item.compatibility || "",
+    migration: item.migration || "",
+    rollback: item.rollback || "",
+    verificationRefs: item.verificationRefs || [],
+    moduleRef: item.moduleRef || null,
+    ownerRef: item.ownerRef || null,
+    source: { discoverer: "manual", declarations: item.source.manualDeclarations || [] },
+    lifecycle: "active",
+    status: "declared",
+    unknown: [],
+  };
+}
+
+/**
+ * 合并 Contracts 集合/对象。
+ */
+function mergeContracts(discovered, manual) {
+  const merged = new Map(discovered.map((item) => [item.id, item]));
+  for (const item of manual) {
+    const existing = merged.get(item.id);
+    merged.set(item.id, existing ? {
+      ...existing,
+      ...item,
+      source: { ...existing.source, manualApproved: true, manualDeclarations: item.source.declarations || [] },
+      callers: existing.callers || [],
+      unknown: existing.unknown || [],
+    } : item);
+  }
+  return [...merged.values()].sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/**
+ * contractFingerprint 内部辅助。
+ */
+function contractFingerprint(value) {
+  const copy = { ...value };
+  delete copy.approvedAt;
+  delete copy.retiredAt;
+  return hashContent(JSON.stringify(sortObject(copy)));
+}
+
+/**
+ * sortObject 内部辅助。
+ */
+function sortObject(value) {
+  if (Array.isArray(value)) return value.map(sortObject);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortObject(value[key])]));
+}
+
+/**
+ * applyApprovedCard：本模块对外API。
+ */
+export function applyApprovedCard(registry, card) {
+  const contracts = new Map(registry.contracts.map((item) => [item.id, item]));
+  if (card.action === "remove") {
+    const existing = contracts.get(card.contractId);
+    if (existing) contracts.set(card.contractId, { ...existing, lifecycle: "retired", retiredAt: nowIso() });
+  } else if (card.candidate) {
+    contracts.set(card.contractId, { ...card.candidate, approvedAt: nowIso() });
+  }
+  return {
+    kind: "contract_registry",
+    schemaVersion: CONTRACT_SCHEMA_VERSION,
+    updatedAt: nowIso(),
+    contracts: [...contracts.values()].sort((a, b) => a.id.localeCompare(b.id)),
+  };
+}
+
+/**
+ * cardTouchesPaths：本模块对外API。
+ */
+export function cardTouchesPaths(card, changedPaths) {
+  if (changedPaths.size === 0) return false;
+  const paths = [card.baseline, card.candidate].flatMap(contractSourcePaths);
+  return paths.some((item) => changedPaths.has(normalizeSlash(item)));
+}
+
+/**
+ * declarationCoversSource：本模块对外API。
+ */
+export function declarationCoversSource(declarations, sourcePath) {
+  const normalized = normalizeSlash(sourcePath);
+  return declarations.some((item) => item.kind === "database" && (item.sourcePaths || []).map(normalizeSlash).includes(normalized));
+}
+
+/**
+ * isContractScanPath：本模块对外API。
+ */
+export function isContractScanPath(value) {
+  const normalized = normalizeSlash(value);
+  return /(^|\/)src-tauri\/src\/.*\.rs$/.test(normalized) || /(^|\/)client\/src\/.*\.(?:[cm]?[jt]sx?)$/.test(normalized);
+}
+
+/**
+ * inspectContractReferences：本模块对外异步 API。
+ */
+export async function inspectContractReferences(rootDir, contract) {
+  const findings = [];
+  const refs = uniqueStrings(contract.verificationRefs || []);
+  if (refs.length > 0) {
+    const loaded = await loadWildArrangeConfig(rootDir);
+    const registryPath = loaded.config?.verificationGovernance?.registryPath;
+    const absolute = registryPath ? path.resolve(rootDir, registryPath) : null;
+    if (!absolute || !await realpathInside(rootDir, absolute)) {
+      findings.push({ code: "contract_verification_registry_unavailable", refs });
+    } else {
+      const registry = await readJson(absolute, null);
+      const known = new Set((registry?.cards || []).map((item) => item.id));
+      for (const ref of refs) if (!known.has(ref)) findings.push({ code: "contract_verification_ref_unknown", ref });
+    }
+  }
+  return findings;
+}
+
+/**
+ * inspectApprovalRef：本模块对外异步 API。
+ */
+export async function inspectApprovalRef(rootDir, item) {
+  const approvalRef = String(item.approvalRef || "").trim();
+  if (!approvalRef) return { pass: false, reason: "approvalRef is missing" };
+  const paths = contractGovernancePaths(rootDir);
+  let entries = [];
+  try { entries = await readdir(paths.archiveCards); } catch (error) { if (error?.code !== "ENOENT") throw error; }
+  for (const name of entries.filter((entry) => entry.endsWith(".json"))) {
+    const record = await readJson(path.join(paths.archiveCards, name), null);
+    if (record?.id === approvalRef && record.status === "approved" && record.committed === true && record.contractId === item.contractId && record.action === "remove") {
+      return { pass: true, record };
+    }
+  }
+  return { pass: false, reason: "approvalRef does not identify an approved remove decision for this contract" };
+}
+
+/**
+ * assertContractReferences：本模块对外异步 API。
+ */
+export async function assertContractReferences(rootDir, contract) {
+  const findings = await inspectContractReferences(rootDir, contract);
+  if (findings.length > 0) {
+    throw contractError("contract_reference_invalid", `contract references are invalid: ${findings.map((item) => item.code).join(", ")}`);
+  }
+}
+
+/**
+ * pathInside 内部辅助。
+ */
+function pathInside(rootDir, absolutePath) {
+  const rel = path.relative(path.resolve(rootDir), path.resolve(absolutePath));
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+/**
+ * realpathInside 内部辅助。
+ */
+async function realpathInside(rootDir, absolutePath) {
+  try {
+    const [realRoot, realTarget] = await Promise.all([realpath(rootDir), realpath(absolutePath)]);
+    return pathInside(realRoot, realTarget);
+  } catch {
+    return false;
+  }
+}
+
+// --- 对外能力入口 ---
 /**
  * 扫描契约治理宇宙；inspectTask 时转为任务审查模式。
  * @param {string} rootDir 项目根
@@ -49,21 +330,11 @@ export async function applyContractGovernanceCard(rootDir, options = {}) {
 }
 
 /**
- * 读取 registry 与 currentScan，生成契约治理只读视图。
- * @param {string} rootDir 项目根
- * @returns {Promise<object>} kind=contract_governance_view
- */
-export async function generateContractGovernanceArtifacts(rootDir) {
-  const paths = contractGovernancePaths(rootDir);
-  return { kind: "contract_governance_view", registry: await readContractRegistry(rootDir), scan: await readJson(paths.currentScan, null) };
-}
-
-/**
  * 对任务执行契约治理审查，包装为 review gate 可用的 evidence 形态。
  * @param {string} rootDir 执行根
  * @param {object} task 含 contractChanges
  * @param {object} [evidence] scopeResult 等
- * @param {object} [options] controlRoot
+ * @param {object} [options] projectRoot
  * @returns {Promise<object>} kind=contract_governance_review
  */
 export async function runContractGovernanceReview(rootDir, task, evidence = {}, options = {}) {
@@ -178,9 +449,9 @@ async function applyContractCardDecisionUnlocked(rootDir, options = {}) {
  * @returns {Promise<object>} status 为 pass|fail|warn，含 findings 与 scan
  */
 export async function inspectContractTask(rootDir, task, evidence = {}, options = {}) {
-  const controlRoot = options.controlRoot || rootDir;
+  const projectRoot = options.projectRoot || rootDir;
   const declarations = Array.isArray(task?.contractChanges?.items) ? task.contractChanges.items : [];
-  const scan = await scanContractGovernanceUniverse(rootDir, { declarations, controlRoot });
+  const scan = await scanContractGovernanceUniverse(rootDir, { declarations, projectRoot });
   const changedPaths = new Set((evidence.scopeResult?.changedPaths || []).map(normalizeSlash));
   const touchedCards = scan.cards.filter((card) => cardTouchesPaths(card, changedPaths));
   const findings = [];
@@ -196,10 +467,10 @@ export async function inspectContractTask(rootDir, task, evidence = {}, options 
       findings.push({ code: "contract_compatibility_missing", contractId: item.contractId || null });
     }
     if (action === "remove") {
-      const approval = await inspectApprovalRef(controlRoot, item);
+      const approval = await inspectApprovalRef(projectRoot, item);
       if (!approval.pass) findings.push({ code: "contract_destructive_approval_missing", contractId: item.contractId || null, reason: approval.reason });
     }
-    const referenceFindings = await inspectContractReferences(controlRoot, item);
+    const referenceFindings = await inspectContractReferences(projectRoot, item);
     findings.push(...referenceFindings.map((finding) => ({ ...finding, contractId: item.contractId || null })));
   }
   const touchedManualRequired = scan.coverage.manualRequired.filter((item) => changedPaths.has(normalizeSlash(item.sourcePath)) && !declarationCoversSource(declarations, item.sourcePath));

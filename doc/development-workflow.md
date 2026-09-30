@@ -17,32 +17,30 @@ init -> plan -> task-worktree -> worker -> verifier -> delivery-commit -> task-b
 - 先还原运行秩序：计划与执行分离、worker 不自证完成、独立验证、失败返工、证据入账。
 - 不把任何宿主专属工具硬塞进 core（例如特定 editor plugin hooks、tmux layout）。
 - Codex / Cursor / Kimi Code 适配放在 runtime adapter 层；核心状态机必须是产品中立的本地文件协议。
-- Kimi Code 项目接入复用根 `AGENTS.md` 与 `.agents/skills/`；生命周期能力通过用户明确安装的 Kimi plugin 转发，不得由项目 CLI 静默改写用户级 `~/.kimi-code/config.toml`。
+- Kimi Code 通过用户显式安装的外置 plugin 接入；项目 CLI 不得静默改写用户级 `~/.kimi-code/config.toml`。
 - Kimi Hook 为 fail-open：PreToolUse 可在 Hook 正常运行时阻断，但 Hook 崩溃或超时默认放行；不得把它宣传为唯一安全边界，最终完成仍必须经过 verifier / scope / review / successCriteria / acceptance proof / checkpoint。
 - LLM review 通过 OpenAI-compatible provider 配置化接入；默认关闭，无 key 时不阻断线性状态机。
 - 第一版不启动常驻多 Agent 集群；多 Agent 先以命令型子 Agent 的隔离运行目录跑通 spawn / collect / message / admission 闭环。
-- 长期 Agent 白名单固定为 Jiuwei、DiJiang、ZhuRong、BaiZe、LuWu；Router 仅为系统节点，CangJie 仅为内部 profile。DiJiang、BaiZe、LuWu 不得进入任意 command worker，临时命令型子 Agent 不能借用这些只读身份。
+- 长期 Agent 白名单固定为 Jiuwei、DiJiang、ZhuRong、BaiZe、LuWu；Router 仅为系统节点。DiJiang、BaiZe、LuWu 不得进入任意 command worker，临时命令型子 Agent 不能借用这些只读身份。
 - 子 Agent 不能直接自证完成；结构化文件成果必须通过 writable_paths、verifier、scope、review、checkpoint 后才能进入 completed。
 - checkpoint 前必须写入 acceptance proof；proof 不通过不得把任务置为 completed。
 - 一个可写任务只能有一个 owner、一个独立 worktree 和一个独立 task branch；两个可写 worktree 不得共享同一分支。开发与 BUG 修复默认从干净 commit 基线创建隔离 worktree；无归属改动优先自动隔离，无法隔离、同文件冲突或所有权不明时才询问开发者。
 - 子 Agent 成功运行后默认保留为 `awaiting_user_acceptance`。实现任务通过全部 gate 后必须形成只含本任务路径的本地 delivery commit，并可自动 push 到该任务独占的远端 task branch；acceptance proof 与 checkpoint 必须绑定同一 delivery commit SHA。没有文件变化时记录 `no_change`，不得制造空 commit。
 - task branch 中允许保存明确标记的中间 WIP commit，但 WIP 不能使任务 completed。AI 或人类对任务成果的后续修复都必须形成新 commit，不能以长期 dirty 工作区代替版本历史。
 - admission 只有在成功提交或工作区成功回滚后才能释放任务所有权；回滚失败必须保留 `verifying` claim 与 rollback plan，并返回 `recovery_required`，直到原 run 完成恢复。
-- Git 多设备协调默认使用 `guarded`：有 remote 时以任务分支 claim commit 维护单写 owner，可写并行 Agent 默认使用 worktree；无 remote 时明确降级为本地协调。`strict` 不允许降级。
-- Git 协调只允许普通非强制 push；同一任务禁止双写，跨设备 handoff 必须绑定已 push 的 task-branch commit 且 push 前复核 prepare 树指纹，takeover 必须显式记录预期旧设备和理由，不允许按本机时间自动过期 owner。
+- 不做多设备/多用户远端协调。Git 只允许普通非强制 push；同一分支已被另一个可写任务或 worktree 占用时拒绝启动。
 - task branch 的 delivery commit/push 是任务自身交付，不代表获准进入共享主线。共享主线统一称为 `main`；task branch 进入 `main` 必须通过一个持续更新的 PR、自动检查与独立验收，并由人类明确批准 merge。系统不得以 checkpoint、admission 或本地确认字段代替 Git 托管平台的真实 merge 审批。
 - PR 可由系统自动创建或更新为 Draft；Approve 与 Merge 是不同动作。默认由人类批准进入 `main`，生产部署是与 merge 分离的另一项人类授权；development、staging、production 是部署环境，不默认复制为长期 `develop`/`production` 分支。
 - 强耦合改动若不能独立验收，归为一个任务在同一 worktree/branch 联合交付；若可拆分，则使用两个任务、两个 worktree、两个 branch，再由独立 integration task 绑定双方 commit SHA 做联合验收。Integration 自身同样拥有独立 worktree/branch，不能写回原实现 worktree。
 - task 处于等待验收、返工或 `recovery_required` 时保留 branch/worktree。确认 `main` 已包含 delivery commit 后，先证明 worktree 干净并删除 worktree，再删除本地 branch；删除远端 branch 属于远端变更，必须由人类确认。Worktree 不是长期档案。
-- ArchivistRouter 只读取清洗后的结论包，不摄入代码块、raw diff 或完整命令输出；无 LLM key 时必须 fallback，不阻断主线或 hook。
-- 路由必须保留 deterministic 证据；semantic shadow 只能作为第二意见和低置信门控，不得无审计地覆盖路由表。
+- 路由只使用确定性路由表，结果必须保留命中证据。
 - 路由写入任务的 `task.skills` 必须由执行前公开宿主入口真实挂载；项目级 Review 必需 Skill 在审查前经同一安全加载器完整读取，缺失或截断不得放行；未接通的 checkpoint 自动挂载仍不得宣称可用。只允许加载 Prompt Pack manifest 或项目 Skill 根内的已登记文件，并校验安装根、realpath 与 hash，继续受数量和字符预算约束。未知或完整性失败的 Skill 必须显式报告，不能静默加载。
 - 商业发布包不得包含受限第三方源码、prompt 原文或近似改写文本；外部项目只能作为概念参考和对照证据。
 
 ## 工程约束
 
 - 使用 Node.js ESM，无外部 npm 依赖，保证 Codex / Cursor / Kimi Code / 普通终端都能直接运行。
-- 所有运行时状态写入 `.wildarrange/`。
+- 运行形态只有外置治理：项目仓只放产品代码与项目自有规则；治理政策与 verification registry 版本化在独立治理仓；运行态写入项目外的 runtimeRoot，WildArrange 不向客户项目写任何文件。外置模式的 Hook 拦截、规则注入、质量门与防篡改能力必须与原内置模式等效，并由测试覆盖。
 - 计划、任务、回执、验证结果必须同时具备机器可读 JSON 和人工可读摘要。
 - worker 的 DoneClaim 不能直接让任务完成；必须有 verifier PASS。
 - verifier FAIL 时任务回到 `pending`，并把失败证据写入 ledger。

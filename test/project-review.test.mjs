@@ -13,27 +13,52 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile, readFile, rm, symlink } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { importPlan, approvePlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { runNextTask } from "../src/orchestration/linear-runtime.mjs";
 import { runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
 import { prepareProjectReview, runProjectReview, hasAcceptedProjectReview } from "../src/capabilities/project-review.mjs";
 import { checkExecutionReadiness } from "../src/capabilities/execution-readiness.mjs";
 import { loadMarkdownAttachment } from "../src/infra/context-attachments.mjs";
-import { resolveTaskAcceptancePath } from "../src/infra/runtime-store.mjs";
+import { resolveTaskAcceptancePath, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { gitCommitAll, withExternalProject } from "./helpers/external-fixture.mjs";
+
+/** 打开外置三根项目并随测试结束（t.after）释放。 */
+async function openProject(t, options) {
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  let ready;
+  const started = new Promise((resolve) => { ready = resolve; });
+  const finished = withExternalProject(async (roots) => { ready(roots); await held; }, options);
+  finished.catch((error) => ready(Promise.reject(error)));
+  t.after(async () => { release(); await finished; });
+  return started;
+}
+
+/** 项目仓之外的临时目录：适配器脚本与计划文件放这里，保持项目工作区基线干净。 */
+function auxDir(root) {
+  return path.dirname(root);
+}
+
+/** 治理仓 policy 下的项目配置文件路径（外置模式的 wildarrange.config.json）。 */
+function governanceConfigPath(root) {
+  return path.join(auxDir(root), "governance", "policy", "wildarrange.config.json");
+}
+
+async function writeGovernanceConfig(root, config) {
+  await writeFile(governanceConfigPath(root), JSON.stringify(config));
+}
 
 async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), "wa-project-review-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  await initRuntime(root);
-  await mkdir(path.join(root, ".agents/skills/project-rule"), { recursive: true });
-  await writeFile(path.join(root, ".agents/skills/project-rule/SKILL.md"), "# PROJECT_SKILL\nCheck target implementation.\n");
-  await writeFile(path.join(root, "rules.md"), "PROJECT_STANDARD\nOnly export one value.\n");
-  await writeFile(path.join(root, "target.mjs"), "export const value = 1;\n");
-  const adapter = path.join(root, ".wildarrange/adapter.cjs");
+  const { projectRoot: root, governanceRoot } = await openProject(t, { projectFiles: {
+    "README.md": "# Fixture project\n",
+    ".agents/skills/project-rule/SKILL.md": "# PROJECT_SKILL\nCheck target implementation.\n",
+    "rules.md": "PROJECT_STANDARD\nOnly export one value.\n",
+    "target.mjs": "export const value = 1;\n",
+  } });
+  const adapter = path.join(auxDir(root), "adapter.cjs");
   await writeFile(adapter, `const fs=require('node:fs');
 const p=JSON.parse(fs.readFileSync(process.env.WILDARRANGE_READINESS_PACKET||process.env.WILDARRANGE_REVIEW_PACKET,'utf8'));
 if(p.kind==='execution_readiness_probe') { if(p.requiredSkills.some(s=>!s.content))process.exit(1); console.log(JSON.stringify({ready:true,challenge:p.challenge,loadedSkills:p.requiredSkills.map(s=>s.name)})); }
@@ -42,12 +67,14 @@ else { if(!p.requiredSkills?.some(s=>s.name==='review-work' && s.content))proces
 `);
   const command = `node "${adapter}"`;
   const config = { executionReadiness: { workerProbe: command }, review: { responsibility: { command }, steps: [{ id: "module-rules", title: "Module rules", appliesTo: ["target.mjs"], requirement: "Export one value", documents: ["rules.md"], skills: ["project-rule"], required: true }] } };
-  await writeFile(path.join(root, "wildarrange.config.json"), JSON.stringify(config));
+  await writeGovernanceConfig(root, config);
+  // 计划导入会冻结治理仓 SHA，配置必须先提交
+  await gitCommitAll(governanceRoot, "project review config");
   const raw = { title: "Project governance", tasks: [{ id: "T001", subject: "Implement value", skills: ["project-rule"], writable_paths: ["target.mjs"],
     worker_command: 'node -e "const fs=require(\'fs\');const c=JSON.parse(fs.readFileSync(process.env.WILDARRANGE_EXECUTION_CONTEXT));if(!c.skills.some(s=>s.name===\'project-rule\'))process.exit(1);fs.writeFileSync(\'target.mjs\',\'export const value = 2;\\n\')"',
     verify_commands: ['node -e "const a=require(\'node:assert/strict\');a.equal(require(\'fs\').readFileSync(\'target.mjs\',\'utf8\'),\'export const value = 2;\\n\')"'],
     responsibilityChanges: [{ script: "target.mjs", additions: "Export value", responsibilityBefore: "Export value", responsibilityAfter: "Export value", facts: [] }] }] };
-  const planFile = path.join(root, ".wildarrange/plan.json");
+  const planFile = path.join(auxDir(root), "plan.json");
   await writeFile(planFile, JSON.stringify(raw));
   await importPlan(root, planFile, { requireResponsibility: true });
   await approvePlan(root);
@@ -92,7 +119,7 @@ test("missing task Skill and false handshake are blocked before execution", asyn
   assert.equal((await checkExecutionReadiness(root, task)).pass, false);
   task.skills.pop();
   config.executionReadiness.workerProbe = 'node -e "console.log(JSON.stringify({ready:true,challenge:\'stale\',loadedSkills:[]}))"';
-  await writeFile(path.join(root, "wildarrange.config.json"), JSON.stringify(config));
+  await writeGovernanceConfig(root, config);
   const result = await checkExecutionReadiness(root, task);
   assert.equal(result.pass, false);
   assert.match(result.issues.join(";"), /handshake/);
@@ -119,17 +146,17 @@ test("mandatory reviewer INCONCLUSIVE blocks completion with evidence", async t 
 test("setup preview preserves config and rejects unrelated or malformed fields", async t => {
   const { configureProjectReview } = await import("../src/capabilities/project-review.mjs");
   const { root } = await fixture(t);
-  const before = await readFile(path.join(root, "wildarrange.config.json"), "utf8");
-  const draft = ".wildarrange/plan-drafts/setup.json";
-  await mkdir(path.join(root, ".wildarrange/plan-drafts"), { recursive: true });
-  await writeFile(path.join(root, draft), JSON.stringify({ review: { steps: [{ id: "new-rule", title: "New rule", requirement: "Check module", documents: ["missing.md"] }] } }));
+  const before = await readFile(governanceConfigPath(root), "utf8");
+  const draft = resolveWildArrangePath(root, "plan-drafts", "setup.json");
+  await mkdir(path.dirname(draft), { recursive: true });
+  await writeFile(draft, JSON.stringify({ review: { steps: [{ id: "new-rule", title: "New rule", requirement: "Check module", documents: ["missing.md"] }] } }));
   const preview = await configureProjectReview(root, draft);
   assert.equal(preview.applied, false);
   assert.equal(preview.checklist.pass, false);
-  assert.equal(await readFile(path.join(root, "wildarrange.config.json"), "utf8"), before);
+  assert.equal(await readFile(governanceConfigPath(root), "utf8"), before);
   assert.equal((await configureProjectReview(root, draft, { apply: true })).applied, true);
   for (const patch of [{ agents: {} }, { review: null }, { executionReadiness: { workerProbe: 7 } }, { executionReadiness: { timeoutMs: -1 } }]) {
-    await writeFile(path.join(root, draft), JSON.stringify(patch));
+    await writeFile(draft, JSON.stringify(patch));
     await assert.rejects(() => configureProjectReview(root, draft, { apply: true }));
   }
   await writeFile(path.join(root, "outside.json"), "{}");
@@ -138,10 +165,10 @@ test("setup preview preserves config and rejects unrelated or malformed fields",
 
 test("project reviewer returns an actionable finding and cannot create checkpoint", async t => {
   const { root, config } = await fixture(t);
-  const reject = path.join(root, ".wildarrange/reject.cjs");
+  const reject = path.join(auxDir(root), "reject.cjs");
   await writeFile(reject, `const fs=require('fs');const p=JSON.parse(fs.readFileSync(process.env.WILDARRANGE_REVIEW_PACKET));if(p.kind==='execution_readiness_probe'){console.log(JSON.stringify({ready:true,challenge:p.challenge,loadedSkills:p.requiredSkills.map(s=>s.name)}))}else{const citation={file:'target.mjs',line:1,text:p.source.files.find(f=>f.path==='target.mjs').content.split('\\n')[0]};console.log(JSON.stringify({stepId:p.step.id,inputDigest:p.inputDigest,decision:'RETURN',summary:'Value violates module contract',evidence:[citation],findings:[{...citation,reason:'Module requires another value',requiredFix:'Correct the exported value'}]}))}`);
   config.review.steps[0].command = `node "${reject}"`;
-  await writeFile(path.join(root, "wildarrange.config.json"), JSON.stringify(config));
+  await writeGovernanceConfig(root, config);
   const run = await runNextTask(root);
   assert.equal(run.reviewResult.projectReview.pass, false);
   assert.equal(run.reviewResult.projectReview.steps[0].findings[0].requiredFix, "Correct the exported value");
@@ -152,9 +179,7 @@ test("project reviewer returns an actionable finding and cannot create checkpoin
 
 test("setup Hook permits only the exact governance command before a task exists", async t => {
   const { preToolUseGuard } = await import("../src/ai/pre-tool-guard.mjs");
-  const root = await mkdtemp(path.join(os.tmpdir(), "wa-setup-hook-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  await initRuntime(root);
+  const { projectRoot: root } = await openProject(t);
   for (const [command, denied] of [
     ["node ./bin/wildarrange.mjs review configure --from .wildarrange/plan-drafts/setup.json", false],
     ["node ./bin/wildarrange.mjs review configure --from .wildarrange/plan-drafts/setup.json --apply", false],
@@ -164,16 +189,6 @@ test("setup Hook permits only the exact governance command before a task exists"
     const result = await preToolUseGuard(root, { hook_event_name: "PreToolUse", cwd: root, session_id: "setup", tool_name: "exec_command", tool_input: { command } });
     assert.equal(result.decision === "deny", denied, JSON.stringify(result));
   }
-});
-
-test("installed adapters expose setup and onboarding Skills", async t => {
-  const { root } = await fixture(t);
-  const { installAdapter } = await import("../src/interface/adapters.mjs");
-  await installAdapter(root, "codex");
-  const setup = await readFile(path.join(root, ".agents/skills/wildarrange-setup/SKILL.md"), "utf8");
-  const onboard = await readFile(path.join(root, ".agents/skills/wildarrange-onboard/SKILL.md"), "utf8");
-  assert.match(setup, /prompts show --skill configure-project-review/);
-  assert.match(onboard, /prompts show --skill project-onboarding/);
 });
 
 test("changed review documents invalidate an earlier acceptance receipt", async t => {
@@ -212,18 +227,18 @@ test("a rule for another module does not require an unrelated legacy worker prob
   delete task.responsibilityChanges;
   task.writable_paths = ["other.mjs"];
   config.executionReadiness.workerProbe = null;
-  await writeFile(path.join(root, "wildarrange.config.json"), JSON.stringify(config));
+  await writeGovernanceConfig(root, config);
   assert.equal((await checkExecutionReadiness(root, task)).required, false);
 });
 
 test("parallel readiness checks its actual adapter instead of a linear worker command", async t => {
   const { root, config, task } = await fixture(t);
   config.parallelAgents = { defaultAdapter: "test-adapter", spawnAdapters: { "test-adapter": { command: task.worker_command } } };
-  await writeFile(path.join(root, "wildarrange.config.json"), JSON.stringify(config));
+  await writeGovernanceConfig(root, config);
   const run = await runParallelAgents(root, { taskId: task.id });
   assert.equal(run.results?.[0]?.exitCode, 0, JSON.stringify(run));
   assert.equal(await readFile(path.resolve(root, run.results[0].workDir, "target.mjs"), "utf8"), "export const value = 2;\n");
-  const context = JSON.parse(await readFile(path.join(root, ".wildarrange/reports/readiness", task.planId, task.id + ".json.context.json"), "utf8"));
+  const context = JSON.parse(await readFile(resolveWildArrangePath(root, "reports", "readiness", task.planId, task.id + ".json.context.json"), "utf8"));
   assert.equal(context.skills.some(s => s.name === "project-rule"), true);
 });
 
@@ -253,11 +268,8 @@ test("approved task creates one historical packet and keeps it unchanged across 
 });
 
 test("document review returns line-backed finding and blocks checkpoint", async t => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "wa-doc-truth-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  await initRuntime(root);
-  await writeFile(path.join(root, "README.md"), "Old instructions");
-  const adapter = path.join(root, ".wildarrange/doc-review.cjs");
+  const { projectRoot: root, governanceRoot } = await openProject(t, { projectFiles: { "README.md": "Old instructions" } });
+  const adapter = path.join(auxDir(root), "doc-review.cjs");
   await writeFile(adapter, `const fs=require('fs');
 const p=JSON.parse(fs.readFileSync(process.env.WILDARRANGE_READINESS_PACKET||process.env.WILDARRANGE_REVIEW_PACKET,'utf8'));
 if(p.kind==='execution_readiness_probe') console.log(JSON.stringify({ready:true,challenge:p.challenge,loadedSkills:p.requiredSkills.map(s=>s.name)}));
@@ -266,12 +278,13 @@ else if(p.kind==='project_review_step') {
   console.log(JSON.stringify({stepId:p.step.id,inputDigest:p.inputDigest,decision:'RETURN',summary:'D1: process log in long-term documentation',evidence:[citation],findings:[{...citation,reason:'D1: task progress belongs in task evidence',requiredFix:'Move progress to the task packet and keep only current usage in README'}]}));
 } else console.log(JSON.stringify({decision:'PASS',checks:Object.keys(p.rules).map(rule=>({rule,decision:'PASS',reason:'Checked README source'})),findings:[]}));`);
   const command = `node "${adapter}"`;
-  await writeFile(path.join(root, "wildarrange.config.json"), JSON.stringify({ executionReadiness:{workerProbe:command}, review:{responsibility:{command}} }));
+  await writeGovernanceConfig(root, { executionReadiness:{workerProbe:command}, review:{responsibility:{command}} });
+  await gitCommitAll(governanceRoot, "document review config");
   const plan = { title:"Document task", tasks:[{id:"T001",subject:"Update documentation",owner:"ZhuRong",writable_paths:["README.md"],
     worker_command:"node -e \"require('fs').writeFileSync('README.md','Attempt 1: updated docs.')\"",
     verify_commands:["node -e \"if(require('fs').readFileSync('README.md','utf8')!=='Attempt 1: updated docs.')process.exit(1)\""],
     responsibilityChanges:[{script:"README.md",additions:"Current usage",responsibilityBefore:"Current usage",responsibilityAfter:"Current usage",facts:[]}] }] };
-  const planFile = path.join(root, ".wildarrange/plan.json");
+  const planFile = path.join(auxDir(root), "plan.json");
   await writeFile(planFile, JSON.stringify(plan));
   await importPlan(root, planFile, { requireResponsibility:true });
   const { resolveTaskPacketPath } = await import("../src/infra/runtime-store.mjs");
@@ -291,7 +304,7 @@ test("task packet refuses a symlinked control directory without writing outside 
   const { root, task } = await fixture(t);
   const outside = await mkdtemp(path.join(os.tmpdir(), "wa-packet-outside-"));
   t.after(() => rm(outside, { recursive: true, force: true }));
-  await symlink(outside, path.join(root, ".wildarrange", "task-packets"), "junction");
+  await symlink(outside, resolveWildArrangePath(root, "task-packets"), "junction");
   const { ensureTaskPacket } = await import("../src/infra/runtime-snapshot.mjs");
   await assert.rejects(() => ensureTaskPacket(root, task.planId, task), /symlink/);
   assert.deepEqual(await import("node:fs/promises").then(fs => fs.readdir(outside)), []);

@@ -4,6 +4,7 @@
 // 作用说明：并行 run 的状态查询、关闭、清理与任务 claim 释放。
 // 执行与 spawn 仍由 parallel-runtime.mjs 持有，避免重试路径形成循环依赖。
 // =============================================================================
+import { realpath } from "node:fs/promises";
 import path from "node:path";
 import { appendLedger } from "../infra/ledger.mjs";
 import {
@@ -11,6 +12,7 @@ import {
   nowIso,
   readJson,
   resolveWildArrangePath,
+  resolveWildArrangeRoot,
 } from "../infra/runtime-store.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { loadTaskLedger } from "../infra/task-state-store.mjs";
@@ -19,9 +21,10 @@ import { persistTaskState } from "./task-board.mjs";
 import { withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { updateAgentRunLifecycle } from "./admission-projection.mjs";
 import { listParallelAgentRuns } from "./parallel-run-index.mjs";
-import { inspectGitCoordination, commitIsAncestor } from "../infra/git-coordination.mjs";
+import { inspectGitDelivery, commitIsAncestor } from "../infra/git-coordination.mjs";
 import { readGitHead } from "../infra/git-diff.mjs";
 import { runCommandFile } from "../infra/command-runner.mjs";
+import { inspectTaskBranchOccupation, releaseAgentWorktree } from "../infra/git-worktree.mjs";
 import { assertPathInsideRoot } from "../infra/path-match.mjs";
 
 export async function parallelAgentStatus(rootDir, options = {}) {
@@ -108,13 +111,46 @@ export async function closeParallelAgentRun(rootDir, options = {}) {
 }
 
 
+/** 终态 lifecycle：结果已不再需要保留（尚未 admit 的通过结果、released 交付都不在此列）。 */
+const DISCARDABLE_RUN_LIFECYCLES = new Set(["failed", "awaiting_revision", "closed"]);
+
+/**
+ * 新 run（并行重试或线性）要接手任务分支前，释放同一任务旧 run worktree 对该分支的占用。
+ * 只在满足全部条件时释放：占用者是本任务自己的 run worktree、该 run 已失败/关闭/待修订、
+ * 不持有任何 claim、分支上没有交付提交。其他任务占用同一分支、尚在保留的 run 一律不动。
+ */
+export async function releaseSupersededRunWorktree(rootDir, task) {
+  const branch = task.coordination?.branch;
+  const baseSha = task.coordination?.baseSha;
+  if (!branch || !baseSha) return { released: false, reason: "no_task_branch" };
+  const occupied = await inspectTaskBranchOccupation(rootDir, branch);
+  if (!occupied?.worktree) return { released: false, reason: "not_checked_out" };
+  const realOrSelf = async (value) => realpath(value).catch(() => path.resolve(value));
+  const runsRoot = await realOrSelf(resolveWildArrangePath(rootDir, "agent-runs"));
+  const [runId, taskId, leaf, ...rest] = path.relative(runsRoot, await realOrSelf(occupied.worktree)).split(path.sep);
+  if (!runId || runId.startsWith("..") || taskId !== task.id || leaf !== "worktree" || rest.length > 0) {
+    return { released: false, reason: "not_a_run_worktree_of_this_task" };
+  }
+  if (task.admission_claim?.runId === runId || task.parallel_run_claim?.runId === runId) {
+    return { released: false, reason: "run_holds_claim" };
+  }
+  const result = await readJson(resolveWildArrangePath(rootDir, "agent-runs", runId, taskId, "result.json"), null);
+  if (!DISCARDABLE_RUN_LIFECYCLES.has(result?.lifecycle?.status)) {
+    return { released: false, reason: "run_result_retained" };
+  }
+  const released = await releaseAgentWorktree(rootDir, { workDir: occupied.worktree, branch, startPoint: baseSha });
+  if (released.released) await appendLedger(rootDir, { type: "parallel_agent_worktree_superseded", runId, taskId, branch });
+  return released;
+}
+
+
 export async function cleanupParallelAgentRun(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   if (!options.runId) throw new Error("parallel cleanup requires --run <runId>");
   const status = await parallelAgentStatus(rootDir, { runId: options.runId });
   const taskLedger = await loadTaskLedger(rootDir);
   const { config } = await loadWildArrangeConfig(rootDir);
-  const gitContext = await inspectGitCoordination(rootDir, config.gitCoordination || {}).catch(() => null);
+  const gitContext = await inspectGitDelivery(rootDir, config.gitDelivery || {}).catch(() => null);
   const cleaned = [];
   for (const run of status.runs || []) {
     const batch = await readJson(resolveWildArrangePath(rootDir, "agent-runs", `${run.runId}.json`), null);
@@ -124,7 +160,7 @@ export async function cleanupParallelAgentRun(rootDir, options = {}) {
       const result = await readJson(resultPath, null);
       if (!result || result.isolation !== "git-worktree" || result.worktreeAvailable !== true) continue;
       const worktreeDir = path.resolve(rootDir, result.workDir || "");
-      assertPathInsideRoot(rootDir, worktreeDir, result.workDir, "parallel worktree");
+      assertPathInsideRoot(resolveWildArrangeRoot(rootDir), worktreeDir, result.workDir, "parallel worktree");
       const task = (taskLedger?.tasks || []).find((candidate) => candidate.planId === runPlanId && candidate.id === entry.taskId) || null;
       const cleanupFence = await inspectParallelCleanupFence(worktreeDir, entry, task, gitContext, runPlanId);
       if (!cleanupFence.pass) {
@@ -164,12 +200,11 @@ async function inspectParallelCleanupFence(worktreeDir, entry, task, gitContext,
     return { pass: false, reason: "task_identity_unavailable", details: { planId: runPlanId, taskId: entry.taskId } };
   }
   if (["in_progress", "verifying", "recovery_required"].includes(task.status)
-    || task.parallel_run_claim
-    || (task.status !== "completed" && ["claimed", "accepted"].includes(task.coordination?.status))) {
+    || task.parallel_run_claim) {
     return {
       pass: false,
       reason: "task_ownership_requires_retention",
-      details: { taskStatus: task.status, parallelRunClaim: task.parallel_run_claim || null, coordination: task.coordination || null },
+      details: { taskStatus: task.status, parallelRunClaim: task.parallel_run_claim || null },
     };
   }
   const worktreeStatus = await runCommandFile("git", ["-C", worktreeDir, "status", "--porcelain"], worktreeDir, 30_000);

@@ -2,18 +2,17 @@
 // 文件名称：runtime-config.test.mjs
 // 所属模块：test
 // 作用说明：
-//   验证配置加载：仓库根 config 含 example 全部键、无文件时内置默认、
-//   legacy runtime 名称字面量归一化。
+//   验证配置加载：example 配置只含已知键并可作为治理配置加载、无文件时内置默认、
+//   runtime 名称字面量归一化。
 //   不测：环境变量覆盖矩阵或热重载。
 //
 // 【运行原理速读】
-//   读写 wildarrange.config.json fixture，调用 loadWildArrangeConfig，
+//   读写治理仓 policy/wildarrange.config.json fixture，调用 loadWildArrangeConfig，
 //   断言合并结果与 DEFAULT 键集合一致。
 // =============================================================================
 
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -22,74 +21,62 @@ import {
   DEFAULT_WILDARRANGE_CONFIG,
 } from "../src/infra/default-config.mjs";
 import { loadWildArrangeConfig } from "../src/infra/runtime-config.mjs";
+import { resolveGovernancePaths } from "../src/infra/runtime-store.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-function getPath(value, dottedPath) {
-  return dottedPath.split(".").reduce((current, key) => current?.[key], value);
-}
-
-test("repo root config carries every key the example config documents", async () => {
+test("the example governance config only uses known keys and loads as policy/wildarrange.config.json", async () => {
   const example = JSON.parse(await readFile(path.join(REPO_ROOT, "wildarrange.config.example.json"), "utf8"));
-  const repoConfig = JSON.parse(await readFile(path.join(REPO_ROOT, "wildarrange.config.json"), "utf8"));
-  // 第 2 期整改补齐的键：example 已声明而正式配置曾经缺失，值照抄 example。
-  const requiredPaths = [
-    "adapters.kimi",
-    "agents.Jiuwei.skills",
-    "agents.DiJiang.skills",
-    "agents.ZhuRong.skills",
-    "agents.BaiZe.skills",
-    "agents.LuWu.skills",
-    "routeGovernance",
-    "gitCoordination",
-    "parallelAgents.retainUntilUserAcceptance",
-    "parallelAgents.defaultAdapter",
-    "parallelAgents.spawnAdapters",
-    "skillMatcher",
-    "contextBudgets",
-    "review.responsibility",
-    "review.steps",
-    "verificationGovernance",
-    "qualityGates.astStructure",
-    "qualityGates.hashlineAnchors",
-    "executionReadiness",
-  ];
-  for (const dottedPath of requiredPaths) {
-    assert.deepEqual(
-      getPath(repoConfig, dottedPath),
-      getPath(example, dottedPath),
-      `wildarrange.config.json must carry ${dottedPath} with the example value`,
-    );
-  }
-
-  const { config, sourcePath } = await loadWildArrangeConfig(REPO_ROOT);
-  assert.equal(sourcePath, "wildarrange.config.json");
-  assert.equal(config.gitCoordination.mode, "guarded");
-  assert.deepEqual(config.review.steps, []);
+  const known = new Set(Object.keys(DEFAULT_WILDARRANGE_CONFIG));
+  // $comment 是示例里的说明字段；其余键必须是已知配置键，未列出的键取内置默认值
+  assert.deepEqual(Object.keys(example).filter((key) => key !== "$comment" && !known.has(key)), []);
+  await withExternalProject(async ({ projectRoot }) => {
+    await writeFile(governanceConfigFile(projectRoot), JSON.stringify(example), "utf8");
+    const { config, sourcePath } = await loadWildArrangeConfig(projectRoot);
+    assert.match(sourcePath, /policy[\\/]wildarrange\.config\.json$/);
+    assert.equal(config.gitDelivery.requireWorktreeForParallelWrites, true);
+    assert.equal("gitCoordination" in config, false);
+  }, { init: false });
 });
 
 test("config loading falls back to built-in defaults when no config file exists", async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "wildarrange-runtime-config-"));
-  try {
-    const { config, sourcePath } = await loadWildArrangeConfig(dir);
+  await withExternalProject(async ({ projectRoot }) => {
+    const { config, sourcePath } = await loadWildArrangeConfig(projectRoot);
     assert.equal(sourcePath, "default");
     assert.equal(config.runtime, DEFAULT_RUNTIME_NAME);
-    assert.deepEqual(config.gitCoordination, DEFAULT_WILDARRANGE_CONFIG.gitCoordination);
+    assert.deepEqual(config.gitDelivery, DEFAULT_WILDARRANGE_CONFIG.gitDelivery);
     assert.deepEqual(config.skillMatcher, DEFAULT_WILDARRANGE_CONFIG.skillMatcher);
     assert.deepEqual(config.contextBudgets, DEFAULT_WILDARRANGE_CONFIG.contextBudgets);
     assert.deepEqual(config.executionReadiness, DEFAULT_WILDARRANGE_CONFIG.executionReadiness);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+  }, { init: false });
 });
 
-test("legacy runtime name literal normalizes to the default runtime", async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "wildarrange-runtime-config-"));
-  try {
-    await writeFile(path.join(dir, "wildarrange.config.json"), JSON.stringify({ runtime: "wildarrange-linear" }), "utf8");
-    const { config } = await loadWildArrangeConfig(dir);
+/** 外置治理配置文件的绝对路径（治理仓内）。 */
+function governanceConfigFile(projectRoot) {
+  const governance = resolveGovernancePaths(projectRoot);
+  return path.join(governance.rootDir, governance.configPath);
+}
+
+test("runtime name literal normalizes to the default runtime", async () => {
+  await withExternalProject(async ({ projectRoot }) => {
+    await writeFile(governanceConfigFile(projectRoot), JSON.stringify({ runtime: "wildarrange-linear" }), "utf8");
+    const { config } = await loadWildArrangeConfig(projectRoot);
     assert.equal(config.runtime, DEFAULT_RUNTIME_NAME);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+  }, { init: false });
+});
+
+test("gitDelivery keeps only single-machine delivery keys", async () => {
+  await withExternalProject(async ({ projectRoot }) => {
+    await writeFile(governanceConfigFile(projectRoot), JSON.stringify({
+      gitDelivery: { remote: " upstream ", taskBranchPrefix: "/wa/task/", requireWorktreeForParallelWrites: false, mode: "strict", requireTakeoverReason: true },
+    }), "utf8");
+    const { config } = await loadWildArrangeConfig(projectRoot);
+    assert.deepEqual(config.gitDelivery, {
+      remote: "upstream",
+      integrationBranch: "auto",
+      taskBranchPrefix: "wa/task",
+      requireWorktreeForParallelWrites: false,
+    });
+  }, { init: false });
 });

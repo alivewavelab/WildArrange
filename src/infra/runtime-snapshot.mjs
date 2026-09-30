@@ -24,6 +24,7 @@ import {
   writeTextAtomic,
 } from "./runtime-store.mjs";
 import { inspectCompletedTaskEvidence, loadTaskState } from "./task-state-store.mjs";
+import { findRunnableTask, summarizeTaskCounts } from "./task-predicates.mjs";
 
 /**
  * writeSnapshot：本模块对外异步 API。
@@ -73,7 +74,7 @@ export async function ensureTaskPacket(rootDir, planId, task) {
     await writeJsonAtomic(baselinePath, {
       kind: "task_start_baseline", planId, taskId: task.id, at: nowIso(),
       note: "Historical start snapshot only; live task state is team/tasks.json.",
-      task: Object.fromEntries(["subject", "owner", "category", "writable_paths", "success_criteria", "verify_commands", "responsibilityChanges", "contractChanges", "request"]
+      task: Object.fromEntries(["subject", "owner", "category", "writable_paths", "successCriteria", "verify_commands", "responsibilityChanges", "contractChanges", "request"]
         .filter(key => task[key] !== undefined).map(key => [key, task[key]])),
       approval: work?.activePlanId === planId ? work.planApproval || null : null,
     });
@@ -127,7 +128,7 @@ export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
   const status = buildStatusReport(work, taskState, changes, completionIntegrity);
   const ledgerIntegrity = await verifyLedger(rootDir);
   const awaitingPlanApproval = isCurrentPlanAwaitingApproval(work, taskState);
-  const nextTask = taskState && !awaitingPlanApproval ? findRunnableTaskForContext(taskState.tasks || []) : null;
+  const nextTask = taskState && !awaitingPlanApproval ? findRunnableTask(taskState.tasks || []) : null;
   const cliCommandPrefix = await resolveRuntimeCliCommandPrefix(rootDir, {
     preferredPrefix: options.cliCommandPrefix,
     fallbackCliPath: options.fallbackCliPath,
@@ -172,35 +173,15 @@ export async function writeRuntimeContextSnapshot(rootDir, options = {}) {
  */
 function buildStatusReport(work, taskState, changes, completionIntegrity) {
   const openChanges = changes.filter((change) => change.status === "open").length;
-  if (!taskState) return { work, planId: null, total: 0, completed: 0, invalidCompleted: 0, completionIntegrity, draft: 0, pending: 0, failed: 0, openChanges };
-  const counts = (taskState.tasks || []).reduce((acc, task) => {
-    acc[task.status] = (acc[task.status] || 0) + 1;
-    return acc;
-  }, {});
+  if (!taskState) return { work, planId: null, ...summarizeTaskCounts([]), invalidCompleted: 0, completionIntegrity, openChanges };
   return {
     work,
     planId: taskState.planId,
-    total: taskState.tasks.length,
-    draft: counts.draft || 0,
-    completed: counts.completed || 0,
+    ...summarizeTaskCounts(taskState.tasks || []),
     invalidCompleted: completionIntegrity.invalid.length,
     completionIntegrity,
-    pending: counts.pending || 0,
-    in_progress: counts.in_progress || 0,
-    verifying: counts.verifying || 0,
-    failed: counts.failed || 0,
-    review_blocked: counts.review_blocked || 0,
-    needs_user_decision: counts.needs_user_decision || 0,
     openChanges,
   };
-}
-
-/**
- * 查找 RunnableTaskForContext 匹配项。
- */
-function findRunnableTaskForContext(tasks) {
-  const completed = new Set(tasks.filter((task) => task.status === "completed").map((task) => task.id));
-  return tasks.find((task) => task.status === "pending" && (task.blockedBy || []).every((id) => completed.has(id))) || null;
 }
 
 /**
@@ -233,7 +214,7 @@ function describeNextAction(tasks, runnable, cliCommandPrefix, options = {}) {
   const reason = recovery ? "admission_recovery" : awaitingPlanApproval ? "awaiting_plan_approval" : runnable ? "runnable_task" : active ? "active_task" : failed ? "blocked_or_failed_task" : waiting ? "awaiting_user_decision" : "no_unfinished_work";
   const command = recovery || (task === active && active?.admission_claim)
     ? renderCliCommand(cliCommandPrefix, `parallel admit --run ${task.admission_claim.runId} --task ${task.id}`)
-    : runnable ? renderCliCommand(cliCommandPrefix, "run") : active ? renderCliCommand(cliCommandPrefix, `node verify --task ${task.id}`) : failed ? renderCliCommand(cliCommandPrefix, "status") : null;
+    : runnable ? renderCliCommand(cliCommandPrefix, "run") : active ? renderCliCommand(cliCommandPrefix, `node checkpoint --task ${task.id}`) : failed ? renderCliCommand(cliCommandPrefix, "status") : null;
   const text = recovery ? command ? `recover shared workspace: ${command}` : "reinstall the adapter before shared-workspace recovery"
     : awaitingPlanApproval ? `await user approval for plan ${options.planId}`
     : runnable ? `run task ${task.id}: ${task.subject}` : active ? command ? `resume task ${task.id}: ${command}` : `reinstall the adapter before resuming task ${task.id}`
@@ -242,73 +223,19 @@ function describeNextAction(tasks, runnable, cliCommandPrefix, options = {}) {
 }
 
 /**
- * resolveRuntimeCliCommandPrefix：本模块对外异步 API。
+ * resolveRuntimeCliCommandPrefix：优先使用调用方给定前缀，其次外置 Adapter 安装报告，最后当前进程 CLI 路径。
  */
 export async function resolveRuntimeCliCommandPrefix(rootDir, options = {}) {
   const preferred = normalizeRuntimeCliCommandPrefix(rootDir, options.preferredPrefix);
   if (preferred) return preferred;
-  const artifactPrefix = await readInstalledHookCliCommandPrefix(rootDir);
-  if (artifactPrefix) return artifactPrefix;
-  const report = await readJson(resolveWildArrangePath(rootDir, "adapters", "install-report.json"), null);
+  const report = await readJson(resolveWildArrangePath(rootDir, "adapters", "external", "install-report.json"), null);
   const reportPrefix = normalizeRuntimeCliCommandPrefix(rootDir, report?.cliPrefix);
   if (reportPrefix) return reportPrefix;
   if (options.fallbackCliPath) {
     const fallbackPrefix = normalizeRuntimeCliCommandPrefix(rootDir, `node "${path.resolve(options.fallbackCliPath)}"`);
     if (fallbackPrefix) return fallbackPrefix;
   }
-  return existsSync(path.join(rootDir, "bin", "wildarrange.mjs")) ? "node ./bin/wildarrange.mjs" : null;
-}
-
-/**
- * 读取 InstalledHookCliCommandPrefix 并返回结构化结果。
- */
-async function readInstalledHookCliCommandPrefix(rootDir) {
-  for (const hookPath of [
-    path.join(rootDir, ".codex", "hooks.json"),
-    resolveWildArrangePath(rootDir, "adapters", "codex", "hooks.json"),
-  ]) {
-    const hooks = await readJson(hookPath, null);
-    for (const command of collectHookCommands(hooks)) {
-      const marker = command.indexOf(" hook run");
-      if (marker < 0) continue;
-      const prefix = normalizeRuntimeCliCommandPrefix(rootDir, command.slice(0, marker));
-      if (prefix) return prefix;
-    }
-  }
-  for (const bridgePath of [
-    path.join(rootDir, ".cursor", "hooks", "wildarrange-hook-bridge.mjs"),
-    resolveWildArrangePath(rootDir, "adapters", "kimi", "plugin", "hooks", "wildarrange-hook-bridge.mjs"),
-  ]) {
-    const source = await readFile(bridgePath, "utf8").catch(() => "");
-    const cliSpecJson = source.match(/^const cliSpec = (\{[^\r\n]+\});$/m)?.[1];
-    if (!cliSpecJson) continue;
-    try {
-      const cliSpec = JSON.parse(cliSpecJson);
-      const candidate = cliSpec.kind === "npx"
-        ? `npx -y ${cliSpec.packageName}`
-        : cliSpec.kind === "local" ? `node "${cliSpec.cliPath}"` : "";
-      const prefix = normalizeRuntimeCliCommandPrefix(rootDir, candidate);
-      if (prefix) return prefix;
-    } catch {
-      // A malformed restored bridge is not an executable CLI fact.
-    }
-  }
   return null;
-}
-
-/**
- * 收集 HookCommands 条目。
- */
-function collectHookCommands(value, output = []) {
-  if (Array.isArray(value)) {
-    for (const item of value) collectHookCommands(item, output);
-  } else if (value && typeof value === "object") {
-    for (const [key, nested] of Object.entries(value)) {
-      if (key === "command" && typeof nested === "string") output.push(nested);
-      else collectHookCommands(nested, output);
-    }
-  }
-  return output;
 }
 
 /**
@@ -323,22 +250,10 @@ function normalizeRuntimeCliCommandPrefix(rootDir, value) {
   const node = prefix.match(/^node(?:\.exe)?\s+(?:"([^"\r\n]+[\\/]wildarrange\.mjs)"|'([^'\r\n]+[\\/]wildarrange\.mjs)'|(\S+[\\/]wildarrange\.mjs))$/i);
   const cliPath = node?.[1] || node?.[2] || node?.[3];
   if (!cliPath) return null;
-  if (/[\\/]_npx[\\/]/i.test(cliPath)) {
-    const packageName = extractNpxPackageNameFromCliPath(cliPath);
-    return packageName ? `npx -y ${packageName}` : null;
-  }
   const absoluteCliPath = path.isAbsolute(cliPath) ? path.resolve(cliPath) : path.resolve(rootDir, cliPath);
   if (!existsSync(absoluteCliPath)) return null;
   if (!path.isAbsolute(cliPath)) return "node ./bin/wildarrange.mjs";
   return `node "${absoluteCliPath}"`;
-}
-
-/**
- * 从内容中提取 NpxPackageNameFromCliPath。
- */
-function extractNpxPackageNameFromCliPath(cliPath) {
-  const normalized = cliPath.replaceAll("\\", "/");
-  return normalized.match(/\/node_modules\/((?:@[A-Za-z0-9][A-Za-z0-9._-]*\/)?[A-Za-z0-9][A-Za-z0-9._-]*)\/bin\/wildarrange\.mjs$/i)?.[1] || null;
 }
 
 /**
@@ -490,7 +405,7 @@ function renderContextMarkdown(context) {
       lines.push(`- Approve after user confirmation: \`${renderCliCommand(context.cliCommandPrefix, `plan approve --plan ${context.nextActionDetails.planId}`)}\``);
     } else {
       lines.push(`- Run next task: \`${renderCliCommand(context.cliCommandPrefix, "run")}\``);
-      lines.push(`- Node loop: \`${renderCliCommand(context.cliCommandPrefix, "node execute|verify|scope|review|checkpoint|retry --task <taskId>")}\``);
+      lines.push(`- Node loop: \`${renderCliCommand(context.cliCommandPrefix, "node execute|checkpoint|retry --task <taskId>")}\``);
     }
     lines.push(`- Open changes: \`${renderCliCommand(context.cliCommandPrefix, "changes list")}\``);
   } else {

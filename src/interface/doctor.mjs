@@ -27,20 +27,21 @@ import {
   ensureWildArrangeDirs,
   nowIso,
   readJson,
+  resolveGovernancePaths,
   resolveWildArrangePath,
   writeJsonAtomic,
-  hashContent,
 } from "../infra/runtime-store.mjs";
 import { readVerifiedLedgerEntries, verifyLedger } from "../infra/ledger.mjs";
+import { POLICY_PLACEHOLDER, listPlaceholderPolicyFiles } from "../infra/rule-scanner.mjs";
 import { loadTaskState } from "../infra/task-state-store.mjs";
-import { listRuntimeStateBackups, verifyConfigBaseline, verifyRuntimeState } from "../infra/security.mjs";
+import { listRuntimeStateBackups } from "../infra/state-backup.mjs";
+import { verifyConfigBaseline } from "../infra/config-baseline.mjs";
+import { verifyRuntimeState } from "../infra/runtime-integrity.mjs";
 import { evaluateGateArming } from "../infra/gate-arming.mjs";
 import { evaluateRegistryFreshness } from "../infra/verification-registry.mjs";
-import { normalizeRelativePath } from "../infra/path-match.mjs";
 import { projectDecisionStats } from "./decisions.mjs";
-import { checkCompletionIntegrity } from "./doctor-completion.mjs";
-import { getBoundWorkspaceContext } from "../infra/workspace-context.mjs";
-import { loadExternalAdapterReport } from "./external-adapters.mjs";
+import { addFinding, checkCompletionIntegrity } from "./doctor-completion.mjs";
+import { inspectAdapterIntegrity, loadAdapterReport } from "./adapters.mjs";
 
 // 诊断与门控分离：每个检查独立 try/catch，单项崩溃只把自己的分项标红，
 // 其余分项照常输出；doctor 不再写 hash 链 ledger（诊断不该抢门控的锁）。
@@ -99,22 +100,16 @@ export async function runDoctor(rootDir) {
   return report;
 }
 
-/** 向 doctor findings 数组追加一条分项结论。 */
-function addFinding(findings, severity, section, message, extra = {}) {
-  findings.push({ severity, section, message, ...extra });
-}
-
 // --- 配置结构 ---
 
-/** 检查 wildarrange.config.json 未知键、未注册 skill 与缺失 markdown 挂载。 */
+/** 检查治理配置未知键、未注册 skill 与缺失 markdown 挂载。 */
 async function checkConfigStructure(rootDir, findings) {
   const { config, sourcePath } = await loadWildArrangeConfig(rootDir);
   const knownTopLevelKeys = new Set(Object.keys(DEFAULT_WILDARRANGE_CONFIG));
   const knownInjectionPoints = new Set(Object.keys(DEFAULT_WILDARRANGE_CONFIG.injectionPoints));
-  const rawConfigs = [
-    await readJson(path.join(rootDir, "wildarrange.config.json"), null),
-    await readJson(resolveWildArrangePath(rootDir, "config.json"), null),
-  ].filter(Boolean);
+  // 唯一配置：治理仓 policy/wildarrange.config.json
+  const governance = resolveGovernancePaths(rootDir);
+  const rawConfigs = [await readJson(path.resolve(governance.rootDir, governance.configPath), null)].filter(Boolean);
 
   const unknownTopLevelKeys = [];
   const unknownInjectionPoints = [];
@@ -165,6 +160,11 @@ async function checkConfigStructure(rootDir, findings) {
     addFinding(findings, "warn", "config", "prompt pack registry missing; run `wildarrange init` to install it");
   }
 
+  // 治理仓政策仍含 [待确认] 占位：不会注入给 Agent，等于没有政策，必须让人看到
+  for (const policyFile of await listPlaceholderPolicyFiles(rootDir)) {
+    addFinding(findings, "warn", "config", `governance policy ${policyFile} still contains ${POLICY_PLACEHOLDER} placeholders; it is not injected into agents until a human fills it in and commits it`, { code: "governance_policy_placeholder", path: policyFile });
+  }
+
   return {
     sourcePath,
     unknownTopLevelKeys,
@@ -184,7 +184,7 @@ async function checkLedgerIntegrity(rootDir, findings) {
       addFinding(findings, "error", "ledger", `ledger line ${failure.line} failed verification: ${failure.reason}`, { line: failure.line, reason: failure.reason });
     }
   }
-  return { ok: result.ok, checked: result.checked, legacy: result.legacy, failureCount: result.failures.length };
+  return { ok: result.ok, checked: result.checked, failureCount: result.failures.length };
 }
 
 // --- Ledger 与备份交叉对账 ---
@@ -256,6 +256,10 @@ async function checkConfigBaseline(rootDir, findings) {
       addFinding(findings, "error", "config_baseline", `config drift detected on ${failure.path}: ${failure.reason}`, { path: failure.path, reason: failure.reason });
     }
   }
+  // 治理仓工作区里未提交的配置改动会被 Hook 立即采用，但不在基线内：必须显式告警
+  if (result.governance?.clean === false) {
+    addFinding(findings, "warn", "config_baseline", "governance repository has uncommitted changes; hooks already use them but they are not reviewed or baselined; commit them, then run `wildarrange config baseline`", { code: "governance_repository_dirty" });
+  }
   return { status: result.status, failureCount: (result.failures || []).length };
 }
 
@@ -288,166 +292,66 @@ async function checkGateArming(rootDir, findings) {
 
 /**
  * Adapter 分项：硬拦截装没装、装得对不对，必须有体检。
- * `.cursor/` 不进 git，团队成员各自 install，漏装时 AI 不受约束——这里兜底发现。
+ * 外置 Adapter 以生成报告 activationId 与宿主真实生命周期回执绑定，文件存在不等于已激活。
  */
 async function checkAdapters(rootDir, findings) {
-  const { config, sourcePath } = await loadWildArrangeConfig(rootDir);
-  const workspace = getBoundWorkspaceContext(rootDir);
-  if (!sourcePath && workspace?.mode !== "external") {
-    return { status: "skipped", reason: "no wildarrange.config.json; adapter checks only run for configured projects" };
-  }
+  const { config } = await loadWildArrangeConfig(rootDir);
   const targets = [];
-  const cursorEnabled = config.adapters?.cursor?.enabled === true;
-  const codexEnabled = config.adapters?.codex?.enabled === true;
-  const kimiEnabled = config.adapters?.kimi?.enabled === true;
-  if (workspace?.mode === "external") {
-    const installReport = await loadExternalAdapterReport(rootDir);
-    const enabledTargets = [
-      ["cursor", cursorEnabled],
-      ["codex", codexEnabled],
-      ["kimi", kimiEnabled],
-    ].filter(([, enabled]) => enabled).map(([target]) => target);
-    for (const target of enabledTargets) {
-      const prepared = installReport?.targets?.[target] || null;
-      const activation = prepared?.activationId
-        ? await inspectExternalHookExecution(rootDir, target, prepared.activationId)
-        : { status: "not_prepared", lastObservedAt: null, lastEvent: null, sessionId: null };
-      if (!prepared) {
-        addFinding(findings, "error", "adapters", `外置治理已连接，但 ${target} 的零项目文件 Adapter 包尚未生成`, {
-          target,
-          code: "external_adapter_not_prepared",
-          nextAction: `运行 wildarrange adapter install --target ${target}`,
-        });
-      } else if (activation.status !== "execution_observed") {
-        addFinding(findings, "error", "adapters", `${target} 外置 Adapter 已生成，但尚无宿主真实生命周期回执；不能认定治理已激活`, {
-          target,
-          code: "external_adapter_activation_unverified",
-          nextAction: (prepared.nextActions || []).join("；"),
-        });
-      }
-      targets.push({
-        target,
-        configured: Boolean(prepared),
-        prepared: Boolean(prepared),
-        activation: activation.status,
-        activationId: prepared?.activationId || null,
-        lastObservedAt: activation.lastObservedAt,
-        lastEvent: activation.lastEvent,
-        sessionId: activation.sessionId,
-      });
-    }
-    return {
-      status: enabledTargets.length === 0
-        ? "skipped"
-        : (targets.every((entry) => entry.activation === "execution_observed") ? "ok" : "error"),
-      mode: "external",
-      reason: enabledTargets.length > 0
-        ? (targets.every((entry) => entry.activation === "execution_observed") ? "all enabled external adapters observed" : "external adapter lifecycle receipt missing")
-        : "no host adapters enabled",
-      targets,
-      staleRules: [],
-      legacyManagedRules: [],
-    };
-  }
-
-  if (cursorEnabled) {
-    const hooksPath = path.join(rootDir, ".cursor", "hooks.json");
-    const bridgePath = path.join(rootDir, ".cursor", "hooks", "wildarrange-hook-bridge.mjs");
-    if (!existsSync(hooksPath)) {
-      addFinding(findings, "warn", "adapters", "config 启用了 Cursor adapter 但 .cursor/hooks.json 不存在，本机没有硬拦截", { target: "cursor", nextAction: "node ./bin/wildarrange.mjs adapter install --target cursor" });
-      targets.push({ target: "cursor", configured: false });
-    } else {
-      const raw = await readFile(hooksPath, "utf8").catch(() => "");
-      const referencesBridge = raw.includes("wildarrange-hook-bridge");
-      const bridgeExists = existsSync(bridgePath);
-      if (!referencesBridge || !bridgeExists) {
-        addFinding(findings, "warn", "adapters", ".cursor/hooks.json 未引用 bridge 或 bridge 文件缺失，硬拦截不完整", { target: "cursor", nextAction: "重新运行 node ./bin/wildarrange.mjs adapter install --target cursor" });
-      }
-      targets.push({ target: "cursor", configured: referencesBridge && bridgeExists });
-    }
-  }
-  if (codexEnabled) {
-    const codexHooks = path.join(rootDir, ".codex", "hooks.json");
-    const configured = existsSync(codexHooks);
-    if (!configured) {
-      addFinding(findings, "error", "adapters", "config 启用了 Codex adapter 但 .codex/hooks.json 不存在，Codex 治理未配置", { target: "codex", code: "codex_hook_not_configured", nextAction: "node ./bin/wildarrange.mjs adapter install --target codex" });
-      targets.push({ target: "codex", configured: false, activation: "not_configured" });
-    } else {
-      const activation = await inspectCodexHookExecution(rootDir, codexHooks);
-      if (activation.status !== "execution_observed") {
-        addFinding(findings, "error", "adapters", "Codex Hook 文件已生成，但没有当前 Hook 配置被宿主实际执行的回执；不能认定治理已生效", {
-          target: "codex",
-          code: "codex_hook_activation_unverified",
-          nextAction: "Codex 桌面版请打开设置 > Hooks，审查、信任并启用本项目 Hook；Codex CLI 请执行 /hooks。然后新开或继续一个任务，再运行 wildarrange doctor",
-        });
-      }
-      targets.push({ target: "codex", configured: true, activation: activation.status, lastObservedAt: activation.lastObservedAt, lastEvent: activation.lastEvent, sessionId: activation.sessionId });
-    }
-  }
-  if (kimiEnabled) {
-    const kimiBridge = resolveWildArrangePath(rootDir, "adapters", "kimi", "plugin", "hooks", "wildarrange-hook-bridge.mjs");
-    const configured = existsSync(kimiBridge);
-    if (!configured) {
-      addFinding(findings, "warn", "adapters", "config 启用了 Kimi adapter 但 plugin bridge 不存在", { target: "kimi", nextAction: "node ./bin/wildarrange.mjs adapter install --target kimi" });
-    }
-    targets.push({ target: "kimi", configured });
-  }
-
-  // 陈旧规则检测：规则文件里指向不存在绝对路径的命令（如换机/换用户名后的
-  // 残留）会静默失效——注入给每个 Agent 的治理规则指向一条跑不通的路径。
-  const rulesDir = path.join(rootDir, ".cursor", "rules");
-  const staleRules = [];
-  const legacyManagedRules = [];
-  if (existsSync(rulesDir)) {
-    const { readdir } = await import("node:fs/promises");
-    for (const entry of await readdir(rulesDir)) {
-      if (!entry.endsWith(".mdc")) continue;
-      const content = await readFile(path.join(rulesDir, entry), "utf8").catch(() => "");
-      for (const match of content.matchAll(/\/Users\/[^\s"')`]+/g)) {
-        if (!existsSync(match[0])) staleRules.push({ file: `.cursor/rules/${entry}`, missingPath: match[0] });
-      }
-    }
-  }
-  for (const stale of staleRules) {
-    addFinding(findings, "warn", "adapters", `${stale.file} 引用了不存在的路径 ${stale.missingPath}（规则会静默失效）`, { target: "cursor", nextAction: "修正为相对路径或当前机器的有效路径" });
-  }
-  // 旧版受管规则文件名（已退役），仍存在于 rules 目录时提示重新安装。
-  const legacyCursorRule = path.join(rulesDir, "wildarrangeflow.mdc");
-  if (existsSync(legacyCursorRule)) {
-    const relativePath = normalizeRelativePath(path.relative(rootDir, legacyCursorRule));
-    legacyManagedRules.push({ path: relativePath });
-    addFinding(findings, "warn", "adapters", `legacy managed Cursor rule ${relativePath} is still active and may be injected alongside wildarrange.mdc`, {
-      target: "cursor",
-      path: relativePath,
-      nextAction: "node ./bin/wildarrange.mjs adapter install --target cursor",
+  const enabled = {
+    cursor: config.adapters?.cursor?.enabled === true,
+    codex: config.adapters?.codex?.enabled === true,
+    kimi: config.adapters?.kimi?.enabled === true,
+  };
+  const installReport = await loadAdapterReport(rootDir);
+  // 以 install-report 里实际生成过的宿主为准：没装的宿主不是缺陷，不能报 error
+  const installedTargets = Object.keys(installReport?.targets || {});
+  const enabledTargets = Object.keys(enabled).filter((target) => enabled[target] && installedTargets.includes(target));
+  if (installedTargets.length === 0) {
+    addFinding(findings, "error", "adapters", "外置治理已连接，但尚未生成任何宿主的零项目文件 Adapter 包，Hook 不会生效", {
+      code: "external_adapter_not_prepared",
+      nextAction: "运行 wildarrange adapter install --target codex|cursor|kimi|all",
     });
   }
-
-  const unconfigured = targets.filter((target) => !target.configured).length;
-  const activationUnverified = targets.filter((target) => target.target === "codex" && target.activation !== "execution_observed").length;
+  for (const target of enabledTargets) {
+    const prepared = installReport?.targets?.[target] || null;
+    const activation = prepared?.activationId
+      ? await inspectExternalHookExecution(rootDir, target, prepared.activationId)
+      : { status: "not_prepared", lastObservedAt: null, lastEvent: null, sessionId: null };
+    if (activation.status !== "execution_observed") {
+      addFinding(findings, "error", "adapters", `${target} 外置 Adapter 已生成，但尚无宿主真实生命周期回执；不能认定治理已激活`, {
+        target,
+        code: "external_adapter_activation_unverified",
+        nextAction: (prepared.nextActions || []).join("；"),
+      });
+    }
+    // 回执在但 Hook 配置文件/用户级条目已被改动或删除时，不能继续当作已激活。
+    const integrity = prepared ? await inspectAdapterIntegrity(target, prepared) : { status: "not_prepared", issues: [] };
+    if (integrity.status === "modified") {
+      addFinding(findings, "error", "adapters", `${target} 外置 Adapter 的 Hook 配置与安装时的 digest 不一致：${integrity.issues.map((issue) => `${issue.file}（${issue.problem}）`).join("；")}`, {
+        target,
+        code: "external_adapter_config_modified",
+        nextAction: `重新运行 wildarrange adapter install --target ${target}${target === "cursor" ? " 与 adapter activate --target cursor" : ""}`,
+      });
+    }
+    targets.push({
+      target,
+      integrity: integrity.status,
+      configured: Boolean(prepared),
+      prepared: Boolean(prepared),
+      activation: activation.status,
+      activationId: prepared?.activationId || null,
+      lastObservedAt: activation.lastObservedAt,
+      lastEvent: activation.lastEvent,
+      sessionId: activation.sessionId,
+    });
+  }
+  const allObserved = targets.every((entry) => entry.activation === "execution_observed");
   return {
-    status: activationUnverified > 0 ? "error" : (unconfigured > 0 || staleRules.length > 0 || legacyManagedRules.length > 0 ? "warn" : "ok"),
+    status: installedTargets.length === 0 ? "error" : enabledTargets.length === 0 ? "skipped" : (allObserved ? "ok" : "error"),
+    reason: enabledTargets.length > 0
+      ? (allObserved ? "all enabled external adapters observed" : "external adapter lifecycle receipt missing")
+      : (installedTargets.length === 0 ? "no external adapter installed" : "no installed host adapters enabled"),
     targets,
-    staleRules,
-    legacyManagedRules,
-  };
-}
-
-/** 从 ledger 查找与当前 Codex hooks.json digest 匹配的 hook_injection_run 回执。 */
-async function inspectCodexHookExecution(rootDir, hooksPath) {
-  const currentDigest = hashContent(await readFile(hooksPath, "utf8"));
-  const entries = await readVerifiedLedgerEntries(rootDir);
-  const latest = entries
-    .filter((entry) => entry.type === "hook_injection_run"
-      && entry.hostAdapter === "codex"
-      && entry.hookConfigDigest === currentDigest)
-    .at(-1);
-  if (!latest) return { status: "unverified", lastObservedAt: null, lastEvent: null, sessionId: null };
-  return {
-    status: "execution_observed",
-    lastObservedAt: latest.at,
-    lastEvent: latest.event || null,
-    sessionId: latest.sessionId || null,
   };
 }
 
@@ -550,9 +454,9 @@ function renderDoctorMarkdown(report) {
   lines.push("", "## Sections", "");
   lines.push(`- Config source: ${sectionValue(report.sections.config, (s) => s.sourcePath)}`);
   lines.push(`- Gate arming: ${sectionValue(report.sections.gateArming, (s) => s.armed ? "armed" : `NOT ARMED (${s.issueCount} issue(s))`)}`);
-  lines.push(`- Adapters: ${sectionValue(report.sections.adapters, (s) => s.status === "skipped" ? `skipped (${s.reason})` : `${(s.targets || []).map(renderAdapterTarget).join(", ") || "none enabled"}${(s.staleRules || []).length ? `, stale rules: ${s.staleRules.length}` : ""}`)}`);
+  lines.push(`- Adapters: ${sectionValue(report.sections.adapters, (s) => s.status === "skipped" ? `skipped (${s.reason})` : `${(s.targets || []).map(renderAdapterTarget).join(", ") || "none enabled"}`)}`);
   lines.push(`- Completed tasks audited: ${sectionValue(report.sections.completionAudit, (s) => s.checkedCompleted)}`);
-  lines.push(`- Ledger entries checked: ${sectionValue(report.sections.ledger, (s) => `${s.checked} (legacy: ${s.legacy})`)}`);
+  lines.push(`- Ledger entries checked: ${sectionValue(report.sections.ledger, (s) => s.checked)}`);
   lines.push(`- Ledger vs backup: ${sectionValue(report.sections.ledgerBackupCrossCheck, (s) => s.checked ? `${s.backupId}: ${s.prefixIntact ? "history intact" : "HISTORY DIVERGED"}` : `not checked (${s.reason})`)}`);
   lines.push(`- Config baseline: ${sectionValue(report.sections.configBaseline, (s) => s.status)}`);
   lines.push(`- Runtime state: ${sectionValue(report.sections.runtimeState, (s) => s.status)}`);

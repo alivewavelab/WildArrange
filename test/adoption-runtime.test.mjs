@@ -13,11 +13,11 @@
 
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
+import { applyApprovedCards } from "../src/orchestration/adoption-apply.mjs";
 import {
-  applyApprovedCards,
   cancelAdoption,
   decideAdoptionCard,
   loadAdoptionViewModel,
@@ -36,20 +36,13 @@ import {
   writeRecoveryManifest,
 } from "../src/infra/recovery-transaction.mjs";
 import { runCommandFile } from "../src/infra/command-runner.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { hashContent, readJson, resolveWildArrangePath, writeJsonAtomic } from "../src/infra/runtime-store.mjs";
-import { fingerprintCard } from "../src/infra/verification-cards.mjs";
-import { digestCanonical, gitBlobDigestEquals, readVerificationInventory } from "../src/infra/verification-registry.mjs";
+import { digestCanonical, fingerprintCard, gitBlobDigestEquals, readVerificationInventory } from "../src/infra/verification-registry.mjs";
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
+// 外置模式：项目根放业务文件，登记册等治理产物落在治理仓（第二个参数 gov）。
 async function withTempDir(fn) {
-  const baseDir = path.join(process.cwd(), ".tmp");
-  await mkdir(baseDir, { recursive: true });
-  const dir = await mkdtemp(path.join(baseDir, "wildarrange-adoption-"));
-  try {
-    await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+  await withExternalProject(({ projectRoot, governanceRoot }) => fn(projectRoot, governanceRoot));
 }
 
 async function git(dir, args) {
@@ -59,7 +52,6 @@ async function git(dir, args) {
 }
 
 async function seedProject(dir) {
-  await initRuntime(dir);
   await writeFile(path.join(dir, "package.json"), JSON.stringify({
     name: "legacy",
     scripts: { test: "node --version", lint: "node --version" },
@@ -82,9 +74,6 @@ async function decideAllCards(dir, sessionId, cards, approvedIds) {
 }
 
 async function initGitRepo(dir, extraPaths = []) {
-  await git(dir, ["init"]);
-  await git(dir, ["config", "user.email", "wa@example.com"]);
-  await git(dir, ["config", "user.name", "WildArrange"]);
   await git(dir, ["config", "core.autocrlf", "false"]);
   const addPaths = ["package.json", "business.txt", "test", ...extraPaths].filter((item) => existsSync(path.join(dir, item)));
   await git(dir, ["add", ...addPaths]);
@@ -96,7 +85,7 @@ function locatorRegistryPath(locatorCard) {
 }
 
 test("adoption start is read-only on business files and rejects a second start", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const first = await startAdoption(dir, { serve: false });
     assert.equal(first.ok, true);
@@ -112,9 +101,9 @@ test("adoption start is read-only on business files and rejects a second start",
 });
 
 test("a mistaken approval can return to pending before apply with no business write", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
-    const configPath = path.join(dir, "wildarrange.config.json");
+    const configPath = path.join(gov, "policy", "wildarrange.config.json");
     const existedBefore = existsSync(configPath);
     const before = existedBefore ? await readFile(configPath, "utf8") : null;
     const started = await startAdoption(dir, { serve: false });
@@ -144,7 +133,7 @@ test("a mistaken approval can return to pending before apply with no business wr
 });
 
 test("adoption decide and apply only touch approved locator, then wait for commit A", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const started = await startAdoption(dir, { serve: false });
     const locatorCard = started.cards.find((card) => card.asset === "config_locator");
@@ -156,22 +145,16 @@ test("adoption decide and apply only touch approved locator, then wait for commi
     });
     assert.equal(applied.ok, true);
     assert.equal(applied.session.status, "awaiting_registry_commit");
-    const config = JSON.parse(await readFile(path.join(dir, "wildarrange.config.json"), "utf8"));
+    const config = JSON.parse(await readFile(path.join(gov, "policy", "wildarrange.config.json"), "utf8"));
     assert.ok(config.verificationGovernance.registryPath);
     assert.equal(await readFile(path.join(dir, "business.txt"), "utf8"), "keep\n");
   });
 });
 
 test("CODE-009: commit A/B require the generated blob, not a same-name older file", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
-    await mkdir(path.join(dir, "docs"), { recursive: true });
-    await git(dir, ["init"]);
-    await git(dir, ["config", "user.email", "wa@example.com"]);
-    await git(dir, ["config", "user.name", "WildArrange"]);
-    await git(dir, ["config", "core.autocrlf", "false"]);
-    await git(dir, ["add", "package.json", "business.txt", "test"]);
-    await git(dir, ["commit", "-m", "seed"]);
+    await initGitRepo(dir);
     const started = await startAdoption(dir, { serve: false });
     const locatorCard = started.cards.find((card) => card.asset === "config_locator");
     assert.ok(locatorCard);
@@ -182,37 +165,37 @@ test("CODE-009: commit A/B require the generated blob, not a same-name older fil
     });
     assert.equal(applied.ok, true);
     assert.equal(applied.session.status, "awaiting_registry_commit");
-    const locator = JSON.parse(await readFile(path.join(dir, "wildarrange.config.json"), "utf8")).verificationGovernance;
+    const locator = JSON.parse(await readFile(path.join(gov, "policy", "wildarrange.config.json"), "utf8")).verificationGovernance;
     const registryPath = locator.registryPath;
-    const generatedBytes = await readFile(path.join(dir, registryPath), "utf8");
+    const generatedBytes = await readFile(path.join(gov, registryPath), "utf8");
     const generatedDigest = hashContent(generatedBytes);
     assert.equal(applied.session.registryDigest, generatedDigest);
 
-    await writeFile(path.join(dir, registryPath), "{\"kind\":\"stale-same-name\"}\n");
-    await git(dir, ["add", registryPath, "wildarrange.config.json"]);
-    await git(dir, ["commit", "-m", "wrong registry blob"]);
-    const wrongHead = (await git(dir, ["rev-parse", "HEAD"])).stdout.trim();
-    assert.equal(await gitBlobDigestEquals(dir, registryPath, wrongHead, generatedDigest), false);
+    await writeFile(path.join(gov, registryPath), "{\"kind\":\"stale-same-name\"}\n");
+    await git(gov, ["add", registryPath, "policy/wildarrange.config.json"]);
+    await git(gov, ["commit", "-m", "wrong registry blob"]);
+    const wrongHead = (await git(gov, ["rev-parse", "HEAD"])).stdout.trim();
+    assert.equal(await gitBlobDigestEquals(gov, registryPath, wrongHead, generatedDigest), false);
     const blocked = await resumeAdoption(dir, { serve: false, sessionId: started.session.sessionId });
     assert.equal(blocked.session.status, "awaiting_registry_commit");
     assert.equal(blocked.session.commitDiagnostics.registry, "mismatch");
     assert.match(blocked.session.nextAction, /registry/);
 
-    await writeFile(path.join(dir, registryPath), generatedBytes);
-    await git(dir, ["add", registryPath]);
-    await git(dir, ["commit", "-m", "commit A generated registry"]);
-    const commitA = (await git(dir, ["rev-parse", "HEAD"])).stdout.trim();
-    assert.equal(await gitBlobDigestEquals(dir, registryPath, commitA, generatedDigest), true);
+    await writeFile(path.join(gov, registryPath), generatedBytes);
+    await git(gov, ["add", registryPath]);
+    await git(gov, ["commit", "-m", "commit A generated registry"]);
+    const commitA = (await git(gov, ["rev-parse", "HEAD"])).stdout.trim();
+    assert.equal(await gitBlobDigestEquals(gov, registryPath, commitA, generatedDigest), true);
     const afterA = await resumeAdoption(dir, { serve: false, sessionId: started.session.sessionId });
     assert.equal(afterA.session.status, "awaiting_final_commit");
     assert.equal(afterA.session.baselineRef, commitA);
-    assert.ok(existsSync(path.join(dir, locator.bootstrapPath)));
-    assert.ok(existsSync(path.join(dir, locator.inventoryPath)));
+    assert.ok(existsSync(path.join(gov, locator.bootstrapPath)));
+    assert.ok(existsSync(path.join(gov, locator.inventoryPath)));
   });
 });
 
 test("adoption resume is idempotent and cancel is allowed before recovery_required", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const started = await startAdoption(dir, { serve: false });
     const first = await resumeAdoption(dir, { serve: false, sessionId: started.session.sessionId });
@@ -226,7 +209,7 @@ test("adoption resume is idempotent and cancel is allowed before recovery_requir
 });
 
 test("maintenance marker blocks ordinary task lock immediately", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     await writeMaintenanceMarker(dir, { sessionId: "adopt_lock", status: "applying" });
     await assert.rejects(() => withTaskStateLock(dir, "run-next-task", async () => "nope"), /接管维护中/);
@@ -236,13 +219,13 @@ test("maintenance marker blocks ordinary task lock immediately", async () => {
 });
 
 test("stale fingerprint refuses apply", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const started = await startAdoption(dir, { serve: false });
     const card = started.cards[0];
     await decideAllCards(dir, started.session.sessionId, started.cards, [card.id]);
     card.purpose = "mutated after approval";
-    const filesDir = path.join(dir, ".wildarrange", "adoption", started.session.sessionId);
+    const filesDir = resolveWildArrangePath(dir, "adoption", started.session.sessionId);
     const cardsPath = path.join(filesDir, "cards.json");
     const current = JSON.parse(await readFile(cardsPath, "utf8"));
     current.cards[0].purpose = "mutated after approval";
@@ -261,13 +244,13 @@ test("stale fingerprint refuses apply", async () => {
 });
 
 test("CODE-004: approve writes live snapshot and apply stales after the real target file changes", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const started = await startAdoption(dir, { serve: false });
     const card = started.cards.find((item) => item.path && existsSync(path.join(dir, item.path)));
     assert.ok(card, "scan should emit at least one card with an existing target file");
     await decideAllCards(dir, started.session.sessionId, started.cards, [card.id]);
-    const filesDir = path.join(dir, ".wildarrange", "adoption", started.session.sessionId);
+    const filesDir = resolveWildArrangePath(dir, "adoption", started.session.sessionId);
     const approvals = JSON.parse(await readFile(path.join(filesDir, "approvals.json"), "utf8"));
     const snapshot = approvals.approvals[card.id].snapshot;
     assert.ok(snapshot, "approved card must persist a live snapshot");
@@ -326,7 +309,7 @@ test("apply stales with zero writes after package, CI, hook or test consumer byt
   ];
 
   for (const mutation of mutations) {
-    await withTempDir(async (dir) => {
+    await withTempDir(async (dir, gov) => {
       await seedProject(dir);
       await mkdir(path.join(dir, ".github", "workflows"), { recursive: true });
       await mkdir(path.join(dir, ".cursor"), { recursive: true });
@@ -355,7 +338,7 @@ test("apply stales with zero writes after package, CI, hook or test consumer byt
       assert.equal(result.status, "stale", `${mutation.name} must be stale`);
       assert.equal(await readFile(path.join(dir, "business.txt"), "utf8"), before["business.txt"]);
       assert.match(JSON.stringify(JSON.parse(await readFile(path.join(dir, "package.json"), "utf8")).scripts), /verify/, `${mutation.name} must not drop scripts`);
-      const txnManifest = path.join(dir, ".wildarrange", "adoption", started.session.sessionId, "transactions", mergeCard.id, "manifest.json");
+      const txnManifest = resolveWildArrangePath(dir, "adoption", started.session.sessionId, "transactions", mergeCard.id, "manifest.json");
       assert.equal(existsSync(txnManifest), false, `${mutation.name} must not write a transaction`);
       for (const rel of mutation.unchanged) {
         assert.notEqual(await readFile(path.join(dir, rel), "utf8"), before[rel], `${mutation.name} fixture must actually change ${rel}`);
@@ -365,12 +348,12 @@ test("apply stales with zero writes after package, CI, hook or test consumer byt
 });
 
 test("CODE-006: resumeAdoption completes a prepared card and keeps the original preimage", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const started = await startAdoption(dir, { serve: false });
     const locatorCard = started.cards.find((card) => card.asset === "config_locator") || started.cards[0];
     await decideAllCards(dir, started.session.sessionId, started.cards, [locatorCard.id]);
-    const sessionDir = path.join(dir, ".wildarrange", "adoption", started.session.sessionId);
+    const sessionDir = resolveWildArrangePath(dir, "adoption", started.session.sessionId);
     const txnDir = adoptionTransactionDir(dir, started.session.sessionId, locatorCard.id);
     const preimagePath = path.join(txnDir, "preimage", "notes.txt");
     await mkdir(path.dirname(preimagePath), { recursive: true });
@@ -392,11 +375,11 @@ test("CODE-006: resumeAdoption completes a prepared card and keeps the original 
 });
 
 test("CODE-006: reconcile recovery_required keeps the maintenance marker", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const started = await startAdoption(dir, { serve: false });
     const card = started.cards[0];
-    const sessionDir = path.join(dir, ".wildarrange", "adoption", started.session.sessionId);
+    const sessionDir = resolveWildArrangePath(dir, "adoption", started.session.sessionId);
     const session = JSON.parse(await readFile(path.join(sessionDir, "session.json"), "utf8"));
     session.status = "applying";
     await writeFile(path.join(sessionDir, "session.json"), `${JSON.stringify(session, null, 2)}\n`);
@@ -417,7 +400,7 @@ test("CODE-006: reconcile recovery_required keeps the maintenance marker", async
 });
 
 test("CODE-007: concurrent startAdoption creates only one session", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const [first, second] = await Promise.all([
       startAdoption(dir, { serve: false }),
@@ -427,17 +410,17 @@ test("CODE-007: concurrent startAdoption creates only one session", async () => 
     const blocked = [first, second].filter((item) => item.status === "session_exists");
     assert.equal(winners.length, 1);
     assert.equal(blocked.length, 1);
-    const entries = await readdir(path.join(dir, ".wildarrange", "adoption"), { withFileTypes: true });
+    const entries = await readdir(resolveWildArrangePath(dir, "adoption"), { withFileTypes: true });
     const sessionDirs = entries.filter((entry) => entry.isDirectory());
     assert.equal(sessionDirs.length, 1);
   });
 });
 
 test("CODE-007: cancel during applying fails and keeps the maintenance marker", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const started = await startAdoption(dir, { serve: false });
-    const sessionDir = path.join(dir, ".wildarrange", "adoption", started.session.sessionId);
+    const sessionDir = resolveWildArrangePath(dir, "adoption", started.session.sessionId);
     const session = JSON.parse(await readFile(path.join(sessionDir, "session.json"), "utf8"));
     session.status = "applying";
     await writeFile(path.join(sessionDir, "session.json"), `${JSON.stringify(session, null, 2)}\n`);
@@ -455,7 +438,7 @@ test("CODE-007: cancel during applying fails and keeps the maintenance marker", 
 });
 
 test("CODE-007: ordinary task lock rechecks maintenance marker after acquiring lock", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     let entered = false;
     const lockPath = resolveWildArrangePath(dir, "team", "tasks.lock");
@@ -484,12 +467,12 @@ test("CODE-007: ordinary task lock rechecks maintenance marker after acquiring l
 });
 
 test("apply marks stale when approved target file changes and writes nothing", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const started = await startAdoption(dir, { serve: false });
     const locatorCard = started.cards.find((card) => card.asset === "config_locator") || started.cards[0];
     await decideAllCards(dir, started.session.sessionId, started.cards, [locatorCard.id]);
-    const targetPath = path.join(dir, locatorCard.path || "wildarrange.config.json");
+    const targetPath = path.join(gov, locatorCard.path || "policy/wildarrange.config.json");
     await writeFile(targetPath, JSON.stringify({ mutatedAfterApproval: true, keep: "original-target" }, null, 2));
     const result = await applyApprovedCards(dir, {
       sessionId: started.session.sessionId,
@@ -504,7 +487,7 @@ test("apply marks stale when approved target file changes and writes nothing", a
 });
 
 test("concurrent start allows only one reviewing session", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const results = await Promise.all([
       startAdoption(dir, { serve: false }),
@@ -516,7 +499,7 @@ test("concurrent start allows only one reviewing session", async () => {
     assert.equal(succeeded[0].session.status, "reviewing");
     assert.equal(rejected.length, 1);
     assert.equal(rejected[0].status, "session_exists");
-    const adoptionRoot = path.join(dir, ".wildarrange", "adoption");
+    const adoptionRoot = resolveWildArrangePath(dir, "adoption");
     const dirs = (await readdir(adoptionRoot, { withFileTypes: true })).filter((entry) => entry.isDirectory());
     const reviewing = [];
     for (const entry of dirs) {
@@ -528,10 +511,10 @@ test("concurrent start allows only one reviewing session", async () => {
 });
 
 test("cancel during applying fails and keeps the maintenance marker", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const started = await startAdoption(dir, { serve: false });
-    const sessionPath = path.join(dir, ".wildarrange", "adoption", started.session.sessionId, "session.json");
+    const sessionPath = resolveWildArrangePath(dir, "adoption", started.session.sessionId, "session.json");
     const session = JSON.parse(await readFile(sessionPath, "utf8"));
     session.status = "applying";
     session.nextAction = "逐卡施工中";
@@ -550,7 +533,7 @@ test("cancel during applying fails and keeps the maintenance marker", async () =
 });
 
 test("prepared transaction resume/apply does not recapture the original preimage", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const started = await startAdoption(dir, { serve: false });
     const locatorCard = started.cards.find((card) => card.asset === "config_locator") || started.cards[0];
@@ -590,7 +573,7 @@ test("prepared transaction resume/apply does not recapture the original preimage
 });
 
 test("task lock re-checks maintenance marker after lock acquire", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     await writeMaintenanceMarker(dir, { sessionId: "adopt_lock_after", status: "applying" });
     await assert.rejects(() => withTaskStateLock(dir, "run-next", async () => "nope"), /接管维护中/);
@@ -598,12 +581,13 @@ test("task lock re-checks maintenance marker after lock acquire", async () => {
 });
 
 test("apply rejects pending cards with zero business writes", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const started = await startAdoption(dir, { serve: false });
     const locatorCard = started.cards.find((card) => card.asset === "config_locator");
     assert.ok(locatorCard);
     const registryPath = locatorRegistryPath(locatorCard);
+    const registryBefore = await readFile(path.join(gov, registryPath), "utf8");
     const result = await applyApprovedCards(dir, {
       sessionId: started.session.sessionId,
       cardId: locatorCard.id,
@@ -613,19 +597,21 @@ test("apply rejects pending cards with zero business writes", async () => {
     assert.ok(Array.isArray(result.pending));
     assert.ok(result.pending.length > 0);
     assert.match(String(result.nextAction || ""), /先判完/);
-    assert.equal(existsSync(path.join(dir, registryPath)), false);
-    assert.equal(existsSync(path.join(dir, "wildarrange.config.json")), false);
+    // 外置治理仓自带空登记册：未批准时它必须保持原样，locator 配置文件也不得出现
+    assert.equal(await readFile(path.join(gov, registryPath), "utf8"), registryBefore);
+    assert.equal(existsSync(path.join(gov, "policy", "wildarrange.config.json")), false);
     assert.equal(await readMaintenanceMarker(dir), null);
     assert.equal(await readFile(path.join(dir, "business.txt"), "utf8"), "keep\n");
   });
 });
 
 test("apply rejects cardIds that are not exactly one", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const started = await startAdoption(dir, { serve: false });
     const locatorCard = started.cards.find((card) => card.asset === "config_locator") || started.cards[0];
     const other = started.cards.find((card) => card.id !== locatorCard.id) || started.cards[0];
+    const registryBefore = await readFile(path.join(gov, locatorRegistryPath(locatorCard)), "utf8");
     await decideAllCards(dir, started.session.sessionId, started.cards, [locatorCard.id]);
     const result = await applyApprovedCards(dir, {
       sessionId: started.session.sessionId,
@@ -633,18 +619,19 @@ test("apply rejects cardIds that are not exactly one", async () => {
     });
     assert.equal(result.ok, false);
     assert.equal(result.status, "single_card_required");
-    assert.equal(existsSync(path.join(dir, locatorRegistryPath(locatorCard))), false);
+    assert.equal(await readFile(path.join(gov, locatorRegistryPath(locatorCard)), "utf8"), registryBefore);
     assert.equal(await readMaintenanceMarker(dir), null);
   });
 });
 
 test("apply one approved card does not generate; last card generates registry", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const started = await startAdoption(dir, { serve: false });
     const locatorCard = started.cards.find((card) => card.asset === "config_locator");
     const second = started.cards.find((card) => card.id !== locatorCard?.id && card.action !== "delete");
     assert.ok(locatorCard && second);
+    const registryBefore = await readFile(path.join(gov, locatorRegistryPath(locatorCard)), "utf8");
     await decideAllCards(dir, started.session.sessionId, started.cards, [locatorCard.id, second.id]);
     const first = await applyApprovedCards(dir, {
       sessionId: started.session.sessionId,
@@ -653,8 +640,8 @@ test("apply one approved card does not generate; last card generates registry", 
     assert.equal(first.ok, true);
     assert.equal(first.session.status, "ready");
     assert.match(String(first.session.nextAction || first.nextAction || ""), new RegExp(second.id));
-    assert.equal(existsSync(path.join(dir, locatorRegistryPath(locatorCard))), false);
-    const locatorApplied = JSON.parse(await readFile(path.join(dir, ".wildarrange", "adoption", started.session.sessionId, "cards.json"), "utf8"));
+    assert.equal(await readFile(path.join(gov, locatorRegistryPath(locatorCard)), "utf8"), registryBefore, "registry is only generated by the last card");
+    const locatorApplied = JSON.parse(await readFile(resolveWildArrangePath(dir, "adoption", started.session.sessionId, "cards.json"), "utf8"));
     const appliedLocator = locatorApplied.cards.find((card) => card.id === locatorCard.id);
     const pendingSecond = locatorApplied.cards.find((card) => card.id === second.id);
     assert.ok(appliedLocator.appliedAt);
@@ -665,17 +652,19 @@ test("apply one approved card does not generate; last card generates registry", 
     });
     assert.equal(last.ok, true);
     assert.equal(last.session.status, "awaiting_registry_commit");
-    assert.ok(existsSync(path.join(dir, locatorRegistryPath(locatorCard))));
+    const registryAfter = await readFile(path.join(gov, locatorRegistryPath(locatorCard)), "utf8");
+    assert.notEqual(registryAfter, registryBefore);
+    assert.equal(last.session.registryDigest, hashContent(registryAfter));
   });
 });
 
 test("resumeAdoption completes a prepared transaction without rewriting session.json first", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const started = await startAdoption(dir, { serve: false });
     const locatorCard = started.cards.find((card) => card.asset === "config_locator") || started.cards[0];
     await decideAllCards(dir, started.session.sessionId, started.cards, [locatorCard.id]);
-    const sessionPath = path.join(dir, ".wildarrange", "adoption", started.session.sessionId, "session.json");
+    const sessionPath = resolveWildArrangePath(dir, "adoption", started.session.sessionId, "session.json");
     const sessionBefore = await readFile(sessionPath, "utf8");
     const txnDir = adoptionTransactionDir(dir, started.session.sessionId, locatorCard.id);
     const guardPath = path.join(txnDir, "preimage", "guard.txt");
@@ -697,7 +686,7 @@ test("resumeAdoption completes a prepared transaction without rewriting session.
 });
 
 test("commit A stays awaiting_registry_commit when locator is not in HEAD", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     await initGitRepo(dir);
     const started = await startAdoption(dir, { serve: false });
@@ -709,9 +698,9 @@ test("commit A stays awaiting_registry_commit when locator is not in HEAD", asyn
       cardId: locatorCard.id,
     });
     assert.equal(applied.session.status, "awaiting_registry_commit");
-    const locator = JSON.parse(await readFile(path.join(dir, "wildarrange.config.json"), "utf8")).verificationGovernance;
-    await git(dir, ["add", locator.registryPath]);
-    await git(dir, ["commit", "-m", "registry only"]);
+    const locator = JSON.parse(await readFile(path.join(gov, "policy", "wildarrange.config.json"), "utf8")).verificationGovernance;
+    await git(gov, ["add", locator.registryPath]);
+    await git(gov, ["commit", "-m", "registry only"]);
     const blocked = await resumeAdoption(dir, { serve: false, sessionId: started.session.sessionId });
     assert.equal(blocked.session.status, "awaiting_registry_commit");
     assert.equal(blocked.session.commitDiagnostics.locator, "mismatch");
@@ -720,7 +709,7 @@ test("commit A stays awaiting_registry_commit when locator is not in HEAD", asyn
 });
 
 test("approved archive missing from HEAD cannot finalize", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     await mkdir(path.join(dir, "docs"), { recursive: true });
     await writeFile(path.join(dir, "README.md"), "# current readme\n");
@@ -743,16 +732,16 @@ test("approved archive missing from HEAD cannot finalize", async () => {
     });
     assert.equal(second.ok, true);
     assert.equal(second.session.status, "awaiting_registry_commit");
-    const locator = JSON.parse(await readFile(path.join(dir, "wildarrange.config.json"), "utf8")).verificationGovernance;
-    await git(dir, ["add", locator.registryPath, "wildarrange.config.json"]);
-    await git(dir, ["commit", "-m", "commit A without archive"]);
+    const locator = JSON.parse(await readFile(path.join(gov, "policy", "wildarrange.config.json"), "utf8")).verificationGovernance;
+    await git(gov, ["add", locator.registryPath, "policy/wildarrange.config.json"]);
+    await git(gov, ["commit", "-m", "commit A without archive"]);
     const afterA = await resumeAdoption(dir, { serve: false, sessionId: started.session.sessionId });
     assert.equal(afterA.session.status, "awaiting_registry_commit");
     assert.equal(afterA.session.commitDiagnostics.appliedEffects, "mismatch");
     assert.notEqual(afterA.session.status, "finalized");
-    if (existsSync(path.join(dir, locator.bootstrapPath))) {
-      await git(dir, ["add", locator.bootstrapPath, locator.inventoryPath]);
-      await git(dir, ["commit", "-m", "commit B without archive"]);
+    if (existsSync(path.join(gov, locator.bootstrapPath))) {
+      await git(gov, ["add", locator.bootstrapPath, locator.inventoryPath]);
+      await git(gov, ["commit", "-m", "commit B without archive"]);
       const afterB = await resumeAdoption(dir, { serve: false, sessionId: started.session.sessionId });
       assert.notEqual(afterB.session.status, "finalized");
       assert.equal(afterB.session.status, "awaiting_registry_commit");
@@ -761,7 +750,7 @@ test("approved archive missing from HEAD cannot finalize", async () => {
 });
 
 test("generated Inventory digest matches digestCanonical without digest", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     await initGitRepo(dir);
     const started = await startAdoption(dir, { serve: false });
@@ -773,12 +762,12 @@ test("generated Inventory digest matches digestCanonical without digest", async 
       cardId: locatorCard.id,
     });
     assert.equal(applied.session.status, "awaiting_registry_commit");
-    const locator = JSON.parse(await readFile(path.join(dir, "wildarrange.config.json"), "utf8")).verificationGovernance;
-    await git(dir, ["add", locator.registryPath, "wildarrange.config.json"]);
-    await git(dir, ["commit", "-m", "commit A"]);
+    const locator = JSON.parse(await readFile(path.join(gov, "policy", "wildarrange.config.json"), "utf8")).verificationGovernance;
+    await git(gov, ["add", locator.registryPath, "policy/wildarrange.config.json"]);
+    await git(gov, ["commit", "-m", "commit A"]);
     const afterA = await resumeAdoption(dir, { serve: false, sessionId: started.session.sessionId });
     assert.equal(afterA.session.status, "awaiting_final_commit");
-    const inventory = await readVerificationInventory(path.join(dir, locator.inventoryPath));
+    const inventory = await readVerificationInventory(path.join(gov, locator.inventoryPath));
     const { digest, ...withoutDigest } = inventory;
     assert.equal(digest, digestCanonical(withoutDigest));
     assert.ok(inventory.declaredInputFingerprint);
@@ -786,10 +775,11 @@ test("generated Inventory digest matches digestCanonical without digest", async 
 });
 
 test("artifact name collision pauses adoption, preserves legacy bytes and releases maintenance", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const legacyBytes = "{\"owner\":\"legacy-project\"}\n";
-    await writeFile(path.join(dir, "verification-registry.json"), legacyBytes);
+    // 治理仓里已有非空的旧登记册：自动生成不得覆盖它
+    await writeFile(path.join(gov, "verification", "registry.json"), legacyBytes);
     const started = await startAdoption(dir, { serve: false });
     const locatorCard = started.cards.find((card) => card.asset === "config_locator");
     assert.ok(locatorCard);
@@ -803,15 +793,15 @@ test("artifact name collision pauses adoption, preserves legacy bytes and releas
     assert.equal(result.ok, false);
     assert.equal(result.status, "generate_failed");
     assert.equal(result.error.code, "artifact_conflict");
-    assert.match(result.nextAction, /verification-registry\.json/);
+    assert.match(result.nextAction, /registry\.json/);
     assert.equal(result.session.status, "needs_review");
-    assert.equal(await readFile(path.join(dir, "verification-registry.json"), "utf8"), legacyBytes);
+    assert.equal(await readFile(path.join(gov, "verification", "registry.json"), "utf8"), legacyBytes);
     assert.equal(await readMaintenanceMarker(dir), null);
   });
 });
 
 test("handoff directory conflict stays retryable and never throws raw EISDIR", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     await initGitRepo(dir);
     const started = await startAdoption(dir, { serve: false });
@@ -822,23 +812,23 @@ test("handoff directory conflict stays retryable and never throws raw EISDIR", a
       sessionId: started.session.sessionId,
       cardId: locatorCard.id,
     });
-    const locator = JSON.parse(await readFile(path.join(dir, "wildarrange.config.json"), "utf8")).verificationGovernance;
-    await git(dir, ["add", locator.registryPath, "wildarrange.config.json"]);
-    await git(dir, ["commit", "-m", "commit A"]);
-    await mkdir(path.join(dir, locator.bootstrapPath));
+    const locator = JSON.parse(await readFile(path.join(gov, "policy", "wildarrange.config.json"), "utf8")).verificationGovernance;
+    await git(gov, ["add", locator.registryPath, "policy/wildarrange.config.json"]);
+    await git(gov, ["commit", "-m", "commit A"]);
+    await mkdir(path.join(gov, locator.bootstrapPath));
 
     const result = await resumeAdoption(dir, { serve: false, sessionId: started.session.sessionId });
 
     assert.equal(result.session.status, "awaiting_registry_commit");
-    assert.match(result.session.nextAction, /verification-bootstrap\.json/);
+    assert.match(result.session.nextAction, /bootstrap\.json/);
     assert.match(result.session.nextAction, /移走或改名/);
-    assert.equal(existsSync(path.join(dir, locator.inventoryPath)), false);
+    assert.equal(existsSync(path.join(gov, locator.inventoryPath)), false);
     assert.equal(applied.session.status, "awaiting_registry_commit");
   });
 });
 
 test("all deferred cards stay reviewable and explain how to finish or cancel", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const started = await startAdoption(dir, { serve: false });
     await decideAllCards(dir, started.session.sessionId, started.cards, []);
@@ -850,7 +840,7 @@ test("all deferred cards stay reviewable and explain how to finish or cancel", a
 });
 
 test("cancel refuses to pretend applied project changes were restored", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const started = await startAdoption(dir, { serve: false });
     const locatorCard = started.cards.find((card) => card.asset === "config_locator");
@@ -860,12 +850,12 @@ test("cancel refuses to pretend applied project changes were restored", async ()
       cancelAdoption(dir, { sessionId: started.session.sessionId }),
       (error) => error?.code === "applied_changes_exist",
     );
-    assert.equal(existsSync(path.join(dir, "wildarrange.config.json")), true);
+    assert.equal(existsSync(path.join(gov, "policy", "wildarrange.config.json")), true);
   });
 });
 
 test("terminal adoption sessions reject decide and apply writes", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const started = await startAdoption(dir, { serve: false });
     await cancelAdoption(dir, { sessionId: started.session.sessionId });
@@ -884,7 +874,7 @@ test("terminal adoption sessions reject decide and apply writes", async () => {
 });
 
 test("recover restores the saved preimage and releases maintenance", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const started = await startAdoption(dir, { serve: false });
     const cardId = started.cards[0].id;
@@ -918,7 +908,7 @@ test("recover restores the saved preimage and releases maintenance", async () =>
 });
 
 test("failed verifier rollback releases maintenance marker", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const started = await startAdoption(dir, { serve: false });
     const locatorCard = started.cards.find((card) => card.asset === "config_locator");
@@ -936,7 +926,7 @@ test("failed verifier rollback releases maintenance marker", async () => {
 });
 
 test("resume reconciles a committed card after a crash before session advancement", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const started = await startAdoption(dir, { serve: false });
     const locatorCard = started.cards.find((card) => card.asset === "config_locator");
@@ -959,7 +949,7 @@ test("resume reconciles a committed card after a crash before session advancemen
 });
 
 test("cards that execute verifier commands cannot be batch-approved", async () => {
-  await withTempDir(async (dir) => {
+  await withTempDir(async (dir, gov) => {
     await seedProject(dir);
     const started = await startAdoption(dir, { serve: false });
     const verifierCard = started.cards.find((card) => Array.isArray(card.verify) && card.verify.length > 0);
@@ -977,6 +967,7 @@ test("cards that execute verifier commands cannot be batch-approved", async () =
   });
 });
 
+// 外置模式下 suggestedLocator 被治理合同取代，故障经显式的 options.scanHook 注入（仅测试使用）。
 test("scan crash settles the session to needs_review instead of stuck scanning", async () => {
   await withTempDir(async (dir) => {
     await seedProject(dir);
@@ -984,10 +975,7 @@ test("scan crash settles the session to needs_review instead of stuck scanning",
     Object.defineProperty(scanBoom, "code", {
       get() { throw new Error("error metadata unreadable"); },
     });
-    const options = { serve: false };
-    Object.defineProperty(options, "suggestedLocator", {
-      get() { throw scanBoom; },
-    });
+    const options = { serve: false, scanHook() { throw scanBoom; } };
     const crashed = await startAdoption(dir, options);
     assert.equal(crashed.ok, false);
     assert.equal(crashed.session.status, "needs_review");

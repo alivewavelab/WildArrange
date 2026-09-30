@@ -11,15 +11,8 @@ import { nowIso } from "./runtime-store.mjs";
 
 /** 各 review lane 失败时的默认严重级别（P0 阻断交付）。 */
 const FAILING_LANE_SEVERITY = {
-  goal_compliance: "P0",
-  scope_fidelity: "P0",
-  evidence_quality: "P0",
-  success_criteria: "P0",
   explicit_review_commands: "P1",
   project_standards: "P1",
-  lsp_diagnostics: "P1",
-  ast_structure: "P1",
-  hashline_anchors: "P1",
   comment_checker: "P1",
   project_rules_context: "P2",
 };
@@ -51,7 +44,7 @@ export function buildReviewFindingBundle({ lanes = [], qualityResults = {}, llmR
         summary: lane.summary,
         fixBy: lane.fixBy,
       };
-      if (lane.name.includes("test") || lane.name.includes("evidence") || lane.name.includes("lsp") || lane.name.includes("ast") || lane.name.includes("hashline")) {
+      if (lane.name.includes("test") || lane.name.includes("evidence")) {
         testingGaps.push(item);
       } else {
         residualRisks.push(item);
@@ -104,7 +97,7 @@ export function buildReviewFindingBundle({ lanes = [], qualityResults = {}, llmR
 /**
  * validateReviewFinding：本模块对外API。
  */
-export function validateReviewFinding(finding, validatorName = "schema_validator") {
+function validateReviewFinding(finding, validatorName = "schema_validator") {
   const missing = [];
   if (!finding.title || typeof finding.title !== "string") missing.push("title");
   if (!finding.evidence || typeof finding.evidence !== "string") missing.push("evidence");

@@ -39,24 +39,20 @@ import { withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { ensureTaskPacket, writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { resolveAgentSpawn } from "../infra/agent-spawn.mjs";
 import { collectAgentWorktreePatch, prepareAgentWorktree } from "../infra/git-worktree.mjs";
-import { inspectGitCoordination } from "../infra/git-coordination.mjs";
+import { inspectGitDelivery } from "../infra/git-coordination.mjs";
 import { runCommand } from "../infra/command-runner.mjs";
 import { normalizeProposedFilesOrEmpty } from "./admission.mjs";
 import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
-import {
-  findRunnableTask,
-  isTaskRunnable,
-  persistTaskState,
-  sendTeamMessage,
-  unresolvedTaskBlockers,
-} from "./task-board.mjs";
-import { assertCurrentTaskOwnership, coordinateTaskClaim } from "./remote-ownership.mjs";
+import { persistTaskState } from "./task-board.mjs";
+import { sendTeamMessage } from "./team-messages.mjs";
+import { findRunnableTask, isTaskRunnable, unresolvedTaskBlockers } from "../infra/task-predicates.mjs";
+import { resolveTaskBranchTarget } from "./task-branch.mjs";
 import {
   appendRunIndex,
   listParallelAgentRuns,
   registerRunIndexEntry,
 } from "./parallel-run-index.mjs";
-import { clearParallelRunClaims } from "./parallel-run-lifecycle.mjs";
+import { clearParallelRunClaims, releaseSupersededRunWorktree } from "./parallel-run-lifecycle.mjs";
 
 export { listParallelAgentRuns };
 export { parallelAgentStatus, closeParallelAgentRun, cleanupParallelAgentRun } from "./parallel-run-lifecycle.mjs";
@@ -138,13 +134,12 @@ export async function runParallelAgents(rootDir, options = {}) {
     ...batchSeed,
     results: [],
   });
-  const gitCoordination = await inspectGitCoordination(rootDir, config.gitCoordination);
-  const defaultIsolation = resolveParallelIsolation(config, gitCoordination, options);
+  const gitContext = await inspectGitDelivery(rootDir, config.gitDelivery);
+  const defaultIsolation = resolveParallelIsolation(config, gitContext, options);
   try {
     await claimParallelRunTasks(rootDir, taskState.planId, tasks, {
       runId,
       agent: options.agent,
-      forceCoordination: config.gitCoordination.mode === "manual" && options.coordinate === true,
     });
   } catch (error) {
     await clearParallelRunClaims(rootDir, runId, tasks.map((task) => task.id));
@@ -394,10 +389,11 @@ async function runOneAgentInner(rootDir, runDir, runId, task, options) {
   await mkdir(taskRunDir, { recursive: true });
   const config = options.config || (await loadWildArrangeConfig(rootDir)).config;
   const isolation = options.defaultIsolation || options.isolation || task.isolation || config.parallelAgents?.isolation || "run-dir";
+  if (isolation === "git-worktree") await releaseSupersededRunWorktree(rootDir, task);
   const worktree = await prepareAgentWorktree(rootDir, taskRunDir, {
     isolation,
     branchName: task.coordination?.branch || null,
-    startPoint: task.coordination?.remoteHeadSha || "HEAD",
+    startPoint: task.coordination?.baseSha || "HEAD",
     timeoutMs: normalizeTimeout(options.timeoutMs || config.parallelAgents?.timeoutMs),
   });
   const taskPacketPath = path.join(taskRunDir, "task.json");
@@ -473,15 +469,14 @@ async function runOneAgentInner(rootDir, runDir, runId, task, options) {
 }
 
 /** 解析 parallel run 的 isolation 模式（worktree/run-dir）。 */
-function resolveParallelIsolation(config, gitCoordination, options) {
+function resolveParallelIsolation(config, gitContext, options) {
   const requested = options.isolation || config.parallelAgents?.isolation || "run-dir";
-  const coordination = config.gitCoordination || {};
-  const enforceWorktree = ["guarded", "strict"].includes(coordination.mode)
-    && coordination.requireWorktreeForParallelWrites !== false
-    && (gitCoordination.active || gitCoordination.localGitAvailable === true);
+  const delivery = config.gitDelivery || {};
+  const enforceWorktree = delivery.requireWorktreeForParallelWrites !== false
+    && gitContext.localGitAvailable === true;
   if (enforceWorktree && options.isolation && options.isolation !== "git-worktree") {
-    // §3.4：可写 parallel 在 guarded/strict 模式下必须 worktree 隔离，禁止 run-dir 直写主 checkout。
-    throw new Error("parallel writable agents require git-worktree isolation; weaken gitCoordination.requireWorktreeForParallelWrites in config to opt out");
+    // §3.4：可写 parallel 有 Git 基线时必须 worktree 隔离，禁止 run-dir 直写主 checkout。
+    throw new Error("parallel writable agents require git-worktree isolation; weaken gitDelivery.requireWorktreeForParallelWrites in config to opt out");
   }
   return enforceWorktree ? "git-worktree" : requested;
 }
@@ -505,16 +500,7 @@ async function claimParallelRunTasks(rootDir, planId, selectedTasks, options) {
         throw new Error(`task ${task.id} already has writable parallel run ${task.parallel_run_claim.runId}`);
       }
       const owner = normalizeAgentKey(options.agent || task.owner || "ZhuRong") || "ZhuRong";
-      if (task.coordination && ["claimed", "accepted"].includes(task.coordination.status)) {
-        await assertCurrentTaskOwnership(rootDir, task);
-      } else {
-        task.coordination = await coordinateTaskClaim(rootDir, {
-          planId,
-          task,
-          owner,
-          force: options.forceCoordination,
-        });
-      }
+      task.coordination = await resolveTaskBranchTarget(rootDir, { planId, task });
       task.parallel_run_claim = { runId: options.runId, owner, claimedAt: nowIso() };
       task.owner = owner;
       task.updatedAt = nowIso();

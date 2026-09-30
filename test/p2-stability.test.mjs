@@ -12,7 +12,7 @@
 // =============================================================================
 
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -24,17 +24,7 @@ import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { proposeContractChange } from "../src/orchestration/contract-governance.mjs";
 import { runNextTask } from "../src/orchestration/linear-runtime.mjs";
 import { runWorkflow } from "../src/orchestration/workflow.mjs";
-
-async function withTempDir(fn) {
-  const baseDir = path.join(os.tmpdir(), "wildarrange-tests");
-  await mkdir(baseDir, { recursive: true });
-  const dir = await mkdtemp(path.join(baseDir, "wildarrange-p2-"));
-  try {
-    await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
+import { gitCommitAll, withExternalProject } from "./helpers/external-fixture.mjs";
 
 function nodeEval(source) {
   const encoded = Buffer.from(source, "utf8").toString("base64");
@@ -78,8 +68,8 @@ async function ledgerEntries(rootDir) {
 }
 
 test("initRuntime is quiet when state and Prompt Pack are unchanged, but reinstalls changed Pack content", async () => {
-  await withTempDir(async (dir) => {
-    const packDir = await writeMinimalPromptPack(dir);
+  await withExternalProject(async ({ root, projectRoot: dir }) => {
+    const packDir = await writeMinimalPromptPack(root);
     await initRuntime(dir, { promptPackDir: packDir });
     await initRuntime(dir, { promptPackDir: packDir });
 
@@ -97,20 +87,19 @@ test("initRuntime is quiet when state and Prompt Pack are unchanged, but reinsta
       await readFile(resolveWildArrangePath(dir, "prompt-pack", "installed", "tools", "tool-contract.json"), "utf8"),
       changedTools,
     );
-  });
+  }, { init: false });
 });
 
 test("runNextTask reports a throwing gate without dereferencing null evidence", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "gate-error-plan.json");
+  await withExternalProject(async ({ root, projectRoot: dir, governanceRoot }) => {
+    const planPath = path.join(root, "gate-error-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Gate error regression",
       tasks: [{
         id: "T001",
         subject: "Corrupt runtime config after worker startup",
         writable_paths: ["src/**"],
-        worker_command: nodeEval("require('fs').writeFileSync('.wildarrange/config.json', '{ broken', 'utf8')"),
+        worker_command: nodeEval(`require('fs').writeFileSync(${JSON.stringify(path.join(governanceRoot, "policy", "wildarrange.config.json"))}, '{ broken', 'utf8')`),
         verify_commands: [nodeEval("process.exit(0)")],
         review_commands: [nodeEval("process.exit(0)")],
       }],
@@ -127,15 +116,10 @@ test("runNextTask reports a throwing gate without dereferencing null evidence", 
 });
 
 test("runWorkflow stops after the first state that requires an external decision", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const configPath = resolveWildArrangePath(dir, "config.json");
-    const config = await readJson(configPath);
-    await writeFile(configPath, JSON.stringify({
-      ...config,
-      planApproval: { ...config.planApproval, required: true },
-    }, null, 2), "utf8");
-    const planPath = path.join(dir, "approval-plan.json");
+  await withExternalProject(async ({ root, projectRoot: dir, governanceRoot }) => {
+    await writeFile(path.join(governanceRoot, "policy", "wildarrange.config.json"), JSON.stringify({ planApproval: { required: true } }, null, 2), "utf8");
+    await gitCommitAll(governanceRoot, "require plan approval");
+    const planPath = path.join(root, "approval-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Approval wait regression",
       tasks: [{
@@ -153,9 +137,8 @@ test("runWorkflow stops after the first state that requires an external decision
 });
 
 test("runWorkflow stops immediately when a task waits for a user contract decision", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
-    const planPath = path.join(dir, "contract-wait-plan.json");
+  await withExternalProject(async ({ root, projectRoot: dir }) => {
+    const planPath = path.join(root, "contract-wait-plan.json");
     await writeFile(planPath, JSON.stringify({
       id: "contract-wait",
       title: "Contract wait regression",
@@ -166,7 +149,7 @@ test("runWorkflow stops immediately when a task waits for a user contract decisi
       }],
     }, null, 2), "utf8");
     await importPlan(dir, planPath);
-    await writeFile(path.join(dir, "proposal.json"), JSON.stringify({
+    await writeFile(path.join(root, "proposal.json"), JSON.stringify({
       reason: "新功能必须保存语言",
       impact: "users 表增加 locale，可空，无存量迁移",
       alternatives: "会话内保存",
@@ -174,7 +157,7 @@ test("runWorkflow stops immediately when a task waits for a user contract decisi
       items: [{ contractId: "db:users.locale", kind: "database", action: "add", summary: "用户语言",
         sourcePaths: ["src/app.js"], expected: { table: "users", column: "locale", nullable: true } }],
     }, null, 2));
-    await proposeContractChange(dir, { taskId: "T001", from: "proposal.json" });
+    await proposeContractChange(dir, { taskId: "T001", from: path.join(root, "proposal.json") });
 
     const result = await runWorkflow(dir, { maxSteps: 5 });
     assert.equal(result.results.length, 1);
@@ -187,7 +170,7 @@ test("runWorkflow stops immediately when a task waits for a user contract decisi
 });
 
 test("repository governance turns a broken Prompt Pack manifest into an auditable finding", async () => {
-  await withTempDir(async (dir) => {
+  await withExternalProject(async ({ projectRoot: dir }) => {
     const packDir = path.join(dir, "packs", "wildarrange-linear");
     await mkdir(packDir, { recursive: true });
     await writeFile(path.join(packDir, "manifest.json"), "{ broken", "utf8");

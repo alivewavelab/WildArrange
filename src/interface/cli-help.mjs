@@ -22,14 +22,15 @@ import { DEFAULT_EXECUTOR_AGENT, DEFAULT_LEAD_AGENT } from "../infra/agent-regis
 import { DEFAULT_PACKAGE_NAME, PRODUCT_NAME } from "../infra/runtime-config.mjs";
 
 /** 默认 --help 展示的核心六命令（日常主循环）。 */
-export const CORE_COMMANDS = ["init", "plan", "run", "status", "decisions", "doctor"];
+export const CORE_COMMANDS = ["setup", "plan", "run", "status", "decisions", "doctor"];
 
 /**
  * 全部 CLI 子命令的 usage、说明与是否 core 标记。
  * 新命令须先登记再于 bin/wildarrange.mjs 实现；governance audit 以 --help --all 校验真实性。
  */
 export const COMMAND_REGISTRY = [
-  { usage: "project init-governance --governance-root <path> --repository <git-url> [--default-branch main]", desc: "在项目外创建不覆盖已有文件的治理仓库骨架；不自动操作 Git" },
+  { usage: "setup --governance-root <path> [--repository <git-url>] [--target codex|cursor|kimi|all] [--default-branch main]", desc: "一步接入外置治理：创建治理仓（含 Git 初始提交与默认武装配置）→ attach → init → 生成宿主 Adapter 包；客户项目零写入", core: true },
+  { usage: "project init-governance --governance-root <path> --repository <git-url> [--default-branch main]", desc: "在项目外创建不覆盖已有文件的治理仓库骨架与默认武装配置；非 Git 目录自动 git init 并提交初始 commit" },
   { usage: "project attach --governance-root <path> [--project-root <path>] [--runtime-root <path>]", desc: "把客户项目连接到独立治理仓库；映射写入项目外部状态目录" },
   { usage: "project show [--project-root <path>]", desc: "查看项目、治理仓库和运行态三根连接" },
   { usage: "integration accept --project-sha <40-char-sha> --governance-sha <40-char-sha> [--id <id>] [--reason \"...\"]", desc: "校验两个仓库的提交与治理注册表，并在项目外运行态写双 SHA 集成验收收据" },
@@ -37,7 +38,7 @@ export const COMMAND_REGISTRY = [
   { usage: "review checklist --task <taskId>", desc: "解析本任务项目审查清单和必需依据，不启动执行器" },
   { usage: "readiness --task <taskId>", desc: "检查已批准任务必需的执行器、Skill、规范与握手，不启动业务 Worker" },
   { usage: "adoption inventory", desc: "只读扫描旧仓库文件与验证资产，供接管 Skill 建立来源映射" },
-  { usage: "init [--sample] [--project-docs] [--architecture]", desc: "初始化运行时；外置治理项目不写客户仓库，legacy 模式可显式补建项目文档", core: true },
+  { usage: "init [--sample]", desc: "在已连接项目的 runtimeRoot 初始化运行态（setup 已包含此步骤）；不写客户仓库" },
   { usage: "plan --from <plan.json>", desc: "导入含 responsibilityChanges 的计划；等待人工确认职责与事实归属", core: true },
   { usage: "plan approve [--plan <planId>]", desc: "确认待执行计划（语义生成计划或已开启 planApproval）" },
   { usage: "run", desc: "跑下一个任务（worker→verifier→scope→review→checkpoint）", core: true },
@@ -45,42 +46,27 @@ export const COMMAND_REGISTRY = [
   { usage: "decisions [--limit N] [--task T001] [--gate pre_tool_use] [--annotatable] [--format json]", desc: "查看门决策记录（每一次拦截/放行；--annotatable 只看可标注队列）", core: true },
   { usage: "doctor", desc: "一键体检：配置/完成状态/ledger/备份对账", core: true },
 
-  { usage: "config init [--root] [--force] [--armed]", desc: "生成默认配置（--armed 直接武装质量门）" },
+  { usage: "config init [--force] [--armed]", desc: "在治理仓 policy/ 生成默认配置（--armed 直接武装质量门）" },
   { usage: "config show", desc: "查看生效配置" },
   { usage: "config baseline [--reason \"...\"]", desc: "写入 config hash 基线" },
   { usage: "config verify", desc: "校验 config 基线" },
-  { usage: "device register [--name macbook] [--force]", desc: "登记当前设备" },
-  { usage: "device status", desc: "查看设备登记状态" },
-  { usage: "coordination status", desc: "查看 Git 协调状态" },
-  { usage: "coordination claim --task T001 [--owner ZhuRong]", desc: "显式远端领取任务" },
-  { usage: "handoff prepare --task T001 --to-device-id <uuid> [--to-device-name mac-mini] [--to-owner ZhuRong]", desc: "准备跨设备交接" },
-  { usage: "handoff push --task T001", desc: "推送跨设备交接" },
-  { usage: "handoff accept --task T001 [--plan P20260731]", desc: "接受跨设备交接" },
-  { usage: "handoff takeover --plan P20260731 --task T001 --expected-device-id <uuid> --reason \"owner offline\"", desc: "显式接管（记录预期旧设备与理由）" },
-  { usage: `adapter install [--target codex|cursor|kimi|all] [--mode local|npx] [--package ${DEFAULT_PACKAGE_NAME}]`, desc: "安装宿主 adapter；外置治理模式只在 runtimeRoot 生成用户插件包" },
-  { usage: "adapter activate --target cursor [--user-root <path>]", desc: "显式合并 Cursor 用户级 Hook；先备份且不写客户项目" },
-  { usage: "adapter uninstall [--target codex|cursor|kimi|all]", desc: "卸载宿主 adapter" },
-  { usage: "adapter restore --backup <backupId>", desc: "恢复 adapter 备份" },
+  { usage: `adapter install [--target codex|cursor|kimi|all] [--mode local|npx] [--package ${DEFAULT_PACKAGE_NAME}]`, desc: "在 runtimeRoot 生成宿主外置插件包；--mode 选择 hook 调用 CLI 的前缀（local 当前 bin 路径 / npx 包名）" },
+  { usage: "adapter activate [--target cursor|codex|all] [--user-root <path>]", desc: "显式写入用户级配置：Cursor Hook 与指针规则、Codex AGENTS.md 指针段；先备份且不写客户项目" },
+  { usage: "adapter uninstall [--target codex|cursor|kimi|all]", desc: "卸载宿主 adapter：移除用户级条目与指针并删除 runtime 插件包" },
+  { usage: "adapter restore --backup <backupId>", desc: "恢复 adapter 备份：还原到该次 activate 之前的用户级文件" },
   { usage: "injection show --point before_review [--agent BaiZe] [--task T001] [--text \"...\"] [--stage plan]", desc: "查看注入点解析结果" },
-  { usage: "hook run [--from hook.json] [--format text|json] [--external-only --adapter-digest <sha256>]", desc: "运行宿主生命周期 Hook；外置 Adapter 只处理已连接项目" },
+  { usage: "hook run [--from hook.json] [--format text|json] --adapter-digest <sha256>", desc: "运行宿主生命周期 Hook；只处理已连接项目，未连接项目静默放行" },
   { usage: "workflow --from <plan.json>", desc: "从计划跑完整 workflow" },
   { usage: "workflow --sample", desc: "跑样例 workflow" },
-  { usage: "parallel run [--max-agents 2] [--task T001,T002] [--agent ZhuRong] [--adapter codex|cursor] [--isolation run-dir|git-worktree] [--coordinate] [--command \"...\"]", desc: "跑并行子 Agent" },
+  { usage: "parallel run [--max-agents 2] [--task T001,T002] [--agent ZhuRong] [--adapter codex|cursor] [--isolation run-dir|git-worktree] [--command \"...\"]", desc: "跑并行子 Agent" },
   { usage: "parallel admit --run <runId> --task T001", desc: "合入子 Agent 成果（admission 事务）" },
   { usage: "parallel list", desc: "列出并行 run" },
   { usage: "parallel status [--run <runId>]", desc: "查看并行运行记录与批次对账" },
   { usage: "parallel close --run <runId> [--task T001] [--reason \"...\"]", desc: "关闭保留的子 Agent 结果" },
   { usage: "parallel cleanup --run <runId>", desc: "清理 Git worktree 隔离目录" },
   { usage: "parallel retry --run <runId> [--command \"...\"] [--max-agents N]", desc: "只重跑未完成任务的局部重试" },
-  { usage: "archivist packet [--text \"...\"] [--stage plan] [--turns turns.json]", desc: "生成档案路由包" },
-  { usage: "archivist run [--text \"...\"] [--stage plan] [--turns turns.json] [--force]", desc: "运行档案路由员" },
-  { usage: "archivist suggestions list", desc: "查看路由建议" },
-  { usage: "archivist suggestions resolve --id <id> --decision accept|reject --evidence \"...\" --rationale \"...\"", desc: "审核路由建议" },
   { usage: "node route --text \"request\"", desc: "单节点：路由" },
   { usage: "node execute [--task T001]", desc: "单节点：执行" },
-  { usage: "node verify [--task T001]", desc: "单节点：验证" },
-  { usage: "node scope [--task T001]", desc: "单节点：范围检查" },
-  { usage: "node review [--task T001]", desc: "单节点：复核" },
   { usage: "node checkpoint [--task T001]", desc: "单节点：checkpoint" },
   { usage: "node retry [--task T001]", desc: "单节点：重试" },
   { usage: "resume [--session <id>]", desc: "恢复会话上下文" },
@@ -116,12 +102,9 @@ export const COMMAND_REGISTRY = [
   { usage: "annotate --decision <decisionId> --category <confirmed|rule_wrong|case_wrong|mislabeled> [--reason \"...\"] [--author name]", desc: "标注门决策（只进报告，不改配置）" },
   { usage: "annotate list [--limit N]", desc: "列出标注" },
   { usage: "annotate stats", desc: "标注聚合统计" },
-  { usage: "review suspicious [--limit N]", desc: "LLM 可疑判断异步审查（只进报告，不进完成链）" },
   { usage: "test [--zone interface|orchestration|ai|capabilities|infra] [changed-file...]", desc: "分区/影响面最小测试集" },
   { usage: "docs commands [--write]", desc: "从命令注册表生成命令文档（单一事实源）" },
   { usage: "state backup [--reason \"...\"]", desc: "备份运行态关键文件" },
-  { usage: "state migrate", desc: "备份后迁移运行态任务总账与旧投影；不改根 wildarrange.config.json" },
-  { usage: "state migrate --to external --governance-root <path> [--runtime-root <path>] [--dry-run]", desc: "校验并复制旧运行态，摘要一致后才连接独立治理仓库；保留项目内源目录" },
   { usage: "state verify", desc: "校验运行态关键文件" },
   { usage: "state list", desc: "列出运行态备份" },
   { usage: "state restore --backup <backupId>", desc: "恢复运行态备份" },
@@ -208,4 +191,26 @@ export function renderCommandsMarkdown() {
     ...rows,
     "",
   ].join("\n");
+}
+
+/**
+ * 从 COMMAND_REGISTRY 生成 Prompt Pack 的 Agent 工具合同（tools/tool-contract.json）。
+ * 与 --help 同源，避免手写合同漂移；由 tooling/generate-tool-contract.mjs 落盘。
+ * @returns {string}
+ */
+export function renderToolContract() {
+  const seen = new Map();
+  const tools = COMMAND_REGISTRY.map((entry) => {
+    const words = entry.usage.split(/\s+/);
+    const firstArg = words.findIndex((word) => /^[-<[\"]/.test(word));
+    const commandWords = firstArg === -1 ? words : words.slice(0, firstArg);
+    let name = `wildarrange_${commandWords.join("_").replace(/-/g, "_")}`;
+    if (seen.has(name)) {
+      const flag = words.find((word) => word.startsWith("--"))?.replace(/^--/, "").replace(/-/g, "_");
+      name = flag ? `${name}_${flag}` : `${name}_${seen.get(name) + 1}`;
+    }
+    seen.set(name, (seen.get(name) || 0) + 1);
+    return { name, command: `wildarrange ${entry.usage}`, purpose: entry.desc };
+  });
+  return `${JSON.stringify({ version: 2, runtime: "wildarrange-linear", generatedFrom: "src/interface/cli-help.mjs", tools }, null, 2)}\n`;
 }

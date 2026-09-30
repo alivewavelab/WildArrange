@@ -30,11 +30,10 @@ import {
   claimTeamTask,
   createTeamTask,
   getTeamTask,
-  listTeamMessages,
   listTeamTasks,
   readyTeamTask,
-  sendTeamMessage,
 } from "../orchestration/task-board.mjs";
+import { listTeamMessages, sendTeamMessage } from "../orchestration/team-messages.mjs";
 import { dashboardData, writeWorkflowSummary } from "../orchestration/status.mjs";
 import { runNextTask, runWorkflowNode } from "../orchestration/linear-runtime.mjs";
 import {
@@ -169,7 +168,7 @@ export function startDashboardServer(rootDir, options = {}) {
       if (request.method === "POST" && url.pathname.startsWith("/api/node/")) {
         const nodeName = safeDecodeSegment(url.pathname.slice("/api/node/".length), "node");
         validateNodeName(nodeName);
-        if (!["execute", "verify", "scope", "review", "checkpoint", "retry"].includes(nodeName)) {
+        if (!["execute", "checkpoint", "retry"].includes(nodeName)) {
           sendJson(response, 400, { ok: false, error: `unsupported node: ${nodeName}` });
           return;
         }

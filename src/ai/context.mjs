@@ -19,6 +19,7 @@ import path from "node:path";
 import {
   DEFAULT_EXECUTOR_AGENT,
   DEFAULT_LEAD_AGENT,
+  normalizeAgentKey,
 } from "../infra/agent-registry.mjs";
 import {
   STATE_VERSION,
@@ -39,14 +40,14 @@ import { uniqueStrings } from "../infra/text-utils.mjs";
 import { defaultInjectionPointForAgent, resolveInjectionPoint } from "./injection.mjs";
 import { loadTaskState } from "../infra/task-state-store.mjs";
 import { scanProjectRules } from "../infra/rule-scanner.mjs";
-import { findRunnableTask, normalizeAgentName } from "../orchestration/task-board.mjs";
+import { findRunnableTask } from "../infra/task-predicates.mjs";
 import { statusReport } from "../orchestration/status.mjs";
 
 // --- Agent 上下文构建 ---
 
 /**
  * 为指定 Agent/任务构建完整上下文包，写入 context-agents/*.json|.md 并记 ledger。
- * @param {string} rootDir 控制根目录
+ * @param {string} rootDir 项目根目录
  * @param {object} options agent、taskId、planId、executionRoot、injectionPoint、role
  * @returns {Promise<object>} kind=wildarrange_agent_context
  */
@@ -61,8 +62,8 @@ export async function buildAgentContext(rootDir, options = {}) {
     ...(task?.writable_paths || []),
     ...(changed.available ? changed.paths : []),
   ].map(normalizeRelativePath));
-  const rules = await scanProjectRules(executionRoot, { controlRoot: rootDir, targetPaths });
-  const agent = normalizeAgentName(options.agent || task?.owner || DEFAULT_EXECUTOR_AGENT) || DEFAULT_EXECUTOR_AGENT;
+  const rules = await scanProjectRules(executionRoot, { projectRoot: rootDir, targetPaths });
+  const agent = normalizeAgentKey(options.agent || task?.owner || DEFAULT_EXECUTOR_AGENT) || DEFAULT_EXECUTOR_AGENT;
   const resumeContext = await writeContextSnapshot(rootDir, { reason: `agent-context:${agent}` });
   const role = options.role || roleForAgent(agent);
   const injectionPointName = options.injectionPoint || defaultInjectionPointForAgent(agent, { taskId: task?.id });
@@ -160,7 +161,7 @@ export async function writeContextSnapshot(rootDir, options = {}) {
  * @param {object} options sessionId、source
  * @returns {Promise<object>} 更新后的 lineage
  */
-export async function recordRuntimeSession(rootDir, options = {}) {
+async function recordRuntimeSession(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const sessionId = options.sessionId || process.env.WILDARRANGE_SESSION_ID || process.env.CODEX_SESSION_ID || process.env.CURSOR_SESSION_ID || createWorkId("session");
   const source = options.source || "resume";

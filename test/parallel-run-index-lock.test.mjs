@@ -12,25 +12,14 @@
 // =============================================================================
 
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
 import { listParallelAgentRuns, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
-import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-
-async function withTempDir(fn) {
-  const baseDir = path.join(process.cwd(), ".tmp");
-  await mkdir(baseDir, { recursive: true });
-  const dir = await mkdtemp(path.join(baseDir, "wildarrange-index-lock-"));
-  try {
-    await fn(dir);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
+import { withExternalProject } from "./helpers/external-fixture.mjs";
 
 async function importFourTaskPlan(dir) {
   const planPath = resolveWildArrangePath(dir, "artifacts", "index-lock-plan.json");
@@ -51,8 +40,7 @@ async function importFourTaskPlan(dir) {
 }
 
 test("concurrent parallel runs keep both run entries and all results in index.json", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
     await importFourTaskPlan(dir);
 
     const command = "node -e \"process.exit(0)\"";
@@ -82,8 +70,7 @@ test("concurrent parallel runs keep both run entries and all results in index.js
 });
 
 test("concurrent index reads adopt every orphan run dir exactly once", async () => {
-  await withTempDir(async (dir) => {
-    await initRuntime(dir);
+  await withExternalProject(async ({ projectRoot: dir }) => {
 
     const orphanCount = 12;
     for (let i = 0; i < orphanCount; i += 1) {

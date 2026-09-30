@@ -112,7 +112,7 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
   const criteria = criteriaStatus(task);
   const verifyCommands = Array.isArray(task.verify_commands) ? task.verify_commands : [];
   const reviewLanes = Array.isArray(reviewResult?.lanes) ? reviewResult.lanes : [];
-  const deliveryBaseline = summarizeDeliveryBaseline(evidence.deliveryBaseline || evidence.integrationCommit);
+  const deliveryBaseline = summarizeDeliveryBaseline(evidence.integrationCommit);
   const executedReview = hasExecutedIndependentReview(reviewResult, config, task);
 
   const checks = [
@@ -214,7 +214,7 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
 /**
  * 判定 review gate 是否实际执行了至少一条非空转独立复核 lane。
  * @param {object|null} reviewResult review_gate evidence
- * @param {object|null} [config] 质量门与 commentChecker 配置
+ * @param {object|null} [config] commentChecker 配置
  * @param {object} [task] 是否声明 responsibilityChanges
  * @returns {{ pass: boolean, sources: string[], reasons: string[] }}
  */
@@ -230,13 +230,6 @@ function hasExecutedIndependentReview(reviewResult, config = null, task = {}) {
     else if ((results || []).length > 0) reasons.push(`${name} were skipped, trivial, or failed`);
   }
   const quality = reviewResult.qualityResults || {};
-  for (const name of ["lspResult", "astResult"]) {
-    const result = quality[name];
-    if (result?.status === "pass" && result?.pass === true
-      && (result.results || []).some((entry) => entry.exitCode === 0 && !isTrivialCommand(entry.command))) sources.push(`quality:${name}`);
-  }
-  if (quality.hashlineResult?.status === "pass" && quality.hashlineResult?.pass === true
-    && (quality.hashlineResult.anchors || []).length > 0) sources.push("quality:hashlineResult");
   if (config?.qualityGates?.commentChecker?.blockOnFindings === true
     && quality.commentResult?.status === "pass" && quality.commentResult?.pass === true
     && (quality.commentResult.checkedPaths || []).length > 0) sources.push("quality:commentResult");

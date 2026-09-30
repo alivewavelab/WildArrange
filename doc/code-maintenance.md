@@ -15,7 +15,5 @@
 - 新增运行时能力必须更新 `doc/project-architecture.md`，包括其「目录约定」中的职责登记。
 - gate 安全不变量不能削弱：不得删除或清空 `verify_commands`，不得跳过 verifier / scope / review / successCriteria 完成 checkpoint。
 - README 命令真实性必须对照真实 CLI `--help`，不得以源码中的注释或普通字符串充当实现证据；真实注释检查必须覆盖 JavaScript 模板表达式。
-- 产品总图位于 `docs/product/architecture-overview.html`；新分区或新运行时模块必须同步登记 `tooling/arch-module-graph/module-file-map.json` 并更新总图。新脚本必须由映射表归属；总图的输入/输出必须来自真实导出签名或代码证据，不得编造。
-- 总图交互固定为“点模块卡片 → 底部抽屉”，不为单个大模块增加第二种展开方式；顶部页签只按真实用户作业切片，不按引擎或网关类型堆目录。
-- 总图门禁豁免测试文件、`index.*`、`mod.rs`、`__init__.py`、`*.types.*`、生成目录与 D 字典的目录节点；其余改动后运行 `npm run check:arch`。
+- 产品总图 `docs/product/architecture-overview.html` 是参考文档，架构变化时顺手更新，不设门禁。
 - 重构后必须验证 `npm test`；该命令由 `tooling/run-tests.mjs` 逐文件隔离执行全部 `test/*.test.mjs`，避免 Windows 上 Git/npm/嵌套测试并发互锁。涉及包内容变化时同时验证 `npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache`。

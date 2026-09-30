@@ -8,21 +8,16 @@
 | 场景                | 命令                                                               |
 | ----------------- | ---------------------------------------------------------------- |
 | 初始化运行时            | `node ./bin/wildarrange.mjs init`                                      |
-| 创建独立治理仓库骨架    | `node ./bin/wildarrange.mjs project init-governance --governance-root <path> --repository <git-url>`（只创建缺失文件，不操作 Git） |
+| 一步接入外置治理        | `node ./bin/wildarrange.mjs setup --governance-root <path> [--repository <git-url>] [--target codex\|cursor\|kimi\|all]`（init-governance → attach → init → adapter install，客户项目零写入） |
+| 创建独立治理仓库骨架    | `node ./bin/wildarrange.mjs project init-governance --governance-root <path> --repository <git-url>`（只创建缺失文件，含默认武装的治理配置；非 Git 目录自动 git init 并初始提交） |
 | 连接独立治理仓库        | `node ./bin/wildarrange.mjs project attach --governance-root <path>` |
 | 查看三根连接            | `node ./bin/wildarrange.mjs project show` |
 | 写入双仓集成验收收据    | `node ./bin/wildarrange.mjs integration accept --project-sha <40-char-sha> --governance-sha <40-char-sha> --reason "..."`（只写外置运行态） |
 | 生成默认配置            | `node ./bin/wildarrange.mjs config init --root`（`--armed` 直接武装质量门） |
-| 登记当前设备            | `node ./bin/wildarrange.mjs device register --name macbook`             |
-| 查看 Git 协调状态       | `node ./bin/wildarrange.mjs coordination status`                        |
-| 显式远端领取任务        | `node ./bin/wildarrange.mjs coordination claim --task T001 --owner ZhuRong` |
-| 准备跨设备交接          | `node ./bin/wildarrange.mjs handoff prepare --task T001 --to-device-id <uuid> --to-device-name mac-mini` |
-| 推送跨设备交接          | `node ./bin/wildarrange.mjs handoff push --task T001`                    |
-| 接受跨设备交接          | `node ./bin/wildarrange.mjs handoff accept --plan <planId> --task T001`  |
 | 安装 adapter        | `node ./bin/wildarrange.mjs adapter install --target all --mode local` |
-| 激活外置 Cursor Hook | `node ./bin/wildarrange.mjs adapter activate --target cursor`（备份并合并用户级配置，不写客户项目） |
-| 卸载 adapter        | `node ./bin/wildarrange.mjs adapter uninstall --target all`            |
-| 恢复 adapter        | `node ./bin/wildarrange.mjs adapter restore --backup <backupId>`       |
+| 激活外置用户级配置 | `node ./bin/wildarrange.mjs adapter activate --target all [--user-root <临时目录>]`（Cursor Hook + 指针规则、Codex `~/.codex/AGENTS.md` 指针段；先备份，不写客户项目） |
+| 卸载 adapter        | `node ./bin/wildarrange.mjs adapter uninstall --target all`（外置：移除用户级条目/指针并删 runtime 插件包） |
+| 恢复 adapter        | `node ./bin/wildarrange.mjs adapter restore --backup <backupId>`（外置：还原到该次 activate 之前） |
 | 导入计划              | `node ./bin/wildarrange.mjs plan --from plan.json`                     |
 | 跑下一个任务            | `node ./bin/wildarrange.mjs run`                                       |
 | 跑 sample workflow | `node ./bin/wildarrange.mjs workflow --sample`                         |
@@ -37,7 +32,6 @@
 | 查看标注与统计 | `node ./bin/wildarrange.mjs annotate list` / `annotate stats` |
 | 门触发统计审查 | `node ./bin/wildarrange.mjs decisions stats` |
 | 统一时间线 | `node ./bin/wildarrange.mjs timeline [--limit N] [--task T001]` |
-| LLM 可疑判断（异步审查） | `node ./bin/wildarrange.mjs review suspicious` |
 | 全量命令 / 物化命令文档 | `node ./bin/wildarrange.mjs --help --all` / `docs commands --write` |
 | 匹配 Skill          | `node ./bin/wildarrange.mjs skills match --text "..." --stage plan`    |
 | 仓库治理检查           | `node ./bin/wildarrange.mjs governance audit` |
@@ -53,8 +47,6 @@
 | 查看决策投影 | `node ./bin/wildarrange.mjs decisions --limit 20` |
 | 分区/影响面测试 | `node ./bin/wildarrange.mjs test --zone infra` |
 | 备份运行态关键文件      | `node ./bin/wildarrange.mjs state backup --reason before-risky-agent`   |
-| 迁移旧运行态           | `node ./bin/wildarrange.mjs state migrate`（自动先备份；旧 completed 无当前 proof 时回到待决策） |
-| 外置旧运行态           | `node ./bin/wildarrange.mjs state migrate --to external --governance-root <path> [--dry-run]`（源目录保留，registry 最后切换） |
 | 归档并删除旧任务        | `node ./bin/wildarrange.mjs task archive --task T001 [--plan <planId>] --delete --reason "obsolete"` |
 | 校验运行态关键文件      | `node ./bin/wildarrange.mjs state verify`                               |
 | 列出运行态备份        | `node ./bin/wildarrange.mjs state list`                                 |

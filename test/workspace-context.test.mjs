@@ -3,24 +3,14 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import {
-  attachGovernanceRepository,
-  clearWorkspaceContext,
-  loadGovernanceContract,
-  loadGovernanceVerificationDefaults,
-  initializeGovernanceRepository,
-  migrateLegacyWorkspace,
-  resolveWorkspaceContext,
-} from "../src/infra/workspace-context.mjs";
+import { attachGovernanceRepository, clearWorkspaceContext, getBoundWorkspaceContext, loadGovernanceContract, loadGovernanceVerificationDefaults, initializeGovernanceRepository, resolveWorkspaceContext } from "../src/infra/workspace-context.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { buildRegistryFromCards } from "../src/infra/verification-registry.mjs";
+import { gitCommitAll, withExternalProject } from "./helpers/external-fixture.mjs";
 import { runCommandFile } from "../src/infra/command-runner.mjs";
 import { scanProjectRules } from "../src/infra/rule-scanner.mjs";
-import {
-  clearWildArrangeRuntimeRoot,
-  resolveWildArrangePath,
-} from "../src/infra/runtime-store.mjs";
+import { clearWildArrangeRuntimeRoot, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 
 async function withWorkspace(fn) {
   const baseDir = path.join(process.cwd(), ".tmp");
@@ -47,16 +37,6 @@ async function withWorkspace(fn) {
   }
 }
 
-test("workspace context: unattached projects preserve legacy runtime semantics", async () => {
-  await withWorkspace(async ({ projectRoot, stateHome }) => {
-    const context = await resolveWorkspaceContext(projectRoot, { stateHome });
-    assert.equal(context.mode, "legacy");
-    assert.equal(context.attached, false);
-    assert.equal(context.runtimeRoot, path.join(projectRoot, ".wildarrange"));
-    assert.equal(resolveWildArrangePath(projectRoot, "team", "tasks.json"), path.join(projectRoot, ".wildarrange", "team", "tasks.json"));
-  });
-});
-
 test("workspace context: governance scaffold writes only the external root and preserves existing policy", async () => {
   await withWorkspace(async ({ root, projectRoot }) => {
     const governanceRoot = path.join(root, "scaffolded-governance");
@@ -65,7 +45,7 @@ test("workspace context: governance scaffold writes only the external root and p
       repository: "https://example.test/scaffolded.git",
       defaultBranch: "main",
     });
-    assert.deepEqual(initialized.created.sort(), ["policy/AGENTS.md", "verification/registry.json", "wildarrange-governance.json"].sort());
+    assert.deepEqual(initialized.created.sort(), ["policy/AGENTS.md", "policy/code-and-interface-conventions.md", "policy/testing-and-acceptance.md", "verification/registry.json", "wildarrange-governance.json"].sort());
     assert.equal(existsSync(path.join(projectRoot, ".wildarrange")), false);
     await writeFile(path.join(governanceRoot, "policy", "AGENTS.md"), "# Human policy\n");
     const repeated = await initializeGovernanceRepository(projectRoot, { governanceRoot, repository: "https://example.test/scaffolded.git" });
@@ -78,7 +58,7 @@ test("workspace context: external governance policy is loaded without copying it
   await withWorkspace(async ({ projectRoot, governanceRoot, stateHome }) => {
     await writeFile(path.join(governanceRoot, "policy", "AGENTS.md"), "# External policy\n\nGOVERNANCE_POLICY_PROBE\n");
     const context = await attachGovernanceRepository(projectRoot, { governanceRoot, stateHome });
-    const rules = await scanProjectRules(projectRoot, { controlRoot: projectRoot });
+    const rules = await scanProjectRules(projectRoot, { projectRoot });
     assert.equal(rules.governanceRoot, governanceRoot);
     assert.equal(rules.governancePolicyRules, 1);
     assert.ok(rules.rules.some((rule) => rule.source === "governance_policy" && rule.path === "governance/policy/AGENTS.md"));
@@ -91,14 +71,12 @@ test("workspace context: external governance policy is loaded without copying it
 test("workspace context: attach keeps runtime and governance outside the project", async () => {
   await withWorkspace(async ({ projectRoot, governanceRoot, stateHome }) => {
     const attached = await attachGovernanceRepository(projectRoot, { governanceRoot, stateHome });
-    assert.equal(attached.mode, "external");
     assert.equal(attached.governanceRoot, governanceRoot);
     assert.equal(existsSync(path.join(projectRoot, ".wildarrange")), false);
     assert.equal(resolveWildArrangePath(projectRoot, "team", "tasks.json"), path.join(attached.runtimeRoot, "team", "tasks.json"));
 
     clearWildArrangeRuntimeRoot(projectRoot);
     const resolved = await resolveWorkspaceContext(projectRoot, { stateHome });
-    assert.equal(resolved.mode, "external");
     assert.equal(resolved.runtimeRoot, attached.runtimeRoot);
     const registry = JSON.parse(await readFile(path.join(stateHome, "registry.json"), "utf8"));
     assert.equal(registry.projects[attached.projectId].governanceRoot, governanceRoot);
@@ -138,59 +116,19 @@ test("workspace context: governance contract paths cannot escape the repository"
   });
 });
 
-test("workspace context: legacy runtime is copied and verified before registry switches", async () => {
-  await withWorkspace(async ({ projectRoot, governanceRoot, stateHome }) => {
-    await resolveWorkspaceContext(projectRoot, { stateHome, legacy: true });
-    await initRuntime(projectRoot);
-    const sourceWork = await readFile(path.join(projectRoot, ".wildarrange", "work.json"), "utf8");
-
-    await assert.rejects(
-      attachGovernanceRepository(projectRoot, { governanceRoot, stateHome }),
-      /state migrate --to external/,
-    );
-    const dryRun = await migrateLegacyWorkspace(projectRoot, { governanceRoot, stateHome, dryRun: true });
-    assert.equal(dryRun.status, "planned");
-    assert.equal(existsSync(path.join(stateHome, "registry.json")), false);
-
-    const migrated = await migrateLegacyWorkspace(projectRoot, { governanceRoot, stateHome });
-    assert.equal(migrated.status, "migrated");
-    assert.equal(migrated.sourcePreserved, true);
-    assert.equal(await readFile(path.join(migrated.context.runtimeRoot, "work.json"), "utf8"), sourceWork);
-    assert.equal(await readFile(path.join(projectRoot, ".wildarrange", "work.json"), "utf8"), sourceWork);
-    const resolved = await resolveWorkspaceContext(projectRoot, { stateHome });
-    assert.equal(resolved.mode, "external");
-    assert.equal(resolveWildArrangePath(projectRoot, "work.json"), migrated.context.runtimeRoot + path.sep + "work.json");
-  });
-});
-
-test("workspace context: corrupted legacy ledger cannot switch registry", async () => {
-  await withWorkspace(async ({ projectRoot, governanceRoot, stateHome }) => {
-    await resolveWorkspaceContext(projectRoot, { stateHome, legacy: true });
-    await initRuntime(projectRoot);
-    await writeFile(path.join(projectRoot, ".wildarrange", "ledger.jsonl"), "{broken-json}\n", { flag: "a" });
-    await assert.rejects(
-      migrateLegacyWorkspace(projectRoot, { governanceRoot, stateHome }),
-      /ledger verification failed/,
-    );
-    assert.equal(existsSync(path.join(stateHome, "registry.json")), false);
-    assert.equal(existsSync(path.join(projectRoot, ".wildarrange", "work.json")), true);
-  });
-});
-
 test("workspace context: governance verification defaults are additive and bound into imported tasks", async () => {
-  await withWorkspace(async ({ projectRoot, governanceRoot, stateHome }) => {
+  await withExternalProject(async ({ root, projectRoot, governanceRoot }) => {
     const registry = buildRegistryFromCards([
       { id: "verify-1", path: "package.json", status: "approved", action: "adopt", patch: { kind: "registry_plan_default", field: "verify_commands", command: "node --version" } },
       { id: "review-1", path: "package.json", status: "approved", action: "adopt", patch: { kind: "registry_plan_default", field: "review_commands", command: "node --version" } },
     ]);
     await writeFile(path.join(governanceRoot, "verification", "registry.json"), JSON.stringify(registry, null, 2));
-    await attachGovernanceRepository(projectRoot, { governanceRoot, stateHome });
-    await initRuntime(projectRoot);
+    await gitCommitAll(governanceRoot, "governance verification defaults");
     const binding = await loadGovernanceVerificationDefaults(projectRoot);
     assert.equal(binding.registryDigest, registry.digest);
     assert.deepEqual(binding.planDefaults.verify_commands, ["node --version"]);
 
-    const planPath = path.join(projectRoot, "plan.json");
+    const planPath = path.join(root, "plan.json");
     await writeFile(planPath, JSON.stringify({
       id: "P-EXTERNAL",
       title: "External governance defaults",
@@ -207,56 +145,30 @@ test("workspace context: governance verification defaults are additive and bound
 });
 
 test("workspace context: tampered governance verification registry blocks plan import", async () => {
-  await withWorkspace(async ({ projectRoot, governanceRoot, stateHome }) => {
+  await withExternalProject(async ({ root, projectRoot, governanceRoot }) => {
     const registry = buildRegistryFromCards([]);
     registry.planDefaults.verify_commands.push("node --version");
     await writeFile(path.join(governanceRoot, "verification", "registry.json"), JSON.stringify(registry, null, 2));
-    await attachGovernanceRepository(projectRoot, { governanceRoot, stateHome });
-    await initRuntime(projectRoot);
-    const planPath = path.join(projectRoot, "plan.json");
+    await gitCommitAll(governanceRoot, "tampered registry");
+    const planPath = path.join(root, "plan.json");
     await writeFile(planPath, JSON.stringify({ title: "Tampered governance", tasks: [{ subject: "Do work", verify_commands: ["node --version"], writable_paths: ["src/**"] }] }));
     await assert.rejects(importPlan(projectRoot, planPath), /registry digest mismatch/);
   });
 });
 
 test("workspace context: uncommitted governance policy cannot control a new plan", async () => {
-  await withWorkspace(async ({ projectRoot, governanceRoot, stateHome }) => {
-    const registry = buildRegistryFromCards([]);
-    await writeFile(path.join(governanceRoot, "verification", "registry.json"), JSON.stringify(registry, null, 2));
-    for (const args of [
-      ["init"],
-      ["config", "user.email", "wildarrange-test@example.test"],
-      ["config", "user.name", "WildArrange Test"],
-      ["add", "."],
-      ["commit", "-m", "governance baseline"],
-    ]) {
-      const result = await runCommandFile("git", ["-C", governanceRoot, ...args], governanceRoot, 15_000);
-      assert.equal(result.exitCode, 0, result.stderr);
-    }
+  await withExternalProject(async ({ projectRoot, governanceRoot }) => {
     await writeFile(path.join(governanceRoot, "policy", "AGENTS.md"), "# Unapproved governance change\n");
-    await attachGovernanceRepository(projectRoot, { governanceRoot, stateHome });
-    await initRuntime(projectRoot);
     await assert.rejects(loadGovernanceVerificationDefaults(projectRoot), /uncommitted changes/);
   });
 });
 
 test("workspace context: linked Git worktrees share project identity and runtime without losing their current root", async () => {
-  await withWorkspace(async ({ root, projectRoot, governanceRoot, stateHome }) => {
-    await writeFile(path.join(projectRoot, "README.md"), "baseline\n");
-    for (const args of [
-      ["init"],
-      ["config", "user.email", "wildarrange-test@example.test"],
-      ["config", "user.name", "WildArrange Test"],
-      ["add", "."],
-      ["commit", "-m", "project baseline"],
-    ]) {
-      const result = await runCommandFile("git", ["-C", projectRoot, ...args], projectRoot, 15_000);
-      assert.equal(result.exitCode, 0, result.stderr);
-    }
+  await withExternalProject(async ({ root, projectRoot, stateHome }) => {
     const linkedRoot = path.join(root, "linked-project");
     const worktree = await runCommandFile("git", ["-C", projectRoot, "worktree", "add", "--detach", linkedRoot], projectRoot, 15_000);
     assert.equal(worktree.exitCode, 0, worktree.stderr);
-    const attached = await attachGovernanceRepository(projectRoot, { governanceRoot, stateHome });
+    const attached = getBoundWorkspaceContext(projectRoot);
     clearWorkspaceContext(projectRoot);
     clearWildArrangeRuntimeRoot(projectRoot);
     const linked = await resolveWorkspaceContext(linkedRoot, { stateHome });
@@ -267,11 +179,10 @@ test("workspace context: linked Git worktrees share project identity and runtime
 });
 
 test("external onboarding: setup drafts use runtime and configuration belongs to governance", async () => {
-  await withWorkspace(async ({ projectRoot, governanceRoot, stateHome }) => {
+  await withExternalProject(async ({ projectRoot, governanceRoot, stateHome }) => {
     const { configureProjectReview } = await import("../src/capabilities/project-review.mjs");
     const { loadWildArrangeConfig } = await import("../src/infra/runtime-config.mjs");
-    const context = await attachGovernanceRepository(projectRoot, { governanceRoot, stateHome });
-    await initRuntime(projectRoot);
+    const context = getBoundWorkspaceContext(projectRoot);
     const drafts = path.join(context.runtimeRoot, "plan-drafts");
     await mkdir(drafts, { recursive: true });
     const draft = path.join(drafts, "setup.json");
@@ -307,25 +218,17 @@ test("external onboarding: setup drafts use runtime and configuration belongs to
 });
 
 test("external onboarding: commit A and B belong to governance while source freshness belongs to product", async () => {
-  await withWorkspace(async ({ projectRoot, governanceRoot, stateHome }) => {
-    const { startAdoption, decideAdoptionCard, applyApprovedCards, resumeAdoption } = await import("../src/orchestration/adoption.mjs");
+  await withExternalProject(async ({ projectRoot, governanceRoot }) => {
+    const { startAdoption, decideAdoptionCard, resumeAdoption } = await import("../src/orchestration/adoption.mjs");
+    const { applyApprovedCards } = await import("../src/orchestration/adoption-apply.mjs");
     const { evaluateRegistryFreshness, readVerificationInventory } = await import("../src/infra/verification-registry.mjs");
     const git = async (root, args) => {
       const result = await runCommandFile("git", ["-C", root, ...args], root, 15_000);
       assert.equal(result.exitCode, 0, result.stderr || result.stdout);
       return result.stdout.trim();
     };
-    await mkdir(path.join(projectRoot, "test"), { recursive: true });
-    await writeFile(path.join(projectRoot, "test/ok.test.mjs"), "export const ok = 1;");
-    await writeFile(path.join(projectRoot, "package.json"), JSON.stringify({ name: "product", scripts: { test: "node --test test/ok.test.mjs" } }));
-    await initializeGovernanceRepository(projectRoot, { governanceRoot, repository: "https://example.test/product.git" });
-    for (const root of [projectRoot, governanceRoot]) {
-      for (const args of [["init"], ["config", "user.email", "wa@example.test"], ["config", "user.name", "WA"], ["add", "."], ["commit", "-m", "baseline"]]) await git(root, args);
-    }
     const initialRegistry = await readFile(path.join(governanceRoot, "verification/registry.json"), "utf8");
     const productHead = await git(projectRoot, ["rev-parse", "HEAD"]);
-    await attachGovernanceRepository(projectRoot, { governanceRoot, stateHome });
-    await initRuntime(projectRoot);
     const started = await startAdoption(projectRoot, { serve: false });
     assert.equal(started.ok, true);
     const locator = started.cards.find(card => card.asset === "config_locator");
@@ -378,14 +281,18 @@ test("external onboarding: commit A and B belong to governance while source fres
     assert.equal(await readFile(registryPath, "utf8"), registryBytes);
     await writeFile(path.join(projectRoot, "package.json"), '{"name":"changed"}');
     assert.equal((await evaluateRegistryFreshness(projectRoot)).status, "declared_input_drift");
+  }, {
+    projectFiles: {
+      "README.md": "# Fixture project\n",
+      "test/ok.test.mjs": "export const ok = 1;",
+      "package.json": JSON.stringify({ name: "product", scripts: { test: "node --test test/ok.test.mjs" } }),
+    },
   });
 });
 
 test("external onboarding: failed locator verifier restores governance and runs in product cwd", async () => {
-  await withWorkspace(async ({ projectRoot, governanceRoot, stateHome }) => {
+  await withExternalProject(async ({ projectRoot, governanceRoot }) => {
     const { applyVerificationCard } = await import("../src/capabilities/verification-governance.mjs");
-    await attachGovernanceRepository(projectRoot, { governanceRoot, stateHome });
-    await initRuntime(projectRoot);
     await writeFile(path.join(projectRoot, "verify.mjs"), 'console.log("PRODUCT_CWD");process.exit(1);');
     const original = '{"executionReadiness":{"timeoutMs":4321}}';
     const configPath = path.join(governanceRoot, "policy/wildarrange.config.json");

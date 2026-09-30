@@ -28,8 +28,7 @@ import {
   restorePreimages,
   writeRecoveryManifest,
 } from "../infra/recovery-transaction.mjs";
-import { fingerprintCard } from "../infra/verification-cards.mjs";
-import { scanVerificationUniverse } from "../infra/verification-discovery.mjs";
+import { scanVerificationUniverse } from "./verification-discovery.mjs";
 import {
   buildBootstrap,
   buildInventory,
@@ -38,6 +37,7 @@ import {
   declaredInputPaths,
   digestCanonical,
   digestGitComparableContent,
+  fingerprintCard,
   parseVerificationInventory,
   readGitInventoryContext,
   readLocator,

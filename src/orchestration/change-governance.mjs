@@ -2,25 +2,12 @@
 // 文件名称：change-governance.mjs
 // 所属模块：orchestration
 // 作用说明：
-//   变更治理：scope 越界 ChangeRequest、review blocker、计划 steering、
-//   契约变更请求与人类 accept/reject 的持久化与索引。
-//
-// 【运行原理速读】
-//   可以把它想成「超出任务范围时的申诉与裁决台」：
-//
-//   · 何时执行？
-//     scope_guard 拦截、review 阻塞、主 Agent steering 或契约提案时。
-//
-//   · 做了什么？
-//     写 ChangeRequest → 任务 needs_user_decision → resolve 后恢复或改计划。
+//   ChangeRequest 存储与裁决：scope 越界 CR、契约变更 CR 的写入/索引/审阅/resolve。
+//   计划 steering 见 plan-steering，review blocker 见 review-blocker。
 // =============================================================================
-import { normalizeResponsibilityChanges } from "../infra/responsibility-contract.mjs";
 import { readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import {
-  DEFAULT_LEAD_AGENT,
-  normalizeAgentKey,
-} from "../infra/agent-registry.mjs";
+import { DEFAULT_LEAD_AGENT, normalizeAgentKey } from "../infra/agent-registry.mjs";
 import { appendLedger, readVerifiedLedgerEntries } from "../infra/ledger.mjs";
 import {
   ensureWildArrangeDirs,
@@ -33,125 +20,8 @@ import {
 import { transactWithLedger, withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { uniqueStrings } from "../infra/text-utils.mjs";
-import {
-  loadTaskState,
-  normalizeStringArray,
-  normalizeSuccessCriteria,
-  normalizeTask,
-  validatePlanGraph,
-} from "./plan-state.mjs";
+import { loadTaskState } from "./plan-state.mjs";
 import { persistTaskState } from "./task-board.mjs";
-
-// --- 计划 steering ---
-
-/** 主 Agent 对当前计划的结构化 steering 提案（增删任务、改验收等）。 */
-export async function steerWorkflow(rootDir, proposal = {}) {
-  return withTaskStateLock(rootDir, `steer:${proposal.kind || "unknown"}`, async () => {
-    await ensureWildArrangeDirs(rootDir);
-    const taskState = await loadTaskState(rootDir);
-    if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
-    const audit = validateSteeringProposal(taskState, proposal);
-    if (!audit.invariant.accepted) {
-      await appendLedger(rootDir, { type: "steering_rejected", kind: audit.kind, reasons: audit.invariant.rejectedReasons });
-      return { accepted: false, audit, taskState };
-    }
-    const before = structuredClone(taskState);
-    const result = applySteeringProposal(taskState, proposal);
-    validatePlanGraph({ tasks: taskState.tasks });
-    validateTaskAcceptanceInvariants(taskState.tasks);
-    audit.before = summarizeSteeringState(before);
-    audit.after = summarizeSteeringState(taskState);
-    await transactWithLedger(rootDir, {
-      type: "steering_applied",
-      kind: audit.kind,
-      targetTaskIds: audit.targetTaskIds,
-      evidence: audit.evidence,
-    }, () => persistTaskState(rootDir, taskState));
-    await writeSnapshot(rootDir, "steering_applied", { kind: audit.kind, targetTaskIds: audit.targetTaskIds });
-    return { accepted: true, audit, result, taskState };
-  });
-}
-
-// --- review 与 scope 变更 ---
-
-/** 记录 review gate 阻塞并可选写入 ChangeRequest。 */
-export async function recordReviewBlocker(rootDir, options = {}) {
-  return withTaskStateLock(rootDir, `review-blocker:${options.taskId || "unknown"}`, async () => {
-    await ensureWildArrangeDirs(rootDir);
-    const taskState = await loadTaskState(rootDir);
-    if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
-    const task = taskState.tasks.find((candidate) => candidate.id === options.taskId);
-    if (!task) throw new Error(`unknown task: ${options.taskId}`);
-    if (!["verifying", "failed", "in_progress"].includes(task.status)) throw new Error(`task ${task.id} is ${task.status}; cannot record review blocker`);
-    const evidence = typeof options.evidence === "string" ? options.evidence.trim() : "";
-    const rationale = typeof options.rationale === "string" ? options.rationale.trim() : "";
-    if (!evidence) throw new Error("review blocker evidence is required");
-    if (!rationale) throw new Error("review blocker rationale is required");
-    if (hasWeakeningLanguage(`${evidence}\n${rationale}`)) throw new Error("review blocker appears to weaken verification");
-    const blockerTask = normalizeTask({
-      id: options.newTaskId || nextTaskId(taskState.tasks),
-      subject: options.title || `Resolve review blocker for ${task.id}`,
-      description: options.objective || rationale,
-      worker_command: options.worker_command || "node -e \"process.exit(0)\"",
-      verify_commands: options.verify_commands || task.verify_commands,
-      review_commands: options.review_commands || task.review_commands || [],
-      standards_commands: options.standards_commands || task.standards_commands || [],
-      writable_paths: options.writable_paths || task.writable_paths || [],
-    }, taskState.tasks.length, {});
-    blockerTask.reviewBlockerFor = task.id;
-    blockerTask.steering = { kind: "review_blocker_resolution", evidence, rationale, at: nowIso() };
-    task.status = "review_blocked";
-    task.reviewBlockedAt = nowIso();
-    task.reviewBlocker = { evidence, rationale, resolutionTaskId: blockerTask.id };
-    task.updatedAt = nowIso();
-    taskState.tasks.push(blockerTask);
-    validatePlanGraph({ tasks: taskState.tasks });
-    await transactWithLedger(rootDir, {
-      type: "review_blocker_recorded",
-      planId: taskState.planId,
-      taskId: task.id,
-      resolutionTaskId: blockerTask.id,
-      evidence,
-    }, () => persistTaskState(rootDir, taskState));
-    await writeSnapshot(rootDir, "review_blocker_recorded", { planId: taskState.planId, taskId: task.id, resolutionTaskId: blockerTask.id });
-    return { planId: taskState.planId, blockedTask: task, resolutionTask: blockerTask };
-  });
-}
-
-/** 解析 review blocker，恢复任务 gate 流程。 */
-export async function resolveReviewBlocker(rootDir, options = {}) {
-  return withTaskStateLock(rootDir, `review-blocker-resolve:${options.taskId || "unknown"}`, async () => {
-    await ensureWildArrangeDirs(rootDir);
-    const taskState = await loadTaskState(rootDir);
-    if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
-    const task = taskState.tasks.find((candidate) => candidate.id === options.taskId);
-    if (!task) throw new Error(`unknown task: ${options.taskId}`);
-    if (task.status !== "review_blocked") throw new Error(`task ${task.id} is ${task.status}; cannot resolve review blocker`);
-    const evidence = typeof options.evidence === "string" ? options.evidence.trim() : "";
-    const rationale = typeof options.rationale === "string" ? options.rationale.trim() : "";
-    if (!evidence) throw new Error("review blocker resolution evidence is required");
-    if (!rationale) throw new Error("review blocker resolution rationale is required");
-    if (hasWeakeningLanguage(`${evidence}\n${rationale}`)) throw new Error("review blocker resolution appears to weaken verification");
-    const resolutionTaskId = task.reviewBlocker?.resolutionTaskId;
-    const resolutionTask = resolutionTaskId
-      ? taskState.tasks.find((candidate) => candidate.id === resolutionTaskId)
-      : null;
-    if (!resolutionTask) throw new Error(`task ${task.id} has no recorded review blocker resolution task`);
-    if (resolutionTask.status !== "completed") throw new Error(`resolution task ${resolutionTask.id} is ${resolutionTask.status}; complete it before unblocking ${task.id}`);
-    task.status = "pending";
-    task.reviewBlocker = { ...task.reviewBlocker, resolvedAt: nowIso(), resolutionEvidence: evidence, resolutionRationale: rationale };
-    task.updatedAt = nowIso();
-    await transactWithLedger(rootDir, {
-      type: "review_blocker_resolved",
-      planId: taskState.planId,
-      taskId: task.id,
-      resolutionTaskId,
-      evidence,
-    }, () => persistTaskState(rootDir, taskState));
-    await writeSnapshot(rootDir, "review_blocker_resolved", { planId: taskState.planId, taskId: task.id, resolutionTaskId });
-    return { planId: taskState.planId, unblockedTask: task, resolutionTask };
-  });
-}
 
 /** 读取并渲染 ChangeRequest 供人类 review。 */
 export async function reviewChangeRequest(rootDir, id) {
@@ -161,9 +31,7 @@ export async function reviewChangeRequest(rootDir, id) {
   if (changeRequest.status !== "open") reasons.push(`change request is ${changeRequest.status}`);
   if (!changeRequest.evidence || !changeRequest.rationale) reasons.push("missing evidence or rationale");
   if (changeRequest.invariants?.autoApply !== false) reasons.push("autoApply invariant must be false");
-  // 兼容 requiresLeadReview 重命名前写入的旧 invariant 键，保持字面量可检索。
-  const legacyLeadReviewKey = "requiresSisyphusReview";
-  if (changeRequest.invariants?.requiresLeadReview !== true && changeRequest.invariants?.[legacyLeadReviewKey] !== true) {
+  if (changeRequest.invariants?.requiresLeadReview !== true) {
     reasons.push("requiresLeadReview invariant must be true");
   }
   if (changeRequest.invariants?.mustNotWeakenVerification !== true) reasons.push("mustNotWeakenVerification invariant must be true");
@@ -288,187 +156,8 @@ async function resolveChangeRequestUnlocked(rootDir, options = {}) {
   return { status: changeRequest.status, changeRequest, task: task || null };
 }
 
-/** 校验转向提案字段完整性与任务引用合法。 */
-function validateSteeringProposal(taskState, proposal) {
-  const reasons = [];
-  if (!proposal || typeof proposal !== "object") reasons.push("proposal must be an object");
-  const kind = proposal?.kind;
-  const allowedKinds = ["add_task", "split_task", "reorder_pending", "revise_acceptance", "mark_blocked"];
-  if (!allowedKinds.includes(kind)) reasons.push(`invalid kind: ${String(kind)}`);
-  const evidence = typeof proposal?.evidence === "string" ? proposal.evidence.trim() : "";
-  const rationale = typeof proposal?.rationale === "string" ? proposal.rationale.trim() : "";
-  if (!evidence) reasons.push("missing evidence");
-  if (!rationale) reasons.push("missing rationale");
-  const proposalText = JSON.stringify(proposal || {});
-  if (hasWeakeningLanguage(proposalText)) reasons.push("weakened completion");
-  if (proposalText.match(/completedAt|completionStatus|autoComplete|mark complete/i)) reasons.push("protected completion payload");
-  const targetTaskIds = proposal?.targetTaskIds || (proposal?.targetTaskId ? [proposal.targetTaskId] : proposal?.taskId ? [proposal.taskId] : []);
-  if ((kind === "split_task" || kind === "revise_acceptance" || kind === "mark_blocked") && targetTaskIds.length === 0) reasons.push(`${kind} requires targetTaskId`);
-  const targets = targetTaskIds.map((id) => taskState.tasks.find((task) => task.id === id));
-  if (targets.some((task) => !task)) reasons.push("unknown target task");
-  if ((kind === "split_task" || kind === "revise_acceptance") && targets.some((task) => task && task.status !== "pending")) reasons.push(`${kind} only applies to pending tasks`);
-  if (kind === "mark_blocked" && targets.some((task) => task && ["completed", "verifying"].includes(task.status))) reasons.push("mark_blocked cannot target completed or verifying tasks");
-  if (kind === "add_task" && (!proposal.task || typeof proposal.task !== "object")) reasons.push("add_task requires task object");
-  if (kind === "split_task" && (!Array.isArray(proposal.tasks) || proposal.tasks.length === 0)) reasons.push("split_task requires tasks array");
-  if (kind === "revise_acceptance") {
-    for (const target of targets.filter(Boolean)) {
-      reasons.push(...validateAcceptanceRevisionStrength(target, proposal));
-    }
-  }
-  if (kind === "reorder_pending") {
-    const pendingOrder = Array.isArray(proposal.pendingOrder) ? proposal.pendingOrder : [];
-    const pendingIds = taskState.tasks.filter((task) => task.status === "pending").map((task) => task.id);
-    const missingPendingIds = pendingIds.filter((id) => !pendingOrder.includes(id));
-    if (pendingOrder.length === 0) reasons.push("reorder_pending requires pendingOrder");
-    if (new Set(pendingOrder).size !== pendingOrder.length) reasons.push("duplicate pending id");
-    if (pendingOrder.some((id) => !pendingIds.includes(id))) reasons.push("unknown pending id");
-    if (pendingOrder.length !== pendingIds.length || missingPendingIds.length > 0) {
-      reasons.push(`reorder_pending must include every pending task exactly once: missing ${missingPendingIds.join(", ") || "none"}`);
-    }
-  }
-  return {
-    kind: allowedKinds.includes(kind) ? kind : "invalid",
-    at: nowIso(),
-    source: proposal.source || "cli",
-    evidence,
-    rationale,
-    targetTaskIds,
-    invariant: {
-      accepted: reasons.length === 0,
-      evidenceBackedNecessity: evidence.length > 0 && rationale.length > 0,
-      noWeakenedCompletion: !hasWeakeningLanguage(proposalText),
-      structuralInvariantAccepted: reasons.length === 0,
-      rejectedReasons: reasons,
-    },
-  };
-}
-
-/** 校验验收修订不得弱化 successCriteria/verify。 */
-function validateAcceptanceRevisionStrength(target, proposal) {
-  const reasons = [];
-  for (const [field, label] of [
-    ["verify_commands", "verify_commands"],
-    ["review_commands", "review_commands"],
-    ["standards_commands", "standards_commands"],
-  ]) {
-    if (!Array.isArray(proposal[field])) continue;
-    const next = normalizeStringArray(proposal[field], `task ${target.id} ${label}`);
-    if (field === "verify_commands" && next.length === 0) {
-      reasons.push("verify_commands cannot be empty");
-    }
-    const removed = (target[field] || []).filter((command) => !next.includes(command));
-    if (removed.length > 0) {
-      reasons.push(`${label} cannot remove existing gate command(s): ${removed.join(", ")}`);
-    }
-  }
-
-  if (Array.isArray(proposal.successCriteria)) {
-    const nextCriteria = normalizeSuccessCriteria(proposal.successCriteria, target.id, target.subject, target.verify_commands);
-    const nextIds = new Set(nextCriteria.map((criterion) => criterion.id));
-    const removedCriteria = (target.successCriteria || []).filter((criterion) => !nextIds.has(criterion.id));
-    if (removedCriteria.length > 0) {
-      reasons.push(`successCriteria cannot remove existing criterion id(s): ${removedCriteria.map((criterion) => criterion.id).join(", ")}`);
-    }
-  }
-  return reasons;
-}
-
-/** 批量校验任务 acceptance 不变量。 */
-function validateTaskAcceptanceInvariants(tasks) {
-  for (const task of tasks) {
-    if (!Array.isArray(task.verify_commands) || task.verify_commands.length === 0) {
-      throw new Error(`task ${task.id} requires at least one verify command`);
-    }
-  }
-}
-
-/** 将已批准转向提案合并进 taskState。 */
-function applySteeringProposal(taskState, proposal) {
-  const planDefaults = {};
-  if (proposal.kind === "add_task") {
-    const task = normalizeTask(proposal.task, taskState.tasks.length, planDefaults);
-    task.steering = steeringStamp(proposal);
-    taskState.tasks.push(task);
-    return { task };
-  }
-  if (proposal.kind === "split_task") {
-    const target = taskState.tasks.find((task) => task.id === (proposal.targetTaskId || proposal.taskId));
-    target.status = "review_blocked";
-    target.steeringStatus = "superseded";
-    target.steering = steeringStamp(proposal);
-    const created = proposal.tasks.map((rawTask, index) => {
-      const task = normalizeTask({ blockedBy: [], ...rawTask }, taskState.tasks.length + index, planDefaults);
-      task.supersedes = [target.id];
-      task.steering = steeringStamp(proposal);
-      return task;
-    });
-    target.supersededBy = created.map((task) => task.id);
-    taskState.tasks.splice(taskState.tasks.indexOf(target) + 1, 0, ...created);
-    return { blockedTask: target, created };
-  }
-  if (proposal.kind === "reorder_pending") {
-    const order = proposal.pendingOrder;
-    const ordered = order.map((id) => taskState.tasks.find((task) => task.id === id)).filter(Boolean);
-    const rest = taskState.tasks.filter((task) => !order.includes(task.id));
-    taskState.tasks = [...ordered, ...rest];
-    return { order };
-  }
-  if (proposal.kind === "revise_acceptance") {
-    const target = taskState.tasks.find((task) => task.id === (proposal.targetTaskId || proposal.taskId));
-    if (proposal.responsibilityChanges !== undefined) {
-      const changes = normalizeResponsibilityChanges(proposal.responsibilityChanges, target.writable_paths);
-      if (!changes) throw new Error("responsibilityChanges cannot be removed");
-      target.responsibilityChanges = changes;
-    }
-    if (Array.isArray(proposal.verify_commands)) target.verify_commands = normalizeStringArray(proposal.verify_commands, `task ${target.id} verify_commands`);
-    if (Array.isArray(proposal.review_commands)) target.review_commands = normalizeStringArray(proposal.review_commands, `task ${target.id} review_commands`);
-    if (Array.isArray(proposal.standards_commands)) target.standards_commands = normalizeStringArray(proposal.standards_commands, `task ${target.id} standards_commands`);
-    if (Array.isArray(proposal.successCriteria)) target.successCriteria = normalizeSuccessCriteria(proposal.successCriteria, target.id, target.subject, target.verify_commands);
-    target.steering = steeringStamp(proposal);
-    target.updatedAt = nowIso();
-    return { task: target };
-  }
-  if (proposal.kind === "mark_blocked") {
-    const target = taskState.tasks.find((task) => task.id === (proposal.targetTaskId || proposal.taskId));
-    target.status = "needs_user_decision";
-    target.blockedReason = proposal.blockedReason || proposal.rationale;
-    target.steering = steeringStamp(proposal);
-    target.updatedAt = nowIso();
-    return { task: target };
-  }
-  return {};
-}
-
-/** 生成 steering 决策的时间戳与 actor 标记。 */
-function steeringStamp(proposal) {
-  return {
-    kind: proposal.kind,
-    source: proposal.source || "cli",
-    evidence: proposal.evidence,
-    rationale: proposal.rationale,
-    at: nowIso(),
-  };
-}
-
-/** 汇总 taskState 上 steering 相关字段供报告使用。 */
-function summarizeSteeringState(taskState) {
-  return {
-    planId: taskState.planId,
-    tasks: taskState.tasks.map((task) => ({ id: task.id, status: task.status, subject: task.subject, blockedBy: task.blockedBy || [] })),
-  };
-}
-
-/** 在现有 tasks 中生成下一个可用 Txxx 编号。 */
-function nextTaskId(tasks) {
-  const max = tasks.reduce((current, task) => {
-    const match = /^T(\d+)$/.exec(task.id);
-    return match ? Math.max(current, Number(match[1])) : current;
-  }, 0);
-  return `T${String(max + 1).padStart(3, "0")}`;
-}
-
 /** 检测文本是否含弱化 gate/验收的措辞。 */
-function hasWeakeningLanguage(value) {
+export function hasWeakeningLanguage(value) {
   return /\b(skip|bypass|weaken|remove|omit|auto[-\s]?complete|mark complete|complete faster)\b/i.test(value)
     && /\b(test|tests|verification|review|quality gate|complete|completion)\b/i.test(value);
 }
@@ -480,7 +169,6 @@ function normalizeDecision(decision) {
   return null;
 }
 
-// --- ChangeRequest 持久化 ---
 
 /** 由 scope 结果创建 scope ChangeRequest 并写报告。 */
 export async function writeChangeRequest(rootDir, planId, task, scopeResult, source = "scope_guard") {
@@ -542,9 +230,7 @@ export async function writeChangeRequest(rootDir, planId, task, scopeResult, sou
 }
 
 /** 将 ChangeRequest 渲染为 Markdown 报告正文。 */
-export function renderChangeRequestMarkdown(changeRequest) {
-  // 兼容 requiresLeadReview 重命名前写入的旧 invariant 键，保持字面量可检索。
-  const legacyLeadReviewKey = "requiresSisyphusReview";
+function renderChangeRequestMarkdown(changeRequest) {
   return `# ChangeRequest ${changeRequest.id}
 
 | Field | Value |
@@ -593,13 +279,13 @@ ${changeRequest.proposedActions.map((action) => `- ${action}`).join("\n")}
 ## Invariants
 
 - autoApply: ${changeRequest.invariants.autoApply}
-- requiresLeadReview: ${changeRequest.invariants.requiresLeadReview ?? changeRequest.invariants[legacyLeadReviewKey]}
+- requiresLeadReview: ${changeRequest.invariants.requiresLeadReview}
 - mustNotWeakenVerification: ${changeRequest.invariants.mustNotWeakenVerification}
 `;
 }
 
 /** 刷新 open changes 索引文件供 dashboard 使用。 */
-export async function writeOpenChangesIndex(rootDir) {
+async function writeOpenChangesIndex(rootDir) {
   const changes = await listChangeRequests(rootDir);
   const openChanges = changes.filter((change) => change.status === "open");
   const lines = ["# Open ChangeRequests", ""];
@@ -618,7 +304,6 @@ export async function writeOpenChangesIndex(rootDir) {
 
 // Called under the task-state lock by the contract workflow. Changes keep one
 // authoritative JSON record; task state contains only a reference to it.
-// --- 契约变更 ---
 
 /** 创建契约类 ChangeRequest（contract_change 来源）。 */
 export async function writeContractChangeRequest(rootDir, planId, task, proposal) {

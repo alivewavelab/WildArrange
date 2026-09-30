@@ -68,7 +68,7 @@ export function resolveAgentSpawn(rootDir, config, task, context, options = {}) 
  * @param {object} context 占位符数据源
  * @returns {string} 渲染后的完整命令
  */
-export function renderSpawnCommand(command, context) {
+function renderSpawnCommand(command, context) {
   return String(command)
     .replaceAll("{rootDir}", quoteShellArgument(context.rootDir))
     .replaceAll("{runDir}", quoteShellArgument(context.runDir))

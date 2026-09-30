@@ -26,10 +26,11 @@ import {
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
 import { appendLedger, verifyLedger } from "../infra/ledger.mjs";
-import { verifyConfigBaseline } from "../infra/security.mjs";
+import { verifyConfigBaseline } from "../infra/config-baseline.mjs";
 import { evaluateGateArming } from "../infra/gate-arming.mjs";
 import { normalizeRelativePath } from "../infra/path-match.mjs";
-import { inspectCompletedTaskEvidence, loadTaskLedger } from "../infra/task-state-store.mjs";
+import { inspectCompletedTaskEvidence, loadTaskLedger, taskStateFromLedger } from "../infra/task-state-store.mjs";
+import { countTasksByStatus, summarizeTaskCounts } from "../infra/task-predicates.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { evaluateRegistryFreshness } from "../infra/verification-registry.mjs";
 import { listChangeRequests } from "./change-governance.mjs";
@@ -67,7 +68,7 @@ export async function writeWorkflowSummary(rootDir, options = {}) {
     version: STATE_VERSION,
     at: nowIso(),
     reason: options.reason || "manual",
-    ok: status.total > 0 && status.completed === status.total && status.invalidCompleted === 0 && status.draft === 0 && status.failed === 0 && status.pending === 0 && status.in_progress === 0 && status.verifying === 0 && status.openChanges === 0,
+    ok: status.total > 0 && status.completed === status.total && status.invalidCompleted === 0 && status.openChanges === 0,
     planId: status.planId,
     status,
     latestSnapshot: latestSnapshot ? { id: latestSnapshot.id, stage: latestSnapshot.stage, at: latestSnapshot.at } : null,
@@ -94,10 +95,10 @@ export async function writeWorkflowSummary(rootDir, options = {}) {
 // --- 状态报告 ---
 
 /** 返回计划任务各状态计数、门武装与完成证据完整性。 */
-export async function statusReport(rootDir) {
+export async function statusReport(rootDir, options = {}) {
   const work = await readJson(resolveWildArrangePath(rootDir, "work.json"), null);
-  const taskState = await loadTaskState(rootDir);
-  const changes = await listChangeRequests(rootDir);
+  const taskState = options.taskState !== undefined ? options.taskState : await loadTaskState(rootDir);
+  const changes = options.changes !== undefined ? options.changes : await listChangeRequests(rootDir);
   const openChanges = changes.filter((change) => change.status === "open").length;
   // 门未武装黄灯：配置地板不满足时常驻显示，绝不因任务全绿而显示绿。
   const { config } = await loadWildArrangeConfig(rootDir);
@@ -109,28 +110,16 @@ export async function statusReport(rootDir) {
     reason: error instanceof Error ? error.message : String(error),
     nextAction: "运行 wildarrange doctor 查看 registryFreshness 分项",
   }));
-  if (!taskState) return { gateArming, registryFreshness, work, planId: null, total: 0, completed: 0, invalidCompleted: 0, draft: 0, pending: 0, failed: 0, openChanges };
+  if (!taskState) return { gateArming, registryFreshness, work, planId: null, ...summarizeTaskCounts([]), invalidCompleted: 0, openChanges };
   const completionIntegrity = await inspectCompletedTaskEvidence(rootDir, taskState);
-  const counts = taskState.tasks.reduce((acc, task) => {
-    acc[task.status] = (acc[task.status] || 0) + 1;
-    return acc;
-  }, {});
   return {
     gateArming,
     registryFreshness,
     work,
     planId: taskState.planId,
-    total: taskState.tasks.length,
-    draft: counts.draft || 0,
-    completed: counts.completed || 0,
+    ...summarizeTaskCounts(taskState.tasks),
     invalidCompleted: completionIntegrity.invalid.length,
     completionIntegrity,
-    pending: counts.pending || 0,
-    in_progress: counts.in_progress || 0,
-    verifying: counts.verifying || 0,
-    failed: counts.failed || 0,
-    review_blocked: counts.review_blocked || 0,
-    needs_user_decision: counts.needs_user_decision || 0,
     openChanges,
   };
 }
@@ -139,14 +128,16 @@ export async function statusReport(rootDir) {
 
 /** 组装 dashboard 所需的 status、tasks、health、attention 等完整视图。 */
 export async function dashboardData(rootDir) {
-  const status = await statusReport(rootDir);
-  const taskState = await loadTaskState(rootDir);
+  // 总账、任务状态、变更请求各只加载一次，供 status / attention / taskLedger 共用。
+  const ledgerFile = await loadTaskLedger(rootDir);
+  const taskState = taskStateFromLedger(ledgerFile);
+  const changes = await listChangeRequests(rootDir);
+  const status = await statusReport(rootDir, { taskState, changes });
   const latestSnapshot = await readJson(resolveWildArrangePath(rootDir, "snapshots", "latest.json"), null);
   const summary = await readJson(resolveWildArrangePath(rootDir, "reports", "workflow-summary.json"), null);
   const ledger = await readLedgerTail(rootDir, 80);
-  const changes = await listChangeRequests(rootDir);
   const attention = await attentionReport(rootDir, { taskState, changes });
-  const taskLedger = await taskLedgerReport(rootDir);
+  const taskLedger = taskLedgerReport(ledgerFile);
   const parallel = await parallelAgentStatus(rootDir).catch(() => null);
   const activeWorkspaces = buildActiveWorkspaces(taskState?.tasks || [], parallel?.runs || []);
   const health = {
@@ -214,23 +205,20 @@ function buildActiveWorkspaces(tasks, runs) {
 
 // --- 账本与注意力 ---
 
-/** 返回跨计划 task ledger 视图（counts、plans、tasks 列表）。 */
-export async function taskLedgerReport(rootDir) {
-  const ledger = await loadTaskLedger(rootDir);
+/** 返回跨计划 task ledger 视图（counts、stages、plans、tasks 列表）。 */
+function taskLedgerReport(ledger) {
   if (!ledger) {
     return { kind: "task_ledger_view", activePlanId: null, total: 0, counts: {}, typeCounts: {}, plans: [], tasks: [] };
   }
-  const counts = {};
   const typeCounts = {};
   for (const task of ledger.tasks) {
-    counts[task.status] = (counts[task.status] || 0) + 1;
     typeCounts[task.workType || "maintenance"] = (typeCounts[task.workType || "maintenance"] || 0) + 1;
   }
   return {
     kind: "task_ledger_view",
     activePlanId: ledger.activePlanId,
     total: ledger.tasks.length,
-    counts,
+    counts: countTasksByStatus(ledger.tasks),
     typeCounts,
     plans: ledger.plans,
     tasks: [...ledger.tasks].sort((left, right) => String(right.updatedAt || right.createdAt || "").localeCompare(String(left.updatedAt || left.createdAt || ""))),

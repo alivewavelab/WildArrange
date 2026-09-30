@@ -19,13 +19,10 @@
     "AGENTS.md",
     "README.md",
     "README.en.md",
-    "使用说明书.md",
-    "架构解析.md",
     ".env.wildarrange.example",
     "bin/",
     "src/",
     "packs/",
-    "doc/2026-07-21-five-zone-refactor-handoff.md",
     "doc/concept.md",
     "doc/development-plan.md",
     "doc/AGENTS.md",
@@ -39,7 +36,6 @@
     "doc/project-architecture.md",
     "docs/product/architecture-overview.html",
     "docs/product/assets/wildarrange-wordmark-dark-v1.png",
-    "tooling/arch-module-graph/",
     "examples/",
     "wildarrange.config.example.json",
     "CLAUDE.md"
@@ -48,7 +44,6 @@
     "node": ">=20"
   },
   "scripts": {
-    "check:arch": "node tooling/arch-module-graph/validate-module-file-map.mjs && node tooling/arch-module-graph/validate-flow-grid.mjs",
     "test": "node tooling/run-tests.mjs",
     "wildarrange": "node ./bin/wildarrange.mjs"
   }
