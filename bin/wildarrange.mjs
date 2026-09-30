@@ -816,7 +816,7 @@ async function main() {
       const declarations = Array.isArray(source) ? source : source?.items || [];
       const result = await invokeCapability("contract-governance-scan", {
         rootDir,
-        options: { declarations, discoverer: "tauri-ipc" },
+        options: { declarations },
       });
       console.log(JSON.stringify(result, null, 2));
       // §3.4：契约扫描未 pass 置 exit 2；stdout 仍输出完整 evidence 供修复。
