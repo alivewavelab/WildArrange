@@ -17,9 +17,9 @@ import {
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import {
   activateCursorAdapter,
-  CURSOR_BRIDGE_NAME,
   installAdapters,
 } from "../src/interface/adapters.mjs";
+import { CURSOR_BRIDGE_NAME } from "../src/interface/adapter-bundles.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
 

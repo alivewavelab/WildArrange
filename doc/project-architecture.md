@@ -128,9 +128,14 @@ AGENTS.md                         # mandatory reading routes
 - `src/interface/AGENTS.md`：Interface 局部职责、宿主安全边界和验收要求
 - `src/interface/dashboard.mjs`：本地 dashboard HTTP API 与 HTML UI，含全项目“工单总账”页（类型/状态/Plan/文本筛选、关联任务与状态历史）、人类表单建单，以及 POST token、Host 与 Origin 防护。
 - `src/interface/http-utils.mjs`：Dashboard 各面板共享的 JSON 响应、64KB 上限请求体读取与 id 模式；体错误以 code 区分 400/413
-- `src/interface/dashboard-view.mjs`：Dashboard 整页 HTML/CSS 与浏览器交互渲染，组合现有 panel 片段
+- `src/interface/dashboard-view.mjs`：Dashboard 整页 HTML 与浏览器交互脚本渲染，组合现有 panel 片段
+- `src/interface/dashboard-styles.mjs`：Dashboard 整页 CSS 字符串常量，由 dashboard-view 放入 `<style>`
 - `src/interface/contract-view.mjs`：`generateContractArtifacts(rootDir)` 读取正式台账与当前扫描，生成 HTML；页面不是批准记录。
-- `src/interface/adoption-panel.mjs`：验证治理接管 Dashboard 卡片、批准/恢复 API 与页面片段；写操作复用 Host/Origin/token/payload 防护。`adoption start/resume` 未显式提供 token 时生成单次随机 token，并通过 URL fragment 放入当前标签页。
+- `src/interface/adoption-panel.mjs`：验证治理接管治理文件索引、只读预览与批准/恢复 API；写操作复用 Host/Origin/token/payload 防护。`adoption start/resume` 未显式提供 token 时生成单次随机 token，并通过 URL fragment 放入当前标签页。
+- `src/interface/adoption-panel-view.mjs`：验证治理接管面板的前端片段（侧栏按钮、主视图 HTML、浏览器脚本），由 dashboard-view 嵌入
+- `src/interface/adapters.mjs`：外置宿主 Adapter 编排：生成安装包、Cursor/Codex 用户级激活、卸载、备份恢复与完整性检查
+- `src/interface/adapter-bundles.mjs`：Codex/Cursor/Kimi 三宿主插件包内容生成（manifest、Hook 配置、slash 命令 Skill），只写 runtimeRoot
+- `src/interface/adapter-bridge-template.mjs`：三宿主共用 Hook bridge 脚本的字符串模板（项目发现、CLI 调用、超时与错误处理骨架）
 - `src/interface/doctor.mjs`：一致性 doctor，审计 config 结构/mounts、将全局 task ledger 中所有 Plan 的 completed 任务与 checkpoint/acceptance proof/ledger 事件按 `<planId>:<taskId>` 对账、校验 ledger hash 链、ledger 与最新备份交叉检查，并展示最新仓库治理状态。`registryFreshness` 是独立容错黄灯分项。无 planId 的完成事件不计为任何任务的完成证据。专用 `gateArming` 与 `adapters` 段展示未武装 gate（黄灯不再埋在 `status` JSON 里）、已启用但未配置的 adapter 文件，以及 Codex 当前 Hook 配置是否已有真实执行证据。`adapter install` 只生成文件并记 `adapter_files_generated`；Codex 仅在 hash 链校验通过的 `hook_injection_run` 同时绑定 `hostAdapter=codex` 与当前 `.codex/hooks.json` SHA-256 时显示 `execution_observed`，否则报 `codex_hook_activation_unverified` 并使 doctor 失败。`configured` 只表示文件存在，不代表宿主已经加载。`.cursor/` 不随每次 clone 传播——`.gitignore` 对 `.cursor/hooks.json` 与 `.cursor/hooks/` 例外以便 hard enforcement 可提交，doctor 验证各机器实际拥有；doctor 也报告引用已不存在绝对路径的规则文件（机器/用户名变更后 stale）。诊断与 gating 隔离：各项检查独立 try/catch（崩溃仅标红本段 `check_failed`，其余仍报告），doctor 从不追加 hash 链 ledger。还检查反向：orphan completion 事件（未 completed 任务已有链校验 completion ledger 事件——中断的完成事务，带 `wildarrange run` 恢复提示）、完成后副作用失败（snapshot/summary 在 commit 后写不出的 `completion_side_effect_failed` ledger 事件），以及 canonical/derived 分歧（派生 `tasks.md` 与权威 `team/tasks.json` 不一致）；含 `decisionHealth` 周期健康摘要。
 - `src/interface/doctor-completion.mjs`：doctor 的 completionAudit 分项：完成证据完整性复核（checkpoint/acceptance proof/ledger 事件对账、worktree 漂移、派生视图分叉）
 - `src/interface/decisions.mjs`：`wildarrange decisions` 只读投影：每条决策三行（发生了什么/命中规则/证据），坏行降级；`decisions stats` 确定性统计审查（计数/从未触发的门/标注关联，无 LLM）
