@@ -63,11 +63,11 @@ import {
 } from "../src/orchestration/parallel-runtime.mjs";
 import {
   listChangeRequests,
-  recordReviewBlocker,
   resolveChangeRequest,
   reviewChangeRequest,
-  steerWorkflow,
 } from "../src/orchestration/change-governance.mjs";
+import { recordReviewBlocker } from "../src/orchestration/review-blocker.mjs";
+import { steerWorkflow } from "../src/orchestration/plan-steering.mjs";
 import {
   claimTeamTask,
   createTeamTask,
