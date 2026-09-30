@@ -121,7 +121,7 @@ AGENTS.md                         # mandatory reading routes
 - `src/infra/ledger.mjs`：hash 链 ledger 追加、ledger 校验与校验条目读取。hash 链启动后，无 hash 的追加行报告为篡改；`doctor` 仅接受链校验条目作为完成证据。追加在尾部损坏时 fail-closed（无效 JSON、链启动后的无 hash 尾行、或相对尾缓存的文件缩小会拒绝追加而非静默分叉链）；`.wildarrange/ledger-tail.json` 的 size+hash 缓存使重复追加 O(1)，全扫描为 fallback；`verifyLedger` 仍是唯一权威。`appendLedgerOnce` 在同一把 ledger 锁内原子完成判重+追加，判重只认已校验条目。
 - `src/infra/text-utils.mjs`：字符串集合小工具（`uniqueStrings`）的单一 owner，各分区不得本地复刻。
 - `src/interface/hook-bridge-core.mjs`：外置 Hook bridge 共享的受治理项目判断、CLI 子进程启动、stdout/stderr 收集与 JSON 解析模板；失败策略与输出协议由 `external-adapters.mjs` 按宿主翻译。
-- `src/orchestration/change-governance.mjs`：转向提案、review blocker、ChangeRequest 复核与显式 accept/reject 决议。
+- `src/orchestration/change-governance.mjs` / `plan-steering.mjs` / `review-blocker.mjs`：ChangeRequest 复核与显式 accept/reject 决议、转向提案、review blocker。
 - `src/infra/repository-binding.mjs`：任务 acceptance proof 的双仓基线校验，以及不修改任一仓库的项目 SHA + 治理 SHA integration acceptance receipt。
 - `src/infra/failure-analysis.mjs`：失败原因分类、重试提示与可行动失败摘要。
 - `src/capabilities/acceptance-proof.mjs`：checkpoint 证明链，在完成前校验 worker、verifier、success criteria、scope、review 与 review 通道；还拒绝 worker 与 verify 命令全为 trivial 且无 writable_paths 的 no-op 任务，并失败于 `verify_commands` 全 trivial 的任务（`verify_not_trivial`——trivial 验证证明不了任何事）。第二硬底线是 `review_not_tautological`：review gate 没有本轮实际成功执行的独立信号时，任务不能到 `completed`；`infra/gate-arming.mjs` 的 `hasRealReviewLane` 只用于配置预检，最终 proof 还检查执行结果，因为同义反复的 review 证明不了任何事。`config init --armed` 写入 armed 质量 gate 的 config（blocking commentChecker），为底线提供命令级入门。
@@ -134,12 +134,12 @@ AGENTS.md                         # mandatory reading routes
 - `src/infra/decision-log.mjs`：统一决策记录（`.wildarrange/decisions.jsonl`）。仅在四缝发射——delivery-pipeline gate（verify/scope/review/acceptance-proof/checkpoint + pipeline 结果）、`ai/hooks` pre/post-tool-use 决策、并行 admission 与路由。路由记录额外保留完整 `inputText` 与结构化 `routeResult`；工具 Hook 保留 `toolName`、目标路径和脱敏后的参数摘要，供同 `sessionId` 复盘。派生日志：非 hash 链（ledger 仍是审计权威）、无锁单行追加（行中途外部截断后自愈）、best-effort 发射且从不破坏主流程；读侧跳过并计数损坏或半写行。
 - `src/capabilities/worker.mjs` / `src/capabilities/review-gate.mjs`：worker 执行与 BaiZe 独立 review 通道。风险复核与怀疑式验收是 BaiZe Skill 模式，非独立长期 Agent。
 - `src/infra/command-safety.mjs`：worker、verifier、review 命令、质量 gate 与子 Agent runner 共用的高风险 shell 命令预检；阻断破坏性系统命令与对项目源/测试/文档目录的递归删除。内置模式为不可削弱底线；config 中 `commandSafety.extraPatterns` 追加项目规则（`compileCommandSafetyPatterns` 编译，调用方经 `runCommand` options 传入）。
-- `src/infra/security.mjs`：config hash 基线、config 校验、运行时状态备份、归档精确恢复包、备份列表、一键状态恢复与关键状态校验；manifest 使用稳定 `.wildarrange/...` 逻辑路径，并解析到当前绑定的外置运行态根。
+- `src/infra/config-baseline.mjs` / `state-backup.mjs` / `runtime-integrity.mjs`：config hash 基线与校验、运行时状态备份、归档精确恢复包、备份列表、一键状态恢复与关键状态校验；manifest 使用稳定 `.wildarrange/...` 逻辑路径，并解析到当前绑定的外置运行态根。
 - `src/interface/adoption-panel.mjs`：验证治理接管 Dashboard 卡片、批准/恢复 API 与页面片段；写操作复用 Host/Origin/token/payload 防护。`adoption start/resume` 未显式提供 token 时生成单次随机 token，并通过 URL fragment 放入当前标签页。
-- `src/orchestration/adoption.mjs`：接管会话状态机、维护互斥、逐卡事务、`adoption recover` 和两次 Git 锚定；commit A/B 核对 Git blob 与生成文件内容哈希，并对 Windows 换行规范化，不接受同名路径存在。已生效改动禁止直接取消；恢复成功或普通回滚成功后才释放维护 marker。不进入 `task.status`。
+- `src/orchestration/adoption.mjs` / `adoption-session.mjs` / `adoption-git-reconcile.mjs` / `adoption-apply.mjs`：接管会话状态机、会话存储与维护互斥、逐卡事务、`adoption recover` 和两次 Git 锚定；commit A/B 核对 Git blob 与生成文件内容哈希，并对 Windows 换行规范化，不接受同名路径存在。已生效改动禁止直接取消；恢复成功或普通回滚成功后才释放维护 marker。不进入 `task.status`。
 - `src/capabilities/verification-governance.mjs`：经 gateway 暴露 scan / apply-card / generate-artifacts。archive 只允许项目可提交根（默认 `docs/verification-archive`），禁止 `.wildarrange/` / `.git` / `node_modules`。
-- `src/infra/verification-discovery.mjs` / `verification-registry.mjs` / `recovery-transaction.mjs`：只读扫描（现行 AGENTS/Skill 不得危险动作）、三文件 freshness（owner 从 Inventory HTML 内嵌的机器记录读取声明指纹）、通用恢复原语。Inventory HTML 是给人看的当前真源/历史档案/删除墓碑/暂缓清单；写入前统一检查目标名称，已有非等价文件、目录或链接时暂停且零覆盖。
-- `src/infra/contract-governance.mjs`：技术栈中立的接口/数据库契约台账、差异卡、覆盖状态和快照归档。发现器采用静态清单；首版只对照 Tauri Rust command、handler 注册与前端 invoke，Rust SQL 字符串明确降级人工申报。
+- `src/capabilities/verification-discovery.mjs` / `verification-cards.mjs` 与 `src/infra/verification-registry.mjs` / `recovery-transaction.mjs`：只读扫描（现行 AGENTS/Skill 不得危险动作）、三文件 freshness（owner 从 Inventory HTML 内嵌的机器记录读取声明指纹）、通用恢复原语。Inventory HTML 是给人看的当前真源/历史档案/删除墓碑/暂缓清单；写入前统一检查目标名称，已有非等价文件、目录或链接时暂停且零覆盖。
+- `src/infra/contract-governance.mjs`：契约台账存储原语（registry 路径与读写、扫描快照/差异卡落盘归档、治理锁）。`src/capabilities/contract-governance.mjs` / `contract-discovery.mjs`：接口/数据库契约扫描、差异卡、覆盖状态与批准落库；仅在存在 registry、声明或 Rust 扫描根时遍历源码。首版只对照 Tauri Rust command、handler 注册与前端 invoke，Rust SQL 字符串明确降级人工申报。
 - `src/capabilities/contract-governance.mjs`：经 gateway 执行扫描、差异卡存储事务与复核，提供只读总图数据；不渲染 HTML、不决定任务状态。
 - `src/orchestration/contract-governance.mjs`：任务契约变更的批准范围、提案、暂停与继续 owner；复用 `change-governance.mjs` 的 ChangeRequest，不建立第二套批准库。
 - `src/interface/contract-view.mjs`：`generateContractArtifacts(rootDir)` 读取正式台账与当前扫描，生成 HTML；页面不是批准记录。
@@ -162,7 +162,7 @@ AGENTS.md                         # mandatory reading routes
 
 SQL/数据库字段首版仍需人工声明精确结构及验证引用，Tauri 发现器不会证明 SQL 迁移正确；`coverage.manualRequired` / `unknown` 持续公开未知项，人工元数据不能抹掉静态扫描未证明的字段。Hook 是向宿主提供说明的增强入口，并非不可绕过的人类身份认证服务；最终推进由持久任务状态和质量门约束。
 - `src/interface/doctor.mjs`：一致性 doctor，审计 config 结构/mounts、将全局 task ledger 中所有 Plan 的 completed 任务与 checkpoint/acceptance proof/ledger 事件按 `<planId>:<taskId>` 对账、校验 ledger hash 链、ledger 与最新备份交叉检查，并展示最新仓库治理状态。`registryFreshness` 是独立容错黄灯分项。旧完成事件缺 planId 时只在 taskId 全局唯一时兼容；无法唯一归属就报告 ambiguous，不猜。专用 `gateArming` 与 `adapters` 段展示未武装 gate（黄灯不再埋在 `status` JSON 里）、已启用但未配置的 adapter 文件，以及 Codex 当前 Hook 配置是否已有真实执行证据。`adapter install` 只生成文件并记 `adapter_files_generated`；Codex 仅在 hash 链校验通过的 `hook_injection_run` 同时绑定 `hostAdapter=codex` 与当前 `.codex/hooks.json` SHA-256 时显示 `execution_observed`，否则报 `codex_hook_activation_unverified` 并使 doctor 失败。`configured` 只表示文件存在，不代表宿主已经加载。`.cursor/` 不随每次 clone 传播——`.gitignore` 对 `.cursor/hooks.json` 与 `.cursor/hooks/` 例外以便 hard enforcement 可提交，doctor 验证各机器实际拥有；doctor 也报告引用已不存在绝对路径的规则文件（机器/用户名变更后 stale）。诊断与 gating 隔离：各项检查独立 try/catch（崩溃仅标红本段 `check_failed`，其余仍报告），doctor 从不追加 hash 链 ledger。还检查反向：orphan completion 事件（未 completed 任务已有链校验 completion ledger 事件——中断的完成事务，带 `wildarrange run` 恢复提示）、完成后副作用失败（snapshot/summary 在 commit 后写不出的 `completion_side_effect_failed` ledger 事件），以及 canonical/derived 分歧（各 Plan mirror JSON 或 active `tasks.md` 与权威 `team/tasks.json` 不一致）。
-- `src/infra/repository-layout.mjs` / `src/capabilities/repository-governance.mjs`：LuWu 只读仓库审计。确定性检查覆盖目录级 `AGENTS.md`、双语 README 命令与安全标记对等、真实 CLI `--help`、固定五 Agent 白名单、prompt-pack 注册、命名、文件放置策略与实际注释 token（含 JavaScript 模板表达式）；capability 经 gateway 写 JSON/Markdown 证据。`--changed-only` 将检查范围限于变更文件及相关结构不变量；Git 变更发现不可用时才全扫描 fallback。
+- `src/infra/repository-layout.mjs` / `comment-lexer.mjs` / `src/capabilities/repository-governance.mjs`：LuWu 只读仓库审计。确定性检查覆盖目录级 `AGENTS.md`、双语 README 命令与安全标记对等、真实 CLI `--help`、固定五 Agent 白名单、prompt-pack 注册、命名、文件放置策略与实际注释 token（含 JavaScript 模板表达式）；capability 经 gateway 写 JSON/Markdown 证据。`--changed-only` 将检查范围限于变更文件及相关结构不变量；Git 变更发现不可用时才全扫描 fallback。
 - `src/ai/injection.mjs`：注入点解析与 markdown/skill 附件加载；把 `agents.<name>.skills` 作为该 Agent 的固定能力上界，安全读取 `.agents/skills/<name>/SKILL.md` 或 Prompt Pack Skill。固定绑定始终挂载，动态 Skill 仍按请求匹配和数量上限做减法；缺失项显式报告，路径穿越与越界软链接拒绝加载。
 - `src/ai/skill-matcher.mjs`：stage/route/agent/keyword Skill 匹配与可解释加载提示；路由信号命中复用 `infra/route-table.mjs` 的 `matchSignals` 单一实现；不维护脱离 Agent Prompt 的模型偏置旋钮。
 - `src/ai/context.mjs`：Agent 上下文、hash 校验后的角色 Prompt 读取与预算化、resume snapshot、session 谱系与 continuation 指令。
@@ -425,9 +425,14 @@ adapter 专用行为属于 `src/interface/external-adapters.mjs` 或宿主专用
 | `src/orchestration/integration.mjs`                           | 交付事务：delivery commit、task branch 普通 push 与故障对账；不得自动合入 `main` |
 | `src/orchestration/task-board.mjs`                            | 全项目工单总账、draft/ready、任务 claim/证据/持久化与消息板 |
 | `src/orchestration/task-archive.mjs`                          | 归档编排：先写 `pre-task-archive:<taskId>` 运行态备份，再交 task-board 精确归档删除（backupId 串联 recovery package） |
-| `src/orchestration/change-governance.mjs`                     | 任务变更治理、Review Blocker、ChangeRequest 单一记录与决定持久化；契约请求复用记录 |
+| `src/orchestration/change-governance.mjs`                     | ChangeRequest 单一记录与决定持久化；scope/契约请求共用 |
+| `src/orchestration/plan-steering.mjs`                         | 计划 steering 提案校验与应用（验收不可弱化） |
+| `src/orchestration/review-blocker.mjs`                        | review blocker 登记与解决 |
 | `src/orchestration/status.mjs`                                | 状态报告、Workflow 总结、attentionReport 与 Dashboard 数据 |
-| `src/orchestration/adoption.mjs`                              | 老项目验证治理接管会话、逐卡批准、维护互斥、恢复与两次 Git 锚定 |
+| `src/orchestration/adoption.mjs`                              | 老项目验证治理接管会话状态机、逐卡批准、恢复 |
+| `src/orchestration/adoption-session.mjs`                      | adoption 会话/卡片/事务文件存储、锁与维护标记 |
+| `src/orchestration/adoption-git-reconcile.mjs`                | commit A/B 两次 Git 锚定、卡片实时快照与产物 digest 对账 |
+| `src/orchestration/adoption-apply.mjs`                        | 已批准卡的事务化应用与收尾 |
 | `src/orchestration/workflow.mjs`                               | Workflow 入口、样例计划生成                            |
 | **ai/**（AI 策略/prompt/技能匹配/hooks，只依赖 orchestration、capabilities、infra，且 capabilities 只能经 gateway） |  |
 | `src/ai/AGENTS.md`                                           | AI 策略、只读边、fallback 与上下文预算约束 |
@@ -442,7 +447,10 @@ adapter 专用行为属于 `src/interface/external-adapters.mjs` 或宿主专用
 | `src/capabilities/AGENTS.md`                                 | 原子能力、网关信封和失败语义约束 |
 | `src/capabilities/gateway.mjs`                                | 能力网关：静态注册表 + 统一结果信封（capability/status/evidence/sideEffect/duration_ms/cost/error） |
 | `src/capabilities/verification-governance.mjs`                | 验证治理原子能力：scan / apply-card / generate-artifacts |
-| `src/capabilities/contract-governance.mjs`                    | 契约扫描、检查与受控原子操作；跨步骤审批和任务推进由 orchestration 负责 |
+| `src/capabilities/contract-governance.mjs`                    | 契约扫描、差异卡、检查与受控原子操作；跨步骤审批和任务推进由 orchestration 负责 |
+| `src/capabilities/contract-discovery.mjs`                     | Tauri IPC 静态发现与契约条目归一化 |
+| `src/capabilities/verification-discovery.mjs`                 | 验证资产只读扫描、消费者分级与卡实况快照 digest |
+| `src/capabilities/verification-cards.mjs`                     | discovery 采纳卡构建：卡片字段组装、危险动作降级与同义脚本合并判定（纯函数，无 IO） |
 | `src/capabilities/verify.mjs`                                 | verifier                                       |
 | `src/capabilities/scope-guard.mjs`                             | scope guard、realpath 范围校验                      |
 | `src/capabilities/worker.mjs`                                 | Worker 执行                                      |
@@ -471,12 +479,12 @@ adapter 专用行为属于 `src/interface/external-adapters.mjs` 或宿主专用
 | `src/infra/gate-arming.mjs` | 门未武装黄灯地板：trivial/缺失 verify、同义反复 review、无 required 质量门的只读评估，status 常驻携带 |
 | `src/infra/dependency-graph.mjs` | 对抗加固的词法 import 扫描器（边界测试与 `wildarrange impact` 共用）、反向波及分析 `computeImpact`、分区测试选择 `computeZoneTests`/`listRepoTests`（供 `wildarrange test`） |
 | `src/infra/test-runner.mjs` | `wildarrange test` 运行编排：zone/影响面/全量测试选择（复用 dependency-graph）与 `node --test` spawn（剥离 `NODE_TEST_*` runner 私有变量），退出码透传 |
-| `src/infra/security.mjs`                                      | config hash 基线、运行态备份、归档精确恢复包、备份列表与一键恢复、关键状态完整性检查 |
+| `src/infra/config-baseline.mjs`                               | config hash 基线登记与校验 |
+| `src/infra/state-backup.mjs`                                  | 运行态备份、归档精确恢复包、备份列表与一键恢复 |
+| `src/infra/runtime-integrity.mjs`                             | 关键状态文件完整性检查 |
 | `src/infra/recovery-transaction.mjs`                          | 通用 preimage/postimage、提交、回滚、maintenance marker 与路径/digest 原语 |
-| `src/infra/verification-discovery.mjs`                        | 验证资产只读扫描、消费者分级与卡实况快照 digest |
-| `src/infra/verification-cards.mjs`                            | discovery 采纳卡构建：卡片字段组装、指纹、危险动作降级与同义脚本合并判定（纯函数，无 IO） |
-| `src/infra/verification-registry.mjs`                         | Registry/Bootstrap/Inventory schema、digest 与 freshness |
-| `src/infra/contract-governance.mjs`                           | 契约 schema、发现、差异与锁/存储原语；批准流程及页面归上层，未知来源显式降级申报 |
+| `src/infra/verification-registry.mjs`                         | Registry/Bootstrap/Inventory schema、digest、卡片指纹与 freshness（infra/interface/status 共用） |
+| `src/infra/contract-governance.mjs`                           | 契约台账存储原语：registry 路径与读写、扫描快照/差异卡落盘归档与治理锁 |
 | `src/infra/review-findings.mjs`                                | LSP / AST / hashline / 注释检查等质量发现              |
 | `src/infra/llm-provider.mjs`                                   | OpenAI-compatible LLM provider 与可选 LLM review |
 | `src/infra/agent-spawn.mjs`                                    | Codex / Cursor / 自定义命令型子 Agent spawn 模板渲染       |
@@ -491,7 +499,8 @@ adapter 专用行为属于 `src/interface/external-adapters.mjs` 或宿主专用
 | `src/infra/task-predicates.mjs`                                 | no-op / trivial command 等纯任务形状判断              |
 | `src/infra/success-criteria.mjs`                                | 成功判据状态机与 verifier 证据回填                        |
 | `src/infra/rule-scanner.mjs`                                    | 项目规范扫描与规则上下文注入                                |
-| `src/infra/repository-layout.mjs`                                | 目录边界、README 对等、Prompt 清单、命名与真实注释的只读检查 |
+| `src/infra/repository-layout.mjs`                                | 目录边界、README 对等、Prompt 清单、命名与注释规则的只读检查 |
+| `src/infra/comment-lexer.mjs`                                    | 源码注释词法器（含 JS 模板表达式），仓库治理与 review 注释检查共用 |
 | `src/infra/decision-log.mjs` | `.wildarrange/decisions.jsonl` 统一决策记录：只在 pipeline/hooks/admission/routing 四缝发射，best-effort 不反噬主流程，坏行读侧跳过 |
 | `src/infra/hook-result-gate.mjs`                                | PostToolUse 结构化结果门（仅建议，不写 ledger）                           |
 | `test/dependency-boundary.test.mjs`                             | 五区依赖方向强制测试，每次 `npm test` 都会跑                |
