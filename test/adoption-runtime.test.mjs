@@ -16,8 +16,8 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
+import { applyApprovedCards } from "../src/orchestration/adoption-apply.mjs";
 import {
-  applyApprovedCards,
   cancelAdoption,
   decideAdoptionCard,
   loadAdoptionViewModel,

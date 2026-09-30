@@ -219,7 +219,8 @@ test("external onboarding: setup drafts use runtime and configuration belongs to
 
 test("external onboarding: commit A and B belong to governance while source freshness belongs to product", async () => {
   await withExternalProject(async ({ projectRoot, governanceRoot }) => {
-    const { startAdoption, decideAdoptionCard, applyApprovedCards, resumeAdoption } = await import("../src/orchestration/adoption.mjs");
+    const { startAdoption, decideAdoptionCard, resumeAdoption } = await import("../src/orchestration/adoption.mjs");
+    const { applyApprovedCards } = await import("../src/orchestration/adoption-apply.mjs");
     const { evaluateRegistryFreshness, readVerificationInventory } = await import("../src/infra/verification-registry.mjs");
     const git = async (root, args) => {
       const result = await runCommandFile("git", ["-C", root, ...args], root, 15_000);

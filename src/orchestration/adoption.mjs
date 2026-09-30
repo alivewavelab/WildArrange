@@ -2,81 +2,49 @@
 // 文件名称：adoption.mjs
 // 所属模块：orchestration
 // 作用说明：
-//   验证卡 adoption 会话状态机：扫描、review、apply、registry commit；
-//   不进入 task.status，不 reuse approvePlan，dashboard 是唯一写批准面。
-//
-// 【运行原理速读】
-//   可以把它想成「把 verification 卡批量迁入 registry 的专用流程」：
-//
-//   · 何时执行？
-//     adoption start/status/resume/decide/apply CLI 与 dashboard。
-//
-//   · 做了什么？
-//     scanning → reviewing → apply 卡 → awaiting_registry_commit → finalized。
-//
-//   · 约束？
-//     敏感卡/路径需人类显式批准；中断须 recovery 或 resume，不可静默跳过。
+//   验证卡 adoption 会话状态机：start/status/resume/recover/reconcile/decide/cancel；不进入 task.status，不复用 approvePlan，dashboard 是唯一写批准面。
+//   会话存储见 adoption-session，Git 对账见 adoption-git-reconcile，卡应用见 adoption-apply。
 // =============================================================================
-import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { invokeCapability } from "../capabilities/gateway.mjs";
-import { inspectFileLock, withFileLock } from "../infra/file-lock.mjs";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
-import {
-  createWorkId,
-  nowIso,
-  readJson,
-  resolveWildArrangePath,
-  resolveGovernancePaths,
-  writeJsonAtomic,
-} from "../infra/runtime-store.mjs";
-import { withTaskStateLock } from "../infra/task-state-lock.mjs";
-import { loadTaskState } from "../infra/task-state-store.mjs";
-import {
-  adoptionTransactionDir,
-  adoptionSessionDir,
-  clearMaintenanceMarker,
-  restorePreimages,
-  writeRecoveryManifest,
-  writeMaintenanceMarker,
-} from "../infra/recovery-transaction.mjs";
-import * as verificationRegistry from "../infra/verification-registry.mjs";
-import {
-  digestCanonical,
-  digestGitComparableContent,
-  evaluateRegistryFreshness,
-  fingerprintCard,
-  gitTreeContains,
-  readLocator,
-  readVerificationInventory,
-} from "../infra/verification-registry.mjs";
+import { createWorkId, nowIso, resolveGovernancePaths } from "../infra/runtime-store.mjs";
+import { adoptionTransactionDir, clearMaintenanceMarker, restorePreimages, writeRecoveryManifest } from "../infra/recovery-transaction.mjs";
+import { evaluateRegistryFreshness, readLocator, readVerificationInventory } from "../infra/verification-registry.mjs";
 import { readGitHead } from "../infra/git-diff.mjs";
-
-/** adoption 会话合法状态集合，供 reconcile/transition 校验。 */
-const SESSION_STATES = new Set([
-  "scanning",
-  "reviewing",
-  "ready",
-  "applying",
-  "awaiting_registry_commit",
-  "awaiting_final_commit",
-  "finalized",
-  "needs_review",
-  "recovery_required",
-  "cancelled",
-]);
+import {
+  adoptionError,
+  findActiveSession,
+  findTransaction,
+  loadSession,
+  preparedResumeAction,
+  readSessionFiles,
+  requiredSession,
+  suggestedLocator,
+  withAdoptionLock,
+  writeSessionFiles,
+} from "./adoption-session.mjs";
+import { applyApprovedCardsUnlocked, concludeAfterCard } from "./adoption-apply.mjs";
+import {
+  appliedEffectsMatchHead,
+  artifactFailureNextAction,
+  captureLiveApprovalSnapshot,
+  captureProjectHeadSha,
+  captureWrittenArtifactDigests,
+  fingerprintLiveCard,
+  gitBlobDigestEqualsIfAvailable,
+  inventoryDigestSelfConsistent,
+  mismatchLabels,
+  recordAppliedEffect,
+  rememberArtifactDigests,
+} from "./adoption-git-reconcile.mjs";
 
 /** 须逐卡人类批准的敏感卡动作（merge/delete/archive）。 */
 const SENSITIVE_ACTIONS = new Set(["merge", "delete", "archive"]);
+
 /** 匹配 AGENTS.md、package.json、wildarrange.config.json 的敏感路径正则。 */
 const SENSITIVE_PATH_RE = /(^|\/)(AGENTS\.md|package\.json|wildarrange\.config\.json)$/i;
-/** 根据 cardId 生成 adoption resume 子命令提示。 */
-function preparedResumeAction(cardId) {
-  return `运行 wildarrange adoption resume 以继续中断的事务 ${cardId}，不要重新 capture`;
-}
 
-// --- 会话生命周期 ---
 
 /** 启动 adoption 扫描会话或恢复已有 active session。 */
 export async function startAdoption(rootDir, options = {}) {
@@ -264,7 +232,6 @@ export async function recoverAdoption(rootDir, options = {}) {
   });
 }
 
-// --- 协调与决策 ---
 
 /** 对账会话与 registry/git 现实，修复 stale 状态或标记 needs_review。 */
 export async function reconcileAdoption(rootDir, options = {}) {
@@ -481,166 +448,6 @@ export async function decideAdoptionCard(rootDir, options = {}) {
   });
 }
 
-// --- apply 与视图 ---
-
-/** 将已批准卡 apply 到 registry/项目文件（事务化 preimage）。 */
-export async function applyApprovedCards(rootDir, options = {}) {
-  return withAdoptionLock(rootDir, options.sessionId || "apply", async () => {
-    return applyApprovedCardsUnlocked(rootDir, options);
-  });
-}
-
-/** 锁内逐张应用已批准卡片并记录 postimage 效应。 */
-async function applyApprovedCardsUnlocked(rootDir, options = {}) {
-  if (Array.isArray(options.cardIds) && options.cardIds.length !== 1) {
-    return { ok: false, status: "single_card_required", nextAction: "一次只 Apply 一张卡" };
-  }
-
-  const session = await requiredSession(rootDir, options.sessionId);
-  if (["finalized", "cancelled"].includes(session.status)) {
-    return { ok: false, status: "session_not_applicable", nextAction: `session status ${session.status} cannot apply cards` };
-  }
-  const files = await readSessionFiles(rootDir, session.sessionId);
-  const recovery = findTransaction(files.transactions, "recovery_required");
-  if (recovery) {
-    // §3.4：存在 recovery_required 事务时禁止新 apply，须先 resume/restore preimage。
-    session.status = "recovery_required";
-    session.nextAction = `卡片 ${recovery.cardId} 回滚失败，保留 maintenance marker`;
-    await writeSessionFiles(rootDir, session, files);
-    return { ok: false, status: "recovery_required", cardId: recovery.cardId };
-  }
-
-  const prepared = findTransaction(files.transactions, "prepared");
-  const undecided = files.cards.filter((card) => card.status === "pending" || card.status === "stale");
-  if (!prepared && undecided.length > 0) {
-    return {
-      ok: false,
-      status: "pending_decisions",
-      pending: undecided,
-      nextAction: `先判完 ${undecided.length} 张卡`,
-    };
-  }
-  if (!["ready", "applying"].includes(session.status)) {
-    return { ok: false, status: "session_not_applicable", nextAction: `session status ${session.status} cannot apply cards` };
-  }
-
-  const requestedId = typeof options.cardId === "string" && options.cardId
-    ? options.cardId
-    : options.cardIds?.[0];
-  const cardId = prepared?.cardId || requestedId;
-  if (!cardId) {
-    return { ok: false, status: "single_card_required", nextAction: "一次只 Apply 一张卡" };
-  }
-
-  const card = files.cards.find((item) => item.id === cardId);
-  if (!card) {
-    return { ok: false, status: "unknown_card", cardId, nextAction: `未知卡片 ${cardId}` };
-  }
-
-  if (files.transactions[cardId]?.status === "committed") {
-    if (!card.appliedAt) card.appliedAt = nowIso();
-    recordAppliedEffect(session, cardId, files.transactions[cardId].postimage || []);
-    await writeSessionFiles(rootDir, session, files);
-    return concludeAfterCard(rootDir, session, files);
-  }
-
-  if (!prepared && card.status !== "approved") {
-    return { ok: false, status: "not_approved", cardId, nextAction: `卡片 ${cardId} 尚未批准` };
-  }
-
-  if (!prepared) {
-    const liveSnapshot = await captureLiveApprovalSnapshot(rootDir, card);
-    if (!snapshotsMatch(files.approvals[card.id]?.snapshot, liveSnapshot)) {
-      card.status = "stale";
-      session.status = "needs_review";
-      session.nextAction = `卡片 ${card.id} 已过期，重新批准`;
-      await writeSessionFiles(rootDir, session, files);
-      return { ok: false, status: "stale", cardId };
-    }
-    const approvedFingerprint = files.approvals[card.id]?.cardFingerprint;
-    const currentFingerprint = fingerprintLiveCard(card);
-    if (approvedFingerprint && approvedFingerprint !== currentFingerprint) {
-      card.status = "stale";
-      session.status = "needs_review";
-      session.nextAction = `卡片 ${card.id} 已过期，重新批准`;
-      await writeSessionFiles(rootDir, session, files);
-      return { ok: false, status: "stale", cardId };
-    }
-  }
-
-  await registerMaintenance(rootDir, session, files);
-  session.status = "applying";
-  session.nextAction = prepared ? preparedResumeAction(card.id) : `正在 Apply ${card.id}`;
-  await writeSessionFiles(rootDir, session, files);
-
-  const envelope = await invokeCapability("verification-governance-apply-card", {
-    rootDir,
-    options: {
-      sessionId: session.sessionId,
-      card,
-      expectedFingerprint: files.approvals[card.id]?.fingerprint,
-      config: (await loadWildArrangeConfig(rootDir)).config,
-    },
-  });
-  files.transactions[cardId] = envelope.evidence?.manifest || { status: envelope.status };
-  if (envelope.error?.code === "recovery_required" || envelope.evidence?.manifest?.status === "recovery_required") {
-    session.status = "recovery_required";
-    session.nextAction = `卡片 ${card.id} 回滚失败，保留 maintenance marker`;
-    await writeSessionFiles(rootDir, session, files);
-    return { ok: false, status: "recovery_required", cardId, error: envelope.error };
-  }
-  if (envelope.status !== "pass") {
-    session.status = "needs_review";
-    session.nextAction = `卡片 ${card.id} 已回滚，检查验证失败后重试`;
-    await writeSessionFiles(rootDir, session, files);
-    await clearMaintenanceMarker(rootDir);
-    return { ok: false, status: "rolled_back", cardId, error: envelope.error };
-  }
-
-  card.appliedAt = nowIso();
-  recordAppliedEffect(session, cardId, envelope.evidence?.manifest?.postimage || envelope.evidence?.postimage || []);
-  await writeSessionFiles(rootDir, session, files);
-  return concludeAfterCard(rootDir, session, files);
-}
-
-/** 单卡应用后更新会话阶段、inventory 与下一阶段动作。 */
-async function concludeAfterCard(rootDir, session, files) {
-  const remaining = files.cards.filter((item) => item.status === "approved" && !item.appliedAt);
-  if (remaining.length > 0) {
-    session.status = "ready";
-    session.nextAction = `继续 Apply 下一张卡 ${remaining[0].id}`;
-    await writeSessionFiles(rootDir, session, files);
-    await clearMaintenanceMarker(rootDir);
-    return { ok: true, session, nextAction: session.nextAction };
-  }
-
-  const locator = takeApprovedLocator(files.cards) || session.locator;
-  session.locator = locator;
-  const generated = await invokeCapability("verification-governance-generate-artifacts", {
-    rootDir,
-    options: {
-      phase: "registry",
-      cards: files.cards,
-      locator,
-      writeLocator: Boolean(locator && files.cards.some((item) => item.action === "adopt" && item.asset === "config_locator" && item.status === "approved")),
-    },
-  });
-  if (generated.status !== "pass") {
-    session.status = "needs_review";
-    session.nextAction = artifactFailureNextAction(generated.error, "Registry 生成失败，检查 locator 后重试 Apply");
-    await writeSessionFiles(rootDir, session, files);
-    await clearMaintenanceMarker(rootDir);
-    return { ok: false, status: "generate_failed", session, nextAction: session.nextAction, error: generated.error };
-  }
-  await captureWrittenArtifactDigests(rootDir, session, locator);
-  await refreshLocatorAppliedEffect(rootDir, session);
-  session.status = "awaiting_registry_commit";
-  session.nextAction = `在 ${resolveGovernancePaths(rootDir).rootDir} 提交 Registry 与 locator（commit A）；已批准的业务改动在业务仓库单独提交，然后运行 adoption resume`;
-  await writeSessionFiles(rootDir, session, files);
-  await clearMaintenanceMarker(rootDir);
-  return { ok: true, session, generated: generated.evidence };
-}
-
 /** 取消 adoption 会话并清理临时状态。 */
 export async function cancelAdoption(rootDir, options = {}) {
   return withAdoptionLock(rootDir, options.sessionId || "cancel", async () => {
@@ -677,304 +484,6 @@ export async function loadAdoptionViewModel(rootDir, options = {}) {
     approvals: files?.approvals || {},
     inventory,
   };
-}
-
-/** 注册 adoption 维护 marker，阻止并发 wildarrange run。 */
-async function registerMaintenance(rootDir, session, files) {
-  await withTaskStateLock(rootDir, `adoption:${session.sessionId}`, async () => {
-    const activity = await detectActiveRun(rootDir);
-    if (activity) {
-      throw adoptionError("active_run", activity.message);
-    }
-    await writeMaintenanceMarker(rootDir, {
-      sessionId: session.sessionId,
-      status: "applying",
-      cardCount: files.cards.length,
-    });
-  });
-}
-
-/** 检测是否有活跃 linear/parallel run 与 adoption 互斥。 */
-async function detectActiveRun(rootDir) {
-  const taskState = await loadTaskState(rootDir).catch(() => null);
-  const busy = (taskState?.tasks || []).find((task) => ["in_progress", "verifying"].includes(task.status));
-  if (busy) return { message: `活动任务 ${busy.id} 处于 ${busy.status}，不能同时接管` };
-  const lock = await inspectFileLock(rootDir, resolveWildArrangePath(rootDir, "team", "tasks.lock"));
-  if (lock.locked && lock.pidAlive && lock.owner && !String(lock.owner).startsWith("adoption")) {
-    return { message: `任务锁由 ${lock.owner} 持有，不能同时接管` };
-  }
-  return null;
-}
-
-/** 在 adoption 文件锁内执行 fn，按 sessionId 串行化写操作。 */
-async function withAdoptionLock(rootDir, sessionId, fn) {
-  const lockPath = resolveWildArrangePath(rootDir, "adoption", "adoption.lock");
-  await mkdir(path.dirname(lockPath), { recursive: true });
-  return withFileLock(rootDir, lockPath, "adoption lock", `adoption:${sessionId}`, fn, { waitTimeoutMs: 15_000 });
-}
-
-/** 查找当前未完成的 adoption 会话指针。 */
-async function findActiveSession(rootDir) {
-  const root = resolveWildArrangePath(rootDir, "adoption");
-  let entries = [];
-  try {
-    entries = await readdir(root, { withFileTypes: true });
-  } catch (error) {
-    if (error?.code === "ENOENT") return null;
-    throw error;
-  }
-  const sessions = [];
-  for (const entry of entries.filter((item) => item.isDirectory())) {
-    const session = await readJson(path.join(root, entry.name, "session.json"), null);
-    if (session?.sessionId) sessions.push(session);
-  }
-  sessions.sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
-  return sessions[0] || null;
-}
-
-/** 读取 adoption 会话 JSON。 */
-async function loadSession(rootDir, sessionId) {
-  if (sessionId) return readJson(path.join(adoptionSessionDir(rootDir, sessionId), "session.json"), null);
-  return findActiveSession(rootDir);
-}
-
-/** 加载会话，不存在时抛 adoption 错误。 */
-async function requiredSession(rootDir, sessionId) {
-  const session = await loadSession(rootDir, sessionId);
-  if (!session) throw adoptionError("no_session", "没有可操作的 adoption 会话");
-  return session;
-}
-
-/** 读取会话目录下 cards/transactions 等附属文件。 */
-async function readSessionFiles(rootDir, sessionId) {
-  const dir = adoptionSessionDir(rootDir, sessionId);
-  const session = await readJson(path.join(dir, "session.json"), null);
-  const cards = (await readJson(path.join(dir, "cards.json"), { cards: [] })).cards || [];
-  const approvals = (await readJson(path.join(dir, "approvals.json"), { approvals: {} })).approvals || {};
-  const scan = await readJson(path.join(dir, "scan.json"), null);
-  const inventory = session?.locator?.inventoryPath
-    ? await readVerificationInventory(path.join(resolveGovernancePaths(rootDir).rootDir, session.locator.inventoryPath), null)
-    : null;
-  const transactions = {};
-  let txnEntries = [];
-  try {
-    txnEntries = await readdir(path.join(dir, "transactions"));
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
-  }
-  for (const cardId of txnEntries) {
-    transactions[cardId] = await readJson(path.join(dir, "transactions", cardId, "manifest.json"), null);
-  }
-  return { session, cards, approvals, scan, transactions, inventory };
-}
-
-/** 原子写入 adoption 会话附属文件集合。 */
-async function writeSessionFiles(rootDir, session, files = {}) {
-  if (!SESSION_STATES.has(session.status)) throw adoptionError("invalid_status", `invalid session status ${session.status}`);
-  const dir = adoptionSessionDir(rootDir, session.sessionId);
-  await writeJsonAtomic(path.join(dir, "session.json"), session);
-  if (files.cards) await writeJsonAtomic(path.join(dir, "cards.json"), { cards: files.cards });
-  if (files.approvals) await writeJsonAtomic(path.join(dir, "approvals.json"), { approvals: files.approvals });
-  if (files.scan) await writeJsonAtomic(path.join(dir, "scan.json"), files.scan);
-}
-
-/** 从 cards 中取首张 approved 卡片的定位信息。 */
-function takeApprovedLocator(cards) {
-  const card = (cards || []).find((item) => item.asset === "config_locator" && item.status === "approved" && item.patch?.value?.verificationGovernance);
-  return card?.patch?.value?.verificationGovernance || null;
-}
-
-/** 返回建议下一张待处理卡片的定位信息。 */
-function suggestedLocator(cards) {
-  const card = (cards || []).find((item) => item.asset === "config_locator" && item.patch?.value?.verificationGovernance);
-  return card?.patch?.value?.verificationGovernance || readLocator({});
-}
-
-/** 在 transactions 列表中按 status 查找条目。 */
-function findTransaction(transactions, status) {
-  for (const [cardId, txn] of Object.entries(transactions || {})) {
-    if (txn?.status === status) return { cardId, txn };
-  }
-  return null;
-}
-
-/** 捕获 Dashboard 批准卡片的实时指纹快照。 */
-async function captureLiveApprovalSnapshot(rootDir, card) {
-  const envelope = await invokeCapability("verification-governance-card-snapshot", { rootDir, options: { card } });
-  if (envelope.error) throw new Error(envelope.error.message || "verification card snapshot failed");
-  const snapshot = envelope.evidence;
-  return {
-    ...snapshot,
-    headSha: await captureProjectHeadSha(rootDir),
-  };
-}
-
-/** 读取当前 Git HEAD SHA 作为 adoption 锚点 A。 */
-async function captureProjectHeadSha(rootDir) {
-  if (!existsSync(path.join(rootDir, ".git"))) return null;
-  const head = await readGitHead(rootDir).catch(() => ({ available: false, sha: null }));
-  return head.available ? head.sha : null;
-}
-
-/** 计算批准卡内容指纹，用于与快照比对。 */
-function fingerprintLiveCard(card) {
-  const clone = JSON.parse(JSON.stringify({ ...card, fingerprint: "" }));
-  delete clone.status;
-  return fingerprintCard(clone);
-}
-
-/** 比较 expected/actual 批准快照是否一致。 */
-function snapshotsMatch(expected, actual) {
-  if (!expected || !actual) return false;
-  if (expected.targetDigest !== actual.targetDigest) return false;
-  if (expected.evidenceDigest !== actual.evidenceDigest) return false;
-  if ((expected.headSha || null) !== (actual.headSha || null)) return false;
-  const left = expected.dependencyDigests || {};
-  const right = actual.dependencyDigests || {};
-  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
-  for (const key of keys) {
-    if (left[key] !== right[key]) return false;
-  }
-  return true;
-}
-
-/** 计算项目内相对路径文件的 UTF-8 内容哈希。 */
-async function fileUtf8Digest(rootDir, relativePath) {
-  if (!relativePath) return null;
-  const absolutePath = path.join(resolveGovernancePaths(rootDir).rootDir, relativePath);
-  if (!existsSync(absolutePath)) return null;
-  try {
-    return digestGitComparableContent(await readFile(absolutePath));
-  } catch (error) {
-    if (["EISDIR", "ENOENT", "EACCES", "EPERM"].includes(error?.code)) return null;
-    throw error;
-  }
-}
-
-/** 从 artifact 错误映射 recovery 下一步提示。 */
-function artifactFailureNextAction(error, fallback) {
-  return error?.next_action || error?.nextAction || fallback;
-}
-
-/** 采集本轮写入制品的路径与 digest 列表。 */
-async function captureWrittenArtifactDigests(rootDir, session, locator = {}) {
-  const registryDigest = await fileUtf8Digest(rootDir, locator.registryPath);
-  if (registryDigest) session.registryDigest = registryDigest;
-  const bootstrapDigest = await fileUtf8Digest(rootDir, locator.bootstrapPath);
-  if (bootstrapDigest) session.bootstrapDigest = bootstrapDigest;
-  const inventoryDigest = await fileUtf8Digest(rootDir, locator.inventoryPath);
-  if (inventoryDigest) session.inventoryDigest = inventoryDigest;
-  const locatorFile = session.locatorFile || resolveGovernancePaths(rootDir).configPath;
-  const locatorDigest = await fileUtf8Digest(rootDir, locatorFile);
-  if (locatorDigest) {
-    session.locatorDigest = locatorDigest;
-    session.locatorFile = locatorFile;
-  }
-}
-
-/** 将会话内制品 digest 持久化到 inventory。 */
-async function rememberArtifactDigests(rootDir, session, locator = {}) {
-  if (!session.registryDigest) {
-    const digest = await fileUtf8Digest(rootDir, locator.registryPath);
-    if (digest) session.registryDigest = digest;
-  }
-  if (!session.bootstrapDigest) {
-    const digest = await fileUtf8Digest(rootDir, locator.bootstrapPath);
-    if (digest) session.bootstrapDigest = digest;
-  }
-  if (!session.inventoryDigest) {
-    const digest = await fileUtf8Digest(rootDir, locator.inventoryPath);
-    if (digest) session.inventoryDigest = digest;
-  }
-  if (!session.locatorDigest) {
-    const locatorFile = session.locatorFile || resolveGovernancePaths(rootDir).configPath;
-    const digest = await fileUtf8Digest(rootDir, locatorFile);
-    if (digest) {
-      session.locatorDigest = digest;
-      session.locatorFile = locatorFile;
-    }
-  }
-}
-
-/** 在会话 appliedEffects 中记录单卡 postimage。 */
-function recordAppliedEffect(session, cardId, postimage = []) {
-  const paths = (postimage || []).map((item) => ({
-    path: item.path,
-    repositoryTarget: item.repositoryTarget || "project",
-    digest: item.gitDigest || item.digest,
-    presence: item.digest === "missing" ? "absent" : "present",
-  }));
-  const rest = (session.appliedEffects || []).filter((item) => item.cardId !== cardId);
-  session.appliedEffects = [...rest, { cardId, paths }];
-}
-
-/** 按当前 HEAD 刷新 locator 对应 appliedEffect。 */
-async function refreshLocatorAppliedEffect(rootDir, session) {
-  const locatorFile = session.locatorFile || resolveGovernancePaths(rootDir).configPath;
-  const digest = session.locatorDigest || await fileUtf8Digest(rootDir, locatorFile);
-  if (!digest) return;
-  for (const effect of session.appliedEffects || []) {
-    for (const entry of effect.paths || []) {
-      if ((entry.repositoryTarget === "governance" || resolveGovernancePaths(rootDir).rootDir === rootDir) && normalizeAdoptionPath(entry.path) === normalizeAdoptionPath(locatorFile)) {
-        entry.digest = digest;
-        entry.presence = "present";
-      }
-    }
-  }
-}
-
-/** 校验 appliedEffects 是否与给定 HEAD 一致。 */
-async function appliedEffectsMatchHead(rootDir, session, headSha) {
-  if (!headSha) return false;
-  const projectHead = resolveGovernancePaths(rootDir).rootDir === rootDir ? headSha : (await readGitHead(rootDir)).sha;
-  for (const effect of session.appliedEffects || []) {
-    for (const entry of effect.paths || []) {
-      if (!entry?.path) continue;
-      const targetRoot = entry.repositoryTarget === "governance" ? resolveGovernancePaths(rootDir).rootDir : rootDir;
-      const targetHead = entry.repositoryTarget === "governance" ? headSha : projectHead;
-      if (entry.presence === "absent") {
-        if (await gitTreeContains(targetRoot, entry.path, targetHead)) return false;
-        continue;
-      }
-      const match = await gitBlobDigestEqualsIfAvailable(targetRoot, entry.path, targetHead, entry.digest);
-      if (match !== true) return false;
-    }
-  }
-  return true;
-}
-
-/** 检查 inventory 内嵌 digest 声明自洽。 */
-function inventoryDigestSelfConsistent(inventory) {
-  if (!inventory || typeof inventory !== "object" || !inventory.digest) return false;
-  const { digest: _digest, ...rest } = inventory;
-  return inventory.digest === digestCanonical(rest);
-}
-
-/** 归一化 adoption 涉及的相对路径。 */
-function normalizeAdoptionPath(relativePath) {
-  return String(relativePath || "").replaceAll("\\", "/");
-}
-
-/** 若 Git 可用则比对 blob digest 与期望值。 */
-async function gitBlobDigestEqualsIfAvailable(rootDir, relativePath, ref, expectedDigest) {
-  const compare = verificationRegistry.gitBlobDigestEquals;
-  if (typeof compare !== "function") return null;
-  if (!relativePath || !ref || !expectedDigest) return false;
-  return compare(rootDir, relativePath, ref, expectedDigest);
-}
-
-/** 构造带 code 的 adoption 专用 Error。 */
-function adoptionError(code, message) {
-  const error = new Error(message);
-  error.code = code;
-  return error;
-}
-
-/** 将 mismatch diagnostics 格式化为人类可读标签列表。 */
-function mismatchLabels(diagnostics) {
-  return Object.entries(diagnostics || {})
-    .filter(([key, value]) => !["phase", "gitAvailable"].includes(key) && value !== "matched")
-    .map(([key]) => key);
 }
 
 /** 判断 adoption 卡是否触及敏感路径或 merge/delete/archive 动作。 */
