@@ -35,10 +35,6 @@
 | 全量命令 / 物化命令文档 | `node ./bin/wildarrange.mjs --help --all` / `docs commands --write` |
 | 匹配 Skill          | `node ./bin/wildarrange.mjs skills match --text "..." --stage plan`    |
 | 仓库治理检查           | `node ./bin/wildarrange.mjs governance audit` |
-| 生成档案路由包         | `node ./bin/wildarrange.mjs archivist packet --text "..." --stage plan` |
-| 运行档案路由员         | `node ./bin/wildarrange.mjs archivist run --text "..." --stage plan --force` |
-| 查看路由建议           | `node ./bin/wildarrange.mjs archivist suggestions list`                 |
-| 审核路由建议           | `node ./bin/wildarrange.mjs archivist suggestions resolve --id <id> --decision accept --evidence "..." --rationale "..."` |
 | 查看状态              | `node ./bin/wildarrange.mjs status`                                    |
 | 写入 config 基线      | `node ./bin/wildarrange.mjs config baseline --reason reviewed`          |
 | 校验 config 基线      | `node ./bin/wildarrange.mjs config verify`                              |
