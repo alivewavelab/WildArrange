@@ -236,12 +236,6 @@ export function isContractScanPath(value) {
  */
 export async function inspectContractReferences(rootDir, contract) {
   const findings = [];
-  if (contract.moduleRef) {
-    const moduleMap = await readJson(path.join(rootDir, "tooling", "arch-module-graph", "module-file-map.json"), null);
-    if (!moduleMap?.modules || !Object.hasOwn(moduleMap.modules, contract.moduleRef)) {
-      findings.push({ code: "contract_module_ref_unknown", ref: contract.moduleRef });
-    }
-  }
   const refs = uniqueStrings(contract.verificationRefs || []);
   if (refs.length > 0) {
     const loaded = await loadWildArrangeConfig(rootDir);

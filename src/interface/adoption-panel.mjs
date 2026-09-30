@@ -552,7 +552,7 @@ function governanceGroupFor(relativePath) {
   const value = String(relativePath || "").replaceAll("\\", "/");
   if (/verification-(registry|bootstrap)\.json$|verification-inventory\.(json|html)$/i.test(value)) return "gates";
   if (/(^|\/)AGENTS\.md$/i.test(value)) return "rules";
-  if (/^(doc\/project-architecture\.md|docs\/product\/architecture-overview\.html|tooling\/arch-module-graph\/)/i.test(value)) return "architecture";
+  if (/^(doc\/project-architecture\.md|docs\/product\/architecture-overview\.html)/i.test(value)) return "architecture";
   if (/^(test\/|tests\/|package\.json$)|\.(test|spec)\.[cm]?[jt]s$/i.test(value)) return "tests";
   if (/^(wildarrange\.config\.json|src\/capabilities\/(verify|scope-guard|review-gate|acceptance-proof|checkpoint)\.mjs)$/i.test(value)) return "gates";
   if (/^(README(?:\.en)?\.md|doc\/.*\.(md|html))$/i.test(value)) return "product";

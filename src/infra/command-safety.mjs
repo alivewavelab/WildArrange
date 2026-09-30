@@ -104,18 +104,15 @@ export function compileCommandSafetyPatterns(config) {
 }
 
 /**
- * 评估命令是否允许执行；allowUnsafe 或环境变量可 override。
+ * 评估命令是否允许执行；无任何 override 后门（内置规则是不可削弱底线）。
  * @param {unknown} command 待检命令文本
- * @param {{ allowUnsafe?: boolean, extraPatterns?: object[] }} [options]
+ * @param {{ extraPatterns?: object[] }} [options]
  * @returns {{ allowed: boolean, level: string, findings: Array<{ id: string, reason: string }> }}
  */
 export function evaluateCommandSafety(command, options = {}) {
   const text = typeof command === "string" ? command.trim() : "";
   if (!text) {
     return { allowed: true, level: "safe", findings: [] };
-  }
-  if (options.allowUnsafe === true || process.env.WILDARRANGE_ALLOW_UNSAFE_COMMANDS === "1") {
-    return { allowed: true, level: "override", findings: [] };
   }
 
   const extraPatterns = Array.isArray(options.extraPatterns) ? options.extraPatterns : [];
