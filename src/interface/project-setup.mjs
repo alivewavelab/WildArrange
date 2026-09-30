@@ -2,7 +2,8 @@
 // 文件名称：project-setup.mjs
 // 所属模块：interface
 // 作用说明：
-//   `wildarrange setup` 的一步式外置治理接入：组合已有 owner，不引入新业务流程。
+//   `wildarrange setup` 的一步式外置治理接入：组合已有 owner，不引入新业务流程；
+//   同时提供 `project init-governance` 的默认值封装与 `project attach/show` 的 JSON 视图。
 //
 // 【运行原理速读】
 //   init-governance（骨架+武装配置+Git 初始提交）→ attach → init 运行态
@@ -12,8 +13,29 @@ import path from "node:path";
 import { runCommandFile } from "../infra/command-runner.mjs";
 import { initRuntime } from "../infra/runtime-bootstrap.mjs";
 import { DEFAULT_PACKAGE_NAME } from "../infra/runtime-config.mjs";
-import { installExternalAdapters } from "./external-adapters.mjs";
-import { attachProjectConnection, initializeProjectGovernance } from "./project-connection.mjs";
+import { attachGovernanceRepository, initializeGovernanceRepository } from "../infra/workspace-context.mjs";
+import { installAdapters } from "./adapters.mjs";
+
+/** 创建独立治理仓库：最小骨架 + 默认武装的治理配置 + Git 初始提交；不触碰客户项目。 */
+export async function initializeProjectGovernance(projectRoot, options = {}) {
+  return initializeGovernanceRepository(projectRoot, { scaffoldConfig: true, initGit: true, ...options });
+}
+
+/** 返回适合 CLI JSON 输出的无策略投影。 */
+export function projectConnectionView(context) {
+  return {
+    attached: true,
+    projectId: context.projectId,
+    governanceId: context.governanceId,
+    projectRoot: context.projectRoot,
+    governanceRoot: context.governanceRoot,
+    runtimeRoot: context.runtimeRoot,
+    registryPath: context.registryPath,
+    governanceContractPath: context.governanceContractPath,
+    projectIdentitySource: context.projectIdentitySource,
+    attachedAt: context.attachedAt,
+  };
+}
 
 /**
  * 一步完成外置治理接入。
@@ -31,9 +53,9 @@ export async function setupExternalGovernance(projectRoot, options = {}) {
     repository,
     defaultBranch: options.defaultBranch,
   });
-  const workspace = await attachProjectConnection(projectRoot, { governanceRoot: governance.governanceRoot });
+  const workspace = await attachGovernanceRepository(projectRoot, { governanceRoot: governance.governanceRoot });
   await initRuntime(workspace.projectRoot);
-  const adapters = await installExternalAdapters(workspace.projectRoot, workspace, {
+  const adapters = await installAdapters(workspace.projectRoot, workspace, {
     target: options.target || "all",
     mode: options.mode || "local",
     packageName: options.packageName || DEFAULT_PACKAGE_NAME,

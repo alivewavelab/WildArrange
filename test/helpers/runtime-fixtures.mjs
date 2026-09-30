@@ -16,7 +16,7 @@ import { runInjectionHook as renderHook } from "../../src/ai/hooks.mjs";
 import { runHostHook, runHostRoute } from "../../src/orchestration/host-runtime.mjs";
 import { routeRequest as classifyRoute } from "../../src/ai/routing.mjs";
 import { resolveWildArrangePath } from "../../src/infra/runtime-store.mjs";
-import { installExternalAdapters } from "../../src/interface/external-adapters.mjs";
+import { installAdapters } from "../../src/interface/adapters.mjs";
 import { getBoundWorkspaceContext } from "../../src/infra/workspace-context.mjs";
 import { gitCommitAll } from "./external-fixture.mjs";
 
@@ -131,7 +131,7 @@ export async function writePolicyConfig(governanceRoot, content) {
 
 /** 在外置 runtime 生成 Codex 宿主包，使 resume/continuation 有可执行的 CLI 前缀事实。 */
 export async function installExternalTestAdapter(projectRoot, options = {}) {
-  return installExternalAdapters(projectRoot, getBoundWorkspaceContext(projectRoot), {
+  return installAdapters(projectRoot, getBoundWorkspaceContext(projectRoot), {
     target: "codex",
     mode: "local",
     localCliPath: path.resolve("bin", "wildarrange.mjs"),

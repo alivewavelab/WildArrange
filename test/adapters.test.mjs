@@ -1,5 +1,5 @@
 // =============================================================================
-// 文件名称：external-adapters.test.mjs
+// 文件名称：adapters.test.mjs
 // 所属模块：test
 // 作用说明：验证外置 Adapter 包、Cursor 用户级显式激活、全局 Hook 项目筛选与回执。
 // =============================================================================
@@ -16,17 +16,17 @@ import {
 } from "../src/infra/workspace-context.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import {
-  activateExternalCursorAdapter,
-  EXTERNAL_CURSOR_BRIDGE_NAME,
-  installExternalAdapters,
-} from "../src/interface/external-adapters.mjs";
+  activateCursorAdapter,
+  CURSOR_BRIDGE_NAME,
+  installAdapters,
+} from "../src/interface/adapters.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
 
 test("external adapters generate all host bundles without writing customer repository files", async () => {
   await withExternalWorkspace(async ({ projectRoot, runtimeRoot, workspace }) => {
     const before = await tree(projectRoot);
-    const report = await installExternalAdapters(projectRoot, workspace, {
+    const report = await installAdapters(projectRoot, workspace, {
       target: "all",
       mode: "local",
       localCliPath: path.join(process.cwd(), "bin", "wildarrange.mjs"),
@@ -47,7 +47,7 @@ test("external adapters generate all host bundles without writing customer repos
     assert.equal(manifest.hooks, undefined, "Codex uses default hooks/hooks.json discovery");
     assert.equal(Array.isArray(manifest.interface.defaultPrompt), true);
     assert.equal(existsSync(path.join(runtimeRoot, "adapters", "external", "install-report.json")), true);
-    const anotherProject = await installExternalAdapters(projectRoot, { ...workspace, projectId: "another-attached-project" }, {
+    const anotherProject = await installAdapters(projectRoot, { ...workspace, projectId: "another-attached-project" }, {
       target: "codex",
       mode: "local",
       localCliPath: path.join(process.cwd(), "bin", "wildarrange.mjs"),
@@ -64,15 +64,15 @@ test("external Cursor activation preserves existing user hooks, backs them up, a
       version: 1,
       hooks: { sessionStart: [{ command: "node existing-hook.mjs" }] },
     }));
-    await installExternalAdapters(projectRoot, workspace, {
+    await installAdapters(projectRoot, workspace, {
       target: "cursor",
       localCliPath: path.join(process.cwd(), "bin", "wildarrange.mjs"),
     });
-    const first = await activateExternalCursorAdapter(projectRoot, workspace, { userRoot });
-    const second = await activateExternalCursorAdapter(projectRoot, workspace, { userRoot });
+    const first = await activateCursorAdapter(projectRoot, workspace, { userRoot });
+    const second = await activateCursorAdapter(projectRoot, workspace, { userRoot });
     const hooks = JSON.parse(await readFile(first.hooksPath, "utf8"));
     assert.ok(hooks.hooks.sessionStart.some((entry) => entry.command === "node existing-hook.mjs"));
-    assert.equal(hooks.hooks.sessionStart.filter((entry) => entry.command.includes(EXTERNAL_CURSOR_BRIDGE_NAME)).length, 1);
+    assert.equal(hooks.hooks.sessionStart.filter((entry) => entry.command.includes(CURSOR_BRIDGE_NAME)).length, 1);
     assert.equal(existsSync(first.backupPath), true);
     assert.equal(existsSync(second.backupPath), true);
     assert.equal(existsSync(first.bridgePath), true);
@@ -83,7 +83,7 @@ test("external Cursor activation preserves existing user hooks, backs them up, a
 test("external host bridges ignore unrelated projects and record lifecycle receipts for attached project", async () => {
   await withExternalWorkspace(async ({ projectRoot, stateHome, workspace }) => {
     await initRuntime(projectRoot);
-    const report = await installExternalAdapters(projectRoot, workspace, {
+    const report = await installAdapters(projectRoot, workspace, {
       target: "all",
       mode: "local",
       localCliPath: path.join(process.cwd(), "bin", "wildarrange.mjs"),
@@ -125,7 +125,7 @@ test("external host bridges ignore unrelated projects and record lifecycle recei
 test("external Codex Stop hooks return JSON and continue unfinished work", async () => {
   await withExternalWorkspace(async ({ projectRoot, runtimeRoot, stateHome, workspace }) => {
     await initRuntime(projectRoot);
-    const report = await installExternalAdapters(projectRoot, workspace, {
+    const report = await installAdapters(projectRoot, workspace, {
       target: "codex",
       mode: "local",
       localCliPath: path.join(process.cwd(), "bin", "wildarrange.mjs"),

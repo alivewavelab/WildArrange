@@ -62,3 +62,22 @@ function renderContractMapHtml(registry, scan) {
  * @returns {string}
  */
 function escapeHtml(value) { return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;"); }
+
+/**
+ * `contracts generate` 的 CLI 结果：沿用 capability 结果外形，evidence 为产物摘要；生成失败直接抛错。
+ * @param {string} rootDir 项目根目录
+ * @returns {Promise<object>}
+ */
+export async function runContractGenerate(rootDir) {
+  const startedAt = Date.now();
+  const evidence = await generateContractArtifacts(rootDir);
+  return {
+    capability: "contract-governance-generate-artifacts",
+    status: "pass",
+    evidence,
+    sideEffect: "files_changed",
+    duration_ms: Date.now() - startedAt,
+    cost: null,
+    error: null,
+  };
+}

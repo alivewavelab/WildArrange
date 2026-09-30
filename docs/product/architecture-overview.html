@@ -1079,9 +1079,21 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "orchestration"
             },
             {
-              "t": "dashboard.mjs",
-              "io": "dashboard.mjs",
-              "p": "src/interface/dashboard.mjs",
+              "t": "dashboard-entry.mjs",
+              "io": "dashboard-entry.mjs",
+              "p": "src/interface/dashboard-entry.mjs",
+              "m": "interface"
+            },
+            {
+              "t": "hook-entry.mjs",
+              "io": "hook-entry.mjs",
+              "p": "src/interface/hook-entry.mjs",
+              "m": "interface"
+            },
+            {
+              "t": "task-input.mjs",
+              "io": "task-input.mjs",
+              "p": "src/interface/task-input.mjs",
               "m": "interface"
             },
             {
@@ -1109,9 +1121,9 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "interface"
             },
             {
-              "t": "external-adapters.mjs",
-              "io": "external-adapters.mjs",
-              "p": "src/interface/external-adapters.mjs",
+              "t": "adapters.mjs",
+              "io": "adapters.mjs",
+              "p": "src/interface/adapters.mjs",
               "m": "interface"
             },
             {
@@ -1283,12 +1295,6 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "infra"
             },
             {
-              "t": "runtime-snapshot.mjs",
-              "io": "runtime-snapshot.mjs",
-              "p": "src/infra/runtime-snapshot.mjs",
-              "m": "infra"
-            },
-            {
               "t": "runtime-config.mjs",
               "io": "runtime-config.mjs",
               "p": "src/infra/runtime-config.mjs",
@@ -1301,10 +1307,10 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "infra"
             },
             {
-              "t": "project-connection.mjs",
-              "io": "project-connection.mjs",
-              "p": "src/interface/project-connection.mjs",
-              "m": "interface"
+              "t": "workspace-context.mjs",
+              "io": "workspace-context.mjs",
+              "p": "src/infra/workspace-context.mjs",
+              "m": "infra"
             },
             {
               "t": "project-setup.mjs",
@@ -1345,9 +1351,21 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "orchestration"
             },
             {
-              "t": "dashboard.mjs",
-              "io": "dashboard.mjs",
-              "p": "src/interface/dashboard.mjs",
+              "t": "dashboard-entry.mjs",
+              "io": "dashboard-entry.mjs",
+              "p": "src/interface/dashboard-entry.mjs",
+              "m": "interface"
+            },
+            {
+              "t": "hook-entry.mjs",
+              "io": "hook-entry.mjs",
+              "p": "src/interface/hook-entry.mjs",
+              "m": "interface"
+            },
+            {
+              "t": "task-input.mjs",
+              "io": "task-input.mjs",
+              "p": "src/interface/task-input.mjs",
               "m": "interface"
             },
             {
@@ -1375,9 +1393,9 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "interface"
             },
             {
-              "t": "external-adapters.mjs",
-              "io": "external-adapters.mjs",
-              "p": "src/interface/external-adapters.mjs",
+              "t": "adapters.mjs",
+              "io": "adapters.mjs",
+              "p": "src/interface/adapters.mjs",
               "m": "interface"
             },
             {
@@ -1549,12 +1567,6 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "infra"
             },
             {
-              "t": "runtime-snapshot.mjs",
-              "io": "runtime-snapshot.mjs",
-              "p": "src/infra/runtime-snapshot.mjs",
-              "m": "infra"
-            },
-            {
               "t": "runtime-config.mjs",
               "io": "runtime-config.mjs",
               "p": "src/infra/runtime-config.mjs",
@@ -1567,10 +1579,10 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "m": "infra"
             },
             {
-              "t": "project-connection.mjs",
-              "io": "project-connection.mjs",
-              "p": "src/interface/project-connection.mjs",
-              "m": "interface"
+              "t": "workspace-context.mjs",
+              "io": "workspace-context.mjs",
+              "p": "src/infra/workspace-context.mjs",
+              "m": "infra"
             },
             {
               "t": "project-setup.mjs",
@@ -1688,7 +1700,7 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
           "id": "src-interface-contract-view-mjs",
           "p": "src/interface/contract-view.mjs",
           "r": "contract-view.mjs",
-          "io": "generateContractArtifacts(rootDir) → 导出",
+          "io": "generateContractArtifacts(rootDir) → 导出；runContractGenerate(rootDir) → 导出",
           "extTo": [
             {
               "t": "runtime-store.mjs",
@@ -1705,17 +1717,10 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
           ]
         },
         {
-          "id": "src-interface-external-adapters-mjs",
-          "p": "src/interface/external-adapters.mjs",
-          "r": "external-adapters.mjs",
+          "id": "src-interface-adapters-mjs",
+          "p": "src/interface/adapters.mjs",
+          "r": "adapters.mjs",
           "io": "adapterCliPrefix({ mode = \"local\", pa) → 导出；buildSlashCommands(cliPrefix) → 导出",
-          "to": [
-            {
-              "t": "src-interface-hook-bridge-core-mjs",
-              "io": "hook-bridge-core.mjs",
-              "p": "src/interface/hook-bridge-core.mjs"
-            }
-          ],
           "extTo": [
             {
               "t": "prompt-pack.mjs",
@@ -1792,17 +1797,10 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
           ]
         },
         {
-          "id": "src-interface-external-adapters-mjs",
-          "p": "src/interface/external-adapters.mjs",
-          "r": "external-adapters.mjs",
+          "id": "src-interface-adapters-mjs",
+          "p": "src/interface/adapters.mjs",
+          "r": "adapters.mjs",
           "io": "adapterCliPrefix({ mode = \"local\", pa) → 导出；buildSlashCommands(cliPrefix) → 导出",
-          "to": [
-            {
-              "t": "src-interface-hook-bridge-core-mjs",
-              "io": "hook-bridge-core.mjs",
-              "p": "src/interface/hook-bridge-core.mjs"
-            }
-          ],
           "extTo": [
             {
               "t": "prompt-pack.mjs",
@@ -1841,9 +1839,9 @@ module.exports={Graph:require("./graph"),version:require("./version")}},{"./grap
               "p": "src/interface/doctor-completion.mjs"
             },
             {
-              "t": "src-interface-external-adapters-mjs",
-              "io": "external-adapters.mjs",
-              "p": "src/interface/external-adapters.mjs"
+              "t": "src-interface-adapters-mjs",
+              "io": "adapters.mjs",
+              "p": "src/interface/adapters.mjs"
             }
           ],
           "extTo": [
@@ -3991,10 +3989,10 @@ const D = {
     { id: "dashboard", p: "src/interface/dashboard.mjs", r: "启动本地 Dashboard", io: "startDashboardServer(rootDir, options) → 本地服务" },
     { id: "dashboard-view", p: "src/interface/dashboard-view.mjs", r: "整页 HTML、CSS 与浏览器逻辑", io: "renderDashboardHtml() → HTML" },
     { id: "contract-view", p: "src/interface/contract-view.mjs", r: "契约台账只读总图", io: "generateContractArtifacts(rootDir) → 产物路径" },
-    { id: "adapters", p: "src/interface/external-adapters.mjs", r: "生成外置宿主适配包", io: "安装选项 → 项目外的 Hook、快捷命令与计划生成说明" },
+    { id: "adapters", p: "src/interface/adapters.mjs", r: "生成外置宿主适配包", io: "安装选项 → 项目外的 Hook、快捷命令与计划生成说明" },
   ], focusFiles: [
     { id: "dashboard", p: "src/interface/dashboard.mjs", r: "本地面板与安全网络边界", io: "网络请求 → 状态与操作结果", extTo: [{ t: "linear-runtime.mjs", p: "src/orchestration/linear-runtime.mjs", m: "流程编排层", io: "请求运行下一项任务" }] },
-    { id: "adapters", p: "src/interface/external-adapters.mjs", r: "外置宿主适配包生成与激活", io: "安装选项 → runtimeRoot 内的 Codex/Cursor/Kimi 插件包", extTo: [{ t: "runtime-store.mjs", p: "src/infra/runtime-store.mjs", m: "可信基础设施层", io: "解析运行态根" }] },
+    { id: "adapters", p: "src/interface/adapters.mjs", r: "外置宿主适配包生成与激活", io: "安装选项 → runtimeRoot 内的 Codex/Cursor/Kimi 插件包", extTo: [{ t: "runtime-store.mjs", p: "src/infra/runtime-store.mjs", m: "可信基础设施层", io: "解析运行态根" }] },
     { id: "doctor", p: "src/interface/doctor.mjs", r: "一键体检与下一步建议", io: "项目状态 → 分项诊断", extTo: [{ t: "security.mjs", p: "src/infra/security.mjs", m: "可信基础设施层", io: "检查关键状态是否完整" }] },
     { id: "decisions", p: "src/interface/decisions.mjs", r: "只读决策投影", io: "决策日志 → 人话审查视图", extTo: [{ t: "decision-log.mjs", p: "src/infra/decision-log.mjs", m: "可信基础设施层", io: "读取可信决策记录" }] }
   ] },

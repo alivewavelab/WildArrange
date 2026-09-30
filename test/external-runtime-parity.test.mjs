@@ -21,8 +21,8 @@ import { admitParallelAgentResult, runParallelAgents } from "../src/orchestratio
 import { generateContractArtifacts } from "../src/interface/contract-view.mjs";
 import { applyContractCardDecision } from "../src/capabilities/contract-governance.mjs";
 import { contractGovernancePaths, persistContractScan, scanContractGovernanceUniverse } from "../src/infra/contract-governance.mjs";
-import { installExternalAdapters } from "../src/interface/external-adapters.mjs";
-import { initializeProjectGovernance } from "../src/interface/project-connection.mjs";
+import { installAdapters } from "../src/interface/adapters.mjs";
+import { initializeProjectGovernance } from "../src/interface/project-setup.mjs";
 import { ensureTaskPacket, resolveRuntimeCliCommandPrefix } from "../src/infra/runtime-snapshot.mjs";
 import { scanProjectRules } from "../src/infra/rule-scanner.mjs";
 import { writeDefaultWildArrangeConfig } from "../src/infra/runtime-config.mjs";
@@ -233,7 +233,7 @@ test("doctor only judges hosts that the install report actually generated", asyn
     const workspace = getBoundWorkspaceContext(projectRoot);
     const none = await runDoctor(projectRoot);
     assert.ok(none.findings.some((finding) => finding.code === "external_adapter_not_prepared"));
-    await installExternalAdapters(projectRoot, workspace, { target: "codex", mode: "local", localCliPath: path.resolve("bin/wildarrange.mjs") });
+    await installAdapters(projectRoot, workspace, { target: "codex", mode: "local", localCliPath: path.resolve("bin/wildarrange.mjs") });
     const report = await runDoctor(projectRoot);
     const adapterFindings = report.findings.filter((finding) => finding.section === "adapters");
     assert.deepEqual(adapterFindings.map((finding) => finding.target), ["codex"]);

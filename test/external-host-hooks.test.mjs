@@ -16,13 +16,13 @@ import { runCommandFile } from "../src/infra/command-runner.mjs";
 import { resolveWorkspaceContext } from "../src/infra/workspace-context.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
 import {
-  activateExternalCodexAdapter,
-  activateExternalCursorAdapter,
-  EXTERNAL_CURSOR_BRIDGE_NAME,
-  installExternalAdapters,
-  restoreExternalAdapterBackup,
-  uninstallExternalAdapters,
-} from "../src/interface/external-adapters.mjs";
+  activateCodexAdapter,
+  activateCursorAdapter,
+  CURSOR_BRIDGE_NAME,
+  installAdapters,
+  restoreAdapterBackup,
+  uninstallAdapters,
+} from "../src/interface/adapters.mjs";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
 import { withExternalProject } from "./helpers/external-fixture.mjs";
 
@@ -31,7 +31,7 @@ const CLI_PATH = path.join(process.cwd(), "bin", "wildarrange.mjs");
 /** 装好三宿主 bundle 并导入一个只允许写 src/result.js 的计划。 */
 async function prepareScopedProject({ projectRoot, stateHome }, { importTask = true } = {}) {
   const workspace = await resolveWorkspaceContext(projectRoot, { stateHome });
-  const report = await installExternalAdapters(projectRoot, workspace, { target: "all", mode: "local", localCliPath: CLI_PATH });
+  const report = await installAdapters(projectRoot, workspace, { target: "all", mode: "local", localCliPath: CLI_PATH });
   if (importTask) {
     const planPath = path.join(stateHome, "plan.json");
     await writeFile(planPath, JSON.stringify({
@@ -175,7 +175,7 @@ test("external bridge lets unconnected projects through when the WildArrange CLI
   await withExternalProject(async (roots) => {
     const { projectRoot, stateHome } = roots;
     const workspace = await resolveWorkspaceContext(projectRoot, { stateHome });
-    const report = await installExternalAdapters(projectRoot, workspace, {
+    const report = await installAdapters(projectRoot, workspace, {
       target: "cursor", mode: "local", localCliPath: path.join(stateHome, "missing-cli.mjs"),
     });
     const write = (cwd) => ({ hook_event_name: "preToolUse", conversation_id: "broken", cwd, tool_name: "Write", tool_input: { file_path: "a.js" } });
@@ -216,7 +216,7 @@ test("external bridge kills a hung CLI subprocess and applies the host failure p
     const hangingCli = path.join(stateHome, "hanging-cli.mjs");
     await writeFile(hangingCli, "setInterval(() => {}, 1000);\n", "utf8");
     const workspace = await resolveWorkspaceContext(projectRoot, { stateHome });
-    const report = await installExternalAdapters(projectRoot, workspace, {
+    const report = await installAdapters(projectRoot, workspace, {
       target: "cursor", mode: "local", localCliPath: hangingCli, hookTimeoutMs: 500,
     });
     const started = Date.now();
@@ -254,10 +254,10 @@ test("activation writes user-level pointers idempotently, never into the custome
     const { workspace } = await prepareScopedProject(roots, { importTask: false });
     const { userRoot } = await seedUserRoot(root);
     const before = await readFile(path.join(userRoot, ".codex", "AGENTS.md"), "utf8");
-    await activateExternalCursorAdapter(projectRoot, workspace, { userRoot });
-    await activateExternalCursorAdapter(projectRoot, workspace, { userRoot });
-    await activateExternalCodexAdapter(projectRoot, workspace, { userRoot });
-    await activateExternalCodexAdapter(projectRoot, workspace, { userRoot });
+    await activateCursorAdapter(projectRoot, workspace, { userRoot });
+    await activateCursorAdapter(projectRoot, workspace, { userRoot });
+    await activateCodexAdapter(projectRoot, workspace, { userRoot });
+    await activateCodexAdapter(projectRoot, workspace, { userRoot });
     const rule = await readFile(path.join(userRoot, ".cursor", "rules", "wildarrange.mdc"), "utf8");
     assert.match(rule, /alwaysApply:\s*true/);
     assert.match(rule, /wildarrange status/);
@@ -277,14 +277,14 @@ test("uninstall removes user hook entries, pointers and runtime bundles but keep
     const { projectRoot, root } = roots;
     const { workspace, report } = await prepareScopedProject(roots, { importTask: false });
     const { userRoot, hooks } = await seedUserRoot(root);
-    await activateExternalCursorAdapter(projectRoot, workspace, { userRoot });
-    await activateExternalCodexAdapter(projectRoot, workspace, { userRoot });
-    const result = await uninstallExternalAdapters(projectRoot, workspace, { target: "all" });
+    await activateCursorAdapter(projectRoot, workspace, { userRoot });
+    await activateCodexAdapter(projectRoot, workspace, { userRoot });
+    const result = await uninstallAdapters(projectRoot, workspace, { target: "all" });
     assert.equal(result.kind, "wildarrange_external_adapter_uninstall");
     const userHooks = JSON.parse(await readFile(path.join(userRoot, ".cursor", "hooks.json"), "utf8"));
     assert.deepEqual(userHooks.hooks.sessionStart, JSON.parse(hooks).hooks.sessionStart);
-    assert.equal(JSON.stringify(userHooks).includes(EXTERNAL_CURSOR_BRIDGE_NAME), false);
-    assert.equal(existsSync(path.join(userRoot, ".cursor", "hooks", EXTERNAL_CURSOR_BRIDGE_NAME)), false);
+    assert.equal(JSON.stringify(userHooks).includes(CURSOR_BRIDGE_NAME), false);
+    assert.equal(existsSync(path.join(userRoot, ".cursor", "hooks", CURSOR_BRIDGE_NAME)), false);
     assert.equal(existsSync(path.join(userRoot, ".cursor", "rules", "wildarrange.mdc")), false);
     const agents = await readFile(path.join(userRoot, ".codex", "AGENTS.md"), "utf8");
     assert.equal(agents.includes(POINTER_BEGIN), false);
@@ -303,14 +303,14 @@ test("restore returns user files to their pre-activation state", async () => {
     const { workspace } = await prepareScopedProject(roots, { importTask: false });
     const { userRoot, hooks } = await seedUserRoot(root);
     const agentsBefore = await readFile(path.join(userRoot, ".codex", "AGENTS.md"), "utf8");
-    const cursor = await activateExternalCursorAdapter(projectRoot, workspace, { userRoot });
-    const codex = await activateExternalCodexAdapter(projectRoot, workspace, { userRoot });
-    await restoreExternalAdapterBackup(projectRoot, workspace, { backupId: cursor.backupId });
-    await restoreExternalAdapterBackup(projectRoot, workspace, { backupId: codex.backupId });
+    const cursor = await activateCursorAdapter(projectRoot, workspace, { userRoot });
+    const codex = await activateCodexAdapter(projectRoot, workspace, { userRoot });
+    await restoreAdapterBackup(projectRoot, workspace, { backupId: cursor.backupId });
+    await restoreAdapterBackup(projectRoot, workspace, { backupId: codex.backupId });
     assert.equal(await readFile(path.join(userRoot, ".cursor", "hooks.json"), "utf8"), hooks);
     assert.equal(await readFile(path.join(userRoot, ".codex", "AGENTS.md"), "utf8"), agentsBefore);
     assert.equal(existsSync(path.join(userRoot, ".cursor", "rules", "wildarrange.mdc")), false, "file created by activation is removed on restore");
-    await assert.rejects(() => restoreExternalAdapterBackup(projectRoot, workspace, { backupId: "no-such-backup" }), /backup/i);
+    await assert.rejects(() => restoreAdapterBackup(projectRoot, workspace, { backupId: "no-such-backup" }), /backup/i);
   });
 });
 
@@ -319,11 +319,11 @@ test("doctor reports plugin hooks files and user Cursor entries that no longer m
     const { projectRoot, root } = roots;
     const { workspace, report } = await prepareScopedProject(roots, { importTask: false });
     const { userRoot } = await seedUserRoot(root);
-    await activateExternalCursorAdapter(projectRoot, workspace, { userRoot });
+    await activateCursorAdapter(projectRoot, workspace, { userRoot });
     assert.equal((await doctorCodes(projectRoot)).includes("external_adapter_config_modified"), false);
     await writeFile(report.targets.codex.hooksPath, JSON.stringify({ hooks: {} }));
     assert.equal((await doctorCodes(projectRoot)).includes("external_adapter_config_modified"), true, "tampered Codex plugin hooks");
-    await installExternalAdapters(projectRoot, workspace, { target: "codex", mode: "local", localCliPath: CLI_PATH });
+    await installAdapters(projectRoot, workspace, { target: "codex", mode: "local", localCliPath: CLI_PATH });
     assert.equal((await doctorCodes(projectRoot)).includes("external_adapter_config_modified"), false);
     const hooksPath = path.join(userRoot, ".cursor", "hooks.json");
     const userHooks = JSON.parse(await readFile(hooksPath, "utf8"));

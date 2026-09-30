@@ -46,8 +46,8 @@ const COMPLETION_LEDGER_EVENT_TYPES = new Set([
   "parallel_agent_admission_completed",
 ]);
 
-/** 向 doctor findings 数组追加一条分项结论（severity/section/message）。 */
-function addFinding(findings, severity, section, message, extra = {}) {
+/** 向 doctor findings 数组追加一条分项结论（severity/section/message）；doctor.mjs 共用。 */
+export function addFinding(findings, severity, section, message, extra = {}) {
   findings.push({ severity, section, message, ...extra });
 }
 
@@ -63,21 +63,7 @@ export async function checkCompletionIntegrity(rootDir, findings) {
     return { checkedCompleted: 0, note: "no imported plan" };
   }
   const tasks = taskLedger.tasks || [];
-  const completionEvents = await collectCompletionLedgerEvents(rootDir, tasks);
-  for (const ambiguous of completionEvents.ambiguousLegacy) {
-    addFinding(
-      findings,
-      "error",
-      "completion_audit",
-      `legacy completion event for task ${ambiguous.taskId} has no planId and cannot be assigned to a current Plan; current candidates: ${ambiguous.planIds.join(", ")}`,
-      {
-        code: "ambiguous_legacy_completion_event",
-        taskId: ambiguous.taskId,
-        planIds: ambiguous.planIds,
-        eventTypes: ambiguous.eventTypes,
-      },
-    );
-  }
+  const completionEvents = await collectCompletionLedgerEvents(rootDir);
   const completedTasks = tasks.filter((task) => task.status === "completed");
   const evidenceIntegrity = await inspectCompletedTaskEvidence(rootDir, taskLedger);
   for (const invalid of evidenceIntegrity.invalid) {
@@ -235,7 +221,6 @@ export async function checkCompletionIntegrity(rootDir, findings) {
     planCount: planIds.length,
     activePlanId: taskLedger.activePlanId,
     revalidationRequired,
-    ambiguousLegacyCompletionEvents: completionEvents.ambiguousLegacy.length,
     orphanCompletionEvents,
     sideEffectFailures,
     derivedDivergences,
@@ -264,46 +249,17 @@ function parseTasksMarkdownStatuses(markdown) {
   return statuses;
 }
 
-/** 从 hash 链校验通过的 ledger 收集完成事件 refs，并标记无 planId 的歧义遗留事件。 */
-async function collectCompletionLedgerEvents(rootDir, tasks) {
+/** 从 hash 链校验通过的 ledger 收集完成事件 refs（planId:taskId）。 */
+async function collectCompletionLedgerEvents(rootDir) {
   const refs = new Set();
-  const planIdsByTaskId = new Map();
-  for (const task of tasks) {
-    if (!task.id || !task.planId) continue;
-    if (!planIdsByTaskId.has(task.id)) planIdsByTaskId.set(task.id, new Set());
-    planIdsByTaskId.get(task.id).add(task.planId);
-  }
-  const ambiguousByTaskId = new Map();
   // 只统计通过 hash 链校验的条目，手工追加的伪造完成事件不算证据
   const entries = await readVerifiedLedgerEntries(rootDir);
   for (const entry of entries) {
-    if (!COMPLETION_LEDGER_EVENT_TYPES.has(entry.type) || !entry.taskId) continue;
+    if (!COMPLETION_LEDGER_EVENT_TYPES.has(entry.type) || !entry.taskId || !entry.planId) continue;
     // 并行 admission 事件对失败结局也会写同名类型并带 status 字段；
     // 只有真正 completed 的结局才算完成证据。
     if (entry.type === "parallel_agent_admission_completed" && entry.status && entry.status !== "completed") continue;
-    if (entry.planId) {
-      refs.add(taskRef(entry.planId, entry.taskId));
-      continue;
-    }
-    const candidatePlanIds = planIdsByTaskId.get(entry.taskId) || new Set();
-    // Unscoped legacy events can never prove a current Plan completion. Even
-    // when taskId is currently unique, an archived older Plan may have reused
-    // it; inferring from today's ledger would silently transfer old evidence.
-    if (candidatePlanIds.size > 0) {
-      const current = ambiguousByTaskId.get(entry.taskId) || {
-        taskId: entry.taskId,
-        planIds: [...candidatePlanIds].sort(),
-        eventTypes: new Set(),
-      };
-      current.eventTypes.add(entry.type);
-      ambiguousByTaskId.set(entry.taskId, current);
-    }
+    refs.add(taskRef(entry.planId, entry.taskId));
   }
-  return {
-    refs,
-    ambiguousLegacy: [...ambiguousByTaskId.values()].map((entry) => ({
-      ...entry,
-      eventTypes: [...entry.eventTypes].sort(),
-    })),
-  };
+  return { refs };
 }

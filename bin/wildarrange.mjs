@@ -27,13 +27,14 @@
 //     无法初始化 .wildarrange、无法跑任务门禁，Hook 也找不到可信 CLI 前缀。
 // =============================================================================
 import { configureProjectReview, prepareProjectReview } from "../src/capabilities/project-review.mjs";
-import { generateContractArtifacts } from "../src/interface/contract-view.mjs";
+import { runContractGenerate } from "../src/interface/contract-view.mjs";
 import { applyContractDecision, proposeContractChange, resolveContractChange } from "../src/orchestration/contract-governance.mjs";
-import { runHostRoute, runHostHook } from "../src/orchestration/host-runtime.mjs";
+import { runHostRoute } from "../src/orchestration/host-runtime.mjs";
 import path from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
-import { randomBytes } from "node:crypto";
-import { startDashboardServer } from "../src/interface/dashboard.mjs";
+import { createAdoptionServerStarter, resolveDashboardOptions, serveDashboard } from "../src/interface/dashboard-entry.mjs";
+import { runHookEntry } from "../src/interface/hook-entry.mjs";
+import { buildTaskFromFlags } from "../src/interface/task-input.mjs";
 import {
   recoverAdoption,
   resumeAdoption,
@@ -44,13 +45,12 @@ import { projectDecisions, projectDecisionStats } from "../src/interface/decisio
 import { projectTimeline } from "../src/interface/timeline.mjs";
 import { COMMAND_REGISTRY, renderCommandsMarkdown, renderHelp } from "../src/interface/cli-help.mjs";
 import {
-  activateExternalCodexAdapter,
-  adapterCliPrefix,
-  activateExternalCursorAdapter,
-  installExternalAdapters,
-  restoreExternalAdapterBackup,
-  uninstallExternalAdapters,
-} from "../src/interface/external-adapters.mjs";
+  activateCodexAdapter,
+  activateCursorAdapter,
+  installAdapters,
+  restoreAdapterBackup,
+  uninstallAdapters,
+} from "../src/interface/adapters.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
 import {
   admitParallelAgentResult,
@@ -110,7 +110,6 @@ import { verifyLedger } from "../src/infra/ledger.mjs";
 import { listPromptPack, renderPromptPackEntry } from "../src/infra/prompt-pack.mjs";
 import { scanProjectRules } from "../src/infra/rule-scanner.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
-import { resolveRuntimeCliCommandPrefix } from "../src/infra/runtime-snapshot.mjs";
 import {
   DEFAULT_PACKAGE_NAME,
   loadWildArrangeConfig,
@@ -125,13 +124,12 @@ import {
   writeConfigBaseline,
   writeRuntimeStateBackup,
 } from "../src/infra/security.mjs";
+import { attachGovernanceRepository, resolveWorkspaceContext } from "../src/infra/workspace-context.mjs";
 import {
-  attachProjectConnection,
   initializeProjectGovernance,
   projectConnectionView,
-  showProjectConnection,
-} from "../src/interface/project-connection.mjs";
-import { setupExternalGovernance } from "../src/interface/project-setup.mjs";
+  setupExternalGovernance,
+} from "../src/interface/project-setup.mjs";
 
 // --- CLI 参数解析 ---
 
@@ -172,16 +170,6 @@ function parseArgs(argv) {
 function strArg(args, key) {
   const value = args[key];
   return typeof value === "string" && value !== "" ? value : undefined;
-}
-
-/**
- * 将逗号分隔 CLI 字符串拆成去空白后的数组；非字符串输入返回 []。
- * @param {unknown} value --writable 等逗号列表原始值
- * @returns {string[]}
- */
-function splitCliList(value) {
-  if (typeof value !== "string") return [];
-  return value.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
 /**
@@ -247,7 +235,7 @@ async function main() {
     if (subcommand === "attach") {
       const governanceRoot = strArg(args, "governance-root");
       if (!governanceRoot) throw new Error("wildarrange project attach requires --governance-root <path>");
-      const context = await attachProjectConnection(requestedProjectRoot, {
+      const context = await attachGovernanceRepository(requestedProjectRoot, {
         governanceRoot: path.resolve(governanceRoot),
         runtimeRoot: strArg(args, "runtime-root") ? path.resolve(String(args["runtime-root"])) : undefined,
       });
@@ -255,7 +243,7 @@ async function main() {
       return;
     }
     if (subcommand === "show") {
-      const context = await showProjectConnection(requestedProjectRoot);
+      const context = await resolveWorkspaceContext(requestedProjectRoot);
       console.log(JSON.stringify(context ? projectConnectionView(context) : {
         attached: false,
         projectRoot: requestedProjectRoot,
@@ -310,7 +298,7 @@ async function main() {
   }
 
   // 以下命令都需要运行态：项目必须已连接治理仓。Hook 对未连接项目静默放行，避免波及无关项目。
-  const workspace = await showProjectConnection(requestedProjectRoot);
+  const workspace = await resolveWorkspaceContext(requestedProjectRoot);
   if (!workspace) {
     if (command === "hook" && args._[1] === "run") {
       const inactive = { kind: "wildarrange_hook_inactive", inactive: true, reason: "project is not connected to WildArrange governance" };
@@ -393,7 +381,7 @@ async function main() {
   if (command === "adapter") {
     const subcommand = args._[1];
     if (subcommand === "install") {
-      console.log(JSON.stringify(await installExternalAdapters(rootDir, workspace, {
+      console.log(JSON.stringify(await installAdapters(rootDir, workspace, {
         target: strArg(args, "target") || "all",
         mode: strArg(args, "mode") || "local",
         packageName: strArg(args, "package") || DEFAULT_PACKAGE_NAME,
@@ -407,18 +395,18 @@ async function main() {
       const userRoot = strArg(args, "user-root");
       console.log(JSON.stringify({
         kind: "wildarrange_external_activation",
-        ...(target !== "codex" ? { cursor: await activateExternalCursorAdapter(rootDir, workspace, { userRoot }) } : {}),
-        ...(target !== "cursor" ? { codex: await activateExternalCodexAdapter(rootDir, workspace, { userRoot }) } : {}),
+        ...(target !== "codex" ? { cursor: await activateCursorAdapter(rootDir, workspace, { userRoot }) } : {}),
+        ...(target !== "cursor" ? { codex: await activateCodexAdapter(rootDir, workspace, { userRoot }) } : {}),
       }, null, 2));
       return;
     }
     if (subcommand === "uninstall") {
-      console.log(JSON.stringify(await uninstallExternalAdapters(rootDir, workspace, { target: strArg(args, "target") || "all" }), null, 2));
+      console.log(JSON.stringify(await uninstallAdapters(rootDir, workspace, { target: strArg(args, "target") || "all" }), null, 2));
       return;
     }
     if (subcommand === "restore") {
       if (!strArg(args, "backup")) throw new Error("wildarrange adapter restore requires --backup <backupId>");
-      console.log(JSON.stringify(await restoreExternalAdapterBackup(rootDir, workspace, { backupId: args.backup }), null, 2));
+      console.log(JSON.stringify(await restoreAdapterBackup(rootDir, workspace, { backupId: args.backup }), null, 2));
       return;
     }
     throw new Error("wildarrange adapter requires install, activate, uninstall, or restore");
@@ -451,27 +439,17 @@ async function main() {
       const payload = strArg(args, "from")
         ? await readJson(path.resolve(rootDir, args.from))
         : JSON.parse(await readAllStdin());
-      const hostAdapter = strArg(args, "host") || String(process.env.WILDARRANGE_HOST_ADAPTER || "");
-      if (hostAdapter) payload.host_adapter = hostAdapter;
-      const adapterDigest = strArg(args, "adapter-digest");
-      if (!adapterDigest) throw new Error("host hook requires --adapter-digest");
-      payload.hook_config_digest = adapterDigest;
-      const hasAdapterMode = strArg(args, "adapter-mode") !== undefined;
-      const adapterMode = hasAdapterMode ? String(args["adapter-mode"]) : "local";
-      const adapterPackage = strArg(args, "adapter-package") || DEFAULT_PACKAGE_NAME;
-      // §3.4：Hook 载荷来自宿主且不可信；cli_command_prefix 必须取自当前进程 CLI，
-      // 禁止信任 payload 内嵌前缀，否则 PreToolUse 可被伪造绕过。
-      const cliCommandPrefix = hasAdapterMode
-        ? adapterCliPrefix({
-          mode: adapterMode,
-          packageName: adapterPackage,
-          localCliPath: path.resolve(process.argv[1]),
-        })
-        : await resolveRuntimeCliCommandPrefix(rootDir, { fallbackCliPath: path.resolve(process.argv[1]) });
-      if (!cliCommandPrefix) throw new Error("WildArrange CLI command prefix is unavailable; reinstall the adapter");
-      payload.cli_command_prefix = cliCommandPrefix;
-      payload[TRUSTED_CLI_COMMAND_PREFIX] = cliCommandPrefix;
-      const result = await runHostHook(rootDir, payload, runInjectionHook);
+      // payload 信任与 digest 决策在 interface/hook-entry.mjs；bin 只传取值。
+      const result = await runHookEntry(rootDir, {
+        payload,
+        hostAdapter: strArg(args, "host") || String(process.env.WILDARRANGE_HOST_ADAPTER || ""),
+        adapterDigest: strArg(args, "adapter-digest"),
+        adapterMode: strArg(args, "adapter-mode"),
+        adapterPackage: strArg(args, "adapter-package"),
+        cliPath: process.argv[1],
+        renderHook: runInjectionHook,
+        trustedPrefixKey: TRUSTED_CLI_COMMAND_PREFIX,
+      });
       // §3.4：默认写 result.output 供 IDE Hook 管道；--format json 才输出完整结构化契约。
       if (args.format === "json") {
         console.log(JSON.stringify(result, null, 2));
@@ -840,13 +818,7 @@ async function main() {
       return;
     }
     if (subcommand === "generate") {
-      const startedAt = Date.now();
-      const evidence = await generateContractArtifacts(rootDir);
-      const result = { capability: "contract-governance-generate-artifacts", status: "pass", evidence,
-        sideEffect: "files_changed", duration_ms: Date.now() - startedAt, cost: null, error: null };
-      console.log(JSON.stringify(result, null, 2));
-      // §3.4：generate 当前恒 pass；仍走统一 exit 映射，便于未来引入生成失败语义。
-      process.exitCode = result.status === "pass" ? 0 : 2;
+      console.log(JSON.stringify(await runContractGenerate(rootDir), null, 2));
       return;
     }
     throw new Error("wildarrange contracts requires scan, apply-card, generate, propose, or resolve");
@@ -940,24 +912,12 @@ async function main() {
       return;
     }
     if (subcommand === "create") {
-      let task;
-      if (strArg(args, "from")) {
-        task = await readJson(path.resolve(rootDir, args.from));
-      } else {
-        const subject = strArg(args, "title") || strArg(args, "subject") || null;
-        if (!subject) throw new Error("wildarrange task create requires --from <task.json> or --title <text>");
-        task = {
-          subject,
-          description: strArg(args, "description") || subject,
-          workType: strArg(args, "type") || "maintenance",
-          priority: strArg(args, "priority") ? String(args.priority).toUpperCase() : "P1",
-          source: strArg(args, "source") || "user",
-          parentTaskRef: strArg(args, "parent") || null,
-          writable_paths: splitCliList(args.writable),
-          verify_commands: strArg(args, "verify") ? [args.verify] : [],
-          review_commands: strArg(args, "review") ? [args.review] : [],
-        };
-      }
+      const task = strArg(args, "from")
+        ? await readJson(path.resolve(rootDir, args.from))
+        : buildTaskFromFlags(Object.fromEntries(
+          ["title", "subject", "description", "type", "priority", "source", "parent", "writable", "verify", "review"]
+            .map((key) => [key, strArg(args, key)]),
+        ));
       console.log(JSON.stringify(await createTeamTask(rootDir, task), null, 2));
       return;
     }
@@ -1051,24 +1011,13 @@ async function main() {
   // §3.4：adoption 启动/恢复验证治理 Dashboard；start/resume 成功后会阻塞进程保活。
   if (command === "adoption") {
     const subcommand = args._[1];
-    // §3.2：Dashboard 默认 host/port；token 优先 CLI，其次 WILDARRANGE_DASHBOARD_TOKEN，否则随机 24 字节 base64url。
-    const host = strArg(args, "host") || "127.0.0.1";
-    const port = strArg(args, "port") ? Number(args.port) : 8765;
-    const token = strArg(args, "token")
-      || process.env.WILDARRANGE_DASHBOARD_TOKEN || randomBytes(24).toString("base64url");
-    /**
-     * 启动 Dashboard HTTP 服务并构造带 token 的 adoption 深链 URL。
-     * @param {{ host?: string, port?: number, token?: string }} options 监听与鉴权参数
-     * @returns {Promise<{ server: import("node:http").Server, url: string }>}
-     */
-    const startServer = async (options) => {
-      const server = await startDashboardServer(rootDir, options);
-      const address = server.address();
-      const actualPort = typeof address === "object" && address ? address.port : options.port || 8765;
-      return { server, url: `http://${options.host || host}:${actualPort}/#approvals?token=${encodeURIComponent(options.token || token)}` };
-    };
+    // §3.2：Dashboard 默认 host/port；token 优先 CLI，其次 WILDARRANGE_DASHBOARD_TOKEN，否则随机。
+    const dashboard = resolveDashboardOptions({
+      host: strArg(args, "host"), port: strArg(args, "port"), token: strArg(args, "token"),
+    }, { autoToken: true });
+    const startServer = createAdoptionServerStarter(rootDir, dashboard);
     if (subcommand === "start") {
-      const result = await startAdoption(rootDir, { host, port, token, startServer });
+      const result = await startAdoption(rootDir, { ...dashboard, startServer });
       console.log(JSON.stringify(result, null, 2));
       // §3.4：start 成功后永不 resolve，保持进程与 Dashboard 存活；Ctrl+C 为唯一退出。
       if (result.ok && result.url) await new Promise(() => {});
@@ -1083,9 +1032,7 @@ async function main() {
     if (subcommand === "resume") {
       const result = await resumeAdoption(rootDir, {
         sessionId: strArg(args, "session"),
-        host,
-        port,
-        token,
+        ...dashboard,
         startServer,
       });
       console.log(JSON.stringify(result, null, 2));
@@ -1108,12 +1055,10 @@ async function main() {
   // --- Dashboard 服务 ---
   // §3.4：serve 启动只读 Dashboard HTTP 服务；无 adoption 流程，成功即永久阻塞。
   if (command === "serve") {
-    // §3.2：与 adoption 共用默认 host/port；token 可选，未指定则 Dashboard 无鉴权。
-    const host = strArg(args, "host") || "127.0.0.1";
-    const port = strArg(args, "port") ? Number(args.port) : 8765;
-    const token = strArg(args, "token");
-    await startDashboardServer(rootDir, { host, port, token });
-    console.log(JSON.stringify({ ok: true, url: `http://${host}:${port}/` }, null, 2));
+    const options = resolveDashboardOptions({
+      host: strArg(args, "host"), port: strArg(args, "port"), token: strArg(args, "token"),
+    });
+    console.log(JSON.stringify(await serveDashboard(rootDir, options), null, 2));
     // §3.4：serve 为长期前台服务，故意不 return；与 adoption start/resume 阻塞语义一致。
     await new Promise(() => {});
   }

@@ -38,8 +38,8 @@ import { listRuntimeStateBackups, verifyConfigBaseline, verifyRuntimeState } fro
 import { evaluateGateArming } from "../infra/gate-arming.mjs";
 import { evaluateRegistryFreshness } from "../infra/verification-registry.mjs";
 import { projectDecisionStats } from "./decisions.mjs";
-import { checkCompletionIntegrity } from "./doctor-completion.mjs";
-import { inspectExternalAdapterIntegrity, loadExternalAdapterReport } from "./external-adapters.mjs";
+import { addFinding, checkCompletionIntegrity } from "./doctor-completion.mjs";
+import { inspectAdapterIntegrity, loadAdapterReport } from "./adapters.mjs";
 
 // 诊断与门控分离：每个检查独立 try/catch，单项崩溃只把自己的分项标红，
 // 其余分项照常输出；doctor 不再写 hash 链 ledger（诊断不该抢门控的锁）。
@@ -96,11 +96,6 @@ export async function runDoctor(rootDir) {
   await writeJsonAtomic(jsonPath, report);
   await writeFile(mdPath, renderDoctorMarkdown(report), "utf8");
   return report;
-}
-
-/** 向 doctor findings 数组追加一条分项结论。 */
-function addFinding(findings, severity, section, message, extra = {}) {
-  findings.push({ severity, section, message, ...extra });
 }
 
 // --- 配置结构 ---
@@ -305,7 +300,7 @@ async function checkAdapters(rootDir, findings) {
     codex: config.adapters?.codex?.enabled === true,
     kimi: config.adapters?.kimi?.enabled === true,
   };
-  const installReport = await loadExternalAdapterReport(rootDir);
+  const installReport = await loadAdapterReport(rootDir);
   // 以 install-report 里实际生成过的宿主为准：没装的宿主不是缺陷，不能报 error
   const installedTargets = Object.keys(installReport?.targets || {});
   const enabledTargets = Object.keys(enabled).filter((target) => enabled[target] && installedTargets.includes(target));
@@ -328,7 +323,7 @@ async function checkAdapters(rootDir, findings) {
       });
     }
     // 回执在但 Hook 配置文件/用户级条目已被改动或删除时，不能继续当作已激活。
-    const integrity = prepared ? await inspectExternalAdapterIntegrity(target, prepared) : { status: "not_prepared", issues: [] };
+    const integrity = prepared ? await inspectAdapterIntegrity(target, prepared) : { status: "not_prepared", issues: [] };
     if (integrity.status === "modified") {
       addFinding(findings, "error", "adapters", `${target} 外置 Adapter 的 Hook 配置与安装时的 digest 不一致：${integrity.issues.map((issue) => `${issue.file}（${issue.problem}）`).join("；")}`, {
         target,

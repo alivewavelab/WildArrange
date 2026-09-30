@@ -152,7 +152,7 @@ test("doctor scopes completion evidence by plan when two plans reuse T001", asyn
   });
 });
 
-test("doctor rejects an unscoped legacy completion event when T001 belongs to two plans", async () => {
+test("doctor never counts an unscoped completion event as proof for either same-id task", async () => {
   await withExternalProject(async ({ projectRoot: dir }) => {
     await writeTwoPlanSameTaskLedger(dir);
     await appendLedger(dir, {
@@ -161,14 +161,10 @@ test("doctor rejects an unscoped legacy completion event when T001 belongs to tw
     });
 
     const report = await runDoctor(dir);
-    const ambiguous = report.findings.find((finding) => finding.code === "ambiguous_legacy_completion_event");
     const missingEvents = report.findings.filter((finding) =>
       finding.section === "completion_audit"
         && finding.message.includes("ledger has no completion event"));
 
-    assert.ok(ambiguous);
-    assert.deepEqual(ambiguous.planIds, ["plan-a", "plan-b"]);
-    assert.equal(report.sections.completionAudit.ambiguousLegacyCompletionEvents, 1);
     assert.deepEqual(missingEvents.map((finding) => finding.taskRef).sort(), ["plan-a:T001", "plan-b:T001"]);
   });
 });
@@ -205,8 +201,6 @@ test("doctor never assigns an archived Plan's unscoped completion event to a new
     assert.ok(report.findings.some((finding) =>
       finding.taskRef === "plan-new:T001"
       && finding.message.includes("ledger has no completion event")));
-    const unscoped = report.findings.find((finding) => finding.code === "ambiguous_legacy_completion_event");
-    assert.deepEqual(unscoped?.planIds, ["plan-new"]);
   });
 });
 
