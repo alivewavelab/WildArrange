@@ -33,7 +33,7 @@ import { criteriaStatus } from "../infra/success-criteria.mjs";
 import { isTrivialCommand } from "../infra/task-predicates.mjs";
 import { uniqueStrings } from "../infra/text-utils.mjs";
 import { normalizeRelativePath, pathMatchesPattern } from "../infra/path-match.mjs";
-import { extractComments } from "../infra/repository-layout.mjs";
+import { extractComments } from "../infra/comment-lexer.mjs";
 
 /**
  * 运行完整 review gate，返回 kind=review_gate 的多 lane 结果。

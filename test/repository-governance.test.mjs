@@ -17,7 +17,8 @@ import path from "node:path";
 import test from "node:test";
 
 import { runRepositoryGovernanceAudit } from "../src/capabilities/repository-governance.mjs";
-import { extractComments, inspectRepositoryGovernance } from "../src/infra/repository-layout.mjs";
+import { extractComments } from "../src/infra/comment-lexer.mjs";
+import { inspectRepositoryGovernance } from "../src/infra/repository-layout.mjs";
 import { resolveRouteDecision } from "../src/infra/route-table.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
 import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
