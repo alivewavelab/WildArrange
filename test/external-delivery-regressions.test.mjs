@@ -238,7 +238,7 @@ test("workflow --sample completes under external Git delivery", async () => {
 // ---------------------------------------------------------------------------
 // 5. 相对计划草稿路径的 plan --from 导入：映射到 runtimeRoot 后被识别并放行
 // ---------------------------------------------------------------------------
-test("feature gate recognizes a relative .wildarrange/plan-drafts import and the CLI resolves it from the runtime root", async () => {
+test("feature gate accepts the runtime draft path and a project-relative .wildarrange path is not an alias", async () => {
   const sessionId = "relative-draft-session";
   await withExternalProject(async ({ projectRoot, stateHome }) => {
     await routeRequest(projectRoot, { text: "新增一个从游戏详情页启动游戏的功能，开始做吧", sessionId });
@@ -266,7 +266,7 @@ test("feature gate recognizes a relative .wildarrange/plan-drafts import and the
       }],
     }, null, 2), "utf8");
 
-    const command = "node ./bin/wildarrange.mjs plan --from .wildarrange/plan-drafts/relative-plan.json";
+    const command = `node ./bin/wildarrange.mjs plan --from "${draftPath}"`;
     const guard = await preToolUseGuard(projectRoot, {
       hook_event_name: "PreToolUse",
       session_id: sessionId,
@@ -275,8 +275,16 @@ test("feature gate recognizes a relative .wildarrange/plan-drafts import and the
     });
     assert.equal(guard.decision, "allow", JSON.stringify(guard));
 
-    // 放行后的命令必须真能跑：CLI 同样把该虚拟路径解析到 runtimeRoot。
-    const run = spawnSync(process.execPath, [path.resolve(process.cwd(), "bin", "wildarrange.mjs"), "plan", "--root", projectRoot, "--from", ".wildarrange/plan-drafts/relative-plan.json"], {
+    // 旧的项目内相对写法不再映射到运行态：放行的只能是运行态绝对路径。
+    const relativeGuard = await preToolUseGuard(projectRoot, {
+      hook_event_name: "PreToolUse",
+      session_id: sessionId,
+      tool_name: "Bash",
+      tool_input: { command: "node ./bin/wildarrange.mjs plan --from .wildarrange/plan-drafts/relative-plan.json" },
+    });
+    assert.equal(relativeGuard.decision, "deny", JSON.stringify(relativeGuard));
+
+    const run = spawnSync(process.execPath, [path.resolve(process.cwd(), "bin", "wildarrange.mjs"), "plan", "--root", projectRoot, "--from", draftPath], {
       cwd: projectRoot, encoding: "utf8", env: { ...process.env, WILDARRANGE_STATE_HOME: stateHome },
     });
     assert.equal(run.status, 0, run.stderr || run.stdout);

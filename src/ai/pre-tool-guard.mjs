@@ -19,7 +19,6 @@ import {
   loadWildArrangeConfig,
 } from "../infra/runtime-config.mjs";
 import {
-  resolveRuntimeInputPath,
   resolveWildArrangePath,
   nowIso,
   readJson,
@@ -143,7 +142,7 @@ export async function preToolUseGuard(rootDir, input = {}, options = {}) {
       ? await isMatchingFeaturePlanImport(rootDir, shellCommand, featureDesignGate.id, cliCommandPrefix)
       : false;
     const blockedShell = isShellTool && !isReadOnlyWildArrangeShellCommand(shellCommand, cliCommandPrefix, rootDir) && !validPlanImport;
-    const blockedWrite = targetPaths.length > 0 && !isPlanDraftWrite(targetPaths);
+    const blockedWrite = targetPaths.length > 0 && !isPlanDraftWrite(rootDir, targetPaths);
     if (blockedShell || blockedWrite) {
       return denyFeatureDesignToolUse(rootDir, {
         code: "feature_plan_required",
@@ -208,7 +207,7 @@ export async function preToolUseGuard(rootDir, input = {}, options = {}) {
       deniedPaths: [],
     };
   }
-  if (isPlanDraftWrite(targetPaths) && (!task || awaitingPlanApproval)) {
+  if (isPlanDraftWrite(rootDir, targetPaths) && (!task || awaitingPlanApproval)) {
     await appendLedger(rootDir, {
       type: "pre_tool_use_allowed",
       reason: "plan_draft_write",
@@ -221,8 +220,8 @@ export async function preToolUseGuard(rootDir, input = {}, options = {}) {
       decision: "allow",
       code: "plan_draft_write",
       reason: awaitingPlanApproval
-        ? "plan is awaiting user approval; edits remain limited to a JSON plan draft under .wildarrange/plan-drafts/"
-        : "no active task yet; write is limited to a JSON plan draft under .wildarrange/plan-drafts/",
+        ? "plan is awaiting user approval; edits remain limited to a JSON plan draft under the runtime plan-drafts directory"
+        : "no active task yet; write is limited to a JSON plan draft under the runtime plan-drafts directory",
       toolName,
       taskId: null,
       targetPaths,
@@ -438,16 +437,22 @@ function isCandidateFilePath(value) {
   return !/^(https?:|data:|mailto:)/i.test(value);
 }
 
-/** 判断是否仅为 .wildarrange/plan-drafts/*.json 的计划草稿写入。 */
-function isPlanDraftWrite(targetPaths) {
-  return targetPaths.length > 0
-    && targetPaths.every((targetPath) => /^\.wildarrange\/plan-drafts\/[A-Za-z0-9_.-]+\.json$/.test(targetPath));
+/** 判断是否仅为运行态 plan-drafts/*.json 的计划草稿写入；项目内同名目录不算。 */
+function isPlanDraftWrite(projectRoot, targetPaths) {
+  return targetPaths.length > 0 && targetPaths.every((targetPath) => isRuntimePlanDraftPath(projectRoot, targetPath));
+}
+
+/** 绝对路径是否落在运行态 plan-drafts 目录内的合法草稿文件名上。 */
+function isRuntimePlanDraftPath(projectRoot, candidate) {
+  if (!path.isAbsolute(candidate)) return false;
+  const relative = path.relative(canonicalizePotentialPath(resolveWildArrangePath(projectRoot)), canonicalizePotentialPath(candidate)).replaceAll("\\", "/");
+  return /^plan-drafts\/[A-Za-z0-9_.-]+\.json$/.test(relative);
 }
 
 // --- Shell 与功能设计门 ---
 
 /** 无活跃任务/计划待批时允许的 WildArrange CLI 子命令参数白名单（只读与计划管理类）。 */
-const READ_ONLY_WILDARRANGE_SHELL_ARGS = /^(?:status|doctor|summary|timeline|decisions|config\s+show|changes\s+list|adoption\s+inventory|review\s+checklist\s+--task\s+[A-Za-z0-9_.-]+|review\s+configure\s+--from\s+\.wildarrange[\\/]plan-drafts[\\/][A-Za-z0-9_.-]+\.json|prompts\s+show\s+--skill\s+[A-Za-z0-9][A-Za-z0-9._-]{0,99}|resume(?:\s+--session\s+[A-Za-z0-9_.-]+)?|continuation\s+check(?:\s+--session\s+[A-Za-z0-9_.-]+)?|help(?:\s+--all)?|--help(?:\s+--all)?)$/i;
+const READ_ONLY_WILDARRANGE_SHELL_ARGS = /^(?:status|doctor|summary|timeline|decisions|config\s+show|changes\s+list|adoption\s+inventory|review\s+checklist\s+--task\s+[A-Za-z0-9_.-]+|prompts\s+show\s+--skill\s+[A-Za-z0-9][A-Za-z0-9._-]{0,99}|resume(?:\s+--session\s+[A-Za-z0-9_.-]+)?|continuation\s+check(?:\s+--session\s+[A-Za-z0-9_.-]+)?|help(?:\s+--all)?|--help(?:\s+--all)?)$/i;
 
 /** 无活跃任务或计划待批时，仅允许只读/计划管理类 WildArrange shell 子命令。 */
 function isAllowedPrePlanShellCommand(command, cliCommandPrefix = "", projectRoot = "") {
@@ -455,7 +460,7 @@ function isAllowedPrePlanShellCommand(command, cliCommandPrefix = "", projectRoo
   const args = stripVerifiedProjectRootOption(parseWildArrangeShellArgs(command, cliCommandPrefix), projectRoot);
   if (!args) return false;
   if (READ_ONLY_WILDARRANGE_SHELL_ARGS.test(args)) return true;
-  if (/^review\s+configure\s+--from\s+\.wildarrange[\\/]plan-drafts[\\/][A-Za-z0-9_.-]+\.json\s+--apply$/i.test(args)) return true;
+  if (isRuntimeReviewConfigure(args, projectRoot, true)) return true;
   if (/^init(?:\s+--sample)?$/i.test(args)) return true;
   if (/^plan\s+approve(?:\s+--plan\s+[A-Za-z0-9_.-]+)?$/i.test(args)) return true;
   return /^plan\s+--from\s+(?:"[A-Za-z0-9_./\\:~ -]+\.json"|'[A-Za-z0-9_./\\:~ -]+\.json'|[A-Za-z0-9_./\\:~ -]+\.json)$/i.test(args);
@@ -492,7 +497,14 @@ function parseWildArrangeShellArgs(command, cliCommandPrefix = "") {
 /** 判断 shell 命令是否为功能设计门允许的只读 WildArrange 子命令。 */
 function isReadOnlyWildArrangeShellCommand(command, cliCommandPrefix = "", projectRoot = "") {
   const args = stripVerifiedProjectRootOption(parseWildArrangeShellArgs(command, cliCommandPrefix), projectRoot);
-  return Boolean(args && READ_ONLY_WILDARRANGE_SHELL_ARGS.test(args));
+  return Boolean(args && (READ_ONLY_WILDARRANGE_SHELL_ARGS.test(args) || isRuntimeReviewConfigure(args, projectRoot, false)));
+}
+
+/** `review configure --from <运行态草稿绝对路径>`；allowApply 为 true 时同时接受 --apply。 */
+function isRuntimeReviewConfigure(args, projectRoot, allowApply) {
+  const match = args.match(/^review\s+configure\s+--from\s+(?:"([^"]+)"|'([^']+)'|(\S+))(\s+--apply)?$/i);
+  if (!match || (match[4] && !allowApply)) return false;
+  return isRuntimePlanDraftPath(projectRoot, match[1] || match[2] || match[3]);
 }
 
 /** 校验 plan --from 导入的 JSON 是否绑定当前功能设计 gateId。 */
@@ -501,7 +513,7 @@ async function isMatchingFeaturePlanImport(rootDir, command, gateId, cliCommandP
   const match = args?.match(/^plan\s+--from\s+(?:"([^"]+\.json)"|'([^']+\.json)'|([^\s]+\.json))$/i);
   const rawPath = match?.[1] || match?.[2] || match?.[3];
   if (!rawPath) return false;
-  const planPath = path.isAbsolute(rawPath) ? rawPath : resolveRuntimeInputPath(rootDir, rawPath);
+  const planPath = path.resolve(rootDir, rawPath);
   const plan = await readJson(planPath, null).catch(() => null);
   return plan?.feature_design_ref === gateId;
 }
@@ -560,8 +572,8 @@ async function denyFeatureDesignToolUse(rootDir, options) {
 /** 将绝对/相对路径规范为相对 rootDir 的路径，经 realpath 解析防 symlink 逃逸。 */
 function normalizeHookTargetPath(value, rootDir, baseDir = rootDir, projectRoot = rootDir) {
   const absoluteTarget = path.isAbsolute(value) ? value : path.resolve(baseDir, value);
-  const runtimeRelative = path.relative(canonicalizePotentialPath(resolveWildArrangePath(projectRoot)), canonicalizePotentialPath(absoluteTarget)).replaceAll("\\", "/");
-  if (/^plan-drafts\/[A-Za-z0-9_.-]+\.json$/.test(runtimeRelative)) return ".wildarrange/" + runtimeRelative;
+  // 运行态草稿保留规范化绝对路径，不与项目内任何相对路径同名
+  if (isRuntimePlanDraftPath(projectRoot, absoluteTarget)) return canonicalizePotentialPath(absoluteTarget);
   const relative = path.relative(
     canonicalizePotentialPath(rootDir),
     canonicalizePotentialPath(absoluteTarget),

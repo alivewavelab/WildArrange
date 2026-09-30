@@ -66,7 +66,7 @@ import {
   resolveChangeRequest,
   reviewChangeRequest,
 } from "../src/orchestration/change-governance.mjs";
-import { recordReviewBlocker } from "../src/orchestration/review-blocker.mjs";
+import { recordReviewBlocker, resolveReviewBlocker } from "../src/orchestration/review-blocker.mjs";
 import { steerWorkflow } from "../src/orchestration/plan-steering.mjs";
 import {
   claimTeamTask,
@@ -104,7 +104,7 @@ import {
 import { computeImpact } from "../src/infra/dependency-graph.mjs";
 import { runRepoTests, selectRepoTests } from "../src/infra/test-runner.mjs";
 import { errorProtocolOf, formatErrorInline } from "../src/infra/error-protocol.mjs";
-import { projectNotConnectedError, resolveRuntimeInputPath } from "../src/infra/runtime-store.mjs";
+import { projectNotConnectedError } from "../src/infra/runtime-store.mjs";
 import { verifyLedger } from "../src/infra/ledger.mjs";
 import { listPromptPack, renderPromptPackEntry } from "../src/infra/prompt-pack.mjs";
 import { scanProjectRules } from "../src/infra/rule-scanner.mjs";
@@ -471,7 +471,7 @@ async function main() {
     // §3.4：import 与 approve 互斥入口；缺 --from 时提示走 approve 子命令而非静默读默认文件。
     if (!args.from) throw new Error("wildarrange plan requires --from <plan.json>（或 wildarrange plan approve 确认已导入计划）");
     await initRuntime(rootDir);
-    const plan = await importPlan(rootDir, resolveRuntimeInputPath(rootDir, args.from), { requireResponsibility: true });
+    const plan = await importPlan(rootDir, path.resolve(rootDir, args.from), { requireResponsibility: true });
     const approval = await loadPlanApproval(rootDir);
     console.log(JSON.stringify({
       ok: true,
@@ -863,7 +863,7 @@ async function main() {
   }
 
   // --- 审查阻塞记录 ---
-  // §3.4：review-blockers record 登记审查阻塞项，关联 task 与 change-governance 流程。
+  // §3.4：review-blockers record 登记审查阻塞项；resolve 在解决任务完成后把被阻塞任务放回 pending。
   if (command === "review-blockers") {
     const subcommand = args._[1];
     if (subcommand === "record") {
@@ -872,7 +872,13 @@ async function main() {
       console.log(JSON.stringify(await recordReviewBlocker(rootDir, blocker), null, 2));
       return;
     }
-    throw new Error("wildarrange review-blockers requires record");
+    if (subcommand === "resolve") {
+      const taskId = strArg(args, "task");
+      if (!taskId) throw new Error("wildarrange review-blockers resolve requires --task <taskId> --evidence <text> --rationale <text>");
+      console.log(JSON.stringify(await resolveReviewBlocker(rootDir, { taskId, evidence: strArg(args, "evidence"), rationale: strArg(args, "rationale") }), null, 2));
+      return;
+    }
+    throw new Error("wildarrange review-blockers requires record or resolve");
   }
 
   // --- 任务板 ---

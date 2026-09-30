@@ -55,6 +55,7 @@
 | `wildarrange evidence record --task T001 --criterion C001 --status pass --evidence "..."` | 回填成功判据证据 |
 | `wildarrange steer --from <proposal.json>` | 任务变更治理入口 |
 | `wildarrange review-blockers record --from <blocker.json>` | 登记 Review Blocker |
+| `wildarrange review-blockers resolve --task <taskId> --evidence <text> --rationale <text>` | 解决任务完成后解除 Review Blocker，被阻塞任务回到 pending |
 | `wildarrange task list [--all] [--status draft|pending|completed] [--type feature|bug|acceptance_correction|maintenance] [--priority P0|P1|P2] [--owner Jiuwei] [--plan <planId>] [--search "text"]` | 列出当前计划或全项目工单 |
 | `wildarrange task get --task T001 [--plan <planId>]` | 查看单个任务与历史 |
 | `wildarrange task claim [--task T001] [--owner Jiuwei]` | 认领任务 |

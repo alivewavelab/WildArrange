@@ -269,6 +269,11 @@
       "purpose": "登记 Review Blocker"
     },
     {
+      "name": "wildarrange_review_blockers_resolve",
+      "command": "wildarrange review-blockers resolve --task <taskId> --evidence <text> --rationale <text>",
+      "purpose": "解决任务完成后解除 Review Blocker，被阻塞任务回到 pending"
+    },
+    {
       "name": "wildarrange_task_list",
       "command": "wildarrange task list [--all] [--status draft|pending|completed] [--type feature|bug|acceptance_correction|maintenance] [--priority P0|P1|P2] [--owner Jiuwei] [--plan <planId>] [--search \"text\"]",
       "purpose": "列出当前计划或全项目工单"

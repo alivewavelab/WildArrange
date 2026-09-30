@@ -20,10 +20,10 @@ description: 配置项目自己的独立审查步骤、规范文档、必需 Ski
 
 ## 步骤三：预览并应用
 
-将仅含 review、executionReadiness 的配置补丁保存为 .wildarrange/plan-drafts/review-setup.json。外置模式先读 project show，实际文件写到 runtimeRoot/plan-drafts/review-setup.json，下面 --from 的逻辑路径保持不变；应用后正式配置位于治理仓库 <policyRoot>/wildarrange.config.json。不要在业务仓库创建 .wildarrange 目录。运行：
+先运行 wildarrange project show 取 runtimeRoot，把仅含 review、executionReadiness 的配置补丁保存为 <runtimeRoot>/plan-drafts/review-setup.json（绝对路径）；应用后正式配置位于治理仓库 <policyRoot>/wildarrange.config.json。不要在业务仓库创建任何文件。运行：
 
 ~~~bash
-wildarrange review configure --from .wildarrange/plan-drafts/review-setup.json
+wildarrange review configure --from "<runtimeRoot>/plan-drafts/review-setup.json"
 ~~~
 
 向用户展示每步检查什么、对哪些文件生效、必需或建议、引用哪份规范和哪个 Skill、执行服务及缺失项。得到对该具体配置的明确批准后执行同一命令加 --apply。已有批准可复用，不重复索取。缺失依赖允许先登记，但不能声称可以开工；修复相关项目文件仍须走正式任务。

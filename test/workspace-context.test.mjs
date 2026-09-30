@@ -193,10 +193,10 @@ test("external onboarding: setup drafts use runtime and configuration belongs to
     assert.equal((await guard(path.join(governanceRoot, "policy/wildarrange.config.json"))).decision, "deny");
     await writeFile(draft, JSON.stringify({ executionReadiness: { timeoutMs: 4321 } }));
     const configPath = path.join(governanceRoot, "policy/wildarrange.config.json");
-    const preview = await configureProjectReview(projectRoot, ".wildarrange/plan-drafts/setup.json");
+    const preview = await configureProjectReview(projectRoot, draft);
     assert.equal(preview.applied, false);
     const cliPreview = await runCommandFile(process.execPath, [path.join(process.cwd(), "bin/wildarrange.mjs"),
-      "review", "configure", "--from", ".wildarrange/plan-drafts/setup.json"], projectRoot, 15_000,
+      "review", "configure", "--from", draft], projectRoot, 15_000,
       { env: { WILDARRANGE_STATE_HOME: stateHome } });
     assert.equal(cliPreview.exitCode, 0, cliPreview.stderr);
     assert.equal(JSON.parse(cliPreview.stdout).applied, false);
@@ -213,7 +213,7 @@ test("external onboarding: setup drafts use runtime and configuration belongs to
     await writeFile(path.join(outside, "setup.json"), "{}");
     await symlink(outside, drafts, process.platform === "win32" ? "junction" : "dir");
     assert.equal((await guard(draft)).decision, "deny");
-    await assert.rejects(configureProjectReview(projectRoot, ".wildarrange/plan-drafts/setup.json"), /escapes/);
+    await assert.rejects(configureProjectReview(projectRoot, draft), /escapes/);
   });
 });
 

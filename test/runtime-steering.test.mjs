@@ -6,6 +6,7 @@
 // =============================================================================
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
@@ -245,7 +246,7 @@ test("review blockers create a resolution task without completing the blocked ta
 });
 
 test("review blocker resolution returns the blocked task to pending only after the resolution task completes", async () => {
-  await withExternalProject(async ({ projectRoot, root }) => {
+  await withExternalProject(async ({ projectRoot, root, stateHome }) => {
     const planPath = path.join(root, "blocker-resolve-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Review blocker resolution",
@@ -287,11 +288,15 @@ test("review blocker resolution returns the blocked task to pending only after t
     assert.equal(completed.status, "completed", JSON.stringify({ status: completed.status, task: completed.task?.id, failure: completed.task?.last_failure }));
     assert.equal(completed.task.id, blocked.resolutionTask.id);
 
-    const resolved = await resolveReviewBlocker(projectRoot, {
-      taskId: "T001",
-      evidence: `Resolution task ${blocked.resolutionTask.id} finished with a passing verifier.`,
-      rationale: "The blocked task re-enters the delivery pipeline for a fresh run.",
+    // 走公开 CLI：review_blocked 必须有用户可达的出口
+    const cli = spawnSync(process.execPath, [path.resolve("bin", "wildarrange.mjs"), "review-blockers", "resolve", "--root", projectRoot,
+      "--task", "T001",
+      "--evidence", `Resolution task ${blocked.resolutionTask.id} finished with a passing verifier.`,
+      "--rationale", "The blocked task re-enters the delivery pipeline for a fresh run."], {
+      cwd: projectRoot, encoding: "utf8", env: { ...process.env, WILDARRANGE_STATE_HOME: stateHome },
     });
+    assert.equal(cli.status, 0, cli.stderr || cli.stdout);
+    const resolved = JSON.parse(cli.stdout);
     assert.equal(resolved.unblockedTask.status, "pending");
     persisted = await readJson(taskStatePath);
     const unblocked = persisted.tasks.find((task) => task.id === "T001");

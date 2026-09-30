@@ -6,7 +6,7 @@
 // =============================================================================
 
 import assert from "node:assert/strict";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { approvePlan, importPlan } from "../src/orchestration/plan-state.mjs";
@@ -393,7 +393,7 @@ test("pre-tool-use guard only allows a JSON plan draft before the first task exi
     });
     assert.equal(realisticPlanPatch.decision, "allow");
     assert.equal(realisticPlanPatch.code, "plan_draft_write");
-    assert.deepEqual(realisticPlanPatch.targetPaths, [".wildarrange/plan-drafts/real-plan.json"]);
+    assert.deepEqual(realisticPlanPatch.targetPaths, [path.join(await realpath(resolveWildArrangePath(projectRoot)), "plan-drafts", "real-plan.json")]);
 
     const nativePatchWithUnifiedLookingContent = await preToolUseGuard(projectRoot, {
       hook_event_name: "PreToolUse",
@@ -405,7 +405,7 @@ test("pre-tool-use guard only allows a JSON plan draft before the first task exi
       },
     });
     assert.equal(nativePatchWithUnifiedLookingContent.decision, "allow");
-    assert.deepEqual(nativePatchWithUnifiedLookingContent.targetPaths, [".wildarrange/plan-drafts/content-plan.json"]);
+    assert.deepEqual(nativePatchWithUnifiedLookingContent.targetPaths, [path.join(await realpath(resolveWildArrangePath(projectRoot)), "plan-drafts", "content-plan.json")]);
 
     const unifiedPlanPatch = await preToolUseGuard(projectRoot, {
       hook_event_name: "PreToolUse",
@@ -416,8 +416,18 @@ test("pre-tool-use guard only allows a JSON plan draft before the first task exi
         diff: "--- /dev/null\n+++ b/.wildarrange/plan-drafts/unified-plan.json\n@@ -0,0 +1 @@\n+{}",
       },
     });
-    assert.equal(unifiedPlanPatch.decision, "allow");
+    // 项目内同名目录不是运行态：写进客户项目必须被拒绝
+    assert.equal(unifiedPlanPatch.decision, "deny");
     assert.deepEqual(unifiedPlanPatch.targetPaths, [".wildarrange/plan-drafts/unified-plan.json"]);
+
+    const projectDraftWrite = await preToolUseGuard(projectRoot, {
+      hook_event_name: "PreToolUse",
+      session_id: "session-plan-draft",
+      cwd: projectRoot,
+      tool_name: "Write",
+      tool_input: { file_path: path.join(projectRoot, ".wildarrange", "plan-drafts", "s1-plan.json"), content: "{}" },
+    });
+    assert.equal(projectDraftWrite.decision, "deny");
 
     const realisticBypassPatch = await preToolUseGuard(projectRoot, {
       hook_event_name: "PreToolUse",

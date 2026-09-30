@@ -37,14 +37,15 @@ test("AI routing does not own feature confirmation while the public host entry d
 });
 
 test("an explicit draft-only request writes a draft without forcing formal import", async () => {
-  const directive = buildPlanDraftDirective({ route: "plan", needsPlan: true }, {
-    sessionId: "draft-only",
-    prompt: "只生成计划草稿，不要导入正式计划",
-  });
-  assert.equal(directive.draftOnly, true);
-  assert.equal(directive.nextCommand, null);
-
   await withExternalProject(async ({ projectRoot: rootDir }) => {
+    const directive = buildPlanDraftDirective({ route: "plan", needsPlan: true }, {
+      sessionId: "draft-only",
+      prompt: "只生成计划草稿，不要导入正式计划",
+      projectRoot: rootDir,
+    });
+    assert.equal(directive.draftOnly, true);
+    assert.equal(directive.nextCommand, null);
+
     const hook = await runInjectionHook(rootDir, {
       hook_event_name: "UserPromptSubmit",
       session_id: "draft-only",
@@ -56,7 +57,8 @@ test("an explicit draft-only request writes a draft without forcing formal impor
   });
 });
 
-test("dependency import constraints do not suppress formal plan import", () => {
+test("dependency import constraints do not suppress formal plan import", async () => {
+  await withExternalProject(async ({ projectRoot }) => {
   for (const prompt of [
     "不要导入第三方库，创建并导入计划",
     "不要 import lodash，创建并导入计划",
@@ -69,10 +71,16 @@ test("dependency import constraints do not suppress formal plan import", () => {
     const directive = buildPlanDraftDirective({ route: "plan", needsPlan: true }, {
       sessionId: "dependency-import",
       prompt,
+      projectRoot,
     });
     assert.equal(directive.draftOnly, false, prompt);
     assert.match(directive.nextCommand, /plan --from/);
   }
+  });
+});
+
+test("plan draft directive refuses to guess a path without the project root", () => {
+  assert.throws(() => buildPlanDraftDirective({ route: "plan", needsPlan: true }, { sessionId: "s" }), /requires projectRoot/);
 });
 
 test("feature design confirmation and complete plan cannot be bypassed across turns", async () => {
@@ -130,7 +138,7 @@ test("feature design confirmation and complete plan cannot be bypassed across tu
 
     const confirmed = await routeRequest(rootDir, { text: "确认", sessionId });
     assert.equal(confirmed.featureDesign.status, "awaiting_plan_import");
-    const directive = buildPlanDraftDirective(confirmed, { sessionId, prompt: "确认" });
+    const directive = buildPlanDraftDirective(confirmed, { sessionId, prompt: "确认", projectRoot: rootDir });
     assert.equal(directive.featureDesignRef, confirmed.featureDesign.id);
 
     const planPath = resolveWildArrangePath(rootDir, "plan-drafts", "feature-gate-plan.json");

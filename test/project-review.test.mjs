@@ -180,11 +180,13 @@ test("project reviewer returns an actionable finding and cannot create checkpoin
 test("setup Hook permits only the exact governance command before a task exists", async t => {
   const { preToolUseGuard } = await import("../src/ai/pre-tool-guard.mjs");
   const { projectRoot: root } = await openProject(t);
+  const draft = resolveWildArrangePath(root, "plan-drafts", "setup.json");
   for (const [command, denied] of [
-    ["node ./bin/wildarrange.mjs review configure --from .wildarrange/plan-drafts/setup.json", false],
-    ["node ./bin/wildarrange.mjs review configure --from .wildarrange/plan-drafts/setup.json --apply", false],
+    [`node ./bin/wildarrange.mjs review configure --from "${draft}"`, false],
+    [`node ./bin/wildarrange.mjs review configure --from "${draft}" --apply`, false],
     ["node ./bin/wildarrange.mjs review configure --from outside.json --apply", true],
-    ["node ./bin/wildarrange.mjs review configure --from .wildarrange/plan-drafts/setup.json; node evil.js", true],
+    ["node ./bin/wildarrange.mjs review configure --from .wildarrange/plan-drafts/setup.json --apply", true],
+    [`node ./bin/wildarrange.mjs review configure --from "${draft}"; node evil.js`, true],
   ]) {
     const result = await preToolUseGuard(root, { hook_event_name: "PreToolUse", cwd: root, session_id: "setup", tool_name: "exec_command", tool_input: { command } });
     assert.equal(result.decision === "deny", denied, JSON.stringify(result));

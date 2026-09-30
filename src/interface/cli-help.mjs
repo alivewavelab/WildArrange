@@ -83,6 +83,7 @@ export const COMMAND_REGISTRY = [
   { usage: "evidence record --task T001 --criterion C001 --status pass --evidence \"...\"", desc: "回填成功判据证据" },
   { usage: "steer --from <proposal.json>", desc: "任务变更治理入口" },
   { usage: "review-blockers record --from <blocker.json>", desc: "登记 Review Blocker" },
+  { usage: "review-blockers resolve --task <taskId> --evidence <text> --rationale <text>", desc: "解决任务完成后解除 Review Blocker，被阻塞任务回到 pending" },
   { usage: `task list [--all] [--status draft|pending|completed] [--type feature|bug|acceptance_correction|maintenance] [--priority P0|P1|P2] [--owner ${DEFAULT_EXECUTOR_AGENT}] [--plan <planId>] [--search "text"]`, desc: "列出当前计划或全项目工单" },
   { usage: "task get --task T001 [--plan <planId>]", desc: "查看单个任务与历史" },
   { usage: `task claim [--task T001] [--owner ${DEFAULT_EXECUTOR_AGENT}]`, desc: "认领任务" },

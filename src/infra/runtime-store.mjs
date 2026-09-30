@@ -62,17 +62,6 @@ export function resolveWildArrangePath(rootDir, ...segments) {
 }
 
 /**
- * 解析 CLI 的输入文件路径：`.wildarrange/plan-drafts/<name>.json` 是运行态虚拟路径，
- * 映射到 runtimeRoot（与 review configure 一致）；其余路径按项目根解析。
- */
-export function resolveRuntimeInputPath(rootDir, value) {
-  const logical = String(value).replaceAll("\\", "/");
-  return /^\.wildarrange\/plan-drafts\/[^/]+\.json$/.test(logical)
-    ? resolveWildArrangePath(rootDir, "plan-drafts", path.posix.basename(logical))
-    : path.resolve(rootDir, value);
-}
-
-/**
  * 返回项目当前绑定的运行态根；项目未连接外置治理时抛出可行动错误。
  */
 export function resolveWildArrangeRoot(rootDir) {
