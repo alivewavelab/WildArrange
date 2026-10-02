@@ -217,13 +217,13 @@
 
 最小落地集：
 
-1. 根 `AGENTS.md`（行动边界与必读入口）。
-2. `doc/standards/code-and-interface-conventions.md`（人工判断规则；格式、类型和接口结构交给机器配置）。
-3. `doc/testing-and-acceptance.md`（由人类确认测试强度、标准命令和交付门槛）。
-4. `doc/progress.md`（任务治理入口；任务事实只保留一个权威总账）。
-5. `doc/architecture.md` 按需创建，不在系统边界未知时编造。
+1. 治理仓 `policy/AGENTS.md`（行动边界与必读入口）。
+2. 治理仓 `policy/code-and-interface-conventions.md`（人工判断规则；格式、类型和接口结构交给机器配置）。
+3. 治理仓 `policy/testing-and-acceptance.md`（由人类确认测试强度、标准命令和交付门槛）。
+4. 任务总账 `runtime:team/tasks.json`（任务事实只保留一个权威总账，不另建进度文档）。
+5. 架构文档按需创建，不在系统边界未知时编造。
 
-WildArrange 可用 `init --project-docs` 非覆盖式补建前四项，按需加 `--architecture`。AI 默认只补与改动复杂度匹配的基础单元测试和必要回归测试；对抗、Fuzz、属性、组合矩阵、soak、额外 E2E、Golden/快照、哈希门禁和新测试框架必须先由人类确认。高风险只允许 AI 提出成本收益方案，不构成自动扩张授权。
+`wildarrange setup` 会在治理仓 `policy/` 下非覆盖式补建前三项，客户项目零写入。AI 默认只补与改动复杂度匹配的基础单元测试和必要回归测试；对抗、Fuzz、属性、组合矩阵、soak、额外 E2E、Golden/快照、哈希门禁和新测试框架必须先由人类确认。高风险只允许 AI 提出成本收益方案，不构成自动扩张授权。
 
 **标志**：人能把症状映射到目录；AI 修完有测试摘要可看。
 

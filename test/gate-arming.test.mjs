@@ -18,9 +18,9 @@ import test from "node:test";
 import { buildAcceptanceProof } from "../src/capabilities/acceptance-proof.mjs";
 import { evaluateGateArming } from "../src/infra/gate-arming.mjs";
 import { DEFAULT_WILDARRANGE_CONFIG } from "../src/infra/default-config.mjs";
-import { importPlan } from "../src/orchestration/plan-state.mjs";
+
 import { statusReport } from "../src/orchestration/status.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
 
 const UNARMED_CONFIG = structuredClone(DEFAULT_WILDARRANGE_CONFIG);
 
@@ -142,20 +142,33 @@ test("acceptance proof fails when every verify command is trivial", async () => 
   assert.equal(warningOnlyCommentProof.checks.find((check) => check.name === "review_not_tautological").status, "fail");
 });
 
+test("acceptance proof flags a task with a trivial worker, trivial verifier and no writable paths as no-op", () => {
+  const evidence = {
+    workerResult: { kind: "worker", exitCode: 0, command: "node -e \"process.exit(0)\"" },
+    verifyResult: { kind: "verifier", pass: true, results: [{ command: "node -e \"process.exit(0)\"", exitCode: 0 }] },
+    scopeResult: { status: "pass" },
+    reviewResult: { kind: "review_gate", pass: true, lanes: [{ name: "evidence_integrity", status: "pass" }] },
+  };
+  const noop = { id: "T001", subject: "noop", worker_command: "node -e \"process.exit(0)\"", verify_commands: ["node -e \"process.exit(0)\""], writable_paths: [], successCriteria: [] };
+  const proof = buildAcceptanceProof("plan-1", noop, evidence);
+  assert.equal(proof.pass, false);
+  assert.equal(proof.checks.find((check) => check.name === "not_noop_task")?.status, "fail");
+});
+
 test("status report carries the persistent unarmed-gates yellow lamp", async () => {
   await withExternalProject(async ({ projectRoot: dir }) => {
     const planPath = path.join(dir, "plan.json");
     await writeFile(planPath, JSON.stringify({
       id: "plan-arming",
       title: "Gate arming demo",
-      tasks: [{ id: "T001", subject: "demo", verify_commands: ["node --test"] }],
+      tasks: [{ id: "T001", subject: "demo", verify_commands: ["node --test"], writable_paths: ["src/app.js"], responsibilityChanges: declare("src/app.js") }],
     }), "utf8");
-    await importPlan(dir, planPath);
+    await importApprovedPlan(dir, planPath);
 
     const status = await statusReport(dir);
     assert.equal(status.gateArming.armed, false);
     assert.ok(status.gateArming.issues.some((issue) => issue.code === "quality_gates_not_required"));
     assert.ok(status.gateArming.issues.some((issue) => issue.code === "review_tautology"));
-  });
+  }, { reviewer: false });
 });
 

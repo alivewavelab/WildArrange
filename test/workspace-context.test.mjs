@@ -5,12 +5,15 @@ import path from "node:path";
 import test from "node:test";
 import { attachGovernanceRepository, clearWorkspaceContext, getBoundWorkspaceContext, loadGovernanceContract, loadGovernanceVerificationDefaults, initializeGovernanceRepository, resolveWorkspaceContext } from "../src/infra/workspace-context.mjs";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
-import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
+import { loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { buildRegistryFromCards } from "../src/infra/verification-registry.mjs";
-import { gitCommitAll, withExternalProject } from "./helpers/external-fixture.mjs";
+import { gitCommitAll, withExternalProject, importApprovedPlan, declare } from "./helpers/external-fixture.mjs";
 import { runCommandFile } from "../src/infra/command-runner.mjs";
 import { scanProjectRules } from "../src/infra/rule-scanner.mjs";
 import { clearWildArrangeRuntimeRoot, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_RESPONSIBILITY = declare("src/app.js");
 
 async function withWorkspace(fn) {
   const baseDir = path.join(process.cwd(), ".tmp");
@@ -133,9 +136,9 @@ test("workspace context: governance verification defaults are additive and bound
       id: "P-EXTERNAL",
       title: "External governance defaults",
       defaults: { verify_commands: ["node -e \"process.exit(0)\""] },
-      tasks: [{ id: "T001", subject: "Write project output", worker_command: "node --version", writable_paths: ["src/**"] }],
+      tasks: [{ id: "T001", subject: "Write project output", worker_command: "node --version", writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY }],
     }));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
     const state = await loadTaskState(projectRoot);
     assert.deepEqual(state.tasks[0].verify_commands, ["node --version", "node -e \"process.exit(0)\""]);
     assert.deepEqual(state.tasks[0].review_commands, ["node --version"]);
@@ -151,8 +154,8 @@ test("workspace context: tampered governance verification registry blocks plan i
     await writeFile(path.join(governanceRoot, "verification", "registry.json"), JSON.stringify(registry, null, 2));
     await gitCommitAll(governanceRoot, "tampered registry");
     const planPath = path.join(root, "plan.json");
-    await writeFile(planPath, JSON.stringify({ title: "Tampered governance", tasks: [{ subject: "Do work", verify_commands: ["node --version"], writable_paths: ["src/**"] }] }));
-    await assert.rejects(importPlan(projectRoot, planPath), /registry digest mismatch/);
+    await writeFile(planPath, JSON.stringify({ title: "Tampered governance", tasks: [{ subject: "Do work", verify_commands: ["node --version"], writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY }] }));
+    await assert.rejects(importApprovedPlan(projectRoot, planPath), /registry digest mismatch/);
   });
 });
 
@@ -179,6 +182,7 @@ test("workspace context: linked Git worktrees share project identity and runtime
 });
 
 test("external onboarding: setup drafts use runtime and configuration belongs to governance", async () => {
+  // 本用例断言 apply 之前治理仓没有正式配置，因此不装夹具审查者
   await withExternalProject(async ({ projectRoot, governanceRoot, stateHome }) => {
     const { configureProjectReview } = await import("../src/capabilities/project-review.mjs");
     const { loadWildArrangeConfig } = await import("../src/infra/runtime-config.mjs");
@@ -193,10 +197,10 @@ test("external onboarding: setup drafts use runtime and configuration belongs to
     assert.equal((await guard(path.join(governanceRoot, "policy/wildarrange.config.json"))).decision, "deny");
     await writeFile(draft, JSON.stringify({ executionReadiness: { timeoutMs: 4321 } }));
     const configPath = path.join(governanceRoot, "policy/wildarrange.config.json");
-    const preview = await configureProjectReview(projectRoot, ".wildarrange/plan-drafts/setup.json");
+    const preview = await configureProjectReview(projectRoot, draft);
     assert.equal(preview.applied, false);
     const cliPreview = await runCommandFile(process.execPath, [path.join(process.cwd(), "bin/wildarrange.mjs"),
-      "review", "configure", "--from", ".wildarrange/plan-drafts/setup.json"], projectRoot, 15_000,
+      "review", "configure", "--from", draft], projectRoot, 15_000,
       { env: { WILDARRANGE_STATE_HOME: stateHome } });
     assert.equal(cliPreview.exitCode, 0, cliPreview.stderr);
     assert.equal(JSON.parse(cliPreview.stdout).applied, false);
@@ -213,8 +217,8 @@ test("external onboarding: setup drafts use runtime and configuration belongs to
     await writeFile(path.join(outside, "setup.json"), "{}");
     await symlink(outside, drafts, process.platform === "win32" ? "junction" : "dir");
     assert.equal((await guard(draft)).decision, "deny");
-    await assert.rejects(configureProjectReview(projectRoot, ".wildarrange/plan-drafts/setup.json"), /escapes/);
-  });
+    await assert.rejects(configureProjectReview(projectRoot, draft), /escapes/);
+  }, { reviewer: false });
 });
 
 test("external onboarding: commit A and B belong to governance while source freshness belongs to product", async () => {

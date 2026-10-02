@@ -21,10 +21,13 @@ import test from "node:test";
 import { runInjectionHook } from "../src/ai/hooks.mjs";
 import { projectDecisionStats } from "../src/interface/decisions.mjs";
 import { projectTimeline } from "../src/interface/timeline.mjs";
-import { importPlan } from "../src/orchestration/plan-state.mjs";
+
 import { appendAnnotation } from "../src/infra/annotation-log.mjs";
 import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, importApprovedPlan, declare } from "./helpers/external-fixture.mjs";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_RESPONSIBILITY = declare("src/app.js");
 
 const execFileAsync = promisify(execFile);
 const WILDARRANGE_BIN = path.resolve(import.meta.dirname, "..", "bin", "wildarrange.mjs");
@@ -39,12 +42,12 @@ async function importPassingPlan(dir) {
         id: "T001",
         title: "stats task",
         owner: "ZhuRong",
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         verify_commands: ["node -e \"process.exit(0)\""],
       },
     ],
   }, null, 2));
-  await importPlan(dir, planPath);
+  await importApprovedPlan(dir, planPath);
 }
 
 async function denyOnce(dir, target, taskId) {

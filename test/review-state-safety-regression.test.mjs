@@ -28,24 +28,24 @@ import {
 } from "../src/infra/contract-governance.mjs";
 import { writeRuntimeContextSnapshot } from "../src/infra/runtime-snapshot.mjs";
 import { admitParallelAgentResult, cleanupParallelAgentRun, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
-import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
+import { loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { claimTeamTask, getTeamTask, persistTaskState } from "../src/orchestration/task-board.mjs";
 import { findRunnableTask, isTaskRunnable } from "../src/infra/task-predicates.mjs";
 import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
 
 const execFileAsync = promisify(execFile);
 
 test("plan reimport refuses to replace an active task claim", async () => {
   await withExternalProject(async ({ projectRoot: rootDir }) => {
     const planPath = await writePlan(rootDir);
-    await importPlan(rootDir, planPath);
+    await importApprovedPlan(rootDir, planPath);
     await claimTeamTask(rootDir, { taskId: "T001", owner: "ZhuRong" });
     const before = await getTeamTask(rootDir, "T001");
     await writePlan(rootDir, "T002");
 
     await assert.rejects(
-      importPlan(rootDir, planPath),
+      importApprovedPlan(rootDir, planPath),
       /active task ownership must be preserved/,
     );
 
@@ -57,7 +57,7 @@ test("plan reimport refuses to replace an active task claim", async () => {
 
 test("a claimed pending task is not runnable until the claim is released", async () => {
   await withExternalProject(async ({ projectRoot: rootDir }) => {
-    await importPlan(rootDir, await writePlan(rootDir));
+    await importApprovedPlan(rootDir, await writePlan(rootDir));
 
     const claimState = await loadTaskState(rootDir);
     claimState.tasks[0].parallel_run_claim = {
@@ -112,7 +112,7 @@ test("a claimed pending task is not runnable until the claim is released", async
 test("parallel cleanup retains an awaiting-acceptance dirty worktree", async () => {
   await withExternalProject(async ({ projectRoot: rootDir }) => {
     const planPath = await writePlan(rootDir);
-    await importPlan(rootDir, planPath);
+    await importApprovedPlan(rootDir, planPath);
 
     const run = await runParallelAgents(rootDir, {
       taskIds: ["T001"],
@@ -146,9 +146,10 @@ test("parallel cleanup waits for main containment and rejects an unmerged worktr
         verify_commands: ["node verify.cjs"],
         review_commands: ["node review.cjs"],
         writable_paths: ["result.txt"],
+        responsibilityChanges: declare("result.txt"),
       }],
     }, null, 2), "utf8");
-    await importPlan(rootDir, planPath);
+    await importApprovedPlan(rootDir, planPath);
     const run = await runParallelAgents(rootDir, {
       taskIds: ["T001"],
       isolation: "git-worktree",
@@ -171,9 +172,10 @@ test("parallel cleanup waits for main containment and rejects an unmerged worktr
         verify_commands: ["node verify.cjs"],
         review_commands: ["node review.cjs"],
         writable_paths: ["next.txt"],
+        responsibilityChanges: declare("next.txt"),
       }],
     }), "utf8");
-    await importPlan(rootDir, nextPlanPath);
+    await importApprovedPlan(rootDir, nextPlanPath);
 
     const beforeMerge = await cleanupParallelAgentRun(rootDir, { runId: run.runId });
     assert.equal(beforeMerge.cleaned[0].reason, "worktree_head_not_in_main");
@@ -274,6 +276,7 @@ async function writePlan(rootDir, taskId = "T001") {
       verify_commands: ["node --version"],
       review_commands: ["node --version"],
       writable_paths: ["result.txt"],
+      responsibilityChanges: declare("result.txt"),
     }],
   }, null, 2), "utf8");
   return planPath;

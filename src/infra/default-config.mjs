@@ -130,9 +130,6 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
   reporting: {
     verbosity: "verbose",
   },
-  planApproval: {
-    required: false, // true 时计划须人类批准后才能 execute
-  },
   // 验证制品 registry/bootstrap/inventory 路径；空串表示用默认推导路径
   verificationGovernance: {
     registryPath: "",
@@ -169,7 +166,7 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
     documentationPairs: [],
     documentationRequirements: [],
     architectureLedgers: [],
-    ignoredPaths: [".git", ".wildarrange", "node_modules", "coverage"],
+    ignoredPaths: [".git", "node_modules", "coverage"],
     naming: {
       directories: "kebab-case",
       sourceFiles: "kebab-case.mjs",
@@ -182,14 +179,14 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
     session_start: {
       enabled: true,
       tools: ["wildarrange_resume", "wildarrange_rules_collect", "wildarrange_context_build"],
-      markdown: [".wildarrange/snapshots/context.md", ".wildarrange/rules/context.md"],
+      markdown: ["runtime:snapshots/context.md", "runtime:rules/context.md"],
       skills: ["wildarrange-injection-runtime", "start-work"],
       rules: { mode: "static" },
     },
     user_prompt_submit: {
       enabled: true,
       tools: ["wildarrange_route", "wildarrange_rules_collect"],
-      markdown: [".wildarrange/snapshots/context.md", ".wildarrange/rules/context.md"],
+      markdown: ["runtime:snapshots/context.md", "runtime:rules/context.md"],
       skills: [
         "wildarrange-injection-runtime",
         "review-work",
@@ -209,56 +206,56 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
     pre_tool_use: {
       enabled: true,
       tools: ["scope_guard", "wildarrange_rules_collect"],
-      markdown: [".wildarrange/rules/context.md"],
+      markdown: ["runtime:rules/context.md"],
       skills: ["wildarrange-injection-runtime"],
       rules: { mode: "dynamic_blocker" },
     },
     post_tool_use: {
       enabled: true,
       tools: ["wildarrange_rules_collect", "scope_guard"],
-      markdown: [".wildarrange/rules/context.md"],
+      markdown: ["runtime:rules/context.md"],
       skills: [],
       rules: { mode: "dynamic" },
     },
     post_compact: {
       enabled: true,
       tools: ["wildarrange_resume", "wildarrange_rules_collect"],
-      markdown: [".wildarrange/snapshots/context.md", ".wildarrange/rules/context.md"],
+      markdown: ["runtime:snapshots/context.md", "runtime:rules/context.md"],
       skills: ["wildarrange-injection-runtime"],
       rules: { mode: "recovery_marker" },
     },
     before_execute: {
       enabled: true,
       tools: ["wildarrange_context_build", "wildarrange_node", "scope_guard"],
-      markdown: [".wildarrange/context-agents/Jiuwei-{taskId}.md", ".wildarrange/rules/context.md"],
+      markdown: ["runtime:context-agents/Jiuwei-{taskId}.md", "runtime:rules/context.md"],
       skills: ["wildarrange-injection-runtime", "run-linear-delivery", "programming", "debugging", "refactor"],
       rules: { mode: "dynamic" },
     },
     before_review: {
       enabled: true,
       tools: ["wildarrange_context_build", "wildarrange_evidence_record", "review_gate"],
-      markdown: [".wildarrange/context-agents/BaiZe-{taskId}.md", ".wildarrange/rules/context.md"],
+      markdown: ["runtime:context-agents/BaiZe-{taskId}.md", "runtime:rules/context.md"],
       skills: ["wildarrange-injection-runtime", "review-work", "review-plan-risk", "review-plan-readiness", "review-scope-tradeoff", "visual-qa"],
       rules: { mode: "dynamic" },
     },
     repository_governance: {
       enabled: true,
       tools: ["repository_governance_audit", "wildarrange_rules_collect", "comment_check", "config_verify"],
-      markdown: [".wildarrange/reports/governance/latest.md", ".wildarrange/rules/context.md"],
+      markdown: ["runtime:reports/governance/latest.md", "runtime:rules/context.md"],
       skills: ["wildarrange-injection-runtime", "repository-governance", "init-deep", "pre-publish-review", "remove-ai-slops"],
       rules: { mode: "dynamic" },
     },
     before_checkpoint: {
       enabled: true,
       tools: ["wildarrange_evidence_record", "review_gate", "wildarrange_summary"],
-      markdown: [".wildarrange/reports/reviews/{planId}/{taskId}.md", ".wildarrange/rules/context.md"],
+      markdown: ["runtime:reports/reviews/{planId}/{taskId}.md", "runtime:rules/context.md"],
       skills: ["wildarrange-injection-runtime", "review-work", "design-acceptance"],
       rules: { mode: "dynamic" },
     },
     stop: {
       enabled: true,
       tools: ["wildarrange_continuation_check", "wildarrange_resume"],
-      markdown: [".wildarrange/sessions/continuation.md", ".wildarrange/snapshots/context.md"],
+      markdown: ["runtime:sessions/continuation.md", "runtime:snapshots/context.md"],
       skills: ["wildarrange-injection-runtime", "start-work", "review-routing-decisions"],
       rules: { mode: "static" },
     },

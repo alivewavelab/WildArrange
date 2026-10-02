@@ -29,6 +29,7 @@ import {
   readJson,
   resolveGovernancePaths,
   resolveWildArrangePath,
+  RUNTIME_LOGICAL_PREFIX,
   writeJsonAtomic,
 } from "../infra/runtime-store.mjs";
 import { readVerifiedLedgerEntries, verifyLedger } from "../infra/ledger.mjs";
@@ -141,8 +142,8 @@ async function checkConfigStructure(rootDir, findings) {
         }
       }
       for (const markdownPath of point?.markdown || []) {
-        // .wildarrange/ 下的挂载是运行时生成的；带模板变量的路径也无法静态检查
-        if (markdownPath.includes("{") || markdownPath.startsWith(".wildarrange/")) continue;
+        // runtime: 挂载是运行时生成的；带模板变量的路径也无法静态检查
+        if (markdownPath.includes("{") || markdownPath.startsWith(RUNTIME_LOGICAL_PREFIX)) continue;
         if (!existsSync(path.join(rootDir, markdownPath))) {
           missingMarkdownMounts.push({ point: pointName, path: markdownPath });
           addFinding(findings, "warn", "config", `injection point "${pointName}" mounts missing markdown "${markdownPath}"; it is silently skipped`, { point: pointName, path: markdownPath });
@@ -197,7 +198,7 @@ async function checkLedgerAgainstBackup(rootDir, findings) {
     return { checked: false, reason: "no_backup" };
   }
   const latest = backups[backups.length - 1];
-  const backupLedgerPath = resolveWildArrangePath(rootDir, "backups", latest.backupId, ".wildarrange", "ledger.jsonl");
+  const backupLedgerPath = resolveWildArrangePath(rootDir, "backups", latest.backupId, "runtime", "ledger.jsonl");
   if (!existsSync(backupLedgerPath)) {
     return { checked: false, reason: "backup_has_no_ledger", backupId: latest.backupId };
   }

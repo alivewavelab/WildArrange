@@ -5,7 +5,7 @@
   "tools": [
     {
       "name": "wildarrange_setup",
-      "command": "wildarrange setup --governance-root <path> [--repository <git-url>] [--target codex|cursor|kimi|all] [--default-branch main]",
+      "command": "wildarrange setup --governance-root <path> [--repository <git-url>] [--target codex|cursor|kimi|all] [--mode local|npx] [--package @alivewavelab/wildarrange] [--default-branch main]",
       "purpose": "一步接入外置治理：创建治理仓（含 Git 初始提交与默认武装配置）→ attach → init → 生成宿主 Adapter 包；客户项目零写入"
     },
     {
@@ -50,7 +50,7 @@
     },
     {
       "name": "wildarrange_init",
-      "command": "wildarrange init [--sample]",
+      "command": "wildarrange init",
       "purpose": "在已连接项目的 runtimeRoot 初始化运行态（setup 已包含此步骤）；不写客户仓库"
     },
     {
@@ -61,7 +61,7 @@
     {
       "name": "wildarrange_plan_approve",
       "command": "wildarrange plan approve [--plan <planId>]",
-      "purpose": "确认待执行计划（语义生成计划或已开启 planApproval）"
+      "purpose": "人工确认已导入的计划或新增的职责声明后放行执行"
     },
     {
       "name": "wildarrange_run",
@@ -135,13 +135,8 @@
     },
     {
       "name": "wildarrange_workflow",
-      "command": "wildarrange workflow --from <plan.json>",
-      "purpose": "从计划跑完整 workflow"
-    },
-    {
-      "name": "wildarrange_workflow_sample",
-      "command": "wildarrange workflow --sample",
-      "purpose": "跑样例 workflow"
+      "command": "wildarrange workflow [--from <plan.json>] [--maxSteps N]",
+      "purpose": "连续推进已批准的计划，直到完成、阻塞或需要人工决定；带 --from 时先导入并停在等待 plan approve"
     },
     {
       "name": "wildarrange_parallel_run",
@@ -269,6 +264,11 @@
       "purpose": "登记 Review Blocker"
     },
     {
+      "name": "wildarrange_review_blockers_resolve",
+      "command": "wildarrange review-blockers resolve --task <taskId> --evidence <text> --rationale <text>",
+      "purpose": "解决任务完成后解除 Review Blocker，被阻塞任务回到 pending"
+    },
+    {
       "name": "wildarrange_task_list",
       "command": "wildarrange task list [--all] [--status draft|pending|completed] [--type feature|bug|acceptance_correction|maintenance] [--priority P0|P1|P2] [--owner Jiuwei] [--plan <planId>] [--search \"text\"]",
       "purpose": "列出当前计划或全项目工单"
@@ -339,6 +339,11 @@
       "purpose": "改动影响面分析（反向依赖闭包）"
     },
     {
+      "name": "wildarrange_test",
+      "command": "wildarrange test [--zone interface|orchestration|ai|capabilities|infra] [changed-file...]",
+      "purpose": "按分区或改动路径选出受影响的测试并运行"
+    },
+    {
       "name": "wildarrange_decisions_stats",
       "command": "wildarrange decisions stats",
       "purpose": "门触发统计：计数/从未触发的门/标注关联"
@@ -364,7 +369,7 @@
       "purpose": "标注聚合统计"
     },
     {
-      "name": "wildarrange_test",
+      "name": "wildarrange_test_2",
       "command": "wildarrange test [--zone interface|orchestration|ai|capabilities|infra] [changed-file...]",
       "purpose": "分区/影响面最小测试集"
     },

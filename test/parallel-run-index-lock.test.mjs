@@ -17,9 +17,15 @@ import path from "node:path";
 import test from "node:test";
 
 import { listParallelAgentRuns, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
-import { importPlan } from "../src/orchestration/plan-state.mjs";
+
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, importApprovedPlan, declare } from "./helpers/external-fixture.mjs";
+
+/** 夹具 Worker：写入已声明的 src/app.js，开工检查不接受空转命令。 */
+const WRITE_APP_WORKER = "node -e \"require('node:fs').mkdirSync('src',{recursive:true});require('node:fs').writeFileSync('src/app.js','ok')\"";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_RESPONSIBILITY = declare("src/app.js");
 
 async function importFourTaskPlan(dir) {
   const planPath = resolveWildArrangePath(dir, "artifacts", "index-lock-plan.json");
@@ -32,18 +38,18 @@ async function importFourTaskPlan(dir) {
       id,
       title: `task ${id}`,
       owner: "ZhuRong",
-      writable_paths: ["src/**"],
+      writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
       verify_commands: ["node -e \"process.exit(0)\""],
     })),
   }, null, 2));
-  await importPlan(dir, planPath);
+  await importApprovedPlan(dir, planPath);
 }
 
 test("concurrent parallel runs keep both run entries and all results in index.json", async () => {
   await withExternalProject(async ({ projectRoot: dir }) => {
     await importFourTaskPlan(dir);
 
-    const command = "node -e \"process.exit(0)\"";
+    const command = WRITE_APP_WORKER;
     const [batchA, batchB] = await Promise.all([
       runParallelAgents(dir, { command, taskIds: ["T001", "T002"], maxAgents: 2, agent: "ZhuRong" }),
       runParallelAgents(dir, { command, taskIds: ["T003", "T004"], maxAgents: 2, agent: "ZhuRong" }),

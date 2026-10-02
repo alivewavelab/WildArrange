@@ -20,9 +20,9 @@ import * as gateway from "../src/capabilities/gateway.mjs";
 import { invokeCapability, listRegisteredCapabilities } from "../src/capabilities/gateway.mjs";
 import { admitParallelAgentResult, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
 import { runDeliveryPipeline } from "../src/orchestration/delivery-pipeline.mjs";
-import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
+import { loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { readJson, resolveTaskAcceptancePath, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { declare, importApprovedPlan, withExternalProject } from "./helpers/external-fixture.mjs";
 
 async function withTempDir(fn) {
   await withExternalProject(({ projectRoot }) => fn(projectRoot));
@@ -44,9 +44,8 @@ function nodeEval(source) {
 }
 
 async function importSingleTaskPlan(dir, { verifyCommand, writablePaths = ["src/**"], reviewCommand = nodeEval("require('node:assert/strict').ok(require('node:fs').existsSync('src/review-marker.txt'))") }) {
-  // Written under .wildarrange/artifacts/ (not the project root) so it is excluded
-  // from the scope guard's git diff pathspec (`git diff -- . ':!.wildarrange'`);
-  // otherwise the plan file itself would show up as an "out of scope" change.
+  // Written under the runtime root, not the project, so the plan file itself
+  // never shows up as an "out of scope" project change.
   const planPath = resolveWildArrangePath(dir, "artifacts", "pipeline-plan.json");
   await writeFile(
     planPath,
@@ -59,11 +58,12 @@ async function importSingleTaskPlan(dir, { verifyCommand, writablePaths = ["src/
           verify_commands: [verifyCommand],
           review_commands: [reviewCommand],
           writable_paths: writablePaths,
+          responsibilityChanges: declare("src/review-marker.txt"),
         },
       ],
     }, null, 2),
   );
-  return importPlan(dir, planPath);
+  return importApprovedPlan(dir, planPath);
 }
 
 test("gateway: invokeCapability rejects unknown capability names", async () => {

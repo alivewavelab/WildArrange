@@ -21,7 +21,7 @@ import test from "node:test";
 
 import { admitParallelAgentResult, closeParallelAgentRun, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
 import { runNextTask } from "../src/orchestration/linear-runtime.mjs";
-import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
+import { loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { claimTeamTask, persistTaskState } from "../src/orchestration/task-board.mjs";
 import { ensureLinearDeliveryWorkspace } from "../src/orchestration/linear-delivery.mjs";
 import { resolveTaskBranchTarget } from "../src/orchestration/task-branch.mjs";
@@ -32,7 +32,7 @@ import { uniqueStrings } from "../src/infra/text-utils.mjs";
 import { prepareAgentWorktree } from "../src/infra/git-worktree.mjs";
 import { loadWildArrangeConfig } from "../src/infra/runtime-config.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
 import {
   createTaskDeliveryCommit,
   inspectTaskWorktreeBaseline,
@@ -44,6 +44,9 @@ import {
   integrateAdmissionCommit,
   readIntegrationIntent,
 } from "../src/orchestration/integration.mjs";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_RESPONSIBILITY = declare("src/feature.mjs", "src/integrated.txt", "src/linear-remote.txt", "src/local-only.txt", "src/local-recovery.txt", "src/lost-response.txt", "src/recover.txt", "src/rewrite-recovery.txt", "src/second-writer.txt", "src/task.txt", "src/unknown-push.txt", "src/unrelated.txt");
 
 const execFileAsync = promisify(execFile);
 
@@ -160,7 +163,7 @@ test("task delivery records no_change without manufacturing an empty commit", as
   });
 });
 
-test("git changed-path probe uses argv safely and excludes .wildarrange", async () => {
+test("git changed-path probe uses argv safely and reports a project .wildarrange directory", async () => {
   await withTempDir(async (dir) => {
     const repo = path.join(dir, "repo with spaces");
     await mkdir(repo, { recursive: true });
@@ -175,7 +178,7 @@ test("git changed-path probe uses argv safely and excludes .wildarrange", async 
 
     const changed = await collectGitChangedPaths(repo);
     assert.equal(changed.available, true);
-    assert.deepEqual(changed.paths, ["new file.txt", "tracked.txt"]);
+    assert.deepEqual(changed.paths, [".wildarrange/runtime.json", "new file.txt", "tracked.txt"]);
   });
 });
 
@@ -492,7 +495,7 @@ test("linear remote delivery resumes the pushed commit after checkpoint failure 
         worker_command: "node -e \"const fs=require('node:fs');fs.mkdirSync('src',{recursive:true});const p='src/linear-remote.txt';const n=fs.existsSync(p)?Number(fs.readFileSync(p,'utf8'))+1:1;fs.writeFileSync(p,String(n))\"",
         verify_commands: ["node -e \"require('node:assert/strict').equal(require('node:fs').readFileSync('src/linear-remote.txt','utf8'),'1')\""],
         review_commands: ["node -e \"const fs=require('node:fs');const assert=require('node:assert/strict');assert.equal(fs.statSync('src/linear-remote.txt').size,1);assert.deepEqual(fs.readdirSync('src'),['linear-remote.txt'])\""],
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
       }],
     });
     const mainBefore = (await git(remote, ["rev-parse", "main"])).trim();
@@ -590,18 +593,18 @@ async function initializeTaskRuntime(rootDir, taskIds = ["T001"]) {
     tasks: taskIds.map((taskId) => ({
       id: taskId,
       subject: `Coordinate task ${taskId}`,
-      writable_paths: ["src/**"],
+      writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
       verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
       review_commands: ["node -e \"const fs=require('node:fs');if(!fs.existsSync('src')||fs.readdirSync('src').length===0)process.exit(1)\""],
     })),
   }, null, 2), "utf8");
-  await importPlan(rootDir, planPath);
+  await importApprovedPlan(rootDir, planPath);
 }
 
 async function importPlanDefinition(rootDir, plan) {
   const planPath = resolveWildArrangePath(rootDir, "artifacts", `${plan.id}.json`);
   await writeFile(planPath, JSON.stringify(plan, null, 2), "utf8");
-  await importPlan(rootDir, planPath);
+  await importApprovedPlan(rootDir, planPath);
 }
 
 async function createCheckpointFailureAfterIntegration(rootDir, filePath) {

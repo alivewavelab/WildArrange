@@ -21,7 +21,7 @@
 import { stat } from "node:fs/promises";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { evaluateGateArming } from "../infra/gate-arming.mjs";
-import { resolveWildArrangePath } from "../infra/runtime-store.mjs";
+import { resolveWildArrangePath, runtimeLogicalPath } from "../infra/runtime-store.mjs";
 import { inspectFileLock } from "../infra/file-lock.mjs";
 import { evaluateRegistryFreshness } from "../infra/verification-registry.mjs";
 import { loadTaskState } from "../orchestration/plan-state.mjs";
@@ -146,7 +146,7 @@ export async function buildOpsPanelViewModel(rootDir) {
   const files = [];
   for (const name of ["ledger.jsonl", "decisions.jsonl", "annotations.jsonl"]) {
     const size = await stat(resolveWildArrangePath(rootDir, name)).then((info) => info.size).catch(() => null);
-    files.push({ path: `.wildarrange/${name}`, sizeBytes: size });
+    files.push({ path: runtimeLogicalPath(name), sizeBytes: size });
   }
   return {
     kind: "wildarrange_dashboard_ops_panel",

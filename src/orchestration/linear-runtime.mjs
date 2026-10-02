@@ -82,6 +82,8 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   const taskState = await loadTaskState(rootDir);
   if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
 
+  // 未完成的回滚比人工批准更紧急：先暴露 recovery_required，再谈是否等待批准
+  assertContractWorkspaceAvailable(taskState.tasks);
   const approval = await loadPlanApproval(rootDir);
   if (approval.required && approval.status !== "approved" && approval.planId === taskState.planId) {
     await appendLedger(rootDir, { type: "run_blocked_awaiting_plan_approval", planId: taskState.planId });
@@ -93,7 +95,6 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
     };
   }
 
-  assertContractWorkspaceAvailable(taskState.tasks);
   const task = findRunnableTask(taskState.tasks);
   if (!task) {
     const waiting = taskState.tasks.find((candidate) => candidate.pendingContractChange);

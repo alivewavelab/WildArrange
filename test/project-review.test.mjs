@@ -16,14 +16,14 @@ import test from "node:test";
 import { mkdir, mkdtemp, writeFile, readFile, rm, symlink } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { importPlan, approvePlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
+import { approvePlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { runNextTask } from "../src/orchestration/linear-runtime.mjs";
 import { runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
 import { prepareProjectReview, runProjectReview, hasAcceptedProjectReview } from "../src/capabilities/project-review.mjs";
 import { checkExecutionReadiness } from "../src/capabilities/execution-readiness.mjs";
 import { loadMarkdownAttachment } from "../src/infra/context-attachments.mjs";
 import { resolveTaskAcceptancePath, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { gitCommitAll, withExternalProject } from "./helpers/external-fixture.mjs";
+import { gitCommitAll, withExternalProject, importApprovedPlan } from "./helpers/external-fixture.mjs";
 
 /** 打开外置三根项目并随测试结束（t.after）释放。 */
 async function openProject(t, options) {
@@ -76,7 +76,7 @@ else { if(!p.requiredSkills?.some(s=>s.name==='review-work' && s.content))proces
     responsibilityChanges: [{ script: "target.mjs", additions: "Export value", responsibilityBefore: "Export value", responsibilityAfter: "Export value", facts: [] }] }] };
   const planFile = path.join(auxDir(root), "plan.json");
   await writeFile(planFile, JSON.stringify(raw));
-  await importPlan(root, planFile, { requireResponsibility: true });
+  await importApprovedPlan(root, planFile, { requireResponsibility: true });
   await approvePlan(root);
   return { root, config, task: (await loadTaskState(root)).tasks[0], scope: { status: "pass", changedPaths: ["target.mjs"] } };
 }
@@ -180,11 +180,13 @@ test("project reviewer returns an actionable finding and cannot create checkpoin
 test("setup Hook permits only the exact governance command before a task exists", async t => {
   const { preToolUseGuard } = await import("../src/ai/pre-tool-guard.mjs");
   const { projectRoot: root } = await openProject(t);
+  const draft = resolveWildArrangePath(root, "plan-drafts", "setup.json");
   for (const [command, denied] of [
-    ["node ./bin/wildarrange.mjs review configure --from .wildarrange/plan-drafts/setup.json", false],
-    ["node ./bin/wildarrange.mjs review configure --from .wildarrange/plan-drafts/setup.json --apply", false],
+    [`node ./bin/wildarrange.mjs review configure --from "${draft}"`, false],
+    [`node ./bin/wildarrange.mjs review configure --from "${draft}" --apply`, false],
     ["node ./bin/wildarrange.mjs review configure --from outside.json --apply", true],
-    ["node ./bin/wildarrange.mjs review configure --from .wildarrange/plan-drafts/setup.json; node evil.js", true],
+    ["node ./bin/wildarrange.mjs review configure --from .wildarrange/plan-drafts/setup.json --apply", true],
+    [`node ./bin/wildarrange.mjs review configure --from "${draft}"; node evil.js`, true],
   ]) {
     const result = await preToolUseGuard(root, { hook_event_name: "PreToolUse", cwd: root, session_id: "setup", tool_name: "exec_command", tool_input: { command } });
     assert.equal(result.decision === "deny", denied, JSON.stringify(result));
@@ -222,13 +224,15 @@ test("scope evidence recorded only as scope_guard still binds the acceptance pro
   assert.equal(findBoundCheck(stale)?.status, "fail");
 });
 
-test("a rule for another module does not require an unrelated legacy worker probe", async t => {
+test("readiness always checks the worker handshake, even when no project rule applies to the task", async t => {
   const { root, config, task } = await fixture(t);
-  delete task.responsibilityChanges;
   task.writable_paths = ["other.mjs"];
+  task.responsibilityChanges = [{ ...task.responsibilityChanges[0], script: "other.mjs" }];
   config.executionReadiness.workerProbe = null;
   await writeGovernanceConfig(root, config);
-  assert.equal((await checkExecutionReadiness(root, task)).required, false);
+  const readiness = await checkExecutionReadiness(root, task);
+  assert.equal(readiness.status, "blocked");
+  assert.ok(readiness.issues.some(issue => /workerProbe is required/.test(issue)), JSON.stringify(readiness.issues));
 });
 
 test("parallel readiness checks its actual adapter instead of a linear worker command", async t => {
@@ -286,7 +290,7 @@ else if(p.kind==='project_review_step') {
     responsibilityChanges:[{script:"README.md",additions:"Current usage",responsibilityBefore:"Current usage",responsibilityAfter:"Current usage",facts:[]}] }] };
   const planFile = path.join(auxDir(root), "plan.json");
   await writeFile(planFile, JSON.stringify(plan));
-  await importPlan(root, planFile, { requireResponsibility:true });
+  await importApprovedPlan(root, planFile, { requireResponsibility:true });
   const { resolveTaskPacketPath } = await import("../src/infra/runtime-store.mjs");
   const initial = (await loadTaskState(root)).tasks[0];
   await assert.rejects(() => readFile(resolveTaskPacketPath(root, initial.planId, initial.id, "baseline.json")), /ENOENT/);

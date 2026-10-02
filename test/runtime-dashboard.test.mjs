@@ -10,9 +10,12 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { startDashboardServer } from "../src/interface/dashboard.mjs";
-import { importPlan } from "../src/orchestration/plan-state.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+
+import { withExternalProject, importApprovedPlan, declare } from "./helpers/external-fixture.mjs";
 import { withDashboard, fetchJson, postJson } from "./helpers/runtime-fixtures.mjs";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_RESPONSIBILITY = declare("src/app.js");
 
 test("dashboard API drives task, inbox, and summary operations without bypassing gates", async () => {
   await withExternalProject(async ({ projectRoot, root }) => {
@@ -23,6 +26,7 @@ test("dashboard API drives task, inbox, and summary operations without bypassing
         {
           id: "T001",
           subject: "Claim through dashboard",
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
           worker_command: "node -e \"if(!process.version)process.exit(1)\"",
           verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
           review_commands: ["node --version"],
@@ -31,13 +35,14 @@ test("dashboard API drives task, inbox, and summary operations without bypassing
           id: "T002",
           subject: "Blocked dashboard task",
           blockedBy: ["T001"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
           worker_command: "node -e \"if(!process.version)process.exit(1)\"",
           verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
           review_commands: ["node --version"],
         },
       ],
     }));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     await withDashboard(projectRoot, async (baseUrl) => {
       const authHeaders = { authorization: "Bearer dashboard-token" };
@@ -96,11 +101,12 @@ test("dashboard API drives task, inbox, and summary operations without bypassing
         id: "T003",
         subject: "Append task from dashboard",
         blockedBy: ["T001"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         worker_command: "node -e \"if(!process.version)process.exit(1)\"",
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
       }, { headers: authHeaders });
-      assert.equal(created.response.status, 200);
+      assert.equal(created.response.status, 200, JSON.stringify(created.body));
       assert.equal(created.body.result.task.id, "T003");
       assert.equal(created.body.result.task.status, "pending");
 
@@ -117,7 +123,7 @@ test("dashboard API drives task, inbox, and summary operations without bypassing
       const readied = await postJson(`${baseUrl}/api/tasks/ready`, {
         taskId: "T004",
         patch: {
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
           verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
           review_commands: ["node --version"],
         },

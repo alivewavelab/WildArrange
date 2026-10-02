@@ -2,7 +2,7 @@
 
 | 命令 | 说明 |
 | ---- | ---- |
-| `wildarrange setup --governance-root <path> [--repository <git-url>] [--target codex|cursor|kimi|all] [--default-branch main]` | 一步接入外置治理：创建治理仓（含 Git 初始提交与默认武装配置）→ attach → init → 生成宿主 Adapter 包；客户项目零写入 |
+| `wildarrange setup --governance-root <path> [--repository <git-url>] [--target codex|cursor|kimi|all] [--mode local|npx] [--package @alivewavelab/wildarrange] [--default-branch main]` | 一步接入外置治理：创建治理仓（含 Git 初始提交与默认武装配置）→ attach → init → 生成宿主 Adapter 包；客户项目零写入 |
 | `wildarrange project init-governance --governance-root <path> --repository <git-url> [--default-branch main]` | 在项目外创建不覆盖已有文件的治理仓库骨架与默认武装配置；非 Git 目录自动 git init 并提交初始 commit |
 | `wildarrange project attach --governance-root <path> [--project-root <path>] [--runtime-root <path>]` | 把客户项目连接到独立治理仓库；映射写入项目外部状态目录 |
 | `wildarrange project show [--project-root <path>]` | 查看项目、治理仓库和运行态三根连接 |
@@ -11,9 +11,9 @@
 | `wildarrange review checklist --task <taskId>` | 解析本任务项目审查清单和必需依据，不启动执行器 |
 | `wildarrange readiness --task <taskId>` | 检查已批准任务必需的执行器、Skill、规范与握手，不启动业务 Worker |
 | `wildarrange adoption inventory` | 只读扫描旧仓库文件与验证资产，供接管 Skill 建立来源映射 |
-| `wildarrange init [--sample]` | 在已连接项目的 runtimeRoot 初始化运行态（setup 已包含此步骤）；不写客户仓库 |
+| `wildarrange init` | 在已连接项目的 runtimeRoot 初始化运行态（setup 已包含此步骤）；不写客户仓库 |
 | `wildarrange plan --from <plan.json>` | 导入含 responsibilityChanges 的计划；等待人工确认职责与事实归属 |
-| `wildarrange plan approve [--plan <planId>]` | 确认待执行计划（语义生成计划或已开启 planApproval） |
+| `wildarrange plan approve [--plan <planId>]` | 人工确认已导入的计划或新增的职责声明后放行执行 |
 | `wildarrange run` | 跑下一个任务（worker→verifier→scope→review→checkpoint） |
 | `wildarrange status` | 查看状态（含门武装黄灯） |
 | `wildarrange decisions [--limit N] [--task T001] [--gate pre_tool_use] [--annotatable] [--format json]` | 查看门决策记录（每一次拦截/放行；--annotatable 只看可标注队列） |
@@ -28,8 +28,7 @@
 | `wildarrange adapter restore --backup <backupId>` | 恢复 adapter 备份：还原到该次 activate 之前的用户级文件 |
 | `wildarrange injection show --point before_review [--agent BaiZe] [--task T001] [--text "..."] [--stage plan]` | 查看注入点解析结果 |
 | `wildarrange hook run [--from hook.json] [--format text|json] --adapter-digest <sha256>` | 运行宿主生命周期 Hook；只处理已连接项目，未连接项目静默放行 |
-| `wildarrange workflow --from <plan.json>` | 从计划跑完整 workflow |
-| `wildarrange workflow --sample` | 跑样例 workflow |
+| `wildarrange workflow [--from <plan.json>] [--maxSteps N]` | 连续推进已批准的计划，直到完成、阻塞或需要人工决定；带 --from 时先导入并停在等待 plan approve |
 | `wildarrange parallel run [--max-agents 2] [--task T001,T002] [--agent ZhuRong] [--adapter codex|cursor] [--isolation run-dir|git-worktree] [--command "..."]` | 跑并行子 Agent |
 | `wildarrange parallel admit --run <runId> --task T001` | 合入子 Agent 成果（admission 事务） |
 | `wildarrange parallel list` | 列出并行 run |
@@ -55,6 +54,7 @@
 | `wildarrange evidence record --task T001 --criterion C001 --status pass --evidence "..."` | 回填成功判据证据 |
 | `wildarrange steer --from <proposal.json>` | 任务变更治理入口 |
 | `wildarrange review-blockers record --from <blocker.json>` | 登记 Review Blocker |
+| `wildarrange review-blockers resolve --task <taskId> --evidence <text> --rationale <text>` | 解决任务完成后解除 Review Blocker，被阻塞任务回到 pending |
 | `wildarrange task list [--all] [--status draft|pending|completed] [--type feature|bug|acceptance_correction|maintenance] [--priority P0|P1|P2] [--owner Jiuwei] [--plan <planId>] [--search "text"]` | 列出当前计划或全项目工单 |
 | `wildarrange task get --task T001 [--plan <planId>]` | 查看单个任务与历史 |
 | `wildarrange task claim [--task T001] [--owner Jiuwei]` | 认领任务 |
@@ -69,6 +69,7 @@
 | `wildarrange changes resolve --id CR-xxxx --decision accept|reject --evidence "..." --rationale "..." [--apply-scope]` | 裁决 ChangeRequest |
 | `wildarrange ledger verify` | 校验 ledger hash 链 |
 | `wildarrange impact <changed-file...>` | 改动影响面分析（反向依赖闭包） |
+| `wildarrange test [--zone interface|orchestration|ai|capabilities|infra] [changed-file...]` | 按分区或改动路径选出受影响的测试并运行 |
 | `wildarrange decisions stats` | 门触发统计：计数/从未触发的门/标注关联 |
 | `wildarrange timeline [--limit N] [--task T001] [--source ledger|decision|annotation] [--format json]` | ledger+决策+标注统一时间线 |
 | `wildarrange annotate --decision <decisionId> --category <confirmed|rule_wrong|case_wrong|mislabeled> [--reason "..."] [--author name]` | 标注门决策（只进报告，不改配置） |

@@ -38,13 +38,12 @@ export function buildPlanDraftDirective(routeResult, options = {}) {
   const sessionId = sanitizeDraftSegment(options.sessionId || "session");
   const prompt = typeof options.prompt === "string" ? options.prompt.trim().slice(0, 4000) : "";
   const draftOnly = isDraftOnlyPlanRequest(prompt);
-  const projectRoot = typeof options.projectRoot === "string" ? path.resolve(options.projectRoot) : null;
+  if (typeof options.projectRoot !== "string") throw new Error("plan draft directive requires projectRoot");
+  const projectRoot = path.resolve(options.projectRoot);
   const executionRoot = typeof options.executionRoot === "string" ? path.resolve(options.executionRoot) : projectRoot;
-  const crossRoot = Boolean(projectRoot && executionRoot && projectRoot !== executionRoot);
+  const crossRoot = projectRoot !== executionRoot;
   // 运行态根在项目之外：草稿必须用绝对路径，相对路径会在客户项目里凭空建出目录
-  const draftPath = projectRoot
-    ? resolveWildArrangePath(projectRoot, "plan-drafts", `${sessionId}-plan.json`)
-    : `.wildarrange/plan-drafts/${sessionId}-plan.json`;
+  const draftPath = resolveWildArrangePath(projectRoot, "plan-drafts", `${sessionId}-plan.json`);
   return {
     status: "host_generation_required",
     generatedBy: "host_semantic",

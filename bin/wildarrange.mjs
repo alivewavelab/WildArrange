@@ -24,7 +24,7 @@
 //     run/plan/workflow 驱动 linear-runtime；guard/doctor 走 capabilities。
 //
 //   · 缺了它会怎样？
-//     无法初始化 .wildarrange、无法跑任务门禁，Hook 也找不到可信 CLI 前缀。
+//     无法初始化运行态、无法跑任务门禁，Hook 也找不到可信 CLI 前缀。
 // =============================================================================
 import { configureProjectReview, prepareProjectReview } from "../src/capabilities/project-review.mjs";
 import { runContractGenerate } from "../src/interface/contract-view.mjs";
@@ -66,7 +66,7 @@ import {
   resolveChangeRequest,
   reviewChangeRequest,
 } from "../src/orchestration/change-governance.mjs";
-import { recordReviewBlocker } from "../src/orchestration/review-blocker.mjs";
+import { recordReviewBlocker, resolveReviewBlocker } from "../src/orchestration/review-blocker.mjs";
 import { steerWorkflow } from "../src/orchestration/plan-steering.mjs";
 import {
   claimTeamTask,
@@ -81,7 +81,7 @@ import { archiveTeamTaskWithBackup } from "../src/orchestration/task-archive.mjs
 import { approvePlan, importPlan, loadPlanApproval } from "../src/orchestration/plan-state.mjs";
 import { writeIntegrationAcceptance } from "../src/infra/repository-binding.mjs";
 import { statusReport, writeWorkflowSummary } from "../src/orchestration/status.mjs";
-import { createSamplePlan, runWorkflow } from "../src/orchestration/workflow.mjs";
+import { runWorkflow } from "../src/orchestration/workflow.mjs";
 import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtime.mjs";
 import {
   buildAgentContext,
@@ -104,7 +104,7 @@ import {
 import { computeImpact } from "../src/infra/dependency-graph.mjs";
 import { runRepoTests, selectRepoTests } from "../src/infra/test-runner.mjs";
 import { errorProtocolOf, formatErrorInline } from "../src/infra/error-protocol.mjs";
-import { projectNotConnectedError, resolveRuntimeInputPath } from "../src/infra/runtime-store.mjs";
+import { projectNotConnectedError } from "../src/infra/runtime-store.mjs";
 import { verifyLedger } from "../src/infra/ledger.mjs";
 import { listPromptPack, renderPromptPackEntry } from "../src/infra/prompt-pack.mjs";
 import { scanProjectRules } from "../src/infra/rule-scanner.mjs";
@@ -323,18 +323,13 @@ async function main() {
   }
 
   // --- 初始化与配置 ---
-  // §3.4：init 在项目外的 runtimeRoot 创建运行态；--sample 为可选附加步骤，不阻断 init 本身。
+  // §3.4：init 在项目外的 runtimeRoot 创建运行态。
   if (command === "init") {
     await initRuntime(rootDir);
-    let samplePath = null;
-    if (args.sample) {
-      samplePath = await createSamplePlan(rootDir);
-    }
     console.log(JSON.stringify({
       ok: true,
       runtime: workspace.runtimeRoot,
       governanceRoot: workspace.governanceRoot,
-      samplePlan: samplePath,
     }, null, 2));
     return;
   }
@@ -471,7 +466,7 @@ async function main() {
     // §3.4：import 与 approve 互斥入口；缺 --from 时提示走 approve 子命令而非静默读默认文件。
     if (!args.from) throw new Error("wildarrange plan requires --from <plan.json>（或 wildarrange plan approve 确认已导入计划）");
     await initRuntime(rootDir);
-    const plan = await importPlan(rootDir, resolveRuntimeInputPath(rootDir, args.from), { requireResponsibility: true });
+    const plan = await importPlan(rootDir, path.resolve(rootDir, args.from));
     const approval = await loadPlanApproval(rootDir);
     console.log(JSON.stringify({
       ok: true,
@@ -511,10 +506,8 @@ async function main() {
 
   // --- 工作流批量推进 ---
   if (command === "workflow") {
-    if (!args.from && !args.sample) throw new Error("wildarrange workflow requires --from <plan.json> or --sample");
     const result = await runWorkflow(rootDir, {
-      planPath: args.from ? path.resolve(rootDir, args.from) : null,
-      sample: Boolean(args.sample),
+      planPath: strArg(args, "from") ? path.resolve(rootDir, args.from) : null,
       maxSteps: Number.isInteger(Number(args.maxSteps)) && args.maxSteps !== true ? Number(args.maxSteps) : undefined,
     });
     console.log(JSON.stringify(result, null, 2));
@@ -863,7 +856,7 @@ async function main() {
   }
 
   // --- 审查阻塞记录 ---
-  // §3.4：review-blockers record 登记审查阻塞项，关联 task 与 change-governance 流程。
+  // §3.4：review-blockers record 登记审查阻塞项；resolve 在解决任务完成后把被阻塞任务放回 pending。
   if (command === "review-blockers") {
     const subcommand = args._[1];
     if (subcommand === "record") {
@@ -872,7 +865,13 @@ async function main() {
       console.log(JSON.stringify(await recordReviewBlocker(rootDir, blocker), null, 2));
       return;
     }
-    throw new Error("wildarrange review-blockers requires record");
+    if (subcommand === "resolve") {
+      const taskId = strArg(args, "task");
+      if (!taskId) throw new Error("wildarrange review-blockers resolve requires --task <taskId> --evidence <text> --rationale <text>");
+      console.log(JSON.stringify(await resolveReviewBlocker(rootDir, { taskId, evidence: strArg(args, "evidence"), rationale: strArg(args, "rationale") }), null, 2));
+      return;
+    }
+    throw new Error("wildarrange review-blockers requires record or resolve");
   }
 
   // --- 任务板 ---
@@ -1071,7 +1070,7 @@ async function main() {
     throw new Error("wildarrange ledger requires verify");
   }
 
-  // §3.4：state 备份/校验/恢复 .wildarrange 关键文件。
+  // §3.4：state 备份/校验/恢复运行态关键文件。
   if (command === "state") {
     const subcommand = args._[1];
     if (subcommand === "backup") {

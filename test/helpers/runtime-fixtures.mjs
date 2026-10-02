@@ -15,26 +15,10 @@ import { startDashboardServer } from "../../src/interface/dashboard.mjs";
 import { runInjectionHook as renderHook } from "../../src/ai/hooks.mjs";
 import { runHostHook, runHostRoute } from "../../src/orchestration/host-runtime.mjs";
 import { routeRequest as classifyRoute } from "../../src/ai/routing.mjs";
-import { resolveWildArrangePath } from "../../src/infra/runtime-store.mjs";
 import { installAdapters } from "../../src/interface/adapters.mjs";
 import { getBoundWorkspaceContext } from "../../src/infra/workspace-context.mjs";
-import { gitCommitAll } from "./external-fixture.mjs";
+import { declare, gitCommitAll } from "./external-fixture.mjs";
 
-
-export async function installDocumentReviewerFixture(projectRoot, governanceRoot) {
-  const adapter = resolveWildArrangePath(projectRoot, "document-reviewer.cjs");
-  await mkdir(path.dirname(adapter), { recursive: true });
-  await writeFile(adapter, `const fs=require('node:fs');
-const p=JSON.parse(fs.readFileSync(process.env.WILDARRANGE_READINESS_PACKET||process.env.WILDARRANGE_REVIEW_PACKET,'utf8'));
-if(p.kind==='execution_readiness_probe') console.log(JSON.stringify({ready:true,challenge:p.challenge,loadedSkills:p.requiredSkills.map(s=>s.name)}));
-else if(p.kind==='project_review_step') {
-  const evidence=p.step.appliesTo.map(name=>p.source.files.find(file=>file.path===name)).filter(file=>file&&typeof file.content==='string').map(file=>({file:file.path,line:1,text:file.content.split('\\n')[0]}));
-  console.log(JSON.stringify({stepId:p.step.id,inputDigest:p.inputDigest,decision:'PASS',summary:'Fixture reviewed current document content',evidence,findings:[]}));
-} else console.log(JSON.stringify({decision:'PASS',checks:Object.keys(p.rules).map(rule=>({rule,decision:'PASS',reason:'Fixture inspected source'})),findings:[]}));`);
-  const command = `node "${adapter}"`;
-  // 外置模式配置真相源在治理仓；必须在 plan 导入（冻结治理版本）之前调用。
-  await writePolicyConfig(governanceRoot, JSON.stringify({ executionReadiness: { workerProbe: command }, review: { responsibility: { command } } }));
-}
 
 export async function writeMinimalPromptPack(rootDir, skills = {}) {
   const packDir = path.join(rootDir, "prompt-pack");
@@ -124,8 +108,23 @@ export const runInjectionHook = (root, input) => runHostHook(root, input, render
  * 写入治理仓 policy 下的 wildarrange.config.json 并提交，保持治理仓干净。
  * 外置模式的配置真相源在治理仓，项目根下的同名文件不会被读取。
  */
+/** 覆盖治理配置；未显式给出时保留夹具已装的 Worker 握手与职责审查者。 */
 export async function writePolicyConfig(governanceRoot, content) {
-  await writeFile(path.join(governanceRoot, "policy", "wildarrange.config.json"), typeof content === "string" ? content : JSON.stringify(content, null, 2), "utf8");
+  const configPath = path.join(governanceRoot, "policy", "wildarrange.config.json");
+  let text = typeof content === "string" ? content : JSON.stringify(content, null, 2);
+  const current = await readFile(configPath, "utf8").then(JSON.parse).catch(() => null);
+  let next = null;
+  try { next = JSON.parse(text); } catch { next = null; }
+  if (current && next && typeof next === "object" && !Array.isArray(next)) {
+    const workerProbe = current.executionReadiness?.workerProbe;
+    const researchProbe = current.executionReadiness?.researchProbe;
+    const reviewer = current.review?.responsibility?.command;
+    if (workerProbe && next.executionReadiness?.workerProbe === undefined) next.executionReadiness = { ...next.executionReadiness, workerProbe };
+    if (researchProbe && next.executionReadiness?.researchProbe === undefined) next.executionReadiness = { ...next.executionReadiness, researchProbe };
+    if (reviewer && next.review?.responsibility?.command === undefined) next.review = { ...next.review, responsibility: { ...next.review?.responsibility, command: reviewer } };
+    text = JSON.stringify(next, null, 2);
+  }
+  await writeFile(configPath, text, "utf8");
   await gitCommitAll(governanceRoot, "fixture policy config");
 }
 
@@ -141,7 +140,7 @@ export async function installExternalTestAdapter(projectRoot, options = {}) {
 
 /**
  * 外置模式下的线性冒烟计划（对应 createSamplePlan，但产物写在项目内普通目录 artifacts/，
- * 不依赖 legacy 的 .wildarrange/ 项目内目录）。返回计划文件路径（位于项目之外的 root）。
+ * 不依赖项目内运行态目录）。返回计划文件路径（位于项目之外的 root）。
  */
 export async function createSmokePlan(root) {
   const planPath = path.join(root, "smoke-plan.json");
@@ -154,6 +153,7 @@ export async function createSmokePlan(root) {
       description: "Worker writes a small artifact; verifier checks exact content.",
       category: "quick",
       writable_paths: ["artifacts/linear-smoke.txt"],
+      responsibilityChanges: declare("artifacts/linear-smoke.txt"),
       worker_command: nodeEval("const fs=require('fs'); fs.mkdirSync('artifacts',{recursive:true}); fs.writeFileSync('artifacts/linear-smoke.txt','ok\\n')"),
       verify_commands: [nodeEval("const fs=require('fs'); const v=fs.readFileSync('artifacts/linear-smoke.txt','utf8').trim(); if(v!=='ok') process.exit(1)")],
       review_commands: [nodeEval("const fs=require('fs'); const v=fs.readFileSync('artifacts/linear-smoke.txt','utf8'); if(!v.includes('ok')) { console.error('review: artifact content mismatch'); process.exit(1); }")],

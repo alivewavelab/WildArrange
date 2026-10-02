@@ -3,10 +3,10 @@
 // 所属模块：capabilities
 // 作用说明：
 //   在 worker 启动前校验必需 Skill、项目审查依据与 adapter 握手探针，
-//   生成 execution context 与 readiness 报告。legacy 任务可跳过。
+//   生成 execution context 与 readiness 报告。
 //
 // 【运行原理速读】
-//   · 何时执行？任务声明 responsibilityChanges 或必需 review step 时。
+//   · 何时执行？每张任务启动 Worker 之前。
 //   · 做了什么？加载 Skill → prepareProjectReview → 写 context → 探针握手。
 //   · 缺了它会怎样？无 Skill/审查依据的任务可能带着错误上下文开工。
 // =============================================================================
@@ -19,7 +19,7 @@ import { loadSkillAttachment } from "../infra/context-attachments.mjs";
 import { isTrivialCommand } from "../infra/task-predicates.mjs";
 import { runCommand } from "../infra/command-runner.mjs";
 import { compileCommandSafetyPatterns } from "../infra/command-safety.mjs";
-import { prepareProjectReview, executeReviewPacket, selectProjectReviewSteps } from "./project-review.mjs";
+import { prepareProjectReview, executeReviewPacket } from "./project-review.mjs";
 
 /**
  * 执行开工就绪检查：Skill、审查附件、adapter 探针与 context 预算。
@@ -30,11 +30,8 @@ import { prepareProjectReview, executeReviewPacket, selectProjectReviewSteps } f
  */
 export async function checkExecutionReadiness(rootDir, task, options = {}) {
   const { config } = await loadWildArrangeConfig(rootDir);
-  const required = Boolean(task.responsibilityChanges) || selectProjectReviewSteps(config, task).some(step => step.required);
-  const result = { kind: "execution_readiness", at: nowIso(), taskId: task.id, planId: task.planId, required,
-    pass: !required, issues: [], skills: [], probes: [] };
-  // §3.4：无职责变更且无必需 review step 的旧任务跳过就绪门，保持向后兼容。
-  if (!required) return { ...result, status: "legacy_not_checked" };
+  const result = { kind: "execution_readiness", at: nowIso(), taskId: task.id, planId: task.planId,
+    pass: false, issues: [], skills: [], probes: [] };
   const budget = config.review?.responsibility?.maxEvidenceChars || 500000;
   const command = options.workerCommand ?? task.worker_command;
   if (!command || isTrivialCommand(command)) result.issues.push("configure a real worker_command before starting a worker");
@@ -51,11 +48,9 @@ export async function checkExecutionReadiness(rootDir, task, options = {}) {
   try {
     review = await prepareProjectReview(rootDir, task, config);
     for (const step of review.steps.filter(step => step.required)) result.issues.push(...step.issues.map(issue => `${step.id}: ${issue}`));
-    if (task.responsibilityChanges) {
-      const reviewSkill = await loadSkillAttachment(rootDir, "review-work", budget);
-      if (!reviewSkill || reviewSkill.truncated) result.issues.push("required responsibility review Skill is unavailable");
-      review.responsibilitySkill = reviewSkill;
-    }
+    const reviewSkill = await loadSkillAttachment(rootDir, "review-work", budget);
+    if (!reviewSkill || reviewSkill.truncated) result.issues.push("required responsibility review Skill is unavailable");
+    review.responsibilitySkill = reviewSkill;
   } catch (error) { result.issues.push(error.message); }
   const settings = config.executionReadiness || {};
   if (!settings.workerProbe?.trim()) result.issues.push("executionReadiness.workerProbe is required; configure the worker adapter handshake");
@@ -72,7 +67,7 @@ export async function checkExecutionReadiness(rootDir, task, options = {}) {
     result.contextDigest = hashContent(JSON.stringify(context));
     const probes = [{ id: "worker", command: settings.workerProbe, skills: result.skills }];
     if (researchNames.length) probes.push({ id: "research", command: settings.researchProbe, skills: result.skills.filter(skill => researchNames.includes(skill.name)) });
-    if (task.responsibilityChanges) probes.push({ id: "responsibility", reviewer: true, command: config.review?.responsibility?.command, skills: [review.responsibilitySkill] });
+    probes.push({ id: "responsibility", reviewer: true, command: config.review?.responsibility?.command, skills: [review.responsibilitySkill] });
     for (const step of review.steps.filter(step => step.required)) probes.push({ id: `review-${step.id}`, reviewer: true, command: step.command, skills: step.skills, documents: step.documents });
     for (const probe of probes) {
       const challenge = randomUUID();
@@ -81,7 +76,8 @@ export async function checkExecutionReadiness(rootDir, task, options = {}) {
         instruction: 'Read the attached required Skills. Confirm your execution service is available without editing project files. Return only JSON {ready:true,challenge:the supplied challenge,loadedSkills:[every required Skill name]}. Do not execute workerCommand.' };
       try {
         let response;
-        const packetPath = contextPath + `.${probe.id}.probe.json`;
+        // 每次握手独立文件：同一任务的并发检查不会互相覆盖挑战码
+        const packetPath = contextPath + `.${probe.id}.${challenge}.probe.json`;
         if (probe.reviewer) response = await executeReviewPacket(rootDir, packetPath, packet, config, { ...config.review?.responsibility, command: probe.command });
         else {
           await writeJsonAtomic(packetPath, packet);

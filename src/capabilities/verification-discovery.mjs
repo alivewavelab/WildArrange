@@ -33,7 +33,6 @@ import {
 /** 验证宇宙 walk 时跳过的目录名。 */
 const EXCLUDED_DIR_NAMES = new Set([
   ".git",
-  ".wildarrange",
   "node_modules",
   "dist",
   "build",
@@ -254,7 +253,7 @@ function classifyAssets({ files, packageFacts, textIndex, importIndex, config })
  * classifyFileKind 内部辅助。
  */
 function classifyFileKind(relativePath, packageFacts, config, headText = "") {
-  if (relativePath === "wildarrange.config.json" || relativePath === ".wildarrange/config.json") return "runtime_gate";
+  if (relativePath === "wildarrange.config.json") return "runtime_gate";
   if (CI_GLOBS.some((pattern) => pathMatchesPattern(relativePath, pattern))) return "runtime_gate";
   if (HOOK_GLOBS.some((pattern) => pathMatchesPattern(relativePath, pattern))) return "host_hook";
   if (/(^|\/)(__fixtures__|fixtures)(\/|$)/i.test(relativePath)) return "test_fixture";

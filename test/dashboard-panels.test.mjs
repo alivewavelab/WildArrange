@@ -18,9 +18,12 @@ import test from "node:test";
 
 import { startDashboardServer } from "../src/interface/dashboard.mjs";
 import { runInjectionHook } from "../src/ai/hooks.mjs";
-import { importPlan } from "../src/orchestration/plan-state.mjs";
+
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_RESPONSIBILITY = declare("src/login.mjs");
 
 async function withTempDir(fn) {
   await withExternalProject(({ projectRoot }) => fn(projectRoot));
@@ -50,12 +53,12 @@ async function importPassingPlan(dir) {
         id: "T001",
         title: "panel task",
         owner: "ZhuRong",
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         verify_commands: ["node -e \"process.exit(0)\""],
       },
     ],
   }, null, 2));
-  await importPlan(dir, planPath);
+  await importApprovedPlan(dir, planPath);
 }
 
 test("decisions and ops panels serve read-only view models", async () => {
@@ -83,7 +86,7 @@ test("decisions and ops panels serve read-only view models", async () => {
       assert.equal(ops.kind, "wildarrange_dashboard_ops_panel");
       assert.ok(ops.gateArming, "运维面板必须带门武装状态");
       assert.equal(ops.locks.length, 2, "tasks.lock 与 ledger.lock 都在巡检");
-      assert.ok(ops.files.some((file) => file.path === ".wildarrange/decisions.jsonl"));
+      assert.ok(ops.files.some((file) => file.path === "runtime:decisions.jsonl"));
 
       const page = await fetch(`${base}/`, { cache: "no-store" });
       const html = await page.text();

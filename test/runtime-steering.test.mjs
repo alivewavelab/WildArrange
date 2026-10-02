@@ -6,18 +6,23 @@
 // =============================================================================
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { importPlan } from "../src/orchestration/plan-state.mjs";
+
 import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtime.mjs";
+import { approvePlan } from "../src/orchestration/plan-state.mjs";
 import { recordTaskEvidence } from "../src/orchestration/task-board.mjs";
 import { recordReviewBlocker, resolveReviewBlocker } from "../src/orchestration/review-blocker.mjs";
 import { steerWorkflow } from "../src/orchestration/plan-steering.mjs";
 import { attentionReport, dashboardData, statusReport } from "../src/orchestration/status.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
 import { nodeEval } from "./helpers/runtime-fixtures.mjs";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_RESPONSIBILITY = declare("src/blocker-resolution.txt", "src/bound-criteria.txt", "src/manual-criteria.txt", "src/mark-blocked.txt");
 
 test("success criteria evidence is recorded and required by checkpoint", async () => {
   await withExternalProject(async ({ projectRoot, root }) => {
@@ -27,7 +32,7 @@ test("success criteria evidence is recorded and required by checkpoint", async (
       tasks: [{
         id: "T001",
         subject: "Require manual criteria",
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         worker_command: nodeEval("const fs=require('fs');fs.mkdirSync('src',{recursive:true});fs.writeFileSync('src/manual-criteria.txt','manual proof captured\\n')"),
         verify_commands: [nodeEval("const fs=require('fs');if(fs.readFileSync('src/manual-criteria.txt','utf8').trim()!=='manual proof captured')process.exit(1)")],
         review_commands: [nodeEval("const fs=require('fs');const lines=fs.readFileSync('src/manual-criteria.txt','utf8').trim().split(/\\r?\\n/);if(lines.length!==1||!lines[0].startsWith('manual proof'))process.exit(1)")],
@@ -36,7 +41,7 @@ test("success criteria evidence is recorded and required by checkpoint", async (
         ],
       }],
     }));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const recorded = await recordTaskEvidence(projectRoot, {
       taskId: "T001",
@@ -60,6 +65,7 @@ test("unbound success criteria are not auto-passed by verifier", async () => {
       tasks: [{
         id: "T001",
         subject: "Do not auto-pass manual criterion",
+        writable_paths: ["src/app.js"], responsibilityChanges: declare("src/app.js"),
         worker_command: "node -e \"if(!process.version)process.exit(1)\"",
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
@@ -68,7 +74,7 @@ test("unbound success criteria are not auto-passed by verifier", async () => {
         ],
       }],
     }));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const result = await runNextTask(projectRoot);
     assert.equal(result.status, "failed");
@@ -86,7 +92,7 @@ test("success criteria can be auto-passed only with explicit verifier command re
       tasks: [{
         id: "T001",
         subject: "Auto-pass bound criterion",
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         worker_command: nodeEval("const fs=require('fs');fs.mkdirSync('src',{recursive:true});fs.writeFileSync('src/bound-criteria.txt','bound criterion')"),
         verify_commands: [verifyCommand],
         review_commands: [nodeEval("const fs=require('fs');const stat=fs.statSync('src/bound-criteria.txt');if(!stat.isFile()||stat.size!==15)process.exit(1)")],
@@ -95,7 +101,7 @@ test("success criteria can be auto-passed only with explicit verifier command re
         ],
       }],
     }));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const result = await runNextTask(projectRoot);
     assert.equal(result.status, "completed");
@@ -112,12 +118,13 @@ test("steering safely adds tasks and rejects weakening proposals", async () => {
       tasks: [{
         id: "T001",
         subject: "Original task",
+        writable_paths: ["src/app.js"], responsibilityChanges: declare("src/app.js"),
         worker_command: "node -e \"if(!process.version)process.exit(1)\"",
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
       }],
     }));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const rejected = await steerWorkflow(projectRoot, {
       kind: "revise_acceptance",
@@ -160,6 +167,7 @@ test("steering safely adds tasks and rejects weakening proposals", async () => {
       task: {
         id: "T002",
         subject: "Follow-up task",
+        writable_paths: ["src/app.js"], responsibilityChanges: declare("src/app.js"),
         worker_command: "node -e \"if(!process.version)process.exit(1)\"",
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
@@ -167,6 +175,22 @@ test("steering safely adds tasks and rejects weakening proposals", async () => {
     });
     assert.equal(accepted.accepted, true);
     assert.equal(accepted.taskState.tasks.length, 2);
+    // 加单改变了职责声明：计划回到待批准
+    assert.equal((await runNextTask(projectRoot)).status, "awaiting_plan_approval");
+
+    await assert.rejects(() => steerWorkflow(projectRoot, {
+      kind: "add_task",
+      source: "test",
+      evidence: "User added a follow-up task without declaring responsibilities.",
+      rationale: "Undeclared tasks must not become executable.",
+      task: {
+        id: "T003",
+        subject: "Undeclared follow-up",
+        writable_paths: ["src/app.js"],
+        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+      },
+    }), /T003 requires responsibilityChanges/);
 
     const incompleteReorder = await steerWorkflow(projectRoot, {
       kind: "reorder_pending",
@@ -189,12 +213,13 @@ test("empty verifier commands cannot complete even if task state is corrupted", 
       tasks: [{
         id: "T001",
         subject: "Corrupted task should not pass",
+        writable_paths: ["src/app.js"], responsibilityChanges: declare("src/app.js"),
         worker_command: "node -e \"if(!process.version)process.exit(1)\"",
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
       }],
     }));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const taskStatePath = resolveWildArrangePath(projectRoot, "team", "tasks.json");
     const taskState = await readJson(taskStatePath);
@@ -218,15 +243,16 @@ test("review blockers create a resolution task without completing the blocked ta
       tasks: [{
         id: "T001",
         subject: "Task needing final review",
+        writable_paths: ["src/app.js"], responsibilityChanges: declare("src/app.js"),
         worker_command: "node -e \"if(!process.version)process.exit(1)\"",
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
       }],
     }));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
     await runWorkflowNode(projectRoot, "execute", { taskId: "T001" });
 
-    const blocked = await recordReviewBlocker(projectRoot, {
+    const blocker = {
       taskId: "T001",
       title: "Resolve missing browser verification",
       objective: "Run browser-level evidence before final checkpoint.",
@@ -235,7 +261,11 @@ test("review blockers create a resolution task without completing the blocked ta
       worker_command: "node -e \"if(!process.version)process.exit(1)\"",
       verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
       review_commands: ["node --version"],
-    });
+      writable_paths: ["src/app.js"],
+    };
+    // 整改单和其他任务一样必须带职责声明
+    await assert.rejects(() => recordReviewBlocker(projectRoot, blocker), /requires responsibilityChanges for the resolution task/);
+    const blocked = await recordReviewBlocker(projectRoot, { ...blocker, responsibilityChanges: declare("src/app.js") });
     assert.equal(blocked.blockedTask.status, "review_blocked");
     assert.equal(blocked.resolutionTask.reviewBlockerFor, "T001");
     const status = await statusReport(projectRoot);
@@ -245,26 +275,27 @@ test("review blockers create a resolution task without completing the blocked ta
 });
 
 test("review blocker resolution returns the blocked task to pending only after the resolution task completes", async () => {
-  await withExternalProject(async ({ projectRoot, root }) => {
+  await withExternalProject(async ({ projectRoot, root, stateHome }) => {
     const planPath = path.join(root, "blocker-resolve-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Review blocker resolution",
       tasks: [{
         id: "T001",
         subject: "Task needing final review",
+        writable_paths: ["src/app.js"], responsibilityChanges: declare("src/app.js"),
         worker_command: "node -e \"if(!process.version)process.exit(1)\"",
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
       }],
     }));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
     await runWorkflowNode(projectRoot, "execute", { taskId: "T001" });
 
     const blocked = await recordReviewBlocker(projectRoot, {
       taskId: "T001",
       evidence: "BaiZe final review found missing browser evidence.",
       rationale: "The blocker must be resolved as a separate task.",
-      writable_paths: ["src/**"],
+      writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
       worker_command: nodeEval("const fs=require('fs');fs.mkdirSync('src',{recursive:true});fs.writeFileSync('src/blocker-resolution.txt','blocker resolved\\n')"),
       verify_commands: [nodeEval("const fs=require('fs');if(fs.readFileSync('src/blocker-resolution.txt','utf8').trim()!=='blocker resolved')process.exit(1)")],
       review_commands: [nodeEval("const fs=require('fs');const lines=fs.readFileSync('src/blocker-resolution.txt','utf8').trim().split(/\\r?\\n/);if(lines.length!==1||!lines[0].startsWith('blocker resolved'))process.exit(1)")],
@@ -283,15 +314,22 @@ test("review blocker resolution returns the blocked task to pending only after t
     let persisted = await readJson(taskStatePath);
     assert.equal(persisted.tasks.find((task) => task.id === "T001").status, "review_blocked");
 
+    // 登记整改单改变了职责声明：计划回到待批准，人确认后整改单才执行
+    assert.equal((await runNextTask(projectRoot)).status, "awaiting_plan_approval");
+    await approvePlan(projectRoot);
     const completed = await runNextTask(projectRoot);
     assert.equal(completed.status, "completed", JSON.stringify({ status: completed.status, task: completed.task?.id, failure: completed.task?.last_failure }));
     assert.equal(completed.task.id, blocked.resolutionTask.id);
 
-    const resolved = await resolveReviewBlocker(projectRoot, {
-      taskId: "T001",
-      evidence: `Resolution task ${blocked.resolutionTask.id} finished with a passing verifier.`,
-      rationale: "The blocked task re-enters the delivery pipeline for a fresh run.",
+    // 走公开 CLI：review_blocked 必须有用户可达的出口
+    const cli = spawnSync(process.execPath, [path.resolve("bin", "wildarrange.mjs"), "review-blockers", "resolve", "--root", projectRoot,
+      "--task", "T001",
+      "--evidence", `Resolution task ${blocked.resolutionTask.id} finished with a passing verifier.`,
+      "--rationale", "The blocked task re-enters the delivery pipeline for a fresh run."], {
+      cwd: projectRoot, encoding: "utf8", env: { ...process.env, WILDARRANGE_STATE_HOME: stateHome },
     });
+    assert.equal(cli.status, 0, cli.stderr || cli.stdout);
+    const resolved = JSON.parse(cli.stdout);
     assert.equal(resolved.unblockedTask.status, "pending");
     persisted = await readJson(taskStatePath);
     const unblocked = persisted.tasks.find((task) => task.id === "T001");
@@ -309,19 +347,20 @@ test("steering mark_blocked rejects completed or verifying targets", async () =>
       tasks: [{
         id: "T001",
         subject: "Task that completes",
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         worker_command: nodeEval("const fs=require('fs');fs.mkdirSync('src',{recursive:true});fs.writeFileSync('src/mark-blocked.txt','terminal guard\\n')"),
         verify_commands: [nodeEval("const fs=require('fs');if(fs.readFileSync('src/mark-blocked.txt','utf8').trim()!=='terminal guard')process.exit(1)")],
         review_commands: [nodeEval("const fs=require('fs');const lines=fs.readFileSync('src/mark-blocked.txt','utf8').trim().split(/\\r?\\n/);if(lines.length!==1||!lines[0].startsWith('terminal guard'))process.exit(1)")],
       }, {
         id: "T002",
         subject: "Task stuck verifying",
+        writable_paths: ["src/app.js"], responsibilityChanges: declare("src/app.js"),
         worker_command: "node -e \"if(!process.version)process.exit(1)\"",
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
       }],
     }));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
     const completed = await runNextTask(projectRoot);
     assert.equal(completed.status, "completed", JSON.stringify({ status: completed.status, task: completed.task?.id, failure: completed.task?.last_failure }));
     assert.equal(completed.task.id, "T001");
@@ -356,13 +395,13 @@ test("attention report aggregates decisions waiting on the user", async () => {
       tasks: [{
         id: "T001",
         subject: "被审阅阻塞的任务",
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         worker_command: "node -e \"if(!process.version)process.exit(1)\"",
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
       }],
     }, null, 2));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
     await runWorkflowNode(projectRoot, "execute", { taskId: "T001" });
     await recordReviewBlocker(projectRoot, {
       taskId: "T001",
@@ -373,6 +412,7 @@ test("attention report aggregates decisions waiting on the user", async () => {
       worker_command: "node -e \"if(!process.version)process.exit(1)\"",
       verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
       review_commands: ["node --version"],
+      responsibilityChanges: declare("src/app.js"),
     });
 
     const attention = await attentionReport(projectRoot);

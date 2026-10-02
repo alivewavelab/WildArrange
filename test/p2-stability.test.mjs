@@ -24,7 +24,10 @@ import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { proposeContractChange } from "../src/orchestration/contract-governance.mjs";
 import { runNextTask } from "../src/orchestration/linear-runtime.mjs";
 import { runWorkflow } from "../src/orchestration/workflow.mjs";
-import { gitCommitAll, withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_RESPONSIBILITY = declare("src/app.js");
 
 function nodeEval(source) {
   const encoded = Buffer.from(source, "utf8").toString("base64");
@@ -98,13 +101,13 @@ test("runNextTask reports a throwing gate without dereferencing null evidence", 
       tasks: [{
         id: "T001",
         subject: "Corrupt runtime config after worker startup",
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         worker_command: nodeEval(`require('fs').writeFileSync(${JSON.stringify(path.join(governanceRoot, "policy", "wildarrange.config.json"))}, '{ broken', 'utf8')`),
         verify_commands: [nodeEval("process.exit(0)")],
         review_commands: [nodeEval("process.exit(0)")],
       }],
     }, null, 2), "utf8");
-    await importPlan(dir, planPath);
+    await importApprovedPlan(dir, planPath);
 
     const result = await runNextTask(dir);
     assert.equal(result.status, "retry");
@@ -116,18 +119,18 @@ test("runNextTask reports a throwing gate without dereferencing null evidence", 
 });
 
 test("runWorkflow stops after the first state that requires an external decision", async () => {
-  await withExternalProject(async ({ root, projectRoot: dir, governanceRoot }) => {
-    await writeFile(path.join(governanceRoot, "policy", "wildarrange.config.json"), JSON.stringify({ planApproval: { required: true } }, null, 2), "utf8");
-    await gitCommitAll(governanceRoot, "require plan approval");
+  await withExternalProject(async ({ root, projectRoot: dir }) => {
     const planPath = path.join(root, "approval-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Approval wait regression",
       tasks: [{
         id: "T001",
         subject: "Wait for approval",
+        writable_paths: ["src/app.js"], responsibilityChanges: declare("src/app.js"),
         verify_commands: [nodeEval("process.exit(0)")],
       }],
     }, null, 2), "utf8");
+    // 每个导入的计划都等待人工批准
     await importPlan(dir, planPath);
 
     const result = await runWorkflow(dir, { maxSteps: 5 });
@@ -145,10 +148,11 @@ test("runWorkflow stops immediately when a task waits for a user contract decisi
       tasks: [{
         id: "T001",
         subject: "Wait for a contract decision",
+        writable_paths: ["src/app.js"], responsibilityChanges: declare("src/app.js"),
         verify_commands: [nodeEval("process.exit(0)")],
       }],
     }, null, 2), "utf8");
-    await importPlan(dir, planPath);
+    await importApprovedPlan(dir, planPath);
     await writeFile(path.join(root, "proposal.json"), JSON.stringify({
       reason: "新功能必须保存语言",
       impact: "users 表增加 locale，可空，无存量迁移",

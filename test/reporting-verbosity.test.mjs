@@ -18,9 +18,13 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { importPlan } from "../src/orchestration/plan-state.mjs";
-import { resolveGovernancePaths, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { gitCommitAll, withExternalProject } from "./helpers/external-fixture.mjs";
+
+import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { writePolicyConfig } from "./helpers/runtime-fixtures.mjs";
+import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_RESPONSIBILITY = declare("src/result.txt");
 
 const CLI_PATH = path.resolve(process.cwd(), "bin", "wildarrange.mjs");
 
@@ -31,7 +35,7 @@ function passingTask(id) {
     worker_command: "node -e \"require('node:fs').mkdirSync('src',{recursive:true});require('node:fs').writeFileSync('src/result.txt','ok')\"",
     verify_commands: ["node -e \"require('node:assert/strict').equal(require('node:fs').readFileSync('src/result.txt','utf8'),'ok')\""],
     review_commands: ["node -e \"const fs=require('node:fs');require('node:assert/strict').equal(fs.statSync('src/result.txt').size,2);if(fs.existsSync('unexpected.txt'))process.exit(1)\""],
-    writable_paths: ["src/**"],
+    writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
   };
 }
 
@@ -39,14 +43,12 @@ async function importPlanWith(dir, fileName, title, tasks) {
   const planPath = resolveWildArrangePath(dir, "artifacts", fileName);
   await mkdir(path.dirname(planPath), { recursive: true });
   await writeFile(planPath, JSON.stringify({ title, tasks }, null, 2));
-  await importPlan(dir, planPath);
+  await importApprovedPlan(dir, planPath);
 }
 
 /** 治理配置写入外置治理仓并提交，使其成为受信任的当前配置。 */
 async function writeGovernanceConfig(dir, governanceRoot, config) {
-  const governance = resolveGovernancePaths(dir);
-  await writeFile(path.join(governance.rootDir, governance.configPath), JSON.stringify(config, null, 2));
-  await gitCommitAll(governanceRoot, "verbosity config");
+  await writePolicyConfig(governanceRoot, config);
 }
 
 function runCli(dir, stateHome) {

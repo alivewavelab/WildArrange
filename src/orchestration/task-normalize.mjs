@@ -61,9 +61,17 @@ export function normalizeTask(task, index, defaults = {}, options = {}) {
 
   const taskVerifyCommands = normalizeStringArray(task.verify_commands ?? [], `task ${id} verify_commands`);
   const verifyCommands = uniqueStrings([...(defaults.verify_commands || []), ...taskVerifyCommands]);
-  const requestedStatus = task.status || (options.defaultDraftWhenIncomplete === true && verifyCommands.length === 0 ? "draft" : "pending");
+  const taskWritablePaths = normalizeStringArray(task.writable_paths ?? [], `task ${id} writable_paths`);
+  const writablePaths = uniqueStrings([...(defaults.writable_paths || []), ...taskWritablePaths]);
+  const responsibilityChanges = normalizeResponsibilityChanges(task.responsibilityChanges, writablePaths);
+  const incomplete = verifyCommands.length === 0 || !responsibilityChanges;
+  const requestedStatus = task.status || (options.defaultDraftWhenIncomplete === true && incomplete ? "draft" : "pending");
   if (verifyCommands.length === 0 && requestedStatus !== "draft") {
     throw new Error(`task ${id} requires at least one verify command`);
+  }
+  // 职责声明是每张可执行任务的准入条件：没有声明只能留在 draft，补齐后经人批准才能执行
+  if (!responsibilityChanges && requestedStatus !== "draft") {
+    throw new Error(`task ${id} requires responsibilityChanges; a task without them can only stay draft`);
   }
   // Imported/requested "completed" is never trusted: only the delivery pipeline
   // may persist a terminal completed state after the proof chain passes.
@@ -72,8 +80,6 @@ export function normalizeTask(task, index, defaults = {}, options = {}) {
   const reviewCommands = uniqueStrings([...(defaults.review_commands || []), ...taskReviewCommands]);
   const taskStandardsCommands = normalizeStringArray(task.standards_commands ?? [], `task ${id} standards_commands`);
   const standardsCommands = uniqueStrings([...(defaults.standards_commands || []), ...taskStandardsCommands]);
-  const taskWritablePaths = normalizeStringArray(task.writable_paths ?? [], `task ${id} writable_paths`);
-  const writablePaths = uniqueStrings([...(defaults.writable_paths || []), ...taskWritablePaths]);
   const taskSkills = normalizeSkillArray(task.skills ?? [], `task ${id} skills`);
   const successCriteria = normalizeSuccessCriteria(task.successCriteria, id, subject, verifyCommands);
   const governanceWarnings = detectTaskGovernanceWarnings({ workerCommand: task.worker_command || null, verifyCommands, writablePaths });
@@ -121,7 +127,7 @@ export function normalizeTask(task, index, defaults = {}, options = {}) {
     skills,
     route_decision: task.route_decision || null,
     contractChanges,
-    responsibilityChanges: normalizeResponsibilityChanges(task.responsibilityChanges, writablePaths),
+    responsibilityChanges,
     evidence: Array.isArray(task.evidence) ? task.evidence : [],
     history: Array.isArray(task.history) ? task.history : [{ at: createdAt, event: "created", status, source }],
     createdAt,

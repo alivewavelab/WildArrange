@@ -55,15 +55,13 @@ export async function readIntegrationIntent(rootDir, runId, taskId) {
   return readJson(integrationIntentPath(rootDir, runId, taskId), null);
 }
 
-/** 收集相对 baseSha 的工作区与已提交变更路径（排除 .wildarrange）。 */
+/** 收集相对 baseSha 的工作区与已提交变更路径。 */
 export async function collectIntegrationCandidatePaths(rootDir, baseSha) {
   const [workingPaths, committedPaths] = await Promise.all([
     listWorkingTreeChanges(rootDir),
     listTreeChanges(rootDir, baseSha, "HEAD"),
   ]);
-  return [...new Set([...workingPaths, ...committedPaths])]
-    .filter((filePath) => filePath !== ".wildarrange" && !filePath.startsWith(".wildarrange/"))
-    .sort();
+  return [...new Set([...workingPaths, ...committedPaths])].sort();
 }
 
 // --- delivery commit ---

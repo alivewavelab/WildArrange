@@ -12,7 +12,15 @@ import test from "node:test";
 import { importPlan } from "../src/orchestration/plan-state.mjs";
 import { validatePlanGraph } from "../src/orchestration/task-normalize.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare } from "./helpers/external-fixture.mjs";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const DOC_PRODUCT_RESPONSIBILITY = declare("doc/product/app.js");
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_RESPONSIBILITY = declare("src/app.js");
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const INDEX_HTML_SRC_TEST_RESPONSIBILITY = declare("index.html");
 
 test("plan graph validation rejects invalid task dependencies", () => {
   assert.doesNotThrow(() => validatePlanGraph({
@@ -69,6 +77,7 @@ test("plan import rejects unsafe task Skill names before persisting", async () =
         subject: "Unsafe binding",
         skills: ["../escape"],
         writable_paths: ["receipt.txt"],
+        responsibilityChanges: declare("receipt.txt"),
         worker_command: "node -e \"process.exit(0)\"",
         verify_commands: ["node -e \"process.exit(0)\""],
       }],
@@ -87,6 +96,7 @@ test("plan import rejects unknown blockedBy before writing task state", async ()
       tasks: [{
         id: "T001",
         subject: "Blocked by missing task",
+        writable_paths: ["src/app.js"], responsibilityChanges: declare("src/app.js"),
         blockedBy: ["T999"],
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
@@ -96,6 +106,37 @@ test("plan import rejects unknown blockedBy before writing task state", async ()
     await assert.rejects(() => importPlan(projectRoot, planPath), /unknown task/);
     const state = await readJson(resolveWildArrangePath(projectRoot, "team", "tasks.json"), null);
     assert.equal(state, null);
+  });
+});
+
+test("plan import rejects an executable task without responsibilityChanges before writing state", async () => {
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "undeclared-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Undeclared",
+      tasks: [{ id: "T001", subject: "No declaration", writable_paths: ["src/app.js"], verify_commands: ["node -e \"if(!process.version)process.exit(1)\""] }],
+    }));
+    await assert.rejects(() => importPlan(projectRoot, planPath), /requires responsibilityChanges; a task without them can only stay draft/);
+    assert.equal(await readJson(resolveWildArrangePath(projectRoot, "team", "tasks.json"), null), null);
+  });
+});
+
+test("an empty declaration is only accepted for a task that cannot write files", async () => {
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const planPath = path.join(root, "empty-declaration-plan.json");
+    await writeFile(planPath, JSON.stringify({
+      title: "Empty declaration",
+      tasks: [{ id: "T001", subject: "Writes but declares nothing", writable_paths: ["src/app.js"], responsibilityChanges: [], verify_commands: ["node -e \"if(!process.version)process.exit(1)\""] }],
+    }));
+    await assert.rejects(() => importPlan(projectRoot, planPath), /must be a non-empty array when the task has writable_paths/);
+  });
+});
+
+test("the fullstack starter example plan imports as documented", async () => {
+  await withExternalProject(async ({ projectRoot }) => {
+    const plan = await importPlan(projectRoot, path.resolve("examples", "fullstack-starter", "plan.example.json"));
+    assert.equal(plan.tasks.length, 2);
+    assert.ok(plan.tasks.every((task) => task.responsibilityChanges?.length === 1));
   });
 });
 
@@ -110,6 +151,7 @@ test("plan import never persists a requested completed status", async () => {
         subject: "Pretends to be done without any verification",
         status: "completed",
         writable_paths: ["receipt.txt"],
+        responsibilityChanges: declare("receipt.txt"),
         verify_commands: ["true"],
       }],
     }, null, 2));
@@ -140,7 +182,7 @@ test("plan import rejects high-risk product plans that are under-split", async (
           id: "T001",
           subject: "写产品 brief 和流程",
           description: "明确产品目标、流程、结构件和互动体验。",
-          writable_paths: ["doc/product/**"],
+          writable_paths: ["doc/product/**"], responsibilityChanges: DOC_PRODUCT_RESPONSIBILITY,
           worker_command: "node -e \"if(!process.version)process.exit(1)\"",
           verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
           review_commands: ["node --version"],
@@ -150,7 +192,7 @@ test("plan import rejects high-risk product plans that are under-split", async (
           subject: "实现静态 MVP",
           description: "实现页面和转换逻辑。",
           blockedBy: ["T001"],
-          writable_paths: ["index.html", "src/**", "test/**"],
+          writable_paths: ["index.html", "src/**", "test/**"], responsibilityChanges: INDEX_HTML_SRC_TEST_RESPONSIBILITY,
           worker_command: "node -e \"if(!process.version)process.exit(1)\"",
           verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
           review_commands: ["node --version"],
@@ -173,7 +215,7 @@ test("plan import persists route decisions and fills missing task category and s
         id: "T001",
         subject: "优化页面 CSS 布局",
         description: "调整按钮样式和页面布局",
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         worker_command: "node -e \"if(!process.version)process.exit(1)\"",
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
@@ -205,6 +247,7 @@ test("plan import preserves explicit category while recording route decision", a
         subject: "单文件小改 README 文案",
         category: "quick",
         writable_paths: ["README.md"],
+        responsibilityChanges: declare("README.md"),
         worker_command: "node -e \"if(!process.version)process.exit(1)\"",
         verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
         review_commands: ["node --version"],
@@ -237,6 +280,7 @@ test("plan import applies default gates and scope to every task", async () => {
       tasks: [{
         id: "T001",
         subject: "Use inherited gates",
+        responsibilityChanges: SRC_RESPONSIBILITY,
         worker_command: "node -e \"if(!process.version)process.exit(1)\"",
       }],
     }));
@@ -260,6 +304,7 @@ test("plan import warns about possible no-op tasks", async () => {
       tasks: [{
         id: "T001",
         subject: "Suspicious task",
+        responsibilityChanges: declare(),
         worker_command: "node -e \"process.exit(0)\"",
         verify_commands: ["node -e \"process.exit(0)\""],
         review_commands: ["node --version"],

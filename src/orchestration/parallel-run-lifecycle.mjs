@@ -192,7 +192,7 @@ export async function cleanupParallelAgentRun(rootDir, options = {}) {
 /** 检查 worktree 是否满足 cleanup 围栏（无残留改动）。 */
 async function inspectParallelCleanupFence(worktreeDir, entry, task, gitContext, runPlanId) {
   const lifecycle = entry.lifecycle?.status || null;
-  const cleanableLifecycle = new Set(["closed", "failed", "skipped", "released"]);
+  const cleanableLifecycle = new Set(["closed", "failed", "released"]);
   if (!cleanableLifecycle.has(lifecycle)) {
     return { pass: false, reason: "lifecycle_requires_retention", details: { lifecycle } };
   }

@@ -21,14 +21,14 @@ import test from "node:test";
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { runCommand } from "../src/infra/command-runner.mjs";
 import { runCommandFile } from "../src/infra/command-runner.mjs";
-import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
+import { loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtime.mjs";
 import { runDeliveryPipeline } from "../src/orchestration/delivery-pipeline.mjs";
 import { persistTaskState } from "../src/orchestration/task-board.mjs";
 import { buildChangedPathDiffEvidence, collectGitChangedPaths, changedPathsIntroducedByTask } from "../src/infra/git-diff.mjs";
 import { readJson, resolveTaskAcceptancePath, resolveTaskCheckpointPath, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
 
 async function withGitFixture(fn) {
   await withExternalProject(async ({ projectRoot }) => {
@@ -48,7 +48,7 @@ async function writePlan(root, tasks) {
   const planPath = resolveWildArrangePath(root, "artifacts", "plan.json");
   await mkdir(path.dirname(planPath), { recursive: true });
   await writeFile(planPath, JSON.stringify({ id: "delivery-regression", title: "Delivery regression", tasks }));
-  return importPlan(root, planPath);
+  return importApprovedPlan(root, planPath);
 }
 
 function realTask(overrides = {}) {
@@ -60,6 +60,7 @@ function realTask(overrides = {}) {
     verify_commands: ["node check.cjs"],
     review_commands: ["node review.cjs"],
     writable_paths: ["result.txt"],
+    responsibilityChanges: declare("result.txt"),
     ...overrides,
   };
 }
@@ -185,13 +186,13 @@ test("linear no-change delivery binds the dependency SHA without creating an emp
   await withGitFixture(async (root) => {
     const plan = await writePlan(root, [
       realTask(),
-      realTask({ id: "T002", blockedBy: ["T001"], subject: "inspect dependency", worker_command: "node check.cjs", writable_paths: [] }),
+      realTask({ id: "T002", blockedBy: ["T001"], subject: "inspect dependency", worker_command: "node check.cjs", writable_paths: [], responsibilityChanges: declare() }),
     ]);
     const first = await runNextTask(root);
     assert.equal(first.status, "completed");
     const firstSha = first.task.delivery.integrationSha;
     const second = await runNextTask(root);
-    assert.equal(second.status, "completed");
+    assert.equal(second.status, "completed", JSON.stringify(second.readiness?.issues || second.task?.last_failure || second.status));
     assert.equal(second.task.delivery.status, "no_change");
     assert.equal(second.task.delivery.integrationSha, firstSha);
     const proof = await readJson(resolveTaskAcceptancePath(root, plan.id, "T002"));

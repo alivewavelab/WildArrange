@@ -35,7 +35,6 @@ import {
   withTaskIdentity,
 } from "../infra/task-state-store.mjs";
 import { appendLedger } from "../infra/ledger.mjs";
-import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { transactWithLedger, withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { uniqueStrings } from "../infra/text-utils.mjs";
 import { writeSnapshot } from "../infra/runtime-snapshot.mjs";
@@ -99,12 +98,12 @@ function normalizePlanDefaults(rawPlan) {
 // --- 导入与批准 ---
 
 /** 从 JSON 文件导入计划：规范化、校验、写 taskState 与 ledger。 */
-export async function importPlan(rootDir, planPath, options = {}) {
-  return withTaskStateLock(rootDir, "import-plan", () => importPlanUnlocked(rootDir, planPath, options));
+export async function importPlan(rootDir, planPath) {
+  return withTaskStateLock(rootDir, "import-plan", () => importPlanUnlocked(rootDir, planPath));
 }
 
 /** 锁内执行计划导入、合并 ledger 与 route enrichment。 */
-async function importPlanUnlocked(rootDir, planPath, options) {
+async function importPlanUnlocked(rootDir, planPath) {
   await ensureWildArrangeDirs(rootDir);
   const rawPlan = await readJson(planPath);
   const governanceBinding = await loadGovernanceVerificationDefaults(rootDir);
@@ -124,11 +123,6 @@ async function importPlanUnlocked(rootDir, planPath, options) {
     plan.tasks = plan.tasks.map((task) => ({ ...task, governance_binding: plan.governance_binding }));
   }
   validateSemanticGeneratedPlan(plan);
-  if (options.requireResponsibility === true || plan.generated_by === "host_semantic") {
-    for (const task of plan.tasks) {
-      if (!task.responsibilityChanges) throw new Error(`task ${task.id} requires responsibilityChanges before plan approval`);
-    }
-  }
   await enrichPlanWithRoutes(rootDir, plan);
   validatePlanImportQuality(plan);
   const featureDesignGate = await assertFeatureDesignPlanBinding(rootDir, plan);
@@ -140,17 +134,13 @@ async function importPlanUnlocked(rootDir, planPath, options) {
   // 任务状态只存在于 team/tasks.json。
   const { tasks: _tasks, ...planSnapshot } = plan;
 
-  const { config } = await loadWildArrangeConfig(rootDir);
-  const approvalRequired = plan.generated_by === "host_semantic" || plan.tasks.some((task) => task.responsibilityChanges) || config?.planApproval?.required === true;
   // 审计先行：plan_imported 入账本后才提交 plan/tasks.json/work.json 等实际
   // 状态，与完成路径 commitTaskCompletionState 同一方向（ARC-003）。
   await transactWithLedger(rootDir, {
-    responsibilityAuditRequired: plan.generated_by === "host_semantic" || plan.tasks.some((task) => task.responsibilityChanges),
     type: "plan_imported",
     planId: plan.id,
     taskCount: plan.tasks.length,
     generatedBy: plan.generated_by,
-    approvalRequired,
   }, async () => {
     await writeJsonAtomic(targetPath, planSnapshot);
     await writeTasksMarkdown(rootDir, plan);
@@ -159,10 +149,11 @@ async function importPlanUnlocked(rootDir, planPath, options) {
       ...work,
       stage: "planned",
       activePlanId: plan.id,
-      status: approvalRequired ? "awaiting_plan_approval" : "ready",
+      // 每张任务都带职责声明，导入的计划一律等待人工批准
+      status: "awaiting_plan_approval",
       planApproval: {
-        required: approvalRequired,
-        status: approvalRequired ? "pending" : "approved",
+        required: true,
+        status: "pending",
         planId: plan.id,
         updatedAt: nowIso(),
       },
@@ -250,12 +241,12 @@ export async function loadPlanApproval(rootDir) {
   const work = await readJson(resolveWildArrangePath(rootDir, "work.json"), null);
   const approval = work?.planApproval;
   if (!approval || approval.required !== true) {
-    return { required: false, status: "approved", planId: approval?.planId || work?.activePlanId || null };
+    return { required: false, status: "approved", planId: approval?.planId ?? null };
   }
   return {
     required: true,
     status: approval.status === "approved" ? "approved" : "pending",
-    planId: approval.planId || work?.activePlanId || null,
+    planId: approval.planId,
   };
 }
 

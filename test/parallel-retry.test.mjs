@@ -22,9 +22,15 @@ import {
   retryParallelAgentRun,
   runParallelAgents,
 } from "../src/orchestration/parallel-runtime.mjs";
-import { importPlan } from "../src/orchestration/plan-state.mjs";
+
 import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, importApprovedPlan, declare } from "./helpers/external-fixture.mjs";
+
+/** 夹具 Worker：写入已声明的 src/app.js，开工检查不接受空转命令。 */
+const WRITE_APP_WORKER = "node -e \"require('node:fs').mkdirSync('src',{recursive:true});require('node:fs').writeFileSync('src/app.js','ok')\"";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_RESPONSIBILITY = declare("src/app.js");
 
 const CLI_PATH = path.resolve(process.cwd(), "bin", "wildarrange.mjs");
 
@@ -39,11 +45,11 @@ async function importTwoTaskPlan(dir) {
       id,
       title: `task ${id}`,
       owner: "ZhuRong",
-      writable_paths: ["src/**"],
+      writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
       verify_commands: ["node -e \"process.exit(0)\""],
     })),
   }, null, 2));
-  await importPlan(dir, planPath);
+  await importApprovedPlan(dir, planPath);
 }
 
 test("status reconciles incomplete tasks and retry re-runs only the failed one", async () => {
@@ -66,7 +72,7 @@ test("status reconciles incomplete tasks and retry re-runs only the failed one",
     // partial 重试：只重跑 T002，并用修复后的命令覆盖原命令。
     const retry = await retryParallelAgentRun(dir, {
       runId: batch.runId,
-      command: "node -e \"process.exit(0)\"",
+      command: WRITE_APP_WORKER,
     });
     assert.equal(retry.status, "requeued");
     assert.deepEqual(retry.retried, ["T002"]);

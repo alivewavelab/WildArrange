@@ -9,16 +9,28 @@ import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { importPlan } from "../src/orchestration/plan-state.mjs";
+
 import { runNextTask } from "../src/orchestration/linear-runtime.mjs";
 import { statusReport, writeWorkflowSummary } from "../src/orchestration/status.mjs";
 import { resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
-import { installDocumentReviewerFixture, nodeEval, routeRequest } from "./helpers/runtime-fixtures.mjs";
+import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
+import { nodeEval, routeRequest } from "./helpers/runtime-fixtures.mjs";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const DOC_PRODUCT_DOC_PLANS_RESPONSIBILITY = declare("doc/plans/reminder-groups/tasks.md", "doc/plans/reminders/tasks.md", "doc/product/reminders/brief.md", "doc/product/reminders/design.md");
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const INDEX_HTML_PACKAGE_JSON_SRC_RESPONSIBILITY = declare("index.html", "package.json", "src/app.cjs", "src/app.js", "src/app.test.js");
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const ARTIFACTS_RESPONSIBILITY = declare("artifacts/reminder-groups-qa.md", "artifacts/reminders-qa.md");
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const DOC_REPORTS_RESPONSIBILITY = declare("doc/reports/reminder-groups-summary.md", "doc/reports/reminders-summary.md");
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const DOC_PLANS_RESPONSIBILITY = declare("doc/plans/reminder-groups/tasks.md", "doc/plans/reminders/tasks.md");
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_TEST_RESPONSIBILITY = declare("src/app.cjs", "src/app.js", "src/app.test.js", "test/app.test.cjs");
 
 test("simulation greenfield project runs from product planning to completed web app", async () => {
   await withExternalProject(async ({ projectRoot, root, governanceRoot }) => {
-    await installDocumentReviewerFixture(projectRoot, governanceRoot);
 
     const route = await routeRequest(projectRoot, {
       text: "从零做一个网页版提醒事项 App，一期 MVP 要有清单流程、空状态、验收标准和失败恢复。",
@@ -38,7 +50,7 @@ test("simulation greenfield project runs from product planning to completed web 
           id: "T001",
           subject: "产出提醒事项产品 brief、设计和计划",
           description: "澄清目标、用户旅程、空状态、失败恢复和验收口径。",
-          writable_paths: ["doc/product/**", "doc/plans/**"],
+          writable_paths: ["doc/product/**", "doc/plans/**"], responsibilityChanges: DOC_PRODUCT_DOC_PLANS_RESPONSIBILITY,
           worker_command: nodeEval(`
             const fs = require("fs");
             fs.mkdirSync("doc/product/reminders", { recursive: true });
@@ -76,7 +88,7 @@ test("simulation greenfield project runs from product planning to completed web 
           subject: "实现网页版提醒事项 App",
           description: "根据 T001 的 brief/design 生成可打开的 HTML 与 JS。",
           blockedBy: ["T001"],
-          writable_paths: ["index.html", "package.json", "src/**"],
+          writable_paths: ["index.html", "package.json", "src/**"], responsibilityChanges: INDEX_HTML_PACKAGE_JSON_SRC_RESPONSIBILITY,
           worker_command: nodeEval(`
             const fs = require("fs");
             fs.mkdirSync("src", { recursive: true });
@@ -110,7 +122,7 @@ test("simulation greenfield project runs from product planning to completed web 
           subject: "验收提醒事项 App 的核心体验",
           description: "验证空状态、添加流程、错误反馈和测试证据都存在。",
           blockedBy: ["T002"],
-          writable_paths: ["artifacts/**"],
+          writable_paths: ["artifacts/**"], responsibilityChanges: ARTIFACTS_RESPONSIBILITY,
           worker_command: nodeEval(`
             const fs = require("fs");
             fs.mkdirSync("artifacts", { recursive: true });
@@ -139,7 +151,7 @@ test("simulation greenfield project runs from product planning to completed web 
           subject: "复核提醒事项 App 完成证据",
           description: "生成最终完成摘要，证明计划、实现和验收链路闭合。",
           blockedBy: ["T003"],
-          writable_paths: ["doc/reports/**"],
+          writable_paths: ["doc/reports/**"], responsibilityChanges: DOC_REPORTS_RESPONSIBILITY,
           worker_command: nodeEval(`
             const fs = require("fs");
             fs.mkdirSync("doc/reports", { recursive: true });
@@ -161,11 +173,11 @@ test("simulation greenfield project runs from product planning to completed web 
       ],
     }, null, 2));
 
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
     const first = await runNextTask(projectRoot);
     assert.equal(first.status, "completed");
     const second = await runNextTask(projectRoot);
-    assert.equal(second.status, "completed");
+    assert.equal(second.status, "completed", JSON.stringify(second.task?.last_failure?.observed || second.readiness?.issues || second.status));
     const third = await runNextTask(projectRoot);
     assert.equal(third.status, "completed");
     const fourth = await runNextTask(projectRoot);
@@ -181,7 +193,6 @@ test("simulation greenfield project runs from product planning to completed web 
 
 test("simulation existing project handles large feature addition through planning and gates", async () => {
   await withExternalProject(async ({ projectRoot, root, governanceRoot }) => {
-    await installDocumentReviewerFixture(projectRoot, governanceRoot);
 
     const route = await routeRequest(projectRoot, {
       text: "已有项目新增一个提醒分组大功能，要处理权限、状态流程、回归验收和范围取舍。",
@@ -200,7 +211,7 @@ test("simulation existing project handles large feature addition through plannin
           id: "T001",
           subject: "补充分组功能计划证据",
           description: "记录用户旅程、范围取舍和验收标准。",
-          writable_paths: ["doc/plans/**"],
+          writable_paths: ["doc/plans/**"], responsibilityChanges: DOC_PLANS_RESPONSIBILITY,
           worker_command: nodeEval(`
             const fs = require("fs");
             fs.mkdirSync("doc/plans/reminder-groups", { recursive: true });
@@ -225,7 +236,7 @@ test("simulation existing project handles large feature addition through plannin
           subject: "实现提醒分组并保留回归行为",
           description: "新增 groupReminder，同时保持 listItems 不变。",
           blockedBy: ["T001"],
-          writable_paths: ["src/**", "test/**"],
+          writable_paths: ["src/**", "test/**"], responsibilityChanges: SRC_TEST_RESPONSIBILITY,
           worker_command: nodeEval(`
             const fs = require("fs");
             fs.writeFileSync("src/app.cjs", [
@@ -256,7 +267,7 @@ test("simulation existing project handles large feature addition through plannin
           subject: "验收提醒分组的回归和边界证据",
           description: "验证既有 listItems 回归、新增 groupReminder happy path 和错误路径。",
           blockedBy: ["T002"],
-          writable_paths: ["artifacts/**"],
+          writable_paths: ["artifacts/**"], responsibilityChanges: ARTIFACTS_RESPONSIBILITY,
           worker_command: nodeEval(`
             const fs = require("fs");
             fs.mkdirSync("artifacts", { recursive: true });
@@ -283,7 +294,7 @@ test("simulation existing project handles large feature addition through plannin
           subject: "复核提醒分组范围取舍和交付摘要",
           description: "记录范围取舍、回归证据和交付状态。",
           blockedBy: ["T003"],
-          writable_paths: ["doc/reports/**"],
+          writable_paths: ["doc/reports/**"], responsibilityChanges: DOC_REPORTS_RESPONSIBILITY,
           worker_command: nodeEval(`
             const fs = require("fs");
             fs.mkdirSync("doc/reports", { recursive: true });
@@ -306,7 +317,7 @@ test("simulation existing project handles large feature addition through plannin
       ],
     }, null, 2));
 
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
     assert.equal((await runNextTask(projectRoot)).status, "completed");
     const implemented = await runNextTask(projectRoot);
     assert.equal(implemented.status, "completed");

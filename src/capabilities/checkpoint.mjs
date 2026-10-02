@@ -8,7 +8,7 @@
 // 【运行原理速读】
 //   · 何时执行？交付流水线在 verifier/scope/review 通过后、最终 proof 前。
 //   · 做了什么？把 verifyResult、scopeResult、reviewResult、deliveryBaseline
-//     写入 .wildarrange 下任务级 checkpoint 路径。
+//     写入运行态目录下任务级 checkpoint 路径。
 //   · 缺了它会怎样？无法追溯「通过验收时」的精确证据组合与 delivery SHA。
 // =============================================================================
 

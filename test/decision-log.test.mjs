@@ -25,9 +25,12 @@ import { routeRequest } from "../src/ai/routing.mjs";
 import { projectDecisions } from "../src/interface/decisions.mjs";
 import { readDecisions } from "../src/infra/decision-log.mjs";
 import { admitParallelAgentResult, runParallelAgents } from "../src/orchestration/parallel-runtime.mjs";
-import { importPlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
+import { loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { readJson, resolveTaskCheckpointPath, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { gitCommitAll, withExternalProject } from "./helpers/external-fixture.mjs";
+import { gitCommitAll, withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_RESPONSIBILITY = declare("src/decision-fixture.txt", "src/parallel.txt", "src/unexpected.txt");
 
 const execFileAsync = promisify(execFile);
 const WILDARRANGE_BIN = path.resolve(import.meta.dirname, "..", "bin", "wildarrange.mjs");
@@ -50,14 +53,14 @@ async function importPassingPlan(dir) {
       {
         id: "T001",
         subject: "Task whose gates all pass",
-        worker_command: nodeEval("process.exit(0)"),
+        worker_command: nodeEval("require('fs').writeFileSync('src/parallel.txt','ok\\n')"),
         verify_commands: [nodeEval("const fs=require('fs');const assert=require('assert/strict');assert.equal(fs.readFileSync('src/decision-fixture.txt','utf8').trim(),'checked');if(fs.existsSync('src/parallel.txt'))assert.equal(fs.readFileSync('src/parallel.txt','utf8').trim(),'ok')")],
         review_commands: [nodeEval("const fs=require('fs');const assert=require('assert/strict');assert.equal(fs.statSync('src/decision-fixture.txt').size,8);assert(!fs.existsSync('src/unexpected.txt'))")],
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
       },
     ],
   }, null, 2));
-  return importPlan(dir, planPath);
+  return importApprovedPlan(dir, planPath);
 }
 
 test("delivery pipeline emits one decision record per gate plus a pipeline outcome", async () => {
@@ -89,9 +92,6 @@ test("contract governance prep failure becomes fail evidence and a blocked outco
   await withExternalProject(async ({ projectRoot: dir }) => {
     const plan = await importPassingPlan(dir);
     // 初始化空契约注册表，让契约扫描本身 pass，注入点稳定在 JSON.parse。
-    await mkdir(path.join(dir, "tooling", "contracts"), { recursive: true });
-    await writeFile(path.join(dir, "tooling", "contracts", "contract-registry.json"),
-      JSON.stringify({ kind: "contract_registry", schemaVersion: 1, updatedAt: new Date().toISOString(), contracts: [] }));
     const taskState = await loadTaskState(dir);
     const task = taskState.tasks.find((candidate) => candidate.id === "T001");
 
@@ -124,8 +124,6 @@ test("delivery target mismatch becomes fail evidence and a blocked outcome inste
   await withExternalProject(async ({ projectRoot: dir }) => {
     await mkdir(path.join(dir, "src"), { recursive: true });
     await writeFile(path.join(dir, "src", "decision-fixture.txt"), "checked\n", "utf8");
-    // writable_paths 额外覆盖契约注册表：注册表放在 tooling/contracts 下，
-    // 让契约扫描本身 pass（不落在 scope 门之外），流程才能走到完成段。
     const planPath = resolveWildArrangePath(dir, "artifacts", "delivery-mismatch-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Delivery mismatch",
@@ -136,14 +134,11 @@ test("delivery target mismatch becomes fail evidence and a blocked outcome inste
           worker_command: nodeEval("process.exit(0)"),
           verify_commands: [nodeEval("const fs=require('fs');const assert=require('assert/strict');assert.equal(fs.readFileSync('src/decision-fixture.txt','utf8').trim(),'checked')")],
           review_commands: [nodeEval("const fs=require('fs');const assert=require('assert/strict');assert.equal(fs.statSync('src/decision-fixture.txt').size,8)")],
-          writable_paths: ["src/**", "tooling/contracts/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         },
       ],
     }, null, 2));
-    const plan = await importPlan(dir, planPath);
-    await mkdir(path.join(dir, "tooling", "contracts"), { recursive: true });
-    await writeFile(path.join(dir, "tooling", "contracts", "contract-registry.json"),
-      JSON.stringify({ kind: "contract_registry", schemaVersion: 1, updatedAt: new Date().toISOString(), contracts: [] }));
+    const plan = await importApprovedPlan(dir, planPath);
     const taskState = await loadTaskState(dir);
     const task = taskState.tasks.find((candidate) => candidate.id === "T001");
 
@@ -345,11 +340,11 @@ test("gate FAIL decisions carry the rule they hit (code/reason), and decision or
           worker_command: nodeEval("process.exit(0)"),
           verify_commands: [nodeEval("console.error('boom: expected marker missing'); process.exit(1)")],
           review_commands: ["node --version"],
-          writable_paths: ["src/**"],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         },
       ],
     }, null, 2));
-    const plan = await importPlan(dir, planPath);
+    const plan = await importApprovedPlan(dir, planPath);
     const taskState = await loadTaskState(dir);
     const task = taskState.tasks.find((candidate) => candidate.id === "T001");
 
@@ -390,7 +385,7 @@ test("completed pipeline emits gate decisions in execution order ending with the
     assert.deepEqual(order, ["verify", "scope", "review", "acceptance-proof", "checkpoint", "pipeline"]);
     // review 决策必须带出约定证据路径（报告在 pipeline 返回后写入该路径）。
     const review = records.find((candidate) => candidate.gate === "review");
-    assert.match(review.evidencePath, /^\.wildarrange\/reports\/reviews\/.+\/T001\.md$/);
+    assert.match(review.evidencePath, /^runtime:reports\/reviews\/.+\/T001\.md$/);
   });
 });
 

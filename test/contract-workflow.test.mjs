@@ -16,7 +16,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { readJson, resolveTaskCheckpointPath, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { importPlan, approvePlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
+import { approvePlan, loadTaskState } from "../src/orchestration/plan-state.mjs";
 import { runNextTask } from "../src/orchestration/linear-runtime.mjs";
 import { prepareContractReview, proposeContractChange, resolveContractChange } from "../src/orchestration/contract-governance.mjs";
 import { recordContractChangeDecision, resolveChangeRequest } from "../src/orchestration/change-governance.mjs";
@@ -28,7 +28,7 @@ import { contractGovernancePaths, persistContractScan } from "../src/infra/contr
 import { applyContractCardDecision, scanContractGovernanceUniverse } from "../src/capabilities/contract-governance.mjs";
 import { continuationDirective } from "../src/ai/context.mjs";
 import { persistTaskState } from "../src/orchestration/task-board.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, importApprovedPlan, declare } from "./helpers/external-fixture.mjs";
 
 const sourcePath = "src-tauri/src/lib.rs";
 const rust = '#[tauri::command]\nfn greet(name: String) -> String { name }\nfn main(){ tauri::generate_handler![greet]; }\n';
@@ -56,9 +56,9 @@ async function fixture(t, items = []) {
     await writeFile(path.join(aux, "review.cjs"), `require('assert').match(require('fs').readFileSync('${sourcePath}','utf8'),/generate_handler/);`);
     const planPath = path.join(aux, "plan.json");
     await writeFile(planPath, JSON.stringify({ id: "contract-flow", title: "Contract flow", tasks: [{ id: "T1", subject: "新增问候", owner: "ZhuRong",
-      worker_command: `node "${path.join(aux, "worker.cjs")}"`, verify_commands: [`node "${path.join(aux, "verify.cjs")}"`], review_commands: [`node "${path.join(aux, "review.cjs")}"`], writable_paths: [sourcePath],
+      worker_command: `node "${path.join(aux, "worker.cjs")}"`, verify_commands: [`node "${path.join(aux, "verify.cjs")}"`], review_commands: [`node "${path.join(aux, "review.cjs")}"`], writable_paths: [sourcePath], responsibilityChanges: declare(sourcePath),
       contractChanges: { items } }] }));
-    await importPlan(root, planPath);
+    await importApprovedPlan(root, planPath);
     ready(root);
     await held;
   });
@@ -248,6 +248,8 @@ test("resume and Stop prioritize unfinished rollback over human approval and oth
   task.last_failure = { reason: "admission_rollback_failed", summary: "rollback could not restore shared files", retryHint: "resume original run" };
   state.tasks.push({ ...task, id: "T2", subject: "Independent task", status: "pending", admission_claim: null, pendingContractChange: null });
   await persistTaskState(root, state);
+  // 新增的 T2 带职责声明会让计划回到待批准；批准后才进入「其它可运行任务」的场景
+  await approvePlan(root);
   const recovery = await continuationDirective(root, { cliCommandPrefix: `node "${path.resolve("bin/wildarrange.mjs")}"` });
   assert.equal(recovery.shouldContinue, true);
   assert.equal(recovery.reason, "admission_recovery");

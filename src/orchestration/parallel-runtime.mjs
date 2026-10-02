@@ -187,14 +187,13 @@ export async function runParallelAgents(rootDir, options = {}) {
     })));
     await releaseFailedParallelRunClaims(rootDir, runId, results);
     await appendRunIndex(rootDir, runId, results);
-    const skipped = results.length > 0 && results.every((result) => result.status === "skipped");
     const pass = results.every((result) => result.pass === true);
     const batch = {
       kind: "parallel_agent_batch",
       runId,
       at: nowIso(),
       startedAt,
-      status: skipped ? "skipped" : pass ? "completed" : "failed",
+      status: pass ? "completed" : "failed",
       isolation: uniqueIsolation(results),
       planId: taskState.planId,
       taskCount: results.length,
@@ -409,14 +408,14 @@ async function runOneAgentInner(rootDir, runDir, runId, task, options) {
     taskPacketPath,
     resultPath,
   }, options);
+  // 开工检查已要求真实 Worker 命令；这里仍缺失只可能是配置在检查后被改动，按失败处理
   const command = spawn.command;
-  const commandConfigured = Boolean(command);
   const startedAt = nowIso();
   const commandResult = worktree.isolation === "git-worktree" && worktree.available !== true
     ? { exitCode: 1, stdout: "", stderr: worktree.reason || "git-worktree isolation unavailable" }
     : command
       ? await runCommand(command, worktree.workDir, normalizeTimeout(options.timeoutMs || config.parallelAgents?.timeoutMs), { env: options.executionContextPath ? { WILDARRANGE_EXECUTION_CONTEXT: options.executionContextPath } : {} })
-      : { exitCode: 78, stdout: "", stderr: "no runner command configured; task packet prepared only" };
+      : { exitCode: 78, stdout: "", stderr: "no runner command configured" };
   const structuredResult = await readJson(resultPath, null) || {};
   const patchResult = await collectAgentWorktreePatch(rootDir, worktree, {
     timeoutMs: normalizeTimeout(options.timeoutMs || config.parallelAgents?.timeoutMs),
@@ -443,12 +442,12 @@ async function runOneAgentInner(rootDir, runDir, runId, task, options) {
     worktreeAvailable: worktree.available,
     worktreeReason: worktree.reason,
     exitCode: commandResult.exitCode,
-    status: commandConfigured ? (commandResult.exitCode === 0 ? "pass" : "fail") : "skipped",
-    pass: commandConfigured && commandResult.exitCode === 0,
+    status: commandResult.exitCode === 0 ? "pass" : "fail",
+    pass: commandResult.exitCode === 0,
     stdout: truncate(commandResult.stdout || "", 4000),
     stderr: truncate(commandResult.stderr || "", 4000),
     result: structuredResult,
-    lifecycle: buildAgentLifecycle(commandConfigured && commandResult.exitCode === 0, config, commandConfigured ? null : "skipped"),
+    lifecycle: buildAgentLifecycle(commandResult.exitCode === 0, config),
     patch: patchResult ? {
       patchPath: patchResult.patchPath,
       changedPaths: patchResult.changedPaths,
@@ -560,14 +559,7 @@ function buildTaskPacket(task, context) {
 }
 
 /** 根据 pass/config 构造 agent lifecycle 初始状态。 */
-function buildAgentLifecycle(pass, config, statusOverride = null) {
-  if (statusOverride === "skipped") {
-    return {
-      status: "skipped",
-      retainUntil: null,
-      updatedAt: nowIso(),
-    };
-  }
+function buildAgentLifecycle(pass, config) {
   if (!pass) {
     return {
       status: "failed",

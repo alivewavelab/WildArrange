@@ -18,10 +18,10 @@ import { normalizeRelativePath } from "../infra/path-match.mjs";
 
 /** 用 git diff/ls-files 收集 admission 后工作区实际变更路径。 */
 export async function collectActualAdmissionPaths(rootDir, fallbackPaths) {
-  const result = await runCommandFile("git", ["-C", rootDir, "diff", "--name-only", "--", ".", ":!.wildarrange"], rootDir, 30_000);
+  const result = await runCommandFile("git", ["-C", rootDir, "diff", "--name-only", "--", "."], rootDir, 30_000);
   if (result.exitCode !== 0) return fallbackPaths;
   const paths = result.stdout.split(/\r?\n/).map((line) => normalizeRelativePath(line.trim())).filter(Boolean);
-  const untracked = await runCommandFile("git", ["-C", rootDir, "ls-files", "--others", "--exclude-standard", "--", ".", ":!.wildarrange"], rootDir, 30_000);
+  const untracked = await runCommandFile("git", ["-C", rootDir, "ls-files", "--others", "--exclude-standard", "--", "."], rootDir, 30_000);
   if (untracked.exitCode === 0) {
     for (const line of untracked.stdout.split(/\r?\n/)) {
       const filePath = normalizeRelativePath(line.trim());

@@ -44,7 +44,7 @@ export const PROJECT_DIR = path.dirname(path.dirname(MODULE_DIR));
 export const DEFAULT_PROMPT_PACK_DIR = path.join(PROJECT_DIR, "packs", DEFAULT_RUNTIME_NAME);
 
 /**
- * 从 pack 目录安装 Prompt Pack 到 .wildarrange 并写 registry。
+ * 从 pack 目录安装 Prompt Pack 到运行态目录并写 registry。
  */
 export async function installPromptPack(rootDir, packDir = DEFAULT_PROMPT_PACK_DIR) {
   const canonicalPackDir = await realpath(packDir);
@@ -94,7 +94,7 @@ function registryIdentity(manifest, entries, canonicalPackDir) {
     description: manifest.description,
     source: manifest.source,
     // Diagnostics only. Runtime readers always use the fixed materialized root
-    // under .wildarrange and never derive a read root from registry JSON.
+    // under the runtime root and never derive a read root from registry JSON.
     sourcePackDir: canonicalPackDir,
     agents: Object.fromEntries(entries.agents.map((entry) => [entry.name, registryEntry(entry)])),
     skills: Object.fromEntries(entries.skills.map((entry) => [entry.name, registryEntry(entry)])),
@@ -229,14 +229,14 @@ async function materializePromptPack(rootDir, entries) {
   const runtimeRoot = resolveWildArrangePath(rootDir);
   const runtimeStat = await lstat(runtimeRoot).catch(() => null);
   if (!runtimeStat?.isDirectory() || runtimeStat.isSymbolicLink()) {
-    throw new Error("runtime .wildarrange root must be a real directory before installing a prompt pack");
+    throw new Error("runtime root must be a real directory before installing a prompt pack");
   }
   const packParent = resolveWildArrangePath(rootDir, "prompt-pack");
   await mkdir(packParent, { recursive: true });
   const realRuntimeRoot = await realpath(runtimeRoot);
   const realPackParent = await realpath(packParent);
   if (!isInsideRoot(realRuntimeRoot, realPackParent)) {
-    throw new Error("runtime prompt-pack directory escapes .wildarrange root");
+    throw new Error("runtime prompt-pack directory escapes the runtime root");
   }
 
   const stagingRoot = path.join(realPackParent, `staging-${createWorkId("pack")}`);
@@ -277,7 +277,7 @@ async function resolveTrustedInstalledRoot(rootDir, label) {
     lstat(installedRoot).catch(() => null),
   ]);
   if (!runtimeStat?.isDirectory() || runtimeStat.isSymbolicLink()) {
-    throw new Error(`runtime .wildarrange root is not trusted for ${label}`);
+    throw new Error(`runtime root is not trusted for ${label}`);
   }
   if (!installedStat?.isDirectory() || installedStat.isSymbolicLink()) {
     throw new Error(`installed prompt-pack root is not trusted for ${label}`);
@@ -287,7 +287,7 @@ async function resolveTrustedInstalledRoot(rootDir, label) {
     realpath(installedRoot),
   ]);
   if (!isInsideRoot(realRuntimeRoot, realInstalledRoot)) {
-    throw new Error(`installed prompt-pack root escapes .wildarrange for ${label}`);
+    throw new Error(`installed prompt-pack root escapes the runtime root for ${label}`);
   }
   return realInstalledRoot;
 }

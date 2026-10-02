@@ -36,7 +36,7 @@ import { SAFE_ID, readJsonBody, sendJson } from "./http-utils.mjs";
 // --- 治理文件分组常量 ---
 
 /** 治理文件索引扫描时跳过的目录名。 */
-const GOVERNANCE_EXCLUDES = new Set([".git", ".wildarrange", "node_modules", ".tmp", "dist", "build", "coverage"]);
+const GOVERNANCE_EXCLUDES = new Set([".git", "node_modules", ".tmp", "dist", "build", "coverage"]);
 /** 治理文件 UI 分组定义（id/label/描述）。 */
 const GOVERNANCE_GROUPS = [
   { id: "gates", label: "质量门", title: "交付检查链", description: "测试、改动范围、独立复核、验收证明和完成入账。" },

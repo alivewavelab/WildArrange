@@ -21,7 +21,7 @@ import {
 } from "../src/interface/adapters.mjs";
 import { CURSOR_BRIDGE_NAME } from "../src/interface/adapter-bundles.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
-import { importPlan } from "../src/orchestration/plan-state.mjs";
+import { declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
 
 test("external adapters generate all host bundles without writing customer repository files", async () => {
   await withExternalWorkspace(async ({ projectRoot, runtimeRoot, workspace }) => {
@@ -146,11 +146,12 @@ test("external Codex Stop hooks return JSON and continue unfinished work", async
         subject: "Create result",
         owner: "ZhuRong",
         writable_paths: ["result.txt"],
+        responsibilityChanges: declare("result.txt"),
         worker_command: "node -e \"require('fs').writeFileSync('result.txt','done')\"",
         verify_commands: ["node -e \"if(!require('fs').existsSync('result.txt')) process.exit(1)\""],
       }],
     }));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     for (const event of ["Stop", "SubagentStop"]) {
       const sessionId = `codex-${event.toLowerCase()}`;

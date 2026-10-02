@@ -14,27 +14,22 @@ import { runNextTask } from "../src/orchestration/linear-runtime.mjs";
 import { attentionReport } from "../src/orchestration/status.mjs";
 import { continuationDirective, resumeReport } from "../src/ai/context.mjs";
 import { preToolUseGuard } from "../src/ai/pre-tool-guard.mjs";
-import { writeDefaultWildArrangeConfig } from "../src/infra/runtime-config.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare } from "./helpers/external-fixture.mjs";
 import { nodeEval, runInjectionHook, writePolicyConfig, installExternalTestAdapter } from "./helpers/runtime-fixtures.mjs";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const SRC_RESPONSIBILITY = declare("src/a.js", "src/before-approval.js", "src/missing.js", "src/read-only.js", "src/result.js");
 
 test("plan approval gate blocks run until developer approves", async () => {
   await withExternalProject(async ({ projectRoot, root, governanceRoot }) => {
-    await writeDefaultWildArrangeConfig(projectRoot, { root: true, force: true });
-    // enable the approval gate in the governance config
-    const configPath = path.join(governanceRoot, "policy", "wildarrange.config.json");
-    const config = await readJson(configPath);
-    config.planApproval = { required: true };
-    await writePolicyConfig(governanceRoot, config);
-
     const planPath = path.join(root, "approval-plan.json");
     await writeFile(planPath, JSON.stringify({
       title: "Approval drill",
       tasks: [{
         id: "T001",
         subject: "should not run before approval",
-        writable_paths: ["src/**"],
+        writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
         worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/a.js','X\\n')\"",
         verify_commands: ["node -e \"const fs=require('fs'); if(!fs.readFileSync('src/a.js','utf8').includes('X')) process.exit(1)\""],
         review_commands: [nodeEval("const fs=require('fs');const lines=fs.readFileSync('src/a.js','utf8').trim().split(/\\r?\\n/);if(lines.length!==1||lines[0]!=='X')process.exit(1)")],
@@ -67,49 +62,6 @@ test("plan approval gate blocks run until developer approves", async () => {
     const ran = await runNextTask(projectRoot);
     assert.equal(ran.status, "completed");
     assert.equal(ran.task.id, "T001");
-  });
-});
-
-test("runtime snapshot follows execution semantics for legacy approval records", async () => {
-  await withExternalProject(async ({ projectRoot, root }) => {
-    await installExternalTestAdapter(projectRoot);
-    const planPath = path.join(root, "legacy-approval-plan.json");
-    await writeFile(planPath, JSON.stringify({
-      id: "legacy-approval-plan",
-      generated_by: "host_semantic",
-      title: "Legacy approval compatibility",
-      tasks: [{
-        id: "T001",
-        subject: "Create a result",
-        description: "Create the requested result file.",
-        owner: "ZhuRong",
-        writable_paths: ["src/result.js"],
-        responsibilityChanges: [{ script: "src/result.js", additions: "Create accepted artifact", responsibilityBefore: "Absent", responsibilityAfter: "Own accepted artifact", facts: [] }],
-        worker_command: "node -e \"const fs=require('fs');fs.mkdirSync('src',{recursive:true});fs.writeFileSync('src/result.js','ok')\"",
-        verify_commands: ["node -e \"if(!require('fs').existsSync('src/result.js'))process.exit(1)\""],
-      }],
-    }, null, 2));
-    await importPlan(projectRoot, planPath);
-
-    const workPath = resolveWildArrangePath(projectRoot, "work.json");
-    const legacyWork = await readJson(workPath);
-    delete legacyWork.planApproval.planId;
-    await writeFile(workPath, JSON.stringify(legacyWork, null, 2));
-    legacyWork.status = "ready";
-    await writeFile(workPath, JSON.stringify(legacyWork, null, 2));
-    const currentLegacy = await resumeReport(projectRoot, { sessionId: "legacy-current-approval" });
-    assert.equal(currentLegacy.nextActionDetails.reason, "awaiting_plan_approval");
-    assert.equal(currentLegacy.nextActionDetails.command, null);
-    assert.match(currentLegacy.nextAction, /await user approval/);
-    const blockedRun = await runNextTask(projectRoot);
-    assert.equal(blockedRun.status, "awaiting_plan_approval");
-    assert.equal(blockedRun.task, null);
-
-    legacyWork.planApproval.planId = "older-plan";
-    await writeFile(workPath, JSON.stringify(legacyWork, null, 2));
-    const staleLegacy = await resumeReport(projectRoot, { sessionId: "legacy-other-plan-approval" });
-    assert.equal(staleLegacy.nextActionDetails.reason, "runnable_task");
-    assert.match(staleLegacy.nextActionDetails.command, /\brun$/);
   });
 });
 
@@ -309,6 +261,7 @@ test("host semantic plans reject missing or trivial workers before formal state 
         id: "T001",
         subject: "Verify work completed outside the automatic host plan",
         writable_paths: ["src/result.js"],
+        responsibilityChanges: declare("src/result.js"),
         verify_commands: ["node -e \"if(!require('fs').existsSync('src/result.js')) process.exit(1)\""],
       }],
     }, null, 2));

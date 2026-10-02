@@ -41,7 +41,7 @@ const strings = (value, label) => {
 const DOCUMENT_TRUTH_ID = "document-current-truth";
 /** 判断路径是否为需 D1-D3 约束的长期文档（排除 plans/reports 等）。 */
 const isLongTermDocument = name => {
-  if (typeof name !== "string" || name.startsWith(".wildarrange/")) return false;
+  if (typeof name !== "string") return false;
   if (/(^|\/)(?:verification-archive|node_modules|vendor|plans|reports|research|evidence)\//i.test(name)) return false;
   return /^[^/]+\.mdx?$/i.test(name)
     || /^(?:doc|docs)\/.+\.(?:md|mdx|html)$/i.test(name);
@@ -232,7 +232,7 @@ export function hasAcceptedProjectReview(config, task, scope, receipt) {
 /**
  * 从 plan-draft 预览或应用 review 配置变更，并生成 checklist。
  * @param {string} rootDir 项目根
- * @param {string} draftPath .wildarrange/plan-drafts 下的 JSON 路径
+ * @param {string} draftPath 运行态 plan-drafts 目录下的 JSON 路径
  * @param {object} [options] apply 为 true 时写入配置
  * @returns {Promise<object>} applied、configPath、checklist 等
  */
@@ -240,12 +240,10 @@ export async function configureProjectReview(rootDir, draftPath, options = {}) {
   const draftRoot = resolveWildArrangePath(rootDir, "plan-drafts");
   await assertRealpathInsideRoot(resolveWildArrangePath(rootDir), draftRoot, "plan-drafts");
   const drafts = await realpath(draftRoot);
-  const logical = String(draftPath).replaceAll("\\", "/");
-  const requested = /^\.wildarrange\/plan-drafts\/[^/]+\.json$/.test(logical)
-    ? path.join(drafts, path.posix.basename(logical)) : path.resolve(rootDir, draftPath);
+  const requested = path.resolve(rootDir, draftPath);
   const file = await realpath(requested);
   const relative = path.relative(drafts, file).replaceAll("\\", "/");
-  if (!/^[A-Za-z0-9_.-]+\.json$/.test(relative) || !(await lstat(requested)).isFile()) throw new Error("setup draft must be a regular JSON file under .wildarrange/plan-drafts");
+  if (!/^[A-Za-z0-9_.-]+\.json$/.test(relative) || !(await lstat(requested)).isFile()) throw new Error(`setup draft must be a regular JSON file under ${draftRoot}`);
   const patch = await readJson(file);
   const preview = await updateProjectGovernanceConfig(rootDir, patch);
   const checklist = await prepareProjectReview(rootDir, { writable_paths: ["**"] }, preview.config);

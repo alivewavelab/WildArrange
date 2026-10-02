@@ -9,19 +9,24 @@ import assert from "node:assert/strict";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { importPlan } from "../src/orchestration/plan-state.mjs";
+
 import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtime.mjs";
 import { statusReport } from "../src/orchestration/status.mjs";
 import { continuationDirective } from "../src/ai/context.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
 import { nodeEval, installExternalTestAdapter, createSmokePlan } from "./helpers/runtime-fixtures.mjs";
+
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const ARTIFACTS_RESPONSIBILITY = declare("artifacts/first.txt", "artifacts/linear-smoke.txt", "artifacts/second.txt");
+/** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
+const ARTIFACTS_SRC_RESPONSIBILITY = declare("artifacts/first.txt", "artifacts/linear-smoke.txt", "artifacts/second.txt", "src/forbidden.js", "src/out.txt");
 
 test("continuation directive reports runnable work across sessions", async () => {
   await withExternalProject(async ({ projectRoot, root }) => {
     const adapter = await installExternalTestAdapter(projectRoot);
     const samplePath = await createSmokePlan(root);
-    await importPlan(projectRoot, samplePath);
+    await importApprovedPlan(projectRoot, samplePath);
     const directive = await continuationDirective(projectRoot, { sessionId: "codex-a", source: "test" });
     assert.equal(directive.shouldContinue, true);
     assert.equal(directive.reason, "runnable_task");
@@ -33,7 +38,7 @@ test("continuation directive reports runnable work across sessions", async () =>
 test("linear loop runs worker, verifies, checkpoints, and records ledger", async () => {
   await withExternalProject(async ({ projectRoot, root }) => {
     const samplePath = await createSmokePlan(root);
-    const plan = await importPlan(projectRoot, samplePath);
+    const plan = await importApprovedPlan(projectRoot, samplePath);
 
     const result = await runNextTask(projectRoot);
     assert.equal(result.status, "completed");
@@ -77,7 +82,7 @@ test("linear loop honors blockedBy dependencies in order", async () => {
         {
           id: "T001",
           subject: "Write first artifact",
-          writable_paths: ["artifacts/**"],
+          writable_paths: ["artifacts/**"], responsibilityChanges: ARTIFACTS_RESPONSIBILITY,
           worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('artifacts',{recursive:true}); fs.writeFileSync('artifacts/first.txt','first')\"",
           verify_commands: ["node -e \"const fs=require('fs'); if(fs.readFileSync('artifacts/first.txt','utf8')!=='first') process.exit(1)\""],
           review_commands: [nodeEval("const fs=require('fs');const stat=fs.statSync('artifacts/first.txt');if(!stat.isFile()||stat.size!==5)process.exit(1)")],
@@ -86,14 +91,14 @@ test("linear loop honors blockedBy dependencies in order", async () => {
           id: "T002",
           subject: "Write second artifact after first",
           blockedBy: ["T001"],
-          writable_paths: ["artifacts/**"],
+          writable_paths: ["artifacts/**"], responsibilityChanges: ARTIFACTS_RESPONSIBILITY,
           worker_command: "node -e \"const fs=require('fs'); fs.writeFileSync('artifacts/second.txt',fs.readFileSync('artifacts/first.txt','utf8')+'+second')\"",
           verify_commands: ["node -e \"const fs=require('fs'); if(fs.readFileSync('artifacts/second.txt','utf8')!=='first+second') process.exit(1)\""],
           review_commands: [nodeEval("const fs=require('fs');const value=fs.readFileSync('artifacts/second.txt','utf8');if(!value.startsWith('first+')||value.split('+').length!==2)process.exit(1)")],
         },
       ],
     }));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const first = await runNextTask(projectRoot);
     assert.equal(first.status, "completed");
@@ -118,13 +123,14 @@ test("verifier failure returns task to pending until max attempts", async () => 
       tasks: [{
         id: "T001",
         subject: "Bad verification",
+        writable_paths: ["src/app.js"], responsibilityChanges: declare("src/app.js"),
         worker_command: "node -e \"if(!process.version)process.exit(1)\"",
         verify_commands: ["node -e \"process.exit(2)\""],
         review_commands: ["node --version"],
         maxAttempts: 2,
       }],
     }));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const first = await runNextTask(projectRoot);
     assert.equal(first.status, "retry");
@@ -152,7 +158,7 @@ test("verifier failure returns task to pending until max attempts", async () => 
   });
 });
 
-test("acceptance proof rejects no-op tasks with trivial worker and verifier", async () => {
+test("readiness rejects no-op tasks with a trivial worker before they can run", async () => {
   await withExternalProject(async ({ projectRoot, root }) => {
     const planPath = path.join(root, "noop-plan.json");
     await writeFile(planPath, JSON.stringify({
@@ -160,17 +166,19 @@ test("acceptance proof rejects no-op tasks with trivial worker and verifier", as
       tasks: [{
         id: "T001",
         subject: "看似完成实则什么都没做",
+        writable_paths: ["src/app.js"], responsibilityChanges: declare("src/app.js"),
         worker_command: "node -e \"process.exit(0)\"",
         verify_commands: ["node -e \"process.exit(0)\""],
         review_commands: [nodeEval(`const fs=require('fs');const state=JSON.parse(fs.readFileSync(${JSON.stringify(resolveWildArrangePath(projectRoot, "team", "tasks.json"))},'utf8'));const task=state.tasks.find((entry)=>entry.id==='T001');if(fs.existsSync('src')||!task||!task.worker_command.includes('process.exit(0)'))process.exit(1)`)],
       }],
     }, null, 2));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
+    // 空转 Worker 在开工检查就被拦下，根本到不了完成段
     const result = await runNextTask(projectRoot);
+    assert.equal(result.status, "readiness_blocked");
     assert.notEqual(result.task.status, "completed");
-    assert.equal(result.task.last_failure.reason, "acceptance_proof_failed");
-    assert.ok(result.acceptanceProof.checks.some((check) => check.name === "not_noop_task" && check.status === "fail"));
+    assert.ok(result.readiness.issues.some((issue) => /real worker_command/.test(issue)), JSON.stringify(result.readiness.issues));
   });
 });
 
@@ -182,13 +190,13 @@ test("worker execution records a pre-execute workspace snapshot in a git repo", 
       tasks: [{
         id: "T001",
         subject: "写一个工件文件",
-        writable_paths: ["artifacts/**", "src/**"],
+        writable_paths: ["artifacts/**", "src/**"], responsibilityChanges: ARTIFACTS_SRC_RESPONSIBILITY,
         worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/out.txt','snapshot')\"",
         verify_commands: ["node -e \"const fs=require('fs'); process.exit(fs.readFileSync('src/out.txt','utf8')==='snapshot'?0:1)\""],
         review_commands: [nodeEval("const fs=require('fs');const stat=fs.statSync('src/out.txt');if(!stat.isFile()||stat.size!==8)process.exit(1)")],
       }],
     }, null, 2));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     const result = await runNextTask(projectRoot);
     assert.equal(result.status, "completed");
@@ -210,11 +218,12 @@ test("linear command workers reject read-only long-lived task owners", async () 
         subject: "Do not run this command",
         owner: "BaiZe",
         writable_paths: ["src/forbidden.js"],
+        responsibilityChanges: declare("src/forbidden.js"),
         worker_command: "node -e \"const fs=require('fs'); fs.mkdirSync('src',{recursive:true}); fs.writeFileSync('src/forbidden.js','x')\"",
         verify_commands: ["node --version"],
       }],
     }, null, 2));
-    await importPlan(projectRoot, planPath);
+    await importApprovedPlan(projectRoot, planPath);
 
     await assert.rejects(() => runNextTask(projectRoot), /agent BaiZe is read-only and cannot enter a command worker/);
     await assert.rejects(() => runWorkflowNode(projectRoot, "execute", { taskId: "T001" }), /agent BaiZe is read-only and cannot enter a command worker/);

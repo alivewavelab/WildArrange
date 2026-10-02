@@ -16,7 +16,7 @@ import { relative, requireSafeId } from "../infra/contract-governance.mjs";
 import { uniqueStrings } from "../infra/text-utils.mjs";
 
 /** 契约扫描 walk 时跳过的目录名。 */
-const SKIP_DIRS = new Set([".git", ".wildarrange", "node_modules", "target", "dist", "build", ".tmp"]);
+const SKIP_DIRS = new Set([".git", "node_modules", "target", "dist", "build", ".tmp"]);
 
 /** 项目是否存在 Rust 侧 Tauri 扫描根（无则不必遍历全仓源码）。 */
 export function hasTauriRustRoot(rootDir) {

@@ -20,7 +20,7 @@
 | 恢复 adapter        | `node ./bin/wildarrange.mjs adapter restore --backup <backupId>`（外置：还原到该次 activate 之前） |
 | 导入计划              | `node ./bin/wildarrange.mjs plan --from plan.json`                     |
 | 跑下一个任务            | `node ./bin/wildarrange.mjs run`                                       |
-| 跑 sample workflow | `node ./bin/wildarrange.mjs workflow --sample`                         |
+| 连续推进已确认计划 | `node ./bin/wildarrange.mjs workflow`（`--from <plan.json>` 只导入并停在待确认） |
 | 跑并行子 Agent       | `node ./bin/wildarrange.mjs parallel run --max-agents 2 --command "..."` |
 | 用 worktree 跑子 Agent | `node ./bin/wildarrange.mjs parallel run --task T001 --isolation git-worktree --command "..."` |
 | 合入子 Agent 成果     | `node ./bin/wildarrange.mjs parallel admit --run <runId> --task T001`     |
@@ -35,10 +35,6 @@
 | 全量命令 / 物化命令文档 | `node ./bin/wildarrange.mjs --help --all` / `docs commands --write` |
 | 匹配 Skill          | `node ./bin/wildarrange.mjs skills match --text "..." --stage plan`    |
 | 仓库治理检查           | `node ./bin/wildarrange.mjs governance audit` |
-| 生成档案路由包         | `node ./bin/wildarrange.mjs archivist packet --text "..." --stage plan` |
-| 运行档案路由员         | `node ./bin/wildarrange.mjs archivist run --text "..." --stage plan --force` |
-| 查看路由建议           | `node ./bin/wildarrange.mjs archivist suggestions list`                 |
-| 审核路由建议           | `node ./bin/wildarrange.mjs archivist suggestions resolve --id <id> --decision accept --evidence "..." --rationale "..."` |
 | 查看状态              | `node ./bin/wildarrange.mjs status`                                    |
 | 写入 config 基线      | `node ./bin/wildarrange.mjs config baseline --reason reviewed`          |
 | 校验 config 基线      | `node ./bin/wildarrange.mjs config verify`                              |

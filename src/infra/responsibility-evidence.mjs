@@ -19,7 +19,7 @@ import { contractPath } from "./responsibility-contract.mjs";
 /** 职责证据 walk 时识别的源码扩展名正则。 */
 const SOURCE = /\.(?:[cm]?[jt]sx?|py|rs|go|java|kt|cs|cpp|cc|c|h|hpp|rb|php|swift|vue|svelte|sql|sh|ps1)$/i;
 /** walk 时跳过的目录名（含 vendor 与构建产物）。 */
-const EXCLUDED = new Set([".git", ".wildarrange", "node_modules", "vendor", "dist", "build", "target", ".venv"]);
+const EXCLUDED = new Set([".git", "node_modules", "vendor", "dist", "build", "target", ".venv"]);
 
 // Evidence only: no decisions, no writes, no silent truncation.
 /**
@@ -62,7 +62,7 @@ export async function collectResponsibilityEvidence(rootDir, changes, changedPat
     if (chars > maxChars) throw new Error("responsibility evidence exceeds budget; configure a larger review.responsibility.maxEvidenceChars");
     files.push({ path: name, content, hash: hashContent(content === null ? "<deleted>" : content) });
   }
-  const diff = await runCommandFile("git", ["diff", "HEAD", "--no-ext-diff", "--", ".", ":!.wildarrange"], root, 30000, { maxOutputChars: maxChars });
+  const diff = await runCommandFile("git", ["diff", "HEAD", "--no-ext-diff", "--", "."], root, 30000, { maxOutputChars: maxChars });
   if (diff.outputTruncated?.stdout) throw new Error("responsibility diff is truncated");
   const packet = { changedPaths, files, diff: diff.exitCode === 0 ? diff.stdout : null, diffAvailable: diff.exitCode === 0 };
   if (JSON.stringify(packet).length > maxChars) throw new Error("responsibility packet exceeds budget");

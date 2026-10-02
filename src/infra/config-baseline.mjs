@@ -20,7 +20,7 @@ import {
   writeJsonAtomic,
 } from "./runtime-store.mjs";
 
-/** 配置完整性基线文件在 .wildarrange 下的相对路径段。 */
+/** 配置完整性基线文件在运行态目录下的相对路径段。 */
 const CONFIG_BASELINE_PATH = ["security", "config-baseline.json"];
 
 /**

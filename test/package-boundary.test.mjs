@@ -30,9 +30,6 @@ const RESTRICTED_PROMPTS = [
   "doc/plans/claude-fable-5-system-prompt.md",
   "doc/plans/claude-fable-5-system-prompt-zh.md",
 ];
-const ALLOWED_PLAN_FILES = new Set([
-  "doc/plans/2026-08-04-beginner-handbook.html",
-]);
 
 async function withPackedPackage(callback) {
   const tempRoot = await mkdtemp(path.join(tmpdir(), "wildarrange-pack-test-"));
@@ -99,11 +96,7 @@ test("npm package excludes plans, restricted prompts, and runtime state", async 
 
     assert.ok(packedPaths.length > 0, "npm pack returned an empty file list");
     const publishedPlanFiles = packedPaths.filter((file) => file.startsWith("doc/plans/"));
-    assert.deepEqual(
-      publishedPlanFiles,
-      [...ALLOWED_PLAN_FILES],
-      "published package may contain only the explicitly allowlisted beginner handbook from doc/plans",
-    );
+    assert.deepEqual(publishedPlanFiles, [], "published package must not contain doc/plans");
     for (const restrictedPath of RESTRICTED_PROMPTS) {
       assert.equal(
         packedPaths.includes(restrictedPath),

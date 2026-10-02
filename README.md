@@ -16,9 +16,9 @@ setup -> plan -> execute -> verify -> scope -> review -> acceptance-proof -> che
 
 核心运行时是宿主中立的。Codex / Cursor / Kimi adapter 负责注入与恢复增强，但仅凭 CLI 也能跑完整流程。
 
-设计原则只有五条：**计划与执行分离 → worker 不自证完成 → 独立验证 → 失败返工 → 证据入账**。所有运行时状态都写在项目之外的本机运行态目录（逻辑路径 `.wildarrange/`），客户项目零写入，不绑定任何特定编辑器。内部实现与不变量见 [doc/project-architecture.md](./doc/project-architecture.md)。
+设计原则只有五条：**计划与执行分离 → worker 不自证完成 → 独立验证 → 失败返工 → 证据入账**。所有运行时状态都写在项目之外的本机运行态目录（`wildarrange project show` 输出的 `runtimeRoot`；下文用 `runtime:<路径>` 表示其中的文件），客户项目零写入，不绑定任何特定编辑器。内部实现与不变量见 [doc/project-architecture.md](./doc/project-architecture.md)。
 
-**小白从这里开始：** 浏览器打开 [doc/plans/2026-08-04-beginner-handbook.html](./doc/plans/2026-08-04-beginner-handbook.html)（部署 → 每步怎么塞自己的要求 → 怎么核对每一道门对错；含 Cursor / Codex / Kimi）。完整命令清单见 `node ./bin/wildarrange.mjs --help --all` 或 [doc/generated/commands.md](./doc/generated/commands.md)。
+**小白从这里开始：** 按下文「[安装、跨设备与升级](#安装跨设备与升级)」接入项目，再照「[最小工作流](#最小工作流)」跑通第一个任务。完整命令清单见 `node ./bin/wildarrange.mjs --help --all` 或 [doc/generated/commands.md](./doc/generated/commands.md)。
 
 ## Agent 职责
 
@@ -48,7 +48,7 @@ WildArrange 只保留 5 个长期 Agent。确定性 Router 是系统节点，不
 
 ### 接入项目：`wildarrange setup`（唯一运行形态）
 
-WildArrange 只有一种运行形态，三根模式：客户项目仓库保存产品代码与产品测试，独立治理仓库保存政策、`policy/wildarrange.config.json`（唯一配置）和验证注册表，本机状态目录保存 ledger、锁、报告、备份与 Prompt Pack。WildArrange 不会向客户项目生成 `AGENTS.md`、`.wildarrange/` 或 Adapter 文件。
+WildArrange 只有一种运行形态，三根模式：客户项目仓库保存产品代码与产品测试，独立治理仓库保存政策、`policy/wildarrange.config.json`（唯一配置）和验证注册表，本机状态目录保存 ledger、锁、报告、备份与 Prompt Pack。WildArrange 不会向客户项目生成 `AGENTS.md`、运行态文件或 Adapter 文件。
 
 最快路径：在客户项目根一步完成治理仓初始化、连接、运行态初始化与宿主 Adapter 包生成：
 
@@ -130,7 +130,7 @@ npx wildarrange doctor
 
 `setup` 与 `project init-governance` 会在治理仓 `policy/` 下补建缺失的政策模板（`AGENTS.md`、代码与接口规范、测试与验收规则），已有文件一律保留，不合并也不覆盖；WildArrange 不会向客户项目写入任何文档。生成后的 `[待确认]` 必须由人类确认或删除，尤其是测试策略、标准命令、生产/测试入口和模块边界。
 
-WildArrange 的 `team/tasks.json`（位于运行态目录，逻辑路径 `.wildarrange/team/tasks.json`）是唯一工单总账，Dashboard 只是入口和视图，不要再同步维护第二份 Markdown 任务表或 ClickUp 真源。
+WildArrange 的 `runtime:team/tasks.json` 是唯一工单总账，Dashboard 只是入口和视图，不要再同步维护第二份 Markdown 任务表或 ClickUp 真源。
 
 ### 在另一台设备安装
 
@@ -177,7 +177,7 @@ Kimi Code 的 plugin 是用户级安装。升级后为确保 Hook bridge 使用�
 
 ### 运行状态与 Git 交付
 
-npm 和 Git 负责同步程序、项目与治理仓；运行态（逻辑路径 `.wildarrange/`）位于每台设备自己的本地状态目录，不直接互相覆盖。WildArrange 不做多设备或多用户的远端协调：多人协作时每人各用自己的分支，唯一约束是**两个可写任务不能在同一分支上开发**。
+npm 和 Git 负责同步程序、项目与治理仓；运行态目录位于每台设备自己的本地状态目录，不直接互相覆盖。WildArrange 不做多设备或多用户的远端协调：多人协作时每人各用自己的分支，唯一约束是**两个可写任务不能在同一分支上开发**。
 
 一个可写任务对应一个隔离 worktree 和一个 task branch（`wildarrange/task/<planId>/<taskId>`）；开始执行前必须绑定干净 commit 基线，除本任务结果外不能夹带其他脏改动。目标分支已被另一个可写任务或 worktree 占用时，任务会被拒绝启动并说明占用者。全部质量门与 acceptance proof 通过后，WildArrange 才生成只含本任务路径的 delivery commit：有 remote 时普通非强制 push 到该任务独占的远端 task branch；无 remote 但仍是 Git 仓库时，commit 保留在本地 task branch/worktree。两种路径都会让 checkpoint 与 acceptance proof 绑定同一 commit SHA，并把共享 checkout 恢复干净。task branch push 不会移动 `main`，一个任务通常持续更新一个 Draft PR，只有人类在托管平台批准并执行 merge 后才进入共享主线。若 task branch push 已成功、仅本地 checkpoint/审计写入失败，则保留同一 run 的 claim 和交付意图，禁止回滚已知 push，只允许同 run 对账恢复或进入 `recovery_required`。
 
@@ -229,10 +229,11 @@ node ./bin/wildarrange.mjs setup --governance-root ../wildarrange-governance --r
       "id": "T001",
       "subject": "Write smoke artifact",
       "owner": "ZhuRong",
-      "writable_paths": [".wildarrange/artifacts/smoke.txt"],
-      "worker_command": "node -e \"const fs=require('fs'); fs.mkdirSync('.wildarrange/artifacts',{recursive:true}); fs.writeFileSync('.wildarrange/artifacts/smoke.txt','ok\\n')\"",
-      "verify_commands": ["node -e \"const fs=require('fs'); if(fs.readFileSync('.wildarrange/artifacts/smoke.txt','utf8').trim()!=='ok') process.exit(1)\""],
-      "review_commands": ["node -e \"const fs=require('fs'); if(!fs.readFileSync('.wildarrange/artifacts/smoke.txt','utf8').includes('ok')) process.exit(1)\""]
+      "writable_paths": ["artifacts/smoke.txt"],
+      "responsibilityChanges": [{ "script": "artifacts/smoke.txt", "additions": "新增冒烟产物", "responsibilityBefore": "不存在", "responsibilityAfter": "记录一次可验证的冒烟结果", "facts": [] }],
+      "worker_command": "node -e \"const fs=require('fs'); fs.mkdirSync('artifacts',{recursive:true}); fs.writeFileSync('artifacts/smoke.txt','ok\\n')\"",
+      "verify_commands": ["node -e \"const fs=require('fs'); if(fs.readFileSync('artifacts/smoke.txt','utf8').trim()!=='ok') process.exit(1)\""],
+      "review_commands": ["node -e \"const fs=require('fs'); if(!fs.readFileSync('artifacts/smoke.txt','utf8').includes('ok')) process.exit(1)\""]
     }
   ]
 }
@@ -242,30 +243,25 @@ node ./bin/wildarrange.mjs setup --governance-root ../wildarrange-governance --r
 
 计划导入会保护已有成果：同一 Plan 中仍在执行、验证、恢复、持有任务 claim 或已经完成的任务不能被重新导入覆盖。已完成旧 Plan 后可以导入新的 Plan，旧任务及其交付记录继续保留。
 
-运行：
+运行（每个导入的计划都要人工确认；开工检查要求先用 `/wildarrange-setup` 配好 Worker 握手 `executionReadiness.workerProbe` 与职责审查者 `review.responsibility.command`）：
 
 ```bash
 node ./bin/wildarrange.mjs plan --from plan.json
+node ./bin/wildarrange.mjs plan approve
 node ./bin/wildarrange.mjs run
 node ./bin/wildarrange.mjs status
 node ./bin/wildarrange.mjs summary
 ```
 
-在已安装 adapter 的 Codex / Cursor / Kimi Code 中，直接描述一个需要开发的需求或 Bug 即可。`UserPromptSubmit` 路由判断需要计划时，会要求当前宿主大模型根据对话语义生成 `.wildarrange/plan-drafts/<session>-plan.json`，而不是让用户手写格式。生成文件必须带 `generated_by: "host_semantic"`，并为每张可执行任务明确填写 `task.owner`；owner 只能是具备 command-worker 资格的 Jiuwei 或 ZhuRong。每张任务还必须提供真实、非空转的 `worker_command`，由 WildArrange 在隔离任务 worktree 中执行并产出 `writable_paths` 内的改动；`node --version`、`process.exit(0)` 等占位命令不能导入。DiJiang、BaiZe、LuWu 分别通过计划、复核和治理阶段参与，不执行 `worker_command`。WildArrange 导入时校验 owner 与 Worker 合同，且无论全局开关如何都强制等待用户 `plan approve`。执行 Hook、任务领取和并行运行随后读取同一个 `task.owner`，不会再另建一套实际负责人。
+在已安装 adapter 的 Codex / Cursor / Kimi Code 中，直接描述一个需要开发的需求或 Bug 即可。`UserPromptSubmit` 路由判断需要计划时，会要求当前宿主大模型根据对话语义把计划草稿写到 Hook 给出的绝对路径 `runtime:plan-drafts/<session>-plan.json`（不写进项目），而不是让用户手写格式。生成文件必须带 `generated_by: "host_semantic"`，并为每张可执行任务明确填写 `task.owner`；owner 只能是具备 command-worker 资格的 Jiuwei 或 ZhuRong。每张任务还必须提供真实、非空转的 `worker_command`，由 WildArrange 在隔离任务 worktree 中执行并产出 `writable_paths` 内的改动；`node --version`、`process.exit(0)` 等占位命令不能导入。DiJiang、BaiZe、LuWu 分别通过计划、复核和治理阶段参与，不执行 `worker_command`。WildArrange 导入时校验 owner 与 Worker 合同，并等待用户 `plan approve`。执行 Hook、任务领取和并行运行随后读取同一个 `task.owner`，不会再另建一套实际负责人。
 
-计划待确认期间，用户仍可修改 `.wildarrange/plan-drafts/*.json` 并重新导入；其它文件写入和任意 Shell 默认阻断，只放行精确匹配的计划管理与只读命令。批准后，草稿目录重新受当前工单的 `writable_paths` 限制。
+计划待确认期间，用户仍可修改 `runtime:plan-drafts/*.json` 并重新导入；其它文件写入和任意 Shell 默认阻断，只放行精确匹配的计划管理与只读命令。批准后，草稿目录重新受当前工单的 `writable_paths` 限制。
 
-手工编写或外部生成的 `plan.json` 仍可直接使用 `plan --from` 导入。缺省 owner 会回落到 Jiuwei；但新计划应始终显式填写 owner。
-
-或直接跑内置样例：
-
-```bash
-node ./bin/wildarrange.mjs workflow --sample
-```
+手工编写或外部生成的 `plan.json` 仍可直接使用 `plan --from` 导入，同样需要职责声明并等待确认。缺省 owner 会回落到 Jiuwei；但新计划应始终显式填写 owner。
 
 ### 工单总账
 
-新功能、独立 Bug、已完成任务的验收纠错和维护工作都使用同一个 Task 模型，并落盘到 `.wildarrange/team/tasks.json`。Plan 只负责分组；跨 Plan 引用使用 `<planId>:<taskId>`。验证信息还没准备好时可以先建 `draft` 留底，draft 不能执行：
+新功能、独立 Bug、已完成任务的验收纠错和维护工作都使用同一个 Task 模型，并落盘到 `runtime:team/tasks.json`。Plan 只负责分组；跨 Plan 引用使用 `<planId>:<taskId>`。验证命令或职责声明还没准备好时可以先建 `draft` 留底，draft 不能执行；`task ready` 转为可执行时必须补齐 `responsibilityChanges`，随后计划回到待确认：
 
 ```bash
 node ./bin/wildarrange.mjs task create --title "修复登录失败" --type bug --priority P0
@@ -297,9 +293,9 @@ node ./bin/wildarrange.mjs task ready --task T001 --from task-details.json
 
 顶层还可写 `defaults`（对所有任务叠加的默认 `verify_commands` / `review_commands` / `standards_commands` / `writable_paths` 等）。`responsibilityChanges` 见文末「职责与事实审计」。
 
-导入时逐层校验：`title` 必填；每个任务有 `subject` 与至少一条 `verify_commands`；`successCriteria` 结构合法且 `verifierCommandRefs` 指向真实存在的验证命令；任务 ID 不重复、`blockedBy` 引用存在且无环；命中产品类关键词且路由判为高风险的计划必须至少 4 个任务并包含验证/复核类任务。没有 `writable_paths`、`worker_command` 为空且 `verify_commands` 只是 `true` / `process.exit(0)` 的空转任务会被标记 `possible_noop_task`，并在验收阶段被硬拦。
+导入时逐层校验：`title` 必填；每个任务有 `subject` 与至少一条 `verify_commands`；`successCriteria` 结构合法且 `verifierCommandRefs` 指向真实存在的验证命令；任务 ID 不重复、`blockedBy` 引用存在且无环；命中产品类关键词且路由判为高风险的计划必须至少 4 个任务并包含验证/复核类任务。每张可执行任务都必须带 `responsibilityChanges`；只读任务（`writable_paths` 为空）用空数组 `[]` 明确声明不改文件。没有 `writable_paths`、`worker_command` 为空且 `verify_commands` 只是 `true` / `process.exit(0)` 的空转任务会被标记 `possible_noop_task`，并在开工检查与验收阶段被硬拦。
 
-计划确认门：带 `generated_by: "host_semantic"` 的计划始终进入 `awaiting_plan_approval`；手工计划在 `planApproval.required=true` 时进入。此时 `run` 会拒绝执行，直到 `plan approve`（或对话里用 `/wildarrange-approve`，AI 会先复述计划再请你确认）。
+计划确认门：每个导入的计划都进入 `awaiting_plan_approval`；计划确认后再新增或改动职责声明（`task create` / `task ready`、review blocker 整改单、`steer` 加单或改声明）也会让计划回到待确认。此时 `run` 会拒绝执行，直到 `plan approve`（或对话里用 `/wildarrange-approve`，AI 会先复述计划再请你确认）。
 
 ### 范围越界被挡住后重试
 
@@ -324,7 +320,7 @@ node ./bin/wildarrange.mjs node retry --task T001
 | worker 退出码 | 系统 | `worker_command` 必须 exit 0，但这只是“声称完成” |
 | 独立验证 | 系统 verifier | `verify_commands` 存在且全部 exit 0 |
 | 范围守卫 | 系统 | 改动路径全部落在 `writable_paths` 内（realpath 防穿越）；越界会生成 ChangeRequest 等人审 |
-| 复核门 | BaiZe + 按需 Review Skill / 质量门 | 主 lane PASS，安全无 high/critical；`review_commands`、`standards_commands`、LSP/AST/hashline/注释检查与可选 LLM review 共同判定 |
+| 复核门 | BaiZe + 按需 Review Skill / 质量门 | 主 lane PASS，安全无 high/critical；`review_commands`、`standards_commands`、注释检查与可选 LLM review 共同判定 |
 | 验收标准 | 系统 | `successCriteria` 通过；必须来自独立证据，不能照抄 verifier |
 | 验收证明 | 系统 | 逐项核验以上证据链，并拒绝 no-op、trivial verify（`verify_not_trivial`）与同义反复 review（`review_not_tautological`） |
 
@@ -332,9 +328,9 @@ node ./bin/wildarrange.mjs node retry --task T001
 
 改坏了怎么救，靠这几层证据：
 
-- **hash 链账本 `.wildarrange/ledger.jsonl`**：每步追加事件，改一行、断链或插入未哈希行都会被 `ledger verify` 报出；`doctor` 只把通过校验的事件当作完成证据。
+- **hash 链账本 `runtime:ledger.jsonl`**：每步追加事件，改一行、断链或插入未哈希行都会被 `ledger verify` 报出；`doctor` 只把通过校验的事件当作完成证据。
 - **执行前工作区快照**：见下文「防御性校验」。
-- **恢复快照 `.wildarrange/snapshots/context.md`**：记录进度，供续跑恢复。
+- **恢复快照 `runtime:snapshots/context.md`**：记录进度，供续跑恢复。
 - **备份与一键恢复**：`state backup` / `state restore`，恢复前会自动再备份一次。
 - **一致性体检 `doctor`**：核对完成任务的 checkpoint / 验收证明 / 账本事件是否齐全，校验 hash 链，并与最近备份交叉比对。
 
@@ -458,11 +454,11 @@ node ./bin/wildarrange.mjs docs commands --write
 
 `doctor` 是一键体检：校验 config 结构与挂载、对账所有 Plan 的已完成任务（checkpoint / acceptance proof / ledger 事件必须以 `planId:taskId` 对齐）、验证 ledger hash 链，并与最近一次备份交叉比对以发现整链重写；`decisionHealth` 分项给出周期健康摘要（各门触发计数、从未触发的门、坏行与孤儿标注预警）。各项检查各自隔离，单项崩溃只标红对应分项；doctor 只读诊断，不写 ledger。`state restore` 恢复前会自动再做一次备份。
 
-`task archive ... --delete` 需要显式删除确认，并且会先做运行态备份；`in_progress` / `verifying` 任务不可归档。Plan/Task ID 必须是安全单段标识符，canonical `planId:id` 身份必须唯一，显式 `--plan` 必须精确命中，不能回退到其它 Plan；删除采用可回滚事务并最后提交权威任务总账，仅清理目标 Task、空 Plan、对应 checkpoint / acceptance report、该任务的 outbox DoneClaim，以及未被其它任务共用的 `.wildarrange/artifacts/` 精确非 glob 产物。本次精确删除集会写入对应 backup 的 recovery package；进程中断或需要撤销时可执行 `state restore --backup <backupId>` 恢复 Plan、证明、DoneClaim 与 artifact。清空活动 Plan 后系统进入 `idle`，不会自动激活其它 Plan。历史 ledger 与 backups 不随归档删除。
+`task archive ... --delete` 需要显式删除确认，并且会先做运行态备份；`in_progress` / `verifying` 任务不可归档。Plan/Task ID 必须是安全单段标识符，canonical `planId:id` 身份必须唯一，显式 `--plan` 必须精确命中，不能回退到其它 Plan；删除采用可回滚事务并最后提交权威任务总账，仅清理目标 Task、空 Plan、对应 checkpoint / acceptance report、该任务的 outbox DoneClaim，以及未被其它任务共用的 `runtime:artifacts/` 精确非 glob 产物。本次精确删除集会写入对应 backup 的 recovery package；进程中断或需要撤销时可执行 `state restore --backup <backupId>` 恢复 Plan、证明、DoneClaim 与 artifact。清空活动 Plan 后系统进入 `idle`，不会自动激活其它 Plan。历史 ledger 与 backups 不随归档删除。
 
 `impact` 是改动影响分析：列出一个文件被哪些文件直接或间接 import，以及应该跑哪些测试（含常驻的五区边界测试），让 AI 改一处后能机器化证明「没碰别的模块」。
 
-`decisions` 是决策投影：delivery-pipeline 五门、PreToolUse/PostToolUse 拦截、admission、routing 四个缝的每一次拦截/通过都会追加到 `.wildarrange/decisions.jsonl`（可丢可截断的派生日志，不进 hash 链），`decisions` 命令把每条记录渲染成三行——发生了什么、命中哪条规则、证据在哪，方便人和异步审查 Agent 逐条复盘。支持 `--task` / `--gate` / `--annotatable`（只看可标注队列）过滤与 `--format json`。读侧从文件尾部流式倒读，`--limit` 约束真实内存占用；长期运行后可直接 `truncate -s 0 .wildarrange/decisions.jsonl` 清空（请截到 0 而不是半行；即使截到半行，写入侧也会自动补换行，读侧跳过坏行）。
+`decisions` 是决策投影：delivery-pipeline 五门、PreToolUse/PostToolUse 拦截、admission、routing 四个缝的每一次拦截/通过都会追加到 `runtime:decisions.jsonl`（可丢可截断的派生日志，不进 hash 链），`decisions` 命令把每条记录渲染成三行——发生了什么、命中哪条规则、证据在哪，方便人和异步审查 Agent 逐条复盘。支持 `--task` / `--gate` / `--annotatable`（只看可标注队列）过滤与 `--format json`。读侧从文件尾部流式倒读，`--limit` 约束真实内存占用；长期运行后可直接 `truncate -s 0 .wildarrange/decisions.jsonl` 清空（请截到 0 而不是半行；即使截到半行，写入侧也会自动补换行，读侧跳过坏行）。
 
 `test` 是分区测试选择：`--zone <区>` 跑「引用了该区文件的测试 + 命名对位测试 + 常驻边界测试」，带文件参数时按 impact 的应跑清单跑，不带参数跑全量；退出码透传 `node --test`。改了哪就跑哪，不必背测试矩阵。
 
@@ -481,11 +477,11 @@ node ./bin/wildarrange.mjs adoption resume
 node ./bin/wildarrange.mjs adoption recover
 ```
 
-`adoption start` 只读扫描测试、Gate、Runner、Hook 和历史档案，打开 Dashboard 逐卡批准；未传 `--token` 时会自动生成本次专用随机口令并注入当前标签页。只执行获批项；带验证命令、归档、合并或关键配置的卡片必须逐张批准。Registry 等待用户自行 commit A，随后生成 Bootstrap 与可直接用浏览器打开的 Inventory HTML，再等待 commit B。Inventory 同时内嵌机器可读记录，展示当前真源、历史档案、暂缓确认和本次变更；V1 不执行物理删除，因此删除墓碑只保留为未来兼容视图。三个目标名称若已被老项目文件、目录或链接占用，流程会暂停并指出冲突，绝不静默覆盖。获批 archive 默认移入项目可提交的 `docs/verification-archive/`（没有 `docs/` 时用 `verification-archive/`），不会放进 `.wildarrange/`。一旦已有卡片改变项目文件，就不能用“取消会话”冒充恢复；应完成两次 Git 锚定，或在 `recovery_required` 时运行 `adoption recover`。`doctor` / `status` 的 `registryFreshness` 过期只亮黄灯，不阻断日常 run。没有 `approve` / `apply` / `delete` CLI。
+`adoption start` 只读扫描测试、Gate、Runner、Hook 和历史档案，打开 Dashboard 逐卡批准；未传 `--token` 时会自动生成本次专用随机口令并注入当前标签页。只执行获批项；带验证命令、归档、合并或关键配置的卡片必须逐张批准。Registry 等待用户自行 commit A，随后生成 Bootstrap 与可直接用浏览器打开的 Inventory HTML，再等待 commit B。Inventory 同时内嵌机器可读记录，展示当前真源、历史档案、暂缓确认和本次变更；V1 不执行物理删除，因此删除墓碑只保留为未来兼容视图。三个目标名称若已被老项目文件、目录或链接占用，流程会暂停并指出冲突，绝不静默覆盖。获批 archive 默认移入项目可提交的 `docs/verification-archive/`（没有 `docs/` 时用 `verification-archive/`），不会放进 `runtime:`。一旦已有卡片改变项目文件，就不能用“取消会话”冒充恢复；应完成两次 Git 锚定，或在 `recovery_required` 时运行 `adoption recover`。`doctor` / `status` 的 `registryFreshness` 过期只亮黄灯，不阻断日常 run。没有 `approve` / `apply` / `delete` CLI。
 
 外置接管扫描和验证仍使用业务仓库；locator 配置、Registry、Bootstrap、Inventory 写入治理仓库。Registry 使用治理合同的 `verificationRegistry` 路径，Bootstrap 和 Inventory 放在其同级目录；commit A/B 在治理仓库完成。若另有已批准的业务文件改动，它们须在业务仓库单独提交，系统分别核对两仓内容。初始化生成且摘要完整的空 Registry 可在 locator 获批后填充，原始内容保存在运行态 `adoption/artifact-preimages/`；非空、摘要异常或生成期间已变化的内容仍报冲突。
 
-Dashboard（`serve`）包含全项目工单总账、路由复盘台、决策面板、运维面板与验证接管页。工单总账直接读取 `.wildarrange/team/tasks.json`，展示全部 Plan、工单类型、优先级、关联任务与状态历史。路由复盘台按日期展示用户原文、结构化路由结果、命中信号及同会话后续工具摘要，并可人工标记正确/规则错/个案错；工具参数中的常见密钥字段会脱敏。复盘只写 annotation，不自动修改 `routes.json`。
+Dashboard（`serve`）包含全项目工单总账、路由复盘台、决策面板、运维面板与验证接管页。工单总账直接读取 `runtime:team/tasks.json`，展示全部 Plan、工单类型、优先级、关联任务与状态历史。路由复盘台按日期展示用户原文、结构化路由结果、命中信号及同会话后续工具摘要，并可人工标记正确/规则错/个案错；工具参数中的常见密钥字段会脱敏。复盘只写 annotation，不自动修改 `routes.json`。
 
 `run` 结束时的门决策汇总按 `reporting.verbosity` 分级：默认 `verbose` 在 stderr 输出本次任务每个门的三行投影（框架初期让人能审判每一条门决策）；信任建立后可改为 `normal`（一行结果）或 `quiet`（只输出 JSON）。stdout 的机器可读 JSON 在任何级别下都不变。
 
@@ -493,7 +489,7 @@ Dashboard（`serve`）包含全项目工单总账、路由复盘台、决策面�
 
 `status` 输出顶部常驻 `gateArming` 黄灯：默认配置下质量门全关、review 门没有独立信号时会显示「门未武装」及修复指引，避免对着一条全绿但不证明任何东西的门流误判项目健康。验收证明（acceptance proof）有两条硬地板：拒绝 `verify_commands` 全是 trivial 命令（如 `true`）的任务；拒绝 review 门没有任何独立信号 lane（无 `review_commands` / `standards_commands` / `review.llm` / 已启用质量门）的任务——同义反复的复核不证明任何东西，不得进入 completed。`config init --armed` 可以直接生成一份武装了质量门（commentChecker 阻断）的配置。`doctor` 有独立的 `gateArming` 与 `adapters` 分项：门未武装、已启用 adapter 但本机没生成 hooks、Codex Hook 已生成却没有当前配置的真实执行回执、规则文件里残留指向不存在路径的命令，都会在体检报告里摆到台面上。Adapter 使用 `configured` 表示文件已生成；只有 Codex 显示 `execution_observed` 才表示当前 Hook 配置至少真实运行过一次。
 
-`governance audit` 是 LuWu 的只读巡检：检查目录级 `AGENTS.md`、README 中英文命令对等、Prompt Pack 登记、命名和真实代码注释，报告写入 `.wildarrange/reports/governance/`。只看当前改动可加 `--changed-only`，它只触发变更文件及相关祖先规则/成对文档/架构台账；Git 变更不可读取时会安全回退为全量扫描。LuWu 不会自动移动、重命名或删除项目文件，运行时也会拒绝 LuWu、DiJiang、BaiZe 进入 command worker。
+`governance audit` 是 LuWu 的只读巡检：检查目录级 `AGENTS.md`、README 中英文命令对等、Prompt Pack 登记、命名和真实代码注释，报告写入 `runtime:reports/governance/`。只看当前改动可加 `--changed-only`，它只触发变更文件及相关祖先规则/成对文档/架构台账；Git 变更不可读取时会安全回退为全量扫描。LuWu 不会自动移动、重命名或删除项目文件，运行时也会拒绝 LuWu、DiJiang、BaiZe 进入 command worker。
 
 接口与数据库契约治理首版自动对照 Tauri Rust command、handler 注册和前端 `invoke`；Rust 源码字符串中的 SQL 只标记为需要人工申报，不伪装成已扫描。扫描生成的差异必须由开发者显式批准或拒绝，LuWu 在既有 review 内检查当前任务触及的契约，不新增平行门禁：
 
@@ -514,7 +510,7 @@ node ./bin/wildarrange.mjs contracts resolve --id <id> --decision accept --expec
 
 每次 worker 执行前，WildArrange 会在 Git 项目里自动记录一份工作区快照（`git stash create`），快照 hash 与恢复命令写入任务证据和 ledger，代码被改坏时可用 `git stash apply <hash>` 还原。
 
-WildArrange 会在 shell 执行前阻断明显破坏性命令，例如删除 `.git/.wildarrange`、递归删除 `src/test/doc` 等项目核心目录、`git reset --hard`、`git clean -fd`、`sudo` 或 `curl | sh`。正常项目命令、verifier、review command 和子 Agent runner 不受影响。
+WildArrange 会在 shell 执行前阻断明显破坏性命令，例如删除 `.git`、递归删除 `src/test/doc` 等项目核心目录、`git reset --hard`、`git clean -fd`、`sudo` 或 `curl | sh`。正常项目命令、verifier、review command 和子 Agent runner 不受影响。
 
 用户验收后可以显式关闭保留结果：
 
@@ -550,7 +546,7 @@ node ./bin/wildarrange.mjs skills match --text "做一个网页版提醒事项 A
 ### 人工决策通道与安全开关
 
 - **通用推送（不绑任何外部 IM）**：所有"待人决策"的事项——计划待确认、改动越界的 ChangeRequest、失败任务、子 Agent 待验收——由 hook 在 SessionStart / UserPromptSubmit / PostCompact / Stop 时注入宿主 AI 上下文，要求 AI 主动向开发者复述并给出选项。`attentionReport` 是这份待办的真相源，`status` / dashboard 也能拉取。
-- **计划确认门**：带 `generated_by: "host_semantic"` 的语义生成计划始终进入 `awaiting_plan_approval`；普通手工计划则在 `planApproval.required=true` 时进入。`run` 拒绝执行，直到开发者 `plan approve`（或对话里用 `/wildarrange-approve`）。
+- **计划确认门**：每个导入的计划、以及确认后新增或改动的职责声明，都进入 `awaiting_plan_approval`。`run` 拒绝执行，直到开发者 `plan approve`（或对话里用 `/wildarrange-approve`）。
 - **命令安全外置**：内置高危命令正则是不可关闭的底线；`commandSafety.extraPatterns` 允许在其之上追加项目专属危险命令拦截（`{ id, pattern, flags, reason }`），无需改代码。
 
 ## 自定义 Prompt、技能与规范
@@ -580,7 +576,7 @@ globs: [src/frontend/**, apps/web/**]
 node ./bin/wildarrange.mjs rules collect --target src/app.js
 ```
 
-命中的规范写入 `.wildarrange/rules/context.md` 与 `context.json`，超预算会显式标记截断。`AGENTS.md`、`CLAUDE.md` 这类控制面文档默认只读，流程不会去改它们。不想从零写规范：复制 `examples/fullstack-starter/`（带注释的全局红线、前后端/数据库三份带 `globs` 的规则文件、可跑通的 `plan.example.json` 与逐块注释的配置讲解），照其 README 的自检清单先跑通一次。
+命中的规范写入 `runtime:rules/context.md` 与 `context.json`，超预算会显式标记截断。`AGENTS.md`、`CLAUDE.md` 这类控制面文档默认只读，流程不会去改它们。不想从零写规范：复制 `examples/fullstack-starter/`（带注释的全局红线、前后端/数据库三份带 `globs` 的规则文件、可跑通的 `plan.example.json` 与逐块注释的配置讲解），照其 README 的自检清单先跑通一次。
 
 ## Dashboard
 
@@ -616,16 +612,16 @@ x-wildarrange-token: <token>
 
 | 路径 | 作用 |
 |---|---|
-| `.wildarrange/team/tasks.json` | 全项目唯一工单总账：所有 Plan 的 Task、类型、关联、状态与精简历史 |
-| `.wildarrange/ledger.jsonl` | 带 hash 链的追加式事件账本，可用 `node ./bin/wildarrange.mjs ledger verify` 检查篡改 |
-| `.wildarrange/security/config-baseline.json` | config hash 基线，可用 `node ./bin/wildarrange.mjs config verify` 检查质量门是否被改弱 |
-| `.wildarrange/backups/` | `state backup` 生成的运行态关键文件备份 |
-| `.wildarrange/checkpoints/` | 已完成任务的 checkpoint |
-| `.wildarrange/reports/` | workflow / review / failure 报告 |
-| `.wildarrange/reports/acceptance/` | checkpoint 前的验收证明链 |
-| `.wildarrange/snapshots/context.md` | 跨会话恢复上下文 |
-| `.wildarrange/adapters/` | adapter 配置、报告与备份 |
-| `.wildarrange/agent-runs/` | 子 Agent 运行包、结果与 admission 记录 |
+| `runtime:team/tasks.json` | 全项目唯一工单总账：所有 Plan 的 Task、类型、关联、状态与精简历史 |
+| `runtime:ledger.jsonl` | 带 hash 链的追加式事件账本，可用 `node ./bin/wildarrange.mjs ledger verify` 检查篡改 |
+| `runtime:security/config-baseline.json` | config hash 基线，可用 `node ./bin/wildarrange.mjs config verify` 检查质量门是否被改弱 |
+| `runtime:backups/` | `state backup` 生成的运行态关键文件备份 |
+| `runtime:checkpoints/` | 已完成任务的 checkpoint |
+| `runtime:reports/` | workflow / review / failure 报告 |
+| `runtime:reports/acceptance/` | checkpoint 前的验收证明链 |
+| `runtime:snapshots/context.md` | 跨会话恢复上下文 |
+| `runtime:adapters/` | adapter 配置、报告与备份 |
+| `runtime:agent-runs/` | 子 Agent 运行包、结果与 admission 记录 |
 
 ## 配置
 
@@ -671,10 +667,9 @@ source .env.wildarrange
 | `injectionPoints` | 每个注入点挂哪些 `tools` / `markdown` / `skills` / `rules` |
 | `contextBudgets` | Prompt / Markdown / Skill 的字符预算，超了显式标 `truncated` |
 | `skillMatcher.dynamicInjection` | Skill 按需挂载：`enabled` / `maxSkills` / `alwaysMount` |
-| `qualityGates` | LSP/类型检查、AST 结构检查、hashline anchor、注释检查 |
+| `qualityGates` | 注释检查（`commentChecker`）；类型检查、lint 等写进 `standards_commands` |
 | `review.llm` | 是否启用 LLM 复核；`required=false` 时无 key 只告警不阻断 |
 | `commandSafety.extraPatterns` | 在内置高危命令正则之上追加项目专属拦截（见下） |
-| `planApproval.required` | 打开后，手工导入的计划也必须 `plan approve` 才能 `run` |
 
 Agent 配置示例（5 个长期 Agent 全部使用 `provider: "host"` 最省事；`/wildarrange-config` 或 `config verify` 校验）：
 
@@ -701,7 +696,7 @@ Agent 配置示例（5 个长期 Agent 全部使用 `provider: "host"` 最省事
 
 `config init` 生成可编辑的默认配置，`config show` 查看最终生效配置。
 
-注释检查走 CLI review gate，而非编辑器专属 hook；LSP / 类型检查、AST 结构检查等命令请写进任务或计划默认的 `standards_commands`：
+注释检查走 CLI review gate，而非编辑器专属 hook；类型检查、lint、结构检查等命令请写进任务或计划默认的 `standards_commands`：
 
 ```json
 {
@@ -745,7 +740,7 @@ npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache
 | 导入 / 确认计划 | `node ./bin/wildarrange.mjs plan --from plan.json` / `plan approve` |
 | 跑下一个任务 | `node ./bin/wildarrange.mjs run` |
 | 单步节点 | `node ./bin/wildarrange.mjs node execute --task T001`（另有 `node checkpoint` / `node retry` / `node route`） |
-| 跑内置样例 | `node ./bin/wildarrange.mjs workflow --sample` |
+| 连续推进已确认的计划 | `node ./bin/wildarrange.mjs workflow`（`--from <plan.json>` 只导入并停在待确认） |
 | 看状态 / 总结 | `node ./bin/wildarrange.mjs status` / `summary` |
 | 并行子 Agent | `node ./bin/wildarrange.mjs parallel run --max-agents 2 --command "..."` |
 | 合入 / 重试 / 关闭 | `parallel admit --run <runId> --task <id>` / `parallel retry --run <runId>` / `parallel close --run <runId>` |
@@ -770,7 +765,7 @@ npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache
 
 ## 职责与事实审计
 
-公开 `plan --from` / `workflow --from` 导入的每张任务增加 `responsibilityChanges`。由计划 Agent 填写，人工确认；不是让用户编写技术设计。每项包含 `script`（精确目标脚本）、`additions`、`responsibilityBefore`、`responsibilityAfter`、`facts`。每项事实包含 `name`、`ownerBefore`、`ownerAfter`、`access`；无事实填空数组，新增/删除事实的不存在一侧填 `null`。任务摘要和 Dashboard 展示这些内容，恢复快照保留同一任务字段。
+每张可执行任务（计划导入、`task ready`、review blocker 整改单、`steer` 加单）都必须带 `responsibilityChanges`。由计划 Agent 填写，人工确认；不是让用户编写技术设计。每项包含 `script`（精确目标脚本）、`additions`、`responsibilityBefore`、`responsibilityAfter`、`facts`。每项事实包含 `name`、`ownerBefore`、`ownerAfter`、`access`；无事实填空数组，新增/删除事实的不存在一侧填 `null`。任务摘要和 Dashboard 展示这些内容，恢复快照保留同一任务字段。
 
 ```json
 {
@@ -797,9 +792,9 @@ Worker 之后的既有 Review 增加独立职责审计：R1 符合批准方案�
 
 审查协议：`{ "decision": "PASS|RETURN", "checks": [{ "rule": "R1", "decision": "PASS|RETURN", "reason": "..." }], "findings": [{ "rule": "R3", "file": "src/example.mjs", "line": 12, "evidence": "该行源码原文", "reason": "...", "requiredFix": "..." }] }`。checks 必须恰好覆盖 R1–R5；每条 RETURN 有对应 finding。缺少执行器、证据超预算、响应格式错误、审查期间代码变化都不能通过 Review。`review.responsibility.maxEvidenceChars` 默认 500000；超限明确阻止审计，不截断后放行。
 
-职责变化通过现有 `steer` 的 `revise_acceptance` 提交 `responsibilityChanges`；原任务保持 pending，计划重新等待人工批准。批准指纹进入现有 ledger，不增加第二个事实台账。旧持久任务没有声明时显示 NOT_AUDITED 警告，不能说已通过新审计；旧底层程序化导入 API 保留兼容模式，集成方应传 `{ requireResponsibility: true }`。公开 CLI 没有关闭此校验的开关。
+职责变化通过现有 `steer` 的 `revise_acceptance` 提交 `responsibilityChanges`；原任务保持 pending，计划重新等待人工批准。批准指纹进入现有 ledger，不增加第二个事实台账。没有「跳过职责审计」的任务：缺少已批准声明的任务一律退回，任何入口都没有关闭此校验的开关。
 
-新增任务或将草稿转为可执行任务时，只要职责声明发生变化，就重新等待人工批准；整链运行、分步执行、并行启动都不得抢跑。内置 `workflow --sample` 仅为固定运行时产物的诊断演示，保留 NOT_AUDITED 标记，不构成职责审计通过证明。
+计划确认后补进来的任务同样要声明并经人确认：`task create` 缺声明时只能停在 draft；`review-blockers record` 的 blocker JSON 必须带整改单的 `responsibilityChanges`，整改单完成后用 `review-blockers resolve --task <原任务> --evidence ... --rationale ...` 放回原任务；`steer` 加单或拆单必须带声明。人工接受的范围变更（ChangeRequest 扩大 `writable_paths`）不会自动生成声明，需用 `revise_acceptance` 补交覆盖新路径的声明并重新确认。只要职责声明发生变化，整链运行、分步执行、并行启动都不得抢跑。
 
 ## 项目接管与项目审查
 
@@ -807,18 +802,18 @@ Worker 之后的既有 Review 增加独立职责审计：R1 符合批准方案�
 
 配置保存在治理仓 policy/wildarrange.config.json 的 review.steps 与 executionReadiness；任务业务字段仍只描述本次工作。每个 Review 步骤声明 id、title、appliesTo、requirement、required、documents、skills 和可选 command，按数组顺序运行。必需步骤不通过就驳回，记录规则、文件行号、原文和整改要求；建议步骤只告警。原有 R1–R5 审计不能被项目步骤替代。
 
-先将配置补丁保存到 .wildarrange/plan-drafts/review-setup.json，执行 wildarrange review configure --from .wildarrange/plan-drafts/review-setup.json 预览，用户确认后再加 --apply。用 review checklist --task T001 查看清单，已批准后用 readiness --task T001 检查开工依赖。配置依赖缺失可先保存，但业务 Worker 不会启动，不消耗重试次数。
+先用 `project show` 取 runtimeRoot，将配置补丁保存到 `<runtimeRoot>/plan-drafts/review-setup.json`，执行 `wildarrange review configure --from "<runtimeRoot>/plan-drafts/review-setup.json"` 预览，用户确认后再加 --apply。用 review checklist --task T001 查看清单，已批准后用 readiness --task T001 检查开工依赖。配置依赖缺失可先保存，但业务 Worker 不会启动，不消耗重试次数。
 
 Worker 读取 WILDARRANGE_EXECUTION_CONTEXT 的完整任务 Skill；探测器读取 WILDARRANGE_READINESS_PACKET，Reviewer 读取 WILDARRANGE_REVIEW_PACKET。探测返回 ready、原 challenge、loadedSkills；Reviewer 按包内协议返回带 inputDigest 的 PASS/RETURN/INCONCLUSIVE 与准确源码证据。请连接真实服务，固定回显不是独立审核。握手通过不等于功能交付。
 
-外置模式先用 `project show` 确认三根。草稿实际保存到 `runtimeRoot/plan-drafts/`，`review configure --from .wildarrange/plan-drafts/review-setup.json` 会将逻辑路径解析到该运行态；也支持该草稿的绝对路径。正式配置保存到治理仓库 `<policyRoot>/wildarrange.config.json`，之后优先读取它；尚无正式配置时沿用运行态配置。业务仓库不新增这些治理文件。
+`review configure --from` 只接受运行态 `plan-drafts/` 下的草稿，请传绝对路径。正式配置保存到治理仓库 `<policyRoot>/wildarrange.config.json`；尚无正式配置时使用内置默认值。业务仓库不新增这些治理文件。
 
-旧项目扫描用 adoption inventory，登记继续使用 adoption 的逐卡批准流程。Registry.fixtures 只保存夹具位置与消费者；旧计划来源保存在 task.request.evidenceRefs，事实读写仍属于唯一 owner。登记完成与实际迁移完成分别报告，历史“已完成”必须重新验证才成为当前完成。存量无职责声明且无项目步骤的兼容任务返回 legacy_not_checked，不能宣传为通过新开工检查。
+旧项目扫描用 adoption inventory，登记继续使用 adoption 的逐卡批准流程。Registry.fixtures 只保存夹具位置与消费者；旧计划来源保存在 task.request.evidenceRefs，事实读写仍属于唯一 owner。登记完成与实际迁移完成分别报告，历史“已完成”必须重新验证才成为当前完成。
 
 架构设计环节：初始化项目文档后会返回下一步 Skill 提示；也可主动运行 `/wildarrange-architecture`，或说“审查旧架构图”。已有设计按职责、依赖、事实归属、流程、必要复杂度五项审查，无设计则按需求提出最小方案。通过后仍须人工确认具体版本，沿用一个权威文档。此环节由宿主执行 Skill，不会自动弹窗、修改旧设计或建立图与代码一致性门禁。
 
 ### 任务证据夹与长期文档审计
 
-获准任务通过开工检查后、Worker 启动前，会自动建立 `.wildarrange/task-packets/<planId>/<taskId>/`：`baseline.json` 冻结首次开工时的任务范围与批准投影，`README.md` 指向现有 readiness、review、failure、acceptance、checkpoint 报告，`research.md` 索引任务启动时已声明的来源。重试不会覆盖首次基线；列出的报告只有实际生成后才是证据。当前任务状态始终以 `.wildarrange/team/tasks.json` 为准。研究成果仍须写入任务批准的 `writable_paths` 并在验收证据中引用；证据夹不扩大 Worker 权限。
+获准任务通过开工检查后、Worker 启动前，会自动建立 `runtime:task-packets/<planId>/<taskId>/`：`baseline.json` 冻结首次开工时的任务范围与批准投影，`README.md` 指向现有 readiness、review、failure、acceptance、checkpoint 报告，`research.md` 索引任务启动时已声明的来源。重试不会覆盖首次基线；列出的报告只有实际生成后才是证据。当前任务状态始终以 `runtime:team/tasks.json` 为准。研究成果仍须写入任务批准的 `writable_paths` 并在验收证据中引用；证据夹不扩大 Worker 权限。
 
 Worker 上下文会提示文档边界。若实际改动项目根 Markdown，或 `doc/`、`docs/` 下的长期 Markdown/HTML 文档（不含 `plans/`、`reports/` 等任务历史目录），独立 Reviewer 额外执行当前事实审计：长期文档保留当前有效的功能、结构、用法与限制；任务时间线、原始日志和未落地方案归任务证据；同一当前事实只由权威来源维护，已验证同步的翻译可保留；旧方案明确标为历史。Reviewer 必须逐份引用改动文档的源码行；违规时给出行号、原因和整改，未通过不能 checkpoint。

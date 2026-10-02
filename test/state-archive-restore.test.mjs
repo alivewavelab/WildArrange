@@ -24,7 +24,7 @@ import { writeRuntimeContextSnapshot } from "../src/infra/runtime-snapshot.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
 import { archiveAndDeleteTeamTask } from "../src/orchestration/task-archive.mjs";
 import { statusReport, writeWorkflowSummary } from "../src/orchestration/status.mjs";
-import { withExternalProject } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare } from "./helpers/external-fixture.mjs";
 
 async function writeJson(filePath, value) {
   await mkdir(path.dirname(filePath), { recursive: true });
@@ -46,6 +46,7 @@ function legacyTask(status = "completed") {
     attempts: 1,
     blockedBy: [],
     writable_paths: ["src/output.txt"],
+    responsibilityChanges: declare("src/output.txt"),
     verify_commands: ["node --test"],
     review_commands: [],
     standards_commands: [],
@@ -645,12 +646,12 @@ test("state restore recovers the exact Plan, proof, DoneClaim, and artifact arch
 
     const restored = await restoreRuntimeStateBackup(dir, { backupId: backup.backupId });
     for (const expectedPath of [
-      ".wildarrange/plans/P1.json",
-      ".wildarrange/checkpoints/P1/T001.json",
-      ".wildarrange/reports/acceptance/P1/T001.json",
-      ".wildarrange/reports/acceptance/P1/T001.md",
-      ".wildarrange/team/outbox/T001-current.json",
-      ".wildarrange/artifacts/P1-T001",
+      "runtime/plans/P1.json",
+      "runtime/checkpoints/P1/T001.json",
+      "runtime/reports/acceptance/P1/T001.json",
+      "runtime/reports/acceptance/P1/T001.md",
+      "runtime/team/outbox/T001-current.json",
+      "runtime/artifacts/P1-T001",
     ]) {
       assert.ok(restored.restored.includes(expectedPath), expectedPath);
     }
@@ -756,7 +757,7 @@ test("state restore recreates a top-level dangling relative symlink from an arch
     await assert.rejects(lstat(artifactLink), /ENOENT/);
 
     const restored = await restoreRuntimeStateBackup(dir, { backupId: archived.backupId });
-    assert.ok(restored.restored.includes(".wildarrange/artifacts/P1-T001"));
+    assert.ok(restored.restored.includes("runtime/artifacts/P1-T001"));
     assert.equal((await lstat(artifactLink)).isSymbolicLink(), true);
     assert.equal((await readlink(artifactLink)).replaceAll("\\", "/"), "./missing-payload.json");
   });

@@ -27,6 +27,8 @@ export async function recordReviewBlocker(rootDir, options = {}) {
     if (!evidence) throw new Error("review blocker evidence is required");
     if (!rationale) throw new Error("review blocker rationale is required");
     if (hasWeakeningLanguage(`${evidence}\n${rationale}`)) throw new Error("review blocker appears to weaken verification");
+    // 整改单和其他任务一样必须带职责声明；登记后计划回到待批准，由人确认后才能执行
+    if (!options.responsibilityChanges) throw new Error("review blocker requires responsibilityChanges for the resolution task");
     const blockerTask = normalizeTask({
       id: options.newTaskId || nextTaskId(taskState.tasks),
       subject: options.title || `Resolve review blocker for ${task.id}`,
@@ -36,6 +38,7 @@ export async function recordReviewBlocker(rootDir, options = {}) {
       review_commands: options.review_commands || task.review_commands || [],
       standards_commands: options.standards_commands || task.standards_commands || [],
       writable_paths: options.writable_paths || task.writable_paths || [],
+      responsibilityChanges: options.responsibilityChanges,
     }, taskState.tasks.length, {});
     blockerTask.reviewBlockerFor = task.id;
     blockerTask.steering = { kind: "review_blocker_resolution", evidence, rationale, at: nowIso() };
