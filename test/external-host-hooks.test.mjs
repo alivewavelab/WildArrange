@@ -6,13 +6,17 @@
 //   全部使用临时 --user-root / stateHome，绝不触碰真实 ~/.cursor、~/.codex、~/.kimi-code。
 // =============================================================================
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { runCommandFile } from "../src/infra/command-runner.mjs";
+import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtime.mjs";
+import { approvePlan } from "../src/orchestration/plan-state.mjs";
+import { recordReviewBlocker } from "../src/orchestration/review-blocker.mjs";
 import { resolveWorkspaceContext } from "../src/infra/workspace-context.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
 import {
@@ -158,6 +162,40 @@ test("external Kimi Stop hook pulls unfinished work back into the session", asyn
     const parsed = JSON.parse(result.stdout);
     assert.equal(parsed.hookSpecificOutput.permissionDecision, "deny");
     assert.match(parsed.hookSpecificOutput.permissionDecisionReason, /continue/i);
+  });
+});
+
+test("external hook lets the exact review-blockers resolve command through when no task is runnable", async () => {
+  await withExternalProject(async (roots) => {
+    const { projectRoot, stateHome } = roots;
+    const { report } = await prepareScopedProject(roots);
+    await runWorkflowNode(projectRoot, "execute", { taskId: "T001" });
+    const blocked = await recordReviewBlocker(projectRoot, {
+      taskId: "T001",
+      evidence: "BaiZe found missing evidence.",
+      rationale: "Resolve as a separate task.",
+      worker_command: "node -e \"1\"", verify_commands: ["node -e \"1\""],
+      writable_paths: ["src/result.js"], responsibilityChanges: declare("src/result.js"),
+    });
+    await approvePlan(projectRoot);
+    const ran = await runNextTask(projectRoot);
+    assert.equal(ran.status, "completed", JSON.stringify(ran.error || ran.readiness));
+    // 此时 T001 review_blocked、整改单已完成：没有可运行任务，Hook 只放行白名单命令
+    const bash = (command) => runBridge(report.targets.codex.bridgePath, {
+      hook_event_name: "PreToolUse", session_id: "resolve", cwd: projectRoot, tool_name: "Bash", tool_input: { command },
+    }, stateHome);
+    const resolve = `node "${CLI_PATH}" review-blockers resolve --task T001 --evidence "Resolution ${blocked.resolutionTask.id} completed." --rationale 'Re-enter the pipeline.'`;
+    const allowed = await bash(resolve);
+    assert.equal(allowed.exitCode, 0, allowed.stderr);
+    assert.equal(parseDecision(allowed.stdout).denied, false, parseDecision(allowed.stdout).reason);
+    for (const variant of [`${resolve} --task T002`, `${resolve} --force`, `${resolve} && node -e 1`]) {
+      assert.equal(parseDecision((await bash(variant)).stdout).denied, true, variant);
+    }
+    // 宿主放行后真实执行同一条命令，被阻塞任务回到 pending
+    const run = spawnSync(resolve, { shell: true, cwd: projectRoot, encoding: "utf8", env: { ...process.env, WILDARRANGE_STATE_HOME: stateHome } });
+    assert.equal(run.status, 0, run.stderr || run.stdout);
+    const tasks = (await readJson(resolveWildArrangePath(projectRoot, "team", "tasks.json"))).tasks;
+    assert.equal(tasks.find((task) => task.id === "T001").status, "pending");
   });
 });
 

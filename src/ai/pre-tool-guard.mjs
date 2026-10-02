@@ -462,8 +462,28 @@ function isAllowedPrePlanShellCommand(command, cliCommandPrefix = "", projectRoo
   if (READ_ONLY_WILDARRANGE_SHELL_ARGS.test(args)) return true;
   if (isRuntimeReviewConfigure(args, projectRoot, true)) return true;
   if (/^init$/i.test(args)) return true;
+  if (isExactReviewBlockerResolve(args)) return true;
   if (/^plan\s+approve(?:\s+--plan\s+[A-Za-z0-9_.-]+)?$/i.test(args)) return true;
   return /^plan\s+--from\s+(?:"[A-Za-z0-9_./\\:~ -]+\.json"|'[A-Za-z0-9_./\\:~ -]+\.json'|[A-Za-z0-9_./\\:~ -]+\.json)$/i.test(args);
+}
+
+/**
+ * `review-blockers resolve` 只接受 --task/--evidence/--rationale 各一次；被阻塞任务没有可运行任务时也必须能解除。
+ * 是否允许解除（整改任务已完成）由 CLI 内部校验，Hook 只核对命令形态。
+ */
+function isExactReviewBlockerResolve(args) {
+  const head = args.match(/^review-blockers\s+resolve/i);
+  if (!head) return false;
+  const option = /\s+--(task|evidence|rationale)\s+(?:"[^"\\]*"|'[^']*'|[A-Za-z0-9_.][A-Za-z0-9_.-]*)/iy;
+  option.lastIndex = head[0].length;
+  const keys = new Set();
+  let end = head[0].length;
+  for (let match; (match = option.exec(args)); end = option.lastIndex) {
+    const key = match[1].toLowerCase();
+    if (keys.has(key)) return false;
+    keys.add(key);
+  }
+  return end === args.length && keys.size === 3;
 }
 
 /** 无任务时允许固定形态的只读 Git 事实查询；不接受任意 revision、pathspec、输出或外部 helper。 */
