@@ -45,6 +45,7 @@ import {
   normalizeTask,
   validatePlanGraph,
   validateTaskReady,
+  hasUnboundDefaultCriteria,
 } from "./task-normalize.mjs";
 import { resolveTaskBranchTarget } from "./task-branch.mjs";
 
@@ -228,9 +229,12 @@ export async function readyTeamTask(rootDir, options = {}) {
     const taskState = await loadTaskState(rootDir, { planId: existing.planId });
     const plan = await readJson(resolveWildArrangePath(rootDir, "plans", `${existing.planId}.json`));
     const patch = options.patch && typeof options.patch === "object" ? options.patch : {};
+    // 建单时没有 verify 命令的默认标准：交给 normalizeTask 按本次补齐的命令重新生成
+    const successCriteria = patch.successCriteria ?? (hasUnboundDefaultCriteria(existing) ? undefined : existing.successCriteria);
     const nextTask = withTaskIdentity(normalizeTask({
       ...existing,
       ...patch,
+      successCriteria,
       id: existing.id,
       status: "pending",
       createdAt: existing.createdAt,

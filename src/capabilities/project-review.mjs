@@ -138,6 +138,7 @@ export async function executeReviewPacket(rootDir, packetPath, packet, config, s
     });
     // §3.4：审查命令进程未确认终止时短路，交由上层 recovery 而非 INCONCLUSIVE。
     if (result.terminationFailed || result.recoveryRequired) return { commandRecovery: result };
+    if (result.timedOut) throw new Error(`independent reviewer timed out after ${settings.timeoutMs || 120000}ms; check that the reviewer service responds, or raise the reviewer timeoutMs in review config`);
     if (result.exitCode !== 0 || result.outputTruncated?.stdout) throw new Error("independent reviewer failed or output was truncated");
     return { content: result.stdout };
   }

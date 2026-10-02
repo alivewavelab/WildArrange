@@ -263,7 +263,7 @@ Manually authored or externally generated `plan.json` files still work with `pla
 
 ### Project-wide Work-item Ledger
 
-Features, standalone bugs, post-completion acceptance corrections, and maintenance work all use the Task model and persist in `runtime:team/tasks.json`. Plans only group tasks; cross-plan references use `<planId>:<taskId>`. A request without verification commands or responsibility declarations yet can be captured as a non-runnable `draft`; `task ready` must add `responsibilityChanges`, after which the plan returns to approval:
+Features, standalone bugs, post-completion acceptance corrections, and maintenance work all use the Task model and persist in `runtime:team/tasks.json`. Plans only group tasks; cross-plan references use `<planId>:<taskId>`. A request without verification commands or responsibility declarations yet can be captured as a non-runnable `draft`; `task ready` must add `responsibilityChanges`, after which the plan returns to approval. Untouched default success criteria generated at intake are bound to the verify commands that `task ready` adds:
 
 ```bash
 node ./bin/wildarrange.mjs task create --title "Fix login failure" --type bug --priority P0
@@ -297,7 +297,7 @@ A top-level `defaults` block adds default `verify_commands` / `review_commands` 
 
 Import validates layer by layer: `title` is required; every task needs `subject` and at least one `verify_commands`; `successCriteria` must be well formed and `verifierCommandRefs` must point at real verify commands; task IDs must be unique and `blockedBy` references must exist without cycles; a plan that matches product keywords and is routed as high risk needs at least 4 tasks including a verification/review task. Every executable task must carry `responsibilityChanges`; a read-only task (empty `writable_paths`) declares no file changes with an explicit empty array `[]`. A no-op task (no `writable_paths`, empty `worker_command`, and `verify_commands` that are only `true` / `process.exit(0)`) gets a `possible_noop_task` warning and is hard-blocked at the readiness check and at acceptance.
 
-Plan approval gate: every imported plan enters `awaiting_plan_approval`; adding or changing responsibility declarations after approval (`task create` / `task ready`, review-blocker resolution tasks, `steer` additions or revisions) also returns the plan to approval. `run` then refuses to execute until `plan approve` (or `/wildarrange-approve` in chat, where the AI restates the plan before asking you to confirm).
+Plan approval gate: every imported plan enters `awaiting_plan_approval`; adding or changing responsibility declarations after approval (`task create` / `task ready`, review-blocker resolution tasks, `steer` additions or revisions) also returns the plan to approval. `run` then refuses to execute until `plan approve` (or `/wildarrange-approve` in chat, where the AI restates the plan before asking you to confirm). While another `run` is executing, a new `run` returns `busy` at once with the running process id instead of queueing.
 
 ### Retrying After a Scope Block
 

@@ -188,6 +188,36 @@ test("task intake creates a traceable draft before any plan and readies it after
   });
 });
 
+test("a title-only draft readied with verify commands binds its default criteria and can complete", async () => {
+  await withExternalProject(async ({ projectRoot }) => {
+    await createTeamTask(projectRoot, { subject: "Write greeting" });
+    const readied = await readyTeamTask(projectRoot, {
+      taskId: "T001",
+      patch: {
+        writable_paths: ["src/greeting.txt"], responsibilityChanges: declare("src/greeting.txt"),
+        worker_command: nodeEval("const fs=require('fs');fs.mkdirSync('src',{recursive:true});fs.writeFileSync('src/greeting.txt','hi')"),
+        verify_commands: [nodeEval("if(require('fs').readFileSync('src/greeting.txt','utf8')!=='hi')process.exit(1)")],
+      },
+    });
+    assert.deepEqual(readied.task.successCriteria.map((criterion) => criterion.verifierCommandRefs), [["0"], ["0"], ["0"]]);
+    await approvePlan(projectRoot);
+    const run = await runNextTask(projectRoot);
+    assert.equal(run.status, "completed", JSON.stringify(run.task?.last_failure || run.error || run.readiness?.issues));
+
+    // 用户显式给出的人工标准不被重绑：它们靠人工证据通过
+    await createTeamTask(projectRoot, { subject: "Manual check" });
+    const manual = await readyTeamTask(projectRoot, {
+      taskId: "T002",
+      patch: {
+        writable_paths: ["src/manual.txt"], responsibilityChanges: declare("src/manual.txt"),
+        verify_commands: ["node --version"],
+        successCriteria: [{ id: "C001", title: "Copy approved by product", expectedEvidence: "product sign-off" }],
+      },
+    });
+    assert.deepEqual(manual.task.successCriteria.map((criterion) => criterion.verifierCommandRefs), [[]]);
+  });
+});
+
 test("team task claim respects blockers and does not bypass execution gates", async () => {
   await withExternalProject(async ({ projectRoot, root }) => {
     const planPath = path.join(root, "claim-plan.json");
