@@ -125,6 +125,18 @@ test("missing task Skill and false handshake are blocked before execution", asyn
   assert.match(result.issues.join(";"), /handshake/);
 });
 
+test("handshake and reviewer timeouts say they timed out and name the setting to raise", async t => {
+  const { root, config, task } = await fixture(t);
+  const sleeper = 'node -e "setTimeout(()=>{},10000)"';
+  config.executionReadiness = { ...config.executionReadiness, workerProbe: sleeper, timeoutMs: 300 };
+  config.review.responsibility = { ...config.review.responsibility, command: sleeper, timeoutMs: 300 };
+  await writeGovernanceConfig(root, config);
+  const result = await checkExecutionReadiness(root, task);
+  assert.equal(result.pass, false);
+  assert.match(result.issues.join(";"), /worker: adapter handshake timed out after 300ms.*executionReadiness\.timeoutMs/);
+  assert.match(result.issues.join(";"), /responsibility: independent reviewer timed out after 300ms.*timeoutMs/);
+});
+
 test("governed worker receives Skill context and project review passes before checkpoint", async t => {
   const { root, task } = await fixture(t);
   const result = await runNextTask(root);

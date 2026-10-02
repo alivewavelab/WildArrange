@@ -85,6 +85,7 @@ export async function checkExecutionReadiness(rootDir, task, options = {}) {
             extraPatterns: compileCommandSafetyPatterns(config), env: { WILDARRANGE_READINESS_PACKET: packetPath, WILDARRANGE_EXECUTION_CONTEXT: contextPath },
           });
           if (raw.recoveryRequired || raw.terminationFailed) response = { commandRecovery: raw };
+          else if (raw.timedOut) throw new Error(`adapter handshake timed out after ${settings.timeoutMs || 30000}ms; check that the adapter service responds, or raise executionReadiness.timeoutMs`);
           else if (raw.exitCode !== 0 || raw.outputTruncated?.stdout) throw new Error("adapter handshake command failed or output was truncated");
           else response = { content: raw.stdout };
         }

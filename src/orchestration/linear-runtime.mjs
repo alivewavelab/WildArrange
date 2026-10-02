@@ -22,7 +22,9 @@ import { appendLedger } from "../infra/ledger.mjs";
 import {
   ensureWildArrangeDirs,
   nowIso,
+  resolveWildArrangePath,
 } from "../infra/runtime-store.mjs";
+import { inspectFileLock } from "../infra/file-lock.mjs";
 import { transactWithLedger, withTaskStateLock } from "../infra/task-state-lock.mjs";
 import { ensureTaskPacket, writeSnapshot } from "../infra/runtime-snapshot.mjs";
 import { readChangeRequest } from "./change-governance.mjs";
@@ -73,6 +75,20 @@ export async function runWorkflowNode(rootDir, nodeName, options = {}) {
 
 /** 在 tasks.lock 下推进下一个 runnable 任务（worker + gates 全周期）。 */
 export async function runNextTask(rootDir, options = {}) {
+  // 另一个存活的 run 会持锁到 Worker 跑完：立即说明谁在跑，而不是等满锁超时再报错。
+  // 只读探测，判断不了时仍按原样排队取锁。
+  const lock = await inspectFileLock(rootDir, resolveWildArrangePath(rootDir, "team", "tasks.lock"));
+  if (lock.locked && lock.owner === "run-next-task" && lock.pidAlive) {
+    return {
+      status: "busy",
+      task: null,
+      busy: {
+        pid: lock.pid,
+        since: lock.acquiredAt,
+        hint: `另一个 run（pid ${lock.pid}）正在执行任务；等它结束后再运行，或用 status 查看进度`,
+      },
+    };
+  }
   return withTaskStateLock(rootDir, "run-next-task", () => runNextTaskUnlocked(rootDir, options));
 }
 

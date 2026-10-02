@@ -14,6 +14,7 @@ import { runNextTask, runWorkflowNode } from "../src/orchestration/linear-runtim
 import { statusReport } from "../src/orchestration/status.mjs";
 import { continuationDirective } from "../src/ai/context.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { withTaskStateLock } from "../src/infra/task-state-lock.mjs";
 import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
 import { nodeEval, installExternalTestAdapter, createSmokePlan } from "./helpers/runtime-fixtures.mjs";
 
@@ -70,6 +71,23 @@ test("linear loop runs worker, verifies, checkpoints, and records ledger", async
     assert.match(ledger, /task_verified/);
     assert.match(ledger, /review_gate_completed/);
     assert.match(ledger, /snapshot_written/);
+  });
+});
+
+test("a second run returns busy at once while another live run holds the task state", async () => {
+  await withExternalProject(async ({ projectRoot, root }) => {
+    await importApprovedPlan(projectRoot, await createSmokePlan(root));
+    await withTaskStateLock(projectRoot, "run-next-task", async () => {
+      const startedAt = Date.now();
+      const second = await runNextTask(projectRoot);
+      assert.ok(Date.now() - startedAt < 5_000, "must not wait out the lock timeout");
+      assert.equal(second.status, "busy");
+      assert.equal(second.busy.pid, process.pid);
+      assert.match(second.busy.hint, /run/);
+    });
+    const state = await readJson(resolveWildArrangePath(projectRoot, "team", "tasks.json"));
+    assert.equal(state.tasks[0].status, "pending");
+    assert.equal((await runNextTask(projectRoot)).status, "completed");
   });
 });
 
