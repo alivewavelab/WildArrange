@@ -324,6 +324,15 @@ function normalizeVerifierCommandRefs(value, verifyCommands, label) {
   }));
 }
 
+/** 是否仍是建单时无 verify 命令生成、未经编辑的默认标准；这类标准不绑定命令就永远无法通过。 */
+export function hasUnboundDefaultCriteria(task) {
+  const seeds = seedDefaultSuccessCriteria(task.id, task.subject, []);
+  const criteria = task.successCriteria || [];
+  return criteria.length === seeds.length && criteria.every((criterion, index) => criterion.id === seeds[index].id
+    && criterion.title === seeds[index].title && criterion.scenario === seeds[index].scenario
+    && criterion.status === "pending" && !criterion.evidence?.length && !criterion.verifierCommandRefs?.length);
+}
+
 /** 为新任务生成默认 successCriteria 条目。 */
 function seedDefaultSuccessCriteria(taskId, subject, verifyCommands) {
   const verifierText = verifyCommands.join(" && ");

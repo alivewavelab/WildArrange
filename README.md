@@ -261,7 +261,7 @@ node ./bin/wildarrange.mjs summary
 
 ### 工单总账
 
-新功能、独立 Bug、已完成任务的验收纠错和维护工作都使用同一个 Task 模型，并落盘到 `runtime:team/tasks.json`。Plan 只负责分组；跨 Plan 引用使用 `<planId>:<taskId>`。验证命令或职责声明还没准备好时可以先建 `draft` 留底，draft 不能执行；`task ready` 转为可执行时必须补齐 `responsibilityChanges`，随后计划回到待确认：
+新功能、独立 Bug、已完成任务的验收纠错和维护工作都使用同一个 Task 模型，并落盘到 `runtime:team/tasks.json`。Plan 只负责分组；跨 Plan 引用使用 `<planId>:<taskId>`。验证命令或职责声明还没准备好时可以先建 `draft` 留底，draft 不能执行；`task ready` 转为可执行时必须补齐 `responsibilityChanges`，随后计划回到待确认。建单时自动生成的默认验收标准未改动过时，会自动绑定 `task ready` 补齐的 verify 命令：
 
 ```bash
 node ./bin/wildarrange.mjs task create --title "修复登录失败" --type bug --priority P0
@@ -295,7 +295,7 @@ node ./bin/wildarrange.mjs task ready --task T001 --from task-details.json
 
 导入时逐层校验：`title` 必填；每个任务有 `subject` 与至少一条 `verify_commands`；`successCriteria` 结构合法且 `verifierCommandRefs` 指向真实存在的验证命令；任务 ID 不重复、`blockedBy` 引用存在且无环；命中产品类关键词且路由判为高风险的计划必须至少 4 个任务并包含验证/复核类任务。每张可执行任务都必须带 `responsibilityChanges`；只读任务（`writable_paths` 为空）用空数组 `[]` 明确声明不改文件。没有 `writable_paths`、`worker_command` 为空且 `verify_commands` 只是 `true` / `process.exit(0)` 的空转任务会被标记 `possible_noop_task`，并在开工检查与验收阶段被硬拦。
 
-计划确认门：每个导入的计划都进入 `awaiting_plan_approval`；计划确认后再新增或改动职责声明（`task create` / `task ready`、review blocker 整改单、`steer` 加单或改声明）也会让计划回到待确认。此时 `run` 会拒绝执行，直到 `plan approve`（或对话里用 `/wildarrange-approve`，AI 会先复述计划再请你确认）。
+计划确认门：每个导入的计划都进入 `awaiting_plan_approval`；计划确认后再新增或改动职责声明（`task create` / `task ready`、review blocker 整改单、`steer` 加单或改声明）也会让计划回到待确认。此时 `run` 会拒绝执行，直到 `plan approve`（或对话里用 `/wildarrange-approve`，AI 会先复述计划再请你确认）。另一个 `run` 正在执行时，新的 `run` 会立即返回 `busy` 并给出正在运行的进程号，不会排队等待。
 
 ### 范围越界被挡住后重试
 

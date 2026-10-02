@@ -294,7 +294,7 @@ SQL/数据库字段首版仍需人工声明精确结构及验证引用，Tauri �
 
 ## 计划批准 gate
 
-`importPlan` 把每个导入的计划标为 `awaiting_plan_approval`；`runNextTask` 在 `approvePlan`（CLI `plan approve` / slash `/wildarrange-approve`）记录批准前拒绝启动任务。`persistTaskState` 发现任一任务的职责声明新增或变化时，把当前计划重新置为待批准；`approvePlan` 把全部任务的声明指纹写入 `plan_approved`，职责审计只认这份快照。职责声明是可执行任务的准入条件（`task-normalize.mjs::normalizeTask`）：没有声明的任务只能是 draft；只读任务用空数组声明不改文件。未完成的回滚（`recovery_required`）优先于批准等待暴露。
+`importPlan` 把每个导入的计划标为 `awaiting_plan_approval`；`runNextTask` 在 `approvePlan`（CLI `plan approve` / slash `/wildarrange-approve`）记录批准前拒绝启动任务。`persistTaskState` 发现任一任务的职责声明新增或变化时，把当前计划重新置为待批准；`approvePlan` 把全部任务的声明指纹写入 `plan_approved`，职责审计只认这份快照。职责声明是可执行任务的准入条件（`task-normalize.mjs::normalizeTask`）：没有声明的任务只能是 draft；只读任务用空数组声明不改文件。未完成的回滚（`recovery_required`）优先于批准等待暴露。另一个存活的 `run` 持有任务状态锁时，`runNextTask` 只读探测后立即返回 `busy`（含持锁 pid），不排队等锁超时；探测不出时仍按原样取锁。
 
 ## Admission 状态机表
 
