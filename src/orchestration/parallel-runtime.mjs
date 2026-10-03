@@ -42,6 +42,7 @@ import { collectAgentWorktreePatch, prepareAgentWorktree } from "../infra/git-wo
 import { inspectGitDelivery } from "../infra/git-coordination.mjs";
 import { runCommand } from "../infra/command-runner.mjs";
 import { normalizeProposedFilesOrEmpty } from "./admission.mjs";
+import { assertAdmissionWorkspaceAvailable } from "./integration.mjs";
 import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
 import { persistTaskState } from "./task-board.mjs";
 import { sendTeamMessage } from "./team-messages.mjs";
@@ -70,6 +71,7 @@ export async function runParallelAgents(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const taskState = await loadTaskState(rootDir);
   if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
+  assertAdmissionWorkspaceAvailable(taskState.tasks);
   const approval = await loadPlanApproval(rootDir);
   if (approval.required && approval.status !== "approved" && approval.planId === taskState.planId) {
     return { status: "awaiting_plan_approval", runId: null, tasks: [], planId: taskState.planId };

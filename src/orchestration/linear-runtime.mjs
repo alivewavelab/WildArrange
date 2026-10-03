@@ -38,7 +38,7 @@ import { persistTaskState, writeOutbox } from "./task-board.mjs";
 import { findRunnableTask } from "../infra/task-predicates.mjs";
 import { resolveTaskBranchTarget } from "./task-branch.mjs";
 import { assertCommandWorkerAgent } from "../infra/agent-registry.mjs";
-import { assertContractWorkspaceAvailable } from "./integration.mjs";
+import { assertAdmissionWorkspaceAvailable } from "./integration.mjs";
 import { ensureLinearDeliveryWorkspace, recordPreExecuteSnapshot } from "./linear-delivery.mjs";
 import { DEFAULT_RECOVERY_HINTS, applyPipelineOutcome, persistCommandRecovery, recordGateEvidence } from "./task-recovery.mjs";
 import {
@@ -99,7 +99,7 @@ async function runNextTaskUnlocked(rootDir, options = {}) {
   if (!taskState) throw new Error("no imported plan found; run wildarrange plan --from <file>");
 
   // 未完成的回滚比人工批准更紧急：先暴露 recovery_required，再谈是否等待批准
-  assertContractWorkspaceAvailable(taskState.tasks);
+  assertAdmissionWorkspaceAvailable(taskState.tasks);
   const approval = await loadPlanApproval(rootDir);
   if (approval.required && approval.status !== "approved" && approval.planId === taskState.planId) {
     await appendLedger(rootDir, { type: "run_blocked_awaiting_plan_approval", planId: taskState.planId });

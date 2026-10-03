@@ -151,6 +151,11 @@ export async function rollbackAdmissionChanges(rootDir, rollbackPlan) {
         if (reverse.exitCode !== 0) {
           throw new Error(reverse.stderr || reverse.stdout || "git apply --reverse failed");
         }
+        // git apply 删不掉文件时只告警、仍返回 0：正向补丁能干净套上才说明工作区确已回到 pre-image
+        const restored = await runCommandFile("git", ["-C", rootDir, "apply", "--check", "--whitespace=nowarn", patchPath], rootDir, 30_000);
+        if (restored.exitCode !== 0) {
+          throw new Error(`git apply --reverse left the workspace unrestored: ${reverse.stderr || restored.stderr || restored.stdout}`.trim());
+        }
       } finally {
         await rm(patchPath, { force: true });
       }

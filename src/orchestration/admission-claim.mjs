@@ -11,7 +11,7 @@
 // =============================================================================
 import { appendLedger, readVerifiedLedgerEntries } from "../infra/ledger.mjs";
 import { nowIso } from "../infra/runtime-store.mjs";
-import { assertContractWorkspaceAvailable } from "./integration.mjs";
+import { assertAdmissionWorkspaceAvailable } from "./integration.mjs";
 import { loadTaskState } from "./plan-state.mjs";
 import { readChangeRequest } from "./change-governance.mjs";
 import { persistTaskState } from "./task-board.mjs";
@@ -27,7 +27,7 @@ export async function claimAdmission(rootDir, options, { result, files, proposed
   const task = taskState.tasks.find((candidate) => candidate.id === options.taskId);
   if (!task) throw new Error(`unknown task: ${options.taskId}`);
 
-  assertContractWorkspaceAvailable(taskState.tasks, options);
+  assertAdmissionWorkspaceAvailable(taskState.tasks, options);
 
   if (task.status === "completed") {
     // A completed task is either an idempotent resume (THIS run completed

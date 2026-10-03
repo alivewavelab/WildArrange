@@ -41,13 +41,14 @@ import { readVerifiedLedgerEntries } from "../infra/ledger.mjs";
 
 // --- 围栏与 intent ---
 
-/** 断言无其他任务持有未恢复的 contract 工作区，避免并行写冲突。 */
-export function assertContractWorkspaceAvailable(tasks, resume = {}) {
-  const held = tasks.find((task) => task.pendingContractChange && task.admission_claim
+/** 断言无其他任务持有未恢复的 admission 工作区（contract 改动或回滚失败），避免新 Worker 与脏工作区并存。 */
+export function assertAdmissionWorkspaceAvailable(tasks, resume = {}) {
+  const held = tasks.find((task) => task.admission_claim
+    && (task.pendingContractChange || task.last_failure?.reason === "admission_rollback_failed")
     && task.admission_claim.workspaceRestored !== true
     && !(task.id === resume.taskId && task.admission_claim.runId === resume.runId));
-  // §3.4：未恢复 contract 工作区时禁止其它 workspace 写，须先 resume 原 admission run。
-  if (held) throw new Error(`recovery_required: task ${held.id} has unrestored contract changes; resume admission run ${held.admission_claim.runId} before other workspace writes`);
+  // §3.4：contract 改动未恢复或 admission 回滚失败时禁止其它 workspace 写与新 Worker，须先 resume 原 admission run。
+  if (held) throw new Error(`recovery_required: task ${held.id} has unrestored admission changes; resume admission run ${held.admission_claim.runId} before other workspace writes`);
 }
 
 /** 读取 run/task 的 integration intent 持久化记录。 */

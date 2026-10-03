@@ -21,7 +21,7 @@ import { persistTaskState, writeOutbox } from "./task-board.mjs";
 import { findRunnableTask } from "../infra/task-predicates.mjs";
 import { resolveTaskBranchTarget } from "./task-branch.mjs";
 import { assertCommandWorkerAgent } from "../infra/agent-registry.mjs";
-import { assertContractWorkspaceAvailable } from "./integration.mjs";
+import { assertAdmissionWorkspaceAvailable } from "./integration.mjs";
 import { ensureLinearDeliveryWorkspace, recordPreExecuteSnapshot } from "./linear-delivery.mjs";
 import { DEFAULT_RECOVERY_HINTS, applyPipelineOutcome, persistCommandRecovery, persistTaskFailure, recordGateEvidence } from "./task-recovery.mjs";
 
@@ -303,7 +303,7 @@ async function retryTaskNodeUnlocked(rootDir, options = {}) {
 
 /** 解析单步 node 命令目标任务与允许状态。 */
 function resolveNodeTask(tasks, taskId, allowedStatuses) {
-  assertContractWorkspaceAvailable(tasks);
+  assertAdmissionWorkspaceAvailable(tasks);
   const task = taskId ? tasks.find((candidate) => candidate.id === taskId) : findRunnableTask(tasks) || tasks.find((candidate) => allowedStatuses.includes(candidate.status));
   if (!task) throw new Error(taskId ? `unknown task: ${taskId}` : "no task available for node");
   if (!allowedStatuses.includes(task.status)) {

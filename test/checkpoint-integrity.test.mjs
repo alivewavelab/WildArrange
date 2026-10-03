@@ -30,6 +30,7 @@ import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { runCommand, runCommandFile } from "../src/infra/command-runner.mjs";
 import { appendLedger } from "../src/infra/ledger.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
+import { rollbackAdmissionChanges } from "../src/orchestration/admission-recovery.mjs";
 import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
 
 /** 夹具任务可能改动的文件：职责声明覆盖本文件用例写入的全部路径。 */
@@ -1176,6 +1177,77 @@ test("adversarial: rollback failure keeps ownership until the same run recovers 
     assert.notEqual(recoveredState.tasks[0].status, "verifying");
     assert.equal(recoveredState.tasks[0].admission_claim, null);
     assert.equal(await readJson(rollbackPlanPath, null), null);
+  });
+});
+
+test("adversarial: an unfinished rollback stops run and parallel run from starting any other worker", async () => {
+  await withProject(async (dir) => {
+    await mkdir(path.join(dir, "src", "locked"), { recursive: true });
+    const planPath = resolveWildArrangePath(dir, "artifacts", "rollback-blocks-run-plan.json");
+    const marker = nodeEval("const fs=require('fs');fs.mkdirSync('src',{recursive:true});fs.writeFileSync('src/one.txt','started')");
+    await writeFile(planPath, JSON.stringify({
+      title: "Rollback failure blocks other work",
+      tasks: [
+        {
+          id: "T001",
+          subject: "Reject a new file after replacing it with a non-empty directory",
+          verify_commands: [nodeEval("const fs=require('fs'); fs.unlinkSync('src/locked/leak.txt'); fs.mkdirSync('src/locked/leak.txt'); fs.writeFileSync('src/locked/leak.txt/blocker.txt','occupied'); process.exit(1)")],
+          review_commands: [realReviewCommand()],
+          writable_paths: ["src/**"], responsibilityChanges: SRC_RESPONSIBILITY,
+        },
+        {
+          id: "T002",
+          subject: "Independent task that must wait for recovery",
+          worker_command: marker,
+          verify_commands: [nodeEval("process.exit(0)")],
+          review_commands: [realReviewCommand()],
+          writable_paths: ["src/one.txt"], responsibilityChanges: declare("src/one.txt"),
+        },
+      ],
+    }, null, 2));
+    await importApprovedPlan(dir, planPath);
+    const command = [
+      nodeEval("const fs=require('fs'); fs.writeFileSync(process.argv[1], JSON.stringify({summary:'adds rejected file', files:[{path:'src/locked/leak.txt', content:'after\\n'}]}));"),
+      "{outputJson}",
+    ].join(" ");
+    const batch = await runParallelAgents(dir, { taskIds: ["T001"], agent: "ZhuRong", command });
+    assert.equal((await admitParallelAgentResult(dir, { runId: batch.runId, taskId: "T001" })).status, "recovery_required");
+
+    // T002 本可运行，但工作区仍是 T001 未回滚的脏状态：任何入口都不得启动新 Worker
+    await assert.rejects(runNextTask(dir), new RegExp(`recovery_required: task T001 .*${batch.runId}`));
+    await assert.rejects(runParallelAgents(dir, { taskIds: ["T002"], agent: "ZhuRong", command: marker }), /recovery_required: task T001/);
+    const state = await loadTaskState(dir);
+    assert.equal(state.tasks.find((task) => task.id === "T002").status, "pending");
+    assert.equal(state.tasks.find((task) => task.id === "T001").admission_claim?.runId, batch.runId);
+    await assert.rejects(readFile(path.join(dir, "src", "one.txt"), "utf8"), /ENOENT/);
+  });
+});
+
+test("adversarial: patch rollback that git only warns about is reported as rollback_failed", { skip: process.platform === "win32" }, async () => {
+  await withProject(async (dir) => {
+    const git = async (...args) => {
+      const result = await runCommandFile("git", args, dir);
+      assert.equal(result.exitCode, 0, result.stderr);
+      return result.stdout;
+    };
+    await mkdir(path.join(dir, "src"), { recursive: true });
+    await writeFile(path.join(dir, "src", "added.txt"), "child output\n");
+    await git("add", "-N", "src/added.txt");
+    const patch = await git("diff");
+    await git("reset", "-q");
+    const plan = { mode: "patch", patch, paths: ["src/added.txt"] };
+
+    // git apply --reverse 删不掉文件时只告警、退出码仍为 0；不得据此宣称已回滚
+    const unblock = await blockFileWrite(path.join(dir, "src", "added.txt"));
+    const failed = await rollbackAdmissionChanges(dir, plan);
+    await unblock();
+    assert.equal(failed.status, "rollback_failed");
+    assert.equal(await readFile(path.join(dir, "src", "added.txt"), "utf8"), "child output\n");
+    assert.match(await readFile(resolveWildArrangePath(dir, "ledger.jsonl"), "utf8"), /parallel_agent_admission_rollback_failed/);
+
+    const recovered = await rollbackAdmissionChanges(dir, plan);
+    assert.equal(recovered.status, "rolled_back");
+    await assert.rejects(readFile(path.join(dir, "src", "added.txt"), "utf8"), /ENOENT/);
   });
 });
 
