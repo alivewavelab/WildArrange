@@ -30,7 +30,8 @@ pre{background:var(--card);border:1px solid var(--line);border-radius:8px;paddin
 
 <div class="box" style="border-left-color:var(--p3)"><b>执行结果（2026-10-03，真实 CLI）：</b>全新项目 <code>setup</code> 后 doctor 报出握手与审查者未配置，并按本机 CLI 推荐 claude 握手 + kimi 审查（含 900 秒超时）；原样采用后：T001 由 claude Worker 实现、kimi 审查，83 秒完成并推送；T002 由 kimi Worker 实现、kimi（只读 plan 档案）审查，104 秒完成并推送。<br>
 <b>实机暴露并修复：</b>① kimi 不允许 <code>-p</code> 与 <code>--yolo</code>/<code>--auto</code> 同用，且 <code>-p</code> 本身自动批准全部工具——Worker 改用纯 <code>-p</code>，握手与审查改用内置只读 <code>plan</code> 档案（实测无法写文件）；② 线性 <code>run</code> 的 Worker 超时原为不可配置的 120 秒，kimi Worker 被杀——新增 <code>executionReadiness.workerTimeoutMs</code>，默认 30 分钟。<br>
-<b>未实机验证：</b>cursor-agent（本机未登录），仅按其命令行帮助实现并用假 CLI 测试；claude 作为审查者走与 kimi 相同的代码路径，本轮未单独实跑。</div>
+<b>Cursor（登录后补测）：</b>T001 由 cursor 握手、cursor Worker 实现、cursor 审查，100 秒完成并推送；doctor 给出"审查者与 Worker 同 CLI"告警。实测暴露：cursor 非交互不带 <code>--trust</code> 会停在工作区信任提示并退出——握手与审查加 <code>--trust</code>（只信任目录、不放开工具审批）；<code>--mode ask</code> 实测拒绝写文件；<code>--sandbox enabled</code> 实测拦不住 worktree 外的 Shell 写入，故未采用；一次 <code>--force</code> 运行回复 DONE 却未生成文件（复现时正常），由 verifier 兜底判定。<br>
+<b>未单独实跑：</b>claude 作为审查者（与 kimi、cursor 共用同一读包与 JSON 提取路径）。</div>
 
 <div class="box"><b>现状问题：</b>开工检查必须配 <code>executionReadiness.workerProbe</code> 与 <code>review.responsibility.command</code>，每张任务还要真实的 <code>worker_command</code>。仓库不带任何适配脚本，用户得自己写一个"读任务包 → 调模型 CLI → 回 JSON"的程序；而且刚 <code>setup</code> 完 <code>doctor</code> 不提示没配，第一次 <code>run</code> 才以 <code>readiness_blocked</code> 暴露。<br>
 <b>方案：</b>产品自带一条命令 <code>wildarrange executor &lt;probe|review|work&gt; --cli &lt;claude|kimi|cursor&gt;</code>，把实机验证过的适配逻辑做成正式能力；配置里直接写这条命令。<code>doctor</code> 在初始化阶段就提示缺失项，并给出可直接复制的推荐配置。</div>

@@ -111,7 +111,8 @@ function buildReadOnlyCall(cli, packetPath, packetText) {
   const prompt = `Read the JSON packet file at ${packetPath}. ${rules}`;
   // kimi -p 会自动批准工具调用；内置 plan 档案没有 Shell 与写文件工具，从机制上保证只读
   if (cli === "kimi") return { args: ["--agent", "plan", "-p", prompt, "--add-dir", path.dirname(packetPath)] };
-  return { args: ["-p", "--mode", "ask", "--output-format", "json", prompt] };
+  // cursor 非交互不带 --trust 会停在工作区信任提示；--trust 只信任目录，不放开工具审批
+  return { args: ["-p", "--mode", "ask", "--trust", "--add-dir", path.dirname(packetPath), "--output-format", "json", prompt] };
 }
 
 /**
@@ -127,7 +128,7 @@ function buildWorkerCall(cli, brief, contextPath) {
     };
   }
   if (cli === "kimi") return { args: ["-p", brief, "--add-dir", path.dirname(contextPath)] };
-  return { args: ["-p", "--force", "--output-format", "json", brief] };
+  return { args: ["-p", "--force", "--add-dir", path.dirname(contextPath), "--output-format", "json", brief] };
 }
 
 /** 任务简报：核心字段内联，完整 Skill 与审查要求留在上下文文件里按需读取。 */

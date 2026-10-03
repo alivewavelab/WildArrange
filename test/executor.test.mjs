@@ -81,7 +81,11 @@ test("probe passes the packet to each CLI without putting it on the command line
       } else {
         assert.ok(call.argv.join(" ").includes(packetPath), `${cli} is pointed at the packet file`);
       }
-      if (cli === "cursor") assert.ok(call.argv.join(" ").includes("--mode ask"), "cursor probe runs read-only");
+      if (cli === "cursor") {
+        assert.ok(call.argv.join(" ").includes("--mode ask"), "cursor probe runs read-only");
+        // 实机：非交互模式不带 --trust 会停在"信任此目录"提示并退出 1
+        assert.ok(call.argv.includes("--trust"), "cursor must trust the workspace non-interactively");
+      }
       // kimi -p 会自动批准工具调用；只读由内置 plan 档案（无 Shell、无写文件工具）保证，实机已验证
       if (cli === "kimi") assert.deepEqual(call.argv.slice(call.argv.indexOf("--agent"), call.argv.indexOf("--agent") + 2), ["--agent", "plan"], "kimi probe runs the read-only plan profile");
     }
