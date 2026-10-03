@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>内置执行者模板</title>
+<style>
+:root{--bg:#fafaf8;--fg:#1d1d1b;--muted:#6b6b66;--card:#fff;--line:#e4e2dc;--p0:#c0392b;--p1:#d9822b;--p2:#2e7dbd;--p3:#6b8e23}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#17171a;--fg:#e8e6e1;--muted:#9a978f;--card:#212126;--line:#34343a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:1180px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:26px;margin:0 0 4px}h2{margin:34px 0 12px;font-size:20px;border-bottom:1px solid var(--line);padding-bottom:6px}
+h3{font-size:16px;margin:0 0 6px}
+.muted{color:var(--muted);font-size:13px}
+.box{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--p2);border-radius:8px;padding:12px 16px;margin:12px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-top:5px solid var(--c);border-radius:10px;padding:12px 16px}
+.card ul,.box ul,.box ol{margin:6px 0;padding-left:18px}
+table{border-collapse:collapse;width:100%;font-size:13px}th,td{border:1px solid var(--line);padding:6px 8px;vertical-align:top;text-align:left}th{background:var(--card)}
+.tw{overflow-x:auto}
+code{font-size:12px;background:rgba(127,127,127,.14);padding:0 3px;border-radius:3px;overflow-wrap:anywhere}
+pre{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto;font-size:12px}
+</style>
+</head>
+<body><main>
+<p style="padding:10px 14px;border:1px solid #d9a441;background:#fff7e6;color:#5c4400;border-radius:6px"><strong>历史方案：已落地（分支 feat/builtin-executors），现行用法以 README 的「项目接管与项目审查」一节为准。</strong></p>
+<h1>内置执行者模板方案（已执行）</h1>
+<div class="muted">2026-10-03 · 目标：用户不再自己写 Worker 握手、审查者、Worker 适配脚本 · 依据：2026-10-02 实机验证的 <code>agent.mjs</code>、本机 <code>claude</code> 2.1.287 / <code>kimi</code> 0.39.1 / <code>cursor-agent</code> 的命令行实测</div>
+
+<div class="box" style="border-left-color:var(--p3)"><b>执行结果（2026-10-03，真实 CLI）：</b>全新项目 <code>setup</code> 后 doctor 报出握手与审查者未配置，并按本机 CLI 推荐 claude 握手 + kimi 审查（含 900 秒超时）；原样采用后：T001 由 claude Worker 实现、kimi 审查，83 秒完成并推送；T002 由 kimi Worker 实现、kimi（只读 plan 档案）审查，104 秒完成并推送。<br>
+<b>实机暴露并修复：</b>① kimi 不允许 <code>-p</code> 与 <code>--yolo</code>/<code>--auto</code> 同用，且 <code>-p</code> 本身自动批准全部工具——Worker 改用纯 <code>-p</code>，握手与审查改用内置只读 <code>plan</code> 档案（实测无法写文件）；② 线性 <code>run</code> 的 Worker 超时原为不可配置的 120 秒，kimi Worker 被杀——新增 <code>executionReadiness.workerTimeoutMs</code>，默认 30 分钟。<br>
+<b>未实机验证：</b>cursor-agent（本机未登录），仅按其命令行帮助实现并用假 CLI 测试；claude 作为审查者走与 kimi 相同的代码路径，本轮未单独实跑。</div>
+
+<div class="box"><b>现状问题：</b>开工检查必须配 <code>executionReadiness.workerProbe</code> 与 <code>review.responsibility.command</code>，每张任务还要真实的 <code>worker_command</code>。仓库不带任何适配脚本，用户得自己写一个"读任务包 → 调模型 CLI → 回 JSON"的程序；而且刚 <code>setup</code> 完 <code>doctor</code> 不提示没配，第一次 <code>run</code> 才以 <code>readiness_blocked</code> 暴露。<br>
+<b>方案：</b>产品自带一条命令 <code>wildarrange executor &lt;probe|review|work&gt; --cli &lt;claude|kimi|cursor&gt;</code>，把实机验证过的适配逻辑做成正式能力；配置里直接写这条命令。<code>doctor</code> 在初始化阶段就提示缺失项，并给出可直接复制的推荐配置。</div>
+
+<h2>1. 验收标准</h2>
+<div class="tw"><table>
+<thead><tr><th>#</th><th>标准</th><th>证据</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>新项目只改两行配置（<code>workerProbe</code>、<code>review.responsibility.command</code>）即可通过开工检查，不写任何脚本</td><td>实机：真实 CLI 握手通过</td></tr>
+<tr><td>2</td><td>用内置 Worker 跑完一张真实任务：Worker 写代码 → verifier → 内置审查者 PASS → 完成并推送 task branch</td><td>实机：<code>run</code> 返回 <code>completed</code></td></tr>
+<tr><td>3</td><td>旧回执、超时、CLI 未安装、模型输出夹杂文字时，结果都是明确失败或正确解析，绝不误判为通过</td><td>自动化测试（假 CLI）+ 实机超时</td></tr>
+<tr><td>4</td><td>刚 <code>setup</code> 完运行 <code>doctor</code>，会提示握手与审查命令未配置，并给出推荐命令</td><td>doctor 输出</td></tr>
+<tr><td>5</td><td>审查者与 Worker 用同一个 CLI 时，doctor 给出"独立性不足"警告（不阻断）</td><td>doctor 输出</td></tr>
+</tbody></table></div>
+
+<h2>2. 设计</h2>
+<div class="grid">
+  <div class="card" style="--c:var(--p2)"><h3>三个角色</h3><ul>
+  <li><b>probe</b>：读 <code>WILDARRANGE_READINESS_PACKET</code>，回 <code>{ready, challenge, loadedSkills}</code></li>
+  <li><b>review</b>：读 <code>WILDARRANGE_REVIEW_PACKET</code>（职责审计与项目审查步骤共用），按包内 <code>instruction</code> 回 JSON</li>
+  <li><b>work</b>：读 <code>WILDARRANGE_EXECUTION_CONTEXT</code> 的任务、Skill 与可写路径，在任务 worktree 内改文件</li></ul>
+  探测与审查一律只读；包内容不进命令行参数（审查包可达数百 KB），claude/cursor 走 stdin，kimi 读包文件路径。</div>
+  <div class="card" style="--c:var(--p2)"><h3>各 CLI 的调用方式（已实测）</h3><ul>
+  <li><b>claude</b>：<code>claude -p --output-format json</code>；只读角色禁用 <code>Bash/Edit/Write</code>；Worker 用 <code>acceptEdits</code>，只开 <code>Read/Write/Edit/Glob/Grep</code>，不开 Shell</li>
+  <li><b>kimi</b>：<code>kimi -p … --add-dir &lt;包目录&gt;</code>；输出带 <code>• </code> 前缀，需提取 JSON；实测握手约 23 秒，深度审查可超过 10 分钟</li>
+  <li><b>cursor</b>：<code>cursor-agent -p --mode ask --output-format json</code>（只读）</li></ul></div>
+  <div class="card" style="--c:var(--p1)"><h3>稳健性</h3><ul>
+  <li>从模型输出中提取第一个完整 JSON 对象，提取失败按失败处理</li>
+  <li>CLI 未安装、退出码非 0、超时：如实报错，交给现有门禁判定失败</li>
+  <li>模型的 <code>model</code> 可选参数透传（<code>--model</code>）</li>
+  <li>归属 <code>src/capabilities/</code>（原子能力），CLI 入口在 <code>bin</code></li></ul></div>
+</div>
+
+<h2>3. 决定（2026-10-03 用户确认）</h2>
+<div class="box" style="border-left-color:var(--p3)"><b>Worker：claude / kimi / cursor 都支持</b>（实测：kimi 的 <code>-p</code> 本身自动批准全部工具且不允许与 <code>--yolo</code> 同用，因此 Worker 直接用 <code>-p</code>，握手与审查改用内置只读 <code>plan</code> 档案；cursor 以 <code>--force</code> 非交互改文件；成果仍过全部门禁）；<b>审查者与 Worker 同 CLI：只警告不阻断</b>；codex 本次不做。另：执行者启动的模型子会话带 <code>WILDARRANGE_EXECUTOR_SESSION=1</code>，宿主 Hook bridge 见到即放行，避免治理注入与续跑嵌套干扰执行者（claude 的 <code>--bare</code> 会跳过 OAuth 登录，不可用）。</div>
+<p class="muted">以下为确认前的选项与推荐，留作记录。</p>
+<div class="tw"><table>
+<thead><tr><th>问题</th><th>推荐</th><th>理由</th></tr></thead>
+<tbody>
+<tr><td>Worker（改代码的那个）支持哪些 CLI</td><td><b>只支持 claude</b>（无 Shell 权限）</td><td>kimi 非交互改文件必须开 <code>--yolo</code>（自动批准一切，含 Shell），cursor-agent 的打印模式默认带写入和 Shell 权限；两者都没有"只能改文件"的开关。Worker 在隔离 worktree 里跑、结果还要过全部门禁，但无约束的 Shell 仍可能碰到 worktree 之外的东西。探测与审查三种都支持。</td></tr>
+<tr><td>codex</td><td><b>本次不做</b></td><td>本机未安装，无法按规范实机验证；等装好后按同一接口补上</td></tr>
+<tr><td>审查者与 Worker 同一个 CLI</td><td><b>只警告，不阻断</b></td><td>同一模型自审独立性弱，但很多用户只有一个 CLI；审查进程只拿任务包、看不到 Worker 过程，仍有隔离</td></tr>
+</tbody></table></div>
+
+<h2>4. 范围外</h2>
+<div class="box" style="border-left-color:var(--p1)"><ul>
+<li>Agent 绑定 Skill 调度外部 CLI 的"软路线"保持不变；本方案只服务硬门禁命令。</li>
+<li>不改任何门禁判定逻辑，只提供执行者命令和 doctor 提示。</li>
+<li>预计不需要改规范文档；若实现中发现需要，先回来确认。</li>
+</ul></div>
+</main></body>
+</html>

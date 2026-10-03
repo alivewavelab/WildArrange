@@ -39,6 +39,7 @@ export async function runWorker(rootDir, task, options = {}) {
   }
   const { config } = await loadWildArrangeConfig(rootDir);
   const extraPatterns = compileCommandSafetyPatterns(config);
-  const result = await runCommand(command, options.executionRoot || rootDir, options.timeoutMs, { extraPatterns, env: options.executionContextPath ? { WILDARRANGE_EXECUTION_CONTEXT: options.executionContextPath } : {} });
+  const timeoutMs = options.timeoutMs ?? config.executionReadiness?.workerTimeoutMs;
+  const result = await runCommand(command, options.executionRoot || rootDir, timeoutMs, { extraPatterns, env: options.executionContextPath ? { WILDARRANGE_EXECUTION_CONTEXT: options.executionContextPath } : {} });
   return { kind: "worker", at: nowIso(), command, ...result };
 }

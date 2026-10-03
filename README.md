@@ -245,7 +245,7 @@ node ./bin/wildarrange.mjs setup --governance-root ../wildarrange-governance --r
 
 计划导入会保护已有成果：同一 Plan 中仍在执行、验证、恢复、持有任务 claim 或已经完成的任务不能被重新导入覆盖。已完成旧 Plan 后可以导入新的 Plan，旧任务及其交付记录继续保留。
 
-运行（每个导入的计划都要人工确认；开工检查要求先用 `/wildarrange-setup` 配好 Worker 握手 `executionReadiness.workerProbe` 与职责审查者 `review.responsibility.command`）：
+运行（每个导入的计划都要人工确认；开工检查要求先用 `/wildarrange-setup` 配好 Worker 握手 `executionReadiness.workerProbe` 与职责审查者 `review.responsibility.command`，可直接使用内置执行者，`doctor` 会给出推荐命令）：
 
 ```bash
 node ./bin/wildarrange.mjs plan --from plan.json
@@ -808,6 +808,17 @@ Worker 之后的既有 Review 增加独立职责审计：R1 符合批准方案�
 先用 `project show` 取 runtimeRoot，将配置补丁保存到 `<runtimeRoot>/plan-drafts/review-setup.json`，执行 `wildarrange review configure --from "<runtimeRoot>/plan-drafts/review-setup.json"` 预览，用户确认后再加 --apply。用 review checklist --task T001 查看清单，已批准后用 readiness --task T001 检查开工依赖。配置依赖缺失可先保存，但业务 Worker 不会启动，不消耗重试次数。
 
 Worker 读取 WILDARRANGE_EXECUTION_CONTEXT 的完整任务 Skill；探测器读取 WILDARRANGE_READINESS_PACKET，Reviewer 读取 WILDARRANGE_REVIEW_PACKET。探测返回 ready、原 challenge、loadedSkills；Reviewer 按包内协议返回带 inputDigest 的 PASS/RETURN/INCONCLUSIVE 与准确源码证据。请连接真实服务，固定回显不是独立审核。握手通过不等于功能交付。
+
+不需要自己写适配脚本：内置执行者 `wildarrange executor probe|review|work --cli claude|kimi|cursor` 会把握手包、审查包或任务交给本机已登录的模型 CLI（Claude Code、Kimi Code、Cursor Agent），并把回答整理成门禁要求的格式。`doctor` 发现握手或审查者未配置时，会按本机已装的 CLI 给出可直接复制的命令（审查者优先选与 Worker 不同的 CLI；审查者与 Worker 用同一 CLI 时只告警）。配置示例：
+
+```json
+{
+  "executionReadiness": { "workerProbe": "wildarrange executor probe --cli claude" },
+  "review": { "responsibility": { "command": "wildarrange executor review --cli kimi", "timeoutMs": 900000 } }
+}
+```
+
+任务的 `worker_command` 可写 `wildarrange executor work --cli claude`。握手与审查只读：claude 禁用 Shell 与写文件工具，kimi 使用内置只读 `plan` 档案（无 Shell、无写文件工具），cursor 使用 `--mode ask`。Worker 在任务 worktree 中改文件：claude 只开放文件工具、不开放 Shell；kimi 的非交互 `-p` 模式本身自动批准全部工具（含 Shell），cursor 需 `--force` 才能非交互改文件（同样含 Shell），成果仍须通过全部门禁。Kimi 深度审查可能超过 10 分钟，审查者用 kimi 时把 `timeoutMs` 调大。线性 `run` 的 Worker 超时由 `executionReadiness.workerTimeoutMs` 控制，默认 30 分钟（此前固定 120 秒，模型 Worker 不够用）。执行者启动的模型子会话不受 WildArrange 宿主 Hook 注入与续跑影响。
 
 `review configure --from` 只接受运行态 `plan-drafts/` 下的草稿，请传绝对路径。正式配置保存到治理仓库 `<policyRoot>/wildarrange.config.json`；尚无正式配置时使用内置默认值。业务仓库不新增这些治理文件。
 

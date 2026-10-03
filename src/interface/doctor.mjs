@@ -43,6 +43,8 @@ import { evaluateRegistryFreshness } from "../infra/verification-registry.mjs";
 import { projectDecisionStats } from "./decisions.mjs";
 import { addFinding, checkCompletionIntegrity } from "./doctor-completion.mjs";
 import { inspectAdapterIntegrity, loadAdapterReport } from "./adapters.mjs";
+import { inspectExecutorConfig } from "./executor-cli.mjs";
+import { resolveRuntimeCliCommandPrefix } from "../infra/runtime-snapshot.mjs";
 
 // 诊断与门控分离：每个检查独立 try/catch，单项崩溃只把自己的分项标红，
 // 其余分项照常输出；doctor 不再写 hash 链 ledger（诊断不该抢门控的锁）。
@@ -51,6 +53,7 @@ const SECTION_CHECKS = [
   ["config", checkConfigStructure],
   ["gateArming", checkGateArming],
   ["adapters", checkAdapters],
+  ["executors", checkExecutors],
   ["completionAudit", checkCompletionIntegrity],
   ["ledger", checkLedgerIntegrity],
   ["ledgerBackupCrossCheck", checkLedgerAgainstBackup],
@@ -355,6 +358,28 @@ async function checkAdapters(rootDir, findings) {
       : (installedTargets.length === 0 ? "no external adapter installed" : "no installed host adapters enabled"),
     targets,
   };
+}
+
+/** 开工握手与职责审查者：缺失时第一次 run 才会 readiness_blocked，这里提前暴露并给出内置执行者命令。 */
+async function checkExecutors(rootDir, findings) {
+  const { config } = await loadWildArrangeConfig(rootDir);
+  const cliPrefix = await resolveRuntimeCliCommandPrefix(rootDir) || "wildarrange";
+  const result = inspectExecutorConfig(config, { cliPrefix });
+  if (result.missing.length) {
+    const recommended = result.recommended;
+    addFinding(findings, "error", "executors", `开工检查必需的执行者未配置：${result.missing.join("、")}；任务无法开工`, {
+      code: "execution_readiness_unconfigured",
+      recommended,
+      nextAction: `在治理仓 policy/wildarrange.config.json 设置 executionReadiness.workerProbe = ${recommended.workerProbe}；review.responsibility.command = ${recommended.reviewerCommand}${recommended.reviewerTimeoutMs ? `（并设 review.responsibility.timeoutMs = ${recommended.reviewerTimeoutMs}）` : ""}；任务 worker_command 可用 ${recommended.workerCommand}。提交治理仓后生效，也可运行 /wildarrange-setup 引导配置`,
+    });
+  }
+  if (result.sameCli) {
+    addFinding(findings, "warn", "executors", `审查者与 Worker 都使用 ${result.sameCli}，独立复核较弱`, {
+      code: "executor_reviewer_not_independent",
+      nextAction: `本机可用：${result.available.join("、") || "（未检测到）"}；建议审查者改用其它 CLI`,
+    });
+  }
+  return { status: result.missing.length ? "error" : result.sameCli ? "warn" : "ok", missing: result.missing, available: result.available };
 }
 
 /** 外置 Adapter 以生成报告 activationId 与宿主回执绑定，三宿主共用同一证据语义。 */
