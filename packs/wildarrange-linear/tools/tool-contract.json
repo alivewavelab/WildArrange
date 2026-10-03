@@ -5,7 +5,7 @@
   "tools": [
     {
       "name": "wildarrange_setup",
-      "command": "wildarrange setup --governance-root <path> [--repository <git-url>] [--target codex|cursor|kimi|all] [--mode local|npx] [--package @alivewavelab/wildarrange] [--default-branch main]",
+      "command": "wildarrange setup --governance-root <path> [--repository <git-url>] [--target codex|cursor|kimi|claude|all] [--mode local|npx] [--package @alivewavelab/wildarrange] [--default-branch main]",
       "purpose": "一步接入外置治理：创建治理仓（含 Git 初始提交与默认武装配置）→ attach → init → 生成宿主 Adapter 包；客户项目零写入"
     },
     {
@@ -105,17 +105,17 @@
     },
     {
       "name": "wildarrange_adapter_install",
-      "command": "wildarrange adapter install [--target codex|cursor|kimi|all] [--mode local|npx] [--package @alivewavelab/wildarrange]",
+      "command": "wildarrange adapter install [--target codex|cursor|kimi|claude|all] [--mode local|npx] [--package @alivewavelab/wildarrange]",
       "purpose": "在 runtimeRoot 生成宿主外置插件包；--mode 选择 hook 调用 CLI 的前缀（local 当前 bin 路径 / npx 包名）"
     },
     {
       "name": "wildarrange_adapter_activate",
-      "command": "wildarrange adapter activate [--target cursor|codex|all] [--user-root <path>]",
-      "purpose": "显式写入用户级配置：Cursor Hook 与指针规则、Codex AGENTS.md 指针段；先备份且不写客户项目"
+      "command": "wildarrange adapter activate [--target cursor|codex|claude|all] [--user-root <path>] [--claude-bin <path>]",
+      "purpose": "显式写入用户级配置：Cursor Hook 与指针规则、Codex AGENTS.md 指针段、经 claude CLI 安装 Claude Code 插件；先备份且不写客户项目"
     },
     {
       "name": "wildarrange_adapter_uninstall",
-      "command": "wildarrange adapter uninstall [--target codex|cursor|kimi|all]",
+      "command": "wildarrange adapter uninstall [--target codex|cursor|kimi|claude|all] [--claude-bin <path>]",
       "purpose": "卸载宿主 adapter：移除用户级条目与指针并删除 runtime 插件包"
     },
     {

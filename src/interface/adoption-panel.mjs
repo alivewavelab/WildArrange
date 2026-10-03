@@ -130,7 +130,7 @@ function governanceGroupFor(relativePath) {
   if (/^(test\/|tests\/|package\.json$)|\.(test|spec)\.[cm]?[jt]s$/i.test(value)) return "tests";
   if (/^(wildarrange\.config\.json|src\/capabilities\/(verify|scope-guard|review-gate|acceptance-proof|checkpoint)\.mjs)$/i.test(value)) return "gates";
   if (/^(README(?:\.en)?\.md|doc\/.*\.(md|html))$/i.test(value)) return "product";
-  if (/^(\.github\/workflows\/|\.cursor\/|\.codex\/|\.kimi-code\/|src\/interface\/.*(?:adapter|hook).*\.mjs$)/i.test(value)) return "automation";
+  if (/^(\.github\/workflows\/|\.cursor\/|\.codex\/|\.kimi-code\/|\.claude\/|src\/interface\/.*(?:adapter|hook).*\.mjs$)/i.test(value)) return "automation";
   return null;
 }
 

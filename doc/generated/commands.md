@@ -2,7 +2,7 @@
 
 | 命令 | 说明 |
 | ---- | ---- |
-| `wildarrange setup --governance-root <path> [--repository <git-url>] [--target codex|cursor|kimi|all] [--mode local|npx] [--package @alivewavelab/wildarrange] [--default-branch main]` | 一步接入外置治理：创建治理仓（含 Git 初始提交与默认武装配置）→ attach → init → 生成宿主 Adapter 包；客户项目零写入 |
+| `wildarrange setup --governance-root <path> [--repository <git-url>] [--target codex|cursor|kimi|claude|all] [--mode local|npx] [--package @alivewavelab/wildarrange] [--default-branch main]` | 一步接入外置治理：创建治理仓（含 Git 初始提交与默认武装配置）→ attach → init → 生成宿主 Adapter 包；客户项目零写入 |
 | `wildarrange project init-governance --governance-root <path> --repository <git-url> [--default-branch main]` | 在项目外创建不覆盖已有文件的治理仓库骨架与默认武装配置；非 Git 目录自动 git init 并提交初始 commit |
 | `wildarrange project attach --governance-root <path> [--project-root <path>] [--runtime-root <path>]` | 把客户项目连接到独立治理仓库；映射写入项目外部状态目录 |
 | `wildarrange project show [--project-root <path>]` | 查看项目、治理仓库和运行态三根连接 |
@@ -22,9 +22,9 @@
 | `wildarrange config show` | 查看生效配置 |
 | `wildarrange config baseline [--reason "..."]` | 写入 config hash 基线 |
 | `wildarrange config verify` | 校验 config 基线 |
-| `wildarrange adapter install [--target codex|cursor|kimi|all] [--mode local|npx] [--package @alivewavelab/wildarrange]` | 在 runtimeRoot 生成宿主外置插件包；--mode 选择 hook 调用 CLI 的前缀（local 当前 bin 路径 / npx 包名） |
-| `wildarrange adapter activate [--target cursor|codex|all] [--user-root <path>]` | 显式写入用户级配置：Cursor Hook 与指针规则、Codex AGENTS.md 指针段；先备份且不写客户项目 |
-| `wildarrange adapter uninstall [--target codex|cursor|kimi|all]` | 卸载宿主 adapter：移除用户级条目与指针并删除 runtime 插件包 |
+| `wildarrange adapter install [--target codex|cursor|kimi|claude|all] [--mode local|npx] [--package @alivewavelab/wildarrange]` | 在 runtimeRoot 生成宿主外置插件包；--mode 选择 hook 调用 CLI 的前缀（local 当前 bin 路径 / npx 包名） |
+| `wildarrange adapter activate [--target cursor|codex|claude|all] [--user-root <path>] [--claude-bin <path>]` | 显式写入用户级配置：Cursor Hook 与指针规则、Codex AGENTS.md 指针段、经 claude CLI 安装 Claude Code 插件；先备份且不写客户项目 |
+| `wildarrange adapter uninstall [--target codex|cursor|kimi|claude|all] [--claude-bin <path>]` | 卸载宿主 adapter：移除用户级条目与指针并删除 runtime 插件包 |
 | `wildarrange adapter restore --backup <backupId>` | 恢复 adapter 备份：还原到该次 activate 之前的用户级文件 |
 | `wildarrange injection show --point before_review [--agent BaiZe] [--task T001] [--text "..."] [--stage plan]` | 查看注入点解析结果 |
 | `wildarrange hook run [--from hook.json] [--format text|json] --adapter-digest <sha256>` | 运行宿主生命周期 Hook；只处理已连接项目，未连接项目静默放行 |

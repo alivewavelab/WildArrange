@@ -2,7 +2,7 @@
 // 文件名称：adapter-bridge-template.mjs
 // 所属模块：interface
 // 作用说明：
-//   渲染三宿主共用的 Hook bridge 脚本（字符串模板）。本文件里的函数产出
+//   渲染四宿主共用的 Hook bridge 脚本（字符串模板）。本文件里的函数产出
 //   嵌入 bridge 的源码，不是运行时逻辑：项目发现、CLI 调用、超时与错误处理骨架
 //   在此，fail-open/fail-closed 与输出协议由各宿主分支显式决定。
 // =============================================================================
@@ -25,7 +25,7 @@ export function renderHookBridge({ host, mode, packageName, localCliPath, activa
     stop: "Stop",
     subagentStop: "SubagentStop",
   } : null;
-  // 三宿主共用一个骨架：先只读 registry 判断是否受治理项目（未命中直接放行），
+  // 四宿主共用一个骨架：先只读 registry 判断是否受治理项目（未命中直接放行），
   // 命中后才调用 CLI；子进程超时/出错/退出非 0 由 failHook 按宿主策略处理。
   return `#!/usr/bin/env node
 import { readFileSync, realpathSync } from "node:fs";
@@ -44,8 +44,12 @@ try { payload = JSON.parse(input); } catch { process.exit(1); }
 const rawCwd = payload.cwd || payload.workspace_roots?.[0] || process.env.CURSOR_PROJECT_DIR || process.cwd();
 let projectDir;
 try { projectDir = realpathSync(rawCwd); } catch { process.exit(0); }
-const event = EVENT_MAP ? EVENT_MAP[payload.hook_event_name] : payload.hook_event_name;
+const hostEvent = EVENT_MAP ? EVENT_MAP[payload.hook_event_name] : payload.hook_event_name;
+// Claude Code 的 PostCompact 不能注入上下文；压缩后的 SessionStart(source=compact) 承担恢复。
+const event = HOST === "claude" && hostEvent === "SessionStart" && payload.source === "compact" ? "PostCompact" : hostEvent;
 if (!event) process.exit(0);
+// Claude Code 已因 Stop Hook 继续过一轮：放行停止，避免空转到它的连续拦截上限（官方推荐用法）。
+if (HOST === "claude" && payload.stop_hook_active === true && (event === "Stop" || event === "SubagentStop")) process.exit(0);
 // 用户级 Hook 只对 registry 已连接的项目生效；未连接项目与 WildArrange 自身安装损坏都不得阻断。
 if (!isGovernedProject(projectDir)) process.exit(0);
 const shell = HOST === "cursor" && payload.hook_event_name === "beforeShellExecution";
@@ -92,6 +96,11 @@ if (event === "Stop" || event === "SubagentStop") {
   } else emit({});
   process.exit(0);
 }
+// Claude Code 只把 SessionStart/UserPromptSubmit 的纯文本 stdout 放进上下文，PostToolUse 须走 additionalContext。
+if (HOST === "claude" && event === "PostToolUse") {
+  if (result.output) emit({ hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: result.output } });
+  process.exit(0);
+}
 if (typeof result.output === "string") process.stdout.write(result.output);
 function emit(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
 /** deny 只带原因摘要，不塞整段注入 JSON。 */
@@ -102,14 +111,14 @@ function denyReason(value) {
   } catch { /* 输出不是 JSON 时走通用文案 */ }
   return "WildArrange denied this operation.";
 }
-/** 已确认受治理后的失败出口：Cursor 写操作 fail-closed，其余宿主 fail-open（非 0 退出）。 */
-function failHook(message, exitCode = 1) {
+/** 已确认受治理后的失败出口：Cursor 写操作 fail-closed，其余宿主 fail-open。退出码固定为 1：Claude Code/Codex 把 2 视为拦截。 */
+function failHook(message) {
   if (message) console.error(String(message).slice(0, 2000));
   if (HOST === "cursor" && event === "PreToolUse") {
     emit({ permission: "deny", user_message: "WildArrange 外置治理 Hook 故障，已阻断写操作。", agent_message: "Run wildarrange doctor before retrying." });
     process.exit(0);
   }
-  process.exit(exitCode || 1);
+  process.exit(1);
 }
 ${renderGovernedProjectCheck()}
 ${renderCliInvocationUtility()}
@@ -163,7 +172,7 @@ const exitCode = await new Promise((resolve) => child.on("close", (code) => {
   resolve(code ?? 1);
 }));
 if (exitCode !== 0) {
-  failHook(stderr.trim() || \`WildArrange hook exited with code \${exitCode}.\`, exitCode);
+  failHook(stderr.trim() || \`WildArrange hook exited with code \${exitCode}.\`);
 }
 
 let result;

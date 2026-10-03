@@ -2,7 +2,7 @@
 
 简体中文 | [English](./README.en.md)
 
-WildArrange 是面向 Codex、Cursor 与 Kimi Code 的本地 Agent 治理运行时。第一版刻意保持精简：先跑通**可恢复、可验证的单线闭环**，再考虑多 Agent 并行。
+WildArrange 是面向 Codex、Cursor、Kimi Code 与 Claude Code 的本地 Agent 治理运行时。第一版刻意保持精简：先跑通**可恢复、可验证的单线闭环**，再考虑多 Agent 并行。
 
 ## 它能做什么
 
@@ -59,7 +59,7 @@ npx wildarrange setup \
   --target all
 ```
 
-`--repository` 省略时取项目 `origin` 远端；`--target` 可选 `codex|cursor|kimi|all`（默认 all）。命令结束会列出剩余的宿主内手工步骤（Codex/Kimi 安装与信任、Cursor 激活）。想分步执行时使用下面的命令：
+`--repository` 省略时取项目 `origin` 远端；`--target` 可选 `codex|cursor|kimi|claude|all`（默认 all）。命令结束会列出剩余的宿主内手工步骤（Codex/Kimi 安装与信任、Cursor 与 Claude Code 激活）。想分步执行时使用下面的命令：
 
 ```bash
 npx wildarrange project init-governance \
@@ -84,11 +84,11 @@ npx wildarrange project show
 
 ```bash
 npx wildarrange adapter install --target all --mode local
-npx wildarrange adapter activate --target all   # Cursor Hook + 用户级指针规则；也可 --target cursor / codex
+npx wildarrange adapter activate --target all   # Cursor Hook + 用户级指针规则 + Claude Code 插件；也可 --target cursor / codex / claude
 npx wildarrange doctor
 ```
 
-`adapter activate` 是显式的用户级写入，普通命令不会触发：`--target cursor` 备份并合并用户级 `~/.cursor/hooks.json`（只替换 WildArrange 自己的条目），并写入 `~/.cursor/rules/wildarrange.mdc`（alwaysApply 的一句话指针：本机项目若已连接 WildArrange，先运行 `wildarrange status`）；`--target codex` 在 `~/.codex/AGENTS.md` 追加带 `<!-- wildarrange:begin/end -->` 标记的同样指针段。写前都会备份，重复执行幂等，客户项目里不写任何文件。`adapter uninstall` 会移除这些用户级条目、指针并删除 runtime 中的插件包；`adapter restore --backup <backupId>` 把用户级文件恢复到该次 activate 之前。`doctor` 会比对安装时记录的 Hook 配置 digest，插件 `hooks.json` 或用户 Cursor 条目被改动/删除时报 `external_adapter_config_modified`。Codex 与 Kimi 仍要求按 `adapter install` 返回的 `nextActions` 在各自插件界面显式安装、审查和信任。文件已生成或用户配置已写入都不等于激活；只有与当前 `activationId` 匹配的真实生命周期回执出现后，`doctor` 才报告 `execution_observed`。Bridge 先只读本机 registry 判断工作目录（含项目子目录与任务 worktree）是否属于已连接项目：未连接项目、或 WildArrange 自身安装损坏时一律放行，不会阻断无关项目；已连接项目上子进程失败才按宿主策略处理（Cursor 写操作 fail-closed，Codex/Kimi fail-open），子进程有超时保险。Kimi 的 Stop 会把未完成任务拉回续跑。
+`adapter activate` 是显式的用户级写入，普通命令不会触发：`--target cursor` 备份并合并用户级 `~/.cursor/hooks.json`（只替换 WildArrange 自己的条目），并写入 `~/.cursor/rules/wildarrange.mdc`（alwaysApply 的一句话指针：本机项目若已连接 WildArrange，先运行 `wildarrange status`）；`--target codex` 在 `~/.codex/AGENTS.md` 追加带 `<!-- wildarrange:begin/end -->` 标记的同样指针段。`--target claude` 经本机 `claude` CLI 校验运行态里的本地 marketplace，并以用户级（`--scope user`）安装 `wildarrange-governance@wildarrange-local`，重复执行只刷新；传 `--user-root` 时设置 `CLAUDE_CONFIG_DIR=<user-root>/.claude`，不碰真实 `~/.claude`；`--target all` 时本机没有 `claude` 命令会跳过 Claude Code，不影响其它宿主。写前都会备份，重复执行幂等，客户项目里不写任何文件。`adapter uninstall` 会移除这些用户级条目、指针并删除 runtime 中的插件包；`adapter restore --backup <backupId>` 把用户级文件恢复到该次 activate 之前。`doctor` 会比对安装时记录的 Hook 配置 digest，插件 `hooks.json` 或用户 Cursor 条目被改动/删除时报 `external_adapter_config_modified`。Codex 与 Kimi 仍要求按 `adapter install` 返回的 `nextActions` 在各自插件界面显式安装、审查和信任。文件已生成或用户配置已写入都不等于激活；只有与当前 `activationId` 匹配的真实生命周期回执出现后，`doctor` 才报告 `execution_observed`。Bridge 先只读本机 registry 判断工作目录（含项目子目录与任务 worktree）是否属于已连接项目：未连接项目、或 WildArrange 自身安装损坏时一律放行，不会阻断无关项目；已连接项目上子进程失败才按宿主策略处理（Cursor 写操作 fail-closed，Codex/Kimi fail-open），子进程有超时保险。Kimi 的 Stop 会把未完成任务拉回续跑。
 
 每张计划任务可声明 `"repositoryTarget": "project"`（默认）或 `"governance"`。一个任务只能写一个仓库；治理任务从治理仓库自己的 branch/worktree 走线性 `wildarrange run` 交付，跨仓依赖必须拆成两张任务。当前并行 admission 仍只拥有项目仓库，遇到治理任务会明确拒绝，不会回落写客户仓库。两个交付都完成后，用完整 SHA 写不修改任一仓库的集成验收收据：
 
@@ -154,6 +154,8 @@ npx wildarrange doctor
 /reload
 ```
 
+对于 Claude Code，在每台设备执行一次 `npx wildarrange adapter activate --target claude`，再新开一次 Claude Code 会话。
+
 ### 升级
 
 在项目根目录执行：
@@ -173,7 +175,7 @@ npm ls @alivewavelab/wildarrange
 npm view @alivewavelab/wildarrange version
 ```
 
-Kimi Code 的 plugin 是用户级安装。升级后为确保 Hook bridge 使用新生成内容，在 Kimi Code 中先 `/plugins remove` 旧 plugin，再按 `adapter install` 返回的路径重新 `/plugins install` 并 `/reload`。
+Kimi Code 的 plugin 是用户级安装。升级后为确保 Hook bridge 使用新生成内容，在 Kimi Code 中先 `/plugins remove` 旧 plugin，再按 `adapter install` 返回的路径重新 `/plugins install` 并 `/reload`。Claude Code 直接读取运行态里的插件文件，升级后新开会话或运行 `/reload-plugins` 即可。
 
 ### 运行状态与 Git 交付
 
@@ -253,7 +255,7 @@ node ./bin/wildarrange.mjs status
 node ./bin/wildarrange.mjs summary
 ```
 
-在已安装 adapter 的 Codex / Cursor / Kimi Code 中，直接描述一个需要开发的需求或 Bug 即可。`UserPromptSubmit` 路由判断需要计划时，会要求当前宿主大模型根据对话语义把计划草稿写到 Hook 给出的绝对路径 `runtime:plan-drafts/<session>-plan.json`（不写进项目），而不是让用户手写格式。生成文件必须带 `generated_by: "host_semantic"`，并为每张可执行任务明确填写 `task.owner`；owner 只能是具备 command-worker 资格的 Jiuwei 或 ZhuRong。每张任务还必须提供真实、非空转的 `worker_command`，由 WildArrange 在隔离任务 worktree 中执行并产出 `writable_paths` 内的改动；`node --version`、`process.exit(0)` 等占位命令不能导入。DiJiang、BaiZe、LuWu 分别通过计划、复核和治理阶段参与，不执行 `worker_command`。WildArrange 导入时校验 owner 与 Worker 合同，并等待用户 `plan approve`。执行 Hook、任务领取和并行运行随后读取同一个 `task.owner`，不会再另建一套实际负责人。
+在已安装 adapter 的 Codex / Cursor / Kimi Code / Claude Code 中，直接描述一个需要开发的需求或 Bug 即可。`UserPromptSubmit` 路由判断需要计划时，会要求当前宿主大模型根据对话语义把计划草稿写到 Hook 给出的绝对路径 `runtime:plan-drafts/<session>-plan.json`（不写进项目），而不是让用户手写格式。生成文件必须带 `generated_by: "host_semantic"`，并为每张可执行任务明确填写 `task.owner`；owner 只能是具备 command-worker 资格的 Jiuwei 或 ZhuRong。每张任务还必须提供真实、非空转的 `worker_command`，由 WildArrange 在隔离任务 worktree 中执行并产出 `writable_paths` 内的改动；`node --version`、`process.exit(0)` 等占位命令不能导入。DiJiang、BaiZe、LuWu 分别通过计划、复核和治理阶段参与，不执行 `worker_command`。WildArrange 导入时校验 owner 与 Worker 合同，并等待用户 `plan approve`。执行 Hook、任务领取和并行运行随后读取同一个 `task.owner`，不会再另建一套实际负责人。
 
 计划待确认期间，用户仍可修改 `runtime:plan-drafts/*.json` 并重新导入；其它文件写入和任意 Shell 默认阻断，只放行精确匹配的计划管理与只读命令。批准后，草稿目录重新受当前工单的 `writable_paths` 限制。
 
@@ -357,11 +359,12 @@ node ./bin/wildarrange.mjs adapter uninstall --target all
 node ./bin/wildarrange.mjs adapter restore --backup <backupId>
 ```
 
-安装、卸载、恢复都会在运行态 `adapters/external/` 写入报告；`adapter activate` 覆盖用户级文件前会备份。`restore` 用于把 `adapters/backups/<backupId>/` 里的备份恢复回用户级原位置。三个宿主都只通过项目外的插件包接入，客户项目里不写任何文件：
+安装、卸载、恢复都会在运行态 `adapters/external/` 写入报告；`adapter activate` 覆盖用户级文件前会备份。`restore` 用于把 `adapters/backups/<backupId>/` 里的备份恢复回用户级原位置。四个宿主都只通过项目外的插件包接入，客户项目里不写任何文件：
 
 - **Codex**：本地 marketplace/plugin 生成在 `adapters/external/codex-marketplace/`；Codex 桌面版需在设置 > Hooks 中审查、信任并启用；Codex CLI 使用 `/hooks`。完成后才会执行这些 hard hook。
 - **Cursor**：`adapter activate --target cursor` 备份并合并用户级 `~/.cursor/hooks.json`；bridge 在受信任工作区中对 `preToolUse`（Write/Delete/Edit/Shell）与 `beforeShellExecution` 硬拦截且 fail-closed，未连接项目静默放行。
 - **Kimi Code**：生成用户 plugin 到运行态 `adapters/external/kimi/`。WildArrange 不会静默改写用户级 `~/.kimi-code/config.toml`；按 `adapter install` 返回的 `nextActions` 显式执行 `/plugins install <路径>`，再执行 `/reload`。不要给路径加引号，Kimi Code 0.27 会把引号当成路径字符。plugin 是用户级安装，但 bridge 会在未连接项目中静默退出。
+- **Claude Code**：本地 marketplace 与插件生成在 `adapters/external/claude-marketplace/`；`adapter activate --target claude` 经 `claude plugin marketplace add` / `claude plugin install` 以用户级安装，`adapter uninstall --target claude` 经 `claude plugin uninstall` / `marketplace remove` 移除。插件 Hook 拦截 `Bash|Write|Edit|MultiEdit|NotebookEdit`；Claude Code 的 `PostCompact` 不能注入上下文，压缩后由 `SessionStart`（`source: compact`）恢复治理上下文。Claude Code 云端会话不加载本机插件，不受此治理。
 
 Codex 新会话的 `SessionStart` 会自动注入完整 Jiuwei 身份 Prompt；上下文压缩后的 `PostCompact` 会再注入一次用于恢复身份。普通 `UserPromptSubmit` 不重复注入，避免每轮对话浪费上下文。Prompt 来自已安装且经过 hash 校验的 Prompt Pack，并受 `contextBudgets.prompt.maxChars` 限制；截断会明确显示。
 
@@ -380,7 +383,7 @@ Codex 新会话的 `SessionStart` 会自动注入完整 Jiuwei 身份 Prompt；�
 | `/wildarrange-approve` | 展示计划摘要并请你确认，确认后才放行执行 |
 | `/wildarrange-run` | 跑下一个任务，走完整门禁 |
 
-Kimi Hook 在正常运行时可拦截越界 Write/Edit 和明显高危 Bash，但 Kimi 的 Hook 执行器在 Hook 崩溃或超时时会 fail-open（失败放行）。因此它不能替代 WildArrange 的 verifier、scope、review、successCriteria、acceptance proof 与 checkpoint 最终质量门。
+Kimi 与 Claude Code 的 Hook 在正常运行时可拦截越界写入和明显高危 Bash，但两者的 Hook 执行器在 Hook 崩溃或超时时都会 fail-open（失败放行）。因此它不能替代 WildArrange 的 verifier、scope、review、successCriteria、acceptance proof 与 checkpoint 最终质量门。
 
 ### Hook 注入时机
 

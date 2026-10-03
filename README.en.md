@@ -2,7 +2,7 @@
 
 [简体中文](./README.md) | English
 
-WildArrange is a local governance runtime for Codex, Cursor, and Kimi Code agent workflows. The first release is deliberately small: one recoverable linear loop before multi-agent parallel execution.
+WildArrange is a local governance runtime for Codex, Cursor, Kimi Code, and Claude Code agent workflows. The first release is deliberately small: one recoverable linear loop before multi-agent parallel execution.
 
 ## What It Does
 
@@ -59,7 +59,7 @@ npx wildarrange setup \
   --target all
 ```
 
-`--repository` defaults to the project's `origin` remote; `--target` is `codex|cursor|kimi|all` (default all). The command ends with the remaining in-host manual steps (Codex/Kimi install and trust, Cursor activation). To go step by step, use the commands below:
+`--repository` defaults to the project's `origin` remote; `--target` is `codex|cursor|kimi|claude|all` (default all). The command ends with the remaining in-host manual steps (Codex/Kimi install and trust, Cursor and Claude Code activation). To go step by step, use the commands below:
 
 ```bash
 npx wildarrange project init-governance \
@@ -84,11 +84,11 @@ In external mode, zero-project-file adapter bundles are generated under `runtime
 
 ```bash
 npx wildarrange adapter install --target all --mode local
-npx wildarrange adapter activate --target all   # Cursor hooks + user-level pointer rules; or --target cursor / codex
+npx wildarrange adapter activate --target all   # Cursor hooks + user-level pointer rules + Claude Code plugin; or --target cursor / codex / claude
 npx wildarrange doctor
 ```
 
-`adapter activate` is an explicit user-level write that no ordinary command triggers. `--target cursor` backs up and merges the user-level `~/.cursor/hooks.json` (replacing only WildArrange-managed entries) and writes `~/.cursor/rules/wildarrange.mdc`, an alwaysApply one-line pointer telling the agent to run `wildarrange status` when the local project is connected. `--target codex` appends the same pointer to `~/.codex/AGENTS.md` inside `<!-- wildarrange:begin/end -->` markers. Everything is backed up first, activation is idempotent, and nothing is written into customer projects. `adapter uninstall` removes those user-level entries and pointers and deletes the runtime plugin bundles; `adapter restore --backup <backupId>` returns the user-level files to their state before that activation. `doctor` compares the Hook configuration digests recorded at install time and reports `external_adapter_config_modified` when a plugin `hooks.json` or a user Cursor entry was changed or removed. Codex and Kimi still require explicit installation, review, and trust through the `nextActions` returned by `adapter install`. Generated files or configured user hooks are not activation proof: `doctor` reports `execution_observed` only after a real lifecycle receipt matches the current `activationId`. The bridge first reads the local registry (read-only) to decide whether the working directory, including project subdirectories and task worktrees, belongs to an attached project. Unattached projects, or a broken WildArrange installation, are always let through so unrelated projects are never blocked; only for an attached project does a failed subprocess follow the host policy (Cursor writes fail closed, Codex/Kimi fail open), and the subprocess has a timeout guard. The Kimi Stop hook pulls unfinished work back into the session.
+`adapter activate` is an explicit user-level write that no ordinary command triggers. `--target cursor` backs up and merges the user-level `~/.cursor/hooks.json` (replacing only WildArrange-managed entries) and writes `~/.cursor/rules/wildarrange.mdc`, an alwaysApply one-line pointer telling the agent to run `wildarrange status` when the local project is connected. `--target codex` appends the same pointer to `~/.codex/AGENTS.md` inside `<!-- wildarrange:begin/end -->` markers. `--target claude` validates the runtime local marketplace with the local `claude` CLI and installs `wildarrange-governance@wildarrange-local` at user scope (`--scope user`); re-running only refreshes it. With `--user-root`, it sets `CLAUDE_CONFIG_DIR=<user-root>/.claude` and never touches the real `~/.claude`; with `--target all`, a machine without the `claude` command skips Claude Code without affecting other hosts. Everything is backed up first, activation is idempotent, and nothing is written into customer projects. `adapter uninstall` removes those user-level entries and pointers and deletes the runtime plugin bundles; `adapter restore --backup <backupId>` returns the user-level files to their state before that activation. `doctor` compares the Hook configuration digests recorded at install time and reports `external_adapter_config_modified` when a plugin `hooks.json` or a user Cursor entry was changed or removed. Codex and Kimi still require explicit installation, review, and trust through the `nextActions` returned by `adapter install`. Generated files or configured user hooks are not activation proof: `doctor` reports `execution_observed` only after a real lifecycle receipt matches the current `activationId`. The bridge first reads the local registry (read-only) to decide whether the working directory, including project subdirectories and task worktrees, belongs to an attached project. Unattached projects, or a broken WildArrange installation, are always let through so unrelated projects are never blocked; only for an attached project does a failed subprocess follow the host policy (Cursor writes fail closed, Codex/Kimi fail open), and the subprocess has a timeout guard. The Kimi Stop hook pulls unfinished work back into the session.
 
 Each plan task may declare `"repositoryTarget": "project"` (default) or `"governance"`. One task can write only one repository. Governance tasks use their own governance branch/worktree through the linear `wildarrange run` path, and cross-repository work must be split into separate tasks. Parallel admission still owns only the project repository; they reject governance tasks instead of falling back to the customer checkout. After both deliveries exist, bind their full SHAs in an integration receipt that modifies neither repository:
 
@@ -154,6 +154,8 @@ For Kimi Code, explicitly run the `nextActions` returned by `adapter install` on
 /reload
 ```
 
+For Claude Code, run `npx wildarrange adapter activate --target claude` once on each device, then start a new Claude Code session.
+
 ### Upgrade
 
 Run from the project root:
@@ -175,7 +177,7 @@ npm view @alivewavelab/wildarrange version
 
 The Kimi Code plugin is installed at user scope. After upgrading, refresh it so the Hook bridge uses the newly generated files:
 
-First `/plugins remove` the old plugin, then `/plugins install` the path returned by `adapter install` and `/reload`.
+First `/plugins remove` the old plugin, then `/plugins install` the path returned by `adapter install` and `/reload`. Claude Code reads the plugin files from the runtime directly, so after upgrading just start a new session or run `/reload-plugins`.
 
 ### Runtime State and Git Delivery
 
@@ -255,7 +257,7 @@ node ./bin/wildarrange.mjs status
 node ./bin/wildarrange.mjs summary
 ```
 
-With an adapter installed in Codex, Cursor, or Kimi Code, describe the feature or bug in the host conversation. When the `UserPromptSubmit` route requires a plan, the host model is instructed to write the plan draft to the absolute path the Hook provides, `runtime:plan-drafts/<session>-plan.json` (never inside the project), from the conversation semantics instead of asking the user to hand-author the format. The file must include `generated_by: "host_semantic"` and an explicit `task.owner` on every executable task. That owner must be a command worker: Jiuwei or ZhuRong. Every task must also provide a real, non-trivial `worker_command` that WildArrange runs inside the isolated task worktree to change `writable_paths`; placeholders such as `node --version` and `process.exit(0)` are rejected before import. DiJiang, BaiZe, and LuWu participate through planning, review, and governance stages rather than executing `worker_command`. WildArrange validates the owner and Worker contract and waits for `plan approve`. Execution hooks, task claims, and parallel runs then read that same `task.owner`; there is no second assignee record.
+With an adapter installed in Codex, Cursor, Kimi Code, or Claude Code, describe the feature or bug in the host conversation. When the `UserPromptSubmit` route requires a plan, the host model is instructed to write the plan draft to the absolute path the Hook provides, `runtime:plan-drafts/<session>-plan.json` (never inside the project), from the conversation semantics instead of asking the user to hand-author the format. The file must include `generated_by: "host_semantic"` and an explicit `task.owner` on every executable task. That owner must be a command worker: Jiuwei or ZhuRong. Every task must also provide a real, non-trivial `worker_command` that WildArrange runs inside the isolated task worktree to change `writable_paths`; placeholders such as `node --version` and `process.exit(0)` are rejected before import. DiJiang, BaiZe, and LuWu participate through planning, review, and governance stages rather than executing `worker_command`. WildArrange validates the owner and Worker contract and waits for `plan approve`. Execution hooks, task claims, and parallel runs then read that same `task.owner`; there is no second assignee record.
 
 While a plan awaits approval, the user can still edit `runtime:plan-drafts/*.json` and re-import it. Other file writes and arbitrary Shell commands are denied; only exact plan-management and read-only WildArrange commands are allowed. After approval, the draft directory returns to ordinary task `writable_paths` enforcement.
 
@@ -359,11 +361,12 @@ node ./bin/wildarrange.mjs adapter uninstall --target all
 node ./bin/wildarrange.mjs adapter restore --backup <backupId>
 ```
 
-Install, uninstall, and restore write reports under the runtime `adapters/external/`; `adapter activate` backs up user-level files before changing them. `restore` copies files from `adapters/backups/<backupId>/` back to their original user-level paths. All three hosts connect only through packages outside the project; nothing is written into the customer project:
+Install, uninstall, and restore write reports under the runtime `adapters/external/`; `adapter activate` backs up user-level files before changing them. `restore` copies files from `adapters/backups/<backupId>/` back to their original user-level paths. All four hosts connect only through packages outside the project; nothing is written into the customer project:
 
 - **Codex**: a local marketplace/plugin is generated under `adapters/external/codex-marketplace/`. In Codex Desktop, review, trust, and enable the plugin Hook under Settings > Hooks; in Codex CLI, use `/hooks`. Codex runs these hard hooks only after that.
 - **Cursor**: `adapter activate --target cursor` backs up and merges the user-level `~/.cursor/hooks.json`; the bridge hard-blocks `preToolUse` (Write/Delete/Edit/Shell) and `beforeShellExecution` fail-closed in a trusted workspace and stays silent for unconnected projects.
 - **Kimi Code**: a user plugin is generated under the runtime `adapters/external/kimi/`. WildArrange never silently edits the user-level `~/.kimi-code/config.toml`; run the `nextActions` from `adapter install` (`/plugins install <path>`, then `/reload`). Do not quote the path: Kimi Code 0.27 treats quotes as path characters. The plugin is a user-level install, but its bridge exits silently in unconnected projects.
+- **Claude Code**: a local marketplace and plugin are generated under `adapters/external/claude-marketplace/`; `adapter activate --target claude` installs it at user scope through `claude plugin marketplace add` / `claude plugin install`, and `adapter uninstall --target claude` removes it through `claude plugin uninstall` / `marketplace remove`. Plugin hooks guard `Bash|Write|Edit|MultiEdit|NotebookEdit`; because Claude Code `PostCompact` cannot inject context, governance context is restored by `SessionStart` (`source: compact`) after compaction. Claude Code cloud sessions do not load local plugins and are not governed.
 
 For Codex, `SessionStart` automatically injects the complete Jiuwei identity prompt, and `PostCompact` injects it again to restore identity after context compaction. Ordinary `UserPromptSubmit` events do not repeat the prompt. The prompt comes from the installed, hash-verified Prompt Pack, respects `contextBudgets.prompt.maxChars`, and reports truncation explicitly.
 
@@ -382,7 +385,7 @@ Each command is a prompt that tells the agent to run the matching `wildarrange.m
 | `/wildarrange-approve` | Show the plan summary and ask you to confirm before execution is unlocked |
 | `/wildarrange-run` | Run the next task through the full gates |
 
-A healthy Kimi Hook can deny out-of-scope Write/Edit calls and clearly destructive Bash commands. Kimi's Hook runner is fail-open on hook crashes and timeouts, so this is an early warning layer rather than the final security boundary. Verifier, scope, review, success criteria, acceptance proof, and checkpoint gates remain authoritative.
+Healthy Kimi and Claude Code hooks can deny out-of-scope writes and clearly destructive Bash commands. Both hook runners are fail-open on hook crashes and timeouts, so this is an early warning layer rather than the final security boundary. Verifier, scope, review, success criteria, acceptance proof, and checkpoint gates remain authoritative.
 
 ### Hook Injection Points
 

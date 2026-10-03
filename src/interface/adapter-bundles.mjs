@@ -2,10 +2,11 @@
 // 文件名称：adapter-bundles.mjs
 // 所属模块：interface
 // 作用说明：
-//   生成 Codex / Cursor / Kimi 三宿主的外置插件包文件（manifest、Hook 配置、
+//   生成 Codex / Cursor / Kimi / Claude Code 四宿主的外置插件包文件（manifest、Hook 配置、
 //   slash 命令 Skill）。只写 runtimeRoot 下的生成物，不写客户项目，
 //   也不做激活；bridge 脚本内容由调用方（adapters.mjs）传入。
 // =============================================================================
+import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PRODUCT_NAME } from "../infra/runtime-config.mjs";
@@ -13,6 +14,8 @@ import { writeJsonAtomic } from "../infra/runtime-store.mjs";
 
 export const CODEX_PLUGIN_NAME = "wildarrange-governance";
 export const KIMI_PLUGIN_NAME = "wildarrange-governance";
+export const CLAUDE_PLUGIN_NAME = "wildarrange-governance";
+export const CLAUDE_MARKETPLACE_NAME = "wildarrange-local";
 export const CURSOR_BRIDGE_NAME = "wildarrange-external-hook-bridge.mjs";
 
 /** 外置插件包内 slash 命令 Skill 的名称前缀。 */
@@ -264,6 +267,48 @@ export async function writeKimiBundle(externalRoot, bridge, activationId, cliPre
   };
 }
 
+/** Claude Code 本地 marketplace：插件按相对路径登记，Claude Code 直接读取运行态里的文件。 */
+export async function writeClaudeBundle(externalRoot, bridge, activationId, cliPrefix) {
+  const marketplaceRoot = path.join(externalRoot, "claude-marketplace");
+  const pluginRoot = path.join(marketplaceRoot, "plugins", CLAUDE_PLUGIN_NAME);
+  const manifestPath = path.join(pluginRoot, ".claude-plugin", "plugin.json");
+  const hooksPath = path.join(pluginRoot, "hooks", "hooks.json");
+  const bridgePath = path.join(pluginRoot, "hooks", CURSOR_BRIDGE_NAME);
+  const marketplacePath = path.join(marketplaceRoot, ".claude-plugin", "marketplace.json");
+  const hooks = buildClaudeHooksConfig(`node "\${CLAUDE_PLUGIN_ROOT}/hooks/${CURSOR_BRIDGE_NAME}"`);
+  // Claude Code 运行安装时缓存的副本，只按版本号决定是否刷新：版本号随包内容变化
+  const contentDigest = createHash("sha256").update(JSON.stringify([bridge, hooks, buildSlashCommands(cliPrefix)])).digest("hex").slice(0, 12);
+  const version = `1.0.0-${contentDigest}`;
+  await writeJsonAtomic(manifestPath, {
+    name: CLAUDE_PLUGIN_NAME,
+    version,
+    description: "Project-selective WildArrange governance hooks without repository files.",
+    author: { name: "AliveWaveLab" },
+  });
+  await writeJsonAtomic(hooksPath, hooks);
+  await mkdir(path.dirname(bridgePath), { recursive: true });
+  await writeFile(bridgePath, bridge, "utf8");
+  await writePluginSkills(pluginRoot, cliPrefix);
+  await writeJsonAtomic(marketplacePath, {
+    name: CLAUDE_MARKETPLACE_NAME,
+    owner: { name: "AliveWaveLab" },
+    plugins: [{ name: CLAUDE_PLUGIN_NAME, source: `./plugins/${CLAUDE_PLUGIN_NAME}`, description: "WildArrange external governance hooks" }],
+  });
+  return {
+    status: "bundle_generated",
+    activationId,
+    pluginRoot,
+    manifestPath,
+    hooksPath,
+    bridgePath,
+    marketplacePath,
+    version,
+    cliPrefix,
+    activation: "explicit_user_activation_required",
+    nextActions: ["wildarrange adapter activate --target claude", "在已连接项目中新开一次 Claude Code 会话（已开会话可运行 /reload-plugins）"],
+  };
+}
+
 async function writePluginSkills(pluginRoot, cliPrefix) {
   for (const command of buildSlashCommands(cliPrefix)) {
     const skillPath = path.join(pluginRoot, "skills", command.name, "SKILL.md");
@@ -292,6 +337,22 @@ function buildCodexHooksConfig(command) {
       }],
       PostToolUse: [{ hooks: [hook(15, "WildArrange: recording tool result")] }],
       PostCompact: [{ matcher: "manual|auto", hooks: [hook(20, "WildArrange: restoring governance context")] }],
+      Stop: [{ hooks: [hook(15, "WildArrange: checking continuation")] }],
+      SubagentStop: [{ hooks: [hook(15, "WildArrange: checking continuation")] }],
+    },
+  };
+}
+
+/** Claude Code 的 PostCompact 不能注入上下文：压缩后的恢复由 SessionStart(source=compact) 承担，bridge 负责映射。 */
+function buildClaudeHooksConfig(command) {
+  const hook = (timeout, statusMessage) => ({ type: "command", command, timeout, statusMessage });
+  const tools = "Bash|Write|Edit|MultiEdit|NotebookEdit";
+  return {
+    hooks: {
+      SessionStart: [{ hooks: [hook(30, "WildArrange: loading external governance")] }],
+      UserPromptSubmit: [{ hooks: [hook(20, "WildArrange: routing with external governance")] }],
+      PreToolUse: [{ matcher: tools, hooks: [hook(20, "WildArrange: checking planned scope")] }],
+      PostToolUse: [{ matcher: tools, hooks: [hook(15, "WildArrange: recording tool result")] }],
       Stop: [{ hooks: [hook(15, "WildArrange: checking continuation")] }],
       SubagentStop: [{ hooks: [hook(15, "WildArrange: checking continuation")] }],
     },

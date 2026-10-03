@@ -3,23 +3,27 @@
 // 所属模块：interface
 // 作用说明：
 //   外置治理模式的 Adapter 编排：生成安装包（包内容见 adapter-bundles.mjs、
-//   bridge 模板见 adapter-bridge-template.mjs）、显式激活 Cursor/Codex 用户级配置、
+//   bridge 模板见 adapter-bridge-template.mjs）、显式激活 Cursor/Codex/Claude Code 用户级配置、
 //   卸载、恢复备份与完整性检查。所有生成物与备份都留在 runtimeRoot 或用户配置目录，不写客户项目。
 // =============================================================================
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { PROJECT_DIR } from "../infra/prompt-pack.mjs";
 import { DEFAULT_PACKAGE_NAME } from "../infra/runtime-config.mjs";
+import { runCommandFile } from "../infra/command-runner.mjs";
 import { nowIso, readJson, resolveWildArrangePath, writeJsonAtomic } from "../infra/runtime-store.mjs";
 import { renderHookBridge } from "./adapter-bridge-template.mjs";
 import {
   buildCursorUserHooks,
+  CLAUDE_MARKETPLACE_NAME,
+  CLAUDE_PLUGIN_NAME,
   CODEX_PLUGIN_NAME,
   CURSOR_BRIDGE_NAME,
   KIMI_PLUGIN_NAME,
+  writeClaudeBundle,
   writeCodexBundle,
   writeCursorBundle,
   writeKimiBundle,
@@ -31,9 +35,10 @@ const CURSOR_RULE_NAME = "wildarrange.mdc";
 const POINTER_BEGIN = "<!-- wildarrange:begin -->";
 const POINTER_END = "<!-- wildarrange:end -->";
 const POINTER_BLOCK_PATTERN = /\n*<!-- wildarrange:begin -->[\s\S]*?<!-- wildarrange:end -->\n*/;
-const BUNDLE_DIRECTORIES = { codex: "codex-marketplace", cursor: "cursor", kimi: "kimi" };
-
-const TARGETS = new Set(["all", "codex", "cursor", "kimi"]);
+const BUNDLE_DIRECTORIES = { codex: "codex-marketplace", cursor: "cursor", kimi: "kimi", claude: "claude-marketplace" };
+const HOSTS = ["codex", "cursor", "kimi", "claude"];
+const TARGETS = new Set(["all", ...HOSTS]);
+const CLAUDE_PLUGIN_ID = `${CLAUDE_PLUGIN_NAME}@${CLAUDE_MARKETPLACE_NAME}`;
 
 // --- CLI 前缀 ---
 
@@ -51,18 +56,18 @@ export function adapterCliPrefix({ mode = "local", packageName = DEFAULT_PACKAGE
   return `node "${path.resolve(localCliPath || path.join(PROJECT_DIR, "bin", "wildarrange.mjs"))}"`;
 }
 
-/** 在外部 runtime 生成三宿主安装包；只生成，不把文件存在冒充为宿主激活。 */
+/** 在外部 runtime 生成各宿主安装包；只生成，不把文件存在冒充为宿主激活。 */
 export async function installAdapters(projectRoot, workspace, options = {}) {
   assertWorkspace(workspace);
   const target = options.target || "all";
-  if (!TARGETS.has(target)) throw new Error("external adapter target must be all, codex, cursor, or kimi");
+  if (!TARGETS.has(target)) throw new Error("external adapter target must be all, codex, cursor, kimi, or claude");
   const mode = options.mode || "local";
   const packageName = options.packageName || DEFAULT_PACKAGE_NAME;
   const localCliPath = path.resolve(options.localCliPath || path.join(process.cwd(), "bin", "wildarrange.mjs"));
   const cliPrefix = adapterCliPrefix({ mode, packageName, localCliPath });
   const externalRoot = resolveWildArrangePath(workspace.projectRoot, "adapters", "external");
   await mkdir(externalRoot, { recursive: true });
-  const selected = target === "all" ? ["codex", "cursor", "kimi"] : [target];
+  const selected = target === "all" ? HOSTS : [target];
   const targets = {};
   for (const host of selected) {
     // 用户级插件可能服务多个已连接项目；activationId 绑定宿主桥版本与 CLI，
@@ -72,6 +77,7 @@ export async function installAdapters(projectRoot, workspace, options = {}) {
     if (host === "codex") targets.codex = await writeCodexBundle(externalRoot, bridge, activationId, cliPrefix);
     if (host === "cursor") targets.cursor = await writeCursorBundle(externalRoot, bridge, activationId, cliPrefix);
     if (host === "kimi") targets.kimi = await writeKimiBundle(externalRoot, bridge, activationId, cliPrefix);
+    if (host === "claude") targets.claude = await writeClaudeBundle(externalRoot, bridge, activationId, cliPrefix);
   }
   const reportPath = path.join(externalRoot, "install-report.json");
   const previous = await readJson(reportPath, null);
@@ -194,13 +200,58 @@ export async function activateCodexAdapter(projectRoot, workspace, options = {})
   };
 }
 
+/**
+ * 显式经 claude CLI 把运行态里的本地 marketplace 与插件装到用户级（不写客户项目）。
+ * 重复执行只刷新 marketplace；同名 marketplace 指向别处时改指向当前包。
+ */
+export async function activateClaudeAdapter(projectRoot, workspace, options = {}) {
+  assertWorkspace(workspace);
+  const { externalRoot, reportPath, report } = await loadReport(workspace);
+  const claude = report?.targets?.claude;
+  if (!claude) throw new Error("external Claude Code adapter bundle is missing; run adapter install --target claude first");
+  const claudeBin = options.claudeBin || "claude";
+  // --user-root 时把 Claude Code 的用户配置（含插件与 marketplace 登记）一并隔离到该目录
+  const configDir = options.userRoot ? path.join(path.resolve(options.userRoot), ".claude") : null;
+  const claudeCli = (args) => runClaude(claudeBin, args, configDir, externalRoot);
+  const marketplaceRoot = path.dirname(path.dirname(claude.marketplacePath));
+  await claudeCli(["plugin", "validate", marketplaceRoot]);
+  const marketplaces = parseJsonArray((await claudeCli(["plugin", "marketplace", "list", "--json"])).stdout);
+  const registered = marketplaces.find((entry) => entry?.name === CLAUDE_MARKETPLACE_NAME);
+  if (registered && samePath(registered.path || registered.installLocation, marketplaceRoot)) {
+    await claudeCli(["plugin", "marketplace", "update", CLAUDE_MARKETPLACE_NAME]);
+  } else {
+    if (registered) await claudeCli(["plugin", "marketplace", "remove", CLAUDE_MARKETPLACE_NAME, "--scope", "user"]);
+    await claudeCli(["plugin", "marketplace", "add", marketplaceRoot]);
+  }
+  const installed = parseJsonArray((await claudeCli(["plugin", "list", "--json"])).stdout)
+    .find((entry) => entry?.id === CLAUDE_PLUGIN_ID && entry.scope === "user");
+  const { version } = await readJson(claude.manifestPath, {});
+  if (!installed) await claudeCli(["plugin", "install", CLAUDE_PLUGIN_ID, "--scope", "user"]);
+  else {
+    // 已装副本落后于当前包时刷新缓存；版本号随包内容变化（见 writeClaudeBundle）
+    if (installed.version !== version) await claudeCli(["plugin", "update", CLAUDE_PLUGIN_ID, "--scope", "user"]);
+    if (installed.enabled === false) await claudeCli(["plugin", "enable", CLAUDE_PLUGIN_ID, "--scope", "user"]);
+  }
+  claude.user = { claudeBin, configDir, marketplaceRoot, pluginId: CLAUDE_PLUGIN_ID, version, activatedAt: nowIso() };
+  await writeJsonAtomic(reportPath, report);
+  return {
+    kind: "wildarrange_external_claude_activation",
+    status: "installed_waiting_for_lifecycle_receipt",
+    activationId: claude.activationId,
+    pluginId: CLAUDE_PLUGIN_ID,
+    marketplaceRoot,
+    nextActions: ["在已连接项目中新开一次 Claude Code 会话（已开会话可运行 /reload-plugins），再运行 wildarrange doctor 确认 execution_observed"],
+    projectFilesWritten: [],
+  };
+}
+
 /** 卸载外置 Adapter：移除已激活的用户级 Hook 条目与指针，并删除 runtime 中的插件包；备份保留。 */
 export async function uninstallAdapters(projectRoot, workspace, options = {}) {
   assertWorkspace(workspace);
   const target = options.target || "all";
-  if (!TARGETS.has(target)) throw new Error("external adapter target must be all, codex, cursor, or kimi");
+  if (!TARGETS.has(target)) throw new Error("external adapter target must be all, codex, cursor, kimi, or claude");
   const { externalRoot, reportPath, report } = await loadReport(workspace);
-  const selected = target === "all" ? ["codex", "cursor", "kimi"] : [target];
+  const selected = target === "all" ? HOSTS : [target];
   const removed = [];
   const nextActions = [];
   for (const host of selected) {
@@ -210,6 +261,13 @@ export async function uninstallAdapters(projectRoot, workspace, options = {}) {
       await removeCursorUserEntries(user.hooksPath);
       for (const file of [user.bridgePath, user.rulePath]) {
         if (file && existsSync(file)) { await rm(file, { force: true }); removed.push(file); }
+      }
+    }
+    if (host === "claude" && user) {
+      // 先从 Claude Code 卸载，再删运行态包；CLI 失败时如实交给用户手工完成
+      for (const args of [["plugin", "uninstall", CLAUDE_PLUGIN_ID, "--scope", "user"], ["plugin", "marketplace", "remove", CLAUDE_MARKETPLACE_NAME, "--scope", "user"]]) {
+        const result = await runCommandFile(options.claudeBin || user.claudeBin || "claude", args, externalRoot, 120_000, claudeEnv(user.configDir));
+        if (result.exitCode !== 0) nextActions.push(`claude ${args.join(" ")}`);
       }
     }
     if (host === "codex" && user?.agentsPath && existsSync(user.agentsPath)) {
@@ -271,12 +329,45 @@ export async function inspectAdapterIntegrity(host, entry) {
     if (await digestFile(user.bridgePath) !== user.bridgeDigest) issues.push({ file: user.bridgePath, problem: "modified_or_missing" });
     if (await digestFile(user.rulePath) !== user.ruleDigest) issues.push({ file: user.rulePath, problem: "modified_or_missing" });
   }
+  if (host === "claude" && user?.version) {
+    const current = (await readJson(entry.manifestPath, null))?.version;
+    if (current !== user.version) issues.push({ file: entry.manifestPath, problem: `stale installed plugin ${user.version}; bundle is ${current || "missing"}` });
+  }
   if (host === "codex" && user?.agentsPath) {
     const text = existsSync(user.agentsPath) ? await readFile(user.agentsPath, "utf8") : "";
     const block = text.match(/<!-- wildarrange:begin -->[\s\S]*?<!-- wildarrange:end -->/)?.[0];
     if (!block || sha256(block) !== user.pointerDigest) issues.push({ file: user.agentsPath, problem: "pointer_changed_or_missing" });
   }
   return { status: issues.length === 0 ? "ok" : "modified", issues };
+}
+
+/**
+ * 调用 claude CLI；失败时带上子命令与输出抛错，找不到 CLI 时给出安装提示。
+ * 在运行态目录执行：在客户项目里执行会读到项目级设置，用户级状态因此被误判。
+ */
+async function runClaude(claudeBin, args, configDir, cwd) {
+  const result = await runCommandFile(claudeBin, args, cwd, 120_000, claudeEnv(configDir));
+  if (result.spawnError) throw new Error(`claude CLI not found (${claudeBin}); install Claude Code or pass its path, then retry`);
+  if (result.exitCode !== 0) throw new Error(`claude ${args.join(" ")} failed: ${(result.stderr || result.stdout).trim().slice(0, 500)}`);
+  return result;
+}
+
+function claudeEnv(configDir) {
+  return configDir ? { env: { CLAUDE_CONFIG_DIR: configDir } } : {};
+}
+
+function parseJsonArray(text) {
+  try {
+    const value = JSON.parse(text || "[]");
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];
+  }
+}
+
+function samePath(left, right) {
+  const canonical = (value) => { try { return realpathSync(value); } catch { return path.resolve(value); } };
+  return Boolean(left) && canonical(left) === canonical(right);
 }
 
 async function loadReport(workspace) {
