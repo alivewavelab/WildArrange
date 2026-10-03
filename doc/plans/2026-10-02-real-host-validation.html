@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>实机验证报告</title>
+<style>
+:root{--bg:#fafaf8;--fg:#1d1d1b;--muted:#6b6b66;--card:#fff;--line:#e4e2dc;--p0:#c0392b;--p1:#d9822b;--p2:#2e7dbd;--p3:#6b8e23}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#17171a;--fg:#e8e6e1;--muted:#9a978f;--card:#212126;--line:#34343a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:1180px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:26px;margin:0 0 4px}h2{margin:34px 0 12px;font-size:20px;border-bottom:1px solid var(--line);padding-bottom:6px}
+h3{font-size:16px;margin:0 0 6px}
+.muted{color:var(--muted);font-size:13px}
+.box{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--p2);border-radius:8px;padding:12px 16px;margin:12px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-top:5px solid var(--c);border-radius:10px;padding:12px 16px}
+.card ul{margin:6px 0;padding-left:18px}
+.tag{display:inline-block;font-size:12px;padding:1px 8px;border-radius:10px;color:#fff;background:var(--c);margin-right:6px}
+table{border-collapse:collapse;width:100%;font-size:13px}th,td{border:1px solid var(--line);padding:6px 8px;vertical-align:top;text-align:left}th{background:var(--card)}
+.tw{overflow-x:auto}
+.pass{color:var(--p3);font-weight:600}.fail{color:var(--p0);font-weight:600}
+code{font-size:12px;background:rgba(127,127,127,.14);padding:0 3px;border-radius:3px;overflow-wrap:anywhere}
+pre{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto;font-size:12px;line-height:1.45}
+details{margin:10px 0}summary{cursor:pointer;font-weight:600}
+</style>
+</head>
+<body><main>
+<p style="padding:10px 14px;border:1px solid #d9a441;background:#fff7e6;color:#5c4400;border-radius:6px"><strong>验证记录（已完成）：发现的缺陷已由 PR #18、#19 修复并合入 main，现行设计以 doc/project-architecture.md 为准。</strong></p>
+<h1>评审清单实机验证报告</h1>
+<div class="muted">2026-10-02 · 对象：PR #17（2026-09-30 复查整改）合并前交叉评审给出的验证清单第 1–6 项 · 基线 <code>ad58a7b</code>，修复后 <code>eb80eb9</code></div>
+
+<div class="box" style="border-left-color:var(--p3)"><b>结论：</b>第 1 项是交叉评审已指出的 Hook 拦截，在 PR #17 修复并补宿主集成测试；第 2–6 项实机验证中 4 项一次通过，第 5 项（有未完成回滚时不启动新 Worker）<b>未通过</b>，定位到 2 个真缺陷，已修复并实机复测通过。另发现 3 个不影响安全、但会让用户卡住的体验问题，一并修复。<br>
+<b>修复合入：</b>PR #17（第 1 项 Hook 放行）· PR #18（回滚恢复两个缺陷）· PR #19（三个体验问题）。合入后 <code>npm test</code> 68 个测试文件全部通过。<br>
+<b>真实调用：</b><code>claude -p</code>（sonnet）共 50 次，费用 $3.87；其中握手探测 32 次、Worker 12 次、职责审查 6 次。</div>
+
+<h2>1. 验证方法</h2>
+<div class="grid">
+  <div class="card" style="--c:var(--p2)"><h3>隔离环境</h3>每个场景新建一套外置三根：产品仓（带本地 bare 仓作 origin，task branch push 真实发生）、独立治理仓、独立 <code>WILDARRANGE_STATE_HOME</code>。全程不触碰本机真实运行态，也不改 WildArrange 仓库。接入走公开命令 <code>setup → plan → plan approve → run / parallel run / parallel admit</code>。</div>
+  <div class="card" style="--c:var(--p2)"><h3>真实执行者</h3>一个 50 行的适配脚本把 WildArrange 交来的握手包、审查包原样交给真实 <code>claude -p</code>，把模型返回的 JSON 原样回传；Worker 模式下由真实模型按任务描述在任务 worktree 内写文件。同时记录每次调用读到的包路径与挑战码，作为并发与旧回执的证据。</div>
+  <div class="card" style="--c:var(--p1)"><h3>故障注入（只在适配层）</h3><ul>
+    <li>旧回执：用上一次真实回执替换本次回执</li>
+    <li>超时：<code>executionReadiness.timeoutMs=3000</code>，真实模型约需 8 秒</li>
+    <li>审查期间改源码：审查开始时向 Worker 产出追加一行</li>
+    <li>回滚失败：审查时把 <code>src/</code> 设为只读，或改动已合入文件，并让审查者崩溃</li></ul>WildArrange 本身不打桩。</div>
+</div>
+
+<h2>2. 逐项结果</h2>
+<div class="tw"><table>
+<thead><tr><th>项</th><th>场景</th><th>观察到的证据</th><th>结论</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>普通宿主工具走完「评审阻塞 → 整改完成 → 解除阻塞」</td><td>原先被 Hook 以 <code>no active task exists</code> 拦截。修复后经真实安装的 Codex Hook 桥接放行精确命令，执行后被阻塞任务回到 <code>pending</code>；多参数、重复参数、<code>&amp;&amp;</code> 拼接三种变形均被拦截。自动化测试 <code>test/external-host-hooks.test.mjs</code>。</td><td class="pass">修复后通过（PR #17）</td></tr>
+<tr><td rowspan="4">2</td><td>真实 Worker / 审查者正常握手并交付</td><td>真实 Worker 写出 <code>src/greet.js</code>；verifier 通过；真实职责审查 PASS；任务 <code>completed</code>；task branch 推到 origin，delivery commit 只含 <code>src/greet.js</code>。</td><td class="pass">通过</td></tr>
+<tr><td>旧回执</td><td>挑战码 <code>53e772fa…</code> 收到旧回执 <code>17031d8c…</code>，报 <code>did not acknowledge current handshake</code>；Worker 未启动；<code>attempts=0</code>。</td><td class="pass">通过</td></tr>
+<tr><td>缺配置</td><td>删除 <code>workerProbe</code> 后报 <code>executionReadiness.workerProbe is required</code>；Worker 未启动；<code>attempts=0</code>。</td><td class="pass">通过</td></tr>
+<tr><td>超时</td><td>3 秒超时触发，探测进程被终止，无残留进程；Worker 未启动；<code>attempts=0</code>。提示语不说"超时"（见第 4 节，已修）。</td><td class="pass">通过</td></tr>
+<tr><td rowspan="2">3</td><td>两个 <code>run</code> 同时启动</td><td>A 完成任务，只启动 1 个 Worker；B 被任务锁串行化，未改动任务。B 等满 15 秒才报锁错误（见第 4 节，已修为立即返回 <code>busy</code>）。</td><td class="pass">通过</td></tr>
+<tr><td>两个 <code>parallel run --task T001</code> 同时启动（开工检查真正并发）</td><td>两进程各自握手：挑战码 <code>d2119b1e</code> / <code>33c04106</code>、<code>fd5581c0</code> / <code>d871625d</code>，各用独立包文件且回执与自己的挑战码一致；随后只有一个认领成功，另一个报 <code>already has writable parallel run</code>，只启动 1 个 Worker。</td><td class="pass">通过</td></tr>
+<tr><td rowspan="2">4</td><td>已批准计划中追加带职责声明的任务</td><td><code>task create</code> + <code>task ready</code> 后 <code>run</code> 返回 <code>awaiting_plan_approval</code>，模型调用 0 次；重新批准后才执行。</td><td class="pass">通过</td></tr>
+<tr><td>审查期间源码变化</td><td>报 <code>Source changed during independent audit; rerun verification and review</code>；任务 <code>failed</code>，未完成、未推送 task branch。</td><td class="pass">通过</td></tr>
+<tr><td>5</td><td>有未完成回滚时 <code>run</code>/<code>resume</code> 不启动新 Worker</td><td>T001 处于 <code>recovery_required</code> 时，<code>run</code> 仍真实启动了独立任务 T002 的 Worker；另发现回滚失败可被误报为成功。详见第 3 节。</td><td class="fail">未通过 → 修复后通过（PR #18）</td></tr>
+<tr><td rowspan="2">6</td><td>备份恢复仅影响 runtime</td><td>备份后新增任务 T003、改治理仓本地配置；恢复后 T003 消失，项目文件指纹前后一致，治理仓本地修改未被覆盖（清单记 <code>governance_repository_managed</code> 跳过）。</td><td class="pass">通过</td></tr>
+<tr><td>非法路径在修改状态前被拒绝</td><td>5 种篡改清单：<code>..</code> 穿越到项目、绝对路径、无 <code>runtime/</code> 前缀、伪装治理仓路径、多层穿越。全部报错，且 <code>tasks.json</code>、账本、备份数、项目文件、治理仓前后完全一致，没有生成恢复前备份；项目与治理仓中找不到注入内容。</td><td class="pass">通过</td></tr>
+</tbody></table></div>
+
+<h2>3. 第 5 项发现的缺陷（PR #18）</h2>
+<div class="grid">
+  <div class="card" style="--c:var(--p0)"><span class="tag">P1</span><h3>回滚未完成时仍启动其它任务的 Worker</h3>
+  <b>根因：</b><code>runNextTask</code> 只在「没有可运行任务」时检查 admission 认领；还有独立任务可跑时整段被跳过。已有守卫只覆盖 contract 任务。<br>
+  <b>修复：</b>守卫改名 <code>assertAdmissionWorkspaceAvailable</code>，覆盖任何回滚失败且仍保留认领的任务；<code>parallel run</code> 也接入。<code>run</code>、<code>workflow</code>、<code>parallel run</code> 统一报 <code>recovery_required: task T001 has unrestored admission changes</code>。</div>
+  <div class="card" style="--c:var(--p0)"><span class="tag">P1</span><h3>patch 回滚失败被当成成功</h3>
+  <b>根因：</b><code>git apply --reverse</code> 删不掉文件时只打印 <code>warning: unable to unlink</code>，退出码仍为 0（在空仓库中独立复现）。系统据此记 <code>rolled_back</code>、释放认领，子 Agent 文件留在客户项目里，上一个缺陷的保护也就不会触发。<br>
+  <b>修复：</b>反向补丁后再跑正向 <code>git apply --check</code>：只有工作区每个路径都确实回到 pre-image 才算回滚完成。比反向检查更严，部分回滚也能识别。</div>
+</div>
+<div class="box"><b>回归测试（先红后绿）：</b><code>test/checkpoint-integrity.test.mjs</code> 中 “an unfinished rollback stops run and parallel run from starting any other worker” 与 “patch rollback that git only warns about is reported as rollback_failed”。<br>
+<b>实机复测：</b>两种真实回滚失败（只读目录、补丁冲突）下 admit 均为 <code>recovery_required / rollback_failed</code>；<code>run</code>、<code>workflow</code>、<code>parallel run</code> 全部拒绝；恢复期间模型调用 0 次，T002 保持 <code>pending</code>。</div>
+
+<h2>4. 体验问题（PR #19）</h2>
+<div class="tw"><table>
+<thead><tr><th>问题</th><th>根因</th><th>修复</th><th>实机复测</th></tr></thead>
+<tbody>
+<tr><td>握手 / 审查超时只报 <code>failed or output was truncated</code></td><td>命令结果已带 <code>timedOut</code>，报错未使用</td><td>明确说超时并指出要调的配置</td><td><code>adapter handshake timed out after 3000ms; … raise executionReadiness.timeoutMs</code></td></tr>
+<tr><td><code>task create</code> 建的任务永远 <code>criteria_failed</code></td><td>建单时无 verify 命令，默认 3 条验收标准未绑定命令；<code>task ready</code> 补命令后不重绑</td><td>未改动的默认标准按补齐的命令重新生成；用户显式标准保持不变</td><td><code>task create → ready → approve → run</code> 由真实 Worker 完成</td></tr>
+<tr><td>第二个 <code>run</code> 等满 15 秒后报锁错误</td><td><code>run</code> 持锁到 Worker 结束，等锁注定超时</td><td>先只读探测锁，另一个存活的 <code>run</code> 持锁时立即返回 <code>busy</code> 与 pid；探测不出照常取锁</td><td>第二个 <code>run</code> 0 秒返回 <code>busy</code>，第一个正常完成</td></tr>
+</tbody></table></div>
+
+<h2>5. 范围与局限</h2>
+<div class="box" style="border-left-color:var(--p1)"><ul style="margin:0;padding-left:18px">
+<li>真实执行者只用了 <code>claude -p</code>（Claude Code 2.1.287，sonnet）。Codex、Cursor、Kimi 客户端未手动驱动；第 1 项经真实安装的 Codex Hook 桥接验证，非客户端界面。</li>
+<li>回滚失败、审查期间改源码、旧回执由适配层故障注入制造；被测的 WildArrange 流程本身未打桩。</li>
+<li>仅在 macOS（Darwin 25.6，Node v26.3.0）验证；Windows 未覆盖。</li>
+<li>修复后的恢复路径（同一 run 修好文件系统后重新 admit）由既有自动化测试覆盖，未在实机重跑。</li>
+</ul></div>
+
+<h2>6. 复现方法</h2>
+<p>每个场景：建产品仓与 bare origin → <code>wildarrange setup --governance-root &lt;gov&gt;</code> → 在治理仓 <code>policy/wildarrange.config.json</code> 把 <code>executionReadiness.workerProbe</code> 与 <code>review.responsibility.command</code> 设为下面的适配脚本并提交 → 导入计划、批准 → 执行对应命令。计划中 <code>worker_command</code> 为 <code>node agent.mjs worker</code>。</p>
+<details><summary>适配脚本 agent.mjs（真实 claude -p + 故障注入开关）</summary>
+<pre>// 真实适配器：把 WildArrange 包交给真实 claude -p，原样返回其 JSON。
+// 用法：node agent.mjs probe|worker [--replay-stale|--mutate-during-review|--sabotage-rollback|--conflict-rollback]
+import { spawnSync } from "node:child_process";
+import { appendFileSync, readFileSync, existsSync, writeFileSync } from "node:fs";
+import path from "node:path";
+const here = path.dirname(new URL(import.meta.url).pathname);
+const log = (entry) =&gt; appendFileSync(path.join(here, "agent-log.jsonl"), JSON.stringify({ at: new Date().toISOString(), pid: process.pid, ...entry }) + "\n");
+const mode = process.argv[2];
+const claude = (prompt, extra) =&gt; {
+  const r = spawnSync("claude", ["-p", "--model", "sonnet", "--output-format", "json", "--no-session-persistence", ...extra], { input: prompt, encoding: "utf8", maxBuffer: 64 &lt;&lt; 20 });
+  if (r.status !== 0) { log({ mode, error: r.stderr.slice(0, 500) }); process.exit(1); }
+  return JSON.parse(r.stdout);
+};
+if (mode === "worker") {
+  const t = JSON.parse(readFileSync(process.env.WILDARRANGE_EXECUTION_CONTEXT, "utf8")).task;
+  log({ mode, task: t.id, cwd: process.cwd() });
+  const out = claude(`You are a worker in ${process.cwd()}. Task: ${t.subject}\n${t.description || ""}\nOnly create or edit files under: ${t.writable_paths.join(", ")}. Do it now, then reply DONE.`,
+    ["--permission-mode", "acceptEdits", "--allowedTools", "Read", "Write", "Edit"]);
+  log({ mode, task: t.id, result: String(out.result).slice(0, 200), cost: out.total_cost_usd });
+  process.exit(0);
+}
+const packetPath = process.env.WILDARRANGE_READINESS_PACKET || process.env.WILDARRANGE_REVIEW_PACKET;
+const packet = JSON.parse(readFileSync(packetPath, "utf8"));
+const flag = (name) =&gt; process.argv.includes(name) &amp;&amp; !packet.challenge;   // 只作用于审查包
+if (flag("--sabotage-rollback")) { (await import("node:fs")).chmodSync(path.join(process.cwd(), "src"), 0o555); process.exit(3); }
+if (flag("--conflict-rollback")) { appendFileSync(path.join(process.cwd(), "src", "greet.js"), "// concurrent edit\n"); process.exit(3); }
+if (flag("--mutate-during-review")) { /* 向最近一次 Worker 工作目录的 src/greet.js 追加一行 */ }
+const out = claude(`You are the external adapter for WildArrange. Below is a JSON packet. Follow packet.instruction exactly. Output only the JSON object, no prose, no code fences.\n\n${JSON.stringify(packet)}`,
+  ["--disallowedTools", "Bash", "Edit", "Write"]);
+let text = String(out.result).trim().replace(/^```(?:json)?\s*|\s*```$/g, "");
+const stalePath = path.join(here, `last-${packet.role || packet.kind}.json`);
+if (process.argv.includes("--replay-stale") &amp;&amp; existsSync(stalePath)) text = readFileSync(stalePath, "utf8");
+else if (packet.challenge) writeFileSync(stalePath, text);
+log({ mode, role: packet.role || null, packetPath: path.basename(packetPath), challengeIn: packet.challenge || null, cost: out.total_cost_usd });
+process.stdout.write(text);</pre></details>
+</main></body>
+</html>
