@@ -37,6 +37,8 @@ const HOST = ${JSON.stringify(host)};
 const ACTIVATION_ID = ${JSON.stringify(activationId)};
 const cliSpec = ${JSON.stringify(cliSpec)};
 const EVENT_MAP = ${JSON.stringify(eventMap)};
+// 内置执行者（wildarrange executor）启动的模型子会话：不注入、不拦截、不续跑，避免治理流程嵌套干扰执行者。
+if (process.env.WILDARRANGE_EXECUTOR_SESSION === "1") process.exit(0);
 let input = "";
 for await (const chunk of process.stdin) input += chunk;
 let payload;

@@ -133,6 +133,7 @@ AGENTS.md                         # mandatory reading routes
 - `src/interface/contract-view.mjs`：`generateContractArtifacts(rootDir)` 读取正式台账与当前扫描，生成 HTML；页面不是批准记录。
 - `src/interface/adoption-panel.mjs`：验证治理接管治理文件索引、只读预览与批准/恢复 API；写操作复用 Host/Origin/token/payload 防护。`adoption start/resume` 未显式提供 token 时生成单次随机 token，并通过 URL fragment 放入当前标签页。
 - `src/interface/adoption-panel-view.mjs`：验证治理接管面板的前端片段（侧栏按钮、主视图 HTML、浏览器脚本），由 dashboard-view 嵌入
+- `src/interface/executor-cli.mjs`：内置执行者：把开工握手包、审查包与任务上下文交给本机模型 CLI（claude / kimi / cursor-agent），提取 JSON 回答；子会话带 `WILDARRANGE_EXECUTOR_SESSION=1`，宿主 bridge 见到即放行；提供 doctor 的执行者配置体检与推荐命令。不做门禁判定。
 - `src/interface/adapters.mjs`：外置宿主 Adapter 编排：生成安装包、Cursor/Codex/Claude Code 用户级激活、卸载、备份恢复与完整性检查
 - `src/interface/adapter-bundles.mjs`：Codex/Cursor/Kimi 三宿主插件包内容生成（manifest、Hook 配置、slash 命令 Skill），只写 runtimeRoot
 - `src/interface/adapter-bridge-template.mjs`：三宿主共用 Hook bridge 脚本的字符串模板（项目发现、CLI 调用、超时与错误处理骨架）

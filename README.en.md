@@ -247,7 +247,7 @@ Create `plan.json`:
 
 Plan import protects existing work: reimport cannot overwrite tasks in the same Plan that are executing, verifying, recovering, holding a task claim, or already completed. After the old Plan completes, a new Plan can be imported while retaining the previous tasks and delivery records.
 
-Run it (every imported plan needs human approval; the readiness check requires a Worker handshake `executionReadiness.workerProbe` and a responsibility reviewer `review.responsibility.command`, configured with `/wildarrange-setup`):
+Run it (every imported plan needs human approval; the readiness check requires a Worker handshake `executionReadiness.workerProbe` and a responsibility reviewer `review.responsibility.command`, configured with `/wildarrange-setup`; the built-in executors work out of the box and `doctor` prints recommended commands):
 
 ```bash
 node ./bin/wildarrange.mjs plan --from plan.json
@@ -787,6 +787,17 @@ Store project policy in the governance repository's policy/wildarrange.config.js
 Use `project show` to get runtimeRoot, write a patch to `<runtimeRoot>/plan-drafts/review-setup.json`, preview with `wildarrange review configure --from "<runtimeRoot>/plan-drafts/review-setup.json"`, then add --apply after the user approves that configuration. Inspect review checklist --task T001; after plan approval, run readiness --task T001. Missing dependencies block Workers before an attempt is consumed. Incomplete configuration can be saved for repair.
 
 Workers receive full Skill context through WILDARRANGE_EXECUTION_CONTEXT. Probes read WILDARRANGE_READINESS_PACKET; reviewers read WILDARRANGE_REVIEW_PACKET. Probes return ready, the current challenge and loadedSkills. Reviewers return PASS/RETURN/INCONCLUSIVE with the inputDigest and exact source evidence according to the packet protocol. Connect real services; a fixed response is not independent review. A successful handshake is not delivery.
+
+No adapter script is needed: the built-in executor `wildarrange executor probe|review|work --cli claude|kimi|cursor` hands the readiness packet, review packet, or task to a logged-in local model CLI (Claude Code, Kimi Code, Cursor Agent) and returns the answer in the format the gates require. When the handshake or reviewer is missing, `doctor` prints ready-to-copy commands based on the CLIs installed on this machine (the reviewer prefers a different CLI from the worker; using the same CLI only warns). Example:
+
+```json
+{
+  "executionReadiness": { "workerProbe": "wildarrange executor probe --cli claude" },
+  "review": { "responsibility": { "command": "wildarrange executor review --cli kimi", "timeoutMs": 900000 } }
+}
+```
+
+A task `worker_command` can be `wildarrange executor work --cli claude`. Handshakes and reviews are read-only: claude disables shell and file-writing tools, kimi runs its built-in read-only `plan` profile (no shell, no file-writing tools), cursor uses `--mode ask`. Workers edit files in the task worktree: claude gets file tools only, without shell; kimi's non-interactive `-p` mode itself auto-approves every tool including shell, and cursor needs `--force` to edit non-interactively (also including shell); their results still pass every gate. Kimi deep reviews can exceed 10 minutes, so raise `timeoutMs` when kimi reviews. The linear `run` worker timeout is `executionReadiness.workerTimeoutMs`, 30 minutes by default (previously a fixed 120 seconds, too short for model workers). Model sessions started by an executor are not affected by WildArrange host hook injection or continuation.
 
 `review configure --from` only accepts drafts under the runtime `plan-drafts/` directory; pass the absolute path. Applied configuration lives at `<policyRoot>/wildarrange.config.json` in the governance repository; until it exists, built-in defaults apply. These governance files are not created in the product repository.
 

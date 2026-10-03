@@ -14,7 +14,7 @@ description: 配置项目自己的独立审查步骤、规范文档、必需 Ski
 
 每个步骤给出 id、title、appliesTo、requirement、required、documents、skills、command。documents 是仓库内文件引用，skills 是已注册包 Skill 或 .agents/skills/<name>/SKILL.md 的名称。按用户要求的顺序排列，如架构、模块合规、注释。requirement 写可驳回标准，不用“质量好”等空话。R1–R5 职责与唯一事实审计始终由原环节负责，项目步骤不能关闭它。
 
-配置 executionReadiness.workerProbe；任务需要调研时配置 researchProbe 与 researchSkills。复核可用每步 command 或 review.responsibility.command。它们必须连接真实执行服务，禁止用固定 PASS 或回显 JSON 充当真实 Agent。先读取执行服务文档确认接入方式。Worker 从 WILDARRANGE_EXECUTION_CONTEXT 读取任务和完整 Skill。
+配置 executionReadiness.workerProbe；任务需要调研时配置 researchProbe 与 researchSkills。复核可用每步 command 或 review.responsibility.command。它们必须连接真实执行服务，禁止用固定 PASS 或回显 JSON 充当真实 Agent。优先推荐内置执行者 `wildarrange executor probe|review|work --cli claude|kimi|cursor`（运行 doctor 可得到按本机已装 CLI 生成的命令；审查者尽量与 Worker 用不同 CLI，审查者用 kimi 时把 timeoutMs 设为 900000）；只有接入其它服务时才需读取其文档自写适配。Worker 从 WILDARRANGE_EXECUTION_CONTEXT 读取任务和完整 Skill。
 
 探测命令从 WILDARRANGE_READINESS_PACKET 读取探测包；Reviewer 从 WILDARRANGE_REVIEW_PACKET 读取。探测返回 ready、原 challenge、loadedSkills。Reviewer 的业务结果必须按包中协议给出结论与源码证据。握手只能证明此刻可调用与已确认上下文，不能证明业务实现正确。
 

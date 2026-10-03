@@ -44,6 +44,7 @@ import {
 import { projectDecisions, projectDecisionStats } from "../src/interface/decisions.mjs";
 import { projectTimeline } from "../src/interface/timeline.mjs";
 import { COMMAND_REGISTRY, renderCommandsMarkdown, renderHelp } from "../src/interface/cli-help.mjs";
+import { runExecutor } from "../src/interface/executor-cli.mjs";
 import {
   activateClaudeAdapter,
   activateCodexAdapter,
@@ -210,6 +211,22 @@ async function main() {
     } else {
       process.stdout.write(markdown);
     }
+    return;
+  }
+
+  // --- 内置执行者 ---
+  // §3.4：由开工检查 / 审查门 / Worker 调用，不依赖项目连接；stdout 是门禁读取的回答，失败原因走 stderr。
+  if (command === "executor") {
+    if (!["probe", "review", "work"].includes(args._[1])) throw new Error("wildarrange executor requires probe, review, or work --cli claude|kimi|cursor");
+    const result = await runExecutor({
+      role: args._[1],
+      cli: strArg(args, "cli"),
+      model: strArg(args, "model"),
+      bin: strArg(args, "bin"),
+    });
+    process.stdout.write(result.stdout);
+    process.stderr.write(result.stderr);
+    process.exitCode = result.exitCode;
     return;
   }
 

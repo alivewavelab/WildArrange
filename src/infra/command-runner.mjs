@@ -72,7 +72,7 @@ function runProcess(file, args, command, cwd, timeoutMs, options) {
       child = spawn(file, args, {
         cwd,
         shell: options.shell,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
         env: { ...process.env, WILDARRANGE_RUNTIME: "1", ...(options.env || {}) },
         detached: process.platform !== "win32",
       });
@@ -86,6 +86,11 @@ function runProcess(file, args, command, cwd, timeoutMs, options) {
         outputTruncated: { stdout: false, stderr: false },
       });
       return;
+    }
+    // 可选 stdin：大段输入（如审查包）不经命令行参数传递
+    if (options.input !== undefined) {
+      child.stdin.on("error", () => {});
+      child.stdin.end(String(options.input));
     }
     let stdout = "";
     let stderr = "";

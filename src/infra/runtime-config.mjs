@@ -88,6 +88,7 @@ function normalizeRuntimeConfig(config) {
   }
   if (!Array.isArray(readiness.researchSkills) || readiness.researchSkills.some(name => typeof name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(name))) throw new Error("executionReadiness.researchSkills must contain Skill names");
   if (!Number.isInteger(readiness.timeoutMs) || readiness.timeoutMs < 1 || readiness.timeoutMs > 300000) throw new Error("executionReadiness.timeoutMs must be between 1 and 300000");
+  if (!Number.isInteger(readiness.workerTimeoutMs) || readiness.workerTimeoutMs < 1 || readiness.workerTimeoutMs > 86400000) throw new Error("executionReadiness.workerTimeoutMs must be between 1 and 86400000");
   if (!isPlainObject(normalized.review) || !Array.isArray(normalized.review.steps)) throw new Error("review.steps must be an array");
   delete normalized.dynamicAgents;
   delete normalized.promptVariants;
@@ -197,7 +198,7 @@ export async function updateProjectGovernanceConfig(rootDir, patch, options = {}
   if (patch.review !== undefined && !isPlainObject(patch.review)) throw new Error("review must be an object");
   if (patch.executionReadiness !== undefined && !isPlainObject(patch.executionReadiness)) throw new Error("executionReadiness must be an object");
   if (patch.review && Object.keys(patch.review).some(key => !["steps", "responsibility"].includes(key))) throw new Error("setup review only accepts steps and responsibility");
-  if (patch.executionReadiness && Object.keys(patch.executionReadiness).some(key => !["workerProbe", "researchProbe", "researchSkills", "timeoutMs"].includes(key))) throw new Error("unknown executionReadiness field");
+  if (patch.executionReadiness && Object.keys(patch.executionReadiness).some(key => !["workerProbe", "researchProbe", "researchSkills", "timeoutMs", "workerTimeoutMs"].includes(key))) throw new Error("unknown executionReadiness field");
   const current = await loadWildArrangeConfig(rootDir);
   const config = normalizeRuntimeConfig(deepMerge(current.config, patch));
   const target = await governanceConfigPath(rootDir);

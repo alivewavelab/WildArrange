@@ -124,6 +124,21 @@
       "purpose": "恢复 adapter 备份：还原到该次 activate 之前的用户级文件"
     },
     {
+      "name": "wildarrange_executor_probe",
+      "command": "wildarrange executor probe --cli claude|kimi|cursor [--model <name>] [--bin <path>]",
+      "purpose": "内置开工握手执行者：写进 executionReadiness.workerProbe，由开工检查调用"
+    },
+    {
+      "name": "wildarrange_executor_review",
+      "command": "wildarrange executor review --cli claude|kimi|cursor [--model <name>] [--bin <path>]",
+      "purpose": "内置独立审查者：写进 review.responsibility.command 或审查步骤 command，由审查门调用"
+    },
+    {
+      "name": "wildarrange_executor_work",
+      "command": "wildarrange executor work --cli claude|kimi|cursor [--model <name>] [--bin <path>]",
+      "purpose": "内置 Worker：写进任务 worker_command，在任务 worktree 中由本机模型 CLI 改代码"
+    },
+    {
       "name": "wildarrange_injection_show",
       "command": "wildarrange injection show --point before_review [--agent BaiZe] [--task T001] [--text \"...\"] [--stage plan]",
       "purpose": "查看注入点解析结果"
