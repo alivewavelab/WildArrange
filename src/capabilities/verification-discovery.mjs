@@ -73,6 +73,8 @@ const HOOK_GLOBS = [
   ".cursor/hooks.json",
   ".codex/hooks.json",
   ".kimi-code/**",
+  ".claude/settings.json",
+  ".claude/settings.local.json",
 ];
 
 /**

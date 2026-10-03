@@ -24,6 +24,7 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
     codex: { enabled: true, hookMode: "cli-adapter" },
     cursor: { enabled: true, hookMode: "cli-adapter" },
     kimi: { enabled: true, hookMode: "plugin-adapter" },
+    claude: { enabled: true, hookMode: "plugin-adapter" },
   },
   // LLM 提供商端点与 API key 环境变量名；host 表示走 IDE 内置模型
   modelProviders: {

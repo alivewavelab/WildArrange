@@ -25,7 +25,7 @@
 
 - Dashboard 默认只绑定 `127.0.0.1`；非 loopback 必须配置 token。
 - Dashboard 写操作必须保留 token、Host、Origin / Sec-Fetch-Site 防护。
-- Adapter 不得静默改写用户级配置；Kimi 用户级 plugin 必须由用户显式安装。
+- Adapter 不得静默改写用户级配置；Kimi 与 Claude Code 用户级 plugin 必须由用户显式安装或显式执行 `adapter activate`。
 - 三个宿主共用一个 bridge 骨架（项目发现、超时、错误处理）；fail-open/fail-closed 与输出协议由各宿主分支显式决定。用户级 Hook 只对 registry 已连接的项目生效；未连接项目或 WildArrange 自身安装损坏时必须放行，不得阻断无关项目。
 - 安装、覆盖、卸载 adapter 文件必须保留报告与可恢复备份。
 - 宿主 Hook 只能增强早期拦截，不能被宣传为最终完成或唯一安全边界。
@@ -35,4 +35,4 @@
 - 更新对应 adapter / dashboard / doctor 测试。
 - 用户命令变化同步更新 `README.md`、`README.en.md` 和 CLI help。
 - 治理仓初始化变化必须覆盖最小集合、重复运行不覆盖。
-- Kimi 变更至少覆盖 plugin 生成、Hook bridge、非目标项目静默退出和卸载恢复。
+- Kimi 与 Claude Code 变更至少覆盖 plugin 生成、Hook bridge、非目标项目静默退出和卸载恢复。

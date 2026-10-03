@@ -45,6 +45,7 @@ import { projectDecisions, projectDecisionStats } from "../src/interface/decisio
 import { projectTimeline } from "../src/interface/timeline.mjs";
 import { COMMAND_REGISTRY, renderCommandsMarkdown, renderHelp } from "../src/interface/cli-help.mjs";
 import {
+  activateClaudeAdapter,
   activateCodexAdapter,
   activateCursorAdapter,
   installAdapters,
@@ -251,7 +252,7 @@ async function main() {
   // --- 一步式外置治理接入：init-governance → attach → init → adapter install ---
   if (command === "setup") {
     const governanceRoot = strArg(args, "governance-root");
-    if (!governanceRoot) throw new Error("wildarrange setup requires --governance-root <path> [--repository <git-url>] [--target codex|cursor|kimi|all]");
+    if (!governanceRoot) throw new Error("wildarrange setup requires --governance-root <path> [--repository <git-url>] [--target codex|cursor|kimi|claude|all]");
     console.log(JSON.stringify(await setupExternalGovernance(requestedProjectRoot, {
       governanceRoot,
       repository: strArg(args, "repository"),
@@ -366,7 +367,7 @@ async function main() {
   }
 
   // --- 宿主适配器 ---
-  // §3.4：adapter 在运行态生成/卸载/恢复 Cursor·Codex·Kimi 外置 Hook 包；local 模式指向当前 bin 路径。
+  // §3.4：adapter 在运行态生成/卸载/恢复 Cursor·Codex·Kimi·Claude Code 外置 Hook 包；local 模式指向当前 bin 路径。
   if (command === "adapter") {
     const subcommand = args._[1];
     if (subcommand === "install") {
@@ -380,17 +381,24 @@ async function main() {
     }
     if (subcommand === "activate") {
       const target = strArg(args, "target") || "all";
-      if (!["all", "cursor", "codex"].includes(target)) throw new Error("adapter activate supports --target cursor, codex, or all; Kimi requires /plugins install in its own UI");
+      if (!["all", "cursor", "codex", "claude"].includes(target)) throw new Error("adapter activate supports --target cursor, codex, claude, or all; Kimi requires /plugins install in its own UI");
       const userRoot = strArg(args, "user-root");
+      const claudeBin = strArg(args, "claude-bin");
+      // all 模式下本机没装 Claude Code、或项目尚未生成 Claude 包时只跳过它，不连累 Cursor/Codex 的激活
+      const activateClaude = () => activateClaudeAdapter(rootDir, workspace, { claudeBin, userRoot }).catch((error) => {
+        if (target === "all" && /^(claude CLI not found|external Claude Code adapter bundle is missing)/.test(error.message)) return { status: "skipped", reason: error.message };
+        throw error;
+      });
       console.log(JSON.stringify({
         kind: "wildarrange_external_activation",
-        ...(target !== "codex" ? { cursor: await activateCursorAdapter(rootDir, workspace, { userRoot }) } : {}),
-        ...(target !== "cursor" ? { codex: await activateCodexAdapter(rootDir, workspace, { userRoot }) } : {}),
+        ...(["all", "cursor"].includes(target) ? { cursor: await activateCursorAdapter(rootDir, workspace, { userRoot }) } : {}),
+        ...(["all", "codex"].includes(target) ? { codex: await activateCodexAdapter(rootDir, workspace, { userRoot }) } : {}),
+        ...(["all", "claude"].includes(target) ? { claude: await activateClaude() } : {}),
       }, null, 2));
       return;
     }
     if (subcommand === "uninstall") {
-      console.log(JSON.stringify(await uninstallAdapters(rootDir, workspace, { target: strArg(args, "target") || "all" }), null, 2));
+      console.log(JSON.stringify(await uninstallAdapters(rootDir, workspace, { target: strArg(args, "target") || "all", claudeBin: strArg(args, "claude-bin") }), null, 2));
       return;
     }
     if (subcommand === "restore") {

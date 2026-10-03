@@ -2,7 +2,7 @@
   "version": 1,
   "source": {
     "routingMechanism": ["deterministic intent gate", "category and Skill delegation"],
-    "adaptation": "Codex/Cursor/Kimi Code 线性 runtime 使用确定性 intent/domain/category 路由；Agent 固定为五个长期岗位，窄职责按需挂载为 Skill。"
+    "adaptation": "Codex/Cursor/Kimi Code/Claude Code 线性 runtime 使用确定性 intent/domain/category 路由；Agent 固定为五个长期岗位，窄职责按需挂载为 Skill。"
   },
   "intents": [
     {

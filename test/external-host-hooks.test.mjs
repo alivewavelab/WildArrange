@@ -378,9 +378,11 @@ test("adapter activate/uninstall/restore run through the CLI with --user-root", 
     await prepareScopedProject(roots, { importTask: false });
     const { userRoot } = await seedUserRoot(root);
     const run = (...args) => runCommandFile(process.execPath, [CLI_PATH, ...args], projectRoot, 60_000, { env: { WILDARRANGE_STATE_HOME: stateHome } });
-    const activated = await run("adapter", "activate", "--target", "all", "--user-root", userRoot);
+    // 本机没有 claude CLI 时 all 只跳过 Claude Code，不影响其它宿主（测试从不调用真实 claude）
+    const activated = await run("adapter", "activate", "--target", "all", "--user-root", userRoot, "--claude-bin", path.join(root, "no-claude"));
     assert.equal(activated.exitCode, 0, activated.stderr);
     const parsed = JSON.parse(activated.stdout);
+    assert.equal(parsed.claude.status, "skipped");
     assert.equal(existsSync(path.join(userRoot, ".cursor", "rules", "wildarrange.mdc")), true);
     assert.match(await readFile(path.join(userRoot, ".codex", "AGENTS.md"), "utf8"), /wildarrange:begin/);
     const restored = await run("adapter", "restore", "--backup", parsed.cursor.backupId);

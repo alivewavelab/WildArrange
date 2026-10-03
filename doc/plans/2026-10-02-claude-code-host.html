@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Code 宿主接入</title>
+<style>
+:root{--bg:#fafaf8;--fg:#1d1d1b;--muted:#6b6b66;--card:#fff;--line:#e4e2dc;--p0:#c0392b;--p1:#d9822b;--p2:#2e7dbd;--p3:#6b8e23;--del:#fdecea;--add:#e8f5ec}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#17171a;--fg:#e8e6e1;--muted:#9a978f;--card:#212126;--line:#34343a;--del:#3a2224;--add:#1f3326}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:1180px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:26px;margin:0 0 4px}h2{margin:34px 0 12px;font-size:20px;border-bottom:1px solid var(--line);padding-bottom:6px}
+h3{font-size:16px;margin:0 0 6px}
+.muted{color:var(--muted);font-size:13px}
+.box{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--p2);border-radius:8px;padding:12px 16px;margin:12px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-top:5px solid var(--c);border-radius:10px;padding:12px 16px}
+.card ul,.box ul,.box ol{margin:6px 0;padding-left:18px}
+table{border-collapse:collapse;width:100%;font-size:13px}th,td{border:1px solid var(--line);padding:6px 8px;vertical-align:top;text-align:left}th{background:var(--card)}
+td.old{background:var(--del)}td.new{background:var(--add)}
+.tw{overflow-x:auto}
+code{font-size:12px;background:rgba(127,127,127,.14);padding:0 3px;border-radius:3px;overflow-wrap:anywhere}
+</style>
+</head>
+<body><main>
+<p style="padding:10px 14px;border:1px solid #d9a441;background:#fff7e6;color:#5c4400;border-radius:6px"><strong>历史方案：已按选项 A 落地（分支 feat/claude-code-host），现行设计以 doc/project-architecture.md 与 README 的 Adapter 一节为准。</strong></p>
+<h1>Claude Code 宿主接入方案（已执行）</h1>
+<div class="muted">2026-10-02 · 目标：Claude Code 成为与 Kimi 同级的第四个宿主 · 依据：Claude Code 官方 Hooks / Plugins / Marketplace 文档（code.claude.com/docs）与现有 <code>src/interface/adapter-*.mjs</code> · 需要你确认三件事：① 第 3 节一个产品选择；② 第 5 节规范改动；③ 整体范围</div>
+
+<div class="box" style="border-left-color:var(--p3)"><b>执行结果（2026-10-03）：</b>第 1 节 6 条验收全部在真实 Claude Code 2.1.287 上通过：插件以 <code>--user-root</code> 隔离安装到沙盒配置（<code>CLAUDE_CONFIG_DIR</code>）；真实会话中计划外写入被拒、计划内写入成功、<code>git clean -fdx</code> 在 <code>bypassPermissions</code> 下仍被拦截、未完成任务停止时拉回一次；账本有 claude 宿主 5 类事件回执，doctor 显示 <code>execution_observed</code>；未连接目录不受影响；卸载后沙盒清空，真实 <code>~/.claude</code> 与验证前一致。<br>
+<b>实施中新增的设计（方案阶段未知）：</b>① Claude Code 运行安装时的缓存副本、只按版本号刷新，故插件版本为 <code>1.0.0-&lt;内容摘要&gt;</code>，再次激活时版本不同即 <code>claude plugin update</code>，doctor 发现已装版本落后即告警；② Stop 输入 <code>stop_hook_active=true</code> 时放行（官方推荐，避免空转到 8 次上限）；③ <code>claude</code> CLI 在运行态目录执行，避免读到客户项目的项目级设置；④ <code>marketplace remove</code> 限定 <code>--scope user</code>；⑤ 宿主 fail-open 时 bridge 退出码固定为 1。<br>
+<b>Kimi 交叉评审遗留（后续项）：</b>两个项目使用不同 WildArrange 安装时会互相覆盖同名 marketplace；用户在 WildArrange 之外卸载插件后 doctor 仍显示已激活（与 Codex/Kimi 同属回执模型的局限）；Windows 上默认 <code>claude</code> 命令解析未验证，可先用 <code>--claude-bin</code> 指定。</div>
+
+<div class="box"><b>结论：</b>Claude Code 的钩子协议和 Codex 几乎相同（同样的 <code>PreToolUse</code> 拒绝格式、<code>additionalContext</code> 注入），插件结构和本地 marketplace 也与 Codex 同构，<code>Stop</code> 续跑可沿用 Kimi 逻辑。因此按「复制 Codex 插件包、换目录与变量名」实现，核心状态机不动。预计源码约 +150 行，另配测试与文档。<br>
+<b>和 Kimi 同级的含义：</b>插件外置在运行态、客户项目零写入；未连接项目静默放行；钩子 fail-open（崩溃或超时放行），最终完成仍以 CLI 质量门为准；<code>doctor</code> 以真实回执判定激活。</div>
+
+<h2>1. 验收标准（先定标准，再让实现通过）</h2>
+<div class="tw"><table>
+<thead><tr><th>#</th><th>在已连接项目、真实 Claude Code 会话中</th><th>证据</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>新会话开始时注入治理规则与当前任务状态</td><td>会话上下文含 WildArrange 注入块；账本 <code>hook_injection_run</code>，<code>hostAdapter=claude</code></td></tr>
+<tr><td>2</td><td>没有计划或越出 <code>writable_paths</code> 的写文件、任意 Shell 被拒绝；计划内写入放行</td><td>Claude 收到拒绝理由；文件未被写入</td></tr>
+<tr><td>3</td><td>有未完成任务时会话停止，会被拉回续跑</td><td><code>Stop</code> 返回 <code>decision: "block"</code> 与续跑指令</td></tr>
+<tr><td>4</td><td><code>doctor</code> 显示 <code>claude:configured/execution observed</code>；插件钩子被改动时报 <code>external_adapter_config_modified</code></td><td>doctor 输出</td></tr>
+<tr><td>5</td><td>在未连接 WildArrange 的项目里使用 Claude Code 完全不受影响；WildArrange 安装损坏时也放行</td><td>bridge 无输出、退出码 0</td></tr>
+<tr><td>6</td><td>卸载后插件与 marketplace 从 Claude Code 移除，可恢复</td><td><code>claude plugin list</code> 不再列出</td></tr>
+</tbody></table></div>
+
+<h2>2. 设计</h2>
+<div class="grid">
+  <div class="card" style="--c:var(--p2)"><h3>插件包（运行态，零项目写入）</h3>
+  <code>runtimeRoot/adapters/external/claude-marketplace/</code><ul>
+  <li><code>.claude-plugin/marketplace.json</code>：市场 <code>wildarrange-local</code>，条目 <code>wildarrange-governance</code>，<code>source: "./plugins/wildarrange-governance"</code></li>
+  <li><code>plugins/wildarrange-governance/.claude-plugin/plugin.json</code></li>
+  <li><code>hooks/hooks.json</code>：命令 <code>node "${CLAUDE_PLUGIN_ROOT}/hooks/&lt;bridge&gt;"</code></li>
+  <li><code>skills/</code>：沿用现有快捷命令，在 Claude Code 中显示为 <code>/wildarrange-governance:wildarrange-status</code> 等</li></ul></div>
+  <div class="card" style="--c:var(--p2)"><h3>事件映射</h3><ul>
+  <li><code>SessionStart</code> / <code>PostCompact</code> → 注入身份、规则与状态（<code>additionalContext</code>）</li>
+  <li><code>UserPromptSubmit</code> → 路由、计划草稿指令</li>
+  <li><code>PreToolUse</code>（<code>Bash|Write|Edit|MultiEdit|NotebookEdit</code>）→ 范围门，拒绝用 <code>permissionDecision: "deny"</code></li>
+  <li><code>PostToolUse</code> → 规则刷新与结果门</li>
+  <li><code>Stop</code> / <code>SubagentStop</code> → 未完成任务时 <code>decision: "block"</code> 续跑（同 Kimi）</li></ul></div>
+  <div class="card" style="--c:var(--p1)"><h3>代码改动</h3><ul>
+  <li><code>adapter-bundles.mjs</code>：新增 <code>writeClaudeBundle</code></li>
+  <li><code>adapter-bridge-template.mjs</code>：<code>host=claude</code>，Stop 续跑分支</li>
+  <li><code>adapters.mjs</code>：目标集合、activate / uninstall / 完整性检查</li>
+  <li><code>doctor.mjs</code>、<code>default-config.mjs</code>（<code>adapters.claude</code>）、<code>cli-help.mjs</code>、<code>bin</code> 的 <code>--target</code> 说明</li>
+  <li>测试：bridge 拒绝 / 放行 / 续跑 / 未连接静默、插件包结构、doctor 回执与篡改检测、卸载恢复</li></ul></div>
+</div>
+
+<h2>3. 需要你选：安装方式</h2>
+<div class="tw"><table>
+<thead><tr><th>选项</th><th>做法</th><th>评价</th></tr></thead>
+<tbody>
+<tr><td><b>A（推荐）</b>自动安装</td><td><code>wildarrange adapter activate --target claude</code> 代为执行 <code>claude plugin validate</code> → <code>claude plugin marketplace add &lt;包路径&gt;</code> → <code>claude plugin install wildarrange-governance@wildarrange-local --scope user</code>；卸载时执行 <code>claude plugin uninstall</code> 与 <code>marketplace remove</code></td><td>一条命令完成，和 Cursor 的 activate 一样是显式的用户级操作；Claude Code 官方提供这些命令行，适合脚本调用</td></tr>
+<tr><td>B 手工安装</td><td>像 Codex 一样只生成包，<code>nextActions</code> 列出上述命令让用户自己敲</td><td>少一点代码，但多一步手工、容易漏</td></tr>
+</tbody></table></div>
+<p class="muted">两种方式都以 user scope 安装，不写项目 <code>.claude/settings.json</code>，保持客户项目零写入。安装后需新开会话（或 <code>/reload-plugins</code>）才生效，doctor 以真实回执为准。</p>
+
+<h2>4. 实机验证</h2>
+<div class="box"><ol>
+<li>本机已装 Claude Code 2.1.287。在隔离三根环境中 <code>setup --target claude</code> → <code>adapter activate --target claude</code> → <code>claude plugin list</code> 确认 enabled。</li>
+<li>在已连接项目中用 <code>claude -p</code> 真实会话逐条跑第 1 节的 6 条验收，记录拒绝理由、账本回执与 doctor 输出。</li>
+<li>在未连接目录跑同样操作，确认无拦截；最后卸载并确认干净。</li>
+<li>为避免影响你本机日常使用的 Claude Code，验证结束即卸载插件与 marketplace。</li>
+</ol></div>
+
+<h2>5. 规范改动（请确认）</h2>
+<p class="muted">只把现有宿主列表补上 Claude Code，不新增门禁、不放宽任何约束。</p>
+<div class="tw"><table>
+<thead><tr><th>文件</th><th>原文</th><th>改为</th></tr></thead>
+<tbody>
+<tr><td rowspan="3"><code>doc/development-workflow.md</code></td><td class="old">Codex / Cursor / Kimi Code 适配放在 runtime adapter 层；核心状态机必须是产品中立的本地文件协议。</td><td class="new">Codex / Cursor / Kimi Code / Claude Code 适配放在 runtime adapter 层；核心状态机必须是产品中立的本地文件协议。</td></tr>
+<tr><td class="old">Kimi Hook 为 fail-open：PreToolUse 可在 Hook 正常运行时阻断，但 Hook 崩溃或超时默认放行；……</td><td class="new">Kimi 与 Claude Code Hook 为 fail-open：PreToolUse 可在 Hook 正常运行时阻断，但 Hook 崩溃或超时默认放行；……（其余不变）</td></tr>
+<tr><td class="old">……保证 Codex / Cursor / Kimi Code / 普通终端都能直接运行。</td><td class="new">……保证 Codex / Cursor / Kimi Code / Claude Code / 普通终端都能直接运行。</td></tr>
+<tr><td rowspan="2"><code>src/interface/AGENTS.md</code></td><td class="old">Adapter 不得静默改写用户级配置；Kimi 用户级 plugin 必须由用户显式安装。</td><td class="new">Adapter 不得静默改写用户级配置；Kimi 与 Claude Code 用户级 plugin 必须由用户显式安装或显式执行 <code>adapter activate</code>。</td></tr>
+<tr><td class="old">Kimi 变更至少覆盖 plugin 生成、Hook bridge、非目标项目静默退出和卸载恢复。</td><td class="new">Kimi 与 Claude Code 变更至少覆盖 plugin 生成、Hook bridge、非目标项目静默退出和卸载恢复。</td></tr>
+</tbody></table></div>
+<p class="muted">另同步非规范文档：中英文 README 的 Adapter 一节与命令说明、<code>doc/project-architecture.md</code> 的 adapter 描述（「三宿主」改为「四宿主」）。</p>
+
+<h2>6. 不在本次范围</h2>
+<div class="box" style="border-left-color:var(--p1)"><ul>
+<li><b>内置执行者模板</b>：产品自带 Claude / Codex / Kimi 的 Worker 握手与职责审查脚本，并与现有「Agent 绑定 Skill 调度外部 CLI」统一，另出方案。</li>
+<li><b>doctor 检查握手与审查命令是否已配置</b>：小改动，可随上一项一起做。</li>
+<li>Claude Code 云端会话（claude.ai/code）：官方文档说明云端会话不加载本机插件，无法接入。</li>
+</ul></div>
+</main></body>
+</html>

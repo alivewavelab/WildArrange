@@ -133,7 +133,7 @@ AGENTS.md                         # mandatory reading routes
 - `src/interface/contract-view.mjs`：`generateContractArtifacts(rootDir)` 读取正式台账与当前扫描，生成 HTML；页面不是批准记录。
 - `src/interface/adoption-panel.mjs`：验证治理接管治理文件索引、只读预览与批准/恢复 API；写操作复用 Host/Origin/token/payload 防护。`adoption start/resume` 未显式提供 token 时生成单次随机 token，并通过 URL fragment 放入当前标签页。
 - `src/interface/adoption-panel-view.mjs`：验证治理接管面板的前端片段（侧栏按钮、主视图 HTML、浏览器脚本），由 dashboard-view 嵌入
-- `src/interface/adapters.mjs`：外置宿主 Adapter 编排：生成安装包、Cursor/Codex 用户级激活、卸载、备份恢复与完整性检查
+- `src/interface/adapters.mjs`：外置宿主 Adapter 编排：生成安装包、Cursor/Codex/Claude Code 用户级激活、卸载、备份恢复与完整性检查
 - `src/interface/adapter-bundles.mjs`：Codex/Cursor/Kimi 三宿主插件包内容生成（manifest、Hook 配置、slash 命令 Skill），只写 runtimeRoot
 - `src/interface/adapter-bridge-template.mjs`：三宿主共用 Hook bridge 脚本的字符串模板（项目发现、CLI 调用、超时与错误处理骨架）
 - `src/interface/doctor.mjs`：一致性 doctor，审计 config 结构/mounts、将全局 task ledger 中所有 Plan 的 completed 任务与 checkpoint/acceptance proof/ledger 事件按 `<planId>:<taskId>` 对账、校验 ledger hash 链、ledger 与最新备份交叉检查，并展示最新仓库治理状态。`registryFreshness` 是独立容错黄灯分项。无 planId 的完成事件不计为任何任务的完成证据。专用 `gateArming` 与 `adapters` 段展示未武装 gate（黄灯不再埋在 `status` JSON 里）、已启用但未配置的 adapter 文件，以及 Codex 当前 Hook 配置是否已有真实执行证据。`adapter install` 只生成文件并记 `adapter_files_generated`；Codex 仅在 hash 链校验通过的 `hook_injection_run` 同时绑定 `hostAdapter=codex` 与当前 `.codex/hooks.json` SHA-256 时显示 `execution_observed`，否则报 `codex_hook_activation_unverified` 并使 doctor 失败。`configured` 只表示文件存在，不代表宿主已经加载。`.cursor/` 不随每次 clone 传播——`.gitignore` 对 `.cursor/hooks.json` 与 `.cursor/hooks/` 例外以便 hard enforcement 可提交，doctor 验证各机器实际拥有；doctor 也报告引用已不存在绝对路径的规则文件（机器/用户名变更后 stale）。诊断与 gating 隔离：各项检查独立 try/catch（崩溃仅标红本段 `check_failed`，其余仍报告），doctor 从不追加 hash 链 ledger。还检查反向：orphan completion 事件（未 completed 任务已有链校验 completion ledger 事件——中断的完成事务，带 `wildarrange run` 恢复提示）、完成后副作用失败（snapshot/summary 在 commit 后写不出的 `completion_side_effect_failed` ledger 事件），以及 canonical/derived 分歧（派生 `tasks.md` 与权威 `team/tasks.json` 不一致）；含 `decisionHealth` 周期健康摘要。
@@ -378,7 +378,7 @@ review gate 是宿主中立的。从 CLI 运行，可含确定性通道、配置
 
 ## Adapter 模型
 
-外置模式是唯一形态：`src/interface/adapters.mjs` 把三宿主 bundle 写到 `runtimeRoot/adapters/external`，WildArrange 不向客户项目写任何文件。Cursor 可经 `adapter activate --target cursor` 备份并合并用户级 Hook；Codex 与 Kimi 由用户在插件界面显式安装和信任。生成/配置不代表激活，只有 bridge 携带当前 activationId 真实运行并进入 hash 链 ledger 后，doctor 才显示 `execution_observed`。bridge 在调用治理运行时前按 cwd 识别已连接项目，未连接工作区静默退出。
+外置模式是唯一形态：`src/interface/adapters.mjs` 把四宿主 bundle 写到 `runtimeRoot/adapters/external`，WildArrange 不向客户项目写任何文件。Cursor 可经 `adapter activate --target cursor` 备份并合并用户级 Hook；Claude Code 可经 `adapter activate --target claude` 调用 `claude plugin` CLI 以用户级安装本地 marketplace 插件（`--user-root` 时以 `CLAUDE_CONFIG_DIR` 隔离）；Codex 与 Kimi 由用户在插件界面显式安装和信任。Claude Code 的 `PostCompact` 不能注入上下文，bridge 把压缩后的 `SessionStart(source=compact)` 映射为 `PostCompact`，并把 `PostToolUse` 输出包装为 `additionalContext`。生成/配置不代表激活，只有 bridge 携带当前 activationId 真实运行并进入 hash 链 ledger 后，doctor 才显示 `execution_observed`。bridge 在调用治理运行时前按 cwd 识别已连接项目，未连接工作区静默退出。
 
 Codex 主会话身份由 lifecycle hook 自动建立：`SessionStart` 从已安装且 hash 校验通过的 Prompt Pack 读取 Jiuwei Prompt 并注入一次；发生上下文压缩时，`PostCompact` 再注入一次。普通用户消息只做路由和动态上下文匹配，不重复加载完整角色 Prompt。
 
@@ -453,7 +453,7 @@ dashboard 保持 local-first。loopback `GET /api/state` 可无 token 读取做�
 
 WildArrange core 必须保持原创代码。外部 workflow 项目可 inform 概念、节点名与质量 gate，但商业构建不得 ship 复制源码、复制 prompt 文本或限制商业再分发许可的工具实现。
 
-adapter 专用行为属于 `src/interface/adapters.mjs` 或宿主专用生成文件。core workflow、gate、ledger 与 provider 逻辑必须在没有 Codex/Cursor/Kimi 私有 hook 的情况下运行。
+adapter 专用行为属于 `src/interface/adapters.mjs` 或宿主专用生成文件。core workflow、gate、ledger 与 provider 逻辑必须在没有 Codex/Cursor/Kimi/Claude Code 私有 hook 的情况下运行。
 
 ## 维护规则
 

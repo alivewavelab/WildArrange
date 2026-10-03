@@ -302,6 +302,7 @@ async function checkAdapters(rootDir, findings) {
     cursor: config.adapters?.cursor?.enabled === true,
     codex: config.adapters?.codex?.enabled === true,
     kimi: config.adapters?.kimi?.enabled === true,
+    claude: config.adapters?.claude?.enabled === true,
   };
   const installReport = await loadAdapterReport(rootDir);
   // 以 install-report 里实际生成过的宿主为准：没装的宿主不是缺陷，不能报 error
@@ -310,7 +311,7 @@ async function checkAdapters(rootDir, findings) {
   if (installedTargets.length === 0) {
     addFinding(findings, "error", "adapters", "外置治理已连接，但尚未生成任何宿主的零项目文件 Adapter 包，Hook 不会生效", {
       code: "external_adapter_not_prepared",
-      nextAction: "运行 wildarrange adapter install --target codex|cursor|kimi|all",
+      nextAction: "运行 wildarrange adapter install --target codex|cursor|kimi|claude|all",
     });
   }
   for (const target of enabledTargets) {
@@ -331,7 +332,7 @@ async function checkAdapters(rootDir, findings) {
       addFinding(findings, "error", "adapters", `${target} 外置 Adapter 的 Hook 配置与安装时的 digest 不一致：${integrity.issues.map((issue) => `${issue.file}（${issue.problem}）`).join("；")}`, {
         target,
         code: "external_adapter_config_modified",
-        nextAction: `重新运行 wildarrange adapter install --target ${target}${target === "cursor" ? " 与 adapter activate --target cursor" : ""}`,
+        nextAction: `重新运行 wildarrange adapter install --target ${target}${["cursor", "claude"].includes(target) ? ` 与 adapter activate --target ${target}` : ""}`,
       });
     }
     targets.push({

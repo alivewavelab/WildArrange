@@ -423,7 +423,7 @@ function collectPathLikeValues(value, output, explicitPath = false) {
   }
   if (!value || typeof value !== "object") return;
   for (const [key, nested] of Object.entries(value)) {
-    if (/^(path|paths|file|files|file_path|file_paths|filepath|target|targets|target_path|target_paths|relative_path)$/i.test(key)) {
+    if (/^(path|paths|file|files|file_path|file_paths|filepath|notebook_path|target|targets|target_path|target_paths|relative_path)$/i.test(key)) {
       collectPathLikeValues(nested, output, true);
       continue;
     }
