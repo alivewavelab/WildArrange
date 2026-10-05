@@ -88,7 +88,7 @@ npx wildarrange adapter activate --target all   # Cursor Hook + 用户级指针�
 npx wildarrange doctor
 ```
 
-`adapter activate` 是显式的用户级写入，普通命令不会触发：`--target cursor` 备份并合并用户级 `~/.cursor/hooks.json`（只替换 WildArrange 自己的条目），并写入 `~/.cursor/rules/wildarrange.mdc`（alwaysApply 的一句话指针：本机项目若已连接 WildArrange，先运行 `wildarrange status`）；`--target codex` 在 `~/.codex/AGENTS.md` 追加带 `<!-- wildarrange:begin/end -->` 标记的同样指针段。`--target claude` 经本机 `claude` CLI 校验运行态里的本地 marketplace，并以用户级（`--scope user`）安装 `wildarrange-governance@wildarrange-local`，重复执行只刷新；传 `--user-root` 时设置 `CLAUDE_CONFIG_DIR=<user-root>/.claude`，不碰真实 `~/.claude`；`--target all` 时本机没有 `claude` 命令会跳过 Claude Code，不影响其它宿主。写前都会备份，重复执行幂等，客户项目里不写任何文件。`adapter uninstall` 会移除这些用户级条目、指针并删除 runtime 中的插件包；`adapter restore --backup <backupId>` 把用户级文件恢复到该次 activate 之前。`doctor` 会比对安装时记录的 Hook 配置 digest，插件 `hooks.json` 或用户 Cursor 条目被改动/删除时报 `external_adapter_config_modified`。Codex 与 Kimi 仍要求按 `adapter install` 返回的 `nextActions` 在各自插件界面显式安装、审查和信任。文件已生成或用户配置已写入都不等于激活；只有与当前 `activationId` 匹配的真实生命周期回执出现后，`doctor` 才报告 `execution_observed`。Bridge 先只读本机 registry 判断工作目录（含项目子目录与任务 worktree）是否属于已连接项目：未连接项目、或 WildArrange 自身安装损坏时一律放行，不会阻断无关项目；已连接项目上子进程失败才按宿主策略处理（Cursor 写操作 fail-closed，Codex/Kimi fail-open），子进程有超时保险。Kimi 的 Stop 会把未完成任务拉回续跑。
+`adapter activate` 是显式的用户级写入，普通命令不会触发：`--target cursor` 备份并合并用户级 `~/.cursor/hooks.json`（只替换 WildArrange 自己的条目），并写入 `~/.cursor/rules/wildarrange.mdc`（alwaysApply 的一句话指针：本机项目若已连接 WildArrange，先运行 `wildarrange status`）；`--target codex` 在 `~/.codex/AGENTS.md` 追加带 `<!-- wildarrange:begin/end -->` 标记的同样指针段。`--target claude` 经本机 `claude` CLI 校验运行态里的本地 marketplace，并以用户级（`--scope user`）安装 `wildarrange-governance@wildarrange-local`，重复执行只刷新；传 `--user-root` 时设置 `CLAUDE_CONFIG_DIR=<user-root>/.claude`，不碰真实 `~/.claude`；`--target all` 时本机没有 `claude` 命令会跳过 Claude Code，不影响其它宿主。写前都会备份，重复执行幂等，客户项目里不写任何文件。`adapter uninstall` 会移除这些用户级条目、指针并删除 runtime 中的插件包；`adapter restore --backup <backupId>` 把用户级文件恢复到该次 activate 之前。`doctor` 会比对安装时记录的 Hook 配置 digest，插件 `hooks.json` 或用户 Cursor 条目被改动/删除时报 `external_adapter_config_modified`。Codex 与 Kimi 仍要求按 `adapter install` 返回的 `nextActions` 在各自插件界面显式安装、审查和信任。文件已生成或用户配置已写入都不等于激活；只有与当前 `activationId` 匹配的真实生命周期回执出现后，`doctor` 才报告 `execution_observed`。回执只证明插件曾经运行过：`doctor` 还会只读核对插件此刻是否仍安装并启用（Claude Code 查 `claude plugin list`，Codex 查 `codex plugin list`，Kimi 读 `~/.kimi-code/plugins/installed.json`，Cursor 由用户级 hooks.json digest 覆盖），在 WildArrange 之外被卸载或禁用时报 `external_adapter_removed`；无法查询时只告警。Bridge 先只读本机 registry 判断工作目录（含项目子目录与任务 worktree）是否属于已连接项目：未连接项目、或 WildArrange 自身安装损坏时一律放行，不会阻断无关项目；已连接项目上子进程失败才按宿主策略处理（Cursor 写操作 fail-closed，Codex/Kimi fail-open），子进程有超时保险。Kimi 的 Stop 会把未完成任务拉回续跑。
 
 每张计划任务可声明 `"repositoryTarget": "project"`（默认）或 `"governance"`。一个任务只能写一个仓库；治理任务从治理仓库自己的 branch/worktree 走线性 `wildarrange run` 交付，跨仓依赖必须拆成两张任务。当前并行 admission 仍只拥有项目仓库，遇到治理任务会明确拒绝，不会回落写客户仓库。两个交付都完成后，用完整 SHA 写不修改任一仓库的集成验收收据：
 
@@ -809,7 +809,7 @@ Worker 之后的既有 Review 增加独立职责审计：R1 符合批准方案�
 
 Worker 读取 WILDARRANGE_EXECUTION_CONTEXT 的完整任务 Skill；探测器读取 WILDARRANGE_READINESS_PACKET，Reviewer 读取 WILDARRANGE_REVIEW_PACKET。探测返回 ready、原 challenge、loadedSkills；Reviewer 按包内协议返回带 inputDigest 的 PASS/RETURN/INCONCLUSIVE 与准确源码证据。请连接真实服务，固定回显不是独立审核。握手通过不等于功能交付。
 
-不需要自己写适配脚本：内置执行者 `wildarrange executor probe|review|work --cli claude|kimi|cursor` 会把握手包、审查包或任务交给本机已登录的模型 CLI（Claude Code、Kimi Code、Cursor Agent），并把回答整理成门禁要求的格式。`doctor` 发现握手或审查者未配置时，会按本机已装的 CLI 给出可直接复制的命令（审查者优先选与 Worker 不同的 CLI；审查者与 Worker 用同一 CLI 时只告警）。配置示例：
+不需要自己写适配脚本：内置执行者 `wildarrange executor probe|review|work --cli codex|claude|kimi|cursor` 会把握手包、审查包或任务交给本机已登录的模型 CLI（Codex、Claude Code、Kimi Code、Cursor Agent；codex 不在 PATH 时自动使用 ChatGPT 桌面版自带的 CLI），并把回答整理成门禁要求的格式。`doctor` 发现握手或审查者未配置时，会按本机已装的 CLI 给出可直接复制的命令（Worker 优先选带操作系统沙盒的 codex，审查者优先选与 Worker 不同的 CLI；审查者与 Worker 用同一 CLI 时只告警）。配置示例：
 
 ```json
 {
@@ -818,7 +818,7 @@ Worker 读取 WILDARRANGE_EXECUTION_CONTEXT 的完整任务 Skill；探测器读
 }
 ```
 
-任务的 `worker_command` 可写 `wildarrange executor work --cli claude`。握手与审查只读：claude 禁用 Shell 与写文件工具，kimi 使用内置只读 `plan` 档案（无 Shell、无写文件工具），cursor 使用 `--mode ask`。Worker 在任务 worktree 中改文件：claude 只开放文件工具、不开放 Shell；kimi 的非交互 `-p` 模式本身自动批准全部工具（含 Shell），cursor 需 `--force` 才能非交互改文件（同样含 Shell），成果仍须通过全部门禁。Kimi 深度审查可能超过 10 分钟，审查者用 kimi 时把 `timeoutMs` 调大。线性 `run` 的 Worker 超时由 `executionReadiness.workerTimeoutMs` 控制，默认 30 分钟（此前固定 120 秒，模型 Worker 不够用）。执行者启动的模型子会话不受 WildArrange 宿主 Hook 注入与续跑影响。
+任务的 `worker_command` 可写 `wildarrange executor work --cli claude`。握手与审查只读：codex 使用 `--sandbox read-only` 操作系统沙盒，claude 禁用 Shell 与写文件工具，kimi 使用内置只读 `plan` 档案（无 Shell、无写文件工具），cursor 使用 `--mode ask`。Worker 在任务 worktree 中改文件：codex 使用 `--sandbox workspace-write`，Shell 也只能写任务目录与系统临时目录；claude 只开放文件工具、不开放 Shell；kimi 的非交互 `-p` 模式本身自动批准全部工具（含 Shell），cursor 需 `--force` 才能非交互改文件（同样含 Shell），成果仍须通过全部门禁。Kimi 深度审查可能超过 10 分钟，审查者用 kimi 时把 `timeoutMs` 调大。线性 `run` 的 Worker 超时由 `executionReadiness.workerTimeoutMs` 控制，默认 30 分钟（此前固定 120 秒，模型 Worker 不够用）。执行者启动的模型子会话不受 WildArrange 宿主 Hook 注入与续跑影响。
 
 `review configure --from` 只接受运行态 `plan-drafts/` 下的草稿，请传绝对路径。正式配置保存到治理仓库 `<policyRoot>/wildarrange.config.json`；尚无正式配置时使用内置默认值。业务仓库不新增这些治理文件。
 

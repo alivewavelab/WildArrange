@@ -16,6 +16,7 @@ import { DEFAULT_PACKAGE_NAME } from "../infra/runtime-config.mjs";
 import { runCommandFile } from "../infra/command-runner.mjs";
 import { nowIso, readJson, resolveWildArrangePath, writeJsonAtomic } from "../infra/runtime-store.mjs";
 import { renderHookBridge } from "./adapter-bridge-template.mjs";
+import { resolveExecutorBin } from "./executor-cli.mjs";
 import {
   buildCursorUserHooks,
   CLAUDE_MARKETPLACE_NAME,
@@ -368,6 +369,45 @@ function parseJsonArray(text) {
 function samePath(left, right) {
   const canonical = (value) => { try { return realpathSync(value); } catch { return path.resolve(value); } };
   return Boolean(left) && canonical(left) === canonical(right);
+}
+
+/**
+ * 查询宿主里 WildArrange 插件此刻是否仍安装且启用（只读，不调用模型）。
+ * 历史回执只能证明"曾经运行过"；插件在 WildArrange 之外被卸载或禁用时靠这里发现。
+ * @param {string} host claude | codex | kimi（cursor 由用户级 hooks.json digest 覆盖，返回 unknown）
+ * @param {object} entry install-report 中该宿主的条目
+ * @param {{ claudeBin?: string, codexBin?: string, homeDir?: string, cwd?: string }} [options]
+ * @returns {Promise<{ status: "present"|"missing"|"disabled"|"unknown", detail: string }>}
+ */
+export async function inspectPluginPresence(host, entry, options = {}) {
+  const cwd = options.cwd || os.tmpdir();
+  if (host === "claude") {
+    const user = entry?.user;
+    if (!user) return { status: "unknown", detail: "Claude Code plugin was not activated through WildArrange" };
+    const result = await runCommandFile(options.claudeBin || user.claudeBin || "claude", ["plugin", "list", "--json"], cwd, 60_000, claudeEnv(user.configDir));
+    if (result.spawnError || result.exitCode !== 0) return { status: "unknown", detail: `claude plugin list failed: ${(result.stderr || result.stdout).trim().slice(0, 200)}` };
+    const plugin = parseJsonArray(result.stdout).find((item) => item?.id === CLAUDE_PLUGIN_ID && item.scope === "user");
+    if (!plugin) return { status: "missing", detail: `${CLAUDE_PLUGIN_ID} is not installed in Claude Code` };
+    return plugin.enabled === false ? { status: "disabled", detail: `${CLAUDE_PLUGIN_ID} is disabled in Claude Code` } : { status: "present", detail: "installed and enabled" };
+  }
+  if (host === "codex") {
+    const result = await runCommandFile(options.codexBin || resolveExecutorBin("codex"), ["plugin", "list"], cwd, 60_000);
+    if (result.spawnError || result.exitCode !== 0) return { status: "unknown", detail: `codex plugin list failed: ${(result.stderr || result.stdout).trim().slice(0, 200)}` };
+    const pluginId = `${CODEX_PLUGIN_NAME}@wildarrange-local`;
+    const row = result.stdout.split(/\r?\n/).find((line) => line.trim().startsWith(`${pluginId} `));
+    if (!row || /not installed/i.test(row)) return { status: "missing", detail: `${pluginId} is not installed in Codex` };
+    return /disabled/i.test(row) ? { status: "disabled", detail: `${pluginId} is disabled in Codex` } : { status: "present", detail: "installed and enabled" };
+  }
+  if (host === "kimi") {
+    const installedPath = path.join(options.homeDir || os.homedir(), ".kimi-code", "plugins", "installed.json");
+    if (!existsSync(installedPath)) return { status: "missing", detail: `${installedPath} does not exist` };
+    let installed;
+    try { installed = JSON.parse(await readFile(installedPath, "utf8")); } catch (error) { return { status: "unknown", detail: `cannot read ${installedPath}: ${error.message}` }; }
+    const plugin = (installed?.plugins || []).find((item) => item?.id === KIMI_PLUGIN_NAME);
+    if (!plugin) return { status: "missing", detail: `${KIMI_PLUGIN_NAME} is not installed in Kimi Code` };
+    return plugin.enabled === false ? { status: "disabled", detail: `${KIMI_PLUGIN_NAME} is disabled in Kimi Code` } : { status: "present", detail: "installed and enabled" };
+  }
+  return { status: "unknown", detail: `${host} plugin presence is covered by the user hook digest` };
 }
 
 async function loadReport(workspace) {

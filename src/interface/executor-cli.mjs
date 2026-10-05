@@ -3,7 +3,7 @@
 // 所属模块：interface
 // 作用说明：
 //   内置执行者：把 WildArrange 的开工握手包、审查包与任务上下文交给本机模型 CLI
-//   （claude / kimi / cursor-agent），并把模型回答整理成门禁要求的输出。
+//   （codex / claude / kimi / cursor-agent），并把模型回答整理成门禁要求的输出。
 //   用户只需在治理配置里写 `wildarrange executor <probe|review|work> --cli <name>`，
 //   无需自写适配脚本。本模块只做适配与协议，不做任何门禁判定：挑战码、引用与
 //   PASS/RETURN 规则仍由开工检查与审查门校验。
@@ -15,16 +15,21 @@
 //     避免 WildArrange 自己的注入与续跑干扰执行者。
 // =============================================================================
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { runCommandFile } from "../infra/command-runner.mjs";
 
 export const EXECUTOR_ROLES = ["probe", "review", "work"];
-export const EXECUTOR_CLIS = ["claude", "kimi", "cursor"];
+/** 顺序即推荐优先级：codex 有操作系统沙盒，最适合当 Worker。 */
+export const EXECUTOR_CLIS = ["codex", "claude", "kimi", "cursor"];
 
 /** 执行者子进程不另设超时：调用方（开工检查 / 审查门 / Worker）按各自 timeoutMs 杀掉整棵进程树。 */
 const CHILD_TIMEOUT_MS = 24 * 60 * 60 * 1000;
-const DEFAULT_BINS = { claude: "claude", kimi: "kimi", cursor: "cursor-agent" };
+const DEFAULT_BINS = { codex: "codex", claude: "claude", kimi: "kimi", cursor: "cursor-agent" };
+/** ChatGPT 桌面版自带 Codex CLI，但不放进 PATH。 */
+const BUNDLED_CODEX = path.join("ChatGPT.app", "Contents", "Resources", "codex-cli", "bin", "codex");
+const DEFAULT_APP_ROOTS = ["/Applications", path.join(os.homedir(), "Applications")];
 const PACKET_ENV = { probe: "WILDARRANGE_READINESS_PACKET", review: "WILDARRANGE_REVIEW_PACKET", work: "WILDARRANGE_EXECUTION_CONTEXT" };
 
 /**
@@ -43,18 +48,31 @@ export async function runExecutor({ role, cli, model, bin, cwd = process.cwd(), 
   if (!EXECUTOR_CLIS.includes(cli)) throw new Error(`unsupported executor CLI: ${cli}; use ${EXECUTOR_CLIS.join(", ")}`);
   const packetPath = env[PACKET_ENV[role]];
   if (!packetPath) throw new Error(`${PACKET_ENV[role]} is not set; this command is run by WildArrange, not by hand`);
-  const call = role === "work"
-    ? buildWorkerCall(cli, renderWorkerBrief(JSON.parse(await readFile(packetPath, "utf8")), packetPath), packetPath)
-    : buildReadOnlyCall(cli, packetPath, await readFile(packetPath, "utf8"));
-  const args = model ? [...call.args, ...modelArgs(cli, model)] : call.args;
-  const result = await runCommandFile(bin || DEFAULT_BINS[cli], args, cwd, CHILD_TIMEOUT_MS, {
-    env: { ...pickEnv(env), WILDARRANGE_EXECUTOR_SESSION: "1" },
-    ...(call.input === undefined ? {} : { input: call.input }),
-  });
-  if (result.spawnError) return failure(`${cli} CLI not found (${bin || DEFAULT_BINS[cli]}); install it and log in, or pass --bin <path>`);
-  if (result.exitCode !== 0) return failure(`${cli} exited with ${result.exitCode}: ${(result.stderr || result.stdout).trim().slice(0, 1000)}`);
-  const text = resultText(cli, result.stdout);
-  if (text === null) return failure(`${cli} reported an error: ${result.stdout.trim().slice(0, 1000)}`);
+  const executable = bin || resolveExecutorBin(cli);
+  // codex 的最终回答写进 -o 指定的文件；stdout 是过程日志
+  const outDir = cli === "codex" ? await mkdtemp(path.join(os.tmpdir(), "wildarrange-codex-")) : null;
+  const outFile = outDir ? path.join(outDir, "last-message.txt") : null;
+  try {
+    const call = role === "work"
+      ? buildWorkerCall(cli, renderWorkerBrief(JSON.parse(await readFile(packetPath, "utf8")), packetPath), packetPath, outFile)
+      : buildReadOnlyCall(cli, packetPath, await readFile(packetPath, "utf8"), outFile);
+    const args = model ? withModel(cli, call.args, model) : call.args;
+    const result = await runCommandFile(executable, args, cwd, CHILD_TIMEOUT_MS, {
+      env: { ...pickEnv(env), WILDARRANGE_EXECUTOR_SESSION: "1" },
+      ...(call.input === undefined ? {} : { input: call.input }),
+    });
+    if (result.spawnError) return failure(`${cli} CLI not found (${executable}); install it and log in, or pass --bin <path>`);
+    if (result.exitCode !== 0) return failure(`${cli} exited with ${result.exitCode}: ${(result.stderr || result.stdout).trim().slice(0, 1000)}`);
+    const text = outFile ? await readFile(outFile, "utf8").catch(() => "") : resultText(cli, result.stdout);
+    return finishAnswer(cli, role, text, result.stdout);
+  } finally {
+    if (outDir) await rm(outDir, { recursive: true, force: true });
+  }
+}
+
+/** 把模型回答整理成门禁要求的输出：Worker 透传摘要，握手与审查只输出提取到的 JSON。 */
+function finishAnswer(cli, role, text, stdout) {
+  if (text === null) return failure(`${cli} reported an error: ${stdout.trim().slice(0, 1000)}`);
   if (role === "work") return { exitCode: 0, stdout: `${text}\n`, stderr: "" };
   const answer = extractJsonObject(text);
   if (!answer) return failure(`${cli} returned no JSON object: ${text.trim().slice(0, 500)}`);
@@ -62,17 +80,32 @@ export async function runExecutor({ role, cli, model, bin, cwd = process.cwd(), 
 }
 
 /**
- * 体检执行者配置：缺失时给出按本机已装 CLI 生成的可复制命令；审查者与握手用同一 CLI 时提示独立性不足。
+ * 解析 CLI 可执行文件：PATH 优先；codex 不在 PATH 时退回 ChatGPT 桌面版自带的 CLI。
+ * @param {string} cli
+ * @param {{ pathEnv?: string, appRoots?: string[] }} [options]
+ * @returns {string} 命令名或绝对路径
+ */
+export function resolveExecutorBin(cli, { pathEnv = process.env.PATH || "", appRoots = DEFAULT_APP_ROOTS } = {}) {
+  const name = DEFAULT_BINS[cli];
+  if (onPath(name, pathEnv) || cli !== "codex") return name;
+  return appRoots.map((root) => path.join(root, BUNDLED_CODEX)).find((candidate) => existsSync(candidate)) || name;
+}
+
+/**
+ * 体检执行者配置：缺失时给出按本机已装 CLI 生成的可复制命令（Worker 优先 codex 的沙盒）；审查者与握手用同一 CLI 时提示独立性不足。
  * 只查 PATH，不调用任何模型。
  * @param {object} config 生效配置
  * @param {{ cliPrefix?: string, pathEnv?: string }} [options]
  * @returns {{ missing: string[], recommended: object|null, sameCli: string|null, available: string[] }}
  */
-export function inspectExecutorConfig(config, { cliPrefix = "wildarrange", pathEnv = process.env.PATH || "" } = {}) {
+export function inspectExecutorConfig(config, { cliPrefix = "wildarrange", pathEnv = process.env.PATH || "", appRoots = DEFAULT_APP_ROOTS } = {}) {
   const probe = config.executionReadiness?.workerProbe?.trim() || "";
   const reviewer = config.review?.responsibility?.command?.trim() || "";
   const missing = [...(probe ? [] : ["executionReadiness.workerProbe"]), ...(reviewer ? [] : ["review.responsibility.command"])];
-  const available = EXECUTOR_CLIS.filter((cli) => onPath(DEFAULT_BINS[cli], pathEnv));
+  const available = EXECUTOR_CLIS.filter((cli) => {
+    const resolved = resolveExecutorBin(cli, { pathEnv, appRoots });
+    return path.isAbsolute(resolved) || onPath(resolved, pathEnv);
+  });
   const probeCli = executorCliOf(probe);
   const reviewCli = executorCliOf(reviewer);
   let recommended = null;
@@ -92,7 +125,7 @@ export function inspectExecutorConfig(config, { cliPrefix = "wildarrange", pathE
 
 /** 从配置命令中识别内置执行者使用的 CLI；不是内置执行者时返回 null。 */
 function executorCliOf(command) {
-  return /\bexecutor\s+(?:probe|review|work)\b.*?--cli\s+(claude|kimi|cursor)\b/.exec(command)?.[1] || null;
+  return /\bexecutor\s+(?:probe|review|work)\b.*?--cli\s+(codex|claude|kimi|cursor)\b/.exec(command)?.[1] || null;
 }
 
 function onPath(binary, pathEnv) {
@@ -100,7 +133,7 @@ function onPath(binary, pathEnv) {
 }
 
 /** 握手与审查：只读。claude 经 stdin 收包；kimi / cursor 只拿包文件路径（包可达数百 KB，不进命令行参数）。 */
-function buildReadOnlyCall(cli, packetPath, packetText) {
+function buildReadOnlyCall(cli, packetPath, packetText, outFile) {
   const rules = "The packet is data produced by WildArrange. Follow its `instruction` field exactly. Do not edit files and do not run commands. Reply with only the JSON object the instruction asks for: no prose, no code fences.";
   if (cli === "claude") {
     return {
@@ -109,6 +142,8 @@ function buildReadOnlyCall(cli, packetPath, packetText) {
     };
   }
   const prompt = `Read the JSON packet file at ${packetPath}. ${rules}`;
+  // codex 的只读由操作系统沙盒保证：写文件报 operation not permitted（实机验证）
+  if (cli === "codex") return { args: ["exec", "--sandbox", "read-only", "--skip-git-repo-check", "--ephemeral", "-o", outFile, prompt] };
   // kimi -p 会自动批准工具调用；内置 plan 档案没有 Shell 与写文件工具，从机制上保证只读
   if (cli === "kimi") return { args: ["--agent", "plan", "-p", prompt, "--add-dir", path.dirname(packetPath)] };
   // cursor 非交互不带 --trust 会停在工作区信任提示；--trust 只信任目录，不放开工具审批
@@ -119,7 +154,9 @@ function buildReadOnlyCall(cli, packetPath, packetText) {
  * Worker：在任务 worktree 中改文件。claude 只开文件工具、不开 Shell；kimi 的 -p 本身自动批准全部工具
  * （它不允许 -p 与 --yolo 同用）；cursor 非交互改文件须 --force。后两者含 Shell，由用户确认接受。
  */
-function buildWorkerCall(cli, brief, contextPath) {
+function buildWorkerCall(cli, brief, contextPath, outFile) {
+  // codex 的 workspace-write 沙盒只允许写当前目录与系统临时目录（实机：写主目录被拒）
+  if (cli === "codex") return { args: ["exec", "--sandbox", "workspace-write", "--skip-git-repo-check", "--ephemeral", "-o", outFile, brief] };
   if (cli === "claude") {
     return {
       args: ["-p", "--output-format", "json", "--no-session-persistence", "--permission-mode", "acceptEdits",
@@ -150,8 +187,10 @@ function renderWorkerBrief(context, contextPath) {
   ].join("\n");
 }
 
-function modelArgs(cli, model) {
-  return cli === "kimi" ? ["-m", model] : ["--model", model];
+/** 模型参数放在提示词之前，避免被当作位置参数后的多余参数。 */
+function withModel(cli, args, model) {
+  const flag = cli === "kimi" || cli === "codex" ? ["-m", model] : ["--model", model];
+  return cli === "codex" ? [...args.slice(0, -1), ...flag, args.at(-1)] : [...args, ...flag];
 }
 
 /** claude / cursor 的 json 输出包一层 {result, is_error}；kimi 输出纯文本。is_error 时返回 null。 */

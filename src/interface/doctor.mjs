@@ -42,7 +42,7 @@ import { evaluateGateArming } from "../infra/gate-arming.mjs";
 import { evaluateRegistryFreshness } from "../infra/verification-registry.mjs";
 import { projectDecisionStats } from "./decisions.mjs";
 import { addFinding, checkCompletionIntegrity } from "./doctor-completion.mjs";
-import { inspectAdapterIntegrity, loadAdapterReport } from "./adapters.mjs";
+import { inspectAdapterIntegrity, inspectPluginPresence, loadAdapterReport } from "./adapters.mjs";
 import { inspectExecutorConfig } from "./executor-cli.mjs";
 import { resolveRuntimeCliCommandPrefix } from "../infra/runtime-snapshot.mjs";
 
@@ -69,14 +69,14 @@ const SECTION_CHECKS = [
  * @param {string} rootDir
  * @returns {Promise<{ kind: string, ok: boolean, findings: Array<object>, sections: object }>}
  */
-export async function runDoctor(rootDir) {
+export async function runDoctor(rootDir, options = {}) {
   await ensureWildArrangeDirs(rootDir);
   const findings = [];
   const sections = {};
 
   for (const [name, check] of SECTION_CHECKS) {
     try {
-      sections[name] = await check(rootDir, findings);
+      sections[name] = await check(rootDir, findings, options);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       // §3.4：单项检查崩溃只标红本项，其余分项照常输出；doctor 不写 ledger。
@@ -298,7 +298,7 @@ async function checkGateArming(rootDir, findings) {
  * Adapter 分项：硬拦截装没装、装得对不对，必须有体检。
  * 外置 Adapter 以生成报告 activationId 与宿主真实生命周期回执绑定，文件存在不等于已激活。
  */
-async function checkAdapters(rootDir, findings) {
+async function checkAdapters(rootDir, findings, options = {}) {
   const { config } = await loadWildArrangeConfig(rootDir);
   const targets = [];
   const enabled = {
@@ -319,10 +319,27 @@ async function checkAdapters(rootDir, findings) {
   }
   for (const target of enabledTargets) {
     const prepared = installReport?.targets?.[target] || null;
-    const activation = prepared?.activationId
+    let activation = prepared?.activationId
       ? await inspectExternalHookExecution(rootDir, target, prepared.activationId)
       : { status: "not_prepared", lastObservedAt: null, lastEvent: null, sessionId: null };
-    if (activation.status !== "execution_observed") {
+    // 回执只证明插件曾经运行过；只在曾经生效的宿主上核对它此刻是否仍安装并启用
+    if (activation.status === "execution_observed" && target !== "cursor") {
+      const presence = await inspectPluginPresence(target, prepared, { ...options.hostProbe, cwd: resolveWildArrangePath(rootDir, "adapters", "external") });
+      if (presence.status === "missing" || presence.status === "disabled") {
+        activation = { ...activation, status: "removed" };
+        addFinding(findings, "error", "adapters", `${target} 的 WildArrange 插件已在 WildArrange 之外${presence.status === "disabled" ? "被禁用" : "被卸载"}（${presence.detail}），历史回执不再代表治理生效`, {
+          target,
+          code: "external_adapter_removed",
+          nextAction: (prepared.nextActions || []).join("；"),
+        });
+      } else if (presence.status === "unknown") {
+        addFinding(findings, "warn", "adapters", `无法确认 ${target} 的 WildArrange 插件是否仍安装：${presence.detail}`, {
+          target,
+          code: "external_adapter_presence_unknown",
+        });
+      }
+    }
+    if (activation.status !== "execution_observed" && activation.status !== "removed") {
       addFinding(findings, "error", "adapters", `${target} 外置 Adapter 已生成，但尚无宿主真实生命周期回执；不能认定治理已激活`, {
         target,
         code: "external_adapter_activation_unverified",

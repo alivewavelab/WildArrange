@@ -113,7 +113,11 @@ test("external host bridges ignore unrelated projects and record lifecycle recei
       const result = await runBridge(bridgePath, payload, stateHome);
       assert.equal(result.exitCode, 0, `${host}: ${result.stderr}`);
     }
-    const doctor = await runDoctor(projectRoot);
+    // 插件存在性查询使用隔离的主目录与不存在的 codex，测试不依赖开发机上真实装了什么
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), "wildarrange-kimi-home-"));
+    await mkdir(path.join(homeDir, ".kimi-code", "plugins"), { recursive: true });
+    await writeFile(path.join(homeDir, ".kimi-code", "plugins", "installed.json"), JSON.stringify({ version: 1, plugins: [{ id: "wildarrange-governance", enabled: true }] }));
+    const doctor = await runDoctor(projectRoot, { hostProbe: { homeDir, codexBin: path.join(homeDir, "no-codex") } });
     const targets = doctor.sections.adapters.targets;
     for (const host of ["cursor", "codex", "kimi"]) {
       assert.equal(targets.find((entry) => entry.target === host)?.activation, "execution_observed");

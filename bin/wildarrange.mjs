@@ -217,7 +217,7 @@ async function main() {
   // --- 内置执行者 ---
   // §3.4：由开工检查 / 审查门 / Worker 调用，不依赖项目连接；stdout 是门禁读取的回答，失败原因走 stderr。
   if (command === "executor") {
-    if (!["probe", "review", "work"].includes(args._[1])) throw new Error("wildarrange executor requires probe, review, or work --cli claude|kimi|cursor");
+    if (!["probe", "review", "work"].includes(args._[1])) throw new Error("wildarrange executor requires probe, review, or work --cli codex|claude|kimi|cursor");
     const result = await runExecutor({
       role: args._[1],
       cli: strArg(args, "cli"),
