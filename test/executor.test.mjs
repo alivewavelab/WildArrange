@@ -39,7 +39,9 @@ if (packetPath) {
     : JSON.stringify({ decision: "PASS", checks: Object.keys(p.rules || {}).map((rule) => ({ rule, decision: "PASS", reason: "fake" })), findings: [] });
 }
 if (mode === "garbage") answer = "I could not decide.";
-if (cli === "kimi") process.stdout.write("• Reading the packet.\\n• " + answer + "\\n\\nTo resume this session: kimi -r x\\n");
+const outIndex = process.argv.indexOf("-o");
+if (cli === "codex") { fs.writeFileSync(process.argv[outIndex + 1], answer); process.stdout.write("codex log line\\ntokens used: 10\\n"); }
+else if (cli === "kimi") process.stdout.write("• Reading the packet.\\n• " + answer + "\\n\\nTo resume this session: kimi -r x\\n");
 else process.stdout.write(JSON.stringify({ type: "result", is_error: false, result: "Here you go:\\n\`\`\`json\\n" + answer + "\\n\`\`\`" }));
 `, "utf8");
   await chmod(bin, 0o755);
@@ -67,7 +69,7 @@ test("extractJsonObject finds the answer inside prose, bullets and code fences",
 
 test("probe passes the packet to each CLI without putting it on the command line and returns only the JSON", async () => {
   await withPacket(async ({ dir, packetPath, bin }) => {
-    for (const cli of ["claude", "kimi", "cursor"]) {
+    for (const cli of ["claude", "kimi", "cursor", "codex"]) {
       const result = await runExecutor({ role: "probe", cli, bin, cwd: dir, env: { WILDARRANGE_READINESS_PACKET: packetPath, FAKE_CLI: cli } });
       assert.equal(result.exitCode, 0, `${cli}: ${result.stderr}`);
       assert.deepEqual(JSON.parse(result.stdout), { ready: true, challenge: "c-42", loadedSkills: ["programming"] }, cli);
@@ -88,6 +90,8 @@ test("probe passes the packet to each CLI without putting it on the command line
       }
       // kimi -p 会自动批准工具调用；只读由内置 plan 档案（无 Shell、无写文件工具）保证，实机已验证
       if (cli === "kimi") assert.deepEqual(call.argv.slice(call.argv.indexOf("--agent"), call.argv.indexOf("--agent") + 2), ["--agent", "plan"], "kimi probe runs the read-only plan profile");
+      // codex 的只读由操作系统沙盒保证（实机：写文件报 operation not permitted）
+      if (cli === "codex") assert.deepEqual(call.argv.slice(call.argv.indexOf("--sandbox"), call.argv.indexOf("--sandbox") + 2), ["--sandbox", "read-only"]);
     }
   });
 });
@@ -107,7 +111,7 @@ test("probe failures are reported as failures, never as a ready answer", async (
     // 旧挑战码原样回传：由开工检查比对挑战码并拒绝（见下方端到端测试）
     const stale = await run("stale");
     assert.equal(JSON.parse(stale.stdout).challenge, "old-challenge");
-    await assert.rejects(runExecutor({ role: "probe", cli: "codex", bin, cwd: dir, env: {} }), /unsupported executor CLI/);
+    await assert.rejects(runExecutor({ role: "probe", cli: "gemini", bin, cwd: dir, env: {} }), /unsupported executor CLI/);
     await assert.rejects(runExecutor({ role: "probe", cli: "claude", bin, cwd: dir, env: {} }), /WILDARRANGE_READINESS_PACKET/);
   });
 });
@@ -117,7 +121,7 @@ test("worker runs in the task directory with each CLI's file-editing mode and th
     const contextPath = path.join(dir, "context.json");
     await writeFile(contextPath, JSON.stringify({ task: { id: "T009", subject: "Add greet", description: "Export greet(name).", writable_paths: ["src/greet.js"], successCriteria: [] }, skills: [] }));
     const worktree = await mkdtemp(path.join(os.tmpdir(), "wildarrange-worktree-"));
-    for (const cli of ["claude", "kimi", "cursor"]) {
+    for (const cli of ["claude", "kimi", "cursor", "codex"]) {
       const result = await runExecutor({ role: "work", cli, bin, cwd: worktree, env: { WILDARRANGE_EXECUTION_CONTEXT: contextPath, FAKE_CLI: cli } });
       assert.equal(result.exitCode, 0, `${cli}: ${result.stderr}`);
       const call = await lastCall(dir);
@@ -133,6 +137,8 @@ test("worker runs in the task directory with each CLI's file-editing mode and th
       // kimi 不允许 -p 与 --yolo/--auto 同用，-p 本身已自动批准（实机验证）
       if (cli === "kimi") assert.ok(!call.argv.includes("--yolo") && !call.argv.includes("--agent"), "kimi worker uses plain -p with the default editing profile");
       if (cli === "cursor") assert.ok(call.argv.includes("--force"), "cursor needs --force to edit non-interactively (approved by the user)");
+      // codex 的 Worker 由沙盒限制在任务 worktree（实机：写主目录被拒）
+      if (cli === "codex") assert.deepEqual(call.argv.slice(call.argv.indexOf("--sandbox"), call.argv.indexOf("--sandbox") + 2), ["--sandbox", "workspace-write"]);
     }
   });
 });
@@ -223,4 +229,23 @@ test("the linear worker timeout is configurable and defaults long enough for mod
     assert.equal(result.timedOut, true);
     assert.ok(Date.now() - startedAt < 8000, "the configured timeout, not the old 120s default, applies");
   });
+});
+
+test("codex is found inside the ChatGPT desktop app when it is not on PATH, and preferred as the sandboxed worker", async () => {
+  const { inspectExecutorConfig, resolveExecutorBin } = await import("../src/interface/executor-cli.mjs");
+  const dir = await mkdtemp(path.join(os.tmpdir(), "wildarrange-bundled-codex-"));
+  const bundled = path.join(dir, "ChatGPT.app", "Contents", "Resources", "codex-cli", "bin", "codex");
+  const { mkdir } = await import("node:fs/promises");
+  await mkdir(path.dirname(bundled), { recursive: true });
+  await writeFile(bundled, "#!/bin/sh\n");
+  await chmod(bundled, 0o755);
+  const claudeDir = path.join(dir, "bin");
+  await mkdir(claudeDir);
+  await writeFile(path.join(claudeDir, "claude"), "#!/bin/sh\n");
+  assert.equal(resolveExecutorBin("codex", { pathEnv: claudeDir, appRoots: [dir] }), bundled);
+  assert.equal(resolveExecutorBin("claude", { pathEnv: claudeDir, appRoots: [dir] }), "claude");
+  const result = inspectExecutorConfig({}, { pathEnv: claudeDir, appRoots: [dir] });
+  assert.deepEqual(result.available, ["codex", "claude"]);
+  assert.match(result.recommended.workerProbe, /executor probe --cli codex$/);
+  assert.match(result.recommended.reviewerCommand, /executor review --cli claude$/);
 });

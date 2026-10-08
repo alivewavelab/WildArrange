@@ -33,6 +33,8 @@ pre{background:var(--card);border:1px solid var(--line);border-radius:8px;paddin
 <b>Cursor（登录后补测）：</b>T001 由 cursor 握手、cursor Worker 实现、cursor 审查，100 秒完成并推送；doctor 给出"审查者与 Worker 同 CLI"告警。实测暴露：cursor 非交互不带 <code>--trust</code> 会停在工作区信任提示并退出——握手与审查加 <code>--trust</code>（只信任目录、不放开工具审批）；<code>--mode ask</code> 实测拒绝写文件；<code>--sandbox enabled</code> 实测拦不住 worktree 外的 Shell 写入，故未采用；一次 <code>--force</code> 运行回复 DONE 却未生成文件（复现时正常），由 verifier 兜底判定。<br>
 <b>未单独实跑：</b>claude 作为审查者（与 kimi、cursor 共用同一读包与 JSON 提取路径）。</div>
 
+<div class="box" style="border-left-color:var(--p3)"><b>Codex 补充（2026-10-05）：</b>ChatGPT 桌面版自带 Codex CLI（未进 PATH，执行者自动定位）。握手与审查用 <code>--sandbox read-only</code>（实测写文件报 operation not permitted），Worker 用 <code>--sandbox workspace-write</code>（实测写主目录被拒，仅允许任务目录与系统临时目录）。因有操作系统沙盒，doctor 推荐 Worker 优先 codex。实机：codex 握手 + codex Worker + claude 审查，176 秒完成并推送（同时补上 claude 当审查者的实机验证）。</div>
+
 <div class="box"><b>现状问题：</b>开工检查必须配 <code>executionReadiness.workerProbe</code> 与 <code>review.responsibility.command</code>，每张任务还要真实的 <code>worker_command</code>。仓库不带任何适配脚本，用户得自己写一个"读任务包 → 调模型 CLI → 回 JSON"的程序；而且刚 <code>setup</code> 完 <code>doctor</code> 不提示没配，第一次 <code>run</code> 才以 <code>readiness_blocked</code> 暴露。<br>
 <b>方案：</b>产品自带一条命令 <code>wildarrange executor &lt;probe|review|work&gt; --cli &lt;claude|kimi|cursor&gt;</code>，把实机验证过的适配逻辑做成正式能力；配置里直接写这条命令。<code>doctor</code> 在初始化阶段就提示缺失项，并给出可直接复制的推荐配置。</div>
 

@@ -30,7 +30,7 @@ code{font-size:12px;background:rgba(127,127,127,.14);padding:0 3px;border-radius
 
 <div class="box" style="border-left-color:var(--p3)"><b>执行结果（2026-10-03）：</b>第 1 节 6 条验收全部在真实 Claude Code 2.1.287 上通过：插件以 <code>--user-root</code> 隔离安装到沙盒配置（<code>CLAUDE_CONFIG_DIR</code>）；真实会话中计划外写入被拒、计划内写入成功、<code>git clean -fdx</code> 在 <code>bypassPermissions</code> 下仍被拦截、未完成任务停止时拉回一次；账本有 claude 宿主 5 类事件回执，doctor 显示 <code>execution_observed</code>；未连接目录不受影响；卸载后沙盒清空，真实 <code>~/.claude</code> 与验证前一致。<br>
 <b>实施中新增的设计（方案阶段未知）：</b>① Claude Code 运行安装时的缓存副本、只按版本号刷新，故插件版本为 <code>1.0.0-&lt;内容摘要&gt;</code>，再次激活时版本不同即 <code>claude plugin update</code>，doctor 发现已装版本落后即告警；② Stop 输入 <code>stop_hook_active=true</code> 时放行（官方推荐，避免空转到 8 次上限）；③ <code>claude</code> CLI 在运行态目录执行，避免读到客户项目的项目级设置；④ <code>marketplace remove</code> 限定 <code>--scope user</code>；⑤ 宿主 fail-open 时 bridge 退出码固定为 1。<br>
-<b>Kimi 交叉评审遗留（后续项）：</b>两个项目使用不同 WildArrange 安装时会互相覆盖同名 marketplace；用户在 WildArrange 之外卸载插件后 doctor 仍显示已激活（与 Codex/Kimi 同属回执模型的局限）；Windows 上默认 <code>claude</code> 命令解析未验证，可先用 <code>--claude-bin</code> 指定。</div>
+<b>Kimi 交叉评审遗留的处理（2026-10-05）：</b>两个项目使用不同 WildArrange 安装时互相覆盖同名 marketplace——用户确认"新版本覆盖旧版本"为可接受行为，不改；外部卸载后 doctor 仍显示已激活——已修复，doctor 只读核对 Claude Code / Codex / Kimi 插件此刻是否仍安装并启用；Windows 命令解析——待最终版本由用户实机测试。</div>
 
 <div class="box"><b>结论：</b>Claude Code 的钩子协议和 Codex 几乎相同（同样的 <code>PreToolUse</code> 拒绝格式、<code>additionalContext</code> 注入），插件结构和本地 marketplace 也与 Codex 同构，<code>Stop</code> 续跑可沿用 Kimi 逻辑。因此按「复制 Codex 插件包、换目录与变量名」实现，核心状态机不动。预计源码约 +150 行，另配测试与文档。<br>
 <b>和 Kimi 同级的含义：</b>插件外置在运行态、客户项目零写入；未连接项目静默放行；钩子 fail-open（崩溃或超时放行），最终完成仍以 CLI 质量门为准；<code>doctor</code> 以真实回执判定激活。</div>
