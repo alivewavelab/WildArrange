@@ -1,8 +1,8 @@
 {
   "name": "@alivewavelab/wildarrange",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": false,
-  "description": "Linear governance runtime for Codex, Cursor, and Kimi Code agent workflows",
+  "description": "Linear governance runtime for Codex, Cursor, Kimi Code, and Claude Code agent workflows",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/alivewavelab/WildArrange.git"
