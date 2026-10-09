@@ -17,11 +17,15 @@ import {
 import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import {
   activateCursorAdapter,
+  inspectAdapterIntegrity,
   installAdapters,
+  uninstallAdapters,
 } from "../src/interface/adapters.mjs";
 import { CURSOR_BRIDGE_NAME } from "../src/interface/adapter-bundles.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
 import { declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
+
+const CURSOR_MODELS = { Jiuwei: "claude-opus-5-thinking-high", ZhuRong: "composer-2.5", BaiZe: "gpt-5.6-sol-high" };
 
 test("external adapters generate all host bundles without writing customer repository files", async () => {
   await withExternalWorkspace(async ({ projectRoot, runtimeRoot, workspace }) => {
@@ -68,8 +72,8 @@ test("external Cursor activation preserves existing user hooks, backs them up, a
       target: "cursor",
       localCliPath: path.join(process.cwd(), "bin", "wildarrange.mjs"),
     });
-    const first = await activateCursorAdapter(projectRoot, workspace, { userRoot });
-    const second = await activateCursorAdapter(projectRoot, workspace, { userRoot });
+    const first = await activateCursorAdapter(projectRoot, workspace, { userRoot, subagentModels: CURSOR_MODELS });
+    const second = await activateCursorAdapter(projectRoot, workspace, { userRoot, subagentModels: CURSOR_MODELS });
     const hooks = JSON.parse(await readFile(first.hooksPath, "utf8"));
     assert.ok(hooks.hooks.sessionStart.some((entry) => entry.command === "node existing-hook.mjs"));
     assert.equal(hooks.hooks.sessionStart.filter((entry) => entry.command.includes(CURSOR_BRIDGE_NAME)).length, 1);
@@ -77,6 +81,46 @@ test("external Cursor activation preserves existing user hooks, backs them up, a
     assert.equal(existsSync(second.backupPath), true);
     assert.equal(existsSync(first.bridgePath), true);
     assert.equal(existsSync(path.join(projectRoot, ".cursor")), false);
+  });
+});
+
+test("external Cursor activation writes one subagent per role with an explicit model and refuses unspecified ones", async () => {
+  await withExternalWorkspace(async ({ projectRoot, workspace, userRoot }) => {
+    await installAdapters(projectRoot, workspace, { target: "cursor", localCliPath: path.join(process.cwd(), "bin", "wildarrange.mjs") });
+    const agentsDir = path.join(userRoot, ".cursor", "agents");
+    await assert.rejects(
+      activateCursorAdapter(projectRoot, workspace, { userRoot, subagentModels: { ...CURSOR_MODELS, BaiZe: "inherit" } }),
+      /must be explicit for BaiZe.*no files were changed/,
+    );
+    await assert.rejects(activateCursorAdapter(projectRoot, workspace, { userRoot }), /must be explicit for Jiuwei, ZhuRong, BaiZe/);
+    await assert.rejects(activateCursorAdapter(projectRoot, workspace, { userRoot, subagentModels: { ...CURSOR_MODELS, ZhuRong: "x\nreadonly: false" } }), /invalid Cursor model ID/);
+    assert.equal(existsSync(path.join(userRoot, ".cursor", "hooks.json")), false);
+    assert.equal(existsSync(agentsDir), false);
+
+    const activated = await activateCursorAdapter(projectRoot, workspace, { userRoot, subagentModels: CURSOR_MODELS });
+    const files = {
+      Jiuwei: ["wildarrange-jiuwei.md", false],
+      ZhuRong: ["wildarrange-zhurong.md", false],
+      BaiZe: ["wildarrange-baize.md", true],
+    };
+    for (const [agent, [fileName, readonly]] of Object.entries(files)) {
+      const text = await readFile(path.join(agentsDir, fileName), "utf8");
+      assert.match(text, new RegExp(`^---\\nname: ${fileName.replace(".md", "")}\\n`));
+      assert.match(text, new RegExp(`\\nmodel: "${CURSOR_MODELS[agent].replaceAll(".", "\\.")}"\\n`));
+      assert.match(text, new RegExp(`\\nreadonly: ${readonly}\\n`));
+      assert.match(text, new RegExp(`# ${agent}`), "role prompt comes from the Prompt Pack");
+    }
+    assert.equal(activated.subagents.length, 3);
+    assert.equal(existsSync(path.join(projectRoot, ".cursor")), false);
+
+    const report = JSON.parse(await readFile(path.join(workspace.runtimeRoot, "adapters", "external", "install-report.json"), "utf8"));
+    assert.equal((await inspectAdapterIntegrity("cursor", report.targets.cursor)).status, "ok");
+    await writeFile(path.join(agentsDir, "wildarrange-baize.md"), "---\nmodel: inherit\n---\n");
+    const tampered = await inspectAdapterIntegrity("cursor", report.targets.cursor);
+    assert.deepEqual(tampered.issues.map(({ file }) => path.basename(file)), ["wildarrange-baize.md"]);
+
+    await uninstallAdapters(projectRoot, workspace, { target: "cursor" });
+    for (const [fileName] of Object.values(files)) assert.equal(existsSync(path.join(agentsDir, fileName)), false);
   });
 });
 

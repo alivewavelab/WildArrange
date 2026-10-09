@@ -379,7 +379,7 @@ review gate 是宿主中立的。从 CLI 运行，可含确定性通道、配置
 
 ## Adapter 模型
 
-外置模式是唯一形态：`src/interface/adapters.mjs` 把四宿主 bundle 写到 `runtimeRoot/adapters/external`，WildArrange 不向客户项目写任何文件。Cursor 可经 `adapter activate --target cursor` 备份并合并用户级 Hook；Claude Code 可经 `adapter activate --target claude` 调用 `claude plugin` CLI 以用户级安装本地 marketplace 插件（`--user-root` 时以 `CLAUDE_CONFIG_DIR` 隔离）；Codex 与 Kimi 由用户在插件界面显式安装和信任。Claude Code 的 `PostCompact` 不能注入上下文，bridge 把压缩后的 `SessionStart(source=compact)` 映射为 `PostCompact`，并把 `PostToolUse` 输出包装为 `additionalContext`。生成/配置不代表激活，只有 bridge 携带当前 activationId 真实运行并进入 hash 链 ledger 后，doctor 才显示 `execution_observed`。bridge 在调用治理运行时前按 cwd 识别已连接项目，未连接工作区静默退出。
+外置模式是唯一形态：`src/interface/adapters.mjs` 把四宿主 bundle 写到 `runtimeRoot/adapters/external`，WildArrange 不向客户项目写任何文件。Cursor 可经 `adapter activate --target cursor` 备份并合并用户级 Hook，并按 `adapters.cursor.subagentModels` 写入显式指定模型的 Jiuwei/ZhuRong/BaiZe 用户级子 Agent（未指定则拒绝激活）；Claude Code 可经 `adapter activate --target claude` 调用 `claude plugin` CLI 以用户级安装本地 marketplace 插件（`--user-root` 时以 `CLAUDE_CONFIG_DIR` 隔离）；Codex 与 Kimi 由用户在插件界面显式安装和信任。Claude Code 的 `PostCompact` 不能注入上下文，bridge 把压缩后的 `SessionStart(source=compact)` 映射为 `PostCompact`，并把 `PostToolUse` 输出包装为 `additionalContext`。生成/配置不代表激活，只有 bridge 携带当前 activationId 真实运行并进入 hash 链 ledger 后，doctor 才显示 `execution_observed`。bridge 在调用治理运行时前按 cwd 识别已连接项目，未连接工作区静默退出。
 
 Codex 主会话身份由 lifecycle hook 自动建立：`SessionStart` 从已安装且 hash 校验通过的 Prompt Pack 读取 Jiuwei Prompt 并注入一次；发生上下文压缩时，`PostCompact` 再注入一次。普通用户消息只做路由和动态上下文匹配，不重复加载完整角色 Prompt。
 

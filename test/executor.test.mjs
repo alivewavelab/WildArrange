@@ -73,7 +73,7 @@ test("extractJsonObject finds the answer inside prose, bullets and code fences",
 test("probe passes the packet to each CLI without putting it on the command line and returns only the JSON", async () => {
   await withPacket(async ({ dir, packetPath, bin }) => {
     for (const cli of ["claude", "kimi", "cursor", "codex"]) {
-      const result = await runExecutor({ role: "probe", cli, bin, cwd: dir, env: { WILDARRANGE_READINESS_PACKET: packetPath, FAKE_CLI: cli } });
+      const result = await runExecutor({ role: "probe", cli, bin, cwd: dir, env: { WILDARRANGE_READINESS_PACKET: packetPath, FAKE_CLI: cli }, ...(cli === "cursor" ? { model: "composer-2.5" } : {}) });
       assert.equal(result.exitCode, 0, `${cli}: ${result.stderr}`);
       assert.deepEqual(JSON.parse(result.stdout), { ready: true, challenge: "c-42", loadedSkills: ["programming"] }, cli);
       const call = await lastCall(dir);
@@ -93,6 +93,7 @@ test("probe passes the packet to each CLI without putting it on the command line
         assert.ok(call.argv.join(" ").includes("--mode ask"), "cursor probe runs read-only");
         // 实机：非交互模式不带 --trust 会停在"信任此目录"提示并退出 1
         assert.ok(call.argv.includes("--trust"), "cursor must trust the workspace non-interactively");
+        assert.deepEqual(call.argv.slice(call.argv.indexOf("--model"), call.argv.indexOf("--model") + 2), ["--model", "composer-2.5"]);
       }
       // kimi -p 会自动批准工具调用；只读由内置 plan 档案（无 Shell、无写文件工具）保证，实机已验证
       if (cli === "kimi") {
@@ -121,6 +122,8 @@ test("probe failures are reported as failures, never as a ready answer", async (
     const stale = await run("stale");
     assert.equal(JSON.parse(stale.stdout).challenge, "old-challenge");
     await assert.rejects(runExecutor({ role: "probe", cli: "gemini", bin, cwd: dir, env: {} }), /unsupported executor CLI/);
+    // Cursor 宿主集成多个模型，未指定时会落到 auto，角色模型不可预期
+    await assert.rejects(runExecutor({ role: "probe", cli: "cursor", bin, cwd: dir, env: { WILDARRANGE_READINESS_PACKET: packetPath } }), /requires --model/);
     await assert.rejects(runExecutor({ role: "probe", cli: "claude", bin, cwd: dir, env: {} }), /WILDARRANGE_READINESS_PACKET/);
   });
 });
@@ -131,7 +134,7 @@ test("worker runs in the task directory with each CLI's file-editing mode and th
     await writeFile(contextPath, JSON.stringify({ task: { id: "T009", subject: "Add greet", description: "Export greet(name).", writable_paths: ["src/greet.js"], successCriteria: [] }, skills: [] }));
     const worktree = await mkdtemp(path.join(os.tmpdir(), "wildarrange-worktree-"));
     for (const cli of ["claude", "kimi", "cursor", "codex"]) {
-      const result = await runExecutor({ role: "work", cli, bin, cwd: worktree, env: { WILDARRANGE_EXECUTION_CONTEXT: contextPath, FAKE_CLI: cli } });
+      const result = await runExecutor({ role: "work", cli, bin, cwd: worktree, env: { WILDARRANGE_EXECUTION_CONTEXT: contextPath, FAKE_CLI: cli }, ...(cli === "cursor" ? { model: "composer-2.5" } : {}) });
       assert.equal(result.exitCode, 0, `${cli}: ${result.stderr}`);
       const call = await lastCall(dir);
       assert.equal(await realpathOf(call.cwd), await realpathOf(worktree), `${cli} works inside the task worktree`);

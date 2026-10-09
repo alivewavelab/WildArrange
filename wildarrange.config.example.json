@@ -6,6 +6,9 @@
     "taskBranchPrefix": "wildarrange/task",
     "requireWorktreeForParallelWrites": true
   },
+  "adapters": {
+    "cursor": { "subagentModels": { "Jiuwei": "<cursor-model-id>", "ZhuRong": "<cursor-model-id>", "BaiZe": "<cursor-model-id>" } }
+  },
   "agents": {
     "BaiZe": { "provider": "host", "model": "host-default", "reasoning": "xhigh" }
   },

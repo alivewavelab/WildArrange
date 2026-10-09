@@ -11,8 +11,8 @@ import { existsSync, realpathSync } from "node:fs";
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { PROJECT_DIR } from "../infra/prompt-pack.mjs";
-import { DEFAULT_PACKAGE_NAME } from "../infra/runtime-config.mjs";
+import { DEFAULT_PROMPT_PACK_DIR, PROJECT_DIR } from "../infra/prompt-pack.mjs";
+import { DEFAULT_PACKAGE_NAME, loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { runCommandFile } from "../infra/command-runner.mjs";
 import { nowIso, readJson, resolveWildArrangePath, writeJsonAtomic } from "../infra/runtime-store.mjs";
 import { renderHookBridge } from "./adapter-bridge-template.mjs";
@@ -33,6 +33,13 @@ import {
 const ADAPTER_VERSION = 2;
 
 const CURSOR_RULE_NAME = "wildarrange.mdc";
+/** Cursor 宿主原生支持子 Agent 指定模型；每个角色一个用户级子 Agent，提示词取自 Prompt Pack。 */
+const CURSOR_SUBAGENTS = [
+  { agent: "Jiuwei", readonly: false, description: "WildArrange 规划与编排：拆解需求、制定计划、分派任务。规划或编排 WildArrange 任务时使用。" },
+  { agent: "ZhuRong", readonly: false, description: "WildArrange 实现 Worker：在任务边界内改代码并收集证据。执行已分派的 WildArrange 实现任务时使用。" },
+  { agent: "BaiZe", readonly: true, description: "WildArrange 独立复核：只读审查实现与证据，不改文件。复核 WildArrange 任务成果时使用。" },
+];
+const UNSPECIFIED_MODELS = new Set(["", "auto", "inherit", "host-default"]);
 const POINTER_BEGIN = "<!-- wildarrange:begin -->";
 const POINTER_END = "<!-- wildarrange:end -->";
 const POINTER_BLOCK_PATTERN = /\n*<!-- wildarrange:begin -->[\s\S]*?<!-- wildarrange:end -->\n*/;
@@ -117,6 +124,7 @@ export async function activateCursorAdapter(projectRoot, workspace, options = {}
   const rulePath = path.join(cursorRoot, "rules", CURSOR_RULE_NAME);
   const sourceBridge = path.resolve(cursor.bridgePath);
   if (!existsSync(sourceBridge)) throw new Error(`external Cursor bridge is missing: ${sourceBridge}`);
+  const subagents = await renderCursorSubagents(options.subagentModels || (await loadWildArrangeConfig(projectRoot)).config.adapters?.cursor?.subagentModels);
   const existing = await readJson(hooksPath, { version: 1, hooks: {} });
   if (!existing || typeof existing !== "object" || Array.isArray(existing)
     || (existing.version !== undefined && existing.version !== 1)
@@ -127,6 +135,7 @@ export async function activateCursorAdapter(projectRoot, workspace, options = {}
     { name: "cursor-hooks.json", target: hooksPath },
     { name: "cursor-bridge.mjs", target: bridgePath },
     { name: "cursor-rule.mdc", target: rulePath },
+    ...subagents.map((agent) => ({ name: `cursor-agent-${agent.fileName}`, target: path.join(cursorRoot, "agents", agent.fileName) })),
   ]);
   await mkdir(path.dirname(bridgePath), { recursive: true });
   await copyFile(sourceBridge, bridgePath);
@@ -144,6 +153,13 @@ export async function activateCursorAdapter(projectRoot, workspace, options = {}
   const ruleText = renderCursorPointerRule(cursor.cliPrefix);
   await mkdir(path.dirname(rulePath), { recursive: true });
   await writeFile(rulePath, ruleText, "utf8");
+  await mkdir(path.join(cursorRoot, "agents"), { recursive: true });
+  const subagentFiles = {};
+  for (const agent of subagents) {
+    const agentPath = path.join(cursorRoot, "agents", agent.fileName);
+    await writeFile(agentPath, agent.text, "utf8");
+    subagentFiles[agentPath] = sha256(agent.text);
+  }
   cursor.user = {
     userRoot,
     hooksPath,
@@ -152,6 +168,7 @@ export async function activateCursorAdapter(projectRoot, workspace, options = {}
     hooksDigest: managedCursorHooksDigest(merged),
     bridgeDigest: await digestFile(bridgePath),
     ruleDigest: sha256(ruleText),
+    subagentFiles,
     backupId: backup.backupId,
     activatedAt: nowIso(),
   };
@@ -163,6 +180,7 @@ export async function activateCursorAdapter(projectRoot, workspace, options = {}
     hooksPath,
     bridgePath,
     rulePath,
+    subagents: subagents.map(({ agent, model, fileName }) => ({ agent, model, path: path.join(cursorRoot, "agents", fileName) })),
     backupId: backup.backupId,
     backupPath: backup.files.find((file) => file.name === "cursor-hooks.json")?.existed ? path.join(backup.dir, "cursor-hooks.json") : null,
     projectFilesWritten: [],
@@ -260,7 +278,7 @@ export async function uninstallAdapters(projectRoot, workspace, options = {}) {
     const user = entry?.user;
     if (host === "cursor" && user) {
       await removeCursorUserEntries(user.hooksPath);
-      for (const file of [user.bridgePath, user.rulePath]) {
+      for (const file of [user.bridgePath, user.rulePath, ...Object.keys(user.subagentFiles || {})]) {
         if (file && existsSync(file)) { await rm(file, { force: true }); removed.push(file); }
       }
     }
@@ -329,6 +347,9 @@ export async function inspectAdapterIntegrity(host, entry) {
     if (!hooks || managedCursorHooksDigest(hooks) !== user.hooksDigest) issues.push({ file: user.hooksPath, problem: "managed_entries_changed" });
     if (await digestFile(user.bridgePath) !== user.bridgeDigest) issues.push({ file: user.bridgePath, problem: "modified_or_missing" });
     if (await digestFile(user.rulePath) !== user.ruleDigest) issues.push({ file: user.rulePath, problem: "modified_or_missing" });
+    for (const [file, digest] of Object.entries(user.subagentFiles || {})) {
+      if (await digestFile(file) !== digest) issues.push({ file, problem: "modified_or_missing" });
+    }
   }
   if (host === "claude" && user?.version) {
     const current = (await readJson(entry.manifestPath, null))?.version;
@@ -457,6 +478,25 @@ function managedCursorHooksDigest(userHooks) {
 function pointerText(cliPrefix) {
   const command = cliPrefix ? `\`wildarrange status\`（本机 CLI：\`${cliPrefix} status\`）` : "`wildarrange status`";
   return `本机项目若已连接 WildArrange 外置治理，先运行 ${command} 并读取其治理上下文，再改代码；未连接的项目忽略本条。`;
+}
+
+/**
+ * 生成 Cursor 角色子 Agent 文件；任一角色未显式指定模型时拒绝，调用方据此不改任何文件。
+ * @param {Record<string, string|null>|undefined} models 角色 → Cursor 模型 ID
+ */
+async function renderCursorSubagents(models) {
+  const missing = CURSOR_SUBAGENTS.filter(({ agent }) => UNSPECIFIED_MODELS.has(String(models?.[agent] ?? "").trim())).map(({ agent }) => agent);
+  if (missing.length) {
+    throw new Error(`Cursor subagent models must be explicit for ${missing.join(", ")}: set adapters.cursor.subagentModels in the governance config (run cursor-agent models to list IDs); no files were changed`);
+  }
+  return Promise.all(CURSOR_SUBAGENTS.map(async ({ agent, readonly, description }) => {
+    const model = String(models[agent]).trim();
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:=,[\]-]*$/.test(model)) throw new Error(`invalid Cursor model ID for ${agent}: ${model}; no files were changed`);
+    const name = `wildarrange-${agent.toLowerCase()}`;
+    const prompt = await readFile(path.join(DEFAULT_PROMPT_PACK_DIR, "agents", `${agent.toLowerCase()}.md`), "utf8");
+    const text = `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\nmodel: ${JSON.stringify(model)}\nreadonly: ${readonly}\n---\n\n${prompt.trim()}\n`;
+    return { agent, model, fileName: `${name}.md`, text };
+  }));
 }
 
 function renderCursorPointerRule(cliPrefix) {
