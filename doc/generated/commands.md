@@ -26,9 +26,9 @@
 | `wildarrange adapter activate [--target cursor|codex|claude|all] [--user-root <path>] [--claude-bin <path>]` | 显式写入用户级配置：Cursor Hook 与指针规则、Codex AGENTS.md 指针段、经 claude CLI 安装 Claude Code 插件；先备份且不写客户项目 |
 | `wildarrange adapter uninstall [--target codex|cursor|kimi|claude|all] [--claude-bin <path>]` | 卸载宿主 adapter：移除用户级条目与指针并删除 runtime 插件包 |
 | `wildarrange adapter restore --backup <backupId>` | 恢复 adapter 备份：还原到该次 activate 之前的用户级文件 |
-| `wildarrange executor probe --cli codex|claude|kimi|cursor [--model <name>] [--bin <path>]` | 内置开工握手执行者：写进 executionReadiness.workerProbe，由开工检查调用 |
-| `wildarrange executor review --cli codex|claude|kimi|cursor [--model <name>] [--bin <path>]` | 内置独立审查者：写进 review.responsibility.command 或审查步骤 command，由审查门调用 |
-| `wildarrange executor work --cli codex|claude|kimi|cursor [--model <name>] [--bin <path>]` | 内置 Worker：写进任务 worker_command，在任务 worktree 中由本机模型 CLI 改代码 |
+| `wildarrange executor probe --cli codex|claude|kimi|cursor [--model <name>] [--bin <path>]` | 内置开工握手执行者：写进 executionReadiness.workerProbe，由开工检查调用；cursor 必须带 --model |
+| `wildarrange executor review --cli codex|claude|kimi|cursor [--model <name>] [--bin <path>]` | 内置独立审查者：写进 review.responsibility.command 或审查步骤 command，由审查门调用；cursor 必须带 --model |
+| `wildarrange executor work --cli codex|claude|kimi|cursor [--model <name>] [--bin <path>]` | 内置 Worker：写进任务 worker_command，在任务 worktree 中由本机模型 CLI 改代码；cursor 必须带 --model |
 | `wildarrange injection show --point before_review [--agent BaiZe] [--task T001] [--text "..."] [--stage plan]` | 查看注入点解析结果 |
 | `wildarrange hook run [--from hook.json] [--format text|json] --adapter-digest <sha256>` | 运行宿主生命周期 Hook；只处理已连接项目，未连接项目静默放行 |
 | `wildarrange workflow [--from <plan.json>] [--maxSteps N]` | 连续推进已批准的计划，直到完成、阻塞或需要人工决定；带 --from 时先导入并停在等待 plan approve |

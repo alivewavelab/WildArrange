@@ -406,9 +406,14 @@ async function main() {
         if (target === "all" && /^(claude CLI not found|external Claude Code adapter bundle is missing)/.test(error.message)) return { status: "skipped", reason: error.message };
         throw error;
       });
+      // all 模式下 Cursor 子 Agent 模型未配置时只跳过 Cursor，并把补配方法带回输出
+      const activateCursor = () => activateCursorAdapter(rootDir, workspace, { userRoot }).catch((error) => {
+        if (target === "all" && /^Cursor subagent models must be explicit/.test(error.message)) return { status: "skipped", reason: error.message };
+        throw error;
+      });
       console.log(JSON.stringify({
         kind: "wildarrange_external_activation",
-        ...(["all", "cursor"].includes(target) ? { cursor: await activateCursorAdapter(rootDir, workspace, { userRoot }) } : {}),
+        ...(["all", "cursor"].includes(target) ? { cursor: await activateCursor() } : {}),
         ...(["all", "codex"].includes(target) ? { codex: await activateCodexAdapter(rootDir, workspace, { userRoot }) } : {}),
         ...(["all", "claude"].includes(target) ? { claude: await activateClaude() } : {}),
       }, null, 2));

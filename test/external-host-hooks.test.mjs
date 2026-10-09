@@ -30,6 +30,8 @@ import { CURSOR_BRIDGE_NAME } from "../src/interface/adapter-bundles.mjs";
 
 import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
 
+const CURSOR_MODELS = { Jiuwei: "claude-opus-5-thinking-high", ZhuRong: "composer-2.5", BaiZe: "gpt-5.6-sol-high" };
+
 const CLI_PATH = path.join(process.cwd(), "bin", "wildarrange.mjs");
 
 /** 装好三宿主 bundle 并导入一个只允许写 src/result.js 的计划。 */
@@ -293,8 +295,8 @@ test("activation writes user-level pointers idempotently, never into the custome
     const { workspace } = await prepareScopedProject(roots, { importTask: false });
     const { userRoot } = await seedUserRoot(root);
     const before = await readFile(path.join(userRoot, ".codex", "AGENTS.md"), "utf8");
-    await activateCursorAdapter(projectRoot, workspace, { userRoot });
-    await activateCursorAdapter(projectRoot, workspace, { userRoot });
+    await activateCursorAdapter(projectRoot, workspace, { userRoot, subagentModels: CURSOR_MODELS });
+    await activateCursorAdapter(projectRoot, workspace, { userRoot, subagentModels: CURSOR_MODELS });
     await activateCodexAdapter(projectRoot, workspace, { userRoot });
     await activateCodexAdapter(projectRoot, workspace, { userRoot });
     const rule = await readFile(path.join(userRoot, ".cursor", "rules", "wildarrange.mdc"), "utf8");
@@ -316,7 +318,7 @@ test("uninstall removes user hook entries, pointers and runtime bundles but keep
     const { projectRoot, root } = roots;
     const { workspace, report } = await prepareScopedProject(roots, { importTask: false });
     const { userRoot, hooks } = await seedUserRoot(root);
-    await activateCursorAdapter(projectRoot, workspace, { userRoot });
+    await activateCursorAdapter(projectRoot, workspace, { userRoot, subagentModels: CURSOR_MODELS });
     await activateCodexAdapter(projectRoot, workspace, { userRoot });
     const result = await uninstallAdapters(projectRoot, workspace, { target: "all" });
     assert.equal(result.kind, "wildarrange_external_adapter_uninstall");
@@ -342,7 +344,7 @@ test("restore returns user files to their pre-activation state", async () => {
     const { workspace } = await prepareScopedProject(roots, { importTask: false });
     const { userRoot, hooks } = await seedUserRoot(root);
     const agentsBefore = await readFile(path.join(userRoot, ".codex", "AGENTS.md"), "utf8");
-    const cursor = await activateCursorAdapter(projectRoot, workspace, { userRoot });
+    const cursor = await activateCursorAdapter(projectRoot, workspace, { userRoot, subagentModels: CURSOR_MODELS });
     const codex = await activateCodexAdapter(projectRoot, workspace, { userRoot });
     await restoreAdapterBackup(projectRoot, workspace, { backupId: cursor.backupId });
     await restoreAdapterBackup(projectRoot, workspace, { backupId: codex.backupId });
@@ -358,7 +360,7 @@ test("doctor reports plugin hooks files and user Cursor entries that no longer m
     const { projectRoot, root } = roots;
     const { workspace, report } = await prepareScopedProject(roots, { importTask: false });
     const { userRoot } = await seedUserRoot(root);
-    await activateCursorAdapter(projectRoot, workspace, { userRoot });
+    await activateCursorAdapter(projectRoot, workspace, { userRoot, subagentModels: CURSOR_MODELS });
     assert.equal((await doctorCodes(projectRoot)).includes("external_adapter_config_modified"), false);
     await writeFile(report.targets.codex.hooksPath, JSON.stringify({ hooks: {} }));
     assert.equal((await doctorCodes(projectRoot)).includes("external_adapter_config_modified"), true, "tampered Codex plugin hooks");
@@ -374,14 +376,24 @@ test("doctor reports plugin hooks files and user Cursor entries that no longer m
 
 test("adapter activate/uninstall/restore run through the CLI with --user-root", async () => {
   await withExternalProject(async (roots) => {
-    const { projectRoot, stateHome, root } = roots;
+    const { projectRoot, stateHome, root, governanceRoot } = roots;
     await prepareScopedProject(roots, { importTask: false });
     const { userRoot } = await seedUserRoot(root);
     const run = (...args) => runCommandFile(process.execPath, [CLI_PATH, ...args], projectRoot, 60_000, { env: { WILDARRANGE_STATE_HOME: stateHome } });
     // 本机没有 claude CLI 时 all 只跳过 Claude Code，不影响其它宿主（测试从不调用真实 claude）
+    // 未配置 Cursor 子 Agent 模型时，all 只跳过 Cursor 并给出补配方法，Codex 照常激活
+    const withoutModels = await run("adapter", "activate", "--target", "all", "--user-root", userRoot, "--claude-bin", path.join(root, "no-claude"));
+    assert.equal(withoutModels.exitCode, 0, withoutModels.stderr);
+    assert.equal(JSON.parse(withoutModels.stdout).cursor.status, "skipped");
+    assert.match(JSON.parse(withoutModels.stdout).cursor.reason, /adapters\.cursor\.subagentModels/);
+    assert.equal(existsSync(path.join(userRoot, ".cursor", "agents")), false);
+    const cursorOnly = await run("adapter", "activate", "--target", "cursor", "--user-root", userRoot);
+    assert.notEqual(cursorOnly.exitCode, 0, "explicit Cursor activation refuses unspecified models");
+    await writeFile(path.join(governanceRoot, "policy", "wildarrange.config.json"), JSON.stringify({ adapters: { cursor: { subagentModels: CURSOR_MODELS } } }));
     const activated = await run("adapter", "activate", "--target", "all", "--user-root", userRoot, "--claude-bin", path.join(root, "no-claude"));
     assert.equal(activated.exitCode, 0, activated.stderr);
     const parsed = JSON.parse(activated.stdout);
+    assert.deepEqual(parsed.cursor.subagents.map(({ agent, model }) => [agent, model]), Object.entries(CURSOR_MODELS));
     assert.equal(parsed.claude.status, "skipped");
     assert.equal(existsSync(path.join(userRoot, ".cursor", "rules", "wildarrange.mdc")), true);
     assert.match(await readFile(path.join(userRoot, ".codex", "AGENTS.md"), "utf8"), /wildarrange:begin/);

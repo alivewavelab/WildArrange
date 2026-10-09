@@ -22,7 +22,8 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
   // 宿主 adapter 开关与 hook 接入模式（cli-adapter / plugin-adapter）
   adapters: {
     codex: { enabled: true, hookMode: "cli-adapter" },
-    cursor: { enabled: true, hookMode: "cli-adapter" },
+    // subagentModels：adapter activate 写入 ~/.cursor/agents 的角色子 Agent 模型 ID，必须显式填写（cursor-agent models 查看）
+    cursor: { enabled: true, hookMode: "cli-adapter", subagentModels: { Jiuwei: null, ZhuRong: null, BaiZe: null } },
     kimi: { enabled: true, hookMode: "plugin-adapter" },
     claude: { enabled: true, hookMode: "plugin-adapter" },
   },

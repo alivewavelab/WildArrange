@@ -46,6 +46,8 @@ const PACKET_ENV = { probe: "WILDARRANGE_READINESS_PACKET", review: "WILDARRANGE
 export async function runExecutor({ role, cli, model, bin, cwd = process.cwd(), env = process.env }) {
   if (!EXECUTOR_ROLES.includes(role)) throw new Error(`unsupported executor role: ${role}; use ${EXECUTOR_ROLES.join(", ")}`);
   if (!EXECUTOR_CLIS.includes(cli)) throw new Error(`unsupported executor CLI: ${cli}; use ${EXECUTOR_CLIS.join(", ")}`);
+  // cursor-agent 不指定模型时落到账号的 auto 档，角色模型不可预期
+  if (cli === "cursor" && !model) throw new Error("executor --cli cursor requires --model <id>; run cursor-agent models to list IDs");
   const packetPath = env[PACKET_ENV[role]];
   if (!packetPath) throw new Error(`${PACKET_ENV[role]} is not set; this command is run by WildArrange, not by hand`);
   const executable = bin || resolveExecutorBin(cli);
@@ -125,10 +127,11 @@ export function inspectExecutorConfig(config, { cliPrefix = "wildarrange", pathE
   if (missing.length) {
     const worker = probeCli || available[0] || "claude";
     const review = reviewCli || available.find((cli) => cli !== worker) || worker;
+    const modelArg = (cli) => (cli === "cursor" ? " --model <cursor-model-id>" : "");
     recommended = {
-      workerProbe: `${cliPrefix} executor probe --cli ${worker}`,
-      reviewerCommand: `${cliPrefix} executor review --cli ${review}`,
-      workerCommand: `${cliPrefix} executor work --cli ${worker}`,
+      workerProbe: `${cliPrefix} executor probe --cli ${worker}${modelArg(worker)}`,
+      reviewerCommand: `${cliPrefix} executor review --cli ${review}${modelArg(review)}`,
+      workerCommand: `${cliPrefix} executor work --cli ${worker}${modelArg(worker)}`,
       // 检查间隔不是执行截止时间；长审查继续使用同一子进程。
       reviewerCheckIntervalMs: 900000,
     };
