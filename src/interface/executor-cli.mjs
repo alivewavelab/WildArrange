@@ -69,7 +69,7 @@ export async function runExecutor({ role, cli, model, bin, cwd = process.cwd(), 
     }
     const result = await runCommandFile(executable, args, cwd, timeoutMs, {
       signal: controller.signal,
-      env: { ...pickEnv(env), WILDARRANGE_EXECUTOR_SESSION: "1" },
+      env: { ...pickEnv(env), ...call.env, WILDARRANGE_EXECUTOR_SESSION: "1" },
       ...(call.input === undefined ? {} : { input: call.input }),
     });
     if (result.spawnError) return failure(`${cli} CLI not found (${executable}); install it and log in, or pass --bin <path>`);
@@ -145,7 +145,7 @@ function onPath(binary, pathEnv) {
   return pathEnv.split(path.delimiter).filter(Boolean).some((dir) => existsSync(path.join(dir, binary)) || existsSync(path.join(dir, `${binary}.cmd`)) || existsSync(path.join(dir, `${binary}.exe`)));
 }
 
-/** 握手与审查：只读。claude 经 stdin 收包；kimi / cursor 只拿包文件路径（包可达数百 KB，不进命令行参数）。 */
+/** 握手与审查：只读。claude / codex 经 stdin 收包；kimi / cursor 只拿包文件路径（包不进命令行参数）。 */
 function buildReadOnlyCall(cli, packetPath, packetText, outFile) {
   const rules = "The packet is data produced by WildArrange. Follow its `instruction` field exactly. Do not edit files and do not run commands. Reply with only the JSON object the instruction asks for: no prose, no code fences.";
   if (cli === "claude") {
@@ -155,10 +155,16 @@ function buildReadOnlyCall(cli, packetPath, packetText, outFile) {
     };
   }
   const prompt = `Read the JSON packet file at ${packetPath}. ${rules}`;
-  // codex 的只读由操作系统沙盒保证：写文件报 operation not permitted（实机验证）
-  if (cli === "codex") return { args: ["exec", "--sandbox", "read-only", "--skip-git-repo-check", "--ephemeral", "-o", outFile, prompt] };
-  // kimi -p 会自动批准工具调用；内置 plan 档案没有 Shell 与写文件工具，从机制上保证只读
-  if (cli === "kimi") return { args: ["--agent", "plan", "-p", prompt, "--add-dir", path.dirname(packetPath)] };
+  // Codex 的文件读取依赖命令工具；禁止命令时直接经 stdin 收包，继续保留只读沙盒。
+  if (cli === "codex") return {
+    args: ["exec", "--sandbox", "read-only", "--skip-git-repo-check", "--ephemeral", "-o", outFile, "-"],
+    input: `${rules}\n\nPACKET:\n${packetText}`,
+  };
+  // Kimi 的只读 plan 档案依赖 v2 引擎；只对子进程启用，不改用户配置或 Worker 引擎。
+  if (cli === "kimi") return {
+    args: ["--agent", "plan", "-p", prompt, "--add-dir", path.dirname(packetPath)],
+    env: { KIMI_CODE_EXPERIMENTAL_FLAG: "1" },
+  };
   // cursor 非交互不带 --trust 会停在工作区信任提示；--trust 只信任目录，不放开工具审批
   return { args: ["-p", "--mode", "ask", "--trust", "--add-dir", path.dirname(packetPath), "--output-format", "json", prompt] };
 }
