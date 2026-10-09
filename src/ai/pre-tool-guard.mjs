@@ -180,8 +180,8 @@ export async function preToolUseGuard(rootDir, input = {}, options = {}) {
   if (isShellTool && (!task || awaitingPlanApproval) && !isAllowedPrePlanShellCommand(shellCommand, cliCommandPrefix, rootDir)) {
     const code = awaitingPlanApproval ? "awaiting_plan_approval_shell" : "no_active_task_shell";
     const reason = awaitingPlanApproval
-      ? "plan is awaiting user approval; only exact WildArrange plan-management and read-only commands are allowed"
-      : "no active task exists; arbitrary shell commands are denied until a plan task is available";
+      ? "plan is awaiting user approval; verified read-only inspection and exact WildArrange plan-management commands are allowed; use Read/Grep/Glob or direct rg/Get-Content for inspection"
+      : "command is not recognized as read-only or approved plan management; use Read/Grep/Glob or direct rg/Get-Content for inspection; writes and arbitrary execution require an approved task";
     await appendLedger(rootDir, {
       type: "pre_tool_use_denied",
       reason: code,
