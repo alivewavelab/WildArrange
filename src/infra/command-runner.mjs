@@ -67,6 +67,10 @@ function runProcess(file, args, command, cwd, timeoutMs, options) {
       resolve(blockedCommandResult(command, safety));
       return;
     }
+    if (options.signal?.aborted) {
+      resolve({ exitCode: 130, stdout: "", stderr: "Command cancelled before start", timedOut: false, cancelled: true });
+      return;
+    }
     let child;
     try {
       child = spawn(file, args, {
@@ -100,20 +104,26 @@ function runProcess(file, args, command, cwd, timeoutMs, options) {
     const outputTruncated = { stdout: false, stderr: false };
     let settled = false;
     let timedOut = false;
+    let cancelled = false;
+    let timer = null;
     let killTimer = null;
     let terminationTimer = null;
     let terminationPromise = Promise.resolve();
     function finish(result) {
       if (settled) return;
       clearTimeout(timer);
+      options.signal?.removeEventListener("abort", cancel);
       if (killTimer) clearTimeout(killTimer);
       if (terminationTimer) clearTimeout(terminationTimer);
       settled = true;
       resolve({ ...result, outputTruncated });
     }
-    const timer = setTimeout(() => {
-      if (settled) return;
-      timedOut = true;
+    // null 只供持续等待的调用方使用；其他命令保留原超时与进程树回收。
+    const cancel = () => terminate(true);
+    function terminate(byCancellation = false) {
+      if (settled || timedOut || cancelled) return;
+      cancelled = byCancellation;
+      timedOut = !byCancellation;
       if (process.platform === "win32" && child.pid) {
         // Killing cmd.exe alone leaks its real child (for example a timed-out
         // verifier) on Windows. taskkill /T closes the complete process tree.
@@ -147,7 +157,10 @@ function runProcess(file, args, command, cwd, timeoutMs, options) {
           if (!settled) killPosixProcessGroup(child, "SIGKILL");
         }, COMMAND_SIGKILL_GRACE_MS);
       }
-    }, timeoutMs);
+    }
+    if (timeoutMs !== null) timer = setTimeout(() => terminate(), timeoutMs);
+    options.signal?.addEventListener("abort", cancel, { once: true });
+    if (options.signal?.aborted) cancel();
 
     child.stdout.on("data", (chunk) => {
       const next = appendCapped(stdout, chunk.toString(), maxOutputChars);
@@ -160,17 +173,18 @@ function runProcess(file, args, command, cwd, timeoutMs, options) {
       outputTruncated.stderr ||= next.truncated;
     });
     child.on("close", async (code) => {
-      if (timedOut) {
+      if (timedOut || cancelled) {
         const termination = await terminationPromise;
         if (termination?.ok === false) {
           finishTerminationFailure(termination);
           return;
         }
         finish({
-          exitCode: 124,
+          exitCode: cancelled ? 130 : 124,
           stdout,
-          stderr: `${stderr}\nCommand timed out after ${timeoutMs}ms`.trim(),
-          timedOut: true,
+          stderr: `${stderr}\n${cancelled ? "Command cancelled" : `Command timed out after ${timeoutMs}ms`}`.trim(),
+          timedOut,
+          ...(cancelled ? { cancelled: true } : {}),
         });
         return;
       }
@@ -184,8 +198,9 @@ function runProcess(file, args, command, cwd, timeoutMs, options) {
       finish({
         exitCode: 125,
         stdout,
-        stderr: `${stderr}\nCommand timed out after ${timeoutMs}ms; process termination failed: ${termination?.error || `taskkill exited ${termination?.exitCode ?? "without confirmation"}`}`.trim(),
-        timedOut: true,
+        stderr: `${stderr}\n${cancelled ? "Command cancelled" : `Command timed out after ${timeoutMs}ms`}; process termination failed: ${termination?.error || `taskkill exited ${termination?.exitCode ?? "without confirmation"}`}`.trim(),
+        timedOut,
+        ...(cancelled ? { cancelled: true } : {}),
         terminationFailed: true,
         recoveryRequired: true,
         pid: child.pid || null,

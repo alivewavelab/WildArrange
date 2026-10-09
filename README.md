@@ -814,11 +814,11 @@ Worker 读取 WILDARRANGE_EXECUTION_CONTEXT 的完整任务 Skill；探测器读
 ```json
 {
   "executionReadiness": { "workerProbe": "wildarrange executor probe --cli claude" },
-  "review": { "responsibility": { "command": "wildarrange executor review --cli kimi", "timeoutMs": 900000 } }
+  "review": { "responsibility": { "command": "wildarrange executor review --cli kimi", "checkIntervalMs": 900000 } }
 }
 ```
 
-任务的 `worker_command` 可写 `wildarrange executor work --cli claude`。握手与审查只读：codex 使用 `--sandbox read-only` 操作系统沙盒，claude 禁用 Shell 与写文件工具，kimi 使用内置只读 `plan` 档案（无 Shell、无写文件工具），cursor 使用 `--mode ask`。Worker 在任务 worktree 中改文件：codex 使用 `--sandbox workspace-write`，Shell 也只能写任务目录与系统临时目录；claude 只开放文件工具、不开放 Shell；kimi 的非交互 `-p` 模式本身自动批准全部工具（含 Shell），cursor 需 `--force` 才能非交互改文件（同样含 Shell），成果仍须通过全部门禁。Kimi 深度审查可能超过 10 分钟，审查者用 kimi 时把 `timeoutMs` 调大。线性 `run` 的 Worker 超时由 `executionReadiness.workerTimeoutMs` 控制，默认 30 分钟（此前固定 120 秒，模型 Worker 不够用）。执行者启动的模型子会话不受 WildArrange 宿主 Hook 注入与续跑影响。
+任务的 `worker_command` 可写 `wildarrange executor work --cli claude`。握手与审查只读：codex 使用 `--sandbox read-only` 操作系统沙盒，claude 禁用 Shell 与写文件工具，kimi 使用内置只读 `plan` 档案（无 Shell、无写文件工具），cursor 使用 `--mode ask`。Worker 在任务 worktree 中改文件：codex 使用 `--sandbox workspace-write`，Shell 也只能写任务目录与系统临时目录；claude 只开放文件工具、不开放 Shell；kimi 的非交互 `-p` 模式本身自动批准全部工具（含 Shell），cursor 需 `--force` 才能非交互改文件（同样含 Shell），成果仍须通过全部门禁。命令型正式审查按 `review.responsibility.checkIntervalMs`（默认 15 分钟）更新审查输入文件旁的 `<packetPath>.status.json`；仍在运行就继续等待同一进程，结束即收取结果，不因检查间隔到期而终止。状态 `running` 仅表示尚未退出，不证明模型持续取得进展；`exited` 也不等于审查通过，结果仍须通过证据与结论校验。Ctrl+C / SIGTERM 显式取消时回收进程树，取消失败进入恢复状态。`review.responsibility.timeoutMs` 仍用于开工审查者握手及 HTTP 审查；旧配置里的该值不再限制命令型正式审查。状态文件用于查看当前进程，不提供宿主崩溃后的会话恢复。线性 `run` 的 Worker 超时由 `executionReadiness.workerTimeoutMs` 控制，默认 30 分钟（此前固定 120 秒，模型 Worker 不够用）。执行者启动的模型子会话不受 WildArrange 宿主 Hook 注入与续跑影响。
 
 `review configure --from` 只接受运行态 `plan-drafts/` 下的草稿，请传绝对路径。正式配置保存到治理仓库 `<policyRoot>/wildarrange.config.json`；尚无正式配置时使用内置默认值。业务仓库不新增这些治理文件。
 

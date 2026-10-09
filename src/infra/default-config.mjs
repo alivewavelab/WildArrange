@@ -113,7 +113,7 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
   // 审查 lane 步骤、职责命令与可选 LLM 审查配置
   review: {
     steps: [],
-    responsibility: { command: null, timeoutMs: 120000, maxEvidenceChars: 500000 },
+    responsibility: { command: null, timeoutMs: 120000, checkIntervalMs: 900000, maxEvidenceChars: 500000 },
     llm: {
       enabled: false,
       required: false,

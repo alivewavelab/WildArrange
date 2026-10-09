@@ -24,7 +24,7 @@ export const EXECUTOR_ROLES = ["probe", "review", "work"];
 /** 顺序即推荐优先级：codex 有操作系统沙盒，最适合当 Worker。 */
 export const EXECUTOR_CLIS = ["codex", "claude", "kimi", "cursor"];
 
-/** 执行者子进程不另设超时：调用方（开工检查 / 审查门 / Worker）按各自 timeoutMs 杀掉整棵进程树。 */
+/** 握手与 Worker 的兜底上限；正式审查不设运行时限，由调用方等待或显式取消。 */
 const CHILD_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_BINS = { codex: "codex", claude: "claude", kimi: "kimi", cursor: "cursor-agent" };
 /** ChatGPT 桌面版自带 Codex CLI，但不放进 PATH。 */
@@ -52,12 +52,23 @@ export async function runExecutor({ role, cli, model, bin, cwd = process.cwd(), 
   // codex 的最终回答写进 -o 指定的文件；stdout 是过程日志
   const outDir = cli === "codex" ? await mkdtemp(path.join(os.tmpdir(), "wildarrange-codex-")) : null;
   const outFile = outDir ? path.join(outDir, "last-message.txt") : null;
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
   try {
+    const packetText = await readFile(packetPath, "utf8");
+    const packet = JSON.parse(packetText);
     const call = role === "work"
-      ? buildWorkerCall(cli, renderWorkerBrief(JSON.parse(await readFile(packetPath, "utf8")), packetPath), packetPath, outFile)
-      : buildReadOnlyCall(cli, packetPath, await readFile(packetPath, "utf8"), outFile);
+      ? buildWorkerCall(cli, renderWorkerBrief(packet, packetPath), packetPath, outFile)
+      : buildReadOnlyCall(cli, packetPath, packetText, outFile);
     const args = model ? withModel(cli, call.args, model) : call.args;
-    const result = await runCommandFile(executable, args, cwd, CHILD_TIMEOUT_MS, {
+    const timeoutMs = role === "review" && packet.kind !== "execution_readiness_probe" ? null : CHILD_TIMEOUT_MS;
+    if (timeoutMs === null) {
+      // POSIX 模型 CLI 在独立进程组中；外层取消须转发到该进程组。
+      process.once("SIGINT", cancel);
+      process.once("SIGTERM", cancel);
+    }
+    const result = await runCommandFile(executable, args, cwd, timeoutMs, {
+      signal: controller.signal,
       env: { ...pickEnv(env), WILDARRANGE_EXECUTOR_SESSION: "1" },
       ...(call.input === undefined ? {} : { input: call.input }),
     });
@@ -66,6 +77,8 @@ export async function runExecutor({ role, cli, model, bin, cwd = process.cwd(), 
     const text = outFile ? await readFile(outFile, "utf8").catch(() => "") : resultText(cli, result.stdout);
     return finishAnswer(cli, role, text, result.stdout);
   } finally {
+    process.removeListener("SIGINT", cancel);
+    process.removeListener("SIGTERM", cancel);
     if (outDir) await rm(outDir, { recursive: true, force: true });
   }
 }
@@ -116,8 +129,8 @@ export function inspectExecutorConfig(config, { cliPrefix = "wildarrange", pathE
       workerProbe: `${cliPrefix} executor probe --cli ${worker}`,
       reviewerCommand: `${cliPrefix} executor review --cli ${review}`,
       workerCommand: `${cliPrefix} executor work --cli ${worker}`,
-      // kimi 深度审查实测可超过 10 分钟，默认 120 秒不够
-      ...(review === "kimi" ? { reviewerTimeoutMs: 900000 } : {}),
+      // 检查间隔不是执行截止时间；长审查继续使用同一子进程。
+      reviewerCheckIntervalMs: 900000,
     };
   }
   return { missing, recommended, sameCli: probeCli && probeCli === reviewCli ? probeCli : null, available };

@@ -201,14 +201,15 @@ function requiresCommandRecovery(result) {
 
 /** 构造 pass=false 的 review_gate，仅含 command_termination lane 与 recovery 证据。 */
 function recoveryRequiredReview(commandEvidence, reviewCommandResults, standardsCommandResults, criteria, qualityResults = null) {
+  const cancelled = commandEvidence.cancelled && !commandEvidence.terminationFailed;
   return {
     kind: "review_gate",
     at: nowIso(),
     pass: false,
     reviewerAgents: DEFAULT_REVIEW_AGENTS,
     lanes: [reviewLane("command_termination", "BaiZe", false, {
-      summary: `command process could not be confirmed stopped${commandEvidence.pid ? ` (pid ${commandEvidence.pid})` : ""}`,
-      fixBy: "确认残留进程终止后，用同一 run 恢复复核。",
+      summary: cancelled ? "review command cancelled; explicit resume required" : `command process could not be confirmed stopped${commandEvidence.pid ? ` (pid ${commandEvidence.pid})` : ""}`,
+      fixBy: cancelled ? "审查已取消；需要继续时，用同一 run 恢复复核。" : "确认残留进程终止后，用同一 run 恢复复核。",
     })],
     qualityResults,
     llmReviews: [],

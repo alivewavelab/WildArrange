@@ -387,7 +387,7 @@ async function checkExecutors(rootDir, findings) {
     addFinding(findings, "error", "executors", `开工检查必需的执行者未配置：${result.missing.join("、")}；任务无法开工`, {
       code: "execution_readiness_unconfigured",
       recommended,
-      nextAction: `在治理仓 policy/wildarrange.config.json 设置 executionReadiness.workerProbe = ${recommended.workerProbe}；review.responsibility.command = ${recommended.reviewerCommand}${recommended.reviewerTimeoutMs ? `（并设 review.responsibility.timeoutMs = ${recommended.reviewerTimeoutMs}）` : ""}；任务 worker_command 可用 ${recommended.workerCommand}。提交治理仓后生效，也可运行 /wildarrange-setup 引导配置`,
+      nextAction: `在治理仓 policy/wildarrange.config.json 设置 executionReadiness.workerProbe = ${recommended.workerProbe}；review.responsibility.command = ${recommended.reviewerCommand}${recommended.reviewerCheckIntervalMs ? `（检查间隔 review.responsibility.checkIntervalMs = ${recommended.reviewerCheckIntervalMs}，不是执行时限）` : ""}；任务 worker_command 可用 ${recommended.workerCommand}。提交治理仓后生效，也可运行 /wildarrange-setup 引导配置`,
     });
   }
   if (result.sameCli) {
