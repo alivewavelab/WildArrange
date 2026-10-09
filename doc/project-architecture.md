@@ -201,7 +201,7 @@ AGENTS.md                         # mandatory reading routes
 - `src/ai/skill-matcher.mjs`：stage/route/agent/keyword Skill 匹配与可解释加载提示；路由信号命中复用 `infra/route-table.mjs` 的 `matchSignals` 单一实现；不维护脱离 Agent Prompt 的模型偏置旋钮。
 - `src/ai/context.mjs`：Agent 上下文、hash 校验后的角色 Prompt 读取与预算化、resume snapshot、session 谱系与 continuation 指令。
 - `src/ai/hooks.mjs`：宿主生命周期 hook 的事件编排与入口接线（facts 采集、注入点解析、报告与 ledger/decision 投影；scope 检查经 `capabilities/gateway.mjs`，非直接 import）。`SessionStart` 注入完整 Jiuwei 身份 Prompt，`PostCompact` 再注入用于恢复；`UserPromptSubmit` 不重复身份 Prompt。
-- `src/infra/read-only-command.mjs`：只读工具身份和 Shell 参数分类；验证组合中每一段，无重定向、执行型参数或未知命令才判定只读。
+- `src/infra/read-only-command.mjs`：只读工具身份和 Shell 参数分类；验证组合中每一段，无重定向（仅丢弃输出的 `2>&1`、`>/dev/null` 除外）、执行型参数或未知命令才判定只读；未加引号的反斜杠去掉后以 `-` 开头的词视为选项伪装并拒绝；git 不允许 `-C`/`--git-dir`/`--work-tree` 切换到其他仓库，因为其配置可在 status/diff 时执行程序。
 - `src/infra/cross-project-evidence.mjs`：从本机项目登记解析跨仓引用并读取唯一任务账本、完成证据及固定交付 SHA；返回事实，不推进状态。
 - `src/orchestration/cross-project-work.mjs`：跨项目总任务导入、状态汇总与联合验收；只存成员引用，复用各仓完成证据，版本变化使旧验收失效。
 - `src/ai/pre-tool-guard.mjs`：PreToolUse 安全门（preToolUseGuard）与目标路径/apply_patch/shell 白名单解析；hook 输入归一化助手（事件别名、taskId、可信 CLI 前缀）也在此持有，供 hooks.mjs 单向复用。

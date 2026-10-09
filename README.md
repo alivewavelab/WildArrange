@@ -362,7 +362,7 @@ node ./bin/wildarrange.mjs adapter restore --backup <backupId>
 安装、卸载、恢复都会在运行态 `adapters/external/` 写入报告；`adapter activate` 覆盖用户级文件前会备份。`restore` 用于把 `adapters/backups/<backupId>/` 里的备份恢复回用户级原位置。四个宿主都只通过项目外的插件包接入，客户项目里不写任何文件：
 
 - **Codex**：本地 marketplace/plugin 生成在 `adapters/external/codex-marketplace/`；Codex 桌面版需在设置 > Hooks 中审查、信任并启用；Codex CLI 使用 `/hooks`。完成后才会执行这些 hard hook。
-- **Cursor**：`adapter activate --target cursor` 备份并合并用户级 `~/.cursor/hooks.json`；bridge 在受信任工作区中对 `preToolUse`（Write/Delete/Edit/Shell）与 `beforeShellExecution` 硬拦截且 fail-closed，未连接项目静默放行。
+- **Cursor**：`adapter activate --target cursor` 备份并合并用户级 `~/.cursor/hooks.json`；bridge 在受信任工作区中对 `preToolUse`（Write/Delete/Edit/Shell）与 `beforeShellExecution` 硬拦截且 fail-closed，未连接项目静默放行。事前范围检查只能读出文件工具参数里的路径；有活跃任务时，Shell 命令只拦截高危模式，不解析它写了哪些文件，越界改动由交付时的范围与归属检查拦下。
 - **Kimi Code**：生成用户 plugin 到运行态 `adapters/external/kimi/`。WildArrange 不会静默改写用户级 `~/.kimi-code/config.toml`；按 `adapter install` 返回的 `nextActions` 显式执行 `/plugins install <路径>`，再执行 `/reload`。不要给路径加引号，Kimi Code 0.27 会把引号当成路径字符。plugin 是用户级安装，但 bridge 会在未连接项目中静默退出。
 - **Claude Code**：本地 marketplace 与插件生成在 `adapters/external/claude-marketplace/`；`adapter activate --target claude` 经 `claude plugin marketplace add` / `claude plugin install` 以用户级安装，`adapter uninstall --target claude` 经 `claude plugin uninstall` / `marketplace remove` 移除。插件 Hook 拦截 `Bash|Write|Edit|MultiEdit|NotebookEdit`；Claude Code 的 `PostCompact` 不能注入上下文，压缩后由 `SessionStart`（`source: compact`）恢复治理上下文。Claude Code 云端会话不加载本机插件，不受此治理。
 
