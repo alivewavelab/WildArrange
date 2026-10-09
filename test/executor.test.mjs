@@ -27,13 +27,16 @@ const fs = require("node:fs"), path = require("node:path");
 const dir = ${JSON.stringify(dir)};
 let stdin = "";
 try { stdin = fs.readFileSync(0, "utf8"); } catch {}
-fs.writeFileSync(path.join(dir, "last.json"), JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), stdin, marker: process.env.WILDARRANGE_EXECUTOR_SESSION || null }));
+fs.writeFileSync(path.join(dir, "last.json"), JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), stdin, marker: process.env.WILDARRANGE_EXECUTOR_SESSION || null, kimiEngine: process.env.KIMI_CODE_EXPERIMENTAL_FLAG || null }));
 const mode = process.env.FAKE_MODE || "ok", cli = process.env.FAKE_CLI;
 if (mode === "fail") { console.error("model unavailable"); process.exit(1); }
 const packetPath = process.env.WILDARRANGE_READINESS_PACKET || process.env.WILDARRANGE_REVIEW_PACKET;
 let answer = "DONE: edited files";
 if (packetPath) {
-  const p = JSON.parse(fs.readFileSync(packetPath, "utf8"));
+  // Codex has no file-read tool when commands are forbidden; it must receive the packet on stdin.
+  if (cli === "codex" && (process.argv.at(-1) !== "-" || !stdin.includes("PACKET:\\n"))) { console.error("packet is not readable without commands"); process.exit(1); }
+  if (cli === "kimi" && process.argv.includes("--agent") && process.env.KIMI_CODE_EXPERIMENTAL_FLAG !== "1") { console.error("plan agent requires the v2 engine"); process.exit(1); }
+  const p = JSON.parse(cli === "codex" ? stdin.split("PACKET:\\n")[1] : fs.readFileSync(packetPath, "utf8"));
   answer = p.kind === "execution_readiness_probe"
     ? JSON.stringify({ ready: true, challenge: mode === "stale" ? "old-challenge" : p.challenge, loadedSkills: p.requiredSkills.map((s) => s.name) })
     : JSON.stringify({ decision: "PASS", checks: Object.keys(p.rules || {}).map((rule) => ({ rule, decision: "PASS", reason: "fake" })), findings: [] });
@@ -80,6 +83,9 @@ test("probe passes the packet to each CLI without putting it on the command line
         assert.ok(call.stdin.includes("c-42"), "claude receives the packet on stdin");
         assert.deepEqual(call.argv.slice(0, 3), ["-p", "--output-format", "json"]);
         for (const tool of ["Bash", "Edit", "Write"]) assert.ok(call.argv.includes(tool), `claude probe must disallow ${tool}`);
+      } else if (cli === "codex") {
+        assert.ok(call.stdin.includes("c-42"), "codex receives the full packet without needing shell reads");
+        assert.equal(call.argv.at(-1), "-");
       } else {
         assert.ok(call.argv.join(" ").includes(packetPath), `${cli} is pointed at the packet file`);
       }
@@ -89,7 +95,10 @@ test("probe passes the packet to each CLI without putting it on the command line
         assert.ok(call.argv.includes("--trust"), "cursor must trust the workspace non-interactively");
       }
       // kimi -p 会自动批准工具调用；只读由内置 plan 档案（无 Shell、无写文件工具）保证，实机已验证
-      if (cli === "kimi") assert.deepEqual(call.argv.slice(call.argv.indexOf("--agent"), call.argv.indexOf("--agent") + 2), ["--agent", "plan"], "kimi probe runs the read-only plan profile");
+      if (cli === "kimi") {
+        assert.deepEqual(call.argv.slice(call.argv.indexOf("--agent"), call.argv.indexOf("--agent") + 2), ["--agent", "plan"], "kimi probe runs the read-only plan profile");
+        assert.equal(call.kimiEngine, "1", "the plan profile requires the v2 engine");
+      }
       // codex 的只读由操作系统沙盒保证（实机：写文件报 operation not permitted）
       if (cli === "codex") assert.deepEqual(call.argv.slice(call.argv.indexOf("--sandbox"), call.argv.indexOf("--sandbox") + 2), ["--sandbox", "read-only"]);
     }
@@ -135,7 +144,10 @@ test("worker runs in the task directory with each CLI's file-editing mode and th
         assert.ok(!call.argv.includes("Bash"), "claude worker gets no shell tool");
       }
       // kimi 不允许 -p 与 --yolo/--auto 同用，-p 本身已自动批准（实机验证）
-      if (cli === "kimi") assert.ok(!call.argv.includes("--yolo") && !call.argv.includes("--agent"), "kimi worker uses plain -p with the default editing profile");
+      if (cli === "kimi") {
+        assert.ok(!call.argv.includes("--yolo") && !call.argv.includes("--agent"), "kimi worker uses plain -p with the default editing profile");
+        assert.equal(call.kimiEngine, null, "worker must retain the user's default engine");
+      }
       if (cli === "cursor") assert.ok(call.argv.includes("--force"), "cursor needs --force to edit non-interactively (approved by the user)");
       // codex 的 Worker 由沙盒限制在任务 worktree（实机：写主目录被拒）
       if (cli === "codex") assert.deepEqual(call.argv.slice(call.argv.indexOf("--sandbox"), call.argv.indexOf("--sandbox") + 2), ["--sandbox", "workspace-write"]);
