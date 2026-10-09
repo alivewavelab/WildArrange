@@ -412,7 +412,7 @@ node ./bin/wildarrange.mjs parallel status --run <runId>
 node ./bin/wildarrange.mjs parallel cleanup --run <runId>
 ```
 
-`parallel cleanup` 会保留等待验收、返工、恢复中或仍有未提交改动的 worktree。只有任务身份与生命周期可核实、worktree 干净且当前 HEAD 已进入 `main` 时才允许清理；不会强制删除验收后的新增文件。
+`parallel cleanup` 会保留等待验收、返工、恢复中或仍有未提交改动的 worktree。只有任务身份与生命周期可核实、worktree 干净且当前 HEAD 已进入 `main` 时才允许清理；不会强制删除验收后的新增文件。删除 worktree 后，若任务已 `completed` 且本地 task branch 没有 `main` 之外的提交，一并删除该本地分支；远端分支仍由人类确认后删除。
 
 子 Agent 若要提交主线成果，需要在 `agent-result.json` 写入结构化文件：
 

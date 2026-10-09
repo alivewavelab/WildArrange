@@ -29,7 +29,7 @@ import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { runDoctor } from "../src/interface/doctor.mjs";
 import { collectGitChangedPaths, readGitHead, readGitTopLevel } from "../src/infra/git-diff.mjs";
 import { uniqueStrings } from "../src/infra/text-utils.mjs";
-import { prepareAgentWorktree } from "../src/infra/git-worktree.mjs";
+import { deleteMergedTaskBranch, prepareAgentWorktree } from "../src/infra/git-worktree.mjs";
 import { loadWildArrangeConfig } from "../src/infra/runtime-config.mjs";
 import { readJson, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
@@ -828,5 +828,26 @@ test("removed multi-device commands are no longer part of the CLI", async () => 
         args.join(" "),
       );
     }
+  });
+});
+
+test("merged task branch deletion refuses branches with commits outside main", async () => {
+  await withRemoteClones(async ({ cloneA }) => {
+    const branch = "wildarrange/task/P-GIT/T009";
+    await git(cloneA, ["branch", branch]);
+    await git(cloneA, ["switch", "--quiet", branch]);
+    await writeFile(path.join(cloneA, "extra.txt"), "extra\n", "utf8");
+    await git(cloneA, ["add", "extra.txt"]);
+    await git(cloneA, ["commit", "--quiet", "-m", "unmerged work"]);
+    await git(cloneA, ["switch", "--quiet", "main"]);
+
+    const refused = await deleteMergedTaskBranch(cloneA, { branch, mainRef: "main" });
+    assert.deepEqual(refused, { deleted: false, reason: "branch_not_in_main" });
+    assert.notEqual((await git(cloneA, ["branch", "--list", branch])).trim(), "");
+
+    await git(cloneA, ["merge", "--quiet", "--ff-only", branch]);
+    assert.deepEqual(await deleteMergedTaskBranch(cloneA, { branch, mainRef: "main" }), { deleted: true });
+    assert.equal((await git(cloneA, ["branch", "--list", branch])).trim(), "");
+    assert.deepEqual(await deleteMergedTaskBranch(cloneA, { branch, mainRef: "main" }), { deleted: false, reason: "branch_missing" });
   });
 });

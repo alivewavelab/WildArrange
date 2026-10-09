@@ -160,6 +160,8 @@ test("parallel cleanup waits for main containment and rejects an unmerged worktr
     assert.equal(admitted.status, "completed");
     const deliverySha = admitted.task.delivery.integrationSha;
     const worktreeDir = path.resolve(rootDir, run.results[0].workDir);
+    const taskBranch = (await git(worktreeDir, "symbolic-ref", "--short", "HEAD")).stdout.trim();
+    const branchExists = async () => (await git(rootDir, "branch", "--list", taskBranch)).stdout.trim() !== "";
 
     const nextPlanPath = resolveWildArrangePath(rootDir, "artifacts", "next-plan.json");
     await writeFile(nextPlanPath, JSON.stringify({
@@ -179,6 +181,7 @@ test("parallel cleanup waits for main containment and rejects an unmerged worktr
 
     const beforeMerge = await cleanupParallelAgentRun(rootDir, { runId: run.runId });
     assert.equal(beforeMerge.cleaned[0].reason, "worktree_head_not_in_main");
+    assert.equal(await branchExists(), true);
 
     await git(rootDir, "merge", "--ff-only", deliverySha);
     await writeFile(path.join(worktreeDir, "post-delivery.txt"), "later\n", "utf8");
@@ -186,11 +189,15 @@ test("parallel cleanup waits for main containment and rejects an unmerged worktr
     await git(worktreeDir, "commit", "-m", "post delivery note");
     const ahead = await cleanupParallelAgentRun(rootDir, { runId: run.runId });
     assert.equal(ahead.cleaned[0].reason, "worktree_head_not_in_main");
+    assert.equal(await branchExists(), true);
 
     const worktreeHead = (await git(worktreeDir, "rev-parse", "HEAD")).stdout.trim();
     await git(rootDir, "merge", "--ff-only", worktreeHead);
     const cleaned = await cleanupParallelAgentRun(rootDir, { runId: run.runId });
     assert.equal(cleaned.cleaned[0].status, "cleaned");
+    assert.equal(cleaned.cleaned[0].branch, taskBranch);
+    assert.equal(cleaned.cleaned[0].branchDeleted, true);
+    assert.equal(await branchExists(), false);
     await assert.rejects(readFile(path.join(worktreeDir, "post-delivery.txt"), "utf8"), /ENOENT/);
   }, {
     projectFiles: {
@@ -198,6 +205,28 @@ test("parallel cleanup waits for main containment and rejects an unmerged worktr
       "verify.cjs": "require('node:assert/strict').equal(require('node:fs').readFileSync('result.txt','utf8'),'done')\n",
       "review.cjs": "const fs=require('node:fs');require('node:assert/strict').equal(fs.statSync('result.txt').size,4)\n",
     },
+  });
+});
+
+test("parallel cleanup keeps the task branch while the task has not ended", async () => {
+  await withExternalProject(async ({ projectRoot: rootDir }) => {
+    const planPath = await writePlan(rootDir);
+    await importApprovedPlan(rootDir, planPath);
+    const run = await runParallelAgents(rootDir, {
+      taskIds: ["T001"],
+      isolation: "git-worktree",
+      maxAgents: 1,
+      command: "node -e \"process.exit(3)\"",
+    });
+    const worktreeDir = path.resolve(rootDir, run.results[0].workDir);
+    const taskBranch = (await git(worktreeDir, "symbolic-ref", "--short", "HEAD")).stdout.trim();
+
+    const cleanup = await cleanupParallelAgentRun(rootDir, { runId: run.runId });
+
+    assert.equal(cleanup.cleaned[0].status, "cleaned");
+    assert.equal(cleanup.cleaned[0].branchDeleted, false);
+    assert.equal(cleanup.cleaned[0].branchReason, "task_not_completed");
+    assert.notEqual((await git(rootDir, "branch", "--list", taskBranch)).stdout.trim(), "");
   });
 });
 

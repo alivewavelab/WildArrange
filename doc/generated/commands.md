@@ -37,7 +37,7 @@
 | `wildarrange parallel list` | 列出并行 run |
 | `wildarrange parallel status [--run <runId>]` | 查看并行运行记录与批次对账 |
 | `wildarrange parallel close --run <runId> [--task T001] [--reason "..."]` | 关闭保留的子 Agent 结果 |
-| `wildarrange parallel cleanup --run <runId>` | 清理 Git worktree 隔离目录 |
+| `wildarrange parallel cleanup --run <runId>` | 清理 Git worktree 隔离目录及已并入 main 的本地 task branch |
 | `wildarrange parallel retry --run <runId> [--command "..."] [--max-agents N]` | 只重跑未完成任务的局部重试 |
 | `wildarrange node route --text "request"` | 单节点：路由 |
 | `wildarrange node execute [--task T001]` | 单节点：执行 |

@@ -414,7 +414,7 @@ node ./bin/wildarrange.mjs parallel status --run <runId>
 node ./bin/wildarrange.mjs parallel cleanup --run <runId>
 ```
 
-`parallel cleanup` retains worktrees awaiting acceptance, rework, recovery, or containing uncommitted changes. Cleanup requires a verifiable task identity and lifecycle, a clean worktree, and its current HEAD to be contained in `main`; it never force-deletes files added after acceptance.
+`parallel cleanup` retains worktrees awaiting acceptance, rework, recovery, or containing uncommitted changes. Cleanup requires a verifiable task identity and lifecycle, a clean worktree, and its current HEAD to be contained in `main`; it never force-deletes files added after acceptance. After removing the worktree, it also deletes the local task branch when the task is `completed` and the branch has no commits outside `main`; remote branches still require human confirmation.
 
 To propose mainline artifacts, a child agent writes structured files to `agent-result.json`:
 
