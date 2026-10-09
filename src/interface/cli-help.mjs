@@ -65,7 +65,7 @@ export const COMMAND_REGISTRY = [
   { usage: "parallel list", desc: "列出并行 run" },
   { usage: "parallel status [--run <runId>]", desc: "查看并行运行记录与批次对账" },
   { usage: "parallel close --run <runId> [--task T001] [--reason \"...\"]", desc: "关闭保留的子 Agent 结果" },
-  { usage: "parallel cleanup --run <runId>", desc: "清理 Git worktree 隔离目录" },
+  { usage: "parallel cleanup --run <runId>", desc: "清理 Git worktree 隔离目录及已并入 main 的本地 task branch" },
   { usage: "parallel retry --run <runId> [--command \"...\"] [--max-agents N]", desc: "只重跑未完成任务的局部重试" },
   { usage: "node route --text \"request\"", desc: "单节点：路由" },
   { usage: "node execute [--task T001]", desc: "单节点：执行" },

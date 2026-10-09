@@ -181,7 +181,7 @@
     {
       "name": "wildarrange_parallel_cleanup",
       "command": "wildarrange parallel cleanup --run <runId>",
-      "purpose": "清理 Git worktree 隔离目录"
+      "purpose": "清理 Git worktree 隔离目录及已并入 main 的本地 task branch"
     },
     {
       "name": "wildarrange_parallel_retry",

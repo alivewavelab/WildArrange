@@ -119,6 +119,24 @@ export async function releaseAgentWorktree(rootDir, { workDir, branch, startPoin
 }
 
 /**
+ * 删除已并入主线的本地 task branch：先读分支 SHA，确认它是 mainRef 的祖先（分支上没有主线之外的提交），
+ * 再以该 SHA 做乐观锁删除，期间分支被移动则拒绝。只删本地分支，远端分支由人类确认。
+ * @returns {Promise<{deleted: boolean, reason?: string}>}
+ */
+export async function deleteMergedTaskBranch(rootDir, { branch, mainRef }) {
+  if (!branch || !mainRef) return { deleted: false, reason: "branch_identity_unknown" };
+  const ref = `refs/heads/${branch}`;
+  const head = await runCommandFile("git", ["-C", rootDir, "rev-parse", "--verify", "--quiet", ref], rootDir, 30_000);
+  if (head.exitCode !== 0) return { deleted: false, reason: "branch_missing" };
+  const sha = head.stdout.trim();
+  const merged = await runCommandFile("git", ["-C", rootDir, "merge-base", "--is-ancestor", sha, mainRef], rootDir, 30_000);
+  if (merged.exitCode !== 0) return { deleted: false, reason: "branch_not_in_main" };
+  const drop = await runCommandFile("git", ["-C", rootDir, "update-ref", "-d", ref, sha], rootDir, 30_000);
+  if (drop.exitCode !== 0) return { deleted: false, reason: `branch_delete_failed: ${drop.stderr || drop.stdout}` };
+  return { deleted: true };
+}
+
+/**
  * 检查 task branch 是否已被占用：返回占用它的 worktree 路径、仅分支存在时返回空路径，未占用返回 null。
  */
 export async function inspectTaskBranchOccupation(rootDir, branchName) {

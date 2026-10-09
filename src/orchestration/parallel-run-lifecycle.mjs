@@ -24,7 +24,7 @@ import { listParallelAgentRuns } from "./parallel-run-index.mjs";
 import { inspectGitDelivery, commitIsAncestor } from "../infra/git-coordination.mjs";
 import { readGitHead } from "../infra/git-diff.mjs";
 import { runCommandFile } from "../infra/command-runner.mjs";
-import { inspectTaskBranchOccupation, releaseAgentWorktree } from "../infra/git-worktree.mjs";
+import { deleteMergedTaskBranch, inspectTaskBranchOccupation, releaseAgentWorktree } from "../infra/git-worktree.mjs";
 import { assertPathInsideRoot } from "../infra/path-match.mjs";
 
 export async function parallelAgentStatus(rootDir, options = {}) {
@@ -167,17 +167,22 @@ export async function cleanupParallelAgentRun(rootDir, options = {}) {
         cleaned.push({ taskId: entry.taskId, status: "retained", path: result.workDir, reason: cleanupFence.reason, details: cleanupFence.details || null });
         continue;
       }
+      // 先记下 worktree 所在分支；worktree 删除后无法再读取
+      const checkedOut = await runCommandFile("git", ["-C", worktreeDir, "symbolic-ref", "--quiet", "--short", "HEAD"], worktreeDir, 30_000);
+      const worktreeBranch = checkedOut.exitCode === 0 ? checkedOut.stdout.trim() : null;
       const remove = await runCommandFile("git", ["-C", rootDir, "worktree", "remove", worktreeDir], rootDir, 30_000);
       if (remove.exitCode !== 0 && !/is not a working tree|No such file/i.test(remove.stderr || remove.stdout || "")) {
         cleaned.push({ taskId: entry.taskId, status: "failed", path: result.workDir, error: remove.stderr || remove.stdout });
         continue;
       }
       await runCommandFile("git", ["-C", rootDir, "worktree", "prune"], rootDir, 30_000);
+      const branchCleanup = await cleanupTaskBranch(rootDir, worktreeBranch, task, gitContext);
       await updateAgentRunLifecycle(rootDir, run.runId, entry.taskId, "cleaned", {
         cleanedAt: nowIso(),
         cleanedPath: result.workDir,
+        cleanedBranch: branchCleanup.branchDeleted ? branchCleanup.branch : null,
       });
-      cleaned.push({ taskId: entry.taskId, status: "cleaned", path: result.workDir });
+      cleaned.push({ taskId: entry.taskId, status: "cleaned", path: result.workDir, ...branchCleanup });
     }
   }
   await appendLedger(rootDir, { type: "parallel_agent_worktree_cleanup", runId: options.runId, cleanedCount: cleaned.filter((item) => item.status === "cleaned").length });
@@ -188,6 +193,18 @@ export async function cleanupParallelAgentRun(rootDir, options = {}) {
   };
 }
 
+
+/**
+ * worktree 删除后清理本地 task branch：只删本任务登记的分支，且任务已 completed、分支没有主线之外的提交。
+ * 任务未明确结束时保留分支，供返工或重跑复用。
+ */
+async function cleanupTaskBranch(rootDir, branch, task, gitContext) {
+  if (!branch) return { branch: null, branchDeleted: false, branchReason: "worktree_detached" };
+  if (branch !== task.coordination?.branch) return { branch, branchDeleted: false, branchReason: "branch_not_owned_by_task" };
+  if (task.status !== "completed") return { branch, branchDeleted: false, branchReason: "task_not_completed" };
+  const result = await deleteMergedTaskBranch(rootDir, { branch, mainRef: gitContext?.integrationBranch || "main" });
+  return { branch, branchDeleted: result.deleted, ...(result.deleted ? {} : { branchReason: result.reason }) };
+}
 
 /** 检查 worktree 是否满足 cleanup 围栏（无残留改动）。 */
 async function inspectParallelCleanupFence(worktreeDir, entry, task, gitContext, runPlanId) {

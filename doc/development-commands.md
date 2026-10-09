@@ -26,7 +26,7 @@
 | 合入子 Agent 成果     | `node ./bin/wildarrange.mjs parallel admit --run <runId> --task T001`     |
 | 查看并行运行记录        | `node ./bin/wildarrange.mjs parallel status --run <runId>`             |
 | 关闭保留的子 Agent 结果 | `node ./bin/wildarrange.mjs parallel close --run <runId> --task T001 --reason user_accepted` |
-| 清理 Git worktree 隔离目录 | `node ./bin/wildarrange.mjs parallel cleanup --run <runId>` |
+| 清理 Git worktree 隔离目录及已并入 `main` 的本地 task branch | `node ./bin/wildarrange.mjs parallel cleanup --run <runId>` |
 | 重跑 run 中未通过的任务 | `node ./bin/wildarrange.mjs parallel retry --run <runId> [--command "..."]` |
 | 标注一条决策 | `node ./bin/wildarrange.mjs annotate --decision <decisionId> --category rule_wrong --reason "..."` |
 | 查看标注与统计 | `node ./bin/wildarrange.mjs annotate list` / `annotate stats` |
