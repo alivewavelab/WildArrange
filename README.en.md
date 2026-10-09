@@ -810,3 +810,39 @@ Architecture design: project-document initialization returns a next-Skill hint. 
 After readiness passes for an approved task and before its Worker starts, WildArrange creates `runtime:task-packets/<planId>/<taskId>/`. `baseline.json` freezes the first-start task scope and approval projection; `README.md` links to the existing readiness, review, failure, acceptance, and checkpoint reports; `research.md` indexes source references declared at the start. Retries preserve the original baseline. A listed report is evidence only after it exists. `runtime:team/tasks.json` remains the live task authority. Research results must be written to a task-approved `writable_paths` entry and cited in acceptance evidence; the packet does not expand Worker permissions.
 
 The Worker context explains the documentation boundary. When a task changes root Markdown or long-term Markdown/HTML files under `doc/` or `docs/` (excluding task-history directories such as `plans/` and `reports/`), an independent reviewer also checks that they describe current behavior, structure, use, and limitations. Task timelines, raw logs, and unlanded proposals belong in task evidence; current facts have one authoritative source (verified translations may mirror it); obsolete designs are marked historical. The reviewer must cite each changed document and return exact source lines, reasons, and fixes for violations. A failed review prevents checkpoint.
+
+### Cross-project work (client and SDK)
+
+Each project keeps its own governance repository, authoritative task ledger and Worker/Reviewer. Import and approve child plans in each project. Use the registered `projectId` from `project show`. A client task can pin its SDK prerequisite with `externalDependencies`:
+
+```json
+{"externalDependencies":[{"projectId":"project_sdk","planId":"sdk-plan","taskId":"SDK-1","deliverySha":"0123456789abcdef0123456789abcdef01234567"}]}
+```
+
+These IDs and SHA are syntax examples. Use registered project IDs and real delivery commits. Existing readiness and acceptance checks reject incomplete upstream tasks, missing proof/checkpoint/audit evidence and changed versions. Dependency changes require renewed plan approval; approval alone cannot replace renewed acceptance. `blockedBy` remains limited to the same repository and plan.
+
+Store the shared objective in one coordinating project's external runtime. The manifest references tasks instead of copying their state. `members` are implementation tasks. The separate `acceptanceTask` must finish the existing delivery pipeline and pin every member's current delivery SHA in its `externalDependencies`, including members of its own project. Its verification commands must actually test that version combination; connectivity probes are not joint acceptance.
+
+```json
+{
+  "id":"client-sdk-change",
+  "title":"Coordinated client and SDK delivery",
+  "members":[
+    {"projectId":"project_client","planId":"client-plan","taskId":"CLIENT-1"},
+    {"projectId":"project_sdk","planId":"sdk-plan","taskId":"SDK-1"}
+  ],
+  "acceptanceTask":{"projectId":"project_client","planId":"joint-plan","taskId":"CHECK-1"}
+}
+```
+
+```bash
+node ./bin/wildarrange.mjs cross-project import --from work.json
+node ./bin/wildarrange.mjs cross-project status --id client-sdk-change
+node ./bin/wildarrange.mjs cross-project accept --id client-sdk-change
+```
+
+Create member tasks before importing the manifest. Manifests are immutable; use a new ID for changed scope. Status is `blocked`, `ready_for_acceptance`, `accepted` or `stale`. Each query rechecks original task evidence; changed delivery versions or invalid evidence invalidate previous acceptance. Use the existing `run` entry point in each project; cross-project blockers appear in readiness reports without automatically dispatching work to another project. PRs, merge approval and releases remain separate per repository; this does not provide atomic cross-repository merges. Existing `integration accept` still binds one product repository to its governance repository.
+
+### Read-only discovery without a task
+
+Known read-only tools (Read/Glob/Grep/read_file) and verifiable `rg`, file reads, directory listings and Git queries do not require an active task or plan/design confirmation. Read-only pipelines and command sequences are checked segment by segment. Use `git --no-pager log` for history and `git --no-pager show --no-ext-diff --no-textconv HEAD:path` for content. Redirection, execution flags, arbitrary Node/Python/Shell programs and mixed writes are not classified as read-only. Host permissions and high-risk command checks still apply; this classifier is not a general Shell security sandbox.

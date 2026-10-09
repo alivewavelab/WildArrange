@@ -12,6 +12,9 @@
 | 创建独立治理仓库骨架    | `node ./bin/wildarrange.mjs project init-governance --governance-root <path> --repository <git-url>`（只创建缺失文件，含默认武装的治理配置；非 Git 目录自动 git init 并初始提交） |
 | 连接独立治理仓库        | `node ./bin/wildarrange.mjs project attach --governance-root <path>` |
 | 查看三根连接            | `node ./bin/wildarrange.mjs project show` |
+| 导入跨业务仓总任务 | `node ./bin/wildarrange.mjs cross-project import --from <work.json>`（引用各仓既有任务，不复制任务状态） |
+| 查看跨仓进度与版本绑定 | `node ./bin/wildarrange.mjs cross-project status --id <id>` |
+| 记录跨仓联合验收 | `node ./bin/wildarrange.mjs cross-project accept --id <id>`（成员与联合验收任务证据及 SHA 均有效才通过，不合并或发布） |
 | 写入双仓集成验收收据    | `node ./bin/wildarrange.mjs integration accept --project-sha <40-char-sha> --governance-sha <40-char-sha> --reason "..."`（只写外置运行态） |
 | 生成默认配置            | `node ./bin/wildarrange.mjs config init --root`（`--armed` 直接武装质量门） |
 | 安装 adapter        | `node ./bin/wildarrange.mjs adapter install --target all --mode local` |

@@ -831,3 +831,39 @@ Worker 读取 WILDARRANGE_EXECUTION_CONTEXT 的完整任务 Skill；探测器读
 获准任务通过开工检查后、Worker 启动前，会自动建立 `runtime:task-packets/<planId>/<taskId>/`：`baseline.json` 冻结首次开工时的任务范围与批准投影，`README.md` 指向现有 readiness、review、failure、acceptance、checkpoint 报告，`research.md` 索引任务启动时已声明的来源。重试不会覆盖首次基线；列出的报告只有实际生成后才是证据。当前任务状态始终以 `runtime:team/tasks.json` 为准。研究成果仍须写入任务批准的 `writable_paths` 并在验收证据中引用；证据夹不扩大 Worker 权限。
 
 Worker 上下文会提示文档边界。若实际改动项目根 Markdown，或 `doc/`、`docs/` 下的长期 Markdown/HTML 文档（不含 `plans/`、`reports/` 等任务历史目录），独立 Reviewer 额外执行当前事实审计：长期文档保留当前有效的功能、结构、用法与限制；任务时间线、原始日志和未落地方案归任务证据；同一当前事实只由权威来源维护，已验证同步的翻译可保留；旧方案明确标为历史。Reviewer 必须逐份引用改动文档的源码行；违规时给出行号、原因和整改，未通过不能 checkpoint。
+
+### 跨业务仓任务（客户端与 SDK）
+
+每仓保留独立治理仓、任务账本和 Worker/Reviewer。先在各仓导入并批准子计划，使用 `project show` 返回的 `projectId` 引用项目。客户端依赖 SDK 时，在客户端任务中声明 `externalDependencies`：
+
+```json
+{"externalDependencies":[{"projectId":"project_sdk","planId":"sdk-plan","taskId":"SDK-1","deliverySha":"0123456789abcdef0123456789abcdef01234567"}]}
+```
+
+这里的 ID 和 SHA 是格式示例；实际使用已登记的项目 ID 和上游真实交付 SHA。上游未完成、验收/checkpoint/审计证据不完整或版本不一致时，现有开工与验收门拒绝放行。变更依赖须重新批准计划；重新批准本身不替代重新验收。`blockedBy` 继续只表示同仓同计划依赖，不使用它引用另一仓。
+
+把统一目标登记到一个协调项目的外置运行态中，清单只引用各仓任务，不复制状态。`members` 是实现任务；独立 `acceptanceTask` 必须经原有完整流水线完成，并在其 `externalDependencies` 中固定所有成员的当前交付 SHA（同项目另一任务也按完整引用登记）。联合验收命令必须实际检查这组版本，不能用连通性探针充当验收。
+
+```json
+{
+  "id":"client-sdk-change",
+  "title":"客户端与 SDK 配套交付",
+  "members":[
+    {"projectId":"project_client","planId":"client-plan","taskId":"CLIENT-1"},
+    {"projectId":"project_sdk","planId":"sdk-plan","taskId":"SDK-1"}
+  ],
+  "acceptanceTask":{"projectId":"project_client","planId":"joint-plan","taskId":"CHECK-1"}
+}
+```
+
+```bash
+node ./bin/wildarrange.mjs cross-project import --from work.json
+node ./bin/wildarrange.mjs cross-project status --id client-sdk-change
+node ./bin/wildarrange.mjs cross-project accept --id client-sdk-change
+```
+
+成员任务先存在再导入总单；总单不可原地更换范围，变更范围用新 ID。状态为 `blocked`、`ready_for_acceptance`、`accepted` 或 `stale`；每次查询重新核对原任务证据，交付版本或验收链失效会使旧结果失效。执行仍在各仓通过已有 `run` 入口推进；跨仓阻塞会出现在 readiness 报告，不会自动跳到另一项目执行。两仓分别提交 PR、批准合并和发布；此总单不保证跨仓原子合并。原 `integration accept` 仍只绑定一个业务仓和它的治理仓。
+
+### 没有工单时的只读检索
+
+已知只读工具（Read/Glob/Grep/read_file 等）和可验证的 `rg`、读文件、目录列举、Git 查询无需活动任务，也不被计划/设计待确认门阻断。只读管道与多条只读命令逐段判定。Git 历史查询使用 `git --no-pager log`；内容查询使用 `git --no-pager show --no-ext-diff --no-textconv HEAD:path`。重定向、执行型参数、任意 Node/Python/Shell 脚本和混合写入不会被当作只读。宿主沙盒权限和高危命令预检仍生效；这不是通用 Shell 安全沙盒。

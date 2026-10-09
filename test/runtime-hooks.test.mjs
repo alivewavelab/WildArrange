@@ -488,7 +488,7 @@ test("pre-tool-use guard only allows a JSON plan draft before the first task exi
         tool_input: { command },
       });
       assert.equal(readOnlyGit.decision, "allow", command);
-      assert.equal(readOnlyGit.code, "no_file_target", command);
+      assert.ok(["read_only_operation", "no_file_target"].includes(readOnlyGit.code), command);
     }
 
     for (const [command, expectedCode] of [

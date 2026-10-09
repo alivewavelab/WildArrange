@@ -1,3 +1,4 @@
+import { externalDependenciesDigest } from "../infra/cross-project-evidence.mjs";
 // =============================================================================
 // 文件名称：task-board.mjs
 // 所属模块：orchestration
@@ -273,8 +274,9 @@ export async function persistTaskState(rootDir, taskState) {
     .map((task) => [task.id, task]));
   const responsibilityChanged = taskState.tasks.some((task) => {
     const previous = previousTasks.get(task.id);
-    return Boolean(task.responsibilityChanges || previous?.responsibilityChanges)
-      && responsibilityDigest(task.responsibilityChanges) !== responsibilityDigest(previous?.responsibilityChanges);
+    return externalDependenciesDigest(task) !== externalDependenciesDigest(previous || {})
+      || (Boolean(task.responsibilityChanges || previous?.responsibilityChanges)
+      && responsibilityDigest(task.responsibilityChanges) !== responsibilityDigest(previous?.responsibilityChanges));
   });
   if (responsibilityChanged) {
     await updateWorkState(rootDir, (work) => work.activePlanId === taskState.planId

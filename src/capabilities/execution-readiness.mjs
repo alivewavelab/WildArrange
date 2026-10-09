@@ -1,3 +1,4 @@
+import { inspectExternalDependencies } from "../infra/cross-project-evidence.mjs";
 // =============================================================================
 // 文件名称：execution-readiness.mjs
 // 所属模块：capabilities
@@ -32,6 +33,10 @@ export async function checkExecutionReadiness(rootDir, task, options = {}) {
   const { config } = await loadWildArrangeConfig(rootDir);
   const result = { kind: "execution_readiness", at: nowIso(), taskId: task.id, planId: task.planId,
     pass: false, issues: [], skills: [], probes: [] };
+  try {
+    result.externalDependencies = await inspectExternalDependencies(rootDir, task);
+    result.issues.push(...result.externalDependencies.issues);
+  } catch (error) { result.issues.push(`external dependencies: ${error.message}`); }
   const budget = config.review?.responsibility?.maxEvidenceChars || 500000;
   const command = options.workerCommand ?? task.worker_command;
   if (!command || isTrivialCommand(command)) result.issues.push("configure a real worker_command before starting a worker");
