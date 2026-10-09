@@ -479,6 +479,8 @@ test("pre-tool-use guard only allows a JSON plan draft before the first task exi
       "git branch --show-current",
       "git worktree list --porcelain",
       "git ls-files --modified --deleted --others --exclude-standard",
+      "git log --oneline",
+      "git show HEAD",
     ]) {
       const readOnlyGit = await preToolUseGuard(projectRoot, {
         hook_event_name: "PreToolUse",
@@ -500,8 +502,7 @@ test("pre-tool-use guard only allows a JSON plan draft before the first task exi
       ["git diff --output=diff.txt", "no_active_task_shell"],
       ["git diff --ext-diff", "no_active_task_shell"],
       ["git diff --textconv", "no_active_task_shell"],
-      ["git log --oneline", "no_active_task_shell"],
-      ["git show HEAD", "no_active_task_shell"],
+      ["git -C ../vendor status", "no_active_task_shell"],
       ["git -c core.pager=evil status", "no_active_task_shell"],
     ]) {
       const unsafeGit = await preToolUseGuard(projectRoot, {

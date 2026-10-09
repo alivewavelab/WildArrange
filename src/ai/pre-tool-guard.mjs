@@ -464,7 +464,6 @@ const READ_ONLY_WILDARRANGE_SHELL_ARGS = /^(?:status|doctor|summary|timeline|dec
 
 /** 无活跃任务或计划待批时，仅允许只读/计划管理类 WildArrange shell 子命令。 */
 function isAllowedPrePlanShellCommand(command, cliCommandPrefix = "", projectRoot = "") {
-  if (isReadOnlyGitShellCommand(command)) return true;
   const args = stripVerifiedProjectRootOption(parseWildArrangeShellArgs(command, cliCommandPrefix), projectRoot);
   if (!args) return false;
   if (READ_ONLY_WILDARRANGE_SHELL_ARGS.test(args)) return true;
@@ -493,19 +492,6 @@ function isExactReviewBlockerResolve(args) {
     keys.add(key);
   }
   return end === args.length && keys.size === 3;
-}
-
-/** 无任务时允许固定形态的只读 Git 事实查询；不接受任意 revision、pathspec、输出或外部 helper。 */
-function isReadOnlyGitShellCommand(command) {
-  if (typeof command !== "string") return false;
-  const trimmed = command.trim();
-  if (!trimmed || /[\r\n;&|><`$%!^]/.test(trimmed)) return false;
-  const git = String.raw`git(?:\.exe)?(?:\s+--no-pager)?`;
-  const statusArg = String.raw`(?:--short|-s|--branch|-b|--porcelain(?:=(?:v1|v2))?|--untracked-files(?:=(?:no|normal|all))?|--ignored(?:=(?:traditional|matching|no))?|--show-stash|--ahead-behind|--no-ahead-behind)`;
-  if (new RegExp(`^${git}\\s+status(?:\\s+${statusArg})*$`, "i").test(trimmed)) return true;
-  const diffArg = String.raw`(?:--cached|--staged|--stat|--shortstat|--numstat|--name-only|--name-status|--check|--no-ext-diff|--no-textconv|--no-color|--color=never)`;
-  if (new RegExp(`^${git}\\s+diff(?:\\s+${diffArg})*$`, "i").test(trimmed)) return true;
-  return new RegExp(`^${git}\\s+(?:branch\\s+--show-current|worktree\\s+list(?:\\s+--porcelain(?:\\s+-z)?)?|rev-parse\\s+(?:HEAD|--show-toplevel|--is-inside-work-tree|--git-dir)|ls-files(?:\\s+(?:--modified|--deleted|--others|--exclude-standard))*)$`, "i").test(trimmed);
 }
 
 /** 从 shell 命令提取 wildarrange 子命令参数；拒绝 shell 元字符与管道注入。 */

@@ -20,10 +20,19 @@ export function isReadOnlyShellCommand(command) {
 function tokenizeReadCommands(command) {
   if (typeof command !== 'string' || !command.trim()) return null;
   const text = command.trim(), parts = [], args = [];
-  let token = '', started = false, quote = '', closed = false;
-  const flush = () => { if (started) args.push(token); token = ''; started = false; closed = false; };
+  let token = '', started = false, quote = '', closed = false, escaped = false;
+  const flush = () => {
+    // shell 会去掉未加引号的反斜杠：\-\-pre 实际是 --pre，不能当普通词放行
+    if (escaped && token.replaceAll('\\', '').startsWith('-')) return false;
+    if (started) args.push(token);
+    token = ''; started = false; closed = false; escaped = false;
+    return true;
+  };
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
+    // 只丢弃输出的重定向不写文件：2>&1、>/dev/null、2>/dev/null
+    const discard = !quote && !started && /^(?:2>&1|[12]?>\s*\/dev\/null)(?=\s|$|[;&|])/.exec(text.slice(i));
+    if (discard) { i += discard[0].length - 1; continue; }
     if (quote) {
       if (ch === quote) { quote = ''; closed = true; continue; }
       if (quote === '"' && /[$`%!^]/.test(ch)) return null;
@@ -36,20 +45,21 @@ function tokenizeReadCommands(command) {
     }
     if (/[$`%!^<>()[\]{}\0]/.test(ch)) return null;
     if (ch === '\\' && /[\s;&|'"<>]/.test(text[i + 1] || '')) return null;
+    if (ch === '\\') escaped = true;
     if (ch === ';' || ch === '|' || ch === '&' || ch === '\n') {
-      flush();
+      if (!flush()) return null;
       if (ch === '&' && text[i + 1] !== '&') return null;
       if ((ch === '&' || ch === '|') && text[i + 1] === ch) i++;
       if (args.length) { parts.push(args.splice(0)); }
       else if (ch !== '\n') return null;
       continue;
     }
-    if (/\s/.test(ch)) { flush(); continue; }
+    if (/\s/.test(ch)) { if (!flush()) return null; continue; }
     if (closed) return null;
     token += ch; started = true;
   }
   if (quote) return null;
-  flush();
+  if (!flush()) return null;
   if (!args.length) return null;
   parts.push(args);
   return parts;
@@ -65,6 +75,9 @@ function isReadCommand([raw, ...args]) {
     case 'cat': return checkOptions(args,['--number','--number-nonblank','--show-ends','--show-tabs','--squeeze-blank'],[], 'nbAETsv', '');
     case 'head': case 'tail': return checkOptions(args,['--quiet','--verbose'],['--lines','--bytes'],'qv','nc',true);
     case 'ls': return checkOptions(args,['--all','--almost-all','--recursive','--directory','--human-readable','--classify','--full-time'],['--color','--sort','--time-style'],'alhRdFtrS1','');
+    case 'wc': return checkOptions(args,['--lines','--words','--bytes','--chars','--max-line-length'],[],'lwcmL','');
+    case 'sed': return isReadSed(args);
+    case 'find': return isReadFind(args);
     case 'pwd': return args.length === 0 || args.every(x=>['-L','-P'].includes(x));
     case 'grep': return checkOptions(args,['--line-number','--recursive','--ignore-case','--fixed-strings','--extended-regexp','--count','--files-with-matches','--only-matching','--word-regexp','--no-messages'],['--include','--exclude','--exclude-dir','--max-count','--context','--before-context','--after-context','--regexp','--file'],'nirRlLFEsovw','emABC');
     case 'get-content': case 'gc': return checkPsOptions(args,['-raw','-force'],['-path','-literalpath','-totalcount','-head','-tail','-encoding','-delimiter']);
@@ -114,21 +127,42 @@ function checkPsOptions(args, flags, values) {
   return true;
 }
 
-/** Git 查询禁止 -c、输出文件、外部 diff/textconv；内容查询要求显式禁用 helper。 */
+/**
+ * Git 查询禁止 -c、切换仓库、输出文件和外部 diff。
+ * 不允许 -C/--git-dir/--work-tree：其他仓库的配置（core.fsmonitor、diff.external）会在 status/diff 时执行程序。
+ * 当前仓库与用户级配置视为可信：改写它们本身需要写权限，届时已不受只读放行约束。
+ * Agent 的 shell 不是 TTY，git 不会启动分页器，因此不要求 --no-pager。
+ */
 function isReadGit(args) {
-  let noPager=false;
-  while(args.length && ['--no-pager','-C'].includes(args[0])) {
-    const option=args.shift();
-    if(option==='--no-pager') noPager=true;
-    else if(!args.shift()) return false;
-  }
+  if (args[0] === '--no-pager') args.shift();
   const verb=args.shift();
+  const diffFlags=['--stat','--shortstat','--numstat','--name-only','--name-status','--check','--no-ext-diff','--no-textconv','--no-color','--patch','--no-patch','--oneline'];
+  const diffValues=['--format','--pretty','--unified','--color'];
   if(verb==='status') return checkOptions(args,['--short','--branch','--porcelain','--show-stash','--ahead-behind','--no-ahead-behind'],['--untracked-files','--ignored'],'sb','');
-  if(verb==='log') return noPager && checkOptions(args,['--oneline','--all','--graph','--decorate','--no-decorate','--stat','--name-only','--name-status','--no-color','--no-ext-diff','--no-textconv'],['--max-count','--format','--pretty','--since','--until','--author'],'','n',true);
-  if(verb==='show' || verb==='diff') return noPager && args.includes('--no-ext-diff') && args.includes('--no-textconv') && checkOptions(args,['--no-ext-diff','--no-textconv','--no-color','--stat','--name-only','--name-status','--check','--cached','--staged'],['--format','--pretty'],'','');
+  if(verb==='log') return checkOptions(args,[...diffFlags,'--all','--graph','--decorate','--no-decorate','--reverse','--first-parent','--no-merges','--merges','--follow'],[...diffValues,'--max-count','--since','--until','--author','--grep'],'p','nU',true);
+  if(verb==='show') return checkOptions(args,diffFlags,diffValues,'p','U');
+  if(verb==='diff') return checkOptions(args,[...diffFlags,'--cached','--staged'],diffValues,'p','U');
   if(verb==='rev-parse') return args.length===1 && /^(?:HEAD|--show-toplevel|--git-dir|--is-inside-work-tree)$/.test(args[0]);
-  if(verb==='branch') return args.length===1 && args[0]==='--show-current';
+  // 带位置参数的 git branch 会新建分支，只接受纯查询选项
+  if(verb==='branch') return args.every(x=>['--show-current','-a','--all','-r','--remotes','-v','-vv','--verbose','--no-color'].includes(x));
   if(verb==='worktree') return args[0]==='list' && args.slice(1).every(x=>['--porcelain','-z'].includes(x));
-  if(verb==='ls-files') return checkOptions(args,['--modified','--deleted','--others','--exclude-standard','--cached','--stage'],'','mdozcs','');
+  if(verb==='ls-files') return checkOptions(args,['--modified','--deleted','--others','--exclude-standard','--cached','--stage'],[],'mdozcs','');
   return false;
+}
+
+/** sed 只接受 `-n <行号范围>p`：脚本中的 w/e/r 等命令可写文件或执行程序。 */
+function isReadSed(args) {
+  return args[0]==='-n' && /^(?:\d+|\$)(?:,(?:\d+|\$))?p$/.test(args[1]||'') && args.slice(2).every(x=>!x.startsWith('-'));
+}
+
+/** find 只接受筛选条件；-exec/-delete/-fprint 等动作一律拒绝。 */
+function isReadFind(args) {
+  const flags=['-print','-print0','-a','-and','-o','-or','-not','-empty','-follow'];
+  const values=['-name','-iname','-path','-ipath','-type','-maxdepth','-mindepth','-newer','-size','-mtime','-mmin'];
+  for(let i=0;i<args.length;i++) {
+    if(!args[i].startsWith('-')) continue;
+    if(flags.includes(args[i])) continue;
+    if(!values.includes(args[i]) || ++i>=args.length) return false;
+  }
+  return true;
 }
