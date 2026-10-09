@@ -1,3 +1,4 @@
+import { inspectExternalDependencies } from "../infra/cross-project-evidence.mjs";
 // =============================================================================
 // 文件名称：acceptance-proof.mjs
 // 所属模块：capabilities
@@ -73,9 +74,13 @@ export async function writeAcceptanceProof(rootDir, planId, task, evidence = {},
       checks: {},
     };
   }
+  let externalDependencies;
+  try { externalDependencies = await inspectExternalDependencies(rootDir, { ...task, planId }); }
+  catch (error) { externalDependencies = { pass: false, issues: [error.message] }; }
   const proof = buildAcceptanceProof(planId, task, {
     ...evidence,
     projectReviewContextValid,
+    externalDependencies,
     repositoryBinding,
   }, config);
   const jsonPath = resolveTaskAcceptancePath(rootDir, planId, task.id, "json");
@@ -116,6 +121,10 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
   const executedReview = hasExecutedIndependentReview(reviewResult, config, task);
 
   const checks = [
+    ...((task.externalDependencies || []).length ? [proofCheck("external_dependencies", evidence.externalDependencies?.pass === true, {
+      evidence: JSON.stringify(evidence.externalDependencies || null),
+      requiredFix: "Restore the approved upstream delivery SHAs and their complete acceptance evidence before delivery.",
+    })] : []),
     ...(task.governance_binding ? [proofCheck("dual_repository_binding", evidence.repositoryBinding?.pass === true, {
       evidence: evidence.repositoryBinding?.pass === true
         ? `target=${evidence.repositoryBinding.repositoryTarget}; project=${evidence.repositoryBinding.projectSha || "pending"}; governance=${evidence.repositoryBinding.governanceSha || "pending"}`
@@ -207,6 +216,7 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
       successCriteria: criteria,
       deliveryBaseline,
       repositoryBinding: evidence.repositoryBinding || null,
+      externalDependencies: evidence.externalDependencies || null,
     },
   };
 }

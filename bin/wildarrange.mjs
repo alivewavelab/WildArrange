@@ -26,6 +26,7 @@
 //   · 缺了它会怎样？
 //     无法初始化运行态、无法跑任务门禁，Hook 也找不到可信 CLI 前缀。
 // =============================================================================
+import { importCrossProjectWork, crossProjectWorkStatus, acceptCrossProjectWork } from "../src/orchestration/cross-project-work.mjs";
 import { configureProjectReview, prepareProjectReview } from "../src/capabilities/project-review.mjs";
 import { runContractGenerate } from "../src/interface/contract-view.mjs";
 import { applyContractDecision, proposeContractChange, resolveContractChange } from "../src/orchestration/contract-governance.mjs";
@@ -323,6 +324,17 @@ async function main() {
 
   // --- 项目/治理双仓集成验收 ---
   // 仅在运行态写不可变收据，不 checkout、merge 或改写任一仓库。
+  if (command === "cross-project") {
+    const subcommand = args._[1];
+    let result;
+    if (subcommand === "import" && strArg(args, "from")) result = await importCrossProjectWork(rootDir, path.resolve(strArg(args, "from")));
+    else if (subcommand === "status" && strArg(args, "id")) result = await crossProjectWorkStatus(rootDir, strArg(args, "id"));
+    else if (subcommand === "accept" && strArg(args, "id")) result = await acceptCrossProjectWork(rootDir, strArg(args, "id"));
+    else throw new Error("cross-project requires import --from <work.json>, status --id <id>, or accept --id <id>");
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
   if (command === "integration") {
     const subcommand = args._[1];
     if (subcommand !== "accept") throw new Error("wildarrange integration requires accept");

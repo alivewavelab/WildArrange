@@ -1,3 +1,4 @@
+import { externalDependenciesDigest } from "../infra/cross-project-evidence.mjs";
 // =============================================================================
 // 文件名称：plan-state.mjs
 // 所属模块：orchestration
@@ -268,6 +269,7 @@ export async function approvePlan(rootDir, options = {}) {
     };
     const state = await loadTaskState(rootDir);
     await transactWithLedger(rootDir, { type: "plan_approved", planId: work.activePlanId, approver: nextApproval.approvedBy,
+      externalDependencyScopes: Object.fromEntries((state?.tasks || []).map(task => [task.id, externalDependenciesDigest(task)])),
       responsibilityScopes: Object.fromEntries((state?.tasks || []).map((task) => [task.id, responsibilityDigest(task.responsibilityChanges)])),
       contractScopes: Object.fromEntries((state?.tasks || []).map((task) => [task.id, hashContent(JSON.stringify(task.contractChanges?.items || []))])) },
       () => updateWorkState(rootDir, (current) => ({ ...current, status: "ready", planApproval: nextApproval }), { createIfMissing: false }));

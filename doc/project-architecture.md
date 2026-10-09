@@ -50,11 +50,15 @@ delivery commit 用 `git commit-tree` 与临时 index 构建，只含本任务 `
 
 并行 admission 在应用子 Agent 结果前绑定任务分支基线。完成之前它会再次检查任务分支基线与变更归属，并拒绝未归因于本 run 结果的候选路径。gate 与 acceptance proof 全部通过后，使用临时 index 创建只含本任务路径、以任务分支 HEAD 为父的 delivery commit；有 remote 时普通 push 到该 task branch（非 force），无 remote 时更新本地 task branch/worktree。acceptance proof 随后补齐该 SHA，checkpoint 绑定相同 SHA。两种交付都会把共享 checkout 按 pre-image 回滚到干净状态，`main` 不移动。任务分支基线变化或无归属脏路径时，仅回滚本 run 的文件并返回 `revalidation_required`。一旦已知 task-branch push 成功，之后任何本地失败或任务分支历史异常都会使 claim 与 intent 处于 `recovery_required`；禁止回滚已推送成果或释放 claim。进入 `main` 另走持续更新的 PR、自动检查、独立验收和人类 merge 批准；development、staging、production 是部署环境，不默认映射为长期分支。
 
-线性 `run` 与单步 `node execute/checkpoint` 在 Git 项目中也使用独立任务 worktree，位置与 branch/base/delivery SHA 保存在任务的 `delivery_workspace`。执行与 gate 读取任务 worktree 中的文件；任务台账、配置、契约批准记录及验收证据通过 `runtime-store` 写入当前绑定的运行态根：统一为本机运行态根 `runtimeRoot`（项目内不生成任何运行态文件）。外置任务的 `repositoryTarget` 只能是 `project` 或 `governance`，每张任务只在对应仓库建立 branch/worktree；跨仓依赖必须拆分并最终由 `integration accept` 绑定项目 SHA、治理 SHA 与该治理 commit 内的 verification registry 摘要。治理任务只走线性交付；并行 admission 目前仍是项目仓库专属入口，遇到治理任务 fail-closed，禁止回落到客户 checkout。依赖任务从同仓上游交付 SHA 开始；多个互不包含的上游分支需要显式 integration task。无文件变化记录 `no_change` 并绑定现有 SHA，不创建空 commit。非 Git 项目保留本地文件协议，不自动初始化 Git。
+线性 `run` 与单步 `node execute/checkpoint` 在 Git 项目中也使用独立任务 worktree，位置与 branch/base/delivery SHA 保存在任务的 `delivery_workspace`。执行与 gate 读取任务 worktree 中的文件；任务台账、配置、契约批准记录及验收证据通过 `runtime-store` 写入当前绑定的运行态根：统一为本机运行态根 `runtimeRoot`（项目内不生成任何运行态文件）。外置任务的 `repositoryTarget` 只能是 `project` 或 `governance`，每张任务只在对应仓库建立 branch/worktree；项目仓与治理仓的改动必须拆分并最终由 `integration accept` 绑定项目 SHA、治理 SHA 与该治理 commit 内的 verification registry 摘要。治理任务只走线性交付；并行 admission 目前仍是项目仓库专属入口，遇到治理任务 fail-closed，禁止回落到客户 checkout。依赖任务从同仓上游交付 SHA 开始；多个互不包含的上游分支需要显式 integration task。无文件变化记录 `no_change` 并绑定现有 SHA，不创建空 commit。非 Git 项目保留本地文件协议，不自动初始化 Git。
 
 外置控制面使用 `projectRoot + governanceRoot + runtimeRoot` 三根上下文。`projectRoot` 只持产品代码、产品测试和客户自己的文档；`governanceRoot` 版本化政策与 verification registry；`runtimeRoot` 保存唯一 task ledger、锁、原始报告、备份、Prompt Pack、双 SHA 验收收据与 Adapter 生成物。三根不得互相嵌套，映射写入项目外的本机 registry。同一 Git common-dir 的 linked worktree 共用 `projectId` 与 runtime，但每次命令保留当前 worktree 为 `projectRoot`。外置 policy 与项目原有规则只叠加、不复制；治理 Git 有未提交改动时，新计划导入 fail-closed。外置 Adapter bridge 只处理本机 registry 已连接的工作目录，无关项目不创建状态；`doctor` 只把当前 activationId 的真实生命周期 ledger 回执视为 `execution_observed`。
 
 命令超时只有确认进程终止后才可进入普通失败重试；Windows 进程树终止失败返回 `terminationFailed` / `recoveryRequired` 和 PID。编排保留 `verifying` 与所有权，停止后续 gate，要求确认残留进程已停止后恢复，不能把超时当作已安全回滚。
+
+跨业务项目仍分别持有唯一任务账本与独立交付流水线。任务的 `externalDependencies` 以已登记的 `projectId + planId + taskId + deliverySha` 引用上游；开工和交付前核对上游 completed、完整验收/checkpoint/ledger 证据及交付版本。跨项目总任务仅保存成员和联合验收任务引用，不复制子任务状态；成员或依赖版本改变后，联合验收结果失效。现有 `integration accept` 继续只绑定项目仓和治理仓，不代替两个业务仓的联合验收。不自动合并主线或发布。
+
+明确的只读文件/搜索工具与参数可验证的只读 Shell 操作不要求活动任务或计划/设计批准。写入和未知效果操作继续受原门约束；只读判定拒绝重定向、执行型参数与混合写入命令，保留高危命令预检和宿主权限边界。
 
 ## 五区分层
 
@@ -154,7 +158,7 @@ AGENTS.md                         # mandatory reading routes
 
 - `src/orchestration/AGENTS.md`：编排、事务、恢复与完成状态不变量
 - `src/orchestration/plan-state.mjs`：计划导入事务、路由 enrichment、任务状态加载、计划批准状态（`loadPlanApproval` / `approvePlan`）、`work.json` 计划状态唯一写入口（`updateWorkState`）与 `tasks.md` 派生渲染；任务字段规范化与任务图校验在 `src/orchestration/task-normalize.mjs`；外置模式把治理 verification registry 的三类命令只增不减地合入计划，并在唯一 task ledger 固化 registry digest 与双仓 revision；feature design 状态委托 `feature-design.mjs` 唯一 owner。
-- `src/orchestration/task-normalize.mjs`：任务字段规范化、successCriteria/contractChanges 校验、任务图校验与单任务路由 enrichment（纯函数）
+- `src/orchestration/task-normalize.mjs`：任务字段规范化、successCriteria/contractChanges/externalDependencies 校验、任务图校验与单任务路由 enrichment（纯函数）
 - `src/orchestration/feature-design.mjs`：需求确认、计划绑定与 feature design 状态迁移的唯一业务 owner
 - `src/orchestration/host-runtime.mjs`：宿主事件的业务前置编排；CLI 显式组合 AI 渲染入口，不添加反向 import
 - `src/orchestration/contract-governance.mjs`：任务契约变更的批准范围、提案、暂停与继续 owner；复用 `change-governance.mjs` 的 ChangeRequest，不建立第二套批准库。
@@ -197,6 +201,9 @@ AGENTS.md                         # mandatory reading routes
 - `src/ai/skill-matcher.mjs`：stage/route/agent/keyword Skill 匹配与可解释加载提示；路由信号命中复用 `infra/route-table.mjs` 的 `matchSignals` 单一实现；不维护脱离 Agent Prompt 的模型偏置旋钮。
 - `src/ai/context.mjs`：Agent 上下文、hash 校验后的角色 Prompt 读取与预算化、resume snapshot、session 谱系与 continuation 指令。
 - `src/ai/hooks.mjs`：宿主生命周期 hook 的事件编排与入口接线（facts 采集、注入点解析、报告与 ledger/decision 投影；scope 检查经 `capabilities/gateway.mjs`，非直接 import）。`SessionStart` 注入完整 Jiuwei 身份 Prompt，`PostCompact` 再注入用于恢复；`UserPromptSubmit` 不重复身份 Prompt。
+- `src/infra/read-only-command.mjs`：只读工具身份和 Shell 参数分类；验证组合中每一段，无重定向、执行型参数或未知命令才判定只读。
+- `src/infra/cross-project-evidence.mjs`：从本机项目登记解析跨仓引用并读取唯一任务账本、完成证据及固定交付 SHA；返回事实，不推进状态。
+- `src/orchestration/cross-project-work.mjs`：跨项目总任务导入、状态汇总与联合验收；只存成员引用，复用各仓完成证据，版本变化使旧验收失效。
 - `src/ai/pre-tool-guard.mjs`：PreToolUse 安全门（preToolUseGuard）与目标路径/apply_patch/shell 白名单解析；hook 输入归一化助手（事件别名、taskId、可信 CLI 前缀）也在此持有，供 hooks.mjs 单向复用。
 - `src/ai/hook-render.mjs`：hook 注入 Markdown 与 PreToolUse 宿主输出（permissionDecision）的渲染模板，纯文本拼装。
 

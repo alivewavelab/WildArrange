@@ -6,6 +6,9 @@
 | `wildarrange project init-governance --governance-root <path> --repository <git-url> [--default-branch main]` | 在项目外创建不覆盖已有文件的治理仓库骨架与默认武装配置；非 Git 目录自动 git init 并提交初始 commit |
 | `wildarrange project attach --governance-root <path> [--project-root <path>] [--runtime-root <path>]` | 把客户项目连接到独立治理仓库；映射写入项目外部状态目录 |
 | `wildarrange project show [--project-root <path>]` | 查看项目、治理仓库和运行态三根连接 |
+| `wildarrange cross-project import --from <work.json>` | 导入跨业务仓总任务引用；成员任务仍由各自项目唯一账本管理 |
+| `wildarrange cross-project status --id <id>` | 核对跨仓成员、依赖 SHA 与联合验收当前证据 |
+| `wildarrange cross-project accept --id <id>` | 联合验收任务固定全部成员 SHA 且证据完整后记录总任务验收，不合并主线 |
 | `wildarrange integration accept --project-sha <40-char-sha> --governance-sha <40-char-sha> [--id <id>] [--reason "..."]` | 校验两个仓库的提交与治理注册表，并在项目外运行态写双 SHA 集成验收收据 |
 | `wildarrange review configure --from <setup.json> [--apply]` | 预览项目审查与执行准备配置；明确确认后 --apply，只能更新治理配置 |
 | `wildarrange review checklist --task <taskId>` | 解析本任务项目审查清单和必需依据，不启动执行器 |

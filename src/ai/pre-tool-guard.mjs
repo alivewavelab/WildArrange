@@ -12,6 +12,7 @@
 //   · 与谁协作？ command-safety、task-state、plan-state、feature-design、path-match。
 // =============================================================================
 
+import { isReadOnlyTool, isReadOnlyShellCommand } from "../infra/read-only-command.mjs";
 import { realpathSync } from "node:fs";
 import path from "node:path";
 import {
@@ -84,6 +85,13 @@ export async function preToolUseGuard(rootDir, input = {}, options = {}) {
         deniedPaths: targetPaths,
       };
     }
+  }
+
+  // 先按操作效果识别读取；读取路径不能被当作 writable_paths 写入目标。
+  if (isReadOnlyTool(toolName) || (isShellTool && isReadOnlyShellCommand(shellCommand))) {
+    return { kind: "pre_tool_use_guard", at: nowIso(), decision: "allow", code: "read_only_operation",
+      reason: "read-only inspection does not require an active task or plan/design approval",
+      toolName, taskId: null, targetPaths, deniedPaths: [] };
   }
 
   if (toolName === "create_goal" && hasInvalidCreateGoalPayload(toolInput)) {
@@ -452,7 +460,7 @@ function isRuntimePlanDraftPath(projectRoot, candidate) {
 // --- Shell 与功能设计门 ---
 
 /** 无活跃任务/计划待批时允许的 WildArrange CLI 子命令参数白名单（只读与计划管理类）。 */
-const READ_ONLY_WILDARRANGE_SHELL_ARGS = /^(?:status|doctor|summary|timeline|decisions|config\s+show|changes\s+list|adoption\s+inventory|review\s+checklist\s+--task\s+[A-Za-z0-9_.-]+|prompts\s+show\s+--skill\s+[A-Za-z0-9][A-Za-z0-9._-]{0,99}|resume(?:\s+--session\s+[A-Za-z0-9_.-]+)?|continuation\s+check(?:\s+--session\s+[A-Za-z0-9_.-]+)?|help(?:\s+--all)?|--help(?:\s+--all)?)$/i;
+const READ_ONLY_WILDARRANGE_SHELL_ARGS = /^(?:status|doctor|summary|timeline|decisions|cross-project\s+status\s+--id\s+[A-Za-z0-9_.-]+|project\s+show|prompts\s+list|config\s+(?:show|verify)|ledger\s+verify|state\s+(?:verify|list)|changes\s+list|adoption\s+inventory|review\s+checklist\s+--task\s+[A-Za-z0-9_.-]+|prompts\s+show\s+--skill\s+[A-Za-z0-9][A-Za-z0-9._-]{0,99}|resume(?:\s+--session\s+[A-Za-z0-9_.-]+)?|continuation\s+check(?:\s+--session\s+[A-Za-z0-9_.-]+)?|help(?:\s+--all)?|--help(?:\s+--all)?)$/i;
 
 /** 无活跃任务或计划待批时，仅允许只读/计划管理类 WildArrange shell 子命令。 */
 function isAllowedPrePlanShellCommand(command, cliCommandPrefix = "", projectRoot = "") {
@@ -462,9 +470,10 @@ function isAllowedPrePlanShellCommand(command, cliCommandPrefix = "", projectRoo
   if (READ_ONLY_WILDARRANGE_SHELL_ARGS.test(args)) return true;
   if (isRuntimeReviewConfigure(args, projectRoot, true)) return true;
   if (/^init$/i.test(args)) return true;
+  if (/^cross-project\s+accept\s+--id\s+[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/i.test(args)) return true;
   if (isExactReviewBlockerResolve(args)) return true;
   if (/^plan\s+approve(?:\s+--plan\s+[A-Za-z0-9_.-]+)?$/i.test(args)) return true;
-  return /^plan\s+--from\s+(?:"[A-Za-z0-9_./\\:~ -]+\.json"|'[A-Za-z0-9_./\\:~ -]+\.json'|[A-Za-z0-9_./\\:~ -]+\.json)$/i.test(args);
+  return /^(?:plan|cross-project\s+import)\s+--from\s+(?:"[A-Za-z0-9_./\\:~ -]+\.json"|'[A-Za-z0-9_./\\:~ -]+\.json'|[A-Za-z0-9_./\\:~ -]+\.json)$/i.test(args);
 }
 
 /**

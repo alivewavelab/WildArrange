@@ -1,3 +1,4 @@
+import { normalizeExternalDependencies } from "../infra/cross-project-evidence.mjs";
 // =============================================================================
 // 文件名称：task-normalize.mjs
 // 所属模块：orchestration
@@ -113,6 +114,7 @@ export function normalizeTask(task, index, defaults = {}, options = {}) {
     status,
     owner,
     repositoryTarget,
+    externalDependencies: normalizeExternalDependencies(task.externalDependencies),
     owner_source: explicitOwner ? "explicit" : "default",
     attempts: Number.isInteger(task.attempts) ? task.attempts : 0,
     maxAttempts: Number.isInteger(task.maxAttempts) ? task.maxAttempts : 3,
