@@ -249,3 +249,33 @@ test("codex is found inside the ChatGPT desktop app when it is not on PATH, and 
   assert.match(result.recommended.workerProbe, /executor probe --cli codex$/);
   assert.match(result.recommended.reviewerCommand, /executor review --cli claude$/);
 });
+
+test("formal executor forwards cancellation to its separate model process group", { skip: process.platform === "win32" }, async () => {
+  await withPacket(async ({ dir, packetPath, bin }) => {
+    const pidFile = path.join(dir, "model.pid");
+    await writeFile(packetPath, JSON.stringify({ kind: "project_review_step" }));
+    await writeFile(bin, "#!/usr/bin/env node\nrequire('node:fs').writeFileSync("
+      + JSON.stringify(pidFile) + ", String(process.pid)); setTimeout(()=>{},20000);\n");
+    let finished = false;
+    const pending = runExecutor({ role: "review", cli: "kimi", bin, cwd: dir,
+      env: { WILDARRANGE_REVIEW_PACKET: packetPath } }).then(result => { finished = true; return result; });
+    try {
+      const deadline = Date.now() + 5000;
+      let pid;
+      while (!finished && Date.now() < deadline) {
+        pid = Number(await readFile(pidFile, "utf8").catch(() => ""));
+        if (pid) break;
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      assert.ok(pid, "model process started");
+      process.emit("SIGTERM");
+      const result = await pending;
+      assert.notEqual(result.exitCode, 0);
+      assert.equal(result.stdout, "");
+      assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+    } finally {
+      if (!finished && process.listenerCount("SIGTERM")) process.emit("SIGTERM");
+      await pending;
+    }
+  });
+});

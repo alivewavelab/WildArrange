@@ -90,6 +90,8 @@ function normalizeRuntimeConfig(config) {
   if (!Number.isInteger(readiness.timeoutMs) || readiness.timeoutMs < 1 || readiness.timeoutMs > 300000) throw new Error("executionReadiness.timeoutMs must be between 1 and 300000");
   if (!Number.isInteger(readiness.workerTimeoutMs) || readiness.workerTimeoutMs < 1 || readiness.workerTimeoutMs > 86400000) throw new Error("executionReadiness.workerTimeoutMs must be between 1 and 86400000");
   if (!isPlainObject(normalized.review) || !Array.isArray(normalized.review.steps)) throw new Error("review.steps must be an array");
+  const reviewInterval = normalized.review.responsibility?.checkIntervalMs;
+  if (!Number.isInteger(reviewInterval) || reviewInterval < 1 || reviewInterval > 86400000) throw new Error("review.responsibility.checkIntervalMs must be between 1 and 86400000");
   delete normalized.dynamicAgents;
   delete normalized.promptVariants;
   normalized.agents = normalizeAgentMap(normalized.agents);

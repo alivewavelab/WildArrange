@@ -53,7 +53,7 @@ export async function runResponsibilityAudit(projectRoot, task, scopeResult, con
     if (JSON.stringify(packet).length > budget) return blocked("Responsibility review packet exceeds evidence budget");
     const packetPath = resolveTaskReportPath(projectRoot, "reviews", task.planId, task.id, "json") + ".responsibility-input.json";
     const response = await executeReviewPacket(executionRoot, packetPath, packet, config, settings);
-    if (response.commandRecovery) return { ...blocked("Reviewer termination requires recovery"), commandRecovery: response.commandRecovery };
+    if (response.commandRecovery) return { ...blocked(response.commandRecovery.cancelled && !response.commandRecovery.terminationFailed ? "Reviewer cancelled; explicit resume required" : "Reviewer termination requires recovery"), commandRecovery: response.commandRecovery };
     const content = response.content;
     const after = await collectResponsibilityEvidence(executionRoot, changes, scopeResult.changedPaths, budget);
     // §3.4：审计执行期间源码变化则 receipt 无效，须重跑 verify/review。

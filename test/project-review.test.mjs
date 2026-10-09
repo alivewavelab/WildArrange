@@ -325,3 +325,135 @@ test("task packet refuses a symlinked control directory without writing outside 
   await assert.rejects(() => ensureTaskPacket(root, task.planId, task), /symlink/);
   assert.deepEqual(await import("node:fs/promises").then(fs => fs.readdir(outside)), []);
 });
+
+
+test("a running reviewer survives repeated checks without restarting or completing the task", async t => {
+  const { root, config, task, scope } = await fixture(t);
+  const adapter = path.join(auxDir(root), "adapter.cjs");
+  const release = path.join(auxDir(root), "release-review");
+  const starts = path.join(auxDir(root), "review-starts");
+  const original = await readFile(adapter, "utf8");
+  await writeFile(adapter, "const fs = require('node:fs');\n"
+    + "fs.appendFileSync(" + JSON.stringify(starts) + ", 'started\\n');\n"
+    + "const timer = setInterval(() => { if (!fs.existsSync(" + JSON.stringify(release)
+    + ")) return; clearInterval(timer); (() => { " + original + " })(); }, 20);\n");
+  config.review.responsibility.timeoutMs = 50;
+  config.review.responsibility.checkIntervalMs = 40;
+  let finished = false;
+  const pending = runProjectReview(root, task, scope, config).then(result => { finished = true; return result; });
+  try {
+    const statusPath = resolveWildArrangePath(root, "reports", "reviews", task.planId, task.id + ".json.module-rules.input.json.status.json");
+    const deadline = Date.now() + 5000;
+    let status;
+    while (Date.now() < deadline) {
+      status = JSON.parse(await readFile(statusPath, "utf8").catch(() => "null"));
+      if (status?.checks >= 2 && await readFile(starts, "utf8").catch(() => "")) break;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    assert.equal(status?.status, "running", JSON.stringify(status));
+    assert.ok(status.checks >= 2);
+    assert.equal(finished, false);
+    assert.notEqual((await loadTaskState(root)).tasks[0].status, "completed");
+    await writeFile(release, "release");
+    const result = await pending;
+    assert.equal(result.pass, true, JSON.stringify(result));
+    assert.equal((await readFile(starts, "utf8")).trim(), "started", "one original process, no restart");
+    const terminal = JSON.parse(await readFile(statusPath, "utf8"));
+    assert.equal(terminal.status, "exited");
+    assert.equal(terminal.exitCode, 0);
+  } finally {
+    await writeFile(release, "release");
+    await pending;
+  }
+});
+
+test("explicit review cancellation stops the process and never returns a verdict", async t => {
+  const { executeReviewPacket } = await import("../src/capabilities/project-review.mjs");
+  const { root } = await fixture(t);
+  const packetPath = path.join(auxDir(root), "cancel-review.json");
+  const controller = new AbortController();
+  const settings = { command: 'node -e "setInterval(()=>{},1000)"', checkIntervalMs: 30, signal: controller.signal };
+  const pending = executeReviewPacket(root, packetPath, { kind: "project_review_step" }, {}, settings);
+  setTimeout(() => controller.abort(), 150);
+  const response = await pending;
+  assert.equal(response.content, undefined);
+  assert.equal(response.commandRecovery.cancelled, true);
+  assert.equal(response.commandRecovery.recoveryRequired, true);
+  const terminal = JSON.parse(await readFile(packetPath + ".status.json", "utf8"));
+  assert.equal(terminal.status, "cancelled");
+  assert.equal(terminal.exitCode, 130);
+});
+
+test("review failures never become approval and readiness retains its deadline", async t => {
+  const { executeReviewPacket } = await import("../src/capabilities/project-review.mjs");
+  const { root, config, task, scope } = await fixture(t);
+  const packetPath = path.join(auxDir(root), "failed-review.json");
+  await assert.rejects(() => executeReviewPacket(root, packetPath, { kind: "project_review_step" }, {},
+    { command: 'node -e "process.exit(3)"', checkIntervalMs: 30 }), /reviewer failed/);
+  assert.equal(JSON.parse(await readFile(packetPath + ".status.json", "utf8")).status, "failed");
+  await assert.rejects(() => executeReviewPacket(root, packetPath, { kind: "execution_readiness_probe" }, {},
+    { command: 'node -e "setInterval(()=>{},1000)"', timeoutMs: 50 }), /timed out/);
+  await writeFile(path.join(auxDir(root), "adapter.cjs"), "console.log('{}');");
+  const result = await runProjectReview(root, task, scope, config);
+  assert.equal(result.pass, false);
+  assert.notEqual((await loadTaskState(root)).tasks[0].status, "completed");
+});
+
+test("cancelling a formal review pauses the pipeline without checkpoint or automatic retry", async t => {
+  const { root, task } = await fixture(t);
+  const adapter = path.join(auxDir(root), "adapter.cjs");
+  const marker = path.join(auxDir(root), "formal-review-started");
+  const original = await readFile(adapter, "utf8");
+  await writeFile(adapter, "const fs = require('node:fs');\n"
+    + "const packet=JSON.parse(fs.readFileSync(process.env.WILDARRANGE_READINESS_PACKET||process.env.WILDARRANGE_REVIEW_PACKET,'utf8'));\n"
+    + "if(packet.kind==='execution_readiness_probe'){ (()=>{" + original + "})(); }\n"
+    + "else { fs.writeFileSync(" + JSON.stringify(marker) + ",'started'); setTimeout(()=>process.exit(2),15000); }\n");
+  let finished = false;
+  const pending = runNextTask(root).then(result => { finished = true; return result; });
+  try {
+    const deadline = Date.now() + 10000;
+    while (!finished && Date.now() < deadline && !await readFile(marker, "utf8").catch(() => "")) {
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    assert.equal(finished, false, JSON.stringify(await (finished ? pending : Promise.resolve(null))));
+    assert.equal(await readFile(marker, "utf8"), "started");
+    process.emit("SIGTERM");
+    const result = await pending;
+    assert.equal(result.status, "recovery_required", JSON.stringify(result));
+    assert.notEqual((await loadTaskState(root)).tasks[0].status, "completed");
+    const resumed = await runNextTask(root);
+    assert.equal(resumed.status, "recovery_required", JSON.stringify(resumed));
+    const statusPath = resolveWildArrangePath(root, "reports", "reviews", task.planId, task.id + ".json.responsibility-input.json.status.json");
+    assert.equal(JSON.parse(await readFile(statusPath, "utf8")).status, "cancelled");
+  } finally {
+    if (!finished && process.listenerCount("SIGTERM")) process.emit("SIGTERM");
+    await pending;
+  }
+});
+
+test("status write failure cancels review without losing the recovery result", async t => {
+  const { executeReviewPacket } = await import("../src/capabilities/project-review.mjs");
+  const { root } = await fixture(t);
+  const packetPath = path.join(auxDir(root), "status-failure.json");
+  const statusPath = packetPath + ".status.json";
+  const controller = new AbortController();
+  const pending = executeReviewPacket(root, packetPath, { kind: "project_review_step" }, {},
+    { command: 'node -e "setInterval(()=>{},1000)"', checkIntervalMs: 50, signal: controller.signal });
+  try {
+    const deadline = Date.now() + 5000;
+    while (!await readFile(statusPath, "utf8").catch(() => "") && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    // 用目录阻断原子替换：进度写入与最终状态写入均失败。
+    await rm(statusPath);
+    await mkdir(statusPath);
+    const response = await pending;
+    assert.equal(response.content, undefined);
+    assert.equal(response.commandRecovery.cancelled, true);
+    assert.equal(response.commandRecovery.recoveryRequired, true);
+    assert.match(response.commandRecovery.stderr, /review status could not be saved/);
+  } finally {
+    controller.abort();
+    await pending;
+  }
+});

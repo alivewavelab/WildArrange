@@ -133,16 +133,76 @@ export async function prepareProjectReview(rootDir, task, config, changedPaths =
 export async function executeReviewPacket(rootDir, packetPath, packet, config, settings = {}) {
   await writeJsonAtomic(packetPath, packet);
   if (settings.command) {
-    const result = await runCommand(settings.command, rootDir, settings.timeoutMs || 120000, {
-      extraPatterns: compileCommandSafetyPatterns(config), env: { WILDARRANGE_REVIEW_PACKET: packetPath },
-    });
+    const options = { extraPatterns: compileCommandSafetyPatterns(config), env: { WILDARRANGE_REVIEW_PACKET: packetPath } };
+    const result = packet.kind === "execution_readiness_probe"
+      ? await runCommand(settings.command, rootDir, settings.timeoutMs || 120000, options)
+      : await waitForReviewCommand(rootDir, packetPath, settings, options);
     // §3.4：审查命令进程未确认终止时短路，交由上层 recovery 而非 INCONCLUSIVE。
+    // 显式取消也暂停流程，复用恢复入口，避免 workflow 把取消当普通失败自动重跑。
+    if (result.cancelled) return { commandRecovery: { ...result, recoveryRequired: true } };
     if (result.terminationFailed || result.recoveryRequired) return { commandRecovery: result };
     if (result.timedOut) throw new Error(`independent reviewer timed out after ${settings.timeoutMs || 120000}ms; check that the reviewer service responds, or raise the reviewer timeoutMs in review config`);
     if (result.exitCode !== 0 || result.outputTruncated?.stdout) throw new Error("independent reviewer failed or output was truncated");
     return { content: result.stdout };
   }
   return { content: await runIndependentLlmReview(config, packet, settings) };
+}
+
+
+/**
+ * 正式审查持续等待同一个子进程。状态文件只描述运行情况，不是 PASS 或完成证明。
+ * 按顺序落盘，防止迟到的 running 覆盖终态；写入失败时取消并拒绝放行。
+ */
+async function waitForReviewCommand(rootDir, packetPath, settings, options) {
+  const checkIntervalMs = settings.checkIntervalMs ?? 900000;
+  if (!Number.isInteger(checkIntervalMs) || checkIntervalMs < 1 || checkIntervalMs > 86400000) {
+    throw new Error("review.responsibility.checkIntervalMs must be between 1 and 86400000");
+  }
+  const statusPath = packetPath + ".status.json";
+  const startedAt = nowIso();
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  const snapshot = { kind: "review_command_status", status: "running", startedAt, ownerPid: process.pid, checkIntervalMs, checks: 0 };
+  let writes = Promise.resolve();
+  let writeError;
+  await writeJsonAtomic(statusPath, { ...snapshot, lastCheckedAt: startedAt });
+  process.once("SIGINT", cancel);
+  process.once("SIGTERM", cancel);
+  settings.signal?.addEventListener("abort", cancel, { once: true });
+  if (settings.signal?.aborted) cancel();
+  // 没有输出不能据此认定模型挂死；进程退出由 close/error 事件即时处理。
+  const timer = setInterval(() => {
+    const progress = { ...snapshot, checks: ++snapshot.checks, lastCheckedAt: nowIso() };
+    writes = writes.then(() => writeJsonAtomic(statusPath, progress)).catch(error => {
+      writeError ||= error;
+      cancel();
+    });
+  }, checkIntervalMs);
+  let result;
+  try {
+    result = await runCommand(settings.command, rootDir, null, { ...options, signal: controller.signal });
+  } finally {
+    clearInterval(timer);
+    process.removeListener("SIGINT", cancel);
+    process.removeListener("SIGTERM", cancel);
+    settings.signal?.removeEventListener("abort", cancel);
+    await writes;
+  }
+  const status = result.recoveryRequired ? "recovery_required"
+    : result.cancelled ? "cancelled" : result.exitCode === 0 && !writeError ? "exited" : "failed";
+  try {
+    await writeJsonAtomic(statusPath, { ...snapshot, status, lastCheckedAt: nowIso(), finishedAt: nowIso(),
+      exitCode: result.exitCode, ...(writeError ? { error: writeError.message } : {}) });
+  } catch (error) {
+    // 状态写盘失败不能掩盖“进程未确认终止”，否则上层可能自动重跑。
+    writeError ||= error;
+  }
+  if (writeError) {
+    const message = "review status could not be saved: " + writeError.message;
+    if (!result.recoveryRequired && !result.cancelled) throw new Error(message);
+    result.stderr = [result.stderr, message].filter(Boolean).join("\n");
+  }
+  return result;
 }
 
 /**
