@@ -9,14 +9,14 @@
 | ----------------- | ---------------------------------------------------------------- |
 | 初始化运行时            | `node ./bin/wildarrange.mjs init`                                      |
 | 一步接入外置治理        | `node ./bin/wildarrange.mjs setup --governance-root <path> [--repository <git-url>] [--target codex\|cursor\|kimi\|all]`（init-governance → attach → init → adapter install，客户项目零写入） |
-| 创建独立治理仓库骨架    | `node ./bin/wildarrange.mjs project init-governance --governance-root <path> --repository <git-url>`（只创建缺失文件，含默认武装的治理配置；非 Git 目录自动 git init 并初始提交） |
+| 创建独立治理仓库骨架    | `node ./bin/wildarrange.mjs project init-governance --governance-root <path> --repository <git-url>`（只创建缺失文件，含默认治理配置；非 Git 目录自动 git init 并初始提交） |
 | 连接独立治理仓库        | `node ./bin/wildarrange.mjs project attach --governance-root <path>` |
 | 查看三根连接            | `node ./bin/wildarrange.mjs project show` |
 | 导入跨业务仓总任务 | `node ./bin/wildarrange.mjs cross-project import --from <work.json>`（引用各仓既有任务，不复制任务状态） |
 | 查看跨仓进度与版本绑定 | `node ./bin/wildarrange.mjs cross-project status --id <id>` |
 | 记录跨仓联合验收 | `node ./bin/wildarrange.mjs cross-project accept --id <id>`（成员与联合验收任务证据及 SHA 均有效才通过，不合并或发布） |
 | 写入双仓集成验收收据    | `node ./bin/wildarrange.mjs integration accept --project-sha <40-char-sha> --governance-sha <40-char-sha> --reason "..."`（只写外置运行态） |
-| 生成默认配置            | `node ./bin/wildarrange.mjs config init --root`（`--armed` 直接武装质量门） |
+| 生成默认配置            | `node ./bin/wildarrange.mjs config init` |
 | 安装 adapter        | `node ./bin/wildarrange.mjs adapter install --target all --mode local` |
 | 激活外置用户级配置 | `node ./bin/wildarrange.mjs adapter activate --target all [--user-root <临时目录>]`（Cursor Hook + 指针规则、Codex `~/.codex/AGENTS.md` 指针段；先备份，不写客户项目） |
 | 卸载 adapter        | `node ./bin/wildarrange.mjs adapter uninstall --target all`（外置：移除用户级条目/指针并删 runtime 插件包） |
@@ -29,7 +29,8 @@
 | 合入子 Agent 成果     | `node ./bin/wildarrange.mjs parallel admit --run <runId> --task T001`     |
 | 查看并行运行记录        | `node ./bin/wildarrange.mjs parallel status --run <runId>`             |
 | 关闭保留的子 Agent 结果 | `node ./bin/wildarrange.mjs parallel close --run <runId> --task T001 --reason user_accepted` |
-| 清理 Git worktree 隔离目录及已并入 `main` 的本地 task branch | `node ./bin/wildarrange.mjs parallel cleanup --run <runId>` |
+| 合并后清理任务现场（线性与并行） | `node ./bin/wildarrange.mjs cleanup [--dry-run]`（同步远端主线，含 squash/rebase 合并判定；远端 branch 只列清单待人工删除） |
+| 清理单个并行 run 的 worktree | `node ./bin/wildarrange.mjs parallel cleanup --run <runId>` |
 | 重跑 run 中未通过的任务 | `node ./bin/wildarrange.mjs parallel retry --run <runId> [--command "..."]` |
 | 标注一条决策 | `node ./bin/wildarrange.mjs annotate --decision <decisionId> --category rule_wrong --reason "..."` |
 | 查看标注与统计 | `node ./bin/wildarrange.mjs annotate list` / `annotate stats` |

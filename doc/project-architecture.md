@@ -41,7 +41,8 @@ task branch target (local, from clean commit base)
   -> delivery commit + non-force task-branch push (when a remote exists)
   -> acceptance proof/checkpoint bind delivery SHA
   -> Draft PR -> human approve/merge -> main
-  -> prove clean -> remove worktree -> remove local branch
+  -> cleanup: fetch main -> prove merged (ancestor or patch-equivalent) and clean
+  -> remove worktree -> remove local branch (remote branch: human confirms)
 ```
 
 `gitDelivery` 只保留 `remote`、`integrationBranch`（清理 worktree 时判断是否已并入主线）、`taskBranchPrefix` 与 `requireWorktreeForParallelWrites`。有 Git 基线时始终强制 worktree 隔离并生成 delivery commit；有 remote 时普通非强制 push 到该 task branch，无 remote 时只更新本地 task branch。任何配置都不得允许两个可写 worktree 共用一个 branch、force push，或用 checkpoint/admission 自动合入共享 `main`。
@@ -150,7 +151,7 @@ AGENTS.md                         # mandatory reading routes
 - `src/interface/hook-entry.mjs`：`hook run` 的载荷信任与 digest 决策（强制 `--adapter-digest`、CLI 命令前缀只取自当前进程 CLI 或已安装 adapter，绝不信任 payload 内嵌值），随后进入 `host-runtime.mjs`；bin 只读取载荷与输出。
 - `src/interface/dashboard-entry.mjs`：`serve` 与 `adoption start/resume` 共用的 Dashboard 监听参数解析（默认 `127.0.0.1:8765`、adoption 自动 token）与 approvals 深链拼装。
 - `src/interface/task-input.mjs`：`task create` 的命令行标志到任务对象的适配与 CLI 默认值，不做状态或校验。
-- `src/interface/project-setup.mjs`：`setup` 一步式外置接入，只按序组合 init-governance（含 Git 初始提交与默认武装配置）、attach、`initRuntime` 与 adapter install；同时提供 `project init-governance` 默认值封装与 `project attach/show` 的 JSON 视图。不拥有任何路径或治理规则；`project attach/show` 由 bin 直接调用 `infra/workspace-context.mjs`。
+- `src/interface/project-setup.mjs`：`setup` 一步式外置接入，只按序组合 init-governance（含 Git 初始提交与默认配置）、attach、`initRuntime` 与 adapter install；同时提供 `project init-governance` 默认值封装与 `project attach/show` 的 JSON 视图。不拥有任何路径或治理规则；`project attach/show` 由 bin 直接调用 `infra/workspace-context.mjs`。
 
 ### orchestration/
 
@@ -159,7 +160,8 @@ AGENTS.md                         # mandatory reading routes
 - `src/orchestration/AGENTS.md`：编排、事务、恢复与完成状态不变量
 - `src/orchestration/plan-state.mjs`：计划导入事务、路由 enrichment、任务状态加载、计划批准状态（`loadPlanApproval` / `approvePlan`）、`work.json` 计划状态唯一写入口（`updateWorkState`）与 `tasks.md` 派生渲染；任务字段规范化与任务图校验在 `src/orchestration/task-normalize.mjs`；外置模式把治理 verification registry 的三类命令只增不减地合入计划，并在唯一 task ledger 固化 registry digest 与双仓 revision；feature design 状态委托 `feature-design.mjs` 唯一 owner。
 - `src/orchestration/task-normalize.mjs`：任务字段规范化、successCriteria/contractChanges/externalDependencies 校验、任务图校验与单任务路由 enrichment（纯函数）
-- `src/orchestration/feature-design.mjs`：需求确认、计划绑定与 feature design 状态迁移的唯一业务 owner
+- `src/orchestration/feature-design.mjs`：需求确认、计划绑定与 feature design 状态迁移的唯一业务 owner；开发者单独回复「取消」或「不是新功能」时关闭当前门（`cancelled`），不生成计划
+- `src/orchestration/task-cleanup.mjs`：合并后现场清理的唯一 owner：对 completed 任务的 `delivery_workspace`（线性与并行）先同步远端主线，证明已合并（祖先或补丁等价）且 worktree 干净后删除 worktree 与本地 branch；远端 branch 只列待人工删除清单；支持 `--dry-run`，不改写任务台账
 - `src/orchestration/host-runtime.mjs`：宿主事件的业务前置编排；CLI 显式组合 AI 渲染入口，不添加反向 import
 - `src/orchestration/contract-governance.mjs`：任务契约变更的批准范围、提案、暂停与继续 owner；复用 `change-governance.mjs` 的 ChangeRequest，不建立第二套批准库。
 - `src/orchestration/linear-runtime.mjs`：连续 `runNextTask` 的任务选择、claim、worker 执行与 delivery pipeline 编排；每个 gate 调用经 `capabilities/gateway.mjs` 的 `invokeCapability`。分步 execute/checkpoint/retry 节点由 `src/orchestration/linear-workflow.mjs` 持有（verify/scope/review 只经完整 pipeline 运行，无单步入口）；pipeline 结果落盘由 `src/orchestration/task-recovery.mjs` 的 `applyPipelineOutcome` 统一维护，全区唯一的失败落盘器是其中的 `persistTaskFailure`。delivery worktree 段（持久 worktree 基线核对、durable intent 对账、依赖 delivery SHA 裁决与 worktree 创建）及 worker 前工作区快照记录在 `src/orchestration/linear-delivery.mjs`；并提供 route 节点入口 `runWorkflowNode`。
@@ -224,7 +226,8 @@ AGENTS.md                         # mandatory reading routes
 - `src/capabilities/review-gate.mjs`：BaiZe 独立 review 通道；风险复核与怀疑式验收是 BaiZe Skill 模式，非独立长期 Agent。
 - `src/capabilities/responsibility-audit.mjs`：Review 内部独立审计能力：核对既有批准 ledger、调用独立审查执行器、校验五条规则和源码证据，返回 PASS/RETURN；不推进任务状态，由 `review-gate.mjs` 统一消费。
 - `src/capabilities/repository-governance.mjs`：LuWu 只读仓库审计，经 gateway 调用并写 JSON/Markdown 证据：确定性检查覆盖目录级 `AGENTS.md`、双语 README 命令与安全标记对等、真实 CLI `--help`、固定五 Agent 白名单、prompt-pack 注册、命名、文件放置策略与实际注释 token（含 JavaScript 模板表达式）；`--changed-only` 将范围限于变更文件及相关结构不变量，Git 变更发现不可用时才全扫描 fallback。
-- `src/capabilities/acceptance-proof.mjs`：checkpoint 证明链，在完成前校验 worker、verifier、success criteria、scope、review 与 review 通道；还拒绝 worker 与 verify 命令全为 trivial 且无 writable_paths 的 no-op 任务，并失败于 `verify_commands` 全 trivial 的任务（`verify_not_trivial`——trivial 验证证明不了任何事）。第二硬底线是 `review_not_tautological`：review gate 没有本轮实际成功执行的独立信号时，任务不能到 `completed`；`infra/gate-arming.mjs` 的 `hasRealReviewLane` 只用于配置预检，最终 proof 还检查执行结果，因为同义反复的 review 证明不了任何事。`config init --armed` 写入 armed 质量 gate 的 config（blocking commentChecker），为底线提供命令级入门。
+- `src/capabilities/execution-readiness.mjs`：开工检查：必需 Skill、项目审查依据、执行器与审查者握手；握手按「角色 + 命令 + Skill/依据 SHA」指纹在 `executionReadiness.handshakeCacheMs`（默认 24 小时，0 关闭）内复用通过结果，任一项变化即重新握手；缓存只存于运行态，不跳过 Skill/依据/预算校验。
+- `src/capabilities/acceptance-proof.mjs`：checkpoint 证明链，在完成前校验 worker、verifier、success criteria、scope、review 与 review 通道；还拒绝 worker 与 verify 命令全为 trivial 且无 writable_paths 的 no-op 任务，并失败于 `verify_commands` 全 trivial 的任务（`verify_not_trivial`——trivial 验证证明不了任何事）。第二硬底线是 `review_not_tautological`：review gate 没有本轮实际成功执行的独立信号时，任务不能到 `completed`；`infra/gate-arming.mjs` 的 `hasRealReviewLane` 只用于配置预检，最终 proof 还检查执行结果，因为同义反复的 review 证明不了任何事。注释检查是正则扫描，只能告警，不计入独立信号。未绑定 verify 命令的待人工验收 successCriteria 列入 proof 的 `manualAcceptance`，不单独阻断。
 - `src/capabilities/checkpoint.mjs`：checkpoint 落盘
 
 ### infra/
@@ -249,7 +252,7 @@ AGENTS.md                         # mandatory reading routes
 - `src/infra/annotation-log.mjs`：决策标注回写：强制分类（confirmed/rule_wrong/case_wrong/mislabeled）、规则×标注统计；硬约束——绝不写 config/verify_commands/门开关
 - `src/infra/command-safety.mjs`：worker、verifier、review 命令、质量 gate 与子 Agent runner 共用的高风险 shell 命令预检；阻断破坏性系统命令与对项目源/测试/文档目录的递归删除。内置规则为不可削弱底线；config 中 `commandSafety.extraPatterns` 追加项目规则（`compileCommandSafetyPatterns` 编译，调用方经 `runCommand` options 传入）。
 - `src/infra/error-protocol.mjs`：统一错误协议 `{code, module, message, next_action}` 与内联单行渲染；覆盖三处结构化错误面（gateway 信封、delivery-pipeline 结果、CLI 非零退出）。
-- `src/infra/gate-arming.mjs`：gate-arming 底线评估（「门未武装」黄灯）。纯只读：标记缺失/trivial `verify_commands`、同义反复 review（无 review/standards 命令、无 LLM review、无启用质量 gate）与无 required 质量 gate 的 config。`statusReport` 始终携带结果；自身不写 config 或翻转 gate。
+- `src/infra/gate-arming.mjs`：gate-arming 底线评估（「门未武装」黄灯）。纯只读：标记缺失/trivial `verify_commands` 与同义反复 review（无独立职责审查者、review/standards 命令或 LLM review）。`statusReport` 始终携带结果；自身不写 config 或翻转 gate。
 - `src/infra/dependency-graph.mjs`：对抗加固的词法 import 扫描器（`maskSource`/`extractImportSpecifiers`），由 `test/dependency-boundary.test.mjs`（保持不可削弱的对抗底线）与 `computeImpact` / `wildarrange impact` 背后的全仓 import 图共用（反向传递 importer + 待跑测试投影）。同一图支撑 `computeZoneTests` / `wildarrange test --zone`（import 该区的测试 + 命名配对测试 + 始终运行的边界测试）与 `listRepoTests`；`wildarrange test` 的运行编排归 `src/infra/test-runner.mjs`，spawn `node --test` 时剥离 `NODE_TEST_CONTEXT`/`NODE_TEST_ID` 等 runner 私有变量，避免从另一 test-runner 进程内调用时空洞 exit 0。
 - `src/infra/test-runner.mjs`：`wildarrange test` 运行编排：zone/影响面/全量测试选择（复用 dependency-graph）与 `node --test` spawn（剥离 `NODE_TEST_*` runner 私有变量），退出码透传
 - `src/infra/config-baseline.mjs`：config hash 基线登记与校验（已审核 config 指纹）。
@@ -262,7 +265,7 @@ AGENTS.md                         # mandatory reading routes
 - `src/infra/responsibility-contract.mjs`：任务职责声明的字段校验、R1–R5 常量、批准摘要指纹与中文摘要；不读取任务状态、不作交付决定。
 - `src/infra/llm-provider.mjs`：OpenAI-compatible LLM provider 与可选 LLM review
 - `src/infra/agent-spawn.mjs`：Codex/Cursor/自定义 command adapter 的宿主中立子 Agent spawn 命令渲染。
-- `src/infra/git-worktree.mjs`：Git worktree 隔离、patch 提取、patch 路径解析、patch admission helper，以及每次 worker run 前基于 `git stash create` 的 pre-execute 工作区 snapshot。
+- `src/infra/git-worktree.mjs`：Git worktree 隔离、patch 提取、patch 路径解析、patch admission helper、已合并判定（祖先或 `git patch-id` 补丁等价，覆盖 squash/rebase 合并）与已合并本地 branch 删除，以及每次 worker run 前基于 `git stash create` 的 pre-execute 工作区 snapshot。
 - `src/infra/git-coordination.mjs`：Git 交付原语（参数数组调用）：交付环境探测、delivery commit、普通 push/fetch、working/tree-diff 检查、祖先检查与 task branch 命名。不决定 task 状态，也不提供自动 merge 到 `main` 的原语。
 - `src/infra/git-diff.mjs`：git 读原语（`readGitHead`/`readGitTopLevel`）、git diff / changed-paths 收集与 manifest 变更分类
 - `src/infra/path-match.mjs`：路径归一化、项目根边界断言与 glob/精确/目录匹配（`pathAllowed`）
@@ -373,12 +376,12 @@ SQL/数据库字段首版仍需人工声明精确结构及验证引用，Tauri �
 
 1. `worker_command` exit 0。
 2. `verify_commands` 存在且通过。
-3. `successCriteria` 通过。
+3. `successCriteria` 中绑定 verify 命令的条目通过、没有 fail 条目（未绑定命令的条目为待人工验收项，见下文）。
 4. `scope_guard` 返回 `pass`。
 5. `review_gate` 返回 `pass`。
 6. `acceptance_proof` 返回 `pass` 并写入 `runtime:reports/acceptance/<planId>/<taskId>.json`；checkpoint 同样写入 `runtime:checkpoints/<planId>/<taskId>.json`。Plan/Task 分目录使两个允许连字符的 ID 仍保持一一对应；
 
-`inconclusive` 不是完成证据。独立复核必须在本轮产生真实成功结果：非空转 review/standards 命令、有检查对象的质量门或成功 LLM review；配置存在、零执行、skipped、无 key fallback、`echo` / `node --version` 不计入。单步 checkpoint 会重新验证当前文件，不能拿修改前的 gate 结果完成任务。
+`inconclusive` 不是完成证据。独立复核必须在本轮产生真实成功结果：非空转 review/standards 命令、与当前声明绑定的职责审计或成功 LLM review；注释检查只告警，不计入；配置存在、零执行、skipped、无 key fallback、`echo` / `node --version` 不计入。单步 checkpoint 会重新验证当前文件，不能拿修改前的 gate 结果完成任务。
 
 完成证据的读侧校验由 `infra/task-state-store.mjs` 统一提供；status、doctor 与恢复上下文共用 proof/checkpoint 身份、gate 结果、可信完成事件和交付 SHA 的技术校验，不各自定义另一套完成判断。它只报告无效证据，不改写任务状态。上下文账本尾部仅来自通过 hash 链校验的条目；Dashboard 的账本与配置基线状态分别读取真实校验结果，不从门武装状态推断。
 
@@ -400,7 +403,7 @@ adapter 安装还在插件包内生成一组共享 command Skill（`wildarrange-
 
 `UserPromptSubmit` 先保留确定性路由证据；当路由为 `plan` 或明确 `needsPlan` 时，Hook 向当前宿主大模型发出结构化生成指令。宿主把对话理解结果写入 Hook 给出的绝对路径 `runtime:plan-drafts/<session>-plan.json`（项目内同名路径会被拒绝），顶层标记 `generated_by: "host_semantic"`。这一步使用宿主模型已有的对话上下文，不在 WildArrange 内重复调用另一套 LLM API。
 
-新增功能先进入跨轮持久化的功能设计确认门。运行时把当前会话状态写入 `runtime:sessions/feature-design/`：`awaiting_feature_confirmation` 时任何“开始做、直接做、跳过计划”都不能生成计划或修改项目；开发者单独明确回复“确认”后进入 `awaiting_plan_import`，只允许写计划草稿并导入带同一 `feature_design_ref` 的完整计划。计划成功导入后仍进入下述 `awaiting_plan_approval`，批准前不得执行任务。旧活动 Plan 不能替代本次新增功能的绑定 Plan。
+新增功能先进入跨轮持久化的功能设计确认门。触发只认明确的功能信号（如「新增功能」「加一个…」），不认单独的「新增」或英文 feature。运行时把当前会话状态写入 `runtime:sessions/feature-design/`：`awaiting_feature_confirmation` 时任何“开始做、直接做、跳过计划”都不能生成计划或修改项目；开发者单独明确回复“确认”后进入 `awaiting_plan_import`，只允许写计划草稿并导入带同一 `feature_design_ref` 的完整计划。计划成功导入后仍进入下述 `awaiting_plan_approval`，批准前不得执行任务。旧活动 Plan 不能替代本次新增功能的绑定 Plan。误触发或放弃时，开发者单独回复「取消」或「不是新功能」即关闭当前门（`cancelled`），Hook 拒绝提示中给出这一出口。
 
 计划导入门要求语义生成计划的每张可执行任务显式填写 `task.owner`，且只能是具备 command-worker 资格的 Jiuwei 或 ZhuRong；缺失、只读 Agent 或非法值在任何任务状态落盘前拒绝。DiJiang、BaiZe、LuWu 仍通过计划、复核、治理阶段参与，不承担 `worker_command`。语义生成计划无条件进入 `awaiting_plan_approval`，用户明确执行 `plan approve` 后才能运行。未标记 `host_semantic` 的手工计划缺省 owner 回落到 Jiuwei；线性执行入口仍会拒绝只读 Agent 进入 command worker。
 
@@ -412,7 +415,9 @@ adapter 安装与卸载始终备份被覆盖或删除的文件，含生成的 sl
 
 `successCriteria` 是独立的完成证据，不是 verifier 输出的镜像。显式 criteria 保持 pending，直到 agent 记录证据或 criterion 声明指向具体 passing `verify_commands` 的 `verifierCommandRefs`。省略 `successCriteria` 的任务收到 verifier 绑定的默认判据。
 
-Checkpoint 仍需要 worker 成功、verifier pass、success criteria pass、scope pass、review pass 与 acceptance proof pass。
+声明了 `verifierCommandRefs` 的条目必须 pass；任何条目被记为 fail 都阻断。没有 `verifierCommandRefs` 且仍 pending 的条目是「待人工验收项」：不单独阻断 checkpoint，但逐条写入 acceptance proof 的 `manualAcceptance`，由人类在 PR 验收时核对。
+
+Checkpoint 仍需要 worker 成功、verifier pass、success criteria（按上述规则）pass、scope pass、review pass 与 acceptance proof pass。
 
 ## Dashboard 安全模型
 
@@ -480,6 +485,8 @@ adapter 专用行为属于 `src/interface/adapters.mjs` 或宿主专用生成文
 - `plan-state.mjs` 持久化 task.responsibilityChanges，批准事件保存 responsibilityScopes；change-governance 的 revise_acceptance 修改声明后重新进入人工批准门。task-reports 保存审计结果，runtime-snapshot 保留声明，Dashboard 只读展示。
 
 完整字段与执行器协议见 README 的“职责与事实审计”。
+
+交付时改动了声明之外的文件（仍须在 `writable_paths` 内）不再机械退回：这些路径作为 `undeclaredChangedPaths` 交给独立审查者按 R1 判断——不新增业务职责或事实归属（如测试、文档、接线）可 PASS，否则 RETURN 并给出源码证据。
 
 职责声明变化的重新批准由 task-board.persistTaskState 统一触发，覆盖新增任务、草稿补全和 steer；先关闭批准门再写任务，防止更新中断后带着旧批准执行。线性、分步和并行入口共同读取 plan-state 的批准状态。
 
