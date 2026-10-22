@@ -64,6 +64,7 @@ import {
   retryParallelAgentRun,
   runParallelAgents,
 } from "../src/orchestration/parallel-runtime.mjs";
+import { cleanupMergedTasks } from "../src/orchestration/task-cleanup.mjs";
 import {
   listChangeRequests,
   resolveChangeRequest,
@@ -750,6 +751,13 @@ async function main() {
       author: strArg(args, "author"),
     });
     console.log(JSON.stringify({ kind: "wildarrange_annotation", recorded: entry }, null, 2));
+    return;
+  }
+
+  // --- 合并后清理 ---
+  // cleanup：线性与并行任务统一清理已合并的 worktree 与本地 branch；远端 branch 只列清单。
+  if (command === "cleanup") {
+    console.log(JSON.stringify(await cleanupMergedTasks(rootDir, { dryRun: Boolean(args["dry-run"]) }), null, 2));
     return;
   }
 

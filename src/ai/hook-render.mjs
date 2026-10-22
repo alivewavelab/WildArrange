@@ -230,6 +230,9 @@ function appendAttentionReport(lines, attention) {
   for (const item of attention.awaitingAcceptance || []) {
     lines.push(`- [子 Agent 待验收] run ${item.runId} / 任务 ${item.taskId}（${item.agent}）。请询问开发者是否合入：\`${item.admitHint}\`。`);
   }
+  for (const item of attention.pendingCleanup || []) {
+    lines.push(`- [待合并后清理] 任务 ${item.id} 已交付到 ${item.branch || "task branch"}，现场仍保留。请询问开发者 PR 是否已合并；已合并则执行 \`${item.cleanupHint}\`（远端 branch 只列清单，删除需开发者确认）。`);
+  }
   lines.push("");
 }
 

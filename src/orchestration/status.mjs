@@ -14,6 +14,7 @@
 //   · 做了什么？
 //     读 taskState/ledger/changes → 聚合 counts 与 attention 列表 → 可选写 summary 文件。
 // =============================================================================
+import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -292,6 +293,16 @@ export async function attentionReport(rootDir, options = {}) {
     }
   }
 
+  // 已交付但现场仍在：提醒人类合并 PR 后运行 cleanup，避免 worktree/branch 无人清理。
+  const pendingCleanup = tasks
+    .filter((task) => task.status === "completed" && task.delivery_workspace?.workDir && existsSync(task.delivery_workspace.workDir))
+    .map((task) => ({
+      id: task.id,
+      subject: task.subject,
+      branch: task.delivery_workspace.branch || null,
+      cleanupHint: "node ./bin/wildarrange.mjs cleanup",
+    }));
+
   const approval = await loadPlanApproval(rootDir).catch(() => ({ required: false, status: "approved" }));
   const awaitingPlanApproval = approval.required && approval.status !== "approved"
     ? [{
@@ -303,13 +314,14 @@ export async function attentionReport(rootDir, options = {}) {
   return {
     kind: "attention_report",
     at: nowIso(),
-    total: openChanges.length + failedTasks.length + needsUserDecision.length + draftTasks.length + awaitingAcceptance.length + awaitingPlanApproval.length,
+    total: openChanges.length + failedTasks.length + needsUserDecision.length + draftTasks.length + awaitingAcceptance.length + awaitingPlanApproval.length + pendingCleanup.length,
     openChanges,
     failedTasks,
     needsUserDecision,
     draftTasks,
     awaitingAcceptance,
     awaitingPlanApproval,
+    pendingCleanup,
   };
 }
 
