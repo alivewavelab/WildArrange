@@ -168,7 +168,7 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
       requiredFix: "重新运行 verifier，确保每条 verify_commands 都有对应结果。",
     }),
     proofCheck("success_criteria_passed", criteria.pass === true, {
-      evidence: `${criteria.passed}/${criteria.total} success criteria passed`,
+      evidence: `${criteria.passed}/${criteria.total} success criteria passed${criteria.manualPending.length ? `; ${criteria.manualPending.length} manual acceptance item(s) handed to the human` : ""}`,
       requiredFix: "补齐 successCriteria 证据，或修复实现后重新验收。",
     }),
     proofCheck("scope_passed", scopeResult?.status === "pass", {
@@ -207,6 +207,8 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
     subject: task.subject,
     pass: checks.every((check) => check.status === "pass"),
     checks,
+    // 未绑定命令的判据：不阻断完成，交给人类在 PR 验收时逐条核对
+    manualAcceptance: criteria.manualPending,
     evidenceRefs: {
       responsibilityAudit: reviewResult?.responsibilityAudit ? { decision: reviewResult.responsibilityAudit.decision, responsibilityDigest: reviewResult.responsibilityAudit.responsibilityDigest, sourceDigest: reviewResult.responsibilityAudit.sourceDigest } : null,
       worker: summarizeCommand(workerResult),
@@ -302,5 +304,9 @@ function renderAcceptanceProofMarkdown(proof) {
 | Check | Status | Evidence | Required Fix |
 | --- | --- | --- | --- |
 ${checks}
-`;
+${(proof.manualAcceptance || []).length ? `
+## 待人工验收项（PR 验收时逐条核对）
+
+${proof.manualAcceptance.map((item) => `- [ ] ${item.id} ${item.title}${item.expectedEvidence ? `：${item.expectedEvidence}` : ""}`).join("\n")}
+` : ""}`;
 }

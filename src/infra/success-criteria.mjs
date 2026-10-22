@@ -20,11 +20,15 @@ import { nowIso } from "./runtime-store.mjs";
  */
 export function criteriaStatus(task) {
   const criteria = task.successCriteria || [];
-  if (criteria.length === 0) return { total: 0, passed: 0, failed: 0, pending: 0, pass: true };
+  if (criteria.length === 0) return { total: 0, passed: 0, failed: 0, pending: 0, manualPending: [], pass: true };
   const passed = criteria.filter((criterion) => criterion.status === "pass").length;
   const failed = criteria.filter((criterion) => criterion.status === "fail").length;
   const pending = criteria.filter((criterion) => criterion.status === "pending").length;
-  return { total: criteria.length, passed, failed, pending, pass: failed === 0 && pending === 0 && passed === criteria.length };
+  // 未绑定 verify 命令、仍 pending 的条目只能人工核对：列为待人工验收项，不单独阻断；绑定命令的条目与 fail 照旧阻断
+  const manualPending = criteria
+    .filter((criterion) => criterion.status === "pending" && !(criterion.verifierCommandRefs || []).length)
+    .map((criterion) => ({ id: criterion.id, title: criterion.title, expectedEvidence: criterion.expectedEvidence || null }));
+  return { total: criteria.length, passed, failed, pending, manualPending, pass: failed === 0 && pending === manualPending.length };
 }
 
 /**
