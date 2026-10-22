@@ -19,9 +19,10 @@
 | `wildarrange plan approve [--plan <planId>]` | 人工确认已导入的计划或新增的职责声明后放行执行 |
 | `wildarrange run` | 跑下一个任务（worker→verifier→scope→review→checkpoint） |
 | `wildarrange status` | 查看状态（含门武装黄灯） |
+| `wildarrange cleanup [--dry-run]` | 合并后清理任务现场：同步远端主线，已合并（含 squash/rebase）且干净的任务删除 worktree 与本地 branch；远端 branch 只列待人工删除清单 |
 | `wildarrange decisions [--limit N] [--task T001] [--gate pre_tool_use] [--annotatable] [--format json]` | 查看门决策记录（每一次拦截/放行；--annotatable 只看可标注队列） |
 | `wildarrange doctor` | 一键体检：配置/完成状态/ledger/备份对账 |
-| `wildarrange config init [--force] [--armed]` | 在治理仓 policy/ 生成默认配置（--armed 直接武装质量门） |
+| `wildarrange config init [--force]` | 在治理仓 policy/ 生成默认配置 |
 | `wildarrange config show` | 查看生效配置 |
 | `wildarrange config baseline [--reason "..."]` | 写入 config hash 基线 |
 | `wildarrange config verify` | 校验 config 基线 |
@@ -40,7 +41,7 @@
 | `wildarrange parallel list` | 列出并行 run |
 | `wildarrange parallel status [--run <runId>]` | 查看并行运行记录与批次对账 |
 | `wildarrange parallel close --run <runId> [--task T001] [--reason "..."]` | 关闭保留的子 Agent 结果 |
-| `wildarrange parallel cleanup --run <runId>` | 清理 Git worktree 隔离目录及已并入 main 的本地 task branch |
+| `wildarrange parallel cleanup --run <runId>` | 清理单个并行 run 的 Git worktree 及已并入 main 的本地 task branch |
 | `wildarrange parallel retry --run <runId> [--command "..."] [--max-agents N]` | 只重跑未完成任务的局部重试 |
 | `wildarrange node route --text "request"` | 单节点：路由 |
 | `wildarrange node execute [--task T001]` | 单节点：执行 |
