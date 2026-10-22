@@ -24,14 +24,21 @@ import { withExternalProject, declare, importApprovedPlan } from "./helpers/exte
 
 const UNARMED_CONFIG = structuredClone(DEFAULT_WILDARRANGE_CONFIG);
 
-test("gate arming floor flags tautological review and unrequired quality gates", async () => {
+test("gate arming floor flags tautological review and no longer demands a blocking comment checker", async () => {
   const result = evaluateGateArming({
     config: UNARMED_CONFIG,
     tasks: [{ id: "T001", status: "pending", verify_commands: ["node --test"] }],
   });
   assert.equal(result.armed, false);
   assert.ok(result.issues.some((issue) => issue.code === "review_tautology"));
-  assert.ok(result.issues.some((issue) => issue.code === "quality_gates_not_required"));
+  assert.ok(!result.issues.some((issue) => issue.code === "quality_gates_not_required"));
+});
+
+test("a blocking comment checker is not an independent review lane", async () => {
+  const config = structuredClone(DEFAULT_WILDARRANGE_CONFIG);
+  config.qualityGates.commentChecker = { ...config.qualityGates.commentChecker, enabled: true, blockOnFindings: true };
+  const result = evaluateGateArming({ config, tasks: [{ id: "T001", status: "pending", verify_commands: ["node --test"] }] });
+  assert.ok(result.issues.some((issue) => issue.code === "review_tautology"));
 });
 
 test("gate arming floor flags missing and trivial verify commands per task", async () => {
@@ -62,7 +69,6 @@ test("gate arming floor finds no review tautology when there are no active tasks
 
 test("gate arming floor goes green once gates are really armed", async () => {
   const config = structuredClone(DEFAULT_WILDARRANGE_CONFIG);
-  config.qualityGates.commentChecker = { ...config.qualityGates.commentChecker, enabled: true, blockOnFindings: true };
   const result = evaluateGateArming({
     config,
     tasks: [{ id: "T001", status: "pending", verify_commands: ["node --test"], review_commands: ["node ./scripts/review.mjs"] }],
@@ -126,7 +132,8 @@ test("acceptance proof fails when every verify command is trivial", async () => 
       qualityResults: { commentResult: { status: "pass", pass: true, checkedPaths: ["src/app.js"], findings: [] } },
     },
   }, { qualityGates: { commentChecker: { enabled: true, blockOnFindings: true } } });
-  assert.equal(commentReviewedProof.checks.find((check) => check.name === "review_not_tautological").status, "pass");
+  // 注释检查是正则扫描，即使设为阻断也不能单独构成独立复核。
+  assert.equal(commentReviewedProof.checks.find((check) => check.name === "review_not_tautological").status, "fail");
 
   const warningOnlyCommentProof = buildAcceptanceProof("plan-1", realTask, {
     ...passingEvidence,
@@ -167,7 +174,6 @@ test("status report carries the persistent unarmed-gates yellow lamp", async () 
 
     const status = await statusReport(dir);
     assert.equal(status.gateArming.armed, false);
-    assert.ok(status.gateArming.issues.some((issue) => issue.code === "quality_gates_not_required"));
     assert.ok(status.gateArming.issues.some((issue) => issue.code === "review_tautology"));
   }, { reviewer: false });
 });

@@ -50,7 +50,7 @@ export const COMMAND_REGISTRY = [
   { usage: "decisions [--limit N] [--task T001] [--gate pre_tool_use] [--annotatable] [--format json]", desc: "查看门决策记录（每一次拦截/放行；--annotatable 只看可标注队列）", core: true },
   { usage: "doctor", desc: "一键体检：配置/完成状态/ledger/备份对账", core: true },
 
-  { usage: "config init [--force] [--armed]", desc: "在治理仓 policy/ 生成默认配置（--armed 直接武装质量门）" },
+  { usage: "config init [--force]", desc: "在治理仓 policy/ 生成默认配置" },
   { usage: "config show", desc: "查看生效配置" },
   { usage: "config baseline [--reason \"...\"]", desc: "写入 config hash 基线" },
   { usage: "config verify", desc: "校验 config 基线" },

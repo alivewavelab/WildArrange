@@ -55,16 +55,8 @@ export function evaluateGateArming({ config, tasks = [] } = {}) {
     issues.push({
       code: "review_tautology",
       taskIds: tasksWithoutRealReview.map((task) => task.id),
-      message: "review 门没有独立信号 lane（无 review_commands / standards_commands / LLM review / 已启用质量门），复核是同义反复",
-      next_action: "为任务配置 review_commands 或 standards_commands，或启用 review.llm / 质量门",
-    });
-  }
-
-  if (!hasRequiredQualityGate(config)) {
-    issues.push({
-      code: "quality_gates_not_required",
-      message: "qualityGates 没有任何一项 required（含 commentChecker.blockOnFindings），质量门全关",
-      next_action: "在 wildarrange.config.json 中至少把一项质量门设为 required（commentChecker.blockOnFindings）",
+      message: "review 门没有独立信号 lane（无独立职责审查者 / review_commands / standards_commands / LLM review），复核是同义反复",
+      next_action: "配置 review.responsibility.command 独立审查者、任务 review_commands / standards_commands，或启用 review.llm",
     });
   }
 
@@ -81,26 +73,5 @@ export function hasRealReviewLane(task, config) {
   if (task?.responsibilityChanges && typeof config?.review?.responsibility?.command === "string" && !isTrivialCommand(config.review.responsibility.command)) return true;
   if ((task?.review_commands || []).some((command) => !isTrivialCommand(command))) return true;
   if ((task?.standards_commands || []).some((command) => !isTrivialCommand(command))) return true;
-  if (config?.review?.llm?.enabled === true) return true;
-  return hasEnabledQualityGate(config);
+  return config?.review?.llm?.enabled === true;
 }
-
-/**
- * 判断 hasEnabledQualityGate 条件。
- */
-function hasEnabledQualityGate(config) {
-  const gates = config?.qualityGates || {};
-  // commentChecker 只有 blockOnFindings 时才构成独立信号；否则它只是 warn。
-  if (gates.commentChecker?.enabled === true && gates.commentChecker?.blockOnFindings === true) return true;
-  return false;
-}
-
-/**
- * 判断 hasRequiredQualityGate 条件。
- */
-function hasRequiredQualityGate(config) {
-  const gates = config?.qualityGates || {};
-  if (gates.commentChecker?.enabled === true && gates.commentChecker?.blockOnFindings === true) return true;
-  return false;
-}
-

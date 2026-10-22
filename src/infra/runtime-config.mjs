@@ -42,7 +42,7 @@ export async function loadWildArrangeConfig(rootDir) {
 }
 
 /**
- * writeDefaultWildArrangeConfig：在治理仓 policy/ 下写入默认（或 --armed）配置。
+ * writeDefaultWildArrangeConfig：在治理仓 policy/ 下写入默认配置。
  */
 export async function writeDefaultWildArrangeConfig(rootDir, options = {}) {
   const targetPath = await governanceConfigPath(rootDir);
@@ -50,29 +50,10 @@ export async function writeDefaultWildArrangeConfig(rootDir, options = {}) {
     return { path: path.relative(rootDir, targetPath), created: false, config: await readJson(targetPath) };
   }
   await ensureWildArrangeDirs(rootDir);
-  const config = options.armed === true ? buildArmedConfig() : DEFAULT_WILDARRANGE_CONFIG;
+  const config = DEFAULT_WILDARRANGE_CONFIG;
   await writeJsonAtomic(targetPath, config);
-  await appendLedger(rootDir, { type: "config_written", configPath: path.relative(rootDir, targetPath), armed: options.armed === true });
+  await appendLedger(rootDir, { type: "config_written", configPath: path.relative(rootDir, targetPath) });
   return { path: path.relative(rootDir, targetPath), created: true, config };
-}
-
-/**
- * `config init --armed`：写出一份「门已武装」的配置——commentChecker 阻断发现
- * （无需任何外部工具即可构成独立复核信号与 required 质量门）。默认配置故意不武装
- * （黄灯提醒），--armed 是给「我知道自己在做什么」的显式入口。
- */
-export function buildArmedConfig() {
-  return {
-    ...DEFAULT_WILDARRANGE_CONFIG,
-    qualityGates: {
-      ...DEFAULT_WILDARRANGE_CONFIG.qualityGates,
-      commentChecker: {
-        ...DEFAULT_WILDARRANGE_CONFIG.qualityGates?.commentChecker,
-        enabled: true,
-        blockOnFindings: true,
-      },
-    },
-  };
 }
 
 /**

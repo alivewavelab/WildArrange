@@ -169,7 +169,7 @@ test("external plan draft directive points at the runtime root and the guard let
   });
 });
 
-test("init-governance scaffolds an armed config, initializes Git once and never overwrites", async () => {
+test("init-governance scaffolds the default config, initializes Git once and never overwrites", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "wildarrange-init-gov-"));
   try {
     const projectRoot = path.join(root, "project");
@@ -179,7 +179,7 @@ test("init-governance scaffolds an armed config, initializes Git once and never 
     assert.ok(first.created.includes("policy/wildarrange.config.json"));
     assert.equal(first.gitInitialized, true);
     const config = JSON.parse(await readFile(path.join(governanceRoot, "policy", "wildarrange.config.json"), "utf8"));
-    assert.equal(config.qualityGates.commentChecker.blockOnFindings, true, "quality gate is armed by default");
+    assert.equal(config.qualityGates.commentChecker.blockOnFindings, false, "comment checker only warns by default");
     const head = (await git(governanceRoot, ["rev-parse", "HEAD"])).trim();
     assert.equal((await git(governanceRoot, ["status", "--short"])).trim(), "", "initial commit contains every scaffold file");
 
@@ -196,7 +196,7 @@ test("init-governance scaffolds an armed config, initializes Git once and never 
 
 test("external config init --root writes the governance config, not the project", async () => {
   await withExternalProject(async ({ projectRoot, governanceRoot }) => {
-    const result = await writeDefaultWildArrangeConfig(projectRoot, { root: true, armed: true });
+    const result = await writeDefaultWildArrangeConfig(projectRoot, { root: true });
     assert.equal(result.created, true);
     assert.equal(existsSync(path.join(governanceRoot, "policy", "wildarrange.config.json")), true);
     assert.equal(existsSync(path.join(projectRoot, "wildarrange.config.json")), false);

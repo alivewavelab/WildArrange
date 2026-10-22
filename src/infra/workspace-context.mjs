@@ -15,7 +15,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runCommandFile } from "./command-runner.mjs";
-import { buildArmedConfig } from "./runtime-config.mjs";
+import { DEFAULT_WILDARRANGE_CONFIG } from "./default-config.mjs";
 import { buildRegistryFromCards, digestCanonical } from "./verification-registry.mjs";
 import {
   bindWildArrangeRuntimeRoot,
@@ -69,7 +69,7 @@ export async function initializeGovernanceRepository(projectRoot, options = {}) 
     },
     ...(options.scaffoldConfig === true ? [{
       path: path.join(governanceRoot, "policy", "wildarrange.config.json"),
-      value: `${JSON.stringify(buildArmedConfig(), null, 2)}\n`,
+      value: `${JSON.stringify(DEFAULT_WILDARRANGE_CONFIG, null, 2)}\n`,
     }] : []),
   ];
   const created = [];

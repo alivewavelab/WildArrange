@@ -372,7 +372,6 @@ async function main() {
       await initRuntime(rootDir);
       console.log(JSON.stringify(await writeDefaultWildArrangeConfig(rootDir, {
         force: Boolean(args.force),
-        armed: Boolean(args.armed),
       }), null, 2));
       return;
     }
