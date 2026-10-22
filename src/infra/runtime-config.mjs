@@ -70,6 +70,7 @@ function normalizeRuntimeConfig(config) {
   if (!Array.isArray(readiness.researchSkills) || readiness.researchSkills.some(name => typeof name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(name))) throw new Error("executionReadiness.researchSkills must contain Skill names");
   if (!Number.isInteger(readiness.timeoutMs) || readiness.timeoutMs < 1 || readiness.timeoutMs > 300000) throw new Error("executionReadiness.timeoutMs must be between 1 and 300000");
   if (!Number.isInteger(readiness.workerTimeoutMs) || readiness.workerTimeoutMs < 1 || readiness.workerTimeoutMs > 86400000) throw new Error("executionReadiness.workerTimeoutMs must be between 1 and 86400000");
+  if (readiness.handshakeCacheMs !== undefined && (!Number.isInteger(readiness.handshakeCacheMs) || readiness.handshakeCacheMs < 0 || readiness.handshakeCacheMs > 604800000)) throw new Error("executionReadiness.handshakeCacheMs must be between 0 and 604800000");
   if (!isPlainObject(normalized.review) || !Array.isArray(normalized.review.steps)) throw new Error("review.steps must be an array");
   const reviewInterval = normalized.review.responsibility?.checkIntervalMs;
   if (!Number.isInteger(reviewInterval) || reviewInterval < 1 || reviewInterval > 86400000) throw new Error("review.responsibility.checkIntervalMs must be between 1 and 86400000");

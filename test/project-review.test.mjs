@@ -125,6 +125,42 @@ test("missing task Skill and false handshake are blocked before execution", asyn
   assert.match(result.issues.join(";"), /handshake/);
 });
 
+test("a passed handshake is reused until the executor, Skills or cache window change", async t => {
+  const { root, config, task } = await fixture(t);
+  const counter = path.join(auxDir(root), "probe-count.txt");
+  const probe = path.join(auxDir(root), "counting-probe.cjs");
+  await writeFile(probe, `const fs=require('node:fs');const p=JSON.parse(fs.readFileSync(process.env.WILDARRANGE_READINESS_PACKET,'utf8'));fs.appendFileSync(${JSON.stringify(counter)},'x');console.log(JSON.stringify({ready:true,challenge:p.challenge,loadedSkills:p.requiredSkills.map(s=>s.name)}));`);
+  const count = async () => (await readFile(counter, "utf8").catch(() => "")).length;
+  config.executionReadiness = { ...config.executionReadiness, workerProbe: `node "${probe}"` };
+  await writeGovernanceConfig(root, config);
+
+  assert.equal((await checkExecutionReadiness(root, task)).pass, true);
+  assert.equal(await count(), 1);
+  const reused = await checkExecutionReadiness(root, task);
+  assert.equal(reused.pass, true);
+  assert.equal(await count(), 1, "unchanged executor and Skills reuse the passed handshake");
+  assert.equal(reused.probes.find((item) => item.role === "worker").cached, true);
+
+  await writeFile(path.join(root, ".agents/skills/project-rule/SKILL.md"), "# PROJECT_SKILL\nCheck target implementation carefully.\n");
+  assert.equal((await checkExecutionReadiness(root, task)).pass, true);
+  assert.equal(await count(), 2, "a changed Skill forces a new handshake");
+
+  config.executionReadiness = { ...config.executionReadiness, workerProbe: `node "${probe}" --v2` };
+  await writeGovernanceConfig(root, config);
+  assert.equal((await checkExecutionReadiness(root, task)).pass, true);
+  assert.equal(await count(), 3, "a changed executor command forces a new handshake");
+
+  config.executionReadiness = { ...config.executionReadiness, handshakeCacheMs: 0 };
+  await writeGovernanceConfig(root, config);
+  await checkExecutionReadiness(root, task);
+  await checkExecutionReadiness(root, task);
+  assert.equal(await count(), 5, "handshakeCacheMs 0 disables reuse");
+
+  config.executionReadiness = { ...config.executionReadiness, handshakeCacheMs: -1 };
+  await writeGovernanceConfig(root, config);
+  await assert.rejects(checkExecutionReadiness(root, task), /handshakeCacheMs/);
+});
+
 test("handshake and reviewer timeouts say they timed out and name the setting to raise", async t => {
   const { root, config, task } = await fixture(t);
   const sleeper = 'node -e "setTimeout(()=>{},10000)"';

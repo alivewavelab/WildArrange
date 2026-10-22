@@ -110,7 +110,8 @@ export const DEFAULT_WILDARRANGE_CONFIG = {
   },
   // 执行前 worker/research 探测命令；null 表示不探测
   // timeoutMs 管开工握手；workerTimeoutMs 管线性 run 的 worker_command（模型 Worker 常需数分钟到数十分钟）
-  executionReadiness: { workerProbe: null, researchProbe: null, researchSkills: [], timeoutMs: 30000, workerTimeoutMs: 1800000 },
+  // handshakeCacheMs：命令与 Skill/依据未变时复用通过的握手（默认 24 小时，0 关闭）
+  executionReadiness: { workerProbe: null, researchProbe: null, researchSkills: [], timeoutMs: 30000, workerTimeoutMs: 1800000, handshakeCacheMs: 86400000 },
   // 审查 lane 步骤、职责命令与可选 LLM 审查配置
   review: {
     steps: [],
