@@ -181,7 +181,7 @@ Kimi Code 的 plugin 是用户级安装。升级后为确保 Hook bridge 使用�
 
 npm 和 Git 负责同步程序、项目与治理仓；运行态目录位于每台设备自己的本地状态目录，不直接互相覆盖。WildArrange 不做多设备或多用户的远端协调：多人协作时每人各用自己的分支，唯一约束是**两个可写任务不能在同一分支上开发**。
 
-一个可写任务对应一个隔离 worktree 和一个 task branch（`wildarrange/task/<planId>/<taskId>`）；开始执行前必须绑定干净 commit 基线，除本任务结果外不能夹带其他脏改动。目标分支已被另一个可写任务或 worktree 占用时，任务会被拒绝启动并说明占用者。全部质量门与 acceptance proof 通过后，WildArrange 才生成只含本任务路径的 delivery commit：有 remote 时普通非强制 push 到该任务独占的远端 task branch；无 remote 但仍是 Git 仓库时，commit 保留在本地 task branch/worktree。两种路径都会让 checkpoint 与 acceptance proof 绑定同一 commit SHA，并把共享 checkout 恢复干净。task branch push 不会移动 `main`，一个任务通常持续更新一个 Draft PR，只有人类在托管平台批准并执行 merge 后才进入共享主线。PR 合并后运行 `wildarrange cleanup`（可先加 `--dry-run` 预览）：它先同步远端主线，普通合并按祖先关系、squash/rebase 合并按补丁内容判定是否已合并，只清理已合并且 worktree 干净的任务现场（worktree 与本地 task branch），远端 task branch 只列出删除命令，由人类确认后执行。仍保留现场的已完成任务会出现在 `status`/Hook 的待处理提醒里。若 task branch push 已成功、仅本地 checkpoint/审计写入失败，则保留同一 run 的 claim 和交付意图，禁止回滚已知 push，只允许同 run 对账恢复或进入 `recovery_required`。
+一个可写任务对应一个隔离 worktree 和一个 task branch（`wildarrange/task/<planId>/<taskId>`）；开始执行前必须绑定干净 commit 基线，除本任务结果外不能夹带其他脏改动。目标分支已被另一个可写任务或 worktree 占用时，任务会被拒绝启动并说明占用者。全部质量门与 acceptance proof 通过后，WildArrange 才生成只含本任务路径的 delivery commit：有 remote 时普通非强制 push 到该任务独占的远端 task branch；无 remote 但仍是 Git 仓库时，commit 保留在本地 task branch/worktree。两种路径都会让 checkpoint 与 acceptance proof 绑定同一 commit SHA，并把共享 checkout 恢复干净。task branch push 不会移动 `main`。推送成功后，WildArrange 经本机已登录的 GitHub CLI `gh` 自动为该分支创建 Draft PR（已有打开的 PR 时只更新正文），正文含验收结论、交付 SHA、检查项与待人工验收清单；系统只建 Draft、只改正文，不 approve、不转 Ready、不 merge，只有人类在托管平台批准并执行 merge 后才进入共享主线。`gh` 缺失、未登录或调用失败不影响任务完成，会出现在待处理提醒里并给出 `wildarrange pr sync --task <taskId>` 重试命令；远端是本地路径时直接跳过。PR 合并后运行 `wildarrange cleanup`（可先加 `--dry-run` 预览）：它先同步远端主线，普通合并按祖先关系、squash/rebase 合并按补丁内容判定是否已合并，只清理已合并且 worktree 干净的任务现场（worktree 与本地 task branch），远端 task branch 只列出删除命令，由人类确认后执行。仍保留现场的已完成任务会出现在 `status`/Hook 的待处理提醒里。若 task branch push 已成功、仅本地 checkpoint/审计写入失败，则保留同一 run 的 claim 和交付意图，禁止回滚已知 push，只允许同 run 对账恢复或进入 `recovery_required`。
 
 进程被强制终止后，若 `parallel status` 显示 run 没有结果但任务仍被占用，可在人工确认进程已经结束后执行：
 
@@ -741,6 +741,7 @@ npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache
 |---|---|
 | 一步接入外置治理 | `node ./bin/wildarrange.mjs setup --governance-root <路径>` |
 | 生成 / 查看治理配置 | `node ./bin/wildarrange.mjs config init` / `config show` |
+| 创建或更新任务的 Draft PR（自动同步失败时重试） | `node ./bin/wildarrange.mjs pr sync [--task T001]` |
 | 合并后清理任务现场 | `node ./bin/wildarrange.mjs cleanup [--dry-run]` |
 | 安装 adapter | `node ./bin/wildarrange.mjs adapter install --target all --mode local` |
 | 导入 / 确认计划 | `node ./bin/wildarrange.mjs plan --from plan.json` / `plan approve` |

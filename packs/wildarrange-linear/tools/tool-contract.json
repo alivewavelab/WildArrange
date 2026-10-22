@@ -89,6 +89,11 @@
       "purpose": "查看状态（含门武装黄灯）"
     },
     {
+      "name": "wildarrange_pr_sync",
+      "command": "wildarrange pr sync [--task <taskId>]",
+      "purpose": "为已推送的已完成任务经 gh 创建或更新 Draft PR（只建 Draft、只改正文，不 approve/merge）；自动同步失败后用它重试"
+    },
+    {
       "name": "wildarrange_cleanup",
       "command": "wildarrange cleanup [--dry-run]",
       "purpose": "合并后清理任务现场：同步远端主线，已合并（含 squash/rebase）且干净的任务删除 worktree 与本地 branch；远端 branch 只列待人工删除清单"

@@ -36,6 +36,7 @@ import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
 import { evaluateRegistryFreshness } from "../infra/verification-registry.mjs";
 import { listChangeRequests } from "./change-governance.mjs";
 import { parallelAgentStatus } from "./parallel-runtime.mjs";
+import { listPendingPullRequests } from "./task-pull-request.mjs";
 import { loadPlanApproval, loadTaskState } from "./plan-state.mjs";
 
 // --- 工作流摘要 ---
@@ -303,6 +304,9 @@ export async function attentionReport(rootDir, options = {}) {
       cleanupHint: "node ./bin/wildarrange.mjs cleanup",
     }));
 
+  // 已推送但 Draft PR 未建成（gh 缺失、未登录或调用失败）：提示 `pr sync` 重试。
+  const pendingPullRequests = await listPendingPullRequests(rootDir, taskState?.planId, tasks).catch(() => []);
+
   const approval = await loadPlanApproval(rootDir).catch(() => ({ required: false, status: "approved" }));
   const awaitingPlanApproval = approval.required && approval.status !== "approved"
     ? [{
@@ -314,7 +318,7 @@ export async function attentionReport(rootDir, options = {}) {
   return {
     kind: "attention_report",
     at: nowIso(),
-    total: openChanges.length + failedTasks.length + needsUserDecision.length + draftTasks.length + awaitingAcceptance.length + awaitingPlanApproval.length + pendingCleanup.length,
+    total: openChanges.length + failedTasks.length + needsUserDecision.length + draftTasks.length + awaitingAcceptance.length + awaitingPlanApproval.length + pendingCleanup.length + pendingPullRequests.length,
     openChanges,
     failedTasks,
     needsUserDecision,
@@ -322,6 +326,7 @@ export async function attentionReport(rootDir, options = {}) {
     awaitingAcceptance,
     awaitingPlanApproval,
     pendingCleanup,
+    pendingPullRequests,
   };
 }
 

@@ -65,6 +65,7 @@ import {
   runParallelAgents,
 } from "../src/orchestration/parallel-runtime.mjs";
 import { cleanupMergedTasks } from "../src/orchestration/task-cleanup.mjs";
+import { syncPullRequests } from "../src/orchestration/task-pull-request.mjs";
 import {
   listChangeRequests,
   resolveChangeRequest,
@@ -757,6 +758,13 @@ async function main() {
   // cleanup：线性与并行任务统一清理已合并的 worktree 与本地 branch；远端 branch 只列清单。
   if (command === "cleanup") {
     console.log(JSON.stringify(await cleanupMergedTasks(rootDir, { dryRun: Boolean(args["dry-run"]) }), null, 2));
+    return;
+  }
+
+  // pr sync：为已推送的已完成任务创建或更新 Draft PR；只建 Draft、只改正文。
+  if (command === "pr") {
+    if (args._[1] !== "sync") throw new Error("wildarrange pr requires sync");
+    console.log(JSON.stringify(await syncPullRequests(rootDir, { taskId: strArg(args, "task") }), null, 2));
     return;
   }
 

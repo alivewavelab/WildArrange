@@ -46,6 +46,7 @@ export const COMMAND_REGISTRY = [
   { usage: "plan approve [--plan <planId>]", desc: "人工确认已导入的计划或新增的职责声明后放行执行" },
   { usage: "run", desc: "跑下一个任务（worker→verifier→scope→review→checkpoint）", core: true },
   { usage: "status", desc: "查看状态（含门武装黄灯）", core: true },
+  { usage: "pr sync [--task <taskId>]", desc: "为已推送的已完成任务经 gh 创建或更新 Draft PR（只建 Draft、只改正文，不 approve/merge）；自动同步失败后用它重试" },
   { usage: "cleanup [--dry-run]", desc: "合并后清理任务现场：同步远端主线，已合并（含 squash/rebase）且干净的任务删除 worktree 与本地 branch；远端 branch 只列待人工删除清单" },
   { usage: "decisions [--limit N] [--task T001] [--gate pre_tool_use] [--annotatable] [--format json]", desc: "查看门决策记录（每一次拦截/放行；--annotatable 只看可标注队列）", core: true },
   { usage: "doctor", desc: "一键体检：配置/完成状态/ledger/备份对账", core: true },
