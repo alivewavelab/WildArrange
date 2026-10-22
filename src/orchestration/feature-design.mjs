@@ -26,12 +26,19 @@ import { withTaskStateLock } from "../infra/task-state-lock.mjs";
  * @param {string} rootDir 项目根目录
  * @param {string|object} input 文本或含 text/sessionId 的对象
  */
+/** 开发者单独回复即可关闭当前功能设计门的出口语句。 */
+const FEATURE_DESIGN_EXIT = /^(?:取消|取消功能设计|不是新功能)[。.!！]?$/;
+
 export async function advanceFeatureDesign(rootDir, input) {
   const text = typeof input === "string" ? input : input?.text;
   if (!text || typeof text !== "string") return null;
   const sessionId = typeof input === "object" ? input.sessionId || input.session_id || "session" : "session";
   return withTaskStateLock(rootDir, "feature-design", async () => {
     const active = await loadActiveFeatureDesignGate(rootDir, sessionId);
+    // 误触发或放弃：开发者单独回复出口语句即关闭门，不生成计划
+    if (["awaiting_feature_confirmation", "awaiting_plan_import"].includes(active?.status) && FEATURE_DESIGN_EXIT.test(text.trim())) {
+      return cancelFeatureDesignGate(rootDir, active);
+    }
     if (active?.status === "awaiting_feature_confirmation") {
       return /^(?:确认|确认以上功能设计|功能设计确认)[。.!！]?$/.test(text.trim())
         ? confirmFeatureDesignGate(rootDir, active) : active;
@@ -89,6 +96,14 @@ async function confirmFeatureDesignGate(rootDir, gate) {
   };
   await writeJsonAtomic(featureDesignGatePath(rootDir, gate.id), confirmed);
   return confirmed;
+}
+
+/** 开发者主动关闭功能设计门，状态记为 cancelled，保留原请求供追溯。 */
+async function cancelFeatureDesignGate(rootDir, gate) {
+  const at = nowIso();
+  const cancelled = { ...gate, status: "cancelled", cancelledAt: at, updatedAt: at };
+  await writeJsonAtomic(featureDesignGatePath(rootDir, gate.id), cancelled);
+  return cancelled;
 }
 
 /** 计划导入前校验 feature_design_ref 与 gate 状态一致。 */

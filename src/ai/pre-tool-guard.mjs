@@ -137,7 +137,7 @@ export async function preToolUseGuard(rootDir, input = {}, options = {}) {
     if (blocked) {
       return denyFeatureDesignToolUse(rootDir, {
         code: "feature_design_confirmation_required",
-        reason: "feature design is awaiting explicit confirmation; implementation, plan files, and plan commands remain blocked",
+        reason: "feature design is awaiting explicit confirmation; implementation, plan files, and plan commands remain blocked. The developer can reply 确认 to continue, or 取消 / 不是新功能 to leave this gate",
         gate: featureDesignGate,
         toolName,
         targetPaths,
@@ -154,7 +154,7 @@ export async function preToolUseGuard(rootDir, input = {}, options = {}) {
     if (blockedShell || blockedWrite) {
       return denyFeatureDesignToolUse(rootDir, {
         code: "feature_plan_required",
-        reason: `feature design ${featureDesignGate.id} is confirmed but no matching complete plan has been imported`,
+        reason: `feature design ${featureDesignGate.id} is confirmed but no matching complete plan has been imported; the developer can reply 取消 to leave this gate`,
         gate: featureDesignGate,
         toolName,
         targetPaths,
