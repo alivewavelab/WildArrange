@@ -119,18 +119,50 @@ export async function releaseAgentWorktree(rootDir, { workDir, branch, startPoin
 }
 
 /**
- * 删除已并入主线的本地 task branch：先读分支 SHA，确认它是 mainRef 的祖先（分支上没有主线之外的提交），
+ * 判定 task 提交是否已进入主线。祖先关系覆盖普通合并与快进；squash / rebase 合并改写了提交，
+ * 改用补丁等价：task 相对 baseSha 的整体补丁 patch-id 与主线 baseSha 之后任一提交相同即视为已合并。
+ * 任何一步无法确认都返回未合并，保守保留现场。
+ * @returns {Promise<{merged: boolean, method?: string, reason?: string}>}
+ */
+export async function isCommitMerged(rootDir, { headSha, baseSha, mainRef }) {
+  if (!headSha || !mainRef) return { merged: false, reason: "identity_unknown" };
+  const isAncestor = async (sha) => (await runCommandFile("git", ["-C", rootDir, "merge-base", "--is-ancestor", sha, mainRef], rootDir, 30_000)).exitCode === 0;
+  if (await isAncestor(headSha)) return { merged: true, method: "ancestor" };
+  if (!baseSha) return { merged: false, reason: "not_in_main" };
+  const diff = await runCommandFile("git", ["-C", rootDir, "diff", "--no-color", "--no-ext-diff", baseSha, headSha], rootDir, 60_000, { maxOutputChars: 20_000_000 });
+  if (diff.exitCode !== 0 || diff.outputTruncated?.stdout) return { merged: false, reason: "task_patch_unavailable" };
+  if (!diff.stdout.trim()) return await isAncestor(baseSha) ? { merged: true, method: "no_change" } : { merged: false, reason: "not_in_main" };
+  const [taskPatch] = await patchIds(rootDir, diff.stdout);
+  if (!taskPatch) return { merged: false, reason: "task_patch_unavailable" };
+  const log = await runCommandFile("git", ["-C", rootDir, "log", "-p", "--no-merges", "--no-color", "--no-ext-diff", "--format=commit %H", `${baseSha}..${mainRef}`], rootDir, 120_000, { maxOutputChars: 50_000_000 });
+  if (log.exitCode !== 0 || log.outputTruncated?.stdout) return { merged: false, reason: "main_history_unavailable" };
+  return (await patchIds(rootDir, log.stdout)).includes(taskPatch)
+    ? { merged: true, method: "patch_equivalent" }
+    : { merged: false, reason: "not_in_main" };
+}
+
+/** 对 diff/log -p 文本逐段计算稳定 patch-id（只读，经 stdin 交给 git patch-id）。 */
+async function patchIds(rootDir, text) {
+  if (!text.trim()) return [];
+  const input = text.startsWith("commit ") ? text : `commit ${"0".repeat(40)}\n${text}`;
+  const result = await runCommandFile("git", ["-C", rootDir, "patch-id", "--stable"], rootDir, 60_000, { input });
+  if (result.exitCode !== 0) return [];
+  return result.stdout.split(/\r?\n/).filter(Boolean).map((line) => line.split(/\s+/)[0]);
+}
+
+/**
+ * 删除已并入主线的本地 task branch：先读分支 SHA，按 isCommitMerged 确认已进入 mainRef，
  * 再以该 SHA 做乐观锁删除，期间分支被移动则拒绝。只删本地分支，远端分支由人类确认。
  * @returns {Promise<{deleted: boolean, reason?: string}>}
  */
-export async function deleteMergedTaskBranch(rootDir, { branch, mainRef }) {
+export async function deleteMergedTaskBranch(rootDir, { branch, mainRef, baseSha = null }) {
   if (!branch || !mainRef) return { deleted: false, reason: "branch_identity_unknown" };
   const ref = `refs/heads/${branch}`;
   const head = await runCommandFile("git", ["-C", rootDir, "rev-parse", "--verify", "--quiet", ref], rootDir, 30_000);
   if (head.exitCode !== 0) return { deleted: false, reason: "branch_missing" };
   const sha = head.stdout.trim();
-  const merged = await runCommandFile("git", ["-C", rootDir, "merge-base", "--is-ancestor", sha, mainRef], rootDir, 30_000);
-  if (merged.exitCode !== 0) return { deleted: false, reason: "branch_not_in_main" };
+  const merged = await isCommitMerged(rootDir, { headSha: sha, baseSha, mainRef });
+  if (!merged.merged) return { deleted: false, reason: "branch_not_in_main" };
   const drop = await runCommandFile("git", ["-C", rootDir, "update-ref", "-d", ref, sha], rootDir, 30_000);
   if (drop.exitCode !== 0) return { deleted: false, reason: `branch_delete_failed: ${drop.stderr || drop.stdout}` };
   return { deleted: true };

@@ -38,8 +38,8 @@ export async function runResponsibilityAudit(projectRoot, task, scopeResult, con
     // §3.4：digest 与 plan_approved 快照不一致说明声明在批准后又被改动。
     if (approved?.responsibilityScopes?.[task.id] !== digest) return blocked("R1: responsibility changes are unapproved or changed after approval; return for plan confirmation");
     if (scopeResult?.status !== "pass") return blocked("Responsibility audit requires passing scope evidence");
-    const uncovered = (scopeResult.changedPaths || []).filter((name) => !changes.some((item) => item.script === name));
-    if (uncovered.length) return blocked(`R1: changed files missing from approved responsibilityChanges: ${uncovered.join(", ")}`);
+    // 声明之外的改动（scope 已保证在 writable_paths 内）不机械退回，交独立审查者按 R1 判断
+    const undeclaredChangedPaths = (scopeResult.changedPaths || []).filter((name) => !changes.some((item) => item.script === name));
     const settings = config.review?.responsibility || {};
     const budget = Number.isInteger(settings.maxEvidenceChars) && settings.maxEvidenceChars > 0 ? settings.maxEvidenceChars : 500000;
     const source = await collectResponsibilityEvidence(executionRoot, changes, scopeResult.changedPaths, budget);
@@ -47,7 +47,7 @@ export async function runResponsibilityAudit(projectRoot, task, scopeResult, con
     if (!reviewSkill || reviewSkill.truncated) return blocked("Required review-work Skill is missing or truncated");
     const packet = {
       requiredSkills: [reviewSkill],
-      taskId: task.id, planId: task.planId, responsibilityChanges: changes, rules: RESPONSIBILITY_RULES, source,
+      taskId: task.id, planId: task.planId, responsibilityChanges: changes, undeclaredChangedPaths, rules: RESPONSIBILITY_RULES, source,
       instruction: RESPONSIBILITY_REVIEW_INSTRUCTIONS,
     };
     if (JSON.stringify(packet).length > budget) return blocked("Responsibility review packet exceeds evidence budget");

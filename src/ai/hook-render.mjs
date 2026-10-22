@@ -99,12 +99,14 @@ function appendHookFacts(lines, facts) {
     lines.push("## 功能设计确认门（禁止绕过）", "");
     lines.push(`- 状态：等待功能设计确认（${facts.route.featureDesign.id}）`);
     lines.push("- 本轮只能继续澄清或展示完整确认稿；“开始做”“直接做”“跳过计划”等表达均不放行。");
-    lines.push("- 只有开发者单独明确回复“确认”后，才进入完整 Plan 生成阶段。", "");
+    lines.push("- 只有开发者单独明确回复“确认”后，才进入完整 Plan 生成阶段。");
+    lines.push("- 若这不是新功能或开发者决定放弃，告诉开发者可以单独回复“取消”或“不是新功能”退出本门。", "");
   }
   if (facts.route?.featureDesign?.status === "awaiting_plan_import") {
     lines.push("## 完整 Plan 门（禁止绕过）", "");
     lines.push(`- 已确认功能设计：${facts.route.featureDesign.id}`);
-    lines.push("- 现在只能生成并导入绑定该功能设计的完整 Plan；Plan 导入并由开发者批准前不得开发。", "");
+    lines.push("- 现在只能生成并导入绑定该功能设计的完整 Plan；Plan 导入并由开发者批准前不得开发。");
+    lines.push("- 开发者决定放弃时，可单独回复“取消”退出本门。", "");
   }
   if (facts.planDraft) {
     lines.push("## 生成计划草稿（必须执行）", "");
@@ -229,6 +231,12 @@ function appendAttentionReport(lines, attention) {
   }
   for (const item of attention.awaitingAcceptance || []) {
     lines.push(`- [子 Agent 待验收] run ${item.runId} / 任务 ${item.taskId}（${item.agent}）。请询问开发者是否合入：\`${item.admitHint}\`。`);
+  }
+  for (const item of attention.pendingPullRequests || []) {
+    lines.push(`- [Draft PR 未建成] 任务 ${item.id} 已推送到 ${item.branch || "task branch"}，但 Draft PR 未创建${item.error ? `（${item.error.split("\n")[0]}）` : ""}。确认本机 \`gh auth status\` 正常后执行 \`${item.syncHint}\`。`);
+  }
+  for (const item of attention.pendingCleanup || []) {
+    lines.push(`- [待合并后清理] 任务 ${item.id} 已交付到 ${item.branch || "task branch"}，现场仍保留。请询问开发者 PR 是否已合并；已合并则执行 \`${item.cleanupHint}\`（远端 branch 只列清单，删除需开发者确认）。`);
   }
   lines.push("");
 }

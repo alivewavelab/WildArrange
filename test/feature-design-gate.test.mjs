@@ -242,3 +242,43 @@ test("ordinary architecture planning does not mount the feature clarification sk
 
 function routeRequest(root, input) { return runHostRoute(root, input, classifyRoute); }
 function runInjectionHook(root, input) { return runHostHook(root, input, renderHook); }
+
+test("bare 新增 or the English word feature no longer opens the feature design gate", async () => {
+  await withExternalProject(async ({ projectRoot: root }) => {
+    for (const [index, text] of ["新增一行日志排查登录失败", "fix the feature flag bug in login"].entries()) {
+      const sessionId = `no-gate-${index}`;
+      await runHostRoute(root, { text, sessionId }, classifyRoute);
+      assert.equal(await loadActiveFeatureDesignGate(root, sessionId), null, text);
+    }
+    await runHostRoute(root, { text: "新增功能：导出订单", sessionId: "gate-on" }, classifyRoute);
+    assert.equal((await loadActiveFeatureDesignGate(root, "gate-on")).status, "awaiting_feature_confirmation");
+  });
+});
+
+test("the developer can leave a mistaken feature design gate by replying 取消 or 不是新功能", async () => {
+  await withExternalProject(async ({ projectRoot: root }) => {
+    for (const [index, exit] of ["取消", "不是新功能"].entries()) {
+      const sessionId = `exit-${index}`;
+      await runHostRoute(root, { text: "加一个导出按钮的功能", sessionId }, classifyRoute);
+      const denied = await preToolUseGuard(root, {
+        hook_event_name: "PreToolUse",
+        session_id: sessionId,
+        tool_name: "Bash",
+        tool_input: { command: "node -e \"console.log('implement')\"" },
+      });
+      assert.equal(denied.code, "feature_design_confirmation_required");
+      assert.match(denied.reason, /取消/, "the denial tells the developer how to leave the gate");
+
+      const left = await runHostRoute(root, { text: exit, sessionId }, classifyRoute);
+      assert.equal(left.featureDesign, undefined);
+      assert.equal((await loadActiveFeatureDesignGate(root, sessionId)).status, "cancelled");
+      const after = await preToolUseGuard(root, {
+        hook_event_name: "PreToolUse",
+        session_id: sessionId,
+        tool_name: "Bash",
+        tool_input: { command: "node -e \"console.log('implement')\"" },
+      });
+      assert.notEqual(after.code, "feature_design_confirmation_required");
+    }
+  });
+});

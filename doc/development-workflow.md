@@ -30,9 +30,9 @@ init -> plan -> task-worktree -> worker -> verifier -> delivery-commit -> task-b
 - admission 只有在成功提交或工作区成功回滚后才能释放任务所有权；回滚失败必须保留 `verifying` claim 与 rollback plan，并返回 `recovery_required`，直到原 run 完成恢复。
 - 不做多设备/多用户远端协调。Git 只允许普通非强制 push；同一分支已被另一个可写任务或 worktree 占用时拒绝启动。
 - task branch 的 delivery commit/push 是任务自身交付，不代表获准进入共享主线。共享主线统一称为 `main`；task branch 进入 `main` 必须通过一个持续更新的 PR、自动检查与独立验收，并由人类明确批准 merge。系统不得以 checkpoint、admission 或本地确认字段代替 Git 托管平台的真实 merge 审批。
-- PR 可由系统自动创建或更新为 Draft；Approve 与 Merge 是不同动作。默认由人类批准进入 `main`，生产部署是与 merge 分离的另一项人类授权；development、staging、production 是部署环境，不默认复制为长期 `develop`/`production` 分支。
+- 任务完成且 task branch 已推送到远端后，系统经 GitHub CLI `gh` 自动创建或更新该分支的 Draft PR（正文含验收结论、交付 SHA 与待人工验收项）；系统只创建 Draft 或更新正文，不 approve、不 merge、不转为 Ready。`gh` 缺失、未登录或调用失败不影响任务完成：结果入账，并在待处理提醒里给出 `pr sync` 重试命令。Approve 与 Merge 是不同动作。默认由人类批准进入 `main`，生产部署是与 merge 分离的另一项人类授权；development、staging、production 是部署环境，不默认复制为长期 `develop`/`production` 分支。
 - 强耦合改动若不能独立验收，归为一个任务在同一 worktree/branch 联合交付；若可拆分，则使用两个任务、两个 worktree、两个 branch，再由独立 integration task 绑定双方 commit SHA 做联合验收。Integration 自身同样拥有独立 worktree/branch，不能写回原实现 worktree。
-- task 处于等待验收、返工或 `recovery_required` 时保留 branch/worktree。确认 `main` 已包含 delivery commit 后，先证明 worktree 干净并删除 worktree，再删除本地 branch；删除远端 branch 属于远端变更，必须由人类确认。Worktree 不是长期档案。
+- task 处于等待验收、返工或 `recovery_required` 时保留 branch/worktree。合并后由 `cleanup` 统一清理线性与并行任务现场：先同步远端主线，再确认 `main` 已包含 delivery commit（普通合并按祖先关系，rebase/squash 合并按补丁等价判定），先证明 worktree 干净并删除 worktree，再删除本地 branch；删除远端 branch 属于远端变更，只列出待删清单，必须由人类确认。Worktree 不是长期档案。
 - 路由只使用确定性路由表，结果必须保留命中证据。
 - 路由写入任务的 `task.skills` 必须由执行前公开宿主入口真实挂载；项目级 Review 必需 Skill 在审查前经同一安全加载器完整读取，缺失或截断不得放行；未接通的 checkpoint 自动挂载仍不得宣称可用。只允许加载 Prompt Pack manifest 或项目 Skill 根内的已登记文件，并校验安装根、realpath 与 hash，继续受数量和字符预算约束。未知或完整性失败的 Skill 必须显式报告，不能静默加载。
 - 商业发布包不得包含受限第三方源码、prompt 原文或近似改写文本；外部项目只能作为概念参考和对照证据。

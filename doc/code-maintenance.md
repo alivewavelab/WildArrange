@@ -13,7 +13,7 @@
 - `src/` 下未知一级目录必须被依赖边界门直接拒绝；不保留 `legacy` 免检分区。
 - 规范采用渐进式披露：根 `AGENTS.md` 保存必读场景与入口，其引用的规范正文承载全局目标与不可削弱不变量；`bin/`、`src/`、五区、`test/`、`doc/`、`packs/wildarrange-linear/` 的 `AGENTS.md` 只补充本目录职责和验收要求。进入目录修改前先读最近的 `AGENTS.md`，子目录规范不得覆盖根级安全约束。
 - 新增运行时能力必须更新 `doc/project-architecture.md`，包括其「目录约定」中的职责登记。
-- gate 安全不变量不能削弱：不得删除或清空 `verify_commands`，不得跳过 verifier / scope / review / successCriteria 完成 checkpoint。
+- gate 安全不变量不能削弱：不得删除或清空 `verify_commands`，不得跳过 verifier / scope / review / successCriteria 完成 checkpoint。successCriteria 中绑定 `verify_commands` 的条目必须通过、标为 fail 的条目必须阻断；未绑定命令、只能人工核对的条目作为「待人工验收项」写进 acceptance proof 并随 PR 交给人类，不单独阻断 checkpoint。
 - README 命令真实性必须对照真实 CLI `--help`，不得以源码中的注释或普通字符串充当实现证据；真实注释检查必须覆盖 JavaScript 模板表达式。
 - 产品总图 `docs/product/architecture-overview.html` 是参考文档，架构变化时顺手更新，不设门禁。
 - 重构后必须验证 `npm test`；该命令由 `tooling/run-tests.mjs` 逐文件隔离执行全部 `test/*.test.mjs`，避免 Windows 上 Git/npm/嵌套测试并发互锁。涉及包内容变化时同时验证 `npm pack --dry-run --cache /private/tmp/wildarrange-npm-cache`。

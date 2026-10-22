@@ -10,12 +10,14 @@ import { inspectExternalDependencies } from "../infra/cross-project-evidence.mjs
 //   · 何时执行？每张任务启动 Worker 之前。
 //   · 做了什么？加载 Skill → prepareProjectReview → 写 context → 探针握手。
 //   · 缺了它会怎样？无 Skill/审查依据的任务可能带着错误上下文开工。
+//   · 握手缓存：同一「角色 + 命令 + Skill/依据 SHA」在 handshakeCacheMs 内复用通过结果，
+//     只省掉重复的模型调用；Skill、依据与预算校验每次照做。
 // =============================================================================
 
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { loadWildArrangeConfig } from "../infra/runtime-config.mjs";
-import { hashContent, nowIso, resolveTaskPacketPath, resolveTaskReportPath, writeJsonAtomic } from "../infra/runtime-store.mjs";
+import { hashContent, nowIso, readJson, resolveTaskPacketPath, resolveTaskReportPath, resolveWildArrangePath, writeJsonAtomic } from "../infra/runtime-store.mjs";
 import { loadSkillAttachment } from "../infra/context-attachments.mjs";
 import { isTrivialCommand } from "../infra/task-predicates.mjs";
 import { runCommand } from "../infra/command-runner.mjs";
@@ -74,7 +76,17 @@ export async function checkExecutionReadiness(rootDir, task, options = {}) {
     if (researchNames.length) probes.push({ id: "research", command: settings.researchProbe, skills: result.skills.filter(skill => researchNames.includes(skill.name)) });
     probes.push({ id: "responsibility", reviewer: true, command: config.review?.responsibility?.command, skills: [review.responsibilitySkill] });
     for (const step of review.steps.filter(step => step.required)) probes.push({ id: `review-${step.id}`, reviewer: true, command: step.command, skills: step.skills, documents: step.documents });
+    const cacheMs = Number.isInteger(settings.handshakeCacheMs) ? settings.handshakeCacheMs : 86_400_000;
+    const cachePath = resolveWildArrangePath(rootDir, "cache", "readiness-handshakes.json");
+    const cache = cacheMs > 0 ? await readJson(cachePath, {}).catch(() => ({})) : {};
+    let cacheChanged = false;
     for (const probe of probes) {
+      const cacheKey = handshakeFingerprint(probe);
+      const cachedAt = Date.parse(cache[cacheKey]?.passedAt || "");
+      if (cacheMs > 0 && Number.isFinite(cachedAt) && Date.now() - cachedAt < cacheMs) {
+        result.probes.push({ role: probe.id, pass: true, cached: true, passedAt: cache[cacheKey].passedAt });
+        continue;
+      }
       const challenge = randomUUID();
       const packet = { kind: "execution_readiness_probe", role: probe.id, challenge, workerCommand: command,
         contextDigest: result.contextDigest, requiredSkills: probe.skills, documents: probe.documents || [],
@@ -99,6 +111,7 @@ export async function checkExecutionReadiness(rootDir, task, options = {}) {
         const answer = JSON.parse(response.content);
         if (answer.ready !== true || answer.challenge !== challenge || !Array.isArray(answer.loadedSkills) || probe.skills.some(skill => !answer.loadedSkills.includes(skill.name))) throw new Error("adapter did not acknowledge current handshake and every required Skill");
         result.probes.push({ role: probe.id, pass: true });
+        if (cacheMs > 0) { cache[cacheKey] = { role: probe.id, passedAt: nowIso() }; cacheChanged = true; }
       } catch (error) {
         result.issues.push(`${probe.id}: ${error.message}`);
         result.probes.push({ role: probe.id, pass: false, reason: error.message });
@@ -106,6 +119,7 @@ export async function checkExecutionReadiness(rootDir, task, options = {}) {
         if (result.commandRecovery) break;
       }
     }
+    if (cacheChanged) await writeJsonAtomic(cachePath, cache);
   }
   result.pass = result.issues.length === 0;
   result.status = result.commandRecovery ? "recovery_required" : result.pass ? "ready" : "blocked";
@@ -114,4 +128,15 @@ export async function checkExecutionReadiness(rootDir, task, options = {}) {
   await writeFile(resolveTaskReportPath(rootDir, "readiness", task.planId, task.id, "md"),
     `# 开工检查 ${task.id}\n\n状态：${result.status}\n\n${result.issues.map(issue => `- ${issue}`).join("\n") || "本任务必需的能力、Skill 和审查依据已通过检查。"}\n`, "utf8");
   return result;
+}
+
+/** 握手缓存指纹：角色、执行命令与所带 Skill/依据内容的 SHA；任一变化即重新握手。 */
+function handshakeFingerprint(probe) {
+  const digest = (item) => [item?.name || item?.path || item?.id || null, item?.sha256 || hashContent(String(item?.content ?? ""))];
+  return hashContent(JSON.stringify({
+    role: probe.id,
+    command: probe.command || null,
+    skills: (probe.skills || []).map(digest),
+    documents: (probe.documents || []).map(digest),
+  }));
 }

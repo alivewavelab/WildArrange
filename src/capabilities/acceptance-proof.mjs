@@ -118,7 +118,7 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
   const verifyCommands = Array.isArray(task.verify_commands) ? task.verify_commands : [];
   const reviewLanes = Array.isArray(reviewResult?.lanes) ? reviewResult.lanes : [];
   const deliveryBaseline = summarizeDeliveryBaseline(evidence.integrationCommit);
-  const executedReview = hasExecutedIndependentReview(reviewResult, config, task);
+  const executedReview = hasExecutedIndependentReview(reviewResult, task);
 
   const checks = [
     ...((task.externalDependencies || []).length ? [proofCheck("external_dependencies", evidence.externalDependencies?.pass === true, {
@@ -168,7 +168,7 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
       requiredFix: "重新运行 verifier，确保每条 verify_commands 都有对应结果。",
     }),
     proofCheck("success_criteria_passed", criteria.pass === true, {
-      evidence: `${criteria.passed}/${criteria.total} success criteria passed`,
+      evidence: `${criteria.passed}/${criteria.total} success criteria passed${criteria.manualPending.length ? `; ${criteria.manualPending.length} manual acceptance item(s) handed to the human` : ""}`,
       requiredFix: "补齐 successCriteria 证据，或修复实现后重新验收。",
     }),
     proofCheck("scope_passed", scopeResult?.status === "pass", {
@@ -189,7 +189,7 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
       evidence: executedReview.pass
         ? `independent review executed: ${executedReview.sources.join(", ")}`
         : `configured review did not produce a substantive passing result: ${executedReview.reasons.join("; ") || "no executed lane"}`,
-      requiredFix: "本轮至少实际执行一条非空转 review/standards 命令、启用并运行质量门，或取得成功 LLM review；仅有配置、skipped/fallback 或 echo/node --version 不能完成任务。",
+      requiredFix: "本轮至少实际执行一条非空转 review/standards 命令、通过当前声明的独立职责审计，或取得成功 LLM review；仅有配置、注释检查、skipped/fallback 或 echo/node --version 不能完成任务。",
     }),
     proofCheck("delivery_commit_bound", evidence.deliveryRequired !== true || evidence.deliveryPending === true || Boolean(deliveryBaseline?.commitSha), {
       evidence: evidence.deliveryPending === true
@@ -207,6 +207,8 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
     subject: task.subject,
     pass: checks.every((check) => check.status === "pass"),
     checks,
+    // 未绑定命令的判据：不阻断完成，交给人类在 PR 验收时逐条核对
+    manualAcceptance: criteria.manualPending,
     evidenceRefs: {
       responsibilityAudit: reviewResult?.responsibilityAudit ? { decision: reviewResult.responsibilityAudit.decision, responsibilityDigest: reviewResult.responsibilityAudit.responsibilityDigest, sourceDigest: reviewResult.responsibilityAudit.sourceDigest } : null,
       worker: summarizeCommand(workerResult),
@@ -224,11 +226,10 @@ export function buildAcceptanceProof(planId, task, evidence = {}, config = null)
 /**
  * 判定 review gate 是否实际执行了至少一条非空转独立复核 lane。
  * @param {object|null} reviewResult review_gate evidence
- * @param {object|null} [config] commentChecker 配置
  * @param {object} [task] 是否声明 responsibilityChanges
  * @returns {{ pass: boolean, sources: string[], reasons: string[] }}
  */
-function hasExecutedIndependentReview(reviewResult, config = null, task = {}) {
+function hasExecutedIndependentReview(reviewResult, task = {}) {
   if (!reviewResult || reviewResult.kind !== "review_gate") return { pass: false, sources: [], reasons: ["missing review result"] };
   const sources = [];
   // §3.4：职责审计 receipt 本身算一条独立 lane，但须与当前声明 digest 绑定。
@@ -239,10 +240,7 @@ function hasExecutedIndependentReview(reviewResult, config = null, task = {}) {
     if (substantive.some((result) => result.exitCode === 0)) sources.push(name);
     else if ((results || []).length > 0) reasons.push(`${name} were skipped, trivial, or failed`);
   }
-  const quality = reviewResult.qualityResults || {};
-  if (config?.qualityGates?.commentChecker?.blockOnFindings === true
-    && quality.commentResult?.status === "pass" && quality.commentResult?.pass === true
-    && (quality.commentResult.checkedPaths || []).length > 0) sources.push("quality:commentResult");
+  // 注释检查是正则扫描，只能告警，不计入独立复核来源。
   if ((reviewResult.llmReviews || []).some((result) => result?.status === "pass" && result?.pass === true)) sources.push("llm_review");
   if (sources.length === 0 && reasons.length === 0) reasons.push("all independent lanes were skipped or unavailable");
   return { pass: sources.length > 0, sources, reasons };
@@ -306,5 +304,9 @@ function renderAcceptanceProofMarkdown(proof) {
 | Check | Status | Evidence | Required Fix |
 | --- | --- | --- | --- |
 ${checks}
-`;
+${(proof.manualAcceptance || []).length ? `
+## 待人工验收项（PR 验收时逐条核对）
+
+${proof.manualAcceptance.map((item) => `- [ ] ${item.id} ${item.title}${item.expectedEvidence ? `：${item.expectedEvidence}` : ""}`).join("\n")}
+` : ""}`;
 }

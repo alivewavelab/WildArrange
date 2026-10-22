@@ -135,11 +135,24 @@ test("fabricated evidence, missing rules and contradictory PASS cannot pass revi
   assert.throws(() => validateResponsibilityVerdict(answer, source), /exact reviewed/);
 });
 
-test("source collection refuses truncation and undeclared changed scripts are rejected", async (t) => {
+test("source collection refuses truncation and undeclared changed files go to the reviewer instead of a mechanical return", async (t) => {
   const { root, task, scope } = await fixture(t);
   await assert.rejects(collectResponsibilityEvidence(root, changes(), scope.changedPaths, 10), /budget/);
-  const result = await runResponsibilityAudit(root, task, { ...scope, changedPaths: ["other.mjs"] }, {});
-  assert.match(result.summary, /R1.*other.mjs/);
+  await writeFile(path.join(root, "other.mjs"), "export const helper = 1;\n");
+  const undeclared = { ...scope, changedPaths: ["router.mjs", "other.mjs"] };
+  const passed = await runResponsibilityAudit(root, task, undeclared, await reviewer(root, verdict()));
+  assert.equal(passed.pass, true, passed.summary);
+  const packet = JSON.parse(await readFile(passed.packetPath, "utf8"));
+  assert.deepEqual(packet.undeclaredChangedPaths, ["other.mjs"]);
+  assert.match(packet.instruction, /undeclaredChangedPaths/);
+
+  const answer = verdict();
+  answer.decision = "RETURN";
+  answer.checks.find((c) => c.rule === "R1").decision = "RETURN";
+  answer.findings.push({ rule: "R1", file: "other.mjs", line: 1, evidence: "export const helper = 1;", reason: "Adds an undeclared responsibility", requiredFix: "Declare it and get approval, or move it out" });
+  const returned = await runResponsibilityAudit(root, task, undeclared, await reviewer(root, answer, "reviewer-return.cjs"));
+  assert.equal(returned.pass, false);
+  assert.match(returned.summary, /R1 other.mjs:1/);
 });
 
 test("shared Review fails when responsibility audit is unavailable", async (t) => {

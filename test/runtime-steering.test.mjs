@@ -57,28 +57,45 @@ test("success criteria evidence is recorded and required by checkpoint", async (
   });
 });
 
-test("unbound success criteria are not auto-passed by verifier", async () => {
-  await withExternalProject(async ({ projectRoot, root }) => {
-    const planPath = path.join(root, "criteria-unbound-plan.json");
-    await writeFile(planPath, JSON.stringify({
-      title: "Unbound criteria evidence",
-      tasks: [{
-        id: "T001",
-        subject: "Do not auto-pass manual criterion",
-        writable_paths: ["src/app.js"], responsibilityChanges: declare("src/app.js"),
-        worker_command: "node -e \"if(!process.version)process.exit(1)\"",
-        verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
-        review_commands: ["node --version"],
-        successCriteria: [
-          { id: "C001", title: "Manual criterion", status: "pending", expectedEvidence: "manual proof" },
-        ],
-      }],
-    }));
-    await importApprovedPlan(projectRoot, planPath);
+/** 一张只带人工判据（无 verifierCommandRefs）的任务计划。 */
+async function importManualCriterionPlan(projectRoot, root) {
+  const planPath = path.join(root, "criteria-unbound-plan.json");
+  await writeFile(planPath, JSON.stringify({
+    title: "Unbound criteria evidence",
+    tasks: [{
+      id: "T001",
+      subject: "Do not auto-pass manual criterion",
+      writable_paths: ["src/app.js"], responsibilityChanges: declare("src/app.js"),
+      worker_command: "node -e \"if(!process.version)process.exit(1)\"",
+      verify_commands: ["node -e \"if(!process.version)process.exit(1)\""],
+      successCriteria: [
+        { id: "C001", title: "Manual criterion", status: "pending", expectedEvidence: "manual proof" },
+      ],
+    }],
+  }));
+  return importApprovedPlan(projectRoot, planPath);
+}
 
+test("unbound success criteria stay pending and are handed to the human as manual acceptance items", async () => {
+  await withExternalProject(async ({ projectRoot, root }) => {
+    const plan = await importManualCriterionPlan(projectRoot, root);
     const result = await runNextTask(projectRoot);
-    assert.equal(result.status, "failed");
-    assert.equal(result.task.successCriteria[0].status, "pending");
+    assert.equal(result.status, "completed", JSON.stringify(result.task?.last_failure || result, null, 2));
+    assert.equal(result.task.successCriteria[0].status, "pending", "the verifier must not auto-pass a manual criterion");
+    const proof = await readJson(resolveWildArrangePath(projectRoot, "reports", "acceptance", plan.id, "T001.json"));
+    assert.deepEqual(proof.manualAcceptance.map((item) => item.id), ["C001"]);
+    assert.match(proof.checks.find((check) => check.name === "success_criteria_passed").evidence, /1 manual/);
+    const markdown = await readFile(resolveWildArrangePath(projectRoot, "reports", "acceptance", plan.id, "T001.md"), "utf8");
+    assert.match(markdown, /待人工验收项[\s\S]*- \[ \] C001 Manual criterion/);
+  });
+});
+
+test("a success criterion recorded as fail still blocks completion", async () => {
+  await withExternalProject(async ({ projectRoot, root }) => {
+    await importManualCriterionPlan(projectRoot, root);
+    await recordTaskEvidence(projectRoot, { taskId: "T001", criterionId: "C001", status: "fail", evidence: "Product owner rejected the flow." });
+    const result = await runNextTask(projectRoot);
+    assert.notEqual(result.task.status, "completed");
     assert.equal(result.task.last_failure.reason, "criteria_failed");
   });
 });

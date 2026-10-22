@@ -24,6 +24,7 @@ import {
   shouldFailDeliveryAttempt,
 } from "./delivery-pipeline.mjs";
 import { persistTaskState } from "./task-board.mjs";
+import { syncTaskPullRequest } from "./task-pull-request.mjs";
 
 /** 线性 run 与单步 node 共用的恢复文案（并行 admission 用「重新 admit」版本）。 */
 export const DEFAULT_RECOVERY_HINTS = {
@@ -162,7 +163,9 @@ export async function applyPipelineOutcome(rootDir, taskState, task, pipeline, c
       ledgerEvent: { type: events.completed, planId, taskId: task.id, ...eventExtra, scopeStatus: scopeResult.status, reviewStatus: "pass" },
     });
     const sideEffectWarnings = await runPostCompletionSideEffects(rootDir, planId, task, () => ctx.afterCompleted?.());
-    return result("completed", { sideEffectWarnings });
+    // 已推送的 task branch 自动同步 Draft PR；失败只入账与提醒，不反完成。
+    const pullRequest = await syncTaskPullRequest(rootDir, planId, task);
+    return result("completed", { sideEffectWarnings, pullRequest });
   }
 
   if (pipeline.status === "checkpoint_failed") {

@@ -338,6 +338,33 @@ export async function fetchRemoteBranch(rootDir, remote, branch) {
 }
 
 /**
+ * 把远端主线同步到 remote-tracking ref（只写 refs/remotes/<remote>/<branch>，不动本地分支与工作区），
+ * 供合并后清理判定使用；离线或拉取失败时回落到已有 tracking ref，再回落到本地主线，并返回来源。
+ */
+export async function syncIntegrationRef(rootDir, gitContext) {
+  const branch = gitContext?.integrationBranch || "main";
+  if (!gitContext?.remoteConfigured) return { ref: branch, source: "local", fetched: false };
+  const tracking = `refs/remotes/${gitContext.remote}/${branch}`;
+  const fetched = await runGit(rootDir, ["fetch", "--no-tags", gitContext.remote, `+refs/heads/${branch}:${tracking}`], { timeoutMs: 120_000 });
+  if (fetched.ok) return { ref: tracking, source: "remote", fetched: true };
+  const existing = await runGit(rootDir, ["rev-parse", "--verify", "--quiet", tracking]);
+  const error = (fetched.stderr || fetched.stdout).trim();
+  return existing.ok
+    ? { ref: tracking, source: "remote_stale", fetched: false, error }
+    : { ref: branch, source: "local", fetched: false, error };
+}
+
+/**
+ * 列出远端仍存在的分支（只读 ls-remote）；失败返回 null，由调用方报告未知。
+ */
+export async function listRemoteBranches(rootDir, remote, branches) {
+  if (!remote || branches.length === 0) return [];
+  const result = await runGit(rootDir, ["ls-remote", "--heads", remote, ...branches.map((branch) => `refs/heads/${branch}`)], { timeoutMs: 120_000 });
+  if (!result.ok) return null;
+  return result.stdout.split(/\r?\n/).filter(Boolean).map((line) => line.split(/\s+/)[1]?.replace(/^refs\/heads\//, "")).filter(Boolean);
+}
+
+/**
  * commitIsAncestor：本模块对外异步 API。
  */
 export async function commitIsAncestor(rootDir, ancestorSha, descendantRef = "HEAD") {

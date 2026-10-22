@@ -164,7 +164,8 @@ test("readiness passes end to end with the built-in executor configured as the p
     const command = (role) => `node "${CLI_PATH}" executor ${role} --cli kimi --bin "${bin}"`;
     const configPath = path.join(governanceRoot, "policy", "wildarrange.config.json");
     const config = JSON.parse(await readFile(configPath, "utf8"));
-    config.executionReadiness = { ...config.executionReadiness, workerProbe: command("probe") };
+    config.executionReadiness = { ...config.executionReadiness, workerProbe: command("probe"), handshakeCacheMs: 0 };
+    // 关闭握手缓存：本用例要求第二次检查真实握手，以验证旧挑战码被拒绝
     config.review = { ...config.review, responsibility: { ...config.review?.responsibility, command: command("review") } };
     await writeFile(configPath, JSON.stringify(config, null, 2));
     await gitCommitAll(governanceRoot, "built-in executors");

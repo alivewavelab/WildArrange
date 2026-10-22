@@ -358,6 +358,16 @@ ${ADOPTION_VIEW_HTML}
           '<div class="muted">' + esc(item.resultPath || "") + '</div>' +
           '<pre>' + esc(item.admitHint || "") + '</pre></div>');
       }
+      for (const item of attention.pendingPullRequests || []) {
+        blocks.push('<div class="review-box"><strong>Draft PR 未建成</strong> · 任务 ' + esc(item.id) + ' · ' + esc(item.subject || "") +
+          '<div class="muted">' + esc(item.error || item.branch || "") + '</div>' +
+          '<pre>' + esc(item.syncHint || "") + '</pre></div>');
+      }
+      for (const item of attention.pendingCleanup || []) {
+        blocks.push('<div class="review-box"><strong>待合并后清理</strong> · 任务 ' + esc(item.id) + ' · ' + esc(item.subject || "") +
+          '<div class="muted">' + esc(item.branch || "") + '</div>' +
+          '<pre>' + esc(item.cleanupHint || "") + '</pre></div>');
+      }
       el("attention").innerHTML = blocks.join("");
     }
     function actionButtons(task) {

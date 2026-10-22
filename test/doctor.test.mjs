@@ -24,7 +24,7 @@ import { initRuntime } from "../src/infra/runtime-bootstrap.mjs";
 import { hashContent, resolveWildArrangePath } from "../src/infra/runtime-store.mjs";
 import { generateVerificationArtifacts } from "../src/capabilities/verification-governance.mjs";
 import { runInjectionHook } from "../src/ai/hooks.mjs";
-import { withExternalProject, declare } from "./helpers/external-fixture.mjs";
+import { withExternalProject, declare, importApprovedPlan } from "./helpers/external-fixture.mjs";
 
 test("doctor keeps reporting when one check crashes on corrupted state", async () => {
   await withExternalProject(async ({ projectRoot: dir }) => {
@@ -64,12 +64,15 @@ test("doctor is diagnostic-only and never appends to the hash-chained ledger", a
 });
 
 test("doctor surfaces unarmed gates and an unprepared external adapter instead of burying them", async () => {
-  await withExternalProject(async ({ projectRoot: dir }) => {
-    // 夹具写的是默认配置：质量门全关、外置 adapter 尚未生成。
+  await withExternalProject(async ({ root, projectRoot: dir }) => {
+    // 无独立审查者的活动任务 = 同义反复 review；外置 adapter 尚未生成。
+    const planPath = path.join(root, "unarmed-plan.json");
+    await writeFile(planPath, JSON.stringify({ id: "plan-unarmed", title: "Unarmed", tasks: [{ id: "T001", subject: "demo", verify_commands: ["node --test"], writable_paths: ["src/app.js"], responsibilityChanges: declare("src/app.js") }] }), "utf8");
+    await importApprovedPlan(dir, planPath);
     const report = await runDoctor(dir);
 
     assert.equal(report.sections.gateArming.armed, false);
-    assert.ok(report.findings.some((finding) => finding.section === "gate_arming" && finding.code === "quality_gates_not_required"));
+    assert.ok(report.findings.some((finding) => finding.section === "gate_arming" && finding.code === "review_tautology"));
 
     assert.equal(report.sections.adapters.status, "error");
     assert.equal(report.ok, false);
@@ -77,7 +80,7 @@ test("doctor surfaces unarmed gates and an unprepared external adapter instead o
 
     const markdown = await readFile(resolveWildArrangePath(dir, "reports", "doctor.md"), "utf8");
     assert.match(markdown, /Gate arming: NOT ARMED/);
-  });
+  }, { reviewer: false });
 });
 
 test("doctor yellow-lights a changed runner after adoption artifacts exist", async () => {
@@ -117,18 +120,6 @@ test("doctor yellow-lights a changed runner after adoption artifacts exist", asy
     assert.equal(drifted.sections.registryFreshness.stale, true);
     assert.equal(drifted.sections.registryFreshness.status, "declared_input_drift");
     assert.ok(drifted.findings.some((finding) => finding.section === "registry_freshness"));
-  });
-});
-
-test("config init --armed writes an armed config that passes the gate arming floor", async () => {
-  await withExternalProject(async ({ projectRoot: dir }) => {
-    const { writeDefaultWildArrangeConfig } = await import("../src/infra/runtime-config.mjs");
-    const { evaluateGateArming } = await import("../src/infra/gate-arming.mjs");
-    const written = await writeDefaultWildArrangeConfig(dir, { root: true, force: true, armed: true });
-    assert.equal(written.created, true);
-    assert.equal(written.config.qualityGates.commentChecker.blockOnFindings, true);
-    const arming = evaluateGateArming({ config: written.config, tasks: [] });
-    assert.equal(arming.issues.some((issue) => issue.code === "quality_gates_not_required"), false);
   });
 });
 

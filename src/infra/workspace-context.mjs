@@ -15,7 +15,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runCommandFile } from "./command-runner.mjs";
-import { buildArmedConfig } from "./runtime-config.mjs";
+import { DEFAULT_WILDARRANGE_CONFIG } from "./default-config.mjs";
 import { buildRegistryFromCards, digestCanonical } from "./verification-registry.mjs";
 import {
   bindWildArrangeRuntimeRoot,
@@ -36,7 +36,7 @@ const POLICY_TEMPLATES = [
 
 /**
  * 在独立目录创建最小治理仓库骨架；只创建缺失文件，不覆盖已有政策。
- * options.scaffoldConfig：额外生成 policy/wildarrange.config.json（默认武装质量门）。
+ * options.scaffoldConfig：额外生成 policy/wildarrange.config.json（默认配置）。
  * options.initGit：治理目录还不是 Git 仓时 git init 并提交初始 commit（已是 Git 仓则跳过）。
  */
 export async function initializeGovernanceRepository(projectRoot, options = {}) {
@@ -69,7 +69,7 @@ export async function initializeGovernanceRepository(projectRoot, options = {}) 
     },
     ...(options.scaffoldConfig === true ? [{
       path: path.join(governanceRoot, "policy", "wildarrange.config.json"),
-      value: `${JSON.stringify(buildArmedConfig(), null, 2)}\n`,
+      value: `${JSON.stringify(DEFAULT_WILDARRANGE_CONFIG, null, 2)}\n`,
     }] : []),
   ];
   const created = [];
