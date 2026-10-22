@@ -29,6 +29,7 @@
 | 合入子 Agent 成果     | `node ./bin/wildarrange.mjs parallel admit --run <runId> --task T001`     |
 | 查看并行运行记录        | `node ./bin/wildarrange.mjs parallel status --run <runId>`             |
 | 关闭保留的子 Agent 结果 | `node ./bin/wildarrange.mjs parallel close --run <runId> --task T001 --reason user_accepted` |
+| 创建或更新任务的 Draft PR（自动同步失败时重试） | `node ./bin/wildarrange.mjs pr sync [--task T001]`（需已安装并登录 `gh`；只建 Draft/更新正文，不合并） |
 | 合并后清理任务现场（线性与并行） | `node ./bin/wildarrange.mjs cleanup [--dry-run]`（同步远端主线，含 squash/rebase 合并判定；远端 branch 只列清单待人工删除） |
 | 清理单个并行 run 的 worktree | `node ./bin/wildarrange.mjs parallel cleanup --run <runId>` |
 | 重跑 run 中未通过的任务 | `node ./bin/wildarrange.mjs parallel retry --run <runId> [--command "..."]` |

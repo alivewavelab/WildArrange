@@ -40,7 +40,7 @@ task branch target (local, from clean commit base)
   -> acceptance proof
   -> delivery commit + non-force task-branch push (when a remote exists)
   -> acceptance proof/checkpoint bind delivery SHA
-  -> Draft PR -> human approve/merge -> main
+  -> Draft PR (auto-created/updated via gh after push; best-effort) -> human approve/merge -> main
   -> cleanup: fetch main -> prove merged (ancestor or patch-equivalent) and clean
   -> remove worktree -> remove local branch (remote branch: human confirms)
 ```
@@ -161,6 +161,7 @@ AGENTS.md                         # mandatory reading routes
 - `src/orchestration/plan-state.mjs`：计划导入事务、路由 enrichment、任务状态加载、计划批准状态（`loadPlanApproval` / `approvePlan`）、`work.json` 计划状态唯一写入口（`updateWorkState`）与 `tasks.md` 派生渲染；任务字段规范化与任务图校验在 `src/orchestration/task-normalize.mjs`；外置模式把治理 verification registry 的三类命令只增不减地合入计划，并在唯一 task ledger 固化 registry digest 与双仓 revision；feature design 状态委托 `feature-design.mjs` 唯一 owner。
 - `src/orchestration/task-normalize.mjs`：任务字段规范化、successCriteria/contractChanges/externalDependencies 校验、任务图校验与单任务路由 enrichment（纯函数）
 - `src/orchestration/feature-design.mjs`：需求确认、计划绑定与 feature design 状态迁移的唯一业务 owner；开发者单独回复「取消」或「不是新功能」时关闭当前门（`cancelled`），不生成计划
+- `src/orchestration/task-pull-request.mjs`：Draft PR 同步的唯一 owner：completed 且 task branch 已推送的任务，按 head 分支查找打开的 PR，没有则建 Draft，有则只更新正文（验收结论、交付 SHA、待人工验收项）；结果写 `runtime:pull-requests/<planId>/<taskId>.json` 与 ledger，不改写任务台账，失败不反完成。线性完成与并行 admission 完成后各调用一次，`pr sync` 可手动重试。
 - `src/orchestration/task-cleanup.mjs`：合并后现场清理的唯一 owner：对 completed 任务的 `delivery_workspace`（线性与并行）先同步远端主线，证明已合并（祖先或补丁等价）且 worktree 干净后删除 worktree 与本地 branch；远端 branch 只列待人工删除清单；支持 `--dry-run`，不改写任务台账
 - `src/orchestration/host-runtime.mjs`：宿主事件的业务前置编排；CLI 显式组合 AI 渲染入口，不添加反向 import
 - `src/orchestration/contract-governance.mjs`：任务契约变更的批准范围、提案、暂停与继续 owner；复用 `change-governance.mjs` 的 ChangeRequest，不建立第二套批准库。
@@ -265,6 +266,7 @@ AGENTS.md                         # mandatory reading routes
 - `src/infra/responsibility-contract.mjs`：任务职责声明的字段校验、R1–R5 常量、批准摘要指纹与中文摘要；不读取任务状态、不作交付决定。
 - `src/infra/llm-provider.mjs`：OpenAI-compatible LLM provider 与可选 LLM review
 - `src/infra/agent-spawn.mjs`：Codex/Cursor/自定义 command adapter 的宿主中立子 Agent spawn 命令渲染。
+- `src/infra/pull-request.mjs`：GitHub CLI `gh` 的最小封装，参数数组调用：只提供按 head 查询打开的 PR、创建 Draft PR、更新 PR 正文三个原语；不提供 approve、merge、ready 原语。
 - `src/infra/git-worktree.mjs`：Git worktree 隔离、patch 提取、patch 路径解析、patch admission helper、已合并判定（祖先或 `git patch-id` 补丁等价，覆盖 squash/rebase 合并）与已合并本地 branch 删除，以及每次 worker run 前基于 `git stash create` 的 pre-execute 工作区 snapshot。
 - `src/infra/git-coordination.mjs`：Git 交付原语（参数数组调用）：交付环境探测、delivery commit、普通 push/fetch、working/tree-diff 检查、祖先检查与 task branch 命名。不决定 task 状态，也不提供自动 merge 到 `main` 的原语。
 - `src/infra/git-diff.mjs`：git 读原语（`readGitHead`/`readGitTopLevel`）、git diff / changed-paths 收集与 manifest 变更分类
